@@ -10,6 +10,7 @@ class CollectionDocumentTests : public QObject
 private slots:
     void roundTripsOrderedMobs();
     void resolvesMapRootRelativeReferences();
+    void resolvesPackagedMprWithDefaultZoneMob();
     void reportsAllMissingReferences();
     void comparesEditableCollectionContent();
 };
@@ -51,6 +52,38 @@ void CollectionDocumentTests::resolvesMapRootRelativeReferences()
         source, QVector<QString>() << root.filePath("Maps"));
     QVERIFY(resolved.isValid());
     QCOMPARE(QFileInfo(resolved.mprPath).fileName().toLower(), QString("zone1.mpr"));
+}
+
+void CollectionDocumentTests::resolvesPackagedMprWithDefaultZoneMob()
+{
+    QTemporaryDir directory;
+    QDir root(directory.path());
+    QVERIFY(root.mkpath("package/collections"));
+    QVERIFY(root.mkpath("package/runtime-atlas-probes/page-256"));
+    QVERIFY(root.mkpath("jmv/Maps"));
+    const QString mprPath = root.filePath(
+        "package/runtime-atlas-probes/page-256/zone18-expanded.mpr");
+    const QString mobPath = root.filePath("jmv/Maps/zone18.mob");
+    for(const QString& path : {mprPath, mobPath})
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    SEnduranceCollection source;
+    source.sourcePath = root.filePath(
+        "package/collections/zone18-expanded-16384-slots.collection");
+    source.profileId = "jamais-vu";
+    source.mprReference =
+        "../runtime-atlas-probes/page-256/zone18-expanded.mpr";
+    source.mobReferences << "zone18.mob";
+    const SResolvedCollection resolved = CCollectionDocument::resolve(
+        source, QVector<QString>() << root.filePath("jmv/Maps"));
+    QVERIFY2(resolved.isValid(), qPrintable(resolved.errors.join('\n')));
+    QCOMPARE(QFileInfo(resolved.mprPath).absoluteFilePath(),
+             QFileInfo(mprPath).absoluteFilePath());
+    QCOMPARE(resolved.mobPaths.size(), 1);
+    QCOMPARE(QFileInfo(resolved.mobPaths.front()).absoluteFilePath(),
+             QFileInfo(mobPath).absoluteFilePath());
 }
 
 void CollectionDocumentTests::reportsAllMissingReferences()

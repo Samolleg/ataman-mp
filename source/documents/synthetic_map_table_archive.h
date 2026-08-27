@@ -17,7 +17,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
-                                   QStringList* errors = nullptr);
+                                   QStringList* errors = nullptr,
+                                   const QString& textureProbeName = QString());
 
 // Builds a standalone run-owned RES containing only Endurance's neutral
 // checkerboard. It does not borrow, replace, or rebuild any installed archive.
@@ -27,6 +28,18 @@ bool buildSyntheticMapPlaceholderArchive(QByteArray* outputArchive,
 // Builds the same run-owned one-member RES with a caller-reviewed 256x256 MMP.
 // This is used only by Test Current Map and never writes an installed archive.
 bool buildSyntheticMapTextureArchive(const QString& textureName,
+                                     const QByteArray& mmpPayload,
+                                     QByteArray* outputArchive,
+                                     QStringList* errors = nullptr);
+
+// Appends a generated minimap to an existing run-owned RES candidate while
+// proving every existing member survives unchanged. An identical existing
+// member is an idempotent no-op; a differing identity collision is refused.
+// This is the composite Test Current path used when the same private archive
+// already contains rebased terrain atlas pages.
+bool stageSyntheticMapTextureArchive(const QByteArray& sourceArchive,
+                                     const QString& sourceName,
+                                     const QString& textureName,
                                      const QByteArray& mmpPayload,
                                      QByteArray* outputArchive,
                                      QStringList* errors = nullptr);

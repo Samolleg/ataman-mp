@@ -33,15 +33,15 @@ Use only a copied map or isolated mod workspace.
 4. Paint a long radius-2 land stroke and a long radius-2 overlay stroke. Record
    FPS and whether the outline remains attached to the cursor. Each drag must
    remain one undo entry.
-5. Open Landscape Tools for a map whose decoded atlas has no approved profile.
-   The editor must offer to generate a review proposal once for that atlas in
-   the current session. Declining must leave manual tile painting available.
-6. In Zone 5_1 atlas review, confirm the preview remains 220 x 220 while moving
-   between slots. Only genuinely ambiguous rows should appear initially. Enable
-   **Show all inferred families and slots** to inspect automated assignments.
-   Transitions between different stone or grass variants must not collapse
-   those variants into one family. Split or merge only a genuinely incorrect
-   assignment. Save draft must remain available throughout.
+5. Open Landscape Tools for a map whose decoded atlas has no supplied profile.
+   The editor must generate the material catalog once, make safe assignments
+   immediately paintable, show assigned/unassigned coverage, and offer to open
+   Material Atlas. Declining must not disable the safe palette or manual mode.
+6. In Zone 5_1 Material Atlas, confirm unusual tiles appear in the visual
+   unassigned pool. Drag a tile to a material, then drag material rows onto its
+   four corner targets. A Ground/Overlay mix must be rejected inline without
+   changing the tile. **Apply + Close** must save the usable catalog even while
+   unusual tiles remain unassigned.
 7. Save As and reopen the changed MPR. Confirm overlay coverage, tile, material,
    and sculpted height survive fresh reopen, then run Test Current Map from the
    isolated workspace.

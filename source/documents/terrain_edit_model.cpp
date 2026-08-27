@@ -11,6 +11,7 @@
 
 #include "endurance_document.h"
 #include "mpr_document.h"
+#include "terrain_virtual_atlas.h"
 
 namespace {
 const int kSectorVertices = 33;
@@ -27,6 +28,49 @@ const int kOverlaySectorSize = kLandVertexOffset + 2 * kVertexBlockSize
     + 3 * kTileBlockSize;
 const quint32 kSectorSignature = 0xCF4BF774;
 const double kNewOverlayClearanceWorld = 0.02;
+
+float terrainNoiseSample(quint32 noiseSeed, int x, int y)
+{
+    // Stable signed coordinate noise: one seed owns a complete sculpt stroke,
+    // so repeated stamps strengthen one pattern instead of rerolling it.
+    quint32 value = noiseSeed ^ (quint32(x) * 0x9E3779B9u)
+        ^ (quint32(y) * 0x85EBCA6Bu);
+    value ^= value >> 16;
+    value *= 0x7FEB352Du;
+    value ^= value >> 15;
+    value *= 0x846CA68Bu;
+    value ^= value >> 16;
+    return (float(value & 0x00FFFFFFu) / 8388607.5f) - 1.0f;
+}
+
+quint32 terrainPaintLayerSeed(quint32 strokeSeed, ETerrainTileLayer layer)
+{
+    return strokeSeed ^ (layer == ETerrainTileLayer::Land
+        ? 0x6c616e64u : 0x6f766572u);
+}
+
+quint16 selectUniformInteriorTile(
+    const CTerrainTransitionCatalog& catalog,
+    const STerrainTransitionSignature& uniformSignature,
+    int cellX, int cellY, quint32 distributionSeed,
+    bool randomizeRotation, bool* found,
+    const QSet<int>* allowedPhysicalSlots = nullptr)
+{
+    bool selected = false;
+    const quint16 value = allowedPhysicalSlots
+        ? catalog.selectForPaint(uniformSignature, cellX, cellY,
+            distributionSeed, *allowedPhysicalSlots, &selected)
+        : catalog.selectForPaint(uniformSignature, cellX, cellY,
+            distributionSeed, &selected);
+    if(found)
+        *found = selected;
+    if(!selected)
+        return 0;
+    if(randomizeRotation)
+        return value;
+    return catalog.lowestPaintRotationForSlot(
+        uniformSignature, value, found);
+}
 
 quint16 readHeight(const QByteArray& payload, int localX, int localY)
 {
@@ -203,11 +247,277 @@ quint16 clampedHeight(float value, bool* wasClamped = nullptr)
 }
 }
 
+STerrainRouteOwnershipPlan planConnectedTerrainRouteOwnership(
+    int tileWidth, int tileHeight,
+    const QVector<STerrainTransitionSignature>& currentSignatures,
+    const QVector<bool>& availableCells,
+    const QVector<qint32>& currentVertexMaterials,
+    const QVector<qint32>& baselineVertexMaterials,
+    const QVector<qint32>& exactGeneratedRouteOwners,
+    const QVector<bool>& repairCandidateCells)
+{
+    STerrainRouteOwnershipPlan plan;
+    const int cellCount = tileWidth * tileHeight;
+    const int vertexWidth = tileWidth + 1;
+    const int vertexCount = vertexWidth * (tileHeight + 1);
+    if(tileWidth <= 0 || tileHeight <= 0
+       || currentSignatures.size() != cellCount
+       || availableCells.size() != cellCount
+       || (!repairCandidateCells.isEmpty()
+           && repairCandidateCells.size() != cellCount))
+        return plan;
+    const bool scopedToRepairCandidates =
+        repairCandidateCells.size() == cellCount;
+
+    struct SRouteCell
+    {
+        bool transition{false};
+        bool junction{false};
+        qint32 first{0};
+        qint32 second{0};
+    };
+    QVector<SRouteCell> cells(cellCount);
+    for(int cell = 0; cell < cellCount; ++cell)
+    {
+        if(!availableCells.at(cell))
+            continue;
+        QSet<qint32> materials;
+        const STerrainTransitionSignature& value = currentSignatures.at(cell);
+        for(qint32 material : {value.northWest, value.northEast,
+                               value.southEast, value.southWest})
+            if(material > 0)
+                materials.insert(material);
+        if(materials.size() > 2)
+        {
+            cells[cell].junction = true;
+            continue;
+        }
+        if(materials.size() != 2)
+            continue;
+        QVector<qint32> ordered = materials.values().toVector();
+        std::sort(ordered.begin(), ordered.end());
+        cells[cell].transition = true;
+        cells[cell].first = ordered.at(0);
+        cells[cell].second = ordered.at(1);
+    }
+
+    const auto samePair = [&cells](int first, int second) {
+        return cells.at(first).transition && cells.at(second).transition
+            && cells.at(first).first == cells.at(second).first
+            && cells.at(first).second == cells.at(second).second;
+    };
+    const auto connectedAcrossMixedEdge = [
+        &currentSignatures, &cells, &samePair,
+        tileWidth](int first, int second) {
+        if(!samePair(first, second))
+            return false;
+        const int firstX = first % tileWidth;
+        const int firstY = first / tileWidth;
+        const int secondX = second % tileWidth;
+        const int secondY = second / tileWidth;
+        qint32 firstA = 0, firstB = 0, secondA = 0, secondB = 0;
+        const STerrainTransitionSignature& a = currentSignatures.at(first);
+        const STerrainTransitionSignature& b = currentSignatures.at(second);
+        if(secondX == firstX + 1 && secondY == firstY)
+        {
+            firstA = a.northEast; firstB = a.southEast;
+            secondA = b.northWest; secondB = b.southWest;
+        }
+        else if(secondX == firstX - 1 && secondY == firstY)
+        {
+            firstA = a.northWest; firstB = a.southWest;
+            secondA = b.northEast; secondB = b.southEast;
+        }
+        else if(secondY == firstY + 1 && secondX == firstX)
+        {
+            firstA = a.southWest; firstB = a.southEast;
+            secondA = b.northWest; secondB = b.northEast;
+        }
+        else if(secondY == firstY - 1 && secondX == firstX)
+        {
+            firstA = a.northWest; firstB = a.northEast;
+            secondA = b.southWest; secondB = b.southEast;
+        }
+        else
+            return false;
+        return firstA == secondA && firstB == secondB
+            && firstA != firstB
+            && (firstA == cells.at(first).first
+                || firstA == cells.at(first).second)
+            && (firstB == cells.at(first).first
+                || firstB == cells.at(first).second);
+    };
+
+    QVector<bool> visited(cellCount, false);
+    const bool deltaFieldsAvailable =
+        currentVertexMaterials.size() == vertexCount
+        && baselineVertexMaterials.size() == vertexCount;
+    const bool provenanceAvailable =
+        exactGeneratedRouteOwners.size() == cellCount;
+    for(int seed = 0; seed < cellCount; ++seed)
+    {
+        if(visited.at(seed) || !cells.at(seed).transition
+           || (scopedToRepairCandidates
+               && !repairCandidateCells.at(seed)))
+            continue;
+        STerrainRouteOwnershipComponent component;
+        component.firstMaterial = cells.at(seed).first;
+        component.secondMaterial = cells.at(seed).second;
+        QVector<int> frontier;
+        frontier.append(seed);
+        visited[seed] = true;
+        while(!frontier.isEmpty())
+        {
+            const int cell = frontier.takeLast();
+            component.cellIndexes.append(cell);
+            const int x = cell % tileWidth;
+            const int y = cell / tileWidth;
+            const int neighbors[4] = {
+                x > 0 ? cell - 1 : -1,
+                x + 1 < tileWidth ? cell + 1 : -1,
+                y > 0 ? cell - tileWidth : -1,
+                y + 1 < tileHeight ? cell + tileWidth : -1};
+            for(int neighbor : neighbors)
+                if(neighbor >= 0 && !visited.at(neighbor)
+                   && connectedAcrossMixedEdge(cell, neighbor))
+                {
+                    visited[neighbor] = true;
+                    frontier.append(neighbor);
+                }
+        }
+        std::sort(component.cellIndexes.begin(), component.cellIndexes.end());
+
+        bool touchesJunction = false;
+        for(int cell : component.cellIndexes)
+        {
+            const int x = cell % tileWidth;
+            const int y = cell / tileWidth;
+            for(int neighborY = y - 1; neighborY <= y + 1; ++neighborY)
+                for(int neighborX = x - 1; neighborX <= x + 1; ++neighborX)
+                    if(neighborX >= 0 && neighborX < tileWidth
+                       && neighborY >= 0 && neighborY < tileHeight
+                       && cells.at(neighborY * tileWidth + neighborX).junction)
+                        touchesJunction = true;
+        }
+        if(touchesJunction)
+            component.ambiguity =
+                ETerrainRouteOwnershipAmbiguity::MultiMaterialJunction;
+        else
+        {
+            QSet<int> incidentVertices;
+            for(int cell : component.cellIndexes)
+            {
+                const int x = cell % tileWidth;
+                const int y = cell / tileWidth;
+                const int northWest = y * vertexWidth + x;
+                incidentVertices.insert(northWest);
+                incidentVertices.insert(northWest + 1);
+                incidentVertices.insert(northWest + vertexWidth);
+                incidentVertices.insert(northWest + vertexWidth + 1);
+            }
+            QSet<qint32> deltaOwners;
+            bool invalidDelta = false;
+            if(deltaFieldsAvailable)
+                for(int vertex : incidentVertices)
+                {
+                    const qint32 current = currentVertexMaterials.at(vertex);
+                    const qint32 baseline = baselineVertexMaterials.at(vertex);
+                    if(current == baseline)
+                        continue;
+                    const bool currentInPair = current == component.firstMaterial
+                        || current == component.secondMaterial;
+                    const bool baselineInPair = baseline == component.firstMaterial
+                        || baseline == component.secondMaterial;
+                    if(!currentInPair || !baselineInPair)
+                    {
+                        invalidDelta = true;
+                        continue;
+                    }
+                    deltaOwners.insert(current);
+                }
+            if(invalidDelta || deltaOwners.size() > 1)
+                component.ambiguity =
+                    ETerrainRouteOwnershipAmbiguity::MixedSemanticDelta;
+            else if(deltaOwners.size() == 1)
+            {
+                component.ownerMaterial = *deltaOwners.constBegin();
+                component.evidence =
+                    ETerrainRouteOwnershipEvidence::SemanticDelta;
+            }
+            else
+            {
+                QSet<qint32> provenanceOwners;
+                bool missingProvenance = !provenanceAvailable;
+                if(provenanceAvailable)
+                    for(int cell : component.cellIndexes)
+                    {
+                        const qint32 owner = exactGeneratedRouteOwners.at(cell);
+                        if(owner != component.firstMaterial
+                           && owner != component.secondMaterial)
+                            missingProvenance = true;
+                        else
+                            provenanceOwners.insert(owner);
+                    }
+                if(missingProvenance || provenanceOwners.isEmpty())
+                    component.ambiguity =
+                        ETerrainRouteOwnershipAmbiguity::MissingEvidence;
+                else if(provenanceOwners.size() > 1)
+                    component.ambiguity =
+                        ETerrainRouteOwnershipAmbiguity::MixedGeneratedProvenance;
+                else
+                {
+                    component.ownerMaterial = *provenanceOwners.constBegin();
+                    component.evidence =
+                        ETerrainRouteOwnershipEvidence::GeneratedProvenance;
+                }
+            }
+        }
+
+        const int componentIndex = plan.components.size();
+        for(int cell : component.cellIndexes)
+            plan.componentByCell.insert(cell, componentIndex);
+        if(component.ownerMaterial > 0
+           && component.ambiguity
+                == ETerrainRouteOwnershipAmbiguity::None)
+            for(int cell : component.cellIndexes)
+                plan.ownerByCell.insert(cell, component.ownerMaterial);
+        else
+            for(int cell : component.cellIndexes)
+                plan.preservedCells.insert(cell);
+        plan.components.append(component);
+    }
+    return plan;
+}
+
 void appendTerrainTileCommand(STerrainTileCommand* stroke,
                               const STerrainTileCommand& stamp)
 {
     if(!stroke)
         return;
+    // The release resolver needs the brush identity for equal-coverage
+    // runtime terrain-type ties. Preserve it while composing incremental
+    // preview stamps into the one undoable stroke; previously only tile and
+    // vertex deltas survived, so the release path saw the default material 0
+    // and refused otherwise valid 2/2 transitions.
+    if(stamp.semanticAudit.valid)
+    {
+        if(!stroke->semanticAudit.valid)
+            stroke->semanticAudit = stamp.semanticAudit;
+        else
+        {
+            stroke->semanticAudit.requestedMaterialId =
+                stamp.semanticAudit.requestedMaterialId;
+            stroke->semanticAudit.brush = stamp.semanticAudit.brush;
+            stroke->semanticAudit.layer = stamp.semanticAudit.layer;
+            stroke->semanticAudit.solverMode = stamp.semanticAudit.solverMode;
+            stroke->semanticAudit.paintedCoreCells +=
+                stamp.semanticAudit.paintedCoreCells;
+            stroke->semanticAudit.paintedVertices +=
+                stamp.semanticAudit.paintedVertices;
+            stroke->semanticAudit.affectedCells +=
+                stamp.semanticAudit.affectedCells;
+        }
+    }
     for(const STerrainTileDelta& delta : stamp.deltas)
     {
         int existingIndex = -1;
@@ -231,6 +541,122 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
             existing.diagnosticStrokeId = delta.diagnosticStrokeId;
             if(existing.before == existing.after)
                 stroke->deltas.remove(existingIndex);
+        }
+    }
+    for(const STerrainTileCommand::SVirtualVertexDelta& delta:stamp.virtualVertices)
+    {
+        int fieldIndex = -1;
+        for(int index = 0; index < stroke->virtualFields.size(); ++index)
+            if(stroke->virtualFields.at(index).layer == delta.layer)
+            {
+                fieldIndex = index;
+                break;
+            }
+        if(fieldIndex >= 0)
+        {
+            auto& field = stroke->virtualFields[fieldIndex];
+            const int key = delta.globalY * field.vertexWidth + delta.globalX;
+            if(key >= 0 && key < field.afterCurrent.size()
+               && field.afterCurrent.at(key) == delta.before)
+            {
+                field.afterCurrent[key] = delta.after;
+                if(delta.updatesBaseline
+                   && key < field.afterBaseline.size()
+                   && field.afterBaseline.at(key) == delta.beforeBaseline)
+                    field.afterBaseline[key] = delta.afterBaseline;
+            }
+            continue;
+        }
+        int existingIndex=-1;
+        for(int index=0;index<stroke->virtualVertices.size();++index)
+        {
+            const auto& existing=stroke->virtualVertices.at(index);
+            if(existing.globalX==delta.globalX&&existing.globalY==delta.globalY
+               &&existing.layer==delta.layer){existingIndex=index;break;}
+        }
+        if(existingIndex<0)stroke->virtualVertices.append(delta);
+        else
+        {
+            auto& existing=stroke->virtualVertices[existingIndex];
+            existing.after=delta.after;
+            if(delta.updatesBaseline)
+            {
+                if(!existing.updatesBaseline)
+                    existing.beforeBaseline = delta.beforeBaseline;
+                existing.updatesBaseline = true;
+                existing.afterBaseline = delta.afterBaseline;
+            }
+            if(existing.before==existing.after
+               && (!existing.updatesBaseline
+                   || existing.beforeBaseline==existing.afterBaseline))
+                stroke->virtualVertices.remove(existingIndex);
+        }
+    }
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : stamp.pendingVirtualVertices)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->pendingVirtualVertices.size(); ++index)
+        {
+            const auto& existing = stroke->pendingVirtualVertices.at(index);
+            if(existing.globalX == delta.globalX
+               && existing.globalY == delta.globalY
+               && existing.layer == delta.layer)
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if(existingIndex < 0)
+            stroke->pendingVirtualVertices.append(delta);
+        else
+        {
+            auto& existing = stroke->pendingVirtualVertices[existingIndex];
+            existing.after = delta.after;
+            if(existing.before == existing.after)
+                stroke->pendingVirtualVertices.remove(existingIndex);
+        }
+    }
+    for(const STerrainTileCommand::SVirtualFieldDelta& delta : stamp.virtualFields)
+    {
+        int existingIndex = -1;
+        for(int index = 0; index < stroke->virtualFields.size(); ++index)
+            if(stroke->virtualFields.at(index).layer == delta.layer)
+            {
+                existingIndex = index;
+                break;
+            }
+        if(existingIndex < 0)
+        {
+            STerrainTileCommand::SVirtualFieldDelta composed = delta;
+            // A mode switch normally closes the live stroke.  Still make
+            // composition deterministic if a full-field command follows
+            // per-vertex edits on the same layer: reconstruct the original
+            // field and let the complete snapshot own the transaction.
+            for(int index = stroke->virtualVertices.size() - 1; index >= 0; --index)
+            {
+                const auto& vertex = stroke->virtualVertices.at(index);
+                if(vertex.layer != delta.layer)
+                    continue;
+                const int key = vertex.globalY * delta.vertexWidth
+                    + vertex.globalX;
+                if(key >= 0 && key < composed.beforeCurrent.size())
+                    composed.beforeCurrent[key] = vertex.before;
+                if(vertex.updatesBaseline && key >= 0
+                   && key < composed.beforeBaseline.size())
+                    composed.beforeBaseline[key] = vertex.beforeBaseline;
+                stroke->virtualVertices.remove(index);
+            }
+            stroke->virtualFields.append(composed);
+        }
+        else
+        {
+            auto& existing = stroke->virtualFields[existingIndex];
+            existing.afterCurrent = delta.afterCurrent;
+            existing.afterBaseline = delta.afterBaseline;
+            if(existing.beforeCurrent == existing.afterCurrent
+               && existing.beforeBaseline == existing.afterBaseline)
+                stroke->virtualFields.remove(existingIndex);
         }
     }
 }
@@ -292,6 +718,37 @@ void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
     }
 }
 
+STerrainHeightInfluenceBounds terrainHeightInfluenceBounds(
+    const STerrainHeightCommand& command, int vertexCountX, int vertexCountY)
+{
+    STerrainHeightInfluenceBounds bounds;
+    if(command.deltas.isEmpty() || vertexCountX < 2 || vertexCountY < 2)
+        return bounds;
+    int minimumX = command.deltas.front().globalX;
+    int minimumY = command.deltas.front().globalY;
+    int maximumX = minimumX;
+    int maximumY = minimumY;
+    for(const STerrainHeightDelta& delta : command.deltas)
+    {
+        minimumX = qMin(minimumX, delta.globalX);
+        minimumY = qMin(minimumY, delta.globalY);
+        maximumX = qMax(maximumX, delta.globalX);
+        maximumY = qMax(maximumY, delta.globalY);
+    }
+    // Surface sampling may walk neighbouring displaced cells before finding
+    // the owning triangle. This conservative halo keeps that search correct
+    // without reprojecting every object in every loaded MOB.
+    constexpr float projectionSearchHalo = 12.0f;
+    bounds.valid = true;
+    bounds.minimumX = float(minimumX) - projectionSearchHalo;
+    bounds.minimumY = float(minimumY) - projectionSearchHalo;
+    bounds.maximumX = float(maximumX) + projectionSearchHalo;
+    bounds.maximumY = float(maximumY) + projectionSearchHalo;
+    bounds.terrainMaximumX = float(vertexCountX - 2);
+    bounds.terrainMaximumY = float(vertexCountY - 2);
+    return bounds;
+}
+
 STerrainTransitionSignature CTerrainTransitionCatalog::rotated(
     const STerrainTransitionSignature& signature, int clockwiseQuarterTurns)
 {
@@ -331,12 +788,91 @@ bool CTerrainTransitionCatalog::addVariant(const STerrainTransitionVariant& vari
                         "Transition variants require a positive distribution weight");
         return false;
     }
+    QSet<qint32> routeMaterials;
+    for(qint32 material : {variant.signature.northWest,
+                           variant.signature.northEast,
+                           variant.signature.southEast,
+                           variant.signature.southWest})
+        routeMaterials.insert(material);
+    if(variant.routeOwnerMaterial < 0
+       || (variant.routeOwnerMaterial > 0
+           && (routeMaterials.size() != 2
+               || !routeMaterials.contains(variant.routeOwnerMaterial))))
+    {
+        if(report)
+            report->add("terrain.transition_route_owner",
+                EValidationSeverity::Error,
+                "A generated transition route owner must be one of exactly two semantic corner materials");
+        return false;
+    }
     if(m_packedLookup.contains(variant.packedTile))
     {
         if(report)
             report->add("terrain.transition_duplicate", EValidationSeverity::Error,
                         "Transition catalog assigns the same packed tile more than once");
         return false;
+    }
+    const int physicalSlot = SMprPackedTile::decode(
+        variant.packedTile).atlasSlot();
+    SMprPackedTile physical = SMprPackedTile::decode(variant.packedTile);
+    for(int rotation = 0; rotation < 4; ++rotation)
+    {
+        physical.rotation = quint8(rotation);
+        const auto existingPacked = m_packedLookup.constFind(physical.encode());
+        if(existingPacked != m_packedLookup.constEnd()
+           && m_variants.at(existingPacked.value()).routeOwnerMaterial
+                != variant.routeOwnerMaterial)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same route owner provenance");
+            return false;
+        }
+        if(existingPacked != m_packedLookup.constEnd()
+           && m_variants.at(existingPacked.value()).canonicalGeneratedRoute
+                != variant.canonicalGeneratedRoute)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same generated-route provenance class");
+            return false;
+        }
+    }
+    const QVector<int> sameSignature = m_signatureLookup.value(
+        signatureKey(variant.signature));
+    for(int existingIndex : sameSignature)
+    {
+        const STerrainTransitionVariant& existing = m_variants.at(existingIndex);
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.distributionWeight != variant.distributionWeight)
+        {
+            if(report)
+                report->add("terrain.transition_physical_weight",
+                    EValidationSeverity::Error,
+                    "Every valid rotation of one physical terrain tile must use the same distribution weight");
+            return false;
+        }
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.routeOwnerMaterial != variant.routeOwnerMaterial)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same route owner provenance");
+            return false;
+        }
+        if(SMprPackedTile::decode(existing.packedTile).atlasSlot() == physicalSlot
+           && existing.canonicalGeneratedRoute
+                != variant.canonicalGeneratedRoute)
+        {
+            if(report)
+                report->add("terrain.transition_route_owner",
+                    EValidationSeverity::Error,
+                    "Every rotation of one physical terrain tile must carry the same generated-route provenance class");
+            return false;
+        }
     }
     const int index = m_variants.size();
     m_variants.append(variant);
@@ -368,10 +904,54 @@ quint16 CTerrainTransitionCatalog::select(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool* found) const
 {
-    const QVector<int> candidates = m_signatureLookup.value(signatureKey(signature));
+    return selectCandidates(signature, globalX, globalY, distributionSeed,
+                            false, nullptr, 0, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectCandidates(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, bool paintOnly,
+    const QSet<int>* allowedPhysicalSlots,
+    qint32 preferredRouteOwnerMaterial, bool* found) const
+{
+    const QVector<int> indexed = m_signatureLookup.value(signatureKey(signature));
+    QSet<qint32> requestedMaterials;
+    for(qint32 material : {signature.northWest, signature.northEast,
+                           signature.southEast, signature.southWest})
+        requestedMaterials.insert(material);
+    const bool applyRouteOwner = preferredRouteOwnerMaterial > 0
+        && requestedMaterials.size() == 2
+        && requestedMaterials.contains(preferredRouteOwnerMaterial);
+    QMap<int, QVector<int>> byPhysicalSlot;
+    for(int index : indexed)
+    {
+        const STerrainTransitionVariant& variant = m_variants.at(index);
+        if(paintOnly && !variant.paintSelectable)
+            continue;
+        const int physicalSlot = SMprPackedTile::decode(
+            variant.packedTile).atlasSlot();
+        if(allowedPhysicalSlots && !allowedPhysicalSlots->contains(physicalSlot))
+            continue;
+        // Authored artwork is route-neutral and retains precedence. Explicit
+        // generated provenance is eligible only for its own connected-region
+        // owner, so an opposite cached route cannot displace the requested
+        // one merely because it has the same semantic corners and MP type.
+        if(applyRouteOwner
+           && ((variant.routeOwnerMaterial > 0
+                && variant.routeOwnerMaterial
+                    != preferredRouteOwnerMaterial)
+               || (variant.canonicalGeneratedRoute
+                   && variant.routeOwnerMaterial
+                        != preferredRouteOwnerMaterial)))
+            continue;
+        byPhysicalSlot[physicalSlot].append(index);
+    }
     quint64 totalWeight = 0;
-    for(int index : candidates)
-        totalWeight += quint64(m_variants.at(index).distributionWeight);
+    for(auto group = byPhysicalSlot.constBegin();
+        group != byPhysicalSlot.constEnd(); ++group)
+        if(!group.value().isEmpty())
+            totalWeight += quint64(m_variants.at(
+                group.value().front()).distributionWeight);
     if(totalWeight == 0)
     {
         if(found)
@@ -395,16 +975,32 @@ quint16 CTerrainTransitionCatalog::select(
     mix(quint32(signature.southEast));
     mix(quint32(signature.southWest));
     quint64 selection = quint64(hash) % totalWeight;
-    for(int index : candidates)
+    QVector<int> selectedRotations;
+    for(auto group = byPhysicalSlot.constBegin();
+        group != byPhysicalSlot.constEnd(); ++group)
     {
-        const STerrainTransitionVariant& variant = m_variants.at(index);
-        if(selection < quint64(variant.distributionWeight))
+        const int weight = m_variants.at(
+            group.value().front()).distributionWeight;
+        if(selection < quint64(weight))
         {
-            if(found)
-                *found = true;
-            return variant.packedTile;
+            selectedRotations = group.value();
+            break;
         }
-        selection -= quint64(variant.distributionWeight);
+        selection -= quint64(weight);
+    }
+    if(!selectedRotations.isEmpty())
+    {
+        // Rotation is a separate deterministic choice. A physical slot with
+        // fewer explicitly valid rotations must not become less likely.
+        quint32 rotationHash = hash ^ 0x9e3779b9u;
+        rotationHash ^= rotationHash >> 16;
+        rotationHash *= 0x85ebca6bu;
+        rotationHash ^= rotationHash >> 13;
+        const int index = selectedRotations.at(
+            int(rotationHash % quint32(selectedRotations.size())));
+        if(found)
+            *found = true;
+        return m_variants.at(index).packedTile;
     }
     if(found)
         *found = false;
@@ -417,7 +1013,101 @@ quint16 CTerrainTransitionCatalog::selectForPaint(
 {
     const STerrainTransitionSignature lookup = m_mirrorPaintGridY
         ? mirroredGridY(signature) : signature;
-    return select(lookup, globalX, globalY, distributionSeed, found);
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, nullptr, 0, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, qint32 preferredRouteOwnerMaterial,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, nullptr,
+                             preferredRouteOwnerMaterial, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, const QSet<int>& allowedPhysicalSlots,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, &allowedPhysicalSlots, 0, found);
+}
+
+quint16 CTerrainTransitionCatalog::selectForPaint(
+    const STerrainTransitionSignature& signature, int globalX, int globalY,
+    quint32 distributionSeed, const QSet<int>& allowedPhysicalSlots,
+    qint32 preferredRouteOwnerMaterial, bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    return selectCandidates(lookup, globalX, globalY, distributionSeed,
+                             true, &allowedPhysicalSlots,
+                             preferredRouteOwnerMaterial, found);
+}
+
+quint16 CTerrainTransitionCatalog::lowestPaintRotationForSlot(
+    const STerrainTransitionSignature& signature, quint16 selectedPacked,
+    bool* found) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    const int physicalSlot = SMprPackedTile::decode(
+        selectedPacked).atlasSlot();
+    int bestRotation = 4;
+    quint16 best = 0;
+    for(int index : m_signatureLookup.value(signatureKey(lookup)))
+    {
+        const STerrainTransitionVariant& variant = m_variants.at(index);
+        const SMprPackedTile packed = SMprPackedTile::decode(variant.packedTile);
+        if(variant.paintSelectable && packed.atlasSlot() == physicalSlot
+           && packed.rotation < bestRotation)
+        {
+            bestRotation = packed.rotation;
+            best = variant.packedTile;
+        }
+    }
+    if(found)
+        *found = bestRotation < 4;
+    return best;
+}
+
+STerrainTransitionVariant CTerrainTransitionCatalog::variantForPacked(
+    quint16 packedTile, bool* found) const
+{
+    const auto existing = m_packedLookup.constFind(packedTile);
+    if(existing != m_packedLookup.constEnd())
+    {
+        if(found)
+            *found = true;
+        return m_variants.at(existing.value());
+    }
+    if(found)
+        *found = false;
+    return STerrainTransitionVariant();
+}
+
+QVector<STerrainTransitionVariant> CTerrainTransitionCatalog::paintVariants(
+    const STerrainTransitionSignature& signature) const
+{
+    const STerrainTransitionSignature lookup = m_mirrorPaintGridY
+        ? mirroredGridY(signature) : signature;
+    QVector<STerrainTransitionVariant> result;
+    for(int index : m_signatureLookup.value(signatureKey(lookup)))
+        if(m_variants.at(index).paintSelectable)
+            result.append(m_variants.at(index));
+    std::sort(result.begin(), result.end(), [](
+        const STerrainTransitionVariant& left,
+        const STerrainTransitionVariant& right) {
+        return left.packedTile < right.packedTile;
+    });
+    return result;
 }
 
 STerrainTransitionSignature CTerrainTransitionCatalog::signatureForPacked(
@@ -475,6 +1165,27 @@ QVector<STerrainTransitionSignature> CTerrainTransitionCatalog::gridSignatures()
         result.append(signature);
     }
     return result;
+}
+
+void CTerrainTransitionCatalog::removeAtlasSlot(int atlasSlot)
+{
+    QVector<STerrainTransitionVariant> retained;
+    retained.reserve(m_variants.size());
+    for(const STerrainTransitionVariant& variant : m_variants)
+        if(SMprPackedTile::decode(variant.packedTile).atlasSlot() != atlasSlot)
+            retained.append(variant);
+    m_variants.clear();
+    m_packedLookup.clear();
+    m_signatureLookup.clear();
+    // Material identities belong to the authoring catalog, not to whichever
+    // physical cache slots happen to be resident. Keep m_materialIds intact.
+    for(const STerrainTransitionVariant& variant : retained)
+    {
+        const int index = m_variants.size();
+        m_variants.append(variant);
+        m_packedLookup.insert(variant.packedTile, index);
+        m_signatureLookup[signatureKey(variant.signature)].append(index);
+    }
 }
 
 QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
@@ -605,6 +1316,12 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
     m_conflictedVertices.clear();
     m_sectors.clear();
     m_sectorLookup.clear();
+    m_virtualLandMaterials.clear();
+    m_virtualOverlayMaterials.clear();
+    m_originalVirtualLandMaterials.clear();
+    m_originalVirtualOverlayMaterials.clear();
+    m_pendingVirtualLandMaterials.clear();
+    m_pendingVirtualOverlayMaterials.clear();
     if(sectorCountX <= 0 || sectorCountY <= 0 || !std::isfinite(maxZ) || maxZ <= 0.0f)
     {
         if(report)
@@ -731,6 +1448,54 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
         }
     }
     m_originalHeights = m_heights;
+    return true;
+}
+
+void CTerrainEditModel::enableWorkingAtlasSlots(int slotCount)
+{
+    const int bounded = qBound(0, slotCount, 16384);
+    if(bounded <= m_tileTypes.size())
+        return;
+    const int previous = m_tileTypes.size();
+    m_tileTypes.resize(bounded);
+    for(int slot = previous; slot < bounded; ++slot)
+        m_tileTypes[slot] = -1;
+    m_textureCount = qMax(m_textureCount, (bounded + 63) / 64);
+}
+
+bool CTerrainEditModel::canInstallWorkingAtlasSlotTypes(
+    const QVector<qint32>& runtimeTerrainTypes) const
+{
+    if(runtimeTerrainTypes.isEmpty()
+       || runtimeTerrainTypes.size() > m_tileTypes.size())
+        return false;
+    for(qint32 runtimeTerrainType : runtimeTerrainTypes)
+        if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+            return false;
+    return true;
+}
+
+bool CTerrainEditModel::installWorkingAtlasSlotTypes(
+    const QVector<qint32>& runtimeTerrainTypes)
+{
+    // Validate the complete table before changing any entry. A generated
+    // family can realize several physical variants at once; publishing only
+    // the selected slot leaves its siblings visible in Manual mode but
+    // unpaintable until a save/reopen rebuilds MP metadata.
+    if(!canInstallWorkingAtlasSlotTypes(runtimeTerrainTypes))
+        return false;
+    for(int slot = 0; slot < runtimeTerrainTypes.size(); ++slot)
+        m_tileTypes[slot] = runtimeTerrainTypes.at(slot);
+    return true;
+}
+
+bool CTerrainEditModel::setWorkingAtlasSlotType(
+    int slot, qint32 runtimeTerrainType)
+{
+    if(slot < 0 || slot >= m_tileTypes.size()
+       || runtimeTerrainType < 0 || runtimeTerrainType >= 16)
+        return false;
+    m_tileTypes[slot] = runtimeTerrainType;
     return true;
 }
 
@@ -867,7 +1632,8 @@ quint16 CTerrainEditModel::packedTile(int globalX, int globalY,
 qint32 CTerrainEditModel::tileType(quint16 packed, bool* found) const
 {
     const int slot = SMprPackedTile::decode(packed).atlasSlot();
-    const bool present = slot >= 0 && slot < m_tileTypes.size();
+    const bool present = slot >= 0 && slot < m_tileTypes.size()
+        && m_tileTypes.at(slot) >= 0 && m_tileTypes.at(slot) < 16;
     if(found)
         *found = present;
     return present ? m_tileTypes.at(slot) : 0;
@@ -928,6 +1694,43 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
                 command.deltas.append(delta);
         }
     }
+    return command;
+}
+
+STerrainHeightCommand CTerrainEditModel::makeNoise(
+    const STerrainBrush& brush, float rawHeightRange,
+    quint32 noiseSeed, bool allowSaturation) const
+{
+    STerrainHeightCommand command;
+    command.description = QStringLiteral("Noise terrain");
+    if(brush.radius < 0.0f || !std::isfinite(rawHeightRange)
+       || rawHeightRange < 0.0f || m_vertexCountX <= 0 || m_vertexCountY <= 0)
+        return command;
+    const int minX = qMax(0, int(std::floor(brush.centerX - brush.radius)));
+    const int maxX = qMin(m_vertexCountX - 1,
+        int(std::ceil(brush.centerX + brush.radius)));
+    const int minY = qMax(0, int(std::floor(brush.centerY - brush.radius)));
+    const int maxY = qMin(m_vertexCountY - 1,
+        int(std::ceil(brush.centerY + brush.radius)));
+    for(int y = minY; y <= maxY; ++y)
+        for(int x = minX; x <= maxX; ++x)
+        {
+            const float dx = float(x) - brush.centerX;
+            const float dy = float(y) - brush.centerY;
+            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                             brush.radius, brush.falloff);
+            if(weight <= 0.0f)
+                continue;
+            STerrainHeightDelta delta;
+            delta.globalX = x;
+            delta.globalY = y;
+            delta.before = height(x, y);
+            delta.after = clampedHeight(float(delta.before)
+                + rawHeightRange * weight * terrainNoiseSample(noiseSeed, x, y),
+                allowSaturation ? nullptr : &delta.clamped);
+            if(delta.before != delta.after)
+                command.deltas.append(delta);
+        }
     return command;
 }
 
@@ -1175,7 +1978,11 @@ qint16 CTerrainEditModel::overlayMaterialIndex(int globalTileX, int globalTileY,
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
     const STerrainTileBrush& brush, qint16 materialIndex,
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
-    CValidationReport* report) const
+    CValidationReport* report,
+    const CTerrainTransitionCatalog* uniformCatalog,
+    const STerrainTransitionSignature& uniformSignature,
+    quint32 distributionSeed, bool randomizeUniformRotation,
+    qint32 requiredRuntimeType) const
 {
     SOverlaySurfaceCommand command;
     command.description = QStringLiteral("Activate overlay surface");
@@ -1213,6 +2020,17 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
         return it.value();
     };
     QVector<SActivatedCell> activatedCells;
+    QSet<int> allowedUniformSlots;
+    if(uniformCatalog && requiredRuntimeType >= 0)
+        for(const STerrainTransitionVariant& variant :
+                uniformCatalog->paintVariants(uniformSignature))
+        {
+            bool typeFound = false;
+            const qint32 type = tileType(variant.packedTile, &typeFound);
+            if(typeFound && type == requiredRuntimeType)
+                allowedUniformSlots.insert(SMprPackedTile::decode(
+                    variant.packedTile).atlasSlot());
+        }
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
     const int maximumX = qMin(tileCountX() - 1,
                               int(std::floor(brush.centerX + brush.radius)));
@@ -1260,11 +2078,38 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayActivation(
                 + kTileBlockSize;
             const bool wasActive = readOverlayMaterial(
                 payload, overlayMaterialOffset, localTile) >= 0;
-            if(readPackedTile(payload, overlayTileOffset, localTile) == selected.encode()
+            quint16 selectedForCell = selected.encode();
+            if(uniformCatalog)
+            {
+                bool variantFound = false;
+                selectedForCell = selectUniformInteriorTile(
+                    *uniformCatalog, uniformSignature, x, y,
+                    terrainPaintLayerSeed(distributionSeed,
+                                          ETerrainTileLayer::Overlay),
+                    randomizeUniformRotation, &variantFound,
+                    requiredRuntimeType >= 0 ? &allowedUniformSlots : nullptr);
+                const int selectedSlot = SMprPackedTile::decode(
+                    selectedForCell).atlasSlot();
+                if(!variantFound || selectedSlot < 0
+                   || selectedSlot >= m_tileTypes.size())
+                {
+                    if(report)
+                        report->add("terrain.overlay_activation_variant",
+                            EValidationSeverity::Error,
+                            "Add Overlay Surface could not select an exact typed uniform brush variant");
+                    return SOverlaySurfaceCommand();
+                }
+            }
+            if(readPackedTile(payload, overlayTileOffset, localTile) == selectedForCell
                && readOverlayMaterial(payload, overlayMaterialOffset, localTile)
                     == materialIndex)
                 continue;
-            writePackedTile(payload, overlayTileOffset, localTile, selected.encode());
+            // Add Surface is the atomic selected-brush authoring operation:
+            // it writes both the packed atlas tile and MPR surface material.
+            // Existing geometry/heights stay intact; only genuinely inactive
+            // cells need their overlay vertices initialized below.
+            writePackedTile(payload, overlayTileOffset, localTile,
+                            selectedForCell);
             writeOverlayMaterial(payload, overlayMaterialOffset, localTile, materialIndex);
             if(!wasActive)
                 activatedCells.append({sectorIndex, localTile, x, y});
@@ -1511,6 +2356,15 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
                                  2, 0.0f, strength, report);
 }
 
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayNoise(
+    const STerrainBrush& brush, float rawHeightRange, quint32 noiseSeed,
+    CValidationReport* report, bool allowSaturation) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Noise overlay height"), brush,
+                                 3, rawHeightRange, 1.0f, report,
+                                 allowSaturation, noiseSeed);
+}
+
 SOverlaySurfaceSnapshot CTerrainEditModel::overlaySurfaceSnapshot() const
 {
     SOverlaySurfaceSnapshot snapshot;
@@ -1574,12 +2428,13 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySurfaceCommand(
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     const QString& description, const STerrainBrush& brush,
     int operation, float value, float strength,
-    CValidationReport* report, bool allowSaturation) const
+    CValidationReport* report, bool allowSaturation,
+    quint32 noiseSeed) const
 {
     SOverlaySurfaceCommand command;
     command.description = description;
     if(brush.radius <= 0.0f || !std::isfinite(value) || !std::isfinite(strength)
-       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 2)
+       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 3)
     {
         if(report)
             report->add("terrain.overlay_sculpt_input", EValidationSeverity::Error,
@@ -1742,7 +2597,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
             target = before + value * weight;
         else if(operation == 1)
             target = before + (value - before) * strength * weight;
-        else
+        else if(operation == 2)
         {
             float sum = 0.0f;
             int samples = 0;
@@ -1762,6 +2617,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
             if(samples > 0)
                 target = before + (sum / float(samples) - before) * strength * weight;
         }
+        else
+            target = before + value * weight * terrainNoiseSample(noiseSeed, x, y);
         bool clamped = false;
         const quint16 after = clampedHeight(target,
             allowSaturation ? nullptr : &clamped);
@@ -2320,6 +3177,24 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
     const STerrainDiagnosticPolicy& policy,
     CValidationReport* report) const
 {
+    return diagnoseState(command, objects, policy, report, false);
+}
+
+STerrainEditDiagnostics CTerrainEditModel::diagnoseApplied(
+    const STerrainHeightCommand& command,
+    const QVector<STerrainObjectHeightProbe>& objects,
+    const STerrainDiagnosticPolicy& policy,
+    CValidationReport* report) const
+{
+    return diagnoseState(command, objects, policy, report, true);
+}
+
+STerrainEditDiagnostics CTerrainEditModel::diagnoseState(
+    const STerrainHeightCommand& command,
+    const QVector<STerrainObjectHeightProbe>& objects,
+    const STerrainDiagnosticPolicy& policy,
+    CValidationReport* report, bool commandAlreadyApplied) const
+{
     STerrainEditDiagnostics result;
     if(command.isEmpty())
     {
@@ -2327,6 +3202,7 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
         return result;
     }
 
+    QMap<int, quint16> beforeHeights;
     QMap<int, quint16> afterHeights;
     QSet<int> affectedSectors;
     bool firstDelta = true;
@@ -2349,7 +3225,9 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
                             QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
             return result;
         }
-        if(m_conflictedVertices.at(index) || m_heights.at(index) != delta.before)
+        const quint16 expectedCurrent = commandAlreadyApplied
+            ? delta.after : delta.before;
+        if(m_conflictedVertices.at(index) || m_heights.at(index) != expectedCurrent)
         {
             if(report)
                 report->add("terrain.diagnostic_provenance", EValidationSeverity::Error,
@@ -2357,6 +3235,7 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
                             QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
             return result;
         }
+        beforeHeights.insert(index, delta.before);
         afterHeights.insert(index, delta.after);
         for(const SVertexRef& ref : m_refs.at(index))
             affectedSectors.insert(ref.sectorIndex);
@@ -2388,9 +3267,13 @@ STerrainEditDiagnostics CTerrainEditModel::diagnose(
     result.changedVertexCount = afterHeights.size();
     result.affectedSectorCount = affectedSectors.size();
 
-    const auto rawHeight = [this, &afterHeights](int index, bool after) {
-        return after && afterHeights.contains(index)
-            ? afterHeights.value(index) : m_heights.at(index);
+    const auto rawHeight = [this, &beforeHeights, &afterHeights,
+                            commandAlreadyApplied](int index, bool after) {
+        if(!after && commandAlreadyApplied && beforeHeights.contains(index))
+            return beforeHeights.value(index);
+        if(after && !commandAlreadyApplied && afterHeights.contains(index))
+            return afterHeights.value(index);
+        return m_heights.at(index);
     };
     const auto position = [this, &rawHeight](int index, bool after) {
         const int x = index % m_vertexCountX;
@@ -2526,6 +3409,7 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
     }
     QSet<int> commandVertices;
     QSet<int> affectedNormals;
+    QSet<int> affectedSectors;
     for(const STerrainHeightDelta& delta : command.deltas)
     {
         if(delta.globalX < 0 || delta.globalX >= m_vertexCountX ||
@@ -2598,6 +3482,7 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         {
             SSector& sector = m_sectors[ref.sectorIndex];
             writeHeight(sector.currentPayload, ref.localX, ref.localY, value);
+            affectedSectors.insert(ref.sectorIndex);
         }
     }
 
@@ -2637,10 +3522,14 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
                 ? readPackedNormal(sector.source.payload, ref.localX, ref.localY)
                 : rebuilt;
             writePackedNormal(sector.currentPayload, ref.localX, ref.localY, value);
+            affectedSectors.insert(ref.sectorIndex);
         }
     }
-    for(SSector& sector : m_sectors)
+    for(int sectorIndex : affectedSectors)
+    {
+        SSector& sector = m_sectors[sectorIndex];
         sector.dirty = sector.currentPayload != sector.source.payload;
+    }
     return true;
 }
 
@@ -2658,7 +3547,9 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     selected.atlasIndex = atlasIndex;
     selected.tileIndex = tileIndex;
     selected.rotation = rotation;
-    if(selected.atlasSlot() >= m_tileTypes.size())
+    if(selected.atlasSlot() >= m_tileTypes.size()
+       || m_tileTypes.at(selected.atlasSlot()) < 0
+       || m_tileTypes.at(selected.atlasSlot()) >= 16)
         return command;
     const quint16 after = selected.encode();
     const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
@@ -2694,10 +3585,199 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     return command;
 }
 
+STerrainTileCommand CTerrainEditModel::makeAtlasSlotRemap(
+    const QMap<int, int>& slotRemap) const
+{
+    STerrainTileCommand command;
+    command.description = QStringLiteral(
+        "Repack animated terrain frames and preserve terrain references");
+    if(slotRemap.isEmpty())
+        return command;
+    for(ETerrainTileLayer layer : {ETerrainTileLayer::Land,
+                                   ETerrainTileLayer::Overlay})
+        for(int y = 0; y < tileCountY(); ++y)
+            for(int x = 0; x < tileCountX(); ++x)
+            {
+                bool available = false;
+                const quint16 before = packedTile(x, y, layer, &available);
+                if(!available)
+                    continue;
+                SMprPackedTile packed = SMprPackedTile::decode(before);
+                const auto remapped = slotRemap.constFind(packed.atlasSlot());
+                if(remapped == slotRemap.constEnd()
+                   || remapped.value() == packed.atlasSlot()
+                   || remapped.value() < 0
+                   || remapped.value() >= m_tileTypes.size()
+                   || m_tileTypes.at(remapped.value()) < 0
+                   || m_tileTypes.at(remapped.value()) >= 16)
+                    continue;
+                packed.tileIndex = quint8(remapped.value() % 64);
+                packed.atlasIndex = quint8(remapped.value() / 64);
+                STerrainTileDelta delta;
+                delta.globalX = x;
+                delta.globalY = y;
+                delta.layer = layer;
+                delta.before = before;
+                delta.after = packed.encode();
+                command.deltas.append(delta);
+            }
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
+    const CTerrainTransitionCatalog& catalog, CValidationReport* report)
+{
+    Q_UNUSED(report);
+    STerrainTileCommand command = makeTilePaint(
+        brush, layer, atlasIndex, tileIndex, rotation);
+    if(brush.radius < 0.0f || tileIndex >= 64 || rotation >= 4
+       || atlasIndex >= m_textureCount)
+        return command;
+
+    SMprPackedTile selected;
+    selected.atlasIndex = atlasIndex;
+    selected.tileIndex = tileIndex;
+    selected.rotation = rotation;
+    if(selected.atlasSlot() >= m_tileTypes.size()
+       || m_tileTypes.at(selected.atlasSlot()) < 0
+       || m_tileTypes.at(selected.atlasSlot()) >= 16)
+        return command;
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const quint16 after = selected.encode();
+    QMap<int, quint16> postCommandPacked;
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(width - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(height - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+    {
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            const float dx = std::fabs(float(x) - brush.centerX);
+            const float dy = std::fabs(float(y) - brush.centerY);
+            const bool inside = brush.shape == ETerrainTileBrushShape::Square
+                ? qMax(dx, dy) <= brush.radius
+                : std::sqrt(dx * dx + dy * dy) <= brush.radius;
+            if(!inside)
+                continue;
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(available)
+                postCommandPacked.insert(y * width + x, after);
+        }
+    }
+    if(postCommandPacked.isEmpty())
+        return command;
+
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = brush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = -1;
+    command.semanticAudit.solverMode = QStringLiteral(
+        "manual-exact-corners");
+    for(auto cell = postCommandPacked.constBegin();
+        cell != postCommandPacked.constEnd(); ++cell)
+    {
+        const QPoint point(cell.key() % width, cell.key() / width);
+        command.semanticAudit.paintedCoreCells.append(point);
+        command.semanticAudit.affectedCells.append(point);
+    }
+
+    const int vertexWidth = width + 1;
+    const int expectedFieldSize = vertexWidth * (height + 1);
+    QVector<qint32> beforeCurrent;
+    QVector<qint32> beforeBaseline;
+    copyVirtualMaterialFieldState(layer, &beforeCurrent, &beforeBaseline);
+
+    bool selectedDecoded = false;
+    const STerrainTransitionSignature signature =
+        catalog.gridSignatureForPacked(after, &selectedDecoded);
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    QMap<int, qint32> finalValues;
+    for(auto cell = postCommandPacked.constBegin();
+        cell != postCommandPacked.constEnd(); ++cell)
+    {
+        const int x = cell.key() % width;
+        const int y = cell.key() / width;
+        const int northWest = y * vertexWidth + x;
+        const int northEast = northWest + 1;
+        const int southWest = (y + 1) * vertexWidth + x;
+        const int southEast = southWest + 1;
+        finalValues[northWest] = selectedDecoded
+            ? signature.northWest : unset;
+        finalValues[northEast] = selectedDecoded
+            ? signature.northEast : unset;
+        finalValues[southEast] = selectedDecoded
+            ? signature.southEast : unset;
+        finalValues[southWest] = selectedDecoded
+            ? signature.southWest : unset;
+    }
+    if(beforeCurrent.size() == expectedFieldSize
+       && beforeBaseline.size() == expectedFieldSize)
+    {
+        // QMap iteration is cell-key order (y, then x). When several Manual
+        // cells touch a vertex, the later explicit cell in that deterministic
+        // order wins. Only the final values are stored; no origin or time data
+        // is retained.
+        for(auto value = finalValues.constBegin();
+            value != finalValues.constEnd(); ++value)
+        {
+            const int key = value.key();
+            if(beforeCurrent.at(key) == value.value()
+               && beforeBaseline.at(key) == value.value())
+                continue;
+            STerrainTileCommand::SVirtualVertexDelta delta;
+            delta.globalX = key % vertexWidth;
+            delta.globalY = key / vertexWidth;
+            delta.layer = layer;
+            delta.before = beforeCurrent.at(key);
+            delta.after = value.value();
+            delta.updatesBaseline = true;
+            delta.beforeBaseline = beforeBaseline.at(key);
+            delta.afterBaseline = value.value();
+            command.virtualVertices.append(delta);
+        }
+    }
+    else if(beforeCurrent.isEmpty() && beforeBaseline.isEmpty())
+    {
+        // Stay proportional to the Manual footprint on a legacy/plain map,
+        // but retain the decoded tuple for the first deterministic material
+        // recovery. The model still has no complete semantic field here.
+        QMap<int, qint32>& pending = layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        for(auto value = finalValues.constBegin();
+            value != finalValues.constEnd(); ++value)
+        {
+            const qint32 before = pending.value(value.key(), unset);
+            if(before == value.value())
+                continue;
+            STerrainTileCommand::SPendingVirtualVertexDelta delta;
+            delta.globalX = value.key() % vertexWidth;
+            delta.globalY = value.key() / vertexWidth;
+            delta.layer = layer;
+            delta.before = before;
+            delta.after = value.value();
+            command.pendingVirtualVertices.append(delta);
+        }
+    }
+    // A plain/legacy MPR has no durable semantic field yet. Manual remains a
+    // direct physical edit in that state; it must not synchronously solve the
+    // complete map for every clicked tile. The first later Modern/Resolve
+    // operation initializes once from the post-Manual packed cells.
+    return command;
+}
+
 STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
-    quint32 distributionSeed, CValidationReport* report) const
+    quint32 distributionSeed, CValidationReport* report,
+    ETerrainSemanticPaintPolicy policy) const
 {
     STerrainTileCommand command;
     command.description = layer == ETerrainTileLayer::Land
@@ -2755,8 +3835,6 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
 
     QVector<int> orderedPainted = painted.values().toVector();
     std::sort(orderedPainted.begin(), orderedPainted.end());
-    for(int index : orderedPainted)
-        command.semanticAudit.paintedCoreCells.append(QPoint(index % width, index / width));
 
     STerrainTransitionSignature pure;
     pure.northWest = pure.northEast = pure.southEast = pure.southWest = materialId;
@@ -2771,49 +3849,46 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
         return command;
     }
 
-    // The only mutable cells outside the brush are the immediate eight-neighbor
-    // ring. Missing transitions never enlarge this footprint.
     QSet<int> boundary;
-    for(int index : painted)
-    {
-        const int x = index % width;
-        const int y = index / width;
-        for(int offsetY = -1; offsetY <= 1; ++offsetY)
-        {
-            for(int offsetX = -1; offsetX <= 1; ++offsetX)
-            {
-                const int candidateX = x + offsetX;
-                const int candidateY = y + offsetY;
-                if(candidateX < 0 || candidateX >= width
-                   || candidateY < 0 || candidateY >= height)
-                    continue;
-                const int candidate = candidateY * width + candidateX;
-                if(painted.contains(candidate))
-                    continue;
-                bool available = false;
-                packedTile(candidateX, candidateY, layer, &available);
-                if(available)
-                    boundary.insert(candidate);
-            }
-        }
-    }
-    QVector<int> orderedBoundary = boundary.values().toVector();
-    std::sort(orderedBoundary.begin(), orderedBoundary.end());
-    for(int index : orderedPainted)
-        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
-    for(int index : orderedBoundary)
-        command.semanticAudit.affectedCells.append(QPoint(index % width, index / width));
-
+    QVector<int> orderedBoundary;
     QSet<int> coreCorners;
-    for(int index : painted)
-    {
-        const int x = index % width;
-        const int y = index / width;
-        coreCorners.insert(y * (width + 1) + x);
-        coreCorners.insert(y * (width + 1) + x + 1);
-        coreCorners.insert((y + 1) * (width + 1) + x + 1);
-        coreCorners.insert((y + 1) * (width + 1) + x);
-    }
+    const auto rebuildFootprint = [&]() {
+        // The only mutable cells outside the brush are the immediate
+        // eight-neighbor ring. Missing transitions never enlarge this
+        // footprint.
+        boundary.clear();
+        coreCorners.clear();
+        for(int index : painted)
+        {
+            const int x = index % width;
+            const int y = index / width;
+            coreCorners.insert(y * (width + 1) + x);
+            coreCorners.insert(y * (width + 1) + x + 1);
+            coreCorners.insert((y + 1) * (width + 1) + x + 1);
+            coreCorners.insert((y + 1) * (width + 1) + x);
+            for(int offsetY = -1; offsetY <= 1; ++offsetY)
+                for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                {
+                    const int candidateX = x + offsetX;
+                    const int candidateY = y + offsetY;
+                    if(candidateX < 0 || candidateX >= width
+                       || candidateY < 0 || candidateY >= height)
+                        continue;
+                    const int candidate = candidateY * width + candidateX;
+                    if(painted.contains(candidate))
+                        continue;
+                    bool available = false;
+                    packedTile(candidateX, candidateY, layer, &available);
+                    if(available)
+                        boundary.insert(candidate);
+                }
+        }
+        orderedPainted = painted.values().toVector();
+        std::sort(orderedPainted.begin(), orderedPainted.end());
+        orderedBoundary = boundary.values().toVector();
+        std::sort(orderedBoundary.begin(), orderedBoundary.end());
+    };
+    rebuildFootprint();
 
     QMap<int, STerrainTransitionSignature> existingSignatures;
     QMap<int, quint16> existingTiles;
@@ -2870,6 +3945,111 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     {
         if(!decodeCell(index, false))
             return command;
+    }
+
+    if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+    {
+        QSet<int> unknownCells = unknownCore;
+        unknownCells.unite(unknownBoundary);
+        const int requestedCoreCount = painted.size();
+        for(;;)
+        {
+            rebuildFootprint();
+            QSet<int> blockedCore;
+            for(int index : orderedBoundary)
+            {
+                const int x = index % width;
+                const int y = index / width;
+                bool supported = !unknownCells.contains(index);
+                if(supported)
+                {
+                    const int cornerKeys[4] = {
+                        y * (width + 1) + x,
+                        y * (width + 1) + x + 1,
+                        (y + 1) * (width + 1) + x + 1,
+                        (y + 1) * (width + 1) + x};
+                    const STerrainTransitionSignature existing =
+                        existingSignatures.value(index);
+                    QVector<qint32> desired = {
+                        existing.northWest, existing.northEast,
+                        existing.southEast, existing.southWest};
+                    bool changed = false;
+                    for(int corner = 0; corner < 4; ++corner)
+                        if(coreCorners.contains(cornerKeys[corner]))
+                        {
+                            changed |= desired[corner] != materialId;
+                            desired[corner] = materialId;
+                        }
+                    if(changed)
+                    {
+                        STerrainTransitionSignature requested;
+                        requested.northWest = desired.at(0);
+                        requested.northEast = desired.at(1);
+                        requested.southEast = desired.at(2);
+                        requested.southWest = desired.at(3);
+                        bool found = false;
+                        catalog.selectForPaint(requested, x, y,
+                                               distributionSeed, &found);
+                        supported = found;
+                    }
+                }
+                if(supported)
+                    continue;
+                // Every retained core cell adjacent to this unsupported ring
+                // cell contributes at least one of its requested corners.
+                // Remove those cores and recompute: this preserves independent
+                // exact islands instead of committing a uniform hard seam.
+                for(int offsetY = -1; offsetY <= 1; ++offsetY)
+                    for(int offsetX = -1; offsetX <= 1; ++offsetX)
+                    {
+                        const int coreX = x + offsetX;
+                        const int coreY = y + offsetY;
+                        const int coreIndex = coreY * width + coreX;
+                        if(coreX >= 0 && coreX < width
+                           && coreY >= 0 && coreY < height
+                           && painted.contains(coreIndex))
+                            blockedCore.insert(coreIndex);
+                    }
+            }
+            if(blockedCore.isEmpty())
+                break;
+            painted.subtract(blockedCore);
+            if(painted.isEmpty())
+                break;
+        }
+        rebuildFootprint();
+        unknownCore = unknownCells;
+        unknownCore.intersect(painted);
+        unknownBoundary = unknownCells;
+        unknownBoundary.intersect(boundary);
+        const int skippedCoreCount = requestedCoreCount - painted.size();
+        if(skippedCoreCount > 0 && report)
+            report->add("terrain.semantic_tile_exact_only_skip",
+                EValidationSeverity::Warning,
+                "Classic Auto Safe left tile cells requiring absent authored boundary blends unchanged",
+                QString::number(skippedCoreCount));
+        if(painted.isEmpty())
+        {
+            command.semanticAudit.paintedCoreCells.clear();
+            command.semanticAudit.affectedCells.clear();
+            return command;
+        }
+    }
+
+    command.semanticAudit.paintedCoreCells.clear();
+    command.semanticAudit.affectedCells.clear();
+    for(int index : orderedPainted)
+    {
+        const QPoint point(index % width, index / width);
+        command.semanticAudit.paintedCoreCells.append(point);
+        command.semanticAudit.affectedCells.append(point);
+    }
+    for(int index : orderedBoundary)
+        command.semanticAudit.affectedCells.append(
+            QPoint(index % width, index / width));
+
+    for(int index : orderedBoundary)
+    {
         if(unknownBoundary.contains(index))
             continue;
         const STerrainTransitionSignature signature = existingSignatures.value(index);
@@ -3035,6 +4215,11 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
         STerrainTransitionSignature selected = desired;
         if(!exactFound)
         {
+            if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+            {
+                ++hardEdgeCount;
+                continue;
+            }
             // Nearest candidates remain topologically anchored to the core and
             // may use only families already present in this exact boundary tile.
             QSet<qint32> allowedMaterials;
@@ -3136,13 +4321,95 @@ STerrainTileCommand CTerrainEditModel::makeBoundedSemanticTilePaint(
     return command;
 }
 
+bool CTerrainEditModel::appendSemanticVirtualVertices(
+    STerrainTileCommand* command,
+    const QVector<QPoint>& acceptedVertices,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog,
+    CValidationReport* report)
+{
+    if(!command)
+        return false;
+    if(acceptedVertices.isEmpty())
+        return true;
+
+    // Classic output is physical authored artwork, but it must not leave a
+    // later Modern operation to reconstruct its meaning from that artwork.
+    // Establish the field from the pre-command topology once, then carry only
+    // the vertices the Classic solver actually accepted in this undoable
+    // transaction. In particular, constrained contextual brushes must never
+    // promote their skipped footprint vertices into semantic identity.
+    if(!initializeVirtualMaterialField(
+           layer, catalog, report,
+           ETerrainMaterialFieldRecovery::RecoverDeterministically))
+    {
+        command->deltas.clear();
+        command->virtualVertices.clear();
+        return false;
+    }
+    QVector<qint32>& field = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const int expectedSize = vertexWidth * (tileCountY() + 1);
+    if(field.size() != expectedSize)
+    {
+        if(report)
+            report->add("terrain.semantic_virtual_field",
+                EValidationSeverity::Error,
+                "The Classic terrain command could not establish its shared-corner material field");
+        command->deltas.clear();
+        command->virtualVertices.clear();
+        return false;
+    }
+
+    QSet<int> seen;
+    for(const QPoint& vertex : acceptedVertices)
+    {
+        if(vertex.x() < 0 || vertex.x() > tileCountX()
+           || vertex.y() < 0 || vertex.y() > tileCountY())
+            continue;
+        const int key = vertex.y() * vertexWidth + vertex.x();
+        if(seen.contains(key))
+            continue;
+        seen.insert(key);
+        const qint32 before = field.at(key);
+        if(before == materialId)
+            continue;
+        STerrainTileCommand::SVirtualVertexDelta delta;
+        delta.globalX = vertex.x();
+        delta.globalY = vertex.y();
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = materialId;
+        command->virtualVertices.append(delta);
+    }
+    return true;
+}
+
 STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     const STerrainTileBrush& brush, ETerrainTileLayer layer,
     qint32 materialId, const CTerrainTransitionCatalog& catalog,
-    quint32 distributionSeed, CValidationReport* report) const
+    quint32 distributionSeed, CValidationReport* report,
+    ETerrainSemanticPaintPolicy policy)
 {
-    return makeBoundedSemanticTilePaint(
-        brush, layer, materialId, catalog, distributionSeed, report);
+    CValidationReport localReport;
+    CValidationReport* effectiveReport = report ? report : &localReport;
+    STerrainTileCommand command = makeBoundedSemanticTilePaint(
+        brush, layer, materialId, catalog, distributionSeed, effectiveReport,
+        policy);
+    if(effectiveReport->hasErrors())
+        return command;
+    QVector<QPoint> acceptedVertices;
+    for(const QPoint& cell : command.semanticAudit.paintedCoreCells)
+    {
+        acceptedVertices.append(cell);
+        acceptedVertices.append(cell + QPoint(1, 0));
+        acceptedVertices.append(cell + QPoint(1, 1));
+        acceptedVertices.append(cell + QPoint(0, 1));
+    }
+    appendSemanticVirtualVertices(&command, acceptedVertices, layer,
+                                  materialId, catalog, effectiveReport);
+    return command;
 #if 0
     CValidationReport compactReport;
     STerrainTileCommand compact = makeSemanticTilePaintAttempt(
@@ -3194,6 +4461,1092 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
                         finding.message, finding.location);
     return expanded;
 #endif
+}
+
+STerrainTileCommand CTerrainEditModel::makeUniformTilePaint(
+    const STerrainTileBrush& brush, ETerrainTileLayer layer,
+    const STerrainTransitionSignature& uniformSignature,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    bool randomizeUniformRotation, CValidationReport* report) const
+{
+    STerrainTileCommand combined;
+    combined.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint uniform terrain tiles")
+        : QStringLiteral("Paint uniform overlay tiles");
+    CTerrainEditModel staged = *this;
+    const quint32 paintSeed = terrainPaintLayerSeed(distributionSeed, layer);
+    const int minimumX = qMax(0, int(std::ceil(brush.centerX - brush.radius)));
+    const int maximumX = qMin(tileCountX() - 1,
+                              int(std::floor(brush.centerX + brush.radius)));
+    const int minimumY = qMax(0, int(std::ceil(brush.centerY - brush.radius)));
+    const int maximumY = qMin(tileCountY() - 1,
+                              int(std::floor(brush.centerY + brush.radius)));
+    for(int y = minimumY; y <= maximumY; ++y)
+        for(int x = minimumX; x <= maximumX; ++x)
+        {
+            if(!tileInsideBrush(brush, x, y))
+                continue;
+            bool available = false;
+            staged.packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            bool selected = false;
+            const quint16 packed = selectUniformInteriorTile(
+                catalog, uniformSignature, x, y, paintSeed,
+                randomizeUniformRotation, &selected);
+            if(!selected)
+            {
+                if(report)
+                    report->add("terrain.uniform_only_missing",
+                        EValidationSeverity::Error,
+                        "Uniform-only Modern paint has no exact uniform tile for the selected family");
+                return STerrainTileCommand();
+            }
+            const SMprPackedTile decoded = SMprPackedTile::decode(packed);
+            STerrainTileBrush point;
+            point.centerX = float(x);
+            point.centerY = float(y);
+            point.radius = 0.0f;
+            const STerrainTileCommand stamp = staged.makeTilePaint(
+                point, layer, decoded.atlasIndex, decoded.tileIndex,
+                decoded.rotation, catalog, report);
+            if(report && report->hasErrors())
+                return STerrainTileCommand();
+            if(stamp.isEmpty())
+                continue;
+            if(!staged.apply(stamp, true, report))
+                return STerrainTileCommand();
+            appendTerrainTileCommand(&combined, stamp);
+        }
+    return combined;
+}
+
+QVector<QPoint> terrainVertexStrokeLine(const QPoint& from, const QPoint& to)
+{
+    QVector<QPoint> result;
+    const int dx = to.x() - from.x();
+    const int dy = to.y() - from.y();
+    const int steps = qMax(qAbs(dx), qAbs(dy));
+    if(steps == 0)
+    {
+        result.append(from);
+        return result;
+    }
+    result.reserve(steps + 1);
+    for(int step = 0; step <= steps; ++step)
+    {
+        const QPoint point(
+            from.x() + qRound(double(dx) * step / steps),
+            from.y() + qRound(double(dy) * step / steps));
+        if(result.isEmpty() || result.back() != point)
+            result.append(point);
+    }
+    return result;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
+    int selectedCellX, int selectedCellY,
+    const STerrainTileBrush& vertexBrush, ETerrainTileLayer layer,
+    qint32 materialId, const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed, CValidationReport* report,
+    qint32 preferredSupportId, ETerrainSemanticPaintPolicy policy)
+{
+    CValidationReport localReport;
+    if(!report)
+        report = &localReport;
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material vertices")
+        : QStringLiteral("Paint overlay material vertices");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.brush = vertexBrush;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
+    command.semanticAudit.solverMode = QStringLiteral("vertex-exact");
+    if(vertexBrush.radius < 0.0f || !catalog.hasMaterial(materialId)
+       || selectedCellX < 0 || selectedCellX >= tileCountX()
+       || selectedCellY < 0 || selectedCellY >= tileCountY())
+    {
+        if(report) report->add("terrain.semantic_vertex_input",
+            EValidationSeverity::Error,
+            "The selected material, brush, or terrain cell is unavailable");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const int vertexWidth = width + 1;
+    const int centerX = qBound(0, qRound(vertexBrush.centerX), width);
+    const int centerY = qBound(0, qRound(vertexBrush.centerY), height);
+    const int centerKey = centerY * vertexWidth + centerX;
+    const auto vertexKey = [vertexWidth](int x, int y) {
+        return y * vertexWidth + x;
+    };
+    const auto valuesOf = [](const STerrainTransitionSignature& signature) {
+        return QVector<qint32>({signature.northWest, signature.northEast,
+                                signature.southEast, signature.southWest});
+    };
+    const auto signatureOf = [](const QVector<qint32>& values) {
+        STerrainTransitionSignature signature;
+        signature.northWest = values.at(0);
+        signature.northEast = values.at(1);
+        signature.southEast = values.at(2);
+        signature.southWest = values.at(3);
+        return signature;
+    };
+    const auto cellCornerKeys = [vertexKey](int x, int y) {
+        return QVector<int>({vertexKey(x, y), vertexKey(x + 1, y),
+                             vertexKey(x + 1, y + 1), vertexKey(x, y + 1)});
+    };
+    const auto cornerForVertex = [](int cellX, int cellY,
+                                    int pointX, int pointY) {
+        if(pointY == cellY)
+            return pointX == cellX ? 0 : 1;
+        return pointX == cellX ? 3 : 2;
+    };
+
+    struct SVertexRequest
+    {
+        SVertexRequest() : x(0), y(0), distanceSquared(0) {}
+        SVertexRequest(int vertexX, int vertexY, int distance)
+            : x(vertexX), y(vertexY), distanceSquared(distance) {}
+        int x;
+        int y;
+        int distanceSquared;
+    };
+    QVector<SVertexRequest> requestedVertices;
+    const int minimumVertexX = qMax(0,
+        int(std::ceil(vertexBrush.centerX - vertexBrush.radius)));
+    const int maximumVertexX = qMin(width,
+        int(std::floor(vertexBrush.centerX + vertexBrush.radius)));
+    const int minimumVertexY = qMax(0,
+        int(std::ceil(vertexBrush.centerY - vertexBrush.radius)));
+    const int maximumVertexY = qMin(height,
+        int(std::floor(vertexBrush.centerY + vertexBrush.radius)));
+    for(int y = minimumVertexY; y <= maximumVertexY; ++y)
+    {
+        for(int x = minimumVertexX; x <= maximumVertexX; ++x)
+        {
+            const float dx = float(x) - vertexBrush.centerX;
+            const float dy = float(y) - vertexBrush.centerY;
+            const bool inside = vertexBrush.shape == ETerrainTileBrushShape::Square
+                ? qMax(std::fabs(dx), std::fabs(dy)) <= vertexBrush.radius
+                : std::sqrt(dx * dx + dy * dy) <= vertexBrush.radius;
+            if(inside)
+                requestedVertices.append({x, y,
+                    (x - centerX) * (x - centerX)
+                        + (y - centerY) * (y - centerY)});
+        }
+    }
+    if(requestedVertices.isEmpty())
+        requestedVertices.append({centerX, centerY, 0});
+    std::sort(requestedVertices.begin(), requestedVertices.end(),
+        [](const SVertexRequest& left, const SVertexRequest& right) {
+            if(left.distanceSquared != right.distanceSquared)
+                return left.distanceSquared < right.distanceSquared;
+            if(left.y != right.y)
+                return left.y < right.y;
+            return left.x < right.x;
+        });
+
+    QSet<int> affectedCells;
+    for(const SVertexRequest& vertex : requestedVertices)
+    {
+        for(int y : {vertex.y - 1, vertex.y})
+        {
+            for(int x : {vertex.x - 1, vertex.x})
+            {
+                if(x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+                bool available = false;
+                packedTile(x, y, layer, &available);
+                if(available)
+                    affectedCells.insert(y * width + x);
+            }
+        }
+    }
+    if(affectedCells.isEmpty())
+    {
+        if(report) report->add(layer == ETerrainTileLayer::Overlay
+                ? "terrain.overlay_vertex_inactive"
+                : "terrain.semantic_vertex_empty",
+            EValidationSeverity::Warning,
+            layer == ETerrainTileLayer::Overlay
+                ? "The vertex brush did not touch an active overlay tile"
+                : "The vertex brush did not touch editable terrain");
+        return command;
+    }
+
+    QMap<int, quint16> originalTiles;
+    QMap<int, STerrainTransitionSignature> scratch;
+    QSet<int> unknownCells;
+    for(int index : affectedCells)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        bool available = false;
+        const quint16 packed = packedTile(x, y, layer, &available);
+        bool decoded = false;
+        const STerrainTransitionSignature signature = available
+            ? catalog.gridSignatureForPacked(packed, &decoded)
+            : STerrainTransitionSignature();
+        if(!available)
+            continue;
+        originalTiles.insert(index, packed);
+        if(decoded)
+            scratch.insert(index, signature);
+        else
+            unknownCells.insert(index);
+    }
+
+    STerrainTransitionSignature pure;
+    pure.northWest = pure.northEast = pure.southEast = pure.southWest = materialId;
+    bool pureAvailable = false;
+    catalog.selectForPaint(pure, 0, 0, distributionSeed, &pureAvailable);
+    const bool cornerOnly = !pureAvailable;
+    const bool contextualStamp = preferredSupportId > 0
+        && preferredSupportId != materialId;
+    if(contextualStamp)
+    {
+        command.semanticAudit.backgroundMaterialId = preferredSupportId;
+        command.semanticAudit.materialPath = {materialId, preferredSupportId};
+    }
+    const auto supportCompatibleWithContextualStamp =
+        [&](const STerrainTransitionSignature& signature, int cellX,
+            int cellY, int pointX, int pointY) {
+            if(!contextualStamp
+               || policy != ETerrainSemanticPaintPolicy::ExactExistingOnly)
+                return true;
+            const QVector<int> keys = cellCornerKeys(cellX, cellY);
+            const QVector<qint32> values = valuesOf(signature);
+            const int ownerCorner =
+                cornerForVertex(cellX, cellY, pointX, pointY);
+            for(int corner = 0; corner < values.size(); ++corner)
+            {
+                if(corner == ownerCorner)
+                    continue;
+                const qint32 value = values.at(corner);
+                if(value != preferredSupportId && value != materialId)
+                    return false;
+            }
+            return keys.size() == 4;
+        };
+    const QVector<STerrainTransitionSignature> authored = catalog.gridSignatures();
+    QSet<int> acceptedVertices;
+    int skippedVertices = 0;
+    int fallbackCells = 0;
+    int candidateChecks = 0;
+
+    const auto chooseClosest = [&](int cellX, int cellY,
+            const QVector<qint32>& desired, const QSet<int>& requiredVertices,
+            STerrainTransitionSignature* selected) {
+        const QVector<int> keys = cellCornerKeys(cellX, cellY);
+        QSet<qint32> existingFamilies;
+        for(qint32 value : desired)
+            if(value >= 0)
+                existingFamilies.insert(value);
+        const bool requestedUniform = std::all_of(
+            desired.cbegin(), desired.cend(), [materialId](qint32 value) {
+                return value == materialId;
+            });
+        bool foundTransition = false;
+        bool foundUniform = false;
+        int bestTransitionCost = std::numeric_limits<int>::max();
+        int bestUniformCost = std::numeric_limits<int>::max();
+        STerrainTransitionSignature bestTransition;
+        STerrainTransitionSignature bestUniform;
+        for(const STerrainTransitionSignature& candidate : authored)
+        {
+            ++candidateChecks;
+            const QVector<qint32> values = valuesOf(candidate);
+            bool compatible = true;
+            int cost = 0;
+            for(int corner = 0; corner < 4; ++corner)
+            {
+                const bool required = requiredVertices.contains(keys.at(corner));
+                if(required && values.at(corner) != materialId)
+                {
+                    compatible = false;
+                    break;
+                }
+                if(desired.at(corner) >= 0
+                   && values.at(corner) != desired.at(corner))
+                    cost += existingFamilies.contains(values.at(corner)) ? 4 : 32;
+                if(!required && values.at(corner) == materialId
+                   && desired.at(corner) != materialId)
+                    cost += 2;
+            }
+            if(!compatible)
+                continue;
+            const bool selectedUniform = values.at(0) == materialId
+                && values.at(1) == materialId
+                && values.at(2) == materialId
+                && values.at(3) == materialId;
+            if(selectedUniform)
+            {
+                // Uniform artwork is never a substitute for a requested
+                // blend. The virtual production path generates the exact
+                // missing tuple; this legacy helper must fail closed when it
+                // cannot find a non-uniform authored alternative.
+                if(requestedUniform
+                   && (!foundUniform || cost < bestUniformCost))
+                {
+                    foundUniform = true;
+                    bestUniformCost = cost;
+                    bestUniform = candidate;
+                }
+            }
+            else if(!foundTransition || cost < bestTransitionCost)
+            {
+                foundTransition = true;
+                bestTransitionCost = cost;
+                bestTransition = candidate;
+            }
+        }
+        if(selected && (foundTransition || foundUniform))
+            *selected = foundTransition ? bestTransition : bestUniform;
+        return foundTransition || foundUniform;
+    };
+
+    for(const SVertexRequest& vertex : requestedVertices)
+    {
+        const int key = vertexKey(vertex.x, vertex.y);
+        const bool centerVertex = key == centerKey;
+        const bool contextualCenter = contextualStamp && centerVertex;
+        struct SPlannedCell
+        {
+            SPlannedCell() : index(0), fallback(false) {}
+            SPlannedCell(int cellIndex,
+                         const STerrainTransitionSignature& cellSignature,
+                         bool usedFallback)
+                : index(cellIndex), signature(cellSignature),
+                  fallback(usedFallback) {}
+            int index;
+            STerrainTransitionSignature signature;
+            bool fallback;
+        };
+        QVector<SPlannedCell> planned;
+        bool vertexExact = true;
+        bool vertexPossible = true;
+        bool constrainedDetailRejected = false;
+        for(int y : {vertex.y - 1, vertex.y})
+        {
+            for(int x : {vertex.x - 1, vertex.x})
+            {
+                if(x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+                const int index = y * width + x;
+                if(!originalTiles.contains(index))
+                    continue;
+                if(contextualCenter && scratch.contains(index)
+                   && !supportCompatibleWithContextualStamp(
+                       scratch.value(index), x, y, vertex.x, vertex.y))
+                {
+                    vertexPossible = false;
+                    break;
+                }
+                QVector<qint32> desired = contextualCenter
+                    ? QVector<qint32>({preferredSupportId, preferredSupportId,
+                                      preferredSupportId, preferredSupportId})
+                    : scratch.contains(index)
+                        ? valuesOf(scratch.value(index))
+                        : QVector<qint32>({-1, -1, -1, -1});
+                if(contextualCenter && scratch.contains(index))
+                {
+                    const QVector<qint32> existing = valuesOf(scratch.value(index));
+                    for(int existingCorner = 0; existingCorner < 4; ++existingCorner)
+                        if(existing.at(existingCorner) == materialId)
+                            desired[existingCorner] = materialId;
+                }
+                const int corner = cornerForVertex(x, y, vertex.x, vertex.y);
+                desired[corner] = materialId;
+                const STerrainTransitionSignature exact = signatureOf(desired);
+                bool exactFound = false;
+                catalog.selectForPaint(exact, x, y, distributionSeed, &exactFound);
+                if(exactFound)
+                {
+                    planned.append({index, exact, false});
+                    continue;
+                }
+                vertexExact = false;
+                if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+                {
+                    vertexPossible = false;
+                    break;
+                }
+                // Transition-only families may cover a larger brush only
+                // while every incident tile remains exact. Avoid an atlas-wide
+                // nearest-candidate scan for a vertex that must be skipped.
+                if((cornerOnly || contextualStamp) && !centerVertex)
+                {
+                    constrainedDetailRejected = true;
+                    break;
+                }
+                QSet<int> required = acceptedVertices;
+                required.insert(key);
+                STerrainTransitionSignature closest;
+                if(!chooseClosest(x, y, desired, required, &closest))
+                {
+                    vertexPossible = false;
+                    break;
+                }
+                planned.append({index, closest, true});
+            }
+            if(!vertexPossible || constrainedDetailRejected)
+                break;
+        }
+
+        if(!vertexPossible || constrainedDetailRejected
+           || ((cornerOnly || contextualStamp) && !centerVertex && !vertexExact))
+        {
+            ++skippedVertices;
+            continue;
+        }
+        for(const SPlannedCell& cell : planned)
+        {
+            scratch.insert(cell.index, cell.signature);
+            fallbackCells += cell.fallback ? 1 : 0;
+        }
+        acceptedVertices.insert(key);
+        command.semanticAudit.paintedVertices.append(QPoint(vertex.x, vertex.y));
+    }
+
+    if(!acceptedVertices.contains(centerKey))
+    {
+        if(report)
+        {
+            report->add("terrain.semantic_vertex_center",
+                EValidationSeverity::Error,
+                "No authored atlas combination can place this material at the selected terrain vertex");
+        }
+        return command;
+    }
+
+    QVector<int> orderedCells = scratch.keys().toVector();
+    std::sort(orderedCells.begin(), orderedCells.end());
+    for(int index : orderedCells)
+    {
+        const int x = index % width;
+        const int y = index / width;
+        const STerrainTransitionSignature selected = scratch.value(index);
+        bool found = false;
+        const quint16 after = catalog.selectForPaint(
+            selected, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report) report->add("terrain.semantic_vertex_internal",
+                EValidationSeverity::Error,
+                "The vertex resolver selected a signature absent from the Material atlas",
+                QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();
+            return command;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        const quint16 before = originalTiles.value(index);
+        if(after == before)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.brushCenterX = centerX;
+        delta.brushCenterY = centerY;
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = selected;
+        command.deltas.append(delta);
+    }
+    command.semanticAudit.solverNodes = candidateChecks;
+    command.semanticAudit.solverMode = contextualStamp
+        ? QStringLiteral("vertex-context-stamp")
+        : fallbackCells > 0
+        ? QStringLiteral("vertex-bounded-fallback")
+        : skippedVertices > 0
+            ? QStringLiteral("vertex-constrained-detail")
+            : QStringLiteral("vertex-exact");
+    if(!unknownCells.isEmpty() && report)
+        report->add("terrain.semantic_vertex_unknown_recovery",
+            EValidationSeverity::Warning,
+            "The vertex brush replaced atlas tiles that were not described by the active profile",
+            QString::number(unknownCells.size()));
+    if(fallbackCells > 0 && report)
+        report->add("terrain.semantic_vertex_fallback",
+            EValidationSeverity::Warning,
+            "The atlas lacks some requested vertex combinations; the brush used the closest local authored tiles",
+            QString::number(fallbackCells));
+    if(skippedVertices > 0 && report)
+        report->add("terrain.semantic_vertex_detail_limit",
+            EValidationSeverity::Warning,
+            "This detail material cannot occupy every requested vertex because the atlas lacks the required multi-corner tiles",
+            QString::number(skippedVertices));
+    if(!report->hasErrors())
+        appendSemanticVirtualVertices(
+            &command, command.semanticAudit.paintedVertices, layer,
+            materialId, catalog, report);
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
+    const QVector<QPoint>& requestedVertices,
+    const QVector<QPoint>& anchorVertices,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    CValidationReport* report, ETerrainSemanticPaintPolicy policy)
+{
+    CValidationReport localReport;
+    if(!report)
+        report = &localReport;
+    STerrainTileCommand command;
+    command.description = layer == ETerrainTileLayer::Land
+        ? QStringLiteral("Paint terrain material stroke")
+        : QStringLiteral("Paint overlay material stroke");
+    command.semanticAudit.valid = true;
+    command.semanticAudit.layer = layer;
+    command.semanticAudit.requestedMaterialId = materialId;
+    command.semanticAudit.solverMode = QStringLiteral("vertex-stroke-exact");
+
+    if(!catalog.hasMaterial(materialId))
+    {
+        if(report) report->add("terrain.semantic_stroke_material",
+            EValidationSeverity::Error,
+            "The selected material is absent from the active Material atlas");
+        return command;
+    }
+
+    const int width = tileCountX();
+    const int height = tileCountY();
+    const int vertexWidth = width + 1;
+    const auto vertexKey = [vertexWidth](const QPoint& point) {
+        return point.y() * vertexWidth + point.x();
+    };
+    QSet<int> requested;
+    for(const QPoint& point : requestedVertices)
+        if(point.x() >= 0 && point.x() <= width
+           && point.y() >= 0 && point.y() <= height)
+            requested.insert(vertexKey(point));
+    Q_UNUSED(anchorVertices);
+    if(requested.isEmpty())
+    {
+        if(report) report->add("terrain.semantic_stroke_empty",
+            EValidationSeverity::Warning,
+            "The stroke did not cover an editable terrain vertex");
+        return command;
+    }
+
+    struct SCellState
+    {
+        quint16 packed{0};
+        STerrainTransitionSignature original;
+    };
+    QMap<int, SCellState> cells;
+    QSet<int> unknownCells;
+    QSet<int> blockedVertices;
+    for(int key : requested)
+    {
+        const int vertexX = key % vertexWidth;
+        const int vertexY = key / vertexWidth;
+        for(int cellY : {vertexY - 1, vertexY})
+        {
+            for(int cellX : {vertexX - 1, vertexX})
+            {
+                if(cellX < 0 || cellX >= width || cellY < 0 || cellY >= height)
+                    continue;
+                const int cellKey = cellY * width + cellX;
+                bool available = false;
+                const quint16 packed = packedTile(cellX, cellY, layer, &available);
+                if(!available)
+                    continue;
+                bool decoded = false;
+                const STerrainTransitionSignature signature =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                if(!decoded)
+                {
+                    unknownCells.insert(cellKey);
+                    blockedVertices.insert(key);
+                    continue;
+                }
+                SCellState state;
+                state.packed = packed;
+                state.original = signature;
+                cells.insert(cellKey, state);
+            }
+        }
+    }
+    if(cells.isEmpty())
+    {
+        if(report) report->add(layer == ETerrainTileLayer::Overlay
+                ? "terrain.overlay_vertex_inactive"
+                : "terrain.semantic_stroke_unavailable",
+            EValidationSeverity::Warning,
+            layer == ETerrainTileLayer::Overlay
+                ? "The stroke did not touch an active overlay surface"
+                : "The stroke did not touch described terrain tiles");
+        return command;
+    }
+    const int originallyRequested = requested.size();
+    requested.subtract(blockedVertices);
+
+    const auto corners = [](const STerrainTransitionSignature& signature) {
+        return QVector<qint32>({signature.northWest, signature.northEast,
+                               signature.southEast, signature.southWest});
+    };
+    const auto cellCornerKeys = [width, vertexWidth](int cellKey) {
+        const int x = cellKey % width;
+        const int y = cellKey / width;
+        return QVector<int>({y * vertexWidth + x,
+                             y * vertexWidth + x + 1,
+                             (y + 1) * vertexWidth + x + 1,
+                             (y + 1) * vertexWidth + x});
+    };
+    const auto signatureFromValues = [](const QVector<qint32>& values) {
+        STerrainTransitionSignature result;
+        result.northWest = values.at(0);
+        result.northEast = values.at(1);
+        result.southEast = values.at(2);
+        result.southWest = values.at(3);
+        return result;
+    };
+
+    QMap<int, QMap<qint32, int>> observedByVertex;
+    QMap<int, SCellState> activeCells;
+    for(auto entry = cells.constBegin(); entry != cells.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        bool incidentToRequest = false;
+        for(int key : keys)
+            incidentToRequest |= requested.contains(key);
+        if(!incidentToRequest)
+            continue;
+        activeCells.insert(entry.key(), entry.value());
+        const QVector<qint32> values = corners(entry.value().original);
+        for(int corner = 0; corner < 4; ++corner)
+            ++observedByVertex[keys.at(corner)][values.at(corner)];
+    }
+    QMap<int, STerrainTransitionSignature> resolvedSignatures;
+    QSet<int> unsupportedVertices = blockedVertices;
+    int solverNodes = 0;
+    QSet<int> hardEdgeCells;
+    QSet<int> repairedBoundaryCells;
+    QSet<int> compatibleBoundaryCells;
+
+    // Consult all four incident cells at each shared vertex. This repairs a
+    // prior collapsed uniform boundary only when the surrounding authored
+    // terrain provides an unambiguous material consensus.
+    QMap<int, QMap<qint32, int>> contextObservedByVertex;
+    for(auto entry = activeCells.constBegin(); entry != activeCells.constEnd(); ++entry)
+    {
+        for(int key : cellCornerKeys(entry.key()))
+        {
+            if(contextObservedByVertex.contains(key))
+                continue;
+            const int vertexX = key % vertexWidth;
+            const int vertexY = key / vertexWidth;
+            const QPoint incidentCells[] = {
+                QPoint(vertexX, vertexY),
+                QPoint(vertexX - 1, vertexY),
+                QPoint(vertexX - 1, vertexY - 1),
+                QPoint(vertexX, vertexY - 1)};
+            const int incidentCorners[] = {0, 1, 2, 3};
+            for(int index = 0; index < 4; ++index)
+            {
+                const QPoint cell = incidentCells[index];
+                if(cell.x() < 0 || cell.x() >= width
+                   || cell.y() < 0 || cell.y() >= height)
+                    continue;
+                bool available = false;
+                const quint16 packed = packedTile(
+                    cell.x(), cell.y(), layer, &available);
+                if(!available)
+                    continue;
+                bool decoded = false;
+                const STerrainTransitionSignature signature =
+                    catalog.gridSignatureForPacked(packed, &decoded);
+                if(!decoded)
+                    continue;
+                const QVector<qint32> values = corners(signature);
+                ++contextObservedByVertex[key][values.at(incidentCorners[index])];
+            }
+            const QMap<qint32, int> observedValues =
+                contextObservedByVertex.value(key);
+            for(auto observed = observedValues.constBegin();
+                observed != observedValues.constEnd(); ++observed)
+                observedByVertex[key][observed.key()] += observed.value();
+        }
+    }
+
+    const auto outsideConsensus = [&](int key, qint32 cellValue,
+                                      bool* found) {
+        QMap<qint32, int> counts = contextObservedByVertex.value(key);
+        if(counts.contains(cellValue))
+        {
+            const int remaining = counts.value(cellValue) - 1;
+            if(remaining > 0)
+                counts[cellValue] = remaining;
+            else
+                counts.remove(cellValue);
+        }
+        qint32 best = cellValue;
+        int bestCount = 0;
+        bool tied = false;
+        for(auto value = counts.constBegin(); value != counts.constEnd(); ++value)
+        {
+            if(value.value() > bestCount)
+            {
+                best = value.key();
+                bestCount = value.value();
+                tied = false;
+            }
+            else if(value.value() == bestCount)
+                tied = true;
+        }
+        if(found)
+            *found = bestCount >= 2 && !tied && best != cellValue;
+        return best;
+    };
+
+    STerrainTransitionSignature uniform;
+    uniform.northWest = uniform.northEast = materialId;
+    uniform.southEast = uniform.southWest = materialId;
+    bool uniformChecked = false;
+    bool uniformFound = false;
+    bool missingWithoutFallback = false;
+    QSet<int> exactOnlyBlockedVertices;
+    const QVector<STerrainTransitionSignature> authoredSignatures =
+        catalog.gridSignatures();
+    for(auto entry = activeCells.constBegin();
+        entry != activeCells.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        const QVector<qint32> originalValues = corners(entry.value().original);
+        QVector<qint32> values;
+        for(int corner = 0; corner < keys.size(); ++corner)
+            values.append(requested.contains(keys.at(corner))
+                ? materialId : originalValues.at(corner));
+        STerrainTransitionSignature exact = signatureFromValues(values);
+        bool found = false;
+        catalog.selectForPaint(exact, entry.key() % width,
+                               entry.key() / width, distributionSeed, &found);
+        ++solverNodes;
+
+        const bool collapsedSelected =
+            exact.northWest == materialId && exact.northEast == materialId
+            && exact.southEast == materialId && exact.southWest == materialId;
+        if(collapsedSelected || !found)
+        {
+            QVector<qint32> repaired = values;
+            bool changed = false;
+            for(int corner = 0; corner < keys.size(); ++corner)
+            {
+                if(requested.contains(keys.at(corner)))
+                    continue;
+                bool consensusFound = false;
+                const qint32 consensus = outsideConsensus(
+                    keys.at(corner), originalValues.at(corner),
+                    &consensusFound);
+                if(consensusFound)
+                {
+                    repaired[corner] = consensus;
+                    changed = true;
+                }
+            }
+            if(changed)
+            {
+                const STerrainTransitionSignature candidate =
+                    signatureFromValues(repaired);
+                bool candidateFound = false;
+                catalog.selectForPaint(candidate, entry.key() % width,
+                                       entry.key() / width, distributionSeed,
+                                       &candidateFound);
+                ++solverNodes;
+                if(candidateFound)
+                {
+                    exact = candidate;
+                    found = true;
+                    repairedBoundaryCells.insert(entry.key());
+                }
+            }
+        }
+
+        const auto isSelectedUniform = [materialId](
+            const STerrainTransitionSignature& signature) {
+            return signature.northWest == materialId
+                && signature.northEast == materialId
+                && signature.southEast == materialId
+                && signature.southWest == materialId;
+        };
+        if(!found || isSelectedUniform(exact))
+        {
+            bool compatibleFound = false;
+            int bestScore = std::numeric_limits<int>::max();
+            STerrainTransitionSignature bestCompatible;
+            for(const STerrainTransitionSignature& candidate : authoredSignatures)
+            {
+                const QVector<qint32> candidateValues = corners(candidate);
+                bool compatible = true;
+                bool uniformSelected = true;
+                int changedCorners = 0;
+                int observedSupport = 0;
+                for(int corner = 0; corner < keys.size(); ++corner)
+                {
+                    const int key = keys.at(corner);
+                    const qint32 candidateValue = candidateValues.at(corner);
+                    uniformSelected &= candidateValue == materialId;
+                    if(requested.contains(key))
+                    {
+                        if(candidateValue != materialId)
+                        {
+                            compatible = false;
+                            break;
+                        }
+                        continue;
+                    }
+                    if(candidateValue != originalValues.at(corner)
+                       && !contextObservedByVertex.value(key).contains(candidateValue))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                    changedCorners += candidateValue != originalValues.at(corner);
+                    observedSupport += contextObservedByVertex.value(key)
+                        .value(candidateValue);
+                }
+                if(!compatible || uniformSelected)
+                    continue;
+                const int score = changedCorners * 1000 - observedSupport;
+                const auto lexicallyBefore = [](
+                    const STerrainTransitionSignature& left,
+                    const STerrainTransitionSignature& right) {
+                    if(left.northWest != right.northWest)
+                        return left.northWest < right.northWest;
+                    if(left.northEast != right.northEast)
+                        return left.northEast < right.northEast;
+                    if(left.southEast != right.southEast)
+                        return left.southEast < right.southEast;
+                    return left.southWest < right.southWest;
+                };
+                if(!compatibleFound || score < bestScore
+                   || (score == bestScore
+                       && lexicallyBefore(candidate, bestCompatible)))
+                {
+                    compatibleFound = true;
+                    bestScore = score;
+                    bestCompatible = candidate;
+                }
+            }
+            solverNodes += authoredSignatures.size();
+            if(compatibleFound)
+            {
+                exact = bestCompatible;
+                found = true;
+                compatibleBoundaryCells.insert(entry.key());
+            }
+        }
+        if(found)
+            resolvedSignatures.insert(entry.key(), exact);
+        else
+        {
+            if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly)
+            {
+                for(int key : keys)
+                    if(requested.contains(key))
+                        exactOnlyBlockedVertices.insert(key);
+                continue;
+            }
+            if(!uniformChecked)
+            {
+                catalog.selectForPaint(uniform, 0, 0, distributionSeed,
+                                       &uniformFound);
+                ++solverNodes;
+                uniformChecked = true;
+            }
+            if(uniformFound)
+            {
+                resolvedSignatures.insert(entry.key(), uniform);
+                hardEdgeCells.insert(entry.key());
+            }
+            else
+            {
+                missingWithoutFallback = true;
+                for(int key : keys)
+                    if(requested.contains(key))
+                        unsupportedVertices.insert(key);
+            }
+        }
+    }
+
+    if(policy == ETerrainSemanticPaintPolicy::ExactExistingOnly
+       && !exactOnlyBlockedVertices.isEmpty())
+    {
+        QSet<int> remaining = requested;
+        remaining.subtract(exactOnlyBlockedVertices);
+        QVector<QPoint> retryVertices;
+        QVector<int> ordered = remaining.values().toVector();
+        std::sort(ordered.begin(), ordered.end());
+        for(int key : ordered)
+            retryVertices.append(QPoint(key % vertexWidth, key / vertexWidth));
+        CValidationReport retryReport;
+        STerrainTileCommand retry = makeSemanticVertexStrokePaint(
+            retryVertices, retryVertices, layer, materialId, catalog,
+            distributionSeed, &retryReport, policy);
+        retry.semanticAudit.solverMode = QStringLiteral(
+            "vertex-stroke-exact-existing-partial");
+        if(report)
+        {
+            report->add("terrain.semantic_stroke_exact_only_skip",
+                EValidationSeverity::Warning,
+                "Classic Auto Safe left vertices requiring absent authored blends unchanged",
+                QString::number(exactOnlyBlockedVertices.size()));
+            for(const SValidationFinding& finding : retryReport.findings())
+                report->add(finding.code, finding.severity,
+                            finding.message, finding.location);
+        }
+        return retry;
+    }
+
+    if(missingWithoutFallback)
+    {
+        resolvedSignatures.clear();
+        hardEdgeCells.clear();
+        unsupportedVertices.unite(requested);
+    }
+
+    QMap<int, QSet<qint32>> resolvedVertices;
+    QSet<int> verticesWithHardEdgeCells;
+    bool invariantFailed = false;
+    for(auto entry = resolvedSignatures.constBegin();
+        entry != resolvedSignatures.constEnd(); ++entry)
+    {
+        const QVector<int> keys = cellCornerKeys(entry.key());
+        const QVector<qint32> values = corners(entry.value());
+        for(int corner = 0; corner < 4; ++corner)
+        {
+            const int key = keys.at(corner);
+            const qint32 value = values.at(corner);
+            resolvedVertices[key].insert(value);
+            if(hardEdgeCells.contains(entry.key()))
+                verticesWithHardEdgeCells.insert(key);
+            if(value != materialId
+               && !observedByVertex.value(key).contains(value))
+                invariantFailed = true;
+        }
+    }
+    for(auto entry = resolvedVertices.constBegin();
+        entry != resolvedVertices.constEnd(); ++entry)
+    {
+        if(!requested.contains(entry.key()))
+            continue;
+        if(entry.value().size() <= 1)
+            continue;
+        if(!verticesWithHardEdgeCells.contains(entry.key())
+           || !entry.value().contains(materialId))
+            invariantFailed = true;
+        for(qint32 value : entry.value())
+            if(value != materialId
+               && !observedByVertex.value(entry.key()).contains(value))
+                invariantFailed = true;
+    }
+    if(invariantFailed)
+    {
+        if(report) report->add("terrain.semantic_stroke_vertex_conflict",
+            EValidationSeverity::Error,
+            "The stroke resolver produced conflicting or unrelated material identities at a shared terrain vertex");
+        return command;
+    }
+
+    QVector<int> activeKeys = requested.values().toVector();
+    std::sort(activeKeys.begin(), activeKeys.end());
+    for(int key : activeKeys)
+        if(!unsupportedVertices.contains(key))
+            command.semanticAudit.paintedVertices.append(
+                QPoint(key % vertexWidth, key / vertexWidth));
+    command.semanticAudit.solverNodes = solverNodes;
+    if(!hardEdgeCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-local-hard-edge");
+    else if(!repairedBoundaryCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-authored-boundary-repair");
+    else if(!compatibleBoundaryCells.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-compatible-authored");
+    else if(!unsupportedVertices.isEmpty())
+        command.semanticAudit.solverMode =
+            QStringLiteral("vertex-stroke-unavailable");
+
+    QVector<int> orderedCells = resolvedSignatures.keys().toVector();
+    std::sort(orderedCells.begin(), orderedCells.end());
+    for(int cellKey : orderedCells)
+    {
+        const int x = cellKey % width;
+        const int y = cellKey / width;
+        const STerrainTransitionSignature desired =
+            resolvedSignatures.value(cellKey, cells.value(cellKey).original);
+        bool found = false;
+        const SCellState& cell = cells.value(cellKey);
+        const quint16 after = catalog.selectForPaint(
+            desired, x, y, distributionSeed, &found);
+        if(!found)
+        {
+            if(report) report->add("terrain.semantic_stroke_internal",
+                EValidationSeverity::Error,
+                "The whole-stroke resolver produced a signature absent from the Material atlas",
+                QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();
+            return command;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        if(after == cell.packed)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = cell.packed;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.requestedMaterialId = materialId;
+        delta.requestedSignature = desired;
+        command.deltas.append(delta);
+    }
+    if(!unknownCells.isEmpty() && report)
+        report->add("terrain.semantic_stroke_unknown",
+            EValidationSeverity::Warning,
+            "Some requested vertices touch atlas tiles not described by the active profile and were left unchanged",
+            QString::number(unknownCells.size()));
+    if(!unsupportedVertices.isEmpty() && report)
+        report->add("terrain.semantic_stroke_atlas_limit",
+            EValidationSeverity::Warning,
+            "The Material atlas cannot represent this material across the requested adjacent vertices. Nothing was changed; use a single-vertex junction stamp or add the missing atlas transitions",
+            QString("%1 of %2 vertices were not paintable")
+                .arg(unsupportedVertices.size()).arg(originallyRequested));
+    if(!hardEdgeCells.isEmpty() && report)
+        report->add("terrain.semantic_stroke_hard_edge",
+            EValidationSeverity::Warning,
+            "The Material atlas is missing some boundary transitions. Exact blends were preserved and only the unresolved boundary tiles used the selected material's uniform hard-edge fallback",
+            QString("%1 boundary tile(s) used hard-edge fallback")
+                .arg(hardEdgeCells.size()));
+    if(!report->hasErrors())
+        appendSemanticVirtualVertices(
+            &command, command.semanticAudit.paintedVertices, layer,
+            materialId, catalog, report);
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeSemanticCornerMaterialPaint(
+    int selectedCellX, int selectedCellY, int vertexX, int vertexY,
+    ETerrainTileLayer layer, qint32 materialId,
+    const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
+    CValidationReport* report)
+{
+    STerrainTileBrush vertexBrush;
+    vertexBrush.centerX = vertexX;
+    vertexBrush.centerY = vertexY;
+    vertexBrush.radius = 0.0f;
+    return makeSemanticVertexPaint(
+        selectedCellX, selectedCellY, vertexBrush, layer, materialId,
+        catalog, distributionSeed, report);
 }
 
 #if 0
@@ -3977,9 +6330,1027 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaintAttempt(
 }
 #endif
 
+STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
+    int selectedCellX,int selectedCellY,const STerrainTileBrush& brush,
+    ETerrainTileLayer layer,qint32 materialId,
+    const CTerrainTransitionCatalog& catalog,quint32 distributionSeed,
+    CValidationReport* report,bool randomizeUniformRotation)
+{
+    QVector<QPoint> requested;
+    const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
+    const int maxX=qMin(tileCountX(),int(std::floor(brush.centerX+brush.radius)));
+    const int minY=qMax(0,int(std::ceil(brush.centerY-brush.radius)));
+    const int maxY=qMin(tileCountY(),int(std::floor(brush.centerY+brush.radius)));
+    for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x)
+    {
+        const float dx=float(x)-brush.centerX,dy=float(y)-brush.centerY;
+        const bool inside=brush.shape==ETerrainTileBrushShape::Square
+            ?qMax(std::fabs(dx),std::fabs(dy))<=brush.radius
+            :std::sqrt(dx*dx+dy*dy)<=brush.radius;
+        if(inside)requested.append(QPoint(x,y));
+    }
+    return makeVirtualMaterialPaintVertices(selectedCellX,selectedCellY,
+        requested,QSet<int>(),brush,layer,materialId,catalog,distributionSeed,report,
+        randomizeUniformRotation);
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
+    const STerrainTileBrush& tileBrush,ETerrainTileLayer layer,
+    qint32 materialId,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation)
+{
+    QSet<QPair<int,int>> vertexCoordinates;
+    QSet<int> previewCoreCells;
+    const int minX=qMax(0,int(std::ceil(tileBrush.centerX-tileBrush.radius)));
+    const int maxX=qMin(tileCountX()-1,
+        int(std::floor(tileBrush.centerX+tileBrush.radius)));
+    const int minY=qMax(0,int(std::ceil(tileBrush.centerY-tileBrush.radius)));
+    const int maxY=qMin(tileCountY()-1,
+        int(std::floor(tileBrush.centerY+tileBrush.radius)));
+    for(int y=minY;y<=maxY;++y)for(int x=minX;x<=maxX;++x)
+    {
+        const float dx=float(x)-tileBrush.centerX;
+        const float dy=float(y)-tileBrush.centerY;
+        const bool inside=tileBrush.shape==ETerrainTileBrushShape::Square
+            ?qMax(std::fabs(dx),std::fabs(dy))<=tileBrush.radius
+            :std::sqrt(dx*dx+dy*dy)<=tileBrush.radius;
+        if(!inside)continue;
+        previewCoreCells.insert(y*tileCountX()+x);
+        vertexCoordinates.insert(qMakePair(x,y));
+        vertexCoordinates.insert(qMakePair(x+1,y));
+        vertexCoordinates.insert(qMakePair(x+1,y+1));
+        vertexCoordinates.insert(qMakePair(x,y+1));
+    }
+    QVector<QPoint> requested;
+    requested.reserve(vertexCoordinates.size());
+    for(const QPair<int,int>& coordinate:vertexCoordinates)
+        requested.append(QPoint(coordinate.first,coordinate.second));
+    std::sort(requested.begin(),requested.end(),[](const QPoint& left,
+        const QPoint& right){return left.y()!=right.y()
+            ?left.y()<right.y():left.x()<right.x();});
+    STerrainTileCommand command=makeVirtualMaterialPaintVertices(
+        qRound(tileBrush.centerX),qRound(tileBrush.centerY),requested,
+        previewCoreCells,tileBrush,layer,materialId,catalog,
+        distributionSeed,report,randomizeUniformRotation);
+    QVector<int> sortedCore=previewCoreCells.values().toVector();
+    std::sort(sortedCore.begin(),sortedCore.end());
+    for(int cell:sortedCore)
+        command.semanticAudit.paintedCoreCells.append(
+            QPoint(cell%tileCountX(),cell/tileCountX()));
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
+    int selectedCellX,int selectedCellY,const QVector<QPoint>& requestedVertices,
+    const QSet<int>& previewCoreCells,const STerrainTileBrush& auditBrush,
+    ETerrainTileLayer layer,
+    qint32 materialId,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation)
+{
+    STerrainTileCommand command;
+    command.description=layer==ETerrainTileLayer::Land
+        ?QStringLiteral("Paint virtual terrain materials")
+        :QStringLiteral("Paint virtual overlay materials");
+    command.semanticAudit.valid=true;command.semanticAudit.brush=auditBrush;
+    command.semanticAudit.layer=layer;command.semanticAudit.requestedMaterialId=materialId;
+    command.semanticAudit.solverMode=QStringLiteral("virtual-unblended-preview");
+    if(auditBrush.radius<0.0f||!catalog.hasMaterial(materialId)
+       ||selectedCellX<0||selectedCellX>=tileCountX()
+       ||selectedCellY<0||selectedCellY>=tileCountY())
+    {
+        if(report)report->add("terrain.virtual_paint_input",EValidationSeverity::Error,
+            "The selected virtual material, brush, or terrain cell is unavailable");
+        return command;
+    }
+    QVector<qint32>& active=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const qint32 unset=std::numeric_limits<qint32>::min();
+    const int vertexWidth=tileCountX()+1;
+    if(active.isEmpty())
+    {
+        // Planning must never establish hidden live state.  Build the first
+        // Modern stamp on a copy, then replace its sparse vertex edits with
+        // one complete before/after field delta.  The resulting command owns
+        // recovery, visible preview, undo, and redo atomically; refusal or a
+        // no-op leaves the live model exactly fieldless.
+        CTerrainEditModel staged=*this;
+        if(!staged.initializeVirtualMaterialField(
+               layer, catalog, report,
+               ETerrainMaterialFieldRecovery::RecoverDeterministically))
+            return command;
+        STerrainTileCommand stagedCommand=
+            staged.makeVirtualMaterialPaintVertices(
+                selectedCellX,selectedCellY,requestedVertices,
+                previewCoreCells,auditBrush,layer,materialId,catalog,
+                distributionSeed,report,randomizeUniformRotation);
+        if(stagedCommand.isEmpty())
+            return stagedCommand;
+        if(!staged.apply(stagedCommand,true,report))
+            return STerrainTileCommand();
+
+        STerrainTileCommand::SVirtualFieldDelta fieldDelta;
+        fieldDelta.layer=layer;
+        fieldDelta.vertexWidth=tileCountX()+1;
+        fieldDelta.vertexHeight=tileCountY()+1;
+        copyVirtualMaterialFieldState(
+            layer,&fieldDelta.beforeCurrent,&fieldDelta.beforeBaseline);
+        staged.copyVirtualMaterialFieldState(
+            layer,&fieldDelta.afterCurrent,&fieldDelta.afterBaseline);
+        stagedCommand.virtualVertices.clear();
+        stagedCommand.virtualFields.append(fieldDelta);
+        return stagedCommand;
+    }
+    QVector<qint32> desired=active;
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
+    QSet<int> affected;
+    for(const QPoint& point:requestedVertices)
+    {
+        const int x=point.x(),y=point.y();
+        if(x<0||x>tileCountX()||y<0||y>tileCountY())continue;
+        bool incidentAvailable=layer==ETerrainTileLayer::Land;
+        if(layer==ETerrainTileLayer::Overlay)
+            for(int cellY:{y-1,y})for(int cellX:{x-1,x})
+            {
+                bool available=false;
+                if(cellX>=0&&cellX<tileCountX()&&cellY>=0&&cellY<tileCountY())
+                    packedTile(cellX,cellY,layer,&available);
+                incidentAvailable|=available;
+            }
+        if(!incidentAvailable)continue;
+        const int key=y*vertexWidth+x;
+        for(int cellY:{y-1,y})for(int cellX:{x-1,x})
+            if(cellX>=0&&cellX<tileCountX()&&cellY>=0&&cellY<tileCountY())
+                affected.insert(cellY*tileCountX()+cellX);
+        if(desired.at(key)==materialId)continue;
+        STerrainTileCommand::SVirtualVertexDelta delta;
+        delta.globalX=x;delta.globalY=y;delta.layer=layer;
+        delta.before=desired.at(key);delta.after=materialId;
+        command.virtualVertices.append(delta);desired[key]=materialId;
+        command.semanticAudit.paintedVertices.append(QPoint(x,y));
+    }
+    if(affected.isEmpty())return command;
+    STerrainTransitionSignature pure;
+    pure.northWest=pure.northEast=pure.southEast=pure.southWest=materialId;
+    bool pureFound=false;
+    catalog.selectForPaint(pure,0,0,paintSeed,&pureFound);
+    QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
+    for(int cell:cells)
+    {
+        const int x=cell%tileCountX(),y=cell/tileCountX();
+        bool available=false;const quint16 before=packedTile(x,y,layer,&available);
+        if(!available)continue;
+        const int nw=y*vertexWidth+x,ne=nw+1,sw=(y+1)*vertexWidth+x,se=sw+1;
+        if(desired.at(nw)==unset||desired.at(ne)==unset
+           ||desired.at(se)==unset||desired.at(sw)==unset)
+        {
+            if(report)report->add("terrain.virtual_paint_unknown",EValidationSeverity::Error,
+                "The current atlas profile cannot recover a complete vertex-material baseline",
+                QString("%1,%2").arg(x).arg(y));
+            command.deltas.clear();command.virtualVertices.clear();return command;
+        }
+        STerrainTransitionSignature exact;
+        exact.northWest=desired.at(nw);exact.northEast=desired.at(ne);
+        exact.southEast=desired.at(se);exact.southWest=desired.at(sw);
+        STerrainTransitionSignature current;
+        current.northWest=active.at(nw);current.northEast=active.at(ne);
+        current.southEast=active.at(se);current.southWest=active.at(sw);
+        if(!pureFound)
+        {
+            if(report)report->add("terrain.virtual_paint_preview",EValidationSeverity::Error,
+                "This material has no uniform authored tile for an honest unblended preview");
+            command.deltas.clear();command.virtualVertices.clear();return command;
+        }
+        bool selected = false;
+        const bool exactUniform = exact.northWest == exact.northEast
+            && exact.northWest == exact.southEast
+            && exact.northWest == exact.southWest;
+        // A cell whose semantic tuple did not change must retain its exact
+        // packed blend while another part of the same overlapping stamp uses
+        // a temporary uniform preview. Release resolution intentionally visits
+        // only cells incident to changed vertices, so changing this collateral
+        // cell here would otherwise leave a permanent uniform hole at an edge.
+        // A wholly semantic-no-op stroke remains a deliberate variant reroll.
+        if(!command.virtualVertices.isEmpty() && exact == current
+           && !previewCoreCells.contains(cell))
+        {
+            command.semanticAudit.affectedCells.append(QPoint(x,y));
+            continue;
+        }
+        // Tile targeting owns complete cells, but changing their four corner
+        // vertices also makes the surrounding blend ring semantically affected.
+        // Keep that ring at its exact current artwork during the drag preview;
+        // release resolution will replace it with exact blends. Painting the
+        // uniform preview into every incident cell made the visible footprint
+        // one cell larger than the tile outline and the committed core.
+        if(!command.virtualVertices.isEmpty()&&!previewCoreCells.isEmpty()
+           &&!previewCoreCells.contains(cell))
+        {
+            command.semanticAudit.affectedCells.append(QPoint(x,y));
+            continue;
+        }
+        const quint16 after = command.virtualVertices.isEmpty()
+            ? (exactUniform
+                ? selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
+                    randomizeUniformRotation, &selected)
+                : catalog.selectForPaint(exact, x, y, paintSeed, &selected))
+            : selectUniformInteriorTile(catalog, pure, x, y, paintSeed,
+                randomizeUniformRotation, &selected);
+        if(!selected)
+        {
+            if(report)report->add("terrain.virtual_paint_preview",
+                EValidationSeverity::Error,
+                "This material has no structurally uniform authored tile for an honest unblended preview");
+            command.deltas.clear();command.virtualVertices.clear();return command;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x,y));
+        if(after==before)continue;
+        STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
+        delta.before=before;delta.after=after;delta.hasSemanticRequest=true;
+        delta.requestedMaterialId=materialId;delta.requestedSignature=exact;
+        command.deltas.append(delta);
+    }
+    if(report)report->add("terrain.virtual_paint_resolve_pending",
+        EValidationSeverity::Info,
+        "Touched vertices are mandatory; authored exact transition resolution is deferred until stroke release");
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualStrokeResolution(
+    const STerrainTileCommand& stroke,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation,
+    qint32 preferredRouteOwnerMaterial) const
+{
+    STerrainTileCommand command;
+    command.description=QStringLiteral("Resolve virtual terrain stroke");
+    command.semanticAudit.valid=true;
+    command.semanticAudit.requestedMaterialId=stroke.semanticAudit.requestedMaterialId;
+    command.semanticAudit.brush=stroke.semanticAudit.brush;
+    command.semanticAudit.layer=stroke.semanticAudit.layer;
+    command.semanticAudit.solverMode=QStringLiteral("virtual-release-exact");
+    QVector<QPoint> changedVertices=stroke.semanticAudit.paintedVertices;
+    for(const auto& vertex:stroke.virtualVertices)
+        changedVertices.append(QPoint(vertex.globalX,vertex.globalY));
+    if(changedVertices.isEmpty())return command;
+    const ETerrainTileLayer layer=!stroke.virtualVertices.isEmpty()
+        ?stroke.virtualVertices.front().layer
+        :!stroke.virtualFields.isEmpty()
+            ?stroke.virtualFields.front().layer:stroke.semanticAudit.layer;
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
+    const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const int vertexWidth=tileCountX()+1;
+    if(values.size()!=vertexWidth*(tileCountY()+1))return command;
+    QSet<int> affected;
+    for(const auto& vertex:stroke.virtualVertices)
+    {
+        if(vertex.layer!=layer)
+        {
+            if(report)report->add("terrain.virtual_stroke_layers",EValidationSeverity::Error,
+                "A virtual material stroke cannot mix land and overlay vertices");
+            return STerrainTileCommand();
+        }
+    }
+    for(const QPoint& vertex:changedVertices)
+        for(int y:{vertex.y()-1,vertex.y()})
+            for(int x:{vertex.x()-1,vertex.x()})
+                if(x>=0&&x<tileCountX()&&y>=0&&y<tileCountY())
+                    affected.insert(y*tileCountX()+x);
+    // A tile-target stamp owns every displayed core cell. Some of those cells
+    // can already have the requested semantic corners after deterministic
+    // recovery while still retaining stale packed artwork. They therefore
+    // produce no changed vertex and used to be skipped by release resolution,
+    // leaving holes in the committed square until a later map-wide Resolve.
+    // Resolve the core cells directly as well as the blend ring incident to
+    // genuinely changed vertices.
+    for(const QPoint& cell:stroke.semanticAudit.paintedCoreCells)
+        if(cell.x()>=0&&cell.x()<tileCountX()
+           &&cell.y()>=0&&cell.y()<tileCountY())
+            affected.insert(cell.y()*tileCountX()+cell.x());
+    QVector<int> cells=affected.values().toVector();std::sort(cells.begin(),cells.end());
+    int unresolved=0;
+    for(int cell:cells)
+    {
+        const int x=cell%tileCountX(),y=cell/tileCountX();
+        bool available=false;const quint16 before=packedTile(x,y,layer,&available);
+        if(!available)continue;
+        const int nw=y*vertexWidth+x,ne=nw+1,sw=(y+1)*vertexWidth+x,se=sw+1;
+        STerrainTransitionSignature exact;
+        exact.northWest=values.at(nw);exact.northEast=values.at(ne);
+        exact.southEast=values.at(se);exact.southWest=values.at(sw);
+        bool found=false;
+        const bool uniform = exact.northWest == exact.northEast
+            && exact.northWest == exact.southEast
+            && exact.northWest == exact.southWest;
+        const quint16 after = uniform
+            ? selectUniformInteriorTile(catalog, exact, x, y,
+                paintSeed, randomizeUniformRotation, &found)
+            : catalog.selectForPaint(exact, x, y, paintSeed,
+                preferredRouteOwnerMaterial, &found);
+        if(!found){++unresolved;continue;}
+        command.semanticAudit.affectedCells.append(QPoint(x,y));
+        if(after==before)continue;
+        STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
+        delta.before=before;delta.after=after;delta.hasSemanticRequest=true;
+        delta.requestedMaterialId=-1;delta.requestedSignature=exact;
+        command.deltas.append(delta);
+    }
+    if(unresolved>0&&report)report->add("terrain.virtual_release_unresolved",
+        EValidationSeverity::Error,
+        QString("%1 exact transition tuple(s) were not realized in the live working atlas before release; the stroke must be refused without substituting identities").arg(unresolved));
+    return command;
+}
+
+bool CTerrainEditModel::inferCellSignatureFromNeighbors(
+    int cellX,int cellY,ETerrainTileLayer layer,
+    const CTerrainTransitionCatalog& catalog,
+    STerrainTransitionSignature* output,
+    const QMap<int, STerrainTransitionSignature>* plannedSignatures) const
+{
+    if(!output||cellX<0||cellX>=tileCountX()
+       ||cellY<0||cellY>=tileCountY())
+        return false;
+    qint32 inferred[4]={0,0,0,0};
+    const int vertexX[4]={cellX,cellX+1,cellX+1,cellX};
+    const int vertexY[4]={cellY,cellY,cellY+1,cellY+1};
+    for(int targetCorner=0;targetCorner<4;++targetCorner)
+    {
+        QSet<qint32> observed;
+        const int vx=vertexX[targetCorner],vy=vertexY[targetCorner];
+        for(int otherY=vy-1;otherY<=vy;++otherY)
+            for(int otherX=vx-1;otherX<=vx;++otherX)
+            {
+                if(otherX<0||otherX>=tileCountX()
+                   ||otherY<0||otherY>=tileCountY()
+                   ||(otherX==cellX&&otherY==cellY))
+                    continue;
+                bool available = true;
+                bool decoded = false;
+                STerrainTransitionSignature signature;
+                const int otherKey = otherY * tileCountX() + otherX;
+                if(plannedSignatures && plannedSignatures->contains(otherKey))
+                {
+                    signature = plannedSignatures->value(otherKey);
+                    decoded = true;
+                }
+                else
+                {
+                    const quint16 packed = packedTile(
+                        otherX, otherY, layer, &available);
+                    if(available)
+                        signature = catalog.gridSignatureForPacked(
+                            packed, &decoded);
+                }
+                if(!available)
+                    continue;
+                if(!decoded)continue;
+                if(otherX==vx&&otherY==vy)
+                    observed.insert(signature.northWest);
+                else if(otherX==vx-1&&otherY==vy)
+                    observed.insert(signature.northEast);
+                else if(otherX==vx-1&&otherY==vy-1)
+                    observed.insert(signature.southEast);
+                else if(otherX==vx&&otherY==vy-1)
+                    observed.insert(signature.southWest);
+            }
+        if(observed.size()!=1)
+            return false;
+        inferred[targetCorner]=*observed.constBegin();
+    }
+    output->northWest=inferred[0];output->northEast=inferred[1];
+    output->southEast=inferred[2];output->southWest=inferred[3];
+    return true;
+}
+
+bool CTerrainEditModel::missingBlendRepairSignature(
+    int cellX,int cellY,ETerrainTileLayer layer,
+    const CTerrainTransitionCatalog& catalog,
+    const CTerrainVirtualMaterialField* repairField,
+    bool repairDecodedCells,STerrainTransitionSignature* output,
+    const QMap<int, STerrainTransitionSignature>* plannedSignatures) const
+{
+    if(!output||cellX<0||cellX>=tileCountX()
+       ||cellY<0||cellY>=tileCountY())
+        return false;
+    bool available = true;
+    bool decoded = false;
+    STerrainTransitionSignature current;
+    const int cellKey = cellY * tileCountX() + cellX;
+    if(plannedSignatures && plannedSignatures->contains(cellKey))
+    {
+        current = plannedSignatures->value(cellKey);
+        decoded = true;
+    }
+    else
+    {
+        const quint16 packed = packedTile(cellX, cellY, layer, &available);
+        if(available)
+            current = catalog.gridSignatureForPacked(packed, &decoded);
+    }
+    if(!available)
+        return false;
+
+    // The model-owned field is an explicit history of Modern and Classic
+    // semantic edits. A supplied repair field and neighbouring packed cells
+    // are reconstruction evidence only, so neither may overwrite it.
+    STerrainTransitionSignature authoritativeSignature;
+    bool authoritativeFound = false;
+    const QVector<qint32>& authoritativeValues =
+        layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    if(authoritativeValues.size() == vertexWidth * (tileCountY() + 1))
+    {
+        const int northWest = cellY * vertexWidth + cellX;
+        const int northEast = northWest + 1;
+        const int southWest = (cellY + 1) * vertexWidth + cellX;
+        const int southEast = southWest + 1;
+        authoritativeFound = authoritativeValues.at(northWest) != unset
+            && authoritativeValues.at(northEast) != unset
+            && authoritativeValues.at(southEast) != unset
+            && authoritativeValues.at(southWest) != unset;
+        if(authoritativeFound)
+        {
+            authoritativeSignature.northWest = authoritativeValues.at(northWest);
+            authoritativeSignature.northEast = authoritativeValues.at(northEast);
+            authoritativeSignature.southEast = authoritativeValues.at(southEast);
+            authoritativeSignature.southWest = authoritativeValues.at(southWest);
+        }
+    }
+    if(authoritativeFound)
+    {
+        if(decoded && current == authoritativeSignature)
+            return false;
+        *output = authoritativeSignature;
+        return true;
+    }
+
+    STerrainTransitionSignature recoveredSignature;
+    bool recoveredFound = false;
+    if(repairField)
+        recoveredSignature = repairField->cellSignature(
+            cellX, cellY, &recoveredFound);
+    STerrainTransitionSignature neighborSignature;
+    const bool neighborFound=inferCellSignatureFromNeighbors(
+        cellX,cellY,layer,catalog,&neighborSignature,plannedSignatures);
+    if(!decoded)
+    {
+        if(neighborFound)*output=neighborSignature;
+        else if(recoveredFound)*output=recoveredSignature;
+        else return false;
+        return true;
+    }
+    const auto uniform=[](const STerrainTransitionSignature& signature)
+    {
+        return signature.northWest==signature.northEast
+            &&signature.northWest==signature.southEast
+            &&signature.northWest==signature.southWest;
+    };
+    // A recovered unanimous shared-corner tuple is stable map-wide evidence.
+    // It applies equally to every decoded tile, including contextual stamps,
+    // Manual placements, authored blends, and uniforms.
+    if(repairDecodedCells&&recoveredFound)
+    {
+        if(current==recoveredSignature)
+            return false;
+        *output=recoveredSignature;
+        return true;
+    }
+    if(!neighborFound||current==neighborSignature)
+        return false;
+    // With an ambiguous recovered vertex, do not let one locally unanimous
+    // uniform tuple move a disputed material boundary. This applies to every
+    // physical tile identically and carries no placement-origin privilege.
+    if(uniform(neighborSignature))
+        return false;
+    *output=neighborSignature;
+    return true;
+}
+
+STerrainTileCommand CTerrainEditModel::makeVirtualMapResolution(
+    ETerrainTileLayer layer,const CTerrainTransitionCatalog& catalog,
+    quint32 distributionSeed,CValidationReport* report,
+    bool randomizeUniformRotation,
+    const CTerrainVirtualMaterialField* repairField,
+    bool allowPartialMaterialField,
+    bool repairDecodedCells,
+    const QMap<int, qint32>* preferredRouteOwners,
+    const QSet<int>* forceExactCells,
+    const QSet<int>* preserveCells) const
+{
+    STerrainTileCommand command;
+    command.description=QStringLiteral("Resolve missing terrain blends");
+    command.semanticAudit.valid=true;
+    command.semanticAudit.layer=layer;
+    command.semanticAudit.requestedMaterialId=-1;
+    command.semanticAudit.solverMode=QStringLiteral("virtual-map-exact");
+    const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    if(repairField
+       && (repairField->tileWidth()!=tileCountX()
+           ||repairField->tileHeight()!=tileCountY()))
+    {
+        if(report)report->add("terrain.virtual_map_field",
+            EValidationSeverity::Error,
+            "The conservative repair field dimensions do not match this map");
+        return command;
+    }
+    if(!repairField&&values.size()!=(tileCountX()+1)*(tileCountY()+1))
+    {
+        if(report)report->add("terrain.virtual_map_field",
+            EValidationSeverity::Error,
+            "The map has no complete shared-corner material field to resolve");
+        return command;
+    }
+    const quint32 paintSeed=terrainPaintLayerSeed(distributionSeed,layer);
+    const auto uniformSignature=[](const STerrainTransitionSignature& signature)
+    {
+        return signature.northWest==signature.northEast
+            &&signature.northWest==signature.southEast
+            &&signature.northWest==signature.southWest;
+    };
+    const auto selectExact = [&](const STerrainTransitionSignature& exact,
+                                  int x, int y,
+                                  int cellKey,
+                                  qint32 requiredRuntimeType,
+                                  bool* found) {
+        QSet<int> allowedPhysicalSlots;
+        const QSet<int>* allowedSlots = nullptr;
+        if(requiredRuntimeType >= 0 && requiredRuntimeType < 16)
+        {
+            for(const STerrainTransitionVariant& variant :
+                catalog.paintVariants(exact))
+            {
+                bool typeFound = false;
+                const qint32 candidateType = tileType(
+                    variant.packedTile, &typeFound);
+                if(!typeFound || candidateType != requiredRuntimeType)
+                    continue;
+                allowedPhysicalSlots.insert(SMprPackedTile::decode(
+                    variant.packedTile).atlasSlot());
+            }
+            allowedSlots = &allowedPhysicalSlots;
+        }
+        // Uniform-only rotation normalization is deliberately confined to a
+        // uniform tuple. A non-uniform exact repair must never fall back to a
+        // pure interior tile merely because its required runtime type is absent.
+        if(uniformSignature(exact))
+            return selectUniformInteriorTile(catalog, exact, x, y, paintSeed,
+                randomizeUniformRotation, found, allowedSlots);
+        const qint32 preferredOwner = preferredRouteOwners
+            ? preferredRouteOwners->value(cellKey, 0) : 0;
+        return allowedSlots
+            ? catalog.selectForPaint(exact, x, y, paintSeed, *allowedSlots,
+                preferredOwner, found)
+            : catalog.selectForPaint(exact, x, y, paintSeed,
+                preferredOwner, found);
+    };
+    const auto refuseRuntimeTypeSubstitution = [report](
+        int x, int y, const STerrainTransitionSignature& exact,
+        qint32 requiredRuntimeType) {
+        if(report)
+            report->add("terrain.virtual_map_runtime_type",
+                EValidationSeverity::Error,
+                QString("Resolve Missing Blends could not select the exact %1/%2/%3/%4 tuple at %5,%6 with the predecessor runtime terrain type %7; no differently typed slot was substituted.")
+                    .arg(exact.northWest).arg(exact.northEast)
+                    .arg(exact.southEast).arg(exact.southWest)
+                    .arg(x).arg(y).arg(requiredRuntimeType));
+    };
+
+    // Neighbour recovery used to emit a first physical batch and only learn
+    // from it on the next Resolve Missing Blends invocation. Keep the planned
+    // semantic signatures separate from sector payloads and iterate them to a
+    // fixed point before producing one reversible command. This never lets a
+    // transient packed choice replace the model-owned virtual field.
+    QMap<int, STerrainTransitionSignature> plannedSignatures;
+    QMap<int, bool> pendingCells;
+    QSet<int> unresolvedCells;
+    QSet<int> runtimeTypeSkippedCells;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            packedTile(x, y, layer, &available);
+            if(available)
+                pendingCells.insert(y * tileCountX() + x, true);
+        }
+    const auto signatureStateKey = [](const STerrainTransitionSignature& value) {
+        return QByteArray::number(value.northWest) + ','
+            + QByteArray::number(value.northEast) + ','
+            + QByteArray::number(value.southEast) + ','
+            + QByteArray::number(value.southWest);
+    };
+    QMap<int, QSet<QByteArray>> observedStates;
+    int stateChanges = 0;
+    const qint64 mapCellCount = qint64(tileCountX()) * tileCountY();
+    const int maximumStateChanges = int(qMax<qint64>(1, qMin<qint64>(
+        1000000, mapCellCount * 8)));
+    while(!pendingCells.isEmpty())
+    {
+        const int key = pendingCells.constBegin().key();
+        pendingCells.remove(key);
+        const int x = key % tileCountX();
+        const int y = key / tileCountX();
+        if(preserveCells && preserveCells->contains(key))
+            continue;
+        bool available = false;
+        const quint16 before = packedTile(x, y, layer, &available);
+        if(!available)
+            continue;
+        STerrainTransitionSignature exact;
+        if(!missingBlendRepairSignature(
+               x, y, layer, catalog, repairField,
+               repairDecodedCells, &exact, &plannedSignatures))
+            continue;
+        bool predecessorTypeFound = false;
+        const qint32 predecessorType = tileType(before, &predecessorTypeFound);
+        bool found = false;
+        selectExact(exact, x, y, key,
+                    predecessorTypeFound ? predecessorType : -1, &found);
+        if(!found)
+        {
+            if(predecessorTypeFound)
+            {
+                if(allowPartialMaterialField)
+                {
+                    unresolvedCells.insert(key);
+                    runtimeTypeSkippedCells.insert(key);
+                    continue;
+                }
+                refuseRuntimeTypeSubstitution(x, y, exact, predecessorType);
+                return STerrainTileCommand();
+            }
+            continue;
+        }
+
+        bool currentDecoded = false;
+        STerrainTransitionSignature current;
+        if(plannedSignatures.contains(key))
+        {
+            current = plannedSignatures.value(key);
+            currentDecoded = true;
+        }
+        else
+        {
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(available)
+                current = catalog.gridSignatureForPacked(
+                    packed, &currentDecoded);
+        }
+        if(currentDecoded && current == exact)
+            continue;
+
+        QSet<QByteArray>& states = observedStates[key];
+        if(states.isEmpty() && currentDecoded)
+            states.insert(signatureStateKey(current));
+        const QByteArray nextState = signatureStateKey(exact);
+        if(states.contains(nextState) || ++stateChanges > maximumStateChanges)
+        {
+            if(report)
+                report->add("terrain.virtual_map_nonconvergent",
+                    EValidationSeverity::Error,
+                    "Resolve Missing Blends detected a cyclic or excessive semantic repair frontier without mutating the map");
+            return command;
+        }
+        states.insert(nextState);
+
+        bool originalDecoded = false;
+        const quint16 originalPacked = packedTile(x, y, layer, &available);
+        STerrainTransitionSignature original;
+        if(available)
+            original = catalog.gridSignatureForPacked(
+                originalPacked, &originalDecoded);
+        if(originalDecoded && original == exact)
+            plannedSignatures.remove(key);
+        else
+            plannedSignatures.insert(key, exact);
+
+        // A changed cell can influence only the three-by-three cell block
+        // sharing one of its four vertices. Keep the frontier ordered by key
+        // so equivalent maps produce the same command independent of hash
+        // iteration order.
+        for(int neighborY = y - 1; neighborY <= y + 1; ++neighborY)
+            for(int neighborX = x - 1; neighborX <= x + 1; ++neighborX)
+                if(neighborX >= 0 && neighborX < tileCountX()
+                   && neighborY >= 0 && neighborY < tileCountY())
+                    pendingCells.insert(
+                        neighborY * tileCountX() + neighborX, true);
+    }
+
+    // Route-only normalization keeps the authoritative semantic tuple fixed
+    // but re-runs exact physical selection through the component owner gate.
+    // It is deliberately added after semantic frontier convergence so an
+    // artwork-route correction cannot influence shared-corner recovery.
+    if(forceExactCells)
+        for(int key : *forceExactCells)
+        {
+            if(key < 0 || key >= tileCountX() * tileCountY()
+               || (preserveCells && preserveCells->contains(key)))
+                continue;
+            const int x = key % tileCountX();
+            const int y = key / tileCountX();
+            bool found = false;
+            STerrainTransitionSignature exact;
+            if(repairField)
+                exact = repairField->cellSignature(x, y, &found);
+            if(!found && values.size()
+                    == (tileCountX() + 1) * (tileCountY() + 1))
+            {
+                const int northWest = y * (tileCountX() + 1) + x;
+                exact.northWest = values.at(northWest);
+                exact.northEast = values.at(northWest + 1);
+                exact.southWest = values.at(
+                    northWest + tileCountX() + 1);
+                exact.southEast = values.at(
+                    northWest + tileCountX() + 2);
+                found = exact.northWest > 0 && exact.northEast > 0
+                    && exact.southEast > 0 && exact.southWest > 0;
+            }
+            if(found)
+                plannedSignatures.insert(key, exact);
+        }
+
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 before = packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            const int key = y * tileCountX() + x;
+            if(preserveCells && preserveCells->contains(key))
+                continue;
+            STerrainTransitionSignature exact;
+            if(!missingBlendRepairSignature(
+                   x, y, layer, catalog, repairField,
+                   repairDecodedCells, &exact, &plannedSignatures))
+                continue;
+            bool predecessorTypeFound = false;
+            const qint32 predecessorType = tileType(
+                before, &predecessorTypeFound);
+            bool found = false;
+            selectExact(exact, x, y, key,
+                        predecessorTypeFound ? predecessorType : -1, &found);
+            if(!found)
+            {
+                if(predecessorTypeFound)
+                {
+                    if(allowPartialMaterialField)
+                    {
+                        unresolvedCells.insert(key);
+                        runtimeTypeSkippedCells.insert(key);
+                        continue;
+                    }
+                    refuseRuntimeTypeSubstitution(x, y, exact,
+                                                  predecessorType);
+                    return STerrainTileCommand();
+                }
+                unresolvedCells.insert(key);
+            }
+        }
+
+    for(auto entry = plannedSignatures.constBegin();
+        entry != plannedSignatures.constEnd(); ++entry)
+    {
+        const int key = entry.key();
+        const int x = key % tileCountX();
+        const int y = key / tileCountX();
+        bool available = false;
+        const quint16 before = packedTile(x, y, layer, &available);
+        if(!available)
+            continue;
+        bool predecessorTypeFound = false;
+        const qint32 predecessorType = tileType(before, &predecessorTypeFound);
+        bool found = false;
+        const quint16 after = selectExact(entry.value(), x, y, key,
+            predecessorTypeFound ? predecessorType : -1, &found);
+        if(!found)
+        {
+            if(predecessorTypeFound)
+            {
+                if(allowPartialMaterialField)
+                {
+                    unresolvedCells.insert(key);
+                    runtimeTypeSkippedCells.insert(key);
+                    continue;
+                }
+                refuseRuntimeTypeSubstitution(x, y, entry.value(),
+                                              predecessorType);
+                return STerrainTileCommand();
+            }
+            unresolvedCells.insert(key);
+            continue;
+        }
+        command.semanticAudit.affectedCells.append(QPoint(x, y));
+        if(after == before)
+            continue;
+        STerrainTileDelta delta;
+        delta.globalX = x;
+        delta.globalY = y;
+        delta.layer = layer;
+        delta.before = before;
+        delta.after = after;
+        delta.hasSemanticRequest = true;
+        delta.requestedMaterialId = -1;
+        delta.requestedSignature = entry.value();
+        command.deltas.append(delta);
+    }
+    if(!runtimeTypeSkippedCells.isEmpty() && report)
+        report->add("terrain.virtual_map_runtime_type_skipped",
+            EValidationSeverity::Warning,
+            QString("%1 map cell(s) were preserved because no exact blend exists with their predecessor runtime terrain type")
+                .arg(runtimeTypeSkippedCells.size()));
+    QSet<int> ambiguousCells = unresolvedCells;
+    ambiguousCells.subtract(runtimeTypeSkippedCells);
+    if(!ambiguousCells.isEmpty()&&report)report->add(
+        allowPartialMaterialField
+            ? "terrain.virtual_map_ambiguous_skipped"
+            : "terrain.virtual_map_unresolved",
+        allowPartialMaterialField
+            ? EValidationSeverity::Warning : EValidationSeverity::Error,
+        allowPartialMaterialField
+            ? QString("%1 ambiguous map cell(s) were preserved rather than moving a tied material boundary")
+                  .arg(ambiguousCells.size())
+            : QString("%1 map cell(s) could not be resolved to an exact physical blend")
+                  .arg(ambiguousCells.size()));
+    return command;
+}
+
+bool CTerrainEditModel::virtualMaterialFieldActive(ETerrainTileLayer layer) const
+{
+    const QVector<qint32>& current=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const QVector<qint32>& baseline=layer==ETerrainTileLayer::Land
+        ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
+    return !current.isEmpty()&&current!=baseline;
+}
+
+QMap<int, QPoint> CTerrainEditModel::referencedUnassignedAtlasSlots(
+    ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog) const
+{
+    QMap<int, QPoint> result;
+    for(int y = 0; y < tileCountY(); ++y)
+        for(int x = 0; x < tileCountX(); ++x)
+        {
+            bool available = false;
+            const quint16 packed = packedTile(x, y, layer, &available);
+            if(!available)
+                continue;
+            bool decoded = false;
+            catalog.gridSignatureForPacked(packed, &decoded);
+            if(decoded)
+                continue;
+            const int slot = SMprPackedTile::decode(packed).atlasSlot();
+            if(!result.contains(slot))
+                result.insert(slot, QPoint(x, y));
+        }
+    return result;
+}
+
+qint32 CTerrainEditModel::virtualMaterialAt(ETerrainTileLayer layer,
+    int vertexX,int vertexY,bool* found) const
+{
+    const QVector<qint32>& values=layer==ETerrainTileLayer::Land
+        ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+    const int width=tileCountX()+1;
+    const bool valid=vertexX>=0&&vertexX<=tileCountX()
+        &&vertexY>=0&&vertexY<=tileCountY()
+        &&values.size()==width*(tileCountY()+1)
+        &&values.at(vertexY*width+vertexX)
+            !=std::numeric_limits<qint32>::min();
+    if(found)*found=valid;
+    return valid?values.at(vertexY*width+vertexX):-1;
+}
+
+bool CTerrainEditModel::virtualMaterialCellChanged(
+    ETerrainTileLayer layer, int cellX, int cellY) const
+{
+    if(cellX < 0 || cellX >= tileCountX()
+       || cellY < 0 || cellY >= tileCountY())
+        return true;
+    const QVector<qint32>& current = layer == ETerrainTileLayer::Land
+        ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+    const QVector<qint32>& baseline = layer == ETerrainTileLayer::Land
+        ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+    const int vertexWidth = tileCountX() + 1;
+    const int expected = vertexWidth * (tileCountY() + 1);
+    if(current.size() != expected || baseline.size() != expected)
+        return true;
+    const int northWest = cellY * vertexWidth + cellX;
+    const int northEast = northWest + 1;
+    const int southWest = (cellY + 1) * vertexWidth + cellX;
+    const int southEast = southWest + 1;
+    return current.at(northWest) != baseline.at(northWest)
+        || current.at(northEast) != baseline.at(northEast)
+        || current.at(southEast) != baseline.at(southEast)
+        || current.at(southWest) != baseline.at(southWest);
+}
+
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
 {
+    QSet<int> commandFields;
+    const int expectedFieldSize = (tileCountX() + 1) * (tileCountY() + 1);
+    for(const STerrainTileCommand::SVirtualFieldDelta& delta
+        : command.virtualFields)
+    {
+        const int layerKey = delta.layer == ETerrainTileLayer::Overlay ? 1 : 0;
+        QVector<qint32>& current = delta.layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+        QVector<qint32>& baseline = delta.layer == ETerrainTileLayer::Land
+            ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+        const QVector<qint32>& expectedCurrent = forward
+            ? delta.beforeCurrent : delta.afterCurrent;
+        const QVector<qint32>& expectedBaseline = forward
+            ? delta.beforeBaseline : delta.afterBaseline;
+        const bool dimensionsValid = delta.vertexWidth == tileCountX() + 1
+            && delta.vertexHeight == tileCountY() + 1;
+        const auto validFieldSize = [expectedFieldSize](const QVector<qint32>& value) {
+            return value.isEmpty() || value.size() == expectedFieldSize;
+        };
+        if(commandFields.contains(layerKey) || !dimensionsValid
+           || !validFieldSize(delta.beforeCurrent)
+           || !validFieldSize(delta.afterCurrent)
+           || !validFieldSize(delta.beforeBaseline)
+           || !validFieldSize(delta.afterBaseline)
+           || current != expectedCurrent || baseline != expectedBaseline)
+        {
+            if(report)
+                report->add("terrain.virtual_field_provenance",
+                    EValidationSeverity::Error,
+                    "The virtual material command no longer matches its complete field state",
+                    delta.layer == ETerrainTileLayer::Land
+                        ? QStringLiteral("land") : QStringLiteral("overlay"));
+            return false;
+        }
+        commandFields.insert(layerKey);
+    }
+    QSet<int> commandPendingVertices;
+    const qint32 unset = std::numeric_limits<qint32>::min();
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : command.pendingVirtualVertices)
+    {
+        if(delta.globalX < 0 || delta.globalX > tileCountX()
+           || delta.globalY < 0 || delta.globalY > tileCountY())
+            return false;
+        const int key = delta.globalY * (tileCountX() + 1) + delta.globalX;
+        const int layerKey = (delta.layer == ETerrainTileLayer::Overlay ? 1 : 0)
+            * (tileCountX() + 1) * (tileCountY() + 1) + key;
+        const QVector<qint32>& values = delta.layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+        const QVector<qint32>& baseline = delta.layer == ETerrainTileLayer::Land
+            ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+        const QMap<int, qint32>& pending = delta.layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        const qint32 expected = forward ? delta.before : delta.after;
+        if(commandPendingVertices.contains(layerKey)
+           || !values.isEmpty() || !baseline.isEmpty()
+           || pending.value(key, unset) != expected)
+        {
+            if(report)
+                report->add("terrain.pending_virtual_paint_provenance",
+                    EValidationSeverity::Error,
+                    "The fieldless Manual corner command no longer matches its pending semantic state",
+                    QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandPendingVertices.insert(layerKey);
+    }
+    QSet<int> commandVertices;
+    for(const STerrainTileCommand::SVirtualVertexDelta& delta:command.virtualVertices)
+    {
+        if(delta.globalX<0||delta.globalX>tileCountX()
+           ||delta.globalY<0||delta.globalY>tileCountY())
+            return false;
+        QVector<qint32>& values=delta.layer==ETerrainTileLayer::Land
+            ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+        QVector<qint32>& baseline=delta.layer==ETerrainTileLayer::Land
+            ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
+        const int key=delta.globalY*(tileCountX()+1)+delta.globalX;
+        const int layerKey=(delta.layer==ETerrainTileLayer::Overlay?1:0)
+            *(tileCountX()+1)*(tileCountY()+1)+key;
+        const qint32 expected=forward?delta.before:delta.after;
+        const qint32 expectedBaseline=forward
+            ?delta.beforeBaseline:delta.afterBaseline;
+        const int fieldLayerKey = delta.layer == ETerrainTileLayer::Overlay ? 1 : 0;
+        if(commandFields.contains(fieldLayerKey)
+           || commandVertices.contains(layerKey)||key>=values.size()
+           ||values.at(key)!=expected
+           ||(delta.updatesBaseline
+              &&(key>=baseline.size()
+                 ||baseline.at(key)!=expectedBaseline)))
+        {
+            if(report)report->add("terrain.virtual_paint_provenance",
+                EValidationSeverity::Error,
+                "The virtual material command no longer matches its vertex field",
+                QString("%1,%2").arg(delta.globalX).arg(delta.globalY));
+            return false;
+        }
+        commandVertices.insert(layerKey);
+    }
     QSet<int> commandTiles;
     struct SResolvedTile
     {
@@ -4053,6 +7424,39 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
         writePackedTile(sector.currentPayload, target.offset, target.localTile,
                         forward ? delta.after : delta.before);
         sector.dirty = sector.currentPayload != sector.source.payload;
+    }
+    for(const STerrainTileCommand::SVirtualVertexDelta& delta:command.virtualVertices)
+    {
+        QVector<qint32>& values=delta.layer==ETerrainTileLayer::Land
+            ?m_virtualLandMaterials:m_virtualOverlayMaterials;
+        QVector<qint32>& baseline=delta.layer==ETerrainTileLayer::Land
+            ?m_originalVirtualLandMaterials:m_originalVirtualOverlayMaterials;
+        const int key=delta.globalY*(tileCountX()+1)+delta.globalX;
+        values[key]=forward?delta.after:delta.before;
+        if(delta.updatesBaseline)
+            baseline[key]=forward?delta.afterBaseline:delta.beforeBaseline;
+    }
+    for(const STerrainTileCommand::SVirtualFieldDelta& delta
+        : command.virtualFields)
+    {
+        QVector<qint32>& current = delta.layer == ETerrainTileLayer::Land
+            ? m_virtualLandMaterials : m_virtualOverlayMaterials;
+        QVector<qint32>& baseline = delta.layer == ETerrainTileLayer::Land
+            ? m_originalVirtualLandMaterials : m_originalVirtualOverlayMaterials;
+        current = forward ? delta.afterCurrent : delta.beforeCurrent;
+        baseline = forward ? delta.afterBaseline : delta.beforeBaseline;
+    }
+    for(const STerrainTileCommand::SPendingVirtualVertexDelta& delta
+        : command.pendingVirtualVertices)
+    {
+        QMap<int, qint32>& pending = delta.layer == ETerrainTileLayer::Land
+            ? m_pendingVirtualLandMaterials : m_pendingVirtualOverlayMaterials;
+        const int key = delta.globalY * (tileCountX() + 1) + delta.globalX;
+        const qint32 value = forward ? delta.after : delta.before;
+        if(value == unset)
+            pending.remove(key);
+        else
+            pending.insert(key, value);
     }
     return true;
 }

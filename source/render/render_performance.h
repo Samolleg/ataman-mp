@@ -78,17 +78,19 @@ class RenderPerformanceContext
 {
 public:
     static RenderPerformanceContext& instance();
-    void beginFrame(bool enabled);
+    void beginFrame(bool enabled, bool reportEnabled = true);
     void recordGpuTime(quint64 nanoseconds);
     void setFrameMetadata(const SRenderFrameMetadata& metadata) { m_metadata = metadata; }
     void endFrame();
     bool collecting() const { return m_collecting; }
     SRenderFrameCounters& counters() { return m_frame; }
+    const SRenderFrameCounters& currentFrameCounters() const { return m_frame; }
 
 private:
     void resetWindow();
 
     bool m_collecting{false};
+    bool m_reportEnabled{false};
     SRenderFrameCounters m_frame;
     SRenderFrameCounters m_total;
     QElapsedTimer m_frameTimer;

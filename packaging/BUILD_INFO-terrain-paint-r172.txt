@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: fix first-load crash in verified decoded-atlas reuse
+Executable source/changelist commit: 4f7aca93c32f0a829c86ed7dea3430dc895eb398
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 124 pass / 0 fail / 6 expected skips; virtual atlas 113 pass / 0 fail; landscape widget 7 pass / 0 fail; fresh atlas-adoption crash regression PASS; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Comparison: patrol package Zone2 worklogs 4589 ms and 5078 ms; R170 5479 ms; R171 crashed before completion timing
+Collections: omitted from this focused MPR-load revision; test against the user's installed Zone2 map and compare the newest workflow timing lines

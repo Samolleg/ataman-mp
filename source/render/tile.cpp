@@ -3,6 +3,30 @@
 #include "gl_dispatch.h"
 #include "math_utils.h"
 
+#include <QOpenGLFunctions>
+
+namespace
+{
+const ushort kPreviewTileIndices[] = {
+    0,1,4, 0,4,3,
+    1,2,5, 1,5,4,
+    3,4,7, 3,7,6,
+    4,5,8, 4,8,7
+};
+
+bool contextsShareGpuResources(const QOpenGLContext* first,
+                               const QOpenGLContext* second)
+{
+    if(!first || !second)
+        return false;
+    if(first == second)
+        return true;
+    return first->shareGroup()
+        && first->shareGroup() == second->shareGroup();
+}
+}
+
+
 CTile::CTile():
     m_materialIndex(-1)
 {
@@ -14,6 +38,8 @@ CTile::CTile(ushort packedData, ushort x, ushort y, float maxZ, int atlasNumber)
   ,m_y(y)
   ,m_maxZ(maxZ)
   ,m_texAtlasNumber(atlasNumber)
+  ,m_atlasColumns(qMax(1, atlasNumber))
+  ,m_atlasRows(1)
 {
     reset();
     m_x = x;
@@ -89,24 +115,30 @@ quat ind: {0,1,4,3}, {1,2,5,4}, {3,4,7, 6},  {4, 5, 8, 7}
 */
 void CTile::generateDrawVertexData(QVector<SVertexData>& outData, int& curIndex)
 {
-    int texCount = m_texAtlasNumber;
-    QVector2D texMinimum(
-        (m_index % 8 / 8.0f + m_atlasTexIndex) / texCount,
-        (7 - int(m_index / 8)) / 8.0f);
-    QVector2D texMaximum(texMinimum.x() + 1.0f / 8.0f / texCount,
-                         texMinimum.y() + 1.0f / 8.0f);
-    texMinimum += QVector2D(4.0f / 512.0f / texCount,
-                            4.0f / 512.0f / texCount);
-    texMaximum -= QVector2D(4.0f / 512.0f / texCount,
-                            4.0f / 512.0f / texCount);
+    QVector<QVector2D> tCoord; // store x,y min and x,y max
+    tCoord.resize(2);
+    tCoord[0] = atlasTileOrigin(tileIndex(), m_texAtlasNumber,
+                               m_atlasColumns);
+    // QOpenGLTexture uploads QImage scanline zero as the bottom of the GL
+    // texture. previewTerrainAtlas writes page row zero into those first
+    // scanlines, so packed atlas pages advance upward without another flip.
+    // Reversing pageRow here made a 3x3 atlas sample pages 6-8 for stock pages
+    // 0-2 and could make the entire map appear as one generated/blank texture.
+    tCoord[1].setX(tCoord[0].x() + 1.0f/8.0f/m_atlasColumns);
+    tCoord[1].setY(tCoord[0].y() + 1.0f/8.0f/m_atlasRows);
+    tCoord[0] += QVector2D(4.0f/512.0f/m_atlasColumns,
+                          4.0f/512.0f/m_atlasRows);
+    tCoord[1] -= QVector2D(4.0f/512.0f/m_atlasColumns,
+                          4.0f/512.0f/m_atlasRows);
 
-    const auto calcTexCoord = [&texMinimum, &texMaximum](
-        QVector2D& texCoord, int row, int col)
+    auto calcTexCoord = [&tCoord](QVector2D& texCoord, int row, int col)
     {
-        const float xStep = (texMaximum.x() - texMinimum.x()) * 0.5f;
-        const float yStep = (texMaximum.y() - texMinimum.y()) * 0.5f;
-        texCoord.setX(texMinimum.x() + xStep * col);
-        texCoord.setY(texMaximum.y() - yStep * row);
+        const float xStep = (tCoord[0].x() + tCoord[1].x()) * 0.5f
+            - tCoord[0].x();
+        const float yStep = (tCoord[0].y() + tCoord[1].y()) * 0.5f
+            - tCoord[0].y();
+        texCoord.setX(tCoord[0].x() + xStep * col);
+        texCoord.setY(tCoord[1].y() - yStep * row);
     };
 
     for(int row(0); row<3; ++row)
@@ -185,6 +217,14 @@ void CTile::setTile(int index, int rotNum)
     m_rotNum = rotNum;
 }
 
+void CTile::setAtlasLayout(int textureCount, int columns)
+{
+    m_texAtlasNumber = qMax(1, textureCount);
+    m_atlasColumns = qBound(1, columns, m_texAtlasNumber);
+    m_atlasRows = qMax(1, (m_texAtlasNumber + m_atlasColumns - 1)
+                            / m_atlasColumns);
+}
+
 ushort CTile::packData()
 {
     return (m_index & 63) | ((m_atlasTexIndex & 255) << 6) | ((m_rotNum & 3) << 14);
@@ -211,71 +251,226 @@ QVector3D CTile::pos(int row, int col)
     return pos;
 }
 
-CPreviewTile::CPreviewTile():
-    m_vertexBuf(QOpenGLBuffer::VertexBuffer)
-   ,m_indexBuf(QOpenGLBuffer::IndexBuffer)
+CPreviewTile::CPreviewTile()
 {
-    m_vertexBuf.create();
-    m_indexBuf.create();
-    //m_modelMatrix.setToIdentity();
 }
 
 CPreviewTile::~CPreviewTile()
 {
-    m_vertexBuf.destroy();
-    m_indexBuf.destroy();
+    // This is deliberately conditional. At normal CView teardown the view
+    // calls releaseGpuResources() with its context current; after an abnormal
+    // widget/context teardown this only drops stale names and never enters Qt
+    // or the driver with no owning context.
+    releaseGpuResources();
 }
 
 void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector)
 {
-    m_arrLandVrtData.clear();
-    m_arrLandVrtData.resize(9);
+    // Palette buttons and cursor input are not OpenGL ownership boundaries.
+    // Build a private CPU generation only; paintGL/draw uploads it later.
+    QVector<SVertexData> vertexData(9);
     CTile previewTile = tile;
     previewTile.setTile(tIndex, rotation);
     previewTile.setMaterialIndex(mIndex);
 
     int curIndex(0);
-    previewTile.generateDrawVertexData(m_arrLandVrtData, curIndex);
-    m_modelMatrix.setToIdentity();
-    m_modelMatrix.translate(QVector3D(xSector*32.0f, ySector*32.0f, .0f));
+    previewTile.generateDrawVertexData(vertexData, curIndex);
+    for(SVertexData& vertex : vertexData)
+        vertex.position.setZ(vertex.position.z()
+                             + terrainTilePreviewElevation());
+    QMatrix4x4 modelMatrix;
+    modelMatrix.setToIdentity();
+    modelMatrix.translate(QVector3D(xSector*32.0f, ySector*32.0f, .0f));
 
-    m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_arrLandVrtData.data(), m_arrLandVrtData.count()*int(sizeof(SVertexData)));
-    m_vertexBuf.release();
+    m_stagedVertexData = vertexData;
+    m_stagedIndexData.resize(int(sizeof(kPreviewTileIndices)
+                                / sizeof(kPreviewTileIndices[0])));
+    for(int index = 0; index < m_stagedIndexData.size(); ++index)
+        m_stagedIndexData[index] = kPreviewTileIndices[index];
+    m_stagedModelMatrix = modelMatrix;
+    ++m_stagedGeneration;
+    // Avoid the sentinel equality after the (practically unreachable) wrap.
+    if(m_stagedGeneration == 0)
+        ++m_stagedGeneration;
+    m_geometryDirty = true;
+}
 
-    const QVector<ushort> arrTileInd{
-        0,1,4, 0,4,3,
-        1,2,5, 1,5,4,
-        3,4,7, 3,7,6,
-        4,5,8, 4,8,7
-    };
-    m_indexBuf.bind();
-    m_indexBuf.allocate(arrTileInd.data(), arrTileInd.size() * sizeof(ushort));
-    m_indexBuf.release();
+bool CPreviewTile::hasStagedGeometry() const
+{
+    return !m_stagedVertexData.isEmpty() && !m_stagedIndexData.isEmpty();
+}
+
+bool CPreviewTile::hasPendingGeometry() const
+{
+    return hasStagedGeometry()
+        && (m_geometryDirty || m_uploadedGeneration != m_stagedGeneration);
+}
+
+bool CPreviewTile::hasCurrentCompatibleGpuContext() const
+{
+    if(!m_vertexBuffer || !m_indexBuffer || m_gpuContext.isNull())
+        return false;
+    return contextsShareGpuResources(QOpenGLContext::currentContext(),
+                                     m_gpuContext.data());
+}
+
+void CPreviewTile::abandonGpuResources()
+{
+    // A buffer name alone is not sufficient authority to call glDeleteBuffers.
+    // If its owner is no longer current, the owner context will reclaim it at
+    // destruction. Keeping the CPU snapshot lets a later compatible context
+    // recreate this generation without touching the stale name.
+    m_vertexBuffer = 0;
+    m_indexBuffer = 0;
+    m_gpuContext.clear();
+    m_uploadedGeneration = 0;
+    m_geometryDirty = hasStagedGeometry();
+}
+
+bool CPreviewTile::uploadPendingGeometry()
+{
+    if(!hasStagedGeometry())
+        return false;
+
+    QOpenGLContext* current = QOpenGLContext::currentContext();
+    if(!current)
+        return false;
+
+    // The QPointer becomes null when a recreated/destroyed Qt context is
+    // gone. Its old GL names cannot be deleted from an unrelated context.
+    if((m_vertexBuffer || m_indexBuffer) && m_gpuContext.isNull())
+        abandonGpuResources();
+    if(!m_gpuContext.isNull()
+       && !contextsShareGpuResources(current, m_gpuContext.data()))
+        return false;
+
+    if(!hasPendingGeometry() && m_vertexBuffer && m_indexBuffer)
+        return true;
+
+    QOpenGLFunctions* functions = current->functions();
+    if(!functions)
+        return false;
+
+    if(!m_vertexBuffer || !m_indexBuffer)
+    {
+        // A partially-created pair is still owned by the compatible current
+        // context, so it can be disposed before retrying atomically.
+        if(m_vertexBuffer)
+            functions->glDeleteBuffers(1, &m_vertexBuffer);
+        if(m_indexBuffer)
+            functions->glDeleteBuffers(1, &m_indexBuffer);
+        m_vertexBuffer = 0;
+        m_indexBuffer = 0;
+        functions->glGenBuffers(1, &m_vertexBuffer);
+        functions->glGenBuffers(1, &m_indexBuffer);
+        if(!m_vertexBuffer || !m_indexBuffer)
+        {
+            if(m_vertexBuffer)
+                functions->glDeleteBuffers(1, &m_vertexBuffer);
+            if(m_indexBuffer)
+                functions->glDeleteBuffers(1, &m_indexBuffer);
+            m_vertexBuffer = 0;
+            m_indexBuffer = 0;
+            return false;
+        }
+        m_gpuContext = current;
+    }
+
+    functions->glBindBuffer(GL_ARRAY_BUFFER, m_vertexBuffer);
+    functions->glBufferData(GL_ARRAY_BUFFER,
+                            m_stagedVertexData.size()
+                                * int(sizeof(SVertexData)),
+                            m_stagedVertexData.constData(), GL_STATIC_DRAW);
+    functions->glBindBuffer(GL_ARRAY_BUFFER, 0);
+    functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_indexBuffer);
+    functions->glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                            m_stagedIndexData.size() * int(sizeof(ushort)),
+                            m_stagedIndexData.constData(), GL_STATIC_DRAW);
+    functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    m_uploadedGeneration = m_stagedGeneration;
+    m_geometryDirty = false;
+    return true;
+}
+
+bool CPreviewTile::releaseGpuResources()
+{
+    if(!m_vertexBuffer && !m_indexBuffer)
+    {
+        m_gpuContext.clear();
+        m_uploadedGeneration = 0;
+        m_geometryDirty = hasStagedGeometry();
+        return true;
+    }
+
+    QOpenGLContext* current = QOpenGLContext::currentContext();
+    if(!current || m_gpuContext.isNull()
+       || !contextsShareGpuResources(current, m_gpuContext.data()))
+    {
+        abandonGpuResources();
+        return false;
+    }
+
+    QOpenGLFunctions* functions = current->functions();
+    if(!functions)
+    {
+        abandonGpuResources();
+        return false;
+    }
+    if(m_vertexBuffer)
+        functions->glDeleteBuffers(1, &m_vertexBuffer);
+    if(m_indexBuffer)
+        functions->glDeleteBuffers(1, &m_indexBuffer);
+    m_vertexBuffer = 0;
+    m_indexBuffer = 0;
+    m_gpuContext.clear();
+    m_uploadedGeneration = 0;
+    m_geometryDirty = hasStagedGeometry();
+    return true;
 }
 
 void CPreviewTile::draw(QOpenGLShaderProgram* program)
 {
-    if (m_arrLandVrtData.count() == 0)
+    if(!program || !hasStagedGeometry())
         return;
 
-    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    // draw is only reached from the renderer. It still rechecks the contract
+    // so a palette callback can never accidentally rely on a stale VBO.
+    if(!uploadPendingGeometry() || !hasCurrentCompatibleGpuContext())
+        return;
+
+    program->setUniformValue("u_modelMmatrix", m_stagedModelMatrix);
 
     int offset = 0;
-    m_vertexBuf.bind();
+    QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
+    if(!functions)
+        return;
+    functions->glBindBuffer(GL_ARRAY_BUFFER, m_vertexBuffer);
     int vertLoc = program->attributeLocation("a_position");
-    program->enableAttributeArray(vertLoc);
-    program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    if(vertLoc >= 0)
+    {
+        program->enableAttributeArray(vertLoc);
+        program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3,
+                                    int(sizeof(SVertexData)));
+    }
 
     offset += int(sizeof(QVector3D));
     int normLoc = program->attributeLocation("a_normal");
-    program->enableAttributeArray(normLoc);
-    program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
+    if(normLoc >= 0)
+    {
+        program->enableAttributeArray(normLoc);
+        program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3,
+                                    int(sizeof(SVertexData)));
+    }
 
     offset+=int(sizeof(QVector3D)); // size of normal
     int textureLocation = program->attributeLocation("a_texture");
-    program->enableAttributeArray(textureLocation);
-    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
+    if(textureLocation >= 0)
+    {
+        program->enableAttributeArray(textureLocation);
+        program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2,
+                                    int(sizeof(SVertexData)));
+    }
     const int animationLocation = program->attributeLocation("a_overlayAnimation");
     if(animationLocation >= 0)
     {
@@ -300,6 +495,6 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
         program->disableAttributeArray(emissionLocation);
         program->setAttributeValue(emissionLocation, QVector3D());
     }
-    m_indexBuf.bind();
+    functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_indexBuffer);
     ei::gl::DrawElements(GL_TRIANGLES, 24, GL_UNSIGNED_SHORT, nullptr);
 }

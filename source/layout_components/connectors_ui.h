@@ -3,7 +3,6 @@
 
 #include <QString>
 #include <QLabel>
-#include <QLineEdit>
 
 #include "types.h"
 
@@ -17,7 +16,7 @@ class CStatusConnector
 {
 public:
     static CStatusConnector* getInstance();
-    void attach(QLabel* pLabel, QLineEdit* pLine);
+    void attach(QLabel* pLabel, QLabel* pLine);
     void updateStatus(QString icoName, QString statusString);
 private:
     CStatusConnector();
@@ -26,7 +25,7 @@ private:
 private:
     static CStatusConnector* m_statusHelper;
     QLabel* m_pIco;
-    QLineEdit* m_pStatus;
+    QLabel* m_pStatus;
 };
 
 ///

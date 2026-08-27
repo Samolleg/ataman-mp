@@ -1,0 +1,29 @@
+{
+  "schema": "ei-ice-continuous-owner-decisions-v1",
+  "checkpoint": "R63-ICE-CONTINUOUS-OWNER-REACH",
+  "authority": "explicit-user-review",
+  "status": "approved",
+  "decisions": {
+    "route-compare-ice-fracture-inside-3of4-v1": {
+      "answer": "Approve continuous owner reach"
+    },
+    "route-compare-ice-fracture-inside-3of4-v2": {
+      "answer": "Approve continuous owner reach"
+    }
+  },
+  "approvedRoutes": [
+    "route-compare-ice-fracture-inside-3of4-v1",
+    "route-compare-ice-fracture-inside-3of4-v2"
+  ],
+  "pendingRoutes": [],
+  "reviewedPresetSha256": "72e934360bd84b485f135dd5ee398c13e9fbd9fd382c207606f0a5e2971b9642",
+  "compatiblePresetSha256": [
+    "7b1f39daf79911e16ff4cffbca56de9033b145566190be2ac414d614b2458410",
+    "7ca428aeb09a154138e15f69db40087f6ff60feb53d566c6ab95a74a974b9987"
+  ],
+  "reviewedMaskPixelSha256": {
+    "route-compare-ice-fracture-inside-3of4-v1": "1617f1c7b073aae77ad0d181368e83d68f2b013e612101c4dc3eb257625f247b",
+    "route-compare-ice-fracture-inside-3of4-v2": "53c17ae64fffa80b182002d4b9e44c54ce381c750329e689eabd65e4ae1aae8d"
+  },
+  "generationPolicy": "Apply only these two reviewed Ice / inside-3of4 masks. Preserve exact corner assignment under rotation and complement; do not authorize any other pending mask route."
+}

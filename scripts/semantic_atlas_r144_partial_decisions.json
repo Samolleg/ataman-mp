@@ -1,0 +1,1398 @@
+{
+  "schema": "ei-semantic-atlas-r144-partial-decisions-v1",
+  "source": "scripts\\semantic_atlas_r144_user_answers.txt",
+  "sourceSha256": "41E3BCDB837A79CE2649360ECB2BCF63F755FA7C5EC1165D978B40933CA6FBE1",
+  "queue": "artifacts\\semantic-atlas-r144-deduplicated-remaining-review\\questionnaire\\r144-deduplicated-remaining-queue.json",
+  "queueSha256": "659C24E526F367DF40E434FC9D2325648D65CC2C06948CBB848FE78D65F638C1",
+  "audit": "C:\\Users\\ilufu\\Downloads\\\u041f\u0417 \u0416\u0430\u043c\u0435\u0432\u044e\\Codex\\work\\semantic-atlas-r143-active-card-audit\\bundle\\audit-results.json",
+  "auditSha256": "11A122C351F2D49293E8791E03B970B74343E5B36ADC5D9E3B1A9DCA3EEAAFA2",
+  "policy": "Every concrete submitted corner overrides a retained reject-audit note. Still uncertain is preserved without a catalog inference. One stable exact-HD answer propagates to all authoritative occurrence namespaces.",
+  "counts": {
+    "queueCards": 69,
+    "submittedCards": 43,
+    "fullyResolvedCards": 42,
+    "partiallyResolvedCards": 1,
+    "unsubmittedCards": 26,
+    "remainingCards": 27,
+    "changedCornerRows": 78
+  },
+  "submittedMappings": {
+    "semantic-atlas-hd-86f858b192ea6441": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Red",
+      "SE": "Ground / Red",
+      "SW": "Sand / Common grayish"
+    },
+    "semantic-atlas-hd-00f0c71acc9f4859": {
+      "NW": "Ground / Red",
+      "NE": "Sand / Common grayish",
+      "SE": "Stone / Orange",
+      "SW": "Stone / Orange"
+    },
+    "semantic-atlas-hd-6b38b9dbe4106269": {
+      "NW": "Sand / Common grayish",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Sand / Dark"
+    },
+    "semantic-atlas-hd-8d297e88053751a2": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Sand / Yellow",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-ffe052bca14758e0": {
+      "NW": "Stone / Orange",
+      "NE": "Stone / Orange",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Gravel"
+    },
+    "semantic-atlas-hd-a10ce038c37feb8f": {
+      "NW": "Sand / Common grayish",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-bbde88b62122c5b5": {
+      "NW": "Sand / Common grayish",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-29bf1e27c5739bbe": {
+      "NW": "Sand / Common grayish",
+      "NE": "Stone / Orange",
+      "SE": "Stone / Orange",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-eb59557aaf407eff": {
+      "NW": "Sand / Common grayish",
+      "NE": "Rubble / Orange",
+      "SE": "Rubble / Orange",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-9374ef68dd33c296": {
+      "NW": "Ground / Red",
+      "NE": "Sand / Common grayish",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-149d596b5afb63f6": {
+      "NW": "Ground / Red",
+      "NE": "Ground / Red",
+      "SE": "Sand / Common grayish",
+      "SW": "Sand / Yellow"
+    },
+    "semantic-atlas-hd-d6276e7c2083e702": {
+      "NW": "Paving / Sand ruins",
+      "NE": "Paving / Sand ruins",
+      "SE": "Ground / Red",
+      "SW": "Ground / Plant soil"
+    },
+    "semantic-atlas-hd-976760c9a3f457e8": {
+      "NW": "Grass / Common",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Stone / Pink"
+    },
+    "semantic-atlas-hd-ccf40ef5afc6207e": {
+      "NW": "Stone / Mossy",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-070cee631de6ddf3": {
+      "NW": "Grass / Common",
+      "NE": "Grass / Fresh",
+      "SE": "Grass / Fresh",
+      "SW": "Stone / Grayish"
+    },
+    "semantic-atlas-hd-e407c0898483bf1a": {
+      "NW": "Grass / Common",
+      "NE": "Grass / Common",
+      "SE": "Grass / Dark",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-1282491ff15dc926": {
+      "NW": "Grass / Fresh",
+      "NE": "Grass / Fresh",
+      "SE": "Grass / Fresh",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-db4966f64c3b5d77": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-3d46a6b52e0b4b2a": {
+      "NW": "Grass / Faded",
+      "NE": "Grass / Faded",
+      "SE": "Grass / Faded",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-c3a83768c9062a6a": {
+      "NW": "Grass / Fresh",
+      "NE": "Grass / Common",
+      "SE": "Stone / Mossy",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-ed691fe7204810d3": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Stone / Lime"
+    },
+    "semantic-atlas-hd-dcf095952df55e20": {
+      "NW": "Ground / Common",
+      "NE": "Grass / Common",
+      "SE": "Grass / Common",
+      "SW": "Grass / Sparse light"
+    },
+    "semantic-atlas-hd-3d4e2db4f1321984": {
+      "NW": "Grass / Dark",
+      "NE": "Grass / Dark",
+      "SE": "Stone / Lime",
+      "SW": "Stone / Grayish"
+    },
+    "semantic-atlas-hd-8eedf276d29b04fd": {
+      "NW": "Grass / Dark",
+      "NE": "Stone / Lime",
+      "SE": "Stone / Lime",
+      "SW": "Stone / Grayish"
+    },
+    "semantic-atlas-hd-7543f33420da0284": {
+      "NW": "Ground / Common",
+      "NE": "Ground / Common",
+      "SE": "Ground / Common",
+      "SW": "Ground / Gravel greenish"
+    },
+    "semantic-atlas-hd-31a58a6c9db97971": {
+      "NW": "Sand / Common",
+      "NE": "Sand / Common",
+      "SE": "Ground / Gravel greenish",
+      "SW": "Ground / Gravel greenish"
+    },
+    "semantic-atlas-hd-c65f53f9a13834c6": {
+      "NW": "Stone / Lime",
+      "NE": "Stone / Lime",
+      "SE": "Stone / Lime",
+      "SW": "Ground / Gravel greenish"
+    },
+    "semantic-atlas-hd-46f373fb4d6498bb": {
+      "NW": "Ground / Common",
+      "NE": "Ground / Gravel greenish",
+      "SE": "Ground / Common",
+      "SW": "Ground / Gravel greenish"
+    },
+    "semantic-atlas-hd-604ae7ffd7233289": {
+      "NW": "Sand / Common",
+      "NE": "Stone / Lime",
+      "SE": "Stone / Lime",
+      "SW": "Sand / Dark pink"
+    },
+    "semantic-atlas-hd-b3d79730f42807ee": {
+      "NW": "Paving / Cobblestone",
+      "NE": "Paving / Cobblestone",
+      "SE": "Sand / Common",
+      "SW": "Sand / Dark pink"
+    },
+    "semantic-atlas-hd-7a9e0b649e0cc9dc": {
+      "NW": "Ground / Common",
+      "NE": "Grass / Dark",
+      "SE": "Grass / Dark",
+      "SW": "Ground / Gravel greenish"
+    },
+    "semantic-atlas-hd-78c7da1531a7d8ea": {
+      "NW": "Still uncertain",
+      "NE": "Sand / Dark pink",
+      "SE": "Sand / Dark pink",
+      "SW": "Sand / Dark pink"
+    },
+    "semantic-atlas-hd-25a700d2f722facc": {
+      "NW": "Grass / Dark",
+      "NE": "Ground / Common",
+      "SE": "Grass / Dark",
+      "SW": "Stone / Light"
+    },
+    "semantic-atlas-hd-5a89e4c8d3f8a163": {
+      "NW": "Sand / Common",
+      "NE": "Stone / Light",
+      "SE": "Sand / Common",
+      "SW": "Sand / Dark pink"
+    },
+    "semantic-atlas-hd-f7e713b170f4fd68": {
+      "NW": "Sand / Common",
+      "NE": "Stone / Light",
+      "SE": "Stone / Light",
+      "SW": "Sand / Grainy"
+    },
+    "semantic-atlas-hd-b19023722f86290b": {
+      "NW": "Stone / Light",
+      "NE": "Sand / Common",
+      "SE": "Sand / Grainy",
+      "SW": "Sand / Grainy"
+    },
+    "semantic-atlas-hd-10cc398e6c2ee685": {
+      "NW": "Sand / Common",
+      "NE": "Stone / Light",
+      "SE": "Sand / Grainy",
+      "SW": "Sand / Grainy"
+    },
+    "semantic-atlas-hd-b08206fb1c3dfe75": {
+      "NW": "Stone / Light",
+      "NE": "Sand / Grainy",
+      "SE": "Sand / Dark pink",
+      "SW": "Sand / Grainy"
+    },
+    "semantic-atlas-hd-a83574dc4e180664": {
+      "NW": "Grass / Sparse dark",
+      "NE": "Stone / Greenish",
+      "SE": "Stone / Greenish",
+      "SW": "Stone / Dark gray"
+    },
+    "semantic-atlas-hd-90adae4370929328": {
+      "NW": "Grass / Sparse dark",
+      "NE": "Stone / Greenish",
+      "SE": "Stone / Greenish",
+      "SW": "Stone / Dark gray"
+    },
+    "semantic-atlas-hd-5400c4d2b6820d0c": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Stone / Gray"
+    },
+    "semantic-atlas-hd-b4f2ff468ecb6cdc": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Stone / Gray",
+      "SW": "Stone / Gray"
+    },
+    "semantic-atlas-hd-5e86e07e0ca9d7e1": {
+      "NW": "Stone / Gray",
+      "NE": "Ground / Light",
+      "SE": "Grass / Tundra",
+      "SW": "Grass / Tundra"
+    }
+  },
+  "notes": {
+    "semantic-atlas-hd-86f858b192ea6441": "",
+    "semantic-atlas-hd-00f0c71acc9f4859": "",
+    "semantic-atlas-hd-6b38b9dbe4106269": "",
+    "semantic-atlas-hd-8d297e88053751a2": "",
+    "semantic-atlas-hd-ffe052bca14758e0": "",
+    "semantic-atlas-hd-a10ce038c37feb8f": "",
+    "semantic-atlas-hd-bbde88b62122c5b5": "",
+    "semantic-atlas-hd-29bf1e27c5739bbe": "",
+    "semantic-atlas-hd-eb59557aaf407eff": "",
+    "semantic-atlas-hd-9374ef68dd33c296": "",
+    "semantic-atlas-hd-149d596b5afb63f6": "",
+    "semantic-atlas-hd-d6276e7c2083e702": "SE ground red",
+    "semantic-atlas-hd-976760c9a3f457e8": "",
+    "semantic-atlas-hd-ccf40ef5afc6207e": "",
+    "semantic-atlas-hd-070cee631de6ddf3": "",
+    "semantic-atlas-hd-e407c0898483bf1a": "",
+    "semantic-atlas-hd-1282491ff15dc926": "",
+    "semantic-atlas-hd-db4966f64c3b5d77": "",
+    "semantic-atlas-hd-3d46a6b52e0b4b2a": "",
+    "semantic-atlas-hd-c3a83768c9062a6a": "",
+    "semantic-atlas-hd-ed691fe7204810d3": "",
+    "semantic-atlas-hd-dcf095952df55e20": "",
+    "semantic-atlas-hd-3d4e2db4f1321984": "",
+    "semantic-atlas-hd-8eedf276d29b04fd": "",
+    "semantic-atlas-hd-7543f33420da0284": "Audit recommendation rejected; keep current assignments.",
+    "semantic-atlas-hd-31a58a6c9db97971": "",
+    "semantic-atlas-hd-c65f53f9a13834c6": "SW gravel greenish",
+    "semantic-atlas-hd-46f373fb4d6498bb": "Audit recommendation rejected; keep current assignments.",
+    "semantic-atlas-hd-604ae7ffd7233289": "Audit recommendation rejected; keep current assignments.",
+    "semantic-atlas-hd-b3d79730f42807ee": "Audit recommendation rejected; keep current assignments.",
+    "semantic-atlas-hd-7a9e0b649e0cc9dc": "SW gravel greenish",
+    "semantic-atlas-hd-78c7da1531a7d8ea": "NW gravel greenish probably??",
+    "semantic-atlas-hd-25a700d2f722facc": "",
+    "semantic-atlas-hd-5a89e4c8d3f8a163": "",
+    "semantic-atlas-hd-f7e713b170f4fd68": "",
+    "semantic-atlas-hd-b19023722f86290b": "",
+    "semantic-atlas-hd-10cc398e6c2ee685": "",
+    "semantic-atlas-hd-b08206fb1c3dfe75": "",
+    "semantic-atlas-hd-a83574dc4e180664": "",
+    "semantic-atlas-hd-90adae4370929328": "",
+    "semantic-atlas-hd-5400c4d2b6820d0c": "SW stone gray",
+    "semantic-atlas-hd-b4f2ff468ecb6cdc": "Audit recommendation rejected; keep current assignments.",
+    "semantic-atlas-hd-5e86e07e0ca9d7e1": ""
+  },
+  "resolvedQuestionKeys": [
+    "semantic-atlas-hd-00f0c71acc9f4859",
+    "semantic-atlas-hd-070cee631de6ddf3",
+    "semantic-atlas-hd-10cc398e6c2ee685",
+    "semantic-atlas-hd-1282491ff15dc926",
+    "semantic-atlas-hd-149d596b5afb63f6",
+    "semantic-atlas-hd-25a700d2f722facc",
+    "semantic-atlas-hd-29bf1e27c5739bbe",
+    "semantic-atlas-hd-31a58a6c9db97971",
+    "semantic-atlas-hd-3d46a6b52e0b4b2a",
+    "semantic-atlas-hd-3d4e2db4f1321984",
+    "semantic-atlas-hd-46f373fb4d6498bb",
+    "semantic-atlas-hd-5400c4d2b6820d0c",
+    "semantic-atlas-hd-5a89e4c8d3f8a163",
+    "semantic-atlas-hd-5e86e07e0ca9d7e1",
+    "semantic-atlas-hd-604ae7ffd7233289",
+    "semantic-atlas-hd-6b38b9dbe4106269",
+    "semantic-atlas-hd-7543f33420da0284",
+    "semantic-atlas-hd-7a9e0b649e0cc9dc",
+    "semantic-atlas-hd-86f858b192ea6441",
+    "semantic-atlas-hd-8d297e88053751a2",
+    "semantic-atlas-hd-8eedf276d29b04fd",
+    "semantic-atlas-hd-90adae4370929328",
+    "semantic-atlas-hd-9374ef68dd33c296",
+    "semantic-atlas-hd-976760c9a3f457e8",
+    "semantic-atlas-hd-a10ce038c37feb8f",
+    "semantic-atlas-hd-a83574dc4e180664",
+    "semantic-atlas-hd-b08206fb1c3dfe75",
+    "semantic-atlas-hd-b19023722f86290b",
+    "semantic-atlas-hd-b3d79730f42807ee",
+    "semantic-atlas-hd-b4f2ff468ecb6cdc",
+    "semantic-atlas-hd-bbde88b62122c5b5",
+    "semantic-atlas-hd-c3a83768c9062a6a",
+    "semantic-atlas-hd-c65f53f9a13834c6",
+    "semantic-atlas-hd-ccf40ef5afc6207e",
+    "semantic-atlas-hd-d6276e7c2083e702",
+    "semantic-atlas-hd-db4966f64c3b5d77",
+    "semantic-atlas-hd-dcf095952df55e20",
+    "semantic-atlas-hd-e407c0898483bf1a",
+    "semantic-atlas-hd-eb59557aaf407eff",
+    "semantic-atlas-hd-ed691fe7204810d3",
+    "semantic-atlas-hd-f7e713b170f4fd68",
+    "semantic-atlas-hd-ffe052bca14758e0"
+  ],
+  "partiallyResolvedQuestionKeys": [
+    "semantic-atlas-hd-78c7da1531a7d8ea"
+  ],
+  "unresolvedQuestionKeys": [
+    "semantic-atlas-hd-7cb467be5bb2a9e7",
+    "semantic-atlas-hd-f330c55936725dd4",
+    "semantic-atlas-hd-61d0c6696df5ae3c",
+    "semantic-atlas-hd-31504ddb59144558",
+    "semantic-atlas-hd-590c32490d6dc35f",
+    "semantic-atlas-hd-edbc4e4aa1cede58",
+    "semantic-atlas-hd-cdf9a1433b7e128b",
+    "semantic-atlas-hd-4b5c7771aae20c1d",
+    "semantic-atlas-hd-487e31416fec12ea",
+    "semantic-atlas-hd-eb5146bed8fe9087",
+    "semantic-atlas-hd-6b81b2dc5503fb0c",
+    "semantic-atlas-hd-78c7da1531a7d8ea",
+    "semantic-atlas-hd-d04b69936d369a20",
+    "semantic-atlas-hd-f3a06567e89a1859",
+    "semantic-atlas-hd-65fad5b86093fce4",
+    "semantic-atlas-hd-209789e52748e22c",
+    "semantic-atlas-hd-6dee5ccaaf1fa6ad",
+    "semantic-atlas-hd-901ecda54ba145ed",
+    "semantic-atlas-hd-f314cb34e8300e21",
+    "semantic-atlas-hd-a73c3bb8f1a4436e",
+    "semantic-atlas-hd-592ddc5644506641",
+    "semantic-atlas-hd-044f5e34f14dd9f5",
+    "semantic-atlas-hd-909eb0177d5a1ee9",
+    "semantic-atlas-hd-12c129abae2b98ad",
+    "semantic-atlas-hd-eb5025d20715b287",
+    "semantic-atlas-hd-96a1919d440fd094",
+    "semantic-atlas-hd-a841620739ed8973"
+  ],
+  "changedRows": [
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-86f858b192ea6441",
+      "namespace": "bz13h",
+      "slot": 229,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "86F858B192EA6441C4CF75E4617AC8E21B0C1AFD7D03D703E354EFE2373C649A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-86f858b192ea6441",
+      "namespace": "Zone15",
+      "slot": 229,
+      "corner": "SW",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "86F858B192EA6441C4CF75E4617AC8E21B0C1AFD7D03D703E354EFE2373C649A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-00f0c71acc9f4859",
+      "namespace": "bz13h",
+      "slot": 352,
+      "corner": "NE",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "00F0C71ACC9F4859BDAE538016D71364D7C4596A66DA749FD7C7377ADEDB1DC7"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-00f0c71acc9f4859",
+      "namespace": "Zone15",
+      "slot": 352,
+      "corner": "NE",
+      "current": "Sand / Dark",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "00F0C71ACC9F4859BDAE538016D71364D7C4596A66DA749FD7C7377ADEDB1DC7"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-6b38b9dbe4106269",
+      "namespace": "bz13h",
+      "slot": 357,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Dark",
+      "targetTilePixelSha256": "6B38B9DBE4106269667629D99273ECDA475AB35086C311200BEF8CAEA685508D"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-6b38b9dbe4106269",
+      "namespace": "Zone15",
+      "slot": 357,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Dark",
+      "targetTilePixelSha256": "6B38B9DBE4106269667629D99273ECDA475AB35086C311200BEF8CAEA685508D"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-8d297e88053751a2",
+      "namespace": "bz13h",
+      "slot": 377,
+      "corner": "SE",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "8D297E88053751A2C109E90A1A6A9032C141F73BB75FAC86082C68BE69FFED5C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-8d297e88053751a2",
+      "namespace": "bz13h",
+      "slot": 377,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "8D297E88053751A2C109E90A1A6A9032C141F73BB75FAC86082C68BE69FFED5C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-8d297e88053751a2",
+      "namespace": "Zone15",
+      "slot": 377,
+      "corner": "SE",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "8D297E88053751A2C109E90A1A6A9032C141F73BB75FAC86082C68BE69FFED5C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-8d297e88053751a2",
+      "namespace": "Zone15",
+      "slot": 377,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "8D297E88053751A2C109E90A1A6A9032C141F73BB75FAC86082C68BE69FFED5C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ffe052bca14758e0",
+      "namespace": "bz13h",
+      "slot": 383,
+      "corner": "SE",
+      "current": "Sand / Gravel",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "FFE052BCA14758E05FAAAF1BB88A76E4E25FC1F118FA6DC251B3FEC8EEBB2E7E"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ffe052bca14758e0",
+      "namespace": "Zone15",
+      "slot": 383,
+      "corner": "SE",
+      "current": "Sand / Gravel",
+      "reviewed": "Sand / Common grayish",
+      "targetTilePixelSha256": "FFE052BCA14758E05FAAAF1BB88A76E4E25FC1F118FA6DC251B3FEC8EEBB2E7E"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-a10ce038c37feb8f",
+      "namespace": "bz13h",
+      "slot": 392,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "A10CE038C37FEB8FD3780D24C1FC132D06C722C73B6584C9286E7403AACCC9E4"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-a10ce038c37feb8f",
+      "namespace": "Zone15",
+      "slot": 392,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "A10CE038C37FEB8FD3780D24C1FC132D06C722C73B6584C9286E7403AACCC9E4"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-bbde88b62122c5b5",
+      "namespace": "bz13h",
+      "slot": 393,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "BBDE88B62122C5B5535DC8A9FA11BFE728049D6AC965B37B14309996F36C9ADF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-bbde88b62122c5b5",
+      "namespace": "Zone15",
+      "slot": 393,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "BBDE88B62122C5B5535DC8A9FA11BFE728049D6AC965B37B14309996F36C9ADF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-29bf1e27c5739bbe",
+      "namespace": "bz13h",
+      "slot": 394,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "29BF1E27C5739BBE5389E9F61EBB92C8CE70604EE4774D2DE25E29991CD0433A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-29bf1e27c5739bbe",
+      "namespace": "Zone15",
+      "slot": 394,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "29BF1E27C5739BBE5389E9F61EBB92C8CE70604EE4774D2DE25E29991CD0433A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-eb59557aaf407eff",
+      "namespace": "bz13h",
+      "slot": 414,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "EB59557AAF407EFF6A48F55A37573BC14B2AC1EB68E7E9FC29FC9782B3FFC74E"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-eb59557aaf407eff",
+      "namespace": "Zone15",
+      "slot": 414,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "EB59557AAF407EFF6A48F55A37573BC14B2AC1EB68E7E9FC29FC9782B3FFC74E"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-9374ef68dd33c296",
+      "namespace": "bz13h",
+      "slot": 451,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "9374EF68DD33C29612C9E783C1C222853DFC8A8EDB705A1095D110A4ABB678B7"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-9374ef68dd33c296",
+      "namespace": "Zone15",
+      "slot": 451,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "9374EF68DD33C29612C9E783C1C222853DFC8A8EDB705A1095D110A4ABB678B7"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-149d596b5afb63f6",
+      "namespace": "bz13h",
+      "slot": 472,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "149D596B5AFB63F6FA183D79A3A70DCEE13EAE38B40573369B26E0393C4838BF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-149d596b5afb63f6",
+      "namespace": "Zone15",
+      "slot": 472,
+      "corner": "SW",
+      "current": "Sand / Common grayish",
+      "reviewed": "Sand / Yellow",
+      "targetTilePixelSha256": "149D596B5AFB63F6FA183D79A3A70DCEE13EAE38B40573369B26E0393C4838BF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-d6276e7c2083e702",
+      "namespace": "bz16h",
+      "slot": 443,
+      "corner": "SE",
+      "current": "Ground / Plant soil",
+      "reviewed": "Ground / Red",
+      "targetTilePixelSha256": "D6276E7C2083E702CCB254C79522E06F505C31B90D7DCB2B38B1398DC3770C30"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-976760c9a3f457e8",
+      "namespace": "bz2g",
+      "slot": 56,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Pink",
+      "targetTilePixelSha256": "976760C9A3F457E8684DEA62927F3B883BD8783E0E5FB438DCB7A83732D0EE1A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-976760c9a3f457e8",
+      "namespace": "Zone2",
+      "slot": 56,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Pink",
+      "targetTilePixelSha256": "976760C9A3F457E8684DEA62927F3B883BD8783E0E5FB438DCB7A83732D0EE1A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ccf40ef5afc6207e",
+      "namespace": "bz2g",
+      "slot": 159,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "CCF40EF5AFC6207E0719B5BB3EB4494F22CB5496ACD35AD71F851B6B3BA9DA3C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ccf40ef5afc6207e",
+      "namespace": "Zone2",
+      "slot": 159,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "CCF40EF5AFC6207E0719B5BB3EB4494F22CB5496ACD35AD71F851B6B3BA9DA3C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-070cee631de6ddf3",
+      "namespace": "bz2g",
+      "slot": 221,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Grayish",
+      "targetTilePixelSha256": "070CEE631DE6DDF3AD7F55132EC8A7B87A000FAC507B9DB675DD40B9221F1D47"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-070cee631de6ddf3",
+      "namespace": "Zone2",
+      "slot": 221,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Grayish",
+      "targetTilePixelSha256": "070CEE631DE6DDF3AD7F55132EC8A7B87A000FAC507B9DB675DD40B9221F1D47"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-e407c0898483bf1a",
+      "namespace": "bz2g",
+      "slot": 278,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "E407C0898483BF1A2021E1C595CA843A123E5EAE33BDD92E7A85EFA5AF0C6C36"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-e407c0898483bf1a",
+      "namespace": "Zone2",
+      "slot": 278,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "E407C0898483BF1A2021E1C595CA843A123E5EAE33BDD92E7A85EFA5AF0C6C36"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-1282491ff15dc926",
+      "namespace": "bz2g",
+      "slot": 282,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "1282491FF15DC9264DAFF7EEE8ADC49426657867B3A2B8EC9462A460466E8085"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-1282491ff15dc926",
+      "namespace": "Zone2",
+      "slot": 282,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "1282491FF15DC9264DAFF7EEE8ADC49426657867B3A2B8EC9462A460466E8085"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-db4966f64c3b5d77",
+      "namespace": "bz2g",
+      "slot": 298,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "DB4966F64C3B5D77D8A23A0140097017213EF346A022086BA9DB59CBDFD63F91"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-db4966f64c3b5d77",
+      "namespace": "Zone2",
+      "slot": 298,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "DB4966F64C3B5D77D8A23A0140097017213EF346A022086BA9DB59CBDFD63F91"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-3d46a6b52e0b4b2a",
+      "namespace": "bz2g",
+      "slot": 365,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "3D46A6B52E0B4B2A66BB092BE2FB731DFA275E7EE3DBD4471B884BCE00E215CA"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-3d46a6b52e0b4b2a",
+      "namespace": "Zone2",
+      "slot": 365,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "3D46A6B52E0B4B2A66BB092BE2FB731DFA275E7EE3DBD4471B884BCE00E215CA"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-c3a83768c9062a6a",
+      "namespace": "bz2g",
+      "slot": 380,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "C3A83768C9062A6A3A6A9E5DC5C9BD41218EC4E509A6B5300F6EEC14C7CA206D"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-c3a83768c9062a6a",
+      "namespace": "Zone2",
+      "slot": 380,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "C3A83768C9062A6A3A6A9E5DC5C9BD41218EC4E509A6B5300F6EEC14C7CA206D"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ed691fe7204810d3",
+      "namespace": "bz2g",
+      "slot": 457,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "ED691FE7204810D3141A5A9E947B419F994C5D7984D3B939CB562D5FCCFFE4DE"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-ed691fe7204810d3",
+      "namespace": "Zone2",
+      "slot": 457,
+      "corner": "SW",
+      "current": "Stone / Mossy",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "ED691FE7204810D3141A5A9E947B419F994C5D7984D3B939CB562D5FCCFFE4DE"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-dcf095952df55e20",
+      "namespace": "bz3g",
+      "slot": 238,
+      "corner": "NW",
+      "current": "Grass / Sparse light",
+      "reviewed": "Ground / Common",
+      "targetTilePixelSha256": "DCF095952DF55E206E879DAA8B2E717BEC668A781C74B2F158409020B7232A93"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-3d4e2db4f1321984",
+      "namespace": "bz3g",
+      "slot": 257,
+      "corner": "SE",
+      "current": "Stone / Grayish",
+      "reviewed": "Stone / Lime",
+      "targetTilePixelSha256": "3D4E2DB4F132198475B50A6CCAB632955DCC7B28433B842D2DBC603AB609A9C9"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-8eedf276d29b04fd",
+      "namespace": "bz3g",
+      "slot": 274,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Grayish",
+      "targetTilePixelSha256": "8EEDF276D29B04FD9FD61849B277F84E84F9CE580BEFF1A6E5643D94F4DAAB49"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-31a58a6c9db97971",
+      "namespace": "bz4g",
+      "slot": 115,
+      "corner": "SE",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "31A58A6C9DB97971715A1AECDB982450D4B3C789063FEDCD7BEDAE2708ED7054"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-31a58a6c9db97971",
+      "namespace": "Zone4",
+      "slot": 115,
+      "corner": "SE",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "31A58A6C9DB97971715A1AECDB982450D4B3C789063FEDCD7BEDAE2708ED7054"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-c65f53f9a13834c6",
+      "namespace": "bz4g",
+      "slot": 140,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "C65F53F9A13834C619EE6A29D839AF2B86BF25692B56012B7AF7D48D050FBF7F"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-c65f53f9a13834c6",
+      "namespace": "Zone4",
+      "slot": 140,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "C65F53F9A13834C619EE6A29D839AF2B86BF25692B56012B7AF7D48D050FBF7F"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b3d79730f42807ee",
+      "namespace": "bz4g",
+      "slot": 259,
+      "corner": "SE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "B3D79730F42807EE6D8BE788680787A4B49C89B31067391ACA7CBFB92E051742"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b3d79730f42807ee",
+      "namespace": "Zone4",
+      "slot": 259,
+      "corner": "SE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "B3D79730F42807EE6D8BE788680787A4B49C89B31067391ACA7CBFB92E051742"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-7a9e0b649e0cc9dc",
+      "namespace": "bz4g",
+      "slot": 354,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "7A9E0B649E0CC9DCBA4AC532E52BCA28EFA52560115BCF9ED4E1335189D7C56C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-7a9e0b649e0cc9dc",
+      "namespace": "Zone4",
+      "slot": 354,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Ground / Gravel greenish",
+      "targetTilePixelSha256": "7A9E0B649E0CC9DCBA4AC532E52BCA28EFA52560115BCF9ED4E1335189D7C56C"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-25a700d2f722facc",
+      "namespace": "bz5g",
+      "slot": 295,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Stone / Light",
+      "targetTilePixelSha256": "25A700D2F722FACCA346FB0AADF35B36B94D80A243C07A59CB35B06B014AB91A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-25a700d2f722facc",
+      "namespace": "bz6g",
+      "slot": 295,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Stone / Light",
+      "targetTilePixelSha256": "25A700D2F722FACCA346FB0AADF35B36B94D80A243C07A59CB35B06B014AB91A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-25a700d2f722facc",
+      "namespace": "Zone8",
+      "slot": 295,
+      "corner": "SW",
+      "current": "Ground / Common",
+      "reviewed": "Stone / Light",
+      "targetTilePixelSha256": "25A700D2F722FACCA346FB0AADF35B36B94D80A243C07A59CB35B06B014AB91A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5a89e4c8d3f8a163",
+      "namespace": "bz5g",
+      "slot": 356,
+      "corner": "SE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "5A89E4C8D3F8A16319047FDAB0214108E6AEF8443E4B69AD14D066F0C6E00678"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5a89e4c8d3f8a163",
+      "namespace": "bz6g",
+      "slot": 356,
+      "corner": "SE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "5A89E4C8D3F8A16319047FDAB0214108E6AEF8443E4B69AD14D066F0C6E00678"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5a89e4c8d3f8a163",
+      "namespace": "Zone8",
+      "slot": 356,
+      "corner": "SE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "5A89E4C8D3F8A16319047FDAB0214108E6AEF8443E4B69AD14D066F0C6E00678"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-f7e713b170f4fd68",
+      "namespace": "bz5g",
+      "slot": 392,
+      "corner": "SW",
+      "current": "Sand / Common",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "F7E713B170F4FD6828FCB15B04C324F9A6E18052A0A1CC69B99DE722271F7F99"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-f7e713b170f4fd68",
+      "namespace": "bz6g",
+      "slot": 392,
+      "corner": "SW",
+      "current": "Sand / Common",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "F7E713B170F4FD6828FCB15B04C324F9A6E18052A0A1CC69B99DE722271F7F99"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-f7e713b170f4fd68",
+      "namespace": "Zone8",
+      "slot": 392,
+      "corner": "SW",
+      "current": "Sand / Common",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "F7E713B170F4FD6828FCB15B04C324F9A6E18052A0A1CC69B99DE722271F7F99"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b19023722f86290b",
+      "namespace": "bz5g",
+      "slot": 429,
+      "corner": "NE",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "B19023722F86290B67E42271DF08685024A39EF22F2CA07F8FE8326072C7044A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b19023722f86290b",
+      "namespace": "bz6g",
+      "slot": 429,
+      "corner": "NE",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "B19023722F86290B67E42271DF08685024A39EF22F2CA07F8FE8326072C7044A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b19023722f86290b",
+      "namespace": "Zone8",
+      "slot": 429,
+      "corner": "NE",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "B19023722F86290B67E42271DF08685024A39EF22F2CA07F8FE8326072C7044A"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-10cc398e6c2ee685",
+      "namespace": "bz5g",
+      "slot": 432,
+      "corner": "NW",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "10CC398E6C2EE685896FD41EDD60166480904EE719A8BA347EE4A69327092996"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-10cc398e6c2ee685",
+      "namespace": "bz6g",
+      "slot": 432,
+      "corner": "NW",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "10CC398E6C2EE685896FD41EDD60166480904EE719A8BA347EE4A69327092996"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-10cc398e6c2ee685",
+      "namespace": "Zone8",
+      "slot": 432,
+      "corner": "NW",
+      "current": "Sand / Grainy",
+      "reviewed": "Sand / Common",
+      "targetTilePixelSha256": "10CC398E6C2EE685896FD41EDD60166480904EE719A8BA347EE4A69327092996"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b08206fb1c3dfe75",
+      "namespace": "bz5g",
+      "slot": 458,
+      "corner": "NE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "B08206FB1C3DFE7577BBA821B7D051D1E812EC2FD7FC7C26C7E4B06661917714"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b08206fb1c3dfe75",
+      "namespace": "bz6g",
+      "slot": 458,
+      "corner": "NE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "B08206FB1C3DFE7577BBA821B7D051D1E812EC2FD7FC7C26C7E4B06661917714"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-b08206fb1c3dfe75",
+      "namespace": "Zone8",
+      "slot": 458,
+      "corner": "NE",
+      "current": "Sand / Dark pink",
+      "reviewed": "Sand / Grainy",
+      "targetTilePixelSha256": "B08206FB1C3DFE7577BBA821B7D051D1E812EC2FD7FC7C26C7E4B06661917714"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-a83574dc4e180664",
+      "namespace": "Bz7g",
+      "slot": 128,
+      "corner": "SW",
+      "current": "Grass / Sparse dark",
+      "reviewed": "Stone / Dark gray",
+      "targetTilePixelSha256": "A83574DC4E18066493ABD4E3EC49EA6A0F34B549C9691EAB2E504278AE5DFE61"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-90adae4370929328",
+      "namespace": "Bz7g",
+      "slot": 131,
+      "corner": "SW",
+      "current": "Grass / Sparse dark",
+      "reviewed": "Stone / Dark gray",
+      "targetTilePixelSha256": "90ADAE4370929328784AC0A478AF0450296E5DD6EEE370A25EBD42C1CB9D92E7"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5400c4d2b6820d0c",
+      "namespace": "bz8k",
+      "slot": 119,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "targetTilePixelSha256": "5400C4D2B6820D0CDD55F55A80BC6F01F9C540C80AD75AA3C70C27C286A52DAF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5400c4d2b6820d0c",
+      "namespace": "bz9k",
+      "slot": 119,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "targetTilePixelSha256": "5400C4D2B6820D0CDD55F55A80BC6F01F9C540C80AD75AA3C70C27C286A52DAF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5400c4d2b6820d0c",
+      "namespace": "Zone11",
+      "slot": 119,
+      "corner": "SW",
+      "current": "Stone / Lime",
+      "reviewed": "Stone / Gray",
+      "targetTilePixelSha256": "5400C4D2B6820D0CDD55F55A80BC6F01F9C540C80AD75AA3C70C27C286A52DAF"
+    },
+    {
+      "sourceQuestionKey": "semantic-atlas-hd-5e86e07e0ca9d7e1",
+      "namespace": "Zone13",
+      "slot": 509,
+      "corner": "NE",
+      "current": "Grass / Tundra",
+      "reviewed": "Ground / Light",
+      "targetTilePixelSha256": "5E86E07E0CA9D7E169B3CBD6F4AC359E4F4FEDAD02F1B66F61CF578273C047E3"
+    }
+  ],
+  "newFamilies": {
+    "bz2g": [
+      {
+        "id": 26,
+        "name": "Stone / Grayish",
+        "templateFamily": "Stone / Gray",
+        "tileType": 0,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 221,
+        "paintSelectable": false
+      }
+    ],
+    "Zone2": [
+      {
+        "id": 26,
+        "name": "Stone / Grayish",
+        "templateFamily": "Stone / Gray",
+        "tileType": 0,
+        "allowedLayers": [
+          "land"
+        ],
+        "underwaterRole": "mixed",
+        "thumbnailSlot": 221,
+        "paintSelectable": false
+      }
+    ]
+  },
+  "cornerCorrections": {
+    "bz13h": {
+      "229": {
+        "SW": "Sand / Common grayish"
+      },
+      "352": {
+        "NE": "Sand / Common grayish"
+      },
+      "357": {
+        "SW": "Sand / Dark"
+      },
+      "377": {
+        "SE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      },
+      "383": {
+        "SE": "Sand / Common grayish"
+      },
+      "392": {
+        "SW": "Sand / Yellow"
+      },
+      "393": {
+        "SW": "Sand / Yellow"
+      },
+      "394": {
+        "SW": "Sand / Yellow"
+      },
+      "414": {
+        "SW": "Sand / Yellow"
+      },
+      "451": {
+        "SW": "Sand / Yellow"
+      },
+      "472": {
+        "SW": "Sand / Yellow"
+      }
+    },
+    "Zone15": {
+      "229": {
+        "SW": "Sand / Common grayish"
+      },
+      "352": {
+        "NE": "Sand / Common grayish"
+      },
+      "357": {
+        "SW": "Sand / Dark"
+      },
+      "377": {
+        "SE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      },
+      "383": {
+        "SE": "Sand / Common grayish"
+      },
+      "392": {
+        "SW": "Sand / Yellow"
+      },
+      "393": {
+        "SW": "Sand / Yellow"
+      },
+      "394": {
+        "SW": "Sand / Yellow"
+      },
+      "414": {
+        "SW": "Sand / Yellow"
+      },
+      "451": {
+        "SW": "Sand / Yellow"
+      },
+      "472": {
+        "SW": "Sand / Yellow"
+      }
+    },
+    "bz16h": {
+      "443": {
+        "SE": "Ground / Red"
+      }
+    },
+    "bz2g": {
+      "56": {
+        "SW": "Stone / Pink"
+      },
+      "159": {
+        "SW": "Stone / Lime"
+      },
+      "221": {
+        "SW": "Stone / Grayish"
+      },
+      "278": {
+        "SW": "Stone / Lime"
+      },
+      "282": {
+        "SW": "Stone / Lime"
+      },
+      "298": {
+        "SW": "Stone / Lime"
+      },
+      "365": {
+        "SW": "Stone / Lime"
+      },
+      "380": {
+        "SW": "Stone / Lime"
+      },
+      "457": {
+        "SW": "Stone / Lime"
+      }
+    },
+    "Zone2": {
+      "56": {
+        "SW": "Stone / Pink"
+      },
+      "159": {
+        "SW": "Stone / Lime"
+      },
+      "221": {
+        "SW": "Stone / Grayish"
+      },
+      "278": {
+        "SW": "Stone / Lime"
+      },
+      "282": {
+        "SW": "Stone / Lime"
+      },
+      "298": {
+        "SW": "Stone / Lime"
+      },
+      "365": {
+        "SW": "Stone / Lime"
+      },
+      "380": {
+        "SW": "Stone / Lime"
+      },
+      "457": {
+        "SW": "Stone / Lime"
+      }
+    },
+    "bz3g": {
+      "238": {
+        "NW": "Ground / Common"
+      },
+      "257": {
+        "SE": "Stone / Lime"
+      },
+      "274": {
+        "SW": "Stone / Grayish"
+      }
+    },
+    "bz4g": {
+      "115": {
+        "SE": "Ground / Gravel greenish"
+      },
+      "140": {
+        "SW": "Ground / Gravel greenish"
+      },
+      "259": {
+        "SE": "Sand / Common"
+      },
+      "354": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "Zone4": {
+      "115": {
+        "SE": "Ground / Gravel greenish"
+      },
+      "140": {
+        "SW": "Ground / Gravel greenish"
+      },
+      "259": {
+        "SE": "Sand / Common"
+      },
+      "354": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "bz5g": {
+      "295": {
+        "SW": "Stone / Light"
+      },
+      "356": {
+        "SE": "Sand / Common"
+      },
+      "392": {
+        "SW": "Sand / Grainy"
+      },
+      "429": {
+        "NE": "Sand / Common"
+      },
+      "432": {
+        "NW": "Sand / Common"
+      },
+      "458": {
+        "NE": "Sand / Grainy"
+      }
+    },
+    "bz6g": {
+      "295": {
+        "SW": "Stone / Light"
+      },
+      "356": {
+        "SE": "Sand / Common"
+      },
+      "392": {
+        "SW": "Sand / Grainy"
+      },
+      "429": {
+        "NE": "Sand / Common"
+      },
+      "432": {
+        "NW": "Sand / Common"
+      },
+      "458": {
+        "NE": "Sand / Grainy"
+      }
+    },
+    "Zone8": {
+      "295": {
+        "SW": "Stone / Light"
+      },
+      "356": {
+        "SE": "Sand / Common"
+      },
+      "392": {
+        "SW": "Sand / Grainy"
+      },
+      "429": {
+        "NE": "Sand / Common"
+      },
+      "432": {
+        "NW": "Sand / Common"
+      },
+      "458": {
+        "NE": "Sand / Grainy"
+      }
+    },
+    "Bz7g": {
+      "128": {
+        "SW": "Stone / Dark gray"
+      },
+      "131": {
+        "SW": "Stone / Dark gray"
+      }
+    },
+    "bz8k": {
+      "119": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "bz9k": {
+      "119": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "Zone11": {
+      "119": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "Zone13": {
+      "509": {
+        "NE": "Ground / Light"
+      }
+    }
+  }
+}

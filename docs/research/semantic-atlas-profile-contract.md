@@ -1,47 +1,82 @@
-# Semantic atlas profile contract
+# Material atlas profile contract
 
-Endurance's generic atlas conversion path treats automatic analysis as a
-proposal, never as permission to paint. The proposal is derived only from the
-decoded atlas tiles already loaded by the editor, the MPR's per-slot category
-metadata, and packed tile usage observed in the open map.
+Endurance first checks for an exact-bound explicitly user-authored local
+override, then resolves the namespace, decoded-pixel hash, and slot-count
+binding against its compact known-map preset catalog. A matching preset is the
+immutable built-in default and is immediately approved and usable. Modified and
+custom atlases fall back to
+deterministic inference from decoded atlas tiles, the MPR's per-slot category
+metadata, and packed tile usage observed in the open map. Zone 1's authored
+table is the behavioral oracle for translating either source into the painting
+solver. All profiles store the corners visibly
+shown by the tile preview. Compilation reflects them once into paint-grid space
+and uses the renderer's single global packed-rotation convention.
 
-The deterministic first-pass proposal:
+The deterministic parser:
 
 - fingerprints the decoded RGBA tile sequence with SHA-256;
-- clusters corner samples only within the same MPR tile category and proposed
-  land/overlay layer;
-- records a four-corner material-family signature for every atlas slot;
-- classifies actual land-only and overlay-only use separately;
-- proposes an underwater land family only when all observed land uses are
-  beneath active overlays;
-- flags unused, mixed-layer, and mixed underwater/non-underwater evidence as
-  ambiguous; and
-- reports family pairs for which it found no mixed transition slot.
+- finds uniform material anchors using perceptual colour, local texture spread,
+  saturation, edge energy, and roughness, preserving distinct grass/stone hues
+  and low-saturation snow/ice
+  families, then assigns two-, three-, and four-corner transition signatures
+  without transitively merging distinct anchors;
+- promotes visually novel transition corners to their own family even when no
+  uniform tile exists, retaining the tile-preview order supplied by
+  the tile decoder;
+- classifies observed land and overlay use separately;
+- classifies underwater only from land use beneath active overlays;
+- makes every structurally valid assignment immediately available to painting;
+- leaves ambiguous or cross-layer tiles unassigned; and
+- reports missing material combinations as hard-edge fallback diagnostics.
 
-Profiles use JSON schema version 1 and are bound to the case-insensitive MPR
-namespace, decoded-atlas pixel hash, and exact slot count. A namespace, hash,
-or count mismatch disables the profile. Inferred profiles begin with
-`approved: false`; semantic catalog construction refuses them until a human
-review has resolved every ambiguity and explicitly approved the profile.
+JSON schema version 7 declares `tile-preview-nw-ne-se-sw-v1` corner space and
+stores exact material names, allowed layers, surface/underwater-only/mixed role,
+member slots, per-slot corner signatures, assigned state, and an optional
+user-selected member thumbnail, plus whether an internal authored family is
+paint-selectable. Known authored legacy profiles receive one deterministic
+paint-grid-to-preview reflection; pixel-inferred profiles retain their visual
+assignments. Schema 1/2 profiles migrate conservatively: ambiguous slots
+become unassigned and existing families remain selectable. Profiles are exact-bound to the
+case-insensitive MPR namespace, decoded pixel hash, and slot count.
 
-The profile contains metadata and corner-family assignments only. It does not
-contain atlas imagery, MPR/SEC payloads, resource archives, or installation
-paths, and saving it does not modify an MPR, MMP, or RES archive. Manual atlas
-tile painting remains the fallback when no reviewed profile is available.
+Approval is derived metadata for the current safe catalog, not a separate user
+workflow and not the switch that enables painting. Unassigned slots remain
+excluded. A
+corrupt assigned slot that crosses Ground/Overlay boundaries is never admitted
+to a catalog, and visual editing rejects such a change before mutation.
 
-The Landscape Tools **Convert / review semantic atlas...** workflow presents
-the inferred families and their member slots beside an atlas-tile preview. It
-supports family renaming, slot-subset splitting, same-layer family merging,
-land/overlay and underwater classification, per-family and per-slot ambiguity
-review, and live missing-transition diagnostics. Drafts may be saved without
-enabling automatic painting. **Approve and save** succeeds only when every
-ambiguity is cleared, every signature stays within one layer, every family has
-a name and uniform paint tile, and the reviewed catalog can be constructed.
+The built-in catalog covers all 38 reviewed installed namespaces and stores
+derived names and corner-family IDs only. Profiles contain metadata only—never atlas imagery, MPR/SEC payloads, resource
+archives, or installation paths. Runtime never falls back to legacy authored
+slot tables when an exact preset is missing. The managed local override lives
+in the portable editor's `terrain-atlas-profiles` folder beside the executable,
+under a sanitized namespace plus namespace hash. AppData profiles from older
+builds are deliberately not migrated or loaded. Built-in defaults do not
+create files when merely viewed or applied unchanged. Landscape Tools and the
+Material Atlas window identify the active source; a local override shows its
+path. The window can save and reopen profile copies at user-chosen locations.
+Loading a copy revalidates all three binding fields; its outer filename is
+irrelevant. Only `user-authored-custom-profile` provenance can override a
+built-in default, and distribution packages must contain no local override
+files.
 
-Profiles are stored below the application's configuration directory in
-`terrain-atlas-profiles`, using a sanitized namespace plus a short namespace
-hash to avoid filename collisions, and atomic JSON replacement. On map load the editor revalidates namespace, decoded-pixel hash,
-and slot count before activating an approved profile. A mismatch keeps semantic
-auto-paint disabled and offers a fresh proposal for review; it never overwrites
-the mismatched profile silently. The atlas viewer labels its semantic state and
-adds family/signature review details to each tile tooltip.
+The editor uses a visual material tree, assigned tile thumbnails, an unassigned
+pool, and four droppable/clickable corner targets. Material confirmation is a single
+explicit action only when identity or classification remains unresolved. Whole
+tile moves and corner changes recompute family membership automatically. Paint
+palette previews use the lowest uniform four-corner tile when one exists. A
+transition-only family instead uses a four-tile size-1 vertex junction when a
+valid 1-on-3 support exists. When several supports exist, the UI exposes
+contextual cards under one profile family ID rather than inventing duplicate
+semantic families. A family with neither uniform nor 1-on-3 support remains
+visible for review/debug but does not become an unusable palette brush.
+
+Semantic painting uses one shared vertex-region resolver for ordinary and
+transition-only families. The brush assigns material identities to terrain
+vertices, resolves every incident cell through an authored four-corner
+signature, and emits ordinary packed-tile deltas. A transition-only family keeps
+the center vertex mandatory and accepts additional brush vertices only while
+all incident cells remain representable. Ordinary families may use a bounded
+same-footprint authored fallback when an exact boundary signature is absent.
+The thumbnail remains presentation metadata and is never the fixed paint
+payload.

@@ -1,0 +1,127 @@
+{
+  "schema": "ei-semantic-atlas-r149-decisions-v1",
+  "source": "scripts\\semantic_atlas_r149_user_answers.txt",
+  "sourceSha256": "A3287ECA7BB36FE83F8AB082156107248E0E40ECA91896DC9DD0A25A7662056E",
+  "queue": "artifacts\\semantic-atlas-r149-r148-followup\\questionnaire\\r149-r148-followup-queue.json",
+  "queueSha256": "CEFF0530D2581D427D9E3D6D718CCCC484262C328D9A6B527D8CC5C46D1A27A6",
+  "catalogInputSha256": "43B56C10B6425F606FB68B88FC5FFD86A8334D4B4FB7D874A3C174BB8937A169",
+  "counts": {
+    "submittedCards": 3,
+    "changedLogicalCorners": 2,
+    "ownerExpandedCorrections": 3,
+    "unchangedSubmittedCards": 1
+  },
+  "cornerCorrections": {
+    "bz4g": {
+      "436": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "Zone4": {
+      "436": {
+        "SW": "Ground / Gravel greenish"
+      }
+    },
+    "Zone7": {
+      "423": {
+        "NE": "Sand / Dark pink"
+      }
+    }
+  },
+  "reviewedCards": [
+    {
+      "key": "semantic-atlas-pixels-08d3c43a5896e599",
+      "submittedMapping": {
+        "NW": "Sand / Grainy",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Ground / Gravel greenish"
+      },
+      "comment": "",
+      "explicitAuditRejection": false,
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 436,
+          "currentMapping": {
+            "NW": "Sand / Grainy",
+            "NE": "Stone / Lime",
+            "SE": "Stone / Lime",
+            "SW": "Ground / Common"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 436,
+          "currentMapping": {
+            "NW": "Sand / Grainy",
+            "NE": "Stone / Lime",
+            "SE": "Stone / Lime",
+            "SW": "Ground / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-42a42cb742729134",
+      "submittedMapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Dark pink",
+        "SE": "Sand / Common",
+        "SW": "Sand / Dark"
+      },
+      "comment": "bring up remaining sand / dark in this atlas for review",
+      "explicitAuditRejection": false,
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 423,
+          "currentMapping": {
+            "NW": "Sand / Common",
+            "NE": "Sand / Dark",
+            "SE": "Sand / Common",
+            "SW": "Sand / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-c115e9deb4764a94",
+      "submittedMapping": {
+        "NW": "Stone / Orange",
+        "NE": "Sand / Common grayish",
+        "SE": "Sand / Gravel",
+        "SW": "Sand / Gravel"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "locations": [
+        {
+          "namespace": "bz13h",
+          "slot": 427,
+          "currentMapping": {
+            "NW": "Stone / Orange",
+            "NE": "Sand / Common grayish",
+            "SE": "Sand / Gravel",
+            "SW": "Sand / Gravel"
+          }
+        },
+        {
+          "namespace": "Zone15",
+          "slot": 427,
+          "currentMapping": {
+            "NW": "Stone / Orange",
+            "NE": "Sand / Common grayish",
+            "SE": "Sand / Gravel",
+            "SW": "Sand / Gravel"
+          }
+        }
+      ]
+    }
+  ],
+  "followupReview": {
+    "namespace": "Zone7",
+    "family": "Sand / Dark"
+  },
+  "policy": "apply only dropdown values changed from the current mapping; unchanged serialized corners are context, not confirmations"
+}

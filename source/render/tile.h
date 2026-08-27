@@ -1,9 +1,12 @@
 #ifndef CTILE_H
 #define CTILE_H
 
-#include <QOpenGLBuffer>
+#include <QOpenGLContext>
 #include <QOpenGLShaderProgram>
+#include <QPointer>
+#include <QVector2D>
 #include <QVector3D>
+#include <QtMath>
 #include "types.h"
 
 struct SSecVertex
@@ -58,6 +61,41 @@ public:
     virtual int tileIndex() const;
     ushort tileRotation() const {return m_rotNum;}
     void setTile(int index, int rotNum);
+    void setAtlasLayout(int textureCount, int columns);
+    static int preferredAtlasColumns(int textureCount)
+    {
+        if(textureCount <= 0)
+            return 1;
+        if(textureCount <= 8)
+            return textureCount;
+        return qMax(1, qCeil(qSqrt(double(textureCount))));
+    }
+    static float atlasPageRowOrigin(int atlasIndex, int textureCount,
+                                    int columns)
+    {
+        const int safeTextures = qMax(1, textureCount);
+        const int safeColumns = qBound(1, columns, safeTextures);
+        const int rows = qMax(1, (safeTextures + safeColumns - 1)
+                                  / safeColumns);
+        return float(atlasIndex / safeColumns) / float(rows);
+    }
+    static QVector2D atlasTileOrigin(int atlasSlot, int textureCount,
+                                     int columns)
+    {
+        const int safeSlot = qMax(0, atlasSlot);
+        const int atlasIndex = safeSlot / 64;
+        const int localSlot = safeSlot % 64;
+        const int safeTextures = qMax(1, textureCount);
+        const int safeColumns = qBound(1, columns, safeTextures);
+        const int rows = qMax(1, (safeTextures + safeColumns - 1)
+                                  / safeColumns);
+        const int pageColumn = atlasIndex % safeColumns;
+        return QVector2D(
+            (float(pageColumn) + float(localSlot % 8) / 8.0f)
+                / float(safeColumns),
+            atlasPageRowOrigin(atlasIndex, safeTextures, safeColumns)
+                + float(7 - localSlot / 8) / 8.0f / float(rows));
+    }
     void setMaxZ(float maxZ) { m_maxZ = maxZ; }
     const QVector<QVector<SSecVertex>>& arrVertex(){return m_arrVertex;}
     void setMaterialIndex(short matIndex) {m_materialIndex = matIndex;}
@@ -75,7 +113,9 @@ protected:
     ushort m_atlasTexIndex; // index of texture atlas
     ushort m_rotNum; //number of rotation
     float m_maxZ; // update for each tile when changing maximum altitude
-    int m_texAtlasNumber; // update for each tile when changing atlas number
+    int m_texAtlasNumber{1}; // update for each tile when changing atlas number
+    int m_atlasColumns{1};
+    int m_atlasRows{1};
     short m_materialIndex; // only for liquid tiles. ind == 1 is equal to disabled liquid
 };
 
@@ -84,14 +124,56 @@ class CPreviewTile
 public:
     CPreviewTile();
     ~CPreviewTile();
+
+    // This deliberately only builds a value-owned CPU snapshot. It is called
+    // from palette and mouse input paths, where a QGLWidget context is not
+    // guaranteed to be current.
     void updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector);
+
+    // Upload the latest CPU snapshot while a compatible OpenGL context is
+    // current. CView should call this from a renderer-owned context boundary;
+    // draw() also performs this check as a safe fallback.
+    bool uploadPendingGeometry();
+
+    // Delete VBOs only when the current context owns (or shares) them. When
+    // that precondition is not met, no GL call is made and the names are
+    // intentionally abandoned for the owner context's teardown. CView must
+    // call this before clearing the preview on normal unload/shutdown while
+    // its context is current, to release the buffers deterministically.
+    bool releaseGpuResources();
+
+    bool hasStagedGeometry() const;
+    bool hasPendingGeometry() const;
+    quint64 stagedGeometryGeneration() const { return m_stagedGeneration; }
+    quint64 uploadedGeometryGeneration() const { return m_uploadedGeneration; }
     void draw(QOpenGLShaderProgram* program);
 
 private:
-    QVector<SVertexData> m_arrLandVrtData;
-    QOpenGLBuffer m_vertexBuf;
-    QOpenGLBuffer m_indexBuf;
-    QMatrix4x4 m_modelMatrix;
+    bool hasCurrentCompatibleGpuContext() const;
+    void abandonGpuResources();
+
+    // These containers have no aliases outside this object. A staged
+    // generation remains immutable until the next updateTile() call.
+    QVector<SVertexData> m_stagedVertexData;
+    QVector<ushort> m_stagedIndexData;
+    QMatrix4x4 m_stagedModelMatrix;
+    quint64 m_stagedGeneration{0};
+    quint64 m_uploadedGeneration{0};
+    bool m_geometryDirty{false};
+
+    // Raw names avoid QOpenGLBuffer's destructor trying to destroy a buffer
+    // after its Qt context/surface has already gone away. Their lifetime is
+    // explicitly guarded by m_gpuContext above.
+    GLuint m_vertexBuffer{0};
+    GLuint m_indexBuffer{0};
+    QPointer<QOpenGLContext> m_gpuContext;
 };
+
+inline float terrainTilePreviewElevation()
+{
+    // Keep the cursor-attached physical tile above the source terrain so the
+    // depth test cannot discard an exactly coplanar preview.
+    return 0.08f;
+}
 
 #endif // CTILE_H

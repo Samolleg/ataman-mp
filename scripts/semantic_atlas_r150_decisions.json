@@ -1,0 +1,172 @@
+{
+  "schema": "ei-semantic-atlas-r150-decisions-v1",
+  "source": "scripts\\semantic_atlas_r150_user_answers.txt",
+  "sourceSha256": "06CCCFCBD9139ED6B98D7FDEB452519668773ECD622A4EF6162243CD64A4C5E0",
+  "queue": "artifacts\\semantic-atlas-r150-zone7-sand-dark-review\\questionnaire\\r150-zone7-sand-dark-queue.json",
+  "queueSha256": "784C8C9882C8DC1D9294A97F3769FE34DFF875CDA2C194085E4ED6FC29794EB9",
+  "catalogInputSha256": "2BDD2BD74CFB39F88F1649D94AC54D1AC3938BAF6206F76019A3408255261EB0",
+  "counts": {
+    "submittedCards": 6,
+    "changedLogicalCorners": 7,
+    "ownerExpandedCorrections": 7,
+    "unchangedSubmittedCards": 0
+  },
+  "cornerCorrections": {
+    "Zone7": {
+      "320": {
+        "NW": "Sand / Common"
+      },
+      "327": {
+        "SW": "Sand / Dark pink"
+      },
+      "423": {
+        "SW": "Sand / Dark pink"
+      },
+      "433": {
+        "NW": "Sand / Dark pink",
+        "SE": "Sand / Common"
+      },
+      "473": {
+        "NW": "Sand / Dark pink"
+      },
+      "474": {
+        "NE": "Sand / Dark pink"
+      }
+    }
+  },
+  "reviewedCards": [
+    {
+      "key": "semantic-atlas-pixels-5e4f48838d14e07d",
+      "submittedMapping": {
+        "NW": "Sand / Common",
+        "NE": "Ground / Brownish",
+        "SE": "Ground / Brownish",
+        "SW": "Ground / Brownish"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 320,
+          "currentMapping": {
+            "NW": "Sand / Dark",
+            "NE": "Ground / Brownish",
+            "SE": "Ground / Brownish",
+            "SW": "Ground / Brownish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-59d396cf3f88f2f8",
+      "submittedMapping": {
+        "NW": "Stone / Light",
+        "NE": "Stone / Light",
+        "SE": "Stone / Light",
+        "SW": "Sand / Dark pink"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 327,
+          "currentMapping": {
+            "NW": "Stone / Light",
+            "NE": "Stone / Light",
+            "SE": "Stone / Light",
+            "SW": "Sand / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-6c58efe8170902ba",
+      "submittedMapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Dark pink",
+        "SE": "Sand / Common",
+        "SW": "Sand / Dark pink"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 423,
+          "currentMapping": {
+            "NW": "Sand / Common",
+            "NE": "Sand / Dark pink",
+            "SE": "Sand / Common",
+            "SW": "Sand / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-235d1d00cae7f317",
+      "submittedMapping": {
+        "NW": "Sand / Dark pink",
+        "NE": "Stone / Light",
+        "SE": "Sand / Common",
+        "SW": "Sand / Light"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 433,
+          "currentMapping": {
+            "NW": "Sand / Dark",
+            "NE": "Stone / Light",
+            "SE": "Sand / Dark",
+            "SW": "Sand / Light"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-e7b8bc590a7d3476",
+      "submittedMapping": {
+        "NW": "Sand / Dark pink",
+        "NE": "Stone / Light",
+        "SE": "Sand / Grainy",
+        "SW": "Sand / Underwater"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 473,
+          "currentMapping": {
+            "NW": "Sand / Dark",
+            "NE": "Stone / Light",
+            "SE": "Sand / Grainy",
+            "SW": "Sand / Underwater"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-ea76b0dce1179b9c",
+      "submittedMapping": {
+        "NW": "Sand / Common",
+        "NE": "Sand / Dark pink",
+        "SE": "Sand / Common",
+        "SW": "Sand / Underwater"
+      },
+      "comment": "",
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 474,
+          "currentMapping": {
+            "NW": "Sand / Common",
+            "NE": "Sand / Dark",
+            "SE": "Sand / Common",
+            "SW": "Sand / Underwater"
+          }
+        }
+      ]
+    }
+  ],
+  "policy": "apply only dropdown values changed from the current mapping; unchanged serialized corners are context, not confirmations"
+}

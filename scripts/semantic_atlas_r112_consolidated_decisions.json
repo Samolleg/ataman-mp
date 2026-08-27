@@ -1,0 +1,120 @@
+{
+  "schema": "ei-semantic-atlas-r112-consolidated-decisions-v1",
+  "sourceCatalogSha256": "35205A279E452F2CC24286D86AA95AB0060D2FE4302490B1E9FA23A06E307AE9",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "newFamilies": {
+    "Zone10": [{
+      "id": 8,
+      "name": "Slabs / Faces irregular",
+      "templateFamily": "Slabs / Faces",
+      "sourceFamily": "reviewed/slabs/faces-irregular",
+      "thumbnailSlot": 396,
+      "uniformSlots": [396],
+      "memberSlots": [396]
+    }]
+  },
+  "cornerCorrections": {
+    "bz4g": {
+      "489": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Common"},
+      "200": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Grass / Common", "SW": "Grass / Fresh"},
+      "157": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Dark"},
+      "486": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Common"}
+    },
+    "Zone4": {
+      "489": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Common"},
+      "200": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Grass / Common", "SW": "Grass / Fresh"},
+      "157": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Dark"},
+      "486": {"NW": "Grass / Common", "NE": "Grass / Dark", "SE": "Grass / Common", "SW": "Grass / Common"}
+    },
+    "bz2g": {
+      "26": {"NW": "Grass / Faded", "NE": "Grass / Faded", "SE": "Grass / Faded", "SW": "Grass / Faded"},
+      "415": {"NW": "Grass / Fresh", "NE": "Grass / Common", "SE": "Grass / Common", "SW": "Stone / Mossy"},
+      "140": {"NW": "Grass / Common", "NE": "Grass / Common", "SE": "Grass / Dark", "SW": "Grass / Fresh"},
+      "81": {"NW": "Grass / Common", "NE": "Grass / Common", "SE": "Grass / Common", "SW": "Grass / Faded"},
+      "472": {"NW": "Grass / Common", "NE": "Grass / Faded", "SE": "Grass / Faded", "SW": "Grass / Burnt"},
+      "423": {"NW": "Grass / Faded", "NE": "Grass / Faded", "SE": "Stone / Lime", "SW": "Grass / Fresh"},
+      "407": {"NW": "Grass / Fresh", "NE": "Grass / Fresh", "SE": "Grass / Common", "SW": "Stone / Mossy"},
+      "394": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Stone / Mossy", "SW": "Stone / Mossy"},
+      "427": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Stone / Lime", "SW": "Grass / Fresh"},
+      "286": {"NW": "Grass / Fresh", "NE": "Grass / Fresh", "SE": "Grass / Fresh", "SW": "Stone / Mossy"}
+    },
+    "Zone2": {
+      "26": {"NW": "Grass / Faded", "NE": "Grass / Faded", "SE": "Grass / Faded", "SW": "Grass / Faded"},
+      "415": {"NW": "Grass / Fresh", "NE": "Grass / Common", "SE": "Grass / Common", "SW": "Stone / Mossy"},
+      "140": {"NW": "Grass / Common", "NE": "Grass / Common", "SE": "Grass / Dark", "SW": "Grass / Fresh"},
+      "81": {"NW": "Grass / Common", "NE": "Grass / Common", "SE": "Grass / Common", "SW": "Grass / Faded"},
+      "472": {"NW": "Grass / Common", "NE": "Grass / Faded", "SE": "Grass / Faded", "SW": "Grass / Burnt"},
+      "423": {"NW": "Grass / Faded", "NE": "Grass / Faded", "SE": "Stone / Lime", "SW": "Grass / Fresh"},
+      "407": {"NW": "Grass / Fresh", "NE": "Grass / Fresh", "SE": "Grass / Common", "SW": "Stone / Mossy"},
+      "394": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Stone / Mossy", "SW": "Stone / Mossy"},
+      "427": {"NW": "Grass / Common", "NE": "Grass / Fresh", "SE": "Stone / Lime", "SW": "Grass / Fresh"},
+      "286": {"NW": "Grass / Fresh", "NE": "Grass / Fresh", "SE": "Grass / Fresh", "SW": "Stone / Mossy"}
+    },
+    "bz16h": {
+      "248": {"NW": "Ground / Red", "NE": "Ground / Desert algae", "SE": "Ground / Desert algae", "SW": "Ground / Desert algae"},
+      "249": {"NW": "Ground / Red", "NE": "Ground / Desert algae", "SE": "Ground / Desert algae", "SW": "Ground / Desert algae"}
+    },
+    "Zone18": {
+      "6": {"NW": "Ground / Desert algae", "NE": "Ground / Desert algae", "SE": "Ground / Desert algae", "SW": "Ground / Desert algae"},
+      "438": {"NW": "Ground / Red", "NE": "Stone / Weathered", "SE": "Ground / Plant soil", "SW": "Ground / Plant soil"},
+      "170": {"NW": "Ground / Red", "NE": "Ground / Plant soil", "SE": "Ground / Plant soil", "SW": "Ground / Plant soil"},
+      "403": {"NW": "Ground / Red", "NE": "Ground / Plant soil", "SE": "Ground / Red", "SW": "Ground / Plant soil"},
+      "171": {"NW": "Ground / Red", "NE": "Ground / Plant soil", "SE": "Ground / Plant soil", "SW": "Ground / Plant soil"},
+      "362": {"NW": "Stone / Weathered", "NE": "Ground / Plant soil", "SE": "Ground / Plant soil", "SW": "Ground / Plant soil"},
+      "399": {"NW": "Ground / Red", "NE": "Ground / Red", "SE": "Stone / Weathered", "SW": "Ground / Plant soil"},
+      "398": {"NW": "Ground / Desert algae", "NE": "Ground / Red", "SE": "Ground / Plant soil", "SW": "Ground / Plant soil"}
+    },
+    "Zone14": {
+      "429": {"NW": "Ground / Light", "NE": "Ground / Light", "SE": "Ground / Light", "SW": "Ground / Stony gray"}
+    },
+    "bz11k": {
+      "429": {"NW": "Ground / Light", "NE": "Ground / Light", "SE": "Ground / Light", "SW": "Ground / Stony gray"}
+    },
+    "Zone13": {
+      "403": {"NW": "Ground / Light", "NE": "Stone / Gray", "SE": "Ground / Light", "SW": "Grass / Tundra"},
+      "273": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "272": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"}
+    },
+    "bz8k": {
+      "370": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "285": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "286": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "288": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "289": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"}
+    },
+    "bz9k": {
+      "370": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "285": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "286": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "288": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "289": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"}
+    },
+    "Zone11": {
+      "370": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "285": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "286": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "288": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"},
+      "289": {"NW": "Ground / Light", "NE": "Paving / Square", "SE": "Paving / Square", "SW": "Paving / Square"}
+    },
+    "Zone10": {
+      "396": {"NW": "Slabs / Faces irregular", "NE": "Slabs / Faces irregular", "SE": "Slabs / Faces irregular", "SW": "Slabs / Faces irregular"}
+    },
+    "Zone6": {
+      "326": {"NW": "Ground / Common", "NE": "Grass / Sparse dark", "SE": "Grass / Sparse dark", "SW": "Grass / Sparse dark"}
+    },
+    "Zone7": {
+      "119": {"NW": "Ground / Dark brown", "NE": "Ground / Dark brown", "SE": "Ground / Dark brown", "SW": "Grass / Common"}
+    },
+    "Zone9": {
+      "433": {"NW": "Ground / Common", "NE": "Grass / Common", "SE": "Grass / Common", "SW": "Sand / Dark pink"},
+      "30": {"NW": "Ground / Dead", "NE": "Ground / Dead", "SE": "Ground / Dead", "SW": "Ground / Dead"}
+    }
+  },
+  "counts": {
+    "submittedCards": 35,
+    "expandedAtlasSlots": 63,
+    "explicitAndAliasCorners": 252,
+    "newFamilies": 1,
+    "remainingUnresolvedCards": 0
+  }
+}

@@ -66,6 +66,8 @@ class CViewportMinimapWidget;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
+class CResourceBrowser;
+namespace ei { class DatabaseDocument; class DatabaseEditorDialog; class ItemSpellConstructorDialog; }
 
 // Localizes formatted validation presentation while preserving the report's
 // English source text for logs and machine-readable output.
@@ -111,6 +113,7 @@ private:
     void initShortcuts();
     void connectUiButtons();
     bool isExitAllowed();
+    bool isDatabaseExitAllowed();
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();
@@ -161,6 +164,7 @@ private:
     void setCustomSpawnPicking(bool enabled);
     void updateCustomSpawnControls();
     QString currentMapContextKey() const;
+    void preserveCustomSpawnAfterDocumentReplacement();
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
     void updateOperationAvailability(bool hasSelection = false);
@@ -168,6 +172,8 @@ private:
     bool beginWorkspaceLoad(const QString& description);
     void endWorkspaceLoad();
     void updateLoadedMapPanel();
+    void updateLoadedMapMprDirtyIndicator();
+    void rebuildLoadedMapPanel();
     void updateOutlinerSelectionPath();
     void updateLogicSlotBarVisibility();
     void updateBehaviorModeUi();
@@ -212,6 +218,9 @@ private:
     void showUnitTexturePreview();
     void updateUnitTexturePreview();
     void renderUnitTexturePreview();
+    void showDatabaseEditor(const QString& prototype = QString());
+    void openDatabaseArchiveFromBrowser(const QString& archivePath);
+    void showItemSpellConstructor(const QString& initialCode = QString());
 
 private slots:
     void showOutliner(bool bShow);
@@ -283,6 +292,8 @@ private:
     QDockWidget* m_historyDock;
     QDockWidget* m_validationDock;
     QDockWidget* m_messageLogDock{nullptr};
+    QDockWidget* m_resourceBrowserDock{nullptr};
+    CResourceBrowser* m_resourceBrowser{nullptr};
     CMessageLogPanel* m_messageLogPanel{nullptr};
     CDockHiddenTab* m_mapsHiddenTab{nullptr};
     CDockHiddenTab* m_messageLogHiddenTab{nullptr};
@@ -293,6 +304,7 @@ private:
     QToolButton* m_behaviorModeButton{nullptr};
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
+    bool m_loadedMapPanelRefreshPending{false};
     QTreeWidget* m_validationTree;
     QLabel* m_validationSummary;
     QTimer* m_validationTimer;
@@ -359,7 +371,6 @@ private:
     bool m_closeAfterTestStop;
     QMap<EButtonOp, QAction*> m_operationActions;
     QComboBox* m_entranceCombo;
-    QToolButton* m_showEntrancesButton;
     QToolButton* m_playFromHereButton;
     QToolButton* m_gotoEntranceButton;
     QCheckBox* m_godmodeCheckBox;
@@ -381,6 +392,9 @@ private:
     QString m_customSpawnContextKey;
     QPointer<CViewportMinimapWidget> m_viewportMinimap;
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
+    QSharedPointer<ei::DatabaseDocument> m_databaseDocument;
+    QPointer<ei::DatabaseEditorDialog> m_databaseEditorDialog;
+    QPointer<ei::ItemSpellConstructorDialog> m_itemSpellConstructorDialog;
     QTimer* m_minimapRefreshTimer{nullptr};
     QTimer* m_minimapCameraTimer{nullptr};
     QByteArray m_generatedMinimapMmp;

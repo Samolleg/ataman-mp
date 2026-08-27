@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Focused integration fix R2: repeatable terrain strokes and corrected signed-light guidance
+Executable source commit: dbe7ed01
+Executable SHA-256: 883693770262E90E0CA9498DD8560F109187342661B877628F3D95F3C2994EDA
+Semantic catalog source commit: 5feb5c967465857241c931bc6fb56c456eb0358e
+Preset SHA-256: 1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3
+Validation: object property UI contract PASS; focused lifecycle 5 pass / 0 fail; full document 167 pass / 0 fail / 7 expected skips; retained Qt 5.12.12 MinGW 7.3 x64 release wrapper PASS; --ui-widget-check exit 0
+Manual gate: complete and cancel multiple strokes across all three paint modes; verify undo ownership; inspect corrected Light radius and Campfire power tooltips

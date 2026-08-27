@@ -1,0 +1,10 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: first-Resolve Manual intent and partial-page draft publication
+Executable source/changelist commit: 5090d34e7517d08ad5d1e53f3d13ec45767014ce
+Executable SHA-256: 90B27801D117FF694DEA4EA395F598F282ACC84FF692A06FA1A610FBF568D180
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 127 pass / 0 fail / 7 expected skips; virtual atlas 114 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Artifact evidence: supplied corrupt pair deterministically exposes 16 referenced transparent land slots, including slot 534 (page 8/local 22)
+Collections: omitted from this focused revision; test against a clean installed Zone 2 map

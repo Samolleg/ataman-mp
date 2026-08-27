@@ -19,10 +19,11 @@ and indexed resource-resolution changes.
 
 Landscape-atlas format research also consulted aspadm's
 [EI-HD-tiles](https://github.com/aspadm/EI-HD-tiles) documentation and map
-descriptions. The compact Zone1 slot-topology compatibility table used by
-semantic painting was derived from that project's public Zone1 map description.
-Endurance does not include its tools, generated atlases, YAML descriptions,
-source code, or texture assets. EI-HD-tiles was developed by aspadm and is
+descriptions. Compact semantic metadata for the built-in known-map Material
+atlas presets was derived from that project's public map descriptions and
+validated against the Zone1 compatibility table. Endurance does not include its
+tools, generated atlases, YAML descriptions, source code, or texture assets.
+EI-HD-tiles was developed by aspadm and is
 distributed for non-commercial use with attribution; it is acknowledged here
 as an independent research source.
 

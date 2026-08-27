@@ -75,9 +75,10 @@ RenderPerformanceContext& RenderPerformanceContext::instance()
     return context;
 }
 
-void RenderPerformanceContext::beginFrame(bool enabled)
+void RenderPerformanceContext::beginFrame(bool enabled, bool reportEnabled)
 {
     m_collecting = enabled;
+    m_reportEnabled = enabled && reportEnabled;
     m_frame = SRenderFrameCounters();
     if(!enabled)
     {
@@ -104,6 +105,11 @@ void RenderPerformanceContext::endFrame()
     if(!m_collecting)
         return;
     const quint64 cpuNanoseconds = quint64(m_frameTimer.nsecsElapsed());
+    if(!m_reportEnabled)
+    {
+        m_collecting = false;
+        return;
+    }
     m_cpuNanoseconds += cpuNanoseconds;
     m_maxCpuNanoseconds = qMax(m_maxCpuNanoseconds, cpuNanoseconds);
     m_cpuSamples.append(cpuNanoseconds);

@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: editable draft and final publication pair safety
+Executable source/changelist commit: c237a330e7956aa2e66d4a1f7c0866c7e11c5167
+Executable SHA-256: 8CC67FFAFB455A282EBA9DB0688F92DD3C8CE16F9320637E711F37465082BA48
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 130 pass / 0 fail / 7 expected skips; virtual atlas 115 pass / 0 fail; landscape widget 7 pass / 0 fail; exact pre-corruption draft MPR/sidecar adoption probe 3 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: omitted from this focused revision; test with copies of a known-good editable modern draft pair and a disposable publication RES

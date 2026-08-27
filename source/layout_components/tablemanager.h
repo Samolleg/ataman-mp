@@ -160,13 +160,16 @@ public slots:
     void _onChange(QString str); //override default 'on change event'
     void _onEditingFinished();
     void _onFilterTextChanged(const QString& text);
+    void requestDatabasePrototypeOpen();
 
 signals:
     void onParamChange(const QSharedPointer<IPropertyBase>&);
+    void openDatabasePrototypeRequested(const QString& prototype);
 
 private:
     void ensureOptionsLoaded();
     void updateDatabaseDiagnostic(const QString& value);
+    void showDatabasePrototypeContextMenu(const QPoint& globalPosition);
 
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
@@ -381,6 +384,7 @@ signals:
     void onTrapCastTargetMove(CMagicTrap* trap, int from, int to);
     void onTrapActivationAreaAdd(CMagicTrap* trap);
     void onTrapCastTargetAdd(CMagicTrap* trap);
+    void openDatabasePrototypeRequested(const QString& prototype);
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class

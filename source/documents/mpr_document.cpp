@@ -29,6 +29,7 @@ const quint64 kSectorVertexCount = 33 * 33;
 const quint64 kSectorVertexSize = 8;
 const quint64 kSectorTileCount = 16 * 16;
 const quint64 kSectorTileSize = 2;
+const int kPackedTerrainSlotsPerTexture = 64;
 const quint64 kLandSectorSize = 5 + kSectorVertexCount * kSectorVertexSize
     + kSectorTileCount * kSectorTileSize;
 const quint64 kOverlaySectorSize = 5 + 2 * kSectorVertexCount * kSectorVertexSize
@@ -854,6 +855,14 @@ bool CMprDocument::appendMapParametersEdit(
            && quint64(animation.tileIndex) + quint64(animation.frameCount)
                 > quint64(m_mapInfo.tileCount))
             return fail("mpr.animation_range", "Animation frames extend beyond the atlas", location);
+        if(animation.frameCount > 0
+           && (animation.frameCount > kPackedTerrainSlotsPerTexture
+               || int(animation.tileIndex % kPackedTerrainSlotsPerTexture)
+                    + int(animation.frameCount)
+                      > kPackedTerrainSlotsPerTexture))
+            return fail("mpr.animation_page",
+                "Animation frames must fit inside the start slot's 64-tile texture page",
+                location);
     }
 
     const int memberIndex = uniqueMemberIndex(m_mapInfo.memberName);

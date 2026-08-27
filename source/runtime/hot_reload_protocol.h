@@ -7,7 +7,7 @@
 
 struct SMapHotReloadRequest
 {
-    int protocolVersion{4};
+    int protocolVersion{5};
     quint64 sequence{0};
     quint64 generation{0};
     quint64 runtimeStateSequence{0};
@@ -28,6 +28,8 @@ struct SMapHotReloadRequest
     QString minimapTextureName;
     QString minimapResourcePath;
     QString minimapResourceSha256;
+    QString databasePath;
+    QString databaseSha256;
     QString savePath;
     bool preservePosition{false};
     bool graphless{false};

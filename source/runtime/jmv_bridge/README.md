@@ -58,11 +58,14 @@ Hot reload protocol v3 gives each initial launch/reload an immutable map and
 save generation beneath the owned run directory. Save path switching occurs on
 the game thread immediately before a committed transition. The bridge records
 guarded runtime-state changes and defers reload while state is initializing or
-in a recent transition. Every reload uses the engine's normal Main Menu
-transition followed by the complete New Game bootstrap so map metadata and UI
-state are rebuilt together. A responsive loader-less stale transition is the
-observed world-map/map-screen case and follows that same rebootstrap path. No
-generic inventory/store UI function is detoured.
+in a recent transition. A reload received in gameplay uses the engine's normal
+zone transition directly, retaining the one initialized player and avoiding a
+second destruction/recreation of global New Game state. Main-menu reloads use
+the complete New Game bootstrap; inventory, store, and responsive loader-less
+world-map states first transition to Main Menu and then use that bootstrap so
+their metadata and UI state are rebuilt together. Runtime evidence records the
+selected `reload_mode` for every dispatch. No generic inventory/store UI
+function is detoured.
 
 The user launches with Ctrl+F5 and waits for the normal intro/menu lifecycle.
 The provider should automatically enter the staged map without a manual New

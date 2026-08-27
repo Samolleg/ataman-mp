@@ -57,7 +57,8 @@ QByteArray unitObject(quint32 nid, const QByteArray& name,
                       bool importMode, const QStringList& bodyParts,
                       const QStringList& armor = QStringList(),
                       const QStringList& weapons = QStringList(),
-                      bool includeBodyPartsRecord = true)
+                      bool includeBodyPartsRecord = true,
+                      const QList<QByteArray>& logicSlots = QList<QByteArray>())
 {
     QByteArray object = section(0xB002, u32(nid))
         + section(0xB003, u32(50))
@@ -65,12 +66,24 @@ QByteArray unitObject(quint32 nid, const QByteArray& name,
         + section(0xB006, model);
     if(includeBodyPartsRecord)
         object += section(0xB00D, stringArrayPayload(bodyParts));
-    object += section(0xBBBB0000,
+    QByteArray unit =
         section(0xBBBB0002, prototype)
         + section(0xBBBB0008, stringArrayPayload(weapons))
         + section(0xBBBB0009, stringArrayPayload(armor))
-        + section(0xBBBB000A, byteValue(importMode ? 1 : 0)));
+        + section(0xBBBB000A, byteValue(importMode ? 1 : 0));
+    for(const QByteArray& logic : logicSlots)
+        unit += logic;
+    object += section(0xBBBB0000, unit);
     return section(0xB001, object);
+}
+
+QByteArray unitLogic(quint32 behavior, bool enabled, int patrolPointCount)
+{
+    QByteArray payload = section(0xBBBC0003, u32(behavior))
+        + section(0xBBBC0007, byteValue(enabled ? 1 : 0));
+    for(int index = 0; index < patrolPointCount; ++index)
+        payload += section(0xBBBD0000);
+    return section(0xBBBC0000, payload);
 }
 
 QByteArray mobWithUnits(const QList<QByteArray>& units)
@@ -314,7 +327,79 @@ private slots:
     void importWithoutTemplateHairEvidenceDoesNotReportMissingHair();
     void databaseCreatureResolutionSuppressesWearableMaskRules();
     void jmvUnitPerkTableFailuresAreCritical();
+    void missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime();
+    void patrolBehaviorWithoutPointsReportsNavigableCrashRisk();
+    void disabledEmptyPatrolIsWarningAndValidRoutesAreClean();
 };
+
+void MobFamilyValidationTests::patrolBehaviorWithoutPointsReportsNavigableCrashRisk()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = writeMob(directory.path(), "missing-patrol.mob",
+        mobWithUnits({unitObject(67000001, "Broken patrol guard", "Guard", "unhuma",
+            false, wearableParts(), {}, {}, true,
+            {unitLogic(2, false, 0), unitLogic(0, false, 0),
+             unitLogic(2, true, 0), unitLogic(0, false, 0), unitLogic(0, false, 0)})}));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "missing-patrol";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVector<SMobFamilyFinding> findings;
+    for(const SMobFamilyFinding& finding : report.findings)
+        if(finding.code == "unit.patrol_points_missing") findings.append(finding);
+    QCOMPARE(findings.size(), 2);
+    for(const SMobFamilyFinding& finding : findings)
+    {
+        QCOMPARE(finding.severity, EMobFamilyFindingSeverity::Critical);
+        QCOMPARE(finding.category, QString("Behavior"));
+        QVERIFY(finding.hasNid);
+        QCOMPARE(finding.nid, quint32(67000001));
+        QVERIFY(finding.locations.size() == 1);
+        QVERIFY(finding.locations.first().startsWith(path + ":"));
+        QVERIFY(finding.message.contains("Broken patrol guard"));
+        QVERIFY(finding.message.contains("NID 67000001"));
+        QVERIFY(finding.message.contains("may terminate", Qt::CaseInsensitive));
+    }
+    QVERIFY(findings.at(0).message.contains("Logic 0"));
+    QVERIFY(findings.at(1).message.contains("Logic 2"));
+}
+
+void MobFamilyValidationTests::disabledEmptyPatrolIsWarningAndValidRoutesAreClean()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = writeMob(directory.path(), "dormant-patrol.mob",
+        mobWithUnits({unitObject(41, "Dormant patrol", "Guard", "unhuma",
+            false, wearableParts(), {}, {}, true,
+            {unitLogic(0, true, 0), unitLogic(2, false, 0),
+             unitLogic(2, true, 1), unitLogic(1, true, 0), unitLogic(0, false, 0)})}));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "dormant-patrol";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+
+    QVector<SMobFamilyFinding> findings;
+    for(const SMobFamilyFinding& finding : report.findings)
+        if(finding.code == "unit.patrol_points_missing") findings.append(finding);
+    QCOMPARE(findings.size(), 1);
+    QCOMPARE(findings.first().severity, EMobFamilyFindingSeverity::Warning);
+    QVERIFY(findings.first().message.contains("Logic 1"));
+    QVERIFY(findings.first().message.contains("disabled", Qt::CaseInsensitive));
+    QVERIFY(findings.first().hasNid);
+    QCOMPARE(findings.first().nid, quint32(41));
+}
 
 void MobFamilyValidationTests::authoredZeroNidIsCriticalAndBlocksRuntimePreflight()
 {
@@ -439,6 +524,40 @@ void MobFamilyValidationTests::jmvUnitPerkTableFailuresAreCritical()
     QVERIFY(std::none_of(report.findings.cbegin(), report.findings.cend(),
         [](const SMobFamilyFinding& item)
         { return item.code.startsWith("jmv.tables."); }));
+}
+
+void MobFamilyValidationTests::missingDatabasePrototypeIsCrashClassButDoesNotBlockRuntime()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString missingPrototype = "Missing Runtime Prototype";
+    const QString path = writeMob(directory.path(), "missing-prototype.mob", mobWithUnits({unitObject(
+        997570, "Broken unit", missingPrototype.toLatin1(), "unhuma", false, wearableParts())}));
+    QVERIFY(!path.isEmpty());
+
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "missing-database-prototype";
+    request.profileId = "base";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    request.database = wearableDatabase("Different Prototype", "unhuma", {});
+
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "database.prototype.missing"; });
+    QVERIFY(finding != report.findings.cend());
+    QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Critical);
+    QCOMPARE(finding->category, QString("Database"));
+    QVERIFY(finding->message.contains(missingPrototype));
+    QVERIFY(finding->message.contains("crash", Qt::CaseInsensitive));
+    QVERIFY(finding->hasNid);
+    QCOMPARE(finding->nid, quint32(997570));
+    QVERIFY(!finding->locations.isEmpty());
+    QVERIFY(finding->locations.first().startsWith(path + ":"));
+    QVERIFY(!report.hasBlockingRuntimeFindings());
+    QCOMPARE(report.blockingRuntimeFindings().size(), 0);
 }
 
 void MobFamilyValidationTests::workspaceCopyShadowsInstalledLogicalMob()

@@ -1,0 +1,5 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: modern terrain atlas R110 typed duplicate aliases and regenerated collections
+Preset SHA-256: EF9A8A92F1B9A6DA6B0E1C3B7CCA1DE90C1039F99056DDF88336C11ACDF80960
+Package policy: finalized clean first-run folder; no options/settings, logs, saves, dumps, object files, generated Makefiles, or stale changelists
+Installed stock JMV assets are included only in isolated visual-test maps; EI-HD research assets are excluded.

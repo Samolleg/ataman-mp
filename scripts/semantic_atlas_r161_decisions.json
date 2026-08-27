@@ -1,0 +1,209 @@
+{
+  "schema": "ei-semantic-atlas-r161-decisions-v1",
+  "source": "scripts\\semantic_atlas_r161_user_answers.txt",
+  "sourceSha256": "280FE229D1E62A9763A70955B9FC348BE04E19547D349712129F0CD45D1DB609",
+  "queue": "artifacts\\semantic-atlas-r161-current-review\\questionnaire\\r161-current-review-queue.json",
+  "queueSha256": "9C5B4A1D04A2DCE90584903A9FF7F727AE6320F97867AF83FBF45A6FB816453B",
+  "catalogInputSha256": "B10DCED75A509AFB9AE2EF527A133C89717F80D0D19C769D600AEB1B552A292C",
+  "counts": {
+    "submittedCards": 5,
+    "changedLogicalCorners": 1,
+    "ownerExpandedCorrections": 1,
+    "unchangedSubmittedCards": 4,
+    "explicitAuditRejectionCards": 3,
+    "explicitCurrentConfirmationCards": 1,
+    "reviewedLogicalAuditCorners": 6,
+    "reviewedOwnerExpandedAuditCorners": 8,
+    "unresolvedCards": 0,
+    "removedFamilies": 1
+  },
+  "cornerCorrections": {
+    "Zone7": {
+      "151": {
+        "NW": "Ground / Dirt"
+      }
+    }
+  },
+  "expectedRemovedFamilies": {
+    "Zone7": [
+      "Ground / Brown"
+    ]
+  },
+  "reviewedCards": [
+    {
+      "key": "r161-zone7-slot151-ground-brown-integrity",
+      "submittedMapping": {
+        "NW": "Ground / Dirt",
+        "NE": "Stone / Light",
+        "SE": "Stone / Light",
+        "SW": "Stone / Light"
+      },
+      "comment": "",
+      "disposition": "explicit-alternative",
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "explicit-alternative",
+          "current": "Ground / Brown",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Dirt"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 151,
+          "currentMapping": {
+            "NW": "Ground / Brown",
+            "NE": "Stone / Light",
+            "SE": "Stone / Light",
+            "SW": "Stone / Light"
+          }
+        }
+      ]
+    },
+    {
+      "key": "r161-zone7-slot249-r164-report",
+      "submittedMapping": {
+        "NW": "Ground / Dark brown",
+        "NE": "Grass / Fresh",
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "comment": "dark brown is correct",
+      "disposition": "confirmed-current-reject-profile-alternative",
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-explicit-current-confirmation",
+          "current": "Ground / Dark brown",
+          "proposed": "Ground / Brown",
+          "submitted": "Ground / Dark brown"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone7",
+          "slot": 249,
+          "currentMapping": {
+            "NW": "Ground / Dark brown",
+            "NE": "Grass / Fresh",
+            "SE": "Grass / Fresh",
+            "SW": "Grass / Fresh"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-af18bd1fdd4bc57a",
+      "submittedMapping": {
+        "NW": "Grass / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Ground / Gravel"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "disposition": "rejected-keep-current",
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Gravel",
+          "proposed": "Ground / Common",
+          "submitted": "Ground / Gravel"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "zone9",
+          "slot": 341,
+          "currentMapping": {
+            "NW": "Grass / Common",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Ground / Gravel"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-da6cb508e2cff50c",
+      "submittedMapping": {
+        "NW": "Ground / Red",
+        "NE": "Rubble / Orange",
+        "SE": "Ground / Red",
+        "SW": "Rubble / Orange"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "disposition": "rejected-keep-current",
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Rubble / Orange",
+          "proposed": "Ground / Red",
+          "submitted": "Rubble / Orange"
+        },
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Rubble / Orange",
+          "proposed": "Ground / Red",
+          "submitted": "Rubble / Orange"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz15h",
+          "slot": 109,
+          "currentMapping": {
+            "NW": "Ground / Red",
+            "NE": "Rubble / Orange",
+            "SE": "Ground / Red",
+            "SW": "Rubble / Orange"
+          }
+        },
+        {
+          "namespace": "Zone17",
+          "slot": 109,
+          "currentMapping": {
+            "NW": "Ground / Red",
+            "NE": "Rubble / Orange",
+            "SE": "Ground / Red",
+            "SW": "Rubble / Orange"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-de4b392c1063743f",
+      "submittedMapping": {
+        "NW": "Grass / Common",
+        "NE": "Ground / Common",
+        "SE": "Ground / Gravel",
+        "SW": "Ground / Gravel"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "disposition": "rejected-keep-current",
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Gravel",
+          "proposed": "Ground / Common",
+          "submitted": "Ground / Gravel"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone6_2",
+          "slot": 402,
+          "currentMapping": {
+            "NW": "Grass / Common",
+            "NE": "Ground / Common",
+            "SE": "Ground / Gravel",
+            "SW": "Ground / Gravel"
+          }
+        }
+      ]
+    }
+  ],
+  "policy": "Apply only the one concrete changed corner; preserve all submitted current confirmations and audit rejections as exact do-not-reask controls; prune the now-unreferenced Zone7 Ground / Brown family; do not infer additional propagation beyond catalog-pinned exact owners.",
+  "unresolvedCards": [],
+  "reviewRound": 161,
+  "catalogOutputSha256": "AA39AE534C82377DDDB1CFD800213B8159BFBADB6F655B8438DB7C719B645518"
+}

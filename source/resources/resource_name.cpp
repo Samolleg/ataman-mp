@@ -10,6 +10,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTextCodec>
+#include <QtMath>
 
 namespace {
 
@@ -194,6 +195,41 @@ float textureUvScaleForBounds(const QString& textureName, float minU, float maxU
     if(maxU - minU > packedQuadrantLimit || maxV - minV > packedQuadrantLimit)
         return 1.0f;
     return namedScale;
+}
+
+SUvTransform standaloneAtlasCellUvTransform(float minU, float maxU,
+                                             float minV, float maxV,
+                                             int columns, int rows)
+{
+    SUvTransform result;
+    if(columns <= 0 || rows <= 0 || minU > maxU || minV > maxV)
+        return result;
+
+    const float cellWidth = 1.0f / float(columns);
+    const float cellHeight = 1.0f / float(rows);
+    // Authored FIG coordinates occasionally exceed a cell edge by roughly
+    // two thousandths. Select the cell by its centre and tolerate only that
+    // small exporter imprecision; a mesh spanning cells must remain unchanged.
+    constexpr float edgeTolerance = 0.003f;
+    if(maxU - minU > cellWidth + edgeTolerance * 2.0f
+            || maxV - minV > cellHeight + edgeTolerance * 2.0f)
+        return result;
+    const int cellX = qBound(0, int(qFloor(((minU + maxU) * 0.5f) / cellWidth)),
+                             columns - 1);
+    const int cellY = qBound(0, int(qFloor(((minV + maxV) * 0.5f) / cellHeight)),
+                             rows - 1);
+    const float cellMinU = float(cellX) * cellWidth;
+    const float cellMinV = float(cellY) * cellHeight;
+    if(minU < cellMinU - edgeTolerance || maxU > cellMinU + cellWidth + edgeTolerance
+            || minV < cellMinV - edgeTolerance || maxV > cellMinV + cellHeight + edgeTolerance)
+        return result;
+
+    result.scaleU = float(columns);
+    result.scaleV = float(rows);
+    result.offsetU = -float(cellX);
+    result.offsetV = -float(cellY);
+    result.normalizedAtlasCell = true;
+    return result;
 }
 
 bool usesUnlayeredHumanoidTexture(const QString& partName)

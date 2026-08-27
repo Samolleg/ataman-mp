@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Focused integration fix: repeatable Modern / Classic Auto / Manual terrain strokes
+Executable source commit: a24eaba3
+Executable SHA-256: 7C3133AE697A3143AC98A2532CDC63D03495D11CF7976324524010133136AC15
+Semantic catalog source commit: 5feb5c967465857241c931bc6fb56c456eb0358e
+Preset SHA-256: 1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3
+Validation: focused lifecycle 5 pass / 0 fail; full document 167 pass / 0 fail / 7 expected skips; retained Qt 5.12.12 MinGW 7.3 x64 release wrapper PASS; --ui-widget-check exit 0
+Manual gate: complete and cancel multiple strokes across all three paint modes, then verify one undo entry per completed gesture and none for cancellation

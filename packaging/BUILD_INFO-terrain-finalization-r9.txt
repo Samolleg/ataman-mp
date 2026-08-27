@@ -1,0 +1,27 @@
+EI Mapper Endurance 0.3.0-alpha.26
+Purpose: terrain flipbook compaction and safe publication R9 test
+Source commit: 58d46ca6
+Toolchain: Qt 5.12.12 win64_mingw73 / MinGW 7.3 x64
+
+Validation:
+- exact supplied zone1testoverlays6finallykinda MPR/RES finalization oracle: PASS
+- terrain_virtual_atlas_tests: PASS (123/123)
+- endurance_document_tests: PASS (178 passed, 0 failed, 14 expected environment-fixture skips)
+- overlay_material_animation_tests: PASS (30/30)
+- landscape_tools_widget_tests: PASS (16/16)
+- jmv_map_test_launcher_tests: PASS (56 passed, 0 failed, 3 environment/runtime skips)
+- res_archive_document_tests: PASS (16/16)
+- hot_reload_protocol_tests: PASS (6/6)
+- retained Qt 5.12.12 MinGW release wrapper, including fresh x86 runtime components: PASS through documented ASCII-junction fallback
+- --version: PASS (0.3.0-alpha.26)
+- --ui-widget-check: new terrain/material assertions PASS; unrelated baseline layout/floating-dock assertions remain red
+
+Primary regression evidence:
+- Water/Emerald animation 540:32 and Water/Still dark 714:19 are compacted to clean page-local 0:32 and 32:19 blocks.
+- Unreferenced Emerald source frames 504-535 are omitted; live source slots 536-539 remain eligible.
+- The prior atomic replacement failure occurred while Endurance-owned Test Current still held the selected RES open. Publication now stops and waits for that owned process before reading or replacing the archive.
+
+Built component SHA-256:
+- EIMapperEndurance.exe: BDC48522FABB4519708E5655DA8D49D17EF585760CC5D0BF47E2263E7DA67A65
+- EIMapperEnduranceJmvBridge.plg: BF9105CE2EC8B317F1CADE8449DC44E131BF61A3F6D01EE17525BD88316D31C2
+- EIMapperEnduranceRuntimeHost.exe: 0FEB4D8CA75C3DC302D37B29400C2F7A8AC61A565260A29A3EF309378B153552

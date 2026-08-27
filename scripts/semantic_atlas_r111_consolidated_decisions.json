@@ -1,0 +1,67 @@
+{
+  "schema": "ei-semantic-atlas-r111-consolidated-decisions-v1",
+  "sourceCatalogSha256": "23C0C830CA04B83FD2143809816CD1C5B58F33F004F2ECBCCA64F1AFA89BA268",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "newFamilies": {
+    "bz15h": [{
+      "id": 6,
+      "name": "Ground / Tan",
+      "templateFamily": "Ground / Topsoil",
+      "sourceFamily": "reviewed/ground/tan",
+      "thumbnailSlot": 248,
+      "uniformSlots": [],
+      "memberSlots": [248]
+    }],
+    "Zone17": [{
+      "id": 6,
+      "name": "Ground / Tan",
+      "templateFamily": "Ground / Topsoil",
+      "sourceFamily": "reviewed/ground/tan",
+      "thumbnailSlot": 248,
+      "uniformSlots": [],
+      "memberSlots": [248]
+    }]
+  },
+  "cornerCorrections": {
+    "bz15h": {
+      "248": {"NW": "Ground / Tan"}
+    },
+    "Zone17": {
+      "248": {"NW": "Ground / Tan"}
+    },
+    "bz16h": {
+      "480": {"NW": "Ground / Red"}
+    }
+  },
+  "confirmedMappings": [
+    {
+      "key": "r111-zone6_2-slot59",
+      "namespace": "Zone6_2",
+      "slot": 59,
+      "mapping": ["Stone / Lime", "Stone / Lime", "Stone / Lime", "Snow / Dark"]
+    },
+    {
+      "key": "r111-basegipat-slot125",
+      "namespace": "BaseGipat",
+      "slot": 125,
+      "mapping": ["Ground / Water", "Grass / Common", "Grass / Common", "Stone / Gray"]
+    }
+  ],
+  "auditEvidence": {
+    "artifact": "artifacts/semantic-atlas-r111-resolution/audit/slot248-ground-split.json",
+    "method": "complete quadrant against every current uniform variant and all quarter-turn rotations",
+    "calibratedConfidence": false,
+    "result": "Ground / Plant soil led Ground / Tan for NW and NE in both HD targets and the shared original; the explicit user decision still assigns NW to Ground / Tan.",
+    "northWestSeparation": {
+      "bz15hHdRunnerUpRatio": 1.42,
+      "zone17HdRunnerUpRatio": 1.22,
+      "sharedOriginalRunnerUpRatio": 1.07
+    }
+  },
+  "counts": {
+    "submittedCards": 4,
+    "changedCorners": 3,
+    "confirmedUnchangedCards": 2,
+    "remainingUnresolvedCards": 0
+  }
+}

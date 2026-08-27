@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "loaded_map_panel_policy.h"
 #include "ui_main_window.h"
 
 #include <QWidget>
@@ -17,6 +18,7 @@
 #include <QApplication>
 #include <QStatusBar>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QMouseEvent>
 #include <QDockWidget>
 #include <QToolBar>
@@ -105,14 +107,21 @@
 #include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
+#include "terrain_save_flow_policy.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
+#include "database_editor_dialog.h"
+#include "item_spell_constructor_dialog.h"
+#include "database_document.h"
 #include "minimap_export_dialog.h"
 #include "viewport_minimap_widget.h"
 #include "mmp_codec.h"
 #include "mmp_inspector.h"
 #include "script_reference_analyzer.h"
 #include "unit.h"
+#include "resource_browser.h"
+#include "resource_name.h"
+#include "view.h"
 
 namespace
 {
@@ -120,6 +129,8 @@ constexpr int kValidationPathRole = Qt::UserRole;
 constexpr int kValidationCopyRole = Qt::UserRole + 1;
 constexpr int kValidationNidRole = Qt::UserRole + 2;
 constexpr int kValidationSectionRole = Qt::UserRole + 3;
+constexpr int kValidationDatabaseTableRole = Qt::UserRole + 4;
+constexpr int kValidationDatabaseRowRole = Qt::UserRole + 5;
 constexpr int kLoadedMapKindRole = Qt::UserRole + 20;
 constexpr int kLoadedMapPathRole = Qt::UserRole + 21;
 constexpr int kLoadedMapMpr = 1;
@@ -225,6 +236,30 @@ QString localizedMobFamilyText(const QString& english)
     }
     return english;
 }
+
+class CDatabaseHistoryCommand final : public QUndoCommand
+{
+public:
+    CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
+                            ei::DatabaseEditorDialog* dialog, CView* view,
+                            const QString& description,const QString& tableKey,
+                            const QString& rowKey,bool affectsVisuals)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey),m_affectsVisuals(affectsVisuals) {}
+    void undo() override { if(m_document->undo()) refresh(); }
+    void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
+private:
+    void refresh()
+    {
+        if(m_dialog)m_dialog->refreshFromHistory();else{QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);}
+        if(m_view&&m_affectsVisuals)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
+    }
+    QSharedPointer<ei::DatabaseDocument> m_document;
+    QPointer<ei::DatabaseEditorDialog> m_dialog;
+    QPointer<CView> m_view;
+    QString m_tableKey,m_rowKey;
+    bool m_affectsVisuals{true};
+    bool m_initialRedo{true};
+};
 
 class CElidedPathLabel final : public QLabel
 {
@@ -396,33 +431,6 @@ private:
     bool m_overlayTapered{false};
 };
 
-QIcon entranceVisibilityIcon(bool visible, const QColor& color)
-{
-    QPixmap pixmap(24, 24);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 1.8, Qt::SolidLine,
-                        Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-
-    QPainterPath eye;
-    eye.moveTo(2.5, 12.0);
-    eye.cubicTo(7.0, 4.3, 17.0, 4.3, 21.5, 12.0);
-    eye.cubicTo(17.0, 19.7, 7.0, 19.7, 2.5, 12.0);
-    painter.drawPath(eye);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(12.0, 12.0), 3.0, 3.0);
-    if(!visible)
-    {
-        painter.setBrush(Qt::NoBrush);
-        painter.setPen(QPen(color, 2.2, Qt::SolidLine,
-                            Qt::RoundCap, Qt::RoundJoin));
-        painter.drawLine(QPointF(4.0, 20.0), QPointF(20.0, 4.0));
-    }
-    return QIcon(pixmap);
-}
-
 QIcon behaviorModeIcon(bool active, const QColor& foreground)
 {
     QPixmap pixmap(28, 28);
@@ -453,19 +461,6 @@ QIcon behaviorModeIcon(bool active, const QColor& foreground)
         painter.drawLine(inner, outer);
     }
     return QIcon(pixmap);
-}
-
-void updateEntranceVisibilityButtonAppearance(QToolButton* button, bool visible)
-{
-    if(!button)
-        return;
-    button->setIcon(entranceVisibilityIcon(visible,
-        button->palette().color(QPalette::ButtonText)));
-    button->setToolTip(visible
-        ? QObject::tr("Hide map.txt entrance areas and labels in the viewport.")
-        : QObject::tr("Show map.txt entrance areas and labels in the viewport."));
-    button->setAccessibleName(visible
-        ? QObject::tr("Hide entrances") : QObject::tr("Show entrances"));
 }
 
 QRect preferredDialogScreenGeometry(const QWidget* owner)
@@ -560,6 +555,147 @@ void MainWindow::on_toolButton_2_clicked()
     ei::log(eLogDebug, "btn test end");
 }
 
+void MainWindow::showItemSpellConstructor(const QString& initialCode)
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    QString diagnostic;
+    if(!m_databaseDocument || !snapshot
+       || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
+        m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+    if(!m_databaseDocument)
+    {
+        QMessageBox::warning(this, tr("Item / Spell Constructor"),
+            tr("The active profile database cannot be opened.\n\n%1").arg(diagnostic));
+        return;
+    }
+    const QString source = QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath();
+    if(m_itemSpellConstructorDialog
+       && m_itemSpellConstructorDialog->property("databaseSource").toString().compare(
+              source, Qt::CaseInsensitive) != 0)
+    {
+        delete m_itemSpellConstructorDialog;
+        m_itemSpellConstructorDialog = nullptr;
+    }
+    if(!m_itemSpellConstructorDialog)
+    {
+        QStringList roots;
+        if(COptStringList* option = dynamic_cast<COptStringList*>(
+               m_settings->opt(eOptSetResource, "resourceRoots")))
+            for(const QString& root : option->value()) roots << root;
+        m_itemSpellConstructorDialog = new ei::ItemSpellConstructorDialog(
+            m_databaseDocument, roots, m_pView, nullptr);
+        m_itemSpellConstructorDialog->setProperty("databaseSource", source);
+    }
+    if(!initialCode.trimmed().isEmpty()) m_itemSpellConstructorDialog->setCode(initialCode);
+    m_itemSpellConstructorDialog->show();
+    m_itemSpellConstructorDialog->raise();
+    m_itemSpellConstructorDialog->activateWindow();
+}
+
+void MainWindow::showDatabaseEditor(const QString& prototype)
+{
+    ei::log(eLogInfo, QString("Database editor navigation requested for prototype '%1'")
+                        .arg(prototype));
+    if(qApp->property("enduranceDatabasePrototypeNavigationProbe").toBool())
+    {
+        qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", prototype);
+        return;
+    }
+    if(!m_databaseEditorDialog)
+    {
+        const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+        QString diagnostic;
+        if(!m_databaseDocument || !snapshot
+           || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath()
+                .compare(QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(),
+                         Qt::CaseInsensitive) != 0)
+            m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+        if(!m_databaseDocument)
+        {
+            QMessageBox::warning(this, tr("Database Editor"),
+                tr("The active profile database cannot be opened for authoring.\n\n%1")
+                    .arg(diagnostic));
+            return;
+        }
+
+        m_databaseEditorDialog = new ei::DatabaseEditorDialog(m_databaseDocument, this);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::transactionCommitted,
+                this, [this](const QString& description, const QString& tableKey,
+                             const QString& rowKey)
+        {
+            const QVector<ei::SDatabaseChange> changes=m_databaseDocument->changes();
+            const QString fieldKey=changes.isEmpty()?QString():changes.last().fieldKey;
+            const bool affectsVisuals=fieldKey.isEmpty()||!fieldKey.startsWith(QStringLiteral("jmv."));
+            m_undoStack->push(new CDatabaseHistoryCommand(
+                m_databaseDocument, m_databaseEditorDialog, m_pView,
+                description, tableKey, rowKey, affectsVisuals));
+            if(affectsVisuals)m_pView->refreshDatabaseVisuals(tableKey, rowKey);
+        });
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
+                m_undoStack, &QUndoStack::undo);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::redoRequested,
+                m_undoStack, &QUndoStack::redo);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
+                this, &MainWindow::showItemSpellConstructor);
+        connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
+                this, [this](const QString& reference)
+        {
+            ei::revealDockNavigationTarget(this, m_resourceBrowserDock,
+                                           m_databaseEditorDialog);
+            // Yield once so the browser becomes visible before catalog lookup
+            // and row selection. Asset decoding already runs asynchronously.
+            QTimer::singleShot(0,this,[this,reference]()
+            {
+                const bool selected=m_resourceBrowser->selectResourceReference(reference);
+                ei::log(selected ? eLogInfo : eLogWarning,
+                        QString("Database resource navigation reference:'%1' accepted:%2")
+                            .arg(reference).arg(selected ? 1 : 0));
+                if(!selected)
+                    QMessageBox::information(this,tr("Resource not found"),
+                        tr("No active-profile resource matches '%1'.").arg(reference));
+            });
+        });
+    }
+
+    m_databaseEditorDialog->show();
+    m_databaseEditorDialog->raise();
+    m_databaseEditorDialog->activateWindow();
+    if(!prototype.trimmed().isEmpty()
+       && !m_databaseEditorDialog->selectPrototype(prototype))
+    {
+        QMessageBox::warning(m_databaseEditorDialog, tr("Prototype not found"),
+            tr("The active profile database does not contain monster prototype '%1'.")
+                .arg(prototype));
+    }
+}
+
+void MainWindow::openDatabaseArchiveFromBrowser(const QString& archivePath)
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    if(!snapshot || snapshot->sourceArchivePath.trimmed().isEmpty())
+    {
+        QMessageBox::warning(this, tr("Database Editor"),
+            tr("No active profile database is available. Configure the game/mod profile first."));
+        return;
+    }
+
+    const QFileInfo requested(archivePath);
+    const QFileInfo active(snapshot->sourceArchivePath);
+    const bool primary = requested.absoluteFilePath().compare(
+        active.absoluteFilePath(), Qt::CaseInsensitive) == 0;
+    if(!primary)
+    {
+        QMessageBox::information(this, tr("External database archive"),
+            tr("The integrated Database Editor authors the active profile's database.res bundle. "
+               "This archive is not that active database.\n\n"
+               "Switch the active game/mod profile to this database, or open Database Editor and "
+               "use Import > Import database.res to bring it into the active document."));
+        return;
+    }
+    showDatabaseEditor();
+}
+
 MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
     m_ui(new Ui::MainWindow),
@@ -588,7 +724,6 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapTestLauncher(nullptr),
     m_closeAfterTestStop(false),
     m_entranceCombo(nullptr),
-    m_showEntrancesButton(nullptr),
     m_playFromHereButton(nullptr),
     m_gotoEntranceButton(nullptr),
     m_godmodeCheckBox(nullptr),
@@ -974,10 +1109,36 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuBar->insertMenu(m_ui->menuSettings->menuAction(), viewMenu);
     viewMenu->addAction(m_mapsDock->toggleViewAction());
     viewMenu->addAction(m_messageLogDock->toggleViewAction());
+    m_resourceBrowser = new CResourceBrowser(this);
+    m_resourceBrowserDock = new QDockWidget(tr("Resource Browser"), this);
+    m_resourceBrowserDock->setObjectName(QStringLiteral("resourceBrowserDock"));
+    m_resourceBrowserDock->setFeatures(QDockWidget::DockWidgetClosable |
+                                       QDockWidget::DockWidgetMovable |
+                                       QDockWidget::DockWidgetFloatable);
+    m_resourceBrowserDock->setWidget(m_resourceBrowser);
+    addDockWidget(Qt::BottomDockWidgetArea, m_resourceBrowserDock);
+    tabifyDockWidget(m_messageLogDock, m_resourceBrowserDock);
+    m_resourceBrowserDock->hide();
+    QAction* resourceBrowserAction = m_resourceBrowserDock->toggleViewAction();
+    resourceBrowserAction->setText(tr("Resource Browser"));
+    viewMenu->addAction(resourceBrowserAction);
+    connect(m_resourceBrowser, &CResourceBrowser::databaseEditorRequested,
+            this, [this](const QString& archivePath) {
+        openDatabaseArchiveFromBrowser(archivePath);
+    });
+    connect(m_resourceBrowser, &CResourceBrowser::activeResourcesPublished,
+            this, [this](const QString& archivePath) {
+        if(m_pView) m_pView->refreshAfterResourceSetup();
+        statusBar()->showMessage(tr("Reloaded resources after publishing %1")
+            .arg(QFileInfo(archivePath).fileName()), 8000);
+    });
     m_landscapeTools = new CLandscapeTools(this);
     m_landscapeToolsDock = new QDockWidget(tr("Landscape Tools"), this);
     m_landscapeToolsDock->setObjectName("landscapeToolsDock");
     m_landscapeToolsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_landscapeToolsDock->setMinimumWidth(260);
+    m_landscapeTools->setMinimumWidth(0);
+    m_landscapeTools->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     m_landscapeToolsDock->setFeatures(QDockWidget::DockWidgetClosable |
                                       QDockWidget::DockWidgetMovable |
                                       QDockWidget::DockWidgetFloatable);
@@ -1103,6 +1264,9 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* validateSelectedMobs = new QAction(tr("Validate Selected MOB Files..."), this);
     QAction* repairMobFamily = new QAction(tr("Review and Repair Object IDs..."), this);
     QAction* openMapCatalog = new QAction(tr("Map Catalog Editor..."), this);
+    QAction* openDatabaseEditor = new QAction(tr("Database Editor..."), this);
+    QAction* openItemSpellConstructor = new QAction(tr("Item / Spell Constructor..."), this);
+    openItemSpellConstructor->setObjectName(QStringLiteral("openItemSpellConstructorAction"));
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
@@ -1119,6 +1283,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(validateSelectedMobs);
     m_ui->menuTools->addAction(repairMobFamily);
     m_ui->menuTools->addAction(openMapCatalog);
+    m_ui->menuTools->addAction(openDatabaseEditor);
+    m_ui->menuTools->addAction(openItemSpellConstructor);
     m_ui->menuTools->addAction(generateMinimapAction);
     m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
@@ -1140,6 +1306,10 @@ MainWindow::MainWindow(QWidget* parent) :
         dialog.exec();
         processMapTableSaveReports(dialog.saveReports());
     });
+    connect(openDatabaseEditor, &QAction::triggered, this,
+            [this]() { showDatabaseEditor(); });
+    connect(openItemSpellConstructor, &QAction::triggered, this,
+            [this]() { showItemSpellConstructor(); });
     connect(generateMinimapAction, &QAction::triggered,
             this, &MainWindow::generateMinimap);
     connect(persistAiGraphAction, &QAction::triggered,
@@ -1284,7 +1454,27 @@ MainWindow::MainWindow(QWidget* parent) :
     if(firstRunSetup)
         showGameAndModSetup();
 
+    if(m_resourceBrowser)
+    {
+        QVector<QString> configured;
+        if(COptStringList* roots = dynamic_cast<COptStringList*>(
+                m_settings->opt(eOptSetResource, "resourceRoots")))
+            configured = roots->value();
+        if(configured.isEmpty())
+        {
+            for(QString optionName : {QStringLiteral("figPaths"), QStringLiteral("texPaths")})
+                if(COptStringList* paths = dynamic_cast<COptStringList*>(
+                        m_settings->opt(eOptSetResource, optionName)))
+                    configured.append(paths->value());
+        }
+        m_resourceBrowser->setActiveProfileSources(
+            ei::orderedResourceSources(configured), activeProfileDisplayName());
+    }
+
     m_undoStack = new QUndoStack(this);
+    connect(m_undoStack,&QUndoStack::indexChanged,this,[this](){
+        if(m_databaseDocument)scheduleMobFamilyValidation(180);
+    });
     int undoHistoryLimit = 512;
     if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
         undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
@@ -1337,21 +1527,110 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    const QMetaObject::Connection databasePrototypeNavigation = connect(
+        m_pView, &CView::openDatabasePrototypeRequested,
+        this, &MainWindow::showDatabaseEditor);
+    Q_ASSERT(databasePrototypeNavigation);
+    ei::log(databasePrototypeNavigation ? eLogInfo : eLogWarning,
+            QString("Database prototype MainWindow route connected=%1 view=%2")
+                .arg(bool(databasePrototypeNavigation))
+                .arg(reinterpret_cast<quintptr>(m_pView), 0, 16));
     m_mapTestLauncher = new CJmvMapTestLauncher(this);
+    connect(m_pView, &CView::terrainPublicationPreflightRequested,
+            this, [this](const QString& resourceArchivePath, bool* accepted)
+    {
+        if(!accepted)
+            return;
+        *accepted = true;
+        if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
+        {
+            QMessageBox prompt(QMessageBox::Warning,
+                tr("Test Current is using game resources"),
+                tr("The game process launched by Endurance is still running and may "
+                   "hold the selected resource archive open. Windows cannot "
+                   "atomically replace an archive while the game is using it.\n\n"
+                   "%1\n\nStop Test Current before publishing?")
+                    .arg(QDir::toNativeSeparators(resourceArchivePath)),
+                QMessageBox::NoButton, this);
+            QPushButton* stopAndContinue = prompt.addButton(
+                tr("Stop Test Current and continue"), QMessageBox::AcceptRole);
+            prompt.addButton(QMessageBox::Cancel);
+            prompt.exec();
+            if(prompt.clickedButton() != stopAndContinue)
+            {
+                *accepted = false;
+                return;
+            }
+
+            QProgressDialog stopping(
+                tr("Stopping Test Current and releasing game resources..."),
+                QString(), 0, 0, this);
+            stopping.setWindowTitle(tr("Preparing terrain publication"));
+            stopping.setCancelButton(nullptr);
+            stopping.setWindowModality(Qt::WindowModal);
+            stopping.setMinimumDuration(0);
+            stopping.show();
+            QEventLoop waitForStop;
+            QTimer timeout;
+            timeout.setSingleShot(true);
+            connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished,
+                    &waitForStop, &QEventLoop::quit);
+            connect(&timeout, &QTimer::timeout,
+                    &waitForStop, &QEventLoop::quit);
+            timeout.start(8000);
+            m_mapTestLauncher->stop();
+            if(m_mapTestLauncher->isRunning())
+                waitForStop.exec(QEventLoop::ExcludeUserInputEvents);
+            stopping.close();
+            if(m_mapTestLauncher->isRunning())
+            {
+                *accepted = false;
+                QMessageBox::critical(this, tr("Terrain publication paused"),
+                    tr("The Endurance-owned game process did not release its "
+                       "resources in time. Publication was not started. Stop the "
+                       "test process and retry."));
+                return;
+            }
+        }
+        if(m_resourceBrowser)
+            m_resourceBrowser->beginInternalPublication(resourceArchivePath);
+    });
+    connect(m_pView, &CView::terrainPublicationFinished,
+            this, [this](const QString& resourceArchivePath, bool committed)
+    {
+        if(m_resourceBrowser)
+            m_resourceBrowser->finishInternalPublication(
+                resourceArchivePath, committed);
+    });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
     {
         ei::log(eLogInfo, QString("JMV direct map test started run:%1 staged-map:%2").arg(runId, mapName));
-        statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
+        if(m_hotReloadProgress)
+        {
+            closeHotReloadProgress();
+            statusBar()->showMessage(tr(
+                "The owned JMV test process restarted with the changed terrain atlas and is loading the staged map."),
+                10000);
+        }
+        else
+            statusBar()->showMessage(tr("JMV direct map test is waiting for the normal menu lifecycle, then will load the staged map automatically."));
         updateMapTestAction();
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testFinished, this,
             [this](const QString& runId, int exitCode, const QString& cleanupMessage)
     {
-        closeHotReloadProgress();
+        const bool terrainAtlasRestart =
+            m_mapTestLauncher->isTerrainAtlasRestartPending();
+        if(!terrainAtlasRestart)
+            closeHotReloadProgress();
         ei::log(eLogInfo, QString("JMV test launch finished run:%1 exit:%2 cleanup:%3")
                 .arg(runId).arg(exitCode).arg(cleanupMessage));
-        statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
+        if(terrainAtlasRestart)
+            statusBar()->showMessage(tr(
+                "Terrain atlas changed; restarting the owned JMV test process with the new atlas..."));
+        else
+            statusBar()->showMessage(tr("JMV direct map test finished (exit code %1). Temporary files were cleaned up.").arg(exitCode), 8000);
         updateMapTestAction();
         if(m_closeAfterTestStop)
         {
@@ -1548,6 +1827,11 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::loadedMapStateChanged,
             this, &MainWindow::updateLoadedMapPanel);
+    connect(m_pView, &CView::mprSaveStateChanged, this, [this]()
+    {
+        preserveCustomSpawnAfterDocumentReplacement();
+        updateDocumentActionAvailability();
+    });
     connect(m_pView, &CView::updateMsg, this, [this](const QString& message)
     {
         statusBar()->showMessage(message, 5000);
@@ -1733,8 +2017,12 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_pView, &CView::hideLandscapeToolsSignal,
             this, &MainWindow::hideLandscapeTools);
-    const auto applyLandscapeVisibility = [this](bool visible)
+    const auto applyLandscapeVisibility = [this](bool visible,
+                                                 const QPointer<CView>& view,
+                                                 const QPointer<QDockWidget>& dock)
     {
+        if(!view)
+            return;
         if(m_landscapeToolsAction)
         {
             const QSignalBlocker blocker(m_landscapeToolsAction);
@@ -1760,22 +2048,24 @@ MainWindow::MainWindow(QWidget* parent) :
         {
             // Layer isolation belongs to Landscape Tools. Closing it restores
             // the ordinary viewport instead of leaving terrain hidden.
-            m_pView->setDrawLand(true);
-            m_pView->setDrawWater(true);
+            view->setDrawLand(true);
+            view->setDrawWater(true);
         }
-        m_pView->setLandscapeEditingEnabled(visible);
-        if(visible)
-            m_landscapeToolsDock->raise();
+        view->setLandscapeEditingEnabled(visible);
+        if(visible && dock)
+            dock->raise();
         // Like Maps and Collections, hiding Landscape Tools changes only
         // visibility. Qt retains its dock area, split, tab, and floating state.
     };
     connect(m_landscapeToolsDock, &QDockWidget::visibilityChanged, this,
             [this, applyLandscapeVisibility](bool visible)
     {
+        const QPointer<CView> view(m_pView);
+        const QPointer<QDockWidget> dock(m_landscapeToolsDock);
         const quint64 visibilityGeneration = ++m_landscapeVisibilityGeneration;
         if(visible)
         {
-            applyLandscapeVisibility(true);
+            applyLandscapeVisibility(true, view, dock);
             return;
         }
         // QDockWidget emits a transient hidden state while changing between
@@ -1783,13 +2073,13 @@ MainWindow::MainWindow(QWidget* parent) :
         // transition avoids both cancelling the active brush and re-entering
         // Qt's dock layout engine during that native-window move.
         QTimer::singleShot(0, this, [this, visibilityGeneration,
-                                    applyLandscapeVisibility]()
+                                    view, dock, applyLandscapeVisibility]()
         {
             if(visibilityGeneration != m_landscapeVisibilityGeneration
-               || !m_pView || !m_landscapeToolsDock
-               || m_landscapeToolsDock->isVisible())
+               || !view || !dock || dock->isVisible()
+               || m_pView != view || m_landscapeToolsDock != dock)
                 return;
-            applyLandscapeVisibility(false);
+            applyLandscapeVisibility(false, view, dock);
         });
     });
     connect(m_pView, &CView::selectionChanged,
@@ -1885,6 +2175,10 @@ MainWindow::MainWindow(QWidget* parent) :
 MainWindow::~MainWindow()
 {
     saveUiState();
+    delete m_itemSpellConstructorDialog;
+    m_itemSpellConstructorDialog=nullptr;
+    delete m_databaseEditorDialog;
+    m_databaseEditorDialog=nullptr;
     delete m_minimapExportDialog;
     m_minimapExportDialog = nullptr;
     if(m_pView && m_pView->prepareForApplicationShutdown())
@@ -2832,8 +3126,7 @@ void MainWindow::updateEntranceOverlays()
         return;
     QVector<QRectF> rectangles;
     QStringList labels;
-    const bool showEntrances = !m_showEntrancesButton
-        || m_showEntrancesButton->isChecked();
+    const bool showEntrances = !m_pView || m_pView->entranceOverlaysVisible();
     if(showEntrances)
     {
         for(const SMapTravelZone& entrance : m_validEntrances)
@@ -3062,6 +3355,58 @@ QString MainWindow::currentMapContextKey() const
         .toCaseFolded();
 }
 
+void MainWindow::preserveCustomSpawnAfterDocumentReplacement()
+{
+    if(!m_customSpawn.valid || !m_customSpawn.custom
+       || m_customSpawnContextKey.isEmpty() || !m_pView)
+        return;
+
+    const QString replacementContext = currentMapContextKey();
+    if(replacementContext == m_customSpawnContextKey)
+        return;
+
+    const int separator = m_customSpawnContextKey.lastIndexOf(QLatin1Char('|'));
+    const QString previousZone = separator >= 0
+        ? m_customSpawnContextKey.mid(separator + 1) : QString();
+    QVector3D projected = m_customSpawnPosition;
+    const bool terrainPointValid = CLandscape::getInstance()->isMprLoad()
+        && CLandscape::getInstance()->projectPt(projected);
+    if(!CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+           m_customSpawn, previousZone, m_mapTestEntry.zoneId,
+           terrainPointValid))
+    {
+        if(m_playFromHereButton && m_playFromHereButton->isChecked())
+            m_playFromHereButton->setChecked(false);
+        return;
+    }
+
+    m_customSpawn.position = QPointF(projected.x(), projected.y());
+    m_customSpawnPosition = projected;
+    m_customSpawnContextKey = replacementContext;
+    if(m_playFromHereButton && !m_playFromHereButton->isChecked())
+    {
+        const QSignalBlocker blocker(m_playFromHereButton);
+        m_playFromHereButton->setChecked(true);
+    }
+    m_pView->setTestSpawnMarker(projected, m_customSpawn.adjusted);
+    m_pView->setTestSpawnMarkerSelected(m_customSpawnSelected);
+    if(m_spawnPositionLabel)
+        m_spawnPositionLabel->setText(tr("Custom: %1, %2, %3%4")
+            .arg(projected.x(), 0, 'f', 2).arg(projected.y(), 0, 'f', 2)
+            .arg(projected.z(), 0, 'f', 2)
+            .arg(m_customSpawn.adjusted ? tr(" (adjusted)") : QString()));
+    updateCustomSpawnControls();
+    updateEntranceOverlays();
+    updateMapTestAction();
+    ei::log(eLogInfo, QStringLiteral(
+        "Play From Here preserved across MPR document replacement zone:%1 "
+        "position:%2,%3,%4")
+        .arg(m_mapTestEntry.zoneId)
+        .arg(projected.x(), 0, 'f', 3)
+        .arg(projected.y(), 0, 'f', 3)
+        .arg(projected.z(), 0, 'f', 3));
+}
+
 void MainWindow::moveCameraToActiveSpawn()
 {
     if(!m_pView)
@@ -3191,15 +3536,6 @@ void MainWindow::createViewportToolbars()
     m_entranceCombo->setMinimumContentsLength(28);
     m_entranceCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_entranceCombo->setToolTip(tr("Selects the map.txt entrance used to initialize the runtime session."));
-    m_showEntrancesButton = new QToolButton(testBar);
-    m_showEntrancesButton->setObjectName("showEntrancesButton");
-    m_showEntrancesButton->setCheckable(true);
-    m_showEntrancesButton->setAutoRaise(true);
-    m_showEntrancesButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_showEntrancesButton->setChecked(
-        QSettings().value("ui/showEntranceOverlays", true).toBool());
-    updateEntranceVisibilityButtonAppearance(m_showEntrancesButton,
-        m_showEntrancesButton->isChecked());
     m_playFromHereButton = new QToolButton(testBar);
     m_playFromHereButton->setText(tr("Play from Here"));
     m_playFromHereButton->setCheckable(true);
@@ -3218,7 +3554,6 @@ void MainWindow::createViewportToolbars()
     testLayout->addSpacing(8);
     testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
     testLayout->addWidget(m_entranceCombo, 1);
-    testLayout->addWidget(m_showEntrancesButton);
     testLayout->addWidget(m_gotoEntranceButton);
     testLayout->addWidget(m_playFromHereButton);
     testLayout->addWidget(m_spawnPositionLabel);
@@ -3371,12 +3706,8 @@ void MainWindow::createViewportToolbars()
         updateEntranceOverlays();
         updateMapTestAction();
     });
-    connect(m_showEntrancesButton, &QToolButton::toggled, this, [this](bool checked)
-    {
-        QSettings().setValue("ui/showEntranceOverlays", checked);
-        updateEntranceVisibilityButtonAppearance(m_showEntrancesButton, checked);
-        updateEntranceOverlays();
-    });
+    connect(m_pView, &CView::entranceOverlayVisibilityChanged,
+            this, [this](bool) { updateEntranceOverlays(); });
     connect(m_gotoEntranceButton, &QToolButton::clicked, this, [this]()
     {
         moveCameraToActiveSpawn();
@@ -3397,6 +3728,15 @@ void MainWindow::updateMapTestAction()
 {
     if(!m_mapTestAction || !m_stopMapTestAction)
         return;
+    if(m_mapTestLauncher && m_mapTestLauncher->isRestartPending())
+    {
+        m_mapTestAction->setText(tr("Restarting Test..."));
+        m_mapTestAction->setEnabled(false);
+        m_mapTestAction->setToolTip(tr(
+            "Stopping the previous Endurance-owned game process before launching the current database, JMV Lua, and map state."));
+        m_stopMapTestAction->setEnabled(false);
+        return;
+    }
     const SResourceProfileEvaluation profile = activeResourceProfile();
     const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
@@ -3724,8 +4064,13 @@ void MainWindow::launchCurrentMapTest()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QByteArray mprData;
+    QByteArray workingTerrainAtlasResource;
+    int workingTerrainAtlasPages = 0;
+    int workingTerrainAtlasSlots = 0;
     CValidationReport mprReport;
-    if(!m_pView->buildValidatedLandscapeCandidate(&mprData, &mprReport))
+    if(!m_pView->buildValidatedLandscapeCandidate(
+           &mprData, &mprReport, &workingTerrainAtlasResource,
+           &workingTerrainAtlasPages, &workingTerrainAtlasSlots))
     {
         QMessageBox::warning(this, tr("JMV test launch"),
             tr("The current MPR edits could not be staged safely:\n\n%1")
@@ -3840,7 +4185,84 @@ void MainWindow::launchCurrentMapTest()
     input.sourceMob = mob->filePath();
     input.mprData = mprData;
     input.mobData = mobData;
+    const QFileInfo terrainAtlasResource(terrainMapTestResourcePath(
+        m_pView->activeTerrainArchivePath(),
+        input.sourceMpr.absoluteFilePath()));
+    if(!workingTerrainAtlasResource.isEmpty())
+    {
+        if(terrainAtlasResource.isFile())
+            input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = workingTerrainAtlasResource;
+        input.expectedTerrainAtlasPages = workingTerrainAtlasPages;
+        input.expectedTerrainAtlasSlots = workingTerrainAtlasSlots;
+    }
+    else if(terrainAtlasResource.isFile())
+    {
+        QFile archive(terrainAtlasResource.absoluteFilePath());
+        CMprDocument stagedMpr;
+        CValidationReport stagedMprReport;
+        if(!archive.open(QIODevice::ReadOnly)
+           || !stagedMpr.loadBytes(mprData, input.sourceMpr.absoluteFilePath(),
+                                   &stagedMprReport))
+        {
+            QMessageBox::warning(this, tr("Map test launch"),
+                tr("The map-specific terrain atlas package could not be read or "
+                   "matched to the staged MPR. No game process was started."));
+            return;
+        }
+        input.sourceTerrainTextureResource = terrainAtlasResource;
+        input.terrainTextureResourceData = archive.readAll();
+        input.expectedTerrainAtlasPages = int(stagedMpr.mapInfo().textureCount);
+        input.expectedTerrainAtlasSlots = int(stagedMpr.mapInfo().tileCount);
+    }
     input.generatedAiGraphData = generatedAiGraphData;
+    const auto databaseSnapshot = ei::ProfileDatabaseContext::instance().current();
+    if(!databaseSnapshot || databaseSnapshot->sourceArchivePath.trimmed().isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active profile database cannot be resolved for runtime staging."));
+        return;
+    }
+    input.databaseSourcePath = databaseSnapshot->sourceArchivePath;
+    QString databaseDiagnostic;
+    if(m_databaseDocument
+       && QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
+              QFileInfo(input.databaseSourcePath).absoluteFilePath(),
+              Qt::CaseInsensitive) == 0)
+        input.databaseData = m_databaseDocument->buildArchive(&databaseDiagnostic);
+    else
+    {
+        QFile databaseFile(input.databaseSourcePath);
+        if(databaseFile.open(QIODevice::ReadOnly))
+            input.databaseData = databaseFile.readAll();
+        else
+            databaseDiagnostic = databaseFile.errorString();
+    }
+    if(input.databaseData.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Map test launch"),
+            tr("The active database could not be staged safely.\n\n%1")
+                .arg(databaseDiagnostic));
+        return;
+    }
+    if(isJmv)
+    {
+        input.tablesLuaSourcePath=m_databaseDocument?m_databaseDocument->sourceTablesLuaPath()
+            :databaseSnapshot->jmvUnitPerkSourcePath;
+        if(m_databaseDocument&&!input.tablesLuaSourcePath.isEmpty())
+            input.tablesLuaData=m_databaseDocument->buildTablesLua(&databaseDiagnostic);
+        else if(!input.tablesLuaSourcePath.isEmpty())
+        {
+            QFile luaFile(input.tablesLuaSourcePath);
+            if(luaFile.open(QIODevice::ReadOnly))input.tablesLuaData=luaFile.readAll();
+            else databaseDiagnostic=luaFile.errorString();
+        }
+        if(input.tablesLuaSourcePath.isEmpty()||input.tablesLuaData.isEmpty())
+        {
+            QMessageBox::critical(this,tr("Map test launch"),tr("The active JMV tables.lua could not be staged safely.\n\n%1").arg(databaseDiagnostic));
+            return;
+        }
+    }
     input.supplementalMobs = supplementalMobs;
     input.embeddedScript = mob->script();
     input.mapEntry = entry;
@@ -3894,16 +4316,48 @@ void MainWindow::launchCurrentMapTest()
             return;
         input.baseProbeLevel = levels.indexOf(selected) + 1;
     }
+    bool fullRestartRequested = false;
+    if(hotReloadRequested)
+    {
+        const QStringList startupChanges =
+            m_mapTestLauncher->startupResourceChanges(input);
+        if(!startupChanges.isEmpty())
+        {
+            progress->hide();
+            QMessageBox restartBox(
+                QMessageBox::Question,
+                tr("Restart Test Current Map"),
+                tr("The running game cannot safely apply pending %1 changes during a map hot reload. The database and JMV Lua state are initialized once when the game process starts.\n\nRestart the Endurance-owned test process and stage the current map, database, and Lua state together?")
+                    .arg(startupChanges.join(tr(" and "))),
+                QMessageBox::NoButton, this);
+            QPushButton* restartButton = restartBox.addButton(
+                tr("Restart Test"), QMessageBox::AcceptRole);
+            restartBox.addButton(QMessageBox::Cancel);
+            restartBox.exec();
+            if(restartBox.clickedButton() != restartButton)
+                return;
+            progress->show();
+            progress->setLabelText(tr("Stopping the current test before a fresh launch..."));
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            fullRestartRequested = true;
+        }
+    }
     QString error;
-    const bool accepted = hotReloadRequested
-        ? m_mapTestLauncher->hotReload(input, &error)
-        : m_mapTestLauncher->launch(input, &error);
+    const bool accepted = fullRestartRequested
+        ? m_mapTestLauncher->restart(input, &error)
+        : hotReloadRequested
+            ? m_mapTestLauncher->hotReload(input, &error)
+            : m_mapTestLauncher->launch(input, &error);
     if(!accepted)
     {
         ei::log(eLogWarning, QString("Map test %1 refused: %2")
-            .arg(hotReloadRequested ? "hot reload" : "launch", error));
+            .arg(fullRestartRequested ? "restart" : hotReloadRequested ? "hot reload" : "launch",
+                 error));
         QMessageBox::critical(this,
-            hotReloadRequested ? tr("Hot reload") : tr("Map test launch"), error);
+            fullRestartRequested ? tr("Restart Test Current Map")
+                                 : hotReloadRequested ? tr("Hot reload")
+                                                      : tr("Map test launch"),
+            error);
     }
     else
     {
@@ -3917,13 +4371,29 @@ void MainWindow::launchCurrentMapTest()
         }
         if(hotReloadRequested)
         {
+            if(fullRestartRequested)
+            {
+                progress->setValue(6);
+                statusBar()->showMessage(tr(
+                    "Stopping the current test; a fresh process will launch automatically with the current database and JMV Lua state."),
+                    8000);
+                updateMapTestAction();
+                return;
+            }
             // Keep this application-modal progress window alive until the bridge
             // commits or rejects the staged generation. The launcher focuses the
             // game only after hotReloadFinished, so editor input stays blocked.
             progress->setRange(0, 0);
-            progress->setLabelText(tr("Applying the staged map generation in the game..."));
+            progress->setLabelText(
+                m_mapTestLauncher->isTerrainAtlasRestartPending()
+                    ? tr("Restarting the owned game with the changed terrain atlas...")
+                    : tr("Applying the staged map generation in the game..."));
             m_hotReloadProgress = progress.take();
-            statusBar()->showMessage(tr("Hot reload queued on the verified JMV game thread."), 6000);
+            statusBar()->showMessage(
+                m_mapTestLauncher->isTerrainAtlasRestartPending()
+                    ? tr("Terrain atlas changed; the owned JMV test process is restarting safely.")
+                    : tr("Hot reload queued on the verified JMV game thread."),
+                6000);
         }
     }
     if(progress)
@@ -4880,13 +5350,21 @@ void MainWindow::updateMobFamilyValidationPanel()
     m_validationTree->clear();
     if(m_validationShowMore)
         m_validationShowMore->hide();
-    if(m_familyValidation.members.isEmpty())
+    const QVector<ei::SDatabaseValidationFinding> databaseFindings =
+        m_databaseDocument ? m_databaseDocument->validate()
+                           : QVector<ei::SDatabaseValidationFinding>();
+    if(m_familyValidation.members.isEmpty() && databaseFindings.isEmpty())
     {
         m_validationSummary->setText(tr("No active MOB family."));
         return;
     }
-    m_validationSummary->setText(localizedMobFamilyText(m_familyValidation.summary()));
-    QTreeWidgetItem* membersRoot = new QTreeWidgetItem(m_validationTree,
+    QString summary = m_familyValidation.members.isEmpty()
+        ? QString() : localizedMobFamilyText(m_familyValidation.summary());
+    if(!databaseFindings.isEmpty())summary+=tr("%1Database: %2 finding(s).")
+        .arg(summary.isEmpty()?QString():QStringLiteral("  ")).arg(databaseFindings.size());
+    m_validationSummary->setText(summary);
+    QTreeWidgetItem* membersRoot = nullptr;
+    if(!m_familyValidation.members.isEmpty())membersRoot = new QTreeWidgetItem(m_validationTree,
         QStringList() << tr("INFO") << tr("Family members")
                       << QString() << tr("%1 MOB(s)").arg(m_familyValidation.members.size()));
     for(const SMobFamilyMember& member : m_familyValidation.members)
@@ -5009,7 +5487,28 @@ void MainWindow::updateMobFamilyValidationPanel()
             .arg(m_familyValidation.findings.size() - visibleFindingCount));
         m_validationShowMore->show();
     }
-    membersRoot->setExpanded(true);
+    if(!databaseFindings.isEmpty())
+    {
+        auto* databaseRoot=new QTreeWidgetItem(m_validationTree,
+            QStringList()<<tr("INFO")<<tr("Database")<<QString()
+                         <<tr("%1 finding(s)").arg(databaseFindings.size()));
+        for(const ei::SDatabaseValidationFinding& finding:databaseFindings)
+        {
+            const bool error=finding.severity==ei::SDatabaseValidationFinding::Severity::Error;
+            const bool warning=finding.severity==ei::SDatabaseValidationFinding::Severity::Warning;
+            const QString severity=error?tr("CRITICAL"):(warning?tr("WARNING"):tr("INFO"));
+            auto* item=new QTreeWidgetItem(databaseRoot,
+                QStringList()<<severity<<finding.code<<finding.rowKey<<finding.message);
+            item->setForeground(0,QBrush(error?QColor(220,70,70):warning?QColor(230,160,45):QColor(130,160,190)));
+            item->setData(0,kValidationDatabaseTableRole,finding.tableKey);
+            item->setData(0,kValidationDatabaseRowRole,finding.rowKey);
+            item->setData(0,kValidationCopyRole,finding.message);
+            if(!finding.tableKey.isEmpty()&&!finding.rowKey.isEmpty())
+                item->setToolTip(1,tr("Double-click to open this row in the Database Editor."));
+        }
+        databaseRoot->setExpanded(true);
+    }
+    if(membersRoot)membersRoot->setExpanded(true);
     if(m_familyValidation.criticalCount() > 0 && m_validationDock)
         m_validationDock->show();
 }
@@ -5215,7 +5714,17 @@ QString MainWindow::validationWarningPreview(
 
 void MainWindow::selectValidationObject(QTreeWidgetItem* item)
 {
-    if(!item || !m_pView || !item->data(0, kValidationNidRole).isValid())
+    if(!item)return;
+    const QString databaseTable=item->data(0,kValidationDatabaseTableRole).toString();
+    const QString databaseRow=item->data(0,kValidationDatabaseRowRole).toString();
+    if(!databaseTable.isEmpty()&&!databaseRow.isEmpty())
+    {
+        showDatabaseEditor();
+        if(m_databaseEditorDialog&&!m_databaseEditorDialog->selectFinding(databaseTable,databaseRow))
+            statusBar()->showMessage(tr("The database finding's row is no longer available."),8000);
+        return;
+    }
+    if(!m_pView || !item->data(0, kValidationNidRole).isValid())
         return;
     const QString mobPath = item->data(0, kValidationPathRole).toString();
     const quint32 nid = item->data(0, kValidationNidRole).toUInt();
@@ -5908,19 +6417,38 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     progress.setValue(1);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     setWorkspaceIdentity("map", zoneId, zoneId, zoneId);
+    QElapsedTimer mapLoadTimer;
+    QElapsedTimer mapLoadPhase;
+    mapLoadTimer.start();
+    mapLoadPhase.start();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
+    mapLoadPhase.restart();
     m_pView->loadMob(mobFile);
+    const qint64 mobMs = mapLoadPhase.elapsed();
+    mapLoadPhase.restart();
     rememberRecentFile(QFileInfo(mprPath));
     rememberRecentFile(QFileInfo(mobPath));
+    const qint64 recentFilesMs = mapLoadPhase.elapsed();
     // The landscape title update can run before the matching MOB has finished
     // loading. Re-resolve the map identity from the completed pair so family
     // validation and hot reload cannot retain the previous map's primary MOB,
     // entrances, or custom-spawn context.
-    refreshMapTestContext();
+    mapLoadPhase.restart();
+    // The Maps browser already owns the current resource/map catalog. Opening
+    // one entry must only bind that snapshot, not rescan every configured RES
+    // and map root on the UI thread.
+    refreshMapTestContext(false, false);
+    const qint64 mapContextMs = mapLoadPhase.elapsed();
+    ei::log(eLogInfo, QString(
+        "Map workspace load phases zone:%1 landscapeMs:%2 mobMs:%3 "
+        "recentFilesMs:%4 mapContextMs:%5 totalMs:%6")
+        .arg(zoneId).arg(landscapeMs).arg(mobMs).arg(recentFilesMs)
+        .arg(mapContextMs).arg(mapLoadTimer.elapsed()));
     ei::log(eLogInfo, QString("Opened profile map zone:%1 mpr:%2 mob:%3")
         .arg(zoneId, mprPath, mobPath));
     progress.setValue(3);
@@ -5986,6 +6514,12 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
 }
 
 void MainWindow::updateLoadedMapPanel()
+{
+    scheduleLoadedMapPanelRefresh(this, &m_loadedMapPanelRefreshPending,
+        [this]() { rebuildLoadedMapPanel(); });
+}
+
+void MainWindow::rebuildLoadedMapPanel()
 {
     if(!m_loadedMapTree || !m_pView)
         return;
@@ -6063,6 +6597,18 @@ void MainWindow::updateLoadedMapPanel()
             QItemSelectionModel::ClearAndSelect);
     m_loadedMapTree->resizeColumnToContents(1);
     updateOperationAvailability();
+}
+
+void MainWindow::updateLoadedMapMprDirtyIndicator()
+{
+    if(!m_loadedMapTree || m_loadedMapTree->topLevelItemCount() < 1)
+        return;
+    QTreeWidgetItem* root = m_loadedMapTree->topLevelItem(0);
+    if(!root || root->data(0, kLoadedMapKindRole).toInt() != kLoadedMapMpr
+       || !CLandscape::getInstance()->isMprLoad())
+        return;
+    root->setText(0, CLandscape::getInstance()->filePath().fileName()
+                  + (CLandscape::getInstance()->isDirty() ? " *" : ""));
 }
 
 void MainWindow::updateOutlinerSelectionPath()
@@ -6173,7 +6719,31 @@ void MainWindow::updateDocumentActionAvailability()
     const bool hasActiveMob = m_pView && m_pView->hasActiveMob();
     const bool hasAnyMob = m_pView && !m_pView->mobs().isEmpty();
     const bool hasMpr = CLandscape::getInstance()->isMprLoad();
-    const bool dirtyMpr = hasMpr && CLandscape::getInstance()->isDirty();
+    const bool dirtyMpr = terrainMprSaveActionEnabled(
+        hasMpr, CLandscape::getInstance()->isDirty(),
+        m_pView && m_pView->hasPendingTerrainPublication());
+    const ETerrainMprSavePresentation savePresentation =
+        hasMpr && m_pView ? m_pView->terrainMprSavePresentation()
+                          : ETerrainMprSavePresentation::PlainMpr;
+    switch(savePresentation)
+    {
+    case ETerrainMprSavePresentation::EditableModernDraft:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR Draft"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize Draft MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PendingModernPublication:
+        m_ui->actionSave_landscape_MPR->setText(
+            tr("Finalize and Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(
+            tr("Finalize MPR As..."));
+        break;
+    case ETerrainMprSavePresentation::PlainMpr:
+    default:
+        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR"));
+        m_ui->actionSave_landscape_MPR_as->setText(tr("Save MPR As..."));
+        break;
+    }
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionNew_MPR->setEnabled(idle);
     m_ui->actionNew_MOB->setEnabled(idle);
@@ -6405,6 +6975,7 @@ void MainWindow::closeHotReloadProgress()
 
 bool MainWindow::isExitAllowed()
 {
+    if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
     if(m_pView)
         for(CMob* mob : m_pView->mobs())
@@ -6421,6 +6992,31 @@ bool MainWindow::isExitAllowed()
     else if(m_pView)
         m_pView->prepareDocumentTransition();
     return m_pView->onExit();
+}
+
+bool MainWindow::isDatabaseExitAllowed()
+{
+    if(!m_databaseDocument)return true;
+    QString diagnostic;
+    if(!m_databaseDocument->hasUnappliedChanges(&diagnostic))return true;
+    QMessageBox box(QMessageBox::Warning,tr("Unapplied database changes"),tr("The active database has unapplied changes. Apply them before deciding whether to save maps, so saved maps cannot reference database rows that were never published."),QMessageBox::NoButton,this);
+    QPushButton* apply=box.addButton(tr("Apply Database"),QMessageBox::AcceptRole);
+    QPushButton* discard=box.addButton(tr("Exit Without Applying"),QMessageBox::DestructiveRole);
+    QPushButton* cancel=box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(apply);box.setEscapeButton(cancel);box.exec();
+    if(box.clickedButton()==cancel)return false;
+    if(box.clickedButton()==discard)return true;
+    CBackupManager backups;const SBackupResult backup=backups.snapshotBeforeSave(QFileInfo(m_databaseDocument->sourceArchivePath()));
+    if(!backup.success&&!backup.skipped){QMessageBox::critical(this,tr("Database apply failed"),backup.error);return false;}
+    if(!m_databaseDocument->sourceTablesLuaPath().isEmpty())
+    {
+        const SBackupResult luaBackup=backups.snapshotBeforeSave(
+            QFileInfo(m_databaseDocument->sourceTablesLuaPath()));
+        if(!luaBackup.success&&!luaBackup.skipped)
+        {QMessageBox::critical(this,tr("Database apply failed"),luaBackup.error);return false;}
+    }
+    if(!m_databaseDocument->applyToSource(&diagnostic)){QMessageBox::critical(this,tr("Database apply failed"),diagnostic);return false;}
+    return true;
 }
 
 void MainWindow::closeAll()
@@ -7764,6 +8360,7 @@ void MainWindow::on_actionCreate_new_object_triggered()
 
 void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
 {
+    bool stateChanged = true;
     switch (type) {
         case eTitleTypeData::eTitleTypeDataActiveMob:
     {
@@ -7785,23 +8382,30 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     }
     case eTitleTypeData::eTitleTypeDataMprDirtyFlag:
     {
-        m_sWindowTitle.mprDirty = !data.isEmpty();
+        const bool dirty = !data.isEmpty();
+        stateChanged = m_sWindowTitle.mprDirty != dirty;
+        m_sWindowTitle.mprDirty = dirty;
         break;
     }
     case eTitleTypeData::eTitleTypeDataDirtyFlag:
     {
-        m_sWindowTitle.durty = !data.isEmpty();
+        const bool dirty = !data.isEmpty();
+        stateChanged = m_sWindowTitle.durty != dirty;
+        m_sWindowTitle.durty = dirty;
         break;
     }
     default:
         Q_ASSERT(false);
         break;
     }
+    if(!stateChanged)
+        return;
     rebuildWindowTitle();
     updateDocumentActionAvailability();
-    if(type == eTitleTypeData::eTitleTypeDataMpr
-       || type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+    if(type == eTitleTypeData::eTitleTypeDataMpr)
         updateLoadedMapPanel();
+    else if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
+        updateLoadedMapMprDirtyIndicator();
     updateMapTestAction();
     if(type == eTitleTypeData::eTitleTypeDataMpr)
         refreshMapTestContext();
@@ -7941,6 +8545,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // generic top-level sweep; no editor-owned diagnostic may outlive main.
     ei::closeFloatingDockHost(m_messageLogDock);
     ei::closeFloatingDockHost(m_validationDock);
+    ei::closeFloatingDockHost(m_resourceBrowserDock);
     ei::closeSecondaryWindows(this);
     // Remove the editor from the desktop before synchronous scene teardown.
     // Windows otherwise presents a still-visible window as unresponsive.
@@ -7973,6 +8578,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     ei::log(eLogInfo, "Shutdown live view deletion started");
+    ++m_landscapeVisibilityGeneration;
     m_pView->prepareForApplicationShutdown();
     delete m_pView;
     m_pView = nullptr;

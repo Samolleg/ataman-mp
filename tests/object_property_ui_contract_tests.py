@@ -73,6 +73,16 @@ def main() -> int:
         'm_aRowToolTip[eObjParam_SOUND_IS_MUSIC] = tr("Stored and preserved in the MOB. No confirmed runtime audio behavior uses this flag.");',
         "unconfirmed Music flag remains editable but is explained",
     )
+    require(
+        table_cpp,
+        'm_aRowToolTip[eObjParam_LIGHT_RADIUS] = "Distance affected by the light. Negative values do not darken the scene: the game uses the absolute value and marks the light unshadowed. In bright daylight, a weaker local light may have no visible effect.";',
+        "signed light radius is not described as subtractive lighting",
+    )
+    require(
+        table_cpp,
+        'm_aRowToolTip[eObjParam_TORCH_STRENGHT] = "Controls both the campfire particle scale and its light radius (power x 10). Use a positive value; negative values can disable the effect and do not create darkness.";',
+        "negative campfire power is not described as darkness",
+    )
     require(table_cpp, "m_magicTrapPropertyContext",
             "magic-trap-specific tooltip context")
     require(table_cpp, "m_lookPointPropertyContext",

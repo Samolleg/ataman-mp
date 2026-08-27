@@ -1,0 +1,2856 @@
+{
+  "schema": "ei-semantic-atlas-r157-decisions-v1",
+  "source": "scripts\\semantic_atlas_r157_user_answers.txt",
+  "sourceSha256": "D7F2FFD6F43EDC1F9C8DCD8BE62308EBF84FE37910AB27C2138500A16B665DD9",
+  "sourceAttachmentSha256": "3623B66B4F3F2B932927FD57630E7F0C2FDAF4088487F79859600F562AA1629B",
+  "queue": "artifacts\\semantic-atlas-r157-next-t4-review\\questionnaire\\r157-next-t4-queue.json",
+  "queueSha256": "99B7E52C5A67762082BF4AB46C7D88839455EA086EE70AC5D8E243299634CDB2",
+  "catalogInputSha256": "029C7C7C57CF258875E60414A74C0CDA5939F4420D9B0CE93E34A4B11578431F",
+  "counts": {
+    "submittedCards": 70,
+    "changedLogicalCorners": 1,
+    "ownerExpandedCorrections": 2,
+    "unchangedSubmittedCards": 69,
+    "explicitAuditRejectionCards": 70,
+    "rejectionOnlyCards": 69,
+    "changedDespiteRejectionNoteCards": 1,
+    "unresolvedFollowupCards": 0,
+    "unresolvedCorners": 0,
+    "acceptedAuditCorners": 0,
+    "rejectedKeepCurrentAuditCorners": 69,
+    "rejectedWithExplicitAlternativeCorners": 1,
+    "rejectedUnresolvedAuditCorners": 0,
+    "reReviewNonBrushAuditCorners": 0,
+    "explicitAlternativeAuditCorners": 0,
+    "totalReviewedAuditCorners": 70
+  },
+  "cornerCorrections": {
+    "bz13h": {
+      "384": {
+        "SW": "Sand / Gravel"
+      }
+    },
+    "Zone15": {
+      "384": {
+        "SW": "Sand / Gravel"
+      }
+    }
+  },
+  "unresolvedFollowups": [],
+  "nonBrushFamilyReReview": [],
+  "reviewedCards": [
+    {
+      "key": "semantic-atlas-pixels-ab94ad3e7e385ae1",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone10",
+          "slot": 53,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-ff16301d7ff87659",
+      "submittedMapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Ground / Plant soil",
+        "SE": "Ground / Plant soil",
+        "SW": "Ground / Plant soil"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Plant soil",
+          "proposed": "Ground / Tan",
+          "submitted": "Ground / Plant soil"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz16h",
+          "slot": 326,
+          "currentMapping": {
+            "NW": "Paving / Sand ruins",
+            "NE": "Ground / Plant soil",
+            "SE": "Ground / Plant soil",
+            "SW": "Ground / Plant soil"
+          }
+        },
+        {
+          "namespace": "Zone18",
+          "slot": 326,
+          "currentMapping": {
+            "NW": "Paving / Sand ruins",
+            "NE": "Ground / Plant soil",
+            "SE": "Ground / Plant soil",
+            "SW": "Ground / Plant soil"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-989755637255eef9",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone1",
+          "slot": 419,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-3ab266719cf58583",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone10",
+          "slot": 28,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-c26d77de748cb9ac",
+      "submittedMapping": {
+        "NW": "Slabs / Carved",
+        "NE": "Slabs / Carved",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone20",
+          "slot": 138,
+          "currentMapping": {
+            "NW": "Slabs / Carved",
+            "NE": "Slabs / Carved",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-346707e2dce32ebb",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Dark",
+        "SE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "zone9",
+          "slot": 191,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Dark",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-f0ea219f5dcce842",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 356,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-9af62de13652ab86",
+      "submittedMapping": {
+        "NW": "Sand / Dark pink",
+        "NE": "Ground / Gravel",
+        "SE": "Ground / Gravel",
+        "SW": "Ground / Gravel"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Gravel",
+          "proposed": "Ground / Common",
+          "submitted": "Ground / Gravel"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz5g",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Ground / Gravel",
+            "SE": "Ground / Gravel",
+            "SW": "Ground / Gravel"
+          }
+        },
+        {
+          "namespace": "bz6g",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Ground / Gravel",
+            "SE": "Ground / Gravel",
+            "SW": "Ground / Gravel"
+          }
+        },
+        {
+          "namespace": "Zone8",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Ground / Gravel",
+            "SE": "Ground / Gravel",
+            "SW": "Ground / Gravel"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-9767aaab6ad39a39",
+      "submittedMapping": {
+        "NW": "Slabs / Carved",
+        "NE": "Slabs / Carved",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone20",
+          "slot": 126,
+          "currentMapping": {
+            "NW": "Slabs / Carved",
+            "NE": "Slabs / Carved",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-8d6e98be82d913be",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Irregular",
+        "SE": "Grass / Irregular",
+        "SW": "Grass / Irregular"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 65,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Irregular",
+            "SE": "Grass / Irregular",
+            "SW": "Grass / Irregular"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 65,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Irregular",
+            "SE": "Grass / Irregular",
+            "SW": "Grass / Irregular"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-f8d6013d0ccf4bd1",
+      "submittedMapping": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Sand / Dark pink"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Dark pink",
+          "proposed": "Sand / Dark",
+          "submitted": "Sand / Dark pink"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "zone9",
+          "slot": 199,
+          "currentMapping": {
+            "NW": "Stone / Lime",
+            "NE": "Stone / Lime",
+            "SE": "Stone / Lime",
+            "SW": "Sand / Dark pink"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-1f6c8760591332b5",
+      "submittedMapping": {
+        "NW": "Slabs / Carved",
+        "NE": "Slabs / Carved",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone20",
+          "slot": 127,
+          "currentMapping": {
+            "NW": "Slabs / Carved",
+            "NE": "Slabs / Carved",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-504236262a8aac2b",
+      "submittedMapping": {
+        "NW": "Sand / Common grayish",
+        "NE": "Sand / Grass",
+        "SE": "Sand / Yellow",
+        "SW": "Sand / Yellow"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Grass",
+          "proposed": "Sand / Dark",
+          "submitted": "Sand / Grass"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone19",
+          "slot": 477,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Sand / Grass",
+            "SE": "Sand / Yellow",
+            "SW": "Sand / Yellow"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-8f075cc3bf265637",
+      "submittedMapping": {
+        "NW": "Slabs / Faces",
+        "NE": "Slabs / Faces",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 189,
+          "currentMapping": {
+            "NW": "Slabs / Faces",
+            "NE": "Slabs / Faces",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-13592c868fb17bfa",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 366,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-be160ebde699d7e1",
+      "submittedMapping": {
+        "NW": "Stone / Dark gray",
+        "NE": "Grass / Sparse dark",
+        "SE": "Slabs / Square",
+        "SW": "Slabs / Square"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone10",
+          "slot": 332,
+          "currentMapping": {
+            "NW": "Stone / Dark gray",
+            "NE": "Grass / Sparse dark",
+            "SE": "Slabs / Square",
+            "SW": "Slabs / Square"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-ab13c7acbac16395",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 254,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 254,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        },
+        {
+          "namespace": "Zone6_2",
+          "slot": 199,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-49efc043bddc074f",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Ground / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone1",
+          "slot": 185,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Ground / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-7dfe361b64fa87b8",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 20,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-cca727425662e446",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 21,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-4915439b364d72c9",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Dark",
+        "SE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 113,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Dark",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        },
+        {
+          "namespace": "Zone1",
+          "slot": 189,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Dark",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-8549d508ce91389c",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 18,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-eca9f7ebc5117984",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 423,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-861d1dc30d48dd16",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 22,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-318dbece957d4531",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Dark",
+        "SE": "Grass / Dark",
+        "SW": "Grass / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 266,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Dark",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 266,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Dark",
+            "SE": "Grass / Dark",
+            "SW": "Grass / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-02e3bb7bee2a229c",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 36,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-cd0ea325ee982ff9",
+      "submittedMapping": {
+        "NW": "Grass / Dark",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Ground / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz4g",
+          "slot": 432,
+          "currentMapping": {
+            "NW": "Grass / Dark",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Ground / Common"
+          }
+        },
+        {
+          "namespace": "Zone4",
+          "slot": 432,
+          "currentMapping": {
+            "NW": "Grass / Dark",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Ground / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-38fed28c835eac27",
+      "submittedMapping": {
+        "NW": "Grass / Sparse dark",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 133,
+          "currentMapping": {
+            "NW": "Grass / Sparse dark",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-3a9847d6112e6239",
+      "submittedMapping": {
+        "NW": "Grass / Sparse dark",
+        "NE": "Grass / Sparse dark",
+        "SE": "Stone / Dark gray",
+        "SW": "Slabs / Carved"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone10",
+          "slot": 286,
+          "currentMapping": {
+            "NW": "Grass / Sparse dark",
+            "NE": "Grass / Sparse dark",
+            "SE": "Stone / Dark gray",
+            "SW": "Slabs / Carved"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-d584c99f43500004",
+      "submittedMapping": {
+        "NW": "Sand / Dark pink",
+        "NE": "Grass / Swamp",
+        "SE": "Grass / Swamp",
+        "SW": "Grass / Swamp"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Dark pink",
+          "proposed": "Sand / Dark",
+          "submitted": "Sand / Dark pink"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz5g",
+          "slot": 482,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Grass / Swamp",
+            "SE": "Grass / Swamp",
+            "SW": "Grass / Swamp"
+          }
+        },
+        {
+          "namespace": "bz6g",
+          "slot": 482,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Grass / Swamp",
+            "SE": "Grass / Swamp",
+            "SW": "Grass / Swamp"
+          }
+        },
+        {
+          "namespace": "Zone8",
+          "slot": 482,
+          "currentMapping": {
+            "NW": "Sand / Dark pink",
+            "NE": "Grass / Swamp",
+            "SE": "Grass / Swamp",
+            "SW": "Grass / Swamp"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-6082f2041a98d20d",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 418,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-bf3b42b85ea74588",
+      "submittedMapping": {
+        "NW": "Ground / Common",
+        "NE": "Grass / Common",
+        "SE": "Grass / Common",
+        "SW": "Grass / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Common",
+          "proposed": "Ground / Gravel greenish",
+          "submitted": "Ground / Common"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "BaseGipat",
+          "slot": 422,
+          "currentMapping": {
+            "NW": "Ground / Common",
+            "NE": "Grass / Common",
+            "SE": "Grass / Common",
+            "SW": "Grass / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-e2e77de9c25ee845",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Greenish",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 19,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Greenish",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-1c69055ca6aa1a30",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 43,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-c9b14ef4a8fba4b4",
+      "submittedMapping": {
+        "NW": "Stone / Greenish",
+        "NE": "Stone / Greenish",
+        "SE": "Stone / Dark gray",
+        "SW": "Stone / Dark gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark gray",
+          "proposed": "Stone / Dark",
+          "submitted": "Stone / Dark gray"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Bz7g",
+          "slot": 40,
+          "currentMapping": {
+            "NW": "Stone / Greenish",
+            "NE": "Stone / Greenish",
+            "SE": "Stone / Dark gray",
+            "SW": "Stone / Dark gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-65821f5dd7f32bbb",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Snow / Common",
+        "SW": "Snow / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 417,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 417,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 417,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-548de2f7e7d2024c",
+      "submittedMapping": {
+        "NW": "Sand / Common grayish",
+        "NE": "Sand / Grass",
+        "SE": "Sand / Grass",
+        "SW": "Sand / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Common grayish"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz16h",
+          "slot": 435,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Sand / Grass",
+            "SE": "Sand / Grass",
+            "SW": "Sand / Dark"
+          }
+        },
+        {
+          "namespace": "Zone18",
+          "slot": 435,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Sand / Grass",
+            "SE": "Sand / Grass",
+            "SW": "Sand / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-df69e53d62df0062",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Stone / Gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Stone / Gray"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Stone / Gray"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 508,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Stone / Gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-8592862d9d347ec5",
+      "submittedMapping": {
+        "NW": "Stone / Gray",
+        "NE": "Stone / Gray",
+        "SE": "Sand / Common grayish",
+        "SW": "Sand / Common grayish"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Common grayish"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 460,
+          "currentMapping": {
+            "NW": "Stone / Gray",
+            "NE": "Stone / Gray",
+            "SE": "Sand / Common grayish",
+            "SW": "Sand / Common grayish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-8afb93f497f18e39",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Grass / Winter faded",
+        "SW": "Grass / Winter faded"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 249,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Grass / Winter faded",
+            "SW": "Grass / Winter faded"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 249,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Grass / Winter faded",
+            "SW": "Grass / Winter faded"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-450874a94339750b",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 379,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Ground / Light"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-d568ac94a879626e",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Snow / Common",
+        "SE": "Ground / Light",
+        "SW": "Grass / Winter faded"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 348,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Snow / Common",
+            "SE": "Ground / Light",
+            "SW": "Grass / Winter faded"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 348,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Snow / Common",
+            "SE": "Ground / Light",
+            "SW": "Grass / Winter faded"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 348,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Snow / Common",
+            "SE": "Ground / Light",
+            "SW": "Grass / Winter faded"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-813c66c458c5b3cd",
+      "submittedMapping": {
+        "NW": "Stone / Orange",
+        "NE": "Stone / Orange",
+        "SE": "Sand / Common grayish",
+        "SW": "Sand / Gravel"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": true,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-with-explicit-alternative",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Gravel"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz13h",
+          "slot": 384,
+          "currentMapping": {
+            "NW": "Stone / Orange",
+            "NE": "Stone / Orange",
+            "SE": "Sand / Common grayish",
+            "SW": "Sand / Common grayish"
+          }
+        },
+        {
+          "namespace": "Zone15",
+          "slot": 384,
+          "currentMapping": {
+            "NW": "Stone / Orange",
+            "NE": "Stone / Orange",
+            "SE": "Sand / Common grayish",
+            "SW": "Sand / Common grayish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-b484fcbf13339d94",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Stone / Gray",
+        "SW": "Stone / Gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 428,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-c333c4489b0c8ddc",
+      "submittedMapping": {
+        "NW": "Sand / Common grayish",
+        "NE": "Stone / Orange",
+        "SE": "Stone / Orange",
+        "SW": "Sand / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Common grayish"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz13h",
+          "slot": 388,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Stone / Orange",
+            "SE": "Stone / Orange",
+            "SW": "Sand / Dark"
+          }
+        },
+        {
+          "namespace": "Zone15",
+          "slot": 388,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Stone / Orange",
+            "SE": "Stone / Orange",
+            "SW": "Sand / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-9ac5db34e1fb316c",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Ground / Light"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 412,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Ground / Light"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-9553e94cb56b002f",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Grass / Winter faded",
+        "SE": "Grass / Winter faded",
+        "SW": "Grass / Winter faded"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Grass / Winter faded",
+          "proposed": "Rubble / Gray",
+          "submitted": "Grass / Winter faded"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 272,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Grass / Winter faded",
+            "SE": "Grass / Winter faded",
+            "SW": "Grass / Winter faded"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 272,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Grass / Winter faded",
+            "SE": "Grass / Winter faded",
+            "SW": "Grass / Winter faded"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-7e2a976251242831",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 218,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 218,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 218,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone13",
+          "slot": 155,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-b29df64090fe00c0",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 349,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-463c2ab74aac0327",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 208,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 208,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-eb0e5cab6bfb244b",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 464,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 464,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 464,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-a450b95de3089472",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Sand / Common grayish",
+        "SE": "Sand / Common grayish",
+        "SW": "Sand / Common grayish"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 372,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Sand / Common grayish",
+            "SE": "Sand / Common grayish",
+            "SW": "Sand / Common grayish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-6bf8db800bb67c98",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 134,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 134,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-7c3049dcbe07c92f",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Snow / Common",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Slabs / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 382,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 382,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 382,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Snow / Common",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-b805e329e7da373b",
+      "submittedMapping": {
+        "NW": "Sand / Common grayish",
+        "NE": "Rubble / Orange",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Common grayish"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz13h",
+          "slot": 359,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Rubble / Orange",
+            "SE": "Stone / Orange",
+            "SW": "Stone / Orange"
+          }
+        },
+        {
+          "namespace": "Zone15",
+          "slot": 359,
+          "currentMapping": {
+            "NW": "Sand / Common grayish",
+            "NE": "Rubble / Orange",
+            "SE": "Stone / Orange",
+            "SW": "Stone / Orange"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-1755a25f82f57e57",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Stone / Gray",
+        "SW": "Stone / Gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 322,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 322,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 322,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-d3f317e9966a03a6",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Dark"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 465,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 465,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 465,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Dark"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-9ee370e2746d5ff7",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 219,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 219,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 219,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone13",
+          "slot": 151,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-45efdbfa617329be",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 153,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-6cc81b5d73c0ba5e",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 222,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 222,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 222,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone13",
+          "slot": 156,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-5d69217880636e67",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 216,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 216,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 216,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-3e5b98f069522572",
+      "submittedMapping": {
+        "NW": "Ice / Common",
+        "NE": "Ice / Common",
+        "SE": "Stone / Dark",
+        "SW": "Ice / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Stone / Dark",
+          "proposed": "Slabs / Faces",
+          "submitted": "Stone / Dark"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz11k",
+          "slot": 328,
+          "currentMapping": {
+            "NW": "Ice / Common",
+            "NE": "Ice / Common",
+            "SE": "Stone / Dark",
+            "SW": "Ice / Common"
+          }
+        },
+        {
+          "namespace": "Zone14",
+          "slot": 328,
+          "currentMapping": {
+            "NW": "Ice / Common",
+            "NE": "Ice / Common",
+            "SE": "Stone / Dark",
+            "SW": "Ice / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-5466c7ac002e2bbf",
+      "submittedMapping": {
+        "NW": "Stone / Gray",
+        "NE": "Snow / Common",
+        "SE": "Ground / Light",
+        "SW": "Grass / Tundra"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 472,
+          "currentMapping": {
+            "NW": "Stone / Gray",
+            "NE": "Snow / Common",
+            "SE": "Ground / Light",
+            "SW": "Grass / Tundra"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-2f33c4f7975fdf69",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Sand / Common grayish"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 447,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Sand / Common grayish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-819cd20555556918",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Stone / Gray",
+        "SW": "Stone / Gray"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 175,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 175,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Stone / Gray",
+            "SW": "Stone / Gray"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-f4d6c441068d9466",
+      "submittedMapping": {
+        "NW": "Ground / Red",
+        "NE": "Sand / Common grayish",
+        "SE": "Stone / Orange",
+        "SW": "Stone / Orange"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Sand / Common grayish",
+          "proposed": "Paving / Sand ruins",
+          "submitted": "Sand / Common grayish"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz13h",
+          "slot": 353,
+          "currentMapping": {
+            "NW": "Ground / Red",
+            "NE": "Sand / Common grayish",
+            "SE": "Stone / Orange",
+            "SW": "Stone / Orange"
+          }
+        },
+        {
+          "namespace": "Zone15",
+          "slot": 353,
+          "currentMapping": {
+            "NW": "Ground / Red",
+            "NE": "Sand / Common grayish",
+            "SE": "Stone / Orange",
+            "SW": "Stone / Orange"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-e610eef6e710a44a",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Sand / Common grayish",
+        "SE": "Sand / Common grayish",
+        "SW": "Sand / Common grayish"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone13",
+          "slot": 371,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Sand / Common grayish",
+            "SE": "Sand / Common grayish",
+            "SW": "Sand / Common grayish"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-a4b914a435d882e1",
+      "submittedMapping": {
+        "NW": "Paving / Sand ruins",
+        "NE": "Paving / Sand ruins",
+        "SE": "Ground / Plant soil",
+        "SW": "Ground / Plant soil"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "SE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Plant soil",
+          "proposed": "Grass / Yellow lichen",
+          "submitted": "Ground / Plant soil"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "Zone18",
+          "slot": 268,
+          "currentMapping": {
+            "NW": "Paving / Sand ruins",
+            "NE": "Paving / Sand ruins",
+            "SE": "Ground / Plant soil",
+            "SW": "Ground / Plant soil"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-f547ef29caa3a5f7",
+      "submittedMapping": {
+        "NW": "Ground / Light",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Snow / Common"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NW": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz10k",
+          "slot": 135,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        },
+        {
+          "namespace": "Zone12",
+          "slot": 135,
+          "currentMapping": {
+            "NW": "Ground / Light",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Snow / Common"
+          }
+        }
+      ]
+    },
+    {
+      "key": "semantic-atlas-pixels-f9685896dca8437b",
+      "submittedMapping": {
+        "NW": "Snow / Common",
+        "NE": "Ground / Light",
+        "SE": "Ground / Light",
+        "SW": "Paving / Square"
+      },
+      "comment": "Audit recommendation rejected; keep current assignments.",
+      "explicitAuditRejection": true,
+      "changedDespiteRejectionNote": false,
+      "unresolvedCorners": [],
+      "auditCornerOutcomes": {
+        "NE": {
+          "outcome": "rejected-keep-current",
+          "current": "Ground / Light",
+          "proposed": "Paving / Square",
+          "submitted": "Ground / Light"
+        }
+      },
+      "locations": [
+        {
+          "namespace": "bz8k",
+          "slot": 473,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Paving / Square"
+          }
+        },
+        {
+          "namespace": "bz9k",
+          "slot": 473,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Paving / Square"
+          }
+        },
+        {
+          "namespace": "Zone11",
+          "slot": 473,
+          "currentMapping": {
+            "NW": "Snow / Common",
+            "NE": "Ground / Light",
+            "SE": "Ground / Light",
+            "SW": "Paving / Square"
+          }
+        }
+      ]
+    }
+  ],
+  "policy": "apply only concrete submitted dropdown/comment values changed from the queue-pinned current mapping; concrete values override stale comments; unchanged serialized corners are context unless the card explicitly rejects the audit, in which case the flagged audit outcome enters rejection memory; expand corrections only through queue-pinned exact approved-HD owners; any absent family or final brush-witness removal requires focused re-review",
+  "catalogOutputSha256": "2BEA83785D9CBA445485AF15891DFFEA59DF3FCA2443E81394AF80BDEC5A5A07",
+  "reviewRound": 157
+}

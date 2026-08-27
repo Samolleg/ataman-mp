@@ -1,0 +1,165 @@
+{
+  "schema": "ei-semantic-atlas-family-review-evidence-v1",
+  "batches": [
+    {
+      "id": "family-catalog-batch-2",
+      "reviewedThrough": "Zone7",
+      "status": "partially-verified-and-applied",
+      "instructions": "Use candidate comments as evidence only. Verify identities, exact connected corners, and visual consistency before changing presets.",
+      "verification": {
+        "checkpoint": "R49",
+        "catalogResult": "38 namespaces; 507 families; zero structural errors or warnings",
+        "applied": [
+          "Zone13 exact thumbnail corners except slot 63 SW; family 4 renamed Grass / Tundra",
+          "Zone20 family 5/6 thumbnail corners",
+          "Zone3Obr family 10 thumbnail NW",
+          "Zone5_1 family 5 renamed Stone / Underwater",
+          "Zone6 families 5/6 merged and exact family 7/11/18/19 thumbnail corners",
+          "Zone6_2 families 5/6 merged and verified family 7/14/22 thumbnail corners",
+          "Zone7 verified family 18/19/21/22/23 thumbnail corners and underwater/cracked names"
+        ],
+        "withheld": [
+          "Zone13 slot 63 SW: no authored-map vote and HD/original candidates disagree",
+          "Zone19 family 7 rename: descriptive vocabulary remains uncertain",
+          "Zone6_2 family 11 SW: cross-atlas snow identity needs a same-scale comparison",
+          "Zone6_2 slot 261 NE: proposed family 15 conflicts with authored-map and decoded-pixel evidence",
+          "Zone6_2 slot 394 SW: proposed family 8 conflicts with authored-map and decoded-pixel evidence",
+          "Zone7 slot 151 NW: proposed family 17 conflicts with authored-map continuity"
+        ]
+      },
+      "entries": [
+        {"namespace": "Zone13", "familyId": 4, "comment": "Ground / Trampled should be Grass / Tundra or similar.", "hypothesis": "rename"},
+        {"namespace": "Zone13", "familyId": 5, "comment": "SW is family 6.", "cornerClaims": {"SW": 6}},
+        {"namespace": "Zone13", "familyId": 9, "comment": "NE is family 3; south corners are family 4.", "cornerClaims": {"NE": 3, "SE": 4, "SW": 4}},
+        {"namespace": "Zone13", "familyId": 10, "comment": "NE is family 3; south corners are family 4.", "cornerClaims": {"NE": 3, "SE": 4, "SW": 4}},
+        {"namespace": "Zone13", "familyId": 12, "comment": "NW is family 3.", "cornerClaims": {"NW": 3}},
+        {"namespace": "Zone13", "familyId": 13, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone13", "familyId": 14, "comment": "NW is family 3.", "cornerClaims": {"NW": 3}},
+        {"namespace": "Zone13", "familyId": 15, "comment": "NE and SW are family 6; SE is family 1.", "cornerClaims": {"NE": 6, "SE": 1, "SW": 6}},
+        {"namespace": "Zone13", "familyId": 16, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone13", "familyId": 17, "comment": "SW is family 7.", "cornerClaims": {"SW": 7}},
+        {"namespace": "Zone19", "familyId": 7, "comment": "Rock / Lime looks like stone/sand ruins; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone20", "familyId": 5, "comment": "NW is family 2.", "cornerClaims": {"NW": 2}},
+        {"namespace": "Zone20", "familyId": 6, "comment": "SW is family 3; SE is family 2.", "cornerClaims": {"SE": 2, "SW": 3}},
+        {"namespace": "Zone3Obr", "familyId": 10, "comment": "NW is family 4.", "cornerClaims": {"NW": 4}},
+        {"namespace": "Zone5_1", "familyId": 5, "comment": "Stone / Wet may be Stone / Underwater; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone6", "familyId": 6, "comment": "Looks like the same family as family 5.", "hypothesis": "merge", "candidateFamilyId": 5},
+        {"namespace": "Zone6", "familyId": 7, "comment": "SW is family 5.", "cornerClaims": {"SW": 5}},
+        {"namespace": "Zone6", "familyId": 11, "comment": "NW is family 8.", "cornerClaims": {"NW": 8}},
+        {"namespace": "Zone6", "familyId": 18, "comment": "NW is family 8; NE is family 3.", "cornerClaims": {"NW": 8, "NE": 3}},
+        {"namespace": "Zone6", "familyId": 19, "comment": "NW and SE are family 1; SW is family 5.", "cornerClaims": {"NW": 1, "SE": 1, "SW": 5}},
+        {"namespace": "Zone6_2", "familyId": 6, "comment": "Looks like the same family as family 5.", "hypothesis": "merge", "candidateFamilyId": 5},
+        {"namespace": "Zone6_2", "familyId": 7, "comment": "SW is family 5.", "cornerClaims": {"SW": 5}},
+        {"namespace": "Zone6_2", "familyId": 11, "comment": "SW is the normal snow family seen in other atlases.", "hypothesis": "cross-atlas-identity"},
+        {"namespace": "Zone6_2", "familyId": 14, "comment": "NW is family 8.", "cornerClaims": {"NW": 8}},
+        {"namespace": "Zone6_2", "familyId": 19, "comment": "NE is family 15.", "cornerClaims": {"NE": 15}},
+        {"namespace": "Zone6_2", "familyId": 22, "comment": "SW is family 8; NE is family 3.", "cornerClaims": {"SW": 8, "NE": 3}},
+        {"namespace": "Zone7", "familyId": 1, "comment": "Rock / Wet should be Rock / Underwater Emerald; it has the same hue as family 5.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 4, "comment": "Sand / Wet should be Sand / Underwater; cross-check the prior review vocabulary.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 14, "comment": "Rock / Light looks like Ground / Cracked.", "hypothesis": "rename"},
+        {"namespace": "Zone7", "familyId": 16, "comment": "NW is family 17.", "cornerClaims": {"NW": 17}},
+        {"namespace": "Zone7", "familyId": 18, "comment": "NW is family 6.", "cornerClaims": {"NW": 6}},
+        {"namespace": "Zone7", "familyId": 19, "comment": "SE is family 10.", "cornerClaims": {"SE": 10}},
+        {"namespace": "Zone7", "familyId": 21, "comment": "NW is family 13.", "cornerClaims": {"NW": 13}},
+        {"namespace": "Zone7", "familyId": 22, "comment": "SW is family 17.", "cornerClaims": {"SW": 17}},
+        {"namespace": "Zone7", "familyId": 23, "comment": "NE is family 10.", "cornerClaims": {"NE": 10}}
+      ]
+    },
+    {
+      "id": "family-catalog-batch-3",
+      "reviewedThrough": "ZoneMainMenuNew",
+      "status": "approved-no-changes",
+      "instructions": "All seven ZoneMainMenuNew families were reviewed and accepted without corrections.",
+      "entries": []
+    },
+    {
+      "id": "focused-family-review-r49",
+      "status": "explicit-decisions-applied-ground-audit-pending",
+      "instructions": "Apply only the six explicit R49 decisions. Ground-family notes trigger evidence gathering and an R50 questionnaire, not automatic relabeling.",
+      "verification": {
+        "checkpoint": "R50",
+        "applied": [
+          "Zone13 slot 63 SW = Grass / Tundra",
+          "Zone6_2 slot 261 NE = Ground / Common",
+          "Zone6_2 slot 394 SW kept Stone / Lime",
+          "Zone7 slot 151 NW = Ground / Brown",
+          "Zone19 family 7 renamed Paving / Sand ruins",
+          "Zone6_2 slot 59 SW kept Snow / Dark",
+          "Zone13 transition-only Ground / Common thumbnail moved from the misleading 2+2 slot 164 to the lowest 3+1 representative, slot 289"
+        ],
+        "withheld": [
+          "Zone6_2 Ground / Light has only three corners and appears to split into Stone / Lime and Ground / Common",
+          "Zone6 contains the matching one-corner Ground / Light fragment",
+          "Zone7 Ground / Light has only one corner and appears to be Ground / Trampled",
+          "Zone7 Ground / Dirt remains mixed evidence across four tiles",
+          "Zone13 slot 164 NW/NE and the broader transition-only Ground / Common family need explicit corner review"
+        ]
+      },
+      "entries": [
+        {"namespace": "Zone13", "slot": 63, "corner": "SW", "decision": "Grass / Tundra"},
+        {"namespace": "Zone6_2", "slot": 261, "corner": "NE", "decision": "Ground / Common"},
+        {"namespace": "Zone6_2", "slot": 394, "corner": "SW", "decision": "Keep Stone / Lime"},
+        {"namespace": "Zone7", "slot": 151, "corner": "NW", "decision": "Ground / Brown"},
+        {"namespace": "Zone19", "familyId": 7, "decision": "Paving / Sand ruins"},
+        {"namespace": "Zone6_2", "slot": 59, "corner": "SW", "decision": "Snow / Dark"}
+      ]
+    },
+    {
+      "id": "focused-ground-review-r50",
+      "status": "explicit-decisions-applied",
+      "instructions": "Apply only the thirteen explicit R50 corner decisions. Do not propagate beyond the named positions.",
+      "verification": {
+        "checkpoint": "R51",
+        "applied": [
+          "Zone6_2 slot 401 NW/SE = Stone / Lime and slot 485 NE = Ground / Common",
+          "Zone6 slot 485 NE = Ground / Common",
+          "Zone7 slot 412 SW and slot 226 SW = Ground / Trampled",
+          "Zone7 slot 329 NW/SE and slot 335 SE = Ground / Brown",
+          "Zone7 slot 329 SW and slot 480 SW = Ground / Trampled",
+          "Zone13 slot 164 NW = Ground / Light and NE = Grass / Tundra"
+        ],
+        "structuralResult": [
+          "Zone6 and Zone6_2 Ground / Light are empty after their complete reviewed corner sets move",
+          "Zone7 Ground / Light and Ground / Dirt are empty after their complete reviewed corner sets move",
+          "No adjacent or visually similar corner was propagated"
+        ],
+        "newlyDetectedAfterRegeneration": [
+          "The original Zone13 atlas makes slot 61 SW pixel-identical to Ground / Light slots 7/8 despite its authored Paving / Square identity; the HD atlas does not reproduce the overlap, so R51 leaves it unchanged for visual review"
+        ]
+      },
+      "entries": [
+        {"namespace": "Zone6_2", "slot": 401, "corner": "NW", "decision": "Stone / Lime"},
+        {"namespace": "Zone6_2", "slot": 401, "corner": "SE", "decision": "Stone / Lime"},
+        {"namespace": "Zone6_2", "slot": 485, "corner": "NE", "decision": "Ground / Common"},
+        {"namespace": "Zone6", "slot": 485, "corner": "NE", "decision": "Ground / Common"},
+        {"namespace": "Zone7", "slot": 412, "corner": "SW", "decision": "Ground / Trampled"},
+        {"namespace": "Zone7", "slot": 226, "corner": "SW", "decision": "Ground / Trampled"},
+        {"namespace": "Zone7", "slot": 329, "corner": "NW", "decision": "Ground / Brown"},
+        {"namespace": "Zone7", "slot": 329, "corner": "SE", "decision": "Ground / Brown"},
+        {"namespace": "Zone7", "slot": 329, "corner": "SW", "decision": "Ground / Trampled"},
+        {"namespace": "Zone7", "slot": 335, "corner": "SE", "decision": "Ground / Brown"},
+        {"namespace": "Zone7", "slot": 480, "corner": "SW", "decision": "Ground / Trampled"},
+        {"namespace": "Zone13", "slot": 164, "corner": "NW", "decision": "Ground / Light"},
+        {"namespace": "Zone13", "slot": 164, "corner": "NE", "decision": "Grass / Tundra"}
+      ]
+    },
+    {
+      "id": "focused-overlap-review-r51",
+      "status": "explicit-keep-decision-recorded",
+      "instructions": "Keep the current authored identity at the one reviewed corner. Do not propagate its exact-pixel overlap to any connected corner.",
+      "verification": {
+        "checkpoint": "R52",
+        "applied": [
+          "Zone13 slot 61 SW remains Paving / Square"
+        ],
+        "structuralResult": [
+          "The preset signature is unchanged",
+          "No family identity, adjacent corner, or connected exact-pixel owner is changed"
+        ]
+      },
+      "entries": [
+        {"namespace": "Zone13", "slot": 61, "corner": "SW", "decision": "Keep Paving / Square"}
+      ]
+    }
+  ]
+}

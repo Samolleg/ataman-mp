@@ -6,11 +6,16 @@
 #include <QElapsedTimer>
 #include <QVector2D>
 #include <QtConcurrent/QtConcurrentRun>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLExtraFunctions>
+#include <QOpenGLTextureBlitter>
 
 #include "landscape.h"
 #include "map_object_placement_policy.h"
 
 #include <cmath>
+#include <cstring>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
@@ -23,6 +28,8 @@
 #include "log.h"
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
+#include "terrain_virtual_atlas.h"
+#include "terrain_atlas_shape_policy.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -36,6 +43,10 @@ CLandscape* CLandscape::getInstance()
 void CLandscape::unloadMpr()
 {
     m_canonicalTerrain = nullptr;
+    clearPreviewTerrainAtlas();
+    m_baseAtlasTexture = nullptr;
+    m_baseAtlasColumns = 1;
+    m_texture = nullptr;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -46,6 +57,7 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_renderTextureCount = 1;
+    m_renderAtlasColumns = 1;
     m_bDirty = false;
     delete m_terrainShadowTexture;
     m_terrainShadowTexture = nullptr;
@@ -61,6 +73,7 @@ void CLandscape::unloadMpr()
 }
 
 CLandscape::CLandscape():
+  m_texture(nullptr),
   m_bDirty(false),
   m_materialDrawDataDirty(false),
   m_canonicalTerrain(nullptr)
@@ -69,6 +82,446 @@ CLandscape::CLandscape():
     m_aAnimTile.clear();
     m_aMaterial.clear();
     m_aTileTypes.clear();
+}
+
+bool CLandscape::previewTerrainAtlasFullUpload(
+    const QVector<QImage>& tileImages, int textureCount, int columns, int rows)
+{
+    const QImage combined = CTerrainVirtualAtlas::composeAtlasGrid(
+        tileImages, textureCount, columns);
+    if(combined.isNull())
+        return false;
+    QOpenGLTexture* replacement = new QOpenGLTexture(
+        combined, QOpenGLTexture::GenerateMipMaps);
+    if(!replacement->isCreated())
+    {
+        delete replacement;
+        return false;
+    }
+    replacement->setMinificationFilter(QOpenGLTexture::NearestMipMapLinear);
+    replacement->setMagnificationFilter(QOpenGLTexture::Nearest);
+    replacement->setWrapMode(QOpenGLTexture::Repeat);
+    if(m_previewAtlasTexture && m_previewAtlasTexture->isCreated())
+        m_previewAtlasTexture->destroy();
+    delete m_previewAtlasTexture;
+    m_previewAtlasTexture = replacement;
+    m_texture = replacement;
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas full upload: slots:%1 pages:%2 grid:%3x%4 dimensions:%5x%6")
+        .arg(tileImages.size()).arg(textureCount).arg(columns).arg(rows)
+        .arg(combined.width()).arg(combined.height()));
+    return true;
+}
+
+bool CLandscape::previewTerrainAtlasIncremental(
+    const QVector<QImage>& tileImages, int textureCount, int columns, int rows,
+    const QSet<int>& changedSlots,
+    const QVector<QImage>& rollbackTileImages)
+{
+    Q_UNUSED(rows)
+    if(!m_previewAtlasTexture || !m_previewAtlasTexture->isCreated()
+       || textureCount != m_previewAtlasTextureCount
+       || columns != m_previewAtlasColumns || changedSlots.isEmpty())
+        return false;
+    const int tileSize = tileImages.front().width();
+    const int pageSize = tileSize * 8;
+    for(int slot : changedSlots)
+        if(slot < 0 || slot >= tileImages.size()
+           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
+            return false;
+    // A same-layout publication updates the existing GL object. Keep a CPU
+    // snapshot for the touched slots so a driver-side upload error can restore
+    // the complete prior atlas before the transaction is rejected.
+    if(rollbackTileImages.size() != tileImages.size())
+        return false;
+    for(int slot : changedSlots)
+        if(rollbackTileImages.at(slot).size() != QSize(tileSize, tileSize))
+            return false;
+
+    QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
+    GLint priorActiveTexture = GL_TEXTURE0;
+    GLint priorTexture = 0;
+    GLint priorUnpackAlignment = 4;
+    gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &priorActiveTexture);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &priorTexture);
+    gl->glGetIntegerv(GL_UNPACK_ALIGNMENT, &priorUnpackAlignment);
+    while(gl->glGetError() != GL_NO_ERROR) {}
+
+    const GLuint previewTextureId = m_previewAtlasTexture->textureId();
+    gl->glBindTexture(GL_TEXTURE_2D, previewTextureId);
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    const auto uploadChangedSlots = [&](const QVector<QImage>& images) {
+        for(int slot : changedSlots)
+        {
+            const int page = slot / 64;
+            const int local = slot % 64;
+            const int x = (page % columns) * pageSize
+                + (local % 8) * tileSize;
+            const int y = (page / columns) * pageSize
+                + (7 - local / 8) * tileSize;
+            const QImage image = images.at(slot).format()
+                == QImage::Format_RGBA8888 ? images.at(slot)
+                : images.at(slot).convertToFormat(QImage::Format_RGBA8888);
+            gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y,
+                                tileSize, tileSize, GL_RGBA,
+                                GL_UNSIGNED_BYTE, image.constBits());
+        }
+        return gl->glGetError() == GL_NO_ERROR;
+    };
+
+    bool installed = uploadChangedSlots(tileImages);
+    if(installed)
+    {
+        gl->glGenerateMipmap(GL_TEXTURE_2D);
+        installed = gl->glGetError() == GL_NO_ERROR;
+    }
+    bool rollbackInstalled = true;
+    const auto rollbackChangedSlots = [&]() {
+        while(gl->glGetError() != GL_NO_ERROR) {}
+        bool restored = uploadChangedSlots(rollbackTileImages);
+        if(restored)
+        {
+            gl->glGenerateMipmap(GL_TEXTURE_2D);
+            restored = gl->glGetError() == GL_NO_ERROR;
+        }
+        return restored;
+    };
+    if(!installed)
+        rollbackInstalled = rollbackChangedSlots();
+
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, priorUnpackAlignment);
+    gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
+    gl->glActiveTexture(GLenum(priorActiveTexture));
+    if(!installed)
+    {
+        ei::log(rollbackInstalled ? eLogWarning : eLogFatal,
+            rollbackInstalled
+                ? "In-place terrain atlas upload failed; prior changed-slot pixels and mipmaps were restored"
+                : "In-place terrain atlas upload and rollback failed; renderer publication is inconsistent");
+        return false;
+    }
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas in-place upload: changedSlots:%1 pages:%2 grid:%3 texture:%4 framebufferTouched:false")
+        .arg(changedSlots.size()).arg(textureCount).arg(columns)
+        .arg(previewTextureId));
+    return true;
+}
+
+bool CLandscape::previewTerrainAtlasRegridCopy(
+    const QVector<QImage>& tileImages, int textureCount, int columns, int rows,
+    const QSet<int>& changedSlots)
+{
+    if(!m_baseAtlasTexture || !m_baseAtlasTexture->isCreated()
+       || m_previewAtlasTexture || changedSlots.isEmpty()
+       || int(m_header.nTexture) <= 0 || textureCount <= int(m_header.nTexture))
+        return false;
+    const int tileSize = tileImages.front().width();
+    const int pageSize = tileSize * 8;
+    const int width = columns * pageSize;
+    const int height = rows * pageSize;
+    if(m_baseAtlasTexture->width() != m_baseAtlasColumns * pageSize
+       || m_baseAtlasTexture->height()
+            != ((int(m_header.nTexture) + m_baseAtlasColumns - 1)
+                / m_baseAtlasColumns) * pageSize)
+        return false;
+    for(int slot : changedSlots)
+        if(slot < int(m_header.nTexture) * 64 || slot >= tileImages.size()
+           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
+            return false;
+
+    QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
+    QOpenGLExtraFunctions* glExtra =
+        QOpenGLContext::currentContext()->extraFunctions();
+    GLint priorFramebuffer = 0;
+    GLint priorReadBuffer = GL_BACK;
+    GLint priorActiveTexture = GL_TEXTURE0;
+    GLint priorTexture = 0;
+    GLint priorUnpackAlignment = 4;
+    GLfloat priorClearColor[4] = {0, 0, 0, 0};
+    GLboolean priorColorMask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+    GLint priorViewport[4] = {0, 0, 0, 0};
+    GLint priorProgram = 0;
+    GLint priorArrayBuffer = 0;
+    const GLboolean scissorEnabled = gl->glIsEnabled(GL_SCISSOR_TEST);
+    const GLboolean framebufferSrgbEnabled =
+        gl->glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    const GLboolean blendEnabled = gl->glIsEnabled(GL_BLEND);
+    const GLboolean depthEnabled = gl->glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean cullEnabled = gl->glIsEnabled(GL_CULL_FACE);
+    gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &priorFramebuffer);
+    gl->glGetIntegerv(GL_READ_BUFFER, &priorReadBuffer);
+    gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &priorActiveTexture);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &priorTexture);
+    gl->glGetIntegerv(GL_UNPACK_ALIGNMENT, &priorUnpackAlignment);
+    gl->glGetFloatv(GL_COLOR_CLEAR_VALUE, priorClearColor);
+    gl->glGetBooleanv(GL_COLOR_WRITEMASK, priorColorMask);
+    gl->glGetIntegerv(GL_VIEWPORT, priorViewport);
+    gl->glGetIntegerv(GL_CURRENT_PROGRAM, &priorProgram);
+    gl->glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &priorArrayBuffer);
+    while(gl->glGetError() != GL_NO_ERROR) {}
+
+    QOpenGLTexture* candidate = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    const int mipLevels = 1 + int(std::floor(std::log2(double(qMax(width, height)))));
+    if(!candidate->create())
+    {
+        delete candidate;
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, GLuint(priorFramebuffer));
+        gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
+        gl->glActiveTexture(GLenum(priorActiveTexture));
+        return false;
+    }
+    candidate->setSize(width, height);
+    candidate->setFormat(QOpenGLTexture::RGBA8_UNorm);
+    candidate->setMipLevels(mipLevels);
+    candidate->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+    candidate->setMinificationFilter(QOpenGLTexture::NearestMipMapLinear);
+    candidate->setMagnificationFilter(QOpenGLTexture::Nearest);
+    candidate->setWrapMode(QOpenGLTexture::Repeat);
+    GLuint framebuffer = 0;
+    gl->glGenFramebuffers(1, &framebuffer);
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, candidate->textureId(), 0);
+    bool copied = gl->glCheckFramebufferStatus(GL_FRAMEBUFFER)
+        == GL_FRAMEBUFFER_COMPLETE;
+    if(copied)
+    {
+        if(scissorEnabled) gl->glDisable(GL_SCISSOR_TEST);
+        if(framebufferSrgbEnabled) gl->glDisable(GL_FRAMEBUFFER_SRGB);
+        if(blendEnabled) gl->glDisable(GL_BLEND);
+        if(depthEnabled) gl->glDisable(GL_DEPTH_TEST);
+        if(cullEnabled) gl->glDisable(GL_CULL_FACE);
+        gl->glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gl->glViewport(0, 0, width, height);
+        gl->glClearColor(0, 0, 0, 0);
+        gl->glClear(GL_COLOR_BUFFER_BIT);
+        gl->glBindTexture(GL_TEXTURE_2D, candidate->textureId());
+        gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   m_baseAtlasTexture->textureId(), 0);
+        const bool baseFramebufferReadable =
+            gl->glCheckFramebufferStatus(GL_FRAMEBUFFER)
+                == GL_FRAMEBUFFER_COMPLETE;
+        if(baseFramebufferReadable)
+            glExtra->glReadBuffer(GL_COLOR_ATTACHMENT0);
+        if(baseFramebufferReadable)
+            for(int page = 0; page < int(m_header.nTexture); ++page)
+            {
+                const int sourceX = (page % m_baseAtlasColumns) * pageSize;
+                const int sourceY = (page / m_baseAtlasColumns) * pageSize;
+                const int destinationX = (page % columns) * pageSize;
+                const int destinationY = (page / columns) * pageSize;
+                gl->glCopyTexSubImage2D(GL_TEXTURE_2D, 0,
+                    destinationX, destinationY, sourceX, sourceY,
+                    pageSize, pageSize);
+            }
+        else
+        {
+            // Shipped terrain pages are DXT1. They are sampleable but the
+            // retained Windows context reports an incomplete attachment when
+            // used as an FBO color source. Render each authored page into the
+            // RGBA candidate instead; no authored QImage is recomposed/uploaded.
+            gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D, candidate->textureId(), 0);
+            copied = gl->glCheckFramebufferStatus(GL_FRAMEBUFFER)
+                == GL_FRAMEBUFFER_COMPLETE;
+            QOpenGLTextureBlitter blitter;
+            copied = copied && blitter.create();
+            if(copied)
+            {
+                blitter.bind();
+                const QSize sourceSize(m_baseAtlasTexture->width(),
+                                       m_baseAtlasTexture->height());
+                const QRect viewport(0, 0, width, height);
+                for(int page = 0; page < int(m_header.nTexture); ++page)
+                {
+                    const int sourceX =
+                        (page % m_baseAtlasColumns) * pageSize;
+                    const int sourceY =
+                        (page / m_baseAtlasColumns) * pageSize;
+                    const int destinationX = (page % columns) * pageSize;
+                    const int destinationY = (page / columns) * pageSize;
+                    const QRectF target(destinationX,
+                        height - destinationY - pageSize,
+                        pageSize, pageSize);
+                    const QRectF source(sourceX,
+                        sourceSize.height() - sourceY - pageSize,
+                        pageSize, pageSize);
+                    blitter.blit(m_baseAtlasTexture->textureId(),
+                        QOpenGLTextureBlitter::targetTransform(
+                            target, viewport),
+                        QOpenGLTextureBlitter::sourceTransform(
+                            source, sourceSize,
+                            QOpenGLTextureBlitter::OriginBottomLeft));
+                }
+                blitter.release();
+                copied = gl->glGetError() == GL_NO_ERROR;
+            }
+        }
+    }
+    if(copied)
+    {
+        gl->glBindTexture(GL_TEXTURE_2D, candidate->textureId());
+        gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        for(int slot : changedSlots)
+        {
+            const int page = slot / 64;
+            const int local = slot % 64;
+            const int x = (page % columns) * pageSize
+                + (local % 8) * tileSize;
+            const int y = (page / columns) * pageSize
+                + (7 - local / 8) * tileSize;
+            const QImage image = tileImages.at(slot).format()
+                == QImage::Format_RGBA8888 ? tileImages.at(slot)
+                : tileImages.at(slot).convertToFormat(QImage::Format_RGBA8888);
+            gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, tileSize, tileSize,
+                                GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
+        }
+        copied = gl->glGetError() == GL_NO_ERROR;
+    }
+    if(copied)
+    {
+        candidate->generateMipMaps();
+        copied = gl->glGetError() == GL_NO_ERROR;
+    }
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, priorUnpackAlignment);
+    gl->glClearColor(priorClearColor[0], priorClearColor[1],
+                     priorClearColor[2], priorClearColor[3]);
+    gl->glColorMask(priorColorMask[0], priorColorMask[1],
+                    priorColorMask[2], priorColorMask[3]);
+    gl->glViewport(priorViewport[0], priorViewport[1],
+                   priorViewport[2], priorViewport[3]);
+    gl->glUseProgram(GLuint(priorProgram));
+    gl->glBindBuffer(GL_ARRAY_BUFFER, GLuint(priorArrayBuffer));
+    if(scissorEnabled) gl->glEnable(GL_SCISSOR_TEST);
+    if(framebufferSrgbEnabled) gl->glEnable(GL_FRAMEBUFFER_SRGB);
+    if(blendEnabled) gl->glEnable(GL_BLEND);
+    if(depthEnabled) gl->glEnable(GL_DEPTH_TEST);
+    if(cullEnabled) gl->glEnable(GL_CULL_FACE);
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, GLuint(priorFramebuffer));
+    glExtra->glReadBuffer(GLenum(priorReadBuffer));
+    gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
+    gl->glActiveTexture(GLenum(priorActiveTexture));
+    gl->glDeleteFramebuffers(1, &framebuffer);
+    if(!copied)
+    {
+        candidate->destroy();
+        delete candidate;
+        ei::log(eLogWarning,
+            "Terrain base-atlas FBO regrid copy unsupported; using full CPU upload fallback");
+        return false;
+    }
+    m_previewAtlasTexture = candidate;
+    m_texture = candidate;
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas regrid copy: authoredPages:%1 changedSlots:%2 grid:%3x%4")
+        .arg(m_header.nTexture).arg(changedSlots.size()).arg(columns).arg(rows));
+    return true;
+}
+
+bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
+                                     int textureCount,
+                                     const QSet<int>& changedSlots,
+                                     const QVector<QImage>& rollbackTileImages)
+{
+    if(textureCount <= 0 || tileImages.size() != textureCount * 64
+       || !QOpenGLContext::currentContext())
+        return false;
+    const int tileSize = tileImages.front().width();
+    if(tileSize <= 0 || tileImages.front().height() != tileSize)
+        return false;
+    const int pageSize = tileSize * 8;
+    const int columns = CTile::preferredAtlasColumns(textureCount);
+    const int rows = (textureCount + columns - 1) / columns;
+    GLint maximumTextureSize = 0;
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(
+        GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+    if(pageSize * columns > maximumTextureSize
+       || pageSize * rows > maximumTextureSize)
+    {
+        ei::log(eLogWarning, QString(
+            "Working terrain atlas grid exceeds this GPU: pages:%1 grid:%2x%3 page:%4 max:%5")
+            .arg(textureCount).arg(columns).arg(rows).arg(pageSize)
+            .arg(maximumTextureSize));
+        return false;
+    }
+    QElapsedTimer uploadTimer;
+    uploadTimer.start();
+    QString route = QStringLiteral("full");
+    const bool stableLayout = m_previewAtlasTexture
+        && m_previewAtlasTexture->isCreated()
+        && textureCount == m_previewAtlasTextureCount
+        && columns == m_previewAtlasColumns && !changedSlots.isEmpty();
+    bool installed = false;
+    if(stableLayout)
+    {
+        installed = previewTerrainAtlasIncremental(
+            tileImages, textureCount, columns, rows, changedSlots,
+            rollbackTileImages);
+        if(!installed)
+            return false;
+        route = QStringLiteral("in-place");
+    }
+    else if(previewTerrainAtlasRegridCopy(
+                tileImages, textureCount, columns, rows, changedSlots))
+    {
+        installed = true;
+        route = QStringLiteral("regrid-copy");
+    }
+    if(!installed)
+        installed = previewTerrainAtlasFullUpload(
+            tileImages, textureCount, columns, rows);
+    if(!installed)
+        return false;
+    m_renderTextureCount = textureCount;
+    m_renderAtlasColumns = columns;
+    if(textureCount != m_previewAtlasTextureCount
+       || columns != m_previewAtlasColumns)
+    {
+        m_previewAtlasTextureCount = textureCount;
+        m_previewAtlasColumns = columns;
+        for(QVector<CSector*>& row : m_aSector)
+            for(CSector* sector : row)
+                if(sector) sector->setTerrainAtlasLayout(textureCount, columns);
+    }
+    ei::log(eLogInfo, QString(
+        "Working terrain atlas uploaded: route:%1 changedSlots:%2 slots:%3 pages:%4 grid:%5x%6 elapsedMs:%7")
+        .arg(route).arg(changedSlots.size()).arg(tileImages.size())
+        .arg(textureCount).arg(columns).arg(rows).arg(uploadTimer.elapsed()));
+    return true;
+}
+
+void CLandscape::clearPreviewTerrainAtlas()
+{
+    m_texture = m_baseAtlasTexture;
+    m_renderTextureCount = qMax(1, int(m_header.nTexture));
+    m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);
+    if(m_previewAtlasTextureCount > 0 && QOpenGLContext::currentContext())
+        for(QVector<CSector*>& row : m_aSector)
+            for(CSector* sector : row)
+                if(sector) sector->setTerrainAtlasLayout(
+                    int(m_header.nTexture), m_baseAtlasColumns);
+    m_previewAtlasTextureCount = 0;
+    m_previewAtlasColumns = 0;
+    if(!m_previewAtlasTexture)
+        return;
+    if(QOpenGLContext::currentContext())
+    {
+        if(m_previewAtlasTexture->isCreated())
+            m_previewAtlasTexture->destroy();
+        delete m_previewAtlasTexture;
+    }
+    else
+    {
+        // At process teardown the driver releases the texture with its
+        // context. Deleting Qt's wrapper after that context has vanished can
+        // dereference a dead QOpenGLContext; retain the tiny wrapper instead.
+        ei::log(eLogWarning,
+            "Working terrain atlas wrapper retained because no OpenGL context is current");
+    }
+    m_previewAtlasTexture = nullptr;
 }
 
 CLandscape::~CLandscape()
@@ -233,9 +686,14 @@ void CLandscape::readMap(const QFileInfo& path)
     ei::log(eLogInfo, QString("MPR namespace outer:%1 inner:%2 expectedTerrainAtlases:%3")
             .arg(path.baseName(), innerMapName).arg(m_header.nTexture));
     int texCount;
+    int atlasColumns = 1;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
-    m_texture = CTextureList::getInstance()->buildLandTex(innerMapName, int(m_header.nTexture), texCount);
+    m_texture = CTextureList::getInstance()->buildLandTex(
+        innerMapName, int(m_header.nTexture), texCount, atlasColumns);
     m_renderTextureCount = qMax(1, texCount);
+    m_baseAtlasTexture = m_texture;
+    m_baseAtlasColumns = atlasColumns;
+    m_renderAtlasColumns = qMax(1, atlasColumns);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
 
@@ -252,6 +710,7 @@ void CLandscape::readMap(const QFileInfo& path)
             util::formatStream(secStream);
             CSector* sector = new CSector(secStream, m_header.maxZ, texCount,
                                           &m_aMaterial, &m_aAnimTile);
+            sector->setTerrainAtlasLayout(texCount, atlasColumns);
             sector->setIndex(secIndex);
             xSec.append(sector);
             if(sector->existsTileIndices(m_arrIncorectTiles))
@@ -397,11 +856,49 @@ void CLandscape::refreshMaterialDrawDataIfNeeded()
     m_materialDrawDataDirty = false;
 }
 
+bool CLandscape::adoptCanonicalTerrainSave(
+    const QFileInfo& path, const QByteArray& bytes,
+    const QString& innerNamespace, uint textureCount,
+    uint textureSize, uint tileCount, uint tileSize, float maxZ,
+    const QVector<qint32>& tileTypes,
+    const QVector<SMprAnimatedTileRecord>& animatedTiles)
+{
+    if(!terrainAtlasLogicalCountsFitPhysicalPages(
+           int(textureCount), int(tileCount), int(textureCount * 64u),
+           tileTypes.size())
+       || innerNamespace.trimmed().isEmpty()
+       || !adoptCanonicalSave(path, bytes))
+        return false;
+    m_innerMapName = innerNamespace;
+    m_header.nTexture = textureCount;
+    m_header.textureSize = textureSize;
+    m_header.nTile = tileCount;
+    m_header.tileSize = tileSize;
+    m_header.maxZ = maxZ;
+    m_header.nAnimTile = uint(animatedTiles.size());
+    m_aTileTypes.clear();
+    for(qint32 type : tileTypes)
+        m_aTileTypes.append(ETileType(type));
+    m_aAnimTile.clear();
+    for(const SMprAnimatedTileRecord& animation : animatedTiles)
+    {
+        SAnimTile tile;
+        tile.tileIndex = animation.tileIndex;
+        tile.nPhase = animation.frameCount;
+        m_aAnimTile.append(tile);
+    }
+    return previewCanonicalMaxZ(maxZ);
+}
+
 void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
+    const int atlasRows = qMax(1, (m_renderTextureCount
+        + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
+    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+        float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
         {
@@ -658,8 +1155,10 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* fr
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue("qt_Texture0", 0);
-    program->setUniformValue("u_overlayAtlasGrid",
-                             QVector2D(float(m_renderTextureCount), 8.0f));
+    const int atlasRows = qMax(1, (m_renderTextureCount
+        + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
+    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+        float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
         {
@@ -826,6 +1325,17 @@ bool CLandscape::previewCanonicalSector(int xSec, int ySec, const QByteArray& pa
         || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
         return false;
     return m_aSector[ySec][xSec]->previewCanonicalPayload(payload);
+}
+
+bool CLandscape::previewCanonicalTerrainSectorDelta(
+    int xSec, int ySec, const QByteArray& beforePayload,
+    const QByteArray& afterPayload)
+{
+    if(ySec < 0 || ySec >= m_aSector.size() || xSec < 0
+        || xSec >= m_aSector.at(ySec).size() || !m_aSector.at(ySec).at(xSec))
+        return false;
+    return m_aSector[ySec][xSec]->previewCanonicalTerrainDelta(
+        beforePayload, afterPayload);
 }
 
 bool CLandscape::previewCanonicalOverlaySector(

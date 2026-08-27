@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "log.h"
 #include "property.h"
+#include "map_object_placement_policy.h"
 #include "layout_components/tree_view.h"
 #include <QElapsedTimer>
 #include <QCoreApplication>
@@ -54,6 +55,12 @@ CDeleteNodeCommand::CDeleteNodeCommand(CView* pView, uint nodeId, QUndoCommand *
 {
     if(m_pMob && m_pNode)
         m_originalIndex = m_pMob->nodes().indexOf(m_pNode);
+}
+
+bool CDeleteNodeCommand::invalidatesAiGraphPreview() const
+{
+    return m_pNode
+        && ei::contributesStaticNavigationCollision(m_pNode->nodeType());
 }
 
 void CDeleteNodeCommand::undo()
@@ -110,6 +117,12 @@ CCreateNodeCommand::CCreateNodeCommand(CView* pView, CMob* pMob,
         m_rawTemplatePath = existingNode->rawSourceObjectPath();
         m_rawTemplateSubtreeSha256 = existingNode->rawSourceSubtreeSha256();
     }
+}
+
+bool CCreateNodeCommand::invalidatesAiGraphPreview() const
+{
+    return m_pCreatedNode
+        && ei::contributesStaticNavigationCollision(m_pCreatedNode->nodeType());
 }
 
 void CCreateNodeCommand::undo()
@@ -1189,6 +1202,13 @@ CChangeProp::CChangeProp(CView* pView, CMob* pMob, CNode* pNode,
     m_newValue.reset(prop->clone());
 }
 
+bool CChangeProp::invalidatesAiGraphPreview() const
+{
+    return m_pNode && m_newValue
+        && aiGraphObjectPropertyInvalidatesPreview(
+            m_pNode->nodeType(), m_newValue->type());
+}
+
 void CChangeProp::undo()
 {
     auto pNode = m_pNode;
@@ -1310,6 +1330,19 @@ CResetIdCommand::CResetIdCommand(CView* pView, QMap<uint, uint>& reconnectId, QU
   ,m_reconnectId(reconnectId)
 {
 
+}
+
+bool CResetIdCommand::invalidatesAiGraphPreview() const
+{
+    CMob* mob = m_pView ? m_pView->currentMob() : nullptr;
+    if(!mob)
+        return false;
+    for(CNode* node : mob->nodes())
+        if(node && ei::contributesStaticNavigationCollision(node->nodeType())
+           && (m_reconnectId.contains(node->mapId())
+               || m_reconnectId.key(node->mapId(), 0) != 0))
+            return true;
+    return false;
 }
 
 void CResetIdCommand::undo()

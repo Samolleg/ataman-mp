@@ -1,0 +1,21 @@
+{
+  "schema": "ei-semantic-atlas-r119-recovered-decisions-v1",
+  "source": "Recovered explicit R79 decisions omitted from the generated catalog",
+  "provenance": {
+    "attachmentSha256": "6C597B478B0C745A89F5B598BF73361EF8D7C7760681E848E9BF7D623429CD35",
+    "rules": "Apply only the exact reviewed corners. Propagate bz2g to Zone2 and bz4g to Zone4 because each approved HD binding pair is byte-identical; do not propagate Zone6 to Zone6_2."
+  },
+  "cornerCorrections": {
+    "Zone6": {"290": {"SW": "Grass / Fresh"}},
+    "bz2g": {"273": {"NE": "Grass / Fresh"}},
+    "Zone2": {"273": {"NE": "Grass / Fresh"}},
+    "bz4g": {
+      "187": {"SW": "Grass / Fresh"},
+      "219": {"SW": "Grass / Fresh"}
+    },
+    "Zone4": {
+      "187": {"SW": "Grass / Fresh"},
+      "219": {"SW": "Grass / Fresh"}
+    }
+  }
+}

@@ -3,6 +3,8 @@ param(
     [string]$BuildDirectory = "build-release",
     [string]$QtBin = $env:EI_MAPPER_QT_BIN,
     [string]$MinGwBin = $env:EI_MAPPER_MINGW_BIN,
+    [switch]$Msvc,
+    [string]$VcVars64,
     [ValidateRange(1, 64)]
     [int]$Jobs = 4
 )
@@ -24,6 +26,23 @@ if (-not $MinGwBin) {
     $bundledMinGw = Join-Path $repositoryRoot '.tooling\Qt\Tools\mingw730_64\bin'
     if (Test-Path -LiteralPath (Join-Path $bundledMinGw 'mingw32-make.exe') -PathType Leaf) {
         $MinGwBin = $bundledMinGw
+    }
+}
+
+function Import-VcEnvironment([string]$ScriptPath) {
+    if (-not $ScriptPath) {
+        throw 'MSVC mode requires -VcVars64 <path-to-vcvars64.bat>.'
+    }
+    $resolved = (Resolve-Path -LiteralPath $ScriptPath).Path
+    $command = 'call "' + $resolved + '" >nul && set'
+    $environment = & cmd.exe /d /s /c $command
+    if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat failed with exit code $LASTEXITCODE." }
+    foreach ($line in $environment) {
+        $separator = $line.IndexOf('=')
+        if ($separator -gt 0) {
+            [Environment]::SetEnvironmentVariable(
+                $line.Substring(0, $separator), $line.Substring($separator + 1), 'Process')
+        }
     }
 }
 
@@ -57,12 +76,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $qtDirectory "uic.exe") -PathType Le
 if (-not (Test-Path -LiteralPath (Join-Path $qtDirectory "lrelease.exe") -PathType Leaf)) {
     throw "lrelease.exe was not found in Qt bin directory '$qtDirectory'."
 }
-$mingwDirectory = Resolve-ToolDirectory $MinGwBin "mingw32-make.exe" "mingw32-make.exe"
+if ($Msvc) {
+    Import-VcEnvironment $VcVars64
+    $compilerDirectory = Join-Path $env:VCToolsInstallDir 'bin\HostX64\x64'
+    $compilerDirectory = Resolve-ToolDirectory $compilerDirectory "nmake.exe" "nmake.exe"
+    $makeExecutable = "nmake.exe"
+} else {
+    $compilerDirectory = Resolve-ToolDirectory $MinGwBin "mingw32-make.exe" "mingw32-make.exe"
+    $makeExecutable = "mingw32-make.exe"
+}
 
 # qmake, uic, moc and rcc are dynamically linked Windows programs. Merely
 # invoking qmake by its full path is insufficient: Qt and MinGW runtime DLLs
 # must also be discoverable by every child process spawned by make.
-$env:PATH = "$qtDirectory;$mingwDirectory;$env:PATH"
+$env:PATH = "$qtDirectory;$compilerDirectory;$env:PATH"
 
 $buildPath = if ([IO.Path]::IsPathRooted($BuildDirectory)) {
     $BuildDirectory
@@ -74,12 +101,14 @@ $buildPath = (Resolve-Path -LiteralPath $buildPath).Path
 
 $qmake = Join-Path $qtDirectory "qmake.exe"
 $lrelease = Join-Path $qtDirectory "lrelease.exe"
-$make = Join-Path $mingwDirectory "mingw32-make.exe"
+$make = Join-Path $compilerDirectory $makeExecutable
 $project = Join-Path $repositoryRoot "ei_maper.pro"
 
-$qmakeSpec = (& $qmake -query QMAKE_SPEC).Trim()
-if ($LASTEXITCODE -ne 0 -or $qmakeSpec -ne 'win32-g++') {
-    throw "The selected Qt kit is '$qmakeSpec', not the required MinGW win32-g++ kit. Do not substitute the MSVC Qt kit. See docs/BUILDING_ENDURANCE.md."
+if (-not $Msvc) {
+    $qmakeSpec = (& $qmake -query QMAKE_SPEC).Trim()
+    if ($LASTEXITCODE -ne 0 -or $qmakeSpec -ne 'win32-g++') {
+        throw "The selected Qt kit is '$qmakeSpec', not the required MinGW win32-g++ kit. Do not substitute the MSVC Qt kit for production builds. See docs/BUILDING_ENDURANCE.md."
+    }
 }
 
 $executionRoot = $repositoryRoot
@@ -112,7 +141,7 @@ if (($repositoryRoot -match '[^\x00-\x7F]') -or ($buildPath -match '[^\x00-\x7F]
 }
 
 Write-Host "Qt bin:    $qtDirectory"
-Write-Host "MinGW bin: $mingwDirectory"
+Write-Host "Compiler:  $compilerDirectory"
 Write-Host "Build:     $buildPath"
 if ($temporaryDrive) { Write-Host "ASCII root: $executionRoot" }
 
@@ -131,8 +160,12 @@ try {
     & $qmake $projectArgument "CONFIG+=release"
     if ($LASTEXITCODE -ne 0) { throw "qmake failed with exit code $LASTEXITCODE." }
 
-    & $make "-j$Jobs" release
-    if ($LASTEXITCODE -ne 0) { throw "mingw32-make failed with exit code $LASTEXITCODE." }
+    if ($Msvc) {
+        & $make /NOLOGO release
+    } else {
+        & $make "-j$Jobs" release
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
 } finally {
     Pop-Location
     if ($temporaryDrive) {

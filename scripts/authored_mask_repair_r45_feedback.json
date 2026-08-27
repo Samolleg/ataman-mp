@@ -1,0 +1,20 @@
+{
+  "schema": "ei-authored-mask-repair-feedback-v1",
+  "checkpoint": "R45-SAND-BANDS",
+  "authority": "explicit-user-review-with-marked-images",
+  "status": "rejected-upstream-extraction",
+  "decisions": {
+    "authored-repair-sand-grain-outer-1of4-v1": {
+      "answer": "Reject extracted mask",
+      "note": "The extracted mask loses the painterly soft brushes already present in the authored transition. Repair must begin from the authored transition image, not the thresholded ownership mask."
+    },
+    "authored-repair-sand-grain-edge-2of4-v2": {
+      "answer": "Reject extracted mask",
+      "note": "The extraction loses the soft painterly transition and introduces holes that are not authored features."
+    },
+    "authored-repair-sand-grain-inside-3of4-v2": {
+      "answer": "Derive from outer 1of4 v1",
+      "note": "Inside 3of4 v2 is the exact polarity-inverted and corner-aligned counterpart of outer 1of4 v1; do not extract or review it independently."
+    }
+  }
+}

@@ -154,6 +154,26 @@ bool CUnit::needsVisualResolution() const
         || m_resolvedVisualRevision != m_visualRevision;
 }
 
+void CUnit::invalidateDatabaseVisual()
+{
+    ++m_visualRevision;
+    m_preparedAppearanceValid=false;
+    m_appearancePreparationInFlight=false;
+    invalidateTransientVisual();
+}
+
+void CUnit::carryResolvedVisualToCurrentDatabaseGeneration()
+{
+    if(!ei::canCarryResolvedVisualToDatabaseGeneration(
+           m_resolvedVisualRevision, m_visualRevision))
+        return;
+    const quint64 generation = ei::ProfileDatabaseContext::instance().generation();
+    m_resolvedDatabaseGeneration = generation;
+    if(m_preparedAppearanceValid
+       && m_preparedAppearanceRevision == m_visualRevision)
+        m_preparedAppearanceGeneration = generation;
+}
+
 bool CUnit::hasPreparedAppearance() const
 {
     return m_preparedAppearanceValid
@@ -1022,8 +1042,9 @@ void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
 
 void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
-    ++m_visualRevision;
-    invalidateTransientVisual();
+    // Pose, IDs, logic and inventory do not own the derived DB appearance.
+    if(ei::unitPropertyAffectsVisual(prop->type()))
+        invalidateDatabaseVisual();
     switch (prop->type())
     {
     case eObjParam_UNIT_NEED_IMPORT:

@@ -31,6 +31,132 @@ QRgb decodeRgb565(quint16 value)
     return qRgba(red, green, blue, 255);
 }
 
+quint16 encodeRgb565(QRgb pixel)
+{
+    return quint16(((qRed(pixel) * 31 + 127) / 255) << 11)
+        | quint16(((qGreen(pixel) * 63 + 127) / 255) << 5)
+        | quint16((qBlue(pixel) * 31 + 127) / 255);
+}
+
+int colorDistance(QRgb left, QRgb right)
+{
+    const int dr = qRed(left) - qRed(right);
+    const int dg = qGreen(left) - qGreen(right);
+    const int db = qBlue(left) - qBlue(right);
+    return dr * dr + dg * dg + db * db;
+}
+
+QByteArray encodeDxt1Level(const QImage& input, QString* diagnostic)
+{
+    const QImage image = input.convertToFormat(QImage::Format_ARGB32);
+    QByteArray result;
+    result.reserve(qMax(1, (image.width()+3)/4)*qMax(1,(image.height()+3)/4)*8);
+    for(int blockY=0; blockY<image.height(); blockY+=4)
+        for(int blockX=0; blockX<image.width(); blockX+=4)
+        {
+            QRgb pixels[16];
+            bool transparent=false;
+            int opaqueCount=0;
+            for(int y=0;y<4;++y) for(int x=0;x<4;++x)
+            {
+                const QRgb pixel=image.pixel(qMin(blockX+x,image.width()-1),
+                                             qMin(blockY+y,image.height()-1));
+                pixels[y*4+x]=pixel;
+                if(qAlpha(pixel)<128) transparent=true; else ++opaqueCount;
+            }
+            if(opaqueCount==0)
+            {
+                result.append(QByteArray(4,'\0'));
+                result.append(QByteArray(4,char(0xFF)));
+                continue;
+            }
+            int darkest=-1,lightest=-1;
+            int minimumLuma=std::numeric_limits<int>::max();
+            int maximumLuma=std::numeric_limits<int>::min();
+            for(int index=0;index<16;++index)
+            {
+                if(qAlpha(pixels[index])<128) continue;
+                const int luma=qRed(pixels[index])*299+qGreen(pixels[index])*587+qBlue(pixels[index])*114;
+                if(luma<minimumLuma){minimumLuma=luma;darkest=index;}
+                if(luma>maximumLuma){maximumLuma=luma;lightest=index;}
+            }
+            quint16 endpoint0=encodeRgb565(pixels[lightest]);
+            quint16 endpoint1=encodeRgb565(pixels[darkest]);
+            if(transparent)
+            {
+                if(endpoint0>endpoint1) std::swap(endpoint0,endpoint1);
+            }
+            else if(endpoint0<=endpoint1)
+            {
+                std::swap(endpoint0,endpoint1);
+                if(endpoint0==endpoint1)
+                    endpoint0=endpoint0==0xFFFF?quint16(0xFFFE):quint16(endpoint0+1);
+            }
+            QRgb palette[4];
+            palette[0]=decodeRgb565(endpoint0); palette[1]=decodeRgb565(endpoint1);
+            if(endpoint0>endpoint1)
+            {
+                palette[2]=qRgb((2*qRed(palette[0])+qRed(palette[1]))/3,
+                                (2*qGreen(palette[0])+qGreen(palette[1]))/3,
+                                (2*qBlue(palette[0])+qBlue(palette[1]))/3);
+                palette[3]=qRgb((qRed(palette[0])+2*qRed(palette[1]))/3,
+                                (qGreen(palette[0])+2*qGreen(palette[1]))/3,
+                                (qBlue(palette[0])+2*qBlue(palette[1]))/3);
+            }
+            else
+            {
+                palette[2]=qRgb((qRed(palette[0])+qRed(palette[1]))/2,
+                                (qGreen(palette[0])+qGreen(palette[1]))/2,
+                                (qBlue(palette[0])+qBlue(palette[1]))/2);
+                palette[3]=qRgba(0,0,0,0);
+            }
+            quint32 indices=0;
+            for(int index=0;index<16;++index)
+            {
+                int selected=transparent&&qAlpha(pixels[index])<128?3:0;
+                int best=selected==3?0:std::numeric_limits<int>::max();
+                if(selected!=3)
+                {
+                    const int paletteCount=endpoint0>endpoint1?4:3;
+                    for(int candidate=0;candidate<paletteCount;++candidate)
+                    {
+                        const int distance=colorDistance(pixels[index],palette[candidate]);
+                        if(distance<best){best=distance;selected=candidate;}
+                    }
+                }
+                indices|=quint32(selected)<<(index*2);
+            }
+            uchar block[8];
+            qToLittleEndian<quint16>(endpoint0,block);
+            qToLittleEndian<quint16>(endpoint1,block+2);
+            qToLittleEndian<quint32>(indices,block+4);
+            result.append(reinterpret_cast<const char*>(block),8);
+        }
+    if(result.isEmpty()&&diagnostic)*diagnostic=QStringLiteral("DXT1 encoding produced no blocks.");
+    return result;
+}
+
+QImage downsamplePremultiplied(const QImage& input)
+{
+    const QImage source=input.convertToFormat(QImage::Format_ARGB32);
+    QImage output(qMax(1,source.width()/2),qMax(1,source.height()/2),QImage::Format_ARGB32);
+    for(int y=0;y<output.height();++y) for(int x=0;x<output.width();++x)
+    {
+        qint64 alpha=0,red=0,green=0,blue=0;
+        for(int dy=0;dy<2;++dy) for(int dx=0;dx<2;++dx)
+        {
+            const QRgb pixel=source.pixel(qMin(source.width()-1,x*2+dx),qMin(source.height()-1,y*2+dy));
+            const int a=qAlpha(pixel);
+            alpha+=a;red+=qRed(pixel)*a;green+=qGreen(pixel)*a;blue+=qBlue(pixel)*a;
+        }
+        const int outAlpha=int((alpha+2)/4);
+        output.setPixel(x,y,alpha==0?qRgba(0,0,0,0)
+            :qRgba(int((red+alpha/2)/alpha),int((green+alpha/2)/alpha),
+                    int((blue+alpha/2)/alpha),outAlpha));
+    }
+    return output;
+}
+
 QRgb interpolate(QRgb first, QRgb second, int firstWeight, int secondWeight,
                   int divisor, int alpha = 255)
 {
@@ -130,8 +256,11 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
                     alpha = int((alphaIndices >> (4 * pixel)) & 0xfu) * 17;
                 else if(format == DxtFormat::Dxt5)
                     alpha = alphaValues[(alphaIndices >> (3 * pixel)) & 7u];
-                result.setPixel(x, y, qRgba(qRed(color), qGreen(color),
-                                            qBlue(color), alpha));
+                // Terrain pages contain millions of texels. QImage::setPixel
+                // repeats format and bounds dispatch for every one; this image
+                // has a fixed format and the coordinates were checked above.
+                reinterpret_cast<QRgb*>(result.scanLine(y))[x] =
+                    qRgba(qRed(color), qGreen(color), qBlue(color), alpha);
             }
         }
     *image = result;
@@ -499,6 +628,308 @@ QByteArray encodeMmpDxt1(const QImage& image, QString* diagnostic)
             }
             stream << c0 << c1 << indices;
         }
+    return result;
+}
+
+bool decodeMmpDxt1AtlasTile(const QByteArray& mmp, int logicalSlot,
+                            QImage* image, QString* diagnostic)
+{
+    constexpr int headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(!image || logicalSlot < 0 || logicalSlot >= 64
+       || mmp.size() < headerSize || readDword(mmp, 0) != signature
+       || readDword(mmp, 16) != dxt1)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page or logical tile index is invalid.");
+        return false;
+    }
+    const quint32 widthValue = readDword(mmp, 4);
+    const quint32 heightValue = readDword(mmp, 8);
+    if(widthValue == 0 || widthValue != heightValue || widthValue % 32 != 0
+       || widthValue > quint32(std::numeric_limits<int>::max()))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page dimensions cannot be divided into 8x8 tiles.");
+        return false;
+    }
+    const int width = int(widthValue);
+    const int tileSize = width / 8;
+    const int pageBlocks = width / 4;
+    const int tileBlocks = tileSize / 4;
+    const qint64 baseBytes = qint64(pageBlocks) * pageBlocks * 8;
+    if(baseBytes > std::numeric_limits<int>::max()
+       || qint64(headerSize) + baseBytes > mmp.size())
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page base mip is truncated.");
+        return false;
+    }
+    const int tileColumn = logicalSlot % 8;
+    // MPR slot rows advance opposite to the raw MMP scanline order. The old
+    // full-page path mirrored the page, cropped, then mirrored the tile back;
+    // selecting 7-row directly is exactly equivalent.
+    const int rawTileRow = 7 - logicalSlot / 8;
+    QByteArray compressed;
+    compressed.reserve(tileBlocks * tileBlocks * 8);
+    for(int blockRow = 0; blockRow < tileBlocks; ++blockRow)
+    {
+        const qint64 sourceBlock = qint64(rawTileRow * tileBlocks + blockRow)
+            * pageBlocks + tileColumn * tileBlocks;
+        compressed.append(mmp.constData() + headerSize + sourceBlock * 8,
+                          tileBlocks * 8);
+    }
+    return decodeDxtImage(compressed, tileSize, tileSize,
+                          DxtFormat::Dxt1, image, diagnostic);
+}
+
+bool decodeMmpDxt1AtlasTile(QIODevice* device, qint64 payloadOffset,
+                            qint64 payloadSize, int logicalSlot,
+                            QImage* image, QString* diagnostic)
+{
+    constexpr qint64 headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(diagnostic)
+        diagnostic->clear();
+    if(!device || !device->isReadable() || !image
+       || logicalSlot < 0 || logicalSlot >= 64
+       || payloadOffset < 0 || payloadSize < headerSize
+       || payloadOffset > std::numeric_limits<qint64>::max() - payloadSize
+       || !device->seek(payloadOffset))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The direct DXT1 terrain tile request is invalid.");
+        return false;
+    }
+    const QByteArray header = device->read(headerSize);
+    if(header.size() != headerSize || readDword(header, 0) != signature
+       || readDword(header, 16) != dxt1)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The terrain atlas member has no complete DXT1 header.");
+        return false;
+    }
+    const quint32 widthValue = readDword(header, 4);
+    const quint32 heightValue = readDword(header, 8);
+    if(widthValue == 0 || widthValue != heightValue || widthValue % 32 != 0
+       || widthValue > quint32(std::numeric_limits<int>::max()))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page dimensions cannot be divided into 8x8 tiles.");
+        return false;
+    }
+    const int width = int(widthValue);
+    const int tileSize = width / 8;
+    const int pageBlocks = width / 4;
+    const int tileBlocks = tileSize / 4;
+    const qint64 pageRowBytes = qint64(pageBlocks) * 8;
+    const qint64 baseBytes = qint64(pageBlocks) * pageBlocks * 8;
+    if(baseBytes > payloadSize - headerSize)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The DXT1 terrain page base mip is truncated.");
+        return false;
+    }
+    const int tileColumn = logicalSlot % 8;
+    const int rawTileRow = 7 - logicalSlot / 8;
+    const qint64 firstBlock = qint64(rawTileRow * tileBlocks) * pageBlocks
+        + tileColumn * tileBlocks;
+    const qint64 bandOffset = headerSize + firstBlock * 8;
+    const qint64 bandSize = qint64(tileBlocks - 1) * pageRowBytes
+        + qint64(tileBlocks) * 8;
+    if(bandOffset < headerSize || bandSize <= 0
+       || bandOffset > payloadSize - bandSize
+       || !device->seek(payloadOffset + bandOffset))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The requested terrain tile band falls outside the MMP member.");
+        return false;
+    }
+    const QByteArray band = device->read(bandSize);
+    if(band.size() != bandSize)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The requested terrain tile band is truncated.");
+        return false;
+    }
+    QByteArray compressed;
+    compressed.reserve(tileBlocks * tileBlocks * 8);
+    const int rowBytes = tileBlocks * 8;
+    for(int blockRow = 0; blockRow < tileBlocks; ++blockRow)
+        compressed.append(band.constData() + blockRow * pageRowBytes,
+                          rowBytes);
+    return decodeDxtImage(compressed, tileSize, tileSize,
+                          DxtFormat::Dxt1, image, diagnostic);
+}
+
+bool decodeMmpDxt1AtlasTileCached(
+    const QString& pageName, int logicalSlot,
+    QMap<QString, QByteArray>* payloadCache,
+    QSet<QString>* missingPageCache,
+    const MmpPayloadLoader& loader,
+    QImage* image, QString* diagnostic)
+{
+    if(!payloadCache || !missingPageCache || !loader || !image)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The cached DXT1 terrain tile request is incomplete.");
+        return false;
+    }
+    const QString key = pageName.toCaseFolded();
+    if(missingPageCache->contains(key))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "The terrain atlas page was already unavailable in this catalog rebuild.");
+        return false;
+    }
+    auto found = payloadCache->constFind(key);
+    if(found == payloadCache->constEnd())
+    {
+        QByteArray payload;
+        if(!loader(key, &payload))
+        {
+            missingPageCache->insert(key);
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "The terrain atlas page could not be resolved.");
+            return false;
+        }
+        found = payloadCache->insert(key, payload);
+    }
+    return decodeMmpDxt1AtlasTile(found.value(), logicalSlot,
+                                  image, diagnostic);
+}
+
+QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
+                         QString* diagnostic)
+{
+    if(diagnostic) diagnostic->clear();
+    if(image.isNull() || image.width() <= 0 || image.height() <= 0
+       || (image.width() % 4) != 0 || (image.height() % 4) != 0)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 terrain pages must be non-empty and divisible by four.");
+        return {};
+    }
+    for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x)
+    {
+        const int alpha=image.pixelColor(x,y).alpha();
+        if(alpha!=0&&alpha!=255)
+        {
+            if(diagnostic)*diagnostic=QStringLiteral(
+                "DXT1 terrain pages cannot preserve graded alpha; finalization was refused.");
+            return {};
+        }
+    }
+    QVector<QImage> levels;
+    levels.append(image.convertToFormat(QImage::Format_ARGB32));
+    if(generateMipmaps)
+        while(levels.back().width() > 1 || levels.back().height() > 1)
+            levels.append(downsamplePremultiplied(levels.back()));
+    QByteArray result;
+    QDataStream stream(&result,QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0x00504d4d) << quint32(image.width()) << quint32(image.height())
+           << quint32(levels.size()) << quint32(0x31545844);
+    QByteArray descriptor(56, '\0');
+    qToLittleEndian<quint32>(4u, reinterpret_cast<uchar*>(descriptor.data()));
+    result.append(descriptor);
+    for(const QImage& level:levels)
+    {
+        const QByteArray encoded=encodeDxt1Level(level,diagnostic);
+        if(encoded.isEmpty()) return {};
+        result.append(encoded);
+    }
+    return result;
+}
+
+QByteArray patchMmpDxt1AtlasTiles(
+    const QByteArray& authoredMmp, const QByteArray& replacementMmp,
+    const QSet<int>& logicalSlots, QString* diagnostic)
+{
+    constexpr int headerSize = 76;
+    constexpr quint32 signature = 0x00504d4d;
+    constexpr quint32 dxt1 = 0x31545844;
+    if(diagnostic) diagnostic->clear();
+    if(authoredMmp.size() < headerSize
+       || replacementMmp.size() < headerSize
+       || readDword(authoredMmp, 0) != signature
+       || readDword(replacementMmp, 0) != signature
+       || readDword(authoredMmp, 16) != dxt1
+       || readDword(replacementMmp, 16) != dxt1
+       || authoredMmp.left(headerSize) != replacementMmp.left(headerSize))
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 atlas tile patch requires matching complete MMP headers.");
+        return {};
+    }
+    const int width = int(readDword(authoredMmp, 4));
+    const int height = int(readDword(authoredMmp, 8));
+    const int mipCount = int(readDword(authoredMmp, 12));
+    if(width <= 0 || width != height || width % 32 != 0 || mipCount <= 0)
+    {
+        if(diagnostic) *diagnostic = QStringLiteral(
+            "DXT1 atlas tile patch received invalid dimensions or mip count.");
+        return {};
+    }
+    for(int slot : logicalSlots)
+        if(slot < 0 || slot >= 64)
+        {
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "DXT1 atlas tile patch slot is outside 0..63.");
+            return {};
+        }
+
+    QByteArray result = authoredMmp;
+    qint64 levelOffset = headerSize;
+    for(int level = 0; level < mipCount; ++level)
+    {
+        const int levelWidth = qMax(1, width >> level);
+        const int levelHeight = qMax(1, height >> level);
+        const int blocksWide = (levelWidth + 3) / 4;
+        const int blocksHigh = (levelHeight + 3) / 4;
+        const qint64 levelBytes = qint64(blocksWide) * blocksHigh * 8;
+        if(levelOffset > authoredMmp.size() - levelBytes
+           || levelOffset > replacementMmp.size() - levelBytes)
+        {
+            if(diagnostic) *diagnostic = QStringLiteral(
+                "DXT1 atlas tile patch encountered a truncated mip chain.");
+            return {};
+        }
+        for(int slot : logicalSlots)
+        {
+            const int tileColumn = slot % 8;
+            const int rawTileRow = 7 - slot / 8;
+            const int x0 = tileColumn * levelWidth / 8;
+            const int x1 = qMin(levelWidth,
+                qMax(x0 + 1, ((tileColumn + 1) * levelWidth + 7) / 8));
+            const int y0 = rawTileRow * levelHeight / 8;
+            const int y1 = qMin(levelHeight,
+                qMax(y0 + 1, ((rawTileRow + 1) * levelHeight + 7) / 8));
+            // At the larger mips each tile owns whole DXT blocks, so authored
+            // neighbours remain byte-identical. At the final shared mips a
+            // block covers several logical tiles; copy the complete rebuilt
+            // block whenever the new tile contributes to it. Leaving those
+            // blocks authored would make the new artwork fade back to the old
+            // transparent padding at distance.
+            const int firstBlockX = x0 / 4;
+            const int lastBlockX = (x1 - 1) / 4;
+            const int firstBlockY = y0 / 4;
+            const int lastBlockY = (y1 - 1) / 4;
+            const int rowBytes = (lastBlockX - firstBlockX + 1) * 8;
+            for(int blockY = firstBlockY; blockY <= lastBlockY; ++blockY)
+            {
+                const qint64 block = qint64(blockY)
+                    * blocksWide + firstBlockX;
+                const qint64 offset = levelOffset + block * 8;
+                memcpy(result.data() + offset,
+                       replacementMmp.constData() + offset,
+                       size_t(rowBytes));
+            }
+        }
+        levelOffset += levelBytes;
+    }
     return result;
 }
 

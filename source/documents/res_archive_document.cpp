@@ -1,6 +1,7 @@
 #include "res_archive_document.h"
 
 #include <QCryptographicHash>
+#include <QSet>
 #include <QTextCodec>
 #include <QtEndian>
 
@@ -181,27 +182,32 @@ bool CResArchiveDocument::replaceMember(const QString& name,
         return true;
     }
 
-    QByteArray staged = m_originalBytes;
-    staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
-    const quint64 payloadOffset = quint64(staged.size());
-    if(payloadOffset > quint64(std::numeric_limits<quint32>::max()) ||
+    const qint64 oldEnd = qint64(member.dataOffset) + member.dataSize;
+    const qint64 delta = qint64(replacementPayload.size()) - member.dataSize;
+    const qint64 newTableOffset = qint64(m_tableOffset) + delta;
+    if(oldEnd > m_tableOffset || newTableOffset < qint64(kHeaderSize) ||
+       newTableOffset > qint64(std::numeric_limits<quint32>::max()) ||
        quint64(replacementPayload.size()) > quint64(std::numeric_limits<quint32>::max()))
     {
         addError(errors, "The staged RES payload exceeds the 32-bit archive format.");
         return false;
     }
+    // Replace the payload inside the original data region. Appending a new
+    // payload after the old RES directory leaves a stale directory embedded
+    // before the authoritative one; the shipped loader does not accept that
+    // layout reliably even though a tolerant parser can reopen it.
+    QByteArray staged = m_originalBytes.left(int(member.dataOffset));
     staged.append(replacementPayload);
-    staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
-    const quint64 newTableOffset = quint64(staged.size());
-    if(newTableOffset > quint64(std::numeric_limits<quint32>::max()))
-    {
-        addError(errors, "The staged RES table offset exceeds the archive format.");
-        return false;
-    }
+    staged.append(m_originalBytes.mid(int(oldEnd),int(m_tableOffset-oldEnd)));
     QByteArray table = m_tableBytes;
-    const quint64 entryOffset = quint64(member.tableIndex) * kEntrySize;
-    writeU32(&table, entryOffset + 4, quint32(replacementPayload.size()));
-    writeU32(&table, entryOffset + 8, quint32(payloadOffset));
+    for(const SResArchiveMember& current : m_members)
+    {
+        const quint64 entryOffset = quint64(current.tableIndex) * kEntrySize;
+        if(current.tableIndex == member.tableIndex)
+            writeU32(&table, entryOffset + 4, quint32(replacementPayload.size()));
+        else if(current.dataOffset > member.dataOffset)
+            writeU32(&table, entryOffset + 8, quint32(qint64(current.dataOffset) + delta));
+    }
     staged.append(table);
     staged.append(m_namesBytes);
     writeU32(&staged, 8, quint32(newTableOffset));
@@ -216,26 +222,41 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
                                                   QByteArray* output,
                                                   QStringList* errors) const
 {
+    SResArchiveNewMember member;
+    member.name = name;
+    member.payload = payload;
+    member.lastWriteTime = lastWriteTime;
+    return buildWithAppendedMembers({member}, output, errors);
+}
+
+bool CResArchiveDocument::buildWithAppendedMembers(
+    const QVector<SResArchiveNewMember>& appendedMembers,
+    QByteArray* output, QStringList* errors) const
+{
+    return buildWithMembers(appendedMembers, false, false, output, errors);
+}
+
+bool CResArchiveDocument::buildWithPublishedMembers(
+    const QVector<SResArchiveNewMember>& publishedMembers,
+    bool allowReplaceExisting, QByteArray* output, QStringList* errors) const
+{
+    return buildWithMembers(publishedMembers, true, allowReplaceExisting,
+                            output, errors);
+}
+
+bool CResArchiveDocument::buildWithMembers(
+    const QVector<SResArchiveNewMember>& requestedMembers,
+    bool allowIdenticalExisting, bool allowReplaceExisting,
+    QByteArray* output, QStringList* errors) const
+{
     if(output)
         output->clear();
-    if(name.isEmpty() || payload.isEmpty() || !output)
+    if(requestedMembers.isEmpty() || !output)
     {
-        addError(errors, "A RES member name, payload, and output are required.");
-        return false;
-    }
-    if(uniqueMemberIndex(name) != -1)
-    {
-        addError(errors, QString("RES member %1 already exists or is ambiguous.").arg(name));
+        addError(errors, "One or more RES members and an output are required.");
         return false;
     }
     QTextCodec* codec = QTextCodec::codecForName("CP1251");
-    const QByteArray appendedName = codec ? codec->fromUnicode(name)
-                                          : name.toLatin1();
-    if(appendedName.isEmpty() || (codec && codec->toUnicode(appendedName) != name))
-    {
-        addError(errors, "The appended RES member name cannot round-trip through CP1251.");
-        return false;
-    }
 
     struct BuildMember
     {
@@ -246,7 +267,7 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
         quint32 nameOffset{0};
     };
     QVector<BuildMember> members;
-    members.reserve(m_members.size() + 1);
+    members.reserve(m_members.size() + requestedMembers.size());
     for(const SResArchiveMember& member : m_members)
     {
         BuildMember copy;
@@ -255,11 +276,67 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
         copy.time = member.lastWriteTime;
         members.append(copy);
     }
-    BuildMember appended;
-    appended.name = appendedName;
-    appended.payload = payload;
-    appended.time = lastWriteTime;
-    members.append(appended);
+    QSet<QString> requestedNames;
+    QSet<QString> replacedNames;
+    bool changed = false;
+    for(const SResArchiveNewMember& requested : requestedMembers)
+    {
+        const QString foldedName = requested.name.toCaseFolded();
+        if(requested.name.isEmpty() || requested.payload.isEmpty()
+           || requestedNames.contains(foldedName))
+        {
+            addError(errors, QString("RES member %1 is empty or duplicated.")
+                     .arg(requested.name));
+            return false;
+        }
+        requestedNames.insert(foldedName);
+        const int existingIndex = uniqueMemberIndex(requested.name);
+        if(existingIndex == -2)
+        {
+            addError(errors, QString("RES member %1 is ambiguous in the destination archive.")
+                     .arg(requested.name));
+            return false;
+        }
+        if(existingIndex >= 0)
+        {
+            if(!allowIdenticalExisting)
+            {
+                addError(errors, QString("RES member %1 already exists.").arg(requested.name));
+                return false;
+            }
+            if(members.at(existingIndex).payload == requested.payload)
+                continue;
+            if(!allowReplaceExisting)
+            {
+                addError(errors, QString("RES identity member %1 differs; explicit replacement is required.")
+                         .arg(requested.name));
+                return false;
+            }
+            members[existingIndex].payload = requested.payload;
+            replacedNames.insert(foldedName);
+            changed = true;
+            continue;
+        }
+        const QByteArray encodedName = codec ? codec->fromUnicode(requested.name)
+                                             : requested.name.toLatin1();
+        if(encodedName.isEmpty()
+           || (codec && codec->toUnicode(encodedName) != requested.name))
+        {
+            addError(errors, "An appended RES member name cannot round-trip through CP1251.");
+            return false;
+        }
+        BuildMember appended;
+        appended.name = encodedName;
+        appended.payload = requested.payload;
+        appended.time = requested.lastWriteTime;
+        members.append(appended);
+        changed = true;
+    }
+    if(!changed)
+    {
+        *output = m_originalBytes;
+        return true;
+    }
     const quint32 count = quint32(members.size());
 
     QByteArray staged(int(kHeaderSize), '\0');
@@ -331,15 +408,25 @@ bool CResArchiveDocument::buildWithAppendedMember(const QString& name,
     CResArchiveDocument reopened;
     QStringList reopenErrors;
     if(!reopened.loadBytes(staged, m_sourceName + " [derived]", &reopenErrors)
-       || reopened.members().size() != members.size()
-       || reopened.memberPayload(name) != payload)
+       || reopened.members().size() != members.size())
     {
         if(errors) errors->append(reopenErrors);
         addError(errors, "The derived RES archive failed structural reopen validation.");
         return false;
     }
+    for(const SResArchiveNewMember& published : requestedMembers)
+    {
+        if(reopened.memberPayload(published.name) != published.payload)
+        {
+            addError(errors, QString("Derived RES changed published member %1.")
+                     .arg(published.name));
+            return false;
+        }
+    }
     for(const SResArchiveMember& original : m_members)
     {
+        if(replacedNames.contains(original.name.toCaseFolded()))
+            continue;
         if(reopened.memberPayload(original.name) != original.payload)
         {
             addError(errors, QString("Derived RES changed untouched member %1.").arg(original.name));

@@ -1,0 +1,13 @@
+{
+  "schema": "ei-authored-mask-r77-decisions-v1",
+  "checkpoint": "R77-NONRECTILINEAR-ADJUSTMENTS",
+  "authority": "explicit-user-review",
+  "approvedAdjustments": [
+    "mask-family-paving-courses-edge-2of4-v2",
+    "mask-family-paving-courses-outer-1of4-v2",
+    "mask-family-sand-grain-outer-1of4-v2",
+    "mask-family-snow-clumps-edge-2of4-v2"
+  ],
+  "adjustmentRequests": {},
+  "policy": "Only the four explicit approvals may replace production masks. Source artwork, uniforms, exact corner ownership, rotation, and polarity remain frozen to the validated R77 evidence."
+}

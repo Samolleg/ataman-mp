@@ -44,6 +44,11 @@ public:
                                       double playerRadius = 1.0,
                                       double searchRadius = 8.0,
                                       int radialSteps = 8);
+    static bool canPreserveCustomSpawnAcrossDocumentReplacement(
+        const SMapSpawnPlan& spawn,
+        const QString& previousZoneId,
+        const QString& currentZoneId,
+        bool terrainPointValid);
 };
 
 #endif // MAP_SPAWN_PLANNER_H

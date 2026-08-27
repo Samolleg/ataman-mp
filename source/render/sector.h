@@ -63,7 +63,10 @@ public:
     QVector<QVector<CTile>>& arrWaterEdit() {return m_arrWater;};
     bool existsTileIndices(const QVector<int>& arrInd); // function for find incorrect\coorrupt tile indices
     void updateDrawData();
+    void setTerrainAtlasLayout(int textureCount, int columns);
     bool previewCanonicalPayload(const QByteArray& payload);
+    bool previewCanonicalTerrainDelta(const QByteArray& beforePayload,
+                                      const QByteArray& afterPayload);
     bool previewCanonicalOverlayPayload(const QByteArray& payload);
     bool previewCanonicalOverlayDelta(const QByteArray& beforePayload,
                                       const QByteArray& afterPayload);
@@ -71,6 +74,7 @@ public:
 
 private:
     void updatePosition();
+    void updateLandTiles(const QSet<int>& localTiles);
     void updateWaterDrawData(bool rebuildIndices = true);
     void updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices);
     void generateWaterVertexData();
@@ -95,7 +99,7 @@ private:
         QVector3D normal;
         QVector2D texCoord;
         QVector4D animation;
-        QVector3D tileAnimation;
+        QVector4D tileAnimation;
         QVector2D grid;
         QVector3D emission;
         float opacity{1.0f};

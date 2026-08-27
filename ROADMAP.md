@@ -97,6 +97,87 @@ history. The permanent safety and compatibility rules are in
 </details>
 
 <details open>
+<summary><strong>0.5.x — beta content and resource authoring</strong></summary>
+
+## Release goal
+
+Promote Endurance into beta with production terrain painting and integrated,
+profile-aware database/resource authoring. Database and RES changes must retain
+the same review, validation, preservation, backup, and atomic-publication
+boundaries as MOB and MPR authoring.
+
+## Completed foundation
+
+- [x] Add a schema-aware Database Editor for all 26 physical Evil Islands
+  tables, including typed and structured fields, lossless opaque-field
+  preservation, clone/delete, undo/redo, review, validation, XLSX interchange,
+  and native database publication.
+- [x] Add a dockable Resource Browser for active-profile and external archives
+  with provider provenance, search/filtering, metadata and format-aware
+  previews, export, and reviewed Save As mutation transactions.
+- [x] Integrate both tools: protected `database.res` opens in the Database
+  Editor, while established database resource fields open the exact winning
+  active-profile member in the Resource Browser.
+- [x] Preserve dock ownership and multi-window stacking during cross-tool
+  navigation; bring the destination tool and its host window forward without
+  silently undocking either tool.
+- [x] Make wide database tables interactive at normal UI latency, including
+  Race Models: keep the literal `#` column frozen by default, preserve explicit
+  freeze/layout state, softly highlight the selected row, and avoid full-grid
+  work during paint, selection, context-menu, and horizontal-scroll events.
+- [x] Consolidate viewport visibility into a collapsed-by-default **Visuals**
+  switcher with synchronized entrance, static-object, dynamic-object,
+  object-helper, scene-light, terrain, overlay, object-shadow, environment,
+  particle, and animation-freeze controls.
+
+## Remaining beta gates
+
+- [x] Ship the generated-blend terrain painter and explicit **Finalize Atlas**
+  workflow tracked in 0.4.x.
+- [ ] Run the representative Base/JMV beta acceptance matrix for database and
+  RES review, mutation, reopen, preservation, and cross-tool navigation.
+
+## 0.5 release-candidate known issues and boundaries
+
+- [ ] **Lava + Resolve Blends:** direct Modern painting follows the selected
+  Lava material, but **Shift+R** cannot yet preserve one visually consistent
+  route owner across every rare connected Lava-on-Water transition without
+  regressing ordinary Ground/Overlay repair. The bounded generic resolver is
+  retained while this remains under review.
+- The shipped 32-bit runtime is validated through **4,096 terrain-atlas slots / 64
+  pages**. Endurance can represent the packed-format maximum of 16,384 slots,
+  but sizes above 4,096 are not release-supported: the controlled 8,192-slot
+  run failed from 32-bit address-space pressure.
+- Test Current Map hot-reloads ordinary MPR/MOB changes in-process. A terrain
+  atlas byte/page/slot change deliberately restarts only the owned test process
+  so the game cannot retain a stale resource identity.
+- [ ] Clear or explicitly waive the remaining headless UI-check failures for
+  compact Landscape Tools layout and floating-dock native-window identity.
+  Their corresponding interactive workflows have passed tester review, but the
+  automated release gate is not yet clean.
+- [ ] Isolate the recurring ANGLE compatibility error after
+  `frame/overlays-complete`; no equivalent default desktop-OpenGL defect is
+  currently confirmed.
+
+## Approved changelists and evidence
+
+- [Database and resource authoring beta foundation](docs/releases/0.5.0-beta-database-resource-foundation.md).
+- Database/Resource Browser integration and navigation: `6940613d` through
+  `4038ba23`.
+- Frozen-column, paint-latency, and multi-window fixes: `e0873c97` and
+  `0eebd4b1`; the r8 tester build was user-confirmed.
+- [Integrated Database Editor contract](docs/DATABASE_EDITOR_VERTICAL_SLICE.md).
+- [Viewport Visuals, Noise sculpt, and live-stroke responsiveness](packaging/ALPHA26_SCULPT_PERFORMANCE_R4.md).
+- [Full database editor coverage](docs/releases/0.3.0-alpha.26-full-database-editor.md).
+- [Expanded terrain-atlas shipped-runtime boundary](docs/validation/EXPANDED_TERRAIN_ATLAS_RUNTIME.md).
+- Resource Browser validation:
+  [r1](packaging/ALPHA26_RESOURCE_BROWSER_R1.md),
+  [r2](packaging/ALPHA26_RESOURCE_BROWSER_R2.md), and
+  [r3](packaging/ALPHA26_RESOURCE_BROWSER_R3.md).
+
+</details>
+
+<details open>
 <summary><strong>0.4.x — lossless landscape and AI navigation</strong></summary>
 
 ## Release goal
@@ -114,7 +195,8 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [x] Stage, freshly reopen, semantically validate, back up, atomically replace,
   and rebind every changed MPR save.
 - [x] Add canonical 33x33 sector ownership, shared-seam synchronization,
-  affected-normal updates, and undoable sculpting.
+  affected-normal updates, undoable sculpting, and a deterministic per-stroke
+  Noise brush for terrain and overlays.
 - [x] Add MPR settings, global height operations, `maxZ` handling, crop/expand,
   object translation, new-MPR creation, and MPR recovery autosaves.
 - [x] Add direct tile placement and smart painting constrained to the existing
@@ -138,11 +220,14 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 
 ## Remaining goals
 
-- [ ] Integrate the approved modern painter as the third terrain mode: direct
-  placement, existing-atlas smart painting, and generated-blend painting must
-  share one atlas model.
-- [ ] Complete semantic-atlas coverage and the explicit **Finalize Atlas** flow;
-  do not import experimental generated imagery.
+- [x] Integrate the approved three-mode terrain painter: Modern resolves exact
+  authored identities before deterministic generation, Classic Auto remains
+  non-mutating with Safe enabled by default, and Manual writes the selected
+  physical slot/rotation directly. All modes share the provenance-aware working
+  atlas and one undoable stroke contract.
+- [x] Complete the reviewed semantic-atlas authority and explicit draft/finalize
+  publication flow, including paired MPR+RES identity, expanded addressing,
+  deterministic resolve, undo/redo persistence, and runtime hot reload.
 - [x] Add typed overlay-material editing with live preview, lossless undoable
   application, animation records, and per-cell material-slot inspection.
 - [ ] Add validated Base/JMV surface-material presets.
@@ -170,6 +255,8 @@ back to the legacy rebuilding serializer; graph persistence remains explicit.
 - [Overlay authoring validation](docs/validation/OVERLAY_SURFACE_AUTHORING_R1.md).
 - [New-MOB creation validation](docs/validation/NEW_MOB_CREATION_R1.md).
 - [Terrain atlas review contract](docs/TERRAIN_ATLAS_REVIEW.md).
+- [Modern terrain editor contract](docs/MODERN_TERRAIN_EDITOR_MVP.md) and
+  [R180 integration test scope](packaging/ALPHA26_TERRAIN_PAINT_MODES_R180_MODERN_DRAFT_UI_SEMANTIC_TEST.md).
 - Minimap changelists:
   [generation](docs/releases/0.3.0-alpha.19-minimap-generation.md),
   [viewport/export](docs/releases/0.3.0-alpha.20-minimap-viewport-and-export.md),

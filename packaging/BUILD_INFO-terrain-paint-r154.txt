@@ -1,0 +1,8 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: Classic Auto contextual stamps, Safe Tile pruning, conservative missing-blend repair, and mask-gap audit
+Executable source/changelist commit: 4481de19
+Semantic source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 107 pass / 0 fail / 6 expected skips; virtual atlas 100 pass / 0 fail; questionnaire 6 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: carried forward from the finalized R153 all-material circles, final stripes, full-game family stamp, uniform inventory, and zone-set collection set

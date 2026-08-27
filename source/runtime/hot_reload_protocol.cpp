@@ -43,6 +43,8 @@ QJsonObject mapHotReloadRequestToJson(const SMapHotReloadRequest& request)
     object.insert("minimapTextureName", request.minimapTextureName);
     object.insert("minimapResourcePath", request.minimapResourcePath);
     object.insert("minimapResourceSha256", request.minimapResourceSha256);
+    object.insert("databasePath", request.databasePath);
+    object.insert("databaseSha256", request.databaseSha256);
     object.insert("savePath", request.savePath);
     object.insert("preservePosition", request.preservePosition);
     object.insert("graphless", request.graphless);
@@ -85,6 +87,8 @@ bool mapHotReloadRequestFromJson(const QJsonObject& object,
     parsed.minimapTextureName = object.value("minimapTextureName").toString();
     parsed.minimapResourcePath = object.value("minimapResourcePath").toString();
     parsed.minimapResourceSha256 = object.value("minimapResourceSha256").toString();
+    parsed.databasePath = object.value("databasePath").toString();
+    parsed.databaseSha256 = object.value("databaseSha256").toString();
     parsed.savePath = object.value("savePath").toString();
     parsed.preservePosition = object.value("preservePosition").toBool();
     parsed.graphless = object.value("graphless").toBool();
@@ -105,7 +109,7 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
                                  QStringList* errors)
 {
     QStringList local;
-    if(request.protocolVersion != 4) local.append("Unsupported hot-reload protocol version.");
+    if(request.protocolVersion != 5) local.append("Unsupported hot-reload protocol version.");
     if(request.sequence == 0) local.append("Hot-reload sequence must be positive.");
     if(request.generation == 0) local.append("Hot-reload generation must be positive.");
     if(request.runId.isEmpty() || request.profileId.isEmpty() || request.zoneId.isEmpty())
@@ -151,6 +155,9 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
        && (request.minimapTextureName.isEmpty()
            || !QFileInfo::exists(request.minimapResourcePath)))
         local.append("The hot-reload minimap RES or texture identity is missing.");
+    if(request.databasePath.isEmpty() || !isOwnedPath(request.databasePath, ownedRunRoot)
+       || !QFileInfo::exists(request.databasePath))
+        local.append("The hot-reload database must be an existing owned generation payload.");
     const QRegularExpression hash("^[0-9a-f]{64}$", QRegularExpression::CaseInsensitiveOption);
     if(!hash.match(request.mprSha256).hasMatch()
        || !hash.match(request.mobSha256).hasMatch())
@@ -161,6 +168,8 @@ bool validateMapHotReloadRequest(const SMapHotReloadRequest& request,
     if(!request.minimapResourcePath.isEmpty()
        && !hash.match(request.minimapResourceSha256).hasMatch())
         local.append("The hot-reload minimap RES hash is invalid.");
+    if(!hash.match(request.databaseSha256).hasMatch())
+        local.append("The hot-reload database hash is invalid.");
     if(errors) errors->append(local);
     return local.isEmpty();
 }
@@ -197,6 +206,8 @@ QByteArray mapHotReloadRequestToControlBytes(const SMapHotReloadRequest& request
     line("minimapTexture", request.minimapTextureName);
     line("minimapResource", QDir::toNativeSeparators(request.minimapResourcePath));
     line("minimapResourceSha256", request.minimapResourceSha256.toLower());
+    line("database", QDir::toNativeSeparators(request.databasePath));
+    line("databaseSha256", request.databaseSha256.toLower());
     line("savePath", QDir::toNativeSeparators(request.savePath));
     line("preservePosition", request.preservePosition ? "1" : "0");
     line("graphless", request.graphless ? "1" : "0");
@@ -256,6 +267,8 @@ bool mapHotReloadRequestFromControlBytes(const QByteArray& bytes,
     parsed.minimapTextureName = values.value("minimapTexture");
     parsed.minimapResourcePath = QDir::fromNativeSeparators(values.value("minimapResource"));
     parsed.minimapResourceSha256 = values.value("minimapResourceSha256");
+    parsed.databasePath = QDir::fromNativeSeparators(values.value("database"));
+    parsed.databaseSha256 = values.value("databaseSha256");
     parsed.savePath = QDir::fromNativeSeparators(values.value("savePath"));
     parsed.preservePosition = values.value("preservePosition") == "1";
     parsed.graphless = values.value("graphless") == "1";

@@ -91,6 +91,17 @@ struct SMobSection
     QVector<SMobSection> children;
 };
 
+struct SMobLogicSnapshot
+{
+    QString sectionPath;
+    int slot = -1;
+    bool hasBehavior = false;
+    quint32 behavior = 0;
+    bool hasEnabled = false;
+    bool enabled = false;
+    int patrolPointCount = 0;
+};
+
 struct SMobObjectSnapshot
 {
     QString sectionPath;
@@ -122,6 +133,7 @@ struct SMobObjectSnapshot
     float positionX = 0.0f;
     float positionY = 0.0f;
     float positionZ = 0.0f;
+    QVector<SMobLogicSnapshot> logicSlots;
     QByteArray subtreeSha256;
 
     QJsonObject toJson() const;

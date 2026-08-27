@@ -173,3 +173,14 @@ SMapSpawnPlan CMapSpawnPlanner::chooseCustom(const QPointF& requested,
     result.reason = "No clear point was found near the requested terrain position.";
     return result;
 }
+
+bool CMapSpawnPlanner::canPreserveCustomSpawnAcrossDocumentReplacement(
+    const SMapSpawnPlan& spawn,
+    const QString& previousZoneId,
+    const QString& currentZoneId,
+    bool terrainPointValid)
+{
+    return spawn.valid && spawn.custom && spawn.exitId > 0
+        && terrainPointValid && !previousZoneId.trimmed().isEmpty()
+        && previousZoneId.compare(currentZoneId, Qt::CaseInsensitive) == 0;
+}

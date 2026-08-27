@@ -1,0 +1,34 @@
+{
+  "schema": "ei-semantic-atlas-r113-consolidated-decisions-v1",
+  "sourceCatalogSha256": "0C1997127002A3F903C8300FCCDDB1E8765B1C68DB1CDEFB211ADDB8EC85F78D",
+  "cornerOrder": ["NW", "NE", "SE", "SW"],
+  "cornerCorrections": {
+    "bz2g": {
+      "237": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Stone / Lime"
+      }
+    },
+    "Zone2": {
+      "237": {
+        "NW": "Stone / Lime",
+        "NE": "Stone / Lime",
+        "SE": "Stone / Lime",
+        "SW": "Stone / Lime"
+      }
+    }
+  },
+  "counts": {
+    "submittedCards": 1,
+    "exactArtworkOwners": 2,
+    "explicitCorners": 8
+  },
+  "provenance": {
+    "reviewKey": "r113-bz2g-zone2-slot237-ne",
+    "userClarification": "change all slots to stone lime",
+    "exactArtworkGrouping": "bz2g and Zone2 share the reviewed tile identity",
+    "disposition": "uniform Stone / Lime"
+  }
+}

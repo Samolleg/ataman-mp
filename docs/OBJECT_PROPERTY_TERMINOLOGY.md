@@ -186,7 +186,7 @@ native magic-trap behavior or visualization consumes them.
 | UI label | Value | Current property UI | Tooltip |
 |---|---|---|---|
 | Light and effect offset | X, Y, Z | Exposed as Torch point | Position of the torch's light and particle effect relative to the object. |
-| Light power | Float | Exposed as Torch power | Strength of the torch light and effect. |
+| Light power | Float | Exposed as Torch power | Controls both particle scale and light radius (power x 10). Negative values can disable the effect; they do not create darkness. |
 | Sound | Sound resource | Exposed as Torch sound | Sound played by this torch. |
 
 ## Point lights
@@ -197,7 +197,7 @@ native magic-trap behavior or visualization consumes them.
 | Position | X, Y, Z | Exposed | Light position on the map. |
 | Cast shadows | On/off | Exposed | Allow this light to cast shadows. |
 | Color | Red, green, blue; `0`-`1` | Exposed | Light color. |
-| Radius | Float | Exposed as Range | Distance affected by the light. Negative values darken instead. |
+| Radius | Float | Exposed as Range | Distance affected by the light. The game uses the absolute value of a negative radius and marks the light unshadowed; it does not darken the scene. |
 | Name | Text | Exposed | Name stored with this light in the MOB. |
 | Comments | Text | Exposed | Editor notes. The game does not use this text. |
 

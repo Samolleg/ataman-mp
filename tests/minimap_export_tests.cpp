@@ -15,14 +15,19 @@ namespace {
 QImage solid(const QSize& size, const QColor& color)
 { QImage image(size, QImage::Format_ARGB32); image.fill(color); return image; }
 
-QByteArray archiveWithMapTable(const QByteArray& mapTable)
+QByteArray emptyArchive()
 {
     QByteArray empty(16, '\0');
     QDataStream header(&empty, QIODevice::WriteOnly);
     header.setByteOrder(QDataStream::LittleEndian);
     header << quint32(0x019ce23c) << quint32(0) << quint32(16) << quint32(0);
+    return empty;
+}
+
+QByteArray archiveWithMapTable(const QByteArray& mapTable)
+{
     CResArchiveDocument baseline;
-    baseline.loadBytes(empty, "empty.res");
+    baseline.loadBytes(emptyArchive(), "empty.res");
     QByteArray result;
     baseline.buildWithAppendedMember("map.txt", mapTable, 0, &result);
     return result;
@@ -47,6 +52,7 @@ private slots:
     void validationFailurePreservesExistingArchive();
     void registersCatalogOnlyAfterExportAndPreservesObjectives();
     void stagesReviewedTextureInRunOwnedArchive();
+    void stagesAppliedTextureBesideTerrainAndReplacesGenerationCleanly();
     void stagesTemporaryCatalogReferenceWithoutObjectivesMutation();
     void temporaryRuntimeNameAvoidsInstalledTextureShadowing();
 };
@@ -329,6 +335,129 @@ void MinimapExportTests::stagesReviewedTextureInRunOwnedArchive()
     QVERIFY(buildSyntheticMapTextureArchive(
         "reviewed_zone_map", mmp, &repeated, &errors));
     QCOMPARE(repeated, archiveBytes);
+}
+
+void MinimapExportTests::stagesAppliedTextureBesideTerrainAndReplacesGenerationCleanly()
+{
+    QByteArray terrainArchive;
+    QStringList errors;
+    CResArchiveDocument empty;
+    QVERIFY(empty.loadBytes(emptyArchive(), "terrain-seed.res", &errors));
+    QVector<SResArchiveNewMember> terrainPages;
+    for(int page = 0; page < 9; ++page)
+    {
+        SResArchiveNewMember member;
+        member.name = QString("runtime%1.mmp")
+            .arg(page, 3, 10, QLatin1Char('0'));
+        member.payload = QString("authored-terrain-page-%1")
+            .arg(page).toLatin1();
+        terrainPages.append(member);
+    }
+    QVERIFY2(empty.buildWithAppendedMembers(
+                 terrainPages, &terrainArchive, &errors),
+             qPrintable(errors.join('\n')));
+
+    const QByteArray firstMmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(17, 33, 65)));
+    const QString firstName = temporaryMinimapRuntimeTextureName(
+        firstMmp, "run-with-terrain");
+    CResArchiveDocument crashContract;
+    QVERIFY(crashContract.loadBytes(
+        terrainArchive, "nine-page-expanded-terrain.res", &errors));
+    QCOMPARE(crashContract.members().size(), 9);
+    QVERIFY(crashContract.memberPayload(firstName + ".mmp").isEmpty());
+    QByteArray firstStaged;
+    QVERIFY2(stageSyntheticMapTextureArchive(
+                 terrainArchive, "rebased-terrain.res", firstName, firstMmp,
+                 &firstStaged, &errors),
+             qPrintable(errors.join('\n')));
+
+    CResArchiveDocument firstReopened;
+    QVERIFY2(firstReopened.loadBytes(firstStaged, "first-staged.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(firstReopened.members().size(), 10);
+    for(const SResArchiveNewMember& terrainPage : terrainPages)
+        QCOMPARE(firstReopened.memberPayload(terrainPage.name),
+                 terrainPage.payload);
+    QCOMPARE(firstReopened.memberPayload(firstName + ".mmp"), firstMmp);
+
+    const QByteArray mapTable =
+        "#zone gz1g gipat game\r\n"
+        "#res\r\nruntime runtime\r\n"
+        "#maps\r\n2 1\r\nauthoredmap authoredquest\r\n";
+    const QByteArray mapArchive = archiveWithMapTable(mapTable);
+    QByteArray firstMapArchive;
+    QVERIFY2(stageTemporaryMinimapReference(
+                 mapArchive, "test-current-texts.res", "gz1g", firstName,
+                 &firstMapArchive, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument firstMapReopened;
+    QVERIFY(firstMapReopened.loadBytes(
+        firstMapArchive, "first-map-table.res", &errors));
+    QVERIFY(firstMapReopened.memberPayload("map.txt").contains(
+        firstName.toLatin1() + " authoredquest\r\n"));
+
+    // Applying the same reviewed generation is deterministic and idempotent.
+    QByteArray repeated;
+    QVERIFY2(stageSyntheticMapTextureArchive(
+                 firstStaged, "first-staged.res", firstName, firstMmp,
+                 &repeated, &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(repeated, firstStaged);
+
+    // Regeneration starts from the same clean terrain candidate.  The new
+    // package contains the new identity and never retains the prior preview.
+    const QByteArray secondMmp = ei::encodeMmp8888(
+        solid(QSize(256, 256), QColor(71, 19, 143)));
+    const QString secondName = temporaryMinimapRuntimeTextureName(
+        secondMmp, "run-with-terrain");
+    QVERIFY(firstName != secondName);
+    const QByteArray firstBeforeCollision = firstStaged;
+    QByteArray refusedCollision("must-be-cleared");
+    errors.clear();
+    QVERIFY(!stageSyntheticMapTextureArchive(
+        firstStaged, "first-staged.res", firstName, secondMmp,
+        &refusedCollision, &errors));
+    QVERIFY(refusedCollision.isEmpty());
+    QCOMPARE(firstStaged, firstBeforeCollision);
+    QVERIFY(!errors.isEmpty());
+    errors.clear();
+    QByteArray secondStaged;
+    QVERIFY2(stageSyntheticMapTextureArchive(
+                 terrainArchive, "rebased-terrain.res", secondName, secondMmp,
+                 &secondStaged, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument secondReopened;
+    QVERIFY2(secondReopened.loadBytes(
+                 secondStaged, "second-staged.res", &errors),
+             qPrintable(errors.join('\n')));
+    QCOMPARE(secondReopened.members().size(), 10);
+    for(const SResArchiveNewMember& terrainPage : terrainPages)
+        QCOMPARE(secondReopened.memberPayload(terrainPage.name),
+                 terrainPage.payload);
+    QCOMPARE(secondReopened.memberPayload(secondName + ".mmp"), secondMmp);
+    QVERIFY(secondReopened.memberPayload(firstName + ".mmp").isEmpty());
+    QByteArray secondMapArchive;
+    QVERIFY2(stageTemporaryMinimapReference(
+                 mapArchive, "test-current-texts.res", "gz1g", secondName,
+                 &secondMapArchive, &errors),
+             qPrintable(errors.join('\n')));
+    CResArchiveDocument secondMapReopened;
+    QVERIFY(secondMapReopened.loadBytes(
+        secondMapArchive, "second-map-table.res", &errors));
+    QVERIFY(secondMapReopened.memberPayload("map.txt").contains(
+        secondName.toLatin1() + " authoredquest\r\n"));
+    QVERIFY(!secondMapReopened.memberPayload("map.txt").contains(
+        firstName.toLatin1()));
+
+    // Every transaction is derived in memory; the terrain candidate remains
+    // byte-identical for ordinary save/reopen and retry paths.
+    CResArchiveDocument sourceReopened;
+    QVERIFY(sourceReopened.loadBytes(terrainArchive, "source-reopen.res", &errors));
+    QCOMPARE(sourceReopened.members().size(), 9);
+    for(const SResArchiveNewMember& terrainPage : terrainPages)
+        QCOMPARE(sourceReopened.memberPayload(terrainPage.name),
+                 terrainPage.payload);
 }
 
 void MinimapExportTests::stagesTemporaryCatalogReferenceWithoutObjectivesMutation()

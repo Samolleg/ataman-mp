@@ -1,0 +1,58 @@
+{
+  "schema": "ei-semantic-atlas-r134-quarantine-keep-current-decisions-v1",
+  "source": "User submitted the R134 changed-only export with no changed rows, then explicitly clarified: aka no changes.",
+  "recoveredAuditMemory": "artifacts/semantic-atlas-r134-quarantine-recovery/questionnaire/quarantine-recovered-audit-memory.json",
+  "recoveredAuditMemorySha256": "F74759565CADD86B6152F0E6B49BE1D9D0A2D591778D4B7CC03A237E0AD000C5",
+  "resolution": "artifacts/semantic-atlas-r134-quarantine-recovery/quarantine-resolution.json",
+  "policy": "All five R134 recovery cards were reviewed. Keep every current corner assignment. Treat every previously unresolved or conflicting recovery corner as an explicit keep-current/do-not-reask outcome. Do not mutate the catalog.",
+  "counts": {
+    "inputQuarantinedRows": 226,
+    "recoveredHistoricalControls": 43,
+    "reviewedCards": 5,
+    "explicitKeepCurrentCorners": 8,
+    "catalogChanges": 0,
+    "remainingQuarantinedRows": 0
+  },
+  "reviewedMappings": {
+    "quarantine-zone11-slot274": {
+      "NW": "Ground / Light",
+      "NE": "Ground / Light",
+      "SE": "Ground / Light",
+      "SW": "Grass / Winter faded"
+    },
+    "quarantine-zone11-slot35": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Dark",
+      "SW": "Snow / Dark"
+    },
+    "quarantine-zone11-slot297": {
+      "NW": "Snow / Common",
+      "NE": "Snow / Common",
+      "SE": "Snow / Common",
+      "SW": "Snow / Dark"
+    },
+    "quarantine-bz11k-slot246-nw": {
+      "NW": "Ground / Stony gray",
+      "NE": "Stone / Black",
+      "SE": "Stone / Dark",
+      "SW": "Stone / Black"
+    },
+    "quarantine-bz3g-slot468": {
+      "NW": "Ground / Dead",
+      "NE": "Stone / Grayish",
+      "SE": "Ground / Dead",
+      "SW": "Ground / Dead"
+    }
+  },
+  "explicitKeepCurrent": [
+    {"owners": ["Zone11"], "slot": 274, "corner": "NW", "family": "Ground / Light"},
+    {"owners": ["Zone11"], "slot": 274, "corner": "SW", "family": "Grass / Winter faded"},
+    {"owners": ["Zone11"], "slot": 35, "corner": "SE", "family": "Snow / Dark"},
+    {"owners": ["Zone11"], "slot": 297, "corner": "NE", "family": "Snow / Common"},
+    {"owners": ["bz11k", "Zone14"], "slot": 246, "corner": "NW", "family": "Ground / Stony gray"},
+    {"owners": ["bz3g", "zone9"], "slot": 468, "corner": "NW", "family": "Ground / Dead"},
+    {"owners": ["bz3g", "zone9"], "slot": 468, "corner": "SE", "family": "Ground / Dead"},
+    {"owners": ["bz3g", "zone9"], "slot": 468, "corner": "SW", "family": "Ground / Dead"}
+  ]
+}

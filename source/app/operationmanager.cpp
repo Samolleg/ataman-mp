@@ -262,7 +262,10 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 
 void CSelect::wheelEvent(COperation *pOp, QWheelEvent* pEvent)
 {
-    pOp->camera()->enlarge(pEvent->delta() > 0);
+    const int step = landscapeWheelStep(pEvent->angleDelta().y(),
+                                        pEvent->delta(), pEvent->pixelDelta().y());
+    if(step != 0)
+        pOp->camera()->enlarge(step > 0);
 }
 
 CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
@@ -329,7 +332,16 @@ void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         //todo: show value in ui
         value += QString().number(key-eKey_0); //get key as digit
@@ -542,7 +554,16 @@ void CRotateAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         value += QString().number(key-eKey_0); //get key as digit
         qDebug() << value << endl;
@@ -818,7 +839,16 @@ void CScaleAxis::keyPress(COperation *pOp, EKeyCode key)
         qDebug() << value << endl;
         break;
     }
-    case eKey_0 ... eKey_9:
+    case eKey_0:
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
+    case eKey_9:
     {
         value += QString().number(key-eKey_0); //get key as digit
         qDebug() << value << endl;
@@ -1122,10 +1152,32 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         m_pView->closeLandscapeTools();
         break;
     }
-    case eKey_1 ... eKey_8:
+    case eKey_Z:
+    case eKey_X:
+    case eKey_C:
+    {
+        if(pOp->keyManager()->isPressed(eKey_Ctrl))
+        {
+            pOp->keyManager()->press(key);
+            break;
+        }
+        m_pView->selectTerrainPaintPaletteMode(key == eKey_Z
+            ? ETerrainPaintPaletteMode::Modern
+            : key == eKey_X ? ETerrainPaintPaletteMode::ClassicAuto
+                            : ETerrainPaintPaletteMode::Manual);
+        break;
+    }
+    case eKey_1:
+    case eKey_2:
+    case eKey_3:
+    case eKey_4:
+    case eKey_5:
+    case eKey_6:
+    case eKey_7:
+    case eKey_8:
     {
         m_pView->pickQuickAccessTile(key-eKey_1);
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
 
         m_pView->updatePreviewTile(
             m_pView->getTerrainBrushPos(), bLand);
@@ -1154,7 +1206,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
     m_lastPos = pEvent->pos();
-    bool bLand = CScene::getInstance()->isLandTileEditMode();
+    const bool bLand = m_pView->terrainTileEditLayerIsLand();
     bool hit = false;
     m_lastLandPos = m_pView->getTerrainBrushPos(
         pEvent->x(), pEvent->y(), &hit, true);
@@ -1172,6 +1224,7 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
     }
     case Qt::RightButton:
     {
+        m_pView->beginTerrainPaintSampling();
         if(hit)
             m_pView->pickTile(m_lastLandPos, bLand);
         break;
@@ -1182,8 +1235,10 @@ void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
+    if(pEvent->button() == Qt::RightButton)
+        m_pView->endTerrainPaintSampling();
     if (pEvent->button() == Qt::LeftButton) {
-        const bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         // Always resolve the release position. The view de-duplicates an
         // unchanged center, while a short/fast gesture cannot lose its tail.
         bool hit = false;
@@ -1200,7 +1255,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
     }
     if(!m_pView->isPreviewTile()) // if we finished brushing, we will come here
     {
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->pos().x(), pEvent->pos().y(), &hit);
@@ -1214,7 +1269,7 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
 void CTileBrush::synchronizePointerAfterCameraNavigation(const QPoint& position)
 {
     m_lastPos = position;
-    const bool land = CScene::getInstance()->isLandTileEditMode();
+    const bool land = m_pView->terrainTileEditLayerIsLand();
     m_lastLandPos = m_pView->getTerrainPos(position.x(), position.y(), land);
     m_pView->updatePreviewTile(m_lastLandPos, land);
 }
@@ -1236,7 +1291,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         if(m_pView->isPreviewTile())
             m_pView->setPreviewTile(false);
 
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos(m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit));
@@ -1287,18 +1342,39 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         m_pView->updatePreviewTile(landPos, bLand);
 
     }
+    else if(pEvent->buttons() & Qt::RightButton)
+    {
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
+        bool hit = false;
+        const QVector3D landPos = m_pView->getTerrainBrushPos(
+            pEvent->x(), pEvent->y(), &hit);
+        if(hit)
+        {
+            if(m_pView->pickTile(landPos, bLand))
+                m_pView->updatePreviewTile(landPos, bLand);
+            m_lastLandPos = landPos;
+            m_lastLandPosValid = true;
+        }
+        else
+            m_lastLandPosValid = false;
+    }
     else
     {// just moving mouse. Set tile preview mode
 //        if(!m_pView->isPreviewTile())
 //            m_pView->setPreviewTile();
 
-        bool bLand = CScene::getInstance()->isLandTileEditMode();
+        const bool bLand = m_pView->terrainTileEditLayerIsLand();
         bool hit = false;
         const QVector3D landPos = m_pView->getTerrainBrushPos(
             pEvent->x(), pEvent->y(), &hit);
-        if(hit && (!m_lastLandPosValid
-                   || landPos.distanceToPoint(m_lastLandPos) > 1.0f))
+        if(hit)
         {
+            // A terrain cell is two world units wide, but its projected screen
+            // boundary can be crossed after a much smaller world-space move.
+            // The old one-unit throttle therefore left the outline on one cell
+            // while mouse press freshly picked and painted its neighbour.
+            // Re-pick every hover event; updatePreviewTile already performs the
+            // authoritative cell/vertex snap used by the paint path.
             m_pView->updatePreviewTile(landPos, bLand);
             m_lastLandPos = landPos;
             m_lastLandPosValid = true;
@@ -1321,7 +1397,7 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
         if(m_pView->manualTilePaintingEnabled())
         {
             m_pView->addTileRotation(step);
-            const bool bLand = CScene::getInstance()->isLandTileEditMode();
+            const bool bLand = m_pView->terrainTileEditLayerIsLand();
             m_pView->updatePreviewTile(
                 m_pView->getTerrainBrushPos(), bLand);
             CStatusConnector::getInstance()->updateStatus(
@@ -1344,5 +1420,5 @@ void CTileBrush::wheelEvent(COperation* pOp, QWheelEvent* pEvent)
         pEvent->accept();
         return;
     }
-    pOp->camera()->enlarge(pEvent->delta() > 0);
+    pOp->camera()->enlarge(step > 0);
 }

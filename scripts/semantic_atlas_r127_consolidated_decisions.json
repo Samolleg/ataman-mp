@@ -1,0 +1,26 @@
+{
+  "schema": "ei-semantic-atlas-r127-consolidated-decisions-v1",
+  "source": "scripts/semantic_atlas_r127_user_answers.txt",
+  "queue": "artifacts/semantic-atlas-r127-conservative-residual-review/questionnaire/r127-conservative-residual-queue.json",
+  "policy": "Apply only submitted values differing from currentMapping. Propagate only through queue-recorded exact artwork owners.",
+  "counts": {
+    "submittedCards": 2,
+    "changedCardCorners": 2,
+    "serializedOwnerCornerRows": 2,
+    "auditFlaggedCorners": 2,
+    "auditMatchedReviewed": 2,
+    "additionalUnflaggedHumanCorners": 0
+  },
+  "cornerCorrections": {
+    "bz3g": {
+      "272": {
+        "NE": "Grass / Sparse dark"
+      }
+    },
+    "Zone20": {
+      "152": {
+        "SE": "Stone / Greenish"
+      }
+    }
+  }
+}

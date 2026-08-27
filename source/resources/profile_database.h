@@ -58,6 +58,7 @@ struct SMonsterDatabaseRecord
     QStringList wears;
     QString weapon;
     QString secondWeapon;
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SRaceModelDatabaseRecord
@@ -66,6 +67,7 @@ struct SRaceModelDatabaseRecord
     QString model;
     QStringList primaryTextures;
     QStringList secondaryTextures;
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SItemDatabaseRecord
@@ -78,6 +80,7 @@ struct SItemDatabaseRecord
     int textureType1{-1};
     int textureType2{-1};
     int wearOrder{-1};
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SMaterialDatabaseRecord
@@ -88,12 +91,31 @@ struct SMaterialDatabaseRecord
     int id{-1};
 };
 
+struct SJmvUnitPerkRecord
+{
+    QString prototype;
+    // Lua fields 2..N. Field 1 is the prototype string.
+    QVector<int> values;
+    int physicalOccurrences{1};
+};
+
+struct SJmvUnitStatRecord
+{
+    QString prototype;
+    // Lua fields 2..N. UnitStat rows are intentionally sparse/variable-length.
+    QVector<double> values;
+    int physicalOccurrences{1};
+};
+
 struct SProfileDatabaseSnapshot
 {
     QString providerId;
     QString profileId;
     QString runtimeManifestId;
     QString cacheKey;
+    QString sourceArchivePath;
+    QString sourceArchiveSha256;
+    QMap<QString, QByteArray> rawMembers;
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;
@@ -110,6 +132,8 @@ struct SProfileDatabaseSnapshot
     QMap<QString, SDatabaseProvenance> actionTableProvenance;
     EJmvUnitPerkTableStatus jmvUnitPerkTableStatus{
         EJmvUnitPerkTableStatus::NotApplicable};
+    QMap<QString, SJmvUnitPerkRecord> jmvUnitPerksByPrototype;
+    QMap<QString, SJmvUnitStatRecord> jmvUnitStatsByPrototype;
     QMap<QString, int> jmvStrongManByPrototype;
     QString jmvUnitPerkSourcePath;
     QString jmvUnitPerkSha256;
@@ -174,6 +198,7 @@ public:
     static ProfileDatabaseContext& instance();
     void activate(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
                   const QMap<QString, QString>& providerBindings = QMap<QString, QString>());
+    void publishEditedSnapshot(const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot);
     QSharedPointer<const SProfileDatabaseSnapshot> current() const;
     quint64 generation() const;
     QString providerForRole(const QString& role) const;

@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QRegularExpression>
 #include <QRectF>
 
 #include "map_table_document.h"
@@ -100,30 +101,78 @@ bool buildSyntheticMapTextureArchive(const QString& textureName,
     QDataStream header(&emptyArchive, QIODevice::WriteOnly);
     header.setByteOrder(QDataStream::LittleEndian);
     header << quint32(0x019CE23C) << quint32(0) << quint32(16) << quint32(0);
+    return stageSyntheticMapTextureArchive(
+        emptyArchive, "Endurance temporary placeholder", normalizedName,
+        mmpPayload, outputArchive, errors);
+}
+
+bool stageSyntheticMapTextureArchive(const QByteArray& sourceArchive,
+                                     const QString& sourceName,
+                                     const QString& textureName,
+                                     const QByteArray& mmpPayload,
+                                     QByteArray* outputArchive,
+                                     QStringList* errors)
+{
+    if(outputArchive)
+        outputArchive->clear();
+    QString normalizedName = textureName.trimmed();
+    if(normalizedName.endsWith(".mmp", Qt::CaseInsensitive))
+        normalizedName.chop(4);
+    const ei::SMmpInspection inspection = ei::inspectMmp(mmpPayload);
+    if(!outputArchive || sourceArchive.isEmpty() || normalizedName.isEmpty()
+       || normalizedName.contains('/') || normalizedName.contains('\\')
+       || !inspection.valid || inspection.width != inspection.height
+       || inspection.width < 64 || inspection.width > 2048
+       || (inspection.width & (inspection.width - 1)) != 0)
+    {
+        addError(errors, inspection.valid
+            ? "A run-owned source RES, safe texture name, square power-of-two MMP from 64 to 2048 pixels, and output RES are required."
+            : "Temporary minimap MMP validation failed: " + inspection.diagnostic);
+        return false;
+    }
+
     CResArchiveDocument baseline;
     QStringList localErrors;
-    if(!baseline.loadBytes(emptyArchive, "Endurance temporary placeholder", &localErrors))
+    if(!baseline.loadBytes(sourceArchive, sourceName, &localErrors))
     {
         if(errors) errors->append(localErrors);
         return false;
     }
     const QString memberName = normalizedName + ".mmp";
-    if(!baseline.buildWithAppendedMember(memberName, mmpPayload, 0,
-                                         outputArchive, &localErrors))
+    SResArchiveNewMember minimapMember;
+    minimapMember.name = memberName;
+    minimapMember.payload = mmpPayload;
+    QByteArray candidateBytes;
+    if(!baseline.buildWithPublishedMembers(
+           {minimapMember}, false, &candidateBytes, &localErrors))
     {
         if(errors) errors->append(localErrors);
         return false;
     }
+
     CResArchiveDocument candidate;
-    if(!candidate.loadBytes(*outputArchive, "Endurance temporary placeholder [reopen]",
+    if(!candidate.loadBytes(candidateBytes, sourceName + " [minimap reopen]",
                             &localErrors)
-       || candidate.members().size() != 1
+       || candidate.members().size()
+              != baseline.members().size()
+                 + (baseline.uniqueMemberIndex(memberName) < 0 ? 1 : 0)
        || candidate.memberPayload(memberName) != mmpPayload)
     {
         if(errors) errors->append(localErrors);
-        addError(errors, "The standalone placeholder RES failed semantic reopen validation.");
+        addError(errors,
+                 "The composite run-owned minimap RES failed semantic reopen validation.");
         return false;
     }
+    for(const SResArchiveMember& original : baseline.members())
+    {
+        if(candidate.memberPayload(original.name) != original.payload)
+        {
+            addError(errors, QString("Composite minimap staging changed existing member %1.")
+                     .arg(original.name));
+            return false;
+        }
+    }
+    *outputArchive = candidateBytes;
     return true;
 }
 
@@ -136,7 +185,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
                                    int mapSizeY,
                                    const QPointF& spawn,
                                    QByteArray* outputArchive,
-                                   QStringList* errors)
+                                   QStringList* errors,
+                                   const QString& textureProbeName)
 {
     if(outputArchive)
         outputArchive->clear();
@@ -168,6 +218,14 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
         if(errors) errors->append(localErrors);
         return false;
     }
+    const QString mapTexture = textureProbeName.trimmed().isEmpty()
+        ? syntheticMapPlaceholderTextureName() : textureProbeName.trimmed();
+    if(!QRegularExpression(QStringLiteral("^[A-Za-z0-9_.-]{1,127}$"))
+           .match(mapTexture).hasMatch())
+    {
+        addError(errors, "The synthetic map texture probe name is not a safe resource basename.");
+        return false;
+    }
     SMapTableZone zone;
     zone.zoneId = zoneId;
     zone.allodId = allodId;
@@ -181,8 +239,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
     zone.maps.present = true;
     zone.maps.sectorWidth = mapSizeX;
     zone.maps.sectorHeight = mapSizeY;
-    zone.maps.minimapTexture = syntheticMapPlaceholderTextureName();
-    zone.maps.objectivesTexture = syntheticMapPlaceholderTextureName();
+    zone.maps.minimapTexture = mapTexture;
+    zone.maps.objectivesTexture = mapTexture;
     SMapTableExit exit;
     exit.exitId = 1;
     exit.destinationZoneId = "none";
@@ -235,8 +293,8 @@ bool buildSyntheticMapTableArchive(const QByteArray& sourceArchive,
            || !item.maps.present
            || item.maps.sectorWidth != mapSizeX
            || item.maps.sectorHeight != mapSizeY
-           || item.maps.minimapTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
-           || item.maps.objectivesTexture.compare(syntheticMapPlaceholderTextureName(), Qt::CaseInsensitive) != 0
+           || item.maps.minimapTexture.compare(mapTexture, Qt::CaseInsensitive) != 0
+           || item.maps.objectivesTexture.compare(mapTexture, Qt::CaseInsensitive) != 0
            || item.exits.size() != 1)
             addError(&localErrors, "The staged synthetic zone failed semantic reopen validation.");
     }

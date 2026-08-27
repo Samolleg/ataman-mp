@@ -1,6 +1,9 @@
 #include <QtTest>
 
+#include <cmath>
+
 #include "overlay_material_animation.h"
+#include "tile.h"
 
 class OverlayMaterialAnimationTests : public QObject
 {
@@ -22,9 +25,19 @@ private slots:
     void usesSharedOverlayVertexRules();
     void gatesUnderlayEmissionByPositiveDepth();
     void resolvesAuthoredOverlayTileAnimation();
+    void givesAnimatedCellsStableIndependentPhases();
     void advancesAuthoredOverlayTileFrames();
     void mprSettingsUsesTopLevelWindowAndOverlaySlotToggle();
     void mprMaterialEditorReloadsSelectionAndDoesNotStealEnter();
+    void workingAtlasPreviewUpdatesFlipbookAtlasGrid();
+    void workingAtlasRegridPreservesLogicalTileOrigins();
+    void incrementalOverlayRefreshRecomputesFlipbookMetadata();
+    void mprMaterialEditorUsesLiveWorkingAtlasSlotCount();
+    void mprAnimationResolvedRangeUsesReadableForeground();
+    void overlayActivationUsesExactWorkingAtlasMaterial();
+    void overlaySurfaceUsesOverlayLayerAuthority();
+    void overlaySurfaceSlotLabelsRender();
+    void workingAtlasRefreshesSavePresentation();
 };
 
 static SMaterial material(ETerrainType type, float wave, float warp)
@@ -161,8 +174,8 @@ void OverlayMaterialAnimationTests::shaderContractsCoverDesktopAndAngle()
     const QByteArray fragment = fragmentFile.readAll();
     const QByteArray objectFragment = objectFragmentFile.readAll();
     QVERIFY(vertex.contains("attribute vec4 a_overlayAnimation"));
-    QVERIFY2(vertex.contains("attribute vec3 a_overlayTileAnimation"),
-             "Overlay vertices must carry the authored atlas start/base/count record");
+    QVERIFY2(vertex.contains("attribute vec4 a_overlayTileAnimation"),
+             "Overlay vertices must carry start/base/count plus the per-cell phase");
     QVERIFY2(vertex.contains("u_overlayAtlasGrid"),
              "The shader must account for the complete multi-page terrain atlas");
     QVERIFY(vertex.contains("u_overlayMotionEnabled"));
@@ -194,6 +207,218 @@ void OverlayMaterialAnimationTests::advancesAuthoredOverlayTileFrames()
              "Water vertices must resolve their authored atlas animation record");
     QVERIFY2(landscape.contains("u_overlayAtlasGrid"),
              "Water rendering must provide the atlas page geometry to the shader");
+}
+
+void OverlayMaterialAnimationTests::workingAtlasPreviewUpdatesFlipbookAtlasGrid()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/landscape.cpp") && repository.cdUp()) {}
+    QFile landscapeFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(landscapeFile.open(QIODevice::ReadOnly));
+    const QByteArray landscape = landscapeFile.readAll();
+
+    QVERIFY2(landscape.contains("m_renderTextureCount = textureCount;"),
+             "Uploading an expanded working atlas must update the atlas grid used by flipbook frame offsets");
+    QVERIFY2(landscape.contains("m_renderTextureCount = qMax(1, int(m_header.nTexture));"),
+             "Clearing a working atlas preview must restore the published flipbook atlas grid");
+}
+
+void OverlayMaterialAnimationTests::workingAtlasRegridPreservesLogicalTileOrigins()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("assets/shaders/landshader.vsh")
+          && repository.cdUp()) {}
+    QFile vertexFile(repository.absoluteFilePath("assets/shaders/landshader.vsh"));
+    QFile landscapeFile(repository.absoluteFilePath("source/render/landscape.cpp"));
+    QVERIFY(vertexFile.open(QIODevice::ReadOnly));
+    QVERIFY(landscapeFile.open(QIODevice::ReadOnly));
+    const QByteArray vertex = vertexFile.readAll();
+    const QByteArray landscape = landscapeFile.readAll();
+
+    QVERIFY2(vertex.contains("uniform vec3 u_overlayAtlasGrid"),
+             "Flipbook addressing receives only page count and still assumes one page row");
+    QVERIFY2(vertex.contains("u_overlayAtlasGrid.x")
+             && vertex.contains("u_overlayAtlasGrid.y")
+             && vertex.contains("u_overlayAtlasGrid.z"),
+             "Flipbook addressing must use atlas columns, rows and tile side");
+    QVERIFY2(landscape.contains("m_renderAtlasColumns"),
+             "Working-atlas upload does not publish its changed page stride to the shader");
+
+    const QSizeF originalPixels(16384.0, 2048.0);
+    const QSizeF expandedPixels(6144.0, 6144.0);
+    for(int slot : {0, 78, 109, 255, 489, 511})
+    {
+        const QVector2D original = CTile::atlasTileOrigin(slot, 8, 8);
+        const QVector2D expanded = CTile::atlasTileOrigin(slot, 9, 3);
+        const float originalLocalX = std::fmod(
+            original.x() * float(originalPixels.width()), 2048.0f);
+        const float originalLocalY = std::fmod(
+            original.y() * float(originalPixels.height()), 2048.0f);
+        const float expandedLocalX = std::fmod(
+            expanded.x() * float(expandedPixels.width()), 2048.0f);
+        const float expandedLocalY = std::fmod(
+            expanded.y() * float(expandedPixels.height()), 2048.0f);
+        QVERIFY(qAbs(originalLocalX - expandedLocalX) < 0.01f);
+        QVERIFY(qAbs(originalLocalY - expandedLocalY) < 0.01f);
+    }
+    const QVector2D zone11Phase = CTile::atlasTileOrigin(78, 9, 3);
+    QVERIFY(qAbs(zone11Phase.x() - 7.0f / 12.0f) < 0.0001f);
+    QVERIFY(qAbs(zone11Phase.y() - 1.0f / 4.0f) < 0.0001f);
+}
+
+void OverlayMaterialAnimationTests::incrementalOverlayRefreshRecomputesFlipbookMetadata()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/sector.cpp") && repository.cdUp()) {}
+    QFile sectorFile(repository.absoluteFilePath("source/render/sector.cpp"));
+    QVERIFY(sectorFile.open(QIODevice::ReadOnly));
+    const QByteArray sector = sectorFile.readAll();
+    const int updateStart = sector.indexOf("void CSector::updateWaterTiles(");
+    const int updateEnd = sector.indexOf("void CSector::updateWaterDrawData(", updateStart);
+    QVERIFY(updateStart >= 0);
+    QVERIFY(updateEnd > updateStart);
+    const QByteArray update = sector.mid(updateStart, updateEnd - updateStart);
+
+    QVERIFY2(update.contains("overlayTileAnimation("),
+             "Changing an overlay tile incrementally must recompute its authored flipbook range");
+    QVERIFY2(update.contains("target.tileAnimation"),
+             "The recomputed flipbook range must be written to every changed overlay vertex");
+}
+
+void OverlayMaterialAnimationTests::mprMaterialEditorUsesLiveWorkingAtlasSlotCount()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+    const int editorStart = view.indexOf("Atlas tile animation records");
+    const int editorEnd = view.indexOf("QWidget* identityPage", editorStart);
+    QVERIFY(editorStart >= 0);
+    QVERIFY(editorEnd > editorStart);
+    const QByteArray editor = view.mid(editorStart, editorEnd - editorStart);
+
+    QVERIFY2(editor.contains("activeTerrainAtlasSlotCount()"),
+             "Material Editor must validate animation records against the live working atlas");
+    QVERIFY2(!editor.contains("m_mprDocument.mapInfo().tileCount"),
+             "Material Editor still rejects valid appended working-atlas slots against the old MPR count");
+}
+
+void OverlayMaterialAnimationTests::mprAnimationResolvedRangeUsesReadableForeground()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    const QByteArray view = viewFile.readAll();
+    const int editorStart = view.indexOf("Atlas tile animation records");
+    const int editorEnd = view.indexOf("QWidget* identityPage", editorStart);
+    QVERIFY(editorStart >= 0);
+    QVERIFY(editorEnd > editorStart);
+    const QByteArray editor = view.mid(editorStart, editorEnd - editorStart);
+
+    QVERIFY2(editor.contains(
+                 "QBrush readableAnimationRangeForeground(QColor(Qt::white))"),
+             "Resolved animation ranges do not define a readable foreground for the dark table");
+    QVERIFY2(editor.count("readableAnimationRangeForeground") >= 3,
+             "The readable foreground is not applied both initially and after editing a range");
+}
+
+void OverlayMaterialAnimationTests::overlayActivationUsesExactWorkingAtlasMaterial()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int commandStart = view.indexOf(
+        "if(!bLand && m_landscapeTools->overlaySurfaceOperation()");
+    const int commandEnd = view.indexOf(
+        "const ETerrainTileLayer layer = bLand", commandStart);
+    QVERIFY(commandStart >= 0);
+    QVERIFY(commandEnd > commandStart);
+    const QByteArray activation = view.mid(
+        commandStart, commandEnd - commandStart);
+
+    QVERIFY2(activation.contains("realizeWorkingTerrainSignature("),
+             "Modern Add Overlay must realize the selected exact uniform signature in the live working atlas");
+    QVERIFY2(activation.contains("selectWorkingPaintVariantWithRuntimeType("),
+             "Add Overlay must retain the selected family's reviewed runtime terrain type");
+    QVERIFY2(!activation.contains("m_terrainMaterialRepresentatives.value"),
+             "Add Overlay still relies on the palette representative map that global palette construction clears");
+}
+
+void OverlayMaterialAnimationTests::overlaySurfaceUsesOverlayLayerAuthority()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QFile operationFile(repository.absoluteFilePath("source/app/operationmanager.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QVERIFY(operationFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    QByteArray operation = operationFile.readAll();
+    view.replace("\r\n", "\n");
+    operation.replace("\r\n", "\n");
+
+    const int selectionStart = view.indexOf("void CView::ensureManualTileSelection()");
+    const int selectionEnd = view.indexOf("void CView::deferTerrainAutoCatalogBuild", selectionStart);
+    QVERIFY(selectionStart >= 0);
+    QVERIFY(selectionEnd > selectionStart);
+    const QByteArray selection = view.mid(selectionStart, selectionEnd - selectionStart);
+    QVERIFY2(selection.contains("terrainTileEditLayerIsLand()"),
+             "Manual Overlay Surface preview still derives Land/Overlay from an incomplete mode comparison");
+    QVERIFY2(operation.contains("m_pView->terrainTileEditLayerIsLand()"),
+             "Tile-brush sampling still trusts mutable scene state instead of the active landscape mode");
+    const int activationStart = view.indexOf(
+        "if(!bLand && m_landscapeTools->overlaySurfaceOperation()");
+    const int activationEnd = view.indexOf(
+        "const ETerrainTileLayer layer = bLand", activationStart);
+    QVERIFY(activationStart >= 0);
+    QVERIFY(activationEnd > activationStart);
+    const QByteArray activation = view.mid(
+        activationStart, activationEnd - activationStart);
+    QVERIFY2(activation.contains(
+                 "m_tileStrokeLayer = ETerrainTileLayer::Overlay;"),
+             "Overlay Surface telemetry does not record the actual operation layer");
+    QVERIFY2(activation.contains(
+                 "m_tileStrokeMaterialId = materialSelected ? material : -1;"),
+             "Overlay Surface telemetry does not record its selected MPR material");
+}
+
+void OverlayMaterialAnimationTests::overlaySurfaceSlotLabelsRender()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int drawStart = view.indexOf("void CView::drawTestOverlaysOpenGl()");
+    const int drawEnd = view.indexOf("void CView::", drawStart + 1);
+    QVERIFY(drawStart >= 0);
+    QVERIFY(drawEnd > drawStart);
+    const QByteArray draw = view.mid(drawStart, drawEnd - drawStart);
+    QVERIFY2(draw.contains("ELandscapeEditMode::OverlaySurface"),
+             "The material-slot checkbox is exposed in Overlay Surface mode but its renderer is disabled");
+}
+
+void OverlayMaterialAnimationTests::workingAtlasRefreshesSavePresentation()
+{
+    QDir repository(QDir::current());
+    while(!repository.exists("source/render/view.cpp") && repository.cdUp()) {}
+    QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
+    QVERIFY(viewFile.open(QIODevice::ReadOnly));
+    QByteArray view = viewFile.readAll();
+    view.replace("\r\n", "\n");
+    const int syncStart = view.indexOf("void CView::syncMprDirtyState()");
+    const int syncEnd = view.indexOf("bool CView::applyMprParametersPreview", syncStart);
+    QVERIFY(syncStart >= 0);
+    QVERIFY(syncEnd > syncStart);
+    const QByteArray sync = view.mid(syncStart, syncEnd - syncStart);
+    QVERIFY2(sync.contains("emit mprSaveStateChanged();"),
+             "A terrain edit does not refresh dynamic Finalize and Save labels when the MPR was already dirty");
 }
 
 void OverlayMaterialAnimationTests::mapLifetimeResetsAnimationState()
@@ -321,12 +546,14 @@ void OverlayMaterialAnimationTests::mprMaterialEditorReloadsSelectionAndDoesNotS
     QFile viewFile(repository.absoluteFilePath("source/render/view.cpp"));
     QVERIFY(viewFile.open(QIODevice::ReadOnly));
     const QByteArray view = viewFile.readAll();
+    QByteArray normalizedView = view;
+    normalizedView.replace("\r\n", "\n");
 
     QVERIFY2(view.contains("showMaterialSlots->setAutoDefault(false)"),
              "Enter in a material editor must not activate or focus the slot-label toggle");
     QVERIFY2(!view.contains("else loadSelectedMaterial();"),
              "Rebuilding a non-empty material table must also refresh the editor fields");
-    QVERIFY2(view.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
+    QVERIFY2(normalizedView.contains("materialTable->selectRow(qBound(0, selected, draftMaterials->size() - 1));\n        loadSelectedMaterial();"),
              "The selected material values and type must reload even when the row number stays unchanged");
     QVERIFY2(view.contains("Effective geometric amplitude is world Wind strength x 0.3 x this value"),
              "Wave multiplier help must explain that zero world wind means zero geometric motion");
@@ -347,12 +574,40 @@ void OverlayMaterialAnimationTests::resolvesAuthoredOverlayTileAnimation()
     QCOMPARE(active.startSlot, 64);
     QCOMPARE(active.baseSlot, 64);
     QCOMPARE(active.frameCount, 32);
+    QCOMPARE(active.startPhase, 5);
 
-    QVERIFY(!ei::overlayTileAnimation(65, &records).animated);
+    const ei::SOverlayTileAnimation storedFrame =
+        ei::overlayTileAnimation(81, &records);
+    QVERIFY2(!storedFrame.animated,
+             "Runtime admits texture animation only for cells referencing the record start; range members are frame storage");
+    QVERIFY(!ei::overlayTileAnimation(96, &records).animated);
     QVERIFY(!ei::overlayTileAnimation(64, nullptr).animated);
     zoneFiveWater.nPhase = 1;
     const QVector<SAnimTile> disabledRecords{zoneFiveWater};
     QVERIFY(!ei::overlayTileAnimation(64, &disabledRecords).animated);
+}
+
+void OverlayMaterialAnimationTests::givesAnimatedCellsStableIndependentPhases()
+{
+    SAnimTile record{};
+    record.tileIndex = 512;
+    record.nPhase = 24;
+    const QVector<SAnimTile> records{record};
+    const ei::SOverlayTileAnimation first =
+        ei::overlayTileAnimation(512, &records, 17u);
+    const ei::SOverlayTileAnimation repeated =
+        ei::overlayTileAnimation(512, &records, 17u);
+    const ei::SOverlayTileAnimation neighbor =
+        ei::overlayTileAnimation(512, &records, 18u);
+    QVERIFY(first.animated);
+    QCOMPARE(first.startPhase, repeated.startPhase);
+    QCOMPARE(first.startPhase, int((17u * 17u + 5u) % 24u));
+    QCOMPARE(neighbor.startPhase, int((18u * 17u + 5u) % 24u));
+    QVERIFY2(first.startPhase != neighbor.startPhase,
+             "Authored per-cell phase offsets were synchronized");
+    QVERIFY(!ei::overlayTileAnimation(511, &records, 17u).animated);
+    QVERIFY(!ei::overlayTileAnimation(517, &records, 17u).animated);
+    QVERIFY(!ei::overlayTileAnimation(536, &records, 17u).animated);
 }
 
 QTEST_APPLESS_MAIN(OverlayMaterialAnimationTests)

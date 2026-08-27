@@ -90,7 +90,8 @@ SOverlayMaterialAnimation overlayMaterialAnimation(const SMaterial* material)
 }
 
 SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
-                                           const QVector<SAnimTile>* animations)
+                                           const QVector<SAnimTile>* animations,
+                                           quint32 phaseSeed)
 {
     SOverlayTileAnimation result;
     result.baseSlot = atlasSlot;
@@ -98,12 +99,16 @@ SOverlayTileAnimation overlayTileAnimation(int atlasSlot,
         return result;
     for(const SAnimTile& animation : *animations)
     {
-        // Sectors reference the first slot. Later sequence slots remain usable
-        // as ordinary static atlas tiles when they are authored directly.
-        if(int(animation.tileIndex) != atlasSlot || animation.nPhase < 2)
+        const int startSlot = int(animation.tileIndex);
+        const int frameCount = int(animation.nPhase);
+        // Runtime activation is keyed by the record start. The remaining
+        // contiguous slots are frame storage and are never activation aliases.
+        if(frameCount < 2 || atlasSlot != startSlot)
             continue;
-        result.startSlot = int(animation.tileIndex);
-        result.frameCount = int(animation.nPhase);
+        result.startSlot = startSlot;
+        result.frameCount = frameCount;
+        result.startPhase = int((phaseSeed * 17u + 5u)
+                                % quint32(result.frameCount));
         result.animated = true;
         break;
     }

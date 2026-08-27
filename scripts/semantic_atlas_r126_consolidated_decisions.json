@@ -1,0 +1,266 @@
+{
+  "schema": "ei-semantic-atlas-r126-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r126_user_answers.txt",
+  "queue": "artifacts\\semantic-atlas-r126-next40-review\\questionnaire\\r126-next40-queue.json",
+  "policy": "Apply only submitted values differing from currentMapping. Propagate only through queue-recorded exact artwork owners. Preserve broad and vertex audit outcomes as calibration evidence.",
+  "counts": {
+    "submittedCards": 40,
+    "changedCardCorners": 39,
+    "serializedOwnerCornerRows": 69,
+    "auditFlaggedCorners": 50,
+    "broadMatchedReviewed": 38,
+    "vertexMatchedReviewed": 39,
+    "bothMatchedReviewed": 36,
+    "broadOnlyMatchedReviewed": 2,
+    "vertexOnlyMatchedReviewed": 3,
+    "neitherMatchedReviewed": 9,
+    "additionalUnflaggedHumanCorners": 0,
+    "explicitAuditRejectedCards": 7
+  },
+  "cornerCorrections": {
+    "bz11k": {
+      "386": {
+        "SW": "Ground / Stony gray"
+      },
+      "510": {
+        "NE": "Ground / Stony gray",
+        "SW": "Ground / Stony gray"
+      }
+    },
+    "Zone14": {
+      "386": {
+        "SW": "Ground / Stony gray"
+      },
+      "510": {
+        "NE": "Ground / Stony gray",
+        "SW": "Ground / Stony gray"
+      }
+    },
+    "bz13h": {
+      "337": {
+        "NE": "Rubble / Orange",
+        "SW": "Rubble / Orange"
+      },
+      "470": {
+        "SE": "Sand / Gravel"
+      }
+    },
+    "Zone15": {
+      "337": {
+        "NE": "Rubble / Orange",
+        "SW": "Rubble / Orange"
+      },
+      "470": {
+        "SE": "Sand / Gravel"
+      }
+    },
+    "bz2g": {
+      "284": {
+        "SW": "Grass / Burnt"
+      },
+      "304": {
+        "SW": "Grass / Burnt"
+      },
+      "500": {
+        "SW": "Grass / Burnt"
+      }
+    },
+    "Zone2": {
+      "284": {
+        "SW": "Grass / Burnt"
+      },
+      "304": {
+        "SW": "Grass / Burnt"
+      },
+      "500": {
+        "SW": "Grass / Burnt"
+      }
+    },
+    "bz3g": {
+      "125": {
+        "NE": "Grass / Sparse dark"
+      },
+      "129": {
+        "NW": "Grass / Sparse dark",
+        "SE": "Grass / Sparse dark"
+      },
+      "221": {
+        "NW": "Ground / Dark underwater"
+      },
+      "323": {
+        "SW": "Ground / Gravel"
+      },
+      "338": {
+        "SE": "Grass / Sparse light"
+      },
+      "407": {
+        "NW": "Stone / Grayish",
+        "SE": "Stone / Grayish"
+      },
+      "432": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    "zone9": {
+      "125": {
+        "NE": "Grass / Sparse dark"
+      },
+      "129": {
+        "NW": "Grass / Sparse dark",
+        "SE": "Grass / Sparse dark"
+      },
+      "323": {
+        "SW": "Ground / Gravel"
+      },
+      "338": {
+        "SE": "Grass / Sparse light"
+      },
+      "407": {
+        "NW": "Stone / Grayish",
+        "SE": "Stone / Grayish"
+      },
+      "432": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    "bz4g": {
+      "203": {
+        "SE": "Ground / Gravel greenish"
+      }
+    },
+    "Zone4": {
+      "203": {
+        "SE": "Ground / Gravel greenish"
+      }
+    },
+    "bz5g": {
+      "260": {
+        "NE": "Ground / Common"
+      },
+      "380": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    "bz6g": {
+      "260": {
+        "NE": "Ground / Common"
+      },
+      "380": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    "Zone8": {
+      "260": {
+        "NE": "Ground / Common"
+      },
+      "380": {
+        "SW": "Ground / Gravel"
+      }
+    },
+    "Bz7g": {
+      "121": {
+        "SW": "Stone / Dark gray"
+      },
+      "122": {
+        "SW": "Stone / Dark gray"
+      },
+      "167": {
+        "SW": "Stone / Dark gray"
+      }
+    },
+    "bz8k": {
+      "316": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray",
+        "SW": "Ground / Light"
+      }
+    },
+    "bz9k": {
+      "316": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray",
+        "SW": "Ground / Light"
+      }
+    },
+    "Zone11": {
+      "316": {
+        "NW": "Stone / Gray",
+        "SE": "Stone / Gray",
+        "SW": "Ground / Light"
+      }
+    },
+    "Zone10": {
+      "271": {
+        "NW": "Stone / Dark gray"
+      },
+      "350": {
+        "NE": "Ground / Dirt"
+      }
+    },
+    "Zone13": {
+      "470": {
+        "NW": "Ground / Light"
+      }
+    },
+    "Zone17": {
+      "251": {
+        "NE": "Rubble / Dry"
+      }
+    },
+    "Zone19": {
+      "455": {
+        "SE": "Sand / Common grayish"
+      },
+      "456": {
+        "SE": "Sand / Common grayish"
+      }
+    },
+    "Zone6": {
+      "328": {
+        "SW": "Grass / Fresh"
+      },
+      "360": {
+        "NW": "Ground / Common"
+      }
+    },
+    "Zone6_2": {
+      "328": {
+        "SW": "Grass / Fresh"
+      },
+      "360": {
+        "NW": "Ground / Common"
+      }
+    },
+    "Zone7": {
+      "76": {
+        "NW": "Ground / Dark brown"
+      },
+      "298": {
+        "SW": "Grass / Fresh"
+      },
+      "340": {
+        "NW": "Ground / Dark brown"
+      },
+      "432": {
+        "SE": "Ground / Dark brown"
+      }
+    }
+  },
+  "explicitAuditRejectedCards": [
+    "r126-bz11k-slot63-8b5480ed36",
+    "r126-bz11k-slot64-754b37596e",
+    "r126-bz11k-slot451-2b68465c20",
+    "r126-bz14h-slot1-ba24086640",
+    "r126-bz16h-slot463-37df166584",
+    "r126-zone9-slot267-db4e1f46b4",
+    "r126-zone9-slot378-26fb1c7d8d"
+  ],
+  "bindingSpecificEvidenceNotes": [
+    {
+      "key": "r126-bz8k-slot316-698d5c0a45",
+      "finding": "The approved HD and positional original counterparts are visually divergent artwork. The submitted HD mapping is applied; original evidence is not treated as identity proof.",
+      "catalogMutationBeyondSubmittedMapping": false
+    }
+  ],
+  "additionalUnflaggedHumanCorners": []
+}

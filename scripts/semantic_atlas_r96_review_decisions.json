@@ -1,0 +1,34 @@
+{
+  "schema": "ei-semantic-atlas-r96-reviewed-decisions-v1",
+  "familyRenames": [
+    {"namespaces": ["bz3g", "zone9"], "familyId": 6, "name": "Ground / Dead"},
+    {"namespaces": ["Zone6", "Zone6_2"], "familyId": 5, "name": "Ground / Dead"}
+  ],
+  "explicitlyUnchanged": [
+    {"namespaces": ["bz2g", "Zone2"], "familyId": 15, "name": "Ground / Dark"}
+  ],
+  "falseUniformReview": [
+    {"namespace": "zone9", "slot": 163},
+    {"namespace": "zone9", "slot": 198},
+    {"namespace": "zone9", "slot": 297},
+    {"namespace": "zone9", "slot": 476},
+    {"namespace": "bz3g", "slot": 163},
+    {"namespace": "bz3g", "slot": 198},
+    {"namespace": "bz3g", "slot": 297}
+  ],
+  "connectedReview": [
+    {
+      "namespace": "bz3g",
+      "slot": 476,
+      "reason": "Original bz3g/Zone9 artwork is byte-identical while approved HD artwork differs"
+    }
+  ],
+  "carriedUnresolvedCorners": [
+    {"key": "bz3g:445:NW"},
+    {"key": "bz3g:445:SE"},
+    {"key": "bz3g:468:NW"},
+    {"key": "bz3g:468:SE"},
+    {"key": "bz3g:468:SW"}
+  ],
+  "unresolvedCornersMutated": false
+}

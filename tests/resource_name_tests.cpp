@@ -6,6 +6,7 @@
 
 #include <QFile>
 #include <QTemporaryDir>
+#include <QElapsedTimer>
 
 class ResourceNameTests : public QObject
 {
@@ -19,6 +20,7 @@ private slots:
     void acceptsMmpExtensionWithoutDuplicatingIt();
     void buildsCompleteTerrainAtlasNames();
     void derivesEquipmentAtlasUvScale();
+    void normalizesStandaloneQuickItemAtlasCell();
     void resolvesDatabaseHumanoidSkin();
     void ignoresNonHumanoidDatabaseSkin();
     void resolvesLiveBaseDatabaseWhenProvided();
@@ -34,6 +36,7 @@ private slots:
     void decodesDxt3ExplicitAlpha();
     void decodesDxt5InterpolatedAlpha();
     void rejectsTruncatedDxtMip();
+    void expandedTerrainDxtDecodeStaysWithinInteractiveBudget();
     void compositesTransparentArmorOverBodyAtlas();
     void compositesPremultipliedPnt3LikeTheGame();
     void keepsFaceAndHairOnSkinAtlas();
@@ -249,6 +252,26 @@ void ResourceNameTests::derivesEquipmentAtlasUvScale()
         0.019314f, 0.984419f, 0.018749f, 0.987295f), 1.0f);
 }
 
+void ResourceNameTests::normalizesStandaloneQuickItemAtlasCell()
+{
+    // Installed initqi41item: selector 8, authored cell (0, 3).
+    const auto transform=ei::standaloneAtlasCellUvTransform(
+        0.0846407711f,0.1644984931f,0.7677384615f,0.9929272532f);
+    QVERIFY(transform.normalizedAtlasCell);
+    QCOMPARE(transform.scaleU,4.0f);
+    QCOMPARE(transform.scaleV,4.0f);
+    QCOMPARE(transform.offsetU,0.0f);
+    QCOMPARE(transform.offsetV,-3.0f);
+    QVERIFY(qAbs(0.0846407711f*transform.scaleU+transform.offsetU
+                 -0.3385630844f)<0.00001f);
+    QVERIFY(qAbs(0.7677384615f*transform.scaleV+transform.offsetV
+                 -0.070953846f)<0.00001f);
+
+    // Multi-cell equipment UVs are not a standalone quick-item atlas cell.
+    QVERIFY(!ei::standaloneAtlasCellUvTransform(
+        0.01f,0.75f,0.02f,0.98f).normalizedAtlasCell);
+}
+
 void ResourceNameTests::decodesSparsePnt3WithTrailingTransparency()
 {
     QByteArray compressed;
@@ -411,6 +434,40 @@ void ResourceNameTests::rejectsTruncatedDxtMip()
     QVERIFY(!ei::decodeDxtImage(QByteArray(7, '\0'), 4, 4,
                                 ei::DxtFormat::Dxt1, &image, &diagnostic));
     QVERIFY(!diagnostic.isEmpty());
+}
+
+void ResourceNameTests::expandedTerrainDxtDecodeStaysWithinInteractiveBudget()
+{
+    // 16 physical pages are the 1,024-slot case reported as unusably slow.
+    // This isolates the formerly per-pixel QColor/QImage dispatch path while
+    // keeping the test independent of an installed resource configuration.
+    const int dimension = 1024;
+    QByteArray dxt((dimension / 4) * (dimension / 4) * 8, '\0');
+    for(int offset = 0; offset < dxt.size(); offset += 8)
+    {
+        dxt[offset] = char(0x1f);
+        dxt[offset + 1] = char(0x7c);
+        dxt[offset + 2] = char(0xe0);
+        dxt[offset + 3] = char(0x03);
+        dxt[offset + 4] = char((offset / 8) & 0xff);
+    }
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QByteArray firstHash;
+    for(int page = 0; page < 16; ++page)
+    {
+        QImage decoded;
+        QString diagnostic;
+        QVERIFY2(ei::decodeDxtImage(dxt, dimension, dimension,
+            ei::DxtFormat::Dxt1, &decoded, &diagnostic), qPrintable(diagnostic));
+        if(page == 0)
+            firstHash = QByteArray::number(decoded.cacheKey());
+        QCOMPARE(decoded.size(), QSize(dimension, dimension));
+    }
+    QVERIFY(!firstHash.isEmpty());
+    QVERIFY2(elapsed.elapsed() < 8000,
+        qPrintable(QStringLiteral("16 terrain pages took %1 ms to decode")
+            .arg(elapsed.elapsed())));
 }
 
 void ResourceNameTests::compositesTransparentArmorOverBodyAtlas()

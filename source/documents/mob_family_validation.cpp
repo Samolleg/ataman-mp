@@ -1269,6 +1269,59 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         }
         for(const SMobObjectSnapshot& object : member.objects)
         {
+            if(object.unit && !object.importMode)
+            {
+                for(const SMobLogicSnapshot& logic : object.logicSlots)
+                {
+                    if(!logic.hasBehavior || logic.behavior != 2
+                       || logic.patrolPointCount != 0)
+                        continue;
+                    const bool canActivate = logic.slot == 0
+                        || (logic.hasEnabled && logic.enabled);
+                    const QString unitName = object.name.trimmed().isEmpty()
+                        ? QString("Unit") : QString("Unit '%1'").arg(object.name);
+                    const QString nid = object.hasNid
+                        ? QString::number(object.nid) : QString("unknown");
+                    SMobFamilyFinding finding;
+                    finding.severity = canActivate
+                        ? EMobFamilyFindingSeverity::Critical
+                        : EMobFamilyFindingSeverity::Warning;
+                    finding.code = "unit.patrol_points_missing";
+                    finding.category = "Behavior";
+                    finding.message = canActivate
+                        ? QString("%1 (NID %2), Logic %3 is %4 and set to Patrol but has no patrol points. The original game may terminate when this logic activates. Add a patrol point or select another behavior.")
+                              .arg(unitName, nid).arg(logic.slot)
+                              .arg(logic.slot == 0 ? QString("the default setup")
+                                                   : QString("enabled"))
+                        : QString("%1 (NID %2), Logic %3 is disabled but set to Patrol and has no patrol points. Enabling or script-activating this logic could create a crash-prone setup. Add a patrol point or select another behavior before activating it.")
+                              .arg(unitName, nid).arg(logic.slot);
+                    finding.locations << member.path + ":" + logic.sectionPath;
+                    finding.hasNid = object.hasNid;
+                    finding.nid = object.nid;
+                    report.findings.append(finding);
+                }
+            }
+            if(request.database && object.unit && !object.importMode)
+            {
+                const QString prototype = object.prototype.trimmed();
+                const QString key = prototype.toLower();
+                if(prototype.isEmpty() || !request.database->monsters.contains(key))
+                {
+                    SMobFamilyFinding finding;
+                    finding.severity = EMobFamilyFindingSeverity::Critical;
+                    finding.code = "database.prototype.missing";
+                    finding.category = "Database";
+                    finding.message = prototype.isEmpty()
+                        ? QString("Character NID %1 has no database prototype. The game cannot resolve this unit and may crash while loading the map.")
+                              .arg(object.hasNid ? QString::number(object.nid) : QString("unknown"))
+                        : QString("Character database prototype '%1' does not exist in the active profile database. The game cannot resolve this unit and may crash while loading the map.")
+                              .arg(prototype);
+                    finding.locations << member.path + ":" + object.sectionPath;
+                    finding.hasNid = object.hasNid;
+                    finding.nid = object.nid;
+                    report.findings.append(finding);
+                }
+            }
             if(jmvDatabase && object.unit && !object.importMode
                && request.database->jmvUnitPerkTableStatus
                     == ei::EJmvUnitPerkTableStatus::Valid)

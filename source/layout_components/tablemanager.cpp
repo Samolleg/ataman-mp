@@ -733,6 +733,14 @@ void CTableManager::registerPropertyRow(int row, const QSharedPointer<IPropertyB
         }
     }
     installClipboardFilter(editor, row);
+    if(editor && value->type()==eObjParam_UNIT_PROTOTYPE)
+    {
+        editor->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
+        if(QLineEdit* line=editor->findChild<QLineEdit*>())
+        {
+            line->setToolTip(tr("Right-click to open this prototype in the Database Editor."));
+        }
+    }
 }
 
 QList<int> CTableManager::selectedPropertyRows(int fallbackRow) const
@@ -967,6 +975,25 @@ void CTableManager::showPropertyContextMenu(const QList<int>& rows, const QPoint
     QMenu menu(m_pTable);
     QAction* copy = menu.addAction(tr("Copy value"));
     QAction* paste = menu.addAction(tr("Paste value"));
+    QAction* database = nullptr;
+    QString prototype;
+    if(rows.size() == 1)
+    {
+        const auto value = m_rowValues.value(rows.first());
+        if(value && value->type() == eObjParam_UNIT_PROTOTYPE)
+        {
+            prototype = value->toString().trimmed();
+            database = menu.addAction(tr("Open prototype in Database Editor"));
+            database->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
+            database->setEnabled(!prototype.isEmpty());
+            connect(database, &QAction::triggered, this, [this, prototype]()
+            {
+                ei::log(eLogInfo, QString("Database prototype property action triggered for '%1'")
+                                      .arg(prototype));
+                emit openDatabasePrototypeRequested(prototype);
+            });
+        }
+    }
     copy->setShortcut(QKeySequence::Copy);
     paste->setShortcut(QKeySequence::Paste);
     QString ignored;
@@ -1155,11 +1182,11 @@ void CTableManager::initRowName()
     m_aRowToolTip[eObjParam_TRAP_AREA_RADIUS] = tr("Radius checked around this activation center.");
 
     m_aRowToolTip[eObjParam_TORCH_PTLINK] = tr("Position of the torch's light and particle effect relative to the object.");
-    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = tr("Strength of the torch light and effect.");
+    m_aRowToolTip[eObjParam_TORCH_STRENGHT] = tr("Controls both the campfire particle scale and its light radius (power x 10). Use a positive value; negative values can disable the effect and do not create darkness.");
     m_aRowToolTip[eObjParam_TORCH_SOUND] = tr("Sound played by this torch.");
     m_aRowToolTip[eObjParam_LIGHT_SHADOW] = tr("Allow this light to cast shadows.");
     m_aRowToolTip[eObjParam_LIGHT_COLOR] = tr("Light color.");
-    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = tr("Distance affected by the light. Negative values darken instead.");
+    m_aRowToolTip[eObjParam_LIGHT_RADIUS] = tr("Distance affected by the light. Negative values do not darken the scene: the game uses the absolute value and marks the light unshadowed. In bright daylight, a weaker local light may have no visible effect.");
     m_aRowToolTip[eObjParam_SOUND_INNER_RADIUS] = tr("Area where the sound plays at full volume.");
     m_aRowToolTip[eObjParam_SOUND_RANGE] = tr("Distance where the sound fades to silence.");
     m_aRowToolTip[eObjParam_SOUND_RESNAME] = tr("Sound resources used by this source.");
@@ -1405,6 +1432,9 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             blockEditWidget(m_pTable->item(i, 0));
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+            if(type == eObjParam_UNIT_PROTOTYPE)
+                QObject::connect(pCombo, &CComboDynItem::openDatabasePrototypeRequested,
+                                 this, &CTableManager::openDatabasePrototypeRequested);
             m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
@@ -1920,6 +1950,35 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     updateDatabaseDiagnostic(m_committedText);
 }
 
+void CComboDynItem::requestDatabasePrototypeOpen()
+{
+    if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        const QString prototype=currentText().trimmed();
+        ei::log(eLogInfo, QString("Database prototype editor action triggered for '%1'")
+                              .arg(prototype));
+        emit openDatabasePrototypeRequested(prototype);
+    }
+}
+
+void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPosition)
+{
+    // Keep the editor and action alive until the user's choice is known.  A
+    // modeless popup can transfer focus back through the property panel and
+    // rebuild this cell before QAction::triggered reaches the routing chain.
+    QScopedPointer<QMenu> menu(lineEdit()->createStandardContextMenu());
+    menu->addSeparator();
+    QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
+    open->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
+    open->setEnabled(!currentText().trimmed().isEmpty());
+    // QAction::triggered is delivered before QMenu::exec() returns.  The
+    // property selection can rebuild this cell while the menu is closing, so
+    // relying on exec()'s returned QAction loses the request in the real
+    // properties panel even though the user selected the action.
+    connect(open, &QAction::triggered, this, &CComboDynItem::requestDatabasePrototypeOpen);
+    menu->exec(globalPosition);
+}
+
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
 {
     if(event->matches(QKeySequence::Copy))
@@ -2143,6 +2202,13 @@ void CComboDynItem::focusOutEvent(QFocusEvent* event)
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
+    if(watched == lineEdit() && event->type() == QEvent::ContextMenu
+       && m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    {
+        const QContextMenuEvent* context = static_cast<QContextMenuEvent*>(event);
+        showDatabasePrototypeContextMenu(context->globalPos());
+        return true;
+    }
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
     {
         const QFocusEvent* focusEvent = static_cast<QFocusEvent*>(event);

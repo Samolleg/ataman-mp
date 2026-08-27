@@ -7,6 +7,8 @@
 #include <QFileInfo>
 #include <QTextCodec>
 #include <QRegularExpression>
+#include <QSet>
+#include <algorithm>
 
 namespace {
 
@@ -191,8 +193,9 @@ bool parseLuaString(const QString& token, QString* value)
     return true;
 }
 
-bool parseJmvUnitPerks(const QByteArray& bytes, QMap<QString, int>* strongMan,
-                       QString* diagnostic)
+bool parseJmvUnitPerks(const QByteArray& bytes,
+                       QMap<QString, ei::SJmvUnitPerkRecord>* records,
+                       QMap<QString, int>* strongMan, QString* diagnostic)
 {
     if(bytes.isEmpty() || bytes.size() > 4 * 1024 * 1024)
     {
@@ -222,6 +225,7 @@ bool parseJmvUnitPerks(const QByteArray& bytes, QMap<QString, int>* strongMan,
         return false;
     }
     QMap<QString, int> parsed;
+    QMap<QString, ei::SJmvUnitPerkRecord> parsedRecords;
     int cursor = opening + 1;
     while(cursor < closing)
     {
@@ -267,15 +271,20 @@ bool parseJmvUnitPerks(const QByteArray& bytes, QMap<QString, int>* strongMan,
         bool ok = false;
         const int strong = fields.at(41).toInt(&ok); // UnitPerkType.StrongMan = 42 (Lua, 1-based).
         const QString key = prototype.trimmed().toLower();
-        if(!ok || (parsed.contains(key) && parsed.value(key) != strong))
+        ei::SJmvUnitPerkRecord parsedRecord;
+        parsedRecord.prototype = prototype.trimmed();
+        for(int field = 1; field < fields.size(); ++field)
+            parsedRecord.values.append(fields.at(field).toInt());
+        if(!ok)
         {
-            if(diagnostic) *diagnostic = !ok
-                ? QString("UnitPerk row '%1' has an invalid StrongMan value.").arg(prototype)
-                : QString("UnitPerk contains conflicting StrongMan values for duplicate prototype '%1'.")
-                    .arg(prototype);
+            if(diagnostic) *diagnostic =
+                QString("UnitPerk row '%1' has an invalid StrongMan value.").arg(prototype);
             return false;
         }
+        parsedRecord.physicalOccurrences = parsedRecords.value(key).physicalOccurrences +
+            (parsedRecords.contains(key) ? 1 : 0);
         parsed.insert(key, strong);
+        parsedRecords.insert(key, parsedRecord);
         if(parsed.size() > 100000)
         {
             if(diagnostic) *diagnostic = "UnitPerk exceeds the 100000-row safety limit.";
@@ -288,8 +297,129 @@ bool parseJmvUnitPerks(const QByteArray& bytes, QMap<QString, int>* strongMan,
         if(diagnostic) *diagnostic = "The UnitPerk table contains no rows.";
         return false;
     }
+    if(records) *records = parsedRecords;
     if(strongMan) *strongMan = parsed;
     return true;
+}
+
+bool parseJmvUnitStats(const QByteArray& bytes,
+                       QMap<QString, ei::SJmvUnitStatRecord>* records,
+                       bool* found, QString* diagnostic)
+{
+    if(found) *found = false;
+    if(bytes.isEmpty() || bytes.size() > 4 * 1024 * 1024)
+    {
+        if(diagnostic) *diagnostic = "tables.lua is empty or exceeds the 4 MiB safety limit.";
+        return false;
+    }
+    bool commentsTerminated = false;
+    const QString text = stripLuaComments(QString::fromUtf8(bytes), &commentsTerminated);
+    if(!commentsTerminated)
+    {
+        if(diagnostic) *diagnostic = "tables.lua contains an unterminated string or block comment.";
+        return false;
+    }
+    const QRegularExpression assignment(
+        "\\bUnitStat\\s*=\\s*\\{", QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = assignment.match(text);
+    if(!match.hasMatch())
+    {
+        if(records) records->clear();
+        return true; // Older/synthetic JMV tables.lua files may legitimately omit UnitStat.
+    }
+    if(found) *found = true;
+    const int opening = match.capturedEnd() - 1;
+    const int closing = matchingBrace(text, opening);
+    if(closing < 0)
+    {
+        if(diagnostic) *diagnostic = "The UnitStat table has unbalanced braces.";
+        return false;
+    }
+    static const QRegularExpression number(
+        "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$");
+    QMap<QString, ei::SJmvUnitStatRecord> parsed;
+    int cursor = opening + 1;
+    int physicalRows = 0;
+    while(cursor < closing)
+    {
+        while(cursor < closing && (text.at(cursor).isSpace() || text.at(cursor) == ',')) ++cursor;
+        if(cursor >= closing) break;
+        if(text.at(cursor) != '{')
+        {
+            if(diagnostic) *diagnostic = "UnitStat contains a non-row expression.";
+            return false;
+        }
+        const int rowClosing = matchingBrace(text, cursor);
+        if(rowClosing < 0 || rowClosing > closing)
+        {
+            if(diagnostic) *diagnostic = "A UnitStat row has unbalanced braces.";
+            return false;
+        }
+        const QStringList fields = splitLuaFields(text.mid(cursor + 1, rowClosing - cursor - 1));
+        QString prototype;
+        if(fields.size() < 2 || !parseLuaString(fields.first(), &prototype)
+           || prototype.trimmed().isEmpty())
+        {
+            if(diagnostic) *diagnostic = "A UnitStat row needs a bounded prototype name and at least one numeric value.";
+            return false;
+        }
+        ei::SJmvUnitStatRecord record;
+        record.prototype = prototype.trimmed();
+        for(int field = 1; field < fields.size(); ++field)
+        {
+            bool ok = false;
+            const double value = fields.at(field).toDouble(&ok);
+            if(!ok || !number.match(fields.at(field)).hasMatch())
+            {
+                if(diagnostic) *diagnostic = QString(
+                    "UnitStat row '%1' contains a non-numeric field at Lua index %2.")
+                    .arg(prototype).arg(field + 1);
+                return false;
+            }
+            record.values.append(value);
+        }
+        const QString key = record.prototype.toLower();
+        record.physicalOccurrences = parsed.contains(key)
+            ? parsed.value(key).physicalOccurrences + 1 : 1;
+        parsed.insert(key, record); // JMV lookup semantics: the last physical row wins.
+        if(++physicalRows > 100000)
+        {
+            if(diagnostic) *diagnostic = "UnitStat exceeds the 100000-row safety limit.";
+            return false;
+        }
+        cursor = rowClosing + 1;
+    }
+    if(records) *records = parsed;
+    return true;
+}
+
+QString luaString(const QString& value)
+{
+    QString escaped = value;
+    escaped.replace('\\', "\\\\");
+    escaped.replace('"', "\\\"");
+    escaped.replace('\r', "\\r");
+    escaped.replace('\n', "\\n");
+    escaped.replace('\t', "\\t");
+    return '"' + escaped + '"';
+}
+
+QString unitPerkRow(const ei::SJmvUnitPerkRecord& record)
+{
+    QStringList fields;
+    fields.append(luaString(record.prototype));
+    for(int value : record.values)
+        fields.append(QString::number(value));
+    return '{' + fields.join(',') + ",}";
+}
+
+QString unitStatRow(const ei::SJmvUnitStatRecord& record)
+{
+    QStringList fields;
+    fields.append(luaString(record.prototype));
+    for(double value : record.values)
+        fields.append(QString::number(value, 'g', 15));
+    return '{' + fields.join(',') + ",}";
 }
 
 }
@@ -435,6 +565,8 @@ void applyJmvUnitPerkTable(const QStringList& resourceDirectories,
     if(!snapshot)
         return;
     snapshot->jmvStrongManByPrototype.clear();
+    snapshot->jmvUnitPerksByPrototype.clear();
+    snapshot->jmvUnitStatsByPrototype.clear();
     snapshot->jmvUnitPerkSourcePath = jmvTablesLuaPath(resourceDirectories);
     snapshot->jmvUnitPerkSha256.clear();
     snapshot->jmvUnitPerkDiagnostic.clear();
@@ -454,14 +586,279 @@ void applyJmvUnitPerkTable(const QStringList& resourceDirectories,
     }
     const QByteArray bytes = file.read(4 * 1024 * 1024 + 1);
     snapshot->jmvUnitPerkSha256 = sha256(bytes);
-    if(!parseJmvUnitPerks(bytes, &snapshot->jmvStrongManByPrototype,
+    if(!parseJmvUnitPerks(bytes, &snapshot->jmvUnitPerksByPrototype,
+                         &snapshot->jmvStrongManByPrototype,
                          &snapshot->jmvUnitPerkDiagnostic))
     {
         snapshot->jmvUnitPerkTableStatus = EJmvUnitPerkTableStatus::Malformed;
+        snapshot->jmvUnitPerksByPrototype.clear();
+        snapshot->jmvStrongManByPrototype.clear();
+        return;
+    }
+    bool unitStatFound = false;
+    if(!parseJmvUnitStats(bytes, &snapshot->jmvUnitStatsByPrototype,
+                         &unitStatFound, &snapshot->jmvUnitPerkDiagnostic))
+    {
+        snapshot->jmvUnitPerkTableStatus = EJmvUnitPerkTableStatus::Malformed;
+        snapshot->jmvUnitPerksByPrototype.clear();
+        snapshot->jmvUnitStatsByPrototype.clear();
         snapshot->jmvStrongManByPrototype.clear();
         return;
     }
     snapshot->jmvUnitPerkTableStatus = EJmvUnitPerkTableStatus::Valid;
+}
+
+bool parseJmvUnitTables(const QByteArray& source,
+                        QMap<QString, SJmvUnitPerkRecord>* perks,
+                        QMap<QString, SJmvUnitStatRecord>* stats,
+                        QString* diagnostic)
+{
+    QMap<QString, SJmvUnitPerkRecord> parsedPerks;
+    QMap<QString, SJmvUnitStatRecord> parsedStats;
+    if(!parseJmvUnitPerks(source, &parsedPerks, nullptr, diagnostic))
+        return false;
+    bool statsFound = false;
+    if(!parseJmvUnitStats(source, &parsedStats, &statsFound, diagnostic))
+        return false;
+    if(!statsFound)
+    {
+        if(diagnostic) *diagnostic = "tables.lua has no UnitStat table.";
+        return false;
+    }
+    if(perks) *perks = parsedPerks;
+    if(stats) *stats = parsedStats;
+    return true;
+}
+
+QByteArray rewriteJmvUnitPerkTable(
+    const QByteArray& source,
+    const QMap<QString, SJmvUnitPerkRecord>& desiredRecords,
+    QString* diagnostic)
+{
+    QMap<QString, SJmvUnitPerkRecord> parsed;
+    if(!parseJmvUnitPerks(source, &parsed, nullptr, diagnostic))
+        return {};
+    for(auto it = desiredRecords.constBegin(); it != desiredRecords.constEnd(); ++it)
+        if(it.value().prototype.trimmed().isEmpty() || it.value().values.size() < 43)
+        {
+            if(diagnostic) *diagnostic = QString(
+                "JMV UnitPerk row '%1' is incomplete; 43 numeric fields are required.")
+                .arg(it.key());
+            return {};
+        }
+
+    bool terminated = false;
+    const QByteArray utf8Bom("\xEF\xBB\xBF",3);
+    const bool hasBom=source.startsWith(utf8Bom);
+    QString text = QString::fromUtf8(hasBom?source.mid(3):source);
+    const QString stripped = stripLuaComments(text, &terminated);
+    const QRegularExpression assignment(
+        "\\bUnitPerk\\s*=\\s*\\{", QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = assignment.match(stripped);
+    if(!terminated || !match.hasMatch())
+    {
+        if(diagnostic) *diagnostic = "tables.lua has no safely editable UnitPerk table.";
+        return {};
+    }
+    const int opening = match.capturedEnd() - 1;
+    const int closing = matchingBrace(stripped, opening);
+    if(closing < 0)
+    {
+        if(diagnostic) *diagnostic = "The UnitPerk table has unbalanced braces.";
+        return {};
+    }
+
+    struct Replacement { int start; int length; QString value; };
+    QVector<Replacement> replacements;
+    QSet<QString> retained;
+    QMap<QString,int> remainingOccurrences;
+    int countCursor=opening+1;
+    while(countCursor<closing)
+    {
+        while(countCursor<closing&&(stripped.at(countCursor).isSpace()||stripped.at(countCursor)==','))++countCursor;
+        if(countCursor>=closing)break;const int end=matchingBrace(stripped,countCursor);if(end<0||end>closing)break;const QStringList fields=splitLuaFields(stripped.mid(countCursor+1,end-countCursor-1));QString prototype;if(!fields.isEmpty()&&parseLuaString(fields.first(),&prototype))++remainingOccurrences[prototype.trimmed().toLower()];countCursor=end+1;
+    }
+    int cursor = opening + 1;
+    while(cursor < closing)
+    {
+        while(cursor < closing && (stripped.at(cursor).isSpace() || stripped.at(cursor) == ','))
+            ++cursor;
+        if(cursor >= closing)
+            break;
+        const int rowStart = cursor;
+        const int rowClosing = matchingBrace(stripped, rowStart);
+        if(rowClosing < 0 || rowClosing > closing)
+        {
+            if(diagnostic) *diagnostic = "A UnitPerk row has unbalanced braces.";
+            return {};
+        }
+        const QStringList fields = splitLuaFields(stripped.mid(
+            rowStart + 1, rowClosing - rowStart - 1));
+        QString prototype;
+        if(fields.isEmpty() || !parseLuaString(fields.first(), &prototype))
+        {
+            if(diagnostic) *diagnostic = "A UnitPerk row has no bounded string prototype name.";
+            return {};
+        }
+        const QString key = prototype.trimmed().toLower();
+        SJmvUnitPerkRecord current;current.prototype=prototype.trimmed();for(int field=1;field<fields.size();++field)current.values.append(fields.at(field).toInt());current.physicalOccurrences=remainingOccurrences.value(key);
+        const bool lastOccurrence=--remainingOccurrences[key]==0;
+        int after = rowClosing + 1;
+        while(after < closing && stripped.at(after).isSpace()) ++after;
+        if(after < closing && stripped.at(after) == ',') ++after;
+        const auto desired = desiredRecords.constFind(key);
+        if(desired == desiredRecords.constEnd())
+            replacements.append({rowStart, after - rowStart, QString()});
+        else
+        {
+            retained.insert(key);
+            if(lastOccurrence&&(desired.value().prototype != current.prototype
+               || desired.value().values != current.values))
+                replacements.append({rowStart, rowClosing - rowStart + 1,
+                                     unitPerkRow(desired.value())});
+        }
+        cursor = after;
+    }
+
+    QStringList additions;
+    for(auto it = desiredRecords.constBegin(); it != desiredRecords.constEnd(); ++it)
+        if(!retained.contains(it.key()))
+            for(int occurrence=0;occurrence<qMax(1,it->physicalOccurrences);++occurrence)
+                additions.append(unitPerkRow(it.value()) + ',');
+    if(!additions.isEmpty())
+    {
+        const QString newline = text.contains("\r\n") ? "\r\n" : "\n";
+        replacements.append({closing, 0, newline + additions.join(newline) + newline});
+    }
+    std::sort(replacements.begin(), replacements.end(),
+              [](const Replacement& left, const Replacement& right)
+              { return left.start > right.start; });
+    for(const Replacement& replacement : replacements)
+        text.replace(replacement.start, replacement.length, replacement.value);
+    const QByteArray result = (hasBom?utf8Bom:QByteArray())+text.toUtf8();
+    QMap<QString, SJmvUnitPerkRecord> verified;
+    if(!parseJmvUnitPerks(result, &verified, nullptr, diagnostic)
+       || verified.size() != desiredRecords.size())
+    {
+        if(diagnostic && diagnostic->isEmpty())
+            *diagnostic = "Rewritten tables.lua did not reproduce the requested UnitPerk rows.";
+        return {};
+    }
+    return result;
+}
+
+QByteArray rewriteJmvUnitStatTable(
+    const QByteArray& source,
+    const QMap<QString, SJmvUnitStatRecord>& desiredRecords,
+    QString* diagnostic)
+{
+    QMap<QString, SJmvUnitStatRecord> parsed;
+    bool found = false;
+    if(!parseJmvUnitStats(source, &parsed, &found, diagnostic)) return {};
+    if(!found)
+    {
+        if(desiredRecords.isEmpty()) return source;
+        if(diagnostic) *diagnostic = "tables.lua has no safely editable UnitStat table.";
+        return {};
+    }
+    for(auto it = desiredRecords.constBegin(); it != desiredRecords.constEnd(); ++it)
+        if(it.value().prototype.trimmed().isEmpty() || it.value().values.isEmpty())
+        {
+            if(diagnostic) *diagnostic = QString("JMV UnitStat row '%1' is incomplete.").arg(it.key());
+            return {};
+        }
+
+    const QByteArray utf8Bom("\xEF\xBB\xBF", 3);
+    const bool hasBom = source.startsWith(utf8Bom);
+    QString text = QString::fromUtf8(hasBom ? source.mid(3) : source);
+    bool terminated = false;
+    const QString stripped = stripLuaComments(text, &terminated);
+    const QRegularExpression assignment(
+        "\\bUnitStat\\s*=\\s*\\{", QRegularExpression::CaseInsensitiveOption);
+    const auto match = assignment.match(stripped);
+    if(!terminated || !match.hasMatch())
+    {
+        if(diagnostic) *diagnostic = "tables.lua has no safely editable UnitStat table.";
+        return {};
+    }
+    const int opening = match.capturedEnd() - 1;
+    const int closing = matchingBrace(stripped, opening);
+    if(closing < 0)
+    {
+        if(diagnostic) *diagnostic = "The UnitStat table has unbalanced braces.";
+        return {};
+    }
+    struct Replacement { int start; int length; QString value; };
+    QVector<Replacement> replacements;
+    QSet<QString> retained;
+    QMap<QString, int> remaining;
+    int cursor = opening + 1;
+    while(cursor < closing)
+    {
+        while(cursor < closing && (stripped.at(cursor).isSpace() || stripped.at(cursor) == ',')) ++cursor;
+        if(cursor >= closing) break;
+        const int end = matchingBrace(stripped, cursor);
+        if(end < 0 || end > closing) return {};
+        const QStringList fields = splitLuaFields(stripped.mid(cursor + 1, end - cursor - 1));
+        QString prototype;
+        if(!fields.isEmpty() && parseLuaString(fields.first(), &prototype))
+            ++remaining[prototype.trimmed().toLower()];
+        cursor = end + 1;
+    }
+    cursor = opening + 1;
+    while(cursor < closing)
+    {
+        while(cursor < closing && (stripped.at(cursor).isSpace() || stripped.at(cursor) == ',')) ++cursor;
+        if(cursor >= closing) break;
+        const int rowStart = cursor;
+        const int rowClosing = matchingBrace(stripped, rowStart);
+        if(rowClosing < 0 || rowClosing > closing) return {};
+        const QStringList fields = splitLuaFields(stripped.mid(rowStart + 1, rowClosing - rowStart - 1));
+        QString prototype;
+        if(fields.isEmpty() || !parseLuaString(fields.first(), &prototype)) return {};
+        const QString key = prototype.trimmed().toLower();
+        SJmvUnitStatRecord current;
+        current.prototype = prototype.trimmed();
+        for(int field = 1; field < fields.size(); ++field) current.values.append(fields.at(field).toDouble());
+        const bool lastOccurrence = --remaining[key] == 0;
+        int after = rowClosing + 1;
+        while(after < closing && stripped.at(after).isSpace()) ++after;
+        if(after < closing && stripped.at(after) == ',') ++after;
+        const auto desired = desiredRecords.constFind(key);
+        if(desired == desiredRecords.constEnd()) replacements.append({rowStart, after - rowStart, {}});
+        else
+        {
+            retained.insert(key);
+            if(lastOccurrence && (desired->prototype != current.prototype || desired->values != current.values))
+                replacements.append({rowStart, rowClosing - rowStart + 1, unitStatRow(desired.value())});
+        }
+        cursor = after;
+    }
+    QStringList additions;
+    for(auto it = desiredRecords.constBegin(); it != desiredRecords.constEnd(); ++it)
+        if(!retained.contains(it.key()))
+            for(int occurrence = 0; occurrence < qMax(1, it->physicalOccurrences); ++occurrence)
+                additions.append(unitStatRow(it.value()) + ',');
+    if(!additions.isEmpty())
+    {
+        const QString newline = text.contains("\r\n") ? "\r\n" : "\n";
+        replacements.append({closing, 0, newline + additions.join(newline) + newline});
+    }
+    std::sort(replacements.begin(), replacements.end(),
+              [](const Replacement& left, const Replacement& right){ return left.start > right.start; });
+    for(const auto& replacement : replacements)
+        text.replace(replacement.start, replacement.length, replacement.value);
+    const QByteArray result = (hasBom ? utf8Bom : QByteArray()) + text.toUtf8();
+    QMap<QString, SJmvUnitStatRecord> verified;
+    bool verifiedFound = false;
+    if(!parseJmvUnitStats(result, &verified, &verifiedFound, diagnostic)
+       || !verifiedFound || verified.size() != desiredRecords.size())
+    {
+        if(diagnostic && diagnostic->isEmpty())
+            *diagnostic = "Rewritten tables.lua did not reproduce the requested UnitStat rows.";
+        return {};
+    }
+    return result;
 }
 
 }

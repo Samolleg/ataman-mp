@@ -42,6 +42,13 @@ staging and refuses a mismatched launch with both paths shown. Select the
 intended mod in Starter before retrying; launching the game from Starter is not
 required for this selection update.
 
+The 32-bit `Work path`, `Resources path`, and `CD-ROM Path` values under
+Starter's Evil Islands path settings must likewise identify the selected game
+root and its `Res` directory. Endurance validates these values before staging.
+A mixed-root launch is rejected because early engine initialization can consume
+those global paths before the run-local bridge owns all later lookups, producing
+misleading missing-prototype failures even when the staged database is valid.
+
 The run-local bridge still virtualizes later `AddonPath` reads inside the owned
 game process, but this is defence in depth rather than a replacement for
 preflight. Endurance does not modify `starter.config` or the user's global

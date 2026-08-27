@@ -1,0 +1,60 @@
+{
+  "schema": "ei-semantic-atlas-r146-decisions-v1",
+  "source": "scripts\\semantic_atlas_r146_user_answers.txt",
+  "sourceSha256": "885D95D71DCFB0707FCC23C3E15285F9543503FFDBA15FBA0EF1D9F67B81B910",
+  "queue": "artifacts\\semantic-atlas-r146-all-ground-followup\\questionnaire\\r146-all-ground-queue.json",
+  "queueSha256": "F1FBF3DAC2294F197E7DA1B85B783569DB3C98AA9F9545C40098AF3CEE0A6A3D",
+  "catalogInputSha256": "9C282DE944DAF8115A73540ECBAD666145170B998F03FDAEEEB3D73870FD32C2",
+  "policy": "The concrete R146 dropdown value overrides the retained R145 carry-forward note. The one changed NW corner propagates only across the byte-identical approved HD+original binding closure.",
+  "counts": {
+    "submittedCards": 1,
+    "fullyResolvedCards": 1,
+    "remainingCards": 0,
+    "changedLogicalCorners": 1,
+    "ownerExpandedCornerRows": 2
+  },
+  "questionKey": "semantic-atlas-hd-78c7da1531a7d8ea",
+  "targetTilePixelSha256": "78C7DA1531A7D8EACA1B9B00537F8CD0D9B62E58D56557222C3A3BC17A5E1B0D",
+  "submittedMapping": {
+    "NW": "Ground / Gravel greenish",
+    "NE": "Sand / Dark pink",
+    "SE": "Sand / Dark pink",
+    "SW": "Sand / Dark pink"
+  },
+  "currentMapping": {
+    "NW": "Ground / Common",
+    "NE": "Sand / Dark pink",
+    "SE": "Sand / Dark pink",
+    "SW": "Sand / Dark pink"
+  },
+  "changedCorners": {
+    "NW": "Ground / Gravel greenish"
+  },
+  "retainedNote": "R146 carry-forward: NW is still uncertain; every Ground family is included for comparison.",
+  "exactBindingOwners": [
+    "Zone4",
+    "bz4g"
+  ],
+  "exactBindings": [
+    {
+      "variant": "hd",
+      "pixelSha256": "4279b31201a5d960d870988415550782e9bae5b28c65cea04095eaf2714d41ed"
+    },
+    {
+      "variant": "original",
+      "pixelSha256": "3ca5c337e95ede0ce8e515eccc10e735254b1f6de75e4711339ba5c8bab4e666"
+    }
+  ],
+  "cornerCorrections": {
+    "Zone4": {
+      "488": {
+        "NW": "Ground / Gravel greenish"
+      }
+    },
+    "bz4g": {
+      "488": {
+        "NW": "Ground / Gravel greenish"
+      }
+    }
+  }
+}

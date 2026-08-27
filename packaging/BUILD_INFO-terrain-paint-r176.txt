@@ -1,0 +1,9 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: transactional first Modern field recovery
+Executable source/changelist commit: 19df73cfc73307e1f45d898360a7f24c54a46c51
+Executable SHA-256: DE03472C96EEFA86B220E7B1B6405EF788894E48156B45C226F8516DB952EDC5
+Semantic catalog source commit: ee5d1139b88ac7eb5c1c44b0a5d67f47328dae1c
+Preset SHA-256: 1D980F2DD24ADE17DD2AD3A0F37E80C0885840FB550CDC937B45FF6B6223EA89
+Validation: document 130 pass / 0 fail / 7 expected skips; virtual atlas 115 pass / 0 fail; landscape widget 7 pass / 0 fail; --ui-widget-check PASS; checked retained MinGW release wrapper PASS
+Build kit: Qt 5.12.12 MinGW 7.3 x64 retained release toolchain
+Collections: omitted from this focused revision; test against a clean installed Zone 2 map

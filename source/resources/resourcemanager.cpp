@@ -1,6 +1,7 @@
 #include "resourcemanager.h"
 #include <QtConcurrent>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include "mmp_codec.h"
 #include <QDebug>
 #include <QMessageBox>
@@ -13,6 +14,8 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QTextCodec>
+#include <QCryptographicHash>
+#include <QHash>
 #include <limits>
 
 #include "res_file.h"
@@ -24,6 +27,7 @@
 #include "resource_name.h"
 #include "unit_appearance.h"
 #include "persistent_visual_cache.h"
+#include "tile.h"
 
 CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
@@ -162,7 +166,9 @@ const SCachedArchiveIndex& archiveIndex(const QString& path)
     return cached;
 }
 
-bool readIndexedResource(const QVector<QString>& sources, const QString& requestedName, QByteArray& output, QString* sourcePath = nullptr)
+bool findIndexedResource(const QVector<QString>& sources,
+                         const QString& requestedName,
+                         QString* sourcePath, SResFileEntry* resourceEntry)
 {
     const QString normalized = requestedName.toLower();
     for(const QString& path : sources)
@@ -171,17 +177,32 @@ bool readIndexedResource(const QVector<QString>& sources, const QString& request
         auto found = index.entries.constFind(normalized);
         if(found == index.entries.constEnd())
             continue;
-        QFile file(path);
-        if(!file.open(QIODevice::ReadOnly) || !file.seek(found->Position))
-            continue;
-        output = file.read(found->Size);
-        if(output.size() != found->Size)
-            continue;
         if(sourcePath)
             *sourcePath = path;
+        if(resourceEntry)
+            *resourceEntry = found.value();
         return true;
     }
     return false;
+}
+
+bool readIndexedResource(const QVector<QString>& sources,
+                         const QString& requestedName, QByteArray& output,
+                         QString* sourcePath = nullptr)
+{
+    QString resolvedPath;
+    SResFileEntry entry;
+    if(!findIndexedResource(sources, requestedName, &resolvedPath, &entry))
+        return false;
+    QFile file(resolvedPath);
+    if(!file.open(QIODevice::ReadOnly) || !file.seek(entry.Position))
+        return false;
+    output = file.read(entry.Size);
+    if(output.size() != entry.Size)
+        return false;
+    if(sourcePath)
+        *sourcePath = resolvedPath;
+    return true;
 }
 
 QStringList indexedNames(const QVector<QString>& sources, const QString& suffix)
@@ -669,6 +690,20 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
     return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
 }
 
+ei::CFigure* CObjectList::getFigureResource(const QString& resourceName)
+{
+    const QString normalized = resourceName.trimmed().toLower();
+    if(normalized.isEmpty() || (!normalized.endsWith(".fig") && !normalized.endsWith(".mod")))
+        return nullptr;
+    if(!m_aFigure.contains(normalized) && !m_missingFigureNames.contains(normalized))
+    {
+        QSet<QString> requested;
+        requested.insert(normalized);
+        loadFigures(requested);
+    }
+    return m_aFigure.value(normalized, nullptr);
+}
+
 QStringList CObjectList::figurePartNames(const QString& name)
 {
     QStringList result;
@@ -1026,13 +1061,20 @@ void CTextureList::loadTexture(QSet<QString>& aName)
     }
 }
 
-QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QString& modelName)
+QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QString& modelName,
+                                                  bool* found)
 {
     const QString cacheKey = ei::textureCacheKey(name, modelName);
     if(m_aTexture.contains(cacheKey))
+    {
+        if(found)*found=true;
         return m_aTexture.value(cacheKey);
+    }
     if(m_missingTextureNames.contains(cacheKey))
+    {
+        if(found)*found=false;
         return textureDefault();
+    }
 
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     const QStringList candidates = ei::textureResourceCandidates(name, modelName);
@@ -1050,6 +1092,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
                 ei::log(eLogInfo, QString("Resolved texture %1 %2 model:%3 -> %4 in %5")
                         .arg(candidateIndex >= 3 ? "fallback" : "alias", name, modelName,
                              candidate, sourcePath));
+            if(found)*found=true;
             return m_aTexture.value(cacheKey);
         }
     }
@@ -1069,6 +1112,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
             {
                 ei::log(eLogInfo, QString("Resolved database unit texture %1 model:%2 -> %3 (database:%4 texture:%5)")
                         .arg(name, modelName, databaseCandidate, databaseSource, textureSource));
+                if(found)*found=true;
                 return m_aTexture.value(cacheKey);
             }
         }
@@ -1077,6 +1121,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
     }
 
     m_missingTextureNames.insert(cacheKey);
+    if(found)*found=false;
     ei::log(eLogWarning, QString("Missing texture (negative cached): %1 model:%2 candidates:%3")
             .arg(name, modelName, candidates.join(", ")));
     return textureDefault();
@@ -1100,6 +1145,24 @@ QOpenGLTexture* CTextureList::texture(const QString& name)
 QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelName)
 {
     return loadTextureResource(name.toLower(), modelName.toLower());
+}
+
+QOpenGLTexture* CTextureList::texture(const QStringList& names,const QString& modelName,
+                                      QString* resolvedName)
+{
+    if(resolvedName)resolvedName->clear();
+    for(const QString& name:names)
+    {
+        bool found=false;
+        QOpenGLTexture* result=loadTextureResource(name.toLower(),modelName.toLower(),&found);
+        if(found)
+        {
+            if(resolvedName)*resolvedName=name;
+            return result;
+        }
+    }
+    if(resolvedName&&!names.isEmpty())*resolvedName=names.last();
+    return textureDefault();
 }
 
 QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
@@ -1353,11 +1416,18 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
 {
     outArrImage.clear();
     outArrImage.resize(inArrTextureName.size());
-    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
     if(sources.isEmpty())
         return false;
 
     int nCount(0);
+    // Expanded map-specific atlases may intentionally repeat authored MMP
+    // pages under distinct physical page names. Preserve those physical
+    // identities while sharing one immutable decoded QImage for byte-identical
+    // payloads instead of allocating the same RGBA page hundreds of times.
+    QHash<QByteArray, QImage> decodedPayloads;
     for(int index = 0; index < inArrTextureName.size(); ++index)
     {
         const QString texName = inArrTextureName.at(index).toLower();
@@ -1366,6 +1436,18 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
         if(!readIndexedResource(sources, texName, textureData, &sourcePath))
         {
             ei::log(eLogWarning, "Missing terrain texture: " + texName);
+            continue;
+        }
+
+        const QByteArray payloadSha256 = QCryptographicHash::hash(
+            textureData, QCryptographicHash::Sha256);
+        const auto cached = decodedPayloads.constFind(payloadSha256);
+        if(cached != decodedPayloads.constEnd())
+        {
+            outArrImage[index] = cached.value();
+            ++nCount;
+            ei::log(eLogInfo, QString("Resolved repeated terrain tile atlas %1 source:%2 sharedDecodedPixels:true")
+                    .arg(texName, sourcePath));
             continue;
         }
 
@@ -1384,9 +1466,27 @@ int CTextureList::extractMmpToDxt1(QVector<QImage>& outArrImage, const QStringLi
             continue;
         }
 
-        stream.device()->seek(header.size());
         QImage& img = outArrImage[index];
-        img = convert_DXT(stream, header.m_width, header.m_height).mirrored(false, true);
+        const qint64 blockBytes = qint64(qMax(1, (header.m_width + 3) / 4))
+            * qint64(qMax(1, (header.m_height + 3) / 4)) * 8;
+        if(blockBytes > std::numeric_limits<int>::max()
+           || header.size() + blockBytes > textureData.size())
+        {
+            ei::log(eLogWarning, "Truncated terrain texture payload: " + texName
+                    + " source:" + sourcePath);
+            continue;
+        }
+        QString decodeDiagnostic;
+        if(!ei::decodeDxtImage(textureData.mid(header.size(), int(blockBytes)),
+                               header.m_width, header.m_height,
+                               ei::DxtFormat::Dxt1, &img, &decodeDiagnostic))
+        {
+            ei::log(eLogWarning, "Cannot decode terrain texture: " + texName
+                    + " source:" + sourcePath + " diagnostic:" + decodeDiagnostic);
+            continue;
+        }
+        img = img.mirrored(false, true);
+        decodedPayloads.insert(payloadSha256, img);
         ++nCount;
         ei::log(eLogInfo, QString("Resolved terrain tile atlas %1 source:%2 size:%3x%4")
                 .arg(texName, sourcePath).arg(header.m_width).arg(header.m_height));
@@ -1400,9 +1500,151 @@ int CTextureList::extractMmpToDxt1(QImage& outImage, const QString textureName)
     QStringList arrTexName;
     arrTexName.append(textureName);
     int res = extractMmpToDxt1(arrImage, arrTexName);
-    if(res == 0)
+    if(res != 0 && !arrImage.isEmpty())
         outImage = arrImage.front();
+    else
+        outImage = QImage();
     return res;
+}
+
+bool CTextureList::terrainMmpPayload(const QString& textureName,
+                                     QByteArray* payload,
+                                     QString* sourcePath) const
+{
+    if(payload)
+        payload->clear();
+    if(!payload)
+        return false;
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
+    return readIndexedResource(sources, textureName.toLower(), *payload,
+                               sourcePath);
+}
+
+bool CTextureList::catalogTerrainMmpPayload(const QString& textureName,
+                                            QByteArray* payload,
+                                            QString* sourcePath) const
+{
+    if(payload)
+        payload->clear();
+    if(!payload)
+        return false;
+    return readIndexedResource(configuredResourceSources(m_pSettings),
+                               textureName.toLower(), *payload, sourcePath);
+}
+
+bool CTextureList::terrainMmpSourceArchive(const QString& textureName,
+                                           QString* sourcePath) const
+{
+    if(sourcePath)
+        sourcePath->clear();
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
+    return findIndexedResource(sources, textureName.toLower(),
+                               sourcePath, nullptr);
+}
+
+bool CTextureList::catalogTerrainMmpTile(const QString& textureName,
+                                         int logicalSlot, QImage* tile,
+                                         QString* sourceIdentity) const
+{
+    if(tile)
+        *tile = QImage();
+    if(sourceIdentity)
+        sourceIdentity->clear();
+    if(!tile || logicalSlot < 0 || logicalSlot >= 64)
+        return false;
+
+    QString resolvedPath;
+    SResFileEntry entry;
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!findIndexedResource(sources, textureName.toLower(),
+                            &resolvedPath, &entry))
+        return false;
+    const QFileInfo info(resolvedPath);
+    const QString pageIdentity = QStringLiteral("%1|%2|%3|%4|%5|%6")
+        .arg(info.absoluteFilePath().toCaseFolded())
+        .arg(info.size())
+        .arg(info.lastModified().toMSecsSinceEpoch())
+        .arg(entry.Position).arg(entry.Size)
+        .arg(entry.LastWriteTime.toMSecsSinceEpoch());
+    const QString cacheKey = pageIdentity + QStringLiteral("|")
+        + QString::number(logicalSlot);
+    const auto cached = m_catalogTerrainTileCache.constFind(cacheKey);
+    if(cached != m_catalogTerrainTileCache.constEnd())
+    {
+        *tile = cached.value();
+        if(sourceIdentity)
+            *sourceIdentity = pageIdentity;
+        return true;
+    }
+    QFile file(resolvedPath);
+    if(!file.open(QIODevice::ReadOnly))
+        return false;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTile(
+           &file, entry.Position, entry.Size, logicalSlot,
+           tile, &diagnostic))
+    {
+        ei::log(eLogWarning, QString(
+            "Cannot decode indexed terrain atlas tile: %1 slot:%2 archive:%3 diagnostic:%4")
+            .arg(textureName).arg(logicalSlot).arg(resolvedPath, diagnostic));
+        return false;
+    }
+    m_catalogTerrainTileCache.insert(cacheKey, *tile);
+    if(sourceIdentity)
+        *sourceIdentity = pageIdentity;
+    return true;
+}
+
+bool CTextureList::terrainMmpTile(const QString& textureName, int logicalSlot,
+                                  QImage* tile, QString* sourcePath) const
+{
+    QByteArray payload;
+    if(!tile || !terrainMmpPayload(textureName, &payload, sourcePath))
+        return false;
+    QString diagnostic;
+    if(!ei::decodeMmpDxt1AtlasTile(payload, logicalSlot, tile, &diagnostic))
+    {
+        ei::log(eLogWarning, QString(
+            "Cannot decode terrain atlas tile directly: %1 slot:%2 diagnostic:%3")
+            .arg(textureName).arg(logicalSlot).arg(diagnostic));
+        return false;
+    }
+    return true;
+}
+
+QStringList CTextureList::configuredResourceArchivePaths() const
+{
+    QStringList paths;
+    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    for(const QString& source : sources)
+        if(QFileInfo(source).isFile()
+           && QFileInfo(source).suffix().compare(
+                  QStringLiteral("res"), Qt::CaseInsensitive) == 0)
+            paths.append(QFileInfo(source).absoluteFilePath());
+    return paths;
+}
+
+void CTextureList::setMapLocalTerrainArchive(const QString& path)
+{
+    QString resolved;
+    if(!path.isEmpty())
+    {
+        const QFileInfo candidate(path);
+        if(candidate.isFile())
+            resolved = candidate.absoluteFilePath();
+    }
+    if(resolved == m_mapLocalTerrainArchive)
+        return;
+
+    m_mapLocalTerrainArchive = resolved;
+    if(m_mapLocalTerrainArchive.isEmpty())
+        ei::log(eLogInfo, "Map-local terrain atlas source cleared");
+    else
+        ei::log(eLogInfo, "Map-local terrain atlas source: " + m_mapLocalTerrainArchive);
 }
 
 struct STexSpecified
@@ -1433,38 +1675,59 @@ int dxt1MipOffset(const SMmpHeader& header, int mipLevel)
 }
 
 QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLevel,
-                             int tileSize)
+                             int tileSize, int columns)
 {
     const int blocksWide = qMax(1, (tileSize + 3) / 4);
     const int blocksHigh = qMax(1, (tileSize + 3) / 4);
     const int rowBytes = blocksWide * 8;
-    QByteArray combined;
-    combined.reserve(rowBytes * blocksHigh * parts.size());
-    for(int blockRow = 0; blockRow < blocksHigh; ++blockRow)
+    const int rows = (parts.size() + columns - 1) / columns;
+    QByteArray combined(rowBytes * columns * blocksHigh * rows, char(0));
+    for(int partIndex = 0; partIndex < parts.size(); ++partIndex)
     {
-        for(const STexSpecified& part : parts)
+        const STexSpecified& part = parts.at(partIndex);
+        const int pageColumn = partIndex % columns;
+        const int pageRow = partIndex / columns;
+        for(int blockRow = 0; blockRow < blocksHigh; ++blockRow)
         {
             const int offset = dxt1MipOffset(part.header,
                 part.selectedMip + outputLevel) + blockRow * rowBytes;
-            combined.append(part.data.mid(offset, rowBytes));
+            const int destination = ((pageRow * blocksHigh + blockRow) * columns
+                                     + pageColumn) * rowBytes;
+            memcpy(combined.data() + destination,
+                   part.data.constData() + offset, size_t(rowBytes));
         }
     }
     return combined;
 }
 }
 
-QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexCount, int& texCount)
+QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
+                                           int expectedTexCount,
+                                           int& texCount,
+                                           int& atlasColumns)
 {
     ei::setCrashContext("mpr/terrain-atlas/cache:" + name);
-    const QString cacheKey = name.toLower();
+    QString archiveFingerprint;
+    if(!m_mapLocalTerrainArchive.isEmpty())
+    {
+        const QFileInfo archive(m_mapLocalTerrainArchive);
+        archiveFingerprint = QStringLiteral("|%1|%2|%3")
+            .arg(archive.absoluteFilePath())
+            .arg(archive.size())
+            .arg(archive.lastModified().toMSecsSinceEpoch());
+    }
+    const QString cacheKey = name.toLower() + archiveFingerprint;
     if(m_aTexture.contains(cacheKey))
     {
-        texCount = m_aTexture[cacheKey]->width()/m_aTexture[cacheKey]->height();
+        texCount = qMax(1, expectedTexCount);
+        atlasColumns = CTile::preferredAtlasColumns(texCount);
         return m_aTexture[cacheKey];
     }
 
     QVector<STexSpecified> aPart;
-    const QVector<QString> sources = configuredResourceSources(m_pSettings);
+    QVector<QString> sources = configuredResourceSources(m_pSettings);
+    if(!m_mapLocalTerrainArchive.isEmpty())
+        sources.prepend(m_mapLocalTerrainArchive);
     if(sources.isEmpty())
     {
         ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Settings > Game and Mod Setup.");
@@ -1529,6 +1792,8 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     }
 
     texCount = aPart.size();
+    atlasColumns = CTile::preferredAtlasColumns(texCount);
+    const int atlasRows = (texCount + atlasColumns - 1) / atlasColumns;
     // Select the authored level matching the smallest source tile. Sources in
     // one map can have different base resolutions, but all output levels must
     // line up in one horizontal atlas.
@@ -1553,13 +1818,30 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     combinedMips.reserve(outputMipCount);
     for(int level = 0; level < outputMipCount; ++level)
         combinedMips.append(combineTerrainMip(aPart, level,
-            qMax(1, minTexSize >> level)));
+            qMax(1, minTexSize >> level), atlasColumns));
 
-    ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 dimensions:%3x%4 compressedBytes:%5")
-            .arg(name).arg(texCount).arg(minTexSize * texCount).arg(minTexSize)
+    ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 grid:%3x%4 dimensions:%5x%6 compressedBytes:%7")
+            .arg(name).arg(texCount).arg(atlasColumns).arg(atlasRows)
+            .arg(minTexSize * atlasColumns).arg(minTexSize * atlasRows)
             .arg(combinedMips.first().size()));
     ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
     const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    if(currentContext)
+    {
+        GLint maximumTextureSize = 0;
+        currentContext->functions()->glGetIntegerv(
+            GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+        if(maximumTextureSize > 0
+           && (minTexSize * atlasColumns > maximumTextureSize
+               || minTexSize * atlasRows > maximumTextureSize))
+        {
+            ei::log(eLogWarning, QString(
+                "Terrain atlas grid exceeds this GPU map:%1 pages:%2 grid:%3x%4 page:%5 max:%6")
+                .arg(name).arg(texCount).arg(atlasColumns).arg(atlasRows)
+                .arg(minTexSize).arg(maximumTextureSize));
+            return nullptr;
+        }
+    }
     const bool openGlesCompatibility = currentContext && currentContext->isOpenGLES();
     const int uploadedMipCount = openGlesCompatibility ? 1 : outputMipCount;
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
@@ -1574,7 +1856,8 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
         // the selected authored mip for each tile, then compose the exact
         // atlas in ordinary RGBA memory. Desktop GL retains the zero-copy DXT
         // path below.
-        QImage atlas(minTexSize * texCount, minTexSize, QImage::Format_ARGB32);
+        QImage atlas(minTexSize * atlasColumns, minTexSize * atlasRows,
+                     QImage::Format_ARGB32);
         atlas.fill(Qt::transparent);
         for(int partIndex = 0; partIndex < aPart.size(); ++partIndex)
         {
@@ -1592,8 +1875,11 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
                 delete texture;
                 return nullptr;
             }
+            const int pageColumn = partIndex % atlasColumns;
+            const int pageRow = partIndex / atlasColumns;
             for(int y = 0; y < minTexSize; ++y)
-                memcpy(atlas.scanLine(y) + partIndex * minTexSize * 4,
+                memcpy(atlas.scanLine(pageRow * minTexSize + y)
+                           + pageColumn * minTexSize * 4,
                        tile.constScanLine(y), size_t(minTexSize) * 4u);
         }
         ei::setCrashContext("mpr/terrain-atlas/opengl-upload-rgba:" + name);
@@ -1606,7 +1892,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name, int expectedTexC
     }
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
     texture->setMipLevels(uploadedMipCount);
-    texture->setSize(minTexSize*texCount, minTexSize);
+    texture->setSize(minTexSize * atlasColumns, minTexSize * atlasRows);
     ei::setCrashContext("mpr/terrain-atlas/opengl-allocate:" + name);
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
     ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
@@ -1642,6 +1928,15 @@ void CTextureList::refreshConfiguredSources()
     clearTransientVisualCache();
     ei::invalidateResourceSourceFingerprintCache();
     m_missingTextureNames.clear();
+    m_aTextureImages.clear();
+    m_catalogTerrainTileCache.clear();
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(it.key().startsWith("layers|"))
+            it = m_aTexture.erase(it);
+        else
+            ++it;
+    }
     QSet<QString> empty;
     loadTexture(empty);
 }

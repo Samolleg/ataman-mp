@@ -1,0 +1,5 @@
+EI Mapper: Endurance Edition 0.3.0-alpha.26
+Closed test build: reviewed family blend masks R44-R71 with R87 semantic catalog
+Preset SHA-256: 08B0ACF9C9D382F11DD01CC1E82EE93DE0F42A1B1E4EC4DB8458630A5B76B7B5
+Package policy: finalized clean first-run folder; no options/settings, logs, saves, dumps, object files, generated Makefiles, or stale changelists
+Installed stock JMV assets are included only in isolated visual-test maps; EI-HD research assets are excluded.

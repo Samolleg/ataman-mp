@@ -1,0 +1,184 @@
+{
+  "schema": "ei-semantic-atlas-r120-consolidated-decisions-v1",
+  "source": "scripts\\semantic_atlas_r120_user_answers.txt",
+  "queue": "artifacts\\semantic-atlas-r120-exact-connection-review\\questionnaire\\r120-exact-connection-queue.json",
+  "policy": "Apply only submitted values differing from currentMapping. Propagate only to the queue's byte-identical owners.",
+  "counts": {
+    "submittedCards": 19,
+    "changedCardCorners": 22,
+    "additionalUnflaggedHumanCorners": 3,
+    "serializedOwnerCornerRows": 32
+  },
+  "additionalUnflaggedHumanCorners": [
+    {
+      "key": "r120-zone6-slot298-08ef36d809",
+      "corner": "SE",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh"
+    },
+    {
+      "key": "r120-zone6-slot299-d1b2b8ac6f",
+      "corner": "SE",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh"
+    },
+    {
+      "key": "r120-zone6-slot323-b86ea3f953",
+      "corner": "SW",
+      "current": "Grass / Common",
+      "reviewed": "Grass / Fresh"
+    }
+  ],
+  "newFamilies": {
+    "bz2g": [
+      {
+        "id": 25,
+        "name": "Stone / Gray",
+        "templateFamily": "Stone / Lime",
+        "sourceFamily": "reviewed/stone/gray-transition-only",
+        "thumbnailSlot": 448,
+        "uniformSlots": [],
+        "memberSlots": [
+          448
+        ],
+        "paintSelectable": false
+      }
+    ],
+    "Zone2": [
+      {
+        "id": 25,
+        "name": "Stone / Gray",
+        "templateFamily": "Stone / Lime",
+        "sourceFamily": "reviewed/stone/gray-transition-only",
+        "thumbnailSlot": 448,
+        "uniformSlots": [],
+        "memberSlots": [
+          448
+        ],
+        "paintSelectable": false
+      }
+    ],
+    "Zone3Obr": [
+      {
+        "id": 14,
+        "name": "Stone / Gray",
+        "templateFamily": "Stone / Grayish",
+        "sourceFamily": "reviewed/stone/gray-transition-only",
+        "thumbnailSlot": 155,
+        "uniformSlots": [],
+        "memberSlots": [
+          155,
+          156,
+          158,
+          159,
+          292,
+          350,
+          489
+        ],
+        "paintSelectable": false
+      }
+    ]
+  },
+  "cornerCorrections": {
+    "bz2g": {
+      "431": {
+        "NW": "Grass / Common"
+      },
+      "448": {
+        "NW": "Stone / Gray"
+      }
+    },
+    "Zone2": {
+      "431": {
+        "NW": "Grass / Common"
+      },
+      "448": {
+        "NW": "Stone / Gray"
+      }
+    },
+    "bz3g": {
+      "109": {
+        "SW": "Ground / Dead"
+      },
+      "343": {
+        "SW": "Ground / Dead"
+      }
+    },
+    "bz4g": {
+      "363": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone4": {
+      "363": {
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone3Obr": {
+      "155": {
+        "SW": "Stone / Gray"
+      },
+      "156": {
+        "SW": "Stone / Gray"
+      },
+      "158": {
+        "SW": "Stone / Gray"
+      },
+      "159": {
+        "SW": "Stone / Gray"
+      },
+      "292": {
+        "SW": "Stone / Gray"
+      },
+      "350": {
+        "NE": "Stone / Gray"
+      },
+      "489": {
+        "SW": "Stone / Gray"
+      }
+    },
+    "Zone6": {
+      "267": {
+        "SW": "Grass / Fresh"
+      },
+      "298": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "299": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "323": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      }
+    },
+    "Zone6_2": {
+      "267": {
+        "SW": "Grass / Fresh"
+      },
+      "298": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "299": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "323": {
+        "SE": "Grass / Fresh",
+        "SW": "Grass / Fresh"
+      },
+      "268": {
+        "SW": "Grass / Fresh"
+      },
+      "290": {
+        "SW": "Grass / Fresh"
+      },
+      "291": {
+        "SW": "Grass / Fresh"
+      }
+    }
+  }
+}
