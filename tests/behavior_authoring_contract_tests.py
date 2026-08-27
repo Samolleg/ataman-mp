@@ -107,7 +107,7 @@ def main() -> int:
                              trap.index("void CMagicTrap::applyLogicParam")]
     if "eObjParam_TRAP_DIPLOMACY" in logic_trap_params:
         raise AssertionError("legacy trap target mask remains editable in Logic mode")
-    require(table, 'm_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = "Will attack";',
+    require(table, 'm_aRowName[eObjParam_TRAP_EFFECTIVE_TARGETS] = tr("Will attack");',
             "plain effective trap-target property label")
     require(table_h, "class CTrapTargetItem: public QToolButton",
             "parts-style read-only trap-target button")
@@ -285,7 +285,9 @@ def main() -> int:
             "ordered look-point mutation API")
     require(undo_h, "class CMoveBehaviorPointCommand",
             "atomic point reorder undo command")
-    require(undo, 'setText(m_lookPoint ? "Reorder look point" : "Reorder patrol point")',
+    require(undo, 'QCoreApplication::translate("UndoCommands", "Reorder look point")',
+            "translated look-point reorder undo label")
+    require(undo, 'QCoreApplication::translate("UndoCommands", "Reorder patrol point")',
             "specific point reorder undo labels")
     require(view, "setBehaviorCollection(unit, m_logicSlotIndex)",
             "single-unit active-Logic collection integration")
@@ -371,8 +373,10 @@ def main() -> int:
             "ordered cast-target mutation API")
     require(undo_h, "class CMoveTrapPointCommand",
             "atomic trap-child reorder undo command")
-    require(undo, 'm_castTarget ? "Reorder cast target" : "Reorder activation area"',
-            "specific trap reorder undo labels")
+    require(undo, 'QCoreApplication::translate("UndoCommands", "Reorder cast target")',
+            "translated cast-target reorder undo label")
+    require(undo, 'QCoreApplication::translate("UndoCommands", "Reorder activation area")',
+            "translated activation-area reorder undo label")
     require(view_h, "void refreshBehaviorOrder(CNode* owner, int logicSlot);",
             "targeted outliner order refresh API")
     require(undo, "refreshBehaviorOrder(unit, m_logicSlot);",

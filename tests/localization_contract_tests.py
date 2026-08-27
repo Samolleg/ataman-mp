@@ -122,6 +122,7 @@ def main():
         "Ctrl+Z", "Ctrl+Y", "Ctrl+X", "Ctrl+D", "Ctrl+H", "Ctrl+F5",
         "Ctrl+S", "Shift+Esc", "MPR:", "MOB", "MPR", "MOB %1", "MPR %1",
         "MPR (*.mpr)", "MOB (*.mob)", "NID %1 (%2): %3", "NID %1 — %2", "NID %1: %2",
+        "JMV Lua [%1] — %2", "database.res", "tables.lua (JMV)",
     }
     technical_tokens = ("MOB", "MPR", "JMV", "NID")
     shortcut_re = re.compile(
@@ -179,7 +180,11 @@ def main():
     require(not re.search(r"\([ыяи]\)", combined_russian),
             "slash-style machine plural remains in Russian UI text")
 
-    require(message_count >= 2200,
+    # Current-main adds the resource browser, database editor, item/spell
+    # constructor, and the expanded terrain/atlas workflow.  The previous
+    # 2,222-message catalog silently passed this test while omitting all of
+    # those visible surfaces, so keep the extracted-current-main floor here.
+    require(message_count >= 2904,
             f"catalog coverage unexpectedly fell to {message_count} messages")
 
     expected = {
@@ -212,6 +217,16 @@ def main():
             "\n\nСейчас игра использует встроенный граф основного MOB вместо этого файла.",
         "Orthographic game orientation: world +X is right and world +Y is down":
             "Ортографическая ориентация: +X вправо, +Y вниз",
+        "Materials and assigned tiles": "Материалы и назначенные тайлы",
+        "Open prototype in Database Editor":
+            "Открыть прототип в редакторе базы данных",
+        "Safe: exact authored blends only":
+            "Безопасный режим: только точные готовые переходы",
+        "Database Editor": "Редактор базы данных",
+        "Resource Browser": "Просмотр ресурсов",
+        "Gold indicates the point currently selected in the viewport and outliner.":
+            "Золотым цветом выделена точка, выбранная на карте и в иерархии.",
+        "+ Add patrol": "+ Добавить патрульную точку",
     }
     for source, translated in expected.items():
         require(translations.get(source) == translated,
@@ -229,6 +244,8 @@ def main():
             "terrain Smooth action must be translated as an action")
     require(context_translations.get(("LandscapeFalloff", "Smooth")) == "Гладкий",
             "smooth brush falloff must be translated as an adjective")
+    require(context_translations.get(("CCollectionEditorDialog", "Remove")) == "Удалить",
+            "collection Remove button must use the imperative")
 
     require("Language" in settings and "restart" in settings.lower(),
             "settings must explain the language restart behavior")

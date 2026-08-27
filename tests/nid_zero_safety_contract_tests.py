@@ -21,7 +21,8 @@ def main() -> None:
 
     if 'QMessageBox::critical(nullptr, "Critical runtime compatibility notice"' in mob:
         raise AssertionError("critical MOB findings must use the normal warning presentation")
-    if 'QMessageBox::warning(nullptr, "MOB validation warning"' not in mob:
+    if ('QMessageBox::warning(nullptr,' not in mob or
+            'QCoreApplication::translate("CMob", "MOB validation warning")' not in mob):
         raise AssertionError("critical MOB findings need the standard high-tier warning path")
 
     on_param = view[view.index("void CView::onParamChange("):]

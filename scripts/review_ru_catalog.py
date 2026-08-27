@@ -1259,6 +1259,1058 @@ CORRECTIONS.update({
     "%1 is not reviewable: %2": "Не удалось открыть %1 для проверки: %2",
 })
 
+# Current-main delta: every entry below was reviewed against its concrete UI
+# context after the 0.5 integration merge.  Keep these exact-source mappings
+# separate from the older editorial pass so future lupdate deltas remain easy
+# to audit.
+CORRECTIONS.update({
+    "Materials and assigned tiles": "Материалы и назначенные тайлы",
+    "+ Add patrol": "+ Добавить патрульную точку",
+    "Remove": "Удалить",
+    "Open prototype in Database Editor":
+        "Открыть прототип в редакторе базы данных",
+    "Right-click to open this prototype in the Database Editor.":
+        "Щёлкните правой кнопкой, чтобы открыть прототип в редакторе базы данных.",
+    "The fresh Test Current Map process could not be started after stopping the previous process.\n\n%1":
+        "После остановки предыдущего процесса не удалось запустить новый тест текущей карты.\n\n%1",
+    "The 32-bit Evil Islands runtime paths do not match the selected Endurance game. Launching this mixed-root configuration can load incompatible resources and report missing prototypes.\n\nSelected game root:\n%1\n\n32-bit registry paths:\nWork path: %2\nResources path: %3\nCD-ROM Path: %4\n\nRestore the runtime paths for the selected installation, then retry Test Current Map.":
+        "Пути 32-разрядной игры не соответствуют выбранной установке Endurance. При таком смешении папок могут загрузиться несовместимые ресурсы, а нужные прототипы окажутся недоступны.\n\nВыбранная папка игры:\n%1\n\nПути 32-разрядной игры в реестре:\nРабочая папка: %2\nПапка ресурсов: %3\nПуть к CD-ROM: %4\n\nВосстановите пути выбранной установки и повторите тест текущей карты.",
+    "Pending %1 changes require a fresh Test Current Map process because database and JMV Lua state are initialized once at process startup.":
+        "Изменения %1 требуют перезапуска теста текущей карты: база данных и Lua-среда JMV загружаются только при запуске процесса.",
+    "A fresh Test Current Map process is already being prepared.":
+        "Новый процесс теста текущей карты уже подготавливается.",
+    "The active editor profile differs from the running test profile.":
+        "Активный профиль редактора не совпадает с профилем запущенного теста.",
+    "Controls both the campfire particle scale and its light radius (power x 10). Use a positive value; negative values can disable the effect and do not create darkness.":
+        "Одновременно задаёт размер эффекта огня и радиус света (сила × 10). Используйте положительное значение: отрицательное может отключить эффект, но не создаёт затемнение.",
+    "Distance affected by the light. Negative values do not darken the scene: the game uses the absolute value and marks the light unshadowed. In bright daylight, a weaker local light may have no visible effect.":
+        "Радиус действия света. Отрицательное значение не затемняет сцену: игра использует его модуль и отключает тени от источника. При ярком дневном свете слабый местный свет может быть незаметен.",
+    "JMV Lua [%1] — %2": "JMV Lua [%1] — %2",
+    "JMV Lua [%1] — Unit stat: %2": "JMV Lua [%1] — параметр существа: %2",
+    "%1.%2 contains invalid item or spell code '%3': %4":
+        "%1.%2 содержит недопустимый код предмета или заклинания «%3»: %4",
+    "%1.%2 contains '%3': item requires material type %4, but %5 is %6.":
+        "%1.%2 содержит «%3»: предмет требует материал типа %4, но %5 имеет тип %6.",
+    "%1.%2 contains '%3': spell prototype '%4' is unknown.":
+        "%1.%2 содержит «%3»: прототип заклинания «%4» неизвестен.",
+    "%1.%2 contains '%3': %4": "%1.%2 содержит «%3»: %4",
+    "%1.%2 contains '%3': spell energy %4 exceeds item energy %5.":
+        "%1.%2 содержит «%3»: энергия заклинания %4 превышает энергию предмета %5.",
+    "%1.%2 contains '%3': spell difficulty %4 exceeds item maximum difficulty %5.":
+        "%1.%2 содержит «%3»: сложность заклинания %4 превышает допустимую для предмета сложность %5.",
+    "Fire": "Огонь",
+    "Lightning": "Молния",
+    "Acid": "Кислота",
+    "Domination": "Подчинение",
+    "Unclassified": "Без категории",
+    "Spell energy %1 exceeds the constructed item's energy %2.":
+        "Энергия заклинания %1 превышает энергию создаваемого предмета %2.",
+    "Spell difficulty %1 exceeds the constructed item's maximum difficulty %2.":
+        "Сложность заклинания %1 превышает допустимую для создаваемого предмета сложность %2.",
+    "Unknown rune code '%1'.": "Неизвестный код руны «%1».",
+    "shown": "показано",
+    "hidden": "скрыто",
+    "WRONG MATERIAL / FAMILY": "НЕВЕРНЫЙ МАТЕРИАЛ ИЛИ СЕМЕЙСТВО",
+    "WRONG ROTATION": "НЕВЕРНЫЙ ПОВОРОТ",
+    "NO / WRONG BLEND": "НЕТ ПЕРЕХОДА ИЛИ ОН НЕВЕРЕН",
+    "Add overlay surface and resolve terrain tiles":
+        "Добавить покрытие и подобрать тайлы рельефа",
+    "Next Save will create a new content-hash identity.":
+        "При следующем сохранении будет создан новый идентификатор по хешу содержимого.",
+    "Valid identity. Existing consumers may also resolve these pages.":
+        "Идентификатор действителен. Эти страницы могут использовать и другие карты.",
+    "Create a visible backup before replacement (%1 additional space)\n%2":
+        "Создать резервную копию перед заменой (дополнительно %1)\n%2",
+    "target does not exist": "целевой файл не существует",
+    "Stable physical row number. Search for #%1 to filter this row.":
+        "Постоянный физический номер строки. Чтобы оставить в списке эту строку, введите #%1.",
+    "Read-only raw payload. It remains preserved byte-for-byte; editing is disabled until this field's type and serializer are verified.":
+        "Исходные данные только для чтения. Они сохраняются побайтово; редактирование недоступно, пока не проверены тип поля и способ его записи.",
+    "Choose a referenced row from the list. Right-click and select Open Referenced Row to follow the link.":
+        "Выберите связанную строку из списка. Для перехода щёлкните правой кнопкой и выберите «Открыть связанную строку».",
+    "This value names a game resource. Right-click and select Open in Resource Browser to locate its active provider.":
+        "Здесь указано имя игрового ресурса. Чтобы найти используемый файл, щёлкните правой кнопкой и выберите «Открыть в просмотре ресурсов».",
+    "Preview limited to %1 of %2 characters. Double-click or press Enter/F2 to edit the complete value.":
+        "Показаны первые %1 из %2 символов. Для редактирования полного значения дважды щёлкните ячейку или нажмите Enter/F2.",
+    "Field is unsupported or read-only.": "Поле не поддерживается или доступно только для чтения.",
+    "This optional field is absent from the source row; safe field insertion is not yet proven.":
+        "В исходной строке нет этого необязательного поля; безопасное добавление пока не подтверждено.",
+    "Item / Spell Constructor": "Конструктор предметов и заклинаний",
+    "The active profile database cannot be opened.\n\n%1":
+        "Не удалось открыть базу данных активного профиля.\n\n%1",
+    "Database Editor": "Редактор базы данных",
+    "The active profile database cannot be opened for authoring.\n\n%1":
+        "Не удалось открыть базу данных активного профиля для редактирования.\n\n%1",
+    "Resource not found": "Ресурс не найден",
+    "No active-profile resource matches '%1'.":
+        "В активном профиле нет ресурса «%1».",
+    "Prototype not found": "Прототип не найден",
+    "The active profile database does not contain monster prototype '%1'.":
+        "В базе данных активного профиля нет прототипа существа «%1».",
+    "No active profile database is available. Configure the game/mod profile first.":
+        "База данных активного профиля недоступна. Сначала настройте профиль игры или мода.",
+    "External database archive": "Сторонний архив базы данных",
+    "The integrated Database Editor authors the active profile's database.res bundle. This archive is not that active database.\n\nSwitch the active game/mod profile to this database, or open Database Editor and use Import > Import database.res to bring it into the active document.":
+        "Встроенный редактор изменяет database.res активного профиля. Этот архив не является активной базой данных.\n\nПереключите профиль игры или мода на эту базу либо откройте редактор базы данных и выберите «Импорт → Импорт database.res», чтобы загрузить её в текущий документ.",
+    "Resource Browser": "Просмотр ресурсов",
+    "Reloaded resources after publishing %1":
+        "Ресурсы обновлены после публикации %1",
+    "Database Editor...": "Редактор базы данных...",
+    "Item / Spell Constructor...": "Конструктор предметов и заклинаний...",
+    "Test Current is using game resources":
+        "Тест текущей карты использует ресурсы игры",
+    "The game process launched by Endurance is still running and may hold the selected resource archive open. Windows cannot atomically replace an archive while the game is using it.\n\n%1\n\nStop Test Current before publishing?":
+        "Запущенная из Endurance игра всё ещё работает и может удерживать выбранный архив ресурсов открытым. Windows не может безопасно заменить архив, пока он используется игрой.\n\n%1\n\nОстановить тест текущей карты перед публикацией?",
+    "Stop Test Current and continue": "Остановить тест и продолжить",
+    "Stopping Test Current and releasing game resources...":
+        "Остановка теста и освобождение ресурсов игры...",
+    "Preparing terrain publication": "Подготовка рельефа к публикации",
+    "Terrain publication paused": "Публикация рельефа приостановлена",
+    "The Endurance-owned game process did not release its resources in time. Publication was not started. Stop the test process and retry.":
+        "Запущенная из Endurance игра не освободила ресурсы вовремя. Публикация не началась. Остановите тест и повторите попытку.",
+    "The owned JMV test process restarted with the changed terrain atlas and is loading the staged map.":
+        "Тест JMV перезапущен с изменённым атласом рельефа и загружает подготовленную карту.",
+    "Terrain atlas changed; restarting the owned JMV test process with the new atlas...":
+        "Атлас рельефа изменён; тест JMV перезапускается с новым атласом...",
+    "Restarting Test...": "Перезапуск теста...",
+    "Stopping the previous Endurance-owned game process before launching the current database, JMV Lua, and map state.":
+        "Предыдущий процесс игры останавливается перед запуском текущей базы данных, Lua JMV и состояния карты.",
+    "The map-specific terrain atlas package could not be read or matched to the staged MPR. No game process was started.":
+        "Не удалось прочитать пакет атласа рельефа карты или сопоставить его с подготовленным MPR. Игра не запущена.",
+    "The active profile database cannot be resolved for runtime staging.":
+        "Не удалось определить базу данных активного профиля для подготовки теста.",
+    "The active database could not be staged safely.\n\n%1":
+        "Не удалось безопасно подготовить активную базу данных.\n\n%1",
+    "The active JMV tables.lua could not be staged safely.\n\n%1":
+        "Не удалось безопасно подготовить активный tables.lua JMV.\n\n%1",
+    "Restart Test Current Map": "Перезапустить тест текущей карты",
+    "The running game cannot safely apply pending %1 changes during a map hot reload. The database and JMV Lua state are initialized once when the game process starts.\n\nRestart the Endurance-owned test process and stage the current map, database, and Lua state together?":
+        "Запущенная игра не может безопасно применить изменения %1 при обновлении карты. База данных и Lua-среда JMV загружаются только при запуске процесса.\n\nПерезапустить тест и одновременно подготовить текущую карту, базу данных и Lua?",
+    " and ": " и ",
+    "Restart Test": "Перезапустить тест",
+    "Stopping the current test before a fresh launch...":
+        "Остановка текущего теста перед новым запуском...",
+    "Stopping the current test; a fresh process will launch automatically with the current database and JMV Lua state.":
+        "Текущий тест останавливается; новый процесс автоматически запустится с текущей базой данных и Lua-средой JMV.",
+    "Restarting the owned game with the changed terrain atlas...":
+        "Перезапуск игры с изменённым атласом рельефа...",
+    "Terrain atlas changed; the owned JMV test process is restarting safely.":
+        "Атлас рельефа изменён; тест JMV безопасно перезапускается.",
+    "%1Database: %2 finding(s).": "%1База данных: замечаний — %2.",
+    "Database": "База данных",
+    "%1 finding(s)": "Замечаний: %1",
+    "Double-click to open this row in the Database Editor.":
+        "Дважды щёлкните, чтобы открыть строку в редакторе базы данных.",
+    "The database finding's row is no longer available.":
+        "Строка, к которой относится замечание, больше недоступна.",
+    "Save MPR Draft": "Сохранить черновик MPR",
+    "Finalize Draft MPR As...": "Завершить черновик MPR как...",
+    "Finalize and Save MPR": "Завершить и сохранить MPR",
+    "Finalize MPR As...": "Завершить MPR как...",
+    "Unapplied database changes": "Неприменённые изменения базы данных",
+    "The active database has unapplied changes. Apply them before deciding whether to save maps, so saved maps cannot reference database rows that were never published.":
+        "В активной базе данных есть неприменённые изменения. Примените их до сохранения карт, чтобы карты не ссылались на строки, которые не были опубликованы.",
+    "Apply Database": "Применить базу данных",
+    "Exit Without Applying": "Выйти без применения",
+    "Database apply failed": "Не удалось применить базу данных",
+    "Database Editor — %1": "Редактор базы данных — %1",
+    "Profile: %1  •  Provider: %2\nSource: %3":
+        "Профиль: %1  •  Источник данных: %2\nФайл: %3",
+    "Filter rows across all fields or enter #row…":
+        "Фильтр по всем полям или #номер строки…",
+    "Item / Spell Constructor…": "Конструктор предметов и заклинаний…",
+    "Clone Row…": "Клонировать строку…",
+    "Delete Row": "Удалить строку",
+    "Review Changes…": "Просмотреть изменения…",
+    "Export XLSX…": "Экспортировать XLSX…",
+    "Import XLSX…": "Импортировать XLSX…",
+    "Save Database As…": "Сохранить базу данных как…",
+    "Import…": "Импортировать…",
+    "Import database.res…": "Импортировать database.res…",
+    "Import tables.lua…": "Импортировать tables.lua…",
+    "Import database.res + tables.lua…":
+        "Импортировать database.res и tables.lua…",
+    "Edit Full Value…": "Изменить полное значение…",
+    "Open Referenced Row": "Открыть связанную строку",
+    "Lock columns through “%1”": "Закрепить столбцы до «%1»",
+    "Unlock columns": "Открепить столбцы",
+    "Show all": "Показать всё",
+    "Hide all": "Скрыть всё",
+    "Show unknown/raw columns": "Показать неизвестные и исходные столбцы",
+    "Hide unknown/raw columns": "Скрыть неизвестные и исходные столбцы",
+    "database.res": "database.res",
+    "tables.lua (JMV)": "tables.lua (JMV)",
+    "Editor columns": "Столбцы редактора",
+    "This complete/raw table is visible for preservation review. Structural editing is disabled until its typed serializer is verified.":
+        "Полная исходная таблица показана для проверки сохранности данных. Изменение структуры недоступно, пока не проверен способ записи её типов.",
+    "Edit rejected": "Изменение отклонено",
+    "Edit %1": "Изменить %1",
+    "%1 — %2": "%1 — %2",
+    "One list entry per line. The brackets and quotation marks used internally are intentionally hidden.":
+        "По одной записи на строку. Служебные скобки и кавычки намеренно скрыты.",
+    "This is the complete stored value. Long lines wrap visually.":
+        "Это полное сохранённое значение. Длинные строки переносятся только на экране.",
+    "%1 item(s) — one per line": "Записей: %1 — по одной на строку",
+    "%1 character(s) — complete value": "Символов: %1 — полное значение",
+    "Copy Row ID": "Копировать ID строки",
+    "Reference not found": "Связанная строка не найдена",
+    "The referenced row '%1' is not present in %2.":
+        "Связанная строка «%1» отсутствует в %2.",
+    "Open in Resource Browser": "Открыть в просмотре ресурсов",
+    "Duplicate / Clone Row…": "Создать копию строки…",
+    "Clone row": "Клонирование строки",
+    "New stable name / ID:": "Новое постоянное имя или ID:",
+    "The ID cannot be empty.": "ID не может быть пустым.",
+    "Enter a new ID; the original ID is already in use.":
+        "Введите новый ID: исходный уже используется.",
+    "That ID is already used by another row.":
+        "Этот ID уже используется другой строкой.",
+    "The new ID is available.": "Новый ID свободен.",
+    "Clone rejected": "Клонирование отклонено",
+    "Delete row": "Удаление строки",
+    "Mark '%1' for deletion? References will be validated before publication.":
+        "Пометить «%1» для удаления? Перед публикацией редактор проверит ссылки.",
+    "Delete rejected": "Удаление отклонено",
+    "Database refresh failed": "Не удалось обновить базу данных",
+    "Verified:": "Проверено:",
+    "Opaque:": "Нераспознано:",
+    "No pending changes.": "Нет неприменённых изменений.",
+    "Pending Database Changes": "Неприменённые изменения базы данных",
+    "Database applied": "База данных применена",
+    "The active database and linked JMV Lua data were updated as one recoverable transaction.\n\nBackups:\n%1":
+        "Активная база данных и связанные данные Lua JMV обновлены одной операцией с возможностью восстановления.\n\nРезервные копии:\n%1",
+    "Save Database As": "Сохранить базу данных как",
+    "Evil Islands database (*.res)": "База данных «Проклятых земель» (*.res)",
+    "Choose a staging path": "Выберите отдельный путь",
+    "Saving over the opened database is blocked. Choose a separate staging path so the source remains recoverable.":
+        "Нельзя сохранять поверх открытой базы данных. Выберите отдельный путь, чтобы исходный файл можно было восстановить.",
+    "Save linked JMV tables.lua As": "Сохранить связанный tables.lua JMV как",
+    "Lua table (*.lua)": "Таблица Lua (*.lua)",
+    "Saving over the opened tables.lua is blocked. Choose a separate staging path so the source remains recoverable.":
+        "Нельзя сохранять поверх открытого tables.lua. Выберите отдельный путь, чтобы исходный файл можно было восстановить.",
+    "Database save failed": "Не удалось сохранить базу данных",
+    "Database saved": "База данных сохранена",
+    "The database bundle was staged successfully at:\n%1\n\nThe source files were not modified.":
+        "Копия базы данных успешно подготовлена по адресу:\n%1\n\nИсходные файлы не изменены.",
+    "Export Database XLSX": "Экспорт базы данных в XLSX",
+    "Excel workbook (*.xlsx)": "Книга Excel (*.xlsx)",
+    "XLSX export failed": "Не удалось экспортировать XLSX",
+    "JMV Lua companion export failed": "Не удалось экспортировать связанные данные Lua JMV",
+    "The XLSX was exported, but its editable Lua companion could not be written.\n\n%1":
+        "XLSX экспортирован, но записать редактируемый связанный файл Lua не удалось.\n\n%1",
+    "The import was applied as one undoable change. Existing source-data findings are retained for review; only newly introduced critical issues cancel import.":
+        "Импорт применён как одно отменяемое изменение. Замечания к исходным данным сохранены для проверки; импорт отменяется только при новых критических ошибках.",
+    "Import Database XLSX": "Импорт базы данных из XLSX",
+    "XLSX import cancelled": "Импорт XLSX отменён",
+    "No database changes were applied.\n\n%1":
+        "Изменения базы данных не применены.\n\n%1",
+    "Imported %1": "Импортирован %1",
+    "XLSX import completed with warnings": "Импорт XLSX завершён с предупреждениями",
+    "Native database import cancelled": "Импорт базы данных отменён",
+    "No database or Lua changes were applied.\n\n%1":
+        "Изменения базы данных и Lua не применены.\n\n%1",
+    "Native import completed with warnings": "Импорт завершён с предупреждениями",
+    "Import database.res": "Импортировать database.res",
+    "Import tables.lua": "Импортировать tables.lua",
+    "Import linked tables.lua": "Импортировать связанный tables.lua",
+    "The selected database/Lua pair could not be read.":
+        "Не удалось прочитать выбранную пару базы данных и Lua.",
+    "Imported %1 + %2": "Импортированы %1 и %2",
+    "%1 pending change(s) • Use Review or the Validation panel for current findings • Full schema authoring: 26 database tables. Descriptor-unknown fields remain visible as hexadecimal and serialize without touching unrelated data.":
+        "Неприменённых изменений: %1 • Текущие замечания доступны в обзоре изменений и на панели проверки • Полное редактирование схемы: 26 таблиц базы данных. Поля неизвестного типа показаны в шестнадцатеричном виде и сохраняются без изменения остальных данных.",
+    "Active Profile": "Активный профиль",
+    "Open Archive": "Открыть архив",
+    "Open .res...": "Открыть .res...",
+    "Filter by member or archive...": "Фильтр по имени файла или архива...",
+    "All Types": "Все типы",
+    "Image": "Изображение",
+    "Text": "Текст",
+    "3D / animation": "3D и анимация",
+    "Audio": "Звук",
+    "Archive": "Архив",
+    "Binary": "Двоичные данные",
+    "All Statuses": "Все состояния",
+    "Winning": "Используется",
+    "Overridden": "Перекрыт",
+    "Members": "Файлы",
+    "Size": "Размер",
+    "Name": "Имя",
+    "Type": "Тип",
+    "Status": "Состояние",
+    "Provider": "Источник",
+    "100%": "100%",
+    "Left drag pans; middle drag rotates; right drag orbits; wheel zooms":
+        "Левая кнопка перемещает вид; средняя вращает модель; правая вращает камеру; колёсико меняет масштаб",
+    "Pause": "Пауза",
+    "Animation": "Анимация",
+    "Filter model parts...": "Фильтр частей модели...",
+    "Normal": "Обычный",
+    "All": "Все",
+    "None": "Нет",
+    "Reset view": "Сбросить вид",
+    "Play": "Воспроизвести",
+    "Volume": "Громкость",
+    "Select a resource to preview it.": "Выберите ресурс для предпросмотра.",
+    "Copy Name": "Копировать имя",
+    "Open Location": "Открыть расположение",
+    "Open in Database Editor": "Открыть в редакторе базы данных",
+    "Replace...": "Заменить...",
+    "Add...": "Добавить...",
+    "Rename...": "Переименовать...",
+    "Delete...": "Удалить...",
+    "No resource catalog loaded.": "Каталог ресурсов не загружен.",
+    "The deployed multimedia backend cannot decode this audio stream. Export remains available.\n\n%1":
+        "Установленный модуль мультимедиа не может декодировать этот звуковой поток. Файл по-прежнему можно экспортировать.\n\n%1",
+    "Indexing %1 archive(s) for %2...": "Индексируются архивы (%1) для %2...",
+    "RES archive changed": "Архив RES изменён",
+    "A loaded archive changed on disk:\n%1\n\nRefresh the Resource Browser and live resource lists now?":
+        "Загруженный архив изменился на диске:\n%1\n\nОбновить просмотр ресурсов и открытые списки ресурсов?",
+    "All archives": "Все архивы",
+    "%1 members from %2 archive(s)%3": "Файлов: %1; архивов: %2%3",
+    "; %1 archive(s) rejected": "; отклонено архивов: %1",
+    "Loading preview...": "Загрузка предпросмотра...",
+    "Active:": "Используется:",
+    "Overridden:": "Перекрыт:",
+    "Neutral assembly pose": "Нейтральная поза сборки",
+    "Could not stage this audio preview as a local file. Export remains available.":
+        "Не удалось подготовить локальный файл для прослушивания. Файл по-прежнему можно экспортировать.",
+    "Audio preview ready (%1). WAV uses the deployed Windows audio backend; MP3 also requires an installed system decoder.":
+        "Звуковой предпросмотр готов (%1). WAV воспроизводится средствами Windows; для MP3 также нужен установленный системный декодер.",
+    "Open RES archive": "Открыть архив RES",
+    "Evil Islands archives (*.res)": "Архивы «Проклятых земель» (*.res)",
+    "Export resource": "Экспортировать ресурс",
+    "Protected database archive": "Защищённый архив базы данных",
+    "database.res cannot be changed by the generic resource transaction. Use the dedicated Database Editor integration.":
+        "database.res нельзя изменить через общую операцию с ресурсами. Используйте редактор базы данных.",
+    "Apply RES changes": "Применить изменения RES",
+    "The target is staged, semantically reopened, race-checked, and atomically replaced. The live resource index refreshes only after validation succeeds.":
+        "Новый архив подготавливается отдельно, повторно открывается и проверяется, а затем заменяет старый одной безопасной операцией. Индекс ресурсов обновляется только после успешной проверки.",
+    "This archive belongs to the active base installation and is read-only here. Choose a mod-owned or copied archive as the target.":
+        "Этот архив принадлежит активной базовой установке и доступен здесь только для чтения. Выберите архив мода или его отдельную копию.",
+    "Target archive:": "Целевой архив:",
+    "Apply changes": "Применить изменения",
+    "Choose RES transaction target": "Выберите целевой архив RES",
+    "Protected active archive": "Защищённый активный архив",
+    "Base-installation archives are read-only. Choose a mod-owned, copied, or new override archive.":
+        "Архивы базовой установки доступны только для чтения. Выберите архив мода, отдельную копию или новый архив переопределений.",
+    "Protected database destination": "Защищённая база данных",
+    "Generic RES transactions cannot publish to database.res or databaseJmv.res.":
+        "Общие операции с RES не могут записывать в database.res или databaseJmv.res.",
+    "RES transaction backup": "Резервная копия RES",
+    "RES transaction failed": "Не удалось изменить RES",
+    "RES transaction complete": "Изменение RES завершено",
+    "The validated archive was written to:\n%1\n\nNo backup was created.":
+        "Проверенный архив записан по адресу:\n%1\n\nРезервная копия не создавалась.",
+    "The validated archive was written to:\n%1\n\nBackup:\n%2":
+        "Проверенный архив записан по адресу:\n%1\n\nРезервная копия:\n%2",
+    "Select replacement payload": "Выберите новый файл ресурса",
+    "All files (*)": "Все файлы (*)",
+    "Replace resource": "Замена ресурса",
+    "Replace %1 with %2 (%3 -> %4).": "Заменить %1 файлом %2 (%3 → %4).",
+    "Select member payload": "Выберите добавляемый файл",
+    "Add RES member": "Добавить файл в RES",
+    "Archive member name:": "Имя файла в архиве:",
+    "Add resource": "Добавление ресурса",
+    "Add %1 from %2. CP1251 and case-insensitive collision checks passed.":
+        "Добавить %1 из %2. Проверки CP1251 и совпадений имён без учёта регистра пройдены.",
+    "Rename RES member": "Переименовать файл в RES",
+    "New member name:": "Новое имя файла:",
+    "Rename resource": "Переименование ресурса",
+    "Rename %1 to %2.\n\nReference coverage is incomplete: structured MOB/script and opaque binary references may still use the old name and must be reviewed manually.":
+        "Переименовать %1 в %2.\n\nПроверка ссылок неполна: старое имя может остаться в структурах MOB, скриптах и нераспознанных двоичных данных. Их нужно проверить вручную.",
+    "Delete resource": "Удаление ресурса",
+    "No lower-priority provider is currently indexed.":
+        "Другой источник этого ресурса с меньшим приоритетом не найден.",
+    "Deleting the winning member exposes: %1":
+        "После удаления будет использоваться: %1",
+    "Delete %1.\n\n%2\n\nReference coverage is incomplete: structured and opaque references must be reviewed manually.":
+        "Удалить %1.\n\n%2\n\nПроверка ссылок неполна: структурированные и нераспознанные ссылки нужно проверить вручную.",
+    "Item or spell code:": "Код предмета или заклинания:",
+    "Paste an item code such as armor.material[spell{rune;rune}]":
+        "Вставьте код предмета, например armor.material[spell{rune;rune}]",
+    "Import": "Импортировать",
+    "Copy": "Копировать",
+    "Filter name or code…": "Фильтр по имени или коду…",
+    "All categories": "Все категории",
+    "Weapons": "Оружие",
+    "Armor": "Доспехи",
+    "Quick items": "Быстрые предметы",
+    "All item types": "Все типы предметов",
+    "All armor layers": "Все слои доспехов",
+    "Upper / heavy armor": "Верхний слой / тяжёлые доспехи",
+    "Lower / light armor": "Нижний слой / лёгкие доспехи",
+    "Optional spell code": "Необязательный код заклинания",
+    "Use spell from Spell tab": "Взять заклинание со вкладки «Заклинания»",
+    "Open in Spell tab": "Открыть на вкладке «Заклинания»",
+    "Compatible material:": "Совместимый материал:",
+    "Inserted spell:": "Добавленное заклинание:",
+    "Reset camera": "Сбросить камеру",
+    "Items & Quick Items": "Предметы и быстрые предметы",
+    "Filter spell name or code…": "Фильтр по имени или коду заклинания…",
+    "All magic schools": "Все школы магии",
+    "Available runes": "Доступные руны",
+    "Filter rune name or code…": "Фильтр по имени или коду руны…",
+    "All rune types": "Все типы рун",
+    "Add →": "Добавить →",
+    "↑": "↑",
+    "↓": "↓",
+    "Runes in spell (maximum 8)": "Руны заклинания (не более 8)",
+    "Spells": "Заклинания",
+    "Armor layers do not apply to this item category.":
+        "Для этой категории предметов слои доспехов не применяются.",
+    "%1 • code: %2 • type: %3": "%1 • код: %2 • тип: %3",
+    "code: %1 • school: %2 • subtype: %3":
+        "код: %1 • школа: %2 • подтип: %3",
+    "%1 • %2": "%1 • %2",
+    "No material": "Без материала",
+    "%1 (%2, authored compatibility)": "%1 (%2, заданная совместимость)",
+    "%1 (%2, code %3)": "%1 (%2, код %3)",
+    "No supported %1 material exists": "Нет поддерживаемого материала %1",
+    "Unknown spell prototype '%1'.": "Неизвестный прототип заклинания «%1».",
+    "Spell icon %1 was not found in the active profile.":
+        "Значок заклинания %1 не найден в активном профиле.",
+    "%1 - %2 (%3)": "%1 — %2 (%3)",
+    "%1 + %2 = %3": "%1 + %2 = %3",
+    "%1\nCode: %2\nSchool: %3 | %4\nEnergy: %5 (%6 per second) | difficulty: %7\nEffect: %8 | duration: %9 s (%10 segments)\nRange: %11 m | area: %12 m² (radius %13 m) | targets: %14\n\nRunes:\n%15":
+        "%1\nКод: %2\nШкола: %3 | %4\nЭнергия: %5 (%6 в секунду) | сложность: %7\nЭффект: %8 | длительность: %9 с (%10 отрезков)\nДальность: %11 м | область: %12 м² (радиус %13 м) | цели: %14\n\nРуны:\n%15",
+    "%1 | %2 | database code: %3": "%1 | %2 | код в базе данных: %3",
+    "Material family: %1 | base energy: %2 | maximum spell difficulty: %3 | crafting material required: %4 components":
+        "Семейство материала: %1 | базовая энергия: %2 | предельная сложность заклинания: %3 | для изготовления требуется материала: %4 ед.",
+    "Preview: standalone inventory figure with its material texture, matching the game's item preview path.":
+        "Предпросмотр: отдельная модель предмета с текстурой материала, как при просмотре предмета в игре.",
+    "This item requires a supported %1 material.":
+        "Для этого предмета требуется поддерживаемый материал %1.",
+    "Constructed item: energy %1 | maximum spell difficulty %2 | energy regeneration %3 per second":
+        "Созданный предмет: энергия %1 | предельная сложность заклинания %2 | восстановление энергии %3 в секунду",
+    "Unknown spell prototype code '%1'.":
+        "Неизвестный код прототипа заклинания «%1».",
+    "Inserted spell: energy %1 (%2 per second) | difficulty %3":
+        "Добавленное заклинание: энергия %1 (%2 в секунду) | сложность %3",
+    "Code is structurally valid. Compatibility findings are advisory.":
+        "Структура кода верна. Замечания о совместимости носят рекомендательный характер.",
+    "Advisory validation:\n• %1": "Рекомендации по совместимости:\n• %1",
+    "Unknown rune": "Неизвестная руна",
+    "Unknown item prototype '%1'.": "Неизвестный прототип предмета «%1».",
+    "Material '%1' is not compatible with %2 (%3 required).":
+        "Материал «%1» несовместим с %2 (требуется %3).",
+    "Code could not be imported": "Не удалось импортировать код",
+    "Confirm material": "Подтвердить материал",
+    "Use selected tile as thumbnail": "Использовать выбранный тайл как миниатюру",
+    "Apply + Close": "Применить и закрыть",
+    "Material atlas": "Атлас материалов",
+    "The editor has already made every safe assignment it could. Painting can use those materials now. Unusual tiles stay in the unassigned pool and never disable the valid palette. Drag a tile onto a material to assign it; for transition tiles, select the tile and drag material rows onto its four corners. Missing transitions only produce hard paint edges.":
+        "Редактор уже выполнил все безопасные назначения. Эти материалы готовы к рисованию. Необычные тайлы остаются без назначения и не отключают рабочую палитру. Чтобы назначить материал, перетащите на него тайл. Для переходного тайла выберите его и перетащите материалы на четыре угла. Если нужного перехода нет, край останется резким.",
+    "Materials — drag a material row onto a tile corner":
+        "Материалы — перетащите строку материала на угол тайла",
+    "New": "Создать",
+    "Rename": "Переименовать",
+    "Delete empty": "Удалить пустые",
+    "Ground": "Земля",
+    "Underwater only": "Только под водой",
+    "Ground + Overlay": "Земля и покрытия",
+    "Ground (surface + underwater)": "Земля (на поверхности и под водой)",
+    "NW": "СЗ",
+    "NE": "СВ",
+    "SE": "ЮВ",
+    "SW": "ЮЗ",
+    "All physical atlas slots": "Все физические слоты атласа",
+    "Choose an atlas page to inspect every physical slot, including repeated slots in expanded atlases. Select a slot for its full preview and exact corner identities. Drag an unassigned slot to a material to classify it.":
+        "Выберите страницу атласа, чтобы просмотреть каждый физический слот, включая повторы в расширенных атласах. Выберите слот для полного предпросмотра и точных материалов его углов. Чтобы назначить материал, перетащите на него свободный слот.",
+    "Page %1 — slots %2–%3": "Страница %1 — слоты %2–%3",
+    "Reset to default": "Восстановить исходные назначения",
+    "Load profile...": "Загрузить профиль...",
+    "Save copy...": "Сохранить копию...",
+    "This custom atlas has no exact built-in default.":
+        "Для этого нестандартного атласа нет точного встроенного профиля.",
+    "Remove the managed local override and restore the shipped atlas assignments.":
+        "Удалить локальные изменения и восстановить поставляемые с редактором назначения атласа.",
+    "Unknown material %1": "Неизвестный материал %1",
+    "  (transition support)": "  (для переходов)",
+    "  • confirm": "  • подтвердить",
+    "%1": "%1",
+    "%1 atlas slots assigned. Allowed section: %2. Drag this row onto a selected tile corner.":
+        "Назначено слотов атласа: %1. Допустимый раздел: %2. Перетащите эту строку на угол выбранного тайла.",
+    "Transition support: this component is required by exact tile corners, but the atlas has no uniform or one-on-three tile that can form a coherent brush. It remains available for corner editing.":
+        "Материал нужен для точных углов переходных тайлов, но в атласе нет равномерного тайла или перехода 1 к 3, из которых можно составить полноценную кисть. Материал по-прежнему доступен для ручного назначения углов.",
+    "Ⓣ  Tile %1": "Ⓣ  Тайл %1",
+    "Tile %1": "Тайл %1",
+    "NW %1 / NE %2 / SE %3 / SW %4": "СЗ %1 / СВ %2 / ЮВ %3 / ЮЗ %4",
+    "Thumbnail tile for %1. %2": "Тайл-миниатюра материала %1. %2",
+    "unassigned": "не назначен",
+    "assigned": "назначен",
+    "Slot %1  (local %2) — %3": "Слот %1  (на странице %2) — %3",
+    "Page %1, local slot %2. NW %3 / NE %4 / SE %5 / SW %6":
+        "Страница %1, слот %2. СЗ %3 / СВ %4 / ЮВ %5 / ЮЗ %6",
+    "Page %1, local slot %2. No semantic definition is available.":
+        "Страница %1, слот %2. Описание материалов отсутствует.",
+    "Confirmation needed: the parser could not prove this material's identity or classification. Check its name, section, thumbnail, and assigned tiles, then confirm once.":
+        "Требуется подтверждение: редактор не смог надёжно определить материал или его раздел. Проверьте имя, раздел, миниатюру и назначенные тайлы, затем подтвердите материал.",
+    "This material is resolved. Moving or editing one of its tiles updates all dependent membership automatically.":
+        "Материал подтверждён. При перемещении или изменении его тайла все связанные назначения обновляются автоматически.",
+    "Select a material to rename, classify, confirm, or choose its thumbnail.":
+        "Выберите материал, чтобы переименовать или подтвердить его, изменить раздел либо выбрать миниатюру.",
+    "%1 — palette thumbnail": "%1 — миниатюра палитры",
+    "Select a tile": "Выберите тайл",
+    "Tile preview": "Предпросмотр тайла",
+    "A transition tile may reference two, three, or four materials. It appears under every material it references, but counts once in atlas coverage.":
+        "Переходный тайл может содержать два, три или четыре материала. Он показан у каждого из них, но в заполнении атласа учитывается один раз.",
+    "—": "—",
+    "Tile %1%2": "Тайл %1%2",
+    " — unassigned": " — не назначен",
+    "Preview unavailable": "Предпросмотр недоступен",
+    "Drag a material row onto a corner. Ground/underwater and overlay materials can never be mixed in one tile.":
+        "Перетащите строку материала на угол. В одном тайле нельзя смешивать материалы земли или дна с материалами покрытия.",
+    "This proposal is not used by painting. First drag the tile onto a material to choose its layer and base assignment; then refine individual corners.":
+        "Предложенное распознавание не используется при рисовании. Сначала перетащите тайл на материал, чтобы выбрать слой и основное назначение, затем уточните отдельные углы.",
+    "Tile was not moved": "Тайл не перемещён",
+    "Tile was not unassigned": "Тайл уже назначен",
+    "Corner assignment is not valid": "Материал нельзя назначить этому углу",
+    "Assign tile corner": "Назначить материал углу тайла",
+    "Material": "Материал",
+    "Rename material": "Переименовать материал",
+    "Material name (also shown in the paint palette)":
+        "Имя материала (также показано в палитре рисования)",
+    "New material": "Новый материал",
+    "Material name": "Имя материала",
+    "Material is still referenced": "Материал всё ещё используется",
+    "Move or resolve every tile that references this material before deleting it.":
+        "Перед удалением переместите или исправьте все тайлы, использующие этот материал.",
+    "Material section was not changed": "Раздел материала не изменён",
+    "Thumbnail was not changed": "Миниатюра не изменена",
+    "%1 / %2 atlas slots assigned (%3 unassigned). %4 active material confirmation(s) remain. Unassigned tiles are a debug warning, not a painting blocker; they will use hard-edge fallback when no valid transition exists.":
+        "Назначено слотов атласа: %1 из %2; без назначения: %3. Осталось подтверждений материалов: %4. Свободные тайлы дают предупреждение, но не мешают рисованию: если подходящего перехода нет, используется резкий край.",
+    "Save material atlas profile copy": "Сохранить копию профиля атласа материалов",
+    "Material atlas profiles (*.semantic-atlas.json);;JSON files (*.json)":
+        "Профили атласа материалов (*.semantic-atlas.json);;Файлы JSON (*.json)",
+    "Could not save material atlas profile": "Не удалось сохранить профиль атласа материалов",
+    "Profile copy saved": "Копия профиля сохранена",
+    "Saved to:\n%1\n\nUse Load profile in this window to reopen it.":
+        "Сохранено по адресу:\n%1\n\nЧтобы снова открыть копию, нажмите «Загрузить профиль» в этом окне.",
+    "Load material atlas profile": "Загрузить профиль атласа материалов",
+    "Material atlas profiles (*.semantic-atlas.json *.json)":
+        "Профили атласа материалов (*.semantic-atlas.json *.json)",
+    "Profile does not match this atlas": "Профиль не соответствует этому атласу",
+    "No built-in default is available": "Встроенный профиль отсутствует",
+    "Reset Material atlas to default": "Восстановить исходный атлас материалов",
+    "Discard the managed local override for this atlas and restore the shipped default?\n\nProfile copies saved elsewhere will not be deleted.":
+        "Удалить локальные изменения этого атласа и восстановить поставляемый с редактором профиль?\n\nКопии профиля, сохранённые в других папках, не будут удалены.",
+    "Source: Local override — %1": "Источник: локальные изменения — %1",
+    "Source: Built-in default (edited). Apply + Close will create a local override at %1.":
+        "Источник: встроенный профиль (изменён). После применения будет создан локальный профиль: %1.",
+    "Source: Built-in default. No local override is loaded. Editing and applying will create one at %1.":
+        "Источник: встроенный профиль. Локальные изменения не загружены. После редактирования и применения будет создан профиль: %1.",
+    "Source: Generated draft for this atlas. Apply + Close will create a local override at %1.":
+        "Источник: созданный для этого атласа черновик. После применения будет создан локальный профиль: %1.",
+    "0 / 0 assigned": "Назначено: 0 из 0",
+    "Added exact tiles: 0": "Добавлено точных тайлов: 0",
+    "Noise": "Шум",
+    "Distributes proven uniform physical variants and deterministic rotations across each stroke interior. Exact blend rotations remain fixed by their corner identities.":
+        "Распределяет проверенные равномерные варианты тайлов и предсказуемые повороты внутри каждого мазка. Повороты точных переходов определяются материалами их углов и не меняются.",
+    "Safe: exact authored blends only":
+        "Безопасный режим: только точные готовые переходы",
+    "Auto-resolve blends": "Автоматически подбирать переходы",
+    "Vary uniform texture rotation across strokes":
+        "Менять поворот равномерной текстуры внутри мазков",
+    "Left-drag sculpts; right-click samples the raw height as the Flatten target. Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step, Noise range, or the Flatten target. Z/X/C/V select Raise/Lower/Smooth/Flatten; Noise is available in the Tool list. Wheel keeps camera zoom. Each drag is one undo step.":
+        "Перетаскивание левой кнопкой правит рельеф; правая кнопка берёт исходную высоту для выравнивания. Alt+колёсико меняет радиус, Shift+колёсико — силу, Alt+Shift+колёсико — шаг подъёма и опускания, диапазон шума или высоту выравнивания. Z/X/C/V выбирают «Поднять», «Опустить», «Сгладить» и «Выровнять»; «Шум» доступен в списке инструментов. Обычное колёсико меняет масштаб камеры. Каждый мазок отменяется целиком.",
+    "Underwater": "Под водой",
+    "Overlay textures": "Текстуры покрытий",
+    "Overlay": "Покрытие",
+    "Existing ground designations": "Существующие назначения земли",
+    "Existing underwater designations": "Существующие назначения дна",
+    "Existing overlay designations": "Существующие назначения покрытий",
+    "When enabled, Modern strokes realize exact transition tiles around the painted uniform cells. Disable it to stamp only uniform tiles without creating or selecting blend tiles.":
+        "В современном режиме создаёт точные переходные тайлы вокруг закрашенных равномерных ячеек. Отключите, чтобы ставить только равномерные тайлы без создания и выбора переходов.",
+    "Apply every exact authored connection that is available and leave unsupported boundary cells untouched. Disable this only when a local uniform hard edge is preferable to an unchanged gap.":
+        "Применяет все доступные точные готовые переходы и не меняет границы, для которых перехода нет. Отключайте только там, где резкий край лучше неизменённого разрыва.",
+    "Filter materials or atlas slots...": "Фильтр материалов или слотов атласа...",
+    "Modern (Z)": "Современный (Z)",
+    "Classic Auto (X)": "Классический (X)",
+    "Manual (C)": "Ручной (C)",
+    "Modern reuses exact authored junctions and generates an exact blend only when one is missing. Hold right-click and move to sample the nearest material vertex; Shift+Wheel changes material.":
+        "Современный режим повторно использует точные готовые стыки и создаёт переход, только если нужного ещё нет. Удерживайте правую кнопку и двигайте мышь, чтобы взять материал ближайшей вершины; Shift+колёсико меняет материал.",
+    "Classic Auto uses only exact tiles already present in this atlas and never changes the atlas. Safe mode leaves unsupported boundaries untouched. Hold right-click and move to sample a material.":
+        "Классический режим использует только точные тайлы, уже имеющиеся в атласе, и никогда не меняет сам атлас. Безопасный режим не трогает границы без подходящего перехода. Удерживайте правую кнопку и двигайте мышь, чтобы взять материал.",
+    "Manual paints the selected physical atlas tile and rotation directly, without semantic blending. Hold right-click and move to sample a tile; Shift+Wheel rotates it.":
+        "Ручной режим напрямую рисует выбранным физическим тайлом атласа с заданным поворотом, без автоматического подбора переходов. Удерживайте правую кнопку и двигайте мышь, чтобы взять тайл; Shift+колёсико поворачивает его.",
+    "Circular brush": "Круглая кисть",
+    "Square brush": "Квадратная кисть",
+    "Tile": "Тайл",
+    "Vertex": "Вершина",
+    "MPR Materials...": "Материалы MPR...",
+    "Open the MPR surface-material and flipbook records used by overlays.":
+        "Открыть записи MPR с материалами поверхности и покадровой анимацией покрытий.",
+    "Brush size (Alt+Wheel)": "Размер кисти (Alt+колёсико)",
+    "Paint target": "Что закрашивать",
+    "Resolve missing blends... (Shift+R)": "Исправить недостающие переходы... (Shift+R)",
+    "Scan the complete map and rebuild missing or inconsistent physical blend tiles from its shared-corner material field. The map repair is committed as one undo step. Shortcut: Shift+R.":
+        "Проверить всю карту и восстановить отсутствующие или неверные физические переходные тайлы по общим материалам углов. Все исправления карты отменяются одним действием. Горячая клавиша: Shift+R.",
+    "Material atlas...": "Атлас материалов...",
+    "Inspect material thumbnails and visually assign unusual atlas tiles. This changes only the editor profile, not atlas images or MPR resources.":
+        "Просмотреть миниатюры материалов и вручную назначить необычные тайлы атласа. Изменяется только профиль редактора, а не изображения атласа или ресурсы MPR.",
+    "No / wrong blend": "Нет перехода или он неверен",
+    "Wrong material / family": "Неверный материал или семейство",
+    "Wrong rotation": "Неверный поворот",
+    "Mark bad tiles on map": "Помечать проблемные тайлы на карте",
+    "Choose an issue type, enable marking, then drag across every visibly bad tile. Painting is disabled while marking. Each drag appends exact tile, corner, rotation, atlas-binding, and stroke information to a portable diagnostic JSON.":
+        "Выберите тип проблемы, включите пометку и проведите по всем видимым проблемным тайлам. Во время пометки рисование отключено. Каждый мазок добавляет в переносимый диагностический JSON точные сведения о тайле, углах, повороте, привязке атласа и мазке.",
+    "Save MPR as modern draft...": "Сохранить MPR как современный черновик...",
+    "Save a portable MPR plus adjacent map-local atlas, even when the MPR itself has no unsaved changes. Normal Save MPR and Save MPR As publish game-ready atlas pages into textures.res instead.":
+        "Сохранить переносимый MPR вместе с соседним локальным атласом карты, даже если сам MPR не изменён. Обычные команды сохранения MPR вместо этого публикуют готовые для игры страницы атласа в textures.res.",
+    "Noise range": "Диапазон шума",
+    "%1 original + %2 added exact = %3 active slots":
+        "%1 исходных + %2 добавленных точных = %3 активных слотов",
+    "Original slots remain byte-identical. Added exact tiles include reused stock JMV blends and newly generated combinations cached for this map session.":
+        "Исходные слоты остаются побайтово неизменными. Среди добавленных точных тайлов есть повторно используемые штатные переходы JMV и новые сочетания, созданные для текущего сеанса карты.",
+    "shipped-size range": "штатный диапазон",
+    "expanded range": "расширенный диапазон",
+    "high-memory range": "диапазон с повышенным расходом памяти",
+    "unvalidated / potentially unstable range": "непроверенный и потенциально нестабильный диапазон",
+    "%1 / 16384 slots - %2": "%1 из 16384 слотов — %2",
+    "Potential instability: this atlas is above 4096 slots. Staging remains available, but runtime memory limits depend on the rest of the map.":
+        "Возможна нестабильность: в атласе больше 4096 слотов. Подготовка к игре доступна, но предел памяти зависит и от остального содержимого карты.",
+    "MARKING: %1": "ПОМЕТКА: %1",
+    "Circular tile brush; the viewport outlines affected tiles":
+        "Круглая кисть; затрагиваемые тайлы обведены на карте",
+    "Square tile brush; the viewport outlines affected tiles":
+        "Квадратная кисть; затрагиваемые тайлы обведены на карте",
+    "%1 / %2 assigned%3": "Назначено: %1 из %2%3",
+    " (%1 unassigned)": " (без назначения: %1)",
+    "No atlas loaded": "Атлас не загружен",
+    "Local override:\n%1": "Локальные изменения:\n%1",
+    "Slot %1 - runtime type %2": "Слот %1 — игровой тип %2",
+    "Slot %1 - %2 - runtime type %3": "Слот %1 — %2 — игровой тип %3",
+    "%1 - exact authored one-corner stamp. Vertex target only. %2":
+        "%1 — точный готовый штамп одного угла. Только для вершин. %2",
+    "Safe mode applies it only when every incident authored tile is exact.":
+        "Безопасный режим применяет его, только если все соседние готовые тайлы точны.",
+    "It is restricted to its reviewed support material.":
+        "Разрешён только для проверенного опорного материала.",
+    "%1 - %2 authored uniform source(s). %3":
+        "%1 — готовых равномерных вариантов: %2. %3",
+    "Currently used on this map.": "Сейчас используется на этой карте.",
+    "Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.":
+        "На этой карте не используется. Классический режим сохраняет доступные готовые переходы; безопасный режим не меняет границу, если точного перехода нет.",
+    "Unused on this map; Modern painting adds this material and generates exact blends as needed.":
+        "На этой карте не используется. Современный режим добавит материал и при необходимости создаст точные переходы.",
+    "Exact reviewed-HD preview is loading.\n": "Загружается проверенный HD-предпросмотр.\n",
+    "No exact reviewed-HD preview is available.\n": "Точный проверенный HD-предпросмотр недоступен.\n",
+    "Used on this map": "Используются на карте",
+    "Unused materials": "Неиспользуемые материалы",
+    "No existing automatic material designation is available for this layer.":
+        "Для этого слоя нет готовых автоматических назначений материалов.",
+    "%1 existing material designation(s). Safe Classic Auto applies only complete exact authored placements; tiles or vertices with unsupported boundaries stay unchanged.":
+        "Готовых назначений материалов: %1. Безопасный классический режим применяет только полные точные готовые сочетания; тайлы и вершины на границах без поддержки остаются неизменными.",
+    "%1 existing material designation(s). Classic Auto never changes the atlas; unresolved boundaries may use a local uniform hard edge.":
+        "Готовых назначений материалов: %1. Классический режим никогда не меняет атлас; на границах без перехода может использоваться локальный резкий край равномерного материала.",
+    "No physical atlas tiles are available.": "В атласе нет доступных физических тайлов.",
+    "%1 physical atlas tile(s). Manual painting writes the selected slot and rotation directly.":
+        "Физических тайлов атласа: %1. Ручной режим напрямую записывает выбранный слот и поворот.",
+    "No materials are available for this layer.": "Для этого слоя нет доступных материалов.",
+    "%1 material(s) ready for this layer.": "Для этого слоя готово материалов: %1.",
+    "%1 (%2)": "%1 (%2)",
+    "%1\n%2": "%1\n%2",
+    "Paint issue marking mode: %1. Drag across every bad tile; normal painting is disabled until you choose a material brush.":
+        "Режим пометки проблем: %1. Проведите по каждому неверному тайлу; обычное рисование отключено, пока не выбрана кисть материала.",
+    "Visuals": "Отображение",
+    "Expand visuals": "Развернуть панель отображения",
+    "Show every currently available viewport visual channel.":
+        "Показать все доступные элементы карты.",
+    "Hide every currently available viewport visual channel.":
+        "Скрыть все доступные элементы карты.",
+    "Entrances": "Входы",
+    "Object helpers": "Вспомогательные модели объектов",
+    "Show editor helper models for light, particle, and sound objects. This does not hide their actual effects.":
+        "Показывать вспомогательные модели источников света, частиц и звука. Их настоящие эффекты при этом не скрываются.",
+    "Static objects": "Статические объекты",
+    "Show ordinary static MOB geometry such as scenery, levers, torches, and trap locators.":
+        "Показывать обычные статические объекты MOB: декорации, рычаги, факелы и указатели ловушек.",
+    "Dynamic objects": "Динамические объекты",
+    "Show units and their animated equipment.": "Показывать существ и их анимированное снаряжение.",
+    "Terrain": "Рельеф",
+    "Show the main terrain. This stays synchronized with Landscape Tools and the M shortcut.":
+        "Показывать основной рельеф. Настройка связана с инструментами ландшафта и клавишей M.",
+    "Overlays": "Покрытия",
+    "Show overlay surfaces such as water and lava. This stays synchronized with Landscape Tools and the O shortcut.":
+        "Показывать покрытия, например воду и лаву. Настройка связана с инструментами ландшафта и клавишей O.",
+    "Fog": "Туман",
+    "Show authored distance fog in Full environment lighting mode.":
+        "Показывать заданный картой туман вдали в полном режиме освещения.",
+    "Scene lights": "Источники света",
+    "Show illumination from authored MOB point lights and torch lights. This mirrors Scene point lights in Render settings.":
+        "Показывать свет от точечных источников и факелов MOB. Настройка соответствует пункту «Точечные источники карты» в настройках отображения.",
+    "Terrain shadows": "Тени рельефа",
+    "Show authored terrain shadowing when a landscape, Full environment, and desktop shadow renderer are available.":
+        "Показывать сохранённые тени рельефа, когда загружен ландшафт, включено полное освещение и доступно настольное отображение теней.",
+    "Object shadows": "Тени объектов",
+    "Show real-time shadows cast by static and dynamic objects in Full environment mode.":
+        "Показывать динамические тени от статических и движущихся объектов в полном режиме освещения.",
+    "Skybox": "Небо",
+    "Show the profile skybox in Full environment mode on outdoor maps.":
+        "Показывать небо из активного профиля на открытых картах в полном режиме освещения.",
+    "Particle visuals": "Эффекты частиц",
+    "Show rendered particle effects. Particle object helper models are controlled separately.":
+        "Показывать эффекты частиц. Вспомогательные модели их источников включаются отдельно.",
+    "Freeze animations": "Заморозить анимации",
+    "Hold animated units at their current idle-cycle frame. Available only when Animate unit idle cycles is enabled in Render settings.":
+        "Остановить анимированных существ на текущем кадре анимации ожидания. Доступно, только если в настройках отображения включены анимации ожидания существ.",
+    "Minimize visuals": "Свернуть панель отображения",
+    "Unavailable: switch Lighting mode to Full environment.":
+        "Недоступно: выберите полный режим освещения.",
+    "Unavailable: Full environment requires the desktop renderer.":
+        "Недоступно: для полного освещения требуется настольный рендерер.",
+    "Unavailable: load terrain and enable shadow quality in Render settings.":
+        "Недоступно: загрузите рельеф и включите качество теней в настройках отображения.",
+    "Unavailable: enable shadow quality in Render settings.":
+        "Недоступно: включите качество теней в настройках отображения.",
+    "Unavailable: cave environments do not render a skybox.":
+        "Недоступно: на пещерных картах небо не отображается.",
+    "Unavailable: enable Animate unit idle cycles in Render settings.":
+        "Недоступно: включите анимации ожидания существ в настройках отображения.",
+    "Could not bind the offscreen minimap capture target.":
+        "Не удалось подключить внеэкранную цель для снимка миникарты.",
+    "Could not rebind the offscreen minimap capture target.":
+        "Не удалось повторно подключить внеэкранную цель для снимка миникарты.",
+    "Restore exact terrain atlas": "Восстановить точный атлас рельефа",
+    "This MPR has an exact editor recovery snapshot, but its matching self-describing RES is not configured.\n\nRestore a map-local atlas now?\n%1\n\nOnly the exact saved pages and semantic profile will be restored; no atlas identity will be inferred.":
+        "Для этого MPR сохранена точная копия атласа для восстановления, но соответствующий RES с описанием материалов не настроен.\n\nВосстановить локальный атлас карты?\n%1\n\nБудут восстановлены только точно сохранённые страницы и профиль материалов; имя атласа не будет определяться предположительно.",
+    "Terrain atlas recovery failed": "Не удалось восстановить атлас рельефа",
+    "The exact recovery snapshot could not be rebuilt. The MPR was not opened.\n\n%1":
+        "Не удалось восстановить точную сохранённую копию. MPR не открыт.\n\n%1",
+    "The existing map-local RES could not be backed up. The MPR was not opened.":
+        "Не удалось создать резервную копию существующего локального RES карты. MPR не открыт.",
+    "The exact map-local RES could not be committed. The MPR was not opened.\n\nPhase: %1\n%2":
+        "Не удалось записать точный локальный RES карты. MPR не открыт.\n\nЭтап: %1\n%2",
+    "The rebuilt RES failed exact semantic binding and was rolled back: %1. The MPR was not opened.\n\n%2":
+        "Восстановленный RES не прошёл точную проверку привязки материалов и был возвращён в прежнее состояние: %1. MPR не открыт.\n\n%2",
+    "complete": "завершено",
+    "failed": "ошибка",
+    "Terrain atlas restored": "Атлас рельефа восстановлен",
+    "The exact map-local terrain atlas was restored and will be used to open this MPR.\n\n%1":
+        "Точный локальный атлас рельефа восстановлен и будет использован для открытия этого MPR.\n\n%1",
+    "This finalized MPR references an exact published terrain atlas, but no single configured RES archive matches it. The map was not opened, so the editor cannot mix old and new texture pages.\n\nResource identity: %1\nExpected atlas hash: %2\n\n%3":
+        "Завершённый MPR ссылается на точно опубликованный атлас рельефа, но среди настроенных архивов RES нет полного соответствия. Карта не открыта: редактор не будет смешивать старые и новые страницы текстур.\n\nИдентификатор ресурса: %1\nОжидаемый хеш атласа: %2\n\n%3",
+    "Finalized terrain RES unavailable": "RES завершённого рельефа недоступен",
+    "Modern Draft pair required": "Требуется пара файлов современного черновика",
+    "This map has unsaved working-atlas tiles. They cannot be stored in an MPR alone: Save As must write a paired MPR plus adjacent RES Modern Draft.":
+        "В рабочем атласе этой карты есть несохранённые тайлы. Одного MPR недостаточно: команда «Сохранить как» должна записать MPR вместе с соседним RES современного черновика.",
+    "Save as Modern Draft keeps the editable working atlas beside the selected MPR. Finalize and Save As publishes a clean runtime atlas. Cancel leaves the current map and destination unchanged.":
+        "«Сохранить как современный черновик» оставляет редактируемый рабочий атлас рядом с выбранным MPR. «Завершить и сохранить как» публикует чистый игровой атлас. При отмене текущая карта и выбранное место не изменяются.",
+    "Save as Modern Draft": "Сохранить как современный черновик",
+    "Finalize and Save As": "Завершить и сохранить как",
+    "The current terrain uses an unsaved working atlas, but this operation cannot preserve its paired RES resource.":
+        "Текущий рельеф использует несохранённый рабочий атлас, а эта операция не может сохранить связанный с ним RES.",
+    "The edited MPR could not be reopened before staging its working atlas.":
+        "Не удалось повторно открыть изменённый MPR перед подготовкой его рабочего атласа.",
+    "The authored terrain page '%1' could not be read for isolated test staging.":
+        "Не удалось прочитать исходную страницу рельефа «%1» для отдельной подготовки теста.",
+    "Modern MPR publication required": "Требуется публикация современного MPR",
+    "This map contains modern terrain atlas edits. Use Save MPR or Save MPR As to publish them, or use Save MPR as modern draft when you intentionally need a portable map-local atlas.":
+        "На карте изменён современный атлас рельефа. Для публикации используйте «Сохранить MPR» или «Сохранить MPR как». Если нужен переносимый локальный атлас рядом с картой, сохраните MPR как современный черновик.",
+    "Encoding the map-local working atlas...": "Кодирование локального рабочего атласа карты...",
+    "Modern draft save refused": "Сохранение современного черновика отклонено",
+    "The edited MPR could not be reopened before pairing it with the working atlas. No destination was changed.\n\n%1":
+        "Не удалось повторно открыть изменённый MPR перед связыванием с рабочим атласом. Целевые файлы не изменены.\n\n%1",
+    "The authored terrain page '%1' could not be read. No destination was changed.":
+        "Не удалось прочитать исходную страницу рельефа «%1». Целевые файлы не изменены.",
+    "The editor could not preserve the working material assignments for reopen. No destination was changed.\n\n%1":
+        "Редактор не смог сохранить рабочие назначения материалов для повторного открытия. Целевые файлы не изменены.\n\n%1",
+    "The exact shared-corner material field could not be bound to the draft MPR. No destination was changed.\n\n%1":
+        "Не удалось привязать к черновику MPR точное поле материалов общих углов. Целевые файлы не изменены.\n\n%1",
+    "The exact material profile could not be embedded in the map-local RES. No destination was changed.\n\n%1":
+        "Не удалось встроить точный профиль материалов в локальный RES карты. Целевые файлы не изменены.\n\n%1",
+    "The paired MPR could not be validated for exact atlas recovery. No destination was changed.\n\n%1":
+        "Не удалось подтвердить, что связанный MPR допускает точное восстановление атласа. Целевые файлы не изменены.\n\n%1",
+    "The exact semantic atlas recovery snapshot could not be created, so no destination was changed.\n\n%1":
+        "Не удалось создать точную копию профиля материалов для восстановления атласа, поэтому целевые файлы не изменены.\n\n%1",
+    "Staging and verifying the map-local atlas...": "Подготовка и проверка локального атласа карты...",
+    "Modern draft save failed": "Не удалось сохранить современный черновик",
+    "The map-local atlas was not committed.\n\nPhase: %1\n%2":
+        "Локальный атлас карты не записан.\n\nЭтап: %1\n%2",
+    "Committing and reopening the paired MPR...": "Запись и повторное открытие связанного MPR...",
+    "The MPR was not committed. Atlas rollback: %1.\n\nPhase: %2\n%3":
+        "MPR не записан. Возврат атласа: %1.\n\nЭтап: %2\n%3",
+    "Modern draft saved; reopen required": "Современный черновик сохранён; требуется открыть его заново",
+    "The paired MPR and map-local atlas were saved, but the current session could not adopt them. Reopen this MPR before editing further:\n%1":
+        "Связанный MPR и локальный атлас карты сохранены, но текущий сеанс не смог перейти на них. Перед дальнейшим редактированием откройте MPR заново:\n%1",
+    "Modern draft save complete.": "Современный черновик сохранён.",
+    "Modern draft saved with map-local atlas: %1":
+        "Современный черновик сохранён с локальным атласом карты: %1",
+    "MPR save refused": "Сохранение MPR отклонено",
+    "The exact shared-corner material state could not be prepared. No destination was changed.\n\n%1":
+        "Не удалось подготовить точное состояние материалов общих углов. Целевые файлы не изменены.\n\n%1",
+    "The active terrain RES could not be read before storing the map's shared-corner material state. No destination was changed.\n\n%1":
+        "Не удалось прочитать активный RES рельефа перед сохранением материалов общих углов карты. Целевые файлы не изменены.\n\n%1",
+    "The active terrain RES could not be validated before storing the map's shared-corner material state. No destination was changed.\n\n%1":
+        "Не удалось проверить активный RES рельефа перед сохранением материалов общих углов карты. Целевые файлы не изменены.\n\n%1",
+    "The map's shared-corner material state could not be stored in the active terrain RES. The MPR was not changed.\n\nPhase: %1\n%2":
+        "Не удалось сохранить материалы общих углов карты в активном RES рельефа. MPR не изменён.\n\nЭтап: %1\n%2",
+    "The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3\nSemantic RES rollback: %4":
+        "Сохранение изменённого MPR не завершено.\n\nЭтап: %1\n%2\n\nРезервная копия: %3\nВозврат RES с профилем материалов: %4",
+    "%1 — on %2": "%1 — включено для %2",
+    "material %1": "материал %1",
+    "No structurally valid material is available for namespace '%1'. Open Material atlas to assign one; manual atlas tile mode remains available.":
+        "Для набора «%1» нет материала с допустимой структурой. Откройте атлас материалов и назначьте его; ручной выбор тайла атласа по-прежнему доступен.",
+    " The obsolete shared profile was ignored and a working Material field was rebuilt from this MPR and its complete sibling atlas; modern painting remains available.":
+        " Устаревший общий профиль пропущен. Рабочее поле материалов восстановлено из этого MPR и полного связанного атласа; современное рисование доступно.",
+    " The obsolete shared profile was ignored. This atlas could not be inferred safely, so only manual tile painting is available.":
+        " Устаревший общий профиль пропущен. Надёжно определить материалы этого атласа не удалось, поэтому доступно только ручное рисование тайлами.",
+    "Game-wide Material families loaded: %1 ground and %2 overlay families.":
+        "Загружены общие семейства материалов игры: для земли — %1, для покрытий — %2.",
+    "Local Material atlas override loaded: %1 land and %2 overlay materials.":
+        "Загружен локальный профиль атласа материалов: материалы земли — %1, покрытий — %2.",
+    "Generated material atlas ready: %1 land and %2 overlay materials; %3 of %4 atlas slots assigned.":
+        "Созданный профиль атласа готов: материалы земли — %1, покрытий — %2; назначено слотов — %3 из %4.",
+    "Saved material atlas loaded: %1 land and %2 overlay materials.":
+        "Загружен сохранённый профиль атласа: материалы земли — %1, покрытий — %2.",
+    " No safe uniform material could be identified; open Material atlas to assign one.":
+        " Не удалось надёжно определить равномерный материал; откройте атлас материалов и назначьте его.",
+    "Default atlas": "Исходный атлас",
+    "Local override: %1": "Локальные изменения: %1",
+    "Generated draft": "Созданный черновик",
+    "%1 (stamp on %2)": "%1 (штамп для %2)",
+    "NW %1 / NE %2 / SW %3 / SE %4": "СЗ %1 / СВ %2 / ЮЗ %3 / ЮВ %4",
+    "Material atlas is in use": "Атлас материалов используется",
+    "Save or undo the current semantic terrain edits before changing the Material atlas profile. This keeps every generated working tile and undo reference bound to the atlas that created it.":
+        "Перед сменой профиля атласа материалов сохраните или отмените текущие изменения материалов рельефа. Тогда каждый созданный рабочий тайл и действие отмены останутся связаны с атласом, в котором они созданы.",
+    "Could not reset Material atlas": "Не удалось восстановить атлас материалов",
+    "Local Material atlas override removed; the built-in default is active.":
+        "Локальные изменения атласа материалов удалены; используется встроенный профиль.",
+    "Built-in Material atlas remains active; no local override was created.":
+        "Встроенный атлас материалов остаётся активным; локальный профиль не создавался.",
+    "Material atlas applied and saved to %1.": "Атлас материалов применён и сохранён в %1.",
+    "Material atlas applied and saved to %1. Unassigned or unconfirmed items remain excluded from painting.":
+        "Атлас материалов применён и сохранён в %1. Неназначенные или неподтверждённые элементы по-прежнему недоступны для рисования.",
+    "ground": "земля",
+    "Terrain atlas artwork is missing": "Изображение атласа рельефа отсутствует",
+    "Modern paint was not started. The %1 map cell %2,%3 references physical atlas slot %4, but the loaded atlas has no image for that slot. Restore the matching RES atlas before painting; Material Atlas cannot assign artwork that is not loaded.":
+        "Современное рисование не начато. Ячейка %2,%3 слоя %1 ссылается на физический слот атласа %4, но в загруженном атласе нет его изображения. Перед рисованием восстановите соответствующий атлас RES: атлас материалов не может назначить незагруженное изображение.",
+    "Terrain tile needs a material assignment": "Тайлу рельефа нужно назначить материал",
+    "Modern paint was not started. The %1 map uses %2 physical artwork slot(s) without semantic assignments; the first is slot %3 at cell %4,%5. Undo the unassigned Manual paint or finish the active Modern atlas session, then assign the slot in Material Atlas.":
+        "Современное рисование не начато. В слое %1 используется физических слотов без назначенного материала: %2; первый — слот %3 в ячейке %4,%5. Отмените ручное рисование неназначенным тайлом или завершите текущий сеанс современного атласа, затем назначьте материал слоту в атласе материалов.",
+    "Modern paint was not started. The %1 map uses %2 physical artwork slot(s) without semantic assignments; the first is slot %3 at cell %4,%5. Material Atlas will open on that slot so its material or four corners can be assigned.":
+        "Современное рисование не начато. В слое %1 используется физических слотов без назначенного материала: %2; первый — слот %3 в ячейке %4,%5. Атлас материалов откроется на этом слоте, чтобы назначить ему материал или материалы четырёх углов.",
+    "Unassigned": "Не назначено",
+    "Assigned": "Назначено",
+    "material atlas approved": "атлас материалов подтверждён",
+    "material atlas available": "атлас материалов доступен",
+    "no safe material assignments": "нет надёжных назначений материалов",
+    "Modern MPR save refused": "Сохранение современного MPR отклонено",
+    "Save MPR or Save MPR As must select the destination before modern terrain publication begins. No file was changed.":
+        "Перед публикацией современного рельефа команда сохранения MPR должна определить целевой файл. Файлы не изменены.",
+    "Modern MPR publication refused": "Публикация современного MPR отклонена",
+    "The selected destination is the currently open editable draft. Publishing over it would replace the draft MPR's atlas layout while its adjacent draft RES still owns the working layout.\n\nUse Save MPR to update the editable draft, or use Save MPR As and choose the final game MPR destination. No file was changed.":
+        "Выбран текущий открытый редактируемый черновик. При публикации поверх него схема атласа в MPR изменится, а соседний черновой RES останется владельцем рабочей схемы.\n\nЧтобы обновить редактируемый черновик, используйте «Сохранить MPR». Для публикации выберите «Сохранить MPR как» и укажите итоговый игровой MPR. Файлы не изменены.",
+    "Nothing to publish": "Нечего публиковать",
+    "Paint at least one semantic terrain material before saving a modern MPR.":
+        "Перед сохранением современного MPR нанесите хотя бы один материал рельефа.",
+    "Preparing map-specific terrain atlas...": "Подготовка атласа рельефа для карты...",
+    "Saving modern MPR": "Сохранение современного MPR",
+    "This MPR cannot be converted to an exact shared-corner material field without changing terrain meaning. No identity or file was changed.\n\n%1":
+        "Этот MPR нельзя преобразовать в точное поле материалов общих углов без изменения вида рельефа. Идентификатор и файлы не изменены.\n\n%1",
+    "The virtual material field is incomplete; no package was written.":
+        "Виртуальное поле материалов неполно; пакет не записан.",
+    "A required terrain blend has not been realized in the live atlas. Run Resolve Missing Blends and retry; no file was changed.\n\n%1":
+        "В рабочем атласе отсутствует необходимый переход рельефа. Выполните «Исправить недостающие переходы» и повторите попытку; файлы не изменены.\n\n%1",
+    "Auditing preserved terrain references and unused slots...":
+        "Проверка сохранённых ссылок рельефа и неиспользуемых слотов...",
+    "Loading exact stock transitions used by this map...":
+        "Загрузка точных штатных переходов, используемых картой...",
+    "An authored stock transition used by this map could not be imported into the isolated final atlas.\n\n%1":
+        "Не удалось перенести штатный переход, используемый картой, в отдельный итоговый атлас.\n\n%1",
+    "Resolving, evicting unused tiles, and rebuilding physical pages...":
+        "Подбор переходов, удаление неиспользуемых тайлов и перестроение физических страниц...",
+    "The working atlas provenance could not be restored after compaction. No package was written.\n\n%1":
+        "После уплотнения не удалось восстановить происхождение тайлов рабочего атласа. Пакет не записан.\n\n%1",
+    "Review modern MPR save": "Проверка сохранения современного MPR",
+    "Published atlas: %1 slots (%2 pages)  |  Layers: %7\nRetained original-map tiles: %3  |  Evicted/merged original-map tiles: %4\nIncluded stock JMV blends: %5  |  Included generated exact blends: %6":
+        "Публикуемый атлас: %1 слотов (%2 страниц)  |  Слои: %7\nСохранено исходных тайлов карты: %3  |  Удалено или объединено исходных тайлов: %4\nДобавлено штатных переходов JMV: %5  |  Добавлено созданных точных переходов: %6",
+    "Save result: the selected MPR and textures.res will be updated together. The MPR includes every current landscape edit, including sculpted heights and the latest paint stroke. Resource identity: %1 (%2). Editor-side JSON review metadata stays beside the MPR and is never put inside the runtime RES archive.":
+        "Результат сохранения: выбранные MPR и textures.res будут обновлены вместе. В MPR войдут все текущие изменения ландшафта, включая правку высот и последний мазок. Идентификатор ресурса: %1 (%2). Служебные данные проверки JSON останутся рядом с MPR и не попадут в игровой архив RES.",
+    "choose after this review": "выбрать после проверки",
+    "use / replace": "использовать или заменить",
+    "new content": "новое содержимое",
+    "potentially unstable": "возможна нестабильность",
+    "Potential instability: this atlas exceeds 4,096 slots. Runtime memory headroom depends on the rest of the map. The package may still be created and staged for controlled testing.":
+        "Возможна нестабильность: в атласе больше 4096 слотов. Запас памяти игры зависит от остального содержимого карты. Пакет всё равно можно создать и подготовить для контролируемого теста.",
+    "Non-original tiles written to this isolated atlas (stock reuse first, generated only when missing):":
+        "Неисходные тайлы, записываемые в отдельный атлас (сначала используются штатные; новые создаются только при отсутствии):",
+    "Blue frame: existing stock JMV blend added to this map.  Orange frame: newly generated exact blend.":
+        "Синяя рамка: существующий штатный переход JMV, добавленный на карту.  Оранжевая рамка: новый созданный точный переход.",
+    "Slot %1 - %2": "Слот %1 — %2",
+    "stock JMV": "штатный JMV",
+    "generated": "созданный",
+    "Used for: %1\nCorners: %2 | %3 | %4 | %5\nPixel SHA-256: %6\nBlend source: %7":
+        "Используется для: %1\nУглы: %2 | %3 | %4 | %5\nSHA-256 пикселей: %6\nИсточник перехода: %7",
+    "original map atlas": "исходный атлас карты",
+    "No non-original tiles are needed; the isolated atlas contains only compacted artwork from the original map.":
+        "Неисходные тайлы не нужны; отдельный атлас содержит только уплотнённые изображения исходной карты.",
+    "Save modern MPR": "Сохранить современный MPR",
+    "Choose terrain resource identity": "Выберите идентификатор ресурса рельефа",
+    "Create a new content identity (recommended)":
+        "Создать новый идентификатор содержимого (рекомендуется)",
+    "Use / replace an identity I specify":
+        "Использовать или заменить указанный мной идентификатор",
+    "Creating a new content identity is the safest export option because it avoids conflicts with existing map atlases. New content defaults to <map>_<12-character content hash>. Using an existing identity can affect every MPR that resolves the same MMP page names after the resulting textures.res is installed.":
+        "Новый идентификатор содержимого — самый безопасный вариант экспорта: он исключает конфликты с существующими атласами карт. По умолчанию используется <карта>_<12 символов хеша содержимого>. Если использовать существующий идентификатор, после установки нового textures.res могут измениться все MPR с теми же именами страниц MMP.",
+    "Invalid terrain resource identity": "Недопустимый идентификатор ресурса рельефа",
+    "Atlas package validation failed": "Пакет атласа не прошёл проверку",
+    "Choose textures.res to update in place": "Выберите textures.res для обновления",
+    "Evil Islands resources (*.res)": "Ресурсы «Проклятых земель» (*.res)",
+    "Save will publish every current landscape edit in one operation.\n\nMPR: %1\ntextures.res: %2\nResource identity: %3 (%4)\nLayers: %5\n\nEditor-side JSON review metadata stays beside the MPR and is never put inside the runtime RES archive.":
+        "При сохранении все текущие изменения ландшафта будут опубликованы одной операцией.\n\nMPR: %1\ntextures.res: %2\nИдентификатор ресурса: %3 (%4)\nСлои: %5\n\nСлужебные данные проверки JSON останутся рядом с MPR и не попадут в игровой архив RES.",
+    "No active resource-profile folder is configured. This RES is still allowed, but the editor and game will not resolve it until that location is installed or configured.":
+        "В активном профиле не настроена папка ресурсов. Этот RES можно сохранить, но редактор и игра не найдут его, пока папка не будет установлена или настроена.",
+    "The selected RES is outside the active resource profile. It is still allowed, but the editor and game will not resolve it until that location is installed or configured.":
+        "Выбранный RES находится вне активного профиля ресурсов. Его можно сохранить, но редактор и игра не найдут его, пока эта папка не будет установлена или настроена.",
+    "textures.res publication refused": "Публикация textures.res отклонена",
+    "The selected resource archive could not be read safely.\n\n%1":
+        "Не удалось безопасно прочитать выбранный архив ресурсов.\n\n%1",
+    "Replace textures.res in place": "Заменить textures.res",
+    "Endurance will stage and reopen the complete updated archive before atomically replacing:\n%1\n\nCreate a backup first?":
+        "Endurance отдельно подготовит и повторно откроет полный обновлённый архив, прежде чем безопасно заменить:\n%1\n\nСначала создать резервную копию?",
+    "Replace with backup": "Заменить с резервной копией",
+    "Replace without backup": "Заменить без резервной копии",
+    "Atlas package not written": "Пакет атласа не записан",
+    "The isolated physical atlas could not be decoded.\n\n%1":
+        "Не удалось декодировать отдельный физический атлас.\n\n%1",
+    "The isolated material profile does not describe every logical atlas tile exactly. No RES or MPR was changed.\n\n%1":
+        "Отдельный профиль материалов не содержит точного описания каждого логического тайла атласа. RES и MPR не изменены.\n\n%1",
+    "The exact shared-corner material field could not be bound to the published MPR. No RES or MPR was changed.\n\n%1":
+        "Не удалось привязать точное поле материалов общих углов к публикуемому MPR. RES и MPR не изменены.\n\n%1",
+    "Atlas publication refused": "Публикация атласа отклонена",
+    "The selected MPR destination could not be read before replacement. No RES or MPR was changed.":
+        "Перед заменой не удалось прочитать выбранный целевой MPR. RES и MPR не изменены.",
+    "The complete MPR candidate failed its fresh reopen. No output was written.\n\n%1":
+        "Полный новый MPR не прошёл повторное открытие. Результат не записан.\n\n%1",
+    "The MPR could not be bound to an exact recovery snapshot. No output was written.\n\n%1":
+        "Не удалось связать MPR с точной копией для восстановления. Результат не записан.\n\n%1",
+    "The exact semantic atlas recovery snapshot could not be created, so no RES or MPR was changed.\n\n%1":
+        "Не удалось создать точную копию профиля материалов атласа для восстановления, поэтому RES и MPR не изменены.\n\n%1",
+    "Building and reopening the complete textures.res candidate...":
+        "Создание и повторное открытие полного нового textures.res...",
+    "The complete textures.res candidate could not be built. No output was written.\n\n%1":
+        "Не удалось создать полный новый textures.res. Результат не записан.\n\n%1",
+    "The complete staged textures.res failed reopen. No output was written.\n\n%1":
+        "Подготовленный полный textures.res не прошёл повторное открытие. Результат не записан.\n\n%1",
+    "The staged textures.res did not reopen with its exact embedded material profile. No output was written.\n\n%1":
+        "Подготовленный textures.res не открылся с точным встроенным профилем материалов. Результат не записан.\n\n%1",
+    "Backing up and atomically replacing textures.res...":
+        "Создание резервной копии и безопасная замена textures.res...",
+    "Atomically replacing textures.res...": "Безопасная замена textures.res...",
+    "textures.res publication failed": "Не удалось опубликовать textures.res",
+    "The selected archive was not replaced.\n\nPhase: %1\n%2":
+        "Выбранный архив не заменён.\n\nЭтап: %1\n%2",
+    "Saving modern MPR...": "Сохранение современного MPR...",
+    "MPR publication failed": "Не удалось опубликовать MPR",
+    "Publication did not complete. textures.res rollback: %1; MPR rollback: %2.\n\nPhase: %3\n%4":
+        "Публикация не завершена. Возврат textures.res: %1; возврат MPR: %2.\n\nЭтап: %3\n%4",
+    "manual recovery required": "требуется ручное восстановление",
+    "Adopting the saved map in this session...": "Переход текущего сеанса на сохранённую карту...",
+    "Modern MPR saved; reopen required": "Современный MPR сохранён; требуется открыть его заново",
+    "The validated textures.res and MPR are saved, but this session could not adopt them. Reopen the MPR before editing further.":
+        "Проверенные textures.res и MPR сохранены, но текущий сеанс не смог перейти на них. Перед дальнейшим редактированием откройте MPR заново.",
+    "Modern terrain atlas published in place: %1":
+        "Современный атлас рельефа опубликован с заменой: %1",
+    "Modern MPR saved": "Современный MPR сохранён",
+    "textures.res was updated in place and the saved MPR is now the open editing baseline. No reload is required.\n\nMPR: %1\ntextures.res: %2\nIdentity: %3\nUsed tiles: %4 / %5\nTexture pages: %6\n\nUndo history was cleared because publication changed external resource identity and physical atlas ownership.":
+        "textures.res обновлён, а сохранённый MPR теперь служит открытой исходной версией для редактирования. Повторная загрузка не требуется.\n\nMPR: %1\ntextures.res: %2\nИдентификатор: %3\nИспользовано тайлов: %4 из %5\nСтраниц текстур: %6\n\nИстория отмены очищена, поскольку публикация изменила внешний идентификатор ресурса и физический атлас.",
+    "Terrain resource identity": "Идентификатор ресурса рельефа",
+    "Animation repack refused": "Перенос анимации отклонён",
+    "The runtime requires every flipbook to occupy one contiguous typed uniform atlas range. The working atlas could not preserve this animation without guessing or replacing a reference.\n\n%1":
+        "Игра требует, чтобы каждая покадровая анимация занимала один непрерывный равномерный диапазон атласа одного типа. Рабочий атлас не может сохранить эту анимацию без предположений или замены ссылки.\n\n%1",
+    "The repacked animation's complete runtime terrain-type table could not be installed. No atlas slots or map cells were changed.":
+        "Не удалось установить полную игровую таблицу типов рельефа для перенесённой анимации. Слоты атласа и ячейки карты не изменены.",
+    "zone2 or zone2_<content hash>": "zone2 или zone2_<хеш содержимого>",
+    "Current identity": "Текущий идентификатор",
+    "Identity to use / replace": "Использовать или заменить идентификатор",
+    "The identity determines the MMP member names used by this MPR. Individual page names are derived automatically and are intentionally hidden. Edit the value above to replace that identity on the next Save MPR or Save MPR As. Clear it to let Save create a new content-hash identity.":
+        "Идентификатор определяет имена файлов MMP, используемых этим MPR. Имена отдельных страниц создаются автоматически и намеренно скрыты. Измените значение выше, чтобы заменить идентификатор при следующем сохранении MPR. Очистите поле, чтобы при сохранении создать новый идентификатор по хешу содержимого.",
+    "Reset to current identity": "Вернуть текущий идентификатор",
+    "Resource identity": "Идентификатор ресурса",
+    "Sampled nearest terrain vertex material %1.":
+        "Взят материал ближайшей вершины рельефа: %1.",
+    "The nearest vertex material is contextual and has no brush in this palette.":
+        "Материал ближайшей вершины зависит от окружения, поэтому в этой палитре для него нет кисти.",
+    "The semantic Add Overlay preview was refused; no edit was kept.":
+        "Не удалось подготовить предпросмотр добавления покрытия; изменения отменены.",
+    "The overlay atlas and surface could not be published together; no edit was kept.":
+        "Не удалось одновременно применить атлас покрытия и поверхность; изменения отменены.",
+    "Preparing exact reviewed-HD terrain artwork...":
+        "Подготовка точных проверенных HD-изображений рельефа...",
+    "Preparing terrain material": "Подготовка материала рельефа",
+    "Finish the current Classic Auto stroke before changing material or layer.":
+        "Завершите текущий мазок классического режима перед сменой материала или слоя.",
+    "The terrain atlas and painted cells could not be published together; no edit was kept.":
+        "Не удалось одновременно применить атлас рельефа и закрашенные ячейки; изменения отменены.",
+    "Endurance identified usable materials in this map's atlas. Painting is already available for the resolved tiles.":
+        "Endurance определил пригодные материалы в атласе карты. Для распознанных тайлов уже доступно рисование.",
+    "Endurance could not prove a safe uniform material in this atlas. This usually indicates an unusual custom tileset or a parser gap; manual tile painting remains available.":
+        "Endurance не смог надёжно определить равномерный материал в этом атласе. Обычно это означает необычный набор тайлов или неподдерживаемую структуру; ручное рисование тайлами остаётся доступным.",
+    "Review generated Material atlas": "Проверить созданный атлас материалов",
+    "%1\n\n%2 of %3 atlas tiles are assigned; %4 unusual tile(s) remain unassigned. Open Material atlas now to review names, thumbnails, and assignments? This does not modify the MPR or texture resources.":
+        "%1\n\nНазначено тайлов атласа: %2 из %3; необычных тайлов без назначения: %4. Открыть атлас материалов, чтобы проверить имена, миниатюры и назначения? MPR и ресурсы текстур при этом не изменятся.",
+    "Resolving exact terrain blends...": "Подбор точных переходов рельефа...",
+    "Finishing terrain stroke": "Завершение мазка рельефа",
+    "Classic Auto refused the whole stroke because %1 exact blend tuple(s) are not already present in this atlas. Use Modern mode to add them.":
+        "Классический режим отклонил весь мазок: в атласе отсутствуют точные сочетания переходов (%1). Чтобы добавить их, используйте современный режим.",
+    "Resolving exact terrain blends (%1 / %2)...":
+        "Подбор точных переходов рельефа (%1 из %2)...",
+    "Preparing the resolved terrain transaction...":
+        "Подготовка полного изменения рельефа...",
+    "Terrain stroke refused without substituting material identities:\n%1":
+        "Мазок рельефа отклонён без подмены материалов:\n%1",
+    " Classic Auto Safe preserved %1 unsupported vertex/vertices and %2 boundary cell(s) unchanged.":
+        " Безопасный классический режим оставил без изменений неподдерживаемые вершины (%1) и граничные ячейки (%2).",
+    "Terrain stroke: %1 stamp(s), %2 changed tile(s), %3 no-op, %4 refused.%5%6":
+        "Мазок рельефа: штампов — %1, изменённых тайлов — %2, без изменений — %3, отклонено — %4.%5%6",
+    " Preview cache checkpointed; earlier undo history was cleared.":
+        " Состояние предпросмотра сохранено; предыдущая история отмены очищена.",
+    "Cancelled unfinished terrain stroke.": "Незавершённый мазок рельефа отменён.",
+    "Resolve missing blends": "Исправить недостающие переходы",
+    "Open an editable MPR with a modern terrain atlas before running the map-wide resolver.":
+        "Перед проверкой всей карты откройте редактируемый MPR с современным атласом рельефа.",
+    "Scan Ground and Overlay and replace every unambiguous missing or inconsistent physical blend with the exact Modern result?\n\nDisputed shared corners are preserved exactly; this repair will not choose a side or move an existing material border. The MPR changes will be one undo step. Newly required atlas tiles remain in the working atlas.":
+        "Проверить землю и покрытия и заменить каждый однозначно отсутствующий или неверный физический переход точным результатом современного режима?\n\nСпорные общие углы останутся неизменными: исправление не будет выбирать сторону или перемещать существующую границу материала. Все изменения MPR отменяются одним действием. Новые необходимые тайлы останутся в рабочем атласе.",
+    "Don't show this confirmation again": "Больше не показывать это подтверждение",
+    "Scanning terrain material connections...": "Проверка соединений материалов рельефа...",
+    "Resolve missing terrain blends": "Исправить недостающие переходы рельефа",
+    "Resolve missing blends refused": "Исправление недостающих переходов отклонено",
+    "No MPR cell was changed.\n\n%1": "Ячейки MPR не изменены.\n\n%1",
+    "No terrain cell needed repair.%1": "Исправление ячеек рельефа не требуется.%1",
+    "The repaired physical tile command could not be applied. No MPR, atlas, preview, or undo state was changed.\n\n%1":
+        "Не удалось применить исправленные физические тайлы. MPR, атлас, предпросмотр и история отмены не изменены.\n\n%1",
+    "No MPR, atlas, preview, or undo state was changed.\n\n%1":
+        "MPR, атлас, предпросмотр и история отмены не изменены.\n\n%1",
+    "Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.":
+        "Исправлено ячеек рельефа: %1; добавлено точных сочетаний атласа: %2. Все изменения отменяются одним действием.",
+    "Resolving full character visuals": "Подготовка полного вида персонажей",
+    "Cell %1,%2 has no %3 terrain tile.": "В ячейке %1,%2 нет тайла слоя «%3».",
+    "land": "земля",
+    "unavailable": "недоступно",
+    "Cell %1,%2 — %3 slot %4, rotation %5":
+        "Ячейка %1,%2 — слой %3, слот %4, поворот %5",
+    "Runtime terrain / ambience / traversal: %1 (%2)":
+        "Игровой рельеф, окружение и проходимость: %1 (%2)",
+    "Uniform brush: %1": "Равномерная кисть: %1",
+    "Blend: %1": "Переход: %1",
+    "Corners NW / NE / SE / SW: %1 / %2 / %3 / %4":
+        "Углы СЗ / СВ / ЮВ / ЮЗ: %1 / %2 / %3 / %4",
+    "Semantic material identity: unrecognized": "Материал не распознан",
+    "Atlas origin: generated exact working-cache tile":
+        "Источник в атласе: созданный точный тайл рабочего кэша",
+    "Atlas origin: authored stock JMV tile":
+        "Источник в атласе: штатный тайл JMV",
+    "Could not create the terrain-paint diagnostic folder.":
+        "Не удалось создать папку диагностики рисования рельефа.",
+    "Could not write paint issue diagnostic: %1 (%2)":
+        "Не удалось записать диагностику проблемы рисования: %1 (%2)",
+    "Paint issue marked. Send this file: %1":
+        "Проблема рисования отмечена. Отправьте этот файл: %1",
+    "MARK: %1": "ПОМЕТКА: %1",
+    "Noise range: %1 raw units": "Диапазон шума: %1 исходных единиц",
+})
+
 CONTEXT_CORRECTIONS = {
     ("CMessageLogPanel", "Debug"): "Отладка",
     ("CMobParameters", "Ambient"): "Фоновый свет",
