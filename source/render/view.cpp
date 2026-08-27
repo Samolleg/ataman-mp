@@ -7482,8 +7482,15 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         // begin the new presentation frame exactly once. Some legacy Qt/NVIDIA
         // composition paths can expose intermediate default-framebuffer
         // contents even though paintGL has not returned yet.
-        QOpenGLFramebufferObject::bindDefault();
-        ei::gl::Viewport(0, 0, m_width, m_height);
+        // A normal widget frame owns the presentation target. Minimap capture
+        // enters draw() with its private FBO and review-size viewport already
+        // bound; rebinding the widget target here exposes the top-down capture
+        // as a one-frame flash after any edit that refreshes the minimap.
+        if(!m_minimapCaptureActive)
+        {
+            QOpenGLFramebufferObject::bindDefault();
+            ei::gl::Viewport(0, 0, m_width, m_height);
+        }
         // Fill the open lower edge of the stock sky cylinder with the same
         // color that distant geometry converges to. This removes the
         // editor-only black seam without modifying the profile sky asset.
@@ -7947,12 +7954,19 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     format.setSamples(0);
     QOpenGLFramebufferObject target(reviewSize, format);
-    if(!target.isValid() || !target.bind())
+    if(!target.isValid())
     {
         restore();
         result.bake.error = tr("Could not allocate the offscreen minimap capture target.");
         return result;
     }
+    const auto bindCaptureTarget = [&]() -> bool
+    {
+        if(!target.bind())
+            return false;
+        ei::gl::Viewport(0, 0, reviewSize.width(), reviewSize.height());
+        return true;
+    };
 
     const float worldWidth = float(m_pLand->widthInWorldUnits());
     const float worldHeight = float(m_pLand->heightInWorldUnits());
@@ -7973,7 +7987,12 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     m_bPreviewTile = false;
     m_tileGridVisible = false;
 
-    ei::gl::Viewport(0, 0, reviewSize.width(), reviewSize.height());
+    if(!bindCaptureTarget())
+    {
+        restore();
+        result.bake.error = tr("Could not bind the offscreen minimap capture target.");
+        return result;
+    }
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_TRUE);
     ei::gl::Enable(GL_BLEND);
@@ -7984,6 +8003,12 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     glFinish();
     const QImage captured = target.toImage();
     m_minimapCaptureUnlitPass = true;
+    if(!bindCaptureTarget())
+    {
+        restore();
+        result.bake.error = tr("Could not rebind the offscreen minimap capture target.");
+        return result;
+    }
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
     glFinish();
