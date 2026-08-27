@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EI Mapper Endurance User Manual</title>
+<link rel="stylesheet" href="../../assets/manual.css">
+</head>
+<body><main>
+<nav class="manual-nav" aria-label="Manual navigation">
+<a href="../../README.md">Manual index</a>
+<a href="../ru/index.html">Русский</a>
+</nav>
+<h1 id="ei-mapper-endurance-user-manual">EI Mapper Endurance User Manual</h1>
+<p>Version scope: <strong>EI Mapper Endurance 0.3.0-alpha.26</strong>, repository baseline <code>596327e509f4cee5a4072a5a3a5cda7b425d09bd</code>.</p>
+<p>This is a task-oriented manual for people authoring Evil Islands and Jamais Vu maps. Menu and button names are written exactly as they appear in the English interface. The Russian manual has the same sections and anchors.</p>
+<blockquote><p><strong>Reading the labels.</strong> <strong>Implemented</strong> describes a normal current workflow. <strong>Known limitation</strong> is a boundary you must plan around. <strong>Advanced / diagnostic</strong> is a real current feature, but it changes ownership, publishes data, or exists primarily to investigate a map; read the whole procedure before using it.</p></blockquote>
+<h2 id="contents">Contents</h2>
+<ul><li><a href="#scope-and-safety">Scope and safety</a></li><li><a href="#mental-model">Documents and ownership</a></li><li><a href="#install-and-profile">Installation and profiles</a></li><li><a href="#interface-tour">Interface, maps, creation, and saving</a></li><li><a href="#viewport-camera">Viewport and object authoring</a></li><li><a href="#behavior-logic">Behavior, paths, traps, and effects</a></li><li><a href="#terrain-model">Terrain and materials</a></li><li><a href="#validation-repair">Validation, AI graph, minimap, and testing</a></li><li><a href="#database-editor">Database and resources</a></li><li><a href="#preferences-language">Preferences, shortcuts, and troubleshooting</a></li></ul>
+<a id="scope-and-safety"></a>
+<h2 id="1-scope-and-safety">1. Scope and safety</h2>
+<blockquote><p><strong>Implemented.</strong> Endurance is preservation-first. Opening a supported file is inspection, not consent to normalize or repair it. A no-op round trip is expected to preserve the original. Changed saves are staged, reopened, checked, backed up, and only then published atomically.</p></blockquote>
+<p>Work on a copy of a map or on a mod-owned destination. Do not point a generic resource mutation at a base-game archive. Keep MPR, all related MOB files, <code>map.txt</code> registration, graph, scripts, and any mod RES overrides together when you make a test copy; a map is a collection, not one file.</p>
+<p>The safest authoring loop is:</p>
+<ol><li>Select the correct resource profile before opening the map.</li><li>Open the collection and confirm which MOB is active and editable.</li><li>Make one logically bounded change.</li><li>Review validation and the history description.</li><li>Save explicitly; do not treat autosave as publication.</li><li>Reopen or use the editor's verified save path, then test through <strong>Test Current Map</strong> on a copied/mod-owned map.</li><li>Keep the backup generation until the game-side result is accepted.</li></ol>
+<p><img src="../../assets/authoring-workflow.svg" alt="Preservation-first authoring workflow" loading="lazy"></p>
+<p>Endurance deliberately refuses operations when source identity, archive ownership, a required runtime dependency, or a fresh reopen cannot be proven. That refusal is a safety result, not a request to bypass the check.</p>
+<a id="mental-model"></a>
+<h2 id="2-documents-and-ownership">2. Documents and ownership</h2>
+<p>The editor presents one workspace, but the game data has several independent owners:</p>
+<table><thead><tr><th>Owner</th><th>What it contains</th><th>What saving it does not imply</th></tr></thead><tbody>
+<tr><td>MPR with MP/SEC members</td><td>Terrain heights, land/overlay tiles, MPR material and animation records, <code>maxZ</code>, dimensions</td><td>Does not save MOB objects, register the map, or necessarily publish a modern working atlas</td></tr>
+<tr><td>Primary MOB</td><td>World objects, units, scripts, diplomacy/world values, often an embedded AI graph</td><td>Does not save terrain or supplemental MOBs</td></tr>
+<tr><td>Supplemental/AutoZone MOB</td><td>Additional objects belonging to the same map family</td><td>Is not automatically the primary map owner</td></tr>
+<tr><td><code>map.txt</code> catalog entry</td><td>Zone-to-MPR/MOB relationship, entrances, minimap/objectives names, map type</td><td>Does not contain the map geometry</td></tr>
+<tr><td>External <code>.grp</code></td><td>Runtime AI graph beside the active MPR</td><td>Is ignored when the primary MOB owns an embedded graph</td></tr>
+<tr><td>RES archives and profile</td><td>Textures, models, animations, sounds, database and priority order</td><td>A lower-priority member can be present but overridden</td></tr>
+<tr><td><code>database.res</code></td><td>Relational prototypes and game data</td><td>Is protected from generic RES editing</td></tr>
+</tbody></table>
+<p>Always ask two questions before saving: “Which document is dirty?” and “Which file currently owns this runtime data?” The <strong>Loaded Map</strong> tree, active-MOB indicator, AI graph source button, minimap source, and Resource Browser provider chain answer those questions.</p>
+<a id="install-and-profile"></a>
+<h2 id="3-installation-first-run-and-profiles">3. Installation, first run, and profiles</h2>
+<blockquote><p><strong>Implemented.</strong> The distributed application is portable. Keep its folder intact and start <code>EIMapperEndurance.exe</code>. Do not copy only the executable; Qt libraries, plugins, translations, and runtime helpers belong to the same package.</p></blockquote>
+<p>On first run, <strong>Game and Mod Setup...</strong> asks for an Evil Islands installation and profile. Select the folder containing the expected <code>game.exe</code>, then review the detected resource and map roots before applying it.</p>
+<p>The built-in profiles are deliberately separate:</p>
+<ul><li><strong>Jamais Vu (JMV)</strong> resolves mod resources before Base resources and mod maps before Base maps. Use it for Jamais Vu authoring and runtime testing.</li><li><strong>Base game only</strong> resolves only the Base game roots. Use it for Base content; do not rely on JMV overrides being absent merely because a filename matches.</li></ul>
+<p>The profile is part of document identity. It determines which same-named resource wins, which <code>database.res</code> is active, which models and texture pages can be previewed, and whether <strong>Test Current Map</strong> has a supported runtime. If a map looks wrong, verify the profile before editing fields to compensate.</p>
+<p>Use <strong>Settings...</strong> to review the configured paths later. Advanced legacy figure/texture paths exist for controlled compatibility work; ordinary Base or JMV projects should remain on their validated profile providers. External profile JSON is an advanced deployment mechanism, not a per-map shortcut.</p>
+<a id="interface-tour"></a>
+<h2 id="4-interface-tour">4. Interface tour</h2>
+<p>The center is the 3D viewport. The normal surrounding tools are:</p>
+<ul><li><strong>Loaded Map</strong> — MPR, loaded MOB files, active/editable ownership, collection context, and map-level commands.</li><li><strong>Object Outliner</strong> — searchable/filterable object list synchronized with viewport selection.</li><li><strong>Object Properties</strong> — typed fields for the current object or compatible multi-selection.</li><li><strong>Landscape Tools</strong> — sculpt, land painting, overlay work, MPR materials and atlas actions. The default shortcut is <code>Ctrl+L</code> (older manuals used <code>B</code>).</li><li><strong>MOB Family Validation</strong> — full findings across the loaded family with navigation to identifiable objects.</li><li><strong>Resource Browser</strong> — profile/archive provenance, search, preview, export, and reviewed resource transactions.</li><li><strong>Message Log</strong> — user-relevant messages plus technical evidence. Detailed serialization and runtime telemetry may remain English.</li><li><strong>Visuals</strong> — viewport-only visibility, lighting, helper and animation channels. It does not delete or rewrite objects.</li></ul>
+<p>Docks can be moved, floated, hidden, and reopened from <strong>View</strong>. <code>F11</code> maximizes the viewport and <code>F12</code> toggles full screen. Closing a dock is not deleting its document.</p>
+<a id="maps-and-collections"></a>
+<h2 id="5-open-maps-and-collections">5. Open maps and collections</h2>
+<p>Use <strong>Open MPR...</strong> (<code>Ctrl+Shift+O</code>) for terrain and <strong>Open MOB(s)...</strong> (<code>Alt+Shift+O</code>) for one or more object documents. The general open command (<code>Ctrl+O</code>) accepts supported map documents. Opening only an MPR is useful for terrain inspection, but collection-dependent features will report what is missing.</p>
+<p>When several MOB files are loaded, exactly one is the active edit target. Other MOBs remain visible for context but are locked against accidental edits. Select the intended active MOB before creating, pasting, deleting, editing diplomacy, or saving <strong>active MOB</strong>. <strong>Save all MOBs</strong> is explicit and does not mean “save everything in the workspace”; save the MPR separately.</p>
+<p>The Maps/Collections browser uses the active <code>map.txt</code> catalog to group a registered MPR, primary MOB, supplemental MOBs, entrances, and metadata. A loose MPR/MOB pair can still be inspected. Registration is a separate reviewed catalog operation—renaming a file or creating terrain does not silently change <code>map.txt</code>.</p>
+<p>Use <strong>Close All</strong> (<code>Ctrl+Q</code>) when changing projects or profiles. Read dirty-file prompts carefully: terrain and each MOB have independent dirty state.</p>
+<a id="create-mpr"></a>
+<h2 id="6-create-a-new-mpr">6. Create a new MPR</h2>
+<p>Choose <strong>New MPR from Terrain Template...</strong>. A template is required because it provides proven MP/SEC structure, atlas identity, material records, and animation conventions that cannot safely be invented from a blank byte stream.</p>
+<p>The creation dialog supports:</p>
+<ol><li>A template MPR from the intended profile/map family.</li><li>Width and height from 1 to 32 sectors.</li><li><code>maxZ</code>, which converts 16-bit raw height to world height.</li><li>A flat raw height or a grayscale heightmap, with explicit flip and black/ white endpoint choices.</li><li>An existing initial atlas slot and rotation.</li><li>Optional edge tapering.</li><li>An optional full overlay plane with its own raw height, existing overlay atlas tile, rotation, and existing surface-material slot.</li></ol>
+<p>Review the candidate location and name. Replacement of an existing destination uses the backup and atomic-publication path. The freshly created MPR is reopened and becomes the terrain document.</p>
+<blockquote><p><strong>Known limitation.</strong> This command creates terrain only. It does not create a primary MOB, entrances, an AI graph, minimap registration, or a <code>map.txt</code> entry. Create/register those deliberately.</p></blockquote>
+<p>For a grayscale heightmap, remember:</p>
+<pre><code class="language-text">world height = raw height × maxZ / 65535</code></pre>
+<p>Black and white therefore represent the chosen raw endpoints, not universal meters. Avoid using an image whose color profile or resampling changed the intended 16-bit/8-bit values without reviewing the generated terrain.</p>
+<a id="create-mob"></a>
+<h2 id="7-create-a-new-mob">7. Create a new MOB</h2>
+<p>Choose <strong>New MOB...</strong>, then choose whether the document is a primary MOB or a supplemental/AutoZone MOB. Specify a safe new-ID range. For a primary MOB you may explicitly copy selected script, diplomacy, and world parameters, or start with a default 32-player non-hostile diplomacy table.</p>
+<p>The command creates an empty runtime-valid document and validates it before publication. An existing destination is backed up; replacing a currently loaded MOB is refused.</p>
+<blockquote><p><strong>Known limitation.</strong> “New MOB” is intentionally not “clone map.” Objects, VSS/editor-only directories, embedded AI graph, and collision/history state are never copied. Add or copy objects as a separate visible operation and regenerate/reassign graph ownership only after the map geometry is final.</p></blockquote>
+<p>For a new collection, a practical order is: create MPR, create primary MOB, load both, create essential static objects and entrance metadata, register a copied catalog, validate, then create supplemental MOBs only when their ownership is actually useful.</p>
+<a id="save-backup-recovery"></a>
+<h2 id="8-save-backups-autosave-and-recovery">8. Save, backups, autosave, and recovery</h2>
+<p>The main save commands are <strong>Save active MOB</strong> (<code>Ctrl+S</code>), <strong>Save all MOBs</strong> (<code>Alt+Shift+S</code>), and <strong>Save MPR</strong> (<code>Ctrl+Shift+S</code>). Use Save As when changing identity or publishing to a copied/mod-owned location.</p>
+<p>A changed save follows this safety pipeline:</p>
+<ol><li>Prepare a candidate without changing the destination.</li><li>Serialize and freshly reopen it.</li><li>Validate structure, semantics, changed scope, and source identity.</li><li>Create the required pre-save backup.</li><li>Race-check the destination and publish atomically.</li><li>Reopen/adopt the published document as the new clean baseline.</li></ol>
+<p>If the required pre-save backup fails, the save is refused. Do not disable or bypass that refusal; fix free space, permissions, or the backup location.</p>
+<p>Backups live under <code>%LOCALAPPDATA%\EI Mapper Endurance\backups</code> by default. Use <strong>Tools &gt; Open Backup Folder</strong>. Endurance keeps hash-addressed snapshots on open, timestamped pre-save generations, and bounded periodic autosaves (the current retention is 50 pre-save and 20 autosave generations per managed stream). Periodic autosave is enabled in General settings by default and can be run immediately with <strong>Autosave Now</strong>.</p>
+<p>Autosave does not overwrite the source map. It creates a recovery generation. After an unclean exit, Endurance reports available generations; it does not silently replace the source. To recover:</p>
+<ol><li>Stop editing the questionable source.</li><li>Open the backup folder and identify the document, timestamp, and generation type.</li><li>Copy the candidate to a new working name/location.</li><li>Open that copy with the same profile and validate it.</li><li>Only after inspection, use Save As to make it the intended working file.</li></ol>
+<p>Keep related MPR/MOB generations together when the edit spanned documents. Never assume the newest timestamp across unrelated files is a coherent map transaction.</p>
+<a id="viewport-camera"></a>
+<h2 id="9-viewport-and-camera">9. Viewport and camera</h2>
+<p>Default navigation:</p>
+<table><thead><tr><th>Input</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>W</code> / <code>S</code> or Up / Down</td><td>Move forward / backward</td></tr>
+<tr><td><code>A</code> / <code>D</code> or Left / Right</td><td>Strafe left / right</td></tr>
+<tr><td><code>Q</code> / <code>E</code></td><td>Move down / up</td></tr>
+<tr><td>hold <code>Shift</code></td><td>Double keyboard movement speed</td></tr>
+<tr><td>middle-button drag</td><td>Orbit around the terrain point under the viewport center</td></tr>
+<tr><td>wheel</td><td>Zoom in Free Camera; change height in constrained mode</td></tr>
+<tr><td>configured modifier + wheel</td><td>Change camera speed from 0.1 to 10.0 (default modifier: <code>Ctrl</code>)</td></tr>
+<tr><td><code>Ctrl+R</code></td><td>Reset camera</td></tr>
+<tr><td>Numpad <code>.</code></td><td>Focus the selected object</td></tr>
+</tbody></table>
+<p>Mouse sensitivity, Free Camera, and the camera-speed wheel modifier are in <strong>Settings...</strong>. Camera moves are editor state, not MOB object transforms. The minimap can also move the camera pivot in XY; see <a href="#minimap">Minimap</a>.</p>
+<a id="selection-transform"></a>
+<h2 id="10-selection-and-transforms">10. Selection and transforms</h2>
+<p>Left-click selects an object; drag an empty-area rectangle for rubber-band selection. Hold <code>Shift</code> to toggle objects in the selection. The Outliner and viewport stay synchronized. Only objects in the active editable MOB can be mutated, even when another MOB remains visible.</p>
+<p>The transform workflow is modal:</p>
+<ul><li><code>G</code> — move, initially in the XY plane.</li><li><code>R</code> — rotate, initially about Z.</li><li><code>T</code> — scale.</li><li><code>X</code>, <code>Y</code>, or <code>Z</code> — constrain to one axis.</li><li><code>Shift+X</code>, <code>Shift+Y</code>, or <code>Shift+Z</code> while moving/scaling — exclude that axis and work in the other two-axis plane.</li><li>Type a signed decimal value for an exact amount; Backspace edits the value.</li><li>Left-click or <code>Enter</code> accepts. <code>Esc</code> cancels and restores the starting state.</li></ul>
+<p>Inspect the status message and properties after a numeric transform. Rotation and scale operate on the selected objects' current transform context; a visual helper or particle billboard is not necessarily the object's collision volume.</p>
+<a id="history-clipboard"></a>
+<h2 id="11-history-clipboard-duplication-and-visibility">11. History, clipboard, duplication, and visibility</h2>
+<p>Use <code>Ctrl+Z</code> / <code>Ctrl+Y</code> for undo/redo and <code>Ctrl+H</code> for the history window. Object edits, terrain strokes, compatible property edits, selected repair operations, and many tool actions produce descriptive history records.</p>
+<p>Standard clipboard commands work for supported object records. <code>Ctrl+D</code> duplicates the selection. A duplicate or pasted group enters pending placement: move it in the viewport and click to commit. <code>Esc</code>, a repeated create/paste command, or changing context cancels the unfinished placement. A committed group creates one final undo entry.</p>
+<p><code>H</code> hides selected objects in the editor and <code>Alt+H</code> unhides. <code>Delete</code> removes supported selected objects from the active MOB. Hiding is relevant to generated minimap capture; it is not the same as deleting. <code>U</code> unloads the active document through the current context—save or discard prompts still apply.</p>
+<blockquote><p><strong>Known limitation.</strong> Undo is document editing history, not a rollback system for publication. Saving establishes a clean baseline. <strong>Bake into Primary MOB</strong> and <strong>Switch MOB to External .grp</strong> save immediately and cannot be reversed with <strong>Edit &gt; Undo</strong>; restore a backup if ownership was committed in error.</p></blockquote>
+<a id="outliner-properties"></a>
+<h2 id="12-object-outliner-and-object-properties">12. Object Outliner and Object Properties</h2>
+<p>Use <strong>Object Outliner</strong> to search a large map, filter by family/type/loaded MOB, and select without finding a tiny helper in 3D. Selection changes the <strong>Object Properties</strong> model and, where possible, the current object highlight.</p>
+<p>Properties expose established typed fields. Unknown or preservation-only values are not relabeled with guessed meanings. For multi-selection, only compatible shared fields are safely editable; review the scope message before applying a value.</p>
+<p>The most important common groups are identity/class, transform, model, script, parent/ownership, rendering/collision flags, and type-specific fields. Raw resource names and serialized tokens may remain English even in the Russian UI because changing them would change game data.</p>
+<p>When a property seems to have no visible effect:</p>
+<ol><li>Confirm the object belongs to the active MOB.</li><li>Confirm <strong>Visuals</strong> has the relevant object/effect/helper channel enabled.</li><li>Confirm a database-prototype value is not currently selected instead of a MOB override.</li><li>Validate the model/resource through the active profile.</li><li>Use <strong>Test Current Map</strong> for behavior that the editor intentionally only approximates.</li></ol>
+<a id="object-authoring"></a>
+<h2 id="13-static-and-dynamic-objects">13. Static and dynamic objects</h2>
+<p>Press <code>Ctrl+N</code> to create an object through the current creation UI. Choose the correct family and active MOB, then place it in the viewport. Static scenery, levers, torches, trap locators, lights, sounds, and particles are grouped separately from dynamic units/equipment in rendering and validation.</p>
+<p>For copied/duplicated objects, Endurance preserves supported fields and unknown payloads, but identity must remain valid in the whole loaded MOB family. Do not hand-type an ID merely because it is unused in the active file; supplemental MOBs can occupy the same family range. Run validation after structural edits.</p>
+<p>Treat script/model/parent references as data, not labels. Renaming a resource or object does not prove that opaque scripts and binaries were rewritten. The explicit collision repair assistant similarly does not guess script or <code>ParentID</code> references.</p>
+<p>For static world geometry, check both visual and navigation consequences: rendered FIG parts can contribute AI collision; current visible model parts, pose, scale and rotation affect regenerated graph diagnostics.</p>
+<a id="units-equipment"></a>
+<h2 id="14-units-equipment-and-model-parts">14. Units, equipment, and model parts</h2>
+<p>Units combine a database prototype with MOB-owned overrides. <strong>Use MOB unit values</strong> determines whether editable MOB values replace prototype-derived values for the supported fields. Review which side owns a value before tuning it; editing the database prototype can affect every user, while a MOB override is local to that object.</p>
+<p>Equipment and character appearance resolve through the active profile. The unit texture/character preview helps inspect the selected assembly, complexion, parts, and animation, but gameplay remains authoritative for scripts and combat logic.</p>
+<p>The model-parts list is an inclusion set. Select only compatible authored parts for the chosen assembly. A blank list has special runtime meaning:</p>
+<blockquote><p><strong>Known limitation.</strong> An empty model-parts list enables all parts. On models with mutually incompatible or unexpected parts—especially units—this can render incorrectly or crash the game. Do not clear the list as a way to hide the model; use a proven set or an appropriate editor visibility control.</p></blockquote>
+<p>After changing a unit, validate the NID, prototype, model, equipment references, logic slots, and any patrol/look records. Test combat/AI behavior in a copied runtime session rather than inferring it from idle animation.</p>
+<a id="behavior-logic"></a>
+<h2 id="15-behavior-mode-logic-slots-and-diplomacy">15. Behavior mode, logic slots, and diplomacy</h2>
+<p>Use <code>Ctrl+Tab</code> to switch between Object and Behavior mode. Behavior mode makes unit logic, paths, look records, traps and related helpers the authoring focus.</p>
+<p>Every unit can carry five logic slots:</p>
+<table><thead><tr><th>Slot</th><th>Typical ownership</th></tr></thead><tbody>
+<tr><td>Logic 0</td><td>Default behavior used without an alarm override</td></tr>
+<tr><td>Logic 1–4</td><td>Behavior selected by the corresponding world alarm state</td></tr>
+</tbody></table>
+<p>Edit the intended slot; a correct Patrol in Logic 0 does not repair an Alarm Guard configuration in Logic 3. Current behavior choices include <strong>Stay</strong>, <strong>Guard area</strong>, <strong>Patrol</strong>, <strong>Sentry</strong>, <strong>Player/script controlled</strong>, and <strong>Alarm guard</strong>, with established aggression and distance/timing fields.</p>
+<p>The diplomacy table belongs to a MOB. Values are directional: the row group acts toward the column group. <code>0</code> is Ally, <code>1</code> Neutral, and <code>2</code> War. The reciprocal-edit option is explicit because asymmetric diplomacy is valid and must not be silently “fixed.” Self-relations and asymmetry are preserved with warnings when unusual.</p>
+<p>For a magic trap, <strong>Will attack...</strong> is a read-only preview derived from the trap's Player group and the containing MOB's current diplomacy. It lists War targets; it is not a separate target list to edit.</p>
+<a id="patrol-look-traps"></a>
+<h2 id="16-patrols-look-points-levers-and-traps">16. Patrols, look points, levers, and traps</h2>
+<p>Patrol and look records belong to a particular unit logic slot. Select the unit and slot first, then add/edit points in Behavior mode. Keep point order visible and avoid coincident points unless the script genuinely expects them.</p>
+<p>Look-point waits are stored in game ticks: <strong>15 ticks = 1 second</strong>. Turn speed and flags are stored values, not degrees-per-second inferred by the viewport. Use gameplay testing for exact pacing.</p>
+<p>For levers, review state, usable/locked behavior, script hooks, and <strong>CalcGraph</strong>. Enable graph recalculation when changing the lever state changes passability; do not use it as a generic visual refresh flag.</p>
+<p>Magic-trap <strong>Cast interval</strong> is also in ticks (15 = 1 second). <strong>Cast once</strong> is the separate boolean ownership. Review spell, activation radius/shape, player group, nearest-unit behavior, and diplomacy-derived targets together. Do not copy older third-party labels that describe the interval as a floating-point reload value.</p>
+<p>Floor traps, guard points, torches, and other behavior objects have their own typed property groups. Keep helper visualization enabled while positioning them, then check the effect/object channels separately so a hidden helper is not mistaken for a missing runtime effect.</p>
+<a id="lights-particles-sounds"></a>
+<h2 id="17-lights-particles-and-sounds">17. Lights, particles, and sounds</h2>
+<p>Lights expose established color, range, intensity and related fields. Scene lights can be disabled in <strong>Visuals</strong> or Render settings without altering the MOB. Compare <strong>Unlit</strong>, <strong>Simple</strong>, and <strong>Full environment</strong> before deciding a light record is broken.</p>
+<p>Particle objects have a helper/locator and a particle visual. <strong>Object helpers</strong> controls placement aids; <strong>Particle visuals</strong> controls the rendered effect. <strong>Freeze animations</strong> freezes supported preview animation without changing its serialized timing.</p>
+<p>Sounds likewise combine a positioned object/helper with a resource resolved through the current profile. The Resource Browser can preview supported audio when the deployed multimedia backend can decode it; export remains available when preview decoding is unavailable. Game attenuation, looping and script activation must be tested in the runtime.</p>
+<p>Keep effect locators in the correct active MOB and give them family-unique IDs. Do not use hide/unhide as a substitute for changing runtime flags unless the desired change is specifically editor/minimap visibility.</p>
+<a id="visual-channels"></a>
+<h2 id="18-visuals-and-render-channels">18. Visuals and render channels</h2>
+<p>The <strong>Visuals</strong> panel has <strong>Show all</strong> / <strong>Hide all</strong> plus independent channels for entrances, object helpers, static objects, dynamic objects, terrain, overlays, fog, scene lights, terrain shadows, object shadows, skybox, particle visuals, and animation freeze. Lighting modes are <strong>Unlit</strong>, <strong>Simple</strong>, and <strong>Full environment</strong>. Time of day is controlled separately and also feeds supported JMV Test/hot-reload staging.</p>
+<p>These controls are diagnostic viewport state. Hiding Terrain does not remove MPR data; hiding Static objects does not delete MOB records. Entrances and helpers are editor overlays and do not become game geometry.</p>
+<blockquote><p><strong>Known limitation.</strong> Some Full environment channels require the desktop renderer and are unavailable under ANGLE. Cave environments suppress the skybox. Freeze animation also depends on animation preview being enabled. Treat a disabled channel as a renderer/context boundary before editing map data to compensate.</p></blockquote>
+<p>Use the channels to isolate a problem: first show the raw terrain and static geometry, then overlays, helpers, local effects, and environmental lighting. For final judgment, use the supported game test because the editor is a close authoring preview, not the engine's complete rendering pipeline.</p>
+<a id="terrain-model"></a>
+<h2 id="19-terrain-data-model">19. Terrain data model</h2>
+<p>An MPR contains MP metadata and SEC sector data. Neighboring sectors share a fixed terrain lattice: each sector contributes a 33×33 vertex grid while the next sector begins 32 cells later. Land tiles, optional overlay surfaces, heights, normals, material references, and atlas slots have different ownership; painting one does not automatically rewrite the others.</p>
+<p>Raw height is unsigned 16-bit and becomes world height through <code>maxZ</code>:</p>
+<pre><code class="language-text">world height = raw × maxZ / 65535</code></pre>
+<p><strong>MPR Materials...</strong> includes height operations such as offset, flatten, clamp, and normalize, plus vertical-scale choices. Changing <code>maxZ</code> without requantizing changes world height. “Preserve world height” requantizes raw values and reports clamping when the new range cannot represent them.</p>
+<p>Canvas resize is a structural <strong>Save As</strong> operation for 1–32 sectors. You place the original tile rectangle within the new canvas. Sector-aligned retained SEC payloads can remain byte-identical; other offsets are retiled and validated. Expansion projects the nearest land boundary and invents no overlays. A closed edge taper is intentionally lossy. An optional companion MOB is always a new file, shifts object origins, can clip by origin, and omits the stale embedded AI graph. Registration and minimap publication remain separate.</p>
+<a id="sculpt-terrain"></a>
+<h2 id="20-sculpt-terrain">20. Sculpt terrain</h2>
+<p>Open <strong>Landscape Tools</strong>, choose <strong>Sculpt terrain</strong>, and select:</p>
+<ul><li>Raise / Lower — move raw height by the configured step.</li><li>Smooth — blend toward neighboring samples.</li><li>Flatten — move toward one raw target; right-click samples a terrain target.</li><li>Noise — apply a bounded variation.</li></ul>
+<p>Left-drag paints one continuous stroke; one completed drag becomes one undo record. <code>Alt+Wheel</code> changes brush radius, <code>Shift+Wheel</code> changes strength, and <code>Alt+Shift+Wheel</code> adjusts the mode-specific step/range/flatten target. When the sculpt tool is active, <code>Z</code>, <code>X</code>, <code>C</code>, and <code>V</code> select its four modes.</p>
+<p>Watch raw/world height and overlay separation near water, cliffs, sector seams, and map edges. Land sculpting does not promise that an active overlay surface follows the land. Use <strong>Sculpt overlay surfaces</strong> for overlay height.</p>
+<p>Generated AI graph preview automatically rebuilds after a short quiet period when that generated source is active. This is diagnostic feedback; the sculpt stroke itself does not silently publish a graph.</p>
+<a id="terrain-paint-modes"></a>
+<h2 id="21-modern-classic-auto-and-manual-terrain-painting">21. Modern, Classic Auto, and Manual terrain painting</h2>
+<p>Choose <strong>Paint land tiles</strong>, then one of three ownership modes:</p>
+<table><thead><tr><th>Mode</th><th>Shortcut</th><th>What it owns</th></tr></thead><tbody>
+<tr><td><strong>Modern (Z)</strong></td><td><code>Z</code></td><td>Paints the selected semantic material, reuses exact authored junctions, and can add an exact missing blend to the working atlas</td></tr>
+<tr><td><strong>Classic Auto (X)</strong></td><td><code>X</code></td><td>Automatically chooses only exact tiles already in the current atlas; it never extends the atlas</td></tr>
+<tr><td><strong>Manual (C)</strong></td><td><code>C</code></td><td>Writes the selected physical atlas slot and rotation directly</td></tr>
+</tbody></table>
+<p>Left-drag paints. Right-drag samples the nearest semantic material in Modern or Classic Auto and samples the exact tile in Manual. <code>Alt+Wheel</code> changes brush size. <code>Shift+Wheel</code> changes semantic material in automatic modes and rotates the tile in Manual. Number keys <code>1</code>–<code>8</code> select physical quick tiles. <code>M</code> toggles main terrain and <code>O</code> toggles overlays.</p>
+<p>Modern is the normal semantic authoring path when new blend tiles may be required. Classic Auto is the safest no-atlas-growth path: unsupported boundaries remain untouched instead of being guessed. Manual is for exact physical corrections and authored special cases; it can create a visually inconsistent junction if the chosen slot/rotation does not match its corners.</p>
+<p>Do not confuse a semantic material (Ground, Lava, etc.), a physical atlas tile, and an MPR surface-material slot. They are three different kinds of data.</p>
+<a id="overlay-authoring"></a>
+<h2 id="22-overlay-authoring">22. Overlay authoring</h2>
+<p>Overlays are optional surfaces such as water, lava, or other authored planes. <strong>Landscape Tools</strong> provides:</p>
+<ul><li><strong>Paint existing overlays</strong> — change atlas imagery only on cells that already have an active overlay.</li><li><strong>Add / remove overlay surfaces</strong> — add coverage or remove it. Add first targets an existing surface context and otherwise projects from land; remove affects overlays only.</li><li><strong>Sculpt overlay surfaces</strong> — edit overlay raw height without sculpting land.</li></ul>
+<p>Adding coverage requires both an existing compatible overlay atlas family and an existing MPR surface-material slot. The atlas tile owns visible texture; the MPR surface material owns typed liquid/surface rendering properties. Ground and overlay materials cannot be mixed within one tile.</p>
+<p>Removal uses the format's inactive designation and preserves exact undo data. Overlay sculpting updates active cells and maintains seams/normals, but cannot invent a missing compatible material family. If added overlay vertices clamp at MPR <code>maxZ</code>, adjust the surface/terrain or vertical range deliberately.</p>
+<p>Use <code>O</code> and the surface-material slot labels to inspect ownership. A surface can exist but be hidden by the viewport channel; conversely, a helper outline does not prove an active serialized overlay exists.</p>
+<a id="mpr-materials"></a>
+<h2 id="23-mpr-materials-and-flipbooks">23. MPR Materials and flipbooks</h2>
+<p>Open <strong>MPR Materials...</strong> for MPR-owned surface records. The material table shows slot, type, usage count, color, opacity, <strong>Illumination</strong>, wave multiplier, and stored warp speed. One slot can be shared by many overlay cells or texture families, so an edit to a shared slot changes all its users without changing their atlas imagery.</p>
+<p>Illumination scales the surface material's RGB emission. It is not a “lava flag”; a lava-looking texture can use a non-emissive material, and another texture can use an emissive one. Duplicate a slot when users need different typed properties. Removal is limited to a safe unused tail slot; arbitrary middle deletion would renumber references.</p>
+<p>The same tool edits overlay animation/flipbook records. A flipbook uses a start atlas slot and a frame count over a contiguous physical range. A zero count disables it. Runtime-compatible frames must remain contiguous and type/ property-compatible; a requested repack can be refused when that cannot be proven. A successful repack/remap is one undoable MPR change.</p>
+<blockquote><p><strong>Known limitation.</strong> Stored warp speed is preserved and editable as a typed record, but confirmed gameplay uses a fixed 0.05 warp rate. The wave multiplier affects amplitude/apparent phase. Do not promise arbitrary runtime animation speed from the stored field alone.</p></blockquote>
+<p>The tool also exposes advanced resource identity, height operations, vertical scale, and canvas resize. Change one ownership domain at a time and review the summary before applying the single history transaction.</p>
+<a id="material-atlas"></a>
+<h2 id="24-material-atlas-editor">24. Material atlas editor</h2>
+<blockquote><p><strong>Advanced / diagnostic.</strong> <strong>Material atlas...</strong> edits profile semantic atlas metadata: material families, physical slot/corner assignments, page bindings, and optional local overrides. It does not paint MMP page pixels, edit MPR surface-material records, or infer semantics from a picture.</p></blockquote>
+<p>Use it when a profile lacks a validated mapping or when an intentional mod atlas needs an explicit local contract. Bind against the exact namespace, pixel hash, slot count, and page identity. A mapping valid for one same-named archive is not automatically valid for another provider.</p>
+<p>The editor prevents mixing ground/underwater and overlay materials in one corner contract. Review unassigned/conflicting slots before saving metadata. Prefer the profile's proven shared mapping; make a local override only when the map genuinely uses a different atlas.</p>
+<p>Texture creation/replacement belongs to a separate resource workflow. MPR surface type/color/illumination belongs to <strong>MPR Materials...</strong>. Keeping these three owners separate avoids the most destructive terrain mistakes.</p>
+<a id="draft-finalize-resolve"></a>
+<h2 id="25-modern-drafts-finalization-and-resolve-missing-blends">25. Modern drafts, finalization, and Resolve Missing Blends</h2>
+<p>Plain terrain edits that do not change working-atlas content can use the normal <strong>Save MPR</strong> path. Modern painting that generated/added atlas content cannot be stored in an MPR alone. Save As then offers two explicit publication paths:</p>
+<ul><li><strong>Save as Modern Draft</strong> — writes the paired editable MPR plus adjacent RES working atlas. Use it to continue authoring. Keep the pair together.</li><li><strong>Finalize and Save As</strong> — compacts and publishes a runtime-clean atlas and MPR to a final game destination. A currently open draft is not overwritten in place by finalization.</li></ul>
+<p>Before finalization, use <strong>Resolve missing blends... (Shift+R)</strong> while <strong>Landscape Tools</strong> is active in a Ground/Overlay paint context. Resolve scans both ground and overlay junctions, replaces missing or inconsistent cases that have one supported solution, preserves disputed shared corners, and records one undoable change. Any required exact tiles remain in the working atlas.</p>
+<p><img src="../../assets/terrain-publication.svg" alt="Modern terrain publication and ownership" loading="lazy"></p>
+<blockquote><p><strong>Known limitation — exact 0.5 RC ROADMAP wording:</strong></p>
+<p><strong>Lava + Resolve Blends:</strong> direct Modern painting follows the selected Lava material, but <strong>Shift+R</strong> cannot yet preserve one visually consistent route owner across every rare connected Lava-on-Water transition without regressing ordinary Ground/Overlay repair. The bounded generic resolver is retained while this remains under review.</p></blockquote>
+<p>For such a rare Lava-on-Water network, keep a pre-resolve generation, inspect the entire connected transition after <code>Shift+R</code>, and use Manual only for a deliberate exact physical correction. Do not repeatedly resolve and assume the last visible tile establishes semantic route ownership.</p>
+<a id="atlas-boundaries"></a>
+<h2 id="26-terrain-atlas-runtime-boundary">26. Terrain-atlas runtime boundary</h2>
+<blockquote><p><strong>Known limitation.</strong> The current tested and release-supported boundary is <strong>4,096 terrain-atlas slots / 64 pages</strong>. The packed format can encode more (up to its larger representational ceiling), but sizes above 4,096 are not supported for release use. A controlled <strong>8,192-slot</strong> load crashed under <strong>32-bit address-space pressure</strong>.</p></blockquote>
+<p>This is a runtime boundary, not merely an editor list limit. Corrected tests validated 1,024, 2,048, and 4,096 slots. Do not publish an 8,192-slot atlas on the assumption that successful packing proves game viability. Keep finalization at or below 4,096 slots and review the page/slot count in the publication summary.</p>
+<p>If growth approaches the boundary, reduce duplicate/unused working content, resolve only needed transitions, and finalize a copy. Never “fix” the issue by changing packed indexes without updating every owning MPR cell and page binding.</p>
+<a id="validation-repair"></a>
+<h2 id="27-validation-and-navigation-to-findings">27. Validation and navigation to findings</h2>
+<p>Open <strong>MOB Family Validation</strong> from the View/Tools workflow after loading the whole map family. The short warning dialog shows only a few bounded lines; the panel is the complete report. It is a normal dockable/floating window and can be reopened after closing.</p>
+<p>Findings distinguish blockers, warnings, and verified/diagnostic context. For an NID-backed row, double-click it or use <strong>Select object in editor</strong>. Endurance activates and selects the exact loaded object when raw section provenance makes it unambiguous. It does not guess between duplicate IDs or select an unloaded object. Context actions also copy a field/path/finding for a report.</p>
+<p>Run validation after:</p>
+<ul><li>create, paste, duplicate, delete, or ID-range changes;</li><li>moving objects between MOB ownership contexts;</li><li>behavior/path/trap and diplomacy changes;</li><li>MPR structural resize or companion-MOB generation;</li><li>graph ownership or map-registration changes;</li><li>database/resource publication that changes referenced identities.</li></ul>
+<p><strong>Tools &gt; Review and Repair Object IDs...</strong> is an explicit limited assistant. It proposes deterministic replacement IDs and applies only selected safe repairs as one undoable document change. It does not run automatically, repair range overlaps, infer scripts/<code>ParentID</code> references, or coordinate an arbitrary multi-MOB save cohort. Review every proposal and save all affected documents deliberately.</p>
+<p>Validation is not the game. A structurally valid map can still have bad script logic, visual composition, or an engine-specific behavior. Use it to prove data contracts before runtime testing, not to replace that testing.</p>
+<a id="ai-graph"></a>
+<h2 id="28-ai-navigation-graph-inspect-regenerate-compare-and-persist">28. AI navigation graph: inspect, regenerate, compare, and persist</h2>
+<p>When a valid embedded graph or exact external sibling <code>.grp</code> is available, the viewport shows the <strong>AI navigation graph</strong> widget. <code>N</code> shows/hides the selected layer. Move the slider through all eight unit-profile layers; profile color runs purple to green, while graph nodes and isolated warnings remain distinct.</p>
+<p>The source button says <strong>Graph: Loaded</strong> or the regenerated equivalent. The selected source is important: <strong>Test Current Map</strong> and <strong>Hot Reload Map</strong> stage the graph named on that button.</p>
+<h3 id="diagnostic-regeneration">Diagnostic regeneration</h3>
+<p>Choose <strong>Regenerate preview</strong> to build all eight layers asynchronously from the current canonical terrain, overlay depth/type, terrain traversal policy, and visible static-object/lever collision proxies. Current transformed FIG parts and authored navigation bounds are used; dynamic units are not blockers. When the regenerated source is selected, committed terrain sculpt/history and relevant object transform changes queue another rebuild after a short quiet period.</p>
+<p>Choose <strong>Diff loaded / regenerated</strong> to compare directional missing/extra links, changed weights, and node positions. This is especially useful around cliffs, shallow/deep water, fences, doors, bridges, and profile clearance.</p>
+<blockquote><p><strong>Advanced / diagnostic boundary.</strong> The generator is a source-informed authoring approximation, not proof of exact game movement. The graph format is 2.5D: one XY cell can select one surface, so a bridge deck and simultaneous traversable underpass cannot both be represented. Missing authored FIG bounds use a conservative rendered-volume fallback and are logged. Compare unusual assemblies against the loaded game graph and test movement in game.</p></blockquote>
+<h3 id="persistence-and-runtime-ownership">Persistence and runtime ownership</h3>
+<p>Choose <strong>Bake / Export...</strong> only after selecting the graph source you intend to publish. Endurance freshly prepares and validates runtime-compatible bytes, then offers:</p>
+<table><thead><tr><th>Action</th><th>Result</th></tr></thead><tbody>
+<tr><td><strong>Export Runtime .grp</strong></td><td>Writes/validates the exact sibling <code>.grp</code> for the active MPR. If the primary MOB still embeds a graph, that embedded graph shadows the file.</td></tr>
+<tr><td><strong>Bake into Primary MOB</strong></td><td>Saves the selected graph inside the primary MOB; it has runtime priority over a sibling <code>.grp</code>.</td></tr>
+<tr><td><strong>Switch MOB to External .grp</strong></td><td>Validates an already existing exact sibling <code>.grp</code>, leaves it unchanged, then removes embedded ownership and saves the primary MOB. Export first if no valid sibling exists.</td></tr>
+</tbody></table>
+<p>Both bake and switch immediately save the primary MOB, include any unsaved MOB edits in that verified save, create a backup, and establish a new baseline. They are not undoable through Edit history. The dialog warns when one primary MOB appears to be shared by several catalog entries—changing embedded ownership can affect every owner.</p>
+<p>Runtime priority is always <strong>primary MOB embedded graph first, then exact active-MPR sibling <code>.grp</code></strong>. Exporting a file while an embedded graph exists is useful for preparation/comparison but does not switch runtime ownership.</p>
+<a id="minimap"></a>
+<h2 id="29-minimap">29. Minimap</h2>
+<p>Once an MPR is loaded, the upper-right viewport minimap can show <strong>Embedded</strong> or <strong>Generated</strong>. It can collapse to a title bar and has three persisted sizes. The current perspective camera footprint is a map-clipped white outline. Click or left-drag across the minimap to move camera XY while preserving the camera's vertical/orbit state.</p>
+<p><strong>Generated</strong> captures terrain, authored overlay surfaces, and visible static MOB geometry. It excludes dynamic units, particles, helpers, selection, tile previews, and grids. It uses deterministic authored-environment diffuse shading; viewport lighting/time changes do not randomly change the result. Unlocked generated maps refresh after relevant committed changes. <strong>Regenerate</strong> refreshes immediately and selects Generated. <strong>Apply &amp; Lock</strong> in the export window freezes the graded result until <strong>Unlock</strong>.</p>
+<blockquote><p><strong>Known limitation.</strong> With no MOB loaded, capture is marked incomplete because static collection geometry is absent. Load the appropriate MOB sources for a production image. Catalog entries authored as <code>brief</code> suppress minimap capture, display, staging, and export.</p></blockquote>
+<p>Choose <strong>Export Minimap...</strong> for the modeless review tool. It shows Generated beside a resolvable Embedded control and provides linked/independent zoom and pan, Fit, 100%, shading, saturation, contrast, brightness, and hue. Reset returns to the authored-profile defaults. The generated image follows the resolved embedded texture's supported square resolution/codec; without one, a JMV zone defaults to the current JMV export profile. Non-square map content is kept in its active rectangle instead of being stretched.</p>
+<p>Export to a new, copied, or mod-owned RES. Existing-member replacement is asked only after the archive is inspected and <strong>Export</strong> is pressed. The transaction stages, reopens, preserves untouched members, optionally backs up, and publishes atomically. A texture placed only in an editor-local RES cannot be selected as Embedded until that archive belongs to the active profile.</p>
+<p>The export flow can stage the reviewed texture for the next JMV test and can open Map Catalog Editor with only the minimap field staged. The objectives texture remains unchanged. Catalog publication still requires its separate verified Save As.</p>
+<a id="test-current"></a>
+<h2 id="30-test-current-map-and-hot-reload">30. Test Current Map and hot reload</h2>
+<p><strong>Test Current Map</strong> (<code>Ctrl+F5</code>) launches only when the active profile and map dependencies pass their exact gates. Normally this means a validated MPR, primary MOB, usable <code>map.txt</code> entry and entrance, plus a valid graph. A missing graph can use the explicit guarded graphless path; a malformed graph that is present blocks the run.</p>
+<p>Before launch, review the selected entrance and optional controls:</p>
+<ul><li><strong>Go to Entrance</strong> uses a registered entrance.</li><li><strong>Play from Here</strong> places a temporary editor marker. While placing/moving it, terrain sculpt/paint input and brush outlines are suspended so a click cannot edit terrain.</li><li><strong>Godmode</strong>, time override, and supplemental runtime options are available only when the current JMV map/runtime/script dependencies support them.</li></ul>
+<p>Endurance stages validated run-local copies. Unsaved but valid MPR edits can be included without changing the source MPR. It stages the selected AI graph and, when Generated is selected, the owned minimap override. Source maps, installed resources, starter configuration, registry, and live saves are not the staging target.</p>
+<p>While the owned test is active, <code>Ctrl+F5</code> becomes <strong>Hot Reload Map</strong>. Ordinary MPR/MOB and selected graph/minimap changes reload in the owned process. If atlas byte identity, page layout, or slot layout changes, Endurance restarts only its owned test process because safe in-process adoption cannot be proven. Use <strong>Stop Test</strong> (<code>Shift+Esc</code>) to stop that process.</p>
+<blockquote><p><strong>Known limitation.</strong> Test Current is fail-closed and profile-specific. A loose JMV pair needs a valid Play from Here route and has no invented minimap/travel/quest metadata. MPR-only, MOB-only, or ambiguous multi-MOB collections are not launchable. A separately started <code>game.exe</code> is not owned and will not be killed or patched by the editor.</p></blockquote>
+<p>When a test is refused, read the first dependency error rather than copying files into the installation. Fix profile, map registration, entrance, graph, or validated runtime component identity in the working copy.</p>
+<a id="database-editor"></a>
+<h2 id="31-database-editor">31. Database Editor</h2>
+<p>Open <strong>Database Editor...</strong> for the active profile's protected relational archive. The editor covers all 26 physical database tables and every schema-described field: materials, weapons, armors, unit tables, spells, perks, prints, quests, acknowledgements, and the remaining public schema.</p>
+<p>The grid is lazy and typed. Search, sort, show/reorder/resize/freeze columns, and keep the literal <code>#</code> identity column frozen by default. Settings persist per editor. A selected row receives a soft highlight.</p>
+<p>Editing supports scalar values, fixed strings, lists, bit fields, nested records, and descriptor-unknown hexadecimal payloads. Long/list values open in a full line-based editor; grid previews stay compact. Established categorical values have suggestions without restricting valid mod-specific text.</p>
+<p>Established identity-compatible references use searchable pickers. Use <code>Ctrl+Enter</code> or <strong>Open Referenced Row</strong> where offered. Database resource-name fields can use <strong>Open in Resource Browser</strong> to reveal the exact winning member. Relationships whose transformation is not proven remain plain editable data.</p>
+<p>Clone/Delete, per-document undo/redo, <strong>Pending Database Changes</strong>, cross-table validation, and the Item/Spell constructors use the same transaction model. Before publication:</p>
+<ol><li>Review the pending-change manifest.</li><li>Resolve identity/reference blockers and understand warnings.</li><li>Use <strong>Save Database As</strong> for a copied/mod-owned destination or <strong>Apply Database</strong> only for an eligible provider target.</li><li>Let Endurance rebuild from the immutable source, patch the exact physical record/field, reopen, validate, back up, and publish atomically.</li></ol>
+<p>XLSX export/import covers all 26 tables with EIDB-compatible sheet and <code>FLD</code> identities plus source/profile/schema fingerprints. A stale or mismatched workbook fails closed. Unchanged import is a verified no-op through the Endurance contract. Do not assume stock EIDBEditor 1.4.4 understands the newer embedded-source metadata.</p>
+<blockquote><p><strong>Known limitation.</strong> Fields described as <code>Hex</code> preserve isolated bytes and are editable as hexadecimal, but their game meaning is not claimed. Do not assign a semantic label based on a coincidental value. Structured values use readable line-based authoring; preserve internal IDs and scalar types shown by the editor.</p></blockquote>
+<a id="resource-browser"></a>
+<h2 id="32-resource-browser">32. Resource Browser</h2>
+<p>Open <strong>Resource Browser</strong> from View/Tools. <strong>Active profile</strong> mode indexes the provider chain in priority order; external archive mode inspects an explicit RES. Search by logical/archive name, filter type, and filter <strong>Winning</strong> versus <strong>Overridden</strong>. The selected item shows the active/lower provider chain.</p>
+<p>Supported previews include images/text, models with part selection and available animation clips, and audio when the multimedia backend can decode it. Preview decoding is asynchronous. <strong>Export...</strong> writes a selected payload to a normal file; <strong>Copy Name</strong> preserves the logical identity for use in properties.</p>
+<p>Reviewed archive mutations are <strong>Replace...</strong>, <strong>Add...</strong>, <strong>Rename...</strong>, and <strong>Delete...</strong>. The transaction dialog states the member, target, consequence, and backup choice, then stages/reopens/race-checks and atomically writes a new or eligible mod-owned archive.</p>
+<p>Safety boundaries:</p>
+<ul><li>Base-installation archives are read-only in generic transactions. Choose a copied, new, or mod-owned target.</li><li><code>database.res</code> and <code>databaseJmv.res</code> are protected; use <strong>Open in Database Editor</strong> for relational work.</li><li>Add checks CP1251 and case-insensitive name collisions.</li><li>Deleting a winning member may expose the next lower provider; the review shows that consequence.</li><li>Rename/Delete cannot prove every structured script or opaque binary reference. Review those references manually.</li><li>Changing an archive that participates in the active profile refreshes the index only after verified publication.</li></ul>
+<p>Do not interpret “Overridden” as unused. Another profile, explicit archive access, or a script can still refer to that physical member.</p>
+<a id="preferences-language"></a>
+<h2 id="33-preferences-language-and-ui-scale">33. Preferences, language, and UI scale</h2>
+<p>Open <strong>Settings...</strong>. Important groups include:</p>
+<ul><li><strong>General</strong> — log level, undo-history limit, mouse sensitivity, new-ID range, diplomacy symmetry default, Free Camera, water display, helper radius, language, UI scale, external script editor, reopen-last-session, periodic autosave and backup/cache controls.</li><li><strong>Render</strong> — culling, unit idle animation, VSync (restart may be required), FPS cap/counters, fog, scene lights, shadow quality/distance, terrain shadows, mipmapping, lighting and environment behavior.</li><li><strong>Keybindings</strong> — every listed action and the camera-speed wheel modifier.</li><li><strong>Resource paths / advanced</strong> — legacy figure and texture locations for controlled compatibility work.</li></ul>
+<p>For Russian, choose <strong>Language</strong> and the Russian interface option, accept the restart prompt, save/close work, and restart the editor. The UI catalog changes; map tokens, resource/member names, scripts, paths, serialized enumerations, workflow logs, headless validation and technical telemetry may remain English. Do not translate those stored values by hand.</p>
+<p>UI scale affects dialogs/docks and input scaling. If controls clip after a large scale change, restart as requested and reset dock geometry before assuming a tool is absent.</p>
+<a id="shortcuts"></a>
+<h2 id="34-default-keyboard-shortcuts">34. Default keyboard shortcuts</h2>
+<p>Bindings are customizable. This table describes the current defaults, not shortcuts copied from the legacy EI Mapper manual.</p>
+<table><thead><tr><th>Area</th><th>Shortcut</th><th>Action</th></tr></thead><tbody>
+<tr><td>File</td><td><code>Ctrl+O</code></td><td>Open supported document</td></tr>
+<tr><td>File</td><td><code>Alt+Shift+O</code></td><td><strong>Open MOB(s)...</strong></td></tr>
+<tr><td>File</td><td><code>Ctrl+Shift+O</code></td><td><strong>Open MPR...</strong></td></tr>
+<tr><td>File</td><td><code>Ctrl+S</code></td><td><strong>Save active MOB</strong></td></tr>
+<tr><td>File</td><td><code>Alt+Shift+S</code></td><td><strong>Save all MOBs</strong></td></tr>
+<tr><td>File</td><td><code>Ctrl+Shift+S</code></td><td><strong>Save MPR</strong></td></tr>
+<tr><td>Workspace</td><td><code>Ctrl+Q</code></td><td>Close All</td></tr>
+<tr><td>Workspace</td><td><code>Ctrl+Space</code></td><td>Maps &amp; Collections</td></tr>
+<tr><td>Workspace</td><td><code>Alt+L</code></td><td>Message Log</td></tr>
+<tr><td>Edit</td><td><code>Ctrl+Z</code> / <code>Ctrl+Y</code></td><td>Undo / redo</td></tr>
+<tr><td>Edit</td><td><code>Ctrl+H</code></td><td>History</td></tr>
+<tr><td>Edit</td><td><code>Ctrl+A</code></td><td>Select all in context</td></tr>
+<tr><td>Edit</td><td><code>Ctrl+C</code> / <code>Ctrl+V</code> / <code>Ctrl+X</code></td><td>Copy / paste / cut supported objects</td></tr>
+<tr><td>Edit</td><td><code>Ctrl+D</code></td><td>Duplicate selected</td></tr>
+<tr><td>Objects</td><td><code>Ctrl+N</code></td><td>Create object</td></tr>
+<tr><td>Objects</td><td><code>Ctrl+F</code></td><td>Select/search by current command</td></tr>
+<tr><td>Objects</td><td><code>H</code> / <code>Alt+H</code></td><td>Hide / unhide</td></tr>
+<tr><td>Objects</td><td><code>Delete</code></td><td>Delete selected supported objects</td></tr>
+<tr><td>Modes</td><td><code>Ctrl+Tab</code></td><td>Object / Behavior mode</td></tr>
+<tr><td>Modes</td><td><code>Ctrl+L</code></td><td><strong>Landscape Tools</strong></td></tr>
+<tr><td>Transform</td><td><code>G</code> / <code>R</code> / <code>T</code></td><td>Move / rotate / scale</td></tr>
+<tr><td>Transform</td><td><code>X</code>, <code>Y</code>, <code>Z</code></td><td>Axis constraint; Shift+axis excludes axis for move/scale</td></tr>
+<tr><td>Camera</td><td><code>Ctrl+R</code></td><td>Reset camera</td></tr>
+<tr><td>Camera</td><td>Numpad <code>.</code></td><td>Focus selection</td></tr>
+<tr><td>Terrain</td><td><code>Z</code> / <code>X</code> / <code>C</code></td><td>Modern / Classic Auto / Manual while painting; sculpt modes depend on active sculpt tool</td></tr>
+<tr><td>Terrain</td><td><code>M</code> / <code>O</code></td><td>Main terrain / overlays visibility</td></tr>
+<tr><td>Terrain</td><td><code>Shift+R</code></td><td>Resolve missing blends in the active paint context</td></tr>
+<tr><td>Graph</td><td><code>N</code></td><td>Show/hide current AI graph layer</td></tr>
+<tr><td>Test</td><td><code>Ctrl+F5</code></td><td>Test Current / Hot Reload</td></tr>
+<tr><td>Test</td><td><code>Shift+Esc</code></td><td>Stop owned test</td></tr>
+<tr><td>View</td><td><code>F11</code> / <code>F12</code></td><td>Maximize viewport / full screen</td></tr>
+<tr><td>Cancel</td><td><code>Esc</code></td><td>Cancel transform/placement/tool action or clear selection by context</td></tr>
+</tbody></table>
+<p><code>Ctrl+M</code> opens MOB parameters; <code>Ctrl+Shift+M</code> opens the embedded script and <code>Ctrl+Alt+M</code> the configured external script workflow. <code>Ctrl+P</code> resets supported logic paths. Some internal telemetry shortcuts exist for developer diagnostics and are intentionally not part of the normal authoring table.</p>
+<p>When an expected shortcut does nothing, focus the viewport/tool, check current mode, and review Keybindings. Landscape Tools now uses <code>Ctrl+L</code>; the historical <code>B</code> shortcut is migrated away unless the user assigns it explicitly.</p>
+<a id="troubleshooting"></a>
+<h2 id="35-troubleshooting">35. Troubleshooting</h2>
+<h3 id="a-map-or-object-looks-wrong">A map or object looks wrong</h3>
+<p>Check, in order: active profile; winning resource provider; active editable MOB; Visuals channels; MPR versus overlay ownership; database prototype versus MOB override; then validation. Avoid “correcting” a field until the ownership mistake is excluded.</p>
+<h3 id="save-is-refused">Save is refused</h3>
+<p>Read the phase in the message/log. Common causes are backup failure, destination changed since opening, unsupported archive ownership, candidate reopen failure, semantic mismatch, an incomplete modern draft pair, or unresolved final atlas junctions. The old destination is intentionally preserved. Free space/permission problems should be fixed before retrying.</p>
+<h3 id="terrain-finalization-is-refused">Terrain finalization is refused</h3>
+<p>Open Landscape Tools in the relevant paint context, run <strong>Resolve missing blends... (Shift+R)</strong>, inspect Ground and Overlay, and review atlas counts. Keep the 4,096-slot/64-page support boundary and the documented Lava-on-Water caveat in mind. Do not replace a draft's RES independently of its paired MPR.</p>
+<h3 id="test-current-is-refused">Test Current is refused</h3>
+<p>Use the first dependency finding: profile/runtime identity, MPR, primary MOB, map registration, entrance, graph, required script, or an already running game. Do not launch/copy into a live install to evade the gate. The test-run folder and <code>workflow.log</code> record staged ownership and cleanup.</p>
+<h3 id="the-editor-closed-unexpectedly">The editor closed unexpectedly</h3>
+<p>Restart, note the recovery notice, use <strong>Open Backup Folder</strong>, and recover to a new copied name as described in <a href="#save-backup-recovery">Save, backups, autosave, and recovery</a>. Do not overwrite the source with an autosave merely because it is newest.</p>
+<h3 id="reporting-a-bug">Reporting a bug</h3>
+<p>Include Endurance version, profile type, exact repeatable steps, expected versus actual result, whether the source was copied, relevant file hashes, validation finding, and the smallest relevant log excerpt. <code>workflow.log</code> can expose local paths; crash dumps can contain source/map memory and are private. Redact account names and private roots. Do not attach copyrighted maps, RES archives, binaries, or private source unless the owner explicitly authorizes the exact transfer.</p>
+<a id="safe-authoring"></a>
+<h2 id="36-safe-authoring-practices">36. Safe authoring practices</h2>
+<p>Use this checklist before a substantial edit or publication:</p>
+<ul><li>Work on copied/mod-owned targets; keep live game and proprietary corpus read-only.</li><li>Record the profile, source hashes, and collection membership.</li><li>Load the whole relevant MOB family before assigning IDs or validating.</li><li>Confirm the active MOB and data owner before create/paste/delete.</li><li>Preserve unknown fields; do not normalize values whose meaning is uncertain.</li><li>Keep modern draft MPR and adjacent RES together.</li><li>Keep final atlases at or below 4,096 slots / 64 pages.</li><li>Treat resource priority and database prototypes as shared-impact operations.</li><li>Review validation and history after each bounded change.</li><li>Save through the verified path, retain the backup, and reopen/test the published copy.</li><li>Test gameplay behavior, AI movement, scripts, audio, particles, and final rendering in the supported owned runtime; editor preview is not final proof.</li><li>Preserve logs/hashes but redact paths and never redistribute proprietary payloads as “evidence.”</li></ul>
+<p>If two documents must change together, write down the cohort before saving. Endurance protects each publication, but an author can still pair MPR revision A with MOB revision B by choosing the wrong files afterward.</p>
+<a id="limitations-diagnostics"></a>
+<h2 id="37-capability-labels-and-current-boundaries">37. Capability labels and current boundaries</h2>
+<p>The manual uses three labels deliberately:</p>
+<ul><li><strong>Implemented</strong> — supported in the current UI and normal authoring contract.</li><li><strong>Known limitation</strong> — implemented around a bounded gap; the stated safe workflow is part of using the feature correctly.</li><li><strong>Advanced / diagnostic</strong> — implemented, but intended for inspection, metadata authoring, explicit ownership changes, or expert publication.</li></ul>
+<p>Major current boundaries are: atlas release support ends at 4,096 slots / 64 pages; rare connected Lava-on-Water resolve ownership is not fully solved; regenerated AI graph is still an approximation until explicitly persisted and game-tested; 2.5D graph cannot represent two traversable surfaces in one XY cell; MPR-only minimaps omit static MOB geometry; Base archives are protected from generic mutation; opaque database/resource/script references are preserved but not invented; and Test Current works only with exact validated profiles and owned processes.</p>
+<p>Unchecked ROADMAP wishes are not capabilities. The current editor does not promise automatic rewriting of every script/opaque reference, an all-purpose association editor, arbitrary third-party profile plugins, or private engine parity.</p>
+<a id="terminology"></a>
+<h2 id="38-terminology">38. Terminology</h2>
+<table><thead><tr><th>Term</th><th>Meaning in this manual</th></tr></thead><tbody>
+<tr><td>Active MOB</td><td>The one loaded MOB currently allowed to receive object edits</td></tr>
+<tr><td>Collection / MOB family</td><td>Registered or loaded set of MPR, primary MOB, supplemental MOBs, and metadata belonging to one map context</td></tr>
+<tr><td>MPR</td><td>Terrain archive/document, including MP/SEC content</td></tr>
+<tr><td>Overlay</td><td>Optional authored surface above/alongside land, such as water or lava</td></tr>
+<tr><td>Semantic material</td><td>Terrain-paint family/corner meaning used by Modern/Classic Auto</td></tr>
+<tr><td>Physical atlas slot</td><td>Exact packed tile image index and rotation used by Manual/runtime cells</td></tr>
+<tr><td>Surface material</td><td>MPR material-table record referenced by overlay cells; owns typed rendering properties</td></tr>
+<tr><td>Working atlas / Modern Draft</td><td>Editable paired atlas state that may contain generated blends</td></tr>
+<tr><td>Finalize</td><td>Produce a compact runtime-clean MPR/atlas publication</td></tr>
+<tr><td>Embedded graph</td><td>AI graph bytes owned by the primary MOB and given runtime priority</td></tr>
+<tr><td>External graph</td><td>Exact <code>.grp</code> sibling of the active MPR, used only when no embedded primary-MOB graph shadows it</td></tr>
+<tr><td>Winning resource</td><td>Highest-priority active-profile provider for a logical resource name</td></tr>
+<tr><td>Run-local</td><td>Temporary, editor-owned test copy; not the source or installed asset</td></tr>
+</tbody></table>
+<p>Russian UI terms are taken from <code>translations/ei_mapper_ru.ts</code>, not literally calqued. Resource names, scripts, file extensions and serialized values remain as stored. For screens not illustrated here, use the <a href="../../SCREENSHOT_CHECKLIST.md">screenshot checklist</a> rather than substituting images from the old upstream editor.</p>
+</main></body>
+</html>

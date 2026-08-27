@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="310" viewBox="0 0 1200 310" role="img" aria-labelledby="title desc">
+  <title id="title">Preservation-first Endurance authoring workflow</title>
+  <desc id="desc">A bilingual diagram from a copied working map through edit, validation, staged reopen and backup, atomic publication, and an owned game test.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#152238"/><stop offset="1" stop-color="#0a111e"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7dd3fc"/></marker>
+    <style>
+      .box{fill:#172a46;stroke:#65c7ee;stroke-width:2;rx:14}.safe{fill:#16382f;stroke:#68d6a8}.txt{font:600 19px Segoe UI,Arial,sans-serif;fill:#f1f7ff;text-anchor:middle}.sub{font:14px Segoe UI,Arial,sans-serif;fill:#bdd0e8;text-anchor:middle}.arrow{stroke:#7dd3fc;stroke-width:3;fill:none;marker-end:url(#arrow)}.note{font:14px Segoe UI,Arial,sans-serif;fill:#8fa9c7;text-anchor:middle}
+    </style>
+  </defs>
+  <rect width="1200" height="310" rx="20" fill="url(#bg)"/>
+  <text x="600" y="35" class="txt">Verified authoring loop / Проверенный цикл работы</text>
+  <g transform="translate(26 76)"><rect class="box" width="185" height="115"/><text x="92" y="40" class="txt">Working copy</text><text x="92" y="66" class="txt">Рабочая копия</text><text x="92" y="94" class="sub">profile + hashes / профиль + хэши</text></g>
+  <path class="arrow" d="M218 134 H255"/>
+  <g transform="translate(262 76)"><rect class="box" width="165" height="115"/><text x="82" y="48" class="txt">Edit</text><text x="82" y="76" class="txt">Правка</text><text x="82" y="99" class="sub">one bounded change</text></g>
+  <path class="arrow" d="M434 134 H471"/>
+  <g transform="translate(478 76)"><rect class="box" width="170" height="115"/><text x="85" y="48" class="txt">Validate</text><text x="85" y="76" class="txt">Проверка</text><text x="85" y="99" class="sub">history + findings</text></g>
+  <path class="arrow" d="M655 134 H692"/>
+  <g transform="translate(699 63)"><rect class="safe" width="218" height="141" rx="14"/><text x="109" y="36" class="txt">Stage + reopen</text><text x="109" y="63" class="txt">Кандидат + проверка</text><text x="109" y="91" class="sub">semantic diff + race check</text><text x="109" y="115" class="sub">backup / резервная копия</text></g>
+  <path class="arrow" d="M924 134 H961"/>
+  <g transform="translate(968 76)"><rect class="safe" width="205" height="115" rx="14"/><text x="102" y="40" class="txt">Atomic publish</text><text x="102" y="67" class="txt">Публикация</text><text x="102" y="94" class="sub">then owned game test</text></g>
+  <path class="arrow" d="M1070 201 C1070 274 350 275 350 205"/>
+  <text x="710" y="288" class="note">Game result informs the next copied edit / Результат в игре определяет следующую правку копии</text>
+</svg>

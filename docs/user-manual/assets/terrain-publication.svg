@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+  <title id="title">Modern terrain ownership and publication</title>
+  <desc id="desc">A bilingual diagram distinguishing a normal MPR save from a Modern Draft pair and finalization at the supported atlas boundary.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#182038"/><stop offset="1" stop-color="#10151f"/></linearGradient>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#91d7ff"/></marker>
+    <style>
+      .b{fill:#1d3150;stroke:#78c8ef;stroke-width:2}.d{fill:#3d2b54;stroke:#c7a0ff;stroke-width:2}.f{fill:#174132;stroke:#6ee7b7;stroke-width:2}.w{fill:#4b2b28;stroke:#ffab91;stroke-width:2}.t{font:600 20px Segoe UI,Arial,sans-serif;fill:#f4f8ff;text-anchor:middle}.s{font:15px Segoe UI,Arial,sans-serif;fill:#c5d5e8;text-anchor:middle}.x{stroke:#91d7ff;stroke-width:3;fill:none;marker-end:url(#a2)}.n{font:14px Segoe UI,Arial,sans-serif;fill:#9fb2cc;text-anchor:middle}
+    </style>
+  </defs>
+  <rect width="1200" height="480" rx="20" fill="url(#bg2)"/>
+  <text x="600" y="38" class="t">Terrain save ownership / Владение при сохранении рельефа</text>
+  <g transform="translate(45 82)"><rect class="b" width="250" height="112" rx="14"/><text x="125" y="45" class="t">Edited MPR</text><text x="125" y="74" class="t">Изменённый MPR</text><text x="125" y="98" class="s">terrain + MP/SEC</text></g>
+  <path class="x" d="M302 137 H410"/>
+  <g transform="translate(420 77)"><rect class="b" width="335" height="122" rx="14"/><text x="167" y="37" class="t">Did Modern add atlas content?</text><text x="167" y="67" class="t">Атлас расширен?</text><text x="167" y="97" class="s">exact generated blend / новый переход</text></g>
+  <path class="x" d="M587 207 V268 H310"/><text x="430" y="252" class="n">No / Нет</text>
+  <g transform="translate(115 278)"><rect class="f" width="390" height="120" rx="14"/><text x="195" y="43" class="t">Normal verified MPR save</text><text x="195" y="74" class="t">Обычное сохранение MPR</text><text x="195" y="101" class="s">backup → reopen → atomic publish</text></g>
+  <path class="x" d="M763 138 H840"/><text x="803" y="122" class="n">Yes / Да</text>
+  <g transform="translate(850 73)"><rect class="d" width="300" height="132" rx="14"/><text x="150" y="39" class="t">Modern Draft pair</text><text x="150" y="69" class="t">Современный черновик</text><text x="150" y="98" class="s">MPR + adjacent RES</text><text x="150" y="119" class="s">keep together / хранить вместе</text></g>
+  <path class="x" d="M1000 213 V270 H802"/>
+  <g transform="translate(620 278)"><rect class="w" width="360" height="120" rx="14"/><text x="180" y="37" class="t">Resolve and inspect</text><text x="180" y="67" class="t">Исправить и проверить</text><text x="180" y="96" class="s">Shift+R • Ground + Overlay • Lava caveat</text></g>
+  <path class="x" d="M987 338 H1060"/>
+  <g transform="translate(1068 270)"><rect class="f" width="108" height="136" rx="14"/><text x="54" y="33" class="s">Finalize</text><text x="54" y="55" class="s">Завершить</text><text x="54" y="83" class="s">≤ 4096</text><text x="54" y="104" class="s">slots</text><text x="54" y="124" class="s">≤ 64 pages</text></g>
+  <text x="600" y="446" class="n">A packed file above the supported boundary is not a supported runtime atlas / Упаковка сверх границы не делает атлас поддерживаемым</text>
+</svg>
