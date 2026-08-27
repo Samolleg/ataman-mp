@@ -18399,13 +18399,11 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeSolverNodes)
                 .arg(m_tileStrokeSafeSkippedVertices)
                 .arg(m_tileStrokeSafeSkippedBoundaryCells));
-        // Resolution happens after mouse release. Present the completed atlas
-        // texture and rebuilt sector VBOs immediately instead of waiting for
-        // a later camera/input event to trigger another frame.
-        if(isValid())
-            updateGL();
-        else
-            update();
+        // Every preview mutation above already queued a normal viewport paint.
+        // Requesting updateGL() here recursively paints and swaps from the
+        // release handler, then Qt services the queued paint again. Keep the
+        // completed atlas/cell state on the ordinary coalesced frame path.
+        update();
     }
     m_lastTerrainPaintCenterValid = false;
     m_tileStrokeClassicAuto = false;

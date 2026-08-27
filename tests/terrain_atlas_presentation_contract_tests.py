@@ -72,6 +72,21 @@ class TerrainAtlasPresentationContractTests(unittest.TestCase):
         self.assertNotIn("updateGL()", present)
         self.assertEqual(present.count("update();"), 1)
 
+    def test_stroke_completion_does_not_reenter_qglwidget_swap(self):
+        stroke_end = function_body(
+            self.view,
+            "void CView::endTileBrushGroup",
+            "void CView::cancelTileBrushGroup",
+        )
+
+        # This handler runs for every completed stamp, including strokes that
+        # neither generate nor upload atlas slots. An immediate updateGL()
+        # paints and swaps recursively from the release event while earlier
+        # terrain updates are still queued; completion must request only the
+        # normal coalesced Qt paint event.
+        self.assertNotIn("updateGL();", stroke_end)
+        self.assertIn("update();", stroke_end)
+
     def test_fix_does_not_disable_object_shadows(self):
         self.assertIn("&& m_objectShadowsVisible", self.view)
         self.assertIn("renderShadowMap(cameraPosition, cameraPivot", self.view)
