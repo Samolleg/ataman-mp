@@ -9,6 +9,10 @@ Current development version: `0.5.0-alpha`.
 Project status and upcoming work are tracked in the living
 [Endurance roadmap](ROADMAP.md).
 
+New contributors using Codex should start with the Russian-first
+[safe contribution guide](CONTRIBUTING.md). It keeps each task on a separate
+branch and reserves `main` integration for the maintainer.
+
 Endurance creates hash-addressed recovery snapshots when MOB/MPR documents are opened and
 timestamped pre-save revisions before replacing existing files. Backups and their JSON metadata
 are stored under `%LOCALAPPDATA%\\EI Mapper Endurance\\backups`; use **Tools → Open Backup

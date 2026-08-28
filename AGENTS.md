@@ -53,6 +53,27 @@ worktrees.
 - Wait for worktree setup to complete before sending follow-up work. Do not use
   same-directory forks for parallel edits.
 
+## External Codex collaborators
+
+- Read `CONTRIBUTING.md` before starting work for an external collaborator. Its
+  Russian quick-start is the preferred handoff for contributors who are not
+  comfortable with Git or English-only project documentation.
+- External contributors work only on a dedicated branch created from the latest
+  `origin/main`. Use `contrib/<github-user>/<short-task>` unless the maintainer
+  assigns another name. Never commit, merge, or push directly to `main`.
+- Keep one bounded issue per branch. Do not mix cleanup, refactors, formatting,
+  generated artifacts, or unrelated fixes into the requested change.
+- Let the contributor's Codex agent perform fetch, branch creation, testing,
+  commits, and branch pushes. If `origin/main` moves, fetch and rebase the
+  contributor branch; stop and report any conflict instead of guessing.
+- Push only the assigned contributor branch, never force-push, and open a pull
+  request for review. The maintainer owns integration and the final `main`
+  validation/push.
+- The final handoff must name the branch and full commit, summarize changed
+  files and behavior, report tests/builds and manual gaps, and list every
+  material uncertainty. Installed game/mod data and private source must never
+  be committed or uploaded.
+
 ## Tester build handoff
 
 - Deliver an unpacked, user-runnable tester folder, not raw compiler output.
