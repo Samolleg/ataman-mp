@@ -2129,6 +2129,30 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     m_valid = true;
 }
 
+CTerrainVirtualAtlas::CTerrainVirtualAtlas(
+    const CTerrainVirtualAtlas& other,
+    const CTerrainTransitionCatalog& catalog)
+    : m_catalog(catalog),
+      m_authoredTiles(other.m_authoredTiles),
+      m_materialSources(other.m_materialSources),
+      m_materialSourceSlots(other.m_materialSourceSlots),
+      m_sourceTileTypes(other.m_sourceTileTypes),
+      m_materialRuntimeTypes(other.m_materialRuntimeTypes),
+      m_materialBlendStyles(other.m_materialBlendStyles),
+      m_generatedBySignature(other.m_generatedBySignature),
+      m_generatedByPixels(other.m_generatedByPixels),
+      m_generatedTiles(other.m_generatedTiles),
+      m_blendMaskTemplates(other.m_blendMaskTemplates),
+      m_authoredLibraryCatalog(other.m_authoredLibraryCatalog),
+      m_authoredLibraryGeneratedIndices(
+          other.m_authoredLibraryGeneratedIndices),
+      m_distributionSeed(other.m_distributionSeed),
+      m_generatedTilesOpaque(other.m_generatedTilesOpaque),
+      m_valid(other.m_valid),
+      m_error(other.m_error)
+{
+}
+
 bool CTerrainVirtualAtlas::addExternalMaterialSource(
     qint32 material, const QImage& pixels)
 {
@@ -4383,7 +4407,8 @@ CTerrainWorkingAtlas::createStagingCopy() const
     QSharedPointer<CTerrainWorkingAtlas> staged(
         new CTerrainWorkingAtlas(*this));
     if(m_resolver)
-        staged->m_resolver.reset(new CTerrainVirtualAtlas(*m_resolver));
+        staged->m_resolver.reset(new CTerrainVirtualAtlas(
+            *m_resolver, staged->m_authoredCatalog));
     return staged;
 }
 
@@ -4419,7 +4444,8 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_animationCopySources = staged.m_animationCopySources;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
-        m_resolver.reset(new CTerrainVirtualAtlas(*staged.m_resolver));
+        m_resolver.reset(new CTerrainVirtualAtlas(
+            *staged.m_resolver, m_authoredCatalog));
     else
         m_resolver.reset();
     return true;

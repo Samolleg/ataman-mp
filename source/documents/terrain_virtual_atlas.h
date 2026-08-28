@@ -351,6 +351,12 @@ public:
         CValidationReport* report = nullptr);
 
 private:
+    CTerrainVirtualAtlas(const CTerrainVirtualAtlas& other,
+                         const CTerrainTransitionCatalog& catalog);
+    CTerrainVirtualAtlas(const CTerrainVirtualAtlas&) = delete;
+    CTerrainVirtualAtlas& operator=(const CTerrainVirtualAtlas&) = delete;
+    friend class CTerrainWorkingAtlas;
+
     QByteArray signatureKey(const STerrainTransitionSignature& signature) const;
     STerrainTransitionSignature canonicalSignature(
         const STerrainTransitionSignature& signature, quint8* rotation) const;

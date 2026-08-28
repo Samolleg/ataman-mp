@@ -8,6 +8,8 @@
 #include <QTransform>
 #include <cmath>
 #include <limits>
+#include <new>
+#include <type_traits>
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -213,6 +215,37 @@ public:
                 ? preferredPaintMaterial : requested.northWest,
             preferredRuntimeType);
     }
+};
+
+class CReusedWorkingAtlasStorage
+{
+public:
+    ~CReusedWorkingAtlasStorage() { reset(); }
+
+    CTestTerrainWorkingAtlas* construct(
+        const CTerrainTransitionCatalog& catalog,
+        const QVector<QImage>& images,
+        quint32 distributionSeed = 0,
+        int capacityLimit = 512)
+    {
+        reset();
+        m_value = new (&m_storage) CTestTerrainWorkingAtlas(
+            catalog, images, distributionSeed, capacityLimit);
+        return m_value;
+    }
+
+    void reset()
+    {
+        if(!m_value)
+            return;
+        m_value->~CTestTerrainWorkingAtlas();
+        m_value = nullptr;
+    }
+
+private:
+    typename std::aligned_storage<sizeof(CTestTerrainWorkingAtlas),
+                                  alignof(CTestTerrainWorkingAtlas)>::type m_storage;
+    CTestTerrainWorkingAtlas* m_value{nullptr};
 };
 
 template<typename TAtlas>
@@ -535,6 +568,7 @@ private slots:
     void unknownGeneratedTerrainTypeIsRefused();
     void workingAtlasCarriesGeneratedTerrainType();
     void stagedResolveUsesPredecessorTypeOverAuthoredAndSemanticMajority();
+    void stagingCopyOwnsCatalogAfterSourceLifetimeEnds();
     void stableHashesAndNamespaceAreDeterministic();
     void mapWideUsageAndUnusedCompaction();
     void exactAuthoredDuplicatesAreRemappedBeforeCapacity();
@@ -3288,6 +3322,39 @@ void TerrainVirtualAtlasTests::stagedResolveUsesPredecessorTypeOverAuthoredAndSe
     QCOMPARE(live.runtimeTerrainTypeForSlot(
                  SMprPackedTile::decode(authoredPacked).atlasSlot()),
              qint32(0));
+}
+
+void TerrainVirtualAtlasTests::stagingCopyOwnsCatalogAfterSourceLifetimeEnds()
+{
+    Fixture original;
+    CReusedWorkingAtlasStorage storage;
+    CTestTerrainWorkingAtlas* live = storage.construct(
+        original.catalog, original.images, 0x51a9u, 8);
+    QSharedPointer<CTerrainWorkingAtlas> staged = live->createStagingCopy();
+    QVERIFY(staged);
+
+    // Reuse the exact source-object storage with a conflicting catalog. A true
+    // staging copy must retain original material 2 -> slot 1 rather than
+    // following this replacement object's material 2 -> slot 3 mapping.
+    storage.reset();
+    CTerrainTransitionCatalog replacementCatalog;
+    STerrainTransitionVariant replacement;
+    replacement.signature = signature(2, 2, 2, 2);
+    SMprPackedTile replacementPacked;
+    replacementPacked.tileIndex = 3;
+    replacement.packedTile = replacementPacked.encode();
+    QVERIFY(replacementCatalog.addVariant(replacement));
+    storage.construct(replacementCatalog, original.images, 0x8e17u, 8);
+
+    QMap<int, quint64> usage;
+    bool generated = true;
+    CValidationReport report;
+    const quint16 resolved = staged->resolve(
+        signature(2, 2, 2, 2), 4, 5, &usage, {}, &generated, &report,
+        2, reviewedFixtureTileTypes(original.images.size()).at(1), true);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QCOMPARE(SMprPackedTile::decode(resolved).atlasSlot(), 1);
+    QVERIFY(!generated);
 }
 
 void TerrainVirtualAtlasTests::stableHashesAndNamespaceAreDeterministic()
