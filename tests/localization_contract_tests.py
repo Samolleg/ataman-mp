@@ -42,6 +42,8 @@ def main():
         encoding="utf-8")
     landscape_tools = (ROOT / "source/ui/landscape_tools.cpp").read_text(
         encoding="utf-8")
+    create_object = (ROOT / "source/ui/createobjectform.cpp").read_text(
+        encoding="utf-8")
     build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
     catalog_path = ROOT / "translations/ei_mapper_ru.ts"
 
@@ -92,6 +94,17 @@ def main():
     require('QCoreApplication::translate("LandscapeFalloff", "Smooth")' in
             landscape_tools,
             "the Smooth tool and smooth falloff must have separate translations")
+    require('text != "<choose object type>"' not in create_object,
+            "Create Object must not compare localized display text to an English literal")
+    require("if(!m_objType.values().contains(object))" in create_object,
+            "Create Object must reject placeholder or unknown translated selections")
+    require("if(m_objType.values().contains(text))" in create_object,
+            "Create Object showEvent must reopen only a structurally valid type")
+    update_table = create_object[
+        create_object.index("void CCreateObjectForm::updateTable()"):
+        create_object.index("CPreview *CCreateObjectForm::viewWidget()")]
+    require("if(!m_pNode)" in update_table,
+            "Create Object table refresh must tolerate an absent template node")
 
     visible_literal_patterns = (
         re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),

@@ -73,6 +73,8 @@ void CCreateObjectForm::initViewWidget()
 void CCreateObjectForm::updateTable()
 {
     m_tableManager->reset();
+    if(!m_pNode)
+        return;
     QList<QSharedPointer<IPropertyBase>> aProp;
     m_pNode->collectParams(aProp, m_pNode->nodeType());
     //filter parameters
@@ -128,6 +130,10 @@ void CCreateObjectForm::closeEvent(QCloseEvent *event)
 
 void CCreateObjectForm::onObjectChoose(QString& object)
 {
+    // The first combo entry is localized display text, not an object type.
+    // Validate against the populated type map instead of comparing its label.
+    if(!m_objType.values().contains(object))
+        return;
 
     ENodeType objType = m_objType.key(object);
 
@@ -222,6 +228,8 @@ void CCreateObjectForm::onObjectChoose(QString& object)
 
 void CCreateObjectForm::onParamChange(const QSharedPointer<IPropertyBase> prop)
 {
+    if(!m_pNode || prop.isNull())
+        return;
     m_pNode->applyParam(prop);
     if(prop->type() == eObjParam_TEMPLATE)
     {
@@ -257,6 +265,8 @@ void CCreateObjectForm::on_buttonCancel_clicked()
 void CCreateObjectForm::on_buttonCreate_clicked()
 {
     Q_ASSERT(m_pView);
+    if(!m_pNode)
+        return;
     if (nullptr == m_pView->currentMob())
     {
         ei::log(eLogWarning, "cant create pre-defined object without active mob file");
@@ -327,7 +337,7 @@ void CCreateObjectForm::on_buttonCreate_clicked()
 void CCreateObjectForm::showEvent(QShowEvent *pEvent)
 {
     QString text = ui->comboObjectType->currentText();
-    if(text != "<choose object type>")
+    if(m_objType.values().contains(text))
     {
         onObjectChoose(text);
     }
