@@ -3674,9 +3674,15 @@ void MainWindow::createViewportToolbars()
     if(const COptDouble* option = dynamic_cast<const COptDouble*>(
            m_settings->opt(eOptSetGeneral, "telephotoCameraMultiplier")))
         telephotoMultiplier = ei::boundedTelephotoMultiplier(float(option->value()));
+    int telephotoDirection = int(ei::kTelephotoDirectionDefault);
+    if(const COptInt* option = dynamic_cast<const COptInt*>(
+           m_settings->opt(eOptSetGeneral, "telephotoCameraDirection")))
+        telephotoDirection = int(ei::boundedTelephotoDirection(option->value()));
     m_cameraTelephotoControls->setTelephotoMultiplier(telephotoMultiplier);
+    m_cameraTelephotoControls->setTelephotoDirection(telephotoDirection);
     m_cameraTelephotoControls->setTelephotoEnabled(false);
     m_pView->setTelephotoCameraMultiplier(telephotoMultiplier);
+    m_pView->setTelephotoCameraDirection(telephotoDirection);
     m_pView->setTelephotoCameraEnabled(false);
     operationLayout->addWidget(m_cameraTelephotoControls);
 
@@ -3708,6 +3714,9 @@ void MainWindow::createViewportToolbars()
     connect(m_cameraTelephotoControls,
             &CCameraTelephotoControls::telephotoMultiplierChanged,
             m_pView, &CView::setTelephotoCameraMultiplier);
+    connect(m_cameraTelephotoControls,
+            &CCameraTelephotoControls::telephotoDirectionChanged,
+            m_pView, &CView::setTelephotoCameraDirection);
     connect(m_pView, &CView::telephotoCameraEnabledChanged, this,
             [this](bool enabled)
     {
@@ -3727,6 +3736,15 @@ void MainWindow::createViewportToolbars()
         m_cameraSpeedPersistTimer->start(250);
         statusBar()->showMessage(
             tr("Telephoto multiplier: %1x").arg(value, 0, 'f', 1), 1500);
+    });
+    connect(m_pView, &CView::telephotoCameraDirectionChanged, this,
+            [this](int direction)
+    {
+        m_cameraTelephotoControls->setTelephotoDirection(direction);
+        if(COptInt* option = dynamic_cast<COptInt*>(
+               m_settings->opt(eOptSetGeneral, "telephotoCameraDirection")))
+            option->setValue(direction);
+        m_cameraSpeedPersistTimer->start(250);
     });
     m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
     m_ui->toolsLayout->setSpacing(0);

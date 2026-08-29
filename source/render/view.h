@@ -294,6 +294,8 @@ public:
     void setTelephotoCameraEnabled(bool enabled);
     double telephotoCameraMultiplier() const;
     void setTelephotoCameraMultiplier(double multiplier);
+    int telephotoCameraDirection() const;
+    void setTelephotoCameraDirection(int direction);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
     void refreshSelectContextHelp();
@@ -647,6 +649,7 @@ signals:
     void cameraSpeedMultiplierChanged(double multiplier);
     void telephotoCameraEnabledChanged(bool enabled);
     void telephotoCameraMultiplierChanged(double multiplier);
+    void telephotoCameraDirectionChanged(int direction);
     void entranceOverlayVisibilityChanged(bool visible);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();

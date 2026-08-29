@@ -1,9 +1,15 @@
 #include <QtTest>
 
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QTranslator>
+
 #include <limits>
 
 #include "camera_orbit.h"
 #include "camera_telephoto.h"
+#include "camera_telephoto_controls.h"
 #include "shadow_cascade.h"
 
 class CameraTests : public QObject
@@ -18,6 +24,9 @@ private slots:
     void advancesVsyncFramesWithoutFixedStepLag();
     void keepsMovementActiveBetweenInterpolatedSteps();
     void telephotoMultiplierContract();
+    void telephotoControlsExposeFourDirections();
+    void telephotoDirectionLabelsAreLocalized();
+    void telephotoDirectionContract();
     void telephotoUsesFixedJamaisVuOrientation();
     void telephotoMovesOnlyTheRenderEye();
     void telephotoScalesOnlyPerspectiveXY();
@@ -146,6 +155,163 @@ void CameraTests::telephotoMultiplierContract()
     QCOMPARE(ei::boundedTelephotoMultiplier(9.0f), 4.0f);
     QCOMPARE(ei::boundedTelephotoMultiplier(
                  std::numeric_limits<float>::quiet_NaN()), 2.0f);
+}
+
+void CameraTests::telephotoControlsExposeFourDirections()
+{
+    CCameraTelephotoControls controls;
+    QCheckBox* enabled = controls.findChild<QCheckBox*>(
+        "telephotoCameraEnabled");
+    QDoubleSpinBox* multiplier = controls.findChild<QDoubleSpinBox*>(
+        "telephotoCameraMultiplier");
+    QComboBox* direction = controls.findChild<QComboBox*>(
+        "telephotoCameraDirection");
+    QVERIFY(enabled);
+    QVERIFY(multiplier);
+    QVERIFY(direction);
+    QVERIFY(!enabled->isChecked());
+    QCOMPARE(multiplier->minimum(), double(ei::kTelephotoMultiplierMinimum));
+    QCOMPARE(multiplier->maximum(), double(ei::kTelephotoMultiplierMaximum));
+    QCOMPARE(multiplier->value(), double(ei::kTelephotoMultiplierDefault));
+    QCOMPARE(direction->count(), 4);
+    QCOMPARE(controls.telephotoDirection(),
+             int(ei::kTelephotoDirectionDefault));
+
+    const ei::ETelephotoDirection expectedDirections[] = {
+        ei::ETelephotoDirection::SouthwestToNortheast,
+        ei::ETelephotoDirection::SoutheastToNorthwest,
+        ei::ETelephotoDirection::NortheastToSouthwest,
+        ei::ETelephotoDirection::NorthwestToSoutheast
+    };
+    for(int index = 0; index < 4; ++index)
+        QCOMPARE(direction->itemData(index).toInt(),
+                 int(expectedDirections[index]));
+
+    QSignalSpy directionChanged(
+        &controls, SIGNAL(telephotoDirectionChanged(int)));
+    direction->setCurrentIndex(3);
+    QCOMPARE(controls.telephotoDirection(),
+             int(ei::ETelephotoDirection::NorthwestToSoutheast));
+    QCOMPARE(directionChanged.count(), 1);
+    QCOMPARE(directionChanged.takeFirst().at(0).toInt(),
+             int(ei::ETelephotoDirection::NorthwestToSoutheast));
+
+    controls.setTelephotoDirection(
+        int(ei::ETelephotoDirection::SoutheastToNorthwest));
+    QCOMPARE(controls.telephotoDirection(),
+             int(ei::ETelephotoDirection::SoutheastToNorthwest));
+    QCOMPARE(directionChanged.count(), 0);
+    controls.setTelephotoDirection(99);
+    QCOMPARE(controls.telephotoDirection(),
+             int(ei::kTelephotoDirectionDefault));
+}
+
+void CameraTests::telephotoDirectionLabelsAreLocalized()
+{
+    QTranslator translator;
+    QVERIFY(translator.load(QFINDTESTDATA("../translations/ei_mapper_ru.qm")));
+    QVERIFY(QCoreApplication::installTranslator(&translator));
+    {
+        CCameraTelephotoControls controls;
+        QComboBox* direction = controls.findChild<QComboBox*>(
+            "telephotoCameraDirection");
+        QVERIFY(direction);
+        QCOMPARE(direction->itemText(0), QString::fromUtf8("ЮЗ → СВ"));
+        QCOMPARE(direction->itemText(1), QString::fromUtf8("ЮВ → СЗ"));
+        QCOMPARE(direction->itemText(2), QString::fromUtf8("СВ → ЮЗ"));
+        QCOMPARE(direction->itemText(3), QString::fromUtf8("СЗ → ЮВ"));
+    }
+    QCoreApplication::removeTranslator(&translator);
+}
+
+void CameraTests::telephotoDirectionContract()
+{
+    QCOMPARE(int(ei::kTelephotoDirectionDefault),
+             int(ei::ETelephotoDirection::SouthwestToNortheast));
+    QCOMPARE(int(ei::boundedTelephotoDirection(-1)),
+             int(ei::kTelephotoDirectionDefault));
+    QCOMPARE(int(ei::boundedTelephotoDirection(4)),
+             int(ei::kTelephotoDirectionDefault));
+
+    struct DirectionExpectation
+    {
+        ei::ETelephotoDirection direction;
+        float yaw;
+        float xSign;
+        float ySign;
+    };
+    const DirectionExpectation expectations[] = {
+        {ei::ETelephotoDirection::SouthwestToNortheast, 45.0f, 1.0f, 1.0f},
+        {ei::ETelephotoDirection::SoutheastToNorthwest, 135.0f, -1.0f, 1.0f},
+        {ei::ETelephotoDirection::NortheastToSouthwest, 225.0f, -1.0f, -1.0f},
+        {ei::ETelephotoDirection::NorthwestToSoutheast, 315.0f, 1.0f, -1.0f}
+    };
+    const QVector3D target(12.0f, -8.0f, 3.0f);
+    QMatrix4x4 normalProjection;
+    normalProjection.perspective(45.0f, 16.0f / 9.0f, 1.0f, 1000.0f);
+    const QMatrix4x4 telephotoProjection = ei::telephotoProjectionMatrix(
+        normalProjection, 2.0f);
+    const QRect viewport(0, 0, 1920, 1080);
+
+    for(const DirectionExpectation& expectation : expectations)
+    {
+        const QVector3D direction = ei::telephotoViewDirection(
+            expectation.direction);
+        float yaw = qRadiansToDegrees(qAtan2(direction.y(), direction.x()));
+        if(yaw < 0.0f)
+            yaw += 360.0f;
+        const float pitch = qRadiansToDegrees(qAsin(-direction.z()));
+        QVERIFY2(qAbs(yaw - expectation.yaw) < 0.0001f,
+                 "Telephoto direction selected the wrong diagonal yaw");
+        QVERIFY2(qAbs(pitch - 35.264f) < 0.0001f,
+                 "Changing Telephoto direction changed its fixed pitch");
+        QVERIFY(direction.x() * expectation.xSign > 0.0f);
+        QVERIFY(direction.y() * expectation.ySign > 0.0f);
+
+        const QVector3D right = ei::telephotoGroundRight(
+            expectation.direction);
+        QVERIFY2(qAbs(right.z()) < 0.000001f,
+                 "Changing Telephoto direction introduced camera roll");
+        QVERIFY(qAbs(QVector3D::dotProduct(right, direction)) < 0.000001f);
+
+        QMatrix4x4 normalView;
+        normalView.lookAt(target - direction * 20.0f, target,
+                          QVector3D(0.0f, 0.0f, 1.0f));
+        const ei::STelephotoCameraFrame frame = ei::telephotoCameraFrame(
+            normalView, target, 2.0f, expectation.direction);
+        QVERIFY2((frame.logicalEye - (target - direction * 20.0f)).length()
+                     < 0.0002f,
+                 "Selected Telephoto direction did not reach the logical eye");
+        QVERIFY2((frame.renderEye - (target - direction * 40.0f)).length()
+                     < 0.0002f,
+                 "Selected Telephoto direction did not reach the render eye");
+        QVERIFY((frame.cullingCenter - frame.logicalEye).length() < 0.0001f);
+        const QVector3D targetInView =
+            (frame.view * QVector4D(target, 1.0f)).toVector3D();
+        QVERIFY(qAbs(targetInView.x()) < 0.0001f);
+        QVERIFY(qAbs(targetInView.y()) < 0.0001f);
+        QVERIFY(qAbs(targetInView.z() + 40.0f) < 0.001f);
+
+        const QVector3D edge = target + right * 2.0f;
+        const float normalPixels = (edge.project(normalView, normalProjection,
+                                                  viewport)
+            - target.project(normalView, normalProjection, viewport)).length();
+        const float telephotoPixels = (edge.project(frame.view,
+                                                     telephotoProjection,
+                                                     viewport)
+            - target.project(frame.view, telephotoProjection, viewport)).length();
+        QVERIFY2(qAbs(normalPixels - telephotoPixels) < 0.01f,
+                 "Changing direction broke Telephoto central scale preservation");
+
+        const QVector3D world = target + right * 3.0f
+            + QVector3D(0.0f, 0.0f, 1.5f);
+        const QVector3D screen = world.project(frame.view, telephotoProjection,
+                                                viewport);
+        const QVector3D unprojected = screen.unproject(
+            frame.view, telephotoProjection, viewport);
+        QVERIFY2((unprojected - world).length() < 0.001f,
+                 "Changing direction desynchronized Telephoto screen/world transforms");
+    }
 }
 
 void CameraTests::telephotoUsesFixedJamaisVuOrientation()
@@ -332,17 +498,27 @@ void CameraTests::telephotoExitRestoresTheExactNormalView()
     const QMatrix4x4 active = ei::activeCameraViewMatrix(
         normalView, target, true, 2.0f);
     QVERIFY(active != normalView);
-    const QMatrix4x4 restored = ei::activeCameraViewMatrix(
-        normalView, target, false, 2.0f);
     const QMatrix4x4 restoredProjection = ei::activeCameraProjectionMatrix(
         normalProjection, false, 2.0f);
-    for(int element = 0; element < 16; ++element)
+    const ei::ETelephotoDirection directions[] = {
+        ei::ETelephotoDirection::SouthwestToNortheast,
+        ei::ETelephotoDirection::SoutheastToNorthwest,
+        ei::ETelephotoDirection::NortheastToSouthwest,
+        ei::ETelephotoDirection::NorthwestToSoutheast
+    };
+    for(ei::ETelephotoDirection direction : directions)
     {
-        QCOMPARE(restored.constData()[element], normalView.constData()[element]);
-        QCOMPARE(restoredProjection.constData()[element],
-                 normalProjection.constData()[element]);
+        const QMatrix4x4 restored = ei::activeCameraViewMatrix(
+            normalView, target, false, 2.0f, direction);
+        for(int element = 0; element < 16; ++element)
+        {
+            QCOMPARE(restored.constData()[element],
+                     normalView.constData()[element]);
+            QCOMPARE(restoredProjection.constData()[element],
+                     normalProjection.constData()[element]);
+        }
     }
 }
 
-QTEST_APPLESS_MAIN(CameraTests)
+QTEST_MAIN(CameraTests)
 #include "camera_tests.moc"

@@ -3,6 +3,7 @@
 
 #include <QMatrix4x4>
 #include <QElapsedTimer>
+#include "camera_telephoto.h"
 #include "utils.h"
 
 class CKeyManager;
@@ -41,6 +42,10 @@ public:
     void setTelephotoEnabled(bool enabled) { m_telephotoEnabled = enabled; }
     float telephotoMultiplier() const { return m_telephotoMultiplier; }
     void setTelephotoMultiplier(float multiplier);
+    ei::ETelephotoDirection telephotoDirection() const {
+        return m_telephotoDirection;
+    }
+    void setTelephotoDirection(ei::ETelephotoDirection direction);
     QVector3D logicalCullingPosition() const;
     bool movementInputActive() const;
     // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
@@ -71,6 +76,7 @@ private:
     float m_step;
     float m_speedMultiplier;
     float m_telephotoMultiplier;
+    ei::ETelephotoDirection m_telephotoDirection;
     float m_frameMovementScale;
     QVector3D m_previousMotionPos;
     QVector3D m_previousMotionPivot;

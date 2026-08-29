@@ -24394,6 +24394,25 @@ void CView::setTelephotoCameraMultiplier(double multiplier)
     update();
 }
 
+int CView::telephotoCameraDirection() const
+{
+    return m_cam ? int(m_cam->telephotoDirection())
+                 : int(ei::kTelephotoDirectionDefault);
+}
+
+void CView::setTelephotoCameraDirection(int direction)
+{
+    if(!m_cam)
+        return;
+    const ei::ETelephotoDirection bounded =
+        ei::boundedTelephotoDirection(direction);
+    if(telephotoCameraDirection() == int(bounded))
+        return;
+    m_cam->setTelephotoDirection(bounded);
+    emit telephotoCameraDirectionChanged(int(bounded));
+    update();
+}
+
 void CView::updateCameraProjection()
 {
     const bool enabled = m_cam && m_cam->telephotoEnabled();

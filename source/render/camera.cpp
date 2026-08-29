@@ -10,6 +10,7 @@
 CCamera::CCamera()
     :m_speedMultiplier(1.0f)
     ,m_telephotoMultiplier(ei::kTelephotoMultiplierDefault)
+    ,m_telephotoDirection(ei::kTelephotoDirectionDefault)
     ,m_frameMovementScale(1.0f)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
@@ -30,6 +31,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
     ,m_step(0.5f)
     ,m_speedMultiplier(1.0f)
     ,m_telephotoMultiplier(ei::kTelephotoMultiplierDefault)
+    ,m_telephotoDirection(ei::kTelephotoDirectionDefault)
     ,m_frameMovementScale(1.0f)
     ,m_keyManager(nullptr)
     ,m_pSettings(nullptr)
@@ -115,6 +117,11 @@ void CCamera::setTelephotoMultiplier(float multiplier)
     m_telephotoMultiplier = ei::boundedTelephotoMultiplier(multiplier);
 }
 
+void CCamera::setTelephotoDirection(ei::ETelephotoDirection direction)
+{
+    m_telephotoDirection = ei::boundedTelephotoDirection(int(direction));
+}
+
 bool CCamera::movementInputActive() const
 {
     if(!m_keyManager)
@@ -159,7 +166,8 @@ QMatrix4x4 CCamera::update()
     const QMatrix4x4 normalView = matrixFor(m_renderPos, m_renderPivot);
     return ei::activeCameraViewMatrix(normalView, m_renderPivot,
                                       m_telephotoEnabled,
-                                      m_telephotoMultiplier);
+                                      m_telephotoMultiplier,
+                                      m_telephotoDirection);
 }
 
 QMatrix4x4 CCamera::viewMatrix()
@@ -168,7 +176,8 @@ QMatrix4x4 CCamera::viewMatrix()
     const QVector3D pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;
     return ei::activeCameraViewMatrix(matrixFor(position, pivot), pivot,
                                       m_telephotoEnabled,
-                                      m_telephotoMultiplier);
+                                      m_telephotoMultiplier,
+                                      m_telephotoDirection);
 }
 
 QVector3D CCamera::logicalCullingPosition() const
@@ -178,7 +187,8 @@ QVector3D CCamera::logicalCullingPosition() const
     const QMatrix4x4 normalView = matrixFor(position, pivot);
     if(m_telephotoEnabled)
         return ei::telephotoCameraFrame(normalView, pivot,
-                                        m_telephotoMultiplier).cullingCenter;
+                                        m_telephotoMultiplier,
+                                        m_telephotoDirection).cullingCenter;
     bool eyeOk = false;
     const QVector3D eye = ei::cameraEyeFromMatrix(normalView, &eyeOk);
     return eyeOk ? eye : position;
@@ -210,7 +220,7 @@ void CCamera::strafeRight(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(ei::telephotoGroundRight(), bShift);
+        translate(ei::telephotoGroundRight(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(1.0, 0.0, 0.0);
@@ -221,7 +231,7 @@ void CCamera::strafeLeft(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(-ei::telephotoGroundRight(), bShift);
+        translate(-ei::telephotoGroundRight(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(-1.0, 0.0, 0.0);
@@ -232,7 +242,7 @@ void CCamera::strafeForward(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(ei::telephotoGroundForward(), bShift);
+        translate(ei::telephotoGroundForward(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(m_pivot-m_pos);
@@ -243,7 +253,7 @@ void CCamera::shiftForward(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(ei::telephotoGroundForward(), bShift);
+        translate(ei::telephotoGroundForward(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(m_pivot-m_pos);
@@ -254,7 +264,7 @@ void CCamera::strafeBack(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(-ei::telephotoGroundForward(), bShift);
+        translate(-ei::telephotoGroundForward(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(m_pos-m_pivot);
@@ -265,7 +275,7 @@ void CCamera::shiftBack(bool bShift)
 {
     if(m_telephotoEnabled)
     {
-        translate(-ei::telephotoGroundForward(), bShift);
+        translate(-ei::telephotoGroundForward(m_telephotoDirection), bShift);
         return;
     }
     QVector3D dir(m_pos-m_pivot);
@@ -352,7 +362,8 @@ void CCamera::enlarge(const bool bZoom)
 {
     if(m_telephotoEnabled)
     {
-        m_pos = ei::telephotoZoomedPosition(m_pos, m_pivot, step(), bZoom);
+        m_pos = ei::telephotoZoomedPosition(
+            m_pos, m_pivot, step(), bZoom, m_telephotoDirection);
         if(!m_integratingKeyboardMotion)
             syncMotionInterpolation();
         return;

@@ -10,11 +10,13 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
     def read(self, relative_path):
         return (ROOT / relative_path).read_text(encoding="utf-8")
 
-    def test_only_multiplier_is_persistent(self):
+    def test_multiplier_and_direction_are_persistent(self):
         settings = self.read("source/app/settings.cpp")
         option_order = self.read("assets/resources/optSet.txt")
         self.assertIn('new COptDouble("telephotoCameraMultiplier", 2.0)', settings)
+        self.assertIn('new COptInt("telephotoCameraDirection", 0)', settings)
         self.assertIn("telephotoCameraMultiplier", option_order)
+        self.assertIn("telephotoCameraDirection", option_order)
         self.assertNotIn('COptBool("telephotoCameraEnabled"', settings)
         self.assertNotIn("telephotoCameraEnabled", option_order)
 
@@ -22,11 +24,19 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
         controls = self.read("source/ui/camera_telephoto_controls.cpp")
         self.assertIn('setObjectName("telephotoCameraEnabled")', controls)
         self.assertIn('setObjectName("telephotoCameraMultiplier")', controls)
+        self.assertIn('setObjectName("telephotoCameraDirection")', controls)
+        self.assertIn("SouthwestToNortheast", controls)
+        self.assertIn("SoutheastToNorthwest", controls)
+        self.assertIn("NortheastToSouthwest", controls)
+        self.assertIn("NorthwestToSoutheast", controls)
         self.assertRegex(controls, r"setRange\(\s*ei::kTelephotoMultiplierMinimum\s*,\s*ei::kTelephotoMultiplierMaximum\s*\)")
         self.assertIn("setChecked(false)", controls)
         main_window = self.read("source/app/main_window.cpp")
         self.assertIn("telephotoCameraMultiplier", main_window)
+        self.assertIn("telephotoCameraDirection", main_window)
         self.assertIn("setTelephotoCameraEnabled", main_window)
+        camera = self.read("source/render/camera.cpp")
+        self.assertGreaterEqual(camera.count("m_telephotoDirection"), 8)
 
     def test_world_and_query_paths_share_active_matrices(self):
         view = self.read("source/render/view.cpp")
@@ -57,6 +67,15 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
         self.assertIn("<source>Telephoto</source>", catalog)
         self.assertIn("Телефотографическая камера JamaisVu", catalog)
         self.assertIn("<source>Multiplier:</source>", catalog)
+        self.assertIn("<source>Direction:</source>", catalog)
+        self.assertIn("<source>SW → NE</source>", catalog)
+        self.assertIn("<translation>ЮЗ → СВ</translation>", catalog)
+        self.assertIn("<source>SE → NW</source>", catalog)
+        self.assertIn("<translation>ЮВ → СЗ</translation>", catalog)
+        self.assertIn("<source>NE → SW</source>", catalog)
+        self.assertIn("<translation>СВ → ЮЗ</translation>", catalog)
+        self.assertIn("<source>NW → SE</source>", catalog)
+        self.assertIn("<translation>СЗ → ЮВ</translation>", catalog)
 
 
 if __name__ == "__main__":

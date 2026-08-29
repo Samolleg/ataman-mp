@@ -15881,13 +15881,38 @@ Runes:
         </message>
         <message>
             <location filename="../source/ui/camera_telephoto_controls.cpp" line="23" />
-            <source>JamaisVu telephoto camera. Locks yaw to 45.0 degrees and pitch to 35.264 degrees, moves the render eye back, and narrows perspective while keeping map movement and zoom available.</source>
-            <translation>Телефотографическая камера JamaisVu. Фиксирует поворот на 45,0° и наклон на 35,264°, отодвигает точку отрисовки и сужает перспективу, сохраняя перемещение по карте и масштабирование.</translation>
+            <source>JamaisVu telephoto camera. Uses the selected fixed diagonal direction and a pitch of 35.264 degrees, moves the render eye back, and narrows perspective while keeping map movement and zoom available.</source>
+            <translation>Телефотографическая камера JamaisVu. Использует выбранное фиксированное диагональное направление и наклон 35,264°, отодвигает точку отрисовки и сужает перспективу, сохраняя перемещение по карте и масштабирование.</translation>
         </message>
         <message>
             <location filename="../source/ui/camera_telephoto_controls.cpp" line="32" />
             <source>Multiplier:</source>
             <translation>Множитель:</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="48" />
+            <source>Direction:</source>
+            <translation>Направление:</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="51" />
+            <source>SW → NE</source>
+            <translation>ЮЗ → СВ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="53" />
+            <source>SE → NW</source>
+            <translation>ЮВ → СЗ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="55" />
+            <source>NE → SW</source>
+            <translation>СВ → ЮЗ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="57" />
+            <source>NW → SE</source>
+            <translation>СЗ → ЮВ</translation>
         </message>
     </context>
 </TS>

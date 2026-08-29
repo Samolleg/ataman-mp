@@ -74,6 +74,7 @@
 #include "ui/message_log_panel.h"
 #include "ui/dock_hidden_tab.h"
 #include "ui/camera_telephoto_controls.h"
+#include "camera_telephoto.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
 #include "ui/resource_setup_dialog.h"
@@ -2327,19 +2328,39 @@ int runHeadlessCommand(QApplication& app)
                 "telephotoCameraEnabled");
             QDoubleSpinBox* multiplier = controls.findChild<QDoubleSpinBox*>(
                 "telephotoCameraMultiplier");
+            QComboBox* direction = controls.findChild<QComboBox*>(
+                "telephotoCameraDirection");
             bool enabledSignal = false;
+            bool directionSignal = false;
+            const bool defaultDirection = controls.telephotoDirection()
+                == int(ei::ETelephotoDirection::SouthwestToNortheast);
             QObject::connect(&controls,
                 &CCameraTelephotoControls::telephotoEnabledChanged,
                 [&enabledSignal](bool value) { enabledSignal = value; });
+            QObject::connect(&controls,
+                &CCameraTelephotoControls::telephotoDirectionChanged,
+                [&directionSignal](int value)
+                {
+                    directionSignal = value
+                        == int(ei::ETelephotoDirection::NortheastToSouthwest);
+                });
             if(enabled)
                 enabled->setChecked(true);
-            telephotoControlsContract = enabled && multiplier
+            if(direction)
+                direction->setCurrentIndex(2);
+            telephotoControlsContract = enabled && multiplier && direction
                 && enabledSignal && controls.telephotoEnabled()
                 && qAbs(multiplier->minimum() - 1.0) < 0.001
                 && qAbs(multiplier->maximum() - 4.0) < 0.001
-                && qAbs(multiplier->value() - 2.0) < 0.001;
+                && qAbs(multiplier->value() - 2.0) < 0.001
+                && direction->count() == 4 && defaultDirection
+                && directionSignal
+                && controls.telephotoDirection()
+                    == int(ei::ETelephotoDirection::NortheastToSouthwest);
             CCameraTelephotoControls nextSessionControls;
-            telephotoEnabledSessionOnly = !nextSessionControls.telephotoEnabled();
+            telephotoEnabledSessionOnly = !nextSessionControls.telephotoEnabled()
+                && nextSessionControls.telephotoDirection()
+                    == int(ei::kTelephotoDirectionDefault);
         }
         {
             const QString previousDirectory = QDir::currentPath();
@@ -2400,6 +2421,8 @@ int runHeadlessCommand(QApplication& app)
                     settingsWindow.opt(eOptSetRender, "renderTerrainShadows"));
                 COptDouble* telephotoMultiplierOption = dynamic_cast<COptDouble*>(
                     settingsWindow.opt(eOptSetGeneral, "telephotoCameraMultiplier"));
+                COptInt* telephotoDirectionOption = dynamic_cast<COptInt*>(
+                    settingsWindow.opt(eOptSetGeneral, "telephotoCameraDirection"));
                 QCheckBox* renderTerrainShadowsCheck =
                     settingsWindow.findChild<QCheckBox*>("renderTerrainShadows");
                 renderOptionsRegistered = animateUnits && animateUnits->value()
@@ -2415,6 +2438,9 @@ int runHeadlessCommand(QApplication& app)
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
                 if(telephotoMultiplierOption)
                     telephotoMultiplierOption->setValue(3.4);
+                if(telephotoDirectionOption)
+                    telephotoDirectionOption->setValue(
+                        int(ei::ETelephotoDirection::NorthwestToSoutheast));
                 if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
@@ -2505,8 +2531,14 @@ int runHeadlessCommand(QApplication& app)
                 const COptDouble* reopenedTelephoto = dynamic_cast<const COptDouble*>(
                     reopenedSettings.opt(eOptSetGeneral,
                                          "telephotoCameraMultiplier"));
+                const COptInt* reopenedTelephotoDirection =
+                    dynamic_cast<const COptInt*>(reopenedSettings.opt(
+                        eOptSetGeneral, "telephotoCameraDirection"));
                 telephotoSettingsPersist = reopenedTelephoto
                     && qAbs(reopenedTelephoto->value() - 3.4) < 0.001
+                    && reopenedTelephotoDirection
+                    && reopenedTelephotoDirection->value()
+                        == int(ei::ETelephotoDirection::NorthwestToSoutheast)
                     && !reopenedSettings.opt("telephotoCameraEnabled");
             }
             QDir::setCurrent(previousDirectory);
