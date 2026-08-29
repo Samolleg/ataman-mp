@@ -73,6 +73,7 @@
 #include "ui/validation_panel_layout.h"
 #include "ui/message_log_panel.h"
 #include "ui/dock_hidden_tab.h"
+#include "ui/camera_telephoto_controls.h"
 #include "ui/viewport_minimap_widget.h"
 #include "ui/minimap_export_dialog.h"
 #include "ui/resource_setup_dialog.h"
@@ -2300,6 +2301,9 @@ int runHeadlessCommand(QApplication& app)
         bool autosaveSettingsPersist = false;
         bool autosaveLiveReconfigure = false;
         bool cameraSpeedSettingsPersist = false;
+        bool telephotoControlsContract = false;
+        bool telephotoSettingsPersist = false;
+        bool telephotoEnabledSessionOnly = false;
         bool uiScaleSettingsPersist = false;
         bool uiScaleLiveApply = false;
         bool uiScaleFontApplied = false;
@@ -2317,6 +2321,26 @@ int runHeadlessCommand(QApplication& app)
         bool russianLayoutsFit = false;
         bool renderOptionsRegistered = false;
         bool terrainShadowToggleApplies = false;
+        {
+            CCameraTelephotoControls controls;
+            QCheckBox* enabled = controls.findChild<QCheckBox*>(
+                "telephotoCameraEnabled");
+            QDoubleSpinBox* multiplier = controls.findChild<QDoubleSpinBox*>(
+                "telephotoCameraMultiplier");
+            bool enabledSignal = false;
+            QObject::connect(&controls,
+                &CCameraTelephotoControls::telephotoEnabledChanged,
+                [&enabledSignal](bool value) { enabledSignal = value; });
+            if(enabled)
+                enabled->setChecked(true);
+            telephotoControlsContract = enabled && multiplier
+                && enabledSignal && controls.telephotoEnabled()
+                && qAbs(multiplier->minimum() - 1.0) < 0.001
+                && qAbs(multiplier->maximum() - 4.0) < 0.001
+                && qAbs(multiplier->value() - 2.0) < 0.001;
+            CCameraTelephotoControls nextSessionControls;
+            telephotoEnabledSessionOnly = !nextSessionControls.telephotoEnabled();
+        }
         {
             const QString previousDirectory = QDir::currentPath();
             QTemporaryDir settingsDirectory;
@@ -2374,6 +2398,8 @@ int runHeadlessCommand(QApplication& app)
                     settingsWindow.opt(eOptSetRender, "renderTextureMipmapping"));
                 COptBool* renderTerrainShadows = dynamic_cast<COptBool*>(
                     settingsWindow.opt(eOptSetRender, "renderTerrainShadows"));
+                COptDouble* telephotoMultiplierOption = dynamic_cast<COptDouble*>(
+                    settingsWindow.opt(eOptSetGeneral, "telephotoCameraMultiplier"));
                 QCheckBox* renderTerrainShadowsCheck =
                     settingsWindow.findChild<QCheckBox*>("renderTerrainShadows");
                 renderOptionsRegistered = animateUnits && animateUnits->value()
@@ -2387,6 +2413,8 @@ int runHeadlessCommand(QApplication& app)
                         && settingsWindow.findChild<QCheckBox*>("renderTextureMipmapping")
                         && renderTerrainShadowsCheck
                         && settingsWindow.findChild<QLineEdit*>("renderFpsCap");
+                if(telephotoMultiplierOption)
+                    telephotoMultiplierOption->setValue(3.4);
                 if(historyShortcut && duplicateShortcut && stopTestShortcut)
                 {
                     historyShortcut->setKeySequence(QKeySequence("Alt+L"));
@@ -2471,6 +2499,15 @@ int runHeadlessCommand(QApplication& app)
                         && saveCloseButton->text() == "Save && Close"
                         && applyButton->geometry().left() < saveCloseButton->geometry().left();
                 }
+            }
+            {
+                CSettings reopenedSettings(&primaryWindow);
+                const COptDouble* reopenedTelephoto = dynamic_cast<const COptDouble*>(
+                    reopenedSettings.opt(eOptSetGeneral,
+                                         "telephotoCameraMultiplier"));
+                telephotoSettingsPersist = reopenedTelephoto
+                    && qAbs(reopenedTelephoto->value() - 3.4) < 0.001
+                    && !reopenedSettings.opt("telephotoCameraEnabled");
             }
             QDir::setCurrent(previousDirectory);
         }
@@ -3029,6 +3066,8 @@ int runHeadlessCommand(QApplication& app)
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
                 && autosaveSettingsPersist && settingsApplySignal && autosaveLiveReconfigure
                 && cameraSpeedSettingsPersist
+                && telephotoControlsContract && telephotoSettingsPersist
+                && telephotoEnabledSessionOnly
                 && uiScaleSettingsPersist && uiScaleLiveApply && uiScaleFontApplied
                 && uiScaleExistingWindowApplied
                 && settingsApplyKeepsOpen && settingsSaveCloseWorks
@@ -3201,6 +3240,9 @@ int runHeadlessCommand(QApplication& app)
                << " autosaveSettingsPersist=" << autosaveSettingsPersist
                << " autosaveLiveReconfigure=" << autosaveLiveReconfigure
                << " cameraSpeedSettingsPersist=" << cameraSpeedSettingsPersist
+               << " telephotoControlsContract=" << telephotoControlsContract
+               << " telephotoSettingsPersist=" << telephotoSettingsPersist
+               << " telephotoEnabledSessionOnly=" << telephotoEnabledSessionOnly
                << " uiScaleSettingsPersist=" << uiScaleSettingsPersist
                << " uiScaleLiveApply=" << uiScaleLiveApply
                << " uiScaleFontApplied=" << uiScaleFontApplied

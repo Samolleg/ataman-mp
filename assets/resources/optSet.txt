@@ -8,6 +8,7 @@ version
 mouseSenseX
 mouseSenseY
 cameraSpeedMultiplier
+telephotoCameraMultiplier
 dipEditSymmetric
 rangeIncrement
 logLevel

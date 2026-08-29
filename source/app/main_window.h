@@ -63,6 +63,7 @@ class QSlider;
 class QDoubleSpinBox;
 class QSettings;
 class CViewportMinimapWidget;
+class CCameraTelephotoControls;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CDockHiddenTab;
@@ -345,6 +346,7 @@ private:
     bool m_backupSessionStarted{false};
     QSlider* m_cameraSpeedSlider{nullptr};
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
+    CCameraTelephotoControls* m_cameraTelephotoControls{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
     bool m_shutdownInProgress{false};

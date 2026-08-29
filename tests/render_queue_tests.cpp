@@ -113,7 +113,8 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
 void RenderQueueTests::filtersShadowCastersByDistance()
 {
     SRenderItem item;
-    item.cameraDistanceSquared = 16.0f;
+    item.cameraDistanceSquared = 1600.0f;
+    item.cullingDistanceSquared = 16.0f;
     QVERIFY(!shadowItemWithinDistance(item, 1.0f));
     QVERIFY(shadowItemWithinDistance(item, 4.0f));
     QVERIFY(shadowItemWithinDistance(item, 8.0f));
