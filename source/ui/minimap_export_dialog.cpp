@@ -3,7 +3,9 @@
 #include <QtWidgets>
 #include <QtConcurrent>
 #include <QCryptographicHash>
+#include <QGuiApplication>
 #include <QFutureWatcher>
+#include <QScreen>
 #include <functional>
 
 #include "mmp_codec.h"
@@ -236,6 +238,16 @@ CMinimapExportDialog::CMinimapExportDialog(
     setModal(false);
     setAttribute(Qt::WA_DeleteOnClose);
     QVBoxLayout* root = new QVBoxLayout(this);
+    QScrollArea* scroll = new QScrollArea(this);
+    scroll->setObjectName(QStringLiteral("minimapExportScrollArea"));
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setFrameShape(QFrame::NoFrame);
+    QWidget* scrollContent = new QWidget(scroll);
+    QVBoxLayout* contentRoot = new QVBoxLayout(scrollContent);
+    scroll->setWidget(scrollContent);
+    root->addWidget(scroll, 1);
 
     m_sectorWidth = capture.sectorWidth;
     m_sectorHeight = capture.sectorHeight;
@@ -247,7 +259,7 @@ CMinimapExportDialog::CMinimapExportDialog(
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
     m_summary->setStyleSheet(capture.bake.incomplete
         ? "QLabel { color: #e6a23c; font-weight: 600; }" : QString());
-    root->addWidget(m_summary);
+    contentRoot->addWidget(m_summary);
 
     m_details = new QLabel(tr(
         "Review: %1 x %2 (%3 x %4 sectors)\nOutput: %5\nFraming: %6\nOrientation: %7")
@@ -256,7 +268,7 @@ CMinimapExportDialog::CMinimapExportDialog(
         .arg(capture.exportProfileDescription, capture.framingDescription,
              capture.orientationDescription), this);
     m_details->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    root->addWidget(m_details);
+    contentRoot->addWidget(m_details);
 
     QSplitter* comparison = new QSplitter(Qt::Horizontal, this);
     QGroupBox* generatedGroup = new QGroupBox(tr("Generated"), comparison);
@@ -277,7 +289,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     comparison->addWidget(generatedGroup);
     comparison->addWidget(m_embeddedGroup);
     comparison->setSizes({500, 500});
-    root->addWidget(comparison, 1);
+    contentRoot->addWidget(comparison, 1);
     QHBoxLayout* previewControls = new QHBoxLayout;
     QLabel* previewHint = new QLabel(
         tr("%1 x %1 game texture - mouse wheel zooms; drag to pan")
@@ -302,7 +314,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     previewControls->addWidget(actualPreview);
     previewControls->addWidget(m_resetGradeButton);
     previewControls->addWidget(m_regenerateButton);
-    root->addLayout(previewControls);
+    contentRoot->addLayout(previewControls);
     connect(fitPreview, &QPushButton::clicked, this,
             [this]() {
         m_generatedPreview->fitImage();
@@ -390,7 +402,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     gradeActionLayout->addStretch(1);
     gradeActionLayout->addWidget(m_applyLockButton);
     gradeForm->addRow(QString(), gradeActions);
-    root->addLayout(gradeForm);
+    contentRoot->addLayout(gradeForm);
     connect(m_applyLockButton, &QPushButton::clicked,
             this, &CMinimapExportDialog::applyAndLock);
 
@@ -408,23 +420,23 @@ CMinimapExportDialog::CMinimapExportDialog(
     destinationLayout->addWidget(m_destination, 1);
     destinationLayout->addWidget(m_browseButton);
     form->addRow(tr("Destination RES"), destinationRow);
-    root->addLayout(form);
+    contentRoot->addLayout(form);
 
     m_registerCatalog = new QCheckBox(
         tr("After export, open zone %1 in Map Catalog Editor with this minimap reference staged")
             .arg(zoneId.isEmpty() ? tr("(unregistered)") : zoneId), this);
     m_registerCatalog->setEnabled(!zoneId.isEmpty());
     m_registerCatalog->setChecked(!zoneId.isEmpty());
-    root->addWidget(m_registerCatalog);
+    contentRoot->addWidget(m_registerCatalog);
     QLabel* catalogNote = new QLabel(tr(
         "Catalog registration is a separate verified save. Objectives metadata is preserved, and no reference is staged if texture export fails."), this);
     catalogNote->setWordWrap(true);
-    root->addWidget(catalogNote);
+    contentRoot->addWidget(catalogNote);
 
     m_status = new QLabel(this);
     m_status->setWordWrap(true);
     m_status->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    root->addWidget(m_status);
+    contentRoot->addWidget(m_status);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     m_savePngButton = buttons->addButton(
         tr("Save review PNG..."), QDialogButtonBox::ActionRole);
@@ -444,8 +456,18 @@ CMinimapExportDialog::CMinimapExportDialog(
         setGenerationLocked(true);
     }
     updateGradePreview();
-    if(!restoreGeometry(QSettings().value("minimap/exportGeometry").toByteArray()))
-        resize(1100, 860);
+    const bool restored = restoreGeometry(
+        QSettings().value("minimap/exportGeometry").toByteArray());
+    QScreen* activeScreen = QGuiApplication::screenAt(
+        parentWidget() ? parentWidget()->mapToGlobal(parentWidget()->rect().center())
+                       : QCursor::pos());
+    if(!activeScreen)
+        activeScreen = QGuiApplication::primaryScreen();
+    const QRect available = activeScreen
+        ? activeScreen->availableGeometry() : QRect(0, 0, 1024, 768);
+    const QSize maximumDialogSize(qMax(520, available.width() - 40),
+                                  qMax(360, available.height() - 40));
+    resize((restored ? size() : QSize(1100, 860)).boundedTo(maximumDialogSize));
     updateReadyState();
 }
 

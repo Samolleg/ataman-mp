@@ -2,6 +2,7 @@
 
 #include <QAbstractItemView>
 #include <QComboBox>
+#include <QCursor>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDrag>
@@ -9,6 +10,7 @@
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -20,6 +22,8 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
+#include <QScreen>
+#include <QScrollArea>
 #include <QSet>
 #include <QTimer>
 #include <QTreeWidget>
@@ -271,21 +275,31 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     resize(1320, 820);
     QVBoxLayout* layout = new QVBoxLayout(this);
+    QScrollArea* scroll = new QScrollArea(this);
+    scroll->setObjectName(QStringLiteral("terrainAtlasReviewScrollArea"));
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setFrameShape(QFrame::NoFrame);
+    QWidget* scrollContent = new QWidget(scroll);
+    QVBoxLayout* contentLayout = new QVBoxLayout(scrollContent);
+    scroll->setWidget(scrollContent);
+    layout->addWidget(scroll, 1);
     QLabel* explanation = new QLabel(tr(
         "The editor has already made every safe assignment it could. Painting can use those materials now. "
         "Unusual tiles stay in the unassigned pool and never disable the valid palette. Drag a tile onto a material to assign it; "
         "for transition tiles, select the tile and drag material rows onto its four corners. Missing transitions only produce hard paint edges."), this);
     explanation->setWordWrap(true);
-    layout->addWidget(explanation);
+    contentLayout->addWidget(explanation);
     m_binding->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_binding->setText(tr("Namespace: %1   Slots: %2   Decoded atlas SHA-256: %3")
         .arg(m_profile.mprNamespace).arg(m_profile.atlasSlotCount)
         .arg(QString::fromLatin1(m_profile.atlasPixelSha256)));
-    layout->addWidget(m_binding);
+    contentLayout->addWidget(m_binding);
     m_storage->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_storage->setWordWrap(true);
     m_storage->setObjectName(QStringLiteral("materialAtlasSource"));
-    layout->addWidget(m_storage);
+    contentLayout->addWidget(m_storage);
 
     QHBoxLayout* body = new QHBoxLayout;
     QVBoxLayout* materialSide = new QVBoxLayout;
@@ -353,10 +367,10 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     m_unassigned->setObjectName(QStringLiteral("physicalAtlasSlots"));
     poolSide->addWidget(m_unassigned, 1);
     body->addLayout(poolSide, 3);
-    layout->addLayout(body, 1);
+    contentLayout->addLayout(body, 1);
 
     m_diagnostics->setWordWrap(true);
-    layout->addWidget(m_diagnostics);
+    contentLayout->addWidget(m_diagnostics);
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     QPushButton* reset = buttons->addButton(tr("Reset to default"), QDialogButtonBox::ActionRole);
     reset->setObjectName(QStringLiteral("resetMaterialAtlasToDefault"));
@@ -411,7 +425,18 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     }
 
     QSettings settings;
-    restoreGeometry(settings.value(QStringLiteral("terrainAtlasReview/geometry")).toByteArray());
+    const bool restored = restoreGeometry(
+        settings.value(QStringLiteral("terrainAtlasReview/geometry")).toByteArray());
+    QScreen* activeScreen = QGuiApplication::screenAt(
+        parentWidget() ? parentWidget()->mapToGlobal(parentWidget()->rect().center())
+                       : QCursor::pos());
+    if(!activeScreen)
+        activeScreen = QGuiApplication::primaryScreen();
+    const QRect available = activeScreen
+        ? activeScreen->availableGeometry() : QRect(0, 0, 1024, 768);
+    const QSize maximumDialogSize(qMax(640, available.width() - 40),
+                                  qMax(420, available.height() - 40));
+    resize((restored ? size() : QSize(1320, 820)).boundedTo(maximumDialogSize));
     connect(this, &QDialog::finished, this, [this](int) {
         QSettings settings;
         settings.setValue(QStringLiteral("terrainAtlasReview/geometry"), saveGeometry());

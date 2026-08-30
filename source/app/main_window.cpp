@@ -7596,16 +7596,34 @@ void MainWindow::on_actionNew_MPR_triggered()
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Create New MPR"));
     dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
-    dialog.resize(760, 820);
+    QScreen* activeScreen = QGuiApplication::screenAt(
+        mapToGlobal(rect().center()));
+    if(!activeScreen)
+        activeScreen = QGuiApplication::primaryScreen();
+    const QRect available = activeScreen
+        ? activeScreen->availableGeometry() : QRect(0, 0, 1024, 768);
+    dialog.resize(QSize(760, 820).boundedTo(QSize(
+        qMax(480, available.width() - 40),
+        qMax(360, available.height() - 40))));
     QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QScrollArea* scroll = new QScrollArea(&dialog);
+    scroll->setObjectName(QStringLiteral("newMprScrollArea"));
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setFrameShape(QFrame::NoFrame);
+    QWidget* scrollContent = new QWidget(scroll);
+    QVBoxLayout* contentRoot = new QVBoxLayout(scrollContent);
+    scroll->setWidget(scrollContent);
+    root->addWidget(scroll, 1);
     QLabel* explanation = new QLabel(tr(
         "A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. "
         "Endurance creates fresh MP/SEC members and does not invent a MOB or map.txt registration. "
         "If you change the namespace, matching atlas textures must already exist in the active resource profile."), &dialog);
     explanation->setWordWrap(true);
-    root->addWidget(explanation);
+    contentRoot->addWidget(explanation);
     QFormLayout* form = new QFormLayout;
-    root->addLayout(form);
+    contentRoot->addLayout(form);
 
     QLineEdit* templatePath = new QLineEdit(&dialog);
     templatePath->setToolTip(tr(
@@ -7743,7 +7761,7 @@ void MainWindow::on_actionNew_MPR_triggered()
     overlayTaperTiles->setToolTip(tr(
         "Width of the overlay edge band affected by the smooth taper."));
     overlayForm->addRow(tr("Overlay taper width (tiles)"), overlayTaperTiles);
-    root->addWidget(overlayGroup);
+    contentRoot->addWidget(overlayGroup);
     for(QWidget* control : {static_cast<QWidget*>(overlayRawHeight),
                             static_cast<QWidget*>(overlayAtlasSlot),
                             static_cast<QWidget*>(overlayRotation),
@@ -7757,8 +7775,8 @@ void MainWindow::on_actionNew_MPR_triggered()
     previewStatus->setWordWrap(true);
     CNewMprCanvasPreview* canvasPreview = new CNewMprCanvasPreview(&dialog);
     canvasPreview->setObjectName(QStringLiteral("newMprCanvasPreview"));
-    root->addWidget(previewStatus);
-    root->addWidget(canvasPreview, 1);
+    contentRoot->addWidget(previewStatus);
+    contentRoot->addWidget(canvasPreview, 1);
 
     const QFileInfo currentTemplate = CLandscape::getInstance()->isMprLoad()
         ? CLandscape::getInstance()->filePath() : QFileInfo();
@@ -8013,14 +8031,32 @@ void MainWindow::on_actionNew_MOB_triggered()
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Create New MOB"));
     dialog.setWindowFlag(Qt::WindowContextHelpButtonHint, false);
-    dialog.resize(650, 560);
+    QScreen* activeScreen = QGuiApplication::screenAt(
+        mapToGlobal(rect().center()));
+    if(!activeScreen)
+        activeScreen = QGuiApplication::primaryScreen();
+    const QRect available = activeScreen
+        ? activeScreen->availableGeometry() : QRect(0, 0, 1024, 768);
+    dialog.resize(QSize(650, 560).boundedTo(QSize(
+        qMax(440, available.width() - 40),
+        qMax(320, available.height() - 40))));
     QVBoxLayout* root = new QVBoxLayout(&dialog);
+    QScrollArea* scroll = new QScrollArea(&dialog);
+    scroll->setObjectName(QStringLiteral("newMobScrollArea"));
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setFrameShape(QFrame::NoFrame);
+    QWidget* scrollContent = new QWidget(scroll);
+    QVBoxLayout* contentRoot = new QVBoxLayout(scrollContent);
+    scroll->setWidget(scrollContent);
+    root->addWidget(scroll, 1);
     QLabel* introduction = new QLabel(tr(
         "Create an empty, runtime-valid MOB. Objects, embedded AI graph, VSS, and "
         "editor-only directory data are never copied. The normal script and "
         "selected map metadata can be copied explicitly."), &dialog);
     introduction->setWordWrap(true);
-    root->addWidget(introduction);
+    contentRoot->addWidget(introduction);
 
     QFormLayout* form = new QFormLayout;
     QComboBox* role = new QComboBox(&dialog);
@@ -8081,7 +8117,7 @@ void MainWindow::on_actionNew_MOB_triggered()
         "Player-31 names. It contains no hostile relations. Leave disabled to "
         "omit diplomacy metadata."));
     form->addRow(QString(), createDiplomacy);
-    root->addLayout(form);
+    contentRoot->addLayout(form);
 
     QGroupBox* worldGroup = new QGroupBox(tr("Initial primary world settings"), &dialog);
     QFormLayout* worldForm = new QFormLayout(worldGroup);
@@ -8109,12 +8145,12 @@ void MainWindow::on_actionNew_MOB_triggered()
     worldForm->addRow(tr("Time"), time);
     worldForm->addRow(tr("Ambient"), ambient);
     worldForm->addRow(tr("Sun light"), sunlight);
-    root->addWidget(worldGroup);
+    contentRoot->addWidget(worldGroup);
 
     QCheckBox* openParameters = new QCheckBox(
         tr("Open MOB Parameters after creation"), &dialog);
     openParameters->setChecked(true);
-    root->addWidget(openParameters);
+    contentRoot->addWidget(openParameters);
 
     const auto selectedTemplate = [&]() -> CMob* {
         return reinterpret_cast<CMob*>(quintptr(templateMob->currentData().toULongLong()));
