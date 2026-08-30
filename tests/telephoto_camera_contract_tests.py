@@ -46,6 +46,10 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
             "scheduleUnitAppearancePreparation(logicalCameraPosition, cameraMoving)",
             view,
         )
+        self.assertIn(
+            "AnimationFrameContext::instance().beginFrame(logicalCameraPosition,",
+            view,
+        )
         self.assertIn("renderQueue.begin(&m_program, cameraPosition, logicalCameraPosition)", view)
         self.assertIn(
             "renderShadowMap(logicalCameraPosition, cameraPivot", view

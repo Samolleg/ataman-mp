@@ -7323,7 +7323,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         m_animationFreezeTime = currentAnimationTime;
     const qint64 animationTime = m_freezeAnimations
         ? m_animationFreezeTime : currentAnimationTime;
-    AnimationFrameContext::instance().beginFrame(cameraPosition,
+    AnimationFrameContext::instance().beginFrame(logicalCameraPosition,
         m_minimapCaptureActive ? 0 : animationTime,
         animationEnabled, cameraMoving);
     const COptBool* cullingOption = m_pSettings
