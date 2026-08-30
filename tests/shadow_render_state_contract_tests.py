@@ -32,7 +32,7 @@ class ShadowRenderStateContractTests(unittest.TestCase):
         view = (ROOT / "source/render/view.cpp").read_text(encoding="utf-8")
 
         self.assertIn("&& m_objectShadowsVisible", view)
-        self.assertIn("renderShadowMap(cameraPosition, cameraPivot", view)
+        self.assertIn("renderShadowMap(logicalCameraPosition, cameraPivot", view)
         self.assertIn("queue.flushShadow", view)
 
     def test_shadow_batch_does_not_expose_the_presentation_target_between_passes(self):
@@ -74,7 +74,7 @@ class ShadowRenderStateContractTests(unittest.TestCase):
         self.assertIn("const auto beginVisibleFrame", draw)
         self.assertEqual(draw.count("beginVisibleFrame();"), 2)
         self.assertLess(
-            draw.index("renderShadowMap(cameraPosition, cameraPivot"),
+            draw.index("renderShadowMap(logicalCameraPosition, cameraPivot"),
             draw.index("beginVisibleFrame();"),
         )
         visible_frame = draw.split("const auto beginVisibleFrame", 1)[1].split(

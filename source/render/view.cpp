@@ -42,6 +42,7 @@
 #include "render_scheduling.h"
 #include "camera.h"
 #include "camera_orbit.h"
+#include "camera_telephoto.h"
 #include "unit_animation.h"
 #include <QDateTime>
 #include "mob\mob.h"
@@ -4105,8 +4106,9 @@ void CView::resizeGL(int width, int height)
     const float ratio = float(width)/height;
     ei::gl::Viewport(0, 0, width, height);
 
-    m_projection.setToIdentity();
-    m_projection.perspective(45, ratio, 1, 1000);
+    m_normalProjection.setToIdentity();
+    m_normalProjection.perspective(45, ratio, 1, 1000);
+    updateCameraProjection();
     //ei::gl::Ortho(-2, +2, -2, +2, -2.0, 2.0);   // draw objects in orthogaphic view
     //ei::gl::Frustum(-2.0, 2.0, -2.0, 2.0, 1.5, 20.0); //convert project matrix to perpective view
     //doneCurrent();
@@ -7292,6 +7294,9 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     const QVector3D cameraPosition = m_minimapCaptureActive
         ? m_minimapCaptureCameraPosition
         : (cameraEyeOk ? renderedCameraEye : cameraAnchor);
+    const QVector3D logicalCameraPosition = !m_minimapCaptureActive
+            && m_cam->telephotoEnabled()
+        ? m_cam->logicalCullingPosition() : cameraPosition;
     const bool renderedCameraChanged = m_visualWarmupCameraValid
         && ((cameraAnchor - m_visualWarmupCameraAnchor).lengthSquared() > 0.000001f
             || (cameraPivot - m_visualWarmupCameraPivot).lengthSquared() > 0.000001f
@@ -7304,7 +7309,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     m_visualWarmupCameraRotation = cameraRotation;
     m_visualWarmupCameraValid = true;
     if(!m_minimapCaptureActive)
-        scheduleUnitAppearancePreparation(cameraPosition, cameraMoving);
+        scheduleUnitAppearancePreparation(logicalCameraPosition, cameraMoving);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !m_minimapCaptureActive
@@ -7606,7 +7611,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                              lightingMode, fogEnabled);
     applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
-    renderQueue.begin(&m_program, cameraPosition);
+    renderQueue.begin(&m_program, cameraPosition, logicalCameraPosition);
     bool terrainDrawn = false;
     const auto drawTerrainColor = [&](bool withShadows)
     {
@@ -7751,7 +7756,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                     const float radius = bounds.radius();
                     if(!qIsFinite(center.x()) || !qIsFinite(center.y())
                             || !qIsFinite(center.z()) || !qIsFinite(radius)
-                            || (center - cameraPosition).length()
+                            || (center - logicalCameraPosition).length()
                                 > maximumShadowDistance + radius)
                         continue;
                     node->drawObjectVisual(mob == m_activeMob, &m_program);
@@ -7760,7 +7765,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             renderQueue.setShadowOnlyCollection(false);
         }
         const bool shadowReady = environmentEnabled && shadowsEnabled
-            && renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,
+            && renderShadowMap(logicalCameraPosition, cameraPivot, environment, shadowLights,
                                renderQueue, maximumShadowDistance, frameTelemetry);
         beginVisibleFrame();
         drawTerrainColor(shadowReady);
@@ -22174,7 +22179,7 @@ bool CView::projectToRegeneratedNavigation(const QPointF& requested,
 
 void CView::anchorCameraRotationToViewportCenter()
 {
-    if(!m_cam || width() <= 0 || height() <= 0)
+    if(!m_cam || telephotoCameraEnabled() || width() <= 0 || height() <= 0)
         return;
     bool hit = false;
     const QVector3D center = getTerrainPos(width() / 2, height() / 2, true, &hit);
@@ -24352,6 +24357,69 @@ void CView::setCameraSpeedMultiplier(double multiplier)
     m_cam->setSpeedMultiplier(float(rounded));
     emit cameraSpeedMultiplierChanged(rounded);
     update();
+}
+
+bool CView::telephotoCameraEnabled() const
+{
+    return m_cam && m_cam->telephotoEnabled();
+}
+
+void CView::setTelephotoCameraEnabled(bool enabled)
+{
+    if(!m_cam || telephotoCameraEnabled() == enabled)
+        return;
+    m_cam->setTelephotoEnabled(enabled);
+    updateCameraProjection();
+    emit telephotoCameraEnabledChanged(enabled);
+    update();
+}
+
+double CView::telephotoCameraMultiplier() const
+{
+    return m_cam ? double(m_cam->telephotoMultiplier())
+                 : double(ei::kTelephotoMultiplierDefault);
+}
+
+void CView::setTelephotoCameraMultiplier(double multiplier)
+{
+    if(!m_cam)
+        return;
+    const float bounded = ei::boundedTelephotoMultiplier(float(multiplier));
+    const double rounded = qRound(double(bounded) * 10.0) / 10.0;
+    if(qAbs(telephotoCameraMultiplier() - rounded) < 0.001)
+        return;
+    m_cam->setTelephotoMultiplier(float(rounded));
+    updateCameraProjection();
+    emit telephotoCameraMultiplierChanged(rounded);
+    update();
+}
+
+int CView::telephotoCameraDirection() const
+{
+    return m_cam ? int(m_cam->telephotoDirection())
+                 : int(ei::kTelephotoDirectionDefault);
+}
+
+void CView::setTelephotoCameraDirection(int direction)
+{
+    if(!m_cam)
+        return;
+    const ei::ETelephotoDirection bounded =
+        ei::boundedTelephotoDirection(direction);
+    if(telephotoCameraDirection() == int(bounded))
+        return;
+    m_cam->setTelephotoDirection(bounded);
+    emit telephotoCameraDirectionChanged(int(bounded));
+    update();
+}
+
+void CView::updateCameraProjection()
+{
+    const bool enabled = m_cam && m_cam->telephotoEnabled();
+    const float multiplier = m_cam ? m_cam->telephotoMultiplier()
+                                   : ei::kTelephotoMultiplierDefault;
+    m_projection = ei::activeCameraProjectionMatrix(
+        m_normalProjection, enabled, multiplier);
 }
 
 bool CView::overridesWorldTime() const

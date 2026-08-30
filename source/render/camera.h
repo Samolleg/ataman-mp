@@ -3,6 +3,7 @@
 
 #include <QMatrix4x4>
 #include <QElapsedTimer>
+#include "camera_telephoto.h"
 #include "utils.h"
 
 class CKeyManager;
@@ -37,6 +38,15 @@ public:
     float step() const {return m_step * m_speedMultiplier * m_frameMovementScale;}
     float speedMultiplier() const {return m_speedMultiplier;}
     void setSpeedMultiplier(float multiplier);
+    bool telephotoEnabled() const { return m_telephotoEnabled; }
+    void setTelephotoEnabled(bool enabled) { m_telephotoEnabled = enabled; }
+    float telephotoMultiplier() const { return m_telephotoMultiplier; }
+    void setTelephotoMultiplier(float multiplier);
+    ei::ETelephotoDirection telephotoDirection() const {
+        return m_telephotoDirection;
+    }
+    void setTelephotoDirection(ei::ETelephotoDirection direction);
+    QVector3D logicalCullingPosition() const;
     bool movementInputActive() const;
     // Legacy serialized orbit-controller state. `pos` is NOT guaranteed to be
     // the rendered world-space eye after pivot rotations. Use viewMatrix() and
@@ -54,6 +64,7 @@ public:
 private:
     void move(QVector3D& orDir, bool bShift = false);
     void shift(QVector3D& orDir, bool bShift = false);
+    void translate(const QVector3D& direction, bool bShift = false);
     void syncMotionInterpolation();
     QMatrix4x4 matrixFor(const QVector3D& position, const QVector3D& pivot) const;
 
@@ -64,6 +75,8 @@ private:
     float m_zRot;
     float m_step;
     float m_speedMultiplier;
+    float m_telephotoMultiplier;
+    ei::ETelephotoDirection m_telephotoDirection;
     float m_frameMovementScale;
     QVector3D m_previousMotionPos;
     QVector3D m_previousMotionPivot;
@@ -72,6 +85,7 @@ private:
     double m_motionAccumulator{0.0};
     bool m_motionStateInitialized{false};
     bool m_integratingKeyboardMotion{false};
+    bool m_telephotoEnabled{false};
     QElapsedTimer m_updateTimer;
     CKeyManager* m_keyManager;
     CSettings* m_pSettings;

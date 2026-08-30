@@ -27,8 +27,16 @@ RenderQueueContext& RenderQueueContext::instance()
 
 void RenderQueueContext::begin(QOpenGLShaderProgram* program, const QVector3D& cameraPosition)
 {
+    begin(program, cameraPosition, cameraPosition);
+}
+
+void RenderQueueContext::begin(QOpenGLShaderProgram* program,
+                               const QVector3D& cameraPosition,
+                               const QVector3D& cullingPosition)
+{
     m_program = program;
     m_cameraPosition = cameraPosition;
+    m_cullingPosition = cullingPosition;
     m_items.clear();
     if(m_items.capacity() < 8192)
         m_items.reserve(8192);
@@ -170,6 +178,7 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
         * qMax(scaleX.length(), qMax(scaleY.length(), scaleZ.length()));
     const QVector3D position(modelMatrix(0, 3), modelMatrix(1, 3), modelMatrix(2, 3));
     item.cameraDistanceSquared = (position - m_cameraPosition).lengthSquared();
+    item.cullingDistanceSquared = (position - m_cullingPosition).lengthSquared();
     m_items.append(item);
 }
 
@@ -191,7 +200,7 @@ QVector<SShadowCasterGroup> RenderQueueContext::shadowCasterGroups(
             group.owner = item.shadowOwner;
             group.center = item.shadowBoundsCenter;
             group.radius = item.shadowBoundsRadius;
-            group.cameraDistanceSquared = item.cameraDistanceSquared;
+            group.cullingDistanceSquared = item.cullingDistanceSquared;
             group.dynamic = item.dynamicShadow;
             indices.insert(item.shadowOwner, result.size());
             result.append(group);
@@ -208,15 +217,15 @@ QVector<SShadowCasterGroup> RenderQueueContext::shadowCasterGroups(
                 group.center += delta / distance * (newRadius - group.radius);
             group.radius = newRadius;
         }
-        group.cameraDistanceSquared = qMin(group.cameraDistanceSquared,
-                                            item.cameraDistanceSquared);
+        group.cullingDistanceSquared = qMin(group.cullingDistanceSquared,
+                                             item.cullingDistanceSquared);
         group.dynamic = group.dynamic || item.dynamicShadow;
     }
     std::sort(result.begin(), result.end(), [](const SShadowCasterGroup& left,
                                                const SShadowCasterGroup& right)
     {
-        if(left.cameraDistanceSquared != right.cameraDistanceSquared)
-            return left.cameraDistanceSquared < right.cameraDistanceSquared;
+        if(left.cullingDistanceSquared != right.cullingDistanceSquared)
+            return left.cullingDistanceSquared < right.cullingDistanceSquared;
         return left.owner < right.owner;
     });
     return result;

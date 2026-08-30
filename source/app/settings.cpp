@@ -523,6 +523,8 @@ void CSettings::initOptions()
     //init default options for digits
     aOpt.append(QSharedPointer<COpt>(new COptDouble("version", m_version)));
     aOpt.append(QSharedPointer<COpt>(new COptDouble("cameraSpeedMultiplier", 1.0)));
+    aOpt.append(QSharedPointer<COpt>(new COptDouble("telephotoCameraMultiplier", 2.0)));
+    aOpt.append(QSharedPointer<COpt>(new COptInt("telephotoCameraDirection", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseX", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mouseSenseY", 25)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("rangeIncrement", 999)));

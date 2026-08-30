@@ -290,6 +290,12 @@ public:
     void resetCamPosition();
     double cameraSpeedMultiplier() const;
     void setCameraSpeedMultiplier(double multiplier);
+    bool telephotoCameraEnabled() const;
+    void setTelephotoCameraEnabled(bool enabled);
+    double telephotoCameraMultiplier() const;
+    void setTelephotoCameraMultiplier(double multiplier);
+    int telephotoCameraDirection() const;
+    void setTelephotoCameraDirection(int direction);
     bool overridesWorldTime() const;
     double effectiveWorldTimeHours() const;
     void refreshSelectContextHelp();
@@ -401,6 +407,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    void updateCameraProjection();
     CUnit* behaviorCollectionOwner(const QList<CNode*>& selection) const;
     CMagicTrap* trapCollectionOwner(const QList<CNode*>& selection) const;
     void closeMprSettingsDock();
@@ -640,6 +647,9 @@ signals:
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
+    void telephotoCameraEnabledChanged(bool enabled);
+    void telephotoCameraMultiplierChanged(double multiplier);
+    void telephotoCameraDirectionChanged(int direction);
     void entranceOverlayVisibilityChanged(bool visible);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
@@ -731,6 +741,7 @@ private:
     QByteArray m_farStaticShadowFingerprint;
     QOpenGLTimerQuery* m_gpuTimer;
     bool m_gpuTimerPending;
+    QMatrix4x4 m_normalProjection;
     QMatrix4x4 m_projection;
     QVector3D m_visualWarmupCameraAnchor;
     QVector3D m_visualWarmupCameraPivot;

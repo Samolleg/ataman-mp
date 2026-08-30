@@ -78,6 +78,8 @@
 #include "ui/validation_panel_layout.h"
 #include "ui/message_log_panel.h"
 #include "ui/dock_hidden_tab.h"
+#include "ui/camera_telephoto_controls.h"
+#include "camera_telephoto.h"
 #include "endurance_ui_scale.h"
 #include "select_window.h"
 #include "createobjectform.h"
@@ -3667,6 +3669,23 @@ void MainWindow::createViewportToolbars()
     operationLayout->addWidget(m_cameraSpeedSlider);
     operationLayout->addWidget(m_cameraSpeedSpin);
 
+    m_cameraTelephotoControls = new CCameraTelephotoControls(operationBar);
+    double telephotoMultiplier = ei::kTelephotoMultiplierDefault;
+    if(const COptDouble* option = dynamic_cast<const COptDouble*>(
+           m_settings->opt(eOptSetGeneral, "telephotoCameraMultiplier")))
+        telephotoMultiplier = ei::boundedTelephotoMultiplier(float(option->value()));
+    int telephotoDirection = int(ei::kTelephotoDirectionDefault);
+    if(const COptInt* option = dynamic_cast<const COptInt*>(
+           m_settings->opt(eOptSetGeneral, "telephotoCameraDirection")))
+        telephotoDirection = int(ei::boundedTelephotoDirection(option->value()));
+    m_cameraTelephotoControls->setTelephotoMultiplier(telephotoMultiplier);
+    m_cameraTelephotoControls->setTelephotoDirection(telephotoDirection);
+    m_cameraTelephotoControls->setTelephotoEnabled(false);
+    m_pView->setTelephotoCameraMultiplier(telephotoMultiplier);
+    m_pView->setTelephotoCameraDirection(telephotoDirection);
+    m_pView->setTelephotoCameraEnabled(false);
+    operationLayout->addWidget(m_cameraTelephotoControls);
+
     m_cameraSpeedPersistTimer = new QTimer(this);
     m_cameraSpeedPersistTimer->setSingleShot(true);
     connect(m_cameraSpeedPersistTimer, &QTimer::timeout,
@@ -3688,6 +3707,44 @@ void MainWindow::createViewportToolbars()
             option->setValue(value);
         m_cameraSpeedPersistTimer->start(250);
         statusBar()->showMessage(tr("Camera speed: %1x").arg(value, 0, 'f', 1), 1500);
+    });
+    connect(m_cameraTelephotoControls,
+            &CCameraTelephotoControls::telephotoEnabledChanged,
+            m_pView, &CView::setTelephotoCameraEnabled);
+    connect(m_cameraTelephotoControls,
+            &CCameraTelephotoControls::telephotoMultiplierChanged,
+            m_pView, &CView::setTelephotoCameraMultiplier);
+    connect(m_cameraTelephotoControls,
+            &CCameraTelephotoControls::telephotoDirectionChanged,
+            m_pView, &CView::setTelephotoCameraDirection);
+    connect(m_pView, &CView::telephotoCameraEnabledChanged, this,
+            [this](bool enabled)
+    {
+        m_cameraTelephotoControls->setTelephotoEnabled(enabled);
+        statusBar()->showMessage(enabled
+            ? tr("Telephoto camera enabled (%1x).").arg(
+                  m_pView->telephotoCameraMultiplier(), 0, 'f', 1)
+            : tr("Telephoto camera disabled."), 1800);
+    });
+    connect(m_pView, &CView::telephotoCameraMultiplierChanged, this,
+            [this](double value)
+    {
+        m_cameraTelephotoControls->setTelephotoMultiplier(value);
+        if(COptDouble* option = dynamic_cast<COptDouble*>(
+               m_settings->opt(eOptSetGeneral, "telephotoCameraMultiplier")))
+            option->setValue(value);
+        m_cameraSpeedPersistTimer->start(250);
+        statusBar()->showMessage(
+            tr("Telephoto multiplier: %1x").arg(value, 0, 'f', 1), 1500);
+    });
+    connect(m_pView, &CView::telephotoCameraDirectionChanged, this,
+            [this](int direction)
+    {
+        m_cameraTelephotoControls->setTelephotoDirection(direction);
+        if(COptInt* option = dynamic_cast<COptInt*>(
+               m_settings->opt(eOptSetGeneral, "telephotoCameraDirection")))
+            option->setValue(direction);
+        m_cameraSpeedPersistTimer->start(250);
     });
     m_ui->toolsLayout->setContentsMargins(0, 0, 0, 0);
     m_ui->toolsLayout->setSpacing(0);

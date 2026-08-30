@@ -27,6 +27,7 @@ struct SRenderItem
     QMatrix4x4 instanceMatrix;
     ERenderMaterialClass materialClass{ERenderMaterialClass::Conservative};
     float cameraDistanceSquared{0.0f};
+    float cullingDistanceSquared{0.0f};
     bool highlighted{false};
     quintptr meshIdentity{0};
     float textureUvScale{1.0f};
@@ -53,7 +54,7 @@ struct SShadowCasterGroup
     quintptr owner{0};
     QVector3D center;
     float radius{0.0f};
-    float cameraDistanceSquared{0.0f};
+    float cullingDistanceSquared{0.0f};
     bool dynamic{false};
 };
 
@@ -132,7 +133,7 @@ inline bool supportsInstancedRenderPath(bool isGles, int majorVersion, int minor
 inline bool shadowItemWithinDistance(const SRenderItem& item, float maximumDistance)
 {
     const float safeDistance = qMax(0.0f, maximumDistance);
-    return item.cameraDistanceSquared <= safeDistance * safeDistance;
+    return item.cullingDistanceSquared <= safeDistance * safeDistance;
 }
 
 inline bool shadowItemIntersectsLightSpace(const SRenderItem& item,
@@ -170,6 +171,8 @@ public:
     static RenderQueueContext& instance();
 
     void begin(QOpenGLShaderProgram* program, const QVector3D& cameraPosition);
+    void begin(QOpenGLShaderProgram* program, const QVector3D& cameraPosition,
+               const QVector3D& cullingPosition);
     void beginSelection(QOpenGLShaderProgram* program);
     void end();
     void releaseGpuResources();
@@ -203,6 +206,7 @@ private:
     bool m_shadowOnlyCollection{false};
     QOpenGLShaderProgram* m_program{nullptr};
     QVector3D m_cameraPosition;
+    QVector3D m_cullingPosition;
     QVector<SRenderItem> m_items;
     QVector<QMatrix4x4> m_matrixScratch;
     QElapsedTimer m_phaseTimer;

@@ -184,7 +184,8 @@ void CSelect::mousePressEvent(COperation *pOp, QMouseEvent *pEvent)
         // Orbit the scene point currently under the viewport center. The
         // inherited camera otherwise retains an old world-space pivot until
         // another command explicitly recenters it.
-        m_pView->anchorCameraRotationToViewportCenter();
+        if(!m_pView->telephotoCameraEnabled())
+            m_pView->anchorCameraRotationToViewportCenter();
         break;
     }
     }
@@ -235,6 +236,11 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 
     if (pEvent->buttons() & Qt::MiddleButton)
     {
+        if(m_pView->telephotoCameraEnabled())
+        {
+            m_lastPos = pEvent->pos();
+            return;
+        }
         // rotate around pivot
         int senseX = dynamic_cast<COptInt*>(m_pView->settings()->opt(eOptSetGeneral, "mouseSenseX"))->value();
         int senseY = dynamic_cast<COptInt*>(m_pView->settings()->opt(eOptSetGeneral, "mouseSenseY"))->value();
@@ -1038,6 +1044,12 @@ void COperation::mousePressEvent(QMouseEvent *pEvent)
 {
     if(pEvent->button() == Qt::MiddleButton)
     {
+        if(current && current->m_pView
+           && current->m_pView->telephotoCameraEnabled())
+        {
+            pEvent->accept();
+            return;
+        }
         m_cameraNavigationActive = true;
         m_cameraNavigationLastPos = pEvent->pos();
         if(current && current->m_pView)

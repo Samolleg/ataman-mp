@@ -11896,6 +11896,21 @@ UV-развёртка: итоговая текстура с повторение
             <translation>Скорость камеры: %1x</translation>
         </message>
         <message>
+            <location filename="../source/app/main_window.cpp" line="3717" />
+            <source>Telephoto camera enabled (%1x).</source>
+            <translation>Телефотографическая камера JamaisVu включена (%1×).</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="3720" />
+            <source>Telephoto camera disabled.</source>
+            <translation>Телефотографическая камера JamaisVu выключена.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="3731" />
+            <source>Telephoto multiplier: %1x</source>
+            <translation>Множитель телефотографической камеры: %1×</translation>
+        </message>
+        <message>
             <location filename="../source/app/main_window.cpp" line="3733" />
             <source>Restarting Test...</source>
             <translation>Перезапуск теста...</translation>
@@ -15855,6 +15870,49 @@ Runes:
             <location filename="../source/ui/item_spell_constructor_dialog.cpp" line="597" />
             <source>Code could not be imported</source>
             <translation>Не удалось импортировать код</translation>
+        </message>
+    </context>
+    <context>
+        <name>CCameraTelephotoControls</name>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="14" />
+            <source>Telephoto</source>
+            <translation>Телефотографическая камера JamaisVu</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="23" />
+            <source>JamaisVu telephoto camera. Uses the selected fixed diagonal direction and a pitch of 35.264 degrees, moves the render eye back, and narrows perspective while keeping map movement and zoom available.</source>
+            <translation>Телефотографическая камера JamaisVu. Использует выбранное фиксированное диагональное направление и наклон 35,264°, отодвигает точку отрисовки и сужает перспективу, сохраняя перемещение по карте и масштабирование.</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="32" />
+            <source>Multiplier:</source>
+            <translation>Множитель:</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="48" />
+            <source>Direction:</source>
+            <translation>Направление:</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="51" />
+            <source>SW → NE</source>
+            <translation>ЮЗ → СВ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="53" />
+            <source>SE → NW</source>
+            <translation>ЮВ → СЗ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="55" />
+            <source>NE → SW</source>
+            <translation>СВ → ЮЗ</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/camera_telephoto_controls.cpp" line="57" />
+            <source>NW → SE</source>
+            <translation>СЗ → ЮВ</translation>
         </message>
     </context>
 </TS>
