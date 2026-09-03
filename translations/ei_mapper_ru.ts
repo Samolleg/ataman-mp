@@ -6473,6 +6473,17 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
             <translation>Показать области входа из map.txt и их метки в окне карты.</translation>
         </message>
         <message>
+            <location filename="../source/render/view.cpp" line="2590" />
+            <source>Neighbor maps</source>
+            <translation>Соседние карты</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2590" />
+            <location filename="../source/render/view.cpp" line="2943" />
+            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Neighbor maps are never selected, edited, saved, exported, or sent to Test Current Map.</source>
+            <translation>Показывать до пяти ближайших MPR-карт из активного профиля как тонированный фон только для чтения. Соседние карты нельзя выбрать, изменить, сохранить, экспортировать или передать в «Тест текущей карты».</translation>
+        </message>
+        <message>
             <location filename="../source/render/view.cpp" line="2582" />
             <source>Object helpers</source>
             <translation>Вспомогательные модели объектов</translation>
@@ -6629,6 +6640,20 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
             <location filename="../source/render/view.cpp" line="2902" />
             <source>Unavailable: enable Animate unit idle cycles in Render settings.</source>
             <translation>Недоступно: включите анимации ожидания существ в настройках отображения.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2931" />
+            <source>Unavailable: the active map has no safely placed neighboring MPR maps in the current profile.</source>
+            <translation>Недоступно: для активной карты в текущем профиле нет соседних MPR-карт с надёжно определённым положением.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2950" />
+            <source>
+
+Available: %1</source>
+            <translation>
+
+Доступны: %1</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="3002" />

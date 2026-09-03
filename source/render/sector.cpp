@@ -966,16 +966,17 @@ void CSector::updateBounds()
     includeVertices(m_arrWaterVrtData);
     const QVector3D sectorOffset(float(m_index.x) * 32.0f,
                                  float(m_index.y) * 32.0f, 0.0f);
+    const QVector3D worldSectorOffset = sectorOffset + m_worldOffset;
     if(initialized)
     {
-        m_boundsCenter = (minimum + maximum) * 0.5f + sectorOffset;
+        m_boundsCenter = (minimum + maximum) * 0.5f + worldSectorOffset;
         m_boundsRadius = (maximum - minimum).length() * 0.5f;
         if(!m_arrWaterVrtData.isEmpty())
             m_boundsRadius += 1.0f;
     }
     else
     {
-        m_boundsCenter = sectorOffset + QVector3D(16.0f, 16.0f, 0.0f);
+        m_boundsCenter = worldSectorOffset + QVector3D(16.0f, 16.0f, 0.0f);
         m_boundsRadius = 23.0f;
     }
 }
@@ -1211,7 +1212,9 @@ void CSector::updateWaterDrawData(bool rebuildIndices)
 
 void CSector::updatePosition()
 {
-    m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f));
+    m_modelMatrix.setToIdentity();
+    m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f)
+                            + m_worldOffset);
     updateBounds();
     m_vertexBuf.bind();
     m_vertexBuf.allocate(m_arrLitLandVrtData.data(),

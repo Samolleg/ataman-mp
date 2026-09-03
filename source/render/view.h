@@ -50,6 +50,8 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "tile_brush_stroke_policy.h"
 #include "shadow_cascade.h"
 #include "frame_presentation_telemetry.h"
+#include "map_catalog.h"
+#include "neighbor_map_layout.h"
 
 class QLineEdit;
 class QFrame;
@@ -246,6 +248,8 @@ public:
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
+    void setNeighborMapContext(const QVector<SMapCatalogEntry>& topology,
+                               const QString& activeZoneId);
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
@@ -469,6 +473,8 @@ private:
     void markObservedSceneFrameFlicker();
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
+    void loadNeighborLandscapes();
+    void clearNeighborLandscapes();
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
     void showTerrainTileInformation(const QPoint& viewportPosition);
     void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
@@ -801,6 +807,8 @@ private:
     std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
+    QVector<QSharedPointer<CLandscape>> m_neighborLandscapes;
+    QVector<SNeighborMapPlacement> m_neighborPlacements;
     int m_tileBrushCommandId;
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
@@ -1004,6 +1012,7 @@ private:
     QToolButton* m_environmentPreviewCollapse{nullptr};
     QComboBox* m_environmentPreviewMode{nullptr};
     QToolButton* m_entranceVisualToggle{nullptr};
+    QToolButton* m_neighborLandscapesVisualToggle{nullptr};
     QToolButton* m_objectHelpersVisualToggle{nullptr};
     QToolButton* m_staticObjectsVisualToggle{nullptr};
     QToolButton* m_dynamicObjectsVisualToggle{nullptr};
@@ -1064,6 +1073,7 @@ private:
     QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
     bool m_entranceOverlaysVisible{true};
+    bool m_neighborLandscapesVisible{false};
     bool m_objectHelpersVisible{true};
     bool m_staticObjectsVisible{true};
     bool m_dynamicObjectsVisible{true};

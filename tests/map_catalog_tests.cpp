@@ -12,6 +12,7 @@ private slots:
     void parsesTravelZoneSpawnData();
     void parsesSkyEnvironment();
     void parsesCompleteMapsIdentityAndRepeatedRoutes();
+    void topologyRetainsTravelOnlyZones();
     void identifiesBriefingZonesFromCatalogMetadata();
 };
 
@@ -106,6 +107,26 @@ void MapCatalogTests::parsesCompleteMapsIdentityAndRepeatedRoutes()
              QString("1|bz1g|2|0"));
     QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 1),
              QString("1|bz1g|2|1"));
+}
+
+void MapCatalogTests::topologyRetainsTravelOnlyZones()
+{
+    const QString table = QString::fromUtf8(
+        "#zone gz7g gipat game\n#res\nzone7 zone7\n#maps\n16 10\na b\n"
+        "#exit 1\ngz3g_gz7g 2\n#deploy\n152 300 161 305\n"
+        "#zone gz3g_gz7g gipat edge\n"
+        "#exit 1\ngz3g 4\n#exit 2\ngz7g 1\n");
+
+    const QVector<SMapCatalogEntry> renderable =
+        CMapCatalog::parseMapTable(table);
+    const QVector<SMapCatalogEntry> topology =
+        CMapCatalog::parseMapTopology(table);
+
+    QCOMPARE(renderable.size(), 1);
+    QCOMPARE(topology.size(), 2);
+    QCOMPARE(topology.at(1).zoneId, QStringLiteral("gz3g_gz7g"));
+    QVERIFY(topology.at(1).mprName.isEmpty());
+    QCOMPARE(topology.at(1).travelZones.size(), 2);
 }
 
 void MapCatalogTests::identifiesBriefingZonesFromCatalogMetadata()

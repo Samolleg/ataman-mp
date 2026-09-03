@@ -14,6 +14,7 @@ uniform bool u_highlight;
 uniform float transparency;
 uniform bool u_solidColorEnabled;
 uniform highp vec4 u_solidColor;
+uniform float u_readOnlyBackground;
 uniform bool u_environmentEnabled;
 uniform int u_lightingMode;
 uniform bool u_fogEnabled;
@@ -265,6 +266,13 @@ void main(void)
 
   if (u_shadowCascadeDebug)
     resColor.rgb = cascadeDebugColor;
+
+  if (u_readOnlyBackground > 0.5)
+  {
+    float luminance = dot(resColor.rgb, vec3(0.299, 0.587, 0.114));
+    resColor.rgb = mix(resColor.rgb, vec3(luminance), 0.32)
+        * vec3(0.82, 0.90, 1.0);
+  }
 
 
   gl_FragColor = u_solidColorEnabled ? u_solidColor : resColor;

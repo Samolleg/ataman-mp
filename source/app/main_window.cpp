@@ -3227,7 +3227,13 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             m_mapTestEntry = nameMatches.first();
     }
     if(m_pView)
+    {
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
+        m_pView->setNeighborMapContext(
+            m_borrowedMapIdentity ? QVector<SMapCatalogEntry>()
+                                  : m_mapCatalog.topologyEntries,
+            m_borrowedMapIdentity ? QString() : m_mapTestEntry.zoneId);
+    }
     populateEntranceCombo();
     if(preserveWorkspaceState && !previousRouteKey.isEmpty())
     {
@@ -3272,6 +3278,8 @@ void MainWindow::chooseBorrowedMapIdentity()
     }
     m_mapTestEntry = choices[index];
     m_borrowedMapIdentity = true;
+    if(m_pView)
+        m_pView->setNeighborMapContext(QVector<SMapCatalogEntry>(), QString());
     ei::log(eLogWarning, QString("Borrowed map.txt identity zone:%1 for unregistered MPR:%2")
         .arg(m_mapTestEntry.zoneId, CLandscape::getInstance()->filePath().absoluteFilePath()));
     populateEntranceCombo();
