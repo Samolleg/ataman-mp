@@ -14,6 +14,13 @@ origin, while camera rebasing subtracted an active-relative display offset.
 There was no persistent identity or coordinate owner to keep an A → B → A
 round trip in one frame of reference.
 
+The first navigation implementation also read the camera only after unloading
+the source workspace and deferred rebasing until the next UI turn. A target
+terrain could therefore be painted with source-local camera coordinates. A
+neighbor transition now snapshots camera position, orbit pivot, and rotation
+before unload and applies the target-local values immediately after the target
+MPR loads, before the next event-processing/paint boundary.
+
 The persistent model separates those responsibilities:
 
 - `CWorldMapLayout` infers the complete connected components and owns the
@@ -40,11 +47,13 @@ unambiguous pair on opposite MPR boundaries contributes an edge. Inference is
 strictly partitioned by resource-profile identity and allod identity; travel
 metadata never creates geometry across allods.
 
-For each connected component, the case-folded lexical minimum zone identity
-is the deterministic anchor at `(0, 0)`. All zones in the component are
-traversed and retained; the viewport's five-neighbor limit is only a rendering
-selection. Disconnected components have independent anchors and are never
-combined for background display.
+The main stock component of each allod uses an explicit MPR anchor at `(0, 0)`:
+Gipat starts at `zone1`, Ingos at `zone11`, and Suslanger at `zone18`. If that
+MPR is absent, or for any disconnected auxiliary component, the case-folded
+lexical minimum zone identity remains the deterministic fallback. All zones in
+the component are traversed and retained; the viewport's five-neighbor limit
+is only a rendering selection. Disconnected components have independent
+anchors and are never combined for background display.
 
 ## Persistent document
 
@@ -84,5 +93,7 @@ The document exposes the following operations for a later map-editing stage:
 
 This stage intentionally binds none of those operations to mouse input. A
 neighbor double-click passes the source and destination absolute origins to
-the camera transform, preserving both camera position and pivot through an
-A → B → A round trip while leaving Z and rotation unchanged.
+the camera transform. The source camera snapshot is taken before workspace
+unload and restored in the destination frame before its first paint, preserving
+both camera position and pivot through an A → B → A round trip while leaving Z
+and rotation unchanged.

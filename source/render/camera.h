@@ -52,7 +52,7 @@ public:
     // the rendered world-space eye after pivot rotations. Use viewMatrix() and
     // ei::cameraEyeFromView() for culling, LOD, lighting, and shadow geometry.
     // See docs/CAMERA_COORDINATE_CONTRACT.md.
-    void getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot);
+    void getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot) const;
     void setLocation(const QVector3D& pos, const QVector3D& pivot, const QVector3D& rot);
     void setOrbitPivotPreservingView(const QVector3D& pivot);
     void move();

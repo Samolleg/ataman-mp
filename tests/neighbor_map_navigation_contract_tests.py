@@ -100,7 +100,8 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertIn("const QPointF& targetWorldOrigin", main_window_h)
         self.assertIn(
             "rebaseCameraForOpenedNeighbor(sourceWorldOrigin,\n"
-            "                targetWorldOrigin);",
+            "            targetWorldOrigin, sourceCameraPosition,\n"
+            "            sourceCameraPivot, sourceCameraRotation);",
             main_window_cpp,
         )
 
@@ -115,7 +116,28 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertIn("targetWorldOrigin", rebase)
         self.assertIn("localPosition", rebase)
         self.assertIn("localPivot", rebase)
-        self.assertIn("rotation", rebase)
+        self.assertIn("sourceRotation", rebase)
+
+    def test_neighbor_camera_state_is_captured_before_unload_and_rebased_before_paint(self):
+        main_window = source("source/app/main_window.cpp")
+        helper_start = main_window.index(
+            "void MainWindow::openMapPairWithCameraPolicy("
+        )
+        helper_end = main_window.index(
+            "void MainWindow::connectUiButtons()", helper_start
+        )
+        helper = main_window[helper_start:helper_end]
+
+        capture = helper.index("captureCameraLocation(")
+        unload = helper.index("m_pView->unloadLand(false);")
+        load = helper.index("m_pView->loadLandscape(")
+        rebase = helper.index("m_pView->rebaseCameraForOpenedNeighbor(")
+        next_event_pump = helper.index("QApplication::processEvents", load)
+
+        self.assertLess(capture, unload)
+        self.assertLess(unload, load)
+        self.assertLess(load, rebase)
+        self.assertLess(rebase, next_event_pump)
 
     def test_navigation_is_reentrant_safe_and_does_not_create_edit_history(self):
         view_cpp = source("source/render/view.cpp")

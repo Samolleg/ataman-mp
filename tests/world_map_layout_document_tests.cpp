@@ -35,6 +35,23 @@ QString threeZoneTable()
         "#exit 2\nc 1\n#deploy\n124 48 128 64\n");
 }
 
+QString canonicalStockAllodAnchorTable()
+{
+    return QString::fromLatin1(
+        "#zone gz10g gipat game\n#res\nzone10 zone10\n#maps\n4 4\na b\n"
+        "#exit 1\ngz1g 1\n#deploy\n0 48 4 64\n"
+        "#zone gz1g gipat game\n#res\nzone1 zone1\n#maps\n4 4\na b\n"
+        "#exit 1\ngz10g 1\n#deploy\n124 48 128 64\n"
+        "#zone gz12k ingos game\n#res\nzone12 zone12\n#maps\n4 4\na b\n"
+        "#exit 1\ngz11k 1\n#deploy\n0 48 4 64\n"
+        "#zone gz11k ingos game\n#res\nzone11 zone11\n#maps\n4 4\na b\n"
+        "#exit 1\ngz12k 1\n#deploy\n124 48 128 64\n"
+        "#zone gz19h suslanger game\n#res\nzone19 zone19\n#maps\n4 4\na b\n"
+        "#exit 1\ngz18h 1\n#deploy\n0 48 4 64\n"
+        "#zone gz18h suslanger game\n#res\nzone18 zone18\n#maps\n4 4\na b\n"
+        "#exit 1\ngz19h 1\n#deploy\n124 48 128 64\n");
+}
+
 QVector<SMapCatalogEntry> topologyFrom(const QString& table)
 {
     QVector<SMapCatalogEntry> topology = CMapCatalog::parseMapTopology(
@@ -102,6 +119,7 @@ private slots:
     void corruptAndUnsupportedDocumentsRemainUntouched();
     void serializedDocumentContainsNoAbsolutePaths();
     void manualResetApisDoNotRequireUiEditing();
+    void usesCanonicalStockAllodAnchors();
     void worldTransformRoundTripPreservesVisiblePoint();
 };
 
@@ -357,6 +375,32 @@ void WorldMapLayoutDocumentTests::manualResetApisDoNotRequireUiEditing()
     QCOMPARE(requiredOrigin(changed.zones, QStringLiteral("profile-one"),
                             QStringLiteral("island"), QStringLiteral("a")),
              QPointF(0.0, 0.0));
+}
+
+void WorldMapLayoutDocumentTests::usesCanonicalStockAllodAnchors()
+{
+    const SWorldMapInferenceResult inferred = CWorldMapLayout::infer(
+        QStringLiteral("jamais-vu"),
+        topologyFrom(canonicalStockAllodAnchorTable()));
+
+    const struct {
+        const char* allodId;
+        const char* zoneId;
+    } expected[] = {
+        {"gipat", "gz1g"},
+        {"ingos", "gz11k"},
+        {"suslanger", "gz18h"}
+    };
+    for(const auto& anchor : expected)
+    {
+        const SWorldMapZoneOrigin* zone = requiredZone(
+            inferred.zones, QStringLiteral("jamais-vu"),
+            QString::fromLatin1(anchor.allodId),
+            QString::fromLatin1(anchor.zoneId));
+        QCOMPARE(zone->origin, QPointF(0.0, 0.0));
+        QCOMPARE(zone->componentAnchorZoneId,
+                 QString::fromLatin1(anchor.zoneId));
+    }
 }
 
 void WorldMapLayoutDocumentTests::worldTransformRoundTripPreservesVisiblePoint()

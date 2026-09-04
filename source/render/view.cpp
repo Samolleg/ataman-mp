@@ -24289,29 +24289,51 @@ void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
     update();
 }
 
+bool CView::captureCameraLocation(QVector3D* position, QVector3D* pivot,
+                                  QVector3D* rotation) const
+{
+    if(!m_cam || !position || !pivot || !rotation)
+        return false;
+    m_cam->getLocation(*position, *pivot, *rotation);
+    return true;
+}
+
 void CView::rebaseCameraForOpenedNeighbor(
     const QPointF& sourceWorldOrigin,
-    const QPointF& targetWorldOrigin)
+    const QPointF& targetWorldOrigin,
+    const QVector3D& sourcePosition,
+    const QVector3D& sourcePivot,
+    const QVector3D& sourceRotation)
 {
     if(!m_cam)
         return;
-    QVector3D position;
-    QVector3D pivot;
-    QVector3D rotation;
-    m_cam->getLocation(position, pivot, rotation);
     const QPointF worldPosition = CWorldMapLayout::toWorld(
-        sourceWorldOrigin, QPointF(position.x(), position.y()));
+        sourceWorldOrigin,
+        QPointF(sourcePosition.x(), sourcePosition.y()));
     const QPointF worldPivot = CWorldMapLayout::toWorld(
-        sourceWorldOrigin, QPointF(pivot.x(), pivot.y()));
+        sourceWorldOrigin, QPointF(sourcePivot.x(), sourcePivot.y()));
     const QPointF localPosition = CWorldMapLayout::toLocal(
         targetWorldOrigin, worldPosition);
     const QPointF localPivot = CWorldMapLayout::toLocal(
         targetWorldOrigin, worldPivot);
+    QVector3D position = sourcePosition;
+    QVector3D pivot = sourcePivot;
     position.setX(float(localPosition.x()));
     position.setY(float(localPosition.y()));
     pivot.setX(float(localPivot.x()));
     pivot.setY(float(localPivot.y()));
-    m_cam->setLocation(position, pivot, rotation);
+    m_cam->setLocation(position, pivot, sourceRotation);
+    ei::log(eLogInfo, QString(
+        "Neighbor camera rebased sourceOrigin:%1,%2 targetOrigin:%3,%4 "
+        "sourcePosition:%5,%6 targetPosition:%7,%8")
+        .arg(sourceWorldOrigin.x(), 0, 'f', 2)
+        .arg(sourceWorldOrigin.y(), 0, 'f', 2)
+        .arg(targetWorldOrigin.x(), 0, 'f', 2)
+        .arg(targetWorldOrigin.y(), 0, 'f', 2)
+        .arg(sourcePosition.x(), 0, 'f', 2)
+        .arg(sourcePosition.y(), 0, 'f', 2)
+        .arg(position.x(), 0, 'f', 2)
+        .arg(position.y(), 0, 'f', 2));
     update();
 }
 

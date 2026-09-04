@@ -239,9 +239,14 @@ public:
                                         float maximumDistance = 8.0f) const;
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
+    bool captureCameraLocation(QVector3D* position, QVector3D* pivot,
+                               QVector3D* rotation) const;
     void rebaseCameraForOpenedNeighbor(
         const QPointF& sourceWorldOrigin,
-        const QPointF& targetWorldOrigin);
+        const QPointF& targetWorldOrigin,
+        const QVector3D& sourcePosition,
+        const QVector3D& sourcePivot,
+        const QVector3D& sourceRotation);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);

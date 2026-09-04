@@ -63,7 +63,8 @@ void CCamera::reset()
     syncMotionInterpolation();
 }
 
-void CCamera::getLocation(QVector3D& pos, QVector3D& pivot, QVector3D& rot)
+void CCamera::getLocation(QVector3D& pos, QVector3D& pivot,
+                          QVector3D& rot) const
 {
     pos = m_motionStateInitialized ? m_renderPos : m_pos;
     pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;

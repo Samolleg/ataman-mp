@@ -264,6 +264,30 @@ QMap<QString, QVector<SDirectedOffset>> buildGraph(
         });
     return graph;
 }
+
+QString canonicalAnchorMprIdentity(const QString& allodKey)
+{
+    if(allodKey == QStringLiteral("gipat"))
+        return QStringLiteral("zone1");
+    if(allodKey == QStringLiteral("ingos"))
+        return QStringLiteral("zone11");
+    if(allodKey == QStringLiteral("suslanger"))
+        return QStringLiteral("zone18");
+    return QString();
+}
+
+QString canonicalAnchorKey(
+    const QMap<QString, const SMapCatalogEntry*>& entries,
+    const QString& allodKey)
+{
+    const QString expectedMpr = canonicalAnchorMprIdentity(allodKey);
+    if(expectedMpr.isEmpty())
+        return QString();
+    for(auto it = entries.constBegin(); it != entries.constEnd(); ++it)
+        if(key(it.value()->mprName) == expectedMpr)
+            return it.key();
+    return QString();
+}
 }
 
 SWorldMapInferenceResult CWorldMapLayout::infer(
@@ -291,9 +315,25 @@ SWorldMapInferenceResult CWorldMapLayout::infer(
         const QMap<QString, QVector<SDirectedOffset>> graph = buildGraph(entries);
         QSet<QString> visited;
 
-        for(auto anchorIt = entries.constBegin(); anchorIt != entries.constEnd();
-            ++anchorIt)
+        // Stock EI allods have a meaningful first map. Starting their main
+        // connected component from that map makes the absolute coordinate
+        // system explicit instead of depending on lexical zone-id ordering.
+        // Disconnected auxiliary maps still receive deterministic lexical
+        // anchors of their own.
+        QStringList anchorKeys = entries.keys();
+        const QString stockAnchorKey = canonicalAnchorKey(entries,
+                                                           allodIt.key());
+        if(!stockAnchorKey.isEmpty())
         {
+            anchorKeys.removeAll(stockAnchorKey);
+            anchorKeys.prepend(stockAnchorKey);
+        }
+
+        for(const QString& candidateAnchorKey : anchorKeys)
+        {
+            const auto anchorIt = entries.constFind(candidateAnchorKey);
+            if(anchorIt == entries.constEnd())
+                continue;
             if(visited.contains(anchorIt.key()) || !layoutable(*anchorIt.value()))
                 continue;
             const QString anchorKey = anchorIt.key();

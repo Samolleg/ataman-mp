@@ -6592,6 +6592,13 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     }
     if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
         return;
+    QVector3D sourceCameraPosition;
+    QVector3D sourceCameraPivot;
+    QVector3D sourceCameraRotation;
+    const bool preserveNeighborCamera = !focusFirstEntrance
+        && m_pView->captureCameraLocation(
+            &sourceCameraPosition, &sourceCameraPivot,
+            &sourceCameraRotation);
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
     configureBlockingProgress(&progress);
@@ -6611,6 +6618,13 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     mapLoadTimer.start();
     mapLoadPhase.start();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    // Apply the source snapshot before the first event pump can paint the
+    // target terrain in source-local camera coordinates. Reading the camera
+    // here would be too late: the old workspace has already been destroyed.
+    if(preserveNeighborCamera)
+        m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,
+            targetWorldOrigin, sourceCameraPosition,
+            sourceCameraPivot, sourceCameraRotation);
     const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
@@ -6646,8 +6660,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
-    QTimer::singleShot(0, this,
-        [this, focusFirstEntrance, sourceWorldOrigin, targetWorldOrigin]()
+    QTimer::singleShot(0, this, [this, focusFirstEntrance]()
     {
         if(!m_validEntrances.isEmpty())
         {
@@ -6656,9 +6669,6 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
             if(focusFirstEntrance)
                 moveCameraToActiveSpawn();
         }
-        if(!focusFirstEntrance)
-            m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,
-                targetWorldOrigin);
     });
 }
 
