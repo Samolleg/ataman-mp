@@ -21666,7 +21666,7 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
     m_neighborPointerGestureCaptured = true;
     m_neighborPointerGestureButton = Qt::LeftButton;
     m_neighborNavigationInProgress = true;
-    emit neighborMapOpenRequested(mprPath, mobPath, zoneId);
+    emit neighborMapOpenRequested(mprPath, mobPath, zoneId, target.origin);
     m_neighborNavigationInProgress = false;
     event->accept();
 }
@@ -24268,6 +24268,20 @@ void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
     m_cam->getLocation(position, pivot, rotation);
     m_cam->moveTo(QVector3D(float(worldPosition.x()),
                             float(worldPosition.y()), pivot.z()));
+    update();
+}
+
+void CView::rebaseCameraForOpenedNeighbor(const QPointF& previousOrigin)
+{
+    if(!m_cam)
+        return;
+    QVector3D position;
+    QVector3D pivot;
+    QVector3D rotation;
+    m_cam->getLocation(position, pivot, rotation);
+    const QVector3D offset(-float(previousOrigin.x()),
+                           -float(previousOrigin.y()), 0.0f);
+    m_cam->setLocation(position + offset, pivot + offset, rotation);
     update();
 }
 

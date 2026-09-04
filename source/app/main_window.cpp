@@ -1530,7 +1530,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
     connect(m_pView, &CView::neighborMapOpenRequested,
-            this, &MainWindow::openMapPair);
+            this, &MainWindow::openNeighborMapPair);
     const QMetaObject::Connection databasePrototypeNavigation = connect(
         m_pView, &CView::openDatabasePrototypeRequested,
         this, &MainWindow::showDatabaseEditor);
@@ -6452,6 +6452,24 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
+    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF());
+}
+
+void MainWindow::openNeighborMapPair(const QString& mprPath,
+                                     const QString& mobPath,
+                                     const QString& zoneId,
+                                     const QPointF& previousOrigin)
+{
+    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, false,
+                                previousOrigin);
+}
+
+void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
+                                             const QString& mobPath,
+                                             const QString& zoneId,
+                                             bool focusFirstEntrance,
+                                             const QPointF& previousOrigin)
+{
     QElapsedTimer workspaceLoadTimer;
     workspaceLoadTimer.start();
     if(m_workspaceLoadInProgress)
@@ -6598,14 +6616,18 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
-    QTimer::singleShot(0, this, [this]()
+    QTimer::singleShot(0, this,
+        [this, focusFirstEntrance, previousOrigin]()
     {
         if(!m_validEntrances.isEmpty())
         {
             m_entranceCombo->setCurrentIndex(0);
             updateEntranceOverlays();
-            moveCameraToActiveSpawn();
+            if(focusFirstEntrance)
+                moveCameraToActiveSpawn();
         }
+        if(!focusFirstEntrance)
+            m_pView->rebaseCameraForOpenedNeighbor(previousOrigin);
     });
 }
 

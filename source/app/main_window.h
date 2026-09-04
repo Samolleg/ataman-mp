@@ -16,6 +16,7 @@
 #include <QFutureWatcher>
 #include <QImage>
 #include <QPointer>
+#include <QPointF>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
@@ -140,6 +141,14 @@ private:
     void refreshActiveCatalog(bool preserveWorkspaceState);
     void processMapTableSaveReports(const QVector<SMapTableSaveReport>& reports);
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
+    void openNeighborMapPair(const QString& mprPath, const QString& mobPath,
+                             const QString& zoneId,
+                             const QPointF& previousOrigin);
+    void openMapPairWithCameraPolicy(const QString& mprPath,
+                                     const QString& mobPath,
+                                     const QString& zoneId,
+                                     bool focusFirstEntrance,
+                                     const QPointF& previousOrigin);
     void openCollection(const QString& path);
     void newCollection();
     void editCollection();

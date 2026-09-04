@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
+#include <QPointF>
 #include <QRectF>
 #include <QPolygonF>
 #include <QSet>
@@ -238,6 +239,7 @@ public:
                                         float maximumDistance = 8.0f) const;
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
+    void rebaseCameraForOpenedNeighbor(const QPointF& previousOrigin);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
@@ -662,7 +664,8 @@ signals:
     void entranceOverlayVisibilityChanged(bool visible);
     void neighborMapOpenRequested(const QString& mprPath,
                                   const QString& mobPath,
-                                  const QString& zoneId);
+                                  const QString& zoneId,
+                                  const QPointF& previousOrigin);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
