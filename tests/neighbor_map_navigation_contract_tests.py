@@ -93,7 +93,7 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertIn("const QPointF& targetWorldOrigin", view_h)
         self.assertIn(
             "emit neighborMapOpenRequested(mprPath, mobPath, zoneId,\n"
-            "        m_activeMapWorldOrigin, target.worldOrigin);",
+            "        sourceWorldOrigin, targetWorldOrigin);",
             view_cpp,
         )
         self.assertIn("const QPointF& sourceWorldOrigin", main_window_h)
@@ -117,6 +117,71 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertIn("localPosition", rebase)
         self.assertIn("localPivot", rebase)
         self.assertIn("sourceRotation", rebase)
+
+    def test_navigation_copies_world_origins_before_synchronous_map_open(self):
+        view_cpp = source("source/render/view.cpp")
+        start = view_cpp.index("void CView::mouseDoubleClickEvent(QMouseEvent* event)")
+        end = view_cpp.index("void CView::sculptTerrainAt", start)
+        handler = view_cpp[start:end]
+
+        source_copy = handler.index(
+            "const QPointF sourceWorldOrigin = m_activeMapWorldOrigin;"
+        )
+        target_copy = handler.index(
+            "const QPointF targetWorldOrigin = target.worldOrigin;"
+        )
+        emit = handler.index("emit neighborMapOpenRequested(")
+        self.assertLess(source_copy, emit)
+        self.assertLess(target_copy, emit)
+        self.assertIn(
+            "sourceWorldOrigin, targetWorldOrigin);",
+            handler[emit : emit + 180],
+        )
+
+    def test_world_map_layout_can_be_arranged_and_reset_from_viewport(self):
+        view_h = source("source/render/view.h")
+        view_cpp = source("source/render/view.cpp")
+        main_window = source("source/app/main_window.cpp")
+        combined = "\n".join((view_h, view_cpp, main_window))
+
+        for needle in (
+            '"visualsArrangeNeighborMaps"',
+            'tr("Arrange maps")',
+            "neighborMapOriginChangeRequested",
+            "neighborMapLayoutResetRequested",
+            "m_neighborLayoutDragActive",
+            "setZoneOrigin(",
+            "resetAllodLayout(",
+        ):
+            self.assertIn(needle, combined)
+
+        press = view_cpp[
+            view_cpp.index("void CView::mousePressEvent(QMouseEvent* event)") :
+            view_cpp.index("void CView::mouseDoubleClickEvent", view_cpp.index(
+                "void CView::mousePressEvent(QMouseEvent* event)"
+            ))
+        ]
+        move = view_cpp[
+            view_cpp.index("void CView::mouseMoveEvent(QMouseEvent* event)") :
+            view_cpp.index("void CView::mouseReleaseEvent", view_cpp.index(
+                "void CView::mouseMoveEvent(QMouseEvent* event)"
+            ))
+        ]
+        release = view_cpp[
+            view_cpp.index("void CView::mouseReleaseEvent(QMouseEvent *event)") :
+            view_cpp.index("QPoint CView::operationAnchor", view_cpp.index(
+                "void CView::mouseReleaseEvent(QMouseEvent *event)"
+            ))
+        ]
+        self.assertIn("m_neighborLayoutEditEnabled", press)
+        self.assertIn("m_neighborLayoutDragActive", move)
+        self.assertIn("updateNeighborLayoutDrag", move)
+        self.assertIn("neighborMapOriginChangeRequested", release)
+        drag_helper = view_cpp[
+            view_cpp.index("bool CView::updateNeighborLayoutDrag") :
+            view_cpp.index("void CView::cancelNeighborLayoutDrag")
+        ]
+        self.assertIn("setWorldOffset", drag_helper)
 
     def test_neighbor_camera_state_is_captured_before_unload_and_rebased_before_paint(self):
         main_window = source("source/app/main_window.cpp")

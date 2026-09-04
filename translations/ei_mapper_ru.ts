@@ -10312,6 +10312,67 @@ Do you want to %3?</source>
             <source>World-map coordinates are temporary. The saved layout was left unchanged; see the log for details.</source>
             <translation>Координаты мира используются временно. Сохранённая схема не изменена; подробности см. в журнале.</translation>
         </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2590" />
+            <location filename="../source/render/view.cpp" line="3025" />
+            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.</source>
+            <translation>Показывать до пяти ближайших карт MPR из активного профиля как тонированный фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не редактирует. Двойной щелчок открывает её пару MPR/MOB. Включите «Расставить карты», чтобы перетащить соседние карты в правильные мировые координаты. Фоновые данные не попадают в сохранение, экспорт и «Тестировать текущую карту».</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2594" />
+            <source>Arrange maps</source>
+            <translation>Расставить карты</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2594" />
+            <source>Turn this on, then left-drag a tinted neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging.</source>
+            <translation>Включите этот режим, затем перетаскивайте тонированную соседнюю карту левой кнопкой мыши. Во время перетаскивания показывается начало карты по мировым X/Y; после отпускания оно сохраняется для активного профиля. Опорная карта аллода остаётся закреплена в X 0, Y 0. Двойной щелчок не переключает карты во время расстановки.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2600" />
+            <source>Reset map positions...</source>
+            <translation>Сбросить положения карт...</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2601" />
+            <source>Discard manual positions for the active allod and infer them again from map.txt.</source>
+            <translation>Удалить заданные вручную положения активного аллода и снова определить их по map.txt.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2750" />
+            <source>Arrange maps is on. Left-drag a tinted neighbor; its world X/Y position is saved when you release it.</source>
+            <translation>Режим расстановки карт включён. Перетащите тонированную соседнюю карту левой кнопкой мыши; её мировое положение X/Y сохранится после отпускания.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2995" />
+            <source>Unavailable: the active map has no neighboring maps to arrange.</source>
+            <translation>Недоступно: у активной карты нет соседних карт для расстановки.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2996" />
+            <source>Unavailable: world-map coordinates cannot be saved; see the log for details.</source>
+            <translation>Недоступно: мировые координаты нельзя сохранить; подробности смотрите в журнале.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="3400" />
+            <source>Base map: %1 (fixed at X 0, Y 0).</source>
+            <translation>Базовая карта: %1 (закреплена в X 0, Y 0).</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="3406" />
+            <source>Left-drag a tinted neighboring map to place it.</source>
+            <translation>Перетащите тонированную соседнюю карту левой кнопкой мыши, чтобы задать её положение.</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="3412" />
+            <source>%1 world origin — X: %2  Y: %3</source>
+            <translation>%1: начало карты в мировых координатах — X: %2  Y: %3</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="21779" />
+            <source>%1 is the fixed base map for this allod and stays at X 0, Y 0.</source>
+            <translation>%1 — закреплённая базовая карта этого аллода и остаётся в X 0, Y 0.</translation>
+        </message>
     </context>
     <context>
         <name>CViewportMinimapWidget</name>
@@ -14273,6 +14334,55 @@ It could not be opened automatically.</source>
             <location filename="../source/app/main_window.cpp" line="3253" />
             <source>World-map coordinates are temporary. The saved layout was left unchanged; see the log for details.</source>
             <translation>Координаты мира используются временно. Сохранённая схема не изменена; подробности см. в журнале.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1549" />
+            <source>The active map has no persistent world-map identity.</source>
+            <translation>У активной карты нет постоянного идентификатора в мировой системе координат.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1550" />
+            <source>Arrange maps</source>
+            <translation>Расставить карты</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1550" />
+            <source>The position of %1 could not be saved.
+
+%2</source>
+            <translation>Не удалось сохранить положение карты %1.
+
+%2</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1562" />
+            <source>%1 world position saved — X: %2, Y: %3</source>
+            <translation>Мировое положение %1 сохранено — X: %2, Y: %3</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1573" />
+            <location filename="../source/app/main_window.cpp" line="1584" />
+            <source>Reset map positions</source>
+            <translation>Сброс положений карт</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1573" />
+            <source>Discard all manual world-map positions for %1 and infer them again from map.txt?</source>
+            <translation>Удалить все заданные вручную положения карт для %1 и снова определить их по map.txt?</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1584" />
+            <source>The map positions could not be reset.
+
+%1</source>
+            <translation>Не удалось сбросить положения карт.
+
+%1</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="1592" />
+            <source>%1 map positions were reset from map.txt.</source>
+            <translation>Положения карт %1 восстановлены из map.txt.</translation>
         </message>
     </context>
     <context>

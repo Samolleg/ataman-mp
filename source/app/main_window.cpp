@@ -1532,6 +1532,66 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
     connect(m_pView, &CView::neighborMapOpenRequested,
             this, &MainWindow::openNeighborMapPair);
+    connect(m_pView, &CView::neighborMapOriginChangeRequested, this,
+            [this](const QString& zoneId, const QPointF& worldOrigin)
+    {
+        const QString profileId = activeResourceProfile().profileId;
+        QString error;
+        const bool saved = !m_borrowedMapIdentity
+            && !profileId.trimmed().isEmpty()
+            && !m_mapTestEntry.allodId.trimmed().isEmpty()
+            && m_worldMapLayoutDocument.setZoneOrigin(
+                profileId, m_mapTestEntry.allodId, zoneId,
+                worldOrigin, &error);
+        if(!saved)
+        {
+            if(error.isEmpty())
+                error = tr("The active map has no persistent world-map identity.");
+            QMessageBox::warning(this, tr("Arrange maps"), tr(
+                "The position of %1 could not be saved.\n\n%2")
+                    .arg(zoneId, error));
+            refreshMapTestContext(false, false);
+            return;
+        }
+        ei::log(eLogInfo, QString(
+            "Manual world-map origin saved zone:%1 allod:%2 origin:%3,%4")
+            .arg(zoneId, m_mapTestEntry.allodId)
+            .arg(worldOrigin.x(), 0, 'f', 2)
+            .arg(worldOrigin.y(), 0, 'f', 2));
+        refreshMapTestContext(false, false);
+        statusBar()->showMessage(tr(
+            "%1 world position saved — X: %2, Y: %3")
+                .arg(zoneId)
+                .arg(worldOrigin.x(), 0, 'f', 2)
+                .arg(worldOrigin.y(), 0, 'f', 2), 6000);
+    });
+    connect(m_pView, &CView::neighborMapLayoutResetRequested, this, [this]()
+    {
+        if(m_borrowedMapIdentity || m_mapTestEntry.allodId.trimmed().isEmpty())
+            return;
+        const QString allodId = m_mapTestEntry.allodId;
+        if(QMessageBox::question(this, tr("Reset map positions"), tr(
+               "Discard all manual world-map positions for %1 and infer them again from map.txt?")
+                   .arg(allodId),
+               QMessageBox::Reset | QMessageBox::Cancel,
+               QMessageBox::Cancel) != QMessageBox::Reset)
+            return;
+        QString error;
+        if(!m_worldMapLayoutDocument.resetAllodLayout(
+               activeResourceProfile().profileId, allodId,
+               m_mapCatalog.topologyEntries, &error))
+        {
+            QMessageBox::warning(this, tr("Reset map positions"), tr(
+                "The map positions could not be reset.\n\n%1").arg(error));
+            return;
+        }
+        ei::log(eLogInfo, QString(
+            "Manual world-map origins reset to map.txt inference allod:%1")
+            .arg(allodId));
+        refreshMapTestContext(false, false);
+        statusBar()->showMessage(tr(
+            "%1 map positions were reset from map.txt.").arg(allodId), 6000);
+    });
     const QMetaObject::Connection databasePrototypeNavigation = connect(
         m_pView, &CView::openDatabasePrototypeRequested,
         this, &MainWindow::showDatabaseEditor);

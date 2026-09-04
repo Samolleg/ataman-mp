@@ -132,17 +132,24 @@ void NeighborMapLayoutTests::worldOriginsDoNotDependOnActiveZone()
         QStringLiteral("island"), QStringLiteral("c"), 5);
     QPointF bFromA;
     QPointF bFromC;
+    bool anchorFixedFromC = false;
     for(const SNeighborMapPlacement& placement : fromA.placements)
         if(placement.zoneId == QStringLiteral("b"))
             bFromA = placement.worldOrigin;
     for(const SNeighborMapPlacement& placement : fromC.placements)
+    {
         if(placement.zoneId == QStringLiteral("b"))
             bFromC = placement.worldOrigin;
+        if(placement.zoneId == QStringLiteral("a"))
+            anchorFixedFromC = placement.fixedAnchor;
+    }
 
     // A persisted world layout must assign B one absolute origin regardless
     // of which map happens to be active. Expected: B remains at (128, 0).
     QCOMPARE(bFromA, QPointF(128.0, 0.0));
     QCOMPARE(bFromC, QPointF(128.0, 0.0));
+    QCOMPARE(fromC.componentAnchorZoneId, QStringLiteral("a"));
+    QVERIFY(anchorFixedFromC);
 }
 
 void NeighborMapLayoutTests::doesNotCombineDifferentAllods()

@@ -490,7 +490,16 @@ private:
     void loadNeighborLandscapes();
     void clearNeighborLandscapes();
     bool neighborMapAtViewport(const QPoint& viewportPosition,
-                               SNeighborMapPlacement* placement);
+                               SNeighborMapPlacement* placement,
+                               QVector3D* hitPoint = nullptr,
+                               bool preferNeighbor = false);
+    bool viewportPointOnHorizontalPlane(const QPoint& viewportPosition,
+                                        float planeZ,
+                                        QPointF* worldPoint) const;
+    bool updateNeighborLayoutDrag(const QPoint& viewportPosition);
+    void cancelNeighborLayoutDrag(bool restoreOrigin);
+    void updateNeighborLayoutStatus(const QString& zoneId = QString(),
+                                    const QPointF& worldOrigin = QPointF());
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
     void showTerrainTileInformation(const QPoint& viewportPosition);
     void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
@@ -678,6 +687,9 @@ signals:
                                   const QString& zoneId,
                                   const QPointF& sourceWorldOrigin,
                                   const QPointF& targetWorldOrigin);
+    void neighborMapOriginChangeRequested(const QString& zoneId,
+                                          const QPointF& worldOrigin);
+    void neighborMapLayoutResetRequested();
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
@@ -836,7 +848,17 @@ private:
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QPointF m_activeMapWorldOrigin;
+    QString m_neighborMapAnchorZoneId;
     bool m_hasActiveMapWorldOrigin{false};
+    bool m_neighborLayoutStorageWritable{false};
+    bool m_neighborLayoutEditEnabled{false};
+    bool m_neighborLayoutDragActive{false};
+    bool m_neighborLayoutDragChanged{false};
+    QString m_neighborLayoutDragZoneId;
+    QPointF m_neighborLayoutDragStartOrigin;
+    QPointF m_neighborLayoutDragWorldOrigin;
+    QPointF m_neighborLayoutDragStartPointerWorld;
+    float m_neighborLayoutDragPlaneZ{0.0f};
     bool m_neighborPointerGestureCaptured{false};
     Qt::MouseButton m_neighborPointerGestureButton{Qt::NoButton};
     bool m_neighborNavigationInProgress{false};
@@ -1044,6 +1066,9 @@ private:
     QComboBox* m_environmentPreviewMode{nullptr};
     QToolButton* m_entranceVisualToggle{nullptr};
     QToolButton* m_neighborLandscapesVisualToggle{nullptr};
+    QToolButton* m_neighborLayoutEditToggle{nullptr};
+    QToolButton* m_neighborLayoutResetButton{nullptr};
+    QLabel* m_neighborLayoutStatus{nullptr};
     QToolButton* m_objectHelpersVisualToggle{nullptr};
     QToolButton* m_staticObjectsVisualToggle{nullptr};
     QToolButton* m_dynamicObjectsVisualToggle{nullptr};

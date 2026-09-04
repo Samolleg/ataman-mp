@@ -19,6 +19,7 @@ struct SNeighborMapPlacement
     QPointF origin;
     QSizeF size;
     int routeDistance{0};
+    bool fixedAnchor{false};
 };
 
 struct SNeighborMapLayoutResult
@@ -26,6 +27,7 @@ struct SNeighborMapLayoutResult
     QVector<SNeighborMapPlacement> placements;
     QStringList messages;
     QPointF activeWorldOrigin;
+    QString componentAnchorZoneId;
     bool hasActiveWorldOrigin{false};
 };
 

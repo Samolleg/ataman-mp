@@ -72,6 +72,7 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         return result;
     }
     result.activeWorldOrigin = activeWorld->origin;
+    result.componentAnchorZoneId = activeWorld->componentAnchorZoneId;
     result.hasActiveWorldOrigin = true;
     if(maximumNeighbors <= 0)
         return result;
@@ -110,6 +111,8 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         candidate.placement.worldOrigin = world.origin;
         candidate.placement.origin = world.origin - activeWorld->origin;
         candidate.placement.size = worldSize(*entry);
+        candidate.placement.fixedAnchor =
+            key(world.zoneId) == key(world.componentAnchorZoneId);
         candidate.distance = rectangleDistance(
             activeBounds, QRectF(candidate.placement.origin,
                                  candidate.placement.size));

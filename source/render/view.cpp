@@ -2588,8 +2588,31 @@ void CView::initEnvironmentPreviewWidget()
         m_entranceOverlaysVisible);
     m_neighborLandscapesVisualToggle = makeToggle(
         "visualsNeighborLandscapes", tr("Neighbor maps"), tr(
-        "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map."),
+        "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map."),
         m_neighborLandscapesVisible);
+    m_neighborLayoutEditToggle = makeToggle(
+        "visualsArrangeNeighborMaps", tr("Arrange maps"), tr(
+        "Turn this on, then left-drag a tinted neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging."),
+        false);
+    m_neighborLayoutResetButton = new QToolButton(m_environmentPreviewBody);
+    m_neighborLayoutResetButton->setObjectName(
+        QStringLiteral("visualsResetNeighborMapLayout"));
+    m_neighborLayoutResetButton->setText(tr("Reset map positions..."));
+    const QString resetMapLayoutToolTip = tr(
+        "Discard manual positions for the active allod and infer them again from map.txt.");
+    m_neighborLayoutResetButton->setProperty(
+        "availableToolTip", resetMapLayoutToolTip);
+    m_neighborLayoutResetButton->setToolTip(resetMapLayoutToolTip);
+    m_neighborLayoutResetButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_neighborLayoutResetButton->setSizePolicy(
+        QSizePolicy::Expanding, QSizePolicy::Preferred);
+    body->addWidget(m_neighborLayoutResetButton);
+    m_neighborLayoutStatus = new QLabel(m_environmentPreviewBody);
+    m_neighborLayoutStatus->setObjectName(
+        QStringLiteral("visualsNeighborMapCoordinates"));
+    m_neighborLayoutStatus->setWordWrap(true);
+    m_neighborLayoutStatus->hide();
+    body->addWidget(m_neighborLayoutStatus);
     m_objectHelpersVisualToggle = makeToggle("visualsObjectHelpers", tr("Object helpers"), tr(
         "Show editor helper models for light, particle, and sound objects. This does not hide their actual effects."),
         m_objectHelpersVisible);
@@ -2705,10 +2728,39 @@ void CView::initEnvironmentPreviewWidget()
                 "Double-click a neighboring map to open its MPR/MOB pair."));
         }
         else
+        {
+            if(m_neighborLayoutEditToggle
+               && m_neighborLayoutEditToggle->isChecked())
+                m_neighborLayoutEditToggle->setChecked(false);
             clearNeighborLandscapes();
+        }
         updateVisualChannelAvailability();
         update();
     });
+    connect(m_neighborLayoutEditToggle, &QToolButton::toggled,
+            this, [this](bool enabled) {
+        if(enabled && m_neighborLandscapesVisualToggle
+           && !m_neighborLandscapesVisualToggle->isChecked())
+            m_neighborLandscapesVisualToggle->setChecked(true);
+        m_neighborLayoutEditEnabled = enabled;
+        if(enabled)
+        {
+            setCursor(Qt::OpenHandCursor);
+            updateNeighborLayoutStatus();
+            emit updateMsg(tr(
+                "Arrange maps is on. Left-drag a tinted neighbor; its world X/Y position is saved when you release it."));
+        }
+        else
+        {
+            cancelNeighborLayoutDrag(true);
+            unsetCursor();
+            if(m_neighborLayoutStatus)
+                m_neighborLayoutStatus->hide();
+        }
+        update();
+    });
+    connect(m_neighborLayoutResetButton, &QToolButton::clicked,
+            this, &CView::neighborMapLayoutResetRequested);
     connect(m_objectHelpersVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
         m_objectHelpersVisible = visible;
         persistViewportVisualState();
@@ -2933,6 +2985,19 @@ void CView::updateVisualChannelAvailability()
     availability(m_neighborLandscapesVisualToggle,
         m_pLand && m_pLand->isMprLoad() && !m_neighborPlacements.isEmpty(),
         tr("Unavailable: the active map has no safely placed neighboring MPR maps in the current profile."));
+    const bool mapLayoutEditingAvailable = m_pLand && m_pLand->isMprLoad()
+        && m_hasActiveMapWorldOrigin && !m_neighborPlacements.isEmpty()
+        && m_neighborLayoutStorageWritable;
+    if(!mapLayoutEditingAvailable && m_neighborLayoutEditToggle
+       && m_neighborLayoutEditToggle->isChecked())
+        m_neighborLayoutEditToggle->setChecked(false);
+    const QString mapLayoutEditingUnavailable = m_neighborLayoutStorageWritable
+        ? tr("Unavailable: the active map has no neighboring maps to arrange.")
+        : tr("Unavailable: world-map coordinates cannot be saved; see the log for details.");
+    availability(m_neighborLayoutEditToggle, mapLayoutEditingAvailable,
+                 mapLayoutEditingUnavailable);
+    availability(m_neighborLayoutResetButton, mapLayoutEditingAvailable,
+                 mapLayoutEditingUnavailable);
 }
 
 void CView::setNeighborMapContext(
@@ -2943,19 +3008,22 @@ void CView::setNeighborMapContext(
 {
     clearNeighborLandscapes();
     m_activeMapWorldOrigin = QPointF();
+    m_neighborMapAnchorZoneId.clear();
     m_hasActiveMapWorldOrigin = false;
+    m_neighborLayoutStorageWritable = layoutWarning.isEmpty();
     const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
         topology, worldOrigins, profileId, activeAllodId, activeZoneId, 5);
     m_neighborPlacements = layout.placements;
     if(layout.hasActiveWorldOrigin)
     {
         m_activeMapWorldOrigin = layout.activeWorldOrigin;
+        m_neighborMapAnchorZoneId = layout.componentAnchorZoneId;
         m_hasActiveMapWorldOrigin = true;
     }
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
-            "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map.");
+            "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.");
         if(!m_neighborPlacements.isEmpty())
         {
             QStringList zones;
@@ -2975,11 +3043,14 @@ void CView::setNeighborMapContext(
         ei::log(eLogWarning, "Neighbor map background: " + message);
     if(m_neighborLandscapesVisible)
         loadNeighborLandscapes();
+    updateNeighborLayoutStatus();
     updateVisualChannelAvailability();
 }
 
 void CView::clearNeighborLandscapes()
 {
+    if(m_neighborLayoutDragActive)
+        cancelNeighborLayoutDrag(true);
     if(m_neighborLandscapes.isEmpty())
         return;
     if(isValid())
@@ -3050,10 +3121,14 @@ void CView::loadNeighborLandscapes()
 }
 
 bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
-                                  SNeighborMapPlacement* placement)
+                                  SNeighborMapPlacement* placement,
+                                  QVector3D* hitPoint,
+                                  bool preferNeighbor)
 {
     if(placement)
         *placement = SNeighborMapPlacement();
+    if(hitPoint)
+        *hitPoint = QVector3D();
     if(!m_neighborLandscapesVisible || !m_landscapeVisible
        || (!m_bDrawLand && !m_bDrawWater) || m_minimapCaptureActive
        || m_neighborLandscapes.isEmpty() || !m_pLand
@@ -3184,11 +3259,168 @@ bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
             bestHitT = neighborHitT;
         }
     }
-    if(bestIndex < 0 || (activeHit && activeHitT <= bestHitT))
+    if(bestIndex < 0
+       || (!preferNeighbor && activeHit && activeHitT <= bestHitT))
         return false;
     if(placement)
         *placement = m_neighborLandscapes.at(bestIndex).placement;
+    if(hitPoint)
+        *hitPoint = rayStart + ray * bestHitT;
     return true;
+}
+
+bool CView::viewportPointOnHorizontalPlane(
+    const QPoint& viewportPosition, float planeZ, QPointF* worldPoint) const
+{
+    if(worldPoint)
+        *worldPoint = QPointF();
+    if(!worldPoint || !m_cam || !rect().contains(viewportPosition)
+       || width() <= 0 || height() <= 0)
+        return false;
+    const QRect viewport(0, 0, width(), height());
+    const float screenY = float(height() - viewportPosition.y());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QVector3D rayStart = QVector3D(
+        float(viewportPosition.x()), screenY, 0.0f).unproject(
+            view, m_projection, viewport);
+    const QVector3D rayEnd = QVector3D(
+        float(viewportPosition.x()), screenY, 1.0f).unproject(
+            view, m_projection, viewport);
+    const QVector3D ray = rayEnd - rayStart;
+    if(qAbs(ray.z()) <= 0.000001f)
+        return false;
+    const float t = (planeZ - rayStart.z()) / ray.z();
+    if(t < 0.0f || !std::isfinite(double(t)))
+        return false;
+    const QVector3D point = rayStart + ray * t;
+    if(!std::isfinite(double(point.x()))
+       || !std::isfinite(double(point.y())))
+        return false;
+    *worldPoint = QPointF(point.x(), point.y());
+    return true;
+}
+
+bool CView::updateNeighborLayoutDrag(const QPoint& viewportPosition)
+{
+    if(!m_neighborLayoutDragActive || !m_hasActiveMapWorldOrigin)
+        return false;
+    QPointF pointerWorld;
+    if(!viewportPointOnHorizontalPlane(
+           viewportPosition, m_neighborLayoutDragPlaneZ, &pointerWorld))
+        return false;
+    const QPointF delta = pointerWorld - m_neighborLayoutDragStartPointerWorld;
+    QPointF worldOrigin = m_neighborLayoutDragStartOrigin + delta;
+    // Quarter-unit snapping keeps persisted coordinates readable while still
+    // matching the half/quarter-unit offsets authored by shipped map tables.
+    worldOrigin.setX(qRound(worldOrigin.x() * 4.0) / 4.0);
+    worldOrigin.setY(qRound(worldOrigin.y() * 4.0) / 4.0);
+    if(worldOrigin == m_neighborLayoutDragWorldOrigin)
+        return true;
+    m_neighborLayoutDragWorldOrigin = worldOrigin;
+    m_neighborLayoutDragChanged =
+        QLineF(m_neighborLayoutDragStartOrigin, worldOrigin).length() > 0.001;
+    const QPointF relativeOrigin = worldOrigin - m_activeMapWorldOrigin;
+    for(SNeighborMapPlacement& placement : m_neighborPlacements)
+        if(placement.zoneId.compare(m_neighborLayoutDragZoneId,
+                                    Qt::CaseInsensitive) == 0)
+        {
+            placement.worldOrigin = worldOrigin;
+            placement.origin = relativeOrigin;
+            break;
+        }
+    for(SLoadedNeighborLandscape& loaded : m_neighborLandscapes)
+        if(loaded.placement.zoneId.compare(m_neighborLayoutDragZoneId,
+                                           Qt::CaseInsensitive) == 0)
+        {
+            loaded.placement.worldOrigin = worldOrigin;
+            loaded.placement.origin = relativeOrigin;
+            if(loaded.landscape)
+                loaded.landscape->setWorldOffset(QVector3D(
+                    float(relativeOrigin.x()), float(relativeOrigin.y()), 0.0f));
+            break;
+        }
+    updateNeighborLayoutStatus(m_neighborLayoutDragZoneId, worldOrigin);
+    update();
+    return true;
+}
+
+void CView::cancelNeighborLayoutDrag(bool restoreOrigin)
+{
+    if(!m_neighborLayoutDragActive)
+        return;
+    if(restoreOrigin)
+    {
+        const QPointF relativeOrigin =
+            m_neighborLayoutDragStartOrigin - m_activeMapWorldOrigin;
+        for(SNeighborMapPlacement& placement : m_neighborPlacements)
+            if(placement.zoneId.compare(m_neighborLayoutDragZoneId,
+                                        Qt::CaseInsensitive) == 0)
+            {
+                placement.worldOrigin = m_neighborLayoutDragStartOrigin;
+                placement.origin = relativeOrigin;
+                break;
+            }
+        for(SLoadedNeighborLandscape& loaded : m_neighborLandscapes)
+            if(loaded.placement.zoneId.compare(m_neighborLayoutDragZoneId,
+                                               Qt::CaseInsensitive) == 0)
+            {
+                loaded.placement.worldOrigin = m_neighborLayoutDragStartOrigin;
+                loaded.placement.origin = relativeOrigin;
+                if(loaded.landscape)
+                    loaded.landscape->setWorldOffset(QVector3D(
+                        float(relativeOrigin.x()), float(relativeOrigin.y()), 0.0f));
+                break;
+            }
+    }
+    m_neighborLayoutDragActive = false;
+    m_neighborLayoutDragChanged = false;
+    m_neighborLayoutDragZoneId.clear();
+    m_neighborPointerGestureCaptured = false;
+    m_neighborPointerGestureButton = Qt::NoButton;
+    if(m_neighborLayoutEditEnabled)
+        setCursor(Qt::OpenHandCursor);
+    else
+        unsetCursor();
+    updateNeighborLayoutStatus();
+    update();
+}
+
+void CView::updateNeighborLayoutStatus(const QString& zoneId,
+                                       const QPointF& worldOrigin)
+{
+    if(!m_neighborLayoutStatus)
+        return;
+    if(!m_neighborLayoutEditEnabled)
+    {
+        m_neighborLayoutStatus->hide();
+        return;
+    }
+    QString text;
+    if(!m_neighborMapAnchorZoneId.isEmpty())
+        text = tr("Base map: %1 (fixed at X 0, Y 0).")
+            .arg(m_neighborMapAnchorZoneId);
+    if(zoneId.isEmpty())
+    {
+        if(!text.isEmpty())
+            text += QLatin1Char('\n');
+        text += tr("Left-drag a tinted neighboring map to place it.");
+    }
+    else
+    {
+        if(!text.isEmpty())
+            text += QLatin1Char('\n');
+        text += tr("%1 world origin — X: %2  Y: %3")
+            .arg(zoneId)
+            .arg(worldOrigin.x(), 0, 'f', 2)
+            .arg(worldOrigin.y(), 0, 'f', 2);
+    }
+    m_neighborLayoutStatus->setText(text);
+    m_neighborLayoutStatus->show();
+    if(m_environmentPreviewWidget)
+    {
+        m_environmentPreviewWidget->adjustSize();
+        positionEnvironmentPreviewWidget();
+    }
 }
 
 bool CView::isObjectVisualVisible(CNode* node) const
@@ -21527,6 +21759,51 @@ void CView::mousePressEvent(QMouseEvent* event)
             event->accept();
         return;
     }
+    if(m_neighborLayoutEditEnabled
+       && (event->button() == Qt::LeftButton
+           || event->button() == Qt::RightButton))
+    {
+        if(event->button() == Qt::LeftButton)
+        {
+            SNeighborMapPlacement target;
+            QVector3D hitPoint;
+            if(neighborMapAtViewport(
+                   event->pos(), &target, &hitPoint, true))
+            {
+                m_neighborPointerGestureCaptured = true;
+                m_neighborPointerGestureButton = Qt::LeftButton;
+                if(target.fixedAnchor)
+                {
+                    updateNeighborLayoutStatus(target.zoneId,
+                                                  target.worldOrigin);
+                    emit updateMsg(tr(
+                        "%1 is the fixed base map for this allod and stays at X 0, Y 0.")
+                        .arg(target.zoneId));
+                    event->accept();
+                    return;
+                }
+                QPointF pointerWorld;
+                if(viewportPointOnHorizontalPlane(
+                       event->pos(), hitPoint.z(), &pointerWorld))
+                {
+                    m_neighborLayoutDragActive = true;
+                    m_neighborLayoutDragChanged = false;
+                    m_neighborLayoutDragZoneId = target.zoneId;
+                    m_neighborLayoutDragStartOrigin = target.worldOrigin;
+                    m_neighborLayoutDragWorldOrigin = target.worldOrigin;
+                    m_neighborLayoutDragStartPointerWorld = pointerWorld;
+                    m_neighborLayoutDragPlaneZ = hitPoint.z();
+                    setCursor(Qt::ClosedHandCursor);
+                    updateNeighborLayoutStatus(target.zoneId,
+                                                  target.worldOrigin);
+                }
+            }
+        }
+        // Arrangement mode owns left/right gestures so a missed map cannot
+        // accidentally select an object or edit the active terrain.
+        event->accept();
+        return;
+    }
     if((event->button() == Qt::LeftButton
         || event->button() == Qt::RightButton)
        && neighborMapAtViewport(event->pos(), nullptr))
@@ -21665,6 +21942,11 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if(m_neighborLayoutEditEnabled)
+    {
+        event->accept();
+        return;
+    }
 
     SNeighborMapPlacement target;
     if(!neighborMapAtViewport(event->pos(), &target)
@@ -21680,11 +21962,16 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
     const QString mprPath = target.mprPath;
     const QString mobPath = target.mobPath;
     const QString zoneId = target.zoneId;
+    // The signal is delivered synchronously. Loading the target landscape can
+    // refresh the view's active-map context before the slot returns, so never
+    // pass the mutable member itself as the source coordinate.
+    const QPointF sourceWorldOrigin = m_activeMapWorldOrigin;
+    const QPointF targetWorldOrigin = target.worldOrigin;
     m_neighborPointerGestureCaptured = true;
     m_neighborPointerGestureButton = Qt::LeftButton;
     m_neighborNavigationInProgress = true;
     emit neighborMapOpenRequested(mprPath, mobPath, zoneId,
-        m_activeMapWorldOrigin, target.worldOrigin);
+        sourceWorldOrigin, targetWorldOrigin);
     m_neighborNavigationInProgress = false;
     event->accept();
 }
@@ -22122,6 +22409,19 @@ void CView::mouseMoveEvent(QMouseEvent* event)
             event->accept();
         return;
     }
+    if(m_neighborLayoutDragActive)
+    {
+        if(event->buttons() & Qt::LeftButton)
+            updateNeighborLayoutDrag(event->pos());
+        event->accept();
+        return;
+    }
+    if(m_neighborLayoutEditEnabled
+       && (event->buttons() & (Qt::LeftButton | Qt::RightButton)))
+    {
+        event->accept();
+        return;
+    }
     if(m_neighborPointerGestureCaptured)
     {
         if(event->buttons() & m_neighborPointerGestureButton)
@@ -22249,6 +22549,27 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
             m_pOp->mouseReleaseEvent(event);
         else
             event->accept();
+        return;
+    }
+    if(m_neighborLayoutDragActive && event->button() == Qt::LeftButton)
+    {
+        updateNeighborLayoutDrag(event->pos());
+        const QString zoneId = m_neighborLayoutDragZoneId;
+        const QPointF worldOrigin = m_neighborLayoutDragWorldOrigin;
+        const bool changed = m_neighborLayoutDragChanged;
+        cancelNeighborLayoutDrag(false);
+        if(changed)
+            emit neighborMapOriginChangeRequested(zoneId, worldOrigin);
+        event->accept();
+        return;
+    }
+    if(m_neighborLayoutEditEnabled
+       && (event->button() == Qt::LeftButton
+           || event->button() == Qt::RightButton))
+    {
+        m_neighborPointerGestureCaptured = false;
+        m_neighborPointerGestureButton = Qt::NoButton;
+        event->accept();
         return;
     }
     if(m_neighborPointerGestureCaptured
