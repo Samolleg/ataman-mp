@@ -281,6 +281,7 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         SCandidate candidate;
         candidate.placement.zoneId = entry.zoneId;
         candidate.placement.mprPath = entry.mprPath;
+        candidate.placement.mobPath = entry.mobPath;
         candidate.placement.origin = it.value();
         candidate.placement.size = worldSize(entry);
         candidate.placement.routeDistance = depths.value(it.key());

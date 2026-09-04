@@ -13,6 +13,7 @@ struct SNeighborMapPlacement
 {
     QString zoneId;
     QString mprPath;
+    QString mobPath;
     QPointF origin;
     QSizeF size;
     int routeDistance{0};

@@ -46,15 +46,22 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
     QVector<SMapCatalogEntry> topology = CMapCatalog::parseMapTopology(table);
     for(SMapCatalogEntry& entry : topology)
         if(!entry.mprName.isEmpty())
+        {
             entry.mprPath = entry.mprName + QStringLiteral(".mpr");
+            entry.mobPath = entry.mobName + QStringLiteral(".mob");
+        }
 
     const SNeighborMapLayoutResult result =
         CNeighborMapLayout::build(topology, QStringLiteral("gz7g"), 5);
 
     QCOMPARE(result.placements.size(), 5);
     QMap<QString, QPointF> origins;
+    QMap<QString, QString> mobPaths;
     for(const SNeighborMapPlacement& placement : result.placements)
+    {
         origins.insert(placement.zoneId, placement.origin);
+        mobPaths.insert(placement.zoneId, placement.mobPath);
+    }
     QCOMPARE(origins.keys().toSet(),
              QSet<QString>({QStringLiteral("gz1g"), QStringLiteral("gz3g"),
                             QStringLiteral("gz6g"), QStringLiteral("gz8g"),
@@ -64,6 +71,8 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
     QVERIFY(origins.value(QStringLiteral("gz6g")).y() >= 320.0);
     QVERIFY(origins.value(QStringLiteral("gz8g")).x() >= 512.0);
     QVERIFY(origins.value(QStringLiteral("gz9g")).x() >= 512.0);
+    QCOMPARE(mobPaths.value(QStringLiteral("gz3g")),
+             QStringLiteral("zone3obr.mob"));
 }
 
 void NeighborMapLayoutTests::rejectsNonOppositeDeployEdges()

@@ -2122,6 +2122,16 @@ Backup: %1</source>
     <context>
         <name>CMob</name>
         <message>
+            <location filename="../source/mob/mob.cpp" line="81" />
+            <source>The MOB structure is valid, but its editable projection is not supported.</source>
+            <translation>Структура MOB корректна, но редактор не поддерживает её редактируемое представление.</translation>
+        </message>
+        <message>
+            <location filename="../source/mob/mob.cpp" line="89" />
+            <source>The MOB editable projection failed: %1</source>
+            <translation>Не удалось построить редактируемое представление MOB: %1</translation>
+        </message>
+        <message>
             <location filename="../source/mob/mob.cpp" line="1022" />
             <source>Invalid MOB structure</source>
             <translation>Неверная структура MOB</translation>
@@ -6479,9 +6489,14 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2590" />
-            <location filename="../source/render/view.cpp" line="2943" />
-            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Neighbor maps are never selected, edited, saved, exported, or sent to Test Current Map.</source>
-            <translation>Показывать до пяти ближайших MPR-карт из активного профиля как тонированный фон только для чтения. Соседние карты нельзя выбрать, изменить, сохранить, экспортировать или передать в «Тест текущей карты».</translation>
+            <location filename="../source/render/view.cpp" line="2948" />
+            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map.</source>
+            <translation>Показывать до пяти ближайших MPR-карт из активного профиля как тонированный фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не изменяет. Дважды щёлкните соседнюю карту, чтобы открыть её пару MPR/MOB. Фоновые данные не участвуют в сохранении, экспорте и «Тесте текущей карты».</translation>
+        </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2705" />
+            <source>Double-click a neighboring map to open its MPR/MOB pair.</source>
+            <translation>Дважды щёлкните соседнюю карту, чтобы открыть её пару MPR/MOB.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2582" />
@@ -13305,9 +13320,68 @@ Map files referenced by it will not be deleted.</source>
             <translation>Открыть карту</translation>
         </message>
         <message>
-            <location filename="../source/app/main_window.cpp" line="6398" />
-            <source>The map pair for %1 is incomplete. Refresh the active game/mod profile.</source>
-            <translation>Пара карт для %1 неполная. Обновите активный профиль игры/мода.</translation>
+            <location filename="../source/app/main_window.cpp" line="6466" />
+            <source>MPR: %1</source>
+            <translation>Файл MPR: %1</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6470" />
+            <source>MOB: %1</source>
+            <translation>Файл MOB: %1</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6467" />
+            <location filename="../source/app/main_window.cpp" line="6471" />
+            <source>not found in the active profile</source>
+            <translation>не найден в активном профиле</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6476" />
+            <source>The map pair for %1 is incomplete.
+
+%2
+
+The current workspace was not changed. Refresh the active game/mod profile and try again.</source>
+            <translation>Пара файлов карты %1 неполна.
+
+%2
+
+Текущая рабочая область не изменена. Обновите активный профиль игры/мода и повторите попытку.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6524" />
+            <source>The map pair for %1 changed while the current workspace was waiting to close.
+
+%2
+
+The current workspace was not changed. Refresh the active game/mod profile and try again.</source>
+            <translation>Пара файлов карты %1 изменилась во время ожидания закрытия текущей рабочей области.
+
+%2
+
+Текущая рабочая область не изменена. Обновите активный профиль игры/мода и повторите попытку.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6486" />
+            <source>The file could not be opened for reading.</source>
+            <translation>Не удалось открыть файл для чтения.</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="6488" />
+            <source>The %1 for map %2 could not be read or validated.
+
+%3
+
+%4
+
+The current workspace was not changed.</source>
+            <translation>Не удалось прочитать или проверить %1 карты %2.
+
+%3
+
+%4
+
+Текущая рабочая область не изменена.</translation>
         </message>
         <message>
             <location filename="../source/app/main_window.cpp" line="6404" />

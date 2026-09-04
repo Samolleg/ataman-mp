@@ -54,6 +54,9 @@ public:
     CMob();
     ~CMob();
     void attach(CView* view, CProgressView* pProgress);
+    static bool validateEditableProjection(const QByteArray& data,
+                                           const QFileInfo& source,
+                                           QString* error = nullptr);
     int readMob(QFileInfo& path);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());

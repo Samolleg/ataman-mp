@@ -2588,7 +2588,7 @@ void CView::initEnvironmentPreviewWidget()
         m_entranceOverlaysVisible);
     m_neighborLandscapesVisualToggle = makeToggle(
         "visualsNeighborLandscapes", tr("Neighbor maps"), tr(
-        "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Neighbor maps are never selected, edited, saved, exported, or sent to Test Current Map."),
+        "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map."),
         m_neighborLandscapesVisible);
     m_objectHelpersVisualToggle = makeToggle("visualsObjectHelpers", tr("Object helpers"), tr(
         "Show editor helper models for light, particle, and sound objects. This does not hide their actual effects."),
@@ -2699,7 +2699,11 @@ void CView::initEnvironmentPreviewWidget()
         m_neighborLandscapesVisible = visible;
         persistViewportVisualState();
         if(visible)
+        {
             loadNeighborLandscapes();
+            emit updateMsg(tr(
+                "Double-click a neighboring map to open its MPR/MOB pair."));
+        }
         else
             clearNeighborLandscapes();
         updateVisualChannelAvailability();
@@ -2941,7 +2945,7 @@ void CView::setNeighborMapContext(
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
-            "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Neighbor maps are never selected, edited, saved, exported, or sent to Test Current Map.");
+            "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map.");
         if(!m_neighborPlacements.isEmpty())
         {
             QStringList zones;
@@ -2967,10 +2971,11 @@ void CView::clearNeighborLandscapes()
     if(isValid())
         makeCurrent();
     QSet<QOpenGLTexture*> textures;
-    for(const QSharedPointer<CLandscape>& landscape : m_neighborLandscapes)
-        if(landscape && landscape->glTexture()
-           && (!m_pLand || landscape->glTexture() != m_pLand->glTexture()))
-            textures.insert(landscape->glTexture());
+    for(const SLoadedNeighborLandscape& loaded : m_neighborLandscapes)
+        if(loaded.landscape && loaded.landscape->glTexture()
+           && (!m_pLand
+               || loaded.landscape->glTexture() != m_pLand->glTexture()))
+            textures.insert(loaded.landscape->glTexture());
     m_neighborLandscapes.clear();
     for(QOpenGLTexture* texture : textures)
         CTextureList::getInstance()->releaseTerrainTexture(texture);
@@ -3015,7 +3020,10 @@ void CView::loadNeighborLandscapes()
         }
         landscape->setWorldOffset(QVector3D(
             float(placement.origin.x()), float(placement.origin.y()), 0.0f));
-        m_neighborLandscapes.append(landscape);
+        SLoadedNeighborLandscape loaded;
+        loaded.placement = placement;
+        loaded.landscape = landscape;
+        m_neighborLandscapes.append(loaded);
         ei::log(eLogInfo, QString(
             "Read-only neighbor map loaded zone:%1 origin:%2,%3 path:%4")
             .arg(placement.zoneId)
@@ -3025,6 +3033,148 @@ void CView::loadNeighborLandscapes()
     }
     doneCurrent();
     update();
+}
+
+bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
+                                  SNeighborMapPlacement* placement)
+{
+    if(placement)
+        *placement = SNeighborMapPlacement();
+    if(!m_neighborLandscapesVisible || !m_landscapeVisible
+       || (!m_bDrawLand && !m_bDrawWater) || m_minimapCaptureActive
+       || m_neighborLandscapes.isEmpty() || !m_pLand
+       || !m_pLand->isMprLoad() || !m_cam
+       || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
+        return false;
+
+    const QRect viewport(0, 0, width(), height());
+    const float screenY = float(height() - viewportPosition.y());
+    const QMatrix4x4 view = m_cam->viewMatrix();
+    const QVector3D rayStart = QVector3D(
+        float(viewportPosition.x()), screenY, 0.0f).unproject(
+            view, m_projection, viewport);
+    const QVector3D rayEnd = QVector3D(
+        float(viewportPosition.x()), screenY, 1.0f).unproject(
+            view, m_projection, viewport);
+    const QVector3D ray = rayEnd - rayStart;
+
+    const auto clipAxis = [](float start, float delta,
+                             float minimum, float maximum,
+                             float* firstT, float* lastT) {
+        if(qAbs(delta) <= 0.000001f)
+            return start >= minimum && start <= maximum;
+        float entry = (minimum - start) / delta;
+        float exit = (maximum - start) / delta;
+        if(entry > exit)
+            qSwap(entry, exit);
+        *firstT = qMax(*firstT, entry);
+        *lastT = qMin(*lastT, exit);
+        return *firstT <= *lastT;
+    };
+    const auto landscapeHit = [&](CLandscape* landscape,
+                                  const QPointF& origin,
+                                  const QSizeF& size,
+                                  float* hitT) {
+        if(!landscape || !landscape->isMprLoad() || size.isEmpty())
+            return false;
+        float firstT = 0.0f;
+        float lastT = 1.0f;
+        if(!clipAxis(rayStart.x(), ray.x(), float(origin.x()),
+                     float(origin.x() + size.width()), &firstT, &lastT)
+           || !clipAxis(rayStart.y(), ray.y(), float(origin.y()),
+                        float(origin.y() + size.height()), &firstT, &lastT)
+           || !clipAxis(rayStart.z(), ray.z(), -2.0f,
+                        qMax(0.0f, landscape->maximumHeight()) + 2.0f,
+                        &firstT, &lastT))
+            return false;
+
+        const QVector3D firstPoint = rayStart + ray * firstT;
+        const QVector3D lastPoint = rayStart + ray * lastT;
+        const float planarDistance = QVector2D(lastPoint - firstPoint).length();
+        const int steps = qBound(
+            32, int(std::ceil(planarDistance / 0.75f)), 1024);
+        bool havePrevious = false;
+        float previousT = firstT;
+        float previousDelta = 0.0f;
+        for(int step = 0; step <= steps; ++step)
+        {
+            const float ratio = float(step) / float(steps);
+            const float t = firstT + (lastT - firstT) * ratio;
+            const QVector3D rayPoint = rayStart + ray * t;
+            QVector3D ground(
+                rayPoint.x() - float(origin.x()),
+                rayPoint.y() - float(origin.y()), 0.0f);
+            if(ground.x() < 0.0f || ground.y() < 0.0f
+               || ground.x() >= size.width() || ground.y() >= size.height()
+               || !landscape->projectPt(ground, true))
+            {
+                havePrevious = false;
+                continue;
+            }
+            ground.setX(ground.x() + float(origin.x()));
+            ground.setY(ground.y() + float(origin.y()));
+            const float delta = rayPoint.z() - ground.z();
+            if(havePrevious && previousDelta >= 0.0f && delta <= 0.0f)
+            {
+                float low = previousT;
+                float high = t;
+                for(int iteration = 0; iteration < 14; ++iteration)
+                {
+                    const float middle = (low + high) * 0.5f;
+                    const QVector3D sample = rayStart + ray * middle;
+                    QVector3D sampleGround(
+                        sample.x() - float(origin.x()),
+                        sample.y() - float(origin.y()), 0.0f);
+                    if(sampleGround.x() < 0.0f || sampleGround.y() < 0.0f
+                       || sampleGround.x() >= size.width()
+                       || sampleGround.y() >= size.height()
+                       || !landscape->projectPt(sampleGround, true))
+                    {
+                        low = middle;
+                        continue;
+                    }
+                    if(sample.z() - sampleGround.z() > 0.0f)
+                        low = middle;
+                    else
+                        high = middle;
+                }
+                if(hitT)
+                    *hitT = high;
+                return true;
+            }
+            havePrevious = true;
+            previousT = t;
+            previousDelta = delta;
+        }
+        return false;
+    };
+
+    float activeHitT = 0.0f;
+    const bool activeHit = landscapeHit(
+        m_pLand, QPointF(),
+        QSizeF(m_pLand->widthInWorldUnits(),
+               m_pLand->heightInWorldUnits()), &activeHitT);
+
+    int bestIndex = -1;
+    float bestHitT = std::numeric_limits<float>::max();
+    for(int index = 0; index < m_neighborLandscapes.size(); ++index)
+    {
+        const SLoadedNeighborLandscape& loaded =
+            m_neighborLandscapes.at(index);
+        float neighborHitT = 0.0f;
+        if(landscapeHit(loaded.landscape.data(), loaded.placement.origin,
+                        loaded.placement.size, &neighborHitT)
+           && neighborHitT < bestHitT)
+        {
+            bestIndex = index;
+            bestHitT = neighborHitT;
+        }
+    }
+    if(bestIndex < 0 || (activeHit && activeHitT <= bestHitT))
+        return false;
+    if(placement)
+        *placement = m_neighborLandscapes.at(bestIndex).placement;
+    return true;
 }
 
 bool CView::isObjectVisualVisible(CNode* node) const
@@ -7766,10 +7916,10 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                 m_landProgram.setUniformValue("u_mapFog", QVector3D());
                 applyShadowUniforms(m_landProgram, false, true, true);
                 m_pLand->applyTerrainShadowUniforms(&m_landProgram, false);
-                for(const QSharedPointer<CLandscape>& neighbor
+                for(const SLoadedNeighborLandscape& neighbor
                     : m_neighborLandscapes)
-                    if(neighbor && neighbor->isMprLoad())
-                        neighbor->draw(&m_landProgram,
+                    if(neighbor.landscape && neighbor.landscape->isMprLoad())
+                        neighbor.landscape->draw(&m_landProgram,
                             cullingEnabled ? &frustum : nullptr);
                 applyEnvironmentUniforms(m_landProgram, environment,
                                          sceneLights, lightingMode, fogEnabled);
@@ -8030,10 +8180,10 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             m_landProgram.setUniformValue("u_mapFog", QVector3D());
             applyShadowUniforms(m_landProgram, false, true, true);
             m_pLand->applyTerrainShadowUniforms(&m_landProgram, false);
-            for(const QSharedPointer<CLandscape>& neighbor
+            for(const SLoadedNeighborLandscape& neighbor
                 : m_neighborLandscapes)
-                if(neighbor && neighbor->isMprLoad())
-                    neighbor->drawWater(&m_landProgram,
+                if(neighbor.landscape && neighbor.landscape->isMprLoad())
+                    neighbor.landscape->drawWater(&m_landProgram,
                         cullingEnabled ? &frustum : nullptr);
             applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                      lightingMode, fogEnabled);
@@ -21361,6 +21511,15 @@ void CView::mousePressEvent(QMouseEvent* event)
             event->accept();
         return;
     }
+    if((event->button() == Qt::LeftButton
+        || event->button() == Qt::RightButton)
+       && neighborMapAtViewport(event->pos(), nullptr))
+    {
+        m_neighborPointerGestureCaptured = true;
+        m_neighborPointerGestureButton = event->button();
+        event->accept();
+        return;
+    }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
         && m_terrainEditAvailable && event->button() == Qt::RightButton)
     {
@@ -21474,6 +21633,42 @@ void CView::mousePressEvent(QMouseEvent* event)
         return;
     }
     m_pOp->mousePressEvent(event);
+}
+
+void CView::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    m_lastViewportMousePos = event->pos();
+    m_hasViewportMousePos = rect().contains(event->pos());
+    if(event->button() != Qt::LeftButton)
+    {
+        QGLWidget::mouseDoubleClickEvent(event);
+        return;
+    }
+    if(m_landscapeInteractionSuspended || m_neighborNavigationInProgress)
+    {
+        event->accept();
+        return;
+    }
+
+    SNeighborMapPlacement target;
+    if(!neighborMapAtViewport(event->pos(), &target))
+    {
+        // The active landscape and empty viewport space keep their existing
+        // no-op double-click behavior. In particular, the active map never
+        // routes back through workspace replacement.
+        event->accept();
+        return;
+    }
+
+    const QString mprPath = target.mprPath;
+    const QString mobPath = target.mobPath;
+    const QString zoneId = target.zoneId;
+    m_neighborPointerGestureCaptured = true;
+    m_neighborPointerGestureButton = Qt::LeftButton;
+    m_neighborNavigationInProgress = true;
+    emit neighborMapOpenRequested(mprPath, mobPath, zoneId);
+    m_neighborNavigationInProgress = false;
+    event->accept();
 }
 
 void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
@@ -21909,6 +22104,16 @@ void CView::mouseMoveEvent(QMouseEvent* event)
             event->accept();
         return;
     }
+    if(m_neighborPointerGestureCaptured)
+    {
+        if(event->buttons() & m_neighborPointerGestureButton)
+        {
+            event->accept();
+            return;
+        }
+        m_neighborPointerGestureCaptured = false;
+        m_neighborPointerGestureButton = Qt::NoButton;
+    }
     if(m_terrainTileInformationPolicy.rightHeld())
     {
         QPoint cell;
@@ -22026,6 +22231,14 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
             m_pOp->mouseReleaseEvent(event);
         else
             event->accept();
+        return;
+    }
+    if(m_neighborPointerGestureCaptured
+       && event->button() == m_neighborPointerGestureButton)
+    {
+        m_neighborPointerGestureCaptured = false;
+        m_neighborPointerGestureButton = Qt::NoButton;
+        event->accept();
         return;
     }
     if(m_sculptGestureCaptured && event->button() == Qt::LeftButton)

@@ -1529,6 +1529,8 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    connect(m_pView, &CView::neighborMapOpenRequested,
+            this, &MainWindow::openMapPair);
     const QMetaObject::Connection databasePrototypeNavigation = connect(
         m_pView, &CView::openDatabasePrototypeRequested,
         this, &MainWindow::showDatabaseEditor);
@@ -6457,15 +6459,89 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
         return;
     }
-    if(!QFileInfo::exists(mprPath) || !QFileInfo::exists(mobPath))
+    QFileInfo targetMpr(mprPath);
+    QFileInfo targetMob(mobPath);
+    const auto missingPairComponents = [&]() {
+        QStringList missing;
+        if(mprPath.isEmpty() || !targetMpr.isFile())
+            missing.append(tr("MPR: %1").arg(mprPath.isEmpty()
+                ? tr("not found in the active profile")
+                : QDir::toNativeSeparators(targetMpr.absoluteFilePath())));
+        if(mobPath.isEmpty() || !targetMob.isFile())
+            missing.append(tr("MOB: %1").arg(mobPath.isEmpty()
+                ? tr("not found in the active profile")
+                : QDir::toNativeSeparators(targetMob.absoluteFilePath())));
+        return missing;
+    };
+    QStringList missingComponents = missingPairComponents();
+    if(!missingComponents.isEmpty())
     {
         QMessageBox::warning(this, tr("Open map"),
-            tr("The map pair for %1 is incomplete. Refresh the active game/mod profile.").arg(zoneId));
-        refreshMapsBrowser();
+            tr("The map pair for %1 is incomplete.\n\n%2\n\nThe current workspace was not changed. Refresh the active game/mod profile and try again.")
+                .arg(zoneId, missingComponents.join(QLatin1Char('\n'))));
+        return;
+    }
+
+    const auto rejectUnreadable = [this, &zoneId](
+            const QString& component, const QFileInfo& file,
+            const CValidationReport& report) {
+        QString details = report.toText().trimmed();
+        if(details.isEmpty())
+            details = tr("The file could not be opened for reading.");
+        const QString message = tr(
+            "The %1 for map %2 could not be read or validated.\n\n%3\n\n%4\n\nThe current workspace was not changed.")
+                .arg(component, zoneId,
+                     QDir::toNativeSeparators(file.absoluteFilePath()), details);
+        ei::log(eLogWarning, QString("Map-pair open preflight rejected zone:%1 component:%2 path:%3 details:%4")
+            .arg(zoneId, component, file.absoluteFilePath(), details));
+        QMessageBox::warning(this, tr("Open map"), message);
+    };
+    CMprDocument targetMprDocument;
+    CValidationReport targetMprReport;
+    if(!targetMprDocument.load(targetMpr, &targetMprReport)
+       || targetMprReport.hasErrors())
+    {
+        rejectUnreadable(tr("MPR"), targetMpr, targetMprReport);
+        return;
+    }
+    CMobDocument targetMobDocument;
+    CValidationReport targetMobReport;
+    if(!targetMobDocument.load(targetMob, &targetMobReport)
+       || targetMobReport.hasErrors())
+    {
+        rejectUnreadable(tr("MOB"), targetMob, targetMobReport);
+        return;
+    }
+    QString targetMobProjectionError;
+    if(!CMob::validateEditableProjection(targetMobDocument.originalBytes(),
+                                         targetMob,
+                                         &targetMobProjectionError))
+    {
+        CValidationReport targetMobProjectionReport;
+        targetMobProjectionReport.add(
+            QStringLiteral("mob.editable_projection"),
+            EValidationSeverity::Error, targetMobProjectionError,
+            targetMob.absoluteFilePath());
+        rejectUnreadable(tr("MOB"), targetMob,
+                         targetMobProjectionReport);
         return;
     }
     if(!isExitAllowed())
         return;
+    // The save prompt is modal, so an external process can remove either
+    // catalog file while the user is deciding. Recheck before the first
+    // workspace mutation so Cancel and stale/invalid targets always retain the
+    // current map and its background.
+    targetMpr.refresh();
+    targetMob.refresh();
+    missingComponents = missingPairComponents();
+    if(!missingComponents.isEmpty())
+    {
+        QMessageBox::warning(this, tr("Open map"),
+            tr("The map pair for %1 changed while the current workspace was waiting to close.\n\n%2\n\nThe current workspace was not changed. Refresh the active game/mod profile and try again.")
+                .arg(zoneId, missingComponents.join(QLatin1Char('\n'))));
+        return;
+    }
     if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
         return;
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);

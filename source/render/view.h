@@ -404,6 +404,7 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
@@ -475,6 +476,8 @@ private:
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
     void clearNeighborLandscapes();
+    bool neighborMapAtViewport(const QPoint& viewportPosition,
+                               SNeighborMapPlacement* placement);
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
     void showTerrainTileInformation(const QPoint& viewportPosition);
     void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
@@ -657,6 +660,9 @@ signals:
     void telephotoCameraMultiplierChanged(double multiplier);
     void telephotoCameraDirectionChanged(int direction);
     void entranceOverlayVisibilityChanged(bool visible);
+    void neighborMapOpenRequested(const QString& mprPath,
+                                  const QString& mobPath,
+                                  const QString& zoneId);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
@@ -807,8 +813,16 @@ private:
     std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
-    QVector<QSharedPointer<CLandscape>> m_neighborLandscapes;
+    struct SLoadedNeighborLandscape
+    {
+        SNeighborMapPlacement placement;
+        QSharedPointer<CLandscape> landscape;
+    };
+    QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
     QVector<SNeighborMapPlacement> m_neighborPlacements;
+    bool m_neighborPointerGestureCaptured{false};
+    Qt::MouseButton m_neighborPointerGestureButton{Qt::NoButton};
+    bool m_neighborNavigationInProgress{false};
     int m_tileBrushCommandId;
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;

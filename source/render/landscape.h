@@ -102,6 +102,7 @@ public:
     uint textureNum() const {return m_header.nTexture;}
     uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
     uint heightInWorldUnits() const { return m_header.nYSector * 32u; }
+    float maximumHeight() const { return m_header.maxZ; }
     const QVector<SMaterial>& materials() const {return m_aMaterial;}
     void setMaterials(const QVector<SMaterial>& arrMat);
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}
