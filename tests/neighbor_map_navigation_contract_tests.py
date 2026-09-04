@@ -71,9 +71,10 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         neighbor_wrapper = browser_wrapper[
             browser_wrapper.index("void MainWindow::openNeighborMapPair(") :
         ]
-        self.assertIn("zoneId, true, QPointF()", browser_wrapper)
+        self.assertIn("zoneId, true, QPointF(), QPointF()", browser_wrapper)
         self.assertIn("zoneId, false,", neighbor_wrapper)
-        self.assertIn("previousOrigin", neighbor_wrapper)
+        self.assertIn("sourceWorldOrigin", neighbor_wrapper)
+        self.assertIn("targetWorldOrigin", neighbor_wrapper)
         helper_end = main_window_cpp.index(
             "void MainWindow::connectUiButtons()", helper_start
         )
@@ -82,20 +83,25 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         camera_move = helper.index("moveCameraToActiveSpawn();")
         self.assertLess(focus_guard, camera_move)
 
-    def test_preserved_camera_is_rebased_from_neighbor_to_active_map_coordinates(self):
+    def test_preserved_camera_is_rebased_through_absolute_world_coordinates(self):
         view_h = source("source/render/view.h")
         view_cpp = source("source/render/view.cpp")
         main_window_h = source("source/app/main_window.h")
         main_window_cpp = source("source/app/main_window.cpp")
 
-        self.assertIn("const QPointF& previousOrigin", view_h)
+        self.assertIn("const QPointF& sourceWorldOrigin", view_h)
+        self.assertIn("const QPointF& targetWorldOrigin", view_h)
         self.assertIn(
-            "emit neighborMapOpenRequested(mprPath, mobPath, zoneId, target.origin);",
+            "emit neighborMapOpenRequested(mprPath, mobPath, zoneId,\n"
+            "        m_activeMapWorldOrigin, target.worldOrigin);",
             view_cpp,
         )
-        self.assertIn("const QPointF& previousOrigin", main_window_h)
+        self.assertIn("const QPointF& sourceWorldOrigin", main_window_h)
+        self.assertIn("const QPointF& targetWorldOrigin", main_window_h)
         self.assertIn(
-            "rebaseCameraForOpenedNeighbor(previousOrigin);", main_window_cpp
+            "rebaseCameraForOpenedNeighbor(sourceWorldOrigin,\n"
+            "                targetWorldOrigin);",
+            main_window_cpp,
         )
 
         rebase_start = view_cpp.index(
@@ -103,10 +109,12 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         )
         rebase_end = view_cpp.index("\n}\n", rebase_start) + 3
         rebase = view_cpp[rebase_start:rebase_end]
-        self.assertIn("-float(previousOrigin.x())", rebase)
-        self.assertIn("-float(previousOrigin.y())", rebase)
-        self.assertIn("position + offset", rebase)
-        self.assertIn("pivot + offset", rebase)
+        self.assertIn("CWorldMapLayout::toWorld", rebase)
+        self.assertIn("CWorldMapLayout::toLocal", rebase)
+        self.assertIn("sourceWorldOrigin", rebase)
+        self.assertIn("targetWorldOrigin", rebase)
+        self.assertIn("localPosition", rebase)
+        self.assertIn("localPivot", rebase)
         self.assertIn("rotation", rebase)
 
     def test_navigation_is_reentrant_safe_and_does_not_create_edit_history(self):

@@ -8,12 +8,14 @@
 #include <QVector>
 
 #include "map_catalog.h"
+#include "world_map_layout.h"
 
 struct SNeighborMapPlacement
 {
     QString zoneId;
     QString mprPath;
     QString mobPath;
+    QPointF worldOrigin;
     QPointF origin;
     QSizeF size;
     int routeDistance{0};
@@ -23,6 +25,8 @@ struct SNeighborMapLayoutResult
 {
     QVector<SNeighborMapPlacement> placements;
     QStringList messages;
+    QPointF activeWorldOrigin;
+    bool hasActiveWorldOrigin{false};
 };
 
 class CNeighborMapLayout
@@ -30,6 +34,8 @@ class CNeighborMapLayout
 public:
     static SNeighborMapLayoutResult build(
         const QVector<SMapCatalogEntry>& topology,
+        const QVector<SWorldMapZoneOrigin>& worldOrigins,
+        const QString& profileId, const QString& activeAllodId,
         const QString& activeZoneId, int maximumNeighbors = 5);
 };
 

@@ -109,6 +109,7 @@
 #include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
+#include "world_map_layout_document.h"
 #include "terrain_save_flow_policy.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
@@ -3231,10 +3232,35 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
     if(m_pView)
     {
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
+        const QVector<SMapCatalogEntry> topology = m_borrowedMapIdentity
+            ? QVector<SMapCatalogEntry>() : m_mapCatalog.topologyEntries;
+        const QString profileId = m_borrowedMapIdentity
+            ? QString() : activeResourceProfile().profileId;
+        SWorldMapLayoutUpdateResult worldLayout;
+        if(!m_borrowedMapIdentity)
+            worldLayout = m_worldMapLayoutDocument.loadAndUpdate(
+                profileId, topology);
+        for(const QString& diagnostic : worldLayout.diagnostics)
+            ei::log(eLogWarning, QStringLiteral("World map layout: ")
+                + diagnostic);
+        if(!worldLayout.warning.isEmpty()
+           && worldLayout.warning != m_lastWorldMapLayoutWarning)
+        {
+            m_lastWorldMapLayoutWarning = worldLayout.warning;
+            ei::log(eLogWarning, QString(
+                "World map layout storage warning path:%1 details:%2")
+                .arg(m_worldMapLayoutDocument.path(), worldLayout.warning));
+            statusBar()->showMessage(tr(
+                "World-map coordinates are temporary. The saved layout was "
+                "left unchanged; see the log for details."), 15000);
+        }
+        else if(worldLayout.warning.isEmpty())
+            m_lastWorldMapLayoutWarning.clear();
         m_pView->setNeighborMapContext(
-            m_borrowedMapIdentity ? QVector<SMapCatalogEntry>()
-                                  : m_mapCatalog.topologyEntries,
-            m_borrowedMapIdentity ? QString() : m_mapTestEntry.zoneId);
+            topology, worldLayout.zones, profileId,
+            m_borrowedMapIdentity ? QString() : m_mapTestEntry.allodId,
+            m_borrowedMapIdentity ? QString() : m_mapTestEntry.zoneId,
+            worldLayout.warning);
     }
     populateEntranceCombo();
     if(preserveWorkspaceState && !previousRouteKey.isEmpty())
@@ -3281,7 +3307,9 @@ void MainWindow::chooseBorrowedMapIdentity()
     m_mapTestEntry = choices[index];
     m_borrowedMapIdentity = true;
     if(m_pView)
-        m_pView->setNeighborMapContext(QVector<SMapCatalogEntry>(), QString());
+        m_pView->setNeighborMapContext(
+            QVector<SMapCatalogEntry>(), QVector<SWorldMapZoneOrigin>(),
+            QString(), QString(), QString());
     ei::log(eLogWarning, QString("Borrowed map.txt identity zone:%1 for unregistered MPR:%2")
         .arg(m_mapTestEntry.zoneId, CLandscape::getInstance()->filePath().absoluteFilePath()));
     populateEntranceCombo();
@@ -6452,23 +6480,25 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
-    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF());
+    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF(), QPointF());
 }
 
 void MainWindow::openNeighborMapPair(const QString& mprPath,
                                      const QString& mobPath,
                                      const QString& zoneId,
-                                     const QPointF& previousOrigin)
+                                     const QPointF& sourceWorldOrigin,
+                                     const QPointF& targetWorldOrigin)
 {
     openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, false,
-                                previousOrigin);
+                                sourceWorldOrigin, targetWorldOrigin);
 }
 
 void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                                              const QString& mobPath,
                                              const QString& zoneId,
                                              bool focusFirstEntrance,
-                                             const QPointF& previousOrigin)
+                                             const QPointF& sourceWorldOrigin,
+                                             const QPointF& targetWorldOrigin)
 {
     QElapsedTimer workspaceLoadTimer;
     workspaceLoadTimer.start();
@@ -6617,7 +6647,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
     QTimer::singleShot(0, this,
-        [this, focusFirstEntrance, previousOrigin]()
+        [this, focusFirstEntrance, sourceWorldOrigin, targetWorldOrigin]()
     {
         if(!m_validEntrances.isEmpty())
         {
@@ -6627,7 +6657,8 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                 moveCameraToActiveSpawn();
         }
         if(!focusFirstEntrance)
-            m_pView->rebaseCameraForOpenedNeighbor(previousOrigin);
+            m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,
+                targetWorldOrigin);
     });
 }
 

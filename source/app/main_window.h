@@ -22,6 +22,7 @@
 #include "map_spawn_planner.h"
 #include "mob_family_validation.h"
 #include "minimap_bake.h"
+#include "world_map_layout_document.h"
 
 namespace Ui {
 class MainWindow;
@@ -143,12 +144,14 @@ private:
     void openMapPair(const QString& mprPath, const QString& mobPath, const QString& zoneId);
     void openNeighborMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId,
-                             const QPointF& previousOrigin);
+                             const QPointF& sourceWorldOrigin,
+                             const QPointF& targetWorldOrigin);
     void openMapPairWithCameraPolicy(const QString& mprPath,
                                      const QString& mobPath,
                                      const QString& zoneId,
                                      bool focusFirstEntrance,
-                                     const QPointF& previousOrigin);
+                                     const QPointF& sourceWorldOrigin,
+                                     const QPointF& targetWorldOrigin);
     void openCollection(const QString& path);
     void newCollection();
     void editCollection();
@@ -388,6 +391,8 @@ private:
     QLabel* m_spawnPositionLabel;
     SMapCatalogResult m_mapCatalog;
     SMapCatalogEntry m_mapTestEntry;
+    CWorldMapLayoutDocument m_worldMapLayoutDocument;
+    QString m_lastWorldMapLayoutWarning;
     QVector<SMapTravelZone> m_validEntrances;
     QString m_openedMapZoneId;
     QString m_currentCollectionPath;

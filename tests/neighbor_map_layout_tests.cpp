@@ -2,6 +2,7 @@
 
 #include "map_catalog.h"
 #include "neighbor_map_layout.h"
+#include "world_map_layout.h"
 
 class NeighborMapLayoutTests : public QObject
 {
@@ -10,6 +11,8 @@ class NeighborMapLayoutTests : public QObject
 private slots:
     void placesNearestZone7BackgroundsFromPairedEntrances();
     void rejectsNonOppositeDeployEdges();
+    void worldOriginsDoNotDependOnActiveZone();
+    void doesNotCombineDifferentAllods();
 };
 
 void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
@@ -51,8 +54,14 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
             entry.mobPath = entry.mobName + QStringLiteral(".mob");
         }
 
-    const SNeighborMapLayoutResult result =
-        CNeighborMapLayout::build(topology, QStringLiteral("gz7g"), 5);
+    const SWorldMapInferenceResult world = CWorldMapLayout::infer(
+        QStringLiteral("test-profile"), topology);
+    // The persisted model keeps the complete six-map component. The limit of
+    // five applies only when selecting background landscapes for this view.
+    QCOMPARE(world.zones.size(), 6);
+    const SNeighborMapLayoutResult result = CNeighborMapLayout::build(
+        topology, world.zones, QStringLiteral("test-profile"),
+        QStringLiteral("gipat"), QStringLiteral("gz7g"), 5);
 
     QCOMPARE(result.placements.size(), 5);
     QMap<QString, QPointF> origins;
@@ -88,11 +97,75 @@ void NeighborMapLayoutTests::rejectsNonOppositeDeployEdges()
         if(!entry.mprName.isEmpty())
             entry.mprPath = entry.mprName + QStringLiteral(".mpr");
 
-    const SNeighborMapLayoutResult result =
-        CNeighborMapLayout::build(topology, QStringLiteral("a"), 5);
+    const SWorldMapInferenceResult world = CWorldMapLayout::infer(
+        QStringLiteral("test-profile"), topology);
+    const SNeighborMapLayoutResult result = CNeighborMapLayout::build(
+        topology, world.zones, QStringLiteral("test-profile"),
+        QStringLiteral("allod"), QStringLiteral("a"), 5);
 
     QVERIFY(result.placements.isEmpty());
     QVERIFY(!result.messages.isEmpty());
+}
+
+void NeighborMapLayoutTests::worldOriginsDoNotDependOnActiveZone()
+{
+    const QString table = QString::fromUtf8(
+        "#zone a island game\n#res\na a\n#maps\n4 4\na b\n"
+        "#exit 1\nb 1\n#deploy\n124 48 128 64\n"
+        "#zone b island game\n#res\nb b\n#maps\n4 4\na b\n"
+        "#exit 1\na 1\n#deploy\n0 48 4 64\n"
+        "#exit 2\nc 1\n#deploy\n124 48 128 64\n"
+        "#zone c island game\n#res\nc c\n#maps\n4 4\na b\n"
+        "#exit 1\nb 2\n#deploy\n0 48 4 64\n");
+    QVector<SMapCatalogEntry> topology = CMapCatalog::parseMapTopology(table);
+    for(SMapCatalogEntry& entry : topology)
+        if(!entry.mprName.isEmpty())
+            entry.mprPath = entry.mprName + QStringLiteral(".mpr");
+
+    const SWorldMapInferenceResult world = CWorldMapLayout::infer(
+        QStringLiteral("test-profile"), topology);
+    const SNeighborMapLayoutResult fromA = CNeighborMapLayout::build(
+        topology, world.zones, QStringLiteral("test-profile"),
+        QStringLiteral("island"), QStringLiteral("a"), 5);
+    const SNeighborMapLayoutResult fromC = CNeighborMapLayout::build(
+        topology, world.zones, QStringLiteral("test-profile"),
+        QStringLiteral("island"), QStringLiteral("c"), 5);
+    QPointF bFromA;
+    QPointF bFromC;
+    for(const SNeighborMapPlacement& placement : fromA.placements)
+        if(placement.zoneId == QStringLiteral("b"))
+            bFromA = placement.worldOrigin;
+    for(const SNeighborMapPlacement& placement : fromC.placements)
+        if(placement.zoneId == QStringLiteral("b"))
+            bFromC = placement.worldOrigin;
+
+    // A persisted world layout must assign B one absolute origin regardless
+    // of which map happens to be active. Expected: B remains at (128, 0).
+    QCOMPARE(bFromA, QPointF(128.0, 0.0));
+    QCOMPARE(bFromC, QPointF(128.0, 0.0));
+}
+
+void NeighborMapLayoutTests::doesNotCombineDifferentAllods()
+{
+    const QString table = QString::fromUtf8(
+        "#zone a first game\n#res\na a\n#maps\n4 4\na b\n"
+        "#exit 1\nb 1\n#deploy\n124 48 128 64\n"
+        "#zone b second game\n#res\nb b\n#maps\n4 4\na b\n"
+        "#exit 1\na 1\n#deploy\n0 48 4 64\n");
+    QVector<SMapCatalogEntry> topology = CMapCatalog::parseMapTopology(table);
+    for(SMapCatalogEntry& entry : topology)
+        if(!entry.mprName.isEmpty())
+            entry.mprPath = entry.mprName + QStringLiteral(".mpr");
+
+    const SWorldMapInferenceResult world = CWorldMapLayout::infer(
+        QStringLiteral("test-profile"), topology);
+    const SNeighborMapLayoutResult result = CNeighborMapLayout::build(
+        topology, world.zones, QStringLiteral("test-profile"),
+        QStringLiteral("first"), QStringLiteral("a"), 5);
+
+    // Cross-allod travel remains navigation metadata only and must never be a
+    // geometric relation in the world layout.
+    QVERIFY(result.placements.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(NeighborMapLayoutTests)

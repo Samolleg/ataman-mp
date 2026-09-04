@@ -10307,6 +10307,11 @@ Do you want to %3?</source>
             <source>Create and place logic point</source>
             <translation>Создать точку логики</translation>
         </message>
+        <message>
+            <location filename="../source/render/view.cpp" line="2967" />
+            <source>World-map coordinates are temporary. The saved layout was left unchanged; see the log for details.</source>
+            <translation>Координаты мира используются временно. Сохранённая схема не изменена; подробности см. в журнале.</translation>
+        </message>
     </context>
     <context>
         <name>CViewportMinimapWidget</name>
@@ -14263,6 +14268,11 @@ It could not be opened automatically.</source>
             <location filename="../source/app/main_window.cpp" line="8501" />
             <source>Stop the game process launched by Endurance, clean up its temporary files, and exit?</source>
             <translation>Остановить игровой процесс, запущенный Endurance, очистить временные файлы и выйти?</translation>
+        </message>
+        <message>
+            <location filename="../source/app/main_window.cpp" line="3253" />
+            <source>World-map coordinates are temporary. The saved layout was left unchanged; see the log for details.</source>
+            <translation>Координаты мира используются временно. Сохранённая схема не изменена; подробности см. в журнале.</translation>
         </message>
     </context>
     <context>

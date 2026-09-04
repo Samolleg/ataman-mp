@@ -239,7 +239,9 @@ public:
                                         float maximumDistance = 8.0f) const;
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
-    void rebaseCameraForOpenedNeighbor(const QPointF& previousOrigin);
+    void rebaseCameraForOpenedNeighbor(
+        const QPointF& sourceWorldOrigin,
+        const QPointF& targetWorldOrigin);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
@@ -250,8 +252,12 @@ public:
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
-    void setNeighborMapContext(const QVector<SMapCatalogEntry>& topology,
-                               const QString& activeZoneId);
+    void setNeighborMapContext(
+        const QVector<SMapCatalogEntry>& topology,
+        const QVector<SWorldMapZoneOrigin>& worldOrigins,
+        const QString& profileId, const QString& activeAllodId,
+        const QString& activeZoneId,
+        const QString& layoutWarning = QString());
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
@@ -665,7 +671,8 @@ signals:
     void neighborMapOpenRequested(const QString& mprPath,
                                   const QString& mobPath,
                                   const QString& zoneId,
-                                  const QPointF& previousOrigin);
+                                  const QPointF& sourceWorldOrigin,
+                                  const QPointF& targetWorldOrigin);
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
@@ -823,6 +830,8 @@ private:
     };
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
     QVector<SNeighborMapPlacement> m_neighborPlacements;
+    QPointF m_activeMapWorldOrigin;
+    bool m_hasActiveMapWorldOrigin{false};
     bool m_neighborPointerGestureCaptured{false};
     Qt::MouseButton m_neighborPointerGestureButton{Qt::NoButton};
     bool m_neighborNavigationInProgress{false};

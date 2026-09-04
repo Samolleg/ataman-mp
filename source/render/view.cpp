@@ -2936,12 +2936,22 @@ void CView::updateVisualChannelAvailability()
 }
 
 void CView::setNeighborMapContext(
-    const QVector<SMapCatalogEntry>& topology, const QString& activeZoneId)
+    const QVector<SMapCatalogEntry>& topology,
+    const QVector<SWorldMapZoneOrigin>& worldOrigins,
+    const QString& profileId, const QString& activeAllodId,
+    const QString& activeZoneId, const QString& layoutWarning)
 {
     clearNeighborLandscapes();
+    m_activeMapWorldOrigin = QPointF();
+    m_hasActiveMapWorldOrigin = false;
     const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
-        topology, activeZoneId, 5);
+        topology, worldOrigins, profileId, activeAllodId, activeZoneId, 5);
     m_neighborPlacements = layout.placements;
+    if(layout.hasActiveWorldOrigin)
+    {
+        m_activeMapWorldOrigin = layout.activeWorldOrigin;
+        m_hasActiveMapWorldOrigin = true;
+    }
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
@@ -2953,6 +2963,10 @@ void CView::setNeighborMapContext(
                 zones.append(placement.zoneId);
             tooltip += tr("\n\nAvailable: %1").arg(zones.join(", "));
         }
+        if(!layoutWarning.isEmpty())
+            tooltip += QStringLiteral("\n\n") + tr(
+                "World-map coordinates are temporary. The saved layout was "
+                "left unchanged; see the log for details.");
         m_neighborLandscapesVisualToggle->setProperty(
             "availableToolTip", tooltip);
         m_neighborLandscapesVisualToggle->setToolTip(tooltip);
@@ -8942,6 +8956,8 @@ void CView::unloadLand(bool promptForSave)
 
     clearNeighborLandscapes();
     m_neighborPlacements.clear();
+    m_activeMapWorldOrigin = QPointF();
+    m_hasActiveMapWorldOrigin = false;
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
     m_pLand->setCanonicalTerrainModel(nullptr);
@@ -21651,7 +21667,8 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
     }
 
     SNeighborMapPlacement target;
-    if(!neighborMapAtViewport(event->pos(), &target))
+    if(!neighborMapAtViewport(event->pos(), &target)
+       || !m_hasActiveMapWorldOrigin)
     {
         // The active landscape and empty viewport space keep their existing
         // no-op double-click behavior. In particular, the active map never
@@ -21666,7 +21683,8 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
     m_neighborPointerGestureCaptured = true;
     m_neighborPointerGestureButton = Qt::LeftButton;
     m_neighborNavigationInProgress = true;
-    emit neighborMapOpenRequested(mprPath, mobPath, zoneId, target.origin);
+    emit neighborMapOpenRequested(mprPath, mobPath, zoneId,
+        m_activeMapWorldOrigin, target.worldOrigin);
     m_neighborNavigationInProgress = false;
     event->accept();
 }
@@ -24271,7 +24289,9 @@ void CView::moveCameraToMinimapPoint(const QPointF& worldPosition)
     update();
 }
 
-void CView::rebaseCameraForOpenedNeighbor(const QPointF& previousOrigin)
+void CView::rebaseCameraForOpenedNeighbor(
+    const QPointF& sourceWorldOrigin,
+    const QPointF& targetWorldOrigin)
 {
     if(!m_cam)
         return;
@@ -24279,9 +24299,19 @@ void CView::rebaseCameraForOpenedNeighbor(const QPointF& previousOrigin)
     QVector3D pivot;
     QVector3D rotation;
     m_cam->getLocation(position, pivot, rotation);
-    const QVector3D offset(-float(previousOrigin.x()),
-                           -float(previousOrigin.y()), 0.0f);
-    m_cam->setLocation(position + offset, pivot + offset, rotation);
+    const QPointF worldPosition = CWorldMapLayout::toWorld(
+        sourceWorldOrigin, QPointF(position.x(), position.y()));
+    const QPointF worldPivot = CWorldMapLayout::toWorld(
+        sourceWorldOrigin, QPointF(pivot.x(), pivot.y()));
+    const QPointF localPosition = CWorldMapLayout::toLocal(
+        targetWorldOrigin, worldPosition);
+    const QPointF localPivot = CWorldMapLayout::toLocal(
+        targetWorldOrigin, worldPivot);
+    position.setX(float(localPosition.x()));
+    position.setY(float(localPosition.y()));
+    pivot.setX(float(localPivot.x()));
+    pivot.setY(float(localPivot.y()));
+    m_cam->setLocation(position, pivot, rotation);
     update();
 }
 
