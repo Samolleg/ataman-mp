@@ -13,6 +13,7 @@
 #include <QVector3D>
 #include <QFuture>
 #include <QSet>
+#include <QSharedPointer>
 #include <functional>
 
 //#include "sector.h"
@@ -74,9 +75,14 @@ class CLandscape
 public:
     using SaveProgress = std::function<void(const QString&, int, int)>;
     static CLandscape* getInstance();
+    static QSharedPointer<CLandscape> createReadOnlyBackground();
+    ~CLandscape();
     bool isMprLoad() {return !m_aSector.isEmpty();}
+    bool isReadOnlyBackground() const { return m_readOnlyBackground; }
     void unloadMpr();
     void readMap(const QFileInfo& path);
+    bool readBackgroundMap(const QFileInfo& path);
+    void setWorldOffset(const QVector3D& offset);
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
@@ -96,6 +102,7 @@ public:
     uint textureNum() const {return m_header.nTexture;}
     uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
     uint heightInWorldUnits() const { return m_header.nYSector * 32u; }
+    float maximumHeight() const { return m_header.maxZ; }
     const QVector<SMaterial>& materials() const {return m_aMaterial;}
     void setMaterials(const QVector<SMaterial>& arrMat);
     const QVector<ETileType>& tileTypes() const {return m_aTileTypes;}
@@ -119,7 +126,7 @@ public:
         const QSet<int>& changedSlots = QSet<int>(),
         const QVector<QImage>& rollbackTileImages = QVector<QImage>());
     void clearPreviewTerrainAtlas();
-    void setDirty(bool bDirty) {m_bDirty = bDirty;}
+    void setDirty(bool bDirty) {if(!m_readOnlyBackground) m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     bool adoptCanonicalTerrainSave(
@@ -136,8 +143,8 @@ public:
     void applyTerrainShadowUniforms(QOpenGLShaderProgram* program, bool enabled);
 
 private:
-    CLandscape();
-    ~CLandscape();
+    explicit CLandscape(bool readOnlyBackground = false);
+    void readMapInternal(const QFileInfo& path, bool createRecoverySnapshot);
     bool readHeader(QDataStream& stream);
     bool serializeMpr(const QString& zoneName, CResFile& mprFile);
     bool uploadTerrainShadowTexture(const STerrainShadowFieldResult& result);
@@ -173,6 +180,7 @@ private:
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
     bool m_materialDrawDataDirty;
+    bool m_readOnlyBackground{false};
     const CTerrainEditModel* m_canonicalTerrain;
     quint64 m_shadowGeneration{0};
     quint64 m_terrainShadowFieldGeneration{0};

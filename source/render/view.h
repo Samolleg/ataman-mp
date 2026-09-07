@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QOpenGLBuffer>
 #include <QElapsedTimer>
+#include <QPointF>
 #include <QRectF>
 #include <QPolygonF>
 #include <QSet>
@@ -50,6 +51,8 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "tile_brush_stroke_policy.h"
 #include "shadow_cascade.h"
 #include "frame_presentation_telemetry.h"
+#include "map_catalog.h"
+#include "neighbor_map_layout.h"
 
 class QLineEdit;
 class QFrame;
@@ -236,6 +239,14 @@ public:
                                         float maximumDistance = 8.0f) const;
     QPolygonF minimapCameraFootprint() const;
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
+    bool captureCameraLocation(QVector3D* position, QVector3D* pivot,
+                               QVector3D* rotation) const;
+    void rebaseCameraForOpenedNeighbor(
+        const QPointF& sourceWorldOrigin,
+        const QPointF& targetWorldOrigin,
+        const QVector3D& sourcePosition,
+        const QVector3D& sourcePivot,
+        const QVector3D& sourceRotation);
     QPoint operationAnchor() const;
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
@@ -246,6 +257,12 @@ public:
     void setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                  const QStringList& labels,
                                  int selectedIndex);
+    void setNeighborMapContext(
+        const QVector<SMapCatalogEntry>& topology,
+        const QVector<SWorldMapZoneOrigin>& worldOrigins,
+        const QString& profileId, const QString& activeAllodId,
+        const QString& activeZoneId,
+        const QString& layoutWarning = QString());
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
@@ -400,6 +417,7 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
@@ -469,6 +487,19 @@ private:
     void markObservedSceneFrameFlicker();
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
+    void loadNeighborLandscapes();
+    void clearNeighborLandscapes();
+    bool neighborMapAtViewport(const QPoint& viewportPosition,
+                               SNeighborMapPlacement* placement,
+                               QVector3D* hitPoint = nullptr,
+                               bool preferNeighbor = false);
+    bool viewportPointOnHorizontalPlane(const QPoint& viewportPosition,
+                                        float planeZ,
+                                        QPointF* worldPoint) const;
+    bool updateNeighborLayoutDrag(const QPoint& viewportPosition);
+    void cancelNeighborLayoutDrag(bool restoreOrigin);
+    void updateNeighborLayoutStatus(const QString& zoneId = QString(),
+                                    const QPointF& worldOrigin = QPointF());
     bool terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell);
     void showTerrainTileInformation(const QPoint& viewportPosition);
     void appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
@@ -651,6 +682,14 @@ signals:
     void telephotoCameraMultiplierChanged(double multiplier);
     void telephotoCameraDirectionChanged(int direction);
     void entranceOverlayVisibilityChanged(bool visible);
+    void neighborMapOpenRequested(const QString& mprPath,
+                                  const QString& mobPath,
+                                  const QString& zoneId,
+                                  const QPointF& sourceWorldOrigin,
+                                  const QPointF& targetWorldOrigin);
+    void neighborMapOriginChangeRequested(const QString& zoneId,
+                                          const QPointF& worldOrigin);
+    void neighborMapLayoutResetRequested();
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
@@ -801,6 +840,28 @@ private:
     std::function<void()> m_refreshMprSettingsDock;
     QSharedPointer<CPreviewTile> m_pPreviewTile;
     CLandscape* m_pLand;
+    struct SLoadedNeighborLandscape
+    {
+        SNeighborMapPlacement placement;
+        QSharedPointer<CLandscape> landscape;
+    };
+    QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
+    QVector<SNeighborMapPlacement> m_neighborPlacements;
+    QPointF m_activeMapWorldOrigin;
+    QString m_neighborMapAnchorZoneId;
+    bool m_hasActiveMapWorldOrigin{false};
+    bool m_neighborLayoutStorageWritable{false};
+    bool m_neighborLayoutEditEnabled{false};
+    bool m_neighborLayoutDragActive{false};
+    bool m_neighborLayoutDragChanged{false};
+    QString m_neighborLayoutDragZoneId;
+    QPointF m_neighborLayoutDragStartOrigin;
+    QPointF m_neighborLayoutDragWorldOrigin;
+    QPointF m_neighborLayoutDragStartPointerWorld;
+    float m_neighborLayoutDragPlaneZ{0.0f};
+    bool m_neighborPointerGestureCaptured{false};
+    Qt::MouseButton m_neighborPointerGestureButton{Qt::NoButton};
+    bool m_neighborNavigationInProgress{false};
     int m_tileBrushCommandId;
     CLandscapeTools* m_landscapeTools;
     CMprDocument m_mprDocument;
@@ -1004,6 +1065,10 @@ private:
     QToolButton* m_environmentPreviewCollapse{nullptr};
     QComboBox* m_environmentPreviewMode{nullptr};
     QToolButton* m_entranceVisualToggle{nullptr};
+    QToolButton* m_neighborLandscapesVisualToggle{nullptr};
+    QToolButton* m_neighborLayoutEditToggle{nullptr};
+    QToolButton* m_neighborLayoutResetButton{nullptr};
+    QLabel* m_neighborLayoutStatus{nullptr};
     QToolButton* m_objectHelpersVisualToggle{nullptr};
     QToolButton* m_staticObjectsVisualToggle{nullptr};
     QToolButton* m_dynamicObjectsVisualToggle{nullptr};
@@ -1064,6 +1129,7 @@ private:
     QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
     bool m_entranceOverlaysVisible{true};
+    bool m_neighborLandscapesVisible{false};
     bool m_objectHelpersVisible{true};
     bool m_staticObjectsVisible{true};
     bool m_dynamicObjectsVisible{true};

@@ -67,6 +67,31 @@ void CMob::attach(CView *view, CProgressView *pProgress)
     m_pProgress = pProgress;
 }
 
+bool CMob::validateEditableProjection(const QByteArray& data,
+                                      const QFileInfo& source,
+                                      QString* error)
+{
+    CMob candidate;
+    candidate.m_filePath = source;
+    try
+    {
+        if(candidate.deserialize(data))
+            return true;
+        if(error)
+            *error = QCoreApplication::translate(
+                "CMob",
+                "The MOB structure is valid, but its editable projection is not supported.");
+    }
+    catch(const std::exception& exception)
+    {
+        if(error)
+            *error = QCoreApplication::translate(
+                "CMob", "The MOB editable projection failed: %1")
+                .arg(QString::fromLocal8Bit(exception.what()));
+    }
+    return false;
+}
+
 void CMob::generateDiplomacyTable()
 {
     const int fieldNum(32);
@@ -276,7 +301,8 @@ bool CMob::deserialize(QByteArray data)
         {
             m_hasObjectSection = true;
             step = step/3;
-            m_pProgress->update(step);
+            if(m_pProgress)
+                m_pProgress->update(step);
             uint objSecLen = parser.nodeLen();
             uint readSecByte(0);
             readByte += parser.skipHeader(); // object section
@@ -351,7 +377,8 @@ bool CMob::deserialize(QByteArray data)
                 return false;
             }
             readByte += readSecByte;
-            m_pProgress->update(step);
+            if(m_pProgress)
+                m_pProgress->update(step);
         }
         else if (parser.isNextTag("LIGHT_SECTION"))
         {
@@ -391,7 +418,8 @@ bool CMob::deserialize(QByteArray data)
                 .arg(readByte - skipped).arg(skipped));
         }
     }
-    m_pProgress->update(step);
+    if(m_pProgress)
+        m_pProgress->update(step);
     ei::log(eLogInfo, "End read mob");
     return true;
 }

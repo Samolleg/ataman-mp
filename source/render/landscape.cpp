@@ -36,8 +36,13 @@ CLandscape* CLandscape::m_pLand = nullptr;
 CLandscape* CLandscape::getInstance()
 {
     if(nullptr == m_pLand)
-        m_pLand = new CLandscape();
+        m_pLand = new CLandscape(false);
     return m_pLand;
+}
+
+QSharedPointer<CLandscape> CLandscape::createReadOnlyBackground()
+{
+    return QSharedPointer<CLandscape>(new CLandscape(true));
 }
 
 void CLandscape::unloadMpr()
@@ -72,10 +77,11 @@ void CLandscape::unloadMpr()
     m_materialDrawDataDirty = false;
 }
 
-CLandscape::CLandscape():
+CLandscape::CLandscape(bool readOnlyBackground):
   m_texture(nullptr),
   m_bDirty(false),
   m_materialDrawDataDirty(false),
+  m_readOnlyBackground(readOnlyBackground),
   m_canonicalTerrain(nullptr)
 {
     m_aSector.clear();
@@ -635,6 +641,20 @@ QString genSectorSuffix(int x, int y)
 
 void CLandscape::readMap(const QFileInfo& path)
 {
+    readMapInternal(path, true);
+}
+
+bool CLandscape::readBackgroundMap(const QFileInfo& path)
+{
+    if(!m_readOnlyBackground)
+        return false;
+    readMapInternal(path, false);
+    return isMprLoad();
+}
+
+void CLandscape::readMapInternal(const QFileInfo& path,
+                                 bool createRecoverySnapshot)
+{
     if (!path.exists())
         return;
 
@@ -645,15 +665,18 @@ void CLandscape::readMap(const QFileInfo& path)
     if(source.open(QIODevice::ReadOnly))
         m_originalMprData = source.readAll();
 
-    const SBackupResult openBackup = CBackupManager().snapshotOnOpen(path);
-    if(!openBackup.success)
+    if(createRecoverySnapshot)
     {
-        ei::log(eLogWarning, QString("MPR opened without recovery snapshot:%1 error:%2")
-            .arg(path.absoluteFilePath(), openBackup.error));
-        QMessageBox::warning(nullptr, "Endurance backup warning",
-            QString("The MPR was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
-                    "Do not edit or save this file until the backup location is writable.")
-                .arg(openBackup.error));
+        const SBackupResult openBackup = CBackupManager().snapshotOnOpen(path);
+        if(!openBackup.success)
+        {
+            ei::log(eLogWarning, QString("MPR opened without recovery snapshot:%1 error:%2")
+                .arg(path.absoluteFilePath(), openBackup.error));
+            QMessageBox::warning(nullptr, "Endurance backup warning",
+                QString("The MPR was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
+                        "Do not edit or save this file until the backup location is writable.")
+                    .arg(openBackup.error));
+        }
     }
 
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
@@ -728,11 +751,15 @@ void CLandscape::readMap(const QFileInfo& path)
 
 bool CLandscape::save(const SaveProgress& progress)
 {
+    if(m_readOnlyBackground)
+        return false;
     return saveMapAs(m_filePath, progress);
 }
 
 bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
 {
+    if(m_readOnlyBackground)
+        return false;
     // TODO: check if source texture has correct textureSize and tileSize with map header
 
     if(m_bDirty)
@@ -819,6 +846,14 @@ bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
     m_bDirty = false;
     if(progress) progress("MPR save complete.", 4, 4);
     return true;
+}
+
+void CLandscape::setWorldOffset(const QVector3D& offset)
+{
+    for(QVector<CSector*>& row : m_aSector)
+        for(CSector* sector : row)
+            if(sector)
+                sector->setWorldOffset(offset);
 }
 
 bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes)

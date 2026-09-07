@@ -89,12 +89,16 @@ SMapCatalogResult CMapCatalog::load(const QVector<QString>& resourceRoots,
     }
     QTextCodec* cp1251 = QTextCodec::codecForName("CP1251");
     result.sourceArchive = textsArchive;
-    result.entries = parseMapTable(cp1251->toUnicode(mapBytes), textsArchive);
-    for(SMapCatalogEntry& entry : result.entries)
+    result.topologyEntries = parseMapTopology(
+        cp1251->toUnicode(mapBytes), textsArchive);
+    for(SMapCatalogEntry& entry : result.topologyEntries)
     {
         entry.mprPath = resolvedMapPath(mapRoots, entry.mprName, ".mpr");
         entry.mobPath = resolvedMapPath(mapRoots, entry.mobName, ".mob");
-        if(!entry.isComplete())
+        if(!entry.mprName.isEmpty() && !entry.mobName.isEmpty())
+            result.entries.append(entry);
+        if(!entry.mprName.isEmpty() && !entry.mobName.isEmpty()
+           && !entry.isComplete())
             result.messages.append(QString("%1: missing %2%3")
                 .arg(entry.zoneId,
                      entry.mprPath.isEmpty() ? entry.mprName + ".mpr" : QString(),

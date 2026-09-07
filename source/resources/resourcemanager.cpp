@@ -1906,6 +1906,24 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
     return texture;
 }
 
+void CTextureList::releaseTerrainTexture(QOpenGLTexture* texture)
+{
+    if(!texture || !m_terrainTextures.contains(texture))
+        return;
+    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
+    {
+        if(it.value() == texture)
+            it = m_aTexture.erase(it);
+        else
+            ++it;
+    }
+    m_terrainTextures.remove(texture);
+    m_textureMaterialClasses.remove(texture);
+    if(texture->isCreated())
+        texture->destroy();
+    delete texture;
+}
+
 void CTextureList::setTerrainMipmappingEnabled(bool enabled)
 {
     if(m_terrainMipmappingEnabled == enabled)

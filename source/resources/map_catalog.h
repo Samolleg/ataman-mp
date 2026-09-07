@@ -45,6 +45,7 @@ struct SMapCatalogEntry
 struct SMapCatalogResult
 {
     QVector<SMapCatalogEntry> entries;
+    QVector<SMapCatalogEntry> topologyEntries;
     QString sourceArchive;
     QStringList messages;
 };
@@ -54,6 +55,8 @@ QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index);
 class CMapCatalog
 {
 public:
+    static QVector<SMapCatalogEntry> parseMapTopology(
+        const QString& text, const QString& sourceArchive = QString());
     static QVector<SMapCatalogEntry> parseMapTable(const QString& text,
                                                    const QString& sourceArchive = QString());
     static SMapCatalogResult load(const QVector<QString>& resourceRoots,

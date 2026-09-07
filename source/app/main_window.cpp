@@ -109,6 +109,7 @@
 #include "staged_save_validator.h"
 #include "landscape_tools.h"
 #include "collection_document.h"
+#include "world_map_layout_document.h"
 #include "terrain_save_flow_policy.h"
 #include "collection_editor_dialog.h"
 #include "map_table_editor_dialog.h"
@@ -1529,6 +1530,68 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    connect(m_pView, &CView::neighborMapOpenRequested,
+            this, &MainWindow::openNeighborMapPair);
+    connect(m_pView, &CView::neighborMapOriginChangeRequested, this,
+            [this](const QString& zoneId, const QPointF& worldOrigin)
+    {
+        const QString profileId = activeResourceProfile().profileId;
+        QString error;
+        const bool saved = !m_borrowedMapIdentity
+            && !profileId.trimmed().isEmpty()
+            && !m_mapTestEntry.allodId.trimmed().isEmpty()
+            && m_worldMapLayoutDocument.setZoneOrigin(
+                profileId, m_mapTestEntry.allodId, zoneId,
+                worldOrigin, &error);
+        if(!saved)
+        {
+            if(error.isEmpty())
+                error = tr("The active map has no persistent world-map identity.");
+            QMessageBox::warning(this, tr("Arrange maps"), tr(
+                "The position of %1 could not be saved.\n\n%2")
+                    .arg(zoneId, error));
+            refreshMapTestContext(false, false);
+            return;
+        }
+        ei::log(eLogInfo, QString(
+            "Manual world-map origin saved zone:%1 allod:%2 origin:%3,%4")
+            .arg(zoneId, m_mapTestEntry.allodId)
+            .arg(worldOrigin.x(), 0, 'f', 2)
+            .arg(worldOrigin.y(), 0, 'f', 2));
+        refreshMapTestContext(false, false);
+        statusBar()->showMessage(tr(
+            "%1 world position saved — X: %2, Y: %3")
+                .arg(zoneId)
+                .arg(worldOrigin.x(), 0, 'f', 2)
+                .arg(worldOrigin.y(), 0, 'f', 2), 6000);
+    });
+    connect(m_pView, &CView::neighborMapLayoutResetRequested, this, [this]()
+    {
+        if(m_borrowedMapIdentity || m_mapTestEntry.allodId.trimmed().isEmpty())
+            return;
+        const QString allodId = m_mapTestEntry.allodId;
+        if(QMessageBox::question(this, tr("Reset map positions"), tr(
+               "Discard all manual world-map positions for %1 and infer them again from map.txt?")
+                   .arg(allodId),
+               QMessageBox::Reset | QMessageBox::Cancel,
+               QMessageBox::Cancel) != QMessageBox::Reset)
+            return;
+        QString error;
+        if(!m_worldMapLayoutDocument.resetAllodLayout(
+               activeResourceProfile().profileId, allodId,
+               m_mapCatalog.topologyEntries, &error))
+        {
+            QMessageBox::warning(this, tr("Reset map positions"), tr(
+                "The map positions could not be reset.\n\n%1").arg(error));
+            return;
+        }
+        ei::log(eLogInfo, QString(
+            "Manual world-map origins reset to map.txt inference allod:%1")
+            .arg(allodId));
+        refreshMapTestContext(false, false);
+        statusBar()->showMessage(tr(
+            "%1 map positions were reset from map.txt.").arg(allodId), 6000);
+    });
     const QMetaObject::Connection databasePrototypeNavigation = connect(
         m_pView, &CView::openDatabasePrototypeRequested,
         this, &MainWindow::showDatabaseEditor);
@@ -3227,7 +3290,38 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             m_mapTestEntry = nameMatches.first();
     }
     if(m_pView)
+    {
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
+        const QVector<SMapCatalogEntry> topology = m_borrowedMapIdentity
+            ? QVector<SMapCatalogEntry>() : m_mapCatalog.topologyEntries;
+        const QString profileId = m_borrowedMapIdentity
+            ? QString() : activeResourceProfile().profileId;
+        SWorldMapLayoutUpdateResult worldLayout;
+        if(!m_borrowedMapIdentity)
+            worldLayout = m_worldMapLayoutDocument.loadAndUpdate(
+                profileId, topology);
+        for(const QString& diagnostic : worldLayout.diagnostics)
+            ei::log(eLogWarning, QStringLiteral("World map layout: ")
+                + diagnostic);
+        if(!worldLayout.warning.isEmpty()
+           && worldLayout.warning != m_lastWorldMapLayoutWarning)
+        {
+            m_lastWorldMapLayoutWarning = worldLayout.warning;
+            ei::log(eLogWarning, QString(
+                "World map layout storage warning path:%1 details:%2")
+                .arg(m_worldMapLayoutDocument.path(), worldLayout.warning));
+            statusBar()->showMessage(tr(
+                "World-map coordinates are temporary. The saved layout was "
+                "left unchanged; see the log for details."), 15000);
+        }
+        else if(worldLayout.warning.isEmpty())
+            m_lastWorldMapLayoutWarning.clear();
+        m_pView->setNeighborMapContext(
+            topology, worldLayout.zones, profileId,
+            m_borrowedMapIdentity ? QString() : m_mapTestEntry.allodId,
+            m_borrowedMapIdentity ? QString() : m_mapTestEntry.zoneId,
+            worldLayout.warning);
+    }
     populateEntranceCombo();
     if(preserveWorkspaceState && !previousRouteKey.isEmpty())
     {
@@ -3272,6 +3366,10 @@ void MainWindow::chooseBorrowedMapIdentity()
     }
     m_mapTestEntry = choices[index];
     m_borrowedMapIdentity = true;
+    if(m_pView)
+        m_pView->setNeighborMapContext(
+            QVector<SMapCatalogEntry>(), QVector<SWorldMapZoneOrigin>(),
+            QString(), QString(), QString());
     ei::log(eLogWarning, QString("Borrowed map.txt identity zone:%1 for unregistered MPR:%2")
         .arg(m_mapTestEntry.zoneId, CLandscape::getInstance()->filePath().absoluteFilePath()));
     populateEntranceCombo();
@@ -6442,6 +6540,26 @@ void MainWindow::saveCollection(bool saveAs)
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
+    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF(), QPointF());
+}
+
+void MainWindow::openNeighborMapPair(const QString& mprPath,
+                                     const QString& mobPath,
+                                     const QString& zoneId,
+                                     const QPointF& sourceWorldOrigin,
+                                     const QPointF& targetWorldOrigin)
+{
+    openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, false,
+                                sourceWorldOrigin, targetWorldOrigin);
+}
+
+void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
+                                             const QString& mobPath,
+                                             const QString& zoneId,
+                                             bool focusFirstEntrance,
+                                             const QPointF& sourceWorldOrigin,
+                                             const QPointF& targetWorldOrigin)
+{
     QElapsedTimer workspaceLoadTimer;
     workspaceLoadTimer.start();
     if(m_workspaceLoadInProgress)
@@ -6449,17 +6567,98 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
         statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
         return;
     }
-    if(!QFileInfo::exists(mprPath) || !QFileInfo::exists(mobPath))
+    QFileInfo targetMpr(mprPath);
+    QFileInfo targetMob(mobPath);
+    const auto missingPairComponents = [&]() {
+        QStringList missing;
+        if(mprPath.isEmpty() || !targetMpr.isFile())
+            missing.append(tr("MPR: %1").arg(mprPath.isEmpty()
+                ? tr("not found in the active profile")
+                : QDir::toNativeSeparators(targetMpr.absoluteFilePath())));
+        if(mobPath.isEmpty() || !targetMob.isFile())
+            missing.append(tr("MOB: %1").arg(mobPath.isEmpty()
+                ? tr("not found in the active profile")
+                : QDir::toNativeSeparators(targetMob.absoluteFilePath())));
+        return missing;
+    };
+    QStringList missingComponents = missingPairComponents();
+    if(!missingComponents.isEmpty())
     {
         QMessageBox::warning(this, tr("Open map"),
-            tr("The map pair for %1 is incomplete. Refresh the active game/mod profile.").arg(zoneId));
-        refreshMapsBrowser();
+            tr("The map pair for %1 is incomplete.\n\n%2\n\nThe current workspace was not changed. Refresh the active game/mod profile and try again.")
+                .arg(zoneId, missingComponents.join(QLatin1Char('\n'))));
+        return;
+    }
+
+    const auto rejectUnreadable = [this, &zoneId](
+            const QString& component, const QFileInfo& file,
+            const CValidationReport& report) {
+        QString details = report.toText().trimmed();
+        if(details.isEmpty())
+            details = tr("The file could not be opened for reading.");
+        const QString message = tr(
+            "The %1 for map %2 could not be read or validated.\n\n%3\n\n%4\n\nThe current workspace was not changed.")
+                .arg(component, zoneId,
+                     QDir::toNativeSeparators(file.absoluteFilePath()), details);
+        ei::log(eLogWarning, QString("Map-pair open preflight rejected zone:%1 component:%2 path:%3 details:%4")
+            .arg(zoneId, component, file.absoluteFilePath(), details));
+        QMessageBox::warning(this, tr("Open map"), message);
+    };
+    CMprDocument targetMprDocument;
+    CValidationReport targetMprReport;
+    if(!targetMprDocument.load(targetMpr, &targetMprReport)
+       || targetMprReport.hasErrors())
+    {
+        rejectUnreadable(tr("MPR"), targetMpr, targetMprReport);
+        return;
+    }
+    CMobDocument targetMobDocument;
+    CValidationReport targetMobReport;
+    if(!targetMobDocument.load(targetMob, &targetMobReport)
+       || targetMobReport.hasErrors())
+    {
+        rejectUnreadable(tr("MOB"), targetMob, targetMobReport);
+        return;
+    }
+    QString targetMobProjectionError;
+    if(!CMob::validateEditableProjection(targetMobDocument.originalBytes(),
+                                         targetMob,
+                                         &targetMobProjectionError))
+    {
+        CValidationReport targetMobProjectionReport;
+        targetMobProjectionReport.add(
+            QStringLiteral("mob.editable_projection"),
+            EValidationSeverity::Error, targetMobProjectionError,
+            targetMob.absoluteFilePath());
+        rejectUnreadable(tr("MOB"), targetMob,
+                         targetMobProjectionReport);
         return;
     }
     if(!isExitAllowed())
         return;
+    // The save prompt is modal, so an external process can remove either
+    // catalog file while the user is deciding. Recheck before the first
+    // workspace mutation so Cancel and stale/invalid targets always retain the
+    // current map and its background.
+    targetMpr.refresh();
+    targetMob.refresh();
+    missingComponents = missingPairComponents();
+    if(!missingComponents.isEmpty())
+    {
+        QMessageBox::warning(this, tr("Open map"),
+            tr("The map pair for %1 changed while the current workspace was waiting to close.\n\n%2\n\nThe current workspace was not changed. Refresh the active game/mod profile and try again.")
+                .arg(zoneId, missingComponents.join(QLatin1Char('\n'))));
+        return;
+    }
     if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
         return;
+    QVector3D sourceCameraPosition;
+    QVector3D sourceCameraPivot;
+    QVector3D sourceCameraRotation;
+    const bool preserveNeighborCamera = !focusFirstEntrance
+        && m_pView->captureCameraLocation(
+            &sourceCameraPosition, &sourceCameraPivot,
+            &sourceCameraRotation);
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
     configureBlockingProgress(&progress);
@@ -6479,6 +6678,13 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     mapLoadTimer.start();
     mapLoadPhase.start();
     m_pView->loadLandscape(QFileInfo(mprPath));
+    // Apply the source snapshot before the first event pump can paint the
+    // target terrain in source-local camera coordinates. Reading the camera
+    // here would be too late: the old workspace has already been destroyed.
+    if(preserveNeighborCamera)
+        m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,
+            targetWorldOrigin, sourceCameraPosition,
+            sourceCameraPivot, sourceCameraRotation);
     const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
@@ -6514,13 +6720,14 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
-    QTimer::singleShot(0, this, [this]()
+    QTimer::singleShot(0, this, [this, focusFirstEntrance]()
     {
         if(!m_validEntrances.isEmpty())
         {
             m_entranceCombo->setCurrentIndex(0);
             updateEntranceOverlays();
-            moveCameraToActiveSpawn();
+            if(focusFirstEntrance)
+                moveCameraToActiveSpawn();
         }
     });
 }

@@ -51,6 +51,8 @@ public:
                                int gridWidth, int gridHeight) const;
     bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
+    void setWorldOffset(const QVector3D& offset)
+    { m_worldOffset = offset; updatePosition(); }
     const UI2& index() {return m_index;}
     bool projectPt(QVector3D& origin, bool land = true);
     bool pickTile(int& row, int& col, QVector3D& point, bool bLand = true);
@@ -107,6 +109,7 @@ private:
 
     UI2 m_index;
     QMatrix4x4 m_modelMatrix;
+    QVector3D m_worldOffset;
 
     QVector<QVector<CTile>> m_arrLand;
     QVector<SVertexData> m_arrLandVrtData;

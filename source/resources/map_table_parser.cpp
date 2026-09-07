@@ -21,8 +21,8 @@ QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index)
         .arg(route.destinationExitId).arg(occurrence);
 }
 
-QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
-                                                     const QString& sourceArchive)
+QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
+    const QString& text, const QString& sourceArchive)
 {
     QVector<SMapCatalogEntry> entries;
     SMapCatalogEntry current;
@@ -35,7 +35,7 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
 
     const auto finishCurrent = [&entries, &current]()
     {
-        if(!current.zoneId.isEmpty() && !current.mprName.isEmpty() && !current.mobName.isEmpty())
+        if(!current.zoneId.isEmpty())
             entries.append(current);
         current = SMapCatalogEntry();
     };
@@ -189,5 +189,15 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(const QString& text,
         pending = PendingValue::None;
     }
     finishCurrent();
+    return entries;
+}
+
+QVector<SMapCatalogEntry> CMapCatalog::parseMapTable(
+    const QString& text, const QString& sourceArchive)
+{
+    QVector<SMapCatalogEntry> entries;
+    for(const SMapCatalogEntry& entry : parseMapTopology(text, sourceArchive))
+        if(!entry.mprName.isEmpty() && !entry.mobName.isEmpty())
+            entries.append(entry);
     return entries;
 }
