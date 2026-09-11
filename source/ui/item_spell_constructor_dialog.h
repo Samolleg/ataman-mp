@@ -35,7 +35,7 @@ public:
     static CWorldObj* buildItemPreview(const ItemSpellConstructorCatalog& catalog,
         const SConstructorItem& item, const SConstructorMaterial* material,
         const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
-        bool worldObject = false);
+        bool worldObject = false, QString* diagnostic = nullptr);
 
 private slots:
     void refreshItemFilter();

@@ -42,6 +42,10 @@ private source, source excerpts or private provenance.
   `39854c58bdd87bf1b6a1ba351667e8051ba454355d57b6c1b1c5914f036146a0`.
   Previous tester folders/settings were preserved; the packaged GUI was not run.
 
+Subsequent user acceptance failed for both the corrected old and newly placed
+dagger. See [continuing investigation](database-item-texture-r5-investigation.md).
+The extension correction does not resolve the gameplay texture failure.
+
 Confidence: the invalid persisted name and exact resource mismatch are confirmed.
 No corrected in-game frame was captured; the user must reload the corrected map
 and verify appearance and interaction. Editor screenshots alone are not gameplay

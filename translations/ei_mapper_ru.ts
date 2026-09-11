@@ -16192,6 +16192,10 @@ Runes:
             <source>Code could not be imported</source>
             <translation>Не удалось импортировать код</translation>
         </message>
+        <message>
+            <source>Map texture %1.mmp is missing or cannot be loaded. Add the converted texture to the active profile resources.</source>
+            <translation>Текстура для карты %1.mmp отсутствует или не загружается. Добавьте преобразованную текстуру в ресурсы активного профиля.</translation>
+        </message>
     </context>
     <context>
         <name>CCameraTelephotoControls</name>

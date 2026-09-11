@@ -494,6 +494,7 @@ void CCreateObjectForm::selectDatabaseEntry()
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
     if(entry.category == ei::EDatabaseMapCategory::Item)
     {
+        QString itemDiagnostic;
         const auto* item = m_itemCatalog.findItem(entry.name);
         m_itemMaterial->setEnabled(item != nullptr);
         if(item)
@@ -508,7 +509,7 @@ void CCreateObjectForm::selectDatabaseEntry()
             m_itemMaterial->setEnabled(m_itemMaterial->count() > 0);
             m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
                 m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString()),
-                ei::ProfileDatabaseContext::instance().current(), true);
+                ei::ProfileDatabaseContext::instance().current(), true, &itemDiagnostic);
             m_pPreview->attachNode(m_pNode);
         }
         else
@@ -518,7 +519,8 @@ void CCreateObjectForm::selectDatabaseEntry()
         }
         m_databaseDetails->setText(tr("Place as an ordinary object. You can convert it to a lever and assign an interaction script afterwards."));
         if(!m_pNode)
-            m_databaseDetails->setText(tr("No model or material texture is available for placing this item."));
+            m_databaseDetails->setText(itemDiagnostic.isEmpty()
+                ? tr("No model or material texture is available for placing this item.") : itemDiagnostic);
         ui->buttonCreate->setEnabled(m_pNode && m_pView && m_pView->currentMob());
         updateTable();
         return;

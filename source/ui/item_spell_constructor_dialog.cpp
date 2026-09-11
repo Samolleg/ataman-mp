@@ -421,16 +421,28 @@ void ItemSpellConstructorDialog::openItemSpellInTab()
 CWorldObj* ItemSpellConstructorDialog::buildItemPreview(
     const ItemSpellConstructorCatalog& catalog, const SConstructorItem& item,
     const SConstructorMaterial* material,
-    const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot, bool worldObject)
+    const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot, bool worldObject,
+    QString* diagnostic)
 {
+    if(diagnostic) diagnostic->clear();
     auto mapObject = [&](const QString& model, const QString& texture, const QStringList& parts) -> CWorldObj* {
-        if(!CTextureList::getInstance()->hasTexture(texture, model)) return nullptr;
+        const QString mapTexture = databaseItemMapTextureName(texture);
+        const auto* textureList = CTextureList::getInstance();
+        bool exactMatch = false;
+        for(const QString& available : textureList->textureList())
+            if(available.compare(mapTexture, Qt::CaseInsensitive) == 0)
+            { exactMatch = true; break; }
+        if(!exactMatch || !CTextureList::getInstance()->hasTexture(mapTexture, model))
+        {
+            if(diagnostic) *diagnostic = tr("Map texture %1.mmp is missing or cannot be loaded. Add the converted texture to the active profile resources.").arg(mapTexture);
+            return nullptr;
+        }
         CWorldObj defaults;
         SDatabaseMapEntry entry;
         entry.category = EDatabaseMapCategory::Item;
         entry.name = ItemSpellConstructorCatalog::formatItemCode(
             item.name, material ? material->name : QString());
-        entry.model = model; entry.primaryTexture = texture;
+        entry.model = model; entry.primaryTexture = mapTexture;
         QJsonObject data;
         if(!applyDatabaseMapEntry(entry, defaults.toJson(), &data)) return nullptr;
         data.insert("Object parts", QJsonArray::fromStringList(parts));

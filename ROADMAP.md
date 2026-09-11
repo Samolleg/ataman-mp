@@ -583,6 +583,47 @@ foundation as one coherent `0.3.0` release.
   remains unchanged; its two texture fields can be corrected in the editor.
   Next: user reloads the corrected map for in-game appearance acceptance. This
   checkpoint does not claim a corrected runtime screenshot or close parent gaps.
+  Follow-up audit requested by user: the current zone1 has 117 creatures and
+  23 levers; neither category has a terminal `.mmp` in its saved texture fields.
+  Among 1,527 ordinary objects only the reported dagger has that defect.
+  Creature catalog texture names already normalize the extension; automatic
+  lever selection also strips it. Conversion of an r3 item to a lever preserves
+  its old bad name, and manually entering `.mmp` is still accepted by properties.
+  This bounded check does not establish all in-game texture/appearance behavior.
+  User workflow clarification: conversion is under Edit > Object > Convert World
+  Object to Lever, for one selected ordinary object in the active map's object
+  mode after placement is committed. Default free-open/two-state settings apply;
+  interaction script remains user-authored. Menu and prerequisites verified in code.
+- R9 reopened by gameplay acceptance (2026-09-11): both the corrected old dagger
+  and a newly placed r4 dagger are white in the user's screenshot. Read-only
+  inspection of zone1 confirms IDs 334/335 both persist extensionless primary
+  and secondary names, model `unhuma`, part `rh3.dagger03`. The suffix fix is
+  insufficient; editor preview is not evidence of game-compatible binding.
+  First incorrect representation: the picker persists a PNT3 equipment layer as
+  a directly loadable ordinary texture; preview also applies an unpersisted x2
+  UV transform. A ready texture with the correct atlas layout is needed.
+  [Investigation and acceptance](docs/validation/database-item-texture-r5-investigation.md).
+  Next: obtain the required edited-resource-copy permission, generate a separate
+  local map resource, then verify original gameplay and persistence/conversion.
+  Installed maps/resources remain unchanged; parent scope stays open.
+  Follow-up explanation: distinguish the MMP container, PNT3 layer compression,
+  uncompressed 8888 pixels and DXT block compression; atlas layout is independent
+  of encoding. The user's format question does not authorize asset-copy/export.
+  User decision: use separately converted item textures with terminal `map`, e.g.
+  `unhumadg_03.br.1.x2map`, instead of generating assets in this task. Implement
+  exact lookup in map-item preview and both persisted texture fields, without
+  silently returning to equipment layers. Existing objects remain user-editable;
+  new creatures and database levers keep their current naming. Implemented: exact
+  map resource selection, primary/secondary identity, missing-file diagnostic.
+  User confirmed resources are alongside the originals; the actual bronze DXT1
+  file was found and passed desktop/ANGLE placement, history, save/reopen and lever
+  conversion checks. Thirteen focused tests and fresh creation/history pass;
+  Base additionally passes with generated synthetic DXT1 fixtures.
+  [r5 validation](docs/validation/database-item-map-texture-r5.md).
+  r5 is finalized in staging and the permanent tester folder; executable hashes
+  match. The used r4 folder/settings remain preserved; packaged GUI not launched.
+  Next: user checks r5 with the saved map in the game, including atlas alignment.
+  No asset or installed-map writes; earlier asset-generation proposal superseded.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
   with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
   acceptance remains unverified, independently of the passing creation checks.

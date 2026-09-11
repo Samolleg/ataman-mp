@@ -356,8 +356,16 @@ void ProfileDatabaseTests::databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupp
               const QJsonObject worldDefaults{{"Base object", QJsonObject{{"Node type", 3}}}};
               QVERIFY(ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
               QCOMPARE(node.value("Model name").toString(), resolved.model);
-              QCOMPARE(node.value("Primary texture").toString(), QString("unhumadg_03.br.1.x2"));
-              QCOMPARE(node.value("Secondary texture").toString(), QString("unhumadg_03.br.1.x2"));
+              QCOMPARE(node.value("Primary texture").toString(), QString("unhumadg_03.br.1.x2map"));
+              QCOMPARE(node.value("Secondary texture").toString(), QString("unhumadg_03.br.1.x2map"));
+              resolved.primaryTexture = "unhumadg_03.br.1.x2map.mmp";
+              QVERIFY(ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
+              QCOMPARE(node.value("Primary texture").toString(), QString("unhumadg_03.br.1.x2map"));
+              resolved.primaryTexture = "";
+              QVERIFY(!ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
+              resolved.primaryTexture = "inventory_texture";
+              QVERIFY(ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
+              QCOMPARE(node.value("Primary texture").toString(), QString("inventory_texturemap"));
               QVERIFY(!node.contains("World object"));
         }
     snapshot.raceModels.clear();

@@ -23,6 +23,8 @@ struct SDatabaseMapEntry
 };
 
 QVector<SDatabaseMapEntry> databaseMapCatalog(const SProfileDatabaseSnapshot& database);
+// Converted item textures use a separate map resource, without the file extension.
+QString databaseItemMapTextureName(QString textureName);
 // Applies database identity to a fresh type's defaults, never to a selected map object.
 bool applyDatabaseMapEntry(const SDatabaseMapEntry& entry, const QJsonObject& defaults,
                           QJsonObject* result);

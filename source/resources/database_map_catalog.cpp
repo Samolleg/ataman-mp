@@ -15,6 +15,14 @@ QString texture(const QString& model, QString value)
 }
 
 namespace ei {
+QString databaseItemMapTextureName(QString textureName)
+{
+    textureName = texture(QString(), textureName);
+    if(!textureName.isEmpty() && !textureName.endsWith("map", Qt::CaseInsensitive))
+        textureName += "map";
+    return textureName;
+}
+
 QVector<SDatabaseMapEntry> databaseMapCatalog(const SProfileDatabaseSnapshot& database)
 {
     QVector<SDatabaseMapEntry> result;
@@ -82,7 +90,7 @@ bool applyDatabaseMapEntry(const SDatabaseMapEntry& entry, const QJsonObject& de
     {
         // Map fields contain a texture identifier; the game appends .mmp.
         // Preview lookup also accepts filenames and must not define save syntax.
-        const QString primaryTexture = texture(entry.model, entry.primaryTexture);
+        const QString primaryTexture = databaseItemMapTextureName(entry.primaryTexture);
         QJsonObject base = node.value("Base object").toObject();
         if(base.value("Node type").toInt() != 3 || entry.model.isEmpty()
            || primaryTexture.isEmpty()) return false;

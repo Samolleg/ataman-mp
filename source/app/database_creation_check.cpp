@@ -32,6 +32,11 @@
 #include "tile_form.h"
 #include "camera.h"
 #include "operationmanager.h"
+#include "item_spell_constructor_dialog.h"
+#include "database_document.h"
+#include "mmp_codec.h"
+#include "resource_name.h"
+#include "res_file.h"
 
 int runDatabaseCreationCheck()
 {
@@ -264,6 +269,50 @@ int runDatabasePreviewCheck()
     if(!jmv)
         for(const auto& item : snapshot->items)
             if(item.category == "weapons") { weaponName = item.name; break; }
+    if(qEnvironmentVariableIsSet("EI_TEST_SYNTHETIC_MAP_TEXTURES"))
+    {
+        const auto catalog = ei::ItemSpellConstructorCatalog::fromDocument(
+            *ei::DatabaseDocument::fromSnapshot(snapshot));
+        const auto* item = catalog.findItem(weaponName);
+        if(!item) return fail("synthetic map texture item");
+        if(jmv && !CTextureList::getInstance()->textureList().contains("unhumadg_03.br.1.x2map"))
+        {
+            QString diagnostic;
+            QScopedPointer<CWorldObj> missing(ei::ItemSpellConstructorDialog::buildItemPreview(
+                catalog, *item, catalog.findMaterial("bronze"), snapshot, true, &diagnostic));
+            if(missing || !diagnostic.contains("unhumadg_03.br.1.x2map.mmp"))
+                return fail("missing map texture must not fall back to original equipment texture");
+            output << "PASS: missing map texture rejected with exact resource name\n";
+        }
+        QStringList sourceNames;
+        if(jmv)
+        {
+            for(const QString& name : CTextureList::getInstance()->textureList())
+                if(name.startsWith("unhumadg_03.") && !name.endsWith("map"))
+                    sourceNames.append(name);
+        }
+        else
+            for(const auto& material : catalog.compatibleMaterials(*item))
+                sourceNames.append(catalog.itemTextureCandidates(*item, &material));
+        if(sourceNames.isEmpty()) return fail("synthetic map texture names");
+        // Deliberately authored test colors, never a copy/conversion of game pixels.
+        QImage pattern(64,64,QImage::Format_ARGB32);
+        for(int y=0; y<64; ++y)
+            for(int x=0; x<64; ++x)
+                pattern.setPixel(x,y,qRgb(x*4,y*4,(x+y)*2));
+        const QByteArray encoded = ei::encodeMmpDxt1(pattern, false);
+        if(encoded.isEmpty()) return fail("synthetic DXT1 encoding");
+        CResFile generated;
+        for(const QString& name : sourceNames)
+            generated.addFiledata(ei::databaseItemMapTextureName(name) + ".mmp", encoded);
+        const QString directory = temporary.path() + "/synthetic-map-resources";
+        QDir().mkpath(directory);
+        generated.saveToFile(directory + "/map-textures.res");
+        QVector<QString> testRoots = roots.toVector(); testRoots.prepend(directory);
+        rootOption->setValue(testRoots);
+        CTextureList::getInstance()->refreshConfiguredSources();
+        output << "Synthetic DXT1 map textures: binding test, not game appearance acceptance\n";
+    }
     category->setCurrentIndex(1); search->setText(weaponName);
     const auto matches = objects->findItems(weaponName, Qt::MatchExactly);
     if(matches.size() != 1) return fail("weapon selection " + weaponName);
@@ -278,7 +327,19 @@ int runDatabasePreviewCheck()
     if(material->count() > 1)
     {
         material->setCurrentIndex(1);
-        if(!capture("weapon-material-2")) return fail("second weapon material");
+        auto* button = form->findChild<QPushButton*>("buttonCreate");
+        if(button && button->isEnabled())
+        {
+            if(!capture("weapon-material-2")) return fail("second weapon material");
+        }
+        else
+        {
+            bool namedMissingResource = false;
+            for(auto* label : form->findChildren<QLabel*>())
+                namedMissingResource |= label->text().contains("map.mmp");
+            if(!namedMissingResource) return fail("missing material must report its map texture");
+            output << "PASS: missing second map material disables placement with filename\n";
+        }
     }
     if(jmv)
     {
@@ -303,8 +364,11 @@ int runDatabasePreviewCheck()
     if(itemTexture.endsWith(".mmp", Qt::CaseInsensitive)
        || !CTextureList::getInstance()->textureList().contains(itemTexture))
         return fail("saved item texture must name an exact game resource without extension");
-    if(jmv && itemTexture != "unhumadg_03.br.1.x2")
-        return fail("reported dagger must retain its material and x2 suffix");
+    if(!itemTexture.endsWith("map", Qt::CaseInsensitive)
+       || (jmv && itemTexture != "unhumadg_03.br.1.x2map"))
+        return fail("placed item must use the separate map texture resource");
+    if(ei::textureUvScale(itemTexture) != 1.0f)
+        return fail("map texture must use authored UVs, without equipment x2 correction");
     const QVector3D itemStart = itemNode->position();
     if(!view->updateDatabasePlacementPointer(QPoint(420,280)) || itemNode->position()==itemStart)
         return fail("item follows pointer");
