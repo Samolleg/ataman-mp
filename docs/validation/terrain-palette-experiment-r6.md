@@ -2,6 +2,12 @@
 
 Task: EI-TERRAIN-PALETTE-001, explicitly authorized on existing PR #6.
 
+**Withdrawn on 2026-09-12:** user observed a 65.4-second Zone1 load, including
+about 60 seconds assembling deferred hydration jobs. The experimental key builder
+rescanned archive metadata for each transition on the GUI thread. The user then
+requested a full experiment rollback and an explicit allowlist entry for their
+Zone1 hash. The records below describe historical r6 only; use r7 instead.
+
 The loaded Zone1 atlas has the same names and slot structure as the built-in
 preset but different pixels. Exact global source binding therefore rejected its
 thumbnails. A separate first-paint failure reported missing uniform material

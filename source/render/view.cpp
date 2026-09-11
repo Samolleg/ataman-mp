@@ -534,22 +534,14 @@ QVector<QPoint> terrainVertexBrushPoints(const STerrainTileBrush& brush,
     return result;
 }
 
-QStringList modernTerrainSourceArchives(const QString& activeArchive)
-{
-    QStringList archives = CTextureList::getInstance()->configuredResourceArchivePaths();
-    if(QFileInfo(activeArchive).isFile()) archives.prepend(activeArchive);
-    return archives;
-}
-
 QString terrainAtlasBindingKey(
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
-    int textureCount, int atlasSlotCount, const QStringList& archives)
+    int textureCount, int atlasSlotCount)
 {
-    return QStringLiteral("experimental|%1|%2|%3|%4|%5")
+    return QStringLiteral("%1|%2|%3|%4")
         .arg(mprNamespace.toCaseFolded())
         .arg(textureCount).arg(atlasSlotCount)
-        .arg(QString::fromLatin1(atlasPixelSha256.toLower()))
-        .arg(QString::fromLatin1(CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint(archives).toHex()));
+        .arg(QString::fromLatin1(atlasPixelSha256.toLower()));
 }
 
 QString terrainAtlasTileCacheKey(const QString& bindingKey, int slot,
@@ -565,10 +557,9 @@ bool terrainAtlasBindingStillValid(
     const QStringList& configuredArchives,
     const QByteArray& expectedPixelSha256)
 {
-    if(!binding.success() || binding.decodedAtlasPixelSha256.size() != 64
-       || expectedPixelSha256.size() != 64
-       || binding.sourceSelectionFingerprint !=
-            CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint(configuredArchives))
+    if(!binding.success()
+       || binding.decodedAtlasPixelSha256.toLower()
+            != expectedPixelSha256.toLower())
         return false;
     const QFileInfo archive(binding.archivePath);
     bool configured = false;
@@ -638,8 +629,7 @@ STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
         result.binding = CTerrainAtlasArchiveBindingResolver::findExactArchive(
             task.configuredArchives, task.mprNamespace,
             task.textureCount, task.atlasSlotCount,
-            task.atlasPixelSha256, QString(), &decodedTiles,
-            ETerrainAtlasPixelMatch::SameStructureExperimental);
+            task.atlasPixelSha256, QString(), &decodedTiles);
         if(!result.binding.success())
         {
             result.error = result.binding.error;
@@ -692,7 +682,6 @@ STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
         hydrated.materialId = request.materialId;
         hydrated.rank = request.rank;
         hydrated.source = request.source;
-        hydrated.source.atlasPixelSha256 = result.binding.decodedAtlasPixelSha256;
         hydrated.tileCacheKey = terrainAtlasTileCacheKey(
             task.bindingKey, request.source.uniformSlot,
             task.requiredSize);
@@ -716,11 +705,8 @@ QImage loadBoundTerrainAtlasTile(
        || textureCount <= 0 || atlasSlotCount <= 0
        || slot < 0 || slot >= atlasSlotCount)
         return QImage();
-    const QStringList configuredArchives = configuredArchivesOverride
-        ? *configuredArchivesOverride
-        : CTextureList::getInstance()->configuredResourceArchivePaths();
     const QString bindingKey = terrainAtlasBindingKey(
-        mprNamespace, atlasPixelSha256, textureCount, atlasSlotCount, configuredArchives);
+        mprNamespace, atlasPixelSha256, textureCount, atlasSlotCount);
     const QString tileKey = terrainAtlasTileCacheKey(
         bindingKey, slot, requiredSize);
     const auto cachedTile = decodedTileCache->constFind(tileKey);
@@ -730,6 +716,9 @@ QImage loadBoundTerrainAtlasTile(
        && missingPageCache->contains(bindingKey))
         return QImage();
 
+    const QStringList configuredArchives = configuredArchivesOverride
+        ? *configuredArchivesOverride
+        : CTextureList::getInstance()->configuredResourceArchivePaths();
     auto cachedBinding = boundAtlasCache->find(bindingKey);
     if(cachedBinding != boundAtlasCache->end())
     {
@@ -744,8 +733,7 @@ QImage loadBoundTerrainAtlasTile(
             CTerrainAtlasArchiveBindingResolver::findExactArchive(
                 configuredArchives, mprNamespace,
                 textureCount, atlasSlotCount,
-                atlasPixelSha256, QString(), nullptr,
-                ETerrainAtlasPixelMatch::SameStructureExperimental);
+                atlasPixelSha256);
         if(!exact.success())
         {
             missingPageCache->insert(bindingKey);
@@ -797,11 +785,8 @@ QImage loadBoundGlobalUniformSource(
     QMap<QString, STerrainAtlasArchiveBindingResult>* boundAtlasCache,
     QSet<QString>* missingBindingCache,
     QMap<QString, QImage>* decodedTileCache,
-    STerrainGlobalMaterialSource* selectedSource = nullptr,
-    const QStringList* configuredArchivesOverride = nullptr)
+    STerrainGlobalMaterialSource* selectedSource = nullptr)
 {
-    const QStringList archives = configuredArchivesOverride ? *configuredArchivesOverride
-        : CTextureList::getInstance()->configuredResourceArchivePaths();
     QVector<STerrainGlobalMaterialSource> sources;
     const auto appendUnique = [&sources](
         const STerrainGlobalMaterialSource& source) {
@@ -832,16 +817,11 @@ QImage loadBoundGlobalUniformSource(
             source.mprNamespace, source.atlasPixelSha256,
             source.textureCount, source.atlasSlotCount,
             source.uniformSlot, requiredSize, boundAtlasCache,
-            missingBindingCache, decodedTileCache, &archives);
+            missingBindingCache, decodedTileCache);
         if(tile.isNull())
             continue;
         if(selectedSource)
-        {
             *selectedSource = source;
-            const QString key = terrainAtlasBindingKey(source.mprNamespace,
-                source.atlasPixelSha256, source.textureCount, source.atlasSlotCount, archives);
-            selectedSource->atlasPixelSha256 = boundAtlasCache->value(key).decodedAtlasPixelSha256;
-        }
         return tile;
     }
     return QImage();
@@ -853,17 +833,31 @@ QImage currentMapGlobalUniformSource(
     const QVector<QImage>& currentTiles,
     STerrainGlobalMaterialSource* selectedSource = nullptr)
 {
-    return CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
-        family, currentNamespace, currentAtlasPixelSha256, currentTiles,
-        selectedSource, ETerrainAtlasPixelMatch::SameStructureExperimental);
+    const auto find = [&](const QVector<STerrainGlobalMaterialSource>& sources) {
+        for(const STerrainGlobalMaterialSource& source : sources)
+        {
+            if(source.mprNamespace.compare(currentNamespace,
+                                           Qt::CaseInsensitive) != 0
+               || source.atlasPixelSha256.toLower()
+                    != currentAtlasPixelSha256.toLower()
+               || source.atlasSlotCount != currentTiles.size()
+               || source.uniformSlot < 0
+               || source.uniformSlot >= currentTiles.size())
+                continue;
+            if(selectedSource)
+                *selectedSource = source;
+            return currentTiles.at(source.uniformSlot);
+        }
+        return QImage();
+    };
+    QImage result = find(family.thumbnailSources);
+    return result.isNull() ? find(family.sources) : result;
 }
 
 QImage cachedGlobalUniformSource(
     const STerrainGlobalMaterialFamily& family,
     const QString& preferredNamespace, const QSize& requiredSize,
     const QMap<QString, QImage>& decodedTileCache,
-    const QMap<QString, STerrainAtlasArchiveBindingResult>& boundAtlasCache,
-    const QStringList& archives,
     STerrainGlobalMaterialSource* selectedSource = nullptr)
 {
     QVector<STerrainGlobalMaterialSource> sources;
@@ -897,21 +891,14 @@ QImage cachedGlobalUniformSource(
             continue;
         const QString bindingKey = terrainAtlasBindingKey(
             source.mprNamespace, source.atlasPixelSha256,
-            source.textureCount, source.atlasSlotCount, archives);
-        const auto binding = boundAtlasCache.constFind(bindingKey);
-        if(binding == boundAtlasCache.constEnd()
-           || !terrainAtlasBindingStillValid(binding.value(), archives, source.atlasPixelSha256))
-            continue;
+            source.textureCount, source.atlasSlotCount);
         const QString tileKey = terrainAtlasTileCacheKey(
             bindingKey, source.uniformSlot, requiredSize);
         const auto cached = decodedTileCache.constFind(tileKey);
         if(cached == decodedTileCache.constEnd() || cached.value().isNull())
             continue;
         if(selectedSource)
-        {
             *selectedSource = source;
-            selectedSource->atlasPixelSha256 = binding->decodedAtlasPixelSha256;
-        }
         return cached.value();
     }
     return QImage();
@@ -1557,7 +1544,6 @@ struct SWorkingTerrainResolveStage
     QMap<QString, QImage> uniformTileCache;
     QMap<qint32, QImage> materialSources;
     QMap<qint32, STerrainGlobalMaterialSource> materialSourceIdentities;
-    QByteArray sourceSelectionFingerprint;
     bool undoCheckpointRequired{false};
 };
 
@@ -11514,8 +11500,7 @@ void CView::rebuildTerrainAutoCatalog()
                     m_authoredTerrainTileImages.isEmpty()
                         ? QSize()
                         : m_authoredTerrainTileImages.front().size(),
-                    m_terrainGlobalUniformTileCache, m_terrainGlobalBoundAtlasCache,
-                    modernTerrainSourceArchives(m_activeTerrainArchivePath), &selectedSource);
+                    m_terrainGlobalUniformTileCache, &selectedSource);
             if(!source.isNull())
             {
                 m_terrainGlobalMaterialSources.insert(family.id, source);
@@ -11589,8 +11574,6 @@ void CView::rebuildTerrainAutoCatalog()
             QFileInfo(m_terrainAtlasProfileSource.path).fileName());
     else if(m_terrainAtlasProfileSource.kind == ETerrainAtlasProfileSource::GeneratedDraft)
         sourceLabel = tr("Generated draft");
-    if(m_terrainAtlasAnalysis.usable)
-        status += tr(" Experimental palette: atlas pixels are matched by name and structure; material assignments may differ.");
     m_terrainPaintPaletteStatus = status;
     m_terrainPaintPaletteSourceLabel = sourceLabel;
     m_terrainPaintPaletteSourcePath = m_terrainAtlasProfileSource.path;
@@ -11705,7 +11688,8 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
        || !m_terrainAtlasAnalysis.usable)
         return;
 
-    const QStringList configuredArchives = modernTerrainSourceArchives(m_activeTerrainArchivePath);
+    const QStringList configuredArchives = CTextureList::getInstance()
+        ->configuredResourceArchivePaths();
     QMap<QString, STerrainGlobalBindingHydrationTask> tasks;
     const auto ensureTask = [&](const QString& sourceNamespace,
                                 const QByteArray& pixelSha256,
@@ -11720,11 +11704,12 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
         // I/O without improving either previews or resolution.
         if(sourceNamespace.compare(currentNamespace,
                                    Qt::CaseInsensitive) == 0
-           && textureCount == (m_authoredTerrainTileImages.size() + 63) / 64
+           && pixelSha256.toLower()
+                == m_terrainAtlasProfile.atlasPixelSha256.toLower()
            && atlasSlotCount == m_authoredTerrainTileImages.size())
             return nullptr;
         const QString key = terrainAtlasBindingKey(
-            sourceNamespace, pixelSha256, textureCount, atlasSlotCount, configuredArchives);
+            sourceNamespace, pixelSha256, textureCount, atlasSlotCount);
         STerrainGlobalBindingHydrationTask& task = tasks[key];
         if(task.bindingKey.isEmpty())
         {
@@ -11830,15 +11815,6 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
             watcher->deleteLater();
             if(generation != m_terrainGlobalHydrationGeneration)
                 return;
-            if(result.binding.success() && !terrainAtlasBindingStillValid(
-                   result.binding, modernTerrainSourceArchives(m_activeTerrainArchivePath),
-                   result.binding.decodedAtlasPixelSha256))
-            {
-                m_terrainGlobalHydrationPendingJobs = qMax(0, m_terrainGlobalHydrationPendingJobs - 1);
-                if(m_terrainGlobalHydrationPendingJobs == 0)
-                    applyDeferredGlobalTerrainPaletteHydration(generation);
-                return;
-            }
             if(result.binding.success())
             {
                 m_terrainGlobalBoundAtlasCache.insert(
@@ -12071,9 +12047,8 @@ void CView::prewarmModernTerrainFamily(qint32 terrainType,
         return left.mprNamespace.toCaseFolded()
             < right.mprNamespace.toCaseFolded();
     });
-    const QStringList configuredArchives = modernTerrainSourceArchives(m_activeTerrainArchivePath);
-    staged->sourceSelectionFingerprint =
-        CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint(configuredArchives);
+    const QStringList configuredArchives = CTextureList::getInstance()
+        ->configuredResourceArchivePaths();
     const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
         ? QSize() : m_authoredTerrainTileImages.front().size();
     const quint32 semanticSeed = m_terrainSemanticSeed;
@@ -12205,10 +12180,7 @@ bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
     m_preparedTerrainFamilyStage.clear();
     m_preparedTerrainFamily = -1;
     ++m_terrainFamilyPrewarmGeneration;
-    if(staged->sourceSelectionFingerprint !=
-           CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint(
-               modernTerrainSourceArchives(m_activeTerrainArchivePath))
-       || staged->undoCheckpointRequired || !m_workingTerrainAtlas
+    if(staged->undoCheckpointRequired || !m_workingTerrainAtlas
        || !m_workingTerrainAtlas->canCommitStaging(*staged->atlas)
        || !m_terrainEdit.canInstallWorkingAtlasSlotTypes(
               staged->atlas->activeTileTypes()))
@@ -13534,10 +13506,9 @@ bool CView::ensureGlobalTerrainMaterialSources(
             return false;
         }
         STerrainGlobalMaterialSource selectedSource;
-        const QStringList archives = modernTerrainSourceArchives(m_activeTerrainArchivePath);
         const QImage source = loadBoundGlobalUniformSource(
             *family, m_mprDocument.mapInfo().innerNamespace, requiredSize,
-            boundAtlasCache, missingBindings, decodedTiles, &selectedSource, &archives);
+            boundAtlasCache, missingBindings, decodedTiles, &selectedSource);
         if(source.isNull() || !atlas->addExternalMaterialSource(material, source))
         {
             if(report) report->add("terrain.global_family_source",
@@ -13631,10 +13602,9 @@ bool CView::realizeWorkingTerrainSignature(
             if(importedPhysical.contains(physicalKey))
                 continue;
             importedPhysical.insert(physicalKey);
-            const QStringList archives = modernTerrainSourceArchives(m_activeTerrainArchivePath);
             const QImage pixels = loadGlobalTransitionTile(
                 source, requiredSize,
-                boundAtlasCache, missingPages, decodedTileCache, &archives);
+                boundAtlasCache, missingPages, decodedTileCache);
             if(pixels.isNull())
                 continue;
             QByteArray pixelKey = globalTransitionKey(source.signature);

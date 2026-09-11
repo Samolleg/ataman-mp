@@ -490,6 +490,28 @@ foundation as one coherent `0.3.0` release.
   semantic assignments and mixed transitions;
   the existing broad UI diagnostic access violation remains an explicit gap.
   This related experiment does not replace EI-ADD-FROM-DB-001.
+- R1 load regression (2026-09-12): user reports Zone1 stuck at 66% in r6.
+  The live process eventually completes: first landscape frame 1078 ms, workspace
+  65416 ms, deferred material catalog 60990 ms. Log timestamps isolate about
+  60 seconds between catalog phase reporting and hydration queue submission;
+  a second launch reproduces the same pause. Hypothesis: source fingerprints
+  scan all archive files for every repeated transition while assembling jobs on
+  the GUI thread. Expected: source snapshot once per planning batch, preserve
+  active-atlas priority/invalidation, and verify actual Zone1 load latency.
+  Status: optimization abandoned by explicit user decision below.
+- Scope change (2026-09-12): user requested rollback of the experiment and only
+  adding their complete Zone1 pixel hash
+  `a44f78f46933dfba29125ec6867c3541acb6be56d93083afa6a6ce9616b5f997`
+  to the allowed painting bindings. This supersedes broad structure matching and
+  its pending performance work. Restore renderer/binding/translation behavior
+  from before r6; retain the prior database-object changes. Keep old HD bindings
+  valid and unknown hashes rejected. Implemented: exact profile/material/transition
+  eligibility and strict rejection checks pass (eight focused cases); renderer and
+  translations match r5. Release/runtime builds, creation and JMV placement checks
+  pass. Separate r7 package finalized and delivered; PR #6 remains the review target.
+  Evidence: [r7 validation](docs/validation/zone1-approved-hash-r7.md).
+  Next: user verifies Zone1 loading and painting; no automatic r7 full-map timing
+  measurement and no approval of other modified atlas hashes are claimed.
 
 ### Authorized implementation: EI-ADD-FROM-DB-001
 
