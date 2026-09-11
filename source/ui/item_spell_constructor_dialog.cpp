@@ -1,6 +1,7 @@
 #include "item_spell_constructor_dialog.h"
 
 #include "database_document.h"
+#include "database_map_catalog.h"
 #include "game_text_catalog.h"
 #include "objects/worldobj.h"
 #include "runtime/providers/profile_visual_resolver_support.h"
@@ -420,8 +421,23 @@ void ItemSpellConstructorDialog::openItemSpellInTab()
 CWorldObj* ItemSpellConstructorDialog::buildItemPreview(
     const ItemSpellConstructorCatalog& catalog, const SConstructorItem& item,
     const SConstructorMaterial* material,
-    const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot)
+    const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot, bool worldObject)
 {
+    auto mapObject = [&](const QString& model, const QString& texture, const QStringList& parts) -> CWorldObj* {
+        if(!CTextureList::getInstance()->hasTexture(texture, model)) return nullptr;
+        CWorldObj defaults;
+        SDatabaseMapEntry entry;
+        entry.category = EDatabaseMapCategory::Item;
+        entry.name = ItemSpellConstructorCatalog::formatItemCode(
+            item.name, material ? material->name : QString());
+        entry.model = model; entry.primaryTexture = texture;
+        QJsonObject data;
+        if(!applyDatabaseMapEntry(entry, defaults.toJson(), &data)) return nullptr;
+        data.insert("Object parts", QJsonArray::fromStringList(parts));
+        auto* object = new CWorldObj(data);
+        object->loadFigure(); object->loadTexture();
+        return object;
+    };
     if(catalog.isJmvProfile() && item.category != QStringLiteral("Quick Item")
        && material && snapshot)
     {
@@ -463,9 +479,22 @@ CWorldObj* ItemSpellConstructorDialog::buildItemPreview(
             emissions.insert(value.toString().toLower(),QVector3D(1,1,1));
         if(resolution.success&&!components.isEmpty())
         {
-            auto* preview = new CConstructorPreviewObject;
-            preview->applyResolvedItem(model,primary,components,textures,bodyTextureLayers,emissions);
-            return preview;
+            if(worldObject)
+            {
+                QSet<QString> uniqueTextures;
+                for(const QString& part : components)
+                    uniqueTextures.insert(textures.value(part, primary));
+                if(uniqueTextures.size() == 1 && bodyTextureLayers.isEmpty())
+                    return mapObject(model, *uniqueTextures.constBegin(), components);
+                // Only persist a visual expressible by ordinary map fields.
+                // Otherwise try the standalone inventory figure below.
+            }
+            else
+            {
+                auto* preview = new CConstructorPreviewObject;
+                preview->applyResolvedItem(model,primary,components,textures,bodyTextureLayers,emissions);
+                return preview;
+            }
         }
     }
     const QString figure = ItemSpellConstructorCatalog::itemFigureName(item);
@@ -473,6 +502,12 @@ CWorldObj* ItemSpellConstructorDialog::buildItemPreview(
     if(figure.isEmpty() || textures.isEmpty()) return nullptr;
     ei::CFigure* raw = CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
     if(!raw) return nullptr;
+    if(worldObject)
+    {
+        for(const QString& texture : textures)
+            if(auto* object = mapObject(figure, texture, {})) return object;
+        return nullptr;
+    }
     auto* preview = new CConstructorPreviewObject;
     preview->applyStandaloneItem(raw,figure,textures,
         ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(item),

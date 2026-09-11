@@ -26,6 +26,7 @@ CWorldObj::CWorldObj():
 CWorldObj::CWorldObj(const CWorldObj &wo):
     CObjectBase(wo)
 {
+    m_standaloneItemFigure = wo.m_standaloneItemFigure;
     m_type = wo.m_type;
     m_modelName = wo.m_modelName;
     m_primaryTexture = wo.m_primaryTexture;
@@ -182,8 +183,42 @@ uint CWorldObj::deserialize(util::CMobParser& parser)
     return readByte;
 }
 
+void CWorldObj::loadFigure()
+{
+    invalidateTransientVisual();
+    m_standaloneItemFigure = false;
+    // Inventory figures are standalone resources. Keep their ordinary model
+    // identity in the map so reopen, cloning and conversion to a lever agree.
+    const QString name = m_modelName.toLower();
+    if(name.startsWith("init") && (name.endsWith("weapon")
+        || name.endsWith("armor") || name.endsWith("item")))
+    {
+        if(auto* figure = CObjectList::getInstance()->getFigureResource(name + ".fig"))
+        {
+            m_standaloneItemFigure = true;
+            updateFigure(figure);
+            return;
+        }
+    }
+    CObjectBase::loadFigure();
+}
+
 void CWorldObj::loadTexture()
 {
+    if((nodeType() == eWorldObject || nodeType() == eLever)
+       && !m_bodyParts.isEmpty() && m_modelName.startsWith("unhuma", Qt::CaseInsensitive)
+       && m_primaryTexture.startsWith("unhuma", Qt::CaseInsensitive))
+    {
+        applyTransientVisual(m_modelName, m_primaryTexture, m_bodyParts, m_complection);
+        return;
+    }
+    if(m_standaloneItemFigure)
+    {
+        applyTransientStandaloneVisual(CObjectList::getInstance()->getFigureResource(
+            m_modelName.toLower() + ".fig"), m_modelName, {m_primaryTexture},
+            false, m_modelName.startsWith("initqi", Qt::CaseInsensitive));
+        return;
+    }
     QString texName(m_primaryTexture);
     setTexture(CTextureList::getInstance()->texture(texName, m_modelName));
 }
@@ -515,8 +550,8 @@ void CWorldObj::applyParam(const QSharedPointer<IPropertyBase>& prop)
     {
         m_modelName = dynamic_cast<propStr*>(prop.get())->value();
         m_bodyParts.clear();
-        auto pFig = CObjectList::getInstance()->getFigure(m_modelName);
-        CObjectBase::updateFigure(pFig);
+        loadFigure();
+        loadTexture();
         break;
     }
     case eObjParam_PARENT_TEMPLATE:
@@ -528,7 +563,7 @@ void CWorldObj::applyParam(const QSharedPointer<IPropertyBase>& prop)
     case eObjParam_PRIM_TXTR:
     {
         m_primaryTexture = dynamic_cast<propStr*>(prop.get())->value();;
-        setTexture(CTextureList::getInstance()->texture(m_primaryTexture));
+        loadTexture();
         break;
     }
     case eObjParam_SEC_TXTR:
@@ -615,6 +650,14 @@ void CWorldObj::applyParam(const QSharedPointer<IPropertyBase>& prop)
         CObjectBase::applyParam(prop);
         break;
     }
+    if((m_standaloneItemFigure || ((nodeType() == eWorldObject || nodeType() == eLever)
+         && !m_bodyParts.isEmpty()
+         && m_modelName.startsWith("unhuma", Qt::CaseInsensitive)
+         && m_primaryTexture.startsWith("unhuma", Qt::CaseInsensitive)))
+       && (prop->type() == eObjParam_BODYPARTS || prop->type() == eObjParam_COMPLECTION
+       || prop->type() == eObjParam_COMPLECTION_X || prop->type() == eObjParam_COMPLECTION_Y
+       || prop->type() == eObjParam_COMPLECTION_Z))
+        loadTexture();
 }
 
 QJsonObject CWorldObj::toJson()

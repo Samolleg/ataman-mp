@@ -471,7 +471,7 @@ foundation as one coherent `0.3.0` release.
 - Original problem: Create Object requires technical fields and a selected
   same-type raw MOB template; there is no complete database-to-map workflow.
 - Expected result: all three searchable categories (monster-prototype creatures,
-  collectible DB items, usable objects/levers), names/models/preview, supported
+  DB items as ordinary objects (latest user decision), usable objects/levers), names/models/preview, supported
   defaults, placement, undo/redo, guarded save/reopen; technical options secondary.
 - Authority: dedicated contributor branch, project code in this worktree only;
   read-only installed-data research; tests/build, scoped commit/push/PR, permanent
@@ -480,10 +480,11 @@ foundation as one coherent `0.3.0` release.
 - Base: `contrib/Samolleg/add-from-db` from fetched `origin/main`
   `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a` (2026-09-11).
 - Status: partial implementation on 2026-09-11: active database catalog,
-  searchable picker, creature/lever preview and click placement, fresh validated
-  creation records, and undo/save/redo retention implemented. Native collectible
-  placement and complete automatic lever appearance remain open. R2 remains
-  native pickup only, without a newly generated scenario/script.
+  searchable picker, creature/item/lever preview and click placement, fresh validated
+  creation records, and undo/save/redo retention implemented. Item placement is now
+  an ordinary object; the user owns lever conversion and the interaction script.
+  This explicitly supersedes R2's native pickup requirement. Complete automatic
+  lever appearance and all-entry/gameplay acceptance remain open.
   Parent remains open until all three categories and their
   persistence/regression checks are delivered. Canonical task read from the
   main checkout roadmap; its local changes have not been overwritten.
@@ -514,7 +515,7 @@ foundation as one coherent `0.3.0` release.
   distribution validation passes and executable hash matches the tested build.
   [Tester notes](packaging/ADD_FROM_DATABASE_TEST.md) explicitly describe the
   incomplete scope; this is a draft contributor handoff, not parent closure.
-- Next: complete native collectible creation, supported automatic lever appearance,
+- Next: validate the delivered ordinary-item workflow, supported automatic lever appearance,
   and interactive/gameplay validation. This checkpoint does not close the parent.
   No installed data or user settings changed; no game assets or private source
   were copied into implementation or distribution.
@@ -538,6 +539,37 @@ foundation as one coherent `0.3.0` release.
   folder. Native item placement and all-entry/gameplay acceptance remain open.
   r2 is finalized in the permanent tester location; executable hashes match the
   tested build. The existing draft PR #6 remains the contributor review target.
+  User acceptance on 2026-09-11: NPC placement works in r2. The supplied screenshot
+  confirms the selected weapon/material preview, but item placement is disabled.
+  This is the existing implementation gap R4: the catalog rejects all item
+  creation and the form never enables its Place button for items. It is not a
+  reported missing texture or failed user setup. Next remains native collectible
+  creation and validation without a new scenario; parent scope is unchanged.
+- R4 continuation (2026-09-11): user explicitly authorized item implementation.
+  The screenshot acceptance case and first rejecting editor decisions are recorded
+  in [native item checkpoint](docs/research/database-native-item-placement.md).
+  Additional read-only research did not establish an independent native pickup
+  path in the inspected Base/JMV facilities; the collection routes examined
+  require a unit target. A proposed runtime extension changes map compatibility
+  and remains unproven. Next: resolve whether a matching game runtime dependency
+  is acceptable, then prove actual pickup and persistence before enabling the
+  picker. Ordinary game compatibility cannot be silently dropped. No production
+  code or installed files changed at this checkpoint; parent remains open.
+- R4 scope change explicitly requested by user (2026-09-11): place the selected
+  database item as an ordinary world object with its model/material. The user
+  will convert it to a lever and attach an existing interaction script. This
+  supersedes the native-pickup requirement for items; no runtime dependency or
+  generated script is needed. Implement enabled Place, immediate mouse ghost,
+  cancel/commit, history, save/reopen and retained appearance. Preserve the
+  earlier requirement/research above as history. Status: implemented and checked
+  for Base/JMV weapons; original disabled button reproduced before the fix.
+  Pointer/cancel/commit/history and save/reopen pass; converting the placed sword
+  to a lever retains model, selected parts and material, with identical rendered
+  images. See [r3 validation](docs/validation/database-item-placement-r3.md).
+  r3 is finalized in the permanent tester location; staged and delivered
+  executable hashes match. Thirteen focused tests and Base/JMV desktop/ANGLE
+  placement checks pass. The used r2 folder is preserved. Gameplay with the
+  user's interaction script remains a user check, not automatic native pickup.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
   with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
   acceptance remains unverified, independently of the passing creation checks.

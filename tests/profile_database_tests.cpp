@@ -347,9 +347,17 @@ void ProfileDatabaseTests::databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupp
     for(const auto& item : catalog)
         if(item.category == ei::EDatabaseMapCategory::Item)
         {
-            QVERIFY(!item.unavailableReason.isEmpty());
-            QVERIFY(!ei::applyDatabaseMapEntry(item, defaults, &node));
-            QVERIFY(node.isEmpty());
+              QVERIFY(item.unavailableReason.isEmpty());
+              QVERIFY(!ei::applyDatabaseMapEntry(item, defaults, &node));
+              QVERIFY(node.isEmpty());
+              auto resolved = item;
+              resolved.model = "initwesw0weapon";
+              resolved.primaryTexture = "unhumasw_00.br.0";
+              const QJsonObject worldDefaults{{"Base object", QJsonObject{{"Node type", 3}}}};
+              QVERIFY(ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
+              QCOMPARE(node.value("Model name").toString(), resolved.model);
+              QCOMPARE(node.value("Primary texture").toString(), resolved.primaryTexture);
+              QVERIFY(!node.contains("World object"));
         }
     snapshot.raceModels.clear();
     QVERIFY(!ei::databaseMapCatalog(snapshot).first().unavailableReason.isEmpty());

@@ -22658,6 +22658,7 @@ bool CView::beginDatabasePlacement(CNode* prototype, QString* diagnostic)
     QScopedPointer<CNode> seed;
     if(prototype->nodeType() == eUnit) seed.reset(new CUnit(descriptor));
     else if(prototype->nodeType() == eLever) seed.reset(new CLever(descriptor));
+    else if(prototype->nodeType() == eWorldObject) seed.reset(new CWorldObj(descriptor));
     else return false;
     point.setZ(0);
     seed->updatePos(point);

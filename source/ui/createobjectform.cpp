@@ -66,7 +66,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
                                   tr("Technical object (from selected template)")});
     m_itemMaterial = new QComboBox(this);
     m_itemMaterial->setObjectName("databaseItemMaterial");
-    m_itemMaterial->setToolTip(tr("Preview material"));
+    m_itemMaterial->setToolTip(tr("Object material"));
     m_databaseSearch = new QLineEdit(this);
     m_databaseSearch->setObjectName("databaseSearch");
     m_databaseSearch->setPlaceholderText(tr("Search by name or model"));
@@ -508,7 +508,7 @@ void CCreateObjectForm::selectDatabaseEntry()
             m_itemMaterial->setEnabled(m_itemMaterial->count() > 0);
             m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
                 m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString()),
-                ei::ProfileDatabaseContext::instance().current());
+                ei::ProfileDatabaseContext::instance().current(), true);
             m_pPreview->attachNode(m_pNode);
         }
         else
@@ -516,11 +516,11 @@ void CCreateObjectForm::selectDatabaseEntry()
             const QSignalBlocker block(m_itemMaterial);
             m_itemMaterial->clear();
         }
-        m_databaseDetails->setText(entry.unavailableReason);
+        m_databaseDetails->setText(tr("Place as an ordinary object. You can convert it to a lever and assign an interaction script afterwards."));
         if(!m_pNode)
-            m_databaseDetails->setText(tr("No preview model is available for this item.") + "\n" + entry.unavailableReason);
-        // Item visualization must not depend on native pickup placement support.
-        m_tableManager->reset();
+            m_databaseDetails->setText(tr("No model or material texture is available for placing this item."));
+        ui->buttonCreate->setEnabled(m_pNode && m_pView && m_pView->currentMob());
+        updateTable();
         return;
     }
     if(!entry.unavailableReason.isEmpty())

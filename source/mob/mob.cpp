@@ -813,7 +813,8 @@ bool CMob::prepareFreshDatabaseNode(CNode* node, QJsonObject* data,
 {
     if(!data) return false;
     *data = QJsonObject();
-    if(!node || (node->nodeType() != eUnit && node->nodeType() != eLever))
+    if(!node || (node->nodeType() != eUnit && node->nodeType() != eLever
+                && node->nodeType() != eWorldObject))
         return false;
     // A newly authored record has its own complete, bounded source. Never
     // claim provenance from a selected object or relax the normal save guard.

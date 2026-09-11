@@ -483,6 +483,18 @@ Choose a primary texture in Advanced properties before placing.</source>
         <source>No preview model is available for this item.</source>
         <translation>Для этого предмета нет доступной модели предпросмотра.</translation>
     </message>
+    <message>
+        <source>Object material</source>
+        <translation>Материал объекта</translation>
+    </message>
+    <message>
+        <source>Place as an ordinary object. You can convert it to a lever and assign an interaction script afterwards.</source>
+        <translation>Размещение обычного объекта. Затем его можно преобразовать в рычаг и назначить скрипт взаимодействия.</translation>
+    </message>
+    <message>
+        <source>No model or material texture is available for placing this item.</source>
+        <translation>Для размещения этого предмета нет доступной модели или текстуры материала.</translation>
+    </message>
 </context>
     <context>
         <name>CJmvMapTestLauncher</name>

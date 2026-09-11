@@ -51,7 +51,6 @@ QVector<SDatabaseMapEntry> databaseMapCatalog(const SProfileDatabaseSnapshot& da
     {
         SDatabaseMapEntry entry; entry.category = EDatabaseMapCategory::Item;
         entry.key = it.key(); entry.name = it->name; entry.label = it->name;
-        entry.unavailableReason = tr("Native placement of a collectible item has not been implemented. No object or script will be added.");
         result.append(entry);
     }
     for(auto it = database.levers.constBegin(); it != database.levers.constEnd(); ++it)
@@ -76,9 +75,22 @@ bool applyDatabaseMapEntry(const SDatabaseMapEntry& entry, const QJsonObject& de
 {
     if(!result) return false;
     *result = QJsonObject();
-    if(!entry.unavailableReason.isEmpty() || entry.category == EDatabaseMapCategory::Item)
+    if(!entry.unavailableReason.isEmpty())
         return false;
     QJsonObject node = defaults;
+    if(entry.category == EDatabaseMapCategory::Item)
+    {
+        QJsonObject base = node.value("Base object").toObject();
+        if(base.value("Node type").toInt() != 3 || entry.model.isEmpty()
+           || entry.primaryTexture.isEmpty()) return false;
+        base.insert("Map name", entry.name);
+        node.insert("Base object", base);
+        node.insert("Model name", entry.model);
+        node.insert("Primary texture", entry.primaryTexture);
+        node.insert("Secondary texture", entry.primaryTexture);
+        *result = node;
+        return true;
+    }
     QJsonObject world = node.value("World object").toObject();
     QJsonObject base = world.value("Base object").toObject();
     const int expectedType = entry.category == EDatabaseMapCategory::Creature ? 0x7 : 0x23;
