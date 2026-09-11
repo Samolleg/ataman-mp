@@ -624,6 +624,41 @@ foundation as one coherent `0.3.0` release.
   match. The used r4 folder/settings remain preserved; packaged GUI not launched.
   Next: user checks r5 with the saved map in the game, including atlas alignment.
   No asset or installed-map writes; earlier asset-generation proposal superseded.
+  R9 gameplay follow-up: r5 loads the map texture, but the user's screenshots
+  show the wrong dagger appearance in both game and editor. Read-only comparison
+  confirms the converted 512x512 DXT1 retains the PNT3 layout (opaque RGB mean
+  absolute error 3.191/255; zero differing alpha-mask pixels). The part uses a
+  half-size UV quadrant; the former equipment preview applied a 2x repeat
+  transform, whereas the ordinary map object uses authored UVs. Naming and format
+  are now correct, but the atlas arrangement remains uncorrected. Next: prepare
+  a separately authorized working copy of the map texture with the required
+  repeated 2x2 atlas, then verify original appearance in the game. Do not hide
+  the mismatch with an editor-only UV correction. No asset writes performed.
+  The current saved dagger (336) retains model `unhuma` and part `rh3.dagger03`,
+  but its figure complexion is [1,1,5]. This independently stretches the geometry;
+  [1,1,1] is the default. Preserve the user's size choice unless asked to reset it.
+  User requested a converter prompt: specify lossless decoding, 2x2 repetition
+  into a double-width/double-height atlas for the verified packed-x2 dagger,
+  terminal map naming, DXT1 alpha/mipmap handling and sampling validation.
+  This delivers conversion instructions only; no asset modification authorized
+  or performed here, and runtime appearance remains the acceptance step.
+  User acceptance after converter instructions: the new mapper screenshot shows
+  the recognizable bronze blade and wrapped handle; user confirms editor display
+  and is checking the game next. Editor appearance accepted for this dagger.
+  In-game appearance remains pending; no new implementation or asset writes.
+  Subsequent user acceptance: the game now matches the corrected mapper dagger.
+  R9 appearance case is accepted for this item after the user's atlas conversion;
+  this does not close all-category coverage or the parent task. Related size
+  concern: doubling both atlas dimensions quadruples the pixel area and DXT1
+  storage at comparable mip settings. A 512x512 atlas of four 256x256 tiles trades
+  half the linear source detail for approximately one-quarter storage; preserving
+  a single 512x512 texture instead would require a separate model/UV change.
+  Explain this tradeoff; no optimization or asset mutation has been requested.
+  Handoff requested: user accepts the texture-size tradeoff for now and requests
+  a PR with the current changes. Update existing PR #6 and mark ready for review,
+  including confirmed dagger gameplay acceptance and explicit remaining gaps.
+  Next: maintainer review of the contributor branch; no merge/main write and no
+  texture-size optimization in this handoff. Parent coverage gaps remain open.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
   with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
   acceptance remains unverified, independently of the passing creation checks.
