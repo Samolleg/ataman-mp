@@ -260,7 +260,7 @@ int runDatabasePreviewCheck()
         return fail("ordinary DXT placement texture validation");
     if(CTextureList::getInstance()->hasTexture("missing-database-preview-test","missing"))
         return fail("missing texture accepted");
-    QString weaponName = "2h metal battle sword";
+    QString weaponName = "cheat dagger";
     if(!jmv)
         for(const auto& item : snapshot->items)
             if(item.category == "weapons") { weaponName = item.name; break; }
@@ -280,6 +280,13 @@ int runDatabasePreviewCheck()
         material->setCurrentIndex(1);
         if(!capture("weapon-material-2")) return fail("second weapon material");
     }
+    if(jmv)
+    {
+        const int bronze = material->findData("bronze");
+        if(bronze < 0) return fail("reported dagger bronze material");
+        material->setCurrentIndex(bronze);
+        if(!capture("cheat-dagger-bronze")) return fail("reported dagger preview");
+    }
     auto* placeButton = form->findChild<QPushButton*>("buttonCreate");
     if(!placeButton || !placeButton->isEnabled())
         return fail("selected database item must enable Place on map");
@@ -291,6 +298,13 @@ int runDatabasePreviewCheck()
     if(itemNode->nodeType()!=eWorldObject || itemNode->textureName().isEmpty())
         return fail("item must be an ordinary textured world object");
     const QString itemModel = itemNode->modelName(), itemTexture = itemNode->textureName();
+    // The game appends .mmp to a map identifier. Do not use the editor's
+    // permissive alias/extension fallback to validate this persistence contract.
+    if(itemTexture.endsWith(".mmp", Qt::CaseInsensitive)
+       || !CTextureList::getInstance()->textureList().contains(itemTexture))
+        return fail("saved item texture must name an exact game resource without extension");
+    if(jmv && itemTexture != "unhumadg_03.br.1.x2")
+        return fail("reported dagger must retain its material and x2 suffix");
     const QVector3D itemStart = itemNode->position();
     if(!view->updateDatabasePlacementPointer(QPoint(420,280)) || itemNode->position()==itemStart)
         return fail("item follows pointer");
@@ -311,6 +325,8 @@ int runDatabasePreviewCheck()
     CNode* reloaded = itemReopened.nodes().first();
     if(reloaded->nodeType()!=eWorldObject || reloaded->modelName()!=itemModel
        || reloaded->textureName()!=itemTexture) return fail("item appearance identity survives reopen");
+    if(reloaded->toJson().value("Secondary texture").toString()!=itemTexture)
+        return fail("secondary item texture identifier survives reopen");
     preview->makeCurrent(); reloaded->loadFigure(); reloaded->loadTexture();
     reloaded->setDrawPosition(QVector3D()); // The preview camera frames local geometry.
     preview->attachNode(reloaded);

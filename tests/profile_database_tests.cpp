@@ -352,11 +352,12 @@ void ProfileDatabaseTests::databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupp
               QVERIFY(node.isEmpty());
               auto resolved = item;
               resolved.model = "initwesw0weapon";
-              resolved.primaryTexture = "unhumasw_00.br.0";
+              resolved.primaryTexture = " unhumadg_03.br.1.x2.MMP ";
               const QJsonObject worldDefaults{{"Base object", QJsonObject{{"Node type", 3}}}};
               QVERIFY(ei::applyDatabaseMapEntry(resolved, worldDefaults, &node));
               QCOMPARE(node.value("Model name").toString(), resolved.model);
-              QCOMPARE(node.value("Primary texture").toString(), resolved.primaryTexture);
+              QCOMPARE(node.value("Primary texture").toString(), QString("unhumadg_03.br.1.x2"));
+              QCOMPARE(node.value("Secondary texture").toString(), QString("unhumadg_03.br.1.x2"));
               QVERIFY(!node.contains("World object"));
         }
     snapshot.raceModels.clear();

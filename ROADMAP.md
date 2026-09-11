@@ -570,6 +570,19 @@ foundation as one coherent `0.3.0` release.
   executable hashes match. Thirteen focused tests and Base/JMV desktop/ANGLE
   placement checks pass. The used r2 folder is preserved. Gameplay with the
   user's interaction script remains a user check, not automatic native pickup.
+- R9 (2026-09-11, necessary regression): user placed `cheat dagger.bronze` on
+  zone1; editor textured, game white. Read-only inspection confirms both texture
+  fields include a terminal `.mmp`. The game appends the extension while the
+  editor's permissive lookup strips it, masking the invalid saved identifier.
+  Expected: persist extensionless texture identifiers while preserving `.x2`
+  and material suffixes. New item creation is fixed; the red test reproduced the
+  invalid filename before the fix. Thirteen focused tests, saved primary/secondary
+  fields, exact resource lookup and Base/JMV desktop/ANGLE checks pass. r4 is
+  finalized in staging and the permanent tester location, with matching hashes.
+  See [r4 validation](docs/validation/database-item-texture-r4.md). The existing user map
+  remains unchanged; its two texture fields can be corrected in the editor.
+  Next: user reloads the corrected map for in-game appearance acceptance. This
+  checkpoint does not claim a corrected runtime screenshot or close parent gaps.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
   with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
   acceptance remains unverified, independently of the passing creation checks.

@@ -80,14 +80,17 @@ bool applyDatabaseMapEntry(const SDatabaseMapEntry& entry, const QJsonObject& de
     QJsonObject node = defaults;
     if(entry.category == EDatabaseMapCategory::Item)
     {
+        // Map fields contain a texture identifier; the game appends .mmp.
+        // Preview lookup also accepts filenames and must not define save syntax.
+        const QString primaryTexture = texture(entry.model, entry.primaryTexture);
         QJsonObject base = node.value("Base object").toObject();
         if(base.value("Node type").toInt() != 3 || entry.model.isEmpty()
-           || entry.primaryTexture.isEmpty()) return false;
+           || primaryTexture.isEmpty()) return false;
         base.insert("Map name", entry.name);
         node.insert("Base object", base);
         node.insert("Model name", entry.model);
-        node.insert("Primary texture", entry.primaryTexture);
-        node.insert("Secondary texture", entry.primaryTexture);
+        node.insert("Primary texture", primaryTexture);
+        node.insert("Secondary texture", primaryTexture);
         *result = node;
         return true;
     }
