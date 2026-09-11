@@ -10475,6 +10475,10 @@ Do you want to %3?</source>
         <source>Point the map view at the terrain before placing an object.</source>
         <translation>Перед размещением объекта направьте камеру на поверхность карты.</translation>
     </message>
+    <message>
+        <source> Experimental palette: atlas pixels are matched by name and structure; material assignments may differ.</source>
+        <translation> Экспериментальная палитра: атлас выбирается по имени и структуре; назначение материалов может отличаться.</translation>
+    </message>
 </context>
     <context>
         <name>CViewportMinimapWidget</name>

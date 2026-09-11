@@ -633,6 +633,7 @@ private slots:
     void indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads();
     void terrainAtlasRecoveryStoreDeduplicatesExactPayloads();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
+    void experimentalPaletteInstalledAtlasProbe();
     void externalPublishedAtlasArchiveBindingProbe();
     void externalLegacyAdjacentAtlasProfileCollisionProbe();
     void externalReopenedDraftTopologyProbe();
@@ -10891,16 +10892,17 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
     QVERIFY(start >= 0 && end > start);
     const QByteArray loader = source.mid(start, end - start);
 
-    // A resource member name is not an atlas identity: different configured
-    // RES archives can contain the same Zone1 page names with unrelated
-    // pixels. Global semantic signatures may only be paired with an archive
-    // whose complete decoded atlas matches an approved preset binding.
+    // Experimental palette relaxes only pixel identity, retaining coherent
+    // whole-archive validation for both uniforms and authored transitions.
     QVERIFY2(loader.contains("QImage loadBoundGlobalUniformSource("),
              "Uniform material sources bypass the bound-atlas loader");
     QVERIFY2(loader.contains("QImage loadGlobalTransitionTile("),
              "Global transitions bypass the bound-atlas loader");
     QVERIFY2(loader.contains("findExactArchive("),
-             "Global terrain pixels bypass exact preset-atlas binding");
+             "Global terrain pixels bypass whole-atlas binding");
+    QVERIFY(loader.contains("ETerrainAtlasPixelMatch::SameStructureExperimental"));
+    QVERIFY(source.contains("modernTerrainSourceArchives(m_activeTerrainArchivePath)"));
+    QVERIFY(source.contains("archiveSelectionFingerprint(archives)"));
     QVERIFY2(!loader.contains("catalogTerrainMmpPayload("),
              "Global terrain pixels still use a name-only resource lookup");
     QVERIFY2(!loader.contains("decodedAtlasTiles"),
@@ -12019,7 +12021,7 @@ void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileS
         expected.fill(Qt::black);
         expectedTiles.append(expected);
     }
-    const auto archiveBytes = [](const QVector<QImage>& tiles) {
+    const auto archiveBytes = [](const QVector<QImage>& tiles, bool damaged = false) {
         QByteArray empty = emptyMpr();
         CResArchiveDocument archive;
         QStringList errors;
@@ -12037,6 +12039,7 @@ void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileS
                 true, &diagnostic);
             if(member.payload.isEmpty())
                 return QByteArray();
+            if(damaged && page == 1) member.payload = "invalid DXT page";
             pages.append(member);
         }
         QByteArray result;
@@ -12067,6 +12070,131 @@ void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileS
              QFileInfo(expectedPath).canonicalFilePath());
     QCOMPARE(binding.decodedAtlasPixelSha256,
              CTerrainAtlasProfileInference::pixelSha256(expectedTiles));
+    // Experimental modern palette: the loaded repaint wins over an exact
+    // base-preset match, while the original strict binding above stays intact.
+    const auto repainted = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+        {expectedPath, wrongPath}, QStringLiteral("zone4"), 2, 128,
+        CTerrainAtlasProfileInference::pixelSha256(expectedTiles), wrongPath,
+        nullptr, ETerrainAtlasPixelMatch::SameStructureExperimental);
+    QVERIFY2(repainted.success(), qPrintable(repainted.error));
+    QCOMPARE(QFileInfo(repainted.archivePath).canonicalFilePath(),
+             QFileInfo(wrongPath).canonicalFilePath());
+    QCOMPARE(repainted.decodedAtlasPixelSha256,
+             CTerrainAtlasProfileInference::pixelSha256(wrongTiles));
+    QVERIFY(repainted.sourceSelectionFingerprint !=
+        CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint({expectedPath, wrongPath}));
+    const auto incomplete = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+        {wrongPath}, QStringLiteral("zone4"), 3, 192,
+        CTerrainAtlasProfileInference::pixelSha256(expectedTiles), {},
+        nullptr, ETerrainAtlasPixelMatch::SameStructureExperimental);
+    QVERIFY(!incomplete.success());
+    STerrainGlobalMaterialFamily family;
+    STerrainGlobalMaterialSource source;
+    source.mprNamespace = "zone4"; source.textureCount = 2;
+    source.atlasSlotCount = 128; source.uniformSlot = 37;
+    source.atlasPixelSha256 = CTerrainAtlasProfileInference::pixelSha256(expectedTiles);
+    family.thumbnailSources.append(source);
+    const QByteArray actualHash = CTerrainAtlasProfileInference::pixelSha256(wrongTiles);
+    QVERIFY(CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+        family, "zone4", actualHash, wrongTiles).isNull());
+    STerrainGlobalMaterialSource selected;
+    QCOMPARE(CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+        family, "zone4", actualHash, wrongTiles, &selected,
+        ETerrainAtlasPixelMatch::SameStructureExperimental), wrongTiles.at(37));
+    QCOMPARE(selected.atlasPixelSha256, actualHash);
+    family.thumbnailSources[0].uniformSlot = 128;
+    QVERIFY(CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+        family, "zone4", actualHash, wrongTiles, nullptr,
+        ETerrainAtlasPixelMatch::SameStructureExperimental).isNull());
+    family.thumbnailSources[0].uniformSlot = 37;
+    family.thumbnailSources[0].textureCount = 1;
+    QVERIFY(CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+        family, "zone4", actualHash, wrongTiles, nullptr,
+        ETerrainAtlasPixelMatch::SameStructureExperimental).isNull());
+    const QString brokenPath = root.filePath("broken.res");
+    QFile broken(brokenPath);
+    QVERIFY(broken.open(QIODevice::WriteOnly));
+    broken.write(archiveBytes(expectedTiles, true)); broken.close();
+    QVERIFY(!CTerrainAtlasArchiveBindingResolver::findExactArchive(
+        {brokenPath}, "zone4", 2, 128, actualHash, {}, nullptr,
+        ETerrainAtlasPixelMatch::SameStructureExperimental).success());
+    const auto beforeChange = CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint({wrongPath, expectedPath});
+    QFile changed(wrongPath); QVERIFY(changed.open(QIODevice::Append));
+    changed.write("test"); changed.close();
+    QVERIFY(beforeChange != CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint({wrongPath, expectedPath}));
+
+}
+
+void EnduranceDocumentTests::experimentalPaletteInstalledAtlasProbe()
+{
+    const QString preferred = qEnvironmentVariable("EI_TEST_PALETTE_ACTIVE_ARCHIVE");
+    const QStringList archives = qEnvironmentVariable("EI_TEST_PALETTE_ARCHIVES")
+        .split(';', QString::SkipEmptyParts);
+    if(preferred.isEmpty() || archives.isEmpty())
+        QSKIP("Set EI_TEST_PALETTE_ACTIVE_ARCHIVE and EI_TEST_PALETTE_ARCHIVES for read-only palette coverage");
+    CValidationReport report;
+    const auto families = CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    const STerrainGlobalMaterialFamily* target = nullptr;
+    for(const auto& family : families)
+        if(family.id == 1712759006) target = &family;
+    QVERIFY(target);
+    QVERIFY(!target->sources.isEmpty());
+    const STerrainGlobalMaterialSource requested = target->sources.front();
+    QVector<QImage> tiles;
+    const auto bound = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+        archives, requested.mprNamespace, requested.textureCount,
+        requested.atlasSlotCount, requested.atlasPixelSha256, preferred,
+        &tiles, ETerrainAtlasPixelMatch::SameStructureExperimental);
+    QVERIFY2(bound.success(), qPrintable(bound.error));
+    QCOMPARE(QFileInfo(bound.archivePath).canonicalFilePath(), QFileInfo(preferred).canonicalFilePath());
+    QVERIFY(bound.decodedAtlasPixelSha256 != requested.atlasPixelSha256);
+    QVERIFY(!CTerrainAtlasArchiveBindingResolver::findExactArchive(
+        {preferred}, requested.mprNamespace, requested.textureCount,
+        requested.atlasSlotCount, requested.atlasPixelSha256).success());
+    STerrainGlobalMaterialSource selected;
+    const QImage tile = CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+        *target, requested.mprNamespace, bound.decodedAtlasPixelSha256, tiles, &selected,
+        ETerrainAtlasPixelMatch::SameStructureExperimental);
+    QVERIFY(!tile.isNull());
+    QCOMPARE(selected.atlasPixelSha256, bound.decodedAtlasPixelSha256);
+    QCOMPARE(tile, tiles.at(selected.uniformSlot));
+    CTerrainTransitionCatalog catalog;
+    catalog.declareMaterial(target->id);
+    const qint32 runtimeType = target->runtimeTerrainType;
+    QVERIFY(runtimeType >= 0 && runtimeType < 16);
+    CTerrainVirtualAtlas generated(catalog, tiles, 0, {{target->id, tile}}, {}, true,
+        QVector<qint32>(tiles.size(), runtimeType), {{target->id, runtimeType}});
+    STerrainTransitionSignature pure;
+    pure.northWest = pure.northEast = pure.southEast = pure.southWest = target->id;
+    const auto resolved = generated.resolve(pure, 0, 0, &report, target->id, runtimeType);
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    QVERIFY(resolved.generatedIndex >= 0 || resolved.authored);
+    qInfo() << "Experimental installed palette:" << requested.mprNamespace << "material" << target->id
+            << "slot" << selected.uniformSlot << "actual pixels" << bound.decodedAtlasPixelSha256
+            << "uniform generation passed; semantic correspondence remains unverified";
+    // Also exercise the map-local thumbnail path on the user's Zone1 repaint.
+    for(const auto& family : families)
+        for(const auto& source : family.sources)
+            if(source.mprNamespace.compare("zone1", Qt::CaseInsensitive) == 0)
+            {
+                QVector<QImage> localTiles;
+                const auto local = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+                    archives, source.mprNamespace, source.textureCount, source.atlasSlotCount,
+                    source.atlasPixelSha256, preferred, &localTiles,
+                    ETerrainAtlasPixelMatch::SameStructureExperimental);
+                QVERIFY2(local.success(), qPrintable(local.error));
+                QCOMPARE(QFileInfo(local.archivePath).canonicalFilePath(), QFileInfo(preferred).canonicalFilePath());
+                QVERIFY(local.decodedAtlasPixelSha256 != source.atlasPixelSha256);
+                const QImage thumbnail = CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+                    family, "zone1", local.decodedAtlasPixelSha256, localTiles, &selected,
+                    ETerrainAtlasPixelMatch::SameStructureExperimental);
+                QVERIFY(!thumbnail.isNull());
+                QCOMPARE(thumbnail, localTiles.at(selected.uniformSlot));
+                QCOMPARE(selected.atlasPixelSha256, local.decodedAtlasPixelSha256);
+                qInfo() << "Zone1 active thumbnail pixels" << local.decodedAtlasPixelSha256;
+                return;
+            }
+    QFAIL("No Zone1 uniform family found in built-in catalog");
 }
 
 void EnduranceDocumentTests::externalPublishedAtlasArchiveBindingProbe()

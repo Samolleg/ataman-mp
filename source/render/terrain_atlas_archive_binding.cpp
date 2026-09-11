@@ -1,6 +1,7 @@
 #include "terrain_atlas_archive_binding.h"
 
 #include <QDataStream>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -357,6 +358,54 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
     return result;
 }
 
+QByteArray CTerrainAtlasArchiveBindingResolver::archiveSelectionFingerprint(
+    const QStringList& archives)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QSet<QString> seen;
+    for(const QString& path : archives)
+    {
+        if(path.isEmpty()) continue;
+        const QFileInfo file(path);
+        const QString key = normalizedPath(file.absoluteFilePath());
+        if(seen.contains(key)) continue;
+        seen.insert(key);
+        hash.addData(key.toUtf8()); hash.addData("\0", 1);
+        hash.addData(QByteArray::number(file.isFile() ? file.size() : -1));
+        hash.addData("|", 1);
+        hash.addData(QByteArray::number(file.lastModified().toMSecsSinceEpoch()));
+        hash.addData("\n", 1);
+    }
+    return hash.result();
+}
+
+QImage CTerrainAtlasArchiveBindingResolver::currentMapUniformSource(
+    const STerrainGlobalMaterialFamily& family, const QString& currentNamespace,
+    const QByteArray& currentPixelSha256, const QVector<QImage>& currentTiles,
+    STerrainGlobalMaterialSource* selectedSource, ETerrainAtlasPixelMatch pixelMatch)
+{
+    if(currentPixelSha256.size() != 64 || currentTiles.isEmpty()) return {};
+    const auto find = [&](const QVector<STerrainGlobalMaterialSource>& sources) {
+        for(auto source : sources)
+        {
+            if(source.mprNamespace.compare(currentNamespace, Qt::CaseInsensitive) != 0
+               || source.atlasPixelSha256.size() != 64
+               || (pixelMatch == ETerrainAtlasPixelMatch::Exact
+                   && source.atlasPixelSha256.toLower() != currentPixelSha256.toLower())
+               || source.textureCount != (currentTiles.size() + 63) / 64
+               || source.atlasSlotCount != currentTiles.size()
+               || source.uniformSlot < 0 || source.uniformSlot >= currentTiles.size()
+               || currentTiles.at(source.uniformSlot).isNull()) continue;
+            source.atlasPixelSha256 = currentPixelSha256.toLower();
+            if(selectedSource) *selectedSource = source;
+            return currentTiles.at(source.uniformSlot);
+        }
+        return QImage();
+    };
+    const QImage image = find(family.thumbnailSources);
+    return image.isNull() ? find(family.sources) : image;
+}
+
 STerrainAtlasArchiveBindingResult
 CTerrainAtlasArchiveBindingResolver::findExactArchive(
     const QStringList& candidateArchives,
@@ -365,7 +414,7 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
     int atlasSlotCount,
     const QByteArray& expectedAtlasPixelSha256,
     const QString& preferredArchive,
-    QVector<QImage>* decodedTiles)
+    QVector<QImage>* decodedTiles, ETerrainAtlasPixelMatch pixelMatch)
 {
     STerrainAtlasArchiveBindingResult result;
     if(decodedTiles)
@@ -381,6 +430,7 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
     if(QFileInfo(preferredArchive).isFile())
         ordered.append(QFileInfo(preferredArchive).absoluteFilePath());
     ordered.append(candidateArchives);
+    const QByteArray selectionFingerprint = archiveSelectionFingerprint(ordered);
     QSet<QString> seen;
     for(const QString& candidate : ordered)
     {
@@ -451,12 +501,16 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             continue;
         result.completeArchivePixelSha256.insert(
             archive.absoluteFilePath(), actual);
-        if(actual.toLower() != expectedAtlasPixelSha256.toLower())
+        if(pixelMatch == ETerrainAtlasPixelMatch::Exact
+           && actual.toLower() != expectedAtlasPixelSha256.toLower())
+            continue;
+        if(archiveSelectionFingerprint(ordered) != selectionFingerprint)
             continue;
         result.archivePath = archive.absoluteFilePath();
         result.decodedAtlasPixelSha256 = actual;
         result.archiveSize = archiveSize;
         result.archiveLastModifiedMs = archiveLastModifiedMs;
+        result.sourceSelectionFingerprint = selectionFingerprint;
         if(decodedTiles)
             *decodedTiles = tiles;
         return result;

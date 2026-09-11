@@ -466,6 +466,31 @@ foundation as one coherent `0.3.0` release.
 
 ## Roadmap maintenance
 
+### Related experiment: EI-TERRAIN-PALETTE-001
+
+- User authorized modern-palette pixel-hash relaxation on the latest PR (#6,
+  `contrib/Samolleg/add-from-db`), confirmed open and unmerged on 2026-09-12.
+  Canonical support diagnosis read from the main checkout roadmap: the loaded
+  Zone1 HD atlas has different pixels from the built-in reviewed preset, so
+  uniform thumbnails and transition-source hydration fail despite matching names.
+- Expected: use the current complete atlas by namespace/structure for modern
+  thumbnails and generation, with active-atlas priority and coherent caching.
+  Retain page/slot/decode checks and all exact checks outside this experiment,
+  including MOB and save integrity. Tile semantics are not guaranteed.
+- Authority: code/tests in this branch, same-PR commit/push, a new permanent
+  unpacked tester folder. Installed data/profiles/maps and old builds stay intact.
+- Status: experimental implementation validated on 2026-09-12. The original
+  repaint test failed before the change and now passes; eight focused cases pass,
+  including strict embedded/save checks. Read-only installed-resource probe selects
+  the active Zone1 repaint and generates material 1712759006 from bz2g slot 195.
+  Release editor/runtime and fresh database creation/preview diagnostics pass.
+  Evidence: [r6 validation](docs/validation/terrain-palette-experiment-r6.md).
+  Separate r6 tester folder delivered and distribution validation passed; PR #6
+  is the review target. Next: user checks interactive palette appearance,
+  semantic assignments and mixed transitions;
+  the existing broad UI diagnostic access violation remains an explicit gap.
+  This related experiment does not replace EI-ADD-FROM-DB-001.
+
 ### Authorized implementation: EI-ADD-FROM-DB-001
 
 - Original problem: Create Object requires technical fields and a selected

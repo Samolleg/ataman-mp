@@ -10,6 +10,8 @@
 
 #include "terrain_atlas_profile.h"
 
+enum class ETerrainAtlasPixelMatch { Exact, SameStructureExperimental };
+
 struct STerrainAtlasArchiveBindingResult
 {
     QString archivePath;
@@ -18,6 +20,7 @@ struct STerrainAtlasArchiveBindingResult
     QMap<QString, QByteArray> completeArchivePixelSha256;
     qint64 archiveSize{-1};
     qint64 archiveLastModifiedMs{-1};
+    QByteArray sourceSelectionFingerprint;
     QString error;
 
     bool success() const { return !archivePath.isEmpty(); }
@@ -50,6 +53,12 @@ struct STerrainAtlasEmbeddedBindingResult
 class CTerrainAtlasArchiveBindingResolver
 {
 public:
+    static QByteArray archiveSelectionFingerprint(const QStringList& archives);
+    static QImage currentMapUniformSource(
+        const STerrainGlobalMaterialFamily& family, const QString& currentNamespace,
+        const QByteArray& currentPixelSha256, const QVector<QImage>& currentTiles,
+        STerrainGlobalMaterialSource* selectedSource = nullptr,
+        ETerrainAtlasPixelMatch pixelMatch = ETerrainAtlasPixelMatch::Exact);
     // Reads only the RES header, hash table, filename buffer, and requested
     // payloads. Large unrelated atlas pages are never copied or hashed.
     static bool readArchiveMembers(
@@ -67,7 +76,8 @@ public:
         int atlasSlotCount,
         const QByteArray& expectedAtlasPixelSha256,
         const QString& preferredArchive = QString(),
-        QVector<QImage>* decodedTiles = nullptr);
+        QVector<QImage>* decodedTiles = nullptr,
+        ETerrainAtlasPixelMatch pixelMatch = ETerrainAtlasPixelMatch::Exact);
 };
 
 #endif // TERRAIN_ATLAS_ARCHIVE_BINDING_H
