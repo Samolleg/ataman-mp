@@ -512,6 +512,32 @@ foundation as one coherent `0.3.0` release.
   Evidence: [r7 validation](docs/validation/zone1-approved-hash-r7.md).
   Next: user verifies Zone1 loading and painting; no automatic r7 full-map timing
   measurement and no approval of other modified atlas hashes are claimed.
+- R2 follow-up (2026-09-12): r7 screenshot shows partial Modern thumbnails.
+  Read-only live log confirms 22 material sources after hydration; other atlas
+  revisions still fail exact binding. Separate confirmed catalog restriction:
+  Zone1 Ground / Common slot 1 (type 1) and Stone / Lime slot 48 (type 2) are
+  excluded because their global names already retain type 0 from another atlas.
+  Adding the Zone1 pixel hash cannot remove that runtime-type conflict, and
+  512/512 assigned slots does not mean every game-wide material has a source.
+  This is explanation/diagnosis only: no other hashes or type-policy changes
+  authorized by this question. Next: decide broader exact-hash coverage separately
+  from runtime-type family handling if the user requests full palette repair.
+  The same log confirms r7 workspace load 4987 ms and material catalog 256 ms,
+  versus r6 65416 ms / 60990 ms: the minute-long load regression is removed.
+- R3 authorized (2026-09-12): user requests access for all maps. Extend the same
+  exact-hash allowlist approach to complete atlas namespaces in the installed HD
+  pack, using the editor's decoder to measure actual pixels. Preserve strict
+  binding, existing presets, runtime-type checks and database placement. Expected:
+  all catalog maps with complete HD sources allowed and global palette source
+  coverage verified; no generic hash bypass. Implemented: native probe first failed
+  on 34 missing approvals; adding those measured hashes yields 38/38 approved
+  namespaces, 41/41 installed MPRs covered and 88/88 global material sources.
+  Nine focused cases, release/runtime build and database creation diagnostics pass.
+  Separate r8 package finalized and delivered; PR #6 is the review target.
+  Evidence: [r8 validation](docs/validation/all-map-hd-bindings-r8.md).
+  Next: user checks interactive thumbnails/transitions and map switching. Per-slot
+  semantic correctness, full r8 load timing and the pre-existing broad UI crash
+  remain explicit coverage limits; parent database coverage gaps stay open.
 
 ### Authorized implementation: EI-ADD-FROM-DB-001
 
