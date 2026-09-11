@@ -64,6 +64,7 @@ struct SMonsterDatabaseRecord
 struct SRaceModelDatabaseRecord
 {
     QString name;
+    int typeId{-1};
     QString model;
     QStringList primaryTextures;
     QStringList secondaryTextures;
@@ -89,6 +90,14 @@ struct SMaterialDatabaseRecord
     QString type;
     QString code;
     int id{-1};
+};
+
+struct SLeverDatabaseRecord
+{
+    QString name;
+    QString text;
+    float scale{1.0f};
+    QMap<int, QByteArray> opaqueFields;
 };
 
 struct SJmvUnitPerkRecord
@@ -119,6 +128,7 @@ struct SProfileDatabaseSnapshot
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;
+    QMap<QString, SLeverDatabaseRecord> levers;
     QMap<QString, SMaterialDatabaseRecord> materialRecords;
     QStringList materials;
     QStringList weapons;
@@ -158,6 +168,7 @@ struct SParsedDatabaseMembers
     QMap<QString, SMonsterDatabaseRecord> monsters;
     QMap<QString, SRaceModelDatabaseRecord> raceModels;
     QMap<QString, SItemDatabaseRecord> items;
+    QMap<QString, SLeverDatabaseRecord> levers;
     QMap<QString, SMaterialDatabaseRecord> materialRecords;
     QMap<QString, QStringList> namesByCategory;
     QVector<SDatabaseDiagnostic> diagnostics;

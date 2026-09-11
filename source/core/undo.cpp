@@ -132,6 +132,16 @@ void CCreateNodeCommand::undo()
         ei::log(eLogWarning, QString("Create undo skipped because exact node %1 is unavailable").arg(m_createdNodeId));
         return;
     }
+    // A save rebinds the node to the saved document and clears its creation
+    // template. Retain that exact record before undo: the user may save the
+    // deletion, then redo after the source record has left the document.
+    QByteArray source, clean;
+    if(m_pMob->rawObjectTemplateBytes(m_pCreatedNode, &source, &clean))
+    {
+        m_pCreatedNode->setRawObjectTemplateBytes(source, clean);
+        m_rawTemplatePath = m_pCreatedNode->rawSourceObjectPath();
+        m_rawTemplateSubtreeSha256 = m_pCreatedNode->rawSourceSubtreeSha256();
+    }
     m_pMob->deleteNode(m_pCreatedNode);
     m_pView->setDurty(m_pMob);
     emit undo_addNodeSignal(m_createdNodeId);

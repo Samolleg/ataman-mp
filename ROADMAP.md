@@ -466,6 +466,66 @@ foundation as one coherent `0.3.0` release.
 
 ## Roadmap maintenance
 
+### Authorized implementation: EI-ADD-FROM-DB-001
+
+- Original problem: Create Object requires technical fields and a selected
+  same-type raw MOB template; there is no complete database-to-map workflow.
+- Expected result: all three searchable categories (monster-prototype creatures,
+  collectible DB items, usable objects/levers), names/models/preview, supported
+  defaults, placement, undo/redo, guarded save/reopen; technical options secondary.
+- Authority: dedicated contributor branch, project code in this worktree only;
+  read-only installed-data research; tests/build, scoped commit/push/PR, permanent
+  unpacked tester folder. No main merge, live game/mod/settings changes, or private
+  source/data in repository, package, or publication.
+- Base: `contrib/Samolleg/add-from-db` from fetched `origin/main`
+  `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a` (2026-09-11).
+- Status: partial implementation on 2026-09-11: active database catalog,
+  searchable picker, creature/lever preview and click placement, fresh validated
+  creation records, and undo/save/redo retention implemented. Native collectible
+  placement and complete automatic lever appearance remain open. R2 remains
+  native pickup only, without a newly generated scenario/script.
+  Parent remains open until all three categories and their
+  persistence/regression checks are delivered. Canonical task read from the
+  main checkout roadmap; its local changes have not been overwritten.
+- Original cause: the creation form had no database selection and required a
+  selected same-type raw template. Database mode now uses its own independently
+  generated, parsed/reopened record; the save guard still requires hashed bytes.
+- Evidence and repeatable acceptance cases:
+  [creation research](docs/research/add-from-database-001.md). Read-only traversal
+  passed on 252 installed MOBs; both databases contain 37 lever prototype rows.
+  [validation checkpoint](docs/validation/add-from-database-001.md): seven focused
+  tests pass, including installed Base/JMV catalog checks and archive identity;
+  the creation diagnostic passes real undo/redo and save/undo/save/redo/save,
+  multiple fresh IDs, editable reopen and corrupt-hash rejection.
+- R2 (resolved 2026-09-11): native item/bag pickup, no new scenario. The proposed
+  generated-script route is rejected; all three categories remain required.
+  R3 (necessary research): validated fresh raw records and
+  creature appearance/lever defaults; current renderer forbids blind DB fallback.
+- R4 (research gap, not an outstanding product decision): independent native
+  item pickup remains unverified. The user reaffirmed creating the selected
+  database object on the map; the proposed creature-loot substitution is not
+  authorized and the follow-up choice is withdrawn. Persistence format is an
+  implementation concern, not a prerequisite the user must resolve.
+- R5 (necessary regression, fixed): a creation command lost its source after
+  save/undo/save, so redo could not be saved. The original failure was reproduced;
+  undo now retains the exact current source/clean bytes before removal, and the
+  full sequence passes for creatures and levers.
+- Delivery checkpoint: unpacked tester folder finalized outside this worktree;
+  distribution validation passes and executable hash matches the tested build.
+  [Tester notes](packaging/ADD_FROM_DATABASE_TEST.md) explicitly describe the
+  incomplete scope; this is a draft contributor handoff, not parent closure.
+- Next: complete native collectible creation, supported automatic lever appearance,
+  and interactive/gameplay validation. This checkpoint does not close the parent.
+  No installed data or user settings changed; no game assets or private source
+  were copied into implementation or distribution.
+- Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
+  with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
+  acceptance remains unverified, independently of the passing creation checks.
+- Related research EI-ADD-FROM-DB-001-R1: named EI safety/reference skills absent
+  from listed skills and searched local skill/plugin locations. Research followed
+  explicit user authorization for read-only inspection; no private contents or
+  provenance may enter the repository, package, or publication.
+
 - Keep this file goal-oriented and concise.
 - Put unassigned requests in the wishlist; assign accepted work to a version.
 - Keep version blocks in descending order and collapsible.

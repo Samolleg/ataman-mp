@@ -6,6 +6,7 @@
 
 #include "layout_components/tablemanager.h"
 #include "node.h"
+#include "database_map_catalog.h"
 
 namespace Ui {
 class CCreateObjectForm;
@@ -13,6 +14,12 @@ class CCreateObjectForm;
 
 class CView;
 class CPreview;
+class CMob;
+class QComboBox;
+class QLineEdit;
+class QListWidget;
+class QLabel;
+class QCheckBox;
 
 ///
 /// \brief The CCreateObjectForm class provides a form for creating a new object in the scene
@@ -42,10 +49,16 @@ private slots:
 
 protected:
     void showEvent(QShowEvent* pEvent) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void initViewWidget();
     void updateTable();
+    void refreshDatabase();
+    void filterDatabase();
+    void selectDatabaseEntry();
+    void cancelPlacement();
+    void placeDatabaseObject(const QPoint& position);
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -55,6 +68,17 @@ private:
     CView* m_pView;
     CPreview * m_pPreview;
     QUndoStack* m_pUndoStack;
+    QComboBox* m_databaseCategory{nullptr};
+    QLineEdit* m_databaseSearch{nullptr};
+    QListWidget* m_databaseList{nullptr};
+    QLabel* m_databaseDetails{nullptr};
+    QCheckBox* m_advanced{nullptr};
+    QVector<ei::SDatabaseMapEntry> m_databaseEntries;
+    quint64 m_databaseGeneration{0};
+    bool m_databaseMode{true};
+    bool m_placementPending{false};
+    bool m_consumePlacementRelease{false};
+    CMob* m_placementMob{nullptr};
 };
 
 #endif // CREATEOBJECTFORM_H

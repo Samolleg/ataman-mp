@@ -36,6 +36,7 @@
 #include <cmath>
 
 #include "profile_database.h"
+#include "database_map_catalog.h"
 #include "database_document.h"
 #include "database_workbook.h"
 #include "database_schema.h"
@@ -187,6 +188,9 @@ class ProfileDatabaseTests : public QObject
     Q_OBJECT
 private slots:
     void parsesStableLinksAndCurrentNames();
+    void mapPickerIncludesDatabaseLeversWithoutMapObjects();
+    void databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupportedEntries();
+    void installedDatabaseMapCatalogUsesActiveDefinitions();
     void validatesBalancedItemGrammarWithoutMutation();
     void providersAreStrictAndJmvOverlaysOnlyActions();
     void jmvLoadsBoundedUnitPerkOwnership();
@@ -288,6 +292,98 @@ void ProfileDatabaseTests::parsesStableLinksAndCurrentNames()
     QCOMPARE(parsed.materialRecords.value("iron").id, 7);
     QVERIFY(parsed.namesByCategory.value("spells").contains("fireball"));
     QVERIFY(parsed.namesByCategory.value("perks").contains("two_handed"));
+}
+
+void ProfileDatabaseTests::mapPickerIncludesDatabaseLeversWithoutMapObjects()
+{
+    auto members = relationalMembers();
+    members.insert("levers.ldb", database({record(stringField(0, "test_lever")
+        + stringField(7, "Test switch") + tag(3, QByteArray::fromHex("00000040")))}));
+    const auto parsed = ei::parseProfileDatabaseMembers(members, "memory");
+    // No map, selected node, or installed data participates in this lookup.
+    QCOMPARE(parsed.namesByCategory.value("levers"), QStringList({"test_lever"}));
+    QCOMPARE(parsed.levers.value("test_lever").text, QString("Test switch"));
+    QCOMPARE(parsed.levers.value("test_lever").scale, 2.0f);
+    QVERIFY(!ei::parseProfileDatabaseMembers(relationalMembers(), "memory")
+                 .namesByCategory.contains("levers"));
+}
+
+void ProfileDatabaseTests::databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupportedEntries()
+{
+    auto members = relationalMembers();
+    const QByteArray race = stringField(0, "Test race") + intField(1, 52)
+        + stringField(30, "testmodel") + tag(31, stringField(0, "skin_00"));
+    const QByteArray monster = stringField(0, "Test creature") + stringField(1, "Test race")
+        + intField(3, 12);
+    members["units.udb"] = database({{}, record(race), record(monster)});
+    ei::SProfileDatabaseSnapshot snapshot;
+    ei::applyRelationalMembers(members, "memory", &snapshot);
+    const auto catalog = ei::databaseMapCatalog(snapshot);
+    QVERIFY(!catalog.isEmpty());
+    const auto& creature = catalog.first();
+    QCOMPARE(creature.unitType, 52);
+    QCOMPARE(creature.primaryTexture, QString("testmodelskin_12"));
+    QVERIFY(creature.unavailableReason.isEmpty());
+    const QJsonObject defaults{{"World object", QJsonObject{
+        {"Base object", QJsonObject{{"Node type", 7}}}}}, {"Logics", QJsonArray{}}};
+    QJsonObject node;
+    QVERIFY(ei::applyDatabaseMapEntry(creature, defaults, &node));
+    QCOMPARE(node.value("Prototype name").toString(), QString("Test creature"));
+    QCOMPARE(node.value("Subtype").toInt(), 52);
+    QVERIFY(!node.value("Is use mob stats?").toBool());
+    QVERIFY(!defaults.contains("Prototype name"));
+    QVERIFY(!node.contains("_Endurance raw provenance"));
+    snapshot.monsters["test creature"].complexionX = 0;
+    QVERIFY(ei::databaseMapCatalog(snapshot).first().unavailableReason.isEmpty());
+    ei::SLeverDatabaseRecord lever;
+    lever.name = "test_lever"; lever.scale = 4;
+    snapshot.levers.insert(lever.name, lever);
+    const auto leverEntry = ei::databaseMapCatalog(snapshot).last();
+    const QJsonObject leverDefaults{{"World object", QJsonObject{{"Base object",
+        QJsonObject{{"Node type", 0x23}, {"Complection", QJsonArray{1, 1, 1}}}}}}};
+    QVERIFY(ei::applyDatabaseMapEntry(leverEntry, leverDefaults, &node));
+    QCOMPARE(node.value("World object").toObject().value("Base object").toObject()
+             .value("Complection").toArray(), QJsonArray({1, 1, 1}));
+    for(const auto& item : catalog)
+        if(item.category == ei::EDatabaseMapCategory::Item)
+        {
+            QVERIFY(!item.unavailableReason.isEmpty());
+            QVERIFY(!ei::applyDatabaseMapEntry(item, defaults, &node));
+            QVERIFY(node.isEmpty());
+        }
+    snapshot.raceModels.clear();
+    QVERIFY(!ei::databaseMapCatalog(snapshot).first().unavailableReason.isEmpty());
+}
+
+void ProfileDatabaseTests::installedDatabaseMapCatalogUsesActiveDefinitions()
+{
+    const auto archives = qEnvironmentVariable("EI_TEST_DATABASE_ARCHIVES").split(';', QString::SkipEmptyParts);
+    if(archives.isEmpty()) QSKIP("Set EI_TEST_DATABASE_ARCHIVES for read-only installed catalog coverage.");
+    for(const QString& archive : archives)
+    {
+        QVector<ei::SDatabaseDiagnostic> diagnostics;
+        const auto members = ei::readDatabaseArchive(archive, &diagnostics);
+        ei::SProfileDatabaseSnapshot snapshot;
+        ei::applyRelationalMembers(members, "installed-test", &snapshot);
+        QVERIFY(snapshot.usable());
+        const auto entries = ei::databaseMapCatalog(snapshot);
+        QCOMPARE(entries.size(), snapshot.monsters.size() + snapshot.items.size() + snapshot.levers.size());
+        int creatures = 0, levers = 0;
+        for(const auto& entry : entries)
+        {
+            if(entry.category == ei::EDatabaseMapCategory::Creature && entry.unavailableReason.isEmpty())
+            {
+                ++creatures;
+                QCOMPARE(entry.unitType, snapshot.raceModels.value(
+                    snapshot.monsters.value(entry.key).baseRace.toLower()).typeId);
+                QVERIFY(!entry.model.isEmpty()); QVERIFY(!entry.primaryTexture.isEmpty());
+            }
+            if(entry.category == ei::EDatabaseMapCategory::Lever) ++levers;
+        }
+        QVERIFY(creatures > 0); QVERIFY(levers > 0);
+        qInfo("Catalog entries: %d; creatures with creation metadata: %d; levers: %d",
+              entries.size(), creatures, levers);
+    }
 }
 
 void ProfileDatabaseTests::validatesBalancedItemGrammarWithoutMutation()

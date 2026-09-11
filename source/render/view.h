@@ -234,6 +234,7 @@ public:
     }
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
+    bool objectPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position);
     bool projectToRegeneratedNavigation(const QPointF& requested,
                                         QVector3D* position,
                                         float maximumDistance = 8.0f) const;

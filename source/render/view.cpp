@@ -22806,6 +22806,16 @@ void CView::moveCameraToPoint(const QVector3D& position)
     }
 }
 
+bool CView::objectPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position)
+{
+    if(!position || !rect().contains(viewportPosition)) return false;
+    if(m_pLand && m_pLand->isMprLoad()) return terrainPositionAt(viewportPosition, position);
+    QPointF onGrid;
+    if(!viewportPointOnHorizontalPlane(viewportPosition, 0.0f, &onGrid)) return false;
+    *position = QVector3D(onGrid.x(), onGrid.y(), 0.0f);
+    return true;
+}
+
 bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                               bool land)
 {

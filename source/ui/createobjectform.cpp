@@ -16,6 +16,15 @@
 #include "layout_components/tree_view.h"
 #include <QJsonArray>
 #include <QMessageBox>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QLabel>
+#include <QCheckBox>
+#include <QMouseEvent>
+#include <QKeyEvent>
+#include <QSignalBlocker>
+#include "endurance_document.h"
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -48,10 +57,38 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     ui->comboObjectType->initComboItem(tr("<choose object type>"), m_objType.values());
 
     QObject::connect(ui->comboObjectType, SIGNAL(currentIndexChangedOut(QString&)), this, SLOT(onObjectChoose(QString&)));
+
+    m_databaseCategory = new QComboBox(this);
+    m_databaseCategory->setObjectName("databaseCategory");
+    m_databaseCategory->addItems({tr("Creatures"), tr("Items"), tr("Usable objects / levers"),
+                                  tr("Technical object (from selected template)")});
+    m_databaseSearch = new QLineEdit(this);
+    m_databaseSearch->setObjectName("databaseSearch");
+    m_databaseSearch->setPlaceholderText(tr("Search by name or model"));
+    m_databaseList = new QListWidget(this);
+    m_databaseList->setObjectName("databaseObjects");
+    m_databaseDetails = new QLabel(this);
+    m_databaseDetails->setWordWrap(true);
+    m_databaseDetails->setTextFormat(Qt::PlainText);
+    m_advanced = new QCheckBox(tr("Advanced properties"), this);
+    ui->verticalLayout_2->insertWidget(0, m_databaseCategory);
+    ui->verticalLayout_2->insertWidget(1, m_databaseSearch);
+    ui->verticalLayout_2->insertWidget(2, m_databaseList, 1);
+    ui->verticalLayout_2->insertWidget(3, m_databaseDetails);
+    ui->verticalLayout_2->insertWidget(4, m_advanced);
+    connect(m_databaseCategory, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { filterDatabase(); });
+    connect(m_databaseSearch, &QLineEdit::textChanged, this, [this] { filterDatabase(); });
+    connect(m_databaseList, &QListWidget::currentRowChanged, this, [this] { selectDatabaseEntry(); });
+    connect(m_advanced, &QCheckBox::toggled, ui->tableParameters, &QWidget::setVisible);
+    resize(860, 600);
 }
 
 CCreateObjectForm::~CCreateObjectForm()
 {
+    cancelPlacement();
+    m_pPreview->attachNode(nullptr, false);
+    delete m_pNode;
     //delete m_pPreview; // it will remove as children of Form (inherited behaviour from parent widget)
     delete ui;
 }
@@ -60,6 +97,12 @@ void CCreateObjectForm::attach(CView *pView, QUndoStack *pStack)
 {
      m_pView = pView;
      m_pUndoStack = pStack;
+     m_pView->installEventFilter(this);
+     connect(m_pView, &QObject::destroyed, this, [this] {
+         m_pView = nullptr;
+         m_placementPending = false;
+         m_placementMob = nullptr;
+     });
 }
 
 void CCreateObjectForm::initViewWidget()
@@ -130,6 +173,7 @@ void CCreateObjectForm::closeEvent(QCloseEvent *event)
 
 void CCreateObjectForm::onObjectChoose(QString& object)
 {
+    if(m_databaseMode) return;
     // The first combo entry is localized display text, not an object type.
     // Validate against the populated type map instead of comparing its label.
     if(!m_objType.values().contains(object))
@@ -137,6 +181,7 @@ void CCreateObjectForm::onObjectChoose(QString& object)
 
     ENodeType objType = m_objType.key(object);
 
+    m_pPreview->attachNode(nullptr, false);
     if (m_pNode)
         delete m_pNode;
 
@@ -224,6 +269,7 @@ void CCreateObjectForm::onObjectChoose(QString& object)
     }
     m_pPreview->attachNode(m_pNode);
     updateTable();
+    ui->buttonCreate->setEnabled(m_pNode && m_pView && m_pView->currentMob());
 }
 
 void CCreateObjectForm::onParamChange(const QSharedPointer<IPropertyBase> prop)
@@ -265,6 +311,28 @@ void CCreateObjectForm::on_buttonCancel_clicked()
 void CCreateObjectForm::on_buttonCreate_clicked()
 {
     Q_ASSERT(m_pView);
+    if(m_databaseMode)
+    {
+        if(!m_pNode || !m_pView->currentMob()) return;
+        if(m_databaseGeneration != ei::ProfileDatabaseContext::instance().generation())
+        {
+            refreshDatabase();
+            return;
+        }
+        if(m_pNode->textureName().isEmpty()
+           || CTextureList::getInstance()->textureImage(m_pNode->textureName(), m_pNode->modelName()).isNull())
+        {
+            m_databaseDetails->setText(tr("Choose an available primary texture in Advanced properties before placing."));
+            m_advanced->setChecked(true);
+            return;
+        }
+        m_placementMob = m_pView->currentMob();
+        m_placementPending = true;
+        m_pView->setCursor(Qt::CrossCursor);
+        hide();
+        m_pView->setFocus();
+        return;
+    }
     if(!m_pNode)
         return;
     if (nullptr == m_pView->currentMob())
@@ -336,11 +404,199 @@ void CCreateObjectForm::on_buttonCreate_clicked()
 
 void CCreateObjectForm::showEvent(QShowEvent *pEvent)
 {
+    cancelPlacement();
+    refreshDatabase();
     QString text = ui->comboObjectType->currentText();
     if(m_objType.values().contains(text))
     {
         onObjectChoose(text);
     }
     QWidget::showEvent(pEvent);
+}
+
+void CCreateObjectForm::refreshDatabase()
+{
+    const auto snapshot = ei::ProfileDatabaseContext::instance().current();
+    m_databaseGeneration = ei::ProfileDatabaseContext::instance().generation();
+    m_databaseEntries = snapshot && snapshot->usable()
+        ? ei::databaseMapCatalog(*snapshot) : QVector<ei::SDatabaseMapEntry>();
+    filterDatabase();
+}
+
+void CCreateObjectForm::filterDatabase()
+{
+    m_databaseMode = m_databaseCategory->currentIndex() != 3;
+    setWindowTitle(m_databaseMode ? tr("Add from database") : tr("Create object"));
+    ui->labelObjectType->setVisible(!m_databaseMode);
+    ui->comboObjectType->setVisible(!m_databaseMode);
+    m_databaseSearch->setVisible(m_databaseMode);
+    m_databaseList->setVisible(m_databaseMode);
+    m_databaseDetails->setVisible(m_databaseMode);
+    m_advanced->setVisible(m_databaseMode);
+    ui->tableParameters->setVisible(!m_databaseMode || m_advanced->isChecked());
+    ui->buttonCreate->setText(m_databaseMode ? tr("Place on map") : tr("Create"));
+    if(!m_databaseMode)
+    {
+        m_pPreview->attachNode(nullptr, false);
+        delete m_pNode; m_pNode = nullptr;
+        QString type = ui->comboObjectType->currentText();
+        onObjectChoose(type);
+        ui->buttonCreate->setEnabled(m_pNode != nullptr);
+        return;
+    }
+    const QSignalBlocker block(m_databaseList);
+    m_databaseList->clear();
+    const auto category = static_cast<ei::EDatabaseMapCategory>(m_databaseCategory->currentIndex());
+    const QString query = m_databaseSearch->text().trimmed();
+    for(int index = 0; index < m_databaseEntries.size(); ++index)
+    {
+        const auto& entry = m_databaseEntries.at(index);
+        const QString searchable = entry.name + " " + entry.label + " " + entry.model;
+        if(entry.category != category || !searchable.contains(query, Qt::CaseInsensitive)) continue;
+        auto* item = new QListWidgetItem(entry.label == entry.name ? entry.name
+            : entry.label + " (" + entry.name + ")", m_databaseList);
+        item->setData(Qt::UserRole, index);
+        item->setToolTip(entry.model + "\n" + entry.unavailableReason);
+    }
+    if(m_databaseList->count()) m_databaseList->setCurrentRow(0);
+    selectDatabaseEntry();
+}
+
+void CCreateObjectForm::selectDatabaseEntry()
+{
+    if(!m_databaseMode) return;
+    m_pPreview->makeCurrent();
+    m_pPreview->attachNode(nullptr, false);
+    delete m_pNode; m_pNode = nullptr;
+    ui->buttonCreate->setEnabled(false);
+    auto* selected = m_databaseList->currentItem();
+    if(!selected)
+    {
+        m_databaseDetails->setText(m_databaseEntries.isEmpty()
+            ? tr("No active database. Configure the game or mod profile first.")
+            : tr("No matching objects."));
+        updateTable(); return;
+    }
+    auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
+    if(!entry.unavailableReason.isEmpty())
+    {
+        m_databaseDetails->setText(entry.unavailableReason);
+        updateTable(); return;
+    }
+    if(entry.category == ei::EDatabaseMapCategory::Lever)
+    {
+        // Use only an unambiguous installed texture match; do not borrow a map object.
+        QStringList matches;
+        for(QString texture : CTextureList::getInstance()->textureList())
+        {
+            if(texture.endsWith(".mmp", Qt::CaseInsensitive)) texture.chop(4);
+            if(texture.compare(entry.model, Qt::CaseInsensitive) == 0)
+            { matches = QStringList{texture}; break; }
+            if(texture.startsWith(entry.model, Qt::CaseInsensitive)) matches.append(texture);
+        }
+        matches.removeDuplicates();
+        if(matches.size() == 1) entry.primaryTexture = matches.first();
+    }
+    bool hasModel = false;
+    for(QString model : CObjectList::getInstance()->figureList())
+    {
+        if(model.endsWith(".mod", Qt::CaseInsensitive) || model.endsWith(".fig", Qt::CaseInsensitive))
+            model.chop(4);
+        if(model.compare(entry.model, Qt::CaseInsensitive) == 0) { hasModel = true; break; }
+    }
+    if(!hasModel)
+    {
+        m_databaseDetails->setText(tr("Model %1 is not available in the active profile.").arg(entry.model));
+        updateTable(); return;
+    }
+    QJsonObject defaults;
+    if(entry.category == ei::EDatabaseMapCategory::Creature) { CUnit unit; defaults = unit.toJson(); }
+    else { CLever lever; defaults = lever.toJson(); }
+    QJsonObject data;
+    if(!ei::applyDatabaseMapEntry(entry, defaults, &data)) { updateTable(); return; }
+    m_pNode = entry.category == ei::EDatabaseMapCategory::Creature
+        ? static_cast<CNode*>(new CUnit(data)) : static_cast<CNode*>(new CLever(data));
+    m_pNode->loadFigure();
+    m_pNode->loadTexture();
+    m_pPreview->attachNode(m_pNode);
+    m_databaseDetails->setText(tr("%1\nModel: %2\nClick Place on map, then click a position. Esc cancels.")
+        .arg(entry.name, entry.model));
+    if(entry.primaryTexture.isEmpty())
+        m_databaseDetails->setText(tr("Model: %1\nChoose a primary texture in Advanced properties before placing.").arg(entry.model));
+    ui->buttonCreate->setEnabled(m_pView && m_pView->currentMob());
+    updateTable();
+}
+
+void CCreateObjectForm::cancelPlacement()
+{
+    if(m_placementPending && m_pView) m_pView->unsetCursor();
+    m_placementPending = false;
+    m_placementMob = nullptr;
+}
+
+bool CCreateObjectForm::eventFilter(QObject* watched, QEvent* event)
+{
+    if(watched != m_pView) return QDialog::eventFilter(watched, event);
+    if(m_consumePlacementRelease && event->type() == QEvent::MouseButtonRelease)
+    { m_consumePlacementRelease = false; return true; }
+    if(!m_placementPending) return QDialog::eventFilter(watched, event);
+    if(event->type() == QEvent::ShortcutOverride
+       && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
+    { event->accept(); return true; }
+    if(event->type() == QEvent::KeyPress
+       && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
+    { cancelPlacement(); return true; }
+    if(event->type() == QEvent::MouseButtonPress)
+    {
+        auto* mouse = static_cast<QMouseEvent*>(event);
+        m_consumePlacementRelease = true;
+        if(mouse->button() == Qt::RightButton) cancelPlacement();
+        else if(mouse->button() == Qt::LeftButton) placeDatabaseObject(mouse->pos());
+        return true;
+    }
+    if(event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)
+        return true;
+    return QDialog::eventFilter(watched, event);
+}
+
+void CCreateObjectForm::placeDatabaseObject(const QPoint& position)
+{
+    CMob* destination = m_pView->currentMob();
+    if(destination != m_placementMob
+       || m_databaseGeneration != ei::ProfileDatabaseContext::instance().generation())
+    { cancelPlacement(); show(); return; }
+    QVector3D point;
+    if(!m_pView->objectPlacementPositionAt(position, &point) || !m_pNode) return;
+    if(m_pNode->textureName().isEmpty())
+    { cancelPlacement(); show(); m_advanced->setChecked(true); return; }
+    point.setZ(0);
+    m_pView->makeCurrent();
+    m_pNode->updatePos(point);
+    CLandscape::getInstance()->projectPosition(m_pNode);
+    QJsonObject data;
+    CValidationReport report;
+    CNode* created = nullptr;
+    if(CMob::prepareFreshDatabaseNode(m_pNode, &data, &report))
+        created = destination->createNode(data);
+    QByteArray candidate;
+    const bool validated = created && destination->buildValidatedCandidate(&candidate, &report);
+    QVector3D origin;
+    m_pNode->setPos(origin); m_pNode->setDrawPosition(origin);
+    if(auto* unit = dynamic_cast<CUnit*>(m_pNode)) unit->resetLogic();
+    cancelPlacement();
+    if(!validated)
+    {
+        if(created) destination->discardUncommittedNode(created);
+        QMessageBox::warning(this, tr("Object was not placed"),
+            tr("The new object could not be validated for saving.\n\n%1").arg(report.toText()));
+        show(); return;
+    }
+    destination->clearSelect(); created->setState(eSelect);
+    auto* command = new CCreateNodeCommand(m_pView, destination, created);
+    connect(command, SIGNAL(addNodeSignal(CNode*)), m_pView->objectTree(), SLOT(addNodeToTree(CNode*)));
+    connect(command, SIGNAL(undo_addNodeSignal(uint)), m_pView->objectTree(), SLOT(onNodeDelete(uint)));
+    m_pUndoStack->push(command);
+    m_pView->objectTree()->addNodeToTree(created);
+    m_pView->updateGL();
 }
 

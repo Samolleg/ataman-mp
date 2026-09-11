@@ -401,7 +401,81 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
             <source>To preserve complete MOB data, select one existing object of the same type before opening Create Object. Endurance will use its complete raw record as the template and apply the values entered here. You can also copy and paste an existing object.</source>
             <translation>Чтобы сохранить полные данные MOB, выберите один существующий объект того же типа, прежде чем открывать «Создать объект». Endurance будет использовать полную исходную запись в качестве шаблона и применять введенные здесь значения. Вы также можете скопировать и вставить существующий объект.</translation>
         </message>
-    </context>
+        <message>
+        <source>Creatures</source>
+        <translation>Существа</translation>
+    </message>
+    <message>
+        <source>Items</source>
+        <translation>Предметы</translation>
+    </message>
+    <message>
+        <source>Usable objects / levers</source>
+        <translation>Используемые объекты / рычаги</translation>
+    </message>
+    <message>
+        <source>Technical object (from selected template)</source>
+        <translation>Технический объект (по выбранному образцу)</translation>
+    </message>
+    <message>
+        <source>Search by name or model</source>
+        <translation>Поиск по названию или модели</translation>
+    </message>
+    <message>
+        <source>Advanced properties</source>
+        <translation>Дополнительные свойства</translation>
+    </message>
+    <message>
+        <source>Place on map</source>
+        <translation>Разместить на карте</translation>
+    </message>
+    <message>
+        <source>Add from database</source>
+        <translation>Добавить из базы</translation>
+    </message>
+    <message>
+        <source>No active database. Configure the game or mod profile first.</source>
+        <translation>База не подключена. Настройте профиль игры или мода.</translation>
+    </message>
+    <message>
+        <source>No matching objects.</source>
+        <translation>Подходящих объектов нет.</translation>
+    </message>
+    <message>
+        <source>Model %1 is not available in the active profile.</source>
+        <translation>Модель %1 отсутствует в активном профиле.</translation>
+    </message>
+    <message>
+        <source>%1
+Model: %2
+Click Place on map, then click a position. Esc cancels.</source>
+        <translation>%1
+Модель: %2
+Нажмите «Разместить на карте» и укажите место. Esc — отмена.</translation>
+    </message>
+    <message>
+        <source>Model: %1
+Choose a primary texture in Advanced properties before placing.</source>
+        <translation>Модель: %1
+Перед размещением выберите основную текстуру в дополнительных свойствах.</translation>
+    </message>
+    <message>
+        <source>Object was not placed</source>
+        <translation>Объект не размещён</translation>
+    </message>
+    <message>
+        <source>The new object could not be validated for saving.
+
+%1</source>
+        <translation>Не удалось подтвердить корректность сохранения нового объекта.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Choose an available primary texture in Advanced properties before placing.</source>
+        <translation>Перед размещением выберите доступную основную текстуру в дополнительных свойствах.</translation>
+    </message>
+</context>
     <context>
         <name>CJmvMapTestLauncher</name>
         <message>
@@ -16134,4 +16208,27 @@ Runes:
             <translation>СЗ → ЮВ</translation>
         </message>
     </context>
+<context>
+    <name>DatabaseMapCatalog</name>
+    <message>
+        <source>The creature's base race is missing from this database.</source>
+        <translation>Базовая раса существа отсутствует в базе.</translation>
+    </message>
+    <message>
+        <source>The database does not define a model and skin for this creature.</source>
+        <translation>В базе не указаны модель и облик этого существа.</translation>
+    </message>
+    <message>
+        <source>This creature's database type is not supported for placement.</source>
+        <translation>Размещение этого типа существа пока не поддерживается.</translation>
+    </message>
+    <message>
+        <source>Native placement of a collectible item has not been implemented. No object or script will be added.</source>
+        <translation>Штатное размещение подбираемого предмета пока не реализовано. Объект и сценарий не будут добавлены.</translation>
+    </message>
+    <message>
+        <source>The database contains an invalid object scale.</source>
+        <translation>В базе указан некорректный масштаб объекта.</translation>
+    </message>
+</context>
 </TS>

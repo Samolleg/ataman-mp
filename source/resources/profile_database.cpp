@@ -287,10 +287,11 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
         {
             SRaceModelDatabaseRecord record;
             record.name = fieldString(fields, 0);
+            record.typeId = fieldInt(fields, 1);
             record.model = fieldString(fields, 30);
             record.primaryTextures = stringListField(fields, 31);
             record.secondaryTextures = stringListField(fields, 32);
-            record.opaqueFields = excludingFields(fields, QSet<int>() << 0 << 30 << 31 << 32);
+            record.opaqueFields = excludingFields(fields, QSet<int>() << 0 << 1 << 30 << 31 << 32);
             if(!record.name.isEmpty())
                 output.raceModels.insert(record.name.toLower(), record);
         }
@@ -361,6 +362,22 @@ SParsedDatabaseMembers parseProfileDatabaseMembers(const QMap<QString, QByteArra
         output.diagnostics.append({EDatabaseDiagnosticSeverity::Error, "database.items.missing",
             "The selected active database has no items.idb.", sourcePath});
 
+    const QByteArray levers = normalized.value("levers.ldb");
+    if(!levers.isEmpty())
+    {
+        const auto records = tableRecords(levers, 0, &output.diagnostics, sourcePath + ":levers.ldb");
+        addNames(records, "levers", &output);
+        for(const auto& fields : records)
+        {
+            SLeverDatabaseRecord record;
+            record.name = fieldString(fields, 0);
+            record.text = fieldString(fields, 7);
+            record.scale = fieldFloat(fields, 3);
+            record.opaqueFields = excludingFields(fields, QSet<int>() << 0 << 3 << 7);
+            if(!record.name.isEmpty())
+                output.levers.insert(record.name.toLower(), record);
+        }
+    }
     const QByteArray spells = normalized.value("spells.sdb");
     if(!spells.isEmpty())
         addNames(tableRecords(spells, 0, &output.diagnostics, sourcePath + ":spells.sdb"), "spells", &output);

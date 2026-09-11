@@ -77,7 +77,9 @@ public:
     void addNode(QList<CNode*>& aNode) {m_aNode.append(aNode); }
     void addNode(CNode* aNode) {m_aNode.append(aNode); }
     void createNode(CNode* pNode);
-    CNode* createNode(QJsonObject data);
+    CNode* createNode(QJsonObject data, bool loadVisuals = true);
+    static bool prepareFreshDatabaseNode(CNode* node, QJsonObject* data,
+                                         CValidationReport* report = nullptr);
     void undo_createNode(uint mapId);
     CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
     bool replaceNode(CNode* current, CNode* replacement, int index = -1);
@@ -151,6 +153,7 @@ public:
     // <== end functions of logic
 
 private:
+    friend int runDatabaseCreationCheck();
     bool buildRawObjectSequenceCandidate(const QByteArray& currentProjection,
                                          CMobEditTransaction* transaction,
                                          QByteArray* candidate,
