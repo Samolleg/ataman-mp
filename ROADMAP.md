@@ -655,8 +655,9 @@ foundation as one coherent `0.3.0` release.
   a single 512x512 texture instead would require a separate model/UV change.
   Explain this tradeoff; no optimization or asset mutation has been requested.
   Handoff requested: user accepts the texture-size tradeoff for now and requests
-  a PR with the current changes. Update existing PR #6 and mark ready for review,
-  including confirmed dagger gameplay acceptance and explicit remaining gaps.
+  a PR with the current changes. Existing [PR #6](https://github.com/Ilufus/ei-mapper-endurance/pull/6)
+  is updated and ready for review (not draft), including confirmed dagger gameplay
+  acceptance and explicit remaining gaps. All changes are on the contributor branch.
   Next: maintainer review of the contributor branch; no merge/main write and no
   texture-size optimization in this handoff. Parent coverage gaps remain open.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
