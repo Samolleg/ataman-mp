@@ -128,6 +128,8 @@ public:
     void loadTexture(QSet<QString>& aName);
     QOpenGLTexture* texture(const QString& name);
     QOpenGLTexture* texture(const QString& name, const QString& modelName);
+    // Uses the renderer's actual loader (including DXT), not the PNT3 atlas decoder.
+    bool hasTexture(const QString& name, const QString& modelName);
     QOpenGLTexture* texture(const QStringList& names, const QString& modelName,
                             QString* resolvedName);
     QOpenGLTexture* layeredTexture(const QStringList& layerNames, const QString& modelName);

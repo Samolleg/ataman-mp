@@ -465,6 +465,8 @@ void CMoveAxis::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
     switch (pEvent->button()) {
     case Qt::LeftButton:
     {
+        if(m_pView->isDatabasePlacementPending()
+           && !m_pView->updateDatabasePlacementPointer(pEvent->pos())) return;
         m_pView->operationApply(EOperationAxisType::eMove);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;
@@ -489,6 +491,11 @@ void CMoveAxis::synchronizePointerAfterCameraNavigation(const QPoint& position)
 void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 {
     Q_UNUSED(pOp);
+    if(m_pView->isDatabasePlacementPending())
+    {
+        m_pView->updateDatabasePlacementPointer(pEvent->pos());
+        return;
+    }
     QVector3D newPos = m_pView->getTerrainPos(pEvent->x(), pEvent->y());
     QVector3D moveDir = newPos - lastLandPos;
     switch (axis) {

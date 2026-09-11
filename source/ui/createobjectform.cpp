@@ -25,6 +25,8 @@
 #include <QKeyEvent>
 #include <QSignalBlocker>
 #include "endurance_document.h"
+#include "database_document.h"
+#include "item_spell_constructor_dialog.h"
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -62,6 +64,9 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_databaseCategory->setObjectName("databaseCategory");
     m_databaseCategory->addItems({tr("Creatures"), tr("Items"), tr("Usable objects / levers"),
                                   tr("Technical object (from selected template)")});
+    m_itemMaterial = new QComboBox(this);
+    m_itemMaterial->setObjectName("databaseItemMaterial");
+    m_itemMaterial->setToolTip(tr("Preview material"));
     m_databaseSearch = new QLineEdit(this);
     m_databaseSearch->setObjectName("databaseSearch");
     m_databaseSearch->setPlaceholderText(tr("Search by name or model"));
@@ -75,7 +80,10 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     ui->verticalLayout_2->insertWidget(1, m_databaseSearch);
     ui->verticalLayout_2->insertWidget(2, m_databaseList, 1);
     ui->verticalLayout_2->insertWidget(3, m_databaseDetails);
-    ui->verticalLayout_2->insertWidget(4, m_advanced);
+    ui->verticalLayout_2->insertWidget(4, m_itemMaterial);
+    ui->verticalLayout_2->insertWidget(5, m_advanced);
+    connect(m_itemMaterial, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this] { selectDatabaseEntry(); });
     connect(m_databaseCategory, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { filterDatabase(); });
     connect(m_databaseSearch, &QLineEdit::textChanged, this, [this] { filterDatabase(); });
@@ -86,7 +94,6 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
 
 CCreateObjectForm::~CCreateObjectForm()
 {
-    cancelPlacement();
     m_pPreview->attachNode(nullptr, false);
     delete m_pNode;
     //delete m_pPreview; // it will remove as children of Form (inherited behaviour from parent widget)
@@ -97,11 +104,8 @@ void CCreateObjectForm::attach(CView *pView, QUndoStack *pStack)
 {
      m_pView = pView;
      m_pUndoStack = pStack;
-     m_pView->installEventFilter(this);
      connect(m_pView, &QObject::destroyed, this, [this] {
          m_pView = nullptr;
-         m_placementPending = false;
-         m_placementMob = nullptr;
      });
 }
 
@@ -319,18 +323,22 @@ void CCreateObjectForm::on_buttonCreate_clicked()
             refreshDatabase();
             return;
         }
-        if(m_pNode->textureName().isEmpty()
-           || CTextureList::getInstance()->textureImage(m_pNode->textureName(), m_pNode->modelName()).isNull())
+        m_pPreview->makeCurrent();
+        if(!CTextureList::getInstance()->hasTexture(m_pNode->textureName(), m_pNode->modelName()))
         {
             m_databaseDetails->setText(tr("Choose an available primary texture in Advanced properties before placing."));
             m_advanced->setChecked(true);
             return;
         }
-        m_placementMob = m_pView->currentMob();
-        m_placementPending = true;
-        m_pView->setCursor(Qt::CrossCursor);
+        QString diagnostic;
+        if(!m_pView->beginDatabasePlacement(m_pNode, &diagnostic))
+        {
+            m_databaseDetails->setText(diagnostic);
+            return;
+        }
         hide();
         m_pView->setFocus();
+        m_pView->updateGL();
         return;
     }
     if(!m_pNode)
@@ -404,7 +412,8 @@ void CCreateObjectForm::on_buttonCreate_clicked()
 
 void CCreateObjectForm::showEvent(QShowEvent *pEvent)
 {
-    cancelPlacement();
+    if(m_pView && m_pView->isDatabasePlacementPending())
+        m_pView->cancelPendingOperation();
     refreshDatabase();
     QString text = ui->comboObjectType->currentText();
     if(m_objType.values().contains(text))
@@ -420,6 +429,10 @@ void CCreateObjectForm::refreshDatabase()
     m_databaseGeneration = ei::ProfileDatabaseContext::instance().generation();
     m_databaseEntries = snapshot && snapshot->usable()
         ? ei::databaseMapCatalog(*snapshot) : QVector<ei::SDatabaseMapEntry>();
+    const auto document = snapshot ? ei::DatabaseDocument::fromSnapshot(snapshot)
+                                   : QSharedPointer<ei::DatabaseDocument>();
+    m_itemCatalog = document ? ei::ItemSpellConstructorCatalog::fromDocument(*document)
+                            : ei::ItemSpellConstructorCatalog();
     filterDatabase();
 }
 
@@ -433,6 +446,7 @@ void CCreateObjectForm::filterDatabase()
     m_databaseList->setVisible(m_databaseMode);
     m_databaseDetails->setVisible(m_databaseMode);
     m_advanced->setVisible(m_databaseMode);
+    m_itemMaterial->setVisible(m_databaseMode && m_databaseCategory->currentIndex() == 1);
     ui->tableParameters->setVisible(!m_databaseMode || m_advanced->isChecked());
     ui->buttonCreate->setText(m_databaseMode ? tr("Place on map") : tr("Create"));
     if(!m_databaseMode)
@@ -478,6 +492,37 @@ void CCreateObjectForm::selectDatabaseEntry()
         updateTable(); return;
     }
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
+    if(entry.category == ei::EDatabaseMapCategory::Item)
+    {
+        const auto* item = m_itemCatalog.findItem(entry.name);
+        m_itemMaterial->setEnabled(item != nullptr);
+        if(item)
+        {
+            const QSignalBlocker block(m_itemMaterial);
+            const QString previous = m_itemMaterial->currentData().toString();
+            m_itemMaterial->clear();
+            for(const auto& material : m_itemCatalog.compatibleMaterials(*item))
+                m_itemMaterial->addItem(material.displayName, material.name);
+            const int previousIndex = m_itemMaterial->findData(previous);
+            if(previousIndex >= 0) m_itemMaterial->setCurrentIndex(previousIndex);
+            m_itemMaterial->setEnabled(m_itemMaterial->count() > 0);
+            m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
+                m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString()),
+                ei::ProfileDatabaseContext::instance().current());
+            m_pPreview->attachNode(m_pNode);
+        }
+        else
+        {
+            const QSignalBlocker block(m_itemMaterial);
+            m_itemMaterial->clear();
+        }
+        m_databaseDetails->setText(entry.unavailableReason);
+        if(!m_pNode)
+            m_databaseDetails->setText(tr("No preview model is available for this item.") + "\n" + entry.unavailableReason);
+        // Item visualization must not depend on native pickup placement support.
+        m_tableManager->reset();
+        return;
+    }
     if(!entry.unavailableReason.isEmpty())
     {
         m_databaseDetails->setText(entry.unavailableReason);
@@ -525,78 +570,5 @@ void CCreateObjectForm::selectDatabaseEntry()
         m_databaseDetails->setText(tr("Model: %1\nChoose a primary texture in Advanced properties before placing.").arg(entry.model));
     ui->buttonCreate->setEnabled(m_pView && m_pView->currentMob());
     updateTable();
-}
-
-void CCreateObjectForm::cancelPlacement()
-{
-    if(m_placementPending && m_pView) m_pView->unsetCursor();
-    m_placementPending = false;
-    m_placementMob = nullptr;
-}
-
-bool CCreateObjectForm::eventFilter(QObject* watched, QEvent* event)
-{
-    if(watched != m_pView) return QDialog::eventFilter(watched, event);
-    if(m_consumePlacementRelease && event->type() == QEvent::MouseButtonRelease)
-    { m_consumePlacementRelease = false; return true; }
-    if(!m_placementPending) return QDialog::eventFilter(watched, event);
-    if(event->type() == QEvent::ShortcutOverride
-       && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
-    { event->accept(); return true; }
-    if(event->type() == QEvent::KeyPress
-       && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
-    { cancelPlacement(); return true; }
-    if(event->type() == QEvent::MouseButtonPress)
-    {
-        auto* mouse = static_cast<QMouseEvent*>(event);
-        m_consumePlacementRelease = true;
-        if(mouse->button() == Qt::RightButton) cancelPlacement();
-        else if(mouse->button() == Qt::LeftButton) placeDatabaseObject(mouse->pos());
-        return true;
-    }
-    if(event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonRelease)
-        return true;
-    return QDialog::eventFilter(watched, event);
-}
-
-void CCreateObjectForm::placeDatabaseObject(const QPoint& position)
-{
-    CMob* destination = m_pView->currentMob();
-    if(destination != m_placementMob
-       || m_databaseGeneration != ei::ProfileDatabaseContext::instance().generation())
-    { cancelPlacement(); show(); return; }
-    QVector3D point;
-    if(!m_pView->objectPlacementPositionAt(position, &point) || !m_pNode) return;
-    if(m_pNode->textureName().isEmpty())
-    { cancelPlacement(); show(); m_advanced->setChecked(true); return; }
-    point.setZ(0);
-    m_pView->makeCurrent();
-    m_pNode->updatePos(point);
-    CLandscape::getInstance()->projectPosition(m_pNode);
-    QJsonObject data;
-    CValidationReport report;
-    CNode* created = nullptr;
-    if(CMob::prepareFreshDatabaseNode(m_pNode, &data, &report))
-        created = destination->createNode(data);
-    QByteArray candidate;
-    const bool validated = created && destination->buildValidatedCandidate(&candidate, &report);
-    QVector3D origin;
-    m_pNode->setPos(origin); m_pNode->setDrawPosition(origin);
-    if(auto* unit = dynamic_cast<CUnit*>(m_pNode)) unit->resetLogic();
-    cancelPlacement();
-    if(!validated)
-    {
-        if(created) destination->discardUncommittedNode(created);
-        QMessageBox::warning(this, tr("Object was not placed"),
-            tr("The new object could not be validated for saving.\n\n%1").arg(report.toText()));
-        show(); return;
-    }
-    destination->clearSelect(); created->setState(eSelect);
-    auto* command = new CCreateNodeCommand(m_pView, destination, created);
-    connect(command, SIGNAL(addNodeSignal(CNode*)), m_pView->objectTree(), SLOT(addNodeToTree(CNode*)));
-    connect(command, SIGNAL(undo_addNodeSignal(uint)), m_pView->objectTree(), SLOT(onNodeDelete(uint)));
-    m_pUndoStack->push(command);
-    m_pView->objectTree()->addNodeToTree(created);
-    m_pView->updateGL();
 }
 

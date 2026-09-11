@@ -45,6 +45,10 @@ delivered by this checkpoint.
 
 ## Manual gaps and choices
 
+The r1 results above are retained as a checkpoint. Preview and placement defects
+reported afterwards are fixed and validated in
+[the r2 video regression report](add-from-database-video-regressions.md).
+
 The picker uses active database identities and the existing type defaults,
 without copying another map object's quests, logic, or appearance. A monster's
 race TypeId, model, skin and complexion seed its instance; database stat import
@@ -54,7 +58,8 @@ these are different properties. A texture is auto-selected only for a unique
 resource-name match; otherwise the user must choose one. This is incomplete
 automatic lever appearance, not a claimed database texture link.
 
-Unverified: interactive picker/preview and placement, profile switching while
+Unverified beyond r2's focused off-screen widget/render checks: user acceptance on
+loaded terrain, profile switching while
 placing, gameplay appearance/equipment/AI of all creature families, lever use,
 and native ground-item pickup. The last item has no implemented independent
 creation path. The item list explicitly disables placement. No generated

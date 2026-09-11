@@ -518,6 +518,26 @@ foundation as one coherent `0.3.0` release.
   and interactive/gameplay validation. This checkpoint does not close the parent.
   No installed data or user settings changed; no game assets or private source
   were copied into implementation or distribution.
+- R6/R7/R8 (fixed for the recorded cases, 2026-09-11 user video): JMV AncientCurseM25 and
+  ArmoredTurtle110 have DB texture names but render as cyan silhouettes; the
+  item `2h long spear` has no preview; Place leaves the window open. Expected:
+  textured previews, including weapons, and immediate cursor-bound placement
+  with the picker hidden, click to commit and Escape to cancel. Decoder installed
+  only in ignored build-video-tools; sampled the supplied 30-second video.
+  First incorrect decisions: preview reuses viewport shader uniforms (including
+  solid customColor); placement checks a PNT3-only CPU atlas decoder for ordinary
+  DXT textures; item placement eligibility suppresses preview; the custom placement
+  event filter never draws a pending object. Reproduction and checks tracked in
+  docs/validation/add-from-database-video-regressions.md. These are necessary
+  fixes within EI-ADD-FROM-DB-001, not a change to its native-pickup requirement.
+  The original shader regression was rebuilt and failed (two-color silhouette);
+  the fixed renderer passes visually inspected JMV desktop/ANGLE and base-resource
+  previews. The production picker/viewport transaction passes immediate placement,
+  pointer motion, cancellation and one-action undo/redo. Thirteen focused tests
+  and the original creation/save diagnostic pass. r2 preserves the user's used r1
+  folder. Native item placement and all-entry/gameplay acceptance remain open.
+  r2 is finalized in the permanent tester location; executable hashes match the
+  tested build. The existing draft PR #6 remains the contributor review target.
 - Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
   with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
   acceptance remains unverified, independently of the passing creation checks.

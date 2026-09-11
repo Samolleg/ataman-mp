@@ -7,6 +7,7 @@
 #include "layout_components/tablemanager.h"
 #include "node.h"
 #include "database_map_catalog.h"
+#include "item_spell_constructor.h"
 
 namespace Ui {
 class CCreateObjectForm;
@@ -49,7 +50,6 @@ private slots:
 
 protected:
     void showEvent(QShowEvent* pEvent) override;
-    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void initViewWidget();
@@ -57,8 +57,6 @@ private:
     void refreshDatabase();
     void filterDatabase();
     void selectDatabaseEntry();
-    void cancelPlacement();
-    void placeDatabaseObject(const QPoint& position);
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -69,6 +67,8 @@ private:
     CPreview * m_pPreview;
     QUndoStack* m_pUndoStack;
     QComboBox* m_databaseCategory{nullptr};
+    QComboBox* m_itemMaterial{nullptr};
+    ei::ItemSpellConstructorCatalog m_itemCatalog;
     QLineEdit* m_databaseSearch{nullptr};
     QListWidget* m_databaseList{nullptr};
     QLabel* m_databaseDetails{nullptr};
@@ -76,9 +76,6 @@ private:
     QVector<ei::SDatabaseMapEntry> m_databaseEntries;
     quint64 m_databaseGeneration{0};
     bool m_databaseMode{true};
-    bool m_placementPending{false};
-    bool m_consumePlacementRelease{false};
-    CMob* m_placementMob{nullptr};
 };
 
 #endif // CREATEOBJECTFORM_H

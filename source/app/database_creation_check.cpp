@@ -13,6 +13,24 @@
 #include <QJsonArray>
 #include <QTextStream>
 #include <QScopedPointer>
+#include <QApplication>
+#include <QDir>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QTableWidget>
+#include <QPushButton>
+#include <QSettings>
+#include "createobjectform.h"
+#include "preview.h"
+#include "settings.h"
+#include "resourcemanager.h"
+#include "runtime/providers/profile_database_provider_support.h"
+#include "layout_components/tree_view.h"
+#include "layout_components/progressview.h"
+#include "tile_form.h"
+#include "camera.h"
+#include "operationmanager.h"
 
 int runDatabaseCreationCheck()
 {
@@ -121,5 +139,159 @@ int runDatabaseCreationCheck()
         output << "PASS: " << entry.name << " creation, reopen, removal, repeat and hash rejection\n";
         output << "PASS: real create command undo/redo and save/undo/save/redo/save\n";
     }
+    output.flush(); return 0;
+}
+
+int runDatabasePreviewCheck()
+{
+    QTextStream output(stdout);
+    auto fail = [&](const QString& message) {
+        output << "FAIL: " << message << "\n"; output.flush(); return 1;
+    };
+    const QString archive = qEnvironmentVariable("EI_TEST_PREVIEW_DATABASE");
+    const QStringList roots = qEnvironmentVariable("EI_TEST_RESOURCE_ROOTS").split(';', QString::SkipEmptyParts);
+    const QString outputDirectory = qEnvironmentVariable("EI_TEST_PREVIEW_OUTPUT");
+    if(archive.isEmpty() || roots.isEmpty() || outputDirectory.isEmpty())
+        return fail("Set EI_TEST_PREVIEW_DATABASE, EI_TEST_RESOURCE_ROOTS and EI_TEST_PREVIEW_OUTPUT.");
+    QDir().mkpath(outputDirectory);
+    QTemporaryDir temporary;
+    if(!temporary.isValid()) return fail("temporary directory");
+    // All settings and diagnostic state are confined to scratch. Process-lifetime
+    // UI services are retained, matching the application's ownership model.
+    QDir::setCurrent(temporary.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
+    auto* settings = new CSettings;
+    auto* rootOption = dynamic_cast<COptStringList*>(settings->opt(eOptSetResource, "resourceRoots"));
+    if(!rootOption) return fail("resource settings");
+    rootOption->setValue(roots.toVector());
+    QSharedPointer<ei::SProfileDatabaseSnapshot> snapshot(new ei::SProfileDatabaseSnapshot);
+    snapshot->providerId = archive.contains("Jamais", Qt::CaseInsensitive) ? "jmv.v1" : "base.standard.v1";
+    snapshot->profileId = archive.contains("Jamais", Qt::CaseInsensitive) ? "jamais-vu" : "base";
+    snapshot->sourceArchivePath = archive;
+    QVector<ei::SDatabaseDiagnostic> diagnostics;
+    snapshot->rawMembers = ei::readDatabaseArchive(archive, &diagnostics);
+    ei::applyRelationalMembers(snapshot->rawMembers, "read-only-test", snapshot.data());
+    if(!snapshot->usable()) return fail("database snapshot");
+    ei::ProfileDatabaseContext::instance().activate(snapshot,
+        {{"characterAppearance", snapshot->providerId}, {"equipmentLayout", snapshot->providerId},
+         {"unitAnimation", snapshot->providerId}});
+
+    auto* form = new CCreateObjectForm;
+    form->setAttribute(Qt::WA_DontShowOnScreen);
+    CPreview* preview = form->viewWidget();
+    preview->resize(400, 400);
+    preview->renderPixmap(400,400);
+    if(!preview->isValid()) return fail("preview OpenGL context");
+    auto* view = new CView(nullptr, preview);
+    view->setAttribute(Qt::WA_DontShowOnScreen);
+    view->resize(640,480);
+    auto* history = new QUndoStack;
+    auto* tree = new CTreeView;
+    auto* table = new QTableWidget;
+    table->setColumnCount(2);
+    view->attach(settings, table, history, new CProgressView, new QLineEdit, tree, new CTileForm);
+    form->attach(view, history);
+    preview->attachView(view);
+    preview->attachSettings(settings);
+    preview->makeCurrent();
+    CTextureList::getInstance()->attachSettings(settings);
+    CObjectList::getInstance()->attachSettings(settings);
+    CTextureList::getInstance()->initResource();
+    CObjectList::getInstance()->initResource();
+    view->renderPixmap(640,480);
+    view->m_projection.setToIdentity();
+    view->m_projection.perspective(45, 640.0f/480.0f, 0.02f, 1000.0f);
+
+    QByteArray baseline;
+    {
+        util::CMobParser writer(baseline, true);
+        writer.startSection("OBJECT_DB_FILE");
+        writer.startSection("SC_OBJECT_DB_FILE"); writer.endSection();
+        writer.startSection("OBJECT_SECTION"); writer.endSection();
+        writer.endSection();
+    }
+    auto* destination = new CMob;
+    destination->m_originalData = baseline;
+    if(!destination->deserialize(baseline)) return fail("empty destination");
+    destination->captureCleanProjection();
+    view->m_aMob.append(destination);
+    view->m_activeMob = destination;
+    view->collectObjectTreeData();
+    form->show();
+    auto* category = form->findChild<QComboBox*>("databaseCategory");
+    auto* search = form->findChild<QLineEdit*>("databaseSearch");
+    auto* objects = form->findChild<QListWidget*>("databaseObjects");
+    if(!category || !search || !objects) return fail("picker controls");
+    const bool jmv = snapshot->profileId == "jamais-vu";
+    const QStringList creatures = jmv ? QStringList{"AncientCurseM25", "ArmoredTurtle110"}
+                                     : QStringList{snapshot->monsters.first().name};
+    auto capture = [&](const QString& name) {
+        // Reproduce the map overlay state that formerly replaced texture color.
+        view->makeCurrent();
+        auto& shader = view->shaderObject();
+        shader.bind(); shader.setUniformValue("customColor", QVector4D(0,1,1,1));
+        const QImage frame = preview->renderPixmap(400,400).toImage().convertToFormat(QImage::Format_RGB32);
+        frame.save(outputDirectory + "/" + name + ".png");
+        QSet<QRgb> colors;
+        for(int y=0; y<frame.height(); ++y)
+            for(int x=0; x<frame.width(); ++x) colors.insert(frame.pixel(x,y));
+        output << "Preview " << name << ": " << colors.size() << " colors\n"; output.flush();
+        return colors.size() > 32;
+    };
+    for(const QString& name : creatures)
+    {
+        category->setCurrentIndex(0); search->setText(name);
+        if(objects->count() != 1) return fail("creature selection " + name);
+        if(!capture(name)) return fail("textured creature " + name);
+    }
+    preview->makeCurrent();
+    if(jmv && (!CTextureList::getInstance()->hasTexture("Curse00","unmocu")
+               || !CTextureList::getInstance()->hasTexture("turtleblue","unanwtu")))
+        return fail("ordinary DXT placement texture validation");
+    if(CTextureList::getInstance()->hasTexture("missing-database-preview-test","missing"))
+        return fail("missing texture accepted");
+    QString weaponName = "2h long spear";
+    if(!jmv)
+        for(const auto& item : snapshot->items)
+            if(item.category == "weapons") { weaponName = item.name; break; }
+    category->setCurrentIndex(1); search->setText(weaponName);
+    const auto matches = objects->findItems(weaponName, Qt::MatchExactly);
+    if(matches.size() != 1) return fail("weapon selection " + weaponName);
+    objects->setCurrentItem(matches.first());
+    if(!capture("weapon")) return fail("weapon preview " + weaponName);
+    auto* material = form->findChild<QComboBox*>("databaseItemMaterial");
+    if(!material || material->count() == 0) return fail("weapon materials");
+    if(material->count() > 1)
+    {
+        material->setCurrentIndex(1);
+        if(!capture("weapon-material-2")) return fail("second weapon material");
+    }
+    category->setCurrentIndex(0); search->setText(creatures.first());
+    if(!QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection)
+       || form->isVisible() || !view->isDatabasePlacementPending()
+       || destination->nodes().size()!=1 || history->count()!=0)
+        return fail("Place must hide picker and start one visible pending object before click");
+    CNode* pending = destination->nodes().first();
+    const QVector3D start = pending->position();
+    if(!view->updateDatabasePlacementPointer(QPoint(420,280)) || pending->position()==start)
+        return fail("pending object follows pointer on neutral grid");
+    if(!view->cancelPendingOperation() || !destination->nodes().isEmpty()
+       || history->count()!=0 || view->isDatabasePlacementPending()) return fail("Escape rollback");
+    form->show(); search->setText(creatures.first());
+    QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+    if(!view->isDatabasePlacementPending()) return fail("repeat placement");
+    QMouseEvent click(QEvent::MouseButtonRelease,QPointF(420,280),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+    view->m_pOp->mouseReleaseEvent(&click);
+    if(view->isDatabasePlacementPending() || destination->nodes().size()!=1 || history->count()!=1)
+        return fail("click commits a single creation action");
+    CValidationReport report; QByteArray candidate;
+    if(!destination->buildValidatedCandidate(&candidate,&report)) return fail(report.toText());
+    history->undo();
+    if(!destination->nodes().isEmpty()) return fail("undo placed object");
+    history->redo();
+    if(destination->nodes().size()!=1 || !destination->buildValidatedCandidate(&candidate,&report))
+        return fail("redo placed object");
+    output << "PASS: textured previews, DXT eligibility, weapon materials, immediate pending placement, pointer motion, cancellation, one-step undo/redo and guarded candidate\n";
     output.flush(); return 0;
 }

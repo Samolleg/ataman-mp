@@ -21749,6 +21749,12 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    if(m_pendingDatabasePlacement && event->button() == Qt::RightButton)
+    {
+        cancelPendingOperation();
+        event->accept();
+        return;
+    }
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
@@ -22628,6 +22634,80 @@ QPoint CView::operationAnchor() const
     return rect().center();
 }
 
+bool CView::beginDatabasePlacement(CNode* prototype, QString* diagnostic)
+{
+    if(diagnostic) diagnostic->clear();
+    if(!prototype || !m_activeMob || !m_pOp || !m_pUndoStack || !m_pTree)
+        return false;
+    cancelPendingOperation();
+    QPoint cursor = mapFromGlobal(QCursor::pos());
+    if(!rect().contains(cursor)) cursor = rect().center();
+    QVector3D point;
+    if(!objectPlacementPositionAt(cursor, &point))
+    {
+        cursor = rect().center();
+        if(!objectPlacementPositionAt(cursor, &point))
+        {
+            if(diagnostic) *diagnostic = tr("Point the map view at the terrain before placing an object.");
+            return false;
+        }
+    }
+    // The form retains its centered preview. The standard pending-placement
+    // transaction owns and draws a separate map instance until click or Escape.
+    const QJsonObject descriptor = prototype->toJson();
+    QScopedPointer<CNode> seed;
+    if(prototype->nodeType() == eUnit) seed.reset(new CUnit(descriptor));
+    else if(prototype->nodeType() == eLever) seed.reset(new CLever(descriptor));
+    else return false;
+    point.setZ(0);
+    seed->updatePos(point);
+    CLandscape::getInstance()->projectPosition(seed.data());
+    QJsonObject data;
+    CValidationReport report;
+    if(!CMob::prepareFreshDatabaseNode(seed.data(), &data, &report))
+    {
+        if(diagnostic) *diagnostic = report.toText();
+        return false;
+    }
+    makeCurrent();
+    const QList<CNode*> originalSelection = selectionSnapshot();
+    CNode* node = m_activeMob->createNode(data);
+    QByteArray candidate;
+    if(!node || !m_activeMob->buildValidatedCandidate(&candidate, &report))
+    {
+        if(node) m_activeMob->discardUncommittedNode(node);
+        if(diagnostic) *diagnostic = report.toText();
+        return false;
+    }
+    for(CMob* mob : m_aMob) if(mob) mob->clearSelect(true);
+    node->setState(eSelect);
+    m_pTree->addNodeToTree(node);
+    m_pendingOperationOwnsPaste = true;
+    m_pendingDatabasePlacement = true;
+    m_pendingPasteMob = m_activeMob;
+    m_pendingPasteNodes = {node};
+    m_pendingPasteOriginalSelection = originalSelection;
+    m_lastViewportMousePos = cursor;
+    m_hasViewportMousePos = true;
+    m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
+    viewParameters();
+    emit loadedMapStateChanged();
+    update();
+    return true;
+}
+
+bool CView::updateDatabasePlacementPointer(const QPoint& position)
+{
+    if(!m_pendingDatabasePlacement || m_pendingPasteMob != m_activeMob
+       || m_pendingPasteNodes.size() != 1) return false;
+    QVector3D point;
+    if(!objectPlacementPositionAt(position, &point)) return false;
+    point.setZ(m_pendingPasteNodes.first()->position().z());
+    m_pendingPasteNodes.first()->updatePos(point);
+    update();
+    return true;
+}
+
 void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
 {
     m_testSpawnMarker = position;
@@ -23199,6 +23279,7 @@ bool CView::cancelPendingOperation()
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
+    m_pendingDatabasePlacement = false;
     m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
@@ -23437,8 +23518,8 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
-        m_pUndoStack->beginMacro(tr("Paste objects: %1")
-                .arg(m_pendingPasteNodes.size()));
+        m_pUndoStack->beginMacro(m_pendingDatabasePlacement ? tr("Add from database")
+            : tr("Paste objects: %1").arg(m_pendingPasteNodes.size()));
         for(CNode* node : m_pendingPasteNodes)
         {
             CCreateNodeCommand* create = new CCreateNodeCommand(this, m_pendingPasteMob, node);
@@ -23603,6 +23684,7 @@ void CView::operationApply(EOperationAxisType operationType)
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
+    m_pendingDatabasePlacement = false;
     m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();

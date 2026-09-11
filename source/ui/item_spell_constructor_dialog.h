@@ -28,6 +28,11 @@ public:
     ~ItemSpellConstructorDialog() override;
     QString code() const;
     void setCode(const QString& code);
+    // Shared by the constructor and Add from database. Caller owns the result
+    // and must make its preview's shared GL context current before calling.
+    static CWorldObj* buildItemPreview(const ItemSpellConstructorCatalog& catalog,
+        const SConstructorItem& item, const SConstructorMaterial* material,
+        const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot);
 
 private slots:
     void refreshItemFilter();

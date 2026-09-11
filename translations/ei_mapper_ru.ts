@@ -475,6 +475,14 @@ Choose a primary texture in Advanced properties before placing.</source>
         <source>Choose an available primary texture in Advanced properties before placing.</source>
         <translation>Перед размещением выберите доступную основную текстуру в дополнительных свойствах.</translation>
     </message>
+    <message>
+        <source>Preview material</source>
+        <translation>Материал для предпросмотра</translation>
+    </message>
+    <message>
+        <source>No preview model is available for this item.</source>
+        <translation>Для этого предмета нет доступной модели предпросмотра.</translation>
+    </message>
 </context>
     <context>
         <name>CJmvMapTestLauncher</name>
@@ -10447,7 +10455,15 @@ Do you want to %3?</source>
             <source>%1 is the fixed base map for this allod and stays at X 0, Y 0.</source>
             <translation>%1 — закреплённая базовая карта этого аллода и остаётся в X 0, Y 0.</translation>
         </message>
-    </context>
+        <message>
+        <source>Add from database</source>
+        <translation>Добавление из базы</translation>
+    </message>
+    <message>
+        <source>Point the map view at the terrain before placing an object.</source>
+        <translation>Перед размещением объекта направьте камеру на поверхность карты.</translation>
+    </message>
+</context>
     <context>
         <name>CViewportMinimapWidget</name>
         <message>
