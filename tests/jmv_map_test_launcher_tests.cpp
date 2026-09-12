@@ -1587,6 +1587,8 @@ void JmvMapTestLauncherTests::detectsAutoSpellMobCapability()
     writeFile(QDir(maps).filePath("AutoRunSpellAddon123.mob"), "mob");
     QVERIFY(CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
     QVERIFY(reason.isEmpty());
+    profile.profileId = "deja-vu";
+    QVERIFY(CJmvMapTestLauncher::hasAutoSpellMob(profile, "game", false, &reason));
     QVERIFY(CJmvMapTestLauncher::hasAutoSpellMob(profile, QString(), true, &reason));
     QVERIFY(!CJmvMapTestLauncher::hasAutoSpellMob(profile, "brief", false, &reason));
     QVERIFY(reason.contains("briefing", Qt::CaseInsensitive));

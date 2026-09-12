@@ -915,7 +915,8 @@ bool ReadHotReloadControl(HotReloadControl* output)
         else if(std::strcmp(line, "runId") == 0) haveRunId = value[0] != '\0';
         else if(std::strcmp(line, "profile") == 0)
         {
-            haveProfile = _stricmp(value, "jamais-vu") == 0;
+            haveProfile = _stricmp(value, "jamais-vu") == 0
+                || _stricmp(value, "deja-vu") == 0;
             if(!haveProfile) return false;
         }
         else if(std::strcmp(line, "zone") == 0)

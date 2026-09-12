@@ -95,6 +95,13 @@ struct SResourceProfileEvaluation
 };
 
 QVector<SResourceProfile> builtInResourceProfiles();
+// These independent mod profiles share the fingerprinted Starter runtime and
+// JMV provider interfaces, while retaining separate resource/map roots.
+inline bool usesJmvRuntime(const QString& profileId)
+{
+    return profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0
+        || profileId.compare("deja-vu", Qt::CaseInsensitive) == 0;
+}
 QVector<SResourceProfile> loadResourceProfiles(const QString& externalDirectory = QString());
 SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
                                                    const SResourceProfile& profile);

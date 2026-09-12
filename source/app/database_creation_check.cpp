@@ -37,6 +37,7 @@
 #include "mmp_codec.h"
 #include "resource_name.h"
 #include "res_file.h"
+#include "resource_profile.h"
 
 int runDatabaseCreationCheck()
 {
@@ -182,8 +183,9 @@ int runDatabasePreviewCheck()
     if(!rootOption) return fail("resource settings");
     rootOption->setValue(roots.toVector());
     QSharedPointer<ei::SProfileDatabaseSnapshot> snapshot(new ei::SProfileDatabaseSnapshot);
-    snapshot->providerId = archive.contains("Jamais", Qt::CaseInsensitive) ? "jmv.v1" : "base.standard.v1";
-    snapshot->profileId = archive.contains("Jamais", Qt::CaseInsensitive) ? "jamais-vu" : "base";
+    snapshot->profileId = qEnvironmentVariable("EI_TEST_PREVIEW_PROFILE",
+        archive.contains("Jamais", Qt::CaseInsensitive) ? "jamais-vu" : "base-game");
+    snapshot->providerId = usesJmvRuntime(snapshot->profileId) ? "jmv.v1" : "base.standard.v1";
     snapshot->sourceArchivePath = archive;
     QVector<ei::SDatabaseDiagnostic> diagnostics;
     snapshot->rawMembers = ei::readDatabaseArchive(archive, &diagnostics);
@@ -239,7 +241,7 @@ int runDatabasePreviewCheck()
     auto* search = form->findChild<QLineEdit*>("databaseSearch");
     auto* objects = form->findChild<QListWidget*>("databaseObjects");
     if(!category || !search || !objects) return fail("picker controls");
-    const bool jmv = snapshot->profileId == "jamais-vu";
+    const bool jmv = usesJmvRuntime(snapshot->profileId);
     const QStringList creatures = jmv ? QStringList{"AncientCurseM25", "ArmoredTurtle110"}
                                      : QStringList{snapshot->monsters.first().name};
     auto capture = [&](const QString& name) {
@@ -297,6 +299,10 @@ int runDatabasePreviewCheck()
             for(const auto& material : catalog.compatibleMaterials(*item))
                 sourceNames.append(catalog.itemTextureCandidates(*item, &material));
         if(sourceNames.isEmpty()) return fail("synthetic map texture names");
+        // The equipment resolver may select an .x2 name absent from the loose
+        // texture combo list. This is a synthetic binding fixture, so provide
+        // the explicit dagger name used by that resolver as well.
+        if(jmv) sourceNames.append("unhumadg_03.br.1.x2");
         // Deliberately authored test colors, never a copy/conversion of game pixels.
         QImage pattern(64,64,QImage::Format_ARGB32);
         for(int y=0; y<64; ++y)

@@ -539,8 +539,43 @@ foundation as one coherent `0.3.0` release.
   semantic correctness, full r8 load timing and the pre-existing broad UI crash
   remain explicit coverage limits; parent database coverage gaps stay open.
 
+### Authorized implementation: EI-PROFILE-DEJAVU-001
+
+- Request (2026-09-12): add DejaVu alongside Jamais Vu and Base, using the
+  supplied installed MODS/DejaVu directory. This is the active task; prior
+  database placement and gameplay findings remain recorded below.
+- Expected: independently selectable/detected profile, its own maps/resources/DB
+  taking precedence over Base, compatible visual providers and map-test staging.
+  Never select the neighboring mod when this profile is absent.
+- Authority: editor changes and tests/build/handoff; read-only mod inspection.
+  No live mod/map edits or interactive game launch.
+- Evidence: installed config identifies DejaVu and uses the JMV resource layout.
+  The original catalog lacked this profile and runtime launch checked JMV's ID.
+- Completion: detection/isolation and launch-request/staging regressions pass,
+  actual installed resources load through the selected profile, runnable tester
+  package delivered; interactive game acceptance reported separately.
+- Status: implemented and packaged as r10. Profile detection found 41 MPRs and
+  69 resource archives including Base; profile isolation, runtime request guards,
+  targeted launcher checks and DejaVu preview/placement diagnostics passed.
+  [Validation and remaining limits](docs/validation/dejavu-profile-r10.md).
+- Next: user selects DejaVu and verifies an actual map-test launch and hot reload.
+  Interactive runtime acceptance remains pending. The installed DejaVu lacks the
+  cheat-dagger map texture; its placement diagnostic used an authored temporary
+  fixture, not a neighboring mod asset.
+
 ### Authorized implementation: EI-ADD-FROM-DB-001
 
+- R11 interaction-distance investigation (2026-09-12): supplied 18-second video
+  shows pickup through lever 336 on zone1 while the character remains away from
+  the visible dagger. Expected: approach the item before interaction. Read-only
+  diagnosis of the map, interaction script and model/lever parameters is
+  authorized; no live map edits. Diagnosis: conversion can produce a lever whose
+  model has no database approach-point definition; the native empty-points path
+  skips approach before interaction. Pickup follows successful activation.
+  This is a gameplay gap beyond the proven structural conversion/ID checks.
+  Detailed local evidence is excluded from publication. Next: choose and validate
+  a close-approach definition or fallback for arbitrary converted models; no
+  game/database changes, build or installation performed. Parent remains open.
 - R10 ID regression (2026-09-12): screenshot of added cheat dagger converted to
   lever shows NID 0. Read-only r8 log confirms positive allocation followed by
   zero-NID validation failures for that lever. Creation allocates positive IDs;
