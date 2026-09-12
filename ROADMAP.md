@@ -520,7 +520,9 @@ foundation as one coherent `0.3.0` release.
   widgets 16 passed/2 offscreen skips, release built. [R2 evidence and limits](docs/validation/WORLD_TERRAIN_SCULPT_R2.md).
   R2 staging finalizer/validator passed; it preserves R1 for A/B comparison.
   Delivery target: `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r2-test`.
-  Next: verify the permanent copy and repeat the recorded scene in R2;
+  Permanent R2 finalizer/distribution validation passed; all copied file hashes
+  match staging. Packaged implementation: `439a46376c8f14d75fac88fe81be18ca5020809a`
+  in draft PR #7. Next: repeat the recorded scene in R2;
   exact-scene visual acceptance and the parent remain open.
 - Related deferred robustness hypothesis: exact double XY grouping can differ
   for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
