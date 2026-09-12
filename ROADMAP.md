@@ -570,8 +570,12 @@ foundation as one coherent `0.3.0` release.
   16 passed/2 offscreen skips and native GPU 3 passed. Release/x86 built,
   staged R4 finalizer passed. [R4 evidence](docs/validation/WORLD_TERRAIN_SCULPT_R4.md).
   Full UI check still fails with `0xC0000005` in normal Windows (sandbox loader
-  failure separately diagnosed). Next: permanent delivery, then original-scene
-  acceptance. R3 is not marked fixed; parent remains open.
+  failure separately diagnosed). Permanent
+  `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r4-test` finalized and
+  validated; all copy hashes matched staging. Packaged implementation
+  `397c5b79e8a057f9de69d8a47e534006650ecfb9` is in draft PR #7. Previous builds
+  preserved. Next: original-scene acceptance with moving brush and far-edge
+  inspection. R3 is not marked fixed; parent remains open.
 - Related deferred robustness hypothesis: exact double XY grouping can differ
   for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the
