@@ -581,6 +581,20 @@ foundation as one coherent `0.3.0` release.
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the
   recorded zone1/zone2 boundary. Assess separately with an offset fixture after
   the recorded gap is verified; do not attribute this recording to it.
+- EI-WORLD-SCULPT-001-BASELINE (open, related integration gap): user reports
+  painting with other textures unavailable and asks about the latest PR baseline.
+  Confirmed R4 uses main `ffdc28ea` plus PR #7; it omits PR #6 branch
+  `origin/contrib/Samolleg/add-from-db` (head `be440676`), including exact HD atlas
+  approvals `721693c3` and `7cb1190f` (38 namespaces/41 maps/88 material sources).
+  Fresh fetch shows main has not incorporated those changes. Prior statement
+  about latest PR code meant #7 only and did not establish inclusion of #6.
+  This explains a missing texture-availability fix; exact reported texture/build
+  remains unspecified and R4 has no local logs yet. No merge or texture changes
+  made during diagnosis. Owner confirms integration on the exact baseline
+  `be4406766c19257d86f85c2e02ab7dd45a96ff4d`. Integrate that history into the
+  existing contributor branch without rewriting published commits; preserve
+  painting/database/profile changes and all world-sculpt fixes. Next: integrate,
+  verify HD atlas coverage plus sculpt regressions, then deliver a combined build.
 
 - Keep this file goal-oriented and concise.
 - Put unassigned requests in the wishlist; assign accepted work to a version.
