@@ -115,7 +115,7 @@ private:
     void createUndoView();
     void initShortcuts();
     void connectUiButtons();
-    bool isExitAllowed();
+    bool isExitAllowed(bool retainWorldTerrain = false);
     bool isDatabaseExitAllowed();
     void closeAll();
     void showGameAndModSetup();

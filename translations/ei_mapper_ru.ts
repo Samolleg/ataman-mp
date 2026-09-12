@@ -1055,7 +1055,31 @@ Restore the runtime paths for the selected installation, then retry Test Current
             <source>%1 material(s) ready for this layer.</source>
             <translation>Для этого слоя готово материалов: %1.</translation>
         </message>
-    </context>
+            <message>
+            <source>Redo world stroke</source>
+            <translation>Повторить общий мазок</translation>
+        </message>
+        <message>
+            <source>World terrain disabled; neighbors protected.</source>
+            <translation>Общая кисть выключена; соседние карты защищены.</translation>
+        </message>
+        <message>
+            <source>World terrain: choose maps...</source>
+            <translation>Общая кисть: выбрать карты...</translation>
+        </message>
+        <message>
+            <source>Enable a shared brush for explicitly selected neighboring maps. Background maps are protected by default.</source>
+            <translation>Включить общую кисть для явно выбранных соседних карт. По умолчанию фоновые карты защищены.</translation>
+        </message>
+        <message>
+            <source>Save world maps...</source>
+            <translation>Сохранить все карты...</translation>
+        </message>
+        <message>
+            <source>Undo world stroke</source>
+            <translation>Отменить общий мазок</translation>
+        </message>
+</context>
     <context>
         <name>CMapTableEditorDialog</name>
         <message>
@@ -10373,7 +10397,151 @@ Do you want to %3?</source>
             <source>%1 is the fixed base map for this allod and stays at X 0, Y 0.</source>
             <translation>%1 — закреплённая базовая карта этого аллода и остаётся в X 0, Y 0.</translation>
         </message>
-    </context>
+            <message>
+            <source> (modified)</source>
+            <translation> (изменена)</translation>
+        </message>
+        <message>
+            <source>World terrain stroke: %1 MPR(s). Undo/redo applies to the complete stroke.</source>
+            <translation>Общий мазок: MPR — %1. Отмена и повтор применяются ко всему мазку.</translation>
+        </message>
+        <message>
+            <source>World terrain unavailable</source>
+            <translation>Общая кисть недоступна</translation>
+        </message>
+        <message>
+            <source>World terrain save refused</source>
+            <translation>Сохранение карт отклонено</translation>
+        </message>
+        <message>
+            <source>Saved and reopened %1 world MPR(s); verified backups retained.</source>
+            <translation>Сохранено и перечитано MPR: %1. Проверенные резервные копии оставлены.</translation>
+        </message>
+        <message>
+            <source>World terrain</source>
+            <translation>Общая кисть рельефа</translation>
+        </message>
+        <message>
+            <source>Neighbor unavailable</source>
+            <translation>Соседняя карта недоступна</translation>
+        </message>
+        <message>
+            <source>World terrain save</source>
+            <translation>Сохранение общей кисти</translation>
+        </message>
+        <message>
+            <source>Undid one complete world terrain stroke.</source>
+            <translation>Отменён один общий мазок на всех картах.</translation>
+        </message>
+        <message>
+            <source>Save world terrain</source>
+            <translation>Сохранение всех карт</translation>
+        </message>
+        <message>
+            <source>World terrain save failed</source>
+            <translation>Ошибка сохранения карт</translation>
+        </message>
+        <message>
+            <source>Save before switching maps</source>
+            <translation>Сохраните изменения перед сменой карты</translation>
+        </message>
+        <message>
+            <source>World terrain: %1; %2 explicitly enabled neighboring MPR(s).</source>
+            <translation>Общая кисть %1; разрешено соседних MPR: %2.</translation>
+        </message>
+        <message>
+            <source>none</source>
+            <translation>нет</translation>
+        </message>
+        <message>
+            <source>Redid one complete world terrain stroke.</source>
+            <translation>Повторён один общий мазок на всех картах.</translation>
+        </message>
+        <message>
+            <source>Close world terrain session</source>
+            <translation>Закрытие сессии рельефа</translation>
+        </message>
+        <message>
+            <source>off</source>
+            <translation>выкл.</translation>
+        </message>
+        <message>
+            <source>World terrain history refused</source>
+            <translation>Общий мазок нельзя отменить или повторить</translation>
+        </message>
+        <message>
+            <source>World terrain maps</source>
+            <translation>Карты для общей кисти</translation>
+        </message>
+        <message>
+            <source>Retained modified MPRs:
+%1</source>
+            <translation>Сохранённые в памяти изменённые MPR:
+%1</translation>
+        </message>
+        <message>
+            <source>on</source>
+            <translation>вкл.</translation>
+        </message>
+        <message>
+            <source>World terrain: %1. Enabled neighbors: %2. Modified: %3</source>
+            <translation>Общая кисть: %1. Разрешено соседей: %2. Изменены: %3</translation>
+        </message>
+        <message>
+            <source>Retained terrain differs from disk</source>
+            <translation>Рельеф в памяти отличается от файла</translation>
+        </message>
+        <message>
+            <source>Save existing local edits before starting a world terrain session.</source>
+            <translation>Сохраните текущие локальные изменения перед включением общей кисти.</translation>
+        </message>
+        <message>
+            <source>Saved terrain needs reopen</source>
+            <translation>Сохранённые карты нужно открыть заново</translation>
+        </message>
+        <message>
+            <source>Open a map with a saved world layout and available canonical terrain first.</source>
+            <translation>Сначала откройте карту с сохранённой мировой раскладкой и доступным редактированием рельефа.</translation>
+        </message>
+        <message>
+            <source>World terrain supports Raise, Lower, Flatten and Smooth. Disable it to use local Noise.</source>
+            <translation>Общая кисть поддерживает поднятие, опускание, выравнивание и сглаживание. Для локального шума выключите общую кисть.</translation>
+        </message>
+        <message>
+            <source>Validate, back up and save all these MPRs?
+
+%1
+
+A failed write restores the whole set when possible. An interrupted save keeps recovery markers and backups; this is not atomic across files.</source>
+            <translation>Проверить, создать резервные копии и сохранить все эти MPR?
+
+%1
+
+При ошибке записи редактор попытается восстановить весь набор. Прерванное сохранение оставляет журнал восстановления и резервные копии. Одновременное сохранение нескольких файлов не гарантируется.</translation>
+        </message>
+        <message>
+            <source>These MPRs contain unsaved changes:
+%1
+
+Save all, discard the entire session, or cancel?</source>
+            <translation>В этих MPR есть несохранённые изменения:
+%1
+
+Сохранить все карты, отбросить изменения всей сессии или отменить закрытие?</translation>
+        </message>
+        <message>
+            <source>Save the world terrain session together before saving a separate draft or publishing this map.</source>
+            <translation>Сначала сохраните вместе все карты общей кисти, затем сохраняйте отдельный черновик или публикуйте карту.</translation>
+        </message>
+        <message>
+            <source>The active map is editable. Check each neighbor you permit the brush to change. Unchecked maps stay protected. Misaligned grids are edited independently; coincident boundary heights are averaged only inside the brush. Saved heights use each MPR&apos;s precision.</source>
+            <translation>Активная карта доступна для редактирования. Отметьте соседние карты, которые разрешаете изменять кистью. Неотмеченные карты защищены. Несовпадающие сетки редактируются независимо; высоты совпадающих граничных вершин усредняются только внутри кисти. Точность сохранения определяется форматом каждой MPR.</translation>
+        </message>
+        <message>
+            <source>Save the affected world MPRs together before creating a separate copy.</source>
+            <translation>Перед созданием отдельной копии сохраните вместе все затронутые MPR.</translation>
+        </message>
+</context>
     <context>
         <name>CViewportMinimapWidget</name>
         <message>

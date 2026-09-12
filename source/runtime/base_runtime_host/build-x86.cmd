@@ -1,6 +1,8 @@
 @echo off
 setlocal
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 -host_arch=x64
+if not defined EI_VS_DEV_CMD set "EI_VS_DEV_CMD=C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
+if not exist "%EI_VS_DEV_CMD%" set "EI_VS_DEV_CMD=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
+call "%EI_VS_DEV_CMD%" -arch=x86 -host_arch=x64
 if errorlevel 1 exit /b 1
 if "%EI_RUNTIME_HOST_OUT_DIR%"=="" (set "OUT_DIR=%~dp0bin") else (set "OUT_DIR=%EI_RUNTIME_HOST_OUT_DIR%")
 if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"

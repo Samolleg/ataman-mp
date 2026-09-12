@@ -28,6 +28,7 @@ class LandscapeToolsWidgetTests : public QObject
     Q_OBJECT
 
 private slots:
+    void worldTerrainControlsStayProtectedAndSignal();
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
     void terrainPaletteBatchDefersIntermediateWidgetRebuilds();
@@ -43,6 +44,27 @@ private slots:
     void compressedTerrainAtlasFramebufferCapability();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::worldTerrainControlsStayProtectedAndSignal()
+{
+    CLandscapeTools tools;
+    tools.activateMode(ELandscapeEditMode::Sculpt,false);
+    tools.setEditingEnabled(true,false);
+    auto maps=tools.findChild<QPushButton*>("worldTerrainMaps");
+    auto undo=tools.findChild<QPushButton*>("worldTerrainUndo");
+    auto redo=tools.findChild<QPushButton*>("worldTerrainRedo");
+    auto save=tools.findChild<QPushButton*>("worldTerrainSave");
+    QVERIFY(maps && undo && redo && save);
+    QVERIFY(!undo->isEnabled());QVERIFY(!redo->isEnabled());QVERIFY(!save->isEnabled());
+    QSignalSpy choose(&tools,&CLandscapeTools::worldSculptSelectionRequested);
+    maps->click();QCOMPARE(choose.count(),1);
+    tools.setWorldTerrainStatus("World terrain: on. Modified: a.mpr, b.mpr",true,false,true);
+    QVERIFY(undo->isEnabled());QVERIFY(!redo->isEnabled());QVERIFY(save->isEnabled());
+    QSignalSpy undoStroke(&tools,&CLandscapeTools::worldSculptUndoRequested);
+    undo->click();QCOMPARE(undoStroke.count(),1);
+    tools.resize(380,850);tools.show();QApplication::processEvents();
+    QVERIFY(tools.grab().save("world-terrain-controls.png"));
+}
 
 void LandscapeToolsWidgetTests::compressedTerrainAtlasFramebufferCapability()
 {

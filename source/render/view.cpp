@@ -1739,6 +1739,14 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
     m_landscapeTools = tools;
     if(m_landscapeTools)
     {
+        connect(m_landscapeTools, &CLandscapeTools::worldSculptSelectionRequested,
+                this, &CView::chooseWorldTerrainMaps);
+        connect(m_landscapeTools, &CLandscapeTools::worldSculptUndoRequested,
+                this, [this]() { worldTerrainHistory(false, true); });
+        connect(m_landscapeTools, &CLandscapeTools::worldSculptRedoRequested,
+                this, [this]() { worldTerrainHistory(true, true); });
+        connect(m_landscapeTools, &CLandscapeTools::worldSculptSaveRequested,
+                this, [this]() { saveWorldTerrainMaps(); });
         // Landscape controls remain active while focus is in their dock. An
         // application event filter also lets the physical Z/X/C/V positions
         // work under non-Latin keyboard layouts.
@@ -1945,6 +1953,10 @@ void CView::syncLandscapeToolState()
 {
     cancelTileBrushGroup();
     finishSculptStroke();
+    if(m_landscapeTools && m_landscapeTools->editMode()!=ELandscapeEditMode::Sculpt
+       && !m_worldTerrainSession.documents.isEmpty()
+       && !resolveWorldTerrainClose(false))
+        m_landscapeTools->activateMode(ELandscapeEditMode::Sculpt,false);
     m_overlayPointerTimer->stop();
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
@@ -3023,7 +3035,7 @@ void CView::setNeighborMapContext(
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
-            "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.");
+            "Show up to five nearby MPR maps from the active profile as a tinted background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.");
         if(!m_neighborPlacements.isEmpty())
         {
             QStringList zones;
@@ -3066,7 +3078,7 @@ void CView::clearNeighborLandscapes()
         CTextureList::getInstance()->releaseTerrainTexture(texture);
     if(isValid())
         doneCurrent();
-    ei::log(eLogInfo, "Read-only neighbor map backgrounds released");
+    ei::log(eLogInfo, "Neighbor render backgrounds released; retained terrain documents preserved");
 }
 
 void CView::loadNeighborLandscapes()
@@ -3117,6 +3129,7 @@ void CView::loadNeighborLandscapes()
             .arg(path.absoluteFilePath()));
     }
     doneCurrent();
+    refreshWorldTerrainNeighbors();
     update();
 }
 
@@ -8665,6 +8678,16 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
 
 void CView::loadLandscape(const QFileInfo& filePath)
 {
+    const QString recovery=filePath.absoluteFilePath()+QStringLiteral(".world-sculpt.json");
+    if(QFileInfo::exists(recovery))
+    {
+        if(QMessageBox::question(this,tr("Interrupted world terrain save"),
+            tr("Restore all MPRs in this interrupted save from their verified backups before opening?\n%1").arg(recovery),
+            QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Yes) return;
+        QString error;
+        if(!recoverWorldTerrainCohort(recovery,&error))
+        { QMessageBox::critical(this,tr("Terrain recovery failed"),error); return; }
+    }
     if(m_pLand->isMprLoad())
     {
         QMessageBox::warning(this, "Warning","Landscape already loaded. Please close before opening new zone (*mpr)");
@@ -9022,6 +9045,7 @@ bool CView::ensureTerrainAutoCatalogReady()
         && !canonicalReport.hasErrors();
     m_pLand->setCanonicalTerrainModel(
         m_terrainEditAvailable ? &m_terrainEdit : nullptr);
+    if(m_terrainEditAvailable) restoreWorldTerrainActive();
     const qint64 canonicalLoadMs = phaseTimer.elapsed();
     if(!m_terrainEditAvailable)
     {
@@ -9168,6 +9192,9 @@ bool CView::ensureTerrainAutoCatalogReady()
 
 void CView::unloadLand(bool promptForSave)
 {
+    finishSculptStroke();
+    syncWorldTerrainActive();
+    if(promptForSave && !resolveWorldTerrainClose(false)) return;
     if(!m_pLand->isMprLoad())
         return;
 
@@ -9243,6 +9270,9 @@ void CView::unloadLand(bool promptForSave)
 
 void CView::saveLand()
 {
+    syncWorldTerrainActive();
+    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
+    { saveWorldTerrainMaps(); return; }
     if(m_pLand->isMprLoad())
     {
         if(!ensureTerrainAutoCatalogReady())
@@ -9283,6 +9313,13 @@ void CView::saveLand()
 
 void CView::saveLandAs()
 {
+    syncWorldTerrainActive();
+    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
+    {
+        QMessageBox::information(this,tr("World terrain save"),
+            tr("Save the affected world MPRs together before creating a separate copy."));
+        saveWorldTerrainMaps(); return;
+    }
     if(!m_pLand->isMprLoad())
         return;
     if(!ensureTerrainAutoCatalogReady())
@@ -9617,6 +9654,13 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
+    syncWorldTerrainActive();
+    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
+    {
+        QMessageBox::information(this,tr("World terrain save"),
+            tr("Save the world terrain session together before saving a separate draft or publishing this map."));
+        return false;
+    }
     if(!ensureTerrainAutoCatalogReady())
         return false;
     if(!m_terrainEditAvailable)
@@ -11015,9 +11059,20 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
                 const float angle = float(segment) * float(2.0 * M_PI / segments);
                 QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
                                 m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
-                if(!m_pLand->projectPt(point, landSculpt)
-                   && (landSculpt || !m_pLand->projectPt(point, true)))
-                    continue;
+                bool projected=m_pLand->projectPt(point, landSculpt);
+                if(!projected && landSculpt && m_worldTerrainEnabled)
+                    for(const auto& loaded:m_neighborLandscapes)
+                    {
+                        if(!m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(loaded.placement.mprPath))) continue;
+                        QVector3D local(point.x()-loaded.placement.origin.x(),point.y()-loaded.placement.origin.y(),0);
+                        if(loaded.landscape->projectPt(local,true))
+                        { point.setZ(local.z());projected=true;break; }
+                    }
+                if(!projected && (landSculpt || !m_pLand->projectPt(point,true)))
+                {
+                    if(!landSculpt || !m_worldTerrainEnabled) continue;
+                    point.setZ(m_sculptOutlineCenter.z());
+                }
                 point.setZ(point.z() + 0.12f);
                 m_sculptOutlineVertices.append(point);
             }
@@ -12616,6 +12671,7 @@ void CView::reviewTerrainAtlasProfile()
 
 void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
 {
+    if(!m_worldTerrainSession.documents.isEmpty() && !resolveWorldTerrainClose(false)) return;
     if(!ensureTerrainAutoCatalogReady())
         return;
     if(!m_terrainEditAvailable || !m_pTileForm || m_pTileForm->tileImages().isEmpty())
@@ -16434,6 +16490,7 @@ void CView::resetSelectedId()
 
 void CView::openMapParameters()
 {
+    if(!m_worldTerrainSession.documents.isEmpty() && !resolveWorldTerrainClose(false)) return;
     if(m_mprSettingsDock)
     {
         refreshMprSettingsDock();
@@ -20498,8 +20555,10 @@ void CView::endTerrainPreviewBatch()
         update();
 }
 
-bool CView::onExit()
+bool CView::onExit(bool retainWorldTerrain)
 {
+    finishSculptStroke();
+    if(!resolveWorldTerrainClose(retainWorldTerrain)) return false;
     if(!closeAllMobScriptWindows())
         return false;
     bool bCloseAllowed = true;
@@ -20528,7 +20587,9 @@ bool CView::onExit()
     if(!bCloseAllowed)
         return bCloseAllowed;
 
-    if(m_pLand && m_pLand->isDirty())
+    if(m_pLand && m_pLand->isDirty()
+       && !(retainWorldTerrain && m_worldTerrainSession.documents.contains(
+           CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath()))))
     {
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Exit", m_pLand->filePath().fileName() + " has unsaved changes.\nDo you want to save changes?", QMessageBox::Save|QMessageBox::No|QMessageBox::Cancel);
@@ -21806,6 +21867,8 @@ void CView::mousePressEvent(QMouseEvent* event)
     }
     if((event->button() == Qt::LeftButton
         || event->button() == Qt::RightButton)
+       && !(m_worldTerrainEnabled && m_landscapeTools
+            && m_landscapeTools->sculptEnabled() && !m_landscapeTools->overlaySculptEnabled())
        && neighborMapAtViewport(event->pos(), nullptr))
     {
         m_neighborPointerGestureCaptured = true;
@@ -21821,7 +21884,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         if(m_landscapeTools->overlaySculptEnabled())
             positionValid = terrainPositionAt(event->pos(), &position, false);
         else
-            position = getTerrainPos(event->x(), event->y(), true, &positionValid);
+            positionValid = worldTerrainPosition(event->pos(), &position);
         updateLandscapeSculptCoordinates(position, positionValid);
         if(positionValid)
         {
@@ -21892,7 +21955,7 @@ void CView::mousePressEvent(QMouseEvent* event)
             pickTimer.start();
         const bool positionValid = overlaySculpt
             ? terrainPositionAt(event->pos(), &position, false)
-            : (position = getTerrainPos(event->x(), event->y(), true), true);
+            : worldTerrainPosition(event->pos(), &position);
         if(overlaySculpt)
         {
             m_overlayPickNsecs += pickTimer.nsecsElapsed();
@@ -21978,6 +22041,7 @@ void CView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
 {
+    if(sculptWorldTerrainAt(position, stampFraction)) return;
     if(!m_terrainEditAvailable || !m_landscapeTools)
         return;
 
@@ -22511,7 +22575,7 @@ void CView::mouseMoveEvent(QMouseEvent* event)
         }
         QVector3D position;
         bool positionValid = false;
-        position = getTerrainPos(event->x(), event->y(), true, &positionValid);
+        positionValid = worldTerrainPosition(event->pos(), &position);
         m_sculptPointerValid = positionValid;
         if(positionValid)
         {
@@ -24778,6 +24842,25 @@ void CView::finishSculptStroke()
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
     m_sculptPointerValid = false;
+    if(!m_worldTerrainStroke.isEmpty())
+    {
+        m_worldTerrainSession.record(m_worldTerrainStroke);
+        updateWorldTerrainStatus();
+        const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+        if(m_worldTerrainStroke.maps.contains(active))
+        {
+            const auto bounds=terrainHeightInfluenceBounds(m_worldTerrainStroke.maps[active],
+                m_terrainEdit.vertexCountX(),m_terrainEdit.vertexCountY());
+            for(CMob* mob:m_aMob) mob->reprojectForCurrentTerrain(bounds);
+        }
+        emit updateMsg(tr("World terrain stroke: %1 MPR(s). Undo/redo applies to the complete stroke.")
+            .arg(m_worldTerrainStroke.maps.size()));
+        m_worldTerrainStroke=SWorldTerrainStroke();
+        m_sculptStrokeCommand=STerrainHeightCommand();
+        m_sculptGestureCaptured=false;
+        syncMprDirtyState();
+        return;
+    }
     if(!m_overlaySurfaceStrokeCommand.isEmpty())
     {
         QElapsedTimer phaseTimer;

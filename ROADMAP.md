@@ -466,6 +466,48 @@ foundation as one coherent `0.3.0` release.
 
 ## Roadmap maintenance
 
+### EI-WORLD-SCULPT-001 — shared world-coordinate terrain brush
+
+- Original problem: the sculpt brush edits only the active MPR; neighboring
+  landscapes are read-only render instances. Approved result: raise, lower,
+  flatten and smooth in world coordinates over active and explicitly enabled
+  neighboring maps, one position/radius/strength and one undo/redo per stroke.
+- Preserve shared boundary heights and order-independent cross-edge smoothing;
+  retain dirty documents across switching/close/reload decisions; review all
+  affected saves, validate/reopen/back up every MPR and provide explicit recovery
+  for partial failure. Do not claim multi-file atomicity without a protocol.
+- Authority: isolated implementation, tests, release tester folder, scoped commit,
+  contributor-branch push and PR; no main merge. Installed resources/layout are
+  read-only; no game-file copying for editing, textures, objects, auto-stitching,
+  map repositioning, unrelated changes or deletion of previous builds.
+- Baseline: `contrib/Samolleg/world-terrain-sculpt` from fetched `origin/main`
+  `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a`, initially clean.
+- Status: implementation and focused tests ready; interactive acceptance open.
+  Evidence and repeatable baseline
+  acceptance scenario: [investigation](docs/research/world-terrain-sculpt.md).
+- Confirmed: zone1/zone2 share 161 XY boundary vertices, three unequal in Z
+  (maximum 0.54200836); zone1/zone3obr share none; zone6/zone9 nominal rectangles
+  overlap by 0.25. Maps have different maxZ/uint16 height quantization.
+- Approved follow-up: independently sculpt misaligned grids; average initially
+  unequal coincident vertices only within the stroke; accept format-bounded
+  saved-height rounding. No map movement or out-of-stroke stitching.
+- Implemented: four world-space modes, explicit map consent, retained documents,
+  compound world history, transition guards, validated cohort saving and recovery.
+  [Validation and remaining acceptance](docs/validation/WORLD_TERRAIN_SCULPT_R1.md):
+  core 9 passed; widgets 16 passed/1 OpenGL skip; release + x86 components built.
+- Related blocker: full headless UI check reproduces `0xC0000005`; not fixed or
+  waived. Native viewport interaction and representative-map performance remain
+  unverified. The portable Qt plugin discovery issue was resolved for tests.
+- Necessary build support: runtime scripts accept `EI_VS_DEV_CMD` and installed
+  BuildTools, replacing the unavailable hardcoded Community-only assumption.
+- Completion requires the full original scenario plus regression/build evidence,
+  permanent unpacked tester folder and PR; a UI change or build alone is partial.
+- Next: scoped commit/PR and permanent finalized r1 tester folder, then manual
+  acceptance of cross-map dragging, switching, save/reopen and close decisions.
+  Do not close this parent task until the remaining acceptance is verified.
+- History: ambiguous "Давай так" was clarified; user explicitly answered "да"
+  to the complete independent-grid/averaging/rounding policy above.
+
 - Keep this file goal-oriented and concise.
 - Put unassigned requests in the wishlist; assign accepted work to a version.
 - Keep version blocks in descending order and collapsible.

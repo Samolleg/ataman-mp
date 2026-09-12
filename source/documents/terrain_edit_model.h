@@ -552,6 +552,12 @@ public:
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }
     quint16 height(int globalX, int globalY) const;
+    QPointF terrainVertexPosition(int x, int y) const
+    {
+        const int i=y*m_vertexCountX+x;
+        return QPointF(double(x)+double(m_xOffsets.value(i))/254.0,
+                       double(y)+double(m_yOffsets.value(i))/254.0);
+    }
     float maxZ() const { return m_maxZ; }
     STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;

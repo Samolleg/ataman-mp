@@ -53,6 +53,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "frame_presentation_telemetry.h"
 #include "map_catalog.h"
 #include "neighbor_map_layout.h"
+#include "world_terrain_session.h"
 
 class QLineEdit;
 class QFrame;
@@ -406,7 +407,8 @@ public:
     QString sessionWorkspaceIdentifier() const { return m_sessionWorkspaceIdentifier; }
     QString sessionWorkspaceDisplayName() const { return m_sessionWorkspaceDisplayName; }
     QString sessionWorkspaceMapZoneId() const { return m_sessionWorkspaceMapZoneId; }
-    bool onExit();
+    bool onExit(bool retainWorldTerrain = false);
+    bool worldTerrainHistory(bool forward, bool force = false);
     QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:
@@ -488,6 +490,15 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
+    void chooseWorldTerrainMaps();
+    void updateWorldTerrainStatus();
+    void syncWorldTerrainActive();
+    void restoreWorldTerrainActive();
+    void refreshWorldTerrainNeighbors();
+    bool saveWorldTerrainMaps();
+    bool resolveWorldTerrainClose(bool retain);
+    bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
+    bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();
     bool neighborMapAtViewport(const QPoint& viewportPosition,
                                SNeighborMapPlacement* placement,
@@ -844,8 +855,13 @@ private:
     {
         SNeighborMapPlacement placement;
         QSharedPointer<CLandscape> landscape;
+        QMap<QPair<int,int>,QByteArray> terrainPreviewPayloads;
     };
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
+    CWorldTerrainSession m_worldTerrainSession;
+    SWorldTerrainStroke m_worldTerrainStroke;
+    QSet<QString> m_worldTerrainEnabledPaths;
+    bool m_worldTerrainEnabled{false};
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QPointF m_activeMapWorldOrigin;
     QString m_neighborMapAnchorZoneId;

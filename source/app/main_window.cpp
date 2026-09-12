@@ -6634,7 +6634,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                          targetMobProjectionReport);
         return;
     }
-    if(!isExitAllowed())
+    if(!isExitAllowed(true))
         return;
     // The save prompt is modal, so an external process can remove either
     // catalog file while the user is deciding. Recheck before the first
@@ -7237,7 +7237,7 @@ void MainWindow::closeHotReloadProgress()
     m_hotReloadProgress = nullptr;
 }
 
-bool MainWindow::isExitAllowed()
+bool MainWindow::isExitAllowed(bool retainWorldTerrain)
 {
     if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
@@ -7255,7 +7255,7 @@ bool MainWindow::isExitAllowed()
                 .arg(m_pView && m_pView->prepareDocumentTransition() ? "cancelled" : "none"));
     else if(m_pView)
         m_pView->prepareDocumentTransition();
-    return m_pView->onExit();
+    return m_pView->onExit(retainWorldTerrain);
 }
 
 bool MainWindow::isDatabaseExitAllowed()
@@ -8608,6 +8608,7 @@ void MainWindow::on_action_Mob_parameters_triggered()
 
 void MainWindow::on_actionUndo_triggered()
 {
+    if(m_pView->worldTerrainHistory(false)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
     else
@@ -8628,6 +8629,7 @@ void MainWindow::on_moveButton_clicked()
 
 void MainWindow::on_actionRedo_triggered()
 {
+    if(m_pView->worldTerrainHistory(true)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() + 1);
     else

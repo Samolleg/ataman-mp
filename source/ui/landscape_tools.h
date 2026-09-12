@@ -82,6 +82,7 @@ public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
     QSize minimumSizeHint() const override;
+    void setWorldTerrainStatus(const QString& status, bool canUndo, bool canRedo, bool dirty);
 
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
@@ -168,6 +169,10 @@ public:
                               bool notify = false);
 
 signals:
+    void worldSculptSelectionRequested();
+    void worldSculptUndoRequested();
+    void worldSculptRedoRequested();
+    void worldSculptSaveRequested();
     void importHeightmapRequested();
     void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
@@ -252,6 +257,10 @@ private:
     QProgressBar* m_atlasCapacity;
     QLabel* m_atlasCapacityWarning;
     QWidget* m_sculptControls;
+    QLabel* m_worldTerrainStatus{nullptr};
+    QPushButton* m_worldUndo{nullptr};
+    QPushButton* m_worldRedo{nullptr};
+    QPushButton* m_worldSave{nullptr};
     QWidget* m_paintControls;
     QVector<STerrainPaintMaterialChoice> m_landPaintTypes;
     QVector<STerrainPaintMaterialChoice> m_underwaterPaintTypes;

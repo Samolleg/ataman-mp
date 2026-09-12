@@ -261,6 +261,31 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     form->addRow(m_deltaLabel, m_delta);
     form->addRow(m_flattenLabel, m_flatten);
     form->addRow(m_falloffLabel, m_falloff);
+    QPushButton* worldMaps = new QPushButton(tr("World terrain: choose maps..."), m_sculptControls);
+    worldMaps->setObjectName(QStringLiteral("worldTerrainMaps"));
+    worldMaps->setToolTip(tr("Enable a shared brush for explicitly selected neighboring maps. Background maps are protected by default."));
+    form->addRow(worldMaps);
+    m_worldTerrainStatus=new QLabel(tr("World terrain disabled; neighbors protected."),m_sculptControls);
+    m_worldTerrainStatus->setWordWrap(true);
+    m_worldTerrainStatus->setObjectName(QStringLiteral("worldTerrainStatus"));
+    form->addRow(m_worldTerrainStatus);
+    connect(worldMaps, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSelectionRequested);
+    QWidget* worldActions = new QWidget(m_sculptControls);
+    QHBoxLayout* worldButtons = new QHBoxLayout(worldActions);
+    worldButtons->setContentsMargins(0,0,0,0);
+    QPushButton* worldUndo = new QPushButton(tr("Undo world stroke"), worldActions);
+    QPushButton* worldRedo = new QPushButton(tr("Redo world stroke"), worldActions);
+    QPushButton* worldSave = new QPushButton(tr("Save world maps..."), worldActions);
+    m_worldUndo=worldUndo;m_worldRedo=worldRedo;m_worldSave=worldSave;
+    worldUndo->setObjectName(QStringLiteral("worldTerrainUndo"));
+    worldRedo->setObjectName(QStringLiteral("worldTerrainRedo"));
+    worldSave->setObjectName(QStringLiteral("worldTerrainSave"));
+    worldUndo->setEnabled(false);worldRedo->setEnabled(false);worldSave->setEnabled(false);
+    worldButtons->addWidget(worldUndo); worldButtons->addWidget(worldRedo);
+    form->addRow(worldActions); form->addRow(worldSave);
+    connect(worldUndo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptUndoRequested);
+    connect(worldRedo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptRedoRequested);
+    connect(worldSave, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSaveRequested);
     layout->addWidget(m_sculptControls);
 
     QLabel* help = new QLabel(tr(
@@ -929,6 +954,12 @@ void CLandscapeTools::setSculptTool(ELandscapeSculptTool tool)
 }
 float CLandscapeTools::radius() const { return float(m_radius->value()); }
 float CLandscapeTools::strength() const { return float(m_strength->value()); }
+void CLandscapeTools::setWorldTerrainStatus(const QString& status,bool canUndo,bool canRedo,bool dirty)
+{
+    m_worldTerrainStatus->setText(status);
+    m_worldUndo->setEnabled(canUndo);m_worldRedo->setEnabled(canRedo);m_worldSave->setEnabled(dirty);
+}
+
 float CLandscapeTools::rawDelta() const { return float(m_delta->value()); }
 quint16 CLandscapeTools::flattenHeight() const { return quint16(m_flatten->value()); }
 void CLandscapeTools::setFlattenHeight(quint16 height)
