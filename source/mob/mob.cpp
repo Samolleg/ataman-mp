@@ -808,7 +808,68 @@ uint CMob::trapIdByPoint(CTrapCastPoint *pPoint)
     return 0;
 }
 
-CNode* CMob::createNode(QJsonObject data)
+bool CMob::prepareFreshDatabaseNode(CNode* node, QJsonObject* data,
+                                    CValidationReport* report)
+{
+    if(!data) return false;
+    *data = QJsonObject();
+    if(!node || (node->nodeType() != eUnit && node->nodeType() != eLever
+                && node->nodeType() != eWorldObject))
+        return false;
+    // A newly authored record has its own complete, bounded source. Never
+    // claim provenance from a selected object or relax the normal save guard.
+    const uint previousId = node->mapId();
+    node->setMapId(1);
+    QByteArray seed;
+    {
+        util::CMobParser writer(seed, true);
+        writer.startSection("OBJECT_DB_FILE");
+        writer.startSection("SC_OBJECT_DB_FILE"); writer.endSection();
+        writer.startSection("OBJECT_SECTION");
+        node->serialize(writer);
+        writer.endSection(); writer.endSection();
+    }
+    QJsonObject authored = node->toJson();
+    node->setMapId(previousId);
+    CMobDocument document;
+    if(!document.loadBytes(seed, "database-created.mob", report)
+       || document.objects().size() != 1)
+        return false;
+    CMob projection;
+    if(!projection.deserialize(seed) || projection.nodes().size() != 1
+       || projection.nodes().first()->toJson() != authored)
+    {
+        if(report) report->add("mob.database_creation.roundtrip", EValidationSeverity::Error,
+            "A newly created database object did not retain its values on reopen.");
+        return false;
+    }
+    const auto& object = document.objects().first();
+    if(!object.hasNid || object.nid != 1 || !object.hasPosition
+       || !object.hasComplection || !object.hasBodyParts || object.model.isEmpty()
+       || (object.unit && (object.prototype.isEmpty() || object.logicSlots.size() != 5
+                          || !object.hasImportMode || object.importMode)))
+    {
+        if(report) report->add("mob.database_creation.incomplete", EValidationSeverity::Error,
+            "The new database object is missing required creation fields.");
+        return false;
+    }
+    QByteArray raw;
+    if(!document.objectSubtreeBytes(object.sectionPath, object.subtreeSha256, &raw))
+        return false;
+    QJsonObject provenance;
+    provenance.insert("origin", "databaseCreation");
+    provenance.insert("sourceDocumentSha256", QString::fromLatin1(
+        QCryptographicHash::hash(seed, QCryptographicHash::Sha256).toHex()));
+    provenance.insert("sourceObjectPath", object.sectionPath);
+    provenance.insert("sourceSubtreeSha256", QString::fromLatin1(object.subtreeSha256.toHex()));
+    provenance.insert("sourceSubtreeBase64", QString::fromLatin1(raw.toBase64()));
+    provenance.insert("cleanSubtreeBase64", QString::fromLatin1(raw.toBase64()));
+    authored.insert("_Endurance raw provenance", provenance);
+    *data = authored;
+    return true;
+}
+
+CNode* CMob::createNode(QJsonObject data, bool loadVisuals)
 {
     const QJsonObject enduranceProvenance = data.value("_Endurance raw provenance").toObject();
     auto wo = data;
@@ -830,15 +891,15 @@ CNode* CMob::createNode(QJsonObject data)
     case ENodeType::eUnit:
     {
         pNode = new CUnit(data);
-        pNode->loadFigure();
-        pNode->loadTexture();
+        if(loadVisuals) pNode->loadFigure();
+        if(loadVisuals) pNode->loadTexture();
         break;
     }
     case ENodeType::eTorch:
     {
         pNode = new CTorch(data);
-        pNode->loadFigure();
-        pNode->loadTexture();
+        if(loadVisuals) pNode->loadFigure();
+        if(loadVisuals) pNode->loadTexture();
         break;
     }
     case ENodeType::eMagicTrap:
@@ -849,8 +910,8 @@ CNode* CMob::createNode(QJsonObject data)
     case ENodeType::eLever:
     {
         pNode = new CLever(data);
-        pNode->loadFigure();
-        pNode->loadTexture();
+        if(loadVisuals) pNode->loadFigure();
+        if(loadVisuals) pNode->loadTexture();
         break;
     }
     case ENodeType::eLight:
@@ -871,8 +932,8 @@ CNode* CMob::createNode(QJsonObject data)
     case ENodeType::eWorldObject:
     {
         pNode = new CWorldObj(data);
-        pNode->loadFigure();
-        pNode->loadTexture();
+        if(loadVisuals) pNode->loadFigure();
+        if(loadVisuals) pNode->loadTexture();
         break;
     }
     default:
@@ -2253,8 +2314,8 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
             m_lastSaveError = QStringLiteral(
                 "Endurance could not map this complete edit set onto verified raw MOB records. "
                 "Properties, transforms, same-MOB copy/paste, deletion, and known patrol/look-point "
-                "changes save automatically. A newly created object requires a selected same-type raw "
-                "template, and unrecognized structural records remain protected.\n\n"
+                "changes save automatically. Database-created objects require a validated creation "
+                "record, and unrecognized structural records remain protected.\n\n"
                 "No destination or backup file was changed. Endurance will not fall back to the legacy "
                 "rebuilding serializer.\n\n") + candidateReport.toText().trimmed();
             return false;

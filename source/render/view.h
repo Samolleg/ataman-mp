@@ -140,6 +140,7 @@ namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 class CView : public QGLWidget
 {
     Q_OBJECT
+    friend int runDatabasePreviewCheck();
 
 public:
     struct SNidRepair
@@ -235,6 +236,7 @@ public:
     }
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
+    bool objectPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position);
     bool projectToRegeneratedNavigation(const QPointF& requested,
                                         QVector3D* position,
                                         float maximumDistance = 8.0f) const;
@@ -249,6 +251,9 @@ public:
         const QVector3D& sourcePivot,
         const QVector3D& sourceRotation);
     QPoint operationAnchor() const;
+    bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
+    bool isDatabasePlacementPending() const { return m_pendingDatabasePlacement; }
+    bool updateDatabasePlacementPointer(const QPoint& position);
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
     bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;
@@ -825,6 +830,7 @@ private:
     QList<CNode*> m_pendingLogicPlacementOriginalSelection;
     CMob* m_pendingPasteMob;
     QList<CNode*> m_pendingPasteNodes;
+    bool m_pendingDatabasePlacement{false};
     QList<CNode*> m_pendingPasteOriginalSelection;
     QList<CNode*> m_pendingBehaviorPasteNodes;
     QList<CNode*> m_pendingBehaviorPasteOriginalSelection;

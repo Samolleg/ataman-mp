@@ -66,6 +66,14 @@ void RuntimeProviderTests::validJmvManifestStaysInsideRunRoot()
     QStringList errors;
     QVERIFY2(validateMapTestLaunchRequest(request, root.path(), &errors), qPrintable(errors.join("\n")));
     QCOMPARE(mapTestLaunchRequestToJson(request).value("protocolVersion").toInt(), 1);
+    request.profileId = "deja-vu";
+    QVERIFY2(validateMapTestLaunchRequest(request, root.path(), &errors), qPrintable(errors.join("\n")));
+    QCOMPARE(mapTestLaunchRequestToJson(request).value("profileId").toString(), QString("deja-vu"));
+    request.stagedMprPath = QDir(root.path()).absoluteFilePath("../live.mpr");
+    QVERIFY(!validateMapTestLaunchRequest(request, root.path(), &errors));
+    request.stagedMprPath = root.filePath("maps/endurance_test.mpr");
+    request.profileId = "unapproved-mod";
+    QVERIFY(!validateMapTestLaunchRequest(request, root.path(), &errors));
 }
 
 void RuntimeProviderTests::livePathsAreRejectedForExperimentalBaseProfile()

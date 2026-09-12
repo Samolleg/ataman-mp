@@ -4,6 +4,7 @@
 #include "node.h"
 #include "camera.h"
 #include "objects/unit.h"
+#include "log.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QOpenGLContext>
@@ -50,6 +51,13 @@ CPreview::~CPreview()
 void CPreview::initializeGL()
 {
     makeCurrent();
+    // Textures/geometry are shared with the viewport, shader state is not.
+    // Map overlays leave customColor and environment uniforms behind.
+    m_program.removeAllShaders();
+    if(!m_program.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh")
+       || !m_program.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/fshader.fsh")
+       || !m_program.link())
+        ei::log(eLogWarning, "Preview shader failure: " + m_program.log());
     qglClearColor(Qt::darkGray);
     //ei::gl::Enable(GL_EXT_texture_filter_anisotropic);
     ei::gl::Enable(GL_DEPTH_TEST);
@@ -142,9 +150,15 @@ void CPreview::draw()
     camMatrix.rotate(m_modelYaw, 0.0f, 0.0f, 1.0f);
 
     // Bind shader pipeline for use
-    QOpenGLShaderProgram* pProgram = &m_pView->shaderObject();
-    if (nullptr != pProgram && !pProgram->bind())
-        close();
+    QOpenGLShaderProgram* pProgram = &m_program;
+    if(!pProgram->bind()) return;
+
+    pProgram->setUniformValue("customColor", QVector4D());
+    pProgram->setUniformValue("u_instanced", false);
+    pProgram->setUniformValue("u_partAnimated", false);
+    pProgram->setUniformValue("u_highlight", false);
+    pProgram->setUniformValue("u_shadowCascadeDebug", false);
+    pProgram->setUniformValue("u_environmentEnabled", false);
 
     pProgram->setUniformValue("u_projMmatrix", m_projection);
     pProgram->setUniformValue("u_viewMmatrix", camMatrix);
@@ -153,7 +167,7 @@ void CPreview::draw()
         unit->drawObjectVisual(true, pProgram);
     else
         m_pNode->draw(true, pProgram);
-
+    pProgram->release();
 }
 
 void CPreview::refreshCam(CBox box)

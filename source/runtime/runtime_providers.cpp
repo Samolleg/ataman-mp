@@ -1,4 +1,5 @@
 #include "runtime_providers.h"
+#include "../resources/resource_profile.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -145,7 +146,7 @@ bool validateMapTestLaunchRequest(const SMapTestLaunchRequest& request,
     static const QRegularExpression safeRunId("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$");
     if(!safeRunId.match(request.runId).hasMatch())
         localErrors.append("Run ID contains unsafe characters or has an invalid length");
-    if(request.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0
+    if(!usesJmvRuntime(request.profileId)
        && request.profileId.compare("base-game", Qt::CaseInsensitive) != 0)
         localErrors.append("Direct test launch has no provider for this profile");
     if(request.runtimeManifestId.isEmpty() || request.runtimeComponentHashes.isEmpty())

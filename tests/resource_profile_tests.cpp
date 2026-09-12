@@ -43,6 +43,8 @@ private slots:
     void externalProfileCanBeAdded();
     void informationalRuntimeHashDoesNotInvalidateManifest();
     void builtInProfilesUseCanonicalRuntimeRegistry();
+    void dejaVuDoesNotSelectNeighboringMod();
+    void installedDejaVuProfile();
 };
 
 void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
@@ -178,7 +180,7 @@ void ResourceProfileTests::informationalRuntimeHashDoesNotInvalidateManifest()
 void ResourceProfileTests::builtInProfilesUseCanonicalRuntimeRegistry()
 {
     const QVector<SResourceProfile> profiles = builtInResourceProfiles();
-    QCOMPARE(profiles.size(), 2);
+    QCOMPARE(profiles.size(), 3);
 
     QStringList expectedJmv;
     QStringList expectedBase;
@@ -203,8 +205,53 @@ void ResourceProfileTests::builtInProfilesUseCanonicalRuntimeRegistry()
     QCOMPARE(profiles.at(1).runtimeComponents.size(), 1);
     QCOMPARE(profiles.at(0).runtimeComponents.first().acceptedSha256, expectedJmv);
     QCOMPARE(profiles.at(1).runtimeComponents.first().acceptedSha256, expectedBase);
+    QCOMPARE(profiles.at(2).runtimeComponents.first().acceptedSha256, expectedJmv);
     QCOMPARE(expectedJmv.size(), 1);
     QCOMPARE(expectedBase.size(), 2);
+}
+
+void ResourceProfileTests::dejaVuDoesNotSelectNeighboringMod()
+{
+    SResourceProfile deja;
+    for(const auto& profile : builtInResourceProfiles())
+        if(profile.id == "deja-vu") deja = profile;
+    QVERIFY2(!deja.id.isEmpty(), "DejaVu must be independently selectable");
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString root = createJmvInstall(&temporary);
+    QVERIFY(!evaluateResourceProfile(root, deja).valid);
+    const QString mod = QDir(root).filePath("Starter/MODS/DejaVu");
+    createFile(QDir(mod).filePath("main.lua"));
+    createFile(QDir(mod).filePath("res/databaseJmv.res"));
+    QDir().mkpath(QDir(mod).filePath("Maps"));
+    const auto selected = evaluateResourceProfile(root, deja);
+    QVERIFY2(selected.valid, qPrintable(selected.messages.join('\n')));
+    QCOMPARE(selected.modRoot, mod);
+    QCOMPARE(selected.resourceDirectories.first(), mod + "/res");
+    QCOMPARE(selected.mapDirectories.first(), mod + "/Maps");
+    QCOMPARE(selected.providers.value("database").id, QString("jmv.v1"));
+    QCOMPARE(selected.providers.value("characterAppearance").id, QString("jmv.v1"));
+    QVERIFY(evaluateResourceProfile(root, builtInResourceProfiles().first()).modRoot.endsWith("JamaisVu135"));
+    QVERIFY(QFile::remove(QDir(root).filePath("Starter/MODS/JamaisVu135/main.lua")));
+    QVERIFY(!evaluateResourceProfile(root, builtInResourceProfiles().first()).valid);
+    QVERIFY(evaluateResourceProfile(root, deja).valid);
+}
+
+void ResourceProfileTests::installedDejaVuProfile()
+{
+    const QString root = qEnvironmentVariable("EI_TEST_DEJAVU_GAME_ROOT");
+    if(root.isEmpty()) QSKIP("Optional read-only installed profile probe");
+    SResourceProfile deja;
+    for(const auto& profile : builtInResourceProfiles())
+        if(profile.id == "deja-vu") deja = profile;
+    QVERIFY(!deja.id.isEmpty());
+    const auto selected = evaluateResourceProfile(root, deja);
+    QVERIFY2(selected.valid, qPrintable(selected.messages.join('\n')));
+    QVERIFY(selected.modRoot.endsWith("/DejaVu", Qt::CaseInsensitive));
+    QVERIFY2(selected.runtimeStackValidated, qPrintable(selected.messages.join('\n')));
+    QVERIFY(QFileInfo(selected.resourceDirectories.first() + "/database.res").isFile());
+    qInfo() << "DejaVu archives:" << selected.archiveCount
+            << "MPR files:" << QDir(selected.mapDirectories.first()).entryList({"*.mpr"}, QDir::Files).size();
 }
 
 QTEST_APPLESS_MAIN(ResourceProfileTests)

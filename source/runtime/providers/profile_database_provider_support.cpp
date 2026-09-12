@@ -528,6 +528,7 @@ void applyRelationalMembers(const QMap<QString, QByteArray>& members, const QStr
     snapshot->monsters = parsed.monsters;
     snapshot->raceModels = parsed.raceModels;
     snapshot->items = parsed.items;
+    snapshot->levers = parsed.levers;
     snapshot->materialRecords = parsed.materialRecords;
     snapshot->materials = parsed.namesByCategory.value("materials");
     snapshot->weapons = parsed.namesByCategory.value("weapons");
@@ -539,7 +540,7 @@ void applyRelationalMembers(const QMap<QString, QByteArray>& members, const QStr
     snapshot->perks = parsed.namesByCategory.value("perks");
     snapshot->diagnostics += parsed.diagnostics;
     for(const QString& member : {QString("units.udb"), QString("items.idb"),
-                                 QString("spells.sdb"), QString("perks.pdb")})
+                                 QString("spells.sdb"), QString("perks.pdb"), QString("levers.ldb")})
         if(members.contains(member))
             snapshot->provenance.append(databaseProvenance(*snapshot, sourcePath, member, false));
 }

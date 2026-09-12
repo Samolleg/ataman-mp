@@ -1147,6 +1147,14 @@ QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelN
     return loadTextureResource(name.toLower(), modelName.toLower());
 }
 
+bool CTextureList::hasTexture(const QString& name, const QString& modelName)
+{
+    if(name.trimmed().isEmpty()) return false;
+    bool found = false;
+    loadTextureResource(name.toLower(), modelName.toLower(), &found);
+    return found;
+}
+
 QOpenGLTexture* CTextureList::texture(const QStringList& names,const QString& modelName,
                                       QString* resolvedName)
 {

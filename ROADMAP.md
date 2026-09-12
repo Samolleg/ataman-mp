@@ -593,8 +593,344 @@ foundation as one coherent `0.3.0` release.
   made during diagnosis. Owner confirms integration on the exact baseline
   `be4406766c19257d86f85c2e02ab7dd45a96ff4d`. Integrate that history into the
   existing contributor branch without rewriting published commits; preserve
-  painting/database/profile changes and all world-sculpt fixes. Next: integrate,
-  verify HD atlas coverage plus sculpt regressions, then deliver a combined build.
+  painting/database/profile changes and all world-sculpt fixes. Integrated exact
+  baseline with automatic code merge; roadmap and translations retain both sides,
+  binary translation regenerated. Presets/resolver match be440676 exactly.
+  Native HD coverage: 38 namespaces, 41 maps, 88 material families; focused
+  document suite 10 passed, sculpt 13 passed, widgets 16 passed/2 skips, native
+  GPU 3 passed. Release/x86 built; full UI check still `0xC0000005`.
+  [Combined R5 evidence](docs/validation/WORLD_TERRAIN_SCULPT_R5.md).
+  Next: deliver R5 with exact base in BUILD_INFO, then user validates both painting
+  and the original moving-seam scenario. Parent remains open.
+### Related experiment: EI-TERRAIN-PALETTE-001
+
+- User authorized modern-palette pixel-hash relaxation on the latest PR (#6,
+  `contrib/Samolleg/add-from-db`), confirmed open and unmerged on 2026-09-12.
+  Canonical support diagnosis read from the main checkout roadmap: the loaded
+  Zone1 HD atlas has different pixels from the built-in reviewed preset, so
+  uniform thumbnails and transition-source hydration fail despite matching names.
+- Expected: use the current complete atlas by namespace/structure for modern
+  thumbnails and generation, with active-atlas priority and coherent caching.
+  Retain page/slot/decode checks and all exact checks outside this experiment,
+  including MOB and save integrity. Tile semantics are not guaranteed.
+- Authority: code/tests in this branch, same-PR commit/push, a new permanent
+  unpacked tester folder. Installed data/profiles/maps and old builds stay intact.
+- Status: experimental implementation validated on 2026-09-12. The original
+  repaint test failed before the change and now passes; eight focused cases pass,
+  including strict embedded/save checks. Read-only installed-resource probe selects
+  the active Zone1 repaint and generates material 1712759006 from bz2g slot 195.
+  Release editor/runtime and fresh database creation/preview diagnostics pass.
+  Evidence: [r6 validation](docs/validation/terrain-palette-experiment-r6.md).
+  Separate r6 tester folder delivered and distribution validation passed; PR #6
+  is the review target. Next: user checks interactive palette appearance,
+  semantic assignments and mixed transitions;
+  the existing broad UI diagnostic access violation remains an explicit gap.
+  This related experiment does not replace EI-ADD-FROM-DB-001.
+- R1 load regression (2026-09-12): user reports Zone1 stuck at 66% in r6.
+  The live process eventually completes: first landscape frame 1078 ms, workspace
+  65416 ms, deferred material catalog 60990 ms. Log timestamps isolate about
+  60 seconds between catalog phase reporting and hydration queue submission;
+  a second launch reproduces the same pause. Hypothesis: source fingerprints
+  scan all archive files for every repeated transition while assembling jobs on
+  the GUI thread. Expected: source snapshot once per planning batch, preserve
+  active-atlas priority/invalidation, and verify actual Zone1 load latency.
+  Status: optimization abandoned by explicit user decision below.
+- Scope change (2026-09-12): user requested rollback of the experiment and only
+  adding their complete Zone1 pixel hash
+  `a44f78f46933dfba29125ec6867c3541acb6be56d93083afa6a6ce9616b5f997`
+  to the allowed painting bindings. This supersedes broad structure matching and
+  its pending performance work. Restore renderer/binding/translation behavior
+  from before r6; retain the prior database-object changes. Keep old HD bindings
+  valid and unknown hashes rejected. Implemented: exact profile/material/transition
+  eligibility and strict rejection checks pass (eight focused cases); renderer and
+  translations match r5. Release/runtime builds, creation and JMV placement checks
+  pass. Separate r7 package finalized and delivered; PR #6 remains the review target.
+  Evidence: [r7 validation](docs/validation/zone1-approved-hash-r7.md).
+  Next: user verifies Zone1 loading and painting; no automatic r7 full-map timing
+  measurement and no approval of other modified atlas hashes are claimed.
+- R2 follow-up (2026-09-12): r7 screenshot shows partial Modern thumbnails.
+  Read-only live log confirms 22 material sources after hydration; other atlas
+  revisions still fail exact binding. Separate confirmed catalog restriction:
+  Zone1 Ground / Common slot 1 (type 1) and Stone / Lime slot 48 (type 2) are
+  excluded because their global names already retain type 0 from another atlas.
+  Adding the Zone1 pixel hash cannot remove that runtime-type conflict, and
+  512/512 assigned slots does not mean every game-wide material has a source.
+  This is explanation/diagnosis only: no other hashes or type-policy changes
+  authorized by this question. Next: decide broader exact-hash coverage separately
+  from runtime-type family handling if the user requests full palette repair.
+  The same log confirms r7 workspace load 4987 ms and material catalog 256 ms,
+  versus r6 65416 ms / 60990 ms: the minute-long load regression is removed.
+- R3 authorized (2026-09-12): user requests access for all maps. Extend the same
+  exact-hash allowlist approach to complete atlas namespaces in the installed HD
+  pack, using the editor's decoder to measure actual pixels. Preserve strict
+  binding, existing presets, runtime-type checks and database placement. Expected:
+  all catalog maps with complete HD sources allowed and global palette source
+  coverage verified; no generic hash bypass. Implemented: native probe first failed
+  on 34 missing approvals; adding those measured hashes yields 38/38 approved
+  namespaces, 41/41 installed MPRs covered and 88/88 global material sources.
+  Nine focused cases, release/runtime build and database creation diagnostics pass.
+  Separate r8 package finalized and delivered; PR #6 is the review target.
+  Evidence: [r8 validation](docs/validation/all-map-hd-bindings-r8.md).
+  Next: user checks interactive thumbnails/transitions and map switching. Per-slot
+  semantic correctness, full r8 load timing and the pre-existing broad UI crash
+  remain explicit coverage limits; parent database coverage gaps stay open.
+
+### Authorized implementation: EI-PROFILE-DEJAVU-001
+
+- Request (2026-09-12): add DejaVu alongside Jamais Vu and Base, using the
+  supplied installed MODS/DejaVu directory. This is the active task; prior
+  database placement and gameplay findings remain recorded below.
+- Expected: independently selectable/detected profile, its own maps/resources/DB
+  taking precedence over Base, compatible visual providers and map-test staging.
+  Never select the neighboring mod when this profile is absent.
+- Authority: editor changes and tests/build/handoff; read-only mod inspection.
+  No live mod/map edits or interactive game launch.
+- Evidence: installed config identifies DejaVu and uses the JMV resource layout.
+  The original catalog lacked this profile and runtime launch checked JMV's ID.
+- Completion: detection/isolation and launch-request/staging regressions pass,
+  actual installed resources load through the selected profile, runnable tester
+  package delivered; interactive game acceptance reported separately.
+- Status: implemented and packaged as r10. Profile detection found 41 MPRs and
+  69 resource archives including Base; profile isolation, runtime request guards,
+  targeted launcher checks and DejaVu preview/placement diagnostics passed.
+  [Validation and remaining limits](docs/validation/dejavu-profile-r10.md).
+- Next: user selects DejaVu and verifies an actual map-test launch and hot reload.
+  Interactive runtime acceptance remains pending. The installed DejaVu lacks the
+  cheat-dagger map texture; its placement diagnostic used an authored temporary
+  fixture, not a neighboring mod asset.
+
+### Authorized implementation: EI-ADD-FROM-DB-001
+
+- R11 interaction-distance investigation (2026-09-12): supplied 18-second video
+  shows pickup through lever 336 on zone1 while the character remains away from
+  the visible dagger. Expected: approach the item before interaction. Read-only
+  diagnosis of the map, interaction script and model/lever parameters is
+  authorized; no live map edits. Diagnosis: conversion can produce a lever whose
+  model has no database approach-point definition; the native empty-points path
+  skips approach before interaction. Pickup follows successful activation.
+  This is a gameplay gap beyond the proven structural conversion/ID checks.
+  Detailed local evidence is excluded from publication. Next: choose and validate
+  a close-approach definition or fallback for arbitrary converted models; no
+  game/database changes, build or installation performed. Parent remains open.
+- R10 ID regression (2026-09-12): screenshot of added cheat dagger converted to
+  lever shows NID 0. Read-only r8 log confirms positive allocation followed by
+  zero-NID validation failures for that lever. Creation allocates positive IDs;
+  the live conversion constructs a CLever from JSON (constructors intentionally
+  leave ID allocation to the caller) but never transfers the original object's
+  ID before replacement. Prior tests converted saved raw bytes, bypassing this
+  live replacement path. Expected: retain the unique positive ID through live
+  conversion, undo/redo and save/reopen; preserve creation allocation semantics.
+  Related persistence regression: real command test then exposed lost raw
+  provenance on redo after saving each side of conversion. Capture each outgoing
+  source/clean subtree before replacement so guarded undo/redo saves remain valid.
+  Implemented: conversion command retains the existing NID and preserves outgoing
+  raw source/clean templates across saves. Real-command regression failed before
+  the fix and passes for fresh and saved objects in JMV and Base, including
+  undo/save/redo/save/reopen. All three creation categories retain unique positive
+  IDs. Separate r9 staging and delivery packages pass finalization; see
+  [R10 validation](docs/validation/object-conversion-id-r9.md).
+  Next: user acceptance on the original map; existing saved zero IDs are not
+  automatically migrated. Parent visual coverage and broad UI-check gap remain
+  open. No live map edits.
+- Original problem: Create Object requires technical fields and a selected
+  same-type raw MOB template; there is no complete database-to-map workflow.
+- Expected result: all three searchable categories (monster-prototype creatures,
+  DB items as ordinary objects (latest user decision), usable objects/levers), names/models/preview, supported
+  defaults, placement, undo/redo, guarded save/reopen; technical options secondary.
+- Authority: dedicated contributor branch, project code in this worktree only;
+  read-only installed-data research; tests/build, scoped commit/push/PR, permanent
+  unpacked tester folder. No main merge, live game/mod/settings changes, or private
+  source/data in repository, package, or publication.
+- Base: `contrib/Samolleg/add-from-db` from fetched `origin/main`
+  `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a` (2026-09-11).
+- Status: partial implementation on 2026-09-11: active database catalog,
+  searchable picker, creature/item/lever preview and click placement, fresh validated
+  creation records, and undo/save/redo retention implemented. Item placement is now
+  an ordinary object; the user owns lever conversion and the interaction script.
+  This explicitly supersedes R2's native pickup requirement. Complete automatic
+  lever appearance and all-entry/gameplay acceptance remain open.
+  Parent remains open until all three categories and their
+  persistence/regression checks are delivered. Canonical task read from the
+  main checkout roadmap; its local changes have not been overwritten.
+- Original cause: the creation form had no database selection and required a
+  selected same-type raw template. Database mode now uses its own independently
+  generated, parsed/reopened record; the save guard still requires hashed bytes.
+- Evidence and repeatable acceptance cases:
+  [creation research](docs/research/add-from-database-001.md). Read-only traversal
+  passed on 252 installed MOBs; both databases contain 37 lever prototype rows.
+  [validation checkpoint](docs/validation/add-from-database-001.md): seven focused
+  tests pass, including installed Base/JMV catalog checks and archive identity;
+  the creation diagnostic passes real undo/redo and save/undo/save/redo/save,
+  multiple fresh IDs, editable reopen and corrupt-hash rejection.
+- R2 (resolved 2026-09-11): native item/bag pickup, no new scenario. The proposed
+  generated-script route is rejected; all three categories remain required.
+  R3 (necessary research): validated fresh raw records and
+  creature appearance/lever defaults; current renderer forbids blind DB fallback.
+- R4 (research gap, not an outstanding product decision): independent native
+  item pickup remains unverified. The user reaffirmed creating the selected
+  database object on the map; the proposed creature-loot substitution is not
+  authorized and the follow-up choice is withdrawn. Persistence format is an
+  implementation concern, not a prerequisite the user must resolve.
+- R5 (necessary regression, fixed): a creation command lost its source after
+  save/undo/save, so redo could not be saved. The original failure was reproduced;
+  undo now retains the exact current source/clean bytes before removal, and the
+  full sequence passes for creatures and levers.
+- Delivery checkpoint: unpacked tester folder finalized outside this worktree;
+  distribution validation passes and executable hash matches the tested build.
+  [Tester notes](packaging/ADD_FROM_DATABASE_TEST.md) explicitly describe the
+  incomplete scope; this is a draft contributor handoff, not parent closure.
+- Next: validate the delivered ordinary-item workflow, supported automatic lever appearance,
+  and interactive/gameplay validation. This checkpoint does not close the parent.
+  No installed data or user settings changed; no game assets or private source
+  were copied into implementation or distribution.
+- R6/R7/R8 (fixed for the recorded cases, 2026-09-11 user video): JMV AncientCurseM25 and
+  ArmoredTurtle110 have DB texture names but render as cyan silhouettes; the
+  item `2h long spear` has no preview; Place leaves the window open. Expected:
+  textured previews, including weapons, and immediate cursor-bound placement
+  with the picker hidden, click to commit and Escape to cancel. Decoder installed
+  only in ignored build-video-tools; sampled the supplied 30-second video.
+  First incorrect decisions: preview reuses viewport shader uniforms (including
+  solid customColor); placement checks a PNT3-only CPU atlas decoder for ordinary
+  DXT textures; item placement eligibility suppresses preview; the custom placement
+  event filter never draws a pending object. Reproduction and checks tracked in
+  docs/validation/add-from-database-video-regressions.md. These are necessary
+  fixes within EI-ADD-FROM-DB-001, not a change to its native-pickup requirement.
+  The original shader regression was rebuilt and failed (two-color silhouette);
+  the fixed renderer passes visually inspected JMV desktop/ANGLE and base-resource
+  previews. The production picker/viewport transaction passes immediate placement,
+  pointer motion, cancellation and one-action undo/redo. Thirteen focused tests
+  and the original creation/save diagnostic pass. r2 preserves the user's used r1
+  folder. Native item placement and all-entry/gameplay acceptance remain open.
+  r2 is finalized in the permanent tester location; executable hashes match the
+  tested build. The existing draft PR #6 remains the contributor review target.
+  User acceptance on 2026-09-11: NPC placement works in r2. The supplied screenshot
+  confirms the selected weapon/material preview, but item placement is disabled.
+  This is the existing implementation gap R4: the catalog rejects all item
+  creation and the form never enables its Place button for items. It is not a
+  reported missing texture or failed user setup. Next remains native collectible
+  creation and validation without a new scenario; parent scope is unchanged.
+- R4 continuation (2026-09-11): user explicitly authorized item implementation.
+  The screenshot acceptance case and first rejecting editor decisions are recorded
+  in [native item checkpoint](docs/research/database-native-item-placement.md).
+  Additional read-only research did not establish an independent native pickup
+  path in the inspected Base/JMV facilities; the collection routes examined
+  require a unit target. A proposed runtime extension changes map compatibility
+  and remains unproven. Next: resolve whether a matching game runtime dependency
+  is acceptable, then prove actual pickup and persistence before enabling the
+  picker. Ordinary game compatibility cannot be silently dropped. No production
+  code or installed files changed at this checkpoint; parent remains open.
+- R4 scope change explicitly requested by user (2026-09-11): place the selected
+  database item as an ordinary world object with its model/material. The user
+  will convert it to a lever and attach an existing interaction script. This
+  supersedes the native-pickup requirement for items; no runtime dependency or
+  generated script is needed. Implement enabled Place, immediate mouse ghost,
+  cancel/commit, history, save/reopen and retained appearance. Preserve the
+  earlier requirement/research above as history. Status: implemented and checked
+  for Base/JMV weapons; original disabled button reproduced before the fix.
+  Pointer/cancel/commit/history and save/reopen pass; converting the placed sword
+  to a lever retains model, selected parts and material, with identical rendered
+  images. See [r3 validation](docs/validation/database-item-placement-r3.md).
+  r3 is finalized in the permanent tester location; staged and delivered
+  executable hashes match. Thirteen focused tests and Base/JMV desktop/ANGLE
+  placement checks pass. The used r2 folder is preserved. Gameplay with the
+  user's interaction script remains a user check, not automatic native pickup.
+- R9 (2026-09-11, necessary regression): user placed `cheat dagger.bronze` on
+  zone1; editor textured, game white. Read-only inspection confirms both texture
+  fields include a terminal `.mmp`. The game appends the extension while the
+  editor's permissive lookup strips it, masking the invalid saved identifier.
+  Expected: persist extensionless texture identifiers while preserving `.x2`
+  and material suffixes. New item creation is fixed; the red test reproduced the
+  invalid filename before the fix. Thirteen focused tests, saved primary/secondary
+  fields, exact resource lookup and Base/JMV desktop/ANGLE checks pass. r4 is
+  finalized in staging and the permanent tester location, with matching hashes.
+  See [r4 validation](docs/validation/database-item-texture-r4.md). The existing user map
+  remains unchanged; its two texture fields can be corrected in the editor.
+  Next: user reloads the corrected map for in-game appearance acceptance. This
+  checkpoint does not claim a corrected runtime screenshot or close parent gaps.
+  Follow-up audit requested by user: the current zone1 has 117 creatures and
+  23 levers; neither category has a terminal `.mmp` in its saved texture fields.
+  Among 1,527 ordinary objects only the reported dagger has that defect.
+  Creature catalog texture names already normalize the extension; automatic
+  lever selection also strips it. Conversion of an r3 item to a lever preserves
+  its old bad name, and manually entering `.mmp` is still accepted by properties.
+  This bounded check does not establish all in-game texture/appearance behavior.
+  User workflow clarification: conversion is under Edit > Object > Convert World
+  Object to Lever, for one selected ordinary object in the active map's object
+  mode after placement is committed. Default free-open/two-state settings apply;
+  interaction script remains user-authored. Menu and prerequisites verified in code.
+- R9 reopened by gameplay acceptance (2026-09-11): both the corrected old dagger
+  and a newly placed r4 dagger are white in the user's screenshot. Read-only
+  inspection of zone1 confirms IDs 334/335 both persist extensionless primary
+  and secondary names, model `unhuma`, part `rh3.dagger03`. The suffix fix is
+  insufficient; editor preview is not evidence of game-compatible binding.
+  First incorrect representation: the picker persists a PNT3 equipment layer as
+  a directly loadable ordinary texture; preview also applies an unpersisted x2
+  UV transform. A ready texture with the correct atlas layout is needed.
+  [Investigation and acceptance](docs/validation/database-item-texture-r5-investigation.md).
+  Next: obtain the required edited-resource-copy permission, generate a separate
+  local map resource, then verify original gameplay and persistence/conversion.
+  Installed maps/resources remain unchanged; parent scope stays open.
+  Follow-up explanation: distinguish the MMP container, PNT3 layer compression,
+  uncompressed 8888 pixels and DXT block compression; atlas layout is independent
+  of encoding. The user's format question does not authorize asset-copy/export.
+  User decision: use separately converted item textures with terminal `map`, e.g.
+  `unhumadg_03.br.1.x2map`, instead of generating assets in this task. Implement
+  exact lookup in map-item preview and both persisted texture fields, without
+  silently returning to equipment layers. Existing objects remain user-editable;
+  new creatures and database levers keep their current naming. Implemented: exact
+  map resource selection, primary/secondary identity, missing-file diagnostic.
+  User confirmed resources are alongside the originals; the actual bronze DXT1
+  file was found and passed desktop/ANGLE placement, history, save/reopen and lever
+  conversion checks. Thirteen focused tests and fresh creation/history pass;
+  Base additionally passes with generated synthetic DXT1 fixtures.
+  [r5 validation](docs/validation/database-item-map-texture-r5.md).
+  r5 is finalized in staging and the permanent tester folder; executable hashes
+  match. The used r4 folder/settings remain preserved; packaged GUI not launched.
+  Next: user checks r5 with the saved map in the game, including atlas alignment.
+  No asset or installed-map writes; earlier asset-generation proposal superseded.
+  R9 gameplay follow-up: r5 loads the map texture, but the user's screenshots
+  show the wrong dagger appearance in both game and editor. Read-only comparison
+  confirms the converted 512x512 DXT1 retains the PNT3 layout (opaque RGB mean
+  absolute error 3.191/255; zero differing alpha-mask pixels). The part uses a
+  half-size UV quadrant; the former equipment preview applied a 2x repeat
+  transform, whereas the ordinary map object uses authored UVs. Naming and format
+  are now correct, but the atlas arrangement remains uncorrected. Next: prepare
+  a separately authorized working copy of the map texture with the required
+  repeated 2x2 atlas, then verify original appearance in the game. Do not hide
+  the mismatch with an editor-only UV correction. No asset writes performed.
+  The current saved dagger (336) retains model `unhuma` and part `rh3.dagger03`,
+  but its figure complexion is [1,1,5]. This independently stretches the geometry;
+  [1,1,1] is the default. Preserve the user's size choice unless asked to reset it.
+  User requested a converter prompt: specify lossless decoding, 2x2 repetition
+  into a double-width/double-height atlas for the verified packed-x2 dagger,
+  terminal map naming, DXT1 alpha/mipmap handling and sampling validation.
+  This delivers conversion instructions only; no asset modification authorized
+  or performed here, and runtime appearance remains the acceptance step.
+  User acceptance after converter instructions: the new mapper screenshot shows
+  the recognizable bronze blade and wrapped handle; user confirms editor display
+  and is checking the game next. Editor appearance accepted for this dagger.
+  In-game appearance remains pending; no new implementation or asset writes.
+  Subsequent user acceptance: the game now matches the corrected mapper dagger.
+  R9 appearance case is accepted for this item after the user's atlas conversion;
+  this does not close all-category coverage or the parent task. Related size
+  concern: doubling both atlas dimensions quadruples the pixel area and DXT1
+  storage at comparable mip settings. A 512x512 atlas of four 256x256 tiles trades
+  half the linear source detail for approximately one-quarter storage; preserving
+  a single 512x512 texture instead would require a separate model/UV change.
+  Explain this tradeoff; no optimization or asset mutation has been requested.
+  Handoff requested: user accepts the texture-size tradeoff for now and requests
+  a PR with the current changes. Existing [PR #6](https://github.com/Ilufus/ei-mapper-endurance/pull/6)
+  is updated and ready for review (not draft), including confirmed dagger gameplay
+  acceptance and explicit remaining gaps. All changes are on the contributor branch.
+  Next: maintainer review of the contributor branch; no merge/main write and no
+  texture-size optimization in this handoff. Parent coverage gaps remain open.
+- Related gap EI-ADD-FROM-DB-001-G1: prior offscreen `--ui-widget-check` crashed
+  with 0xC0000005; reproduced under the minimal Qt platform. Interactive UI
+  acceptance remains unverified, independently of the passing creation checks.
+- Related research EI-ADD-FROM-DB-001-R1: named EI safety/reference skills absent
+  from listed skills and searched local skill/plugin locations. Research followed
+  explicit user authorization for read-only inspection; no private contents or
+  provenance may enter the repository, package, or publication.
 
 - Keep this file goal-oriented and concise.
 - Put unassigned requests in the wishlist; assign accepted work to a version.

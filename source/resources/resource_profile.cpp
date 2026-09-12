@@ -190,6 +190,16 @@ bool candidateMeetsRequirements(const QString& candidate, const SResourceProfile
     if(candidate.isEmpty() || !QDir(candidate).exists() ||
        QFileInfo(candidate).fileName().contains("backup", Qt::CaseInsensitive))
         return false;
+    // Related mods can have identical signature files. A built-in named preset
+    // must not silently bind to its neighbor when the requested mod is absent.
+    if(profile.source == "built-in" && !profile.directoryNameContains.isEmpty())
+    {
+        bool matchesName = false;
+        for(const QString& name : profile.directoryNameContains)
+            matchesName |= QFileInfo(candidate).fileName().contains(name, Qt::CaseInsensitive);
+        if(!matchesName)
+            return false;
+    }
     for(const QString& file : profile.requiredFiles)
         if(!QFileInfo(absoluteFromRoot(candidate, file)).isFile())
             return false;
@@ -290,7 +300,12 @@ QVector<SResourceProfile> builtInResourceProfiles()
     base.capabilities.insert("runtime.semanticValidation", capability("runtime.semanticValidation", EProfileCapabilityStatus::Experimental,
         "Runtime validation requires manual Base EI game tests."));
 
-    return {jmv, base};
+    SResourceProfile deja = jmv;
+    deja.id = "deja-vu";
+    deja.displayName = "DejaVu";
+    deja.fixedModRoots = QStringList() << "Starter/MODS/DejaVu";
+    deja.directoryNameContains = QStringList() << "DejaVu";
+    return {jmv, base, deja};
 }
 
 QVector<SResourceProfile> loadResourceProfiles(const QString& externalDirectory)

@@ -13,6 +13,7 @@ public:
     ENodeType nodeType() override {return ENodeType::eWorldObject; }
     uint deserialize(util::CMobParser& parser) override;
     QString textureName() override {return m_primaryTexture.toLower();}
+    void loadFigure() override;
     void loadTexture() override;
     void serializeJson(QJsonObject& obj) override;
     uint serialize(util::CMobParser& parser) override;
@@ -24,6 +25,7 @@ public:
     bool castsRenderShadow() const override { return m_bShadow; }
 
 protected:
+    bool m_standaloneItemFigure{false};
     //uint m_NID;
     uint m_type;
     QString m_primaryTexture;

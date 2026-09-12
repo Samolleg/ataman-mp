@@ -1004,7 +1004,7 @@ bool CJmvMapTestLauncher::hasAutoSpellMob(
     };
     if(reason)
         reason->clear();
-    if(profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) != 0)
+    if(!usesJmvRuntime(profile.profileId))
         return reject(QStringLiteral("The active profile does not support Play from Here."));
     if(!syntheticMapIdentity
        && zoneType.compare("game", Qt::CaseInsensitive) != 0)
@@ -2328,7 +2328,7 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
 
 bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* error)
 {
-    const bool isJmv = input.profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isJmv = usesJmvRuntime(input.profile.profileId);
     const bool isBase = input.profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     m_baseProbe = isBase;
     m_usesRuntimeHost = isJmv || isBase;

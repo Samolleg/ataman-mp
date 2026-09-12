@@ -28,6 +28,14 @@ public:
     ~ItemSpellConstructorDialog() override;
     QString code() const;
     void setCode(const QString& code);
+    // Shared by the constructor and Add from database. Caller owns the result
+    // and must make its preview's shared GL context current before calling.
+    // worldObject requests a persistent ordinary object, using only visuals
+    // representable by native model/parts/texture fields, or returns null.
+    static CWorldObj* buildItemPreview(const ItemSpellConstructorCatalog& catalog,
+        const SConstructorItem& item, const SConstructorMaterial* material,
+        const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot,
+        bool worldObject = false, QString* diagnostic = nullptr);
 
 private slots:
     void refreshItemFilter();

@@ -18,6 +18,7 @@ SOURCES += \
     ../source/core/log.cpp \
     ../source/ui/database_editor_dialog.cpp \
     ../source/resources/profile_database.cpp \
+    ../source/resources/database_map_catalog.cpp \
     ../source/runtime/providers/profile_database_provider_support.cpp \
     ../source/runtime/providers/base_profile_database_provider.cpp \
     ../source/runtime/providers/jmv_profile_database_provider.cpp

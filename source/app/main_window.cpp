@@ -3893,7 +3893,7 @@ void MainWindow::updateMapTestAction()
         return;
     }
     const SResourceProfileEvaluation profile = activeResourceProfile();
-    const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isJmv = usesJmvRuntime(profile.profileId);
     const bool isBaseProbe = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     CMob* stagingMob = mapTestStagingMob();
     const bool hasMobs = m_pView && m_pView->hasActiveMob()
@@ -4107,7 +4107,7 @@ void MainWindow::launchCurrentMapTest()
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     const SResourceProfileEvaluation profile = activeResourceProfile();
-    const bool isJmv = profile.profileId.compare("jamais-vu", Qt::CaseInsensitive) == 0;
+    const bool isJmv = usesJmvRuntime(profile.profileId);
     const bool isBase = profile.profileId.compare("base-game", Qt::CaseInsensitive) == 0;
     if(hotReloadRequested && !isJmv)
     {

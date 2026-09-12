@@ -1,6 +1,7 @@
 #include "item_spell_constructor_dialog.h"
 
 #include "database_document.h"
+#include "database_map_catalog.h"
 #include "game_text_catalog.h"
 #include "objects/worldobj.h"
 #include "runtime/providers/profile_visual_resolver_support.h"
@@ -417,22 +418,46 @@ void ItemSpellConstructorDialog::openItemSpellInTab()
     m_selectedRunes->clear();for(const QString&code:parsed.runeCodes)if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));updateOutput();
 }
 
-void ItemSpellConstructorDialog::updateItemPreview()
+CWorldObj* ItemSpellConstructorDialog::buildItemPreview(
+    const ItemSpellConstructorCatalog& catalog, const SConstructorItem& item,
+    const SConstructorMaterial* material,
+    const QSharedPointer<const SProfileDatabaseSnapshot>& snapshot, bool worldObject,
+    QString* diagnostic)
 {
-    const auto* item=currentItem();
-    if(!item)return;
-    const bool resetForCategory=
-        ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset(
-            m_itemPreviewCategory,item->category);
-    if(m_itemPreview&&m_previewObject&&m_catalog.isJmvProfile()
-       &&item->category!=QStringLiteral("Quick Item")&&currentMaterial()
-       &&m_databaseSnapshot)
+    if(diagnostic) diagnostic->clear();
+    auto mapObject = [&](const QString& model, const QString& texture, const QStringList& parts) -> CWorldObj* {
+        const QString mapTexture = databaseItemMapTextureName(texture);
+        const auto* textureList = CTextureList::getInstance();
+        bool exactMatch = false;
+        for(const QString& available : textureList->textureList())
+            if(available.compare(mapTexture, Qt::CaseInsensitive) == 0)
+            { exactMatch = true; break; }
+        if(!exactMatch || !CTextureList::getInstance()->hasTexture(mapTexture, model))
+        {
+            if(diagnostic) *diagnostic = tr("Map texture %1.mmp is missing or cannot be loaded. Add the converted texture to the active profile resources.").arg(mapTexture);
+            return nullptr;
+        }
+        CWorldObj defaults;
+        SDatabaseMapEntry entry;
+        entry.category = EDatabaseMapCategory::Item;
+        entry.name = ItemSpellConstructorCatalog::formatItemCode(
+            item.name, material ? material->name : QString());
+        entry.model = model; entry.primaryTexture = mapTexture;
+        QJsonObject data;
+        if(!applyDatabaseMapEntry(entry, defaults.toJson(), &data)) return nullptr;
+        data.insert("Object parts", QJsonArray::fromStringList(parts));
+        auto* object = new CWorldObj(data);
+        object->loadFigure(); object->loadTexture();
+        return object;
+    };
+    if(catalog.isJmvProfile() && item.category != QStringLiteral("Quick Item")
+       && material && snapshot)
     {
-        const QString model=m_catalog.previewModelName();
+        const QString model=catalog.previewModelName();
         SEquipmentLayoutRequest request;
-        request.profileId=m_profileId;
-        request.runtimeManifestId=m_databaseSnapshot->runtimeManifestId;
-        request.prototype=item->name;
+        request.profileId=snapshot->profileId;
+        request.runtimeManifestId=snapshot->runtimeManifestId;
+        request.prototype=item.name;
         request.model=model;
         request.assemblyParts=CObjectList::getInstance()->figurePartNames(model);
         request.dataSource=EUnitVisualDataSource::ProfileDatabase;
@@ -444,12 +469,12 @@ void ItemSpellConstructorDialog::updateItemPreview()
                                            ignoredComplexion);
         }
         const QString reference=ItemSpellConstructorCatalog::formatItemCode(
-            item->name,currentMaterial()->name);
-        if(item->category==QStringLiteral("Weapon"))request.weapons<<reference;
+            item.name,material->name);
+        if(item.category==QStringLiteral("Weapon"))request.weapons<<reference;
         else request.armor<<reference;
         QJsonObject resolved;
         const SRuntimeProviderResult resolution=resolveEquipmentLayout(
-            m_providerId,true,SJmvEquipmentGates(),m_databaseSnapshot,request,&resolved);
+            snapshot->providerId,true,SJmvEquipmentGates(),snapshot,request,&resolved);
         QStringList components;
         for(const QJsonValue& value:resolved.value("components").toArray())
             components<<value.toString();
@@ -457,7 +482,7 @@ void ItemSpellConstructorDialog::updateItemPreview()
         const QJsonObject textureObject=resolved.value("componentTextures").toObject();
         for(auto it=textureObject.constBegin();it!=textureObject.constEnd();++it)
             textures.insert(it.key(),it.value().toString());
-        const QString primary=m_catalog.previewTextureName();
+        const QString primary=catalog.previewTextureName();
         const QJsonArray bodyLayers=resolved.value("bodyTextureLayers").toArray();
         QStringList bodyTextureLayers;
         for(const QJsonValue& value:bodyLayers)bodyTextureLayers<<value.toString();
@@ -466,28 +491,55 @@ void ItemSpellConstructorDialog::updateItemPreview()
             emissions.insert(value.toString().toLower(),QVector3D(1,1,1));
         if(resolution.success&&!components.isEmpty())
         {
-            m_itemPreview->makeCurrent();
-            static_cast<CConstructorPreviewObject*>(m_previewObject)->applyResolvedItem(
-                model,primary,components,textures,bodyTextureLayers,emissions);
-            m_itemPreview->attachNode(m_previewObject,false);
-            if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();
-            m_itemPreview->updateGL();
-            if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
-            return;
+            if(worldObject)
+            {
+                QSet<QString> uniqueTextures;
+                for(const QString& part : components)
+                    uniqueTextures.insert(textures.value(part, primary));
+                if(uniqueTextures.size() == 1 && bodyTextureLayers.isEmpty())
+                    return mapObject(model, *uniqueTextures.constBegin(), components);
+                // Only persist a visual expressible by ordinary map fields.
+                // Otherwise try the standalone inventory figure below.
+            }
+            else
+            {
+                auto* preview = new CConstructorPreviewObject;
+                preview->applyResolvedItem(model,primary,components,textures,bodyTextureLayers,emissions);
+                return preview;
+            }
         }
     }
-    const QString figure=ItemSpellConstructorCatalog::itemFigureName(*item);
-    const QStringList textures=m_catalog.itemTextureCandidates(*item,currentMaterial());
-    if(m_itemPreview&&!figure.isEmpty()&&!textures.isEmpty())
+    const QString figure = ItemSpellConstructorCatalog::itemFigureName(item);
+    const QStringList textures = catalog.itemTextureCandidates(item,material);
+    if(figure.isEmpty() || textures.isEmpty()) return nullptr;
+    ei::CFigure* raw = CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
+    if(!raw) return nullptr;
+    if(worldObject)
     {
-        if(m_previewObject)
-        {
-            m_itemPreview->makeCurrent();
-            ei::CFigure* raw=CObjectList::getInstance()->getFigureResource(figure+QStringLiteral(".fig"));
-            if(raw){static_cast<CConstructorPreviewObject*>(m_previewObject)->applyStandaloneItem(raw,figure,textures,ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(*item),ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(*item));m_itemPreview->attachNode(m_previewObject,false);if(!m_itemPreviewInitialized||resetForCategory)resetItemCamera();}else m_itemPreview->attachNode(nullptr,false);
-        }
-        m_itemPreview->updateGL();
-    }else if(m_itemPreview)m_itemPreview->attachNode(nullptr,false);
+        for(const QString& texture : textures)
+            if(auto* object = mapObject(figure, texture, {})) return object;
+        return nullptr;
+    }
+    auto* preview = new CConstructorPreviewObject;
+    preview->applyStandaloneItem(raw,figure,textures,
+        ItemSpellConstructorCatalog::preservesStandaloneTextureUvs(item),
+        ItemSpellConstructorCatalog::normalizesStandaloneTextureAtlasCell(item));
+    return preview;
+}
+
+void ItemSpellConstructorDialog::updateItemPreview()
+{
+    const auto* item=currentItem();
+    if(!item || !m_itemPreview) return;
+    const bool resetForCategory=ItemSpellConstructorCatalog::previewCategoryNeedsCameraReset(
+        m_itemPreviewCategory,item->category);
+    m_itemPreview->makeCurrent();
+    m_itemPreview->attachNode(nullptr,false);
+    delete m_previewObject;
+    m_previewObject=buildItemPreview(m_catalog,*item,currentMaterial(),m_databaseSnapshot);
+    m_itemPreview->attachNode(m_previewObject,false);
+    if(m_previewObject && (!m_itemPreviewInitialized || resetForCategory)) resetItemCamera();
+    m_itemPreview->updateGL();
     if(m_itemSpellBadge){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(m_itemSpell->text());const auto*spell=parsed.valid?m_catalog.findSpell(parsed.prototypeCode):nullptr;if(spell){m_itemSpellBadge->setPixmap(spellPixmap(m_catalog,*spell,parsed.runeCodes,140));m_itemSpellBadge->show();m_itemSpellBadge->raise();}else m_itemSpellBadge->hide();}
 }
 

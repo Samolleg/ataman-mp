@@ -634,6 +634,7 @@ private slots:
     void terrainAtlasRecoveryStoreDeduplicatesExactPayloads();
     void publishedAtlasArchiveBindingSelectsCoherentProfileSource();
     void externalPublishedAtlasArchiveBindingProbe();
+    void installedHdAtlasAllowlistProbe();
     void externalLegacyAdjacentAtlasProfileCollisionProbe();
     void externalReopenedDraftTopologyProbe();
     void externalModernDraftAdoptionPairProbe();
@@ -10808,6 +10809,13 @@ void EnduranceDocumentTests::globalMaterialBrushSourceIsPayloadCoherentAndPrefer
 
 void EnduranceDocumentTests::globalTerrainSourcesUseOnlyApprovedHdBindings()
 {
+    const QByteArray zone1Repaint = "a44f78f46933dfba29125ec6867c3541acb6be56d93083afa6a6ce9616b5f997";
+    QVERIFY2(!CTerrainAtlasPresetCatalog::exactProfile("zone1", zone1Repaint, 512)
+                  .slotDefinitions.isEmpty(), "User-approved Zone1 repaint is not paintable");
+    QVERIFY(CTerrainAtlasPresetCatalog::exactProfile("zone1", QByteArray(64, 'f'), 512)
+                .slotDefinitions.isEmpty());
+    QVERIFY(CTerrainAtlasPresetCatalog::exactProfile("zone1", zone1Repaint, 511)
+                .slotDefinitions.isEmpty());
     QFile resource(QStringLiteral(":/terrain_atlas_presets.json"));
     QVERIFY(resource.open(QIODevice::ReadOnly));
     const QJsonObject catalog = QJsonDocument::fromJson(
@@ -10840,12 +10848,15 @@ void EnduranceDocumentTests::globalTerrainSourcesUseOnlyApprovedHdBindings()
         CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
     QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
     int materialSources = 0;
+    bool repaintMaterialSource = false;
     for(const STerrainGlobalMaterialFamily& family : families)
         for(const QVector<STerrainGlobalMaterialSource>* list :
                 {&family.sources, &family.thumbnailSources})
             for(const STerrainGlobalMaterialSource& source : *list)
             {
                 ++materialSources;
+                repaintMaterialSource |= source.mprNamespace.compare("zone1", Qt::CaseInsensitive) == 0
+                    && source.atlasPixelSha256 == zone1Repaint;
                 const QString name = source.mprNamespace.toCaseFolded();
                 QVERIFY2(hdByNamespace.value(name).contains(
                              source.atlasPixelSha256),
@@ -10860,12 +10871,16 @@ void EnduranceDocumentTests::globalTerrainSourcesUseOnlyApprovedHdBindings()
                          "Original-tier artwork can enter HD Modern generation");
             }
     QVERIFY(materialSources > 0);
+    QVERIFY(repaintMaterialSource);
 
     int transitionSources = 0;
+    bool repaintTransitionSource = false;
     for(const STerrainGlobalTransitionSource& source :
             CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
     {
         ++transitionSources;
+        repaintTransitionSource |= source.mprNamespace.compare("zone1", Qt::CaseInsensitive) == 0
+            && source.atlasPixelSha256 == zone1Repaint;
         const QString name = source.mprNamespace.toCaseFolded();
         QVERIFY2(hdByNamespace.value(name).contains(
                      source.atlasPixelSha256),
@@ -10879,6 +10894,7 @@ void EnduranceDocumentTests::globalTerrainSourcesUseOnlyApprovedHdBindings()
                  "Original-tier authored transition can enter HD Modern painting");
     }
     QVERIFY(transitionSources > 0);
+    QVERIFY(repaintTransitionSource);
 }
 
 void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBinding()
@@ -12067,6 +12083,83 @@ void EnduranceDocumentTests::publishedAtlasArchiveBindingSelectsCoherentProfileS
              QFileInfo(expectedPath).canonicalFilePath());
     QCOMPARE(binding.decodedAtlasPixelSha256,
              CTerrainAtlasProfileInference::pixelSha256(expectedTiles));
+}
+
+void EnduranceDocumentTests::installedHdAtlasAllowlistProbe()
+{
+    const QString archive = qEnvironmentVariable("EI_TEST_HD_ATLAS_ARCHIVE");
+    if(archive.isEmpty()) QSKIP("Set EI_TEST_HD_ATLAS_ARCHIVE for read-only HD catalog coverage");
+    QFile resource(":/terrain_atlas_presets.json");
+    QVERIFY(resource.open(QIODevice::ReadOnly));
+    const auto presets = QJsonDocument::fromJson(resource.readAll()).object().value("presets").toArray();
+    QJsonArray measured;
+    QMap<QString, QByteArray> actualByNamespace;
+    QStringList missing;
+    for(const auto& value : presets)
+    {
+        const auto preset = value.toObject();
+        const QString name = preset.value("namespace").toString();
+        const int slotCount = preset.value("slotCount").toInt();
+        // A deliberately unknown expected hash leaves the native decoder's
+        // measured complete-atlas identities available without weakening binding.
+        const auto probe = CTerrainAtlasArchiveBindingResolver::findExactArchive(
+            {archive}, name, (slotCount + 63) / 64, slotCount, QByteArray(64, '0'));
+        QVERIFY2(!probe.completeArchivePixelSha256.isEmpty(), qPrintable(name + ": " + probe.error));
+        const QByteArray actual = probe.completeArchivePixelSha256.first();
+        actualByNamespace.insert(name.toCaseFolded(), actual);
+        QJsonObject row;
+        row.insert("namespace", name); row.insert("slotCount", slotCount);
+        row.insert("pixelSha256", QString::fromLatin1(actual));
+        measured.append(row);
+        if(CTerrainAtlasPresetCatalog::exactProfile(name, actual, slotCount).slotDefinitions.isEmpty())
+            missing.append(name);
+    }
+    const QString outputPath = qEnvironmentVariable("EI_TEST_HD_ATLAS_REPORT");
+    if(!outputPath.isEmpty())
+    {
+        QFile output(outputPath);
+        QVERIFY(output.open(QIODevice::WriteOnly));
+        const QByteArray bytes = QJsonDocument(measured).toJson();
+        QCOMPARE(output.write(bytes), qint64(bytes.size()));
+    }
+    qInfo() << "Native decoded HD atlas namespaces:" << measured.size() << "not approved:" << missing.size();
+    QVERIFY2(missing.isEmpty(), qPrintable("HD atlases missing exact approval: " + missing.join(", ")));
+    CValidationReport report;
+    const auto families = CTerrainAtlasPresetCatalog::globalUniformFamilies(&report);
+    int available = 0;
+    for(const auto& family : families)
+    {
+        bool found = false;
+        for(const auto& source : family.sources)
+            found |= actualByNamespace.value(source.mprNamespace.toCaseFolded()) == source.atlasPixelSha256;
+        QVERIFY2(found, qPrintable("No exact HD uniform source for " + family.name));
+        ++available;
+    }
+    QSet<QString> transitionNamespaces;
+    for(const auto& source : CTerrainAtlasPresetCatalog::globalAuthoredTransitions(&report))
+        if(actualByNamespace.value(source.mprNamespace.toCaseFolded()) == source.atlasPixelSha256)
+            transitionNamespaces.insert(source.mprNamespace.toCaseFolded());
+    QCOMPARE(transitionNamespaces.size(), measured.size());
+    QVERIFY2(!report.hasErrors(), qPrintable(report.toText()));
+    qInfo() << "All global material families have exact HD sources:" << available;
+    const QString mapDirectory = qEnvironmentVariable("EI_TEST_HD_MAP_DIRECTORY");
+    if(!mapDirectory.isEmpty())
+    {
+        const auto maps = QDir(mapDirectory).entryInfoList({"*.mpr"}, QDir::Files);
+        QVERIFY(!maps.isEmpty());
+        for(const auto& file : maps)
+        {
+            CMprDocument map;
+            CValidationReport mapReport;
+            QVERIFY2(map.load(file, &mapReport), qPrintable(mapReport.toText()));
+            const QString name = map.mapInfo().innerNamespace;
+            const auto profile = CTerrainAtlasPresetCatalog::exactProfile(
+                name, actualByNamespace.value(name.toCaseFolded()),
+                int(map.mapInfo().textureCount) * 64);
+            QVERIFY2(!profile.slotDefinitions.isEmpty(), qPrintable("Uncovered map atlas: " + file.fileName() + " -> " + name));
+        }
+        qInfo() << "Installed MPR maps with exact approved HD atlas:" << maps.size();
+    }
 }
 
 void EnduranceDocumentTests::externalPublishedAtlasArchiveBindingProbe()

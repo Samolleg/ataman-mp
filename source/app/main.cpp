@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "database_creation_check.h"
 #include <QApplication>
 #include <QProgressBar>
 #include <QStyleFactory>
@@ -516,6 +517,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
+    QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
     QCommandLineOption resourceNavigationCheckOption("resource-navigation-check",
         "Run the sorted Resource Browser reference-navigation regression check.");
     QCommandLineOption testRunReportOption("test-run-report",
@@ -545,6 +548,8 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(databaseCreationCheckOption);
+    parser.addOption(databasePreviewCheckOption);
     parser.addOption(resourceNavigationCheckOption);
     parser.addOption(testRunReportOption);
     parser.addOption(againstOption);
@@ -592,20 +597,25 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool databasePreviewCheck = parser.isSet(databasePreviewCheckOption);
+    const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
     if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck
-       && !resourceNavigationCheck
+       && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0)
-            + (resourceNavigationCheck ? 1 : 0)
+            + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
     }
+
+    if(databasePreviewCheck) return runDatabasePreviewCheck();
+    if(databaseCreationCheck) return runDatabaseCreationCheck();
 
     if(resourceNavigationCheck)
     {

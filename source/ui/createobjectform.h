@@ -6,6 +6,8 @@
 
 #include "layout_components/tablemanager.h"
 #include "node.h"
+#include "database_map_catalog.h"
+#include "item_spell_constructor.h"
 
 namespace Ui {
 class CCreateObjectForm;
@@ -13,6 +15,12 @@ class CCreateObjectForm;
 
 class CView;
 class CPreview;
+class CMob;
+class QComboBox;
+class QLineEdit;
+class QListWidget;
+class QLabel;
+class QCheckBox;
 
 ///
 /// \brief The CCreateObjectForm class provides a form for creating a new object in the scene
@@ -46,6 +54,9 @@ protected:
 private:
     void initViewWidget();
     void updateTable();
+    void refreshDatabase();
+    void filterDatabase();
+    void selectDatabaseEntry();
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -55,6 +66,16 @@ private:
     CView* m_pView;
     CPreview * m_pPreview;
     QUndoStack* m_pUndoStack;
+    QComboBox* m_databaseCategory{nullptr};
+    QComboBox* m_itemMaterial{nullptr};
+    ei::ItemSpellConstructorCatalog m_itemCatalog;
+    QLineEdit* m_databaseSearch{nullptr};
+    QListWidget* m_databaseList{nullptr};
+    QLabel* m_databaseDetails{nullptr};
+    QCheckBox* m_advanced{nullptr};
+    QVector<ei::SDatabaseMapEntry> m_databaseEntries;
+    quint64 m_databaseGeneration{0};
+    bool m_databaseMode{true};
 };
 
 #endif // CREATEOBJECTFORM_H
