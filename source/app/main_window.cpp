@@ -6634,7 +6634,10 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                          targetMobProjectionReport);
         return;
     }
-    if(!isExitAllowed(true))
+    // Only neighbor-to-neighbor navigation retains the multi-MPR sculpt
+    // session. An ordinary Maps-browser open must run the normal cohort
+    // save/discard prompt instead of silently carrying edits to another map.
+    if(!isExitAllowed(!focusFirstEntrance))
         return;
     // The save prompt is modal, so an external process can remove either
     // catalog file while the user is deciding. Recheck before the first

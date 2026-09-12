@@ -4716,7 +4716,7 @@ class R162Tier4DecisionTests(unittest.TestCase):
             "1E0609597348F6405BC2AF04870773C036DB779A1D74FD3D1AE957D2ED4E9DF3",
             decisions["catalogOutputSha256"])
         self.assertEqual(
-            "50CA765659E721D03AB896A78962AB675FDE7BEFF537675580DC338F63488104",
+            "ECA998D6955B9835DA720143DF266D6C3F6547A01468AFA60C4E24F3E480F84C",
             hashlib.sha256(catalog_bytes).hexdigest().upper())
 
         reviewed = decisions["reviewedCards"]

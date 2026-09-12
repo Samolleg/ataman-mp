@@ -96,7 +96,7 @@ void CView::chooseWorldTerrainMaps()
     syncWorldTerrainActive();
     QDialog dialog(this); dialog.setWindowTitle(tr("World terrain maps"));
     QVBoxLayout* layout=new QVBoxLayout(&dialog);
-    QCheckBox* enabled=new QCheckBox(tr("Изменять рельеф соседних карт"),&dialog);
+    QCheckBox* enabled=new QCheckBox(tr("Edit neighboring-map terrain"),&dialog);
     enabled->setChecked(m_worldTerrainEnabled);layout->addWidget(enabled);
     QLabel* description=new QLabel(tr("The active map is editable. Check each neighbor you permit the brush to change. Unchecked maps stay protected. Touching shifted boundaries are reconciled along the entire connected seam reached by the brush, including outside its radius. This can straighten a long boundary. Saved heights use each MPR's precision."),&dialog);
     description->setWordWrap(true);layout->addWidget(description);

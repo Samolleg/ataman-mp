@@ -225,7 +225,7 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         mpr_preflight = handler.index("CMprDocument targetMprDocument")
         mob_preflight = handler.index("CMobDocument targetMobDocument")
         mob_projection = handler.index("CMob::validateEditableProjection")
-        dirty_prompt = handler.index("if(!isExitAllowed())")
+        dirty_prompt = handler.index("if(!isExitAllowed(!focusFirstEntrance))")
         post_prompt_recheck = handler.index("targetMpr.refresh();")
         first_mutation = handler.index("m_undoStack->clear()")
         self.assertLess(mpr_preflight, dirty_prompt)
@@ -235,6 +235,18 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertLess(post_prompt_recheck, first_mutation)
         self.assertLess(dirty_prompt, first_mutation)
         self.assertIn("The current workspace was not changed.", handler)
+
+    def test_only_neighbor_navigation_retains_world_terrain_session(self):
+        main_window = source("source/app/main_window.cpp")
+        self.assertIn(
+            "openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true,",
+            main_window,
+        )
+        self.assertIn(
+            "openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, false,",
+            main_window,
+        )
+        self.assertIn("isExitAllowed(!focusFirstEntrance)", main_window)
 
     def test_user_hint_explains_single_and_double_clicks(self):
         view_cpp = source("source/render/view.cpp")

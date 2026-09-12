@@ -10568,6 +10568,10 @@ Do you want to %3?</source>
             <translation>Карты для общей кисти</translation>
         </message>
         <message>
+            <source>Edit neighboring-map terrain</source>
+            <translation>Изменять рельеф соседних карт</translation>
+        </message>
+        <message>
             <source>Retained modified MPRs:
 %1</source>
             <translation>Сохранённые в памяти изменённые MPR:

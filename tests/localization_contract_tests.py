@@ -42,6 +42,8 @@ def main():
         encoding="utf-8")
     landscape_tools = (ROOT / "source/ui/landscape_tools.cpp").read_text(
         encoding="utf-8")
+    world_terrain = (ROOT / "source/render/view_world_terrain.cpp").read_text(
+        encoding="utf-8")
     create_object = (ROOT / "source/ui/createobjectform.cpp").read_text(
         encoding="utf-8")
     build = (ROOT / "scripts/build_release.ps1").read_text(encoding="utf-8")
@@ -96,6 +98,8 @@ def main():
             "the Smooth tool and smooth falloff must have separate translations")
     require('text != "<choose object type>"' not in create_object,
             "Create Object must not compare localized display text to an English literal")
+    require(not re.search(r"[А-Яа-яЁё]", world_terrain),
+            "world-terrain UI source must stay English and use the Russian catalog")
     require("if(!m_objType.values().contains(object))" in create_object,
             "Create Object must reject placeholder or unknown translated selections")
     require("if(m_objType.values().contains(text))" in create_object,

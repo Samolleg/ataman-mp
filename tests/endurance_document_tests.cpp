@@ -10482,7 +10482,10 @@ void EnduranceDocumentTests::authoredPresetCatalogAllEntriesCompile()
         totalFamilies += profile.families.size();
     }
     QCOMPARE(totalSlots, 16576);
-    QCOMPARE(bindings, 58);
+    // PR 6 adds the reviewed Zone 1 revision, then the all-map audit adds the
+    // remaining 34 exact installed HD revisions. Semantic slot data is
+    // unchanged; the catalog now carries 35 additional binding identities.
+    QCOMPARE(bindings, 93);
     // The synchronized R162 authority keeps every currently referenced
     // family record and its reviewed paintability classification.
     QCOMPARE(totalFamilies, 415);
