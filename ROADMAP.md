@@ -600,8 +600,12 @@ foundation as one coherent `0.3.0` release.
   document suite 10 passed, sculpt 13 passed, widgets 16 passed/2 skips, native
   GPU 3 passed. Release/x86 built; full UI check still `0xC0000005`.
   [Combined R5 evidence](docs/validation/WORLD_TERRAIN_SCULPT_R5.md).
-  Next: deliver R5 with exact base in BUILD_INFO, then user validates both painting
-  and the original moving-seam scenario. Parent remains open.
+  Delivered `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r5-test`, package
+  commit `e327897ad94c8f1fb1b0a0292a0871791a7c0b0d`; requested be440676 is a
+  verified ancestor and explicitly recorded in BUILD_INFO. Finalizer/distribution
+  validation passed and all permanent-copy hashes matched. PR #7 updated;
+  no main merge or force-push. Next: user validates both painting and the original
+  moving-seam scenario. Parent remains open.
 ### Related experiment: EI-TERRAIN-PALETTE-001
 
 - User authorized modern-palette pixel-hash relaxation on the latest PR (#6,
