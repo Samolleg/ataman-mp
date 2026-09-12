@@ -523,7 +523,28 @@ foundation as one coherent `0.3.0` release.
   Permanent R2 finalizer/distribution validation passed; all copied file hashes
   match staging. Packaged implementation: `439a46376c8f14d75fac88fe81be18ca5020809a`
   in draft PR #7. Next: repeat the recorded scene in R2;
-  exact-scene visual acceptance and the parent remain open.
+  User now confirms the original two-map problem disappeared in R2. This
+  recorded two-map regression is accepted; full parent acceptance remains open.
+- EI-WORLD-SCULPT-001-TRIPLE (open, necessary follow-up): recording
+  `20260912-1239-41.0343493.mp4` shows a gap with zone1, zone2 and zone3obr
+  modified, both neighbors enabled. R2 logs confirm origins (0,0), (192,288),
+  (352,63.5). Read-only boundary audit: zone1/zone2 share 161 XY vertices;
+  zone3 shares zero with either because its grid is shifted by half a step.
+  Current stamp groups exact coincident boundary vertices only; zone3 therefore
+  smooths independently, as previously approved. This is a distinct geometric
+  limitation from the accepted R2 GPU fix. No new implementation or installed
+  map mutation during diagnosis. Owner now explicitly authorizes coordinated
+  boundary heights inside the brush, including local straightening; this replaces
+  the prior independent-edge policy for touching shifted grids. Map placement,
+  protected maps and vertices outside the brush stay unchanged. Implemented
+  affine profiles on connected complete shifted boundary segments inside the
+  brush. Synthetic before-failure/after-pass, history and cohort save/reopen,
+  both axes/four modes/range saturation/order/protection checks passed. Installed
+  triple calculated in memory: max covered gap 0.000254583, within quantization.
+  Core 12 passed; widgets 16 passed/2 offscreen skips; native GPU 3 passed;
+  release built. [R3 validation and scope](docs/validation/WORLD_TERRAIN_SCULPT_R3.md).
+  Brush-rim crossing cells retain a transition to fixed outside geometry; they
+  are not guaranteed gap-free. Next: finalize R3 and repeat the video scene.
 - Related deferred robustness hypothesis: exact double XY grouping can differ
   for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the

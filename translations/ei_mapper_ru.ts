@@ -10534,8 +10534,8 @@ Save all, discard the entire session, or cancel?</source>
             <translation>Сначала сохраните вместе все карты общей кисти, затем сохраняйте отдельный черновик или публикуйте карту.</translation>
         </message>
         <message>
-            <source>The active map is editable. Check each neighbor you permit the brush to change. Unchecked maps stay protected. Misaligned grids are edited independently; coincident boundary heights are averaged only inside the brush. Saved heights use each MPR&apos;s precision.</source>
-            <translation>Активная карта доступна для редактирования. Отметьте соседние карты, которые разрешаете изменять кистью. Неотмеченные карты защищены. Несовпадающие сетки редактируются независимо; высоты совпадающих граничных вершин усредняются только внутри кисти. Точность сохранения определяется форматом каждой MPR.</translation>
+            <source>The active map is editable. Check each neighbor you permit the brush to change. Unchecked maps stay protected. Touching shifted boundaries are straightened together on complete segments inside the brush. Boundary segments crossing the brush rim transition to unchanged terrain. Saved heights use each MPR&apos;s precision.</source>
+            <translation>Активная карта доступна для редактирования. Отметьте соседние карты, которые разрешаете изменять кистью. Неотмеченные карты защищены. Соприкасающиеся смещённые границы согласуются с локальным выпрямлением целых отрезков внутри кисти. На краю кисти остаётся переход к неизменённому рельефу. Точность сохранения определяется форматом каждой MPR.</translation>
         </message>
         <message>
             <source>Save the affected world MPRs together before creating a separate copy.</source>
