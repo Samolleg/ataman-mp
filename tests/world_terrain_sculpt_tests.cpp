@@ -36,6 +36,38 @@ class WorldTerrainTests : public QObject
     double z(CWorldTerrainSession& s,const QString& id,int x,int y)
     { auto& t=s.documents[id]->terrain;return t.height(x,y)*double(t.maxZ())/65535; }
 private slots:
+    void movingStaggeredStrokeKeepsWholeTouchedSeamClosed()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");add(s,"c");
+        auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{0,32}),target(s,"c",{32,16.5})};
+        STerrainHeightCommand peak;STerrainHeightDelta d;
+        d.globalX=1;d.globalY=15;d.before=10000;d.after=50000;peak.deltas.append(d);
+        QVERIFY(s.documents["c"]->terrain.apply(peak,true));
+        QMap<QString,QByteArray> before;
+        for(auto it=s.documents.cbegin();it!=s.documents.cend();++it) before[it.key()]=it.value()->terrain.sectorPayload(0,0);
+        SWorldTerrainStroke whole;bool expanded=false;
+        double worst=0,where=0;
+        for(double center:{32.0,33.0,34.0})
+        {
+            STerrainBrush brush;brush.centerX=32;brush.centerY=center;brush.radius=5;
+            QString error;const auto stamp=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::Smooth,0,0,1);
+            QVERIFY(s.apply(stamp,true,&error));
+            whole.append(stamp);
+            for(const auto& t:targets) for(const auto& delta:stamp.maps[t.id].deltas)
+                expanded=expanded || std::hypot(t.origin.x()+delta.globalX-32,t.origin.y()+delta.globalY-center)>5;
+            for(double y=16.5;y<=48.5;y+=0.125)
+            {
+                const auto sample=[&](const QString& id,int x,double local){int i=qMin(31,int(std::floor(local)));double f=local-i;return z(s,id,x,i)*(1-f)+z(s,id,x,i+1)*f;};
+                double gap=qAbs((y<32?sample("a",32,y):sample("b",32,y-32))-sample("c",0,y-16.5));
+                if(gap>worst){worst=gap;where=y;}
+            }
+        }
+        qInfo("Moving stroke: maximum gap %.9f at y %.3f",worst,where);
+        QVERIFY2(worst<200.0/65535,"Moving brush must not leave a crack behind at a previously covered rim");
+        QVERIFY(expanded);s.record(whole);QString error;QVERIFY(s.undo(&error));
+        for(auto it=s.documents.cbegin();it!=s.documents.cend();++it) QCOMPARE(it.value()->terrain.sectorPayload(0,0),before[it.key()]);
+        QVERIFY(s.redo(&error));
+    }
     void installedTripleReadOnly()
     {
         const QString directory=qEnvironmentVariable("EI_WORLD_SCULPT_MAPS");
@@ -50,20 +82,21 @@ private slots:
             QVERIFY2(s.load(path,&error),qPrintable(error));
             targets.append(target(s,CWorldTerrainSession::key(path),origins[i]));
         }
-        STerrainBrush brush;brush.centerX=352;brush.centerY=288;brush.radius=5;
+            STerrainBrush brush;brush.centerX=352;brush.centerY=288;brush.radius=5;
         QElapsedTimer timer;timer.start();
         for(int pass=0;pass<8;++pass)
         {
+            brush.centerY=288+pass;
             const auto stamp=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::Smooth,0,0,1);
             QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));
         }
         double worst=0;
-        for(double y=285;y<=291;y+=0.125)
+        for(double y=63.5;y<=383.5;y+=0.125)
         {
             const int left=y<288?0:1;
             const auto sample=[&](int map,int x){
                 const auto& t=targets[map];const double local=y-t.origin.y();
-                const int i=int(std::floor(local));const double f=local-i;
+                const int i=qMin(t.model->vertexCountY()-2,int(std::floor(local)));const double f=local-i;
                 return z(s,t.id,x,i)*(1-f)+z(s,t.id,x,i+1)*f;
             };
             worst=qMax(worst,qAbs(sample(left,targets[left].model->vertexCountX()-1)-sample(2,0)));
@@ -94,10 +127,10 @@ private slots:
             }
             QString error;QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));s.record(stamp);
             // Compare actual piecewise-linear surfaces, not just coincident vertices.
-            for(double y=29;y<=35;y+=0.125)
+            for(double y=16.5;y<=48.5;y+=0.125)
             {
                 auto interpolate=[&](const QString& id,int x,double localY){
-                    int i=int(std::floor(localY));double f=localY-i;
+                    int i=qMin(31,int(std::floor(localY)));double f=localY-i;
                     return horizontal ? z(s,id,i,x)*(1-f)+z(s,id,i+1,x)*f
                                       : z(s,id,x,i)*(1-f)+z(s,id,x,i+1)*f;
                 };
@@ -109,7 +142,8 @@ private slots:
             {
                 const auto t=*std::find_if(targets.begin(),targets.end(),[&](const SWorldTerrainTarget& t){return t.id==it.key();});
                 for(const auto& d:it->deltas)
-                    QVERIFY(std::hypot(t.origin.x()+d.globalX-32,t.origin.y()+d.globalY-32)<=5);
+                    QVERIFY(std::hypot(t.origin.x()+d.globalX-32,t.origin.y()+d.globalY-32)<=5
+                            || d.globalX==0 || d.globalX==32 || d.globalY==0 || d.globalY==32);
             }
             QVERIFY(s.undo(&error));
             for(const auto& doc:s.documents)
@@ -148,6 +182,8 @@ private slots:
         QVERIFY(protectedStamp.isEmpty());QVERIFY(alone.isEmpty());
         b.editable=true;
         QVERIFY(makeWorldTerrainStamp({a,b},brush,EWorldSculptMode::Smooth,0,0,0).isEmpty());
+        auto distantBrush=brush;distantBrush.centerX=16;
+        QVERIFY(makeWorldTerrainStamp({a,b},distantBrush,EWorldSculptMode::Smooth,0,0,1).isEmpty());
         for(double x:{31.75,32.25}) // overlap and gap are not a shared boundary
         {
             b.origin.setX(x);

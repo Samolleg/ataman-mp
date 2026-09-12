@@ -549,6 +549,29 @@ foundation as one coherent `0.3.0` release.
   distribution-validated; all copy hashes matched. Packaged implementation
   `62eb8516303c924b6a5fbab55585726fa9a38faa` is in draft PR #7. R2 preserved
   for comparison. Next: user repeats the video scene in R3; parent remains open.
+- EI-WORLD-SCULPT-001-MOVING-RIM (open, blocks original outcome): owner reports
+  remaining strips in `20260912-1312-16.8301064.mp4`. R3 visual acceptance failed.
+  Added local failing regression `movingStaggeredStrokeKeepsWholeTouchedSeamClosed`:
+  initially equal flat boundary heights, an interior peak, three radius-5 smooth
+  stamps with centers at y=32/33/34. Whole touched seam sampled every 1/8 unit;
+  maximum gap 0.940718700 at y=27.5. Existing center-only checks missed this.
+  First wrong decision: excluding rim-crossing segments leaves incompatible
+  fixed endpoints as a new affine profile replaces the covered segment chain.
+  No new fix/build shipped. Regression is intentionally failing locally.
+  Removing this limitation by height-only reconciliation requires permission to
+  adjust the whole connected staggered boundary beyond the brush (potentially
+  straightening a long edge). Prior authority explicitly fixes outside vertices.
+  Owner explicitly authorized the whole connected seam beyond the brush.
+  Implemented full enabled-boundary traversal; only components reached by the
+  stamp are reconciled. Outside interiors and unrelated seams remain unchanged.
+  Moving-stroke regression now measures 0.000762951 (height quantization);
+  full installed triple seam over Y=63.5..383.5: 0.000494528 after eight moved
+  stamps. Core 13 passed including whole-stroke history/save/reopen; widgets
+  16 passed/2 offscreen skips and native GPU 3 passed. Release/x86 built,
+  staged R4 finalizer passed. [R4 evidence](docs/validation/WORLD_TERRAIN_SCULPT_R4.md).
+  Full UI check still fails with `0xC0000005` in normal Windows (sandbox loader
+  failure separately diagnosed). Next: permanent delivery, then original-scene
+  acceptance. R3 is not marked fixed; parent remains open.
 - Related deferred robustness hypothesis: exact double XY grouping can differ
   for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the

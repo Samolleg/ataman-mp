@@ -27,7 +27,8 @@ XY subtract(const XY& a,const XY& b) { return {a.first-b.first,a.second-b.second
 
 void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
                           const QVector<QVector<Vertex>>& groups,
-                          QVector<double>& proposed,const QVector<double>& limits)
+                          QVector<double>& proposed,const QVector<double>& limits,
+                          QVector<bool>& affected)
 {
     QVector<QMap<QPair<int,int>,int>> indices(targets.size());
     QVector<XY> positions(groups.size());
@@ -47,8 +48,8 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
     {
         if(indices[m].isEmpty()) continue;
         const int w=targets[m].model->vertexCountX(),h=targets[m].model->vertexCountY();
-        // Only complete boundary segments with both editable endpoints inside
-        // the brush participate. No outside anchors or protected maps move.
+        // Trace complete enabled-map boundaries, including outside the brush.
+        // Only connected components reached by this stamp are reconciled.
         for(auto it=indices[m].cbegin();it!=indices[m].cend();++it)
         {
             const int x=it.key().first,y=it.key().second;
@@ -109,6 +110,9 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
     for(auto component:components)
     {
         if(component.size()<3) continue;
+        bool touched=false;
+        for(int i:component) touched=touched||affected[i];
+        if(!touched) continue;
         // Geometric ordering makes fitting independent of target enumeration.
         std::sort(component.begin(),component.end(),[&](int a,int b){return positions[a]<positions[b];});
         const XY anchor=positions[component.first()];
@@ -134,7 +138,11 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
             if(delta>0) scale=qMin(scale,(limit-base)/delta);
             if(delta<0) scale=qMin(scale,-base/delta);
         }
-        for(int i:component) proposed[i]=base+scale*(sx*(positions[i].first-anchor.first-mx)+sy*(positions[i].second-anchor.second-my));
+        for(int i:component)
+        {
+            proposed[i]=base+scale*(sx*(positions[i].first-anchor.first-mx)+sy*(positions[i].second-anchor.second-my));
+            affected[i]=true;
+        }
     }
 }
 }
@@ -162,6 +170,9 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         if(!t.editable || !t.model || !(t.model->maxZ()>0) || !std::isfinite(t.model->maxZ())
            || !std::isfinite(t.origin.x()) || !std::isfinite(t.origin.y())) continue;
         const int w=t.model->vertexCountX(), h=t.model->vertexCountY();
+        const auto edge=[&](int x,int y){edges[point(t,x,y)].append({i,x,y});};
+        for(int x=0;x<w;++x) {edge(x,0);if(h>1) edge(x,h-1);}
+        for(int y=1;y<h-1;++y) {edge(0,y);if(w>1) edge(w-1,y);}
         // Packed XY offsets are bounded by half a grid step.
         const int x0=qMax(0,int(std::floor(brush.centerX-t.origin.x()-brush.radius-1)));
         const int x1=qMin(w-1,int(std::ceil(brush.centerX-t.origin.x()+brush.radius+1)));
@@ -169,15 +180,16 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         const int y1=qMin(h-1,int(std::ceil(brush.centerY-t.origin.y()+brush.radius+1)));
         for(int y=y0; y<=y1; ++y) for(int x=x0; x<=x1; ++x)
         {
+            if(x==0 || y==0 || x==w-1 || y==h-1) continue;
             const XY p=point(t,x,y);
             if(std::hypot(p.first-brush.centerX,p.second-brush.centerY)>brush.radius) continue;
             Vertex v{i,x,y};
-            if(x==0 || y==0 || x==w-1 || y==h-1) edges[p].append(v);
-            else groups.append(QVector<Vertex>{v});
+            groups.append(QVector<Vertex>{v});
         }
     }
     for(const auto& edge : edges) groups.append(edge);
     QVector<double> proposed(groups.size(),std::numeric_limits<double>::quiet_NaN()),limits(groups.size());
+    QVector<bool> affected(groups.size(),false);
     for(int groupIndex=0;groupIndex<groups.size();++groupIndex)
     {
         const auto& group=groups[groupIndex];
@@ -190,7 +202,6 @@ SWorldTerrainStroke makeWorldTerrainStamp(
             weight=qBound(0.0,1.0-distance/brush.radius,1.0);
             if(brush.falloff==ETerrainBrushFalloff::Smooth) weight=weight*weight*(3-2*weight);
         }
-        if(weight<=0 || strength<=0) continue;
         QVector<double> initial;
         double limit=std::numeric_limits<double>::max();
         for(const auto& v:group)
@@ -199,6 +210,9 @@ SWorldTerrainStroke makeWorldTerrainStamp(
             limit=qMin(limit,double(targets[v.map].model->maxZ()));
         }
         const double before=mean(initial);
+        proposed[groupIndex]=before;limits[groupIndex]=limit;
+        if(distance>brush.radius || weight<=0) continue;
+        affected[groupIndex]=true;
         double after=before;
         if(mode==EWorldSculptMode::Raise || mode==EWorldSculptMode::Lower)
             after+= (mode==EWorldSculptMode::Raise ? 1 : -1)*worldDelta*weight*strength;
@@ -229,12 +243,12 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         after=qBound(0.0,after,limit);
         proposed[groupIndex]=after;limits[groupIndex]=limit;
     }
-    reconcileShiftedEdges(targets,groups,proposed,limits);
+    reconcileShiftedEdges(targets,groups,proposed,limits,affected);
     for(int groupIndex=0;groupIndex<groups.size();++groupIndex)
     {
         const auto& group=groups[groupIndex];
         const double after=proposed[groupIndex];
-        if(!std::isfinite(after)) continue;
+        if(!affected[groupIndex] || !std::isfinite(after)) continue;
         for(const auto& v:group)
         {
             const auto& t=targets[v.map];
