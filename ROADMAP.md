@@ -502,7 +502,12 @@ foundation as one coherent `0.3.0` release.
   BuildTools, replacing the unavailable hardcoded Community-only assumption.
 - Completion requires the full original scenario plus regression/build evidence,
   permanent unpacked tester folder and PR; a UI change or build alone is partial.
-- Next: scoped commit/PR and permanent finalized r1 tester folder, then manual
+- Review: [draft PR #7](https://github.com/Ilufus/ei-mapper-endurance/pull/7).
+  Implementation commit: `b7078b086a5436370412916c53f44f7aa5ee7a95`.
+- Delivery: permanent unpacked `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r1-test`;
+  package finalizer and distribution validator passed, permanent copy hashes
+  matched the staged package. No packaged GUI launch or ZIP.
+- Next: manual
   acceptance of cross-map dragging, switching, save/reopen and close decisions.
   Do not close this parent task until the remaining acceptance is verified.
 - History: ambiguous "Давай так" was clarified; user explicitly answered "да"

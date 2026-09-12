@@ -29,4 +29,3 @@ HEADERS += \
 
 SOURCES += ../source/documents/world_terrain_sculpt.cpp ../source/documents/world_terrain_session.cpp
 HEADERS += ../source/documents/world_terrain_sculpt.h ../source/documents/world_terrain_session.h
-

@@ -1,6 +1,7 @@
 # EI-WORLD-SCULPT-001 — world terrain sculpt r1
 
 Implementation branch: `contrib/Samolleg/world-terrain-sculpt`.
+Review: [draft PR #7](https://github.com/Ilufus/ei-mapper-endurance/pull/7).
 Baseline: `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a`.
 The complete feature remains awaiting interactive acceptance; it is not closed
 merely because the implementation and focused tests are ready.
@@ -71,6 +72,11 @@ was reported at baseline and is not claimed fixed. The focused tests above do
 not waive that release gate.
 
 ## Manual acceptance still required
+
+The permanent unpacked r1 tester folder passed `finalize_package.ps1` and
+`validate_distribution.ps1`; all copied files matched the staged hashes. It
+contains rebuilt runtime components, Qt/compiler libraries, notices, one current
+changelist and checksums. No ZIP, user settings, logs or installed game files.
 
 Use user-owned test copies/profile paths. This task did not copy installed maps
 for editing and never launched the packaged editor interactively.
