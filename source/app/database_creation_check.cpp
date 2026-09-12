@@ -123,6 +123,7 @@ int runDatabaseCreationCheck()
         if(!created || !destination.buildValidatedCandidate(&candidate, &report))
             return fail("normal guarded creation");
         const uint id = created->mapId();
+        if(id == 0) return fail("new object must have a positive allocated ID");
         QUndoStack history;
         history.push(new CCreateNodeCommand(&view, &destination, created));
         history.undo();
@@ -142,7 +143,8 @@ int runDatabaseCreationCheck()
             return fail("save after undo/save/redo: " + destination.lastSaveError());
         CNode* second = destination.createNode(prepared, false);
         CNode* third = destination.createNode(prepared, false);
-        if(!second || !third || second->mapId() == id || third->mapId() == id
+        if(!second || !third || second->mapId() == 0 || third->mapId() == 0
+           || second->mapId() == id || third->mapId() == id
            || second->mapId() == third->mapId()
            || !destination.saveAs(QFileInfo(prefix + "-multiple.mob")))
             return fail("multiple fresh objects: " + destination.lastSaveError());
@@ -381,6 +383,53 @@ int runDatabasePreviewCheck()
     view->m_pOp->mouseReleaseEvent(&itemClick);
     if(view->isDatabasePlacementPending() || history->count()!=1 || destination->nodes().size()!=1)
         return fail("item click commits one action");
+    CNode* placedItem = destination->nodes().first();
+    const uint placedId = placedItem->mapId();
+    if(placedId == 0) return fail("pointer placement must allocate a positive ID");
+    const auto checkLiveConversion = [&](const QString& phase) {
+        CValidationReport report;
+        QByteArray sourceObject, cleanObject, sourceLever, cleanLever;
+        if(!destination->rawObjectTemplateBytes(placedItem, &sourceObject, &cleanObject)
+           || !CMobDocument::convertWorldObjectSubtreeToLever(sourceObject,
+                 CMobDocument::SLeverConversionValues(), &sourceLever, &report)
+           || !CMobDocument::convertWorldObjectSubtreeToLever(cleanObject,
+                 CMobDocument::SLeverConversionValues(), &cleanLever, &report)) return false;
+        QJsonObject data = CLever().toJson();
+        data.insert("World object", placedItem->toJson());
+        auto* replacement = new CLever(data);
+        replacement->setRawObjectProvenance(placedItem->rawSourceDocumentSha256(),
+            placedItem->rawSourceObjectPath(), QCryptographicHash::hash(sourceLever, QCryptographicHash::Sha256));
+        replacement->setRawStructuralReplacementBytes(sourceLever, cleanLever);
+        QUndoStack conversions;
+        conversions.push(new CConvertWorldObjectToLeverCommand(view, destination, placedItem, replacement));
+        const auto verify = [&](CNode* expected) {
+            QByteArray bytes;
+            CMobDocument saved;
+            const bool valid = destination->nodes().size() == 1 && destination->nodes().first() == expected
+                && expected->mapId() == placedId && placedId > 0
+                && destination->buildValidatedCandidate(&bytes, &report)
+                && saved.loadBytes(bytes, "conversion-check.mob", &report)
+                && saved.objects().size() == 1 && saved.objects().first().nid == placedId;
+            if(!valid) output << "Conversion " << phase << " expected ID " << placedId
+                              << ", actual " << expected->mapId() << "\n" << report.toText();
+            return valid;
+        };
+        if(!verify(replacement)) return false;
+        const QString prefix = temporary.path() + "/conversion-" + phase;
+        if(!destination->saveAs(QFileInfo(prefix + "-lever.mob")))
+        { output << "Conversion save: " << destination->lastSaveError() << "\n"; return false; }
+        conversions.undo();
+        if(!verify(placedItem) || !destination->saveAs(QFileInfo(prefix + "-object.mob"))) return false;
+        conversions.redo();
+        if(!verify(replacement) || !destination->saveAs(QFileInfo(prefix + "-redo.mob"))) return false;
+        conversions.undo();
+        return verify(placedItem);
+    };
+    if(!checkLiveConversion("fresh")) return fail("fresh live conversion retains allocated positive ID");
+    if(!destination->saveAs(QFileInfo(temporary.path() + "/conversion-saved-baseline.mob")))
+        return fail("save original object before second conversion");
+    if(!checkLiveConversion("saved")) return fail("saved live conversion retains allocated positive ID");
+    output << "PASS: live item-to-lever conversion retains positive ID through undo/redo/save/reopen\n";
     CValidationReport itemReport; QByteArray itemBytes;
     if(!destination->buildValidatedCandidate(&itemBytes,&itemReport)) return fail(itemReport.toText());
     CMob itemReopened;

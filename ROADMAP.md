@@ -541,6 +541,26 @@ foundation as one coherent `0.3.0` release.
 
 ### Authorized implementation: EI-ADD-FROM-DB-001
 
+- R10 ID regression (2026-09-12): screenshot of added cheat dagger converted to
+  lever shows NID 0. Read-only r8 log confirms positive allocation followed by
+  zero-NID validation failures for that lever. Creation allocates positive IDs;
+  the live conversion constructs a CLever from JSON (constructors intentionally
+  leave ID allocation to the caller) but never transfers the original object's
+  ID before replacement. Prior tests converted saved raw bytes, bypassing this
+  live replacement path. Expected: retain the unique positive ID through live
+  conversion, undo/redo and save/reopen; preserve creation allocation semantics.
+  Related persistence regression: real command test then exposed lost raw
+  provenance on redo after saving each side of conversion. Capture each outgoing
+  source/clean subtree before replacement so guarded undo/redo saves remain valid.
+  Implemented: conversion command retains the existing NID and preserves outgoing
+  raw source/clean templates across saves. Real-command regression failed before
+  the fix and passes for fresh and saved objects in JMV and Base, including
+  undo/save/redo/save/reopen. All three creation categories retain unique positive
+  IDs. Separate r9 staging and delivery packages pass finalization; see
+  [R10 validation](docs/validation/object-conversion-id-r9.md).
+  Next: user acceptance on the original map; existing saved zero IDs are not
+  automatically migrated. Parent visual coverage and broad UI-check gap remain
+  open. No live map edits.
 - Original problem: Create Object requires technical fields and a selected
   same-type raw MOB template; there is no complete database-to-map workflow.
 - Expected result: all three searchable categories (monster-prototype creatures,
