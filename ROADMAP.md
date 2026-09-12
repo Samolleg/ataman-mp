@@ -544,7 +544,11 @@ foundation as one coherent `0.3.0` release.
   Core 12 passed; widgets 16 passed/2 offscreen skips; native GPU 3 passed;
   release built. [R3 validation and scope](docs/validation/WORLD_TERRAIN_SCULPT_R3.md).
   Brush-rim crossing cells retain a transition to fixed outside geometry; they
-  are not guaranteed gap-free. Next: finalize R3 and repeat the video scene.
+  are not guaranteed gap-free. Permanent
+  `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r3-test` finalized and
+  distribution-validated; all copy hashes matched. Packaged implementation
+  `62eb8516303c924b6a5fbab55585726fa9a38faa` is in draft PR #7. R2 preserved
+  for comparison. Next: user repeats the video scene in R3; parent remains open.
 - Related deferred robustness hypothesis: exact double XY grouping can differ
   for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the
