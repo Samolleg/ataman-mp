@@ -18,6 +18,8 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLTexture>
 #include <QOpenGLTextureBlitter>
+#include <QOpenGLBuffer>
+#include "../source/render/terrain_preview_context.h"
 
 #include "loaded_map_panel_policy.h"
 #include "landscape_tools.h"
@@ -28,6 +30,7 @@ class LandscapeToolsWidgetTests : public QObject
     Q_OBJECT
 
 private slots:
+    void nestedTerrainPreviewKeepsBothGpuBuffersCurrent();
     void worldTerrainControlsStayProtectedAndSignal();
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
@@ -44,6 +47,38 @@ private slots:
     void compressedTerrainAtlasFramebufferCapability();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::nestedTerrainPreviewKeepsBothGpuBuffersCurrent()
+{
+    QGLWidget viewport;
+    if(!viewport.isValid()) QSKIP("No legacy viewport OpenGL context");
+    viewport.makeCurrent();
+    QOpenGLBuffer active, neighbor;
+    QVERIFY(active.create()); QVERIFY(neighbor.create());
+    const float initial=20, smoothed=12;
+    QVERIFY(active.bind()); active.allocate(&initial,sizeof(initial));active.release();
+    QVERIFY(neighbor.bind());neighbor.allocate(&initial,sizeof(initial));neighbor.release();
+    {
+        CTerrainPreviewContext batch(&viewport);
+        {
+            CTerrainPreviewContext refreshNeighbor(&viewport);
+            QVERIFY(neighbor.bind());neighbor.allocate(&smoothed,sizeof(smoothed));neighbor.release();
+        }
+        // Regression: neighbor doneCurrent() used to detach the context before
+        // the deferred active-map upload, leaving old heights on the GPU.
+        QCOMPARE(QGLContext::currentContext(),viewport.context());
+        QVERIFY(active.bind());active.allocate(&smoothed,sizeof(smoothed));active.release();
+    }
+    QCOMPARE(QGLContext::currentContext(),viewport.context());
+    float a=0,b=0;
+    QVERIFY(active.bind());QVERIFY(active.read(0,&a,sizeof(a)));active.release();
+    QVERIFY(neighbor.bind());QVERIFY(neighbor.read(0,&b,sizeof(b)));neighbor.release();
+    QCOMPARE(a,smoothed);QCOMPARE(b,smoothed);
+    active.destroy();neighbor.destroy();viewport.doneCurrent();
+    { CTerrainPreviewContext fromTimer(&viewport);
+      QCOMPARE(QGLContext::currentContext(),viewport.context()); }
+    QVERIFY(!QGLContext::currentContext());
+}
 
 void LandscapeToolsWidgetTests::worldTerrainControlsStayProtectedAndSignal()
 {

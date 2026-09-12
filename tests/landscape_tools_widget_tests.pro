@@ -1,4 +1,4 @@
-QT += core gui widgets testlib
+QT += core gui widgets opengl testlib
 CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = landscape_tools_widget_tests

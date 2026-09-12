@@ -1,4 +1,5 @@
 #include "view.h"
+#include "terrain_preview_context.h"
 #include "landscape.h"
 #include "landscape_tools.h"
 #include "endurance_document.h"
@@ -31,6 +32,7 @@ void CView::syncWorldTerrainActive()
 
 void CView::restoreWorldTerrainActive()
 {
+    CTerrainPreviewContext contextGuard(this);
     const QString id=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     if(!m_worldTerrainSession.documents.contains(id)) return;
     auto doc=m_worldTerrainSession.documents[id];
@@ -58,7 +60,7 @@ void CView::restoreWorldTerrainActive()
 
 void CView::refreshWorldTerrainNeighbors()
 {
-    if(isValid()) makeCurrent();
+    CTerrainPreviewContext contextGuard(this);
     for(auto& loaded:m_neighborLandscapes)
     {
         const QString id=CWorldTerrainSession::key(loaded.placement.mprPath);
@@ -79,7 +81,6 @@ void CView::refreshWorldTerrainNeighbors()
         }
         if(changed) loaded.landscape->invalidateTerrainShadowField();
     }
-    if(isValid()) doneCurrent();
     update();
 }
 

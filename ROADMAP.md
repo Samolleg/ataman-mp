@@ -512,6 +512,21 @@ foundation as one coherent `0.3.0` release.
   Do not close this parent task until the remaining acceptance is verified.
 - History: ambiguous "Давай так" was clarified; user explicitly answered "да"
   to the complete independent-grid/averaging/rounding policy above.
+- EI-WORLD-SCULPT-001-GAPS (open, necessary acceptance investigation): user
+  recording `20260912-1215-58.5560116.mp4` shows reported black gaps during
+  smoothing. Reproduced first incorrect state: neighbor refresh releases the GL
+  context before deferred active-map GPU upload. Corrected context ownership;
+  native GPU regression failed before and passes after (3/0/0), core 9 passed,
+  widgets 16 passed/2 offscreen skips, release built. [R2 evidence and limits](docs/validation/WORLD_TERRAIN_SCULPT_R2.md).
+  R2 staging finalizer/validator passed; it preserves R1 for A/B comparison.
+  Delivery target: `EI-Mapper-Endurance-0.5.0-alpha-world-terrain-sculpt-r2-test`.
+  Next: verify the permanent copy and repeat the recorded scene in R2;
+  exact-scene visual acceptance and the parent remain open.
+- Related deferred robustness hypothesis: exact double XY grouping can differ
+  for mathematically equivalent offset vertices (e.g. `(192+1)+16/254` versus
+  `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the
+  recorded zone1/zone2 boundary. Assess separately with an offset fixture after
+  the recorded gap is verified; do not attribute this recording to it.
 
 - Keep this file goal-oriented and concise.
 - Put unassigned requests in the wishlist; assign accepted work to a version.

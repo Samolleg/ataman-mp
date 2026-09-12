@@ -1,4 +1,5 @@
 #include <QtWidgets>
+#include "terrain_preview_context.h"
 #include <QDebug>
 #include <QtMath>       //for fabs
 #include <QMap>         //for parameters
@@ -20503,6 +20504,7 @@ void CView::endTerrainPreviewBatch()
 {
     if(!m_terrainPreviewBatchActive)
         return;
+    CTerrainPreviewContext contextGuard(this);
     m_terrainPreviewBatchActive = false;
     const QSet<QPair<int, int>> terrainSectors = m_pendingTerrainPreviewSectors;
     const QMap<QPair<int, int>, QByteArray> terrainBefore =
@@ -22213,6 +22215,7 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
 {
     if(!m_terrainEditAvailable)
         return false;
+    CTerrainPreviewContext contextGuard(this);
     QSet<QPair<int, int>> sectors;
     const int sectorCountX = int(m_mprDocument.mapInfo().sectorCountX);
     const int sectorCountY = int(m_mprDocument.mapInfo().sectorCountY);
