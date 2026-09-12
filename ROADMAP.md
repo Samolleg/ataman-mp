@@ -609,7 +609,9 @@ foundation as one coherent `0.3.0` release.
   no main merge or force-push. Owner confirms R5 works as intended and authorizes
   final PR submission. This acceptance resolves the reported painting, triple
   junction and moving-rim scenarios; older pending statements above are history.
-  Next: mark PR #7 ready and hand off to maintainer review. Broad UI diagnostic
+  PR #7 is open and ready for review (draft=false verified); final description
+  includes owner acceptance, the exact PR #6 baseline and known limitations.
+  Next: maintainer review/integration. Broad UI diagnostic
   `0xC0000005` and the separate offset-coordinate robustness hypothesis remain
   disclosed unresolved items; this acceptance is not a claim they were fixed.
 ### Related experiment: EI-TERRAIN-PALETTE-001
