@@ -1,5 +1,12 @@
 # Combined be440676 baseline and world terrain fixes — R5
 
+## Owner acceptance — 2026-09-12
+
+After testing the delivered R5, the owner confirmed "Всё работает как надо"
+and requested final PR submission. This supersedes the pending user checks below
+for the reported painting and moving-seam scenarios. The broad UI diagnostic
+failure remains disclosed and was not fixed by this work.
+
 The owner explicitly selected base commit
 `be4406766c19257d86f85c2e02ab7dd45a96ff4d` (PR #6). R1–R4 were based on
 main `ffdc28ea` plus PR #7 and omitted that branch's HD texture approvals.

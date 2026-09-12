@@ -482,7 +482,9 @@ foundation as one coherent `0.3.0` release.
   map repositioning, unrelated changes or deletion of previous builds.
 - Baseline: `contrib/Samolleg/world-terrain-sculpt` from fetched `origin/main`
   `ffdc28ea9f749896ddffdd583e2a6a5e44d5201a`, initially clean.
-- Status: implementation and focused tests ready; interactive acceptance open.
+- Status: owner accepted combined R5 on 2026-09-12 ("Всё работает как надо")
+  and requested the final PR. Painting and reported world-seam scenarios accepted;
+  ready for review. Known broad UI diagnostic failure remains explicitly open.
   Evidence and repeatable baseline
   acceptance scenario: [investigation](docs/research/world-terrain-sculpt.md).
 - Confirmed: zone1/zone2 share 161 XY boundary vertices, three unequal in Z
@@ -581,7 +583,7 @@ foundation as one coherent `0.3.0` release.
   `192+(1+16/254)`). Read-only inspection found zero such key mismatches on the
   recorded zone1/zone2 boundary. Assess separately with an offset fixture after
   the recorded gap is verified; do not attribute this recording to it.
-- EI-WORLD-SCULPT-001-BASELINE (open, related integration gap): user reports
+- EI-WORLD-SCULPT-001-BASELINE (resolved in owner-accepted R5): user reports
   painting with other textures unavailable and asks about the latest PR baseline.
   Confirmed R4 uses main `ffdc28ea` plus PR #7; it omits PR #6 branch
   `origin/contrib/Samolleg/add-from-db` (head `be440676`), including exact HD atlas
@@ -604,8 +606,12 @@ foundation as one coherent `0.3.0` release.
   commit `e327897ad94c8f1fb1b0a0292a0871791a7c0b0d`; requested be440676 is a
   verified ancestor and explicitly recorded in BUILD_INFO. Finalizer/distribution
   validation passed and all permanent-copy hashes matched. PR #7 updated;
-  no main merge or force-push. Next: user validates both painting and the original
-  moving-seam scenario. Parent remains open.
+  no main merge or force-push. Owner confirms R5 works as intended and authorizes
+  final PR submission. This acceptance resolves the reported painting, triple
+  junction and moving-rim scenarios; older pending statements above are history.
+  Next: mark PR #7 ready and hand off to maintainer review. Broad UI diagnostic
+  `0xC0000005` and the separate offset-coordinate robustness hypothesis remain
+  disclosed unresolved items; this acceptance is not a claim they were fixed.
 ### Related experiment: EI-TERRAIN-PALETTE-001
 
 - User authorized modern-palette pixel-hash relaxation on the latest PR (#6,
