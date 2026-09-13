@@ -287,7 +287,11 @@ Result analyze(const Request& request) {
         for(const auto& item:pending) {
             if(item.source!=s || result.references[item.reference].kind!=Kind::Dependency) continue;
             if(!item.dependencyLiteral) { result.familyComplete=false; continue; }
-            const QString logical=QFileInfo(normalizedSource(item.dependency)).fileName();
+            // AddMob accepts logical MOB names with or without the extension,
+            // just like the family loader. Match case-insensitively after the
+            // same extension normalization; never select among duplicate names.
+            QString logical=QFileInfo(normalizedSource(item.dependency)).fileName();
+            if(!logical.endsWith(".mob")) logical+=".mob";
             const auto candidates=sourceNames.value(logical);
             if(candidates.size()!=1) {
                 result.familyComplete=false;

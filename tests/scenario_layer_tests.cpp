@@ -101,6 +101,21 @@ private slots:
         QVERIFY(!result.familyComplete);
         QVERIFY(result.markers.isEmpty());
     }
+    void dependencyNamesWithoutExtension() {
+        auto r = fixture("WorldScript(AddMob(\"QUEST\") GetObject(9))");
+        Source quest; quest.key="quest.mob";
+        quest.text="WorldScript(AddMob(\"nested.mob\") SetCP(GetObject(7),4,5,6))";
+        Source nested; nested.key="nested.mob";
+        Object a; a.key="nested/9"; a.id=9; nested.objects={a};
+        nested.text="WorldScript(SwitchLeverState(GetObject(8),1))";
+        r.sources << quest << nested;
+        const auto result=analyze(r);
+        QVERIFY(result.familyComplete);
+        QCOMPARE(result.family.size(),3);
+        QCOMPARE(calls(result,"GetObject")[0].targets[0].resolution,Resolution::Family);
+        QCOMPARE(result.markers.size(),1);
+        QCOMPARE(result.markers[0].position,QVector3D(4,5,6));
+    }
     void familyCollisionAndDuplicateSpawn() {
         auto r = fixture("WorldScript(AddMob(\"quest.mob\") GetObject(7) "
                          "AddUnitToServer(\"x\",\"fixture.guard\",\"X\",1,2,3) "

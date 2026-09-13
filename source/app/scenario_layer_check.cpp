@@ -186,6 +186,41 @@ int runScenarioLayerCheck()
     emit view.mobStateChanged(); panel.refresh();
     check(panel.analysis().markers.isEmpty() && refs->topLevelItemCount()==1 && view.m_scenarioParticipants.isEmpty(),"map switch treats old map identity as external");
     view.m_aMob.removeOne(second); view.m_activeMob=mob; delete second; emit view.mobStateChanged(); panel.refresh();
+    // Regression: connected scripts must survive both file-name aliases and
+    // an active supplemental MOB whose owning primary is not open in the view.
+    CMob* connected=new CMob; connected->setFileName(QFileInfo(scratch.filePath("quest.mob")));
+    connected->setScript("WorldScript(AddMob(\"nested\") SetCP(GetObject(7),21,22,23))");
+    view.m_aMob.append(connected);
+    const QString withDependency=original+"\nWorldScript(AddMob(\"QUEST\"))";
+    mob->setScript(withDependency);
+    CMobFamilyValidationReport connectedFamily;
+    SMobFamilyMember primary; primary.path=scratch.filePath("primary.mob"); primary.primaryMob=true;
+    primary.script="WorldScript(AddMob(\"scenario\") SwitchLeverState(GetObject(8),1))";
+    SMobFamilyMember activeMember; activeMember.path=mob->filePath().absoluteFilePath(); activeMember.script=withDependency;
+    SMobFamilyMember quest; quest.path=connected->filePath().absoluteFilePath(); quest.script=connected->script();
+    SMobFamilyMember nested; nested.path=scratch.filePath("nested.mob"); nested.script="WorldScript(SetCP(GetObject(8),31,32,33))";
+    connectedFamily.members={primary,activeMember,quest,nested};
+    panel.setFamilyReport(connectedFamily); panel.refresh();
+    check(panel.analysis().familyComplete && panel.analysis().family.size()==4,
+          "connected MOB closure includes unloaded owning primary and nested extensionless sources");
+    check(refs->topLevelItemCount()==16 && panel.analysis().markers.size()==5,
+          "connected MOB calls and destinations reach the panel");
+    view.m_aMob.removeOne(connected); delete connected; panel.refresh();
+    check(panel.analysis().family.size()==4 && refs->topLevelItemCount()==16 && panel.analysis().markers.size()==5,
+          "closing connected MOB keeps its inspected script in the scenario");
+    view.openScenarioSource(mob,withDependency,0);
+    auto dependencyWindow=view.m_scriptWindows.value(mob);
+    dependencyWindow->findChild<CScriptEditor*>()->setPlainText(original); panel.refresh();
+    check(panel.analysis().family.size()==2 && panel.analysis().markers.size()==3,
+          "unapplied AddMob removal prunes connected subtree without losing owning primary");
+    dependencyWindow->findChild<CScriptEditor*>()->setPlainText(withDependency);
+    dependencyWindow->requestClose(); QCoreApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    second=new CMob; second->setFileName(QFileInfo(scratch.filePath("unrelated.mob")));
+    second->setScript("WorldScript(GetObject(7))"); view.m_aMob.append(second); view.m_activeMob=second; panel.refresh();
+    check(panel.analysis().family.size()==1 && panel.analysis().markers.isEmpty() && refs->topLevelItemCount()==1,
+          "cached connected family never leaks into unrelated active map");
+    view.m_aMob.removeOne(second); delete second; view.m_activeMob=mob;
+    mob->setScript(original); panel.setFamilyReport({}); panel.refresh();
     QVector3D xy(12,14,0);
     check(!view.scenarioMarkerPosition(&xy,false),"MOB-only XY marker gets no fictional ground");
     panel.setLayerEnabled(false);

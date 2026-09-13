@@ -485,6 +485,20 @@ foundation as one coherent `0.3.0` release.
   object/script undo refresh, Russian UI, release and finalized tester package.
 - Status: first-stage implementation and permanent tester delivery complete;
   parent remains open for representative interactive map acceptance.
+- Linked follow-up EI-MOB-SCENARIO-VISUAL-001-A (2026-09-14): user reports that
+  connected MOBs appear omitted. Two reproduced defects fixed locally: optional
+  `.mob` normalization and omission of an inspected but unopened owning primary.
+  Before: 1 model failure and 4 native panel failures. After: model 15/15, desktop
+  integration 38/38, ANGLE plus JMV zone3obr corpus 42/42. Recursive loaded/unloaded
+  source participation, draft pruning and unrelated-map isolation pass.
+  [Follow-up evidence and uncertainty audit](docs/validation/MOB_SCENARIO_R2.md).
+  Delivered R2: `C:/GOG Games/maped/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r2-test`;
+  finalizer passed, 92 files hash-identical to staging. R1 preserved with the user's
+  settings/logs for comparison instead of re-finalizing that used baseline.
+  Exact missing participant is not identified; relation of these fixes to the
+  reported observation remains unconfirmed. Next: user verifies the same case
+  with [R2 tester steps](packaging/MOB_SCENARIO_R2.md); parent and follow-up stay
+  open for acceptance. No publication or installed data mutation.
 - Original failure: legacy analyzer returned one numeric lookup for the original
   three-operation probe. Implemented value-only call/condition/scope analysis,
   live draft inspector and navigation, conservative identity/prototype resolution,

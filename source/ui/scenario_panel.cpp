@@ -130,9 +130,10 @@ void CScenarioPanel::refresh() {
         for(const auto& member:m_family.members) if(scenario::normalizedSource(member.path)==scenario::normalizedSource(m_request.activeSource)) activeInReportedFamily=member.activeRuntimeFamily;
         for(const auto& member:m_family.members) {
             if(member.missing || !member.error.isEmpty()) continue;
-            // Only use a reported primary as a root when it is still loaded.
-            // A previous map's family cannot survive a close/switch by cache.
-            if(activeInReportedFamily && member.activeRuntimeFamily && member.primaryMob && loaded.contains(scenario::normalizedSource(member.path)))
+            // A supplemental MOB can be active while its owning primary is
+            // inspected but not open. Keep that primary as a source root;
+            // active-family membership guards against unrelated cached maps.
+            if(activeInReportedFamily && member.activeRuntimeFamily && member.primaryMob)
                 m_request.familyRoots.append(member.path);
             if(activeInReportedFamily && member.activeRuntimeFamily && member.inclusionReason=="profile-wide autorun")
                 m_request.familyRoots.append(member.path);
