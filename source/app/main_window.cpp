@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "loaded_map_panel_policy.h"
+#include "scenario_panel.h"
 #include "ui_main_window.h"
 
 #include <QWidget>
@@ -1864,6 +1865,20 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
+    m_scenarioPanel = new CScenarioPanel(m_pView, this);
+    QDockWidget* scenarioDock = new QDockWidget(tr("Map Scenario"), this);
+    scenarioDock->setObjectName("mapScenarioDock");
+    scenarioDock->setWidget(m_scenarioPanel);
+    addDockWidget(Qt::BottomDockWidgetArea, scenarioDock);
+    scenarioDock->hide();
+    m_ui->menuTools->addAction(scenarioDock->toggleViewAction());
+    connect(scenarioDock, &QDockWidget::visibilityChanged, m_scenarioPanel, &CScenarioPanel::setLayerEnabled);
+    connect(m_scenarioPanel, &CScenarioPanel::showRequested, this, [this, scenarioDock]() {
+        scenarioDock->show(); scenarioDock->raise();
+    });
+    connect(scenarioDock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+        if(visible) scheduleMobFamilyValidation(0);
+    });
     m_ui->actionMap_parameters->setText(tr("MPR Settings..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
@@ -5393,6 +5408,7 @@ void MainWindow::applyMobFamilyValidationReport(const CMobFamilyValidationReport
         previouslyMissingTrapDiplomacy = previouslyMissingTrapDiplomacy
             || finding.code == "diplomacy.magic_trap_table_missing";
     m_familyValidation = report;
+    if(m_scenarioPanel) m_scenarioPanel->setFamilyReport(report);
     // Visual providers resolve against live profile/database/resource state on
     // the GUI-owned unit projection. Surface their fail-closed diagnostics in
     // the same navigable validation report without repeating that work in the

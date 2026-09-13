@@ -68,6 +68,7 @@ class CViewportMinimapWidget;
 class CCameraTelephotoControls;
 class CMinimapExportDialog;
 class CMessageLogPanel;
+class CScenarioPanel;
 class CDockHiddenTab;
 class CResourceBrowser;
 namespace ei { class DatabaseDocument; class DatabaseEditorDialog; class ItemSpellConstructorDialog; }
@@ -366,6 +367,7 @@ private:
     ETransientNotificationAction m_transientNotificationAction{
         ETransientNotificationAction::None};
     CMobFamilyValidationReport m_familyValidation;
+    CScenarioPanel* m_scenarioPanel{nullptr};
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;
     QSet<quint32> m_sessionAllocatedNids;

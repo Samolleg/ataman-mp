@@ -16435,4 +16435,290 @@ Runes:
         <translation>В базе указан некорректный масштаб объекта.</translation>
     </message>
 </context>
+<context>
+    <name>CMobScriptWindow</name>
+    <message>
+        <source>Scenario references at cursor</source>
+        <translation>Обращения сценария у курсора</translation>
+    </message>
+</context>
+<context>
+    <name>CScenarioPanel</name>
+    <message>
+        <source>Static scenario links do not prove execution. No references found does not mean unused.</source>
+        <translation>Статические связи не доказывают выполнение. Отсутствие найденных ссылок не означает, что объект не используется.</translation>
+    </message>
+    <message>
+        <source>Show scenario layer</source>
+        <translation>Показывать слой сценария</translation>
+    </message>
+    <message>
+        <source>Selected participant only</source>
+        <translation>Только выбранный участник</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>Обновить</translation>
+    </message>
+    <message>
+        <source>Cyan: placed participant · Purple: virtual spawn · Amber: destination / selected links</source>
+        <translation>Голубой: размещённый участник · Фиолетовый: виртуальное появление · Жёлтый: назначение / выбранные связи</translation>
+    </message>
+    <message>
+        <source>Filter by participant, command, source or status</source>
+        <translation>Фильтр по участнику, команде, источнику или статусу</translation>
+    </message>
+    <message>
+        <source>Command</source>
+        <translation>Команда</translation>
+    </message>
+    <message>
+        <source>Participant / expression</source>
+        <translation>Участник / выражение</translation>
+    </message>
+    <message>
+        <source>Source</source>
+        <translation>Источник</translation>
+    </message>
+    <message>
+        <source>Function</source>
+        <translation>Функция</translation>
+    </message>
+    <message>
+        <source>Line</source>
+        <translation>Строка</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>Статус</translation>
+    </message>
+    <message>
+        <source>Go to code</source>
+        <translation>К коду</translation>
+    </message>
+    <message>
+        <source>Show participant / marker</source>
+        <translation>Показать участника / маркер</translation>
+    </message>
+    <message>
+        <source>Updating scenario analysis…</source>
+        <translation>Обновление анализа сценария…</translation>
+    </message>
+    <message>
+        <source>NPC</source>
+        <translation>НПС</translation>
+    </message>
+    <message>
+        <source>Lever</source>
+        <translation>Рычаг</translation>
+    </message>
+    <message>
+        <source>Object</source>
+        <translation>Объект</translation>
+    </message>
+    <message>
+        <source>Static call; execution not proven</source>
+        <translation>Статический вызов; выполнение не доказано</translation>
+    </message>
+    <message>
+        <source> [unapplied buffer]</source>
+        <translation> [неприменённый буфер]</translation>
+    </message>
+    <message>
+        <source>Open a MOB to inspect its scenario.</source>
+        <translation>Откройте MOB для просмотра сценария.</translation>
+    </message>
+    <message>
+        <source>%1 references shown · %2 virtual markers · %3 unapplied buffers</source>
+        <translation>Показано обращений: %1 · Виртуальных маркеров: %2 · Неприменённых буферов: %3</translation>
+    </message>
+    <message>
+        <source>No references found in this view. This does not mean unused.</source>
+        <translation>В этом представлении ссылки не найдены. Это не означает, что объект не используется.</translation>
+    </message>
+    <message>
+        <source>No enclosing condition identified; execution still unproven</source>
+        <translation>Охватывающее условие не найдено; выполнение не доказано</translation>
+    </message>
+    <message>
+        <source>%1 · %2:%3 · %4
+Conditions: %5</source>
+        <translation>%1 · %2:%3 · %4
+Условия: %5</translation>
+    </message>
+    <message>
+        <source>Authored XYZ: %1, %2, %3</source>
+        <translation>Заданные XYZ: %1, %2, %3</translation>
+    </message>
+    <message>
+        <source>Authored XY: %1, %2; viewport height comes from the loaded surface</source>
+        <translation>Заданные XY: %1, %2; высота для отображения взята с загруженной поверхности</translation>
+    </message>
+    <message>
+        <source>Virtual spawn</source>
+        <translation>Виртуальное появление</translation>
+    </message>
+    <message>
+        <source>Virtual destination</source>
+        <translation>Виртуальное назначение</translation>
+    </message>
+    <message>
+        <source>Source changed; references refreshed. Select the call again.</source>
+        <translation>Источник изменился; обращения обновлены. Выберите вызов снова.</translation>
+    </message>
+    <message>
+        <source>Unloaded source: read-only preview. Open its MOB to edit.</source>
+        <translation>Источник не загружен: только просмотр. Для редактирования откройте его MOB.</translation>
+    </message>
+    <message>
+        <source>No loaded surface for XY marker; no point was invented.</source>
+        <translation>Нет загруженной поверхности для XY-маркера; фиктивная точка не назначена.</translation>
+    </message>
+    <message>
+        <source>Participant MOB is hidden. Enable its visibility to navigate.</source>
+        <translation>MOB участника скрыт. Включите его видимость для перехода.</translation>
+    </message>
+</context>
+<context>
+    <name>MainWindow</name>
+    <message>
+        <source>Map Scenario</source>
+        <translation>Сценарий карты</translation>
+    </message>
+</context>
+<context>
+    <name>QObject</name>
+    <message>
+        <source>Placed in source MOB</source>
+        <translation>Размещён в MOB источника</translation>
+    </message>
+    <message>
+        <source>MOB family participant</source>
+        <translation>Участник семейства MOB</translation>
+    </message>
+    <message>
+        <source>Virtual participant (static prediction)</source>
+        <translation>Виртуальный участник (статический прогноз)</translation>
+    </message>
+    <message>
+        <source>Outside the active MOB family</source>
+        <translation>За пределами активного семейства MOB</translation>
+    </message>
+    <message>
+        <source>Ambiguous identity; no automatic target</source>
+        <translation>Неоднозначный идентификатор; цель не выбрана</translation>
+    </message>
+    <message>
+        <source>Target not found in inspected sources</source>
+        <translation>Цель не найдена в проверенных источниках</translation>
+    </message>
+    <message>
+        <source>Dynamic expression; target unresolved</source>
+        <translation>Динамическое выражение; цель не определена</translation>
+    </message>
+    <message>
+        <source>Invalid or inexact object ID</source>
+        <translation>Некорректный или неточный ID объекта</translation>
+    </message>
+    <message>
+        <source>Incomplete family; identity not confirmed</source>
+        <translation>Семейство неполно; идентификатор не подтверждён</translation>
+    </message>
+    <message>
+        <source>Object lookup</source>
+        <translation>Поиск объекта</translation>
+    </message>
+    <message>
+        <source>Creation</source>
+        <translation>Создание</translation>
+    </message>
+    <message>
+        <source>Movement</source>
+        <translation>Перемещение</translation>
+    </message>
+    <message>
+        <source>Object control / use</source>
+        <translation>Управление / использование объекта</translation>
+    </message>
+    <message>
+        <source>Group membership</source>
+        <translation>Состав группы</translation>
+    </message>
+    <message>
+        <source>MOB dependency</source>
+        <translation>Зависимость MOB</translation>
+    </message>
+    <message>
+        <source>Unclassified call</source>
+        <translation>Нераспознанный вызов</translation>
+    </message>
+    <message>
+        <source>Analysis token limit reached; results are incomplete</source>
+        <translation>Достигнут предел анализа; результаты неполны</translation>
+    </message>
+    <message>
+        <source>Unclosed comment</source>
+        <translation>Незакрытый комментарий</translation>
+    </message>
+    <message>
+        <source>Unclosed string</source>
+        <translation>Незакрытая строка</translation>
+    </message>
+    <message>
+        <source>Unmatched closing parenthesis</source>
+        <translation>Лишняя закрывающая скобка</translation>
+    </message>
+    <message>
+        <source>Unclosed call or script block</source>
+        <translation>Незакрытый вызов или блок сценария</translation>
+    </message>
+    <message>
+        <source>Empty condition</source>
+        <translation>Пустое условие</translation>
+    </message>
+    <message>
+        <source>Script call; arguments and execution are not resolved</source>
+        <translation>Вызов сценария; аргументы и выполнение не определены</translation>
+    </message>
+    <message>
+        <source>Incomplete call or unexpected argument count</source>
+        <translation>Неполный вызов или неверное число аргументов</translation>
+    </message>
+    <message>
+        <source>Dynamic or empty spawn identity</source>
+        <translation>Динамический или пустой идентификатор появления</translation>
+    </message>
+    <message>
+        <source>Prototype not verified in the active database</source>
+        <translation>Прототип не подтверждён в активной базе</translation>
+    </message>
+    <message>
+        <source>Dynamic MOB dependency; family incomplete</source>
+        <translation>Динамическая зависимость MOB; семейство неполно</translation>
+    </message>
+    <message>
+        <source>Computed or invalid coordinates; no position marker</source>
+        <translation>Вычисляемые или некорректные координаты; маркера нет</translation>
+    </message>
+    <message>
+        <source>Target position at execution is unknown; link only</source>
+        <translation>Позиция цели при выполнении неизвестна; показана только связь</translation>
+    </message>
+    <message>
+        <source>MOB dependency missing or ambiguous</source>
+        <translation>Зависимость MOB отсутствует или неоднозначна</translation>
+    </message>
+    <message>
+        <source>Static dependency; loading is not proven</source>
+        <translation>Статическая зависимость; загрузка не доказана</translation>
+    </message>
+    <message>
+        <source>Family incomplete: missing, dynamic or ambiguous MOB dependencies</source>
+        <translation>Семейство неполно: отсутствующие, динамические или неоднозначные зависимости MOB</translation>
+    </message>
+    <message>
+        <source>Duplicate spawn identity; no unique virtual marker</source>
+        <translation>Повторный идентификатор появления; однозначного маркера нет</translation>
+    </message>
+</context>
 </TS>

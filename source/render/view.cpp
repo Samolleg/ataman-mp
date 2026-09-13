@@ -2117,6 +2117,15 @@ void CView::updateReadState(EReadState state)
 
 CView::~CView()
 {
+    // Child QObject destruction happens after CView's members are gone. Retire
+    // script-window callbacks now, while their map and buffer registry is alive.
+    const auto scriptWindows = m_scriptWindows.values();
+    m_scriptWindows.clear();
+    for(const auto& window : scriptWindows) if(window) {
+        disconnect(window, nullptr, this, nullptr);
+        disconnect(this, nullptr, window, nullptr);
+        delete window;
+    }
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();
     m_sculptRepeatTimer->stop();
@@ -5947,6 +5956,8 @@ void CView::drawTestOverlaysOpenGl()
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
         && !paintIssueOverlay
+        && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
+        && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
         && !showOverlayMaterialSlots
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
        || width() <= 0 || height() <= 0)
@@ -5969,7 +5980,15 @@ void CView::drawTestOverlaysOpenGl()
     QOpenGLExtraFunctions* functions = context ? context->extraFunctions() : nullptr;
     if(functions)
     {
-        functions->glBindVertexArray(0);
+        // ANGLE's ES2 path has no core glBindVertexArray. Calling the ES3
+        // entry point produced GL_INVALID_OPERATION before any glyph draw.
+        if(!context->isOpenGLES() || context->format().majorVersion() >= 3)
+            functions->glBindVertexArray(0);
+        else if(context->hasExtension(QByteArrayLiteral("GL_OES_vertex_array_object"))) {
+            using BindVertexArrayOes = void (APIENTRY*)(GLuint);
+            const auto bind = reinterpret_cast<BindVertexArrayOes>(context->getProcAddress("glBindVertexArrayOES"));
+            if(bind) bind(0);
+        }
         functions->glBindBuffer(GL_ARRAY_BUFFER, 0);
         functions->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
         GLint attributeCount = 0;
@@ -5996,11 +6015,43 @@ void CView::drawTestOverlaysOpenGl()
     m_program.setUniformValue("u_fogEnabled", false);
     m_program.setUniformValue("u_shadowsEnabled", false);
     m_program.setUniformValue("u_pointLightCount", 0);
+    m_program.setUniformValue("u_instanced", false);
+    m_program.setUniformValue("u_partAnimated", false);
 
     ei::gl::Enable(GL_BLEND);
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_FALSE);
+
+    // Transient scenario glyphs: no editable objects or picking IDs are created.
+    // Use the established clean native-GL overlay state, never QPainter on QGLWidget.
+    const auto scenarioGlyphs = [&](const QVector<QVector3D>& centers, const QVector4D& color, bool diamond) {
+        QVector<QVector3D> lines;
+        const int segments = diamond ? 4 : 20;
+        for(const QVector3D& center : centers) {
+            for(int segment = 0; segment < segments; ++segment) {
+                const float a = float(segment) * 6.2831853f / segments;
+                const float b = float(segment + 1) * 6.2831853f / segments;
+                lines << center + QVector3D(std::cos(a)*0.8f, std::sin(a)*0.8f, 0.2f)
+                      << center + QVector3D(std::cos(b)*0.8f, std::sin(b)*0.8f, 0.2f);
+            }
+            if(diamond) lines << center << center + QVector3D(0,0,1.8f);
+        }
+        if(lines.isEmpty()) return;
+        m_program.setUniformValue("customColor", color);
+        m_program.setAttributeArray(position, lines.constData());
+        ei::gl::DrawArrays(GL_LINES, 0, lines.size());
+    };
+    ei::gl::LineWidth(2.0f);
+    scenarioGlyphs(m_scenarioParticipants, QVector4D(0.1f,0.9f,1.f,1.f), false);
+    scenarioGlyphs(m_scenarioSpawns, QVector4D(0.9f,0.35f,1.f,1.f), true);
+    scenarioGlyphs(m_scenarioDestinations, QVector4D(1.f,0.75f,0.15f,1.f), true);
+    if(!m_scenarioLinks.isEmpty()) {
+        m_program.setUniformValue("customColor", QVector4D(1.f,0.8f,0.3f,0.9f));
+        m_program.setAttributeArray(position, m_scenarioLinks.constData());
+        ei::gl::DrawArrays(GL_LINES, 0, m_scenarioLinks.size());
+    }
+    ei::gl::LineWidth(1.0f);
 
     if(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
     {
@@ -15923,25 +15974,77 @@ void CView::openActiveMobScript()
 {
     if(!m_activeMob)
         return;
-    QPointer<CMobScriptWindow> existing = m_scriptWindows.value(m_activeMob);
+    openScenarioSource(m_activeMob, scenarioScriptText(m_activeMob), -1);
+}
+
+QString CView::scenarioScriptText(CMob* mob, bool* draft) const
+{
+    if(draft) *draft = false;
+    if(!mob || !m_aMob.contains(mob)) return QString();
+    QPointer<CMobScriptWindow> window = m_scriptWindows.value(mob);
+    if(window && window->mob() == mob) {
+        if(draft) *draft = window->hasUnappliedText();
+        return window->analysisText();
+    }
+    return QTextCodec::codecForName("Windows-1251")->toUnicode(mob->script().toLatin1())
+        .replace("\r\n", "\n").replace('\r', '\n');
+}
+
+bool CView::openScenarioSource(CMob* mob, const QString& analyzedText, int offset)
+{
+    if(!mob || !m_aMob.contains(mob) || scenarioScriptText(mob) != analyzedText) return false;
+    QPointer<CMobScriptWindow> existing = m_scriptWindows.value(mob);
+    if(existing && existing->mob() != mob) existing = nullptr;
     if(existing)
     {
+        if(offset >= 0) return existing->navigateToSource(analyzedText, offset);
         existing->show();
         existing->raise();
         existing->activateWindow();
-        return;
+        return true;
     }
 
-    CMob* mob = m_activeMob;
     CMobScriptWindow* window = new CMobScriptWindow(mob, this, this);
     m_scriptWindows.insert(mob, window);
     connect(this, &CView::mobScriptChanged, window, &CMobScriptWindow::onMobScriptChanged);
     connect(this, &CView::externalMobScriptImported,
             window, &CMobScriptWindow::onExternalMobScriptImported);
-    connect(window, &QObject::destroyed, this, [this, mob]() { m_scriptWindows.remove(mob); });
+    connect(window, &CMobScriptWindow::analysisBufferChanged, this, &CView::scenarioBufferChanged);
+    connect(window, &CMobScriptWindow::scenarioLocationRequested, this, &CView::scenarioSourceLocationRequested);
+    connect(window, &QObject::destroyed, this, [this, mob, window]() {
+        if(!m_scriptWindows.value(mob) || m_scriptWindows.value(mob) == window) m_scriptWindows.remove(mob);
+        emit scenarioBufferChanged();
+    });
+    if(offset >= 0) return window->navigateToSource(analyzedText, offset);
     window->show();
     window->raise();
     window->activateWindow();
+    return true;
+}
+
+void CView::setScenarioOverlay(const QVector<QVector3D>& participants,
+                               const QVector<QVector3D>& spawns,
+                               const QVector<QVector3D>& destinations,
+                               const QVector<QVector3D>& links)
+{
+    m_scenarioParticipants = participants; m_scenarioSpawns = spawns;
+    m_scenarioDestinations = destinations; m_scenarioLinks = links;
+    update();
+}
+
+bool CView::scenarioMarkerPosition(QVector3D* position, bool hasZ) const
+{
+    if(!position) return false;
+    if(hasZ) return true;
+    // XY-only script calls have no authored Z. Project only against an actually
+    // loaded surface; MOB-only mode must not manufacture a ground plane marker.
+    return m_terrainEditAvailable && CLandscape::getInstance()->projectPt(*position);
+}
+
+void CView::focusScenarioPosition(const QVector3D& position)
+{
+    if(m_cam) m_cam->moveTo(position);
+    update();
 }
 
 void CView::openExternalMobScript(CMob* mob)

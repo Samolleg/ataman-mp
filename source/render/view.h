@@ -141,6 +141,7 @@ class CView : public QGLWidget
 {
     Q_OBJECT
     friend int runDatabasePreviewCheck();
+    friend int runScenarioLayerCheck();
 
 public:
     struct SNidRepair
@@ -184,6 +185,14 @@ public:
     void unloadActiveMob();
     void openActiveMobEditParams();
     void openActiveMobScript();
+    QString scenarioScriptText(CMob* mob, bool* draft = nullptr) const;
+    bool openScenarioSource(CMob* mob, const QString& analyzedText, int offset);
+    void setScenarioOverlay(const QVector<QVector3D>& participants,
+                            const QVector<QVector3D>& spawns,
+                            const QVector<QVector3D>& destinations,
+                            const QVector<QVector3D>& links);
+    bool scenarioMarkerPosition(QVector3D* position, bool hasZ) const;
+    void focusScenarioPosition(const QVector3D& position);
     void openExternalMobScript(CMob* mob);
     void commitMobParameterEdit(CMob* mob, const SMobParameterState& before,
                                 const SMobParameterState& after);
@@ -681,6 +690,8 @@ signals:
     void showLandscapeToolsSignal();
     void hideLandscapeToolsSignal();
     void mobScriptChanged(CMob* mob, const QString& displayScript);
+    void scenarioBufferChanged();
+    void scenarioSourceLocationRequested(CMob* mob, int offset);
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
     void openDatabasePrototypeRequested(const QString& prototype);
@@ -845,6 +856,8 @@ private:
     QList<CMobParameters*> m_arrParamWindow;
     QSharedPointer<CExternalScriptWorkspaceManager> m_scriptWorkspaces;
     QHash<CMob*, QPointer<CMobScriptWindow>> m_scriptWindows;
+    QVector<QVector3D> m_scenarioParticipants, m_scenarioSpawns,
+                       m_scenarioDestinations, m_scenarioLinks;
     CRoundMobForm* m_pRoundForm;
     QTimer* m_mprModifyTimer;
     QDateTime m_lastModifiedLand;

@@ -466,6 +466,49 @@ foundation as one coherent `0.3.0` release.
 
 ## Roadmap maintenance
 
+### EI-MOB-SCENARIO-VISUAL-001 — read-only map scenario layer
+
+- Original goal: reveal placed NPC/object/lever participants and verified
+  script-created entities; source/function/line inspector, object/code navigation,
+  creation/movement/use commands, trustworthy virtual spawn/destination markers,
+  conditions, dynamic/unknown references, family/external/duplicate-ID statuses.
+  Graphs and runtime tracing are deferred; static presence never proves execution
+  and no references never proves an object unused.
+- Authority: isolated local implementation, synthetic tests, release build and a
+  new permanent unpacked tester folder. No push, PR, merge or publication;
+  installed data and other worktrees are read-only. No script execution/rewriting,
+  live game/map edits or game-file copies for editing.
+- Baseline: refreshed origin/main `af24d453ac3a5a86f1664a4b1af7cefaec1a9a08`,
+  local branch `contrib/Samolleg/mob-scenario-layer`, initially clean.
+- Completion: repeatable parsing/navigation/markers/conditions/unknowns/scope/
+  duplicate/lifecycle/nonmutation tests, draft-buffer line fidelity, map and
+  object/script undo refresh, Russian UI, release and finalized tester package.
+- Status: first-stage implementation and permanent tester delivery complete;
+  parent remains open for representative interactive map acceptance.
+- Original failure: legacy analyzer returned one numeric lookup for the original
+  three-operation probe. Implemented value-only call/condition/scope analysis,
+  live draft inspector and navigation, conservative identity/prototype resolution,
+  and transient participant/spawn/destination overlays. No document mutation or
+  execution inference. Evidence and acceptance: [research](docs/research/mob-scenario-layer.md)
+  and [validation](docs/validation/MOB_SCENARIO_R1.md).
+- Verified: release build; model 14, legacy references 6, family 32, viewport 8,
+  shadow 4 tests; localization contract; hidden native desktop integration 39
+  and ANGLE integration 33 checks. Read-only Base/JMV corpus hashes unchanged.
+  ANGLE overlay VAO reset was traced to the unsupported ES2 core call and fixed;
+  both backend glyph pixels/state now pass.
+- Delivered: `C:/GOG Games/maped/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r1-test`,
+  92 files identical to finalized staging, destination finalizer passed. Packaged
+  GUI was not launched; no push, PR, merge or publication.
+- Linked blocker/evidence gap: full `--ui-widget-check` remains not passed
+  (offscreen/minimal access violation, native Windows stalls after Russian layout).
+  Focused native scenario/dialog checks pass, but do not replace that broad check.
+- Bounds: arbitrary symbolic aliases/runtime execution and uninspected new source
+  dependencies remain unresolved; named EI skills were unavailable. No private
+  source was inspected. Next: user runs [tester steps](packaging/MOB_SCENARIO_R1.md)
+  on representative maps; investigate the broad UI diagnostic separately before
+  claiming full UI regression coverage. No remaining material low-confidence
+  implementation choice is presented as proven runtime behavior.
+
 ### EI-WORLD-SCULPT-001 — shared world-coordinate terrain brush
 
 - Original problem: the sculpt brush edits only the active MPR; neighboring

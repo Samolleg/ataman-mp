@@ -15,6 +15,13 @@ public:
     CMobScriptWindow(CMob* mob, CView* view, QWidget* parent = nullptr);
     CMob* mob() const { return m_mob; }
     bool requestClose();
+    QString analysisText() const;
+    bool hasUnappliedText() const { return hasLocalChanges(); }
+    bool navigateToSource(const QString& analyzedText, int offset);
+
+signals:
+    void analysisBufferChanged();
+    void scenarioLocationRequested(CMob* mob, int offset);
 
 public slots:
     void onMobScriptChanged(CMob* mob, const QString& displayScript);

@@ -7,6 +7,8 @@
 #include <QShortcut>
 #include <QTextCodec>
 #include <QVBoxLayout>
+#include <QTextCursor>
+#include "scenario_analysis.h"
 
 #include "mob/mob.h"
 #include "mob/script_editor.h"
@@ -30,6 +32,12 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
     QPushButton* apply = new QPushButton(tr("Apply and Close"), this);
     QPushButton* closeButton = new QPushButton(tr("Close"), this);
     buttons->addWidget(external);
+    QPushButton* scenarioButton = new QPushButton(tr("Scenario references at cursor"), this);
+    scenarioButton->setObjectName("scenarioReferencesAtCursor");
+    buttons->addWidget(scenarioButton);
+    connect(scenarioButton, &QPushButton::clicked, this, [this]() {
+        emit scenarioLocationRequested(m_mob, m_editor->textCursor().position());
+    });
     buttons->addStretch();
     buttons->addWidget(apply);
     buttons->addWidget(closeButton);
@@ -39,11 +47,30 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
     m_editor->setPlainText(m_committedDisplayScript);
     m_committedDisplayScript = m_editor->toPlainText();
     new CScriptHighlighter(m_editor->document());
+    connect(m_editor, &QPlainTextEdit::textChanged, this, &CMobScriptWindow::analysisBufferChanged);
     connect(external, &QPushButton::clicked, this, &CMobScriptWindow::openExternalEditor);
     connect(apply, &QPushButton::clicked, this, &CMobScriptWindow::applyScript);
     connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
     QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, &CMobScriptWindow::applyScript);
+}
+
+QString CMobScriptWindow::analysisText() const
+{
+    return m_editor->toPlainText();
+}
+
+bool CMobScriptWindow::navigateToSource(const QString& analyzedText, int offset)
+{
+    if(scenario::normalizedText(analyzedText) != m_editor->toPlainText())
+        return false;
+    QTextCursor cursor(m_editor->document());
+    cursor.setPosition(qBound(0, offset, m_editor->toPlainText().size()));
+    cursor.select(QTextCursor::LineUnderCursor);
+    m_editor->setTextCursor(cursor);
+    m_editor->centerCursor();
+    show(); raise(); activateWindow(); m_editor->setFocus();
+    return true;
 }
 
 QString CMobScriptWindow::displayScript(CMob* mob)
@@ -134,6 +161,7 @@ void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
         m_committedDisplayScript = normalizedDisplay;
         setWindowTitle(tr("MOB Script: %1 [unapplied local text retained]")
                        .arg(m_mob->filePath().absoluteFilePath()));
+        emit analysisBufferChanged();
         return;
     }
     m_editor->setPlainText(normalizedDisplay);
@@ -156,6 +184,7 @@ void CMobScriptWindow::onExternalMobScriptImported(CMob* mob, const QString& dis
 
 bool CMobScriptWindow::requestClose()
 {
+    if(!m_mob) return true;
     m_closeAccepted = false;
     close();
     return m_closeAccepted;
@@ -163,6 +192,7 @@ bool CMobScriptWindow::requestClose()
 
 void CMobScriptWindow::closeEvent(QCloseEvent* event)
 {
+    if(!m_mob) { m_closeAccepted = true; event->accept(); return; }
     if(hasLocalChanges())
     {
         const QMessageBox::StandardButton answer = QMessageBox::question(
@@ -182,5 +212,9 @@ void CMobScriptWindow::closeEvent(QCloseEvent* event)
         }
     }
     m_closeAccepted = true;
+    // WA_DeleteOnClose is deferred; detach this buffer before a CMob can be
+    // destroyed or a replacement editor opened for the same map.
+    m_mob = nullptr;
+    emit analysisBufferChanged();
     event->accept();
 }
