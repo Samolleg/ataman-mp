@@ -38,6 +38,8 @@
 #include "resource_name.h"
 #include "res_file.h"
 #include "resource_profile.h"
+#include "mob_family_validation.h"
+#include <QStandardPaths>
 
 int runDatabaseCreationCheck()
 {
@@ -173,6 +175,10 @@ int runDatabasePreviewCheck()
     QDir().mkpath(outputDirectory);
     QTemporaryDir temporary;
     if(!temporary.isValid()) return fail("temporary directory");
+    struct RestoreDirectory {
+        QString path = QDir::currentPath();
+        ~RestoreDirectory() { QDir::setCurrent(path); }
+    } restoreDirectory;
     // All settings and diagnostic state are confined to scratch. Process-lifetime
     // UI services are retained, matching the application's ownership model.
     QDir::setCurrent(temporary.path());
@@ -190,6 +196,8 @@ int runDatabasePreviewCheck()
     QVector<ei::SDatabaseDiagnostic> diagnostics;
     snapshot->rawMembers = ei::readDatabaseArchive(archive, &diagnostics);
     ei::applyRelationalMembers(snapshot->rawMembers, "read-only-test", snapshot.data());
+    if(usesJmvRuntime(snapshot->profileId))
+        ei::applyJmvUnitPerkTable(roots, snapshot.data());
     if(!snapshot->usable()) return fail("database snapshot");
     ei::ProfileDatabaseContext::instance().activate(snapshot,
         {{"characterAppearance", snapshot->providerId}, {"equipmentLayout", snapshot->providerId},
@@ -257,6 +265,57 @@ int runDatabasePreviewCheck()
         output << "Preview " << name << ": " << colors.size() << " colors\n"; output.flush();
         return colors.size() > 32;
     };
+    if(qEnvironmentVariableIsSet("EI_TEST_NPC_CREATION_ONLY"))
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QStringList names;
+        if(jmv) names=QStringList{"Jun Male Hero","Jun Female Deva M1","AncientCurseM25","ArmoredTurtle110"};
+        else for(const auto& entry:ei::databaseMapCatalog(*snapshot))
+            if(entry.model=="unhuma" && entry.unavailableReason.isEmpty()) { names.append(entry.name); break; }
+        if(names.isEmpty()) return fail("no fixture creature in active database");
+        for(const QString& name:names) {
+            form->show(); category->setCurrentIndex(0); search->setText(name);
+            const auto exact=objects->findItems(name,Qt::MatchExactly);
+            if(exact.size()!=1) return fail("NPC selection: "+name);
+            objects->setCurrentItem(exact.first());
+            if(!capture(name)) return fail("NPC preview: "+name);
+            view->m_cam->setLocation(QVector3D(0,0,30),QVector3D(),QVector3D());
+            QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+            if(!view->isDatabasePlacementPending()) return fail("NPC placement without manual texture/parts repair: "+name);
+            if(!view->cancelPendingOperation() || !destination->nodes().isEmpty()) return fail("NPC cancel: "+name);
+            form->show(); QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+            if(!view->isDatabasePlacementPending()) return fail("NPC placement retry: "+name);
+            QMouseEvent click(QEvent::MouseButtonRelease,QPointF(320,240),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+            view->m_pOp->mouseReleaseEvent(&click);
+            if(destination->nodes().size()!=1 || history->count()!=1) return fail("NPC one-step commit: "+name);
+            CValidationReport checkReport; QByteArray created;
+            if(!destination->buildValidatedCandidate(&created,&checkReport)) return fail(checkReport.toText());
+            const QString savedPath=temporary.filePath("npc-created.mob");
+            if(!destination->saveAs(QFileInfo(savedPath))) return fail(destination->lastSaveError());
+            CMobDocument saved;
+            if(!saved.load(QFileInfo(savedPath),&checkReport) || saved.objects().size()!=1) return fail("NPC saved reopen: "+name);
+            const auto& obj=saved.objects().first();
+            if(obj.prototype!=name || obj.importMode) return fail("NPC database identity lost");
+            SMobFamilyValidationRequest family;
+            family.profileId=snapshot->profileId; family.database=snapshot;
+            family.seedMobPaths=QStringList{savedPath}; family.explicitComposition=true; family.includeProfileWideMobs=false;
+            const auto validated=CMobFamilyValidator::validate(family);
+            if(validated.criticalCount()!=0) return fail("NPC family critical after creation: "+name+"\n"+validated.toText());
+            const QString model=obj.model;
+            if((model=="unhuma" || model=="unhufe") && (obj.bodyParts.size()!=16 || !obj.bodyParts.contains("hr")))
+                return fail("NPC explicit humanoid anatomy: "+name);
+            if((name=="AncientCurseM25" || name=="ArmoredTurtle110") && !obj.bodyParts.isEmpty())
+                return fail("integral creature was given a humanoid mask");
+            history->undo(); if(!destination->nodes().isEmpty()) return fail("NPC undo: "+name);
+            history->redo();
+            QByteArray redone;
+            if(!destination->buildValidatedCandidate(&redone,&checkReport) || redone!=created) return fail("NPC redo exact bytes: "+name);
+            history->undo(); history->clear();
+            output << "PASS: " << name << " picker, no manual repair, cancel/place, save/reopen, family validation, undo/redo\n";
+            output.flush();
+        }
+        return 0;
+    }
     for(const QString& name : creatures)
     {
         category->setCurrentIndex(0); search->setText(name);

@@ -1,4 +1,6 @@
 #include "database_map_catalog.h"
+#include "resource_profile.h"
+#include "../runtime/character_bodypart_runtime.h"
 #include <QCoreApplication>
 #include <QJsonArray>
 #include <cmath>
@@ -45,6 +47,13 @@ QVector<SDatabaseMapEntry> databaseMapCatalog(const SProfileDatabaseSnapshot& da
                     break;
                 }
             entry.primaryTexture = texture(entry.model, primary);
+            // Same numbered wearable skin convention as the active JMV
+            // appearance resolver, including skins beyond RaceModels' examples.
+            if(usesJmvRuntime(database.profileId) && standardWearableAssembly(entry.model)
+               && monster.skinIndex >= 0)
+                entry.primaryTexture = texture(entry.model,
+                    QString("skin_%1_x4").arg(monster.skinIndex, 2, 10, QChar('0')));
+            entry.bodyParts = freshDatabaseBodyParts(entry.model, monster.hairIndex);
             entry.secondaryTexture = texture(entry.model, race->secondaryTextures.value(0));
             if(entry.model.isEmpty() || entry.primaryTexture.isEmpty())
                 entry.unavailableReason = tr("The database does not define a model and skin for this creature.");
@@ -113,6 +122,8 @@ bool applyDatabaseMapEntry(const SDatabaseMapEntry& entry, const QJsonObject& de
     world.insert("Model name", entry.model);
     world.insert("Primary texture", entry.primaryTexture);
     world.insert("Secondary texture", entry.secondaryTexture);
+    if(entry.category == EDatabaseMapCategory::Creature)
+        world.insert("Object parts", QJsonArray::fromStringList(entry.bodyParts));
     node.insert("World object", world);
     if(entry.category == EDatabaseMapCategory::Creature)
     {

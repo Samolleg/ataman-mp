@@ -6,6 +6,11 @@
 
 namespace ei {
 
+bool standardWearableAssembly(const QString& model);
+// Fresh DB-created actors only. Existing serialized masks are never repaired
+// or normalized by this helper; integral creatures retain their empty mask.
+QStringList freshDatabaseBodyParts(const QString& model, int hairIndex);
+
 struct SHelmetHairRuntimeDecision
 {
     QString nativeHairPart;

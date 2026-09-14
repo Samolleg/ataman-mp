@@ -1,4 +1,27 @@
 #include "character_bodypart_runtime.h"
+#include <QSet>
+
+bool ei::standardWearableAssembly(const QString& model)
+{
+    static const QSet<QString> models = {
+        "unhuma", "unhufe", "unorma", "unorfe", "unhusk", "unhuzm", "unhuzf"};
+    return models.contains(model.trimmed().toLower());
+}
+
+QStringList ei::freshDatabaseBodyParts(const QString& model, int hairIndex)
+{
+    if(!standardWearableAssembly(model))
+        return {};
+    // These explicit anatomy roots are the shipped wearable mask, not the
+    // dangerous empty-mask meaning of every optional assembly member.
+    QStringList parts = {"hp", "bd", "hd", "lh1", "rh1", "lh2", "rh2", "lh3", "rh3",
+                         "ll1", "rl1", "ll2", "rl2", "ll3", "rl3"};
+    if(legacyHairRootAlias(model))
+        parts.insert(3, "hr");
+    else if(hairIndex >= 0)
+        parts.insert(3, databaseHairPart(hairIndex));
+    return parts;
+}
 
 namespace {
 bool containsPart(const QStringList& parts, const QString& wanted)

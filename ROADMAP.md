@@ -468,6 +468,32 @@ foundation as one coherent `0.3.0` release.
 
 ### EI-MOB-SCENARIO-VISUAL-001 — read-only map scenario layer
 
+- Linked fix EI-DB-NPC-PLACEMENT-001 (2026-09-14): Jun Male Hero created from DB
+  first rejects its raw texture, then (after manual x4 selection and placement)
+  receives critical `mob.semantic.wearable_all_parts_enabled` on NID 14.
+  Originally diagnostic-only; promoted to implementation when the user confirmed
+  this was the editor's DB creation defect. Expected: fresh supported DB creatures
+  place without manual skin/parts repair, save/reopen without newly authored empty
+  wearable-mask errors. Scope: fresh descriptors, focused Base/JMV and item/lever
+  regressions, local tester delivery; no existing/installed map mutation or
+  publication. Parent scenario scope is preserved.
+  First incorrect values: Base-style JMV skin name and default empty Object parts,
+  masked by independently resolved preview. Descriptor and actual picker tests
+  reproduced rejection before the fix. New creation supplies JMV x4 skins and
+  explicit wearable anatomy with model-appropriate DB hair. Integral creatures
+  and the validator retain their semantics.
+  Status: implementation, release and focused checks pass; clean staging and
+  permanent `C:/GOG Games/maped/EI-Mapper-Endurance-0.5.0-alpha-db-npc-r1-test`
+  packages finalized, all 92 files match. Four JMV creatures pass Desktop/ANGLE placement, save/reopen, zero
+  family criticals and exact undo/redo; Base human passes too. Seven focused
+  database tests, creature/item/lever creation and 51 scenario checks pass.
+  [Evidence and remaining acceptance](docs/validation/DATABASE_NPC_CREATION_R1.md).
+  Next: user checks a newly added actor on their map and in the game. Old NID 14
+  is not automatically repaired. Package executable SHA-256:
+  `289c2cac8ae200de65c4109e31e3c7d58d7846e37037137f2a54b81fc1435d08`.
+  Earlier terrain-ray message was passed by the user's subsequent placement;
+  the exact camera failure was not reproduced and ray behavior is unchanged.
+  Full UI-widget check remains an inherited gap; parent task stays open.
 - Original goal: reveal placed NPC/object/lever participants and verified
   script-created entities; source/function/line inspector, object/code navigation,
   creation/movement/use commands, trustworthy virtual spawn/destination markers,

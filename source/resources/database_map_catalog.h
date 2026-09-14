@@ -17,6 +17,7 @@ struct SDatabaseMapEntry
     QString model;
     QString primaryTexture;
     QString secondaryTexture;
+    QStringList bodyParts;
     QString unavailableReason;
     int unitType{-1};
     float complexionX{1}, complexionY{1}, complexionZ{1};

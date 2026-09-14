@@ -333,6 +333,29 @@ void ProfileDatabaseTests::databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupp
     QVERIFY(!node.value("Is use mob stats?").toBool());
     QVERIFY(!defaults.contains("Prototype name"));
     QVERIFY(!node.contains("_Endurance raw provenance"));
+    // Original Jun Male Hero failure shape: a JMV humanoid DB row, skin 41,
+    // becomes a fresh object with usable JMV skin and explicit base anatomy.
+    auto humanSnapshot=snapshot;
+    humanSnapshot.profileId="jamais-vu";
+    humanSnapshot.raceModels["test race"].model="unhufe";
+    humanSnapshot.monsters["test creature"].skinIndex=41;
+    const auto human=ei::databaseMapCatalog(humanSnapshot).first();
+    QCOMPARE(human.primaryTexture,QString("unhufeskin_41_x4"));
+    QJsonObject humanNode;
+    QVERIFY(ei::applyDatabaseMapEntry(human,defaults,&humanNode));
+    const auto humanParts=humanNode.value("World object").toObject().value("Object parts").toArray();
+    QCOMPARE(humanParts.size(),16);
+    QVERIFY(humanParts.contains("bd") && humanParts.contains("hr") && humanParts.contains("rl3"));
+    humanSnapshot.profileId="base-game";
+    QCOMPARE(ei::databaseMapCatalog(humanSnapshot).first().primaryTexture,QString("unhufeskin_41"));
+    humanSnapshot.raceModels["test race"].model="unorma";
+    humanSnapshot.monsters["test creature"].hairIndex=7;
+    const auto orc=ei::databaseMapCatalog(humanSnapshot).first();
+    QCOMPARE(orc.bodyParts.size(),16);
+    QVERIFY(orc.bodyParts.contains("hr.07") && !orc.bodyParts.contains("hr"));
+    humanSnapshot.monsters["test creature"].hairIndex=-1;
+    QCOMPARE(ei::databaseMapCatalog(humanSnapshot).first().bodyParts.size(),15);
+    QVERIFY(creature.bodyParts.isEmpty()); // Integral models retain their own assembly.
     snapshot.monsters["test creature"].complexionX = 0;
     QVERIFY(ei::databaseMapCatalog(snapshot).first().unavailableReason.isEmpty());
     ei::SLeverDatabaseRecord lever;
