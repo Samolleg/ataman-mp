@@ -93,6 +93,7 @@ class UnitAnimationTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void prefersCidle15ForMapNpcs();
     void parsesAndSelectsDeterministically();
     void providersSeparateBaseAndJmvMasks();
     void jmvSelectsStandingModelSpecificIdles();
@@ -385,6 +386,27 @@ void UnitAnimationTests::parsesAndSelectsDeterministically()
     QCOMPARE(actions.size(), 2);
     SAdbAction selected; QVERIFY(selectDefaultIdleAction(actions, -1, false, &selected));
     QCOMPARE(selected.name, QString("winner"));
+}
+
+void UnitAnimationTests::prefersCidle15ForMapNpcs()
+{
+    // Real Base/JMV cidle15 is state 0, unlike the state-2 standing cycle.
+    const auto actions = parseAdbActions(adb({
+        {"cidle01", 80, idlePacked(127, 2), 100, 65},
+        {"cidle15", 94, idlePacked(89, 0), 10, 115}
+    }));
+    SAdbAction selected;
+    QVERIFY(selectDefaultIdleAction(actions, -1, false, &selected));
+    QCOMPARE(selected.name, QString("cidle15"));
+    QVERIFY(selectJmvDefaultIdleAction(actions, "unhufe", -1, &selected));
+    QCOMPARE(selected.name, QString("cidle15"));
+    QCOMPARE(selected.length, quint32(115));
+    const auto invalid = parseAdbActions(adb({
+        {"cidle01", 80, idlePacked(0, 2), 100, 65},
+        {"cidle15", 94, idlePacked(0, 0), 100, 0}
+    }));
+    QVERIFY(selectJmvDefaultIdleAction(invalid, "unhufe", -1, &selected));
+    QCOMPARE(selected.name, QString("cidle01"));
 }
 
 void UnitAnimationTests::providersSeparateBaseAndJmvMasks()

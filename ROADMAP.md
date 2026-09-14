@@ -468,6 +468,20 @@ foundation as one coherent `0.3.0` release.
 
 ### EI-MOB-SCENARIO-VISUAL-001 — read-only map scenario layer
 
+- Follow-up EI-NPC-IDLE-015 (2026-09-14): user requests `cidle15` instead of the
+  current default NPC animation on the map. Scope: editor idle selection, preserve
+  old fallback for models without this cycle, no saved MOB/game data changes.
+  Installed Base/JMV action tables confirm `cidle15` is an IDLE cycle of length
+  115 with allowedState=0, currently excluded by JMV's standing-only filter.
+  Expected: prefer this valid named cycle, including state 0, for Base/JMV;
+  retain deterministic prior selection if absent or invalid. Status: implemented;
+  original regression reproduced before the fix, all 39 animation tests pass.
+  JMV male/female and Base human select and parse the installed cidle15 clip;
+  creation/save/reopen/history checks remain clean for all five tested actors.
+  [Evidence and limits](docs/validation/NPC_IDLE_015.md). Staging and permanent
+  `C:/GOG Games/maped/EI-Mapper-Endurance-0.5.0-alpha-db-npc-r2-test` finalized,
+  all 92 files match. Next: user visually checks motion/equipment on their map;
+  continuation is included in PR #8 for maintainer review. No game data changed.
 - Acceptance and PR handoff (2026-09-14): user confirms "everything works" for
   the delivered build and explicitly requests a PR. This supersedes the earlier
   local-only publication restriction for this contributor branch. Current

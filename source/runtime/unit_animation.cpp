@@ -380,11 +380,35 @@ QVector<SAdbAction> parseAdbActions(const QByteArray& bytes, QStringList* diagno
     return result;
 }
 
+namespace {
+bool selectEditorIdle(const QVector<SAdbAction>& actions, bool allowExtendedWeaponMask,
+                      SAdbAction* selected)
+{
+    const SAdbAction* best = nullptr;
+    for(const SAdbAction& action : actions)
+    {
+        // Explicit editor display preference, not the game's probabilistic
+        // stance selector. The authored cidle15 cycle has allowedState 0.
+        if(action.name.compare("cidle15", Qt::CaseInsensitive) != 0
+           || action.actionType != 6 || action.stage != 2 || action.length == 0
+           || (!allowExtendedWeaponMask && (action.weaponMask & ~quint16(0x7f))))
+            continue;
+        if(!best || action.probability > best->probability
+           || (action.probability == best->probability && action.number < best->number))
+            best = &action;
+    }
+    if(!best) return false;
+    *selected = *best;
+    return true;
+}
+}
+
 bool selectDefaultIdleAction(const QVector<SAdbAction>& actions, int weaponTypeId,
                              bool allowExtendedWeaponMask, SAdbAction* selected,
                              QString* diagnostic)
 {
     if(!selected) return false;
+    if(selectEditorIdle(actions, allowExtendedWeaponMask, selected)) return true;
     QVector<SAdbAction> candidates;
     for(const SAdbAction& action : actions)
     {
@@ -419,6 +443,7 @@ bool selectJmvDefaultIdleAction(const QVector<SAdbAction>& actions, const QStrin
                                 int weaponTypeId, SAdbAction* selected, QString* diagnostic)
 {
     if(!selected) return false;
+    if(selectEditorIdle(actions, true, selected)) return true;
     QVector<SAdbAction> standing;
     for(const SAdbAction& action : actions)
         if(action.actionType == 6 && action.stage == 2 && action.length > 0

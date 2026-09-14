@@ -39,6 +39,8 @@
 #include "res_file.h"
 #include "resource_profile.h"
 #include "mob_family_validation.h"
+#include "profile_visual_provider.h"
+#include "unit_animation.h"
 #include <QStandardPaths>
 
 int runDatabaseCreationCheck()
@@ -196,8 +198,14 @@ int runDatabasePreviewCheck()
     QVector<ei::SDatabaseDiagnostic> diagnostics;
     snapshot->rawMembers = ei::readDatabaseArchive(archive, &diagnostics);
     ei::applyRelationalMembers(snapshot->rawMembers, "read-only-test", snapshot.data());
+    ei::applyActionMembers(snapshot->rawMembers, "read-only-test", false, snapshot.data());
     if(usesJmvRuntime(snapshot->profileId))
+    {
+        const QString overlay = ei::siblingArchive(archive, "databaseJmv.res");
+        ei::applyActionMembers(ei::readDatabaseArchive(overlay, &diagnostics),
+                              overlay, true, snapshot.data());
         ei::applyJmvUnitPerkTable(roots, snapshot.data());
+    }
     if(!snapshot->usable()) return fail("database snapshot");
     ei::ProfileDatabaseContext::instance().activate(snapshot,
         {{"characterAppearance", snapshot->providerId}, {"equipmentLayout", snapshot->providerId},
@@ -302,6 +310,22 @@ int runDatabasePreviewCheck()
             const auto validated=CMobFamilyValidator::validate(family);
             if(validated.criticalCount()!=0) return fail("NPC family critical after creation: "+name+"\n"+validated.toText());
             const QString model=obj.model;
+            if(model=="unhuma" || model=="unhufe")
+            {
+                ProfileVisualProviderService providers;
+                SUnitAnimationRequest request;
+                request.model=model; request.prototype=name;
+                QJsonObject animation;
+                const auto resolver=providers.animationResolver(snapshot->providerId,snapshot);
+                if(resolver.isNull() || !resolver->resolve(request,&animation).success
+                   || animation.value("actionName").toString()!="cidle15")
+                    return fail("NPC cidle15 selection: "+name);
+                const auto clip=parseNestedAnimationClip(
+                    CObjectList::getInstance()->modelAnimation(model),"cidle15",
+                    animation.value("length").toInt());
+                if(!clip.valid()) return fail("NPC cidle15 animation resource: "+name);
+                output << "PASS: " << name << " cidle15 selected and model clip parsed\n";
+            }
             if((model=="unhuma" || model=="unhufe") && (obj.bodyParts.size()!=16 || !obj.bodyParts.contains("hr")))
                 return fail("NPC explicit humanoid anatomy: "+name);
             if((name=="AncientCurseM25" || name=="ArmoredTurtle110") && !obj.bodyParts.isEmpty())
