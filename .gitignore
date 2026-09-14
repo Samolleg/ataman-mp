@@ -36,6 +36,7 @@ CMakeLists.txt.user*
 # Local toolchains and generated packages
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r1-test/
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r2-test/
+/artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r3-test/
 /.tooling/
 /aqtinstall.log
 /bin/

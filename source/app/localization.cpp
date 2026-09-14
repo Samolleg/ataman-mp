@@ -39,12 +39,12 @@ QString persistedApplicationLanguage(const QString& optionsPath)
 {
     QFile options(optionsPath);
     if(!options.open(QIODevice::ReadOnly | QIODevice::Text))
-        return QStringLiteral("en");
+        return QStringLiteral("ru");
 
     const QJsonDocument document = QJsonDocument::fromJson(options.readAll());
     const QString language = document.object().value(QStringLiteral("General"))
         .toObject().value(QStringLiteral("language")).toString().toLower();
-    return language == QStringLiteral("ru") ? language : QStringLiteral("en");
+    return language == QStringLiteral("en") ? language : QStringLiteral("ru");
 }
 
 bool installApplicationTranslator(QApplication& application, const QString& requestedLanguage)

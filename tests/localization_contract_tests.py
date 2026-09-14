@@ -53,8 +53,8 @@ def main():
             "qmake must own the Russian catalog")
     require("installApplicationTranslator" in startup,
             "startup must install the translator before constructing UI")
-    require('new COptString("language", "en")' in settings,
-            "English must be the persisted default/fallback language")
+    require('new COptString("language", "ru")' in settings,
+            "Russian must be the persisted default/fallback language")
     require(catalog_path.is_file(), "Russian TS catalog is missing")
     require("lrelease.exe" in build and "ei_mapper_ru.qm" in build,
             "release builds must compile the catalog")

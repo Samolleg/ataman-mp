@@ -20,6 +20,10 @@
 #include <QSplitter>
 #include <QSignalBlocker>
 #include <QFontDatabase>
+#include <QMouseEvent>
+#include <QFile>
+#include <QCryptographicHash>
+#include <QScopedValueRollback>
 #include <cmath>
 #include <limits>
 
@@ -53,6 +57,7 @@ CScenarioPanel::CScenarioPanel(CView* view, QWidget* parent) : QWidget(parent), 
     m_references->setRootIsDecorated(false); m_references->setUniformRowHeights(true);
     m_references->setSelectionMode(QAbstractItemView::SingleSelection);
     m_references->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_references->viewport()->installEventFilter(this);
     m_references->header()->setSectionResizeMode(QHeaderView::Interactive);
     const int columnWidths[] = {180,230,140,130,65,340};
     for(int c=0;c<6;++c) m_references->setColumnWidth(c,columnWidths[c]);
@@ -87,6 +92,26 @@ CScenarioPanel::CScenarioPanel(CView* view, QWidget* parent) : QWidget(parent), 
         connect(view,QOverload<CMob*>::of(&CView::unloadMob),this,[this](CMob*){scheduleRefresh();});
     }
     populate();
+}
+bool CScenarioPanel::eventFilter(QObject* watched, QEvent* event) {
+    if(watched==m_references->viewport()) {
+        if(event->type()==QEvent::ContextMenu) return true;
+        if(event->type()==QEvent::MouseButtonPress || event->type()==QEvent::MouseButtonRelease) {
+            auto* mouse=static_cast<QMouseEvent*>(event);
+            if(mouse->button()==Qt::RightButton) {
+                if(event->type()==QEvent::MouseButtonPress) {
+                    if(auto* item=m_references->itemAt(mouse->pos())) {
+                        m_references->setCurrentItem(item);
+                        showReference();
+                        if(m_targets->count()>0) { m_targets->setCurrentIndex(0); navigateTarget(); }
+                        else m_details->setText(m_details->text()+"\n"+tr("No uniquely resolved participant or marker for this row."));
+                    }
+                }
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched,event);
 }
 void CScenarioPanel::setFamilyReport(const CMobFamilyValidationReport& report) { m_family=report; scheduleRefresh(); }
 void CScenarioPanel::setLayerEnabled(bool enabled) {
@@ -235,7 +260,7 @@ void CScenarioPanel::showReference() {
     m_details->setText(details);
     for(int t=0;t<ref.targets.size();++t) if(scenario::navigable(ref.targets[t].resolution)) {
         const auto& target=ref.targets[t];
-        if(!target.objectKey.startsWith("raw:")) m_targets->addItem(target.name.isEmpty()?target.expression:target.name,t);
+        m_targets->addItem(target.name.isEmpty()?target.expression:target.name,t);
     }
     for(int i=0;i<m_result.markers.size();++i) if(m_result.markers[i].reference==m_navigationReference)
         m_targets->addItem(m_result.markers[i].spawn?tr("Virtual spawn"):tr("Virtual destination"),-i-1);
@@ -255,7 +280,8 @@ void CScenarioPanel::navigateCode() {
 }
 void CScenarioPanel::navigateTarget() {
     const int i=currentReference();
-    if(!m_view || m_view->hasPendingOperation() || i<0 || i>=m_result.references.size() || m_targets->currentIndex()<0) return;
+    if(m_navigating || !m_view || m_view->hasPendingOperation() || i<0 || i>=m_result.references.size() || m_targets->currentIndex()<0) return;
+    QScopedValueRollback<bool> navigating(m_navigating,true);
     const auto ref=m_result.references[i]; const int value=m_targets->currentData().toInt();
     if(value<0) {
         const int marker=-value-1; if(marker>=m_result.markers.size()) return;
@@ -266,14 +292,39 @@ void CScenarioPanel::navigateTarget() {
     }
     if(value>=ref.targets.size()) return;
     const auto& target=ref.targets[value];
+    const bool raw=target.objectKey.startsWith("raw:");
+    QByteArray expectedHash;
+    if(raw) for(const auto& member:m_family.members)
+        if(scenario::normalizedSource(member.path)==scenario::normalizedSource(target.sourceKey)) expectedHash=member.sourceSha256;
+    bool loaded=false;
+    for(CMob* mob:m_view->mobs()) if(scenario::normalizedSource(mob->filePath().absoluteFilePath())==scenario::normalizedSource(target.sourceKey)) loaded=true;
+    if(!loaded && raw) {
+        QFile file(target.sourceKey);
+        if(expectedHash.size()!=32 || !file.open(QIODevice::ReadOnly)
+           || QCryptographicHash::hash(file.readAll(),QCryptographicHash::Sha256)!=expectedHash) {
+            m_details->setText(tr("Participant MOB changed or is unavailable. Refresh MOB Family Validation before navigating.")); return;
+        }
+        file.close();
+        CMob* previous=m_view->currentMob();
+        QFileInfo path(target.sourceKey);
+        const bool opened=m_view->loadMob(path);
+        if(!m_view) return;
+        if(previous && m_view->mobs().contains(previous)) m_view->changeCurrentMob(previous);
+        refresh();
+        if(!opened) { m_details->setText(tr("Could not open the participant MOB.")); return; }
+    }
     for(CMob* mob:m_view->mobs()) if(scenario::normalizedSource(mob->filePath().absoluteFilePath())==scenario::normalizedSource(target.sourceKey)) {
-        for(CNode* node:mob->nodes()) if(node && nodeKey(node)==target.objectKey && node->mapId()==target.id) {
+        for(CNode* node:mob->nodes()) if(node && !node->isMarkDeleted() && node->mapId()==target.id
+            && (raw ? node->rawSourceObjectPath()==target.objectKey.mid(4) && node->rawSourceDocumentSha256()==expectedHash
+                    : nodeKey(node)==target.objectKey)) {
             if(!m_view->isMobVisible(mob)) { m_details->setText(tr("Participant MOB is hidden. Enable its visibility to navigate.")); return; }
             // Navigation is not an edit or a new history command.
-            m_view->restoreSelection({node}); m_view->moveCamToSelectedObjects(); return;
+            const QVector3D position=node->drawPosition();
+            m_view->restoreSelection({node}); m_view->focusScenarioPosition(position); return;
         }
     }
     refresh();
+    m_details->setText(tr("Participant changed since analysis. Refresh the family and select the reference again."));
 }
 void CScenarioPanel::showSourceLocation(CMob* mob, int offset) {
     if(!m_view || !mob || !m_view->mobs().contains(mob)) return;

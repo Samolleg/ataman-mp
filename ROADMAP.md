@@ -485,6 +485,30 @@ foundation as one coherent `0.3.0` release.
   object/script undo refresh, Russian UI, release and finalized tester package.
 - Status: first-stage implementation and permanent tester delivery complete;
   parent remains open for representative interactive map acceptance.
+- Follow-up EI-MOB-SCENARIO-VISUAL-001-B (2026-09-14): user requests Russian as
+  the default language and immediate object navigation on scenario-row right
+  click. Preserve explicitly saved language and read-only navigation. Screenshot
+  shows a family target with no navigation option (unopened source); asked whether
+  to load its MOB or focus a coordinate marker. Acceptance: fresh/missing-language
+  startup and settings use Russian; saved English remains valid; right click
+  selects the clicked row and navigates without document/history mutation;
+  unresolved/ambiguous rows never guess an object. Status: both requests implemented
+  and delivered in R3; parent remains open for representative interactive acceptance.
+  Before: 4 native failures for language/right click, then a separate reproduced
+  cross-MOB camera failure and unopened-target failure. After: release, localization
+  contract, native desktop 55/55 (with capture) and ANGLE 58/58 with read-only JMV
+  zone6 corpus. Russian panel visually checked. Camera now
+  focuses the target position instead of searching selection only in active MOB;
+  unknown rows cannot reuse a prior target. Existing saved English is preserved.
+  User approved automatic MOB load and object selection (2026-09-14).
+  Auto-load checks file hash and exact object provenance, reuses open documents
+  and preserves file bytes/dirty state/history. Stale files do not navigate.
+  [R3 evidence and audit](docs/validation/MOB_SCENARIO_R3.md).
+  Delivered `C:/GOG Games/maped/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r3-test`;
+  finalizers passed, 92 files hash-identical to staging. Earlier folders preserved.
+  Next: user checks the same screenshot case via [R3 steps](packaging/MOB_SCENARIO_R3.md).
+  No pending material choice; actual session acceptance and the R1 broad UI
+  diagnostic remain evidence gaps. No publication or packaged GUI launch.
 - Linked follow-up EI-MOB-SCENARIO-VISUAL-001-A (2026-09-14): user reports that
   connected MOBs appear omitted. Two reproduced defects fixed locally: optional
   `.mob` normalization and omission of an inspected but unopened owning primary.

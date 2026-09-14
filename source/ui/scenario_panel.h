@@ -28,6 +28,8 @@ public:
     void showSourceLocation(CMob* mob, int offset);
 signals:
     void showRequested();
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void scheduleRefresh();
     void populate();
@@ -56,6 +58,7 @@ private:
     CMobFamilyValidationReport m_family;
     bool m_enabled = false;
     bool m_refreshing = false;
+    bool m_navigating = false;
     int m_navigationReference = -1;
 };
 #endif

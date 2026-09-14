@@ -1,21 +1,24 @@
 # Russian localization
 
-Endurance uses Qt 5.12 translation catalogs. English source text is the default
-and fallback; Russian is stored in `translations/ei_mapper_ru.ts` and compiled
+Endurance uses Qt 5.12 translation catalogs. Russian is the default interface;
+English source text is the fallback for missing translations. Russian is stored
+in `translations/ei_mapper_ru.ts` and compiled
 to the embedded `ei_mapper_ru.qm` resource by the checked release wrapper.
 
 ## Language choice
 
 The persistent selector is in **Settings > General > Language**. The stored
 option is `General.language` in `endurance-options.json` and accepts `en` or
-`ru`. Unknown values and missing catalogs safely select English.
+`ru`. Missing, unreadable or invalid settings default to Russian; an explicitly
+saved `en` choice is preserved. Missing catalog entries fall back to English.
 
 A restart is required. Endurance creates long-lived generated models, property
 metadata, secondary windows, and viewport overlays. Retrofitting every one of
 those objects on `LanguageChange` would be error-prone, so the translator is
 installed once before the splash and first visible widget are constructed.
 Saving a different language shows a restart-required dialog immediately.
-Headless validation runs before translator installation and remains English.
+Headless validation runs before normal translator installation. The scenario
+integration check explicitly verifies Russian startup; its test labels stay English.
 
 ## Translation sources
 

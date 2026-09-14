@@ -35,6 +35,9 @@
 #include <QOpenGLFunctions>
 #include <QElapsedTimer>
 #include <QCryptographicHash>
+#include <QMouseEvent>
+#include <QStandardPaths>
+#include "backup_manager.h"
 
 namespace {
 class HiddenCheckWidgets : public QObject {
@@ -53,12 +56,32 @@ int runScenarioLayerCheck()
     auto check=[&](bool pass,const char* name) { ++checks; if(!pass) ++failures; output << (pass?"PASS: ":"FAIL: ") << name << "\n"; output.flush(); };
     QTemporaryDir scratch;
     if(!scratch.isValid()) return 1;
+    struct TestLocationsGuard {
+        bool previous=QStandardPaths::isTestModeEnabled();
+        TestLocationsGuard() { QStandardPaths::setTestModeEnabled(true); }
+        ~TestLocationsGuard() { QStandardPaths::setTestModeEnabled(previous); }
+    } testLocations;
     struct CurrentDirectoryGuard { QString old=QDir::currentPath(); ~CurrentDirectoryGuard(){QDir::setCurrent(old);} } directoryGuard;
     QDir::setCurrent(scratch.path());
     HiddenCheckWidgets hiddenWidgets; qApp->installEventFilter(&hiddenWidgets);
     if(qEnvironmentVariable("EI_SCENARIO_CHECK_LANGUAGE")=="ru")
         check(ei::installApplicationTranslator(*qApp,"ru"),"Russian scenario catalog loaded");
     CSettings settings;
+    check(ei::persistedApplicationLanguage(scratch.filePath("missing-options.json"))=="ru",
+          "fresh startup defaults to Russian");
+    const auto* defaultLanguage=dynamic_cast<const COptString*>(settings.opt(eOptSetGeneral,"language"));
+    check(defaultLanguage && defaultLanguage->value()=="ru","fresh settings default to Russian");
+    QFile languageFile(scratch.filePath("language-options.json"));
+    const auto languageCase=[&](const QByteArray& bytes,const QString& expected) {
+        if(!languageFile.open(QIODevice::WriteOnly|QIODevice::Truncate)) return false;
+        languageFile.write(bytes); languageFile.close();
+        return ei::persistedApplicationLanguage(languageFile.fileName())==expected;
+    };
+    check(languageCase("{}","ru") && languageCase("broken json","ru"),"missing or corrupt language defaults to Russian");
+    check(languageCase("{\"General\":{\"language\":\"en\"}}","en"),"explicit English preference remains English");
+    check(ei::installApplicationTranslator(*qApp)
+          && QCoreApplication::translate("CScenarioPanel","Go to code")==QString::fromUtf8("К коду"),
+          "fresh startup installs Russian scenario translation");
     QUndoStack history;
     CTreeView tree; QTableWidget properties; properties.setColumnCount(2);
     CProgressView progress; QLineEdit coordinates; CTileForm tiles;
@@ -88,6 +111,41 @@ int runScenarioLayerCheck()
     check(refs && refs->topLevelItemCount()==7,"operation and nested lookup rows");
     refs->setCurrentItem(refs->topLevelItem(0));
     check(view.m_scenarioLinks.size()==2 && view.m_scenarioDestinations.size()==1,"selected participant links only");
+    // Deliver an actual right-button press to the row viewport, including a row
+    // different from the current selection. No context-menu signal shortcut.
+    panel.show(); QApplication::processEvents();
+    const auto rightClickRow=[&](QTreeWidgetItem* item) {
+        refs->scrollToItem(item);
+        const QPoint point=refs->visualItemRect(item).center();
+        QMouseEvent press(QEvent::MouseButtonPress,point,Qt::RightButton,Qt::RightButton,Qt::NoModifier);
+        QApplication::sendEvent(refs->viewport(),&press);
+        QMouseEvent release(QEvent::MouseButtonRelease,point,Qt::RightButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(refs->viewport(),&release);
+    };
+    rightClickRow(refs->topLevelItem(2));
+    check(view.selectedNodes().contains(lever) && !view.selectedNodes().contains(object)
+          && history.count()==0 && !mob->isDirty(),"right click navigates clicked scenario row without editing");
+    view.restoreSelection({}); refs->setCurrentItem(refs->topLevelItem(0));
+    auto* navigationMob=new CMob; navigationMob->setFileName(QFileInfo(scratch.filePath("navigation.mob")));
+    // Keep the same object identity in a different loaded source, as happens
+    // when a family reference points outside the active MOB.
+    mob->nodes().removeOne(lever); navigationMob->nodes().append(lever);
+    view.m_aMob.append(navigationMob);
+    mob->setScript(original+"\nWorldScript(AddMob(\"navigation.mob\"))"); panel.refresh();
+    view.m_cam->moveTo(QVector3D(101,102,103));
+    rightClickRow(refs->topLevelItem(2));
+    QVector3D cameraPosition,cameraPivot,cameraRotation;
+    view.m_cam->getLocation(cameraPosition,cameraPivot,cameraRotation);
+    check(view.selectedNodes().contains(lever) && cameraPivot==lever->drawPosition()
+          && view.currentMob()==mob,"right click focuses participant in another loaded MOB");
+    view.restoreSelection({}); navigationMob->nodes().removeOne(lever); mob->nodes().append(lever);
+    view.m_aMob.removeOne(navigationMob); delete navigationMob;
+    mob->setScript("WorldScript(SetCP(variable,12,14,2))"); panel.refresh();
+    view.m_cam->moveTo(QVector3D(101,102,103)); rightClickRow(refs->topLevelItem(0));
+    view.m_cam->getLocation(cameraPosition,cameraPivot,cameraRotation);
+    check(cameraPivot==QVector3D(101,102,103) && view.selectedNodes().isEmpty() && history.count()==0,
+          "right click on unresolved row never reuses a previous target");
+    mob->setScript(original); panel.refresh(); refs->setCurrentItem(refs->topLevelItem(0));
     const QString capture=qEnvironmentVariable("EI_SCENARIO_CHECK_OUTPUT");
     if(!capture.isEmpty()) { QDir().mkpath(capture); check(panel.grab().save(QDir(capture).filePath("scenario-panel.png")),"offscreen scenario panel capture"); }
     if(qEnvironmentVariableIntValue("EI_SCENARIO_CHECK_GL")) {
@@ -221,6 +279,71 @@ int runScenarioLayerCheck()
           "cached connected family never leaks into unrelated active map");
     view.m_aMob.removeOne(second); delete second; view.m_activeMob=mob;
     mob->setScript(original); panel.setFamilyReport({}); panel.refresh();
+    // Actual file-backed unopened-family navigation, not a loaded-node shortcut.
+    const QString diskPath=scratch.filePath("disk-quest.mob");
+    QByteArray diskBytes;
+    {
+        CMob fixture; fixture.setQuestMob();
+        auto* diskObject=new CWorldObj; diskObject->setMapId(42);
+        QVector3D diskPosition(41,42,43); diskObject->setPos(diskPosition);
+        fixture.nodes().append(diskObject); fixture.serializeMob(diskBytes,false);
+    }
+    QFile diskFile(diskPath);
+    check(diskFile.open(QIODevice::WriteOnly) && diskFile.write(diskBytes)==diskBytes.size(),"synthetic unopened MOB fixture written");
+    diskFile.close();
+    CMobDocument diskDocument; CValidationReport diskReport;
+    check(diskDocument.loadBytes(diskBytes,diskPath,&diskReport) && diskDocument.objects().size()==1,
+          "synthetic unopened MOB has validated object provenance");
+    SMobFamilyMember diskMember; diskMember.path=diskPath; diskMember.primaryMob=false;
+    diskMember.sourceSha256=QCryptographicHash::hash(diskBytes,QCryptographicHash::Sha256);
+    diskMember.objects=diskDocument.objects();
+    SMobFamilyMember diskPrimary; diskPrimary.path=mob->filePath().absoluteFilePath(); diskPrimary.primaryMob=true;
+    mob->setScript("WorldScript(AddMob(\"disk-quest\") GetObjectByID(\"42\"))");
+    CMobFamilyValidationReport diskFamily; diskFamily.members={diskPrimary,diskMember};
+    panel.setFamilyReport(diskFamily); view.restoreSelection({}); panel.refresh();
+    const int previousHistory=history.count(); const bool previousDirty=mob->isDirty();
+    const auto testBackup=CBackupManager().snapshotOnOpen(QFileInfo(diskPath));
+    check(testBackup.success,"synthetic recovery snapshot in isolated Qt test data");
+    view.m_cam->moveTo(QVector3D(101,102,103));
+    QTimer unexpectedDialog;
+    QObject::connect(&unexpectedDialog,&QTimer::timeout,[&]() {
+        for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* box=qobject_cast<QMessageBox*>(widget)) {
+            output << "Unexpected synthetic load dialog: " << box->text() << "\n"; output.flush();
+            check(false,"synthetic MOB loads without unexpected modal warnings");
+            if(!box->buttons().isEmpty()) box->buttons().first()->click();
+        }
+    });
+    unexpectedDialog.start(100);
+    rightClickRow(refs->topLevelItem(1));
+    unexpectedDialog.stop();
+    CMob* openedDisk=nullptr;
+    for(CMob* candidate:view.mobs()) if(candidate->filePath().absoluteFilePath()==diskPath) openedDisk=candidate;
+    view.m_cam->getLocation(cameraPosition,cameraPivot,cameraRotation);
+    check(openedDisk && view.selectedNodes().size()==1 && view.selectedNodes()[0]->mapId()==42
+          && cameraPivot==QVector3D(41,42,43),"right click loads unopened family MOB and selects exact object");
+    if(openedDisk) {
+        panel.refresh();
+        rightClickRow(refs->topLevelItem(refs->topLevelItemCount()-1));
+        check(view.mobs().size()==2 && view.selectedNodes().size()==1 && view.selectedNodes()[0]->mapId()==42,
+              "repeated right click reuses loaded MOB without duplicate documents");
+    }
+    diskFile.open(QIODevice::ReadOnly);
+    check(diskFile.readAll()==diskBytes && history.count()==previousHistory && mob->isDirty()==previousDirty
+          && (!openedDisk || !openedDisk->isDirty()),"automatic MOB navigation preserves source bytes and history");
+    diskFile.close();
+    if(openedDisk) { view.changeCurrentMob(mob); view.unloadMobDocument(openedDisk,false); }
+    diskFile.open(QIODevice::Append); diskFile.write("changed"); diskFile.close();
+    panel.setFamilyReport(diskFamily); view.restoreSelection({}); panel.refresh();
+    view.m_cam->moveTo(QVector3D(101,102,103)); rightClickRow(refs->topLevelItem(1));
+    view.m_cam->getLocation(cameraPosition,cameraPivot,cameraRotation);
+    check(view.mobs().size()==1 && view.selectedNodes().isEmpty() && cameraPivot==QVector3D(101,102,103),
+          "stale unopened MOB hash blocks navigation before file loading");
+    const QString testBackupRoot=QDir::cleanPath(CBackupManager::defaultRootPath());
+    const QString testBackupPath=QFileInfo(testBackup.backupPath).absolutePath();
+    if(!testBackup.backupPath.isEmpty() && testBackupRoot.contains("/qttest/",Qt::CaseInsensitive)
+       && testBackupPath.startsWith(testBackupRoot+"/",Qt::CaseInsensitive))
+        check(!QDir(testBackupPath).exists() || QDir(testBackupPath).removeRecursively(),"temporary synthetic recovery snapshot cleaned");
+    mob->setScript(original); panel.setFamilyReport({}); view.restoreSelection({}); panel.refresh();
     QVector3D xy(12,14,0);
     check(!view.scenarioMarkerPosition(&xy,false),"MOB-only XY marker gets no fictional ground");
     panel.setLayerEnabled(false);

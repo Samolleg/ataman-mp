@@ -16721,4 +16721,26 @@ Conditions: %5</source>
         <translation>Повторный идентификатор появления; однозначного маркера нет</translation>
     </message>
 </context>
+<context>
+    <name>CScenarioPanel</name>
+    <message>
+        <source>No uniquely resolved participant or marker for this row.</source>
+        <translation>Для этой строки нет однозначно найденного участника или маркера.</translation>
+    </message>
+</context>
+<context>
+    <name>CScenarioPanel</name>
+    <message>
+        <source>Participant MOB changed or is unavailable. Refresh MOB Family Validation before navigating.</source>
+        <translation>MOB участника изменился или недоступен. Перед переходом обновите проверку семейства MOB.</translation>
+    </message>
+    <message>
+        <source>Could not open the participant MOB.</source>
+        <translation>Не удалось открыть MOB участника.</translation>
+    </message>
+    <message>
+        <source>Participant changed since analysis. Refresh the family and select the reference again.</source>
+        <translation>Участник изменился после анализа. Обновите семейство и снова выберите обращение.</translation>
+    </message>
+</context>
 </TS>

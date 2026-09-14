@@ -494,7 +494,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("externalEditorPath", "")));
-    aOpt.append(QSharedPointer<COpt>(new COptString("language", "en")));
+    aOpt.append(QSharedPointer<COpt>(new COptString("language", "ru")));
     aOpt.append(QSharedPointer<COpt>(new COptStringList("recentFiles", {})));
 
     //init default options for bools
@@ -783,7 +783,7 @@ void CSettings::applyUiOptions()
     const COptString* storedLanguage = dynamic_cast<const COptString*>(
         opt(eOptSetGeneral, "language"));
     const QString previousLanguage = storedLanguage
-        ? storedLanguage->value() : QStringLiteral("en");
+        ? storedLanguage->value() : QStringLiteral("ru");
     updateOptFromUi();
     const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
         opt(eOptSetGeneral, "autosaveEnabled"));
