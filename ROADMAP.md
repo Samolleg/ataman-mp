@@ -468,6 +468,17 @@ foundation as one coherent `0.3.0` release.
 
 ### EI-MOB-SCENARIO-VISUAL-001 — read-only map scenario layer
 
+- Acceptance and PR handoff (2026-09-14): user confirms "everything works" for
+  the delivered build and explicitly requests a PR. This supersedes the earlier
+  local-only publication restriction for this contributor branch. Current
+  delivered scope is accepted; submit the scenario layer, connected-MOB fixes,
+  Russian/right-click navigation and linked DB-NPC creation fix together for
+  maintainer review. Exact gameplay/backend coverage was not specified by the
+  user; retain the documented broad UI diagnostic and static-analysis limits.
+  Refreshed origin/main remains `af24d453ac3a5a86f1664a4b1af7cefaec1a9a08`;
+  no rebase is needed and no existing PR targets this branch. Next: push only
+  `contrib/Samolleg/mob-scenario-layer`, create a ready PR and verify its head.
+  Merge/main writes remain outside this handoff.
 - Linked fix EI-DB-NPC-PLACEMENT-001 (2026-09-14): Jun Male Hero created from DB
   first rejects its raw texture, then (after manual x4 selection and placement)
   receives critical `mob.semantic.wearable_all_parts_enabled` on NID 14.

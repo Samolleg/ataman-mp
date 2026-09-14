@@ -66,6 +66,10 @@ can produce an unrelated warning; no critical finding is suppressed.
 
 ## Remaining acceptance and uncertainty audit
 
+User acceptance (2026-09-14): the user reports "everything works" and requests
+a PR for the delivered build. The exact game/backend coverage was not specified;
+the automated evidence and remaining technical limits below are unchanged.
+
 The original user map and game runtime were not launched or modified. A newly
 added NPC on the user's map and its in-game appearance remain manual acceptance.
 Old NID 14 keeps its old mask until the user recreates or edits it. The earlier
