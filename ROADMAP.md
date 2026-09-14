@@ -476,8 +476,9 @@ foundation as one coherent `0.3.0` release.
   maintainer review. Exact gameplay/backend coverage was not specified by the
   user; retain the documented broad UI diagnostic and static-analysis limits.
   Refreshed origin/main remains `af24d453ac3a5a86f1664a4b1af7cefaec1a9a08`;
-  no rebase is needed and no existing PR targets this branch. Next: push only
-  `contrib/Samolleg/mob-scenario-layer`, create a ready PR and verify its head.
+  no rebase was needed. Contributor branch pushed and ready-for-review
+  [PR #8](https://github.com/Ilufus/ei-mapper-endurance/pull/8) created.
+  Next: maintainer reviews the accepted changes and documented coverage gaps.
   Merge/main writes remain outside this handoff.
 - Linked fix EI-DB-NPC-PLACEMENT-001 (2026-09-14): Jun Male Hero created from DB
   first rejects its raw texture, then (after manual x4 selection and placement)
