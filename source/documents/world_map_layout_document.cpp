@@ -843,6 +843,25 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
     return result;
 }
 
+bool CWorldMapLayoutDocument::updateResourceMetadata(const SWorldMapZoneOrigin& verifiedMap)
+{
+    if(!ensureLoaded() || verifiedMap.sectorWidth <= 0 || verifiedMap.sectorHeight <= 0)
+        return false;
+    const QString verifiedPath = key(QFileInfo(absoluteResourcePath(verifiedMap.mprPath)).canonicalFilePath());
+    if(verifiedPath.isEmpty()) return false;
+    for(auto& zone : m_zones)
+        if(zoneKey(zone.profileId,zone.allodId,zone.zoneId)
+            == zoneKey(verifiedMap.profileId,verifiedMap.allodId,verifiedMap.zoneId))
+        {
+            if(key(QFileInfo(absoluteResourcePath(zone.mprPath)).canonicalFilePath()) != verifiedPath)
+                return false;
+            zone.sectorWidth = verifiedMap.sectorWidth;
+            zone.sectorHeight = verifiedMap.sectorHeight;
+            return true;
+        }
+    return false;
+}
+
 bool CWorldMapLayoutDocument::addEditorMaps(
     const QVector<SWorldMapZoneOrigin>& maps, QString* error)
 {

@@ -111,6 +111,27 @@ class WorldMapLayoutDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void verifiedMetadataPersistsOnlyWithIntentionalEdit()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const auto path=dir.filePath("world.json");
+        const QByteArray legacy=R"({"schemaVersion":1,"layoutAlgorithmVersion":1,"coordinateSystem":"mpr-local-xy","profiles":[{"profileId":"p","allods":[{"allodId":"w","zones":[{"zoneId":"a","mprIdentity":"a","origin":{"x":0.125,"y":42},"provenance":"manual","componentAnchorZoneId":"a"}]}]}]})";
+        QVERIFY(writeFile(path,legacy)); QVERIFY(writeFile(dir.filePath("a.mpr"),"fixture"));
+        CWorldMapLayoutDocument doc(path);
+        auto map=doc.loadEditorWorld("p",{dir.path()}).zones[0];
+        map.sectorWidth=8;map.sectorHeight=6; map.origin=QPointF(999,999);
+        QVERIFY(doc.updateResourceMetadata(map));
+        QCOMPARE(readFile(path),legacy);
+        auto wrong=map;wrong.mprPath="missing.mpr";wrong.sectorWidth=9;
+        QVERIFY(!doc.updateResourceMetadata(wrong));
+        QString error;QVERIFY2(doc.setZoneOrigin("p","w","a",QPointF(0.125,50),&error),qPrintable(error));
+        CWorldMapLayoutDocument reopened(path);auto saved=reopened.loadEditorWorld("p",{}).zones[0];
+        QCOMPARE(saved.sectorWidth,8);QCOMPARE(saved.sectorHeight,6);
+        QCOMPARE(saved.origin,QPointF(0.125,50));
+        saved.sectorWidth=10;QVERIFY(reopened.updateResourceMetadata(saved));
+        QVERIFY(reopened.setZoneOrigin("p","w","a",saved.origin,&error));
+        reopened.reload();QCOMPARE(reopened.loadEditorWorld("p",{}).zones[0].sectorWidth,10);
+    }
     void legacyWorldUsesOrderedRoots()
     {
         QTemporaryDir dir; QVERIFY(dir.isValid());

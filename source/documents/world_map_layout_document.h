@@ -31,6 +31,8 @@ public:
                                               const QStringList& mapRoots);
     bool addEditorMaps(const QVector<SWorldMapZoneOrigin>& maps, QString* error);
     bool replaceEditorMap(const SWorldMapZoneOrigin& map, QString* error);
+    // Synchronize verified MPR dimensions in memory; only an explicit edit saves.
+    bool updateResourceMetadata(const SWorldMapZoneOrigin& verifiedMap);
     void reload() { m_loadState = ELoadState::NotLoaded; m_hasPersistentFile = false;
                     m_zones.clear(); m_diskBytes.clear(); m_loadWarning.clear(); }
     bool removeEditorMap(const QString& profileId, const QString& worldId,

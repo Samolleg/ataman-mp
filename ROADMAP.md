@@ -1,6 +1,6 @@
 # EI Mapper Ataman — roadmap
 
-Current Ataman version: `17` (исходники; постоянная установка пока 16).
+Current Ataman version: `18` (исходники; постоянная установка пока 16).
 
 ## EI-AUDIT-FIXES — исправление всех результатов аудита
 

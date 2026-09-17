@@ -90,6 +90,7 @@ void MainWindow::refreshEditorWorld()
         }
         const QSize size = m_worldMapSizeCache.value(cacheKey);
         map.sectorWidth=size.width();map.sectorHeight=size.height();
+        m_worldMapLayoutDocument.updateResourceMetadata(map);
         SMapCatalogEntry entry;
         entry.zoneId=map.zoneId;entry.allodId=map.allodId;entry.mprName=map.mprIdentity;
         entry.mprPath=path;entry.mobPath=m_worldMapLayoutDocument.absoluteResourcePath(map.mobPath);
