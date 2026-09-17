@@ -72,3 +72,18 @@ Interactive file dialogs and the full MainWindow workflow have not been driven
 automatically. Original neighbor-scene visual/FPS acceptance remains open.
 Installed game resources and the user's actual layout were not modified by the
 agent. The new runtime writes layout changes only when the user performs them.
+
+## Installed handoff
+
+Source: `292195d6bd95671ae8470bf82cdda4ecaab163dc`.
+Stage `build-staging-15-world`: version 15, runtime deployment and finalizer PASS.
+Independent verification: 100 valid manifest entries/digests, exact file coverage,
+one current changelist, fresh/staged EXE and runtime equality PASS.
+Installed at `artifacts/EI-Mapper-Ataman-2-first-test`: process gate PASS,
+100 installed managed hashes verified, all 2867 unlisted user files preserved by
+hash, six program files replaced, zero obsolete files removed.
+Installed EXE SHA-256:
+`550E9C7EBDF39B04A5B97E49A9E3DC691231B050438915BE278A0149431F6D10`.
+Verified version-14 rollback retained in `build-rollback-world15`; older owned
+version-13 rollback verified by its manifest and removed after successful update.
+The user editor was not launched.
