@@ -42,6 +42,35 @@ No installed game maps were edited or copied for these tests.
 
 ## Delivery status
 
-Release build, staged-package verification and permanent installation pending.
+Source commit: `5a4f06dc8618644d80ccb24d432e135432634c59`, branch
+`codex/boundary-fill-v7`. Fresh `build-release-7-boundary` compiled with the
+verified retained Qt 5.12.12/MinGW 7.3 x64 kit; x86 bridge and host rebuilt.
+The original Endurance checkout/toolchain were used read-only.
+
+- Release and runtime build PASS (`build-boundary7.log`).
+- Executable `--version`, database creation and resource navigation PASS;
+  scenario integration 47 passed, 0 failed (`build-release-7-boundary/checks.json`).
+- Additional focused widget regression: 5 passed, 0 failed, including sculpt
+  preview admission and protected world controls (`build-tests-7-widgets/regression.txt`).
+- Fresh owned staging `build-staging-7-boundary`; only old manifest-owned program
+  files copied, followed by the newly built exe/runtime, VERSION, Readme and one
+  version-7 CHANGELOG. windeployqt and isolated-PATH `--version` PASS. Finalizer
+  PASS; its first wrapper invocation could not resolve powershell.exe after PATH
+  isolation, so the finalizer was invoked using its verified absolute system path.
+- Independent checks: 100 manifest entries, one-to-one coverage, all SHA-256
+  values, current changelist, executable equality, runtime equality PASS.
+- Installed in `artifacts/EI-Mapper-Ataman-2-first-test`, version 7. Application
+  was closed. Six managed program files replaced; none removed. All 331 unlisted
+  user files retained byte-for-byte. Full installed manifest verified afterwards.
+- Current rollback of replaced version-6 files: `build-rollback-boundary7`.
+  The previous owned `build-rollback-ui6` was hash-verified and removed only
+  after the successful new installation, per the single-generation contract.
+- Executable SHA-256 (build, stage and installation):
+  `48D5A67E2EB1018A767E5A8A0135EF6E11429D4E14FDBE58486F34119F5C7E49`.
+
 Manual viewport acceptance on the user's original map remains pending. The
-pre-existing general `--ui-widget-check` timeout is not a passed check.
+general `--ui-widget-check` result is recorded below; a timeout is not PASS.
+
+`--ui-widget-check`: timeout at 120 seconds, terminated only this owned headless
+test process. This repeats the version-2/version-6 EI-BUILD-001-UI limitation;
+it does not replace the passed focused mode tests or constitute visual acceptance.
