@@ -33,12 +33,12 @@ limits, not as a verified release. For a new fix/feature, failure of its origina
 reproduction or relevant regression blocks declaring the task complete. Do not
 change an explicitly requested historical commit to make checks pass.
 
-## 2. Stage one runnable tester folder
+## 2. Stage a temporary runnable package
 
-Create a new, previously nonexistent owned staging folder:
+Create a new, previously nonexistent owned temporary staging folder; the user-facing target stays fixed:
 
 ```text
-artifacts/EI-Mapper-Endurance-<version>-<purpose>-test/
+build-staging-<version>-<purpose>/
 ```
 
 The folder must be directly runnable and contain the editor executable, its Qt
@@ -73,23 +73,53 @@ and caches. Never point it at a user-run or existing distributed folder.
 The finalizer must pass. Do not run the finalized package afterwards: that
 would recreate user settings/logs and invalidate its clean first-run state.
 
-## 3. Reuse versus create
+## 3. Update one permanent installation
 
-Reusing a folder is allowed only for the agent's own never-delivered staging
-area, after verifying it has no user-generated data. For an existing user build,
-make a separate revision/commit-named package, even for a small fix. Do not
-replace or delete prior builds/settings without a separate owner instruction.
+Owner decision, 2026-09-17: each requested build updates the same program folder.
+The permanent target is `artifacts/EI-Mapper-Ataman-2-first-test` relative to the
+Ataman repository root. Its original name is a stable path, not a version claim.
+Use VERSION and the executable's version as the installed version. Do not create
+a new user-facing installation for every fix. Another target requires an owner
+request. The build request already authorizes program replacement at this target.
 
-Create a new folder when:
+The shadow-build and staging directories are temporary engineering outputs;
+section 2 and the finalizer apply only to a fresh owned staging package.
+Never run the finalizer or clean-package deletion rules on the permanent target.
 
-- the Ataman version changes;
-- the test scope is materially different;
-- the user needs an A/B comparison;
-- the previous folder has already been shared and must remain reproducible.
+Update procedure:
 
-Do not silently mutate a build that has already been distributed to other
-testers. A separate fix requires the next Ataman version; a suffix may distinguish
-packages of identical source but must not replace a version increment for a fix.
+1. Build, test and finalize staging; complete section 4's independent checks.
+   Retain the previous installation if the build or package-integrity checks fail.
+   Functional test failures remain explicit limitations under section 1; never
+   label them PASS or silently claim a complete fix.
+2. Resolve the exact permanent target and verify that no editor or runtime
+   component from it is running. If it is running, ask the user to close it;
+   do not kill a user's session or replace loaded binaries.
+3. Use the old and new manifests to identify managed program files. Preserve all
+   settings, logs, caches, maps, saves, resources added by the user and unlisted
+   files. Do not mirror, recursively clear, or overwrite the entire directory.
+   If a new managed path collides with an unlisted user file, or a managed file
+   differs from its recorded old hash, retain it and resolve that conflict first.
+4. Back up the exact files to be replaced or removed and the previous manifest
+   into one owned rollback area outside the permanent folder. Verify the backup
+   hashes before replacing anything. This is a technical backup, not another
+   user-facing installation. Never overwrite the only rollback copy mid-update.
+5. Copy verified program files, VERSION and current notes from staging. Remove
+   obsolete managed program files only when their current hashes match the old
+   manifest. Never include protected user data in this removal. Replace the
+   manifest last. If any step fails, restore this update's changed files from
+   the verified backup and remove only newly created files owned by this update;
+   report whether rollback succeeded.
+6. Verify every installed managed file against the new manifest, including exe
+   and runtime hashes. User files outside that manifest are expected and must
+   remain unchanged; the clean-package validator is not an installed-data cleaner.
+   Report installed version and the same permanent folder link. Keep at most one
+   completed rollback generation: after successful verification of the next
+   update, remove only an older, positively identified owned rollback generation.
+
+Older reports describe immutable per-version delivery as history. This owner
+choice supersedes that workflow for the named Ataman installation only. Game
+installations, Endurance checkouts and other users' packages remain untouched.
 
 ## 4. Changelist and test notes
 
@@ -141,7 +171,7 @@ version's entry and focused test notes, not the entire historical changelog.
 The final response uses this order:
 
 1. Outcome and version.
-2. Clickable link to the unpacked tester folder.
+2. Clickable link to the permanent installation updated under section 3.
 3. Concise changelist.
 4. Focused test steps, when needed.
 5. Automated checks and commit hash.

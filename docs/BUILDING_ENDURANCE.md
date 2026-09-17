@@ -155,10 +155,10 @@ Never use a folder that has already been launched as an unsanitized package
 source. A fresh package must enter first-run game/mod setup.
 
 For Ataman, every separate fix advances VERSION under root AGENTS.md. Build each
-version in a fresh shadow directory and stage a new tester folder. Never update
-or finalize a user-run or previously delivered folder. Reuse is limited to an
-owned, never-delivered staging area verified to contain no user-generated data,
-as specified in TEST_BUILD_HANDOFF.md.
+version in a fresh shadow directory and validate an owned temporary staging
+folder. Then update the single permanent Ataman installation using section 3
+of TEST_BUILD_HANDOFF.md. Preserve user data and never run the finalizer on the
+permanent installation. Do not hand the user a new versioned folder each time.
 
 The normal handoff is the unpacked, user-runnable folder. Do not create a ZIP or
 launch the packaged editor unless the user explicitly requests that action.
