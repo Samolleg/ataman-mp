@@ -34,5 +34,16 @@ executable passed all 47 checks with access to isolated Qt qttest data. These
 failed attempts are not PASS. UI-widget check timed out after 120 seconds, as
 in prior versions; only the owned test process was stopped.
 
-Package and installation pending. Full interactive visual acceptance remains
-open; automated checks do not prove the complete user window's final pixels.
+Source commit: 2f747dd57469928bdc752050d4eeee5af2edac30.
+Fresh stage build-staging-16-paths finalized successfully; independent version,
+one current changelog, manifest coverage/path safety, all 100 digests and fresh
+EXE equality passed. Permanent artifacts/EI-Mapper-Ataman-2-first-test updated:
+100 managed files verified, 2982 user files unchanged by hash, six program files
+replaced, zero obsolete files removed. No user editor was running. EXE SHA256:
+87AD51EDA304A1AB39BAEF2CE299F4A75E4067ECB6BE4B42CC68903B28421CF0.
+Rollback v15 is build-rollback-paths16; older owned v14 rollback was verified
+against its manifest and removed only after installation succeeded.
+
+Full interactive visual acceptance remains open. Check zone9 with neighbors
+and the world map list; only genuinely missing zonemichel should remain missing.
+Automated checks do not prove the complete user window's final pixels.
