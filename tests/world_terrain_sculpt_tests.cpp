@@ -215,6 +215,25 @@ private slots:
             }
         }
     }
+    void boundaryFillSharedContourAnchorsStayIdentical()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");
+        auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,0})};
+        for(const auto& t:targets) {
+            STerrainHeightCommand shape;
+            for(int y=0;y<t.model->vertexCountY();++y) for(int x=0;x<t.model->vertexCountX();++x) {
+                STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);
+                d.after=quint16(qRound(20000+1000*std::sin((t.origin.x()+x)*1.3)+1000*std::cos(y*1.8)));
+                shape.deltas.append(d);
+            }
+            QVERIFY(s.documents[t.id]->terrain.apply(shape,true));
+        }
+        STerrainBrush brush;brush.centerX=32.25;brush.centerY=16.3;brush.radius=7.6;brush.falloff=ETerrainBrushFalloff::Constant;
+        const auto fill=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,1);
+        QVERIFY(!fill.isEmpty());QString error;QVERIFY(s.apply(fill,true,&error));
+        for(int y=0;y<33;++y) QCOMPARE(s.documents["a"]->terrain.height(32,y),s.documents["b"]->terrain.height(0,y));
+        QVERIFY(makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,1).isEmpty());
+    }
     void movingStaggeredStrokeKeepsWholeTouchedSeamClosed()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");add(s,"c");

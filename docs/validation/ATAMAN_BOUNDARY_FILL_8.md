@@ -31,7 +31,7 @@ their version-7 discrete contour solver. Original Flatten/Smooth are unchanged.
 
 ## Tests
 
-`build-boundary8-analysis/results.txt`: 18 passed, 0 failed, 1 skipped (optional
+`build-boundary8-analysis/results.txt`: 19 passed, 0 failed, 1 skipped (optional
 installed-game-map test). No installed game maps were copied or modified.
 
 - Original reproduction now passes: both interior seam sides move toward the

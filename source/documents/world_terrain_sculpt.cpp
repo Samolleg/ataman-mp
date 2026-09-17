@@ -158,6 +158,22 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
     }
     SWorldTerrainStroke result;
     const double innerRadius=brush.radius*std::cos(pi/count);
+    QSet<XY> frozenPositions;
+    QMap<XY,double> limits;
+    for(int m:maps) {
+        const auto& t=targets[m];
+        for(const auto& anchor:frozen[m]) frozenPositions.insert(point(t,anchor.first,anchor.second));
+        const int w=t.model->vertexCountX(),h=t.model->vertexCountY();
+        if(w<=0 || h<=0) continue;
+        const int x0=int(qBound(0.0,std::floor(brush.centerX-t.origin.x()-brush.radius-1),double(w-1)));
+        const int x1=int(qBound(0.0,std::ceil(brush.centerX-t.origin.x()+brush.radius+1),double(w-1)));
+        const int y0=int(qBound(0.0,std::floor(brush.centerY-t.origin.y()-brush.radius-1),double(h-1)));
+        const int y1=int(qBound(0.0,std::ceil(brush.centerY-t.origin.y()+brush.radius+1),double(h-1)));
+        for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
+            const auto p=point(t,x,y);
+            limits[p]=qMin(limits.value(p,std::numeric_limits<double>::max()),double(t.model->maxZ()));
+        }
+    }
     QVector<double> distances(count),tangents(count);
     QVector<QPointF> vectors(count);
     for(int m:maps) {
@@ -170,7 +186,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
         for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
             const auto xy=point(t,x,y);const QPointF p(xy.first,xy.second);
             const double distance=std::hypot(p.x()-brush.centerX,p.y()-brush.centerY);
-            if(distance>=innerRadius || frozen[m].contains({x,y})) continue;
+            if(distance>=innerRadius || frozenPositions.contains(xy)) continue;
             // Mean-value coordinates reproduce affine slopes and interpolate
             // all contour heights. Interior heights cannot influence the target.
             for(int i=0;i<count;++i) {vectors[i]=ring[i]-p;distances[i]=std::hypot(vectors[i].x(),vectors[i].y());}
@@ -191,7 +207,8 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
                 if(brush.falloff==ETerrainBrushFalloff::Smooth) f=f*f*(3-2*f);
                 blend*=f;
             }
-            const double before=height(t,x,y),after=before+(sum/total-before)*blend;
+            const double target=qBound(0.0,sum/total,limits.value(xy));
+            const double before=height(t,x,y),after=before+(target-before)*blend;
             STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);
             d.after=quint16(qBound(0,qRound(after*65535.0/t.model->maxZ()),65535));
             if(d.after==d.before) continue;
