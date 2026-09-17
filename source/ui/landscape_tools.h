@@ -72,7 +72,8 @@ enum class ELandscapeSculptTool
     Lower,
     Flatten,
     Smooth,
-    Noise
+    Noise,
+    BoundaryFill
 };
 
 class CLandscapeTools : public QWidget

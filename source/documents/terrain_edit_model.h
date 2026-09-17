@@ -600,6 +600,9 @@ public:
     SOverlaySurfaceCommand makeOverlayFlatten(
         const STerrainBrush& brush, quint16 targetHeight, float strength,
         CValidationReport* report = nullptr) const;
+    SOverlaySurfaceCommand makeOverlayBoundaryFill(
+        const STerrainBrush& brush, float strength,
+        CValidationReport* report = nullptr) const;
     SOverlaySurfaceCommand makeOverlaySmooth(
         const STerrainBrush& brush, float strength,
         CValidationReport* report = nullptr) const;
@@ -620,6 +623,7 @@ public:
     STerrainHeightCommand makeFlatten(const STerrainBrush& brush,
                                       quint16 targetHeight,
                                       float strength) const;
+    STerrainHeightCommand makeBoundaryFill(const STerrainBrush& brush, float strength) const;
     STerrainHeightCommand makeSmooth(const STerrainBrush& brush,
                                      float strength) const;
     STerrainHeightCommand makeNoise(const STerrainBrush& brush,

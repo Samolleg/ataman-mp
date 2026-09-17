@@ -3,11 +3,13 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QSpinBox>
 #include <QLabel>
 #include <QListWidget>
 #include <QPointer>
 #include <QSignalSpy>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QTabWidget>
@@ -28,8 +30,33 @@
 class LandscapeToolsWidgetTests : public QObject
 {
     Q_OBJECT
+    QTemporaryDir settingsDirectory;
 
 private slots:
+    void initTestCase()
+    {
+        QVERIFY(settingsDirectory.isValid());
+        QCoreApplication::setOrganizationName("AtamanTests");
+        QCoreApplication::setApplicationName("LandscapeTools");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDirectory.path());
+    }
+    void boundaryFillHasNoFixedHeight()
+    {
+        CLandscapeTools tools;
+        const auto original=tools.sculptTool();
+        tools.setSculptTool(ELandscapeSculptTool::BoundaryFill);
+        QCOMPARE(tools.sculptTool(),ELandscapeSculptTool::BoundaryFill);
+        auto* combo=tools.findChild<QComboBox*>(QStringLiteral("landscapeSculptTool"));
+        auto* target=tools.findChild<QSpinBox*>(QStringLiteral("landscapeFlattenTarget"));
+        QVERIFY(combo);QVERIFY(target);QVERIFY(target->isHidden());
+        QCOMPARE(combo->count(),6);
+        CLandscapeTools restored;
+        QCOMPARE(restored.sculptTool(),ELandscapeSculptTool::BoundaryFill);
+        tools.setSculptTool(ELandscapeSculptTool::Flatten);
+        QVERIFY(!target->isHidden());
+        tools.setSculptTool(original);
+    }
     void nestedTerrainPreviewKeepsBothGpuBuffersCurrent();
     void worldTerrainControlsStayProtectedAndSignal();
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();

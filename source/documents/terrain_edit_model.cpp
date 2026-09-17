@@ -1,4 +1,5 @@
 #include "terrain_edit_model.h"
+#include "terrain_boundary_fill.h"
 
 #include <algorithm>
 #include <QCryptographicHash>
@@ -1780,6 +1781,27 @@ STerrainHeightCommand CTerrainEditModel::makeFlatten(
     return makeBlendedCommand("Flatten terrain", brush, targets, strength);
 }
 
+STerrainHeightCommand CTerrainEditModel::makeBoundaryFill(
+    const STerrainBrush& brush, float strength) const
+{
+    STerrainHeightCommand command;
+    command.description = "Fill terrain from boundary";
+    if(!std::isfinite(strength) || strength<=0) return command;
+    const auto targets=TerrainBoundaryFill::grid(brush.centerX,brush.centerY,brush.radius,
+        m_vertexCountX,m_vertexCountY,[this](int x,int y,double* value) {
+            *value=height(x,y);return true;
+        });
+    for(auto it=targets.cbegin();it!=targets.cend();++it) {
+        const int x=it.key().first,y=it.key().second;
+        const double weight=brushWeight(std::hypot(x-brush.centerX,y-brush.centerY),
+            brush.radius,brush.falloff)*qBound(0.0f,strength,1.0f);
+        STerrainHeightDelta delta;delta.globalX=x;delta.globalY=y;delta.before=height(x,y);
+        delta.after=clampedHeight(delta.before+(it.value()-delta.before)*weight);
+        if(delta.before!=delta.after) command.deltas.append(delta);
+    }
+    return command;
+}
+
 STerrainHeightCommand CTerrainEditModel::makeSmooth(
     const STerrainBrush& brush, float strength) const
 {
@@ -2348,6 +2370,13 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayFlatten(
                                  1, float(targetHeight), strength, report);
 }
 
+SOverlaySurfaceCommand CTerrainEditModel::makeOverlayBoundaryFill(
+    const STerrainBrush& brush, float strength, CValidationReport* report) const
+{
+    return makeOverlayHeightEdit(QStringLiteral("Fill overlay from boundary"), brush,
+                                 4, 0.0f, strength, report);
+}
+
 SOverlaySurfaceCommand CTerrainEditModel::makeOverlaySmooth(
     const STerrainBrush& brush, float strength,
     CValidationReport* report) const
@@ -2434,7 +2463,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
     SOverlaySurfaceCommand command;
     command.description = description;
     if(brush.radius <= 0.0f || !std::isfinite(value) || !std::isfinite(strength)
-       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 3)
+       || strength < 0.0f || strength > 1.0f || operation < 0 || operation > 4)
     {
         if(report)
             report->add("terrain.overlay_sculpt_input", EValidationSeverity::Error,
@@ -2577,6 +2606,14 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         yOffsets.insert(key, selected->yOffset);
     }
 
+    QMap<QPair<int,int>,double> boundaryTargets;
+    if(operation==4)
+        boundaryTargets=TerrainBoundaryFill::grid(brush.centerX,brush.centerY,brush.radius,
+            m_vertexCountX,m_vertexCountY,[&](int x,int y,double* value) {
+                const auto it=heights.constFind(globalIndex(x,y));
+                if(it==heights.cend()) return false;
+                *value=it.value();return true;
+            });
     QMap<int, quint16> afterHeights = heights;
     QSet<int> changedVertices;
     for(int key : activeVertices)
@@ -2616,6 +2653,12 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 }
             if(samples > 0)
                 target = before + (sum / float(samples) - before) * strength * weight;
+        }
+        else if(operation==4)
+        {
+            const auto it=boundaryTargets.constFind({x,y});
+            if(it==boundaryTargets.cend()) continue;
+            target=before+(it.value()-before)*strength*weight;
         }
         else
             target = before + value * weight * terrainNoiseSample(noiseSeed, x, y);

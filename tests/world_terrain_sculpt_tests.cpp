@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include "world_terrain_session.h"
 #include "endurance_document.h"
+#include "terrain_boundary_fill.h"
 
 class WorldTerrainTests : public QObject
 {
@@ -36,6 +37,114 @@ class WorldTerrainTests : public QObject
     double z(CWorldTerrainSession& s,const QString& id,int x,int y)
     { auto& t=s.documents[id]->terrain;return t.height(x,y)*double(t.maxZ())/65535; }
 private slots:
+    void boundaryFillLargeContourAndOverlay()
+    {
+        QElapsedTimer timer;timer.start();
+        const auto grid=TerrainBoundaryFill::grid(65,65,64,131,131,[](int x,int y,double* value) {
+            *value=std::hypot(x-65,y-65)<62 ? 500 : 20000+20*x+10*y;
+            return true;
+        });
+        QVERIFY(grid.size()>10000);
+        for(auto it=grid.cbegin();it!=grid.cend();++it)
+            QVERIFY(qAbs(it.value()-(20000+20*it.key().first+10*it.key().second))<0.001);
+        qInfo("Radius 64 fill: %lld ms",timer.elapsed());
+        CWorldTerrainSession s;add(s,"a");auto& model=s.documents["a"]->terrain;
+        STerrainTileBrush activate;activate.centerX=8;activate.centerY=8;activate.radius=6;
+        CValidationReport report;
+        const auto activation=model.makeOverlayActivation(activate,0,0,0,0,&report);
+        QVERIFY2(!activation.isEmpty(),qPrintable(report.toText()));
+        QVERIFY(model.apply(activation,true));
+        const auto baseline=model.sectorPayload(0,0);
+        STerrainBrush point;point.centerX=16;point.centerY=16;point.radius=1;point.falloff=ETerrainBrushFalloff::Constant;
+        const auto hole=model.makeOverlayFlatten(point,500,1,&report);
+        QVERIFY(!hole.isEmpty());QVERIFY(model.apply(hole,true));
+        const auto before=model.sectorPayload(0,0);
+        point.radius=5;
+        const auto fill=model.makeOverlayBoundaryFill(point,1,&report);
+        QVERIFY2(!fill.isEmpty(),qPrintable(report.toText()));
+        QVERIFY(model.apply(fill,true));QCOMPARE(model.sectorPayload(0,0),baseline);
+        QVERIFY(model.apply(fill,false));QCOMPARE(model.sectorPayload(0,0),before);
+    }
+    void boundaryFillLocalPlaneCraterAndUndo()
+    {
+        CWorldTerrainSession s;add(s,"a");auto& model=s.documents["a"]->terrain;
+        STerrainHeightCommand shape;
+        for(int y=0;y<model.vertexCountY();++y) for(int x=0;x<model.vertexCountX();++x) {
+            STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=model.height(x,y);
+            d.after=quint16(10000+100*x+50*y+2*x*y);shape.deltas.append(d);
+        }
+        QVERIFY(model.apply(shape,true));
+        STerrainBrush brush;brush.centerX=16;brush.centerY=16;brush.radius=7;
+        brush.falloff=ETerrainBrushFalloff::Constant;
+        QVERIFY(model.makeBoundaryFill(brush,1).isEmpty()); // affine plus harmonic saddle
+        STerrainHeightCommand hole;
+        for(int y=14;y<=18;++y) for(int x=14;x<=18;++x) {
+            STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=model.height(x,y);
+            d.after=((x+y)%2)?500:50000;hole.deltas.append(d);
+        }
+        QVERIFY(model.apply(hole,true));
+        const auto before=model.sectorPayload(0,0);
+        const auto fill=model.makeBoundaryFill(brush,1);
+        QCOMPARE(fill.deltas.size(),25);
+        for(const auto& d:fill.deltas) QCOMPARE(int(d.after),10000+100*d.globalX+50*d.globalY+2*d.globalX*d.globalY);
+        const auto half=model.makeBoundaryFill(brush,0.5);
+        QCOMPARE(half.deltas.size(),25);
+        for(int i=0;i<half.deltas.size();++i)
+            QVERIFY(qAbs(int(half.deltas[i].after)-qRound((fill.deltas[i].before+fill.deltas[i].after)*0.5))<=1);
+        QVERIFY(model.apply(fill,true));QVERIFY(model.makeBoundaryFill(brush,1).isEmpty());
+        QVERIFY(model.apply(fill,false));QCOMPARE(model.sectorPayload(0,0),before);
+        QVERIFY(model.makeBoundaryFill(brush,0).isEmpty());
+        brush.radius=0.5;QVERIFY(model.makeBoundaryFill(brush,1).isEmpty());
+    }
+    void boundaryFillWorldSeamMixedScalesAndOrder()
+    {
+        CWorldTerrainSession s;add(s,"a",100,20000);add(s,"b",200,10000);add(s,"disabled");
+        const auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,0}),target(s,"disabled",{0,0},false)};
+        for(const auto& t:targets) if(t.editable) {
+            STerrainHeightCommand hole;
+            for(int y=14;y<=18;++y) for(int x=0;x<t.model->vertexCountX();++x)
+                if(qAbs(t.origin.x()+x-32)<=2) {
+                    STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);d.after=100;
+                    hole.deltas.append(d);
+                }
+            QVERIFY(s.documents[t.id]->terrain.apply(hole,true));
+        }
+        QMap<QString,QByteArray> before;for(const auto& t:targets) before[t.id]=t.model->sectorPayload(0,0);
+        STerrainBrush brush;brush.centerX=32;brush.centerY=16;brush.radius=7;brush.falloff=ETerrainBrushFalloff::Constant;
+        const auto fill=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,747,1);
+        QVERIFY(!fill.isEmpty());QVERIFY(!fill.maps.contains("disabled"));
+        auto reverse=targets;std::reverse(reverse.begin(),reverse.end());
+        const auto reversed=makeWorldTerrainStamp(reverse,brush,EWorldSculptMode::BoundaryFill,0,12345,1);
+        QCOMPARE(fill.maps.keys(),reversed.maps.keys());
+        for(const auto& id:fill.maps.keys()) {
+            QCOMPARE(fill.maps[id].deltas.size(),reversed.maps[id].deltas.size());
+            for(int i=0;i<fill.maps[id].deltas.size();++i) {
+                const auto& a=fill.maps[id].deltas[i];const auto& b=reversed.maps[id].deltas[i];
+                QCOMPARE(a.globalX,b.globalX);QCOMPARE(a.globalY,b.globalY);QCOMPARE(a.after,b.after);
+                QCOMPARE(int(a.after),id=="a"?20000:10000);
+                QVERIFY(std::hypot((id=="a"?0:32)+a.globalX-32,a.globalY-16)<brush.radius);
+            }
+        }
+        QString error;QVERIFY2(s.apply(fill,true,&error),qPrintable(error));
+        for(int y=10;y<=22;++y) QVERIFY(qAbs(z(s,"a",32,y)-z(s,"b",0,y))<0.0031);
+        s.record(fill);QVERIFY(s.undo(&error));
+        for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),before[t.id]);
+        QVERIFY(s.redo(&error));
+    }
+    void boundaryFillStaggeredEdgesStayFixed()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");
+        auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,0.5})};
+        STerrainHeightCommand hole;STerrainHeightDelta d;d.globalX=30;d.globalY=16;d.before=10000;d.after=1;hole.deltas.append(d);
+        QVERIFY(s.documents["a"]->terrain.apply(hole,true));
+        STerrainBrush brush;brush.centerX=32;brush.centerY=16;brush.radius=6;brush.falloff=ETerrainBrushFalloff::Constant;
+        const auto fill=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,1);
+        QVERIFY(!fill.isEmpty());
+        for(const auto& id:fill.maps.keys()) for(const auto& delta:fill.maps[id].deltas) {
+            QVERIFY(id=="a"?delta.globalX<32:delta.globalX>0);
+            QCOMPARE(int(delta.after),10000);
+        }
+    }
     void movingStaggeredStrokeKeepsWholeTouchedSeamClosed()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");add(s,"c");

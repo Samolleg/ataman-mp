@@ -3,7 +3,7 @@
 #include <QPointF>
 #include "terrain_edit_model.h"
 
-enum class EWorldSculptMode { Raise, Lower, Flatten, Smooth };
+enum class EWorldSculptMode { Raise, Lower, Flatten, Smooth, BoundaryFill };
 struct SWorldTerrainTarget
 {
     QString id;

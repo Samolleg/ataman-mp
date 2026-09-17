@@ -196,6 +196,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_tool->addItem(tr("Smooth"), int(ELandscapeSculptTool::Smooth));
     m_tool->addItem(tr("Flatten"), int(ELandscapeSculptTool::Flatten));
     m_tool->addItem(tr("Noise"), int(ELandscapeSculptTool::Noise));
+    m_tool->addItem(tr("Fill from boundary"), int(ELandscapeSculptTool::BoundaryFill));
+    m_tool->setItemData(m_tool->count()-1,
+        tr("Preserves the outer row of vertices inside the circle and fills the interior from their heights. Strength controls blending. No fixed target height."),
+        Qt::ToolTipRole);
     m_radius->setRange(0.5, 64.0);
     m_radius->setValue(4.0);
     m_radius->setSingleStep(0.5);

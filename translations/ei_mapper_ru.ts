@@ -551,6 +551,14 @@ Restore the runtime paths for the selected installation, then retry Test Current
     <context>
         <name>CLandscapeTools</name>
         <message>
+            <source>Fill from boundary</source>
+            <translation>По границе</translation>
+        </message>
+        <message>
+            <source>Preserves the outer row of vertices inside the circle and fills the interior from their heights. Strength controls blending. No fixed target height.</source>
+            <translation>Сохраняет внешний ряд вершин внутри круга и заполняет внутренность по их высотам. Сила задаёт степень выравнивания. Фиксированная высота не используется.</translation>
+        </message>
+        <message>
             <location filename="../source/ui/landscape_tools.cpp" line="111" />
             <location filename="../source/ui/landscape_tools.cpp" line="908" />
             <source>Raise/lower step</source>

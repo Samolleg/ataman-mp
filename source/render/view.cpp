@@ -22189,6 +22189,9 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
                 brush, m_landscapeTools->flattenHeight(),
                 blendStrength, &report);
             break;
+        case ELandscapeSculptTool::BoundaryFill:
+            overlayCommand = m_terrainEdit.makeOverlayBoundaryFill(brush, blendStrength, &report);
+            break;
         case ELandscapeSculptTool::Smooth:
             overlayCommand = m_terrainEdit.makeOverlaySmooth(
                 brush, blendStrength, &report);
@@ -22236,6 +22239,9 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
                 brush, m_landscapeTools->flattenHeight(),
                 m_landscapeTools->strength(), &report);
             break;
+        case ELandscapeSculptTool::BoundaryFill:
+            overlayCommand = m_terrainEdit.makeOverlayBoundaryFill(brush, blendStrength, &report);
+            break;
         case ELandscapeSculptTool::Smooth:
             overlayCommand = m_terrainEdit.makeOverlaySmooth(
                 brush, m_landscapeTools->strength(), &report);
@@ -22277,6 +22283,9 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     case ELandscapeSculptTool::Flatten:
         command = m_terrainEdit.makeFlatten(
             brush, m_landscapeTools->flattenHeight(), blendStrength);
+        break;
+    case ELandscapeSculptTool::BoundaryFill:
+        command = m_terrainEdit.makeBoundaryFill(brush, blendStrength);
         break;
     case ELandscapeSculptTool::Smooth:
         command = m_terrainEdit.makeSmooth(brush, blendStrength);

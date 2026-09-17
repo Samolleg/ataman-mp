@@ -1,4 +1,5 @@
 #include "world_terrain_sculpt.h"
+#include "terrain_boundary_fill.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -22,6 +23,78 @@ double mean(QVector<double> values)
 }
 
 struct Segment { int a,b; XY p,q; };
+
+SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
+                                const STerrainBrush& brush,double strength)
+{
+    QMap<XY,QVector<Vertex>> positions;
+    for(int m=0;m<targets.size();++m) {
+        const auto& t=targets[m];
+        if(!t.editable || !t.model || !(t.model->maxZ()>0) || !std::isfinite(t.model->maxZ())
+           || !std::isfinite(t.origin.x()) || !std::isfinite(t.origin.y())) continue;
+        const int w=t.model->vertexCountX(),h=t.model->vertexCountY();
+        if(w<=0 || h<=0) continue;
+        const int x0=int(qBound(0.0,std::floor(brush.centerX-t.origin.x()-brush.radius-1),double(w-1)));
+        const int x1=int(qBound(0.0,std::ceil(brush.centerX-t.origin.x()+brush.radius+1),double(w-1)));
+        const int y0=int(qBound(0.0,std::floor(brush.centerY-t.origin.y()-brush.radius-1),double(h-1)));
+        const int y1=int(qBound(0.0,std::ceil(brush.centerY-t.origin.y()+brush.radius+1),double(h-1)));
+        for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
+            const auto p=point(t,x,y);
+            if(std::hypot(p.first-brush.centerX,p.second-brush.centerY)<=brush.radius)
+                positions[p].append({m,x,y});
+        }
+    }
+    QVector<QVector<Vertex>> groups;
+    QVector<TerrainBoundaryFill::Node> nodes;
+    QVector<QMap<QPair<int,int>,int>> lookup(targets.size());
+    for(const auto& group:positions) {
+        QVector<double> values;
+        for(const auto& v:group) {
+            lookup[v.map][{v.x,v.y}]=nodes.size();
+            values.append(height(targets[v.map],v.x,v.y));
+        }
+        TerrainBoundaryFill::Node node;node.before=mean(values);
+        nodes.append(node);groups.append(group);
+    }
+    const QPair<int,int> steps[]={{-1,0},{1,0},{0,-1},{0,1}};
+    for(int i=0;i<nodes.size();++i) {
+        QSet<int> neighbors;
+        for(const auto& v:groups[i]) for(const auto& step:steps) {
+            const auto it=lookup[v.map].constFind({v.x+step.first,v.y+step.second});
+            if(it!=lookup[v.map].cend() && it.value()!=i) neighbors.insert(it.value());
+        }
+        nodes[i].neighbors=neighbors.values().toVector();
+        std::sort(nodes[i].neighbors.begin(),nodes[i].neighbors.end());
+    }
+    QVector<double> solved;
+    SWorldTerrainStroke result;
+    if(!TerrainBoundaryFill::solve(nodes,&solved)) return result;
+    for(int i=0;i<nodes.size();++i) {
+        if(nodes[i].neighbors.size()!=4) continue;
+        const auto first=groups[i].first();const auto p=point(targets[first.map],first.x,first.y);
+        double weight=qBound(0.0,strength,1.0);
+        if(brush.falloff!=ETerrainBrushFalloff::Constant && brush.radius>0) {
+            double f=qBound(0.0,1-std::hypot(p.first-brush.centerX,p.second-brush.centerY)/brush.radius,1.0);
+            if(brush.falloff==ETerrainBrushFalloff::Smooth) f=f*f*(3-2*f);
+            weight*=f;
+        }
+        double limit=std::numeric_limits<double>::max();
+        for(const auto& v:groups[i]) limit=qMin(limit,double(targets[v.map].model->maxZ()));
+        const double after=qBound(0.0,nodes[i].before+(solved[i]-nodes[i].before)*weight,limit);
+        for(const auto& v:groups[i]) {
+            const auto& t=targets[v.map];
+            STerrainHeightDelta d;d.globalX=v.x;d.globalY=v.y;d.before=t.model->height(v.x,v.y);
+            d.after=quint16(qBound(0,qRound(after*65535.0/t.model->maxZ()),65535));
+            if(d.after==d.before) continue;
+            auto& command=result.maps[t.id];command.description=QStringLiteral("Fill terrain from boundary");
+            command.deltas.append(d);
+        }
+    }
+    // Staggered map edges remain fixed contours: do not extend this operation
+    // beyond the brush to reconcile a pre-existing seam profile.
+    return result;
+}
+
 double cross(const XY& a,const XY& b) { return a.first*b.second-a.second*b.first; }
 XY subtract(const XY& a,const XY& b) { return {a.first-b.first,a.second-b.second}; }
 
@@ -162,6 +235,7 @@ SWorldTerrainStroke makeWorldTerrainStamp(
        || !std::isfinite(brush.radius) || brush.radius < 0
        || !std::isfinite(worldDelta) || !std::isfinite(worldFlatten)
        || !std::isfinite(strength) || strength<=0) return result;
+    if(mode==EWorldSculptMode::BoundaryFill) return boundaryFill(targets,brush,strength);
     QMap<XY, QVector<Vertex>> edges;
     QVector<QVector<Vertex>> groups;
     for(int i=0; i<targets.size(); ++i)

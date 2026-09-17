@@ -199,6 +199,7 @@ bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
     case ELandscapeSculptTool::Lower:mode=EWorldSculptMode::Lower;break;
     case ELandscapeSculptTool::Flatten:mode=EWorldSculptMode::Flatten;break;
     case ELandscapeSculptTool::Smooth:mode=EWorldSculptMode::Smooth;break;
+    case ELandscapeSculptTool::BoundaryFill:mode=EWorldSculptMode::BoundaryFill;break;
     default:break;
     }
     const double quantum=m_terrainEdit.maxZ()/65535.0;
