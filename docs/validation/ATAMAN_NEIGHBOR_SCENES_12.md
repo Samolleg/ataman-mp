@@ -35,6 +35,29 @@ loaded; neighboring scenes share the active scene's sun/time settings.
   context; world-origin uniform exists. This does not prove rendered appearance.
 - `build-neighbors12.log`: release build PASS in fresh version-12 shadow.
 
+## Build and installation
+
+Source `4b41818983ebdc919ecd8d711cf7d59d20fa8f53` rebuilt successfully
+(`build-neighbors12-final.log`) after tooltip translation refresh. An interim
+link failed because the earlier UI check still held the EXE; retry after that
+test exited passed. No user process was stopped.
+
+Final executable: version, database-creation, resource-navigation checks PASS;
+scenario integration 47/47 PASS (`final-checks.json`). Initial sandboxed scenario
+check failed creating an isolated recovery snapshot and timed out; rerun with
+test-folder access passed. General UI check timed out at 120 seconds as in
+prior builds; its own test process was stopped. Not PASS.
+
+Fresh owned `build-staging-12-neighbors`: deployment, isolated version smoke,
+finalizer PASS. Independently checked exactly one current changelist, all
+100 manifest digests, full coverage, and fresh/staged/installed EXE equality.
+Permanent `artifacts/EI-Mapper-Ataman-2-first-test` was closed and updated:
+6 managed files replaced, 0 removed, 1486 unlisted user files unchanged by hash.
+EXE SHA-256: `18C0493CE9CB8880EAAFFA001F05D4EEAEB9278CA1CF89EDE6BCD4207E3E6F5E`.
+Runtime components also match the fresh build. Retained rollback:
+`build-rollback-neighbors12` (previous version 11); older owned
+`build-rollback-layout11` (version 10) hash-verified before removal.
+
 ## Remaining acceptance
 
 Open the original zone9 view with neighbors enabled. Check buildings, trees,
