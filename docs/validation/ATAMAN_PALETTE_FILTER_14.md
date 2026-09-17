@@ -39,3 +39,18 @@ Toggle “Только используемые на карте”, switch groun
 the complete catalogue should return without switching paint modes.
 Check the same preference after restarting. The actual user window has not
 been opened by the agent. Neighbor-scene visual/FPS acceptance remains separate.
+
+## Handoff
+
+Source commit: `0ad6d7f9708b658358d8d4efe0c18d2b790660e4`.
+Fresh stage `build-staging-14-palette`: windeployqt and finalizer PASS,
+independent manifest/path/hash/coverage checks for all 100 files PASS,
+one current changelist, VERSION 14, fresh/staged EXE equality PASS.
+Installed in `artifacts/EI-Mapper-Ataman-2-first-test`: process gate passed,
+six program files replaced, zero obsolete files removed. All 100 installed
+managed hashes match; all 2393 unlisted user files preserved by hash.
+Installed EXE SHA-256:
+`9BE00CAFC03181FF741EDE4F3E08A40A0A39264B76DA2EC305B87C2F8D928D9B`.
+Version-13 rollback retained in `build-rollback-palette14`; older owned
+version-12 rollback verified against its manifest and removed only after
+successful installation. The user application was not launched.
