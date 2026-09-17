@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "loaded_map_panel_policy.h"
 #include "ui/graphite_caption.h"
+#include "ui/flat_tree_widget.h"
 #include "scenario_panel.h"
 #include "ui_main_window.h"
 
@@ -880,7 +881,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_mapsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_mapsDock->setWidget(m_mapsBrowser);
     addDockWidget(Qt::LeftDockWidgetArea, m_mapsDock);
-    m_loadedMapTree = new QTreeWidget(this);
+    m_loadedMapTree = new CFlatTreeWidget(this);
     m_loadedMapTree->setColumnCount(3);
     m_loadedMapTree->setHeaderLabels(QStringList() << tr("Loaded document")
                                       << tr("Visible") << tr("State"));
@@ -1033,7 +1034,7 @@ MainWindow::MainWindow(QWidget* parent) :
     validationLayout->setContentsMargins(4, 4, 4, 4);
     m_validationSummary = new QLabel(tr("No active MOB family."), validationWidget);
     m_validationSummary->setWordWrap(true);
-    m_validationTree = new QTreeWidget(validationWidget);
+    m_validationTree = new CFlatTreeWidget(validationWidget);
     m_validationTree->setColumnCount(4);
     m_validationTree->setHeaderLabels(QStringList() << tr("Severity") << tr("MOB / Type")
                                       << tr("Source path") << tr("Details"));

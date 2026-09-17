@@ -1,4 +1,5 @@
 #include "maps_browser.h"
+#include "flat_tree_widget.h"
 
 #include <algorithm>
 #include <QDir>
@@ -58,7 +59,7 @@ QString localizedMapCatalogMessages(const QStringList& messages)
 CMapsBrowser::CMapsBrowser(QWidget* parent)
     : QWidget(parent)
     , m_filter(new QLineEdit(this))
-    , m_tree(new QTreeWidget(this))
+    , m_tree(new CFlatTreeWidget(this))
     , m_status(new QLabel(this))
     , m_newCollection(new QPushButton(tr("New Collection..."), this))
     , m_refresh(new QPushButton(tr("Refresh maps and collections"), this))

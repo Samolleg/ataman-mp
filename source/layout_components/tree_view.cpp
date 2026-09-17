@@ -18,7 +18,7 @@
 #include "log.h"
 #include "scene.h"
 
-CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
+CTreeView::CTreeView(QWidget *parent) : CFlatTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
 {
     setSelectionMode(QAbstractItemView::ExtendedSelection);

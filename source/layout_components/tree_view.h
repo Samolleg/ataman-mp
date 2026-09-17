@@ -1,6 +1,7 @@
 #ifndef CTREEVIEW_H
 #define CTREEVIEW_H
 #include <QTreeWidget>
+#include "ui/flat_tree_widget.h"
 #include <QHash>
 #include <QSet>
 #include "types.h"
@@ -36,7 +37,7 @@ private:
 /// \brief The CTreeView class provides display of objects on the scene
 /// \todo display of patrol points (partially implemented)
 ///
-class CTreeView : public QTreeWidget
+class CTreeView : public CFlatTreeWidget
 {
     Q_OBJECT
 public:

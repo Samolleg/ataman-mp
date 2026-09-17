@@ -1,6 +1,6 @@
 # EI Mapper Ataman — roadmap
 
-Current Ataman version: `5` (установленный пакет пока версии 2).
+Current Ataman version: `6` (установленный пакет пока версии 2).
 
 ## Текущая задача: EI-UI-004 — графитовая шапка, камера и деревья
 
