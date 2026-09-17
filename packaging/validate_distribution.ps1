@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$PackageRoot
 )
@@ -156,11 +156,61 @@ else {
             $failures.Add("stale alpha changelist included: $($file.Name)")
         }
     }
+    elseif ($version -match '^[1-9][0-9]*$') {
+        $changelogs = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+            $_.Name -match '(?i)changelog|changelist|^ALPHA[0-9].*\.md$'
+        })
+        $currentNotes = Join-Path $root 'CHANGELOG.md'
+        if ($changelogs.Count -ne 1 -or -not (Test-Path -LiteralPath $currentNotes -PathType Leaf)) {
+            $failures.Add('integer releases require exactly one root CHANGELOG.md')
+        } else {
+            $notes = Get-Content -LiteralPath $currentNotes -Raw -Encoding UTF8
+            $headings = [regex]::Matches($notes, '(?m)^#{1,2}\s+(?:Ataman\s+)?([0-9]+)(?=\s|$|[—–-])')
+            if ($headings.Count -ne 1 -or $headings[0].Groups[1].Value -ne $version) {
+                $failures.Add("CHANGELOG.md must describe only current version $version")
+            }
+        }
+    }
+    else { $failures.Add("unsupported package VERSION: $version") }
 }
 
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if(Test-Path -LiteralPath $checksums)
 {
+    $manifestPaths = @{}
+    foreach ($line in Get-Content -LiteralPath $checksums) {
+        if ($line -notmatch '^([0-9a-fA-F]{64}) \*(.+)$') {
+            $failures.Add("malformed checksum entry: $line"); continue
+        }
+        $digest = $Matches[1]; $relative = $Matches[2].Replace('\','/')
+        try { $full = [IO.Path]::GetFullPath((Join-Path $root $relative)) }
+        catch { $failures.Add("invalid checksum path: $relative"); continue }
+        if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or
+            $relative.Split('/') -contains '..' -or $relative.Split('/') -contains '.' -or
+            -not $full.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase) -or
+            $relative -eq 'SHA256SUMS.txt' -or $manifestPaths.ContainsKey($relative)) {
+            $failures.Add("unsafe, self-referencing or duplicate checksum path: $relative"); continue
+        }
+        $manifestPaths[$relative] = $true
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+            $failures.Add("checksum file is missing: $relative"); continue
+        }
+        $linked = $false; $ancestor = Get-Item -LiteralPath $full
+        while ($ancestor -and $ancestor.FullName -ne $root) {
+            if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { $linked=$true; break }
+            $ancestor = Get-Item -LiteralPath (Split-Path $ancestor.FullName -Parent)
+        }
+        if ($linked) { $failures.Add("linked checksum path is not portable: $relative"); continue }
+        if ((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash -ne $digest) {
+            $failures.Add("checksum mismatch: $relative")
+        }
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
+        $relative=$file.FullName.Substring($root.Length+1).Replace('\','/')
+        if ($relative -ne 'SHA256SUMS.txt' -and -not $manifestPaths.ContainsKey($relative)) {
+            $failures.Add("file is not covered by checksum manifest: $relative")
+        }
+    }
     $forbiddenManifestEntries = Select-String -LiteralPath $checksums -Pattern '(endurance-options\.json|options\.json)$|\.log$|\.(dmp|mdmp|sav|o|obj|a|lib|exp|ilk|pdb|zip)$|(^|/)(Makefile[^/]*|\.qmake\.stash|moc_[^/]*\.cpp|qrc_[^/]*\.cpp|ui_[^/]*\.h)$'
     foreach($entry in $forbiddenManifestEntries)
     {

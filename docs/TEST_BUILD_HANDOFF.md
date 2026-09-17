@@ -133,31 +133,18 @@ The package's one current changelist should state:
 Do not turn routine tests into a long engineering report. Link deeper validation
 documents only when the tester needs them.
 
-The current packaging scripts are not a complete quality gate: their changelist
-check only handles alpha.N, not integer Ataman versions (nor 0.5.0-alpha),
-and the distribution validator
-does not compare manifest digests to actual file hashes. Until separately fixed,
-explicitly verify exactly one current changelist, every manifest entry/hash,
-coverage of all packaged files, and equality of fresh/packaged executable hashes.
-Package completeness is distinct from functional test success.
+Since Ataman 21, validate_distribution.ps1 checks integer-version changelog
+identity, manifest syntax, safe/unique paths, every SHA-256, missing files and
+complete coverage. finalize_package.ps1 invokes this validator after generating
+the manifest. The validator also rejects linked manifest paths.
 
-Required independent verification until the scripts implement the full contract:
-
-1. Read staged VERSION and require the expected Ataman number. Require exactly
-   one current CHANGELOG.md entry for that number and no historical changelist
-   files in the package. Inspect its content, not only its filename.
-2. Parse every SHA256SUMS.txt entry as a SHA-256 plus a relative package path.
-   Reject malformed entries, duplicate paths, missing files and paths outside
-   the resolved package root. The manifest itself must not list itself.
-3. Enumerate all packaged files except SHA256SUMS.txt. Require a one-to-one
-   match with manifest paths and recompute each file's SHA-256; all must match.
-4. Compare the fresh tested executable and staged executable hashes; require
-   equality. Record source SHA, version, absolute package path and these results
-   in the handoff evidence. Do not modify the finalized package afterwards.
-
-Any failed or omitted check prevents describing the package as fully verified,
-even when the existing scripts print PASS. Fixing the validator implementation
-is a separate tracked task, not an effect of updating these rules.
+The finalizer and validator must pass. Independently compare the fresh tested
+executable and staged executable hashes and verify the staged --version result
+before finalization. Record source SHA, absolute package path and verification
+results in the handoff evidence. Do not modify or run the finalized package.
+Package completeness remains distinct from functional test success: a valid
+manifest cannot prove that the editor's behavior is correct. Historical reports
+before version 21 retain their earlier independent-check requirements as evidence.
 
 For each Ataman version use a fresh shadow-build directory: changing VERSION
 changes a compiler definition, which incremental Make builds may fail to notice.
