@@ -50,4 +50,32 @@ geometry saves without that state retain the ordinary MPR-only path.
 - GUI routing inspected in source. No interactive editor or live-game save run;
   the exact end-to-end user path remains a manual acceptance check.
 
-Build, package verification and permanent-install update pending.
+## Delivery
+
+Source commit `607417b0853567577df10eeabb8f0358acfe1dfb` built in fresh
+`build-release-9-save` with retained Qt 5.12.12/MinGW 7.3 x64 and x86 runtime
+components. Original Endurance checkout/toolchain used read-only. Release and
+runtime PASS (`build-save9.log`). Additional route-cost regression: 3 PASS
+(`build-tests-9-save/route-cost.txt`).
+
+- Ready-executable version 9, database creation, resource navigation PASS;
+  scenario integration 47 passed, 0 failed.
+- General `--ui-widget-check` did not complete within 120 seconds; its own
+  process was stopped by the check runner. This is not PASS and matches the
+  previously recorded timeout limitation. See `build-release-9-save/checks.json`.
+- Fresh owned `build-staging-9-save`: dependency deployment, isolated-PATH
+  version smoke and finalizer PASS. One current changelist; all 100 managed
+  files/manifest digests and exact file coverage independently checked. Staged
+  executable and runtime match fresh build hashes.
+- Updated the same `artifacts/EI-Mapper-Ataman-2-first-test` while closed:
+  six managed files replaced, none deleted; all 866 user files retained with
+  identical hashes. Installed manifest verified completely.
+- Executable SHA-256 (build/stage/install):
+  `C0F3649546399AEBE2650C78A4BF62D86D9EA5CCD49B96C570B7FC964B18F8C8`.
+- Previous version-8 changed files retained in `build-rollback-save9`; the older
+  owned `build-rollback-boundary8` was hash-verified and removed after success.
+
+Manual acceptance: paint existing tiles, Save MPR, paint generated transitions,
+Save MPR, reopen and verify both appearance and height edits. No claim of a
+completed manual save on the user's real map; installed game resources untouched
+by this agent. The user-driven save will update resources when required.
