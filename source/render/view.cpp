@@ -1643,6 +1643,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     // their work isolated from the global pool so a palette cannot starve
     // unrelated editor preparation, and bound concurrency to avoid decoding
     // several complete 256/512-slot atlases at once.
+    m_neighborScenePool = new QThreadPool(this);
+    m_neighborScenePool->setMaxThreadCount(2);
+    m_neighborScenePool->setExpiryTimeout(10000);
     m_terrainGlobalHydrationPool = new QThreadPool(this);
     m_terrainGlobalHydrationPool->setMaxThreadCount(2);
     m_terrainGlobalHydrationPool->setExpiryTimeout(10000);
@@ -2117,6 +2120,7 @@ void CView::updateReadState(EReadState state)
 
 CView::~CView()
 {
+    ++(*m_neighborSceneGeneration);
     // Child QObject destruction happens after CView's members are gone. Retire
     // script-window callbacks now, while their map and buffer registry is alive.
     const auto scriptWindows = m_scriptWindows.values();
@@ -2610,11 +2614,11 @@ void CView::initEnvironmentPreviewWidget()
         m_entranceOverlaysVisible);
     m_neighborLandscapesVisualToggle = makeToggle(
         "visualsNeighborLandscapes", tr("Neighbor maps"), tr(
-        "Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map."),
+        "Show up to five nearby MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map."),
         m_neighborLandscapesVisible);
     m_neighborLayoutEditToggle = makeToggle(
         "visualsArrangeNeighborMaps", tr("Arrange maps"), tr(
-        "Turn this on, then left-drag a tinted neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging."),
+        "Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging."),
         false);
     m_neighborLayoutResetButton = new QToolButton(m_environmentPreviewBody);
     m_neighborLayoutResetButton->setObjectName(
@@ -2770,7 +2774,7 @@ void CView::initEnvironmentPreviewWidget()
             setCursor(Qt::OpenHandCursor);
             updateNeighborLayoutStatus();
             emit updateMsg(tr(
-                "Arrange maps is on. Left-drag a tinted neighbor; its world X/Y position is saved when you release it."));
+                "Arrange maps is on. Left-drag a neighbor; its world X/Y position is saved when you release it."));
         }
         else
         {
@@ -3045,7 +3049,7 @@ void CView::setNeighborMapContext(
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
-            "Show up to five nearby MPR maps from the active profile as a tinted background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.");
+            "Show up to five nearby MPR maps from the active profile as a background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.");
         if(!m_neighborPlacements.isEmpty())
         {
             QStringList zones;
@@ -3071,6 +3075,8 @@ void CView::setNeighborMapContext(
 
 void CView::clearNeighborLandscapes()
 {
+    ++(*m_neighborSceneGeneration);
+    m_neighborObjectUploadScheduled = false;
     if(m_neighborLayoutDragActive)
         cancelNeighborLayoutDrag(true);
     if(m_neighborLandscapes.isEmpty())
@@ -3097,50 +3103,94 @@ void CView::loadNeighborLandscapes()
     if(!m_neighborLandscapesVisible || m_neighborPlacements.isEmpty()
        || !m_pLand || !m_pLand->isMprLoad() || !isValid())
         return;
-
-    makeCurrent();
+    const quint64 generation = m_neighborSceneGeneration->load();
+    const auto epoch = m_neighborSceneGeneration;
     for(const SNeighborMapPlacement& placement : m_neighborPlacements)
     {
-        const QFileInfo path(placement.mprPath);
-        CMprDocument document;
-        CValidationReport report;
-        if(!path.isFile() || !document.load(path, &report)
-           || report.hasErrors()
-           || int(document.mapInfo().sectorCountX) * 32
-                != qRound(placement.size.width())
-           || int(document.mapInfo().sectorCountY) * 32
-                != qRound(placement.size.height()))
+        auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
+        connect(watcher, &QFutureWatcher<SNeighborSceneData>::finished, this,
+                [this, watcher, generation]() {
+            const SNeighborSceneData result = watcher->result();
+            watcher->deleteLater();
+            if(generation != m_neighborSceneGeneration->load()
+               || !m_neighborLandscapesVisible || !isValid()) return;
+            for(const QString& diagnostic : result.diagnostics)
+                ei::log(eLogWarning, diagnostic);
+            if(!result.valid) return;
+            // GPU resources are created only by their owning render context.
+            // CPU workers return immutable values, never GL handles or nodes.
+            makeCurrent();
+            SLoadedNeighborLandscape loaded;
+            loaded.placement = result.placement;
+            // A drag may have updated the placement while CPU work was pending.
+            for(const auto& current : m_neighborPlacements)
+                if(current.zoneId == loaded.placement.zoneId) loaded.placement = current;
+            loaded.landscape = CLandscape::createReadOnlyBackground();
+            if(!loaded.landscape->readPreparedBackground(
+                    QFileInfo(loaded.placement.mprPath), result.terrainMembers))
+            {
+                loaded.landscape.clear();
+                doneCurrent();
+                return;
+            }
+            loaded.landscape->setWorldOffset(QVector3D(
+                float(loaded.placement.origin.x()), float(loaded.placement.origin.y()), 0));
+            loaded.pendingObjects = result.staticObjects;
+            m_neighborLandscapes.append(loaded);
+            doneCurrent();
+            ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3")
+                    .arg(loaded.placement.zoneId).arg(result.staticObjects.size()).arg(generation));
+            refreshWorldTerrainNeighbors();
+            if(!m_neighborObjectUploadScheduled)
+            {
+                m_neighborObjectUploadScheduled = true;
+                QTimer::singleShot(0, this, [this, generation]() { populateNeighborObjects(generation); });
+            }
+            update();
+        });
+        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, epoch, generation]() {
+            if(epoch->load() != generation) return SNeighborSceneData();
+            return prepareNeighborScene(placement);
+        }));
+    }
+}
+
+void CView::populateNeighborObjects(quint64 generation)
+{
+    if(generation != m_neighborSceneGeneration->load()
+       || !m_neighborLandscapesVisible || !isValid()) return;
+    m_neighborObjectUploadScheduled = false;
+    makeCurrent();
+    QElapsedTimer budget; budget.start();
+    int added = 0;
+    bool pending = false;
+    for(auto& neighbor : m_neighborLandscapes)
+    {
+        while(neighbor.nextObject < neighbor.pendingObjects.size())
         {
-            ei::log(eLogWarning, QString(
-                "Read-only neighbor map rejected zone:%1 path:%2 validation:%3")
-                .arg(placement.zoneId, path.absoluteFilePath(), report.toText()));
-            continue;
+            if(added >= 16 || budget.elapsed() >= 4) { pending = true; break; }
+            const auto data = neighbor.pendingObjects.at(neighbor.nextObject++);
+            QSharedPointer<CNode> node(new CWorldObj(data));
+            node->loadFigure();
+            node->loadTexture();
+            neighbor.landscape->projectPosition(node.data());
+            neighbor.staticLocalPositions.append(node->drawPosition());
+            neighbor.staticObjects.append(node);
+            ++added;
         }
-        QSharedPointer<CLandscape> landscape =
-            CLandscape::createReadOnlyBackground();
-        if(!landscape->readBackgroundMap(path))
+        if(neighbor.nextObject == neighbor.pendingObjects.size())
         {
-            ei::log(eLogWarning, QString(
-                "Read-only neighbor map failed to render zone:%1 path:%2")
-                .arg(placement.zoneId, path.absoluteFilePath()));
-            continue;
+            neighbor.pendingObjects.clear();
+            neighbor.nextObject = 0;
         }
-        landscape->setWorldOffset(QVector3D(
-            float(placement.origin.x()), float(placement.origin.y()), 0.0f));
-        SLoadedNeighborLandscape loaded;
-        loaded.placement = placement;
-        loaded.landscape = landscape;
-        m_neighborLandscapes.append(loaded);
-        ei::log(eLogInfo, QString(
-            "Read-only neighbor map loaded zone:%1 origin:%2,%3 path:%4")
-            .arg(placement.zoneId)
-            .arg(placement.origin.x(), 0, 'f', 2)
-            .arg(placement.origin.y(), 0, 'f', 2)
-            .arg(path.absoluteFilePath()));
     }
     doneCurrent();
-    refreshWorldTerrainNeighbors();
-    update();
+    if(added) update();
+    if(pending)
+    {
+        m_neighborObjectUploadScheduled = true;
+        QTimer::singleShot(8, this, [this, generation]() { populateNeighborObjects(generation); });
+    }
 }
 
 bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
@@ -3426,7 +3476,7 @@ void CView::updateNeighborLayoutStatus(const QString& zoneId,
     {
         if(!text.isEmpty())
             text += QLatin1Char('\n');
-        text += tr("Left-drag a tinted neighboring map to place it.");
+        text += tr("Left-drag a neighboring map to place it.");
     }
     else
     {
@@ -8008,6 +8058,11 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         m_pLand->updateTerrainShadowVisibility(
             environment.sunDirection, !m_sculptStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
+    if(!m_minimapCaptureActive && terrainShadowsEnabled && m_neighborLandscapesVisible)
+        for(auto& neighbor : m_neighborLandscapes)
+            if(neighbor.landscape)
+                neighbor.landscape->updateTerrainShadowVisibility(
+                    environment.sunDirection, !m_sculptStrokeActive);
     QVector<ei::SScenePointLight> sceneLights;
     QVector<ei::SScenePointLight> shadowLights;
     if(environmentEnabled && sceneLightsEnabled)
@@ -8223,15 +8278,17 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                && m_neighborLandscapesVisible
                && !m_neighborLandscapes.isEmpty() && m_bDrawLand)
             {
-                m_landProgram.setUniformValue("u_readOnlyBackground", 1.0f);
+                m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
                 m_landProgram.setUniformValue("u_mapFog", QVector3D());
-                applyShadowUniforms(m_landProgram, false, true, true);
-                m_pLand->applyTerrainShadowUniforms(&m_landProgram, false);
                 for(const SLoadedNeighborLandscape& neighbor
                     : m_neighborLandscapes)
                     if(neighbor.landscape && neighbor.landscape->isMprLoad())
+                    {
+                        neighbor.landscape->applyTerrainShadowUniforms(
+                            &m_landProgram, terrainShadowsEnabled);
                         neighbor.landscape->draw(&m_landProgram,
                             cullingEnabled ? &frustum : nullptr);
+                    }
                 applyEnvironmentUniforms(m_landProgram, environment,
                                          sceneLights, lightingMode, fogEnabled);
                 applyShadowUniforms(m_landProgram, withShadows, true, true);
@@ -8277,6 +8334,24 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     if(m_activeMob != nullptr)
     {
         QSet<CNode*> colorSubmittedNodes;
+        if(!m_minimapCaptureActive && m_neighborLandscapesVisible && m_staticObjectsVisible)
+            for(auto& neighbor : m_neighborLandscapes)
+                for(int index=0; index<neighbor.staticObjects.size(); ++index)
+                {
+                    CNode* node=neighbor.staticObjects.at(index).data();
+                    node->setDrawPosition(neighbor.staticLocalPositions.at(index)
+                        + QVector3D(float(neighbor.placement.origin.x()),
+                                    float(neighbor.placement.origin.y()),0));
+                    CBox bounds=node->getBBox();
+                    const QVector3D center=bounds.center()+node->drawPosition();
+                    const bool visible=!cullingEnabled || frustum.intersectsSphere(center,bounds.radius());
+                    const bool caster=environmentEnabled && shadowsEnabled && node->castsRenderShadow()
+                        && (center-logicalCameraPosition).length() <= maximumShadowDistance+bounds.radius();
+                    if(!visible && !caster) continue;
+                    renderQueue.setShadowOnlyCollection(!visible);
+                    node->drawObjectVisual(false,&m_program);
+                }
+        renderQueue.setShadowOnlyCollection(false);
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
             if(!m_minimapCaptureActive && !isMobVisible(mob))
@@ -8487,21 +8562,24 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         if(!m_minimapCaptureActive && !m_neighborLandscapes.isEmpty()
            && m_neighborLandscapesVisible)
         {
-            m_landProgram.setUniformValue("u_readOnlyBackground", 1.0f);
+            m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
             m_landProgram.setUniformValue("u_mapFog", QVector3D());
-            applyShadowUniforms(m_landProgram, false, true, true);
-            m_pLand->applyTerrainShadowUniforms(&m_landProgram, false);
             for(const SLoadedNeighborLandscape& neighbor
                 : m_neighborLandscapes)
                 if(neighbor.landscape && neighbor.landscape->isMprLoad())
+                {
+                    neighbor.landscape->applyTerrainShadowUniforms(
+                        &m_landProgram, terrainShadowsEnabled);
                     neighbor.landscape->drawWater(&m_landProgram,
                         cullingEnabled ? &frustum : nullptr);
+                }
             applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                      lightingMode, fogEnabled);
             applyShadowUniforms(m_landProgram,
                 environmentEnabled && shadowsEnabled, true, true);
         }
         m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
+        m_pLand->applyTerrainShadowUniforms(&m_landProgram, terrainShadowsEnabled);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         logOpenGlErrors(QStringLiteral("draw/water"));
         m_landProgram.setUniformValue("u_overlayMotionEnabled", false);

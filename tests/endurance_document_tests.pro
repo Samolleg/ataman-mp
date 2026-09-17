@@ -10,6 +10,7 @@ RESOURCES += \
 INCLUDEPATH += ../source/documents ../source/core ../source/render ../source/resources ../source/app
 SOURCES += \
     endurance_document_tests.cpp \
+    ../source/render/neighbor_scene_data.cpp \
     ../source/documents/endurance_document.cpp \
     ../source/documents/ai_graph_persistence.cpp \
     ../source/documents/ai_graph_document.cpp \

@@ -53,6 +53,8 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "frame_presentation_telemetry.h"
 #include "map_catalog.h"
 #include "neighbor_map_layout.h"
+#include "neighbor_scene_data.h"
+#include <atomic>
 #include "world_terrain_session.h"
 
 class QLineEdit;
@@ -504,6 +506,7 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
+    void populateNeighborObjects(quint64 generation);
     void chooseWorldTerrainMaps();
     void updateWorldTerrainStatus();
     void syncWorldTerrainActive();
@@ -875,8 +878,16 @@ private:
         SNeighborMapPlacement placement;
         QSharedPointer<CLandscape> landscape;
         QMap<QPair<int,int>,QByteArray> terrainPreviewPayloads;
+        QVector<QJsonObject> pendingObjects;
+        int nextObject{0};
+        QVector<QSharedPointer<CNode>> staticObjects;
+        QVector<QVector3D> staticLocalPositions;
     };
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
+    QThreadPool* m_neighborScenePool{nullptr};
+    bool m_neighborObjectUploadScheduled{false};
+    QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{
+        new std::atomic<quint64>(0)};
     CWorldTerrainSession m_worldTerrainSession;
     SWorldTerrainStroke m_worldTerrainStroke;
     QSet<QString> m_worldTerrainEnabledPaths;

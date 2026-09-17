@@ -1,4 +1,5 @@
 #include "view.h"
+#include "node.h"
 #include "terrain_preview_context.h"
 #include "landscape.h"
 #include "landscape_tools.h"
@@ -79,7 +80,15 @@ void CView::refreshWorldTerrainNeighbors()
             { loaded.terrainPreviewPayloads[key]=after;changed=true; }
             else emit updateMsg(tr("Neighbor terrain preview failed: %1").arg(loaded.placement.zoneId));
         }
-        if(changed) loaded.landscape->invalidateTerrainShadowField();
+        if(changed)
+        {
+            loaded.landscape->invalidateTerrainShadowField();
+            for(int index=0; index<loaded.staticObjects.size(); ++index)
+            {
+                loaded.landscape->projectPosition(loaded.staticObjects.at(index).data());
+                loaded.staticLocalPositions[index]=loaded.staticObjects.at(index)->drawPosition();
+            }
+        }
     }
     update();
 }

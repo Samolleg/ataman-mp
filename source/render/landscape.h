@@ -82,6 +82,8 @@ public:
     void unloadMpr();
     void readMap(const QFileInfo& path);
     bool readBackgroundMap(const QFileInfo& path);
+    bool readPreparedBackground(const QFileInfo& path,
+                                const QMap<QString,QByteArray>& members);
     void setWorldOffset(const QVector3D& offset);
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
@@ -144,7 +146,9 @@ public:
 
 private:
     explicit CLandscape(bool readOnlyBackground = false);
-    void readMapInternal(const QFileInfo& path, bool createRecoverySnapshot);
+    void readMapInternal(const QFileInfo& path, bool createRecoverySnapshot,
+                         const QMap<QString,QByteArray>* prepared = nullptr);
+    QVector3D m_worldOffset;
     bool readHeader(QDataStream& stream);
     bool serializeMpr(const QString& zoneName, CResFile& mprFile);
     bool uploadTerrainShadowTexture(const STerrainShadowFieldResult& result);

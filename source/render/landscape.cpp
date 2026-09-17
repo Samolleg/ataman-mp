@@ -652,8 +652,17 @@ bool CLandscape::readBackgroundMap(const QFileInfo& path)
     return isMprLoad();
 }
 
+bool CLandscape::readPreparedBackground(const QFileInfo& path,
+                                      const QMap<QString,QByteArray>& members)
+{
+    if(!m_readOnlyBackground || isMprLoad()) return false;
+    readMapInternal(path, false, &members);
+    return isMprLoad();
+}
+
 void CLandscape::readMapInternal(const QFileInfo& path,
-                                 bool createRecoverySnapshot)
+                                 bool createRecoverySnapshot,
+                                 const QMap<QString,QByteArray>* prepared)
 {
     if (!path.exists())
         return;
@@ -662,7 +671,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
     m_filePath = path;
 
     QFile source(path.filePath());
-    if(source.open(QIODevice::ReadOnly))
+    if(!prepared && source.open(QIODevice::ReadOnly))
         m_originalMprData = source.readAll();
 
     if(createRecoverySnapshot)
@@ -681,8 +690,9 @@ void CLandscape::readMapInternal(const QFileInfo& path,
 
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
     ei::setCrashContext("mpr/archive/read:" + path.fileName());
-    CResFile map(path.filePath());
-    QMap<QString, QByteArray> aTmp =  map.bufferOfFiles();  // map contains DIfferentCaseName
+    QMap<QString, QByteArray> aTmp;
+    if(prepared) aTmp = *prepared;
+    else { CResFile map(path.filePath()); aTmp = map.bufferOfFiles(); }
     ei::log(eLogInfo, QString("MPR archive read complete file:%1 members:%2")
             .arg(path.fileName()).arg(aTmp.size()));
     ei::setCrashContext("mpr/archive/normalize:" + path.fileName());
@@ -850,6 +860,7 @@ bool CLandscape::saveMapAs(const QFileInfo& path, const SaveProgress& progress)
 
 void CLandscape::setWorldOffset(const QVector3D& offset)
 {
+    m_worldOffset = offset;
     for(QVector<CSector*>& row : m_aSector)
         for(CSector* sector : row)
             if(sector)
@@ -1073,6 +1084,7 @@ void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
         && m_terrainShadowTextureWidth > 1 && m_terrainShadowTextureHeight > 1;
     program->setUniformValue("u_terrainShadowEnabled", available);
     program->setUniformValue("u_terrainShadowMap", 6);
+    program->setUniformValue("u_terrainShadowOrigin", m_worldOffset.toVector2D());
     program->setUniformValue("u_terrainShadowTextureSize",
         QVector2D(float(qMax(1, m_terrainShadowTextureWidth)),
                   float(qMax(1, m_terrainShadowTextureHeight))));

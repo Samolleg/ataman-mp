@@ -13,6 +13,7 @@
 #include <limits>
 
 #include "endurance_document.h"
+#include "neighbor_scene_data.h"
 #include "ai_graph_document.h"
 #include "ai_graph_persistence.h"
 #include "landscape_edit_policy.h"
@@ -480,6 +481,9 @@ class EnduranceDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void neighborStaticScenePreservesVisualsWithoutGameplayNodes();
+    void neighborSceneRejectsInvalidTerrain();
+    void neighborRealMapReadOnly();
     void terrainTileInformationPersistsWithoutBlinking();
     void persistentPaintOperationSurvivesHistoryNavigation();
     void tileBrushFirstValidSampleOwnsUndoStroke();
@@ -14233,6 +14237,77 @@ void EnduranceDocumentTests::generatedMobCommitIsValidatedBackedUpAndAtomic()
     QVERIFY(after.open(QIODevice::ReadOnly));
     QCOMPARE(after.readAll(), committedBeforeFailure);
 #endif
+}
+
+void EnduranceDocumentTests::neighborStaticScenePreservesVisualsWithoutGameplayNodes()
+{
+    const QByteArray fields=section(0xB002,u32(42))+section(0xB003,u32(54))
+        +section(0xB004,"tree")+section(0xB006,"tree01")
+        +section(0xB007,"tree_green")+section(0xB008,"tree_bark")
+        +section(0xB009,plot(12,24,3))
+        +section(0xB00C,plot(1,2,3))
+        +section(0xB00A,plot(0,0,1)+u32(0))
+        +stringArray(0xB00D,{"trunk","leaves"})
+        +section(0xB014,QByteArray(1,0));
+    const QByteArray bytes=validMob(section(0xB000,
+        section(0xB001,fields)
+        +section(0xB001,fields+section(0xBBBB0000))
+        +object(44,"no visual")));
+    CMobDocument document; CValidationReport report;
+    QVERIFY2(document.loadBytes(bytes,"neighbor.mob",&report),qPrintable(report.toText()));
+    const auto visuals=neighborStaticObjects(document);
+    QCOMPARE(visuals.size(),1);
+    const auto visual=visuals.first();
+    QCOMPARE(visual["Model name"].toString(),QString("tree01"));
+    QCOMPARE(visual["Primary texture"].toString(),QString("tree_green"));
+    QCOMPARE(visual["Secondary texture"].toString(),QString("tree_bark"));
+    QCOMPARE(visual["Object parts"].toArray(),QJsonArray({"trunk","leaves"}));
+    QCOMPARE(visual["Base object"].toObject()["Position"].toArray(),QJsonArray({12,24,3}));
+    QCOMPARE(visual["Base object"].toObject()["Complection"].toArray(),QJsonArray({1,2,3}));
+    QCOMPARE(visual["Base object"].toObject()["Rotation"].toArray(),QJsonArray({0,0,1,0}));
+    QVERIFY(!visual["Is shadow?"].toBool());
+    QCOMPARE(document.serialize(),bytes);
+}
+
+void EnduranceDocumentTests::neighborSceneRejectsInvalidTerrain()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    SNeighborMapPlacement placement;
+    placement.zoneId="a"; placement.mprPath=dir.filePath("a.mpr");
+    placement.mobPath=dir.filePath("a.mob"); placement.size=QSizeF(32,32);
+    QFile file(placement.mprPath); QVERIFY(file.open(QIODevice::WriteOnly));
+    const auto bytes=syntheticMpr(); file.write(bytes); file.close();
+    auto result=prepareNeighborScene(placement);
+    QVERIFY(result.valid); QVERIFY(!result.terrainMembers.isEmpty());
+    QVERIFY(result.staticObjects.isEmpty()); // Missing MOB never drops valid terrain.
+    QVERIFY(!result.diagnostics.isEmpty());
+    placement.size=QSizeF(64,32);
+    QVERIFY(!prepareNeighborScene(placement).valid);
+    QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate)); file.write("broken"); file.close();
+    QVERIFY(!prepareNeighborScene(placement).valid);
+}
+
+void EnduranceDocumentTests::neighborRealMapReadOnly()
+{
+    const QString root=QString::fromLocal8Bit(qgetenv("EI_NEIGHBOR_TEST_ROOT"));
+    if(root.isEmpty()) QSKIP("Optional installed-map read-only check");
+    for(const QString& name : {QString("zone1"),QString("zone9"),QString("zone4")})
+    {
+        SNeighborMapPlacement placement;
+        placement.zoneId=name;
+        placement.mprPath=QDir(root).filePath("Maps/"+name+".mpr");
+        placement.mobPath=QDir(root).filePath("Maps/"+name+".mob");
+        CMprDocument terrain; CValidationReport report;
+        QVERIFY2(terrain.load(QFileInfo(placement.mprPath),&report),qPrintable(report.toText()));
+        placement.size=QSizeF(terrain.mapInfo().sectorCountX*32,terrain.mapInfo().sectorCountY*32);
+        const auto result=prepareNeighborScene(placement);
+        QVERIFY2(result.valid,qPrintable(result.diagnostics.join("\n")));
+        QVERIFY2(!result.staticObjects.isEmpty(),qPrintable(result.diagnostics.join("\n")));
+        qInfo("Read-only neighbor %s: %d static objects, %d terrain members",
+              qPrintable(name),result.staticObjects.size(),result.terrainMembers.size());
+        QFile source(placement.mprPath); QVERIFY(source.open(QIODevice::ReadOnly));
+        QCOMPARE(source.readAll(),terrain.originalBytes());
+    }
 }
 
 QTEST_APPLESS_MAIN(EnduranceDocumentTests)

@@ -22,6 +22,7 @@
 #include <QOpenGLTexture>
 #include <QOpenGLTextureBlitter>
 #include <QOpenGLBuffer>
+#include <QOpenGLShaderProgram>
 #include "../source/render/terrain_preview_context.h"
 
 #include "loaded_map_panel_policy.h"
@@ -59,6 +60,7 @@ private slots:
         tools.setSculptTool(original);
     }
     void nestedTerrainPreviewKeepsBothGpuBuffersCurrent();
+    void neighborTerrainShaderCompiles();
     void paintPaletteUsesVisibleWidthOnFirstActivation_data();
     void paintPaletteUsesVisibleWidthOnFirstActivation();
     void worldTerrainControlsStayProtectedAndSignal();
@@ -159,6 +161,23 @@ void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation()
     QVERIFY(buttonFor(102)->isVisible());
     QVERIFY(buttonFor(100)->isHidden());
     QVERIFY(buttonFor(102)->isChecked());
+}
+
+void LandscapeToolsWidgetTests::neighborTerrainShaderCompiles()
+{
+    QGLWidget viewport;
+    if(!viewport.isValid()) QSKIP("No legacy viewport OpenGL context");
+    viewport.makeCurrent();
+    QOpenGLShaderProgram program;
+    QVERIFY2(program.addShaderFromSourceFile(QOpenGLShader::Vertex,
+        QFINDTESTDATA("../assets/shaders/landshader.vsh")),qPrintable(program.log()));
+    QVERIFY2(program.addShaderFromSourceFile(QOpenGLShader::Fragment,
+        QFINDTESTDATA("../assets/shaders/landshader.fsh")),qPrintable(program.log()));
+    QVERIFY2(program.link(),qPrintable(program.log()));
+    QVERIFY(program.bind());
+    QVERIFY(program.uniformLocation("u_terrainShadowOrigin")>=0);
+    program.setUniformValue("u_terrainShadowOrigin",QVector2D(128,-64));
+    program.release();
 }
 
 void LandscapeToolsWidgetTests::nestedTerrainPreviewKeepsBothGpuBuffersCurrent()

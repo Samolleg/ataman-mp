@@ -6616,8 +6616,8 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         <message>
             <location filename="../source/render/view.cpp" line="2590" />
             <location filename="../source/render/view.cpp" line="2948" />
-            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map.</source>
-            <translation>Показывать до пяти ближайших MPR-карт из активного профиля как тонированный фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не изменяет. Дважды щёлкните соседнюю карту, чтобы открыть её пару MPR/MOB. Фоновые данные не участвуют в сохранении, экспорте и «Тесте текущей карты».</translation>
+            <source>Show up to five nearby MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Background data is excluded from saving, export, and Test Current Map.</source>
+            <translation>Показывать до пяти ближайших MPR-карт из активного профиля как фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не изменяет. Дважды щёлкните соседнюю карту, чтобы открыть её пару MPR/MOB. Фоновые данные не участвуют в сохранении, экспорте и «Тесте текущей карты».</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2705" />
@@ -10441,8 +10441,8 @@ Do you want to %3?</source>
         <message>
             <location filename="../source/render/view.cpp" line="2590" />
             <location filename="../source/render/view.cpp" line="3025" />
-            <source>Show up to five nearby MPR maps from the active profile as a tinted, read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.</source>
-            <translation>Показывать до пяти ближайших карт MPR из активного профиля как тонированный фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не редактирует. Двойной щелчок открывает её пару MPR/MOB. Включите «Расставить карты», чтобы перетащить соседние карты в правильные мировые координаты. Фоновые данные не попадают в сохранение, экспорт и «Тестировать текущую карту».</translation>
+            <source>Show up to five nearby MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.</source>
+            <translation>Показывать до пяти ближайших карт MPR из активного профиля как фон только для чтения. Одиночный щелчок по соседней карте ничего не выделяет и не редактирует. Двойной щелчок открывает её пару MPR/MOB. Включите «Расставить карты», чтобы перетащить соседние карты в правильные мировые координаты. Фоновые данные не попадают в сохранение, экспорт и «Тестировать текущую карту».</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2594" />
@@ -10451,8 +10451,8 @@ Do you want to %3?</source>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2594" />
-            <source>Turn this on, then left-drag a tinted neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging.</source>
-            <translation>Включите этот режим, затем перетаскивайте тонированную соседнюю карту левой кнопкой мыши. Во время перетаскивания показывается начало карты по мировым X/Y; после отпускания оно сохраняется для активного профиля. Опорная карта аллода остаётся закреплена в X 0, Y 0. Двойной щелчок не переключает карты во время расстановки.</translation>
+            <source>Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging.</source>
+            <translation>Включите этот режим, затем перетаскивайте соседнюю карту левой кнопкой мыши. Во время перетаскивания показывается начало карты по мировым X/Y; после отпускания оно сохраняется для активного профиля. Опорная карта аллода остаётся закреплена в X 0, Y 0. Двойной щелчок не переключает карты во время расстановки.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2600" />
@@ -10466,8 +10466,8 @@ Do you want to %3?</source>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2750" />
-            <source>Arrange maps is on. Left-drag a tinted neighbor; its world X/Y position is saved when you release it.</source>
-            <translation>Режим расстановки карт включён. Перетащите тонированную соседнюю карту левой кнопкой мыши; её мировое положение X/Y сохранится после отпускания.</translation>
+            <source>Arrange maps is on. Left-drag a neighbor; its world X/Y position is saved when you release it.</source>
+            <translation>Режим расстановки карт включён. Перетащите соседнюю карту левой кнопкой мыши; её мировое положение X/Y сохранится после отпускания.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2995" />
@@ -10486,8 +10486,8 @@ Do you want to %3?</source>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="3406" />
-            <source>Left-drag a tinted neighboring map to place it.</source>
-            <translation>Перетащите тонированную соседнюю карту левой кнопкой мыши, чтобы задать её положение.</translation>
+            <source>Left-drag a neighboring map to place it.</source>
+            <translation>Перетащите соседнюю карту левой кнопкой мыши, чтобы задать её положение.</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="3412" />

@@ -56,6 +56,7 @@ uniform bool u_receiveDynamicShadow;
 uniform bool u_terrainShadowEnabled;
 uniform sampler2D u_terrainShadowMap;
 uniform vec2 u_terrainShadowTextureSize;
+uniform vec2 u_terrainShadowOrigin;
 
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
@@ -70,7 +71,7 @@ float terrainShadowVisibility()
   if (!u_terrainShadowEnabled)
     return 1.0;
   vec2 halfTexel = vec2(0.5) / u_terrainShadowTextureSize;
-  vec2 uv = (v_worldPosition.xy + vec2(0.5)) / u_terrainShadowTextureSize;
+  vec2 uv = (v_worldPosition.xy - u_terrainShadowOrigin + vec2(0.5)) / u_terrainShadowTextureSize;
   uv = clamp(uv, halfTexel, vec2(1.0) - halfTexel);
   return texture2D(u_terrainShadowMap, uv).r;
 }
