@@ -22,6 +22,10 @@ public:
     explicit CWorldMapLayoutDocument(const QString& path = QString());
 
     static QString defaultPath();
+    // root is the evaluated mod root (or game root for Base), above Maps.
+    // An empty root disables persistence; never fall back to a global store.
+    void setProfileDirectory(const QString& root, const QString& profileId,
+                             const QString& legacyPath = defaultPath());
     QString path() const { return m_path; }
     SWorldMapLayoutUpdateResult loadAndUpdate(
         const QString& profileId,
@@ -58,6 +62,8 @@ private:
         const QVector<SWorldMapZoneOrigin>& existing) const;
 
     QString m_path;
+    QString m_legacyPath;
+    QString m_storageProfileId;
     ELoadState m_loadState{ELoadState::NotLoaded};
     bool m_hasPersistentFile{false};
     QString m_loadWarning;

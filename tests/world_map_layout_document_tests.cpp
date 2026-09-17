@@ -121,7 +121,101 @@ private slots:
     void manualResetApisDoNotRequireUiEditing();
     void usesCanonicalStockAllodAnchors();
     void worldTransformRoundTripPreservesVisiblePoint();
+    void profileDirectoryMigrationAndSwitching();
+    void existingProfileFileWinsOverLegacy();
+    void profileMigrationFailsWithoutOverwritingData();
 };
+
+void WorldMapLayoutDocumentTests::profileDirectoryMigrationAndSwitching()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString legacyPath = dir.filePath("legacy.json");
+    const auto topology = topologyFrom(twoZoneTable());
+    CWorldMapLayoutDocument legacy(legacyPath);
+    QVERIFY(legacy.loadAndUpdate("jamais-vu", topology).persisted);
+    QVERIFY(legacy.loadAndUpdate("deja-vu", topology).persisted);
+    QVERIFY(legacy.setZoneOrigin("jamais-vu", "island", "a", QPointF(123, 456)));
+    QVERIFY(legacy.setZoneOrigin("deja-vu", "island", "a", QPointF(-50, 9)));
+    const QByteArray original = readFile(legacyPath);
+    CWorldMapLayoutDocument document;
+    const QString jmvRoot = dir.filePath("MODS/JamaisVu135");
+    document.setProfileDirectory(jmvRoot, "jamais-vu", legacyPath);
+    QCOMPARE(document.path(), jmvRoot + "/world-map-layouts.json");
+    auto loaded = document.loadAndUpdate("jamais-vu", topology);
+    QVERIFY(loaded.persisted);
+    QCOMPARE(requiredOrigin(loaded.zones, "jamais-vu", "island", "a"), QPointF(123, 456));
+    QVERIFY(!readFile(document.path()).contains("deja-vu"));
+    QVERIFY(document.setZoneOrigin("jamais-vu", "island", "a", QPointF(777, 88)));
+    const QByteArray jmvSaved = readFile(document.path());
+    document.setProfileDirectory(dir.filePath("MODS/DejaVu"), "deja-vu", legacyPath);
+    loaded = document.loadAndUpdate("deja-vu", topology);
+    QVERIFY(loaded.persisted);
+    QCOMPARE(requiredOrigin(loaded.zones, "deja-vu", "island", "a"), QPointF(-50, 9));
+    QVERIFY(!readFile(document.path()).contains("jamais-vu"));
+    document.setProfileDirectory(jmvRoot, "jamais-vu", legacyPath);
+    loaded = document.loadAndUpdate("jamais-vu", topology);
+    QCOMPARE(requiredOrigin(loaded.zones, "jamais-vu", "island", "a"), QPointF(777, 88));
+    QCOMPARE(readFile(document.path()), jmvSaved);
+    document.setProfileDirectory(dir.filePath("BaseGame"), "base", legacyPath);
+    QVERIFY(document.loadAndUpdate("base", topology).persisted);
+    QCOMPARE(document.path(), dir.filePath("BaseGame/world-map-layouts.json"));
+    QCOMPARE(readFile(legacyPath), original);
+}
+
+void WorldMapLayoutDocumentTests::existingProfileFileWinsOverLegacy()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto topology = topologyFrom(twoZoneTable());
+    const QString path = dir.filePath("world-map-layouts.json");
+    CWorldMapLayoutDocument existing(path);
+    QVERIFY(existing.loadAndUpdate("jamais-vu", topology).persisted);
+    QVERIFY(existing.loadAndUpdate("deja-vu", topology).persisted);
+    QVERIFY(existing.setZoneOrigin("jamais-vu", "island", "a", QPointF(99, 55)));
+    const QByteArray original = readFile(path);
+    const QString badLegacy = dir.filePath("bad-legacy.json");
+    QVERIFY(writeFile(badLegacy, "corrupt"));
+    CWorldMapLayoutDocument document;
+    document.setProfileDirectory(dir.path(), "jamais-vu", badLegacy);
+    const auto loaded = document.loadAndUpdate("jamais-vu", topology);
+    QVERIFY(loaded.persisted);
+    QCOMPARE(requiredOrigin(loaded.zones, "jamais-vu", "island", "a"), QPointF(99, 55));
+    QCOMPARE(readFile(path), original); // Including the other profile's data.
+    QVERIFY(document.setZoneOrigin("jamais-vu", "island", "a", QPointF(100, 56)));
+    QVERIFY(readFile(path).contains("deja-vu"));
+}
+
+void WorldMapLayoutDocumentTests::profileMigrationFailsWithoutOverwritingData()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto topology = topologyFrom(twoZoneTable());
+    const QString legacyPath = dir.filePath("legacy.json");
+    QVERIFY(writeFile(legacyPath, "broken legacy"));
+    CWorldMapLayoutDocument document;
+    document.setProfileDirectory(dir.filePath("new"), "jamais-vu", legacyPath);
+    QVERIFY(document.loadAndUpdate("jamais-vu", topology).storageBlocked);
+    QVERIFY(!QFileInfo::exists(document.path()));
+    QCOMPARE(readFile(legacyPath), QByteArray("broken legacy"));
+    const QString destination = dir.filePath("world-map-layouts.json");
+    QVERIFY(writeFile(destination, "broken destination"));
+    document.setProfileDirectory(dir.path(), "jamais-vu", legacyPath);
+    QVERIFY(document.loadAndUpdate("jamais-vu", topology).storageBlocked);
+    QVERIFY(!document.setZoneOrigin("jamais-vu", "island", "a", QPointF(0, 0)));
+    QCOMPARE(readFile(destination), QByteArray("broken destination"));
+    document.setProfileDirectory(QString(), "jamais-vu", legacyPath);
+    QVERIFY(document.loadAndUpdate("jamais-vu", topology).storageBlocked);
+    QVERIFY(document.path().isEmpty());
+    document.setProfileDirectory(dir.filePath("race"), "jamais-vu", QString());
+    document.loadAndUpdate("jamais-vu", {});
+    QVERIFY(QDir().mkpath(dir.filePath("race")));
+    QVERIFY(writeFile(document.path(), "new external destination"));
+    const auto raced = document.loadAndUpdate("jamais-vu", topology);
+    QVERIFY(!raced.persisted);
+    QVERIFY(!raced.warning.isEmpty());
+    QCOMPARE(readFile(document.path()), QByteArray("new external destination"));
+}
 
 void WorldMapLayoutDocumentTests::seedsDeterministicWorldOriginsFromMapTable()
 {

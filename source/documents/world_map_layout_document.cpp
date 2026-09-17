@@ -352,13 +352,50 @@ QString CWorldMapLayoutDocument::defaultPath()
             QStringLiteral("EI Mapper Endurance/world-map-layouts.json"));
 }
 
+void CWorldMapLayoutDocument::setProfileDirectory(
+    const QString& root, const QString& profileId, const QString& legacyPath)
+{
+    const QString destination = root.trimmed().isEmpty() || !QDir::isAbsolutePath(root)
+        || !safeIdentity(profileId) ? QString()
+        : QDir::cleanPath(QDir(root).filePath(QStringLiteral("world-map-layouts.json")));
+    if(m_path == destination && m_storageProfileId == profileId
+       && m_legacyPath == legacyPath)
+        return;
+    m_path = destination;
+    m_storageProfileId = profileId;
+    m_legacyPath = legacyPath;
+    m_loadState = ELoadState::NotLoaded;
+    m_hasPersistentFile = false;
+    m_loadWarning.clear();
+    m_zones.clear();
+}
+
 bool CWorldMapLayoutDocument::ensureLoaded()
 {
     if(m_loadState != ELoadState::NotLoaded)
         return m_loadState == ELoadState::Ready;
+    if(m_path.isEmpty())
+    {
+        m_loadState = ELoadState::Blocked;
+        m_loadWarning = QStringLiteral("The active profile has no world-map storage directory.");
+        return false;
+    }
     const QFileInfo info(m_path);
     if(!info.exists())
     {
+        if(!m_legacyPath.isEmpty() && QFileInfo::exists(m_legacyPath))
+        {
+            CWorldMapLayoutDocument legacy(m_legacyPath);
+            if(!legacy.ensureLoaded())
+            {
+                m_loadState = ELoadState::Blocked;
+                m_loadWarning = legacy.m_loadWarning;
+                return false;
+            }
+            // Leave the legacy file intact as a recovery copy. Do not carry
+            // other profiles into a newly created profile-local document.
+            m_zones = profileZones(legacy.m_zones, m_storageProfileId);
+        }
         m_loadState = ELoadState::Ready;
         return true;
     }
@@ -390,6 +427,12 @@ bool CWorldMapLayoutDocument::ensureLoaded()
 bool CWorldMapLayoutDocument::save(
     const QVector<SWorldMapZoneOrigin>& zones, QString* error) const
 {
+    if(m_path.isEmpty() || (!m_hasPersistentFile && QFileInfo::exists(m_path)))
+    {
+        if(error) *error = QStringLiteral(
+            "World-map storage is unavailable or a destination appeared after loading. Reload the profile; the existing file was left unchanged.");
+        return false;
+    }
     QString serializationError;
     const QByteArray bytes = serialize(zones, &serializationError);
     if(bytes.isEmpty())
@@ -498,7 +541,7 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadAndUpdate(
     }
 
     QVector<SWorldMapZoneOrigin> candidate = m_zones;
-    bool changed = false;
+    bool changed = !m_hasPersistentFile && !candidate.isEmpty();
     for(const SWorldMapZoneOrigin& inferred : inference.zones)
     {
         QString validationError;

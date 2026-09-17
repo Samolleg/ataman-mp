@@ -3311,12 +3311,19 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
         const QVector<SMapCatalogEntry> topology = m_borrowedMapIdentity
             ? QVector<SMapCatalogEntry>() : m_mapCatalog.topologyEntries;
+        const SResourceProfileEvaluation layoutProfile = activeResourceProfile();
         const QString profileId = m_borrowedMapIdentity
-            ? QString() : activeResourceProfile().profileId;
+            ? QString() : layoutProfile.profileId;
         SWorldMapLayoutUpdateResult worldLayout;
         if(!m_borrowedMapIdentity)
+        {
+            const QString root = !layoutProfile.valid ? QString()
+                : (layoutProfile.modRoot.isEmpty() ? layoutProfile.gameRoot
+                                                   : layoutProfile.modRoot);
+            m_worldMapLayoutDocument.setProfileDirectory(root, profileId);
             worldLayout = m_worldMapLayoutDocument.loadAndUpdate(
                 profileId, topology);
+        }
         for(const QString& diagnostic : worldLayout.diagnostics)
             ei::log(eLogWarning, QStringLiteral("World map layout: ")
                 + diagnostic);
