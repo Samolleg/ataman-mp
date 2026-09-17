@@ -46,5 +46,30 @@ installed-game-map test). No installed game maps were copied or modified.
   save/reopen and recovery regressions pass. One existing QTemporaryDir cleanup
   warning appeared; it is not an edit to user data.
 
-Build/installation pending. Real viewport behavior on the user's edited maps
-still requires acceptance; synthetic tests are not a claim of that acceptance.
+## Build and installation
+
+Built source commit: `1397d5365453c1fa5ce693eca65330176596cede`, branch
+`codex/boundary-fill-seams-v8`. Fresh version-8 shadow build with the retained
+read-only Qt 5.12.12/MinGW 7.3 kit, then incremental rebuild after shared-anchor
+review. Release and x86 runtime components PASS. Exact final build log:
+`build-boundary8-final.log`.
+
+- Executable version, database creation, resource navigation PASS; scenarios
+  47 passed, 0 failed. New numerical/model regression: 19 passed, 1 optional skip.
+- Fresh owned staging `build-staging-8-boundary`: deployed dependencies,
+  isolated-PATH version 8, runtime/exe equality, finalizer PASS. One current
+  changelist verified independently; all 100 manifest digests and file coverage
+  verified independently by the installation guard.
+- Same permanent installation `artifacts/EI-Mapper-Ataman-2-first-test` updated
+  with application closed. Six managed files replaced; none removed. All 375
+  unlisted user files retained with identical hashes. All installed managed
+  hashes verified (`build-release-8-boundary/install-result.txt`).
+- Executable SHA-256 in build/stage/installation:
+  `E80A42672259BB083EE2E9DA8EA61642617D7DD07A5C7305A16CB14EBCC64ECC`.
+- Version-7 changed files retained in `build-rollback-boundary8`. Prior owned
+  rollback `build-rollback-boundary7` hash-verified and removed after success.
+
+Real viewport behavior on the user's edited maps still requires acceptance;
+synthetic tests are not a claim of that acceptance. General `--ui-widget-check`
+again timed out at 120 seconds (existing EI-BUILD-001-UI); only the owned headless
+test process was terminated. This check is not PASS.
