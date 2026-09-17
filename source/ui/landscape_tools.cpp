@@ -116,6 +116,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintModeTabs(new QTabWidget(this))
     , m_classicMaterialTabs(new QTabWidget(this))
     , m_paintFilter(new QLineEdit(this))
+    , m_usedMaterialsOnly(new QCheckBox(tr("Only materials used on this map"), this))
     , m_modernModePage(new QWidget(this))
     , m_classicModePage(new QWidget(this))
     , m_manualModePage(new QWidget(this))
@@ -439,6 +440,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintFilter->setPlaceholderText(tr("Filter materials or atlas slots..."));
     m_paintFilter->setClearButtonEnabled(true);
     paintLayout->addWidget(m_paintFilter);
+    m_usedMaterialsOnly->setObjectName(QStringLiteral("terrainUsedMaterialsOnly"));
+    m_usedMaterialsOnly->setChecked(settings.value(
+        QStringLiteral("ui/landscape/usedMaterialsOnly"), false).toBool());
+    paintLayout->addWidget(m_usedMaterialsOnly);
     m_paintModeTabs->addTab(m_modernModePage, tr("Modern (Z)"));
     m_paintModeTabs->addTab(m_classicModePage, tr("Classic Auto (X)"));
     m_paintModeTabs->addTab(m_manualModePage, tr("Manual (C)"));
@@ -725,6 +730,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             .toInt(), 2));
     connect(m_paintFilter, &QLineEdit::textChanged, this,
             [this](const QString&) { applyPaintFilter(); });
+    connect(m_usedMaterialsOnly, &QCheckBox::toggled, this, [this](bool checked) {
+        QSettings().setValue(QStringLiteral("ui/landscape/usedMaterialsOnly"), checked);
+        requestMaterialPaletteRebuild();
+        requestPaintTerrainTypesRefresh();
+        emit editingStateChanged();
+    });
+    m_usedMaterialsOnly->setVisible(paintPaletteMode() != ETerrainPaintPaletteMode::Manual);
     connect(m_manualTileList, &QListWidget::itemSelectionChanged, this,
             [this]() {
         const QListWidgetItem* item = m_manualTileList->currentItem();
@@ -1457,6 +1469,7 @@ void CLandscapeTools::setManualAtlasTiles(
 
 void CLandscapeTools::applyPaintFilter()
 {
+    m_usedMaterialsOnly->setVisible(paintPaletteMode() != ETerrainPaintPaletteMode::Manual);
     const QString filter = m_paintFilter
         ? m_paintFilter->text().trimmed() : QString();
     const bool hideClassicStamps = paintPaletteMode()
@@ -1524,11 +1537,17 @@ void CLandscapeTools::rebuildMaterialPalette()
             const QVector<STerrainPaintMaterialChoice>& choices,
             bool classicAuto) {
         int row = 0;
-        const auto addSection = [&](bool used, const QString& title) {
+        if(choices.isEmpty()) return;
+        const auto addSection = [&](bool usedOnly, const QString& title) {
           QVector<STerrainPaintMaterialChoice> section;
           for(const STerrainPaintMaterialChoice& choice : choices)
-              if(choice.used == used) section.append(choice);
-          if(section.isEmpty()) return;
+              if(!usedOnly || choice.used) section.append(choice);
+          if(section.isEmpty())
+          {
+              grid->addWidget(new QLabel(tr("No used materials in this layer."), this),
+                              row++, 0, 1, columns);
+              return;
+          }
           QLabel* heading = new QLabel(title, this);
           heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
           grid->addWidget(heading, row++, 0, 1, columns);
@@ -1567,7 +1586,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                             : tr("It is restricted to its reviewed support material."))
                   : tr("%1 - %2 authored uniform source(s). %3")
                   .arg(choice.name).arg(choice.assignedSlots)
-                  .arg(used ? tr("Currently used on this map.")
+                  .arg(choice.used ? tr("Currently used on this map.")
                             : (classicAuto
                                 ? tr("Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.")
                                 : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed.")))));
@@ -1597,8 +1616,9 @@ void CLandscapeTools::rebuildMaterialPalette()
             row += (family.value().size() + columns - 1) / columns;
           }
         };
-        addSection(true, tr("Used on this map"));
-        addSection(false, tr("Unused materials"));
+        addSection(m_usedMaterialsOnly->isChecked(),
+                   m_usedMaterialsOnly->isChecked() ? tr("Used on this map")
+                                                   : tr("All materials"));
         for(int column = 0; column < columns; ++column)
             grid->setColumnStretch(column, 1);
         grid->setAlignment(Qt::AlignTop);
@@ -1743,7 +1763,10 @@ void CLandscapeTools::setUsedTerrainFamilies(
     update(&m_classicUnderwaterPaintTypes, landFamilies);
     update(&m_classicOverlayPaintTypes, overlayFamilies);
     if(changed)
+    {
         requestMaterialPaletteRebuild();
+        requestPaintTerrainTypesRefresh();
+    }
 }
 
 void CLandscapeTools::refreshPaintTerrainTypes()

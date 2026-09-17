@@ -1119,6 +1119,18 @@ Restore the runtime paths for the selected installation, then retry Test Current
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="1563" />
+            <source>Only materials used on this map</source>
+            <translation>Только используемые на карте</translation>
+        </message>
+        <message>
+            <source>All materials</source>
+            <translation>Все материалы</translation>
+        </message>
+        <message>
+            <source>No used materials in this layer.</source>
+            <translation>На этом слое пока нет используемых материалов.</translation>
+        </message>
+        <message>
             <source>Unused materials</source>
             <translation>Неиспользуемые материалы</translation>
         </message>

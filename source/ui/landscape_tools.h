@@ -212,6 +212,7 @@ private:
     QTabWidget* m_paintModeTabs;
     QTabWidget* m_classicMaterialTabs;
     QLineEdit* m_paintFilter;
+    QCheckBox* m_usedMaterialsOnly;
     QWidget* m_modernModePage;
     QWidget* m_classicModePage;
     QWidget* m_manualModePage;

@@ -63,6 +63,7 @@ private slots:
     void neighborTerrainShaderCompiles();
     void paintPaletteUsesVisibleWidthOnFirstActivation_data();
     void paintPaletteUsesVisibleWidthOnFirstActivation();
+    void usedMaterialFilterTracksMapAndSelection();
     void worldTerrainControlsStayProtectedAndSignal();
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
@@ -79,6 +80,57 @@ private slots:
     void compressedTerrainAtlasFramebufferCapability();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::usedMaterialFilterTracksMapAndSelection()
+{
+    const QString key = QStringLiteral("ui/landscape/usedMaterialsOnly");
+    QSettings().remove(key);
+    CLandscapeTools tools;
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    STerrainPaintMaterialChoice used, unused;
+    used.id = 101; used.name = "Grass A"; used.familyName = "Grass"; used.used = true;
+    unused = used; unused.id = 102; unused.name = "Grass B"; unused.used = false;
+    tools.setPaintMaterials({used, unused}, {}, {used, unused}, 2, 2);
+    tools.setClassicAutoMaterials({used, unused}, {}, {used, unused});
+    auto* filter = tools.findChild<QCheckBox*>("terrainUsedMaterialsOnly");
+    QVERIFY(filter);
+    QVERIFY(!filter->isChecked());
+    auto* scroll = tools.findChild<QScrollArea*>("groundMaterialScroll");
+    QVERIFY(scroll);
+    QCOMPARE(scroll->findChildren<QToolButton*>().size(), 2);
+    int headings = 0;
+    for(auto* label : scroll->findChildren<QLabel*>())
+        headings += label->text() == "Grass";
+    QCOMPARE(headings, 1); // Used and unused variants share the same family.
+    QVERIFY(tools.selectPaintTerrainType(102));
+    QSignalSpy changed(&tools, &CLandscapeTools::paintTerrainTypeChanged);
+    filter->setChecked(true);
+    QCOMPARE(scroll->findChildren<QToolButton*>().size(), 1);
+    QCOMPARE(tools.paintTerrainType(), qint32(101));
+    QVERIFY(!changed.isEmpty());
+    QCOMPARE(changed.last().first().toInt(), 101);
+    for(const QString& name : {QStringLiteral("overlayMaterialScroll"),
+            QStringLiteral("classicGroundMaterialScroll"),
+            QStringLiteral("classicOverlayMaterialScroll")})
+        QCOMPARE(tools.findChild<QScrollArea*>(name)->findChildren<QToolButton*>().size(), 1);
+    tools.setUsedTerrainFamilies({102}, {});
+    QCOMPARE(tools.paintTerrainType(), qint32(102));
+    tools.setUsedTerrainFamilies({}, {});
+    bool selected = true;
+    tools.paintTerrainType(&selected);
+    QVERIFY(!selected);
+    QCOMPARE(scroll->findChildren<QToolButton*>().size(), 0);
+    CLandscapeTools restored;
+    QVERIFY(restored.findChild<QCheckBox*>("terrainUsedMaterialsOnly")->isChecked());
+    filter->setChecked(false);
+    QCOMPARE(scroll->findChildren<QToolButton*>().size(), 2);
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
+    QVERIFY(filter->isHidden());
+    tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+    QVERIFY(!filter->isHidden());
+    QSettings().remove(key);
+}
 
 void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation_data()
 {
