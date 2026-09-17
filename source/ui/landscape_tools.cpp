@@ -334,7 +334,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     overlayGrid->setLayout(m_overlayMaterialGrid);
     overlayPalette->addWidget(overlayGrid);
     overlayPalette->addStretch(1);
-    const auto configurePaletteScroll = [](QScrollArea* scroll, QWidget* page) {
+    const auto configurePaletteScroll = [this](QScrollArea* scroll, QWidget* page) {
         scroll->setWidgetResizable(true);
         scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
         scroll->setMinimumSize(0, 0);
@@ -343,6 +343,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
         scroll->setWidget(page);
+        scroll->viewport()->installEventFilter(this);
     };
     configurePaletteScroll(m_groundMaterialScroll, m_groundMaterialPage);
     configurePaletteScroll(m_overlayMaterialScroll, m_overlayMaterialPage);
@@ -711,7 +712,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         emit paintTerrainTypeChanged(selected ? material : -1);
         emit editingStateChanged();
         applyPaintFilter();
-        QTimer::singleShot(0, this, [this]() { refreshPaletteColumns(); });
+        schedulePaletteRelayout();
     });
     connect(m_modernAutoResolveBlends, &QCheckBox::toggled, this,
             [this](bool checked) {
@@ -1502,6 +1503,8 @@ void CLandscapeTools::rebuildMaterialPalette()
     const QPair<int, int> previousClassicOverlay =
         selectedMaterial(m_classicOverlayMaterialButtons);
     const auto clear = [](QGridLayout* layout) {
+        for(int column = 0; column < layout->columnCount(); ++column)
+            layout->setColumnStretch(column, 0);
         while(QLayoutItem* item = layout->takeAt(0))
         {
             delete item->widget();
@@ -1665,6 +1668,20 @@ void CLandscapeTools::requestPaintTerrainTypesRefresh()
 void CLandscapeTools::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    schedulePaletteRelayout();
+}
+
+bool CLandscapeTools::eventFilter(QObject* watched, QEvent* event)
+{
+    // A palette can become visible or change width without resizing the outer
+    // tools panel (Sculpt -> Paint, layer tabs, scroll bars, dock layout).
+    if(event->type() == QEvent::Show || event->type() == QEvent::Resize)
+        schedulePaletteRelayout();
+    return QWidget::eventFilter(watched, event);
+}
+
+void CLandscapeTools::schedulePaletteRelayout()
+{
     if(m_paletteRelayoutPending)
         return;
     m_paletteRelayoutPending = true;
@@ -1688,6 +1705,10 @@ void CLandscapeTools::refreshPaletteColumns(bool rebuild)
     else if(paintPaletteMode() == ETerrainPaintPaletteMode::Modern)
         activeScroll = overlay ? m_overlayMaterialScroll
                                : m_groundMaterialScroll;
+    // Hidden Qt viewports still have placeholder/previous geometry. Their
+    // Show/Resize events will request a new pass after layout has settled.
+    if(!activeScroll || !activeScroll->isVisible())
+        return;
     int viewportWidth = activeScroll && activeScroll->viewport()
         ? activeScroll->viewport()->width() : 0;
     if(viewportWidth < 70 && m_paintModeTabs)

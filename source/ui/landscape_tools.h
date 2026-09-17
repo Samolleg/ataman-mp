@@ -193,6 +193,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     bool m_editingActive{false};
@@ -287,6 +288,7 @@ private:
     void clearPaintMaterialSelection();
     void applyPaintFilter();
     void refreshPaletteColumns(bool rebuild = true);
+    void schedulePaletteRelayout();
     QButtonGroup* activeMaterialButtons() const;
 };
 

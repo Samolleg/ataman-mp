@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QScrollArea>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -58,6 +59,8 @@ private slots:
         tools.setSculptTool(original);
     }
     void nestedTerrainPreviewKeepsBothGpuBuffersCurrent();
+    void paintPaletteUsesVisibleWidthOnFirstActivation_data();
+    void paintPaletteUsesVisibleWidthOnFirstActivation();
     void worldTerrainControlsStayProtectedAndSignal();
     void manualPaletteDoesNotAllocateRowsForEmptyAtlasHoles();
     void manualPaletteFiltersNonNullPaddingAndRestoresPhysicalIdentity();
@@ -74,6 +77,89 @@ private slots:
     void compressedTerrainAtlasFramebufferCapability();
     void loadedMapRefreshWaitsForTreeItemMutationToReturn();
 };
+
+void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation_data()
+{
+    QTest::addColumn<bool>("classic");
+    QTest::addColumn<bool>("overlay");
+    QTest::newRow("modern-ground") << false << false;
+    QTest::newRow("modern-overlay") << false << true;
+    QTest::newRow("classic-ground") << true << false;
+    QTest::newRow("classic-overlay") << true << true;
+}
+
+void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation()
+{
+    QFETCH(bool, classic);
+    QFETCH(bool, overlay);
+    CLandscapeTools tools;
+    tools.setPaintPaletteMode(classic ? ETerrainPaintPaletteMode::ClassicAuto
+                                     : ETerrainPaintPaletteMode::Modern);
+    tools.activateMode(ELandscapeEditMode::Sculpt, false);
+    QVector<STerrainPaintMaterialChoice> choices;
+    for(int i = 0; i < 8; ++i)
+    {
+        STerrainPaintMaterialChoice choice;
+        choice.id = 100 + i;
+        choice.name = QStringLiteral("Grass %1").arg(i);
+        choice.familyName = QStringLiteral("Grass");
+        choice.used = true;
+        choices.append(choice);
+    }
+    tools.setPaintMaterials(choices, {}, choices, 8, 8);
+    tools.setClassicAutoMaterials(choices, {}, choices);
+    tools.resize(420, 1100);
+    tools.show();
+    QTest::qWait(100);
+    const QString scrollName = classic
+        ? (overlay ? "classicOverlayMaterialScroll" : "classicGroundMaterialScroll")
+        : (overlay ? "overlayMaterialScroll" : "groundMaterialScroll");
+    auto* scroll = tools.findChild<QScrollArea*>(scrollName);
+    QVERIFY(scroll);
+    const auto buttonFor = [scroll](int id) {
+        for(auto* button : scroll->findChildren<QToolButton*>())
+            if(button->property("terrainMaterialId").toInt() == id)
+                return button;
+        return static_cast<QToolButton*>(nullptr);
+    };
+    QVERIFY(buttonFor(102));
+    buttonFor(102)->setChecked(true);
+    tools.activateMode(overlay ? ELandscapeEditMode::OverlayPaint
+                               : ELandscapeEditMode::TilePaint, false);
+    QTest::qWait(100);
+    QVERIFY(scroll->isVisible());
+    QVERIFY(scroll->viewport()->width() > 280);
+    QVERIFY2(buttonFor(100)->y() == buttonFor(102)->y(),
+             "First paint activation left material buttons in a single column");
+    QVERIFY(buttonFor(102)->isChecked());
+    const QPoint firstPosition = buttonFor(102)->pos();
+    tools.setPaintPaletteMode(classic ? ETerrainPaintPaletteMode::Modern
+                                     : ETerrainPaintPaletteMode::ClassicAuto);
+    tools.setPaintPaletteMode(classic ? ETerrainPaintPaletteMode::ClassicAuto
+                                     : ETerrainPaintPaletteMode::Modern);
+    QTest::qWait(100);
+    QCOMPARE(buttonFor(102)->pos(), firstPosition);
+    QVERIFY(buttonFor(102)->isChecked());
+    tools.resize(280, 1100);
+    QTest::qWait(100);
+    QVERIFY(buttonFor(102)->isChecked());
+    QVERIFY(buttonFor(100)->width() >= 64);
+    QVERIFY(buttonFor(102)->geometry().right() <= scroll->viewport()->width());
+    tools.resize(420, 1100);
+    QTest::qWait(100);
+    QCOMPARE(buttonFor(102)->pos(), firstPosition);
+    auto* filter = tools.findChild<QLineEdit*>(QStringLiteral("terrainPaintFilter"));
+    QVERIFY(filter);
+    filter->setText(QStringLiteral("Grass 2"));
+    tools.activateMode(ELandscapeEditMode::Sculpt, false);
+    QTest::qWait(50);
+    tools.activateMode(overlay ? ELandscapeEditMode::OverlayPaint
+                               : ELandscapeEditMode::TilePaint, false);
+    QTest::qWait(100);
+    QVERIFY(buttonFor(102)->isVisible());
+    QVERIFY(buttonFor(100)->isHidden());
+    QVERIFY(buttonFor(102)->isChecked());
+}
 
 void LandscapeToolsWidgetTests::nestedTerrainPreviewKeepsBothGpuBuffersCurrent()
 {
