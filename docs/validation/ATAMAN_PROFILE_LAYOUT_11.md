@@ -35,7 +35,27 @@ serialization and coordinate-transform regressions also pass.
 
 ## Delivery
 
-Build/install pending. Actual supplied JMV JSON and legacy source left unchanged.
+Source `80727ba4e2439fc75002709f4eaba8bb7bdaaf9d` built in fresh shadow
+`build-release-11-layout`, Qt 5.12.12/MinGW 7.3 x64 editor and x86 runtime:
+PASS (`build-layout11.log`). Endurance toolchain read-only.
+Ready-executable version, database creation, resource navigation PASS; scenario
+integration 47/47 PASS. General `--ui-widget-check` timed out after 120 seconds,
+matching the prior limitation; its own test process was stopped. Not PASS.
+
+Fresh owned staging `build-staging-11-layout`: dependency deployment,
+isolated-PATH version 11 smoke and finalizer PASS. One current changelist, no
+historical alpha notes. Independently verified all 100 manifest entries/digests
+and complete file coverage; executable/runtime match fresh build.
+Permanent installation `artifacts/EI-Mapper-Ataman-2-first-test` updated while
+closed: six managed files replaced, none removed, 1234 unlisted user files
+preserved with identical hashes. Installed manifest completely verified.
+Executable SHA-256 (build/stage/install):
+`5427EE8920F05B66F688A05CEE536D52D9224FC12AE16CABB33CA259A1B28E87`.
+Rollback of replaced version-10 files: `build-rollback-layout11`; older owned
+version-9 rollback `build-rollback-palette10` hash-verified and removed after
+successful installation. Both supplied JMV JSON and legacy AppData source have
+the unchanged SHA-256 recorded above, checked again after installation.
+
 Manual acceptance pending: open JMV, check known positions, move a neighboring
 map and verify the JMV-root JSON changes; switch profiles and verify separation.
 Do not claim a live-user map dragging test from synthetic tests alone.
