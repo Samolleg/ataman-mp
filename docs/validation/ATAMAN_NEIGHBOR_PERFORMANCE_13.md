@@ -80,11 +80,16 @@ Fresh staging `build-staging-13-performance`: dependency deployment, isolated
 version smoke, finalizer PASS. Independently verified 100 manifest digests,
 complete coverage, exactly one current changelist and fresh/staged EXE equality.
 EXE SHA-256: `5DC2BD4A5CF0D42A05DF6652B2E097542BB53B9DB13C42993232E2BFBE7E322D`.
-Installation is pending: the permanent version-12 editor was running (PID 29204).
-Owner asked to save and close it under TEST_BUILD_HANDOFF section 3.2; do not
-terminate that process or replace its loaded files. Next: recheck processes,
-run `build-release-13-performance/install13.ps1`, verify preserved files, then
-retire the hash-verified older owned rollback only after successful installation.
+Installation completed on 2026-09-17 after the owner confirmed closing the editor.
+`build-release-13-performance/install13.ps1` passed its Get-Process path gate,
+verified 100 managed files and preserved all 2317 unlisted user files by hash.
+Six program files replaced, zero obsolete files removed. Installed VERSION is 13;
+an independent EXE hash check matches the digest above. The initial CIM process
+query was access-denied; the installer used Get-Process instead.
+Verified version-12 rollback retained in `build-rollback-performance13`.
+Older `build-rollback-neighbors12` was identified as version 11, every contained
+payload verified against its old manifest, and only that exact owned folder removed.
+The application was not launched for the owner.
 
 Open the user's original view. Pan/orbit and approach/distance neighbors;
 check near geometry, distant transitions and reduced shadow reach. Move a
