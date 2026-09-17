@@ -24,7 +24,7 @@ double mean(QVector<double> values)
 
 struct Segment { int a,b; XY p,q; };
 
-SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
+SWorldTerrainStroke boundaryFillClipped(const QVector<SWorldTerrainTarget>& targets,
                                 const STerrainBrush& brush,double strength)
 {
     QMap<XY,QVector<Vertex>> positions;
@@ -92,6 +92,113 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
     }
     // Staggered map edges remain fixed contours: do not extend this operation
     // beyond the brush to reconcile a pre-existing seam profile.
+    return result;
+}
+
+// Sample the visible displaced triangle, recording its vertices as immutable
+// contour anchors. Only permitted maps participate; interior map seams are not
+// anchors. This is separate from the runtime/navigation height samplers.
+bool contourSample(const SWorldTerrainTarget& t,double wx,double wy,double* z,
+                   QVector<QPair<int,int>>* anchors)
+{
+    const double x=wx-t.origin.x(),y=wy-t.origin.y();
+    if(x < -0.51 || y < -0.51 || x > t.model->vertexCountX()-0.49
+       || y > t.model->vertexCountY()-0.49) return false;
+    const int baseX=int(std::floor(x)),baseY=int(std::floor(y));
+    for(int cy=qMax(0,baseY-1);cy<=qMin(t.model->vertexCountY()-2,baseY+1);++cy)
+        for(int cx=qMax(0,baseX-1);cx<=qMin(t.model->vertexCountX()-2,baseX+1);++cx) {
+            const QPair<int,int> corners[]={{cx,cy},{cx+1,cy},{cx+1,cy+1},{cx,cy+1}};
+            const int triangles[2][3]={{0,1,2},{0,2,3}};
+            for(const auto& triangle:triangles) {
+                const auto a=corners[triangle[0]],b=corners[triangle[1]],c=corners[triangle[2]];
+                const QPointF pa=t.model->terrainVertexPosition(a.first,a.second);
+                const QPointF pb=t.model->terrainVertexPosition(b.first,b.second);
+                const QPointF pc=t.model->terrainVertexPosition(c.first,c.second);
+                const double det=(pb.x()-pa.x())*(pc.y()-pa.y())-(pb.y()-pa.y())*(pc.x()-pa.x());
+                if(qAbs(det)<1e-12) continue;
+                const double u=((x-pa.x())*(pc.y()-pa.y())-(y-pa.y())*(pc.x()-pa.x()))/det;
+                const double v=((pb.x()-pa.x())*(y-pa.y())-(pb.y()-pa.y())*(x-pa.x()))/det;
+                if(u < -1e-8 || v < -1e-8 || u+v > 1+1e-8) continue;
+                *z=(1-u-v)*height(t,a.first,a.second)+u*height(t,b.first,b.second)+v*height(t,c.first,c.second);
+                anchors->append(a);anchors->append(b);anchors->append(c);
+                return true;
+            }
+        }
+    return false;
+}
+
+SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
+                                const STerrainBrush& brush,double strength)
+{
+    if(brush.radius<=0) return {};
+    QVector<int> maps;
+    for(int m=0;m<targets.size();++m) {
+        const auto& t=targets[m];
+        if(t.editable && t.model && t.model->maxZ()>0 && std::isfinite(t.model->maxZ())
+           && std::isfinite(t.origin.x()) && std::isfinite(t.origin.y())) maps.append(m);
+    }
+    const double pi=std::acos(-1.0);
+    const int count=qBound(64,int(std::ceil(qMin(double(brush.radius),64.0)*8*pi)),2048);
+    QVector<QPointF> ring;
+    QVector<double> ringHeights;
+    QVector<QSet<QPair<int,int>>> frozen(targets.size());
+    for(int i=0;i<count;++i) {
+        const double angle=2*pi*i/count;
+        const QPointF p(brush.centerX+brush.radius*std::cos(angle),brush.centerY+brush.radius*std::sin(angle));
+        QVector<double> values;
+        for(int m:maps) {
+            double z=0;QVector<QPair<int,int>> anchors;
+            if(!contourSample(targets[m],p.x(),p.y(),&z,&anchors)) continue;
+            values.append(z);for(const auto& anchor:anchors) frozen[m].insert(anchor);
+        }
+        // An incomplete circle at the edge of available data uses the existing
+        // clipped-domain fill. Never invent samples from an unapproved map.
+        if(values.isEmpty()) return boundaryFillClipped(targets,brush,strength);
+        ring.append(p);ringHeights.append(mean(values));
+    }
+    SWorldTerrainStroke result;
+    const double innerRadius=brush.radius*std::cos(pi/count);
+    QVector<double> distances(count),tangents(count);
+    QVector<QPointF> vectors(count);
+    for(int m:maps) {
+        const auto& t=targets[m];const int w=t.model->vertexCountX(),h=t.model->vertexCountY();
+        if(w<=0 || h<=0) continue;
+        const int x0=int(qBound(0.0,std::floor(brush.centerX-t.origin.x()-brush.radius-1),double(w-1)));
+        const int x1=int(qBound(0.0,std::ceil(brush.centerX-t.origin.x()+brush.radius+1),double(w-1)));
+        const int y0=int(qBound(0.0,std::floor(brush.centerY-t.origin.y()-brush.radius-1),double(h-1)));
+        const int y1=int(qBound(0.0,std::ceil(brush.centerY-t.origin.y()+brush.radius+1),double(h-1)));
+        for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
+            const auto xy=point(t,x,y);const QPointF p(xy.first,xy.second);
+            const double distance=std::hypot(p.x()-brush.centerX,p.y()-brush.centerY);
+            if(distance>=innerRadius || frozen[m].contains({x,y})) continue;
+            // Mean-value coordinates reproduce affine slopes and interpolate
+            // all contour heights. Interior heights cannot influence the target.
+            for(int i=0;i<count;++i) {vectors[i]=ring[i]-p;distances[i]=std::hypot(vectors[i].x(),vectors[i].y());}
+            for(int i=0;i<count;++i) {
+                const int j=(i+1)%count;
+                tangents[i]=(vectors[i].x()*vectors[j].y()-vectors[i].y()*vectors[j].x())
+                    /(distances[i]*distances[j]+QPointF::dotProduct(vectors[i],vectors[j]));
+            }
+            double total=0,sum=0;
+            for(int i=0;i<count;++i) {
+                const double weight=(tangents[(i+count-1)%count]+tangents[i])/distances[i];
+                total+=weight;sum+=weight*ringHeights[i];
+            }
+            if(!(total>0) || !std::isfinite(sum)) continue;
+            double blend=qBound(0.0,strength,1.0);
+            if(brush.falloff!=ETerrainBrushFalloff::Constant) {
+                double f=qBound(0.0,1-distance/brush.radius,1.0);
+                if(brush.falloff==ETerrainBrushFalloff::Smooth) f=f*f*(3-2*f);
+                blend*=f;
+            }
+            const double before=height(t,x,y),after=before+(sum/total-before)*blend;
+            STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);
+            d.after=quint16(qBound(0,qRound(after*65535.0/t.model->maxZ()),65535));
+            if(d.after==d.before) continue;
+            auto& command=result.maps[t.id];command.description=QStringLiteral("Fill terrain from boundary");
+            command.deltas.append(d);
+        }
+    }
     return result;
 }
 
