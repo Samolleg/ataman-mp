@@ -279,6 +279,7 @@ private slots:
     void on_actionSave_landscape_MPR_triggered();
 
 protected:
+    bool event(QEvent* event) override;
     void closeEvent(QCloseEvent* e);
     void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* watched, QEvent* event) override;

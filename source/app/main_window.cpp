@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "loaded_map_panel_policy.h"
+#include "ui/graphite_caption.h"
 #include "scenario_panel.h"
 #include "ui_main_window.h"
 
@@ -6551,6 +6552,15 @@ void MainWindow::saveCollection(bool saveAs)
         refreshMapsBrowser();
         statusBar()->showMessage(tr("Collection saved: %1").arg(path), 5000);
     }
+}
+
+bool MainWindow::event(QEvent* event)
+{
+    const bool result = QMainWindow::event(event);
+    if(event->type() == QEvent::WinIdChange || event->type() == QEvent::Show
+       || event->type() == QEvent::WindowActivate || event->type() == QEvent::PaletteChange)
+        applyGraphiteCaption(internalWinId());
+    return result;
 }
 
 void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
