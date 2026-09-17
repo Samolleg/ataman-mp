@@ -61,7 +61,7 @@ bool CView::updateWorldMapPlacement(const QPoint& position)
         m_worldPlacementOverlaps |= rect.intersects(QRectF(m_worldPlacementOrigin,m_worldPlacementSize));
     if(m_neighborLayoutStatus)
     {
-        m_neighborLayoutStatus->setText(tr("Place map: X %1, Y %2 вЂ” %3 Г— %4. Left click: place; Esc: cancel.%5")
+        m_neighborLayoutStatus->setText(tr("Place map: X %1, Y %2 — %3 × %4. Left click: place; Esc: cancel.%5")
             .arg(m_worldPlacementOrigin.x()).arg(m_worldPlacementOrigin.y())
             .arg(m_worldPlacementSize.width()).arg(m_worldPlacementSize.height())
             .arg(m_worldPlacementOverlaps ? tr(" Overlaps another map.") : QString()));
