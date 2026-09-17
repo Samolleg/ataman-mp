@@ -10,6 +10,8 @@
 #include "resourcemanager.h"
 #include "endurance_document.h"
 #include "camera.h"
+#include "world_map_layout_document.h"
+#include "neighbor_map_layout.h"
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -58,6 +60,39 @@ int runNeighborPerformanceCheck()
     placement.zoneId="neighbor-test";
     const QString zone=qEnvironmentVariable("EI_NEIGHBOR_PERF_ZONE","zone9");
     placement.mprPath=root+"/Maps/"+zone+".mpr"; placement.mobPath=root+"/Maps/"+zone+".mob";
+    if(qEnvironmentVariableIsSet("EI_WORLD_PATHS_CHECK"))
+    {
+        CWorldMapLayoutDocument world(root+"/world-map-layouts.json");
+        const auto records=world.loadEditorWorld("jamais-vu",
+            qEnvironmentVariable("EI_WORLD_ROOTS_CHECK").split(';',QString::SkipEmptyParts));
+        QVector<SMapCatalogEntry> topology;
+        QString activeId,activeWorld;
+        for(const auto& record:records.zones)
+        {
+            const QString path=world.absoluteResourcePath(record.mprPath);
+            if(path.isEmpty()) continue;
+            CMprDocument terrain; CValidationReport validation;
+            const bool loaded=terrain.load(QFileInfo(path),&validation) && !validation.hasErrors();
+            check(loaded,"resolved JSON terrain parses for neighbor context");
+            if(!loaded) continue;
+            SMapCatalogEntry entry;
+            entry.zoneId=record.zoneId;entry.allodId=record.allodId;entry.mprName=record.mprIdentity;
+            entry.mprPath=path;entry.mobPath=world.absoluteResourcePath(record.mobPath);
+            entry.sectorWidth=terrain.mapInfo().sectorCountX;entry.sectorHeight=terrain.mapInfo().sectorCountY;
+            topology.append(entry);
+            if(record.mprIdentity==zone) {
+                activeId=record.zoneId;activeWorld=record.allodId;
+                placement.mprPath=entry.mprPath;placement.mobPath=entry.mobPath;
+            }
+        }
+        const auto layout=CNeighborMapLayout::build(topology,records.zones,"jamais-vu",activeWorld,activeId,5);
+        check(layout.hasActiveWorldOrigin && layout.placements.size()==5,
+              "real JSON and ordered roots restore active map and five neighbors");
+        bool objectsAvailable=true;
+        for(const auto& neighbor:layout.placements)
+            objectsAvailable &= QFileInfo(neighbor.mobPath).isFile();
+        check(objectsAvailable && !layout.placements.isEmpty(),"resolved neighbors retain MOB object files");
+    }
     CMprDocument document; CValidationReport report;
     if(!document.load(QFileInfo(placement.mprPath),&report)) return 1;
     placement.size=QSizeF(document.mapInfo().sectorCountX*32,document.mapInfo().sectorCountY*32);

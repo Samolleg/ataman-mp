@@ -796,6 +796,8 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
         QSet<QString> seen;
         for(const QString& root : roots)
         {
+            QMap<QString, QStringList> rootFiles;
+            QMap<QString, QStringList> directFiles;
             QDirIterator it(root, QDir::Files, QDirIterator::Subdirectories);
             while(it.hasNext())
             {
@@ -805,8 +807,18 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
                 const QString path = info.canonicalFilePath();
                 if(path.isEmpty() || seen.contains(key(path))) continue;
                 seen.insert(key(path));
-                files[key(info.fileName())].append(path);
+                rootFiles[key(info.fileName())].append(path);
+                if(QDir(info.absolutePath()) == QDir(root))
+                    directFiles[key(info.fileName())].append(path);
             }
+            // Profile roots are ordered overrides (mod before base game), just
+            // like normal map opening. A base copy is not an ambiguity. Prefer
+            // direct children over backups/subfolders in the same root; retain
+            // ambiguity only among candidates of equal priority.
+            for(auto entry = rootFiles.constBegin(); entry != rootFiles.constEnd(); ++entry)
+                if(!files.contains(entry.key()))
+                    files.insert(entry.key(), directFiles.contains(entry.key())
+                                 ? directFiles.value(entry.key()) : entry.value());
         }
     }
     for(auto& zone : m_zones)
@@ -818,8 +830,8 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
             if(mprs.size() == 1)
             {
                 zone.mprPath = portableResourcePath(mprs.first());
-                // Only an unambiguous sibling MOB is inferred. Different names
-                // can be attached explicitly in the world manager.
+                // Resolve the same-name MOB with the same profile-root priority.
+                // Different names can be attached explicitly in the world manager.
                 const auto mobs = files.value(key(zone.mprIdentity + ".mob"));
                 if(mobs.size() == 1) zone.mobPath = portableResourcePath(mobs.first());
             }

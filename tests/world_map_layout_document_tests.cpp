@@ -111,6 +111,67 @@ class WorldMapLayoutDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void legacyWorldUsesOrderedRoots()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const QString path=dir.filePath("world-map-layouts.json");
+        const QByteArray legacy=R"({"schemaVersion":1,"layoutAlgorithmVersion":1,"coordinateSystem":"mpr-local-xy","profiles":[{"profileId":"p","allods":[{"allodId":"island","zones":[{"zoneId":"old","mprIdentity":"terrain","origin":{"x":31,"y":42},"provenance":"manual","componentAnchorZoneId":"old"}]}]}]})";
+        QVERIFY(writeFile(path,legacy));
+        for(const QString& root : {QStringLiteral("Maps"),QStringLiteral("Base"),QStringLiteral("Maps/backup")}) {
+            QVERIFY(QDir().mkpath(dir.filePath(root)));
+            QVERIFY(writeFile(dir.filePath(root+"/terrain.mpr"),"fixture"));
+            QVERIFY(writeFile(dir.filePath(root+"/terrain.mob"),"fixture"));
+        }
+        CWorldMapLayoutDocument doc(path);
+        auto result=doc.loadEditorWorld("p",{dir.filePath("Maps"),dir.filePath("Base")});
+        QCOMPARE(result.zones.size(),1);
+        QCOMPARE(result.zones[0].mprPath,QStringLiteral("Maps/terrain.mpr"));
+        QCOMPARE(result.zones[0].mobPath,QStringLiteral("Maps/terrain.mob"));
+        QCOMPARE(result.zones[0].origin,QPointF(31,42));
+        QVERIFY(result.diagnostics.isEmpty());
+        QCOMPARE(readFile(path),legacy); // Resolution alone never migrates user data.
+        doc.reload();
+        result=doc.loadEditorWorld("p",{dir.filePath("Base"),dir.filePath("Maps")});
+        QCOMPARE(result.zones[0].mprPath,QStringLiteral("Base/terrain.mpr"));
+        QCOMPARE(result.zones[0].mobPath,QStringLiteral("Base/terrain.mob"));
+        QVERIFY(QFile::remove(dir.filePath("Base/terrain.mpr")));
+        doc.reload();
+        result=doc.loadEditorWorld("p",{dir.filePath("Base"),dir.filePath("Maps")});
+        QCOMPARE(result.zones[0].mprPath,QStringLiteral("Maps/terrain.mpr"));
+        QCOMPARE(readFile(path),legacy);
+    }
+    void installedWorldReadOnlyCheck()
+    {
+        const QString path=qEnvironmentVariable("EI_WORLD_LAYOUT_CHECK");
+        if(path.isEmpty()) QSKIP("Optional installed profile read-only check");
+        const QByteArray before=readFile(path);
+        CWorldMapLayoutDocument doc(path);
+        const auto roots=qEnvironmentVariable("EI_WORLD_ROOTS_CHECK").split(';',QString::SkipEmptyParts);
+        const auto result=doc.loadEditorWorld("jamais-vu",roots);
+        QVERIFY(!result.storageBlocked); QVERIFY(!result.zones.isEmpty());
+        int found=0, missing=0;
+        for(const auto& zone : result.zones) {
+            QString expected;
+            for(const auto& root : roots) {
+                for(const auto& file : QDir(root).entryInfoList(QDir::Files))
+                    if(file.fileName().compare(zone.mprIdentity+".mpr",Qt::CaseInsensitive)==0)
+                        { expected=file.canonicalFilePath(); break; }
+                if(!expected.isEmpty()) break;
+            }
+            if(expected.isEmpty()) {
+                ++missing; QVERIFY(zone.mprPath.isEmpty());
+                qInfo().noquote() << "Absent on disk:" << zone.mprIdentity;
+                continue;
+            }
+            ++found;
+            QCOMPARE(QFileInfo(doc.absoluteResourcePath(zone.mprPath)).canonicalFilePath(),expected);
+            qInfo().noquote() << zone.mprIdentity << zone.mprPath << zone.mobPath;
+        }
+        QVERIFY(found>1);
+        QCOMPARE(result.diagnostics.size(),missing);
+        qInfo() << "Resolved:" << found << "Actually absent:" << missing;
+        QCOMPARE(readFile(path),before);
+    }
 
     void editorWorldIsJsonOnlyAndDetectsConcurrentChanges()
     {
