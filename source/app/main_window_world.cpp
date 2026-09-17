@@ -22,6 +22,7 @@
 #include <QDirIterator>
 #include <QStatusBar>
 #include <QUuid>
+#include "world_coordinate_edit.h"
 
 namespace {
 QString newId() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -276,9 +277,8 @@ void MainWindow::manageWorldMaps()
         auto* name=new QLineEdit(map.displayName,&edit);
         auto* mpr=new QLineEdit(m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath),&edit);
         auto* mob=new QLineEdit(m_worldMapLayoutDocument.absoluteResourcePath(map.mobPath),&edit);
-        auto* x=new QDoubleSpinBox(&edit);auto* y=new QDoubleSpinBox(&edit);
-        for(auto* value:{x,y}) {value->setRange(-10000000,10000000);value->setDecimals(2);}
-        x->setValue(map.origin.x());y->setValue(map.origin.y());
+        auto* x=new CWorldCoordinateEdit(map.origin.x(),&edit);
+        auto* y=new CWorldCoordinateEdit(map.origin.y(),&edit);
         form->addRow(tr("Name:"),name);
         const auto fileRow=[&](QLineEdit* field,const QString& label,const QString& filter){
             auto* row=new QHBoxLayout;auto* browse=new QPushButton(tr("Browse..."),&edit);
@@ -293,8 +293,11 @@ void MainWindow::manageWorldMaps()
         auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&edit);form->addRow(buttons);
         connect(buttons,&QDialogButtonBox::rejected,&edit,&QDialog::reject);
         connect(buttons,&QDialogButtonBox::accepted,&edit,[&](){
+            double originX,originY;
+            if(!x->coordinate(&originX) || !y->coordinate(&originY))
+            {QMessageBox::warning(&edit,tr("World maps"),tr("Enter finite X and Y coordinates using a decimal point."));return;}
             map.displayName=name->text().trimmed();map.mprPath=mpr->text().trimmed();map.mobPath=mob->text().trimmed();
-            map.origin=QPointF(x->value(),y->value());map.provenance=EWorldMapOriginProvenance::Manual;
+            map.origin=QPointF(originX,originY);map.provenance=EWorldMapOriginProvenance::Manual;
             QString error;
             if(!validateWorldMap(&map,&error) || !m_worldMapLayoutDocument.replaceEditorMap(map,&error))
             {QMessageBox::warning(&edit,tr("World maps"),error);return;}
