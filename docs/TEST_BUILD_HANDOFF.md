@@ -82,13 +82,14 @@ replace or delete prior builds/settings without a separate owner instruction.
 
 Create a new folder when:
 
-- the Endurance version changes;
+- the Ataman version changes;
 - the test scope is materially different;
 - the user needs an A/B comparison;
 - the previous folder has already been shared and must remain reproducible.
 
 Do not silently mutate a build that has already been distributed to other
-testers. Use a new version or explicit revision suffix for that case.
+testers. A separate fix requires the next Ataman version; a suffix may distinguish
+packages of identical source but must not replace a version increment for a fix.
 
 ## 4. Changelist and test notes
 
@@ -109,6 +110,24 @@ does not compare manifest digests to actual file hashes. Until separately fixed,
 explicitly verify exactly one current changelist, every manifest entry/hash,
 coverage of all packaged files, and equality of fresh/packaged executable hashes.
 Package completeness is distinct from functional test success.
+
+Required independent verification until the scripts implement the full contract:
+
+1. Read staged VERSION and require the expected Ataman number. Require exactly
+   one current CHANGELOG.md entry for that number and no historical changelist
+   files in the package. Inspect its content, not only its filename.
+2. Parse every SHA256SUMS.txt entry as a SHA-256 plus a relative package path.
+   Reject malformed entries, duplicate paths, missing files and paths outside
+   the resolved package root. The manifest itself must not list itself.
+3. Enumerate all packaged files except SHA256SUMS.txt. Require a one-to-one
+   match with manifest paths and recompute each file's SHA-256; all must match.
+4. Compare the fresh tested executable and staged executable hashes; require
+   equality. Record source SHA, version, absolute package path and these results
+   in the handoff evidence. Do not modify the finalized package afterwards.
+
+Any failed or omitted check prevents describing the package as fully verified,
+even when the existing scripts print PASS. Fixing the validator implementation
+is a separate tracked task, not an effect of updating these rules.
 
 For each Ataman version use a fresh shadow-build directory: changing VERSION
 changes a compiler definition, which incremental Make builds may fail to notice.

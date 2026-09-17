@@ -1,9 +1,9 @@
-# Building EI Mapper: Endurance Edition
+# Building EI Mapper Ataman
 
 ## Supported baseline
 
 - Windows x64
-- Qt 5.12 or newer with the MinGW x64 toolchain
+- Qt 5.12.12 win64_mingw73 with the matching MinGW 7.3 x64 toolchain
 - qmake
 - C++11
 - Visual Studio 2022 C++ tools with the x86 compiler (for the process-owned
@@ -25,24 +25,26 @@ Endurance production builds use exactly Qt `5.12.12` `win64_mingw73` with
 the existing source intentionally uses GNU switch-range syntax and will not
 compile as the same target under MSVC.
 
-The main checkout retains the kit at:
+Check for a retained kit at these paths in the current Ataman checkout;
+its presence is not guaranteed by this document:
 
 ```text
 .tooling\Qt\5.12.12\mingw73_64\bin
 .tooling\Qt\Tools\mingw730_64\bin
 ```
 
-`build_release.cmd` discovers those directories automatically. Cleanup tasks
+`build_release.cmd` discovers those directories when present. Cleanup tasks
 must not delete `.tooling\Qt`; it is retained build infrastructure, not a stale
 tester artifact. Linked worktrees may point `EI_MAPPER_QT_BIN` and
-`EI_MAPPER_MINGW_BIN` at the main checkout's retained kit rather than installing
-another copy.
+`EI_MAPPER_MINGW_BIN` at a verified retained kit rather than installing another
+copy. Resolve its actual path first. Do not install into, repatch, or clean the
+original Endurance checkout or its toolchain as part of Ataman work.
 
-Qt 5.12 embeds its installation prefix in `qmake.exe`. Because this repository
-path contains non-ASCII characters, install or repatch the kit through a stable
-ASCII junction such as `C:\build-links\ei-mapper-main`; installing it directly
-through the Unicode path produces a broken `QT_INSTALL_PREFIX`. Verify a kit
-before building:
+Qt 5.12 embeds its installation prefix in `qmake.exe`. Inspect the actual path;
+the Ataman checkout may already have an ASCII path. Only if a non-ASCII prefix
+causes the documented failure, use an owned ASCII junction for a separate
+Ataman kit. Do not repatch a shared or Endurance kit. With the verified Qt and
+matching MinGW bin directories on this process's PATH, check before building:
 
 ```powershell
 qmake -query QMAKE_SPEC             # must be win32-g++
@@ -54,16 +56,18 @@ mingw32-make --version
 One-time bootstrap, only when the retained kit is genuinely absent:
 
 ```powershell
-$source = 'C:\path\to\ei-mapper-endurance'
-$link = 'C:\build-links\ei-mapper-main'
+$source = 'C:\path\to\ei-mapper-ataman'
+$link = 'C:\build-links\ei-mapper-ataman'
 New-Item -ItemType Junction -Path $link -Target $source
 py -m pip install aqtinstall
 py -m aqt install-qt windows desktop 5.12.12 win64_mingw73 -O "$link\.tooling\Qt"
 py -m aqt install-tool windows desktop tools_mingw qt.tools.win64_mingw730 -O "$link\.tooling\Qt"
 ```
 
-Do not repeat bootstrap merely because a fresh shell cannot find `qmake`; first
-run the wrapper without arguments and inspect the retained paths above.
+Do not repeat bootstrap merely because a fresh shell cannot find `qmake`.
+First inspect the paths above, explicit tool arguments, process environment
+and PATH. The wrapper starts a build; it is not a read-only discovery command.
+Bootstrap is installation work, not a prerequisite for a documentation audit.
 
 Use the checked build wrapper from any PowerShell prompt:
 
@@ -71,7 +75,7 @@ Use the checked build wrapper from any PowerShell prompt:
 .\scripts\build_release.cmd `
   -QtBin .tooling\Qt\5.12.12\mingw73_64\bin `
   -MinGwBin .tooling\Qt\Tools\mingw730_64\bin `
-  -BuildDirectory build-release
+  -BuildDirectory build-release-<version>-<purpose>
 ```
 
 The paths can instead be stored in `EI_MAPPER_QT_BIN` and
@@ -81,7 +85,7 @@ builds into a separate shadow directory.
 
 The wrapper also rebuilds both 32-bit runtime components on every release
 build and places only their distributable `.plg`/`.exe` files under
-`build-release\release\runtime`. This is intentional: copying an older binary
+`<BuildDirectory>\release\runtime`. This is intentional: copying an older binary
 from `source\runtime\*\bin` can leave the editor executable and runtime protocol
 out of sync even though the Qt application compiled successfully.
 
@@ -106,7 +110,7 @@ PowerShell policy.
 If using a preconfigured Qt MinGW command prompt, the arguments may be omitted:
 
 ```powershell
-.\scripts\build_release.cmd -BuildDirectory build-release
+.\scripts\build_release.cmd -BuildDirectory build-release-<version>-<purpose>
 ```
 
 ### Windows paths containing Cyrillic or other non-ASCII characters
@@ -117,10 +121,10 @@ contains Cyrillic characters. Build through an ASCII-only directory junction;
 do not copy or relocate the working tree just for the build:
 
 ```powershell
-$source = 'C:\path\containing-Cyrillic\ei-mapper-endurance'
-$link = 'C:\build-links\ei-mapper-endurance'
+$source = 'C:\path\containing-Cyrillic\ei-mapper-ataman'
+$link = 'C:\build-links\ei-mapper-ataman'
 New-Item -ItemType Junction -Path $link -Target $source
-Set-Location "$link\build-release"
+Set-Location "$link\build-release-<version>-<purpose>"
 qmake ..\ei_maper.pro CONFIG+=release
 mingw32-make -o Makefile.Release -f Makefile.Release release/EIMapperEndurance.exe -j4
 ```
@@ -129,11 +133,12 @@ The `-o Makefile.Release` option is intentional for junction builds. It keeps
 MinGW Make from repeatedly regenerating the makefile after qmake canonicalizes
 the junction target. If a build command is interrupted, verify that no orphaned
 `mingw32-make` or `qmake` processes remain before retrying. The junction and
-shadow-build directory are disposable; tracked source remains in the worktree.
+shadow-build directory are owned build artifacts, not user installations;
+their removal must follow the project permissions and verified path boundaries.
 
 For unattended build verification, use `--ui-widget-check`, the headless MOB/MPR
-commands below, or the non-dialog `--version` option. Validation must not launch
-the editor without an explicit file or leave About/version windows open.
+commands below, or the non-dialog `--version` option. Do not launch the interactive
+editor to perform the user's manual acceptance, even with an explicit file.
 
 Before handing over any tester folder or creating a distribution archive, run:
 
@@ -143,7 +148,9 @@ Before handing over any tester folder or creating a distribution archive, run:
 
 This is mandatory for direct tester folders as well as ZIP releases. It removes
 `endurance-options.json`, upstream `options.json`, logs, saves, and crash dumps;
-regenerates `SHA256SUMS.txt`; and then runs the strict distribution validator.
+regenerates `SHA256SUMS.txt`; and then runs the distribution validator. Its PASS
+is only a partial check: complete the independent package checks in
+TEST_BUILD_HANDOFF.md before reporting a verified handoff.
 Never use a folder that has already been launched as an unsanitized package
 source. A fresh package must enter first-run game/mod setup.
 
