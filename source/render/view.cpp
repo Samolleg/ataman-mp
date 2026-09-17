@@ -10039,6 +10039,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     QString semanticResPath;
     QString semanticResCandidateSha256;
     bool semanticResChanged = false;
+    bool semanticPublicationStarted = false;
     const auto restoreSemanticRes = [&]() {
         if(!semanticResChanged || semanticResPath.isEmpty())
             return true;
@@ -10118,11 +10119,17 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             semanticRequest.published = {semanticFieldMember};
             semanticRequest.allowReplaceExisting = true;
             semanticRequest.createBackup = true;
+            bool semanticPublicationReady = true;
+            emit terrainPublicationPreflightRequested(semanticResPath, &semanticPublicationReady);
+            if(!semanticPublicationReady)
+                return false;
+            semanticPublicationStarted = true;
             const SResPublishedMembersSaveResult semanticResult =
                 commitStagedResPublishedMembers(
                     semanticArchive, semanticRequest);
             if(!semanticResult.success)
             {
+                emit terrainPublicationFinished(semanticResPath, false);
                 QMessageBox::critical(this, tr("MPR save refused"),
                     tr("The map's shared-corner material state could not be "
                        "stored in the active terrain RES. The MPR was not "
@@ -10144,6 +10151,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     if(!result.success)
     {
         const bool semanticRestored = restoreSemanticRes();
+        if(semanticPublicationStarted)
+            emit terrainPublicationFinished(semanticResPath, !semanticRestored);
         ei::log(eLogFatal, QString("Changed MPR save failed phase:%1 path:%2 error:%3 backup:%4")
             .arg(result.phase, destinationPath, result.error,
                  result.backupPath.isEmpty() ? QStringLiteral("not-created")
@@ -10159,7 +10168,13 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
 
     updateProgress(tr("Reopening and adopting validated terrain..."), 3);
     if(adoptAsOpenBaseline && !adoptCommittedLandscapeBaseline(destination, result))
+    {
+        if(semanticPublicationStarted)
+            emit terrainPublicationFinished(semanticResPath, true);
         return false;
+    }
+    if(semanticPublicationStarted)
+        emit terrainPublicationFinished(semanticResPath, true);
 
     ei::log(eLogInfo, QString("Changed MPR semantic diff destination:%1\n%2")
         .arg(destinationPath,
@@ -14188,7 +14203,7 @@ void CView::finalizeVirtualTerrainAtlas()
     endTileBrushGroup();
     QProgressDialog finalizeProgress(
         tr("Preparing map-specific terrain atlas..."),QString(),0,0,this);
-    finalizeProgress.setWindowTitle(tr("Saving modern MPR"));
+    finalizeProgress.setWindowTitle(tr("Saving MPR"));
     finalizeProgress.setCancelButton(nullptr);
     finalizeProgress.setWindowModality(Qt::WindowModal);
     finalizeProgress.setMinimumDuration(0);
@@ -14398,7 +14413,16 @@ void CView::finalizeVirtualTerrainAtlas()
             QDir::cleanPath(preselectedMprDestination.absoluteFilePath()),
             QDir::cleanPath(m_pLand->filePath().absoluteFilePath()),
             Qt::CaseInsensitive) == 0;
-    if(selectedIdentity.isEmpty() && saveOverCurrentMpr && !persistedDraft
+    const bool ordinarySave = saveOverCurrentMpr && !persistedDraft
+        && !identityOnlyRequest && requestedIdentity.isEmpty();
+    if(ordinarySave)
+    {
+        // New artwork gets its own content identity. Do not replace shared
+        // original HD-pack pages merely because this map is being saved.
+        selectedIdentity = finalized.isolatedNamespace;
+        replaceIdentity = false;
+    }
+    else if(selectedIdentity.isEmpty() && saveOverCurrentMpr && !persistedDraft
        && m_terrainAtlasProfile.provenance.startsWith(
               QStringLiteral("portable-finalized-modern-atlas-v1")))
     {
@@ -14635,10 +14659,12 @@ void CView::finalizeVirtualTerrainAtlas()
         terrainPublicationResourceChoicePlan(
             resourceRoots, mprDestination.absoluteFilePath(),
             m_activeTerrainArchivePath, saveOverCurrentMpr, persistedDraft);
-    const QString texturesPath = QFileDialog::getOpenFileName(
-        this, tr("Choose textures.res to update in place"),
-        resourceChoice.initialPath,
-        tr("Evil Islands resources (*.res)"));
+    const bool automaticDestination = ordinarySave && !resourceChoice.requiresExplicitChoice;
+    const QString texturesPath = automaticDestination ? resourceChoice.initialPath
+        : QFileDialog::getOpenFileName(
+            this, tr("Choose textures.res to update in place"),
+            resourceChoice.initialPath,
+            tr("Evil Islands resources (*.res)"));
     if(texturesPath.isEmpty())
         return;
 
@@ -14670,7 +14696,7 @@ void CView::finalizeVirtualTerrainAtlas()
             "QLabel { color: #efb24a; font-weight: bold; padding: 5px; }"));
         previewLayout->insertWidget(2, visibilityWarning);
     }
-    if(preview.exec()!=QDialog::Accepted)
+    if(!automaticDestination && preview.exec()!=QDialog::Accepted)
         return;
 
     QFile sourceTextures(texturesPath);
@@ -14701,24 +14727,27 @@ void CView::finalizeVirtualTerrainAtlas()
         pages.append(member);
     }
 
-    QMessageBox backupChoice(QMessageBox::Question,
-        tr("Replace textures.res in place"),
-        tr("Endurance will stage and reopen the complete updated archive before "
-           "atomically replacing:\n%1\n\nCreate a backup first?")
-            .arg(QDir::toNativeSeparators(texturesPath)),
-        QMessageBox::NoButton, this);
-    QAbstractButton* backupButton = backupChoice.addButton(
-        tr("Replace with backup"), QMessageBox::AcceptRole);
-    QAbstractButton* noBackupButton = backupChoice.addButton(
-        tr("Replace without backup"), QMessageBox::DestructiveRole);
-    backupChoice.addButton(QMessageBox::Cancel);
-    backupChoice.setDefaultButton(qobject_cast<QPushButton*>(backupButton));
-    backupChoice.exec();
-    if(backupChoice.clickedButton() != backupButton
-       && backupChoice.clickedButton() != noBackupButton)
-        return;
-    const bool createTexturesBackup =
-        backupChoice.clickedButton() == backupButton;
+    bool createTexturesBackup = true;
+    if(!ordinarySave)
+    {
+        QMessageBox backupChoice(QMessageBox::Question,
+            tr("Replace textures.res in place"),
+            tr("Endurance will stage and reopen the complete updated archive before "
+               "atomically replacing:\n%1\n\nCreate a backup first?")
+                .arg(QDir::toNativeSeparators(texturesPath)),
+            QMessageBox::NoButton, this);
+        QAbstractButton* backupButton = backupChoice.addButton(
+            tr("Replace with backup"), QMessageBox::AcceptRole);
+        QAbstractButton* noBackupButton = backupChoice.addButton(
+            tr("Replace without backup"), QMessageBox::DestructiveRole);
+        backupChoice.addButton(QMessageBox::Cancel);
+        backupChoice.setDefaultButton(qobject_cast<QPushButton*>(backupButton));
+        backupChoice.exec();
+        if(backupChoice.clickedButton() != backupButton
+           && backupChoice.clickedButton() != noBackupButton)
+            return;
+        createTexturesBackup = backupChoice.clickedButton() == backupButton;
+    }
 
     // The isolated atlas has a new namespace, pixel hash, slot order, and
     // generated signatures. Persist that exact semantic contract inside the
@@ -15049,6 +15078,8 @@ void CView::finalizeVirtualTerrainAtlas()
              finalized.isolatedNamespace));
     emit updateMsg(tr("Modern terrain atlas published in place: %1")
         .arg(QDir::toNativeSeparators(texturesPath)));
+    if(ordinarySave)
+        return;
     QMessageBox::information(this, tr("Modern MPR saved"),
         tr("textures.res was updated in place and the saved MPR is now the "
            "open editing baseline. No reload is required.\n\n"

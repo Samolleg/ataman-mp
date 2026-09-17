@@ -48,8 +48,11 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
     // Save As operation where the final MPR destination is selected first.
     if(persistedWorkingDraft && !saveAs && !identityPublicationRequested)
         return ETerrainMprSaveRoute::SaveEditableModernDraft;
-    return identityPublicationRequested || landMaterialFieldActive
-            || overlayMaterialFieldActive || landUsesWorkingExtension
+    // A semantic paint field is not new artwork. Authored physical tiles can
+    // be saved by the ordinary MPR transaction (and its semantic-state store).
+    Q_UNUSED(landMaterialFieldActive);
+    Q_UNUSED(overlayMaterialFieldActive);
+    return identityPublicationRequested || landUsesWorkingExtension
             || overlayUsesWorkingExtension || persistedWorkingDraft
         ? ETerrainMprSaveRoute::PublishModernAtlas
         : ETerrainMprSaveRoute::PlainMpr;
@@ -207,7 +210,10 @@ inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePla
         && terrainPublicationPathInResourceRoots(
                activeArchive.absoluteFilePath(), configuredResourceRoots);
     if(canReuseActiveArchive)
+    {
         plan.initialPath = activeArchive.absoluteFilePath();
+        plan.requiresExplicitChoice = false;
+    }
     else
         plan.initialPath = terrainPublicationInitialResourcePath(
             configuredResourceRoots, mprPath);

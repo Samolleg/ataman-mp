@@ -7027,7 +7027,7 @@ void MainWindow::updateDocumentActionAvailability()
         break;
     case ETerrainMprSavePresentation::PendingModernPublication:
         m_ui->actionSave_landscape_MPR->setText(
-            tr("Finalize and Save MPR"));
+            tr("Save MPR"));
         m_ui->actionSave_landscape_MPR_as->setText(
             tr("Finalize MPR As..."));
         break;

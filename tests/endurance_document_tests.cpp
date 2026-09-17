@@ -1327,9 +1327,9 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QCOMPARE(terrainMprSaveRoute(true, false, false, false, false),
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(false, true, false, false, false),
-             ETerrainMprSaveRoute::PublishModernAtlas);
+             ETerrainMprSaveRoute::PlainMpr);
     QCOMPARE(terrainMprSaveRoute(false, false, true, false, false),
-             ETerrainMprSaveRoute::PublishModernAtlas);
+             ETerrainMprSaveRoute::PlainMpr);
     QCOMPARE(terrainMprSaveRoute(false, false, false, true, false),
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
@@ -1385,8 +1385,8 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              "An editable draft does not identify ordinary Save as a draft save");
     QVERIFY2(mainSource.contains("Finalize Draft MPR As..."),
              "An editable draft does not identify Save As as publication");
-    QVERIFY2(mainSource.contains("Finalize and Save MPR"),
-             "A normal MPR with atlas changes does not identify Save as finalization");
+    QVERIFY2(mainSource.contains("tr(\"Save MPR\")"),
+             "Ordinary save must retain the familiar Save MPR action");
     QVERIFY2(mainSource.contains("Finalize MPR As..."),
              "A normal MPR with atlas changes does not identify Save As as finalization");
     const int saveStart = source.indexOf("void CView::saveLand()");
@@ -1592,9 +1592,9 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
             {missing, modRes}, mprPath, publishedRes, true, false);
     QCOMPARE(QDir::cleanPath(normalSave.initialPath),
              QDir::cleanPath(publishedRes));
-    // Even an exactly bound published RES is only the chooser suggestion. A
-    // modern save must never mutate an archive without explicit confirmation.
-    QVERIFY(normalSave.requiresExplicitChoice);
+    // Ordinary Save already authorizes this map's bound resource update.
+    // The exact source can be HDPack_Terrain.res, not necessarily textures.res.
+    QVERIFY(!normalSave.requiresExplicitChoice);
 
     const QString outsideMaps = QDir(resources.path()).filePath("maps");
     QVERIFY(QDir().mkpath(outsideMaps));

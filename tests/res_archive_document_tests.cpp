@@ -4,6 +4,7 @@
 #include "res_save_coordinator.h"
 #include "synthetic_map_table_archive.h"
 #include "map_table_document.h"
+#include "terrain_save_flow_policy.h"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -111,6 +112,38 @@ class ResArchiveDocumentTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void ordinaryMapSaveUsesBoundHdArchiveWithBackup()
+    {
+        QTemporaryDir temp;QVERIFY(temp.isValid());
+        const QString archivePath=QDir(temp.path()).filePath("HDPack_Terrain.res");
+        const QByteArray original=syntheticRes();
+        QFile file(archivePath);QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(original),qint64(original.size()));file.close();
+        const auto plan=terrainPublicationResourceChoicePlan(
+            {temp.path()},QDir(temp.path()).filePath("zone3obr.mpr"),archivePath,true,false);
+        QVERIFY(!plan.requiresExplicitChoice);
+        QCOMPARE(plan.initialPath,QFileInfo(archivePath).absoluteFilePath());
+        CResArchiveDocument baseline;QStringList errors;
+        QVERIFY(baseline.loadBytes(original,archivePath,&errors));
+        SResArchiveNewMember page;page.name="zone3obr_a27158a988f4_000.mmp";page.payload="synthetic-new-page";
+        SResPublishedMembersSaveRequest request;request.source=QFileInfo(plan.initialPath);
+        request.destination=request.source;request.published={page};request.createBackup=true;
+        request.allowReplaceExisting=false;request.backupRootOverride=temp.path()+"/backups";
+        const auto saved=commitStagedResPublishedMembers(baseline,request);
+        QVERIFY2(saved.success,qPrintable(saved.error));
+        QVERIFY(file.open(QIODevice::ReadOnly));const auto result=file.readAll();file.close();
+        CResArchiveDocument reopened;QVERIFY(reopened.loadBytes(result,archivePath,&errors));
+        QCOMPARE(reopened.memberPayload("opaque.bin"),baseline.memberPayload("opaque.bin"));
+        QCOMPARE(reopened.memberPayload("map.txt"),baseline.memberPayload("map.txt"));
+        QCOMPARE(reopened.memberPayload(page.name),page.payload);
+        QFile backup(saved.backupPath);QVERIFY(backup.open(QIODevice::ReadOnly));QCOMPARE(backup.readAll(),original);
+        page.payload="conflicting-page";request.published={page};
+        const auto refused=commitStagedResPublishedMembers(reopened,request);
+        QVERIFY(!refused.success);
+        QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),result);file.close();
+        QVERIFY(terrainPublicationResourceChoicePlan({temp.path()},"copy.mpr",archivePath,false,false).requiresExplicitChoice);
+        QVERIFY(terrainPublicationResourceChoicePlan({temp.path()},"zone3obr.mpr",QString(),true,false).requiresExplicitChoice);
+    }
     void noOpIsByteIdentical();
     void legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges();
     void replacementPreservesUntouchedMembersAndMetadata();
