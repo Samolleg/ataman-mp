@@ -150,7 +150,7 @@ private:
     void openMapPairWithCameraPolicy(const QString& mprPath,
                                      const QString& mobPath,
                                      const QString& zoneId,
-                                     bool focusFirstEntrance,
+                                     bool ordinaryMapOpen,
                                      const QPointF& sourceWorldOrigin,
                                      const QPointF& targetWorldOrigin);
     void openCollection(const QString& path);

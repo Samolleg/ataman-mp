@@ -6582,7 +6582,7 @@ void MainWindow::openNeighborMapPair(const QString& mprPath,
 void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                                              const QString& mobPath,
                                              const QString& zoneId,
-                                             bool focusFirstEntrance,
+                                             bool ordinaryMapOpen,
                                              const QPointF& sourceWorldOrigin,
                                              const QPointF& targetWorldOrigin)
 {
@@ -6663,7 +6663,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     // Only neighbor-to-neighbor navigation retains the multi-MPR sculpt
     // session. An ordinary Maps-browser open must run the normal cohort
     // save/discard prompt instead of silently carrying edits to another map.
-    if(!isExitAllowed(!focusFirstEntrance))
+    if(!isExitAllowed(!ordinaryMapOpen))
         return;
     // The save prompt is modal, so an external process can remove either
     // catalog file while the user is deciding. Recheck before the first
@@ -6684,7 +6684,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     QVector3D sourceCameraPosition;
     QVector3D sourceCameraPivot;
     QVector3D sourceCameraRotation;
-    const bool preserveNeighborCamera = !focusFirstEntrance
+    const bool preserveNeighborCamera = !ordinaryMapOpen
         && m_pView->captureCameraLocation(
             &sourceCameraPosition, &sourceCameraPivot,
             &sourceCameraRotation);
@@ -6749,14 +6749,13 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     rebuildWindowTitle();
-    QTimer::singleShot(0, this, [this, focusFirstEntrance]()
+    QTimer::singleShot(0, this, [this]()
     {
         if(!m_validEntrances.isEmpty())
         {
             m_entranceCombo->setCurrentIndex(0);
             updateEntranceOverlays();
-            if(focusFirstEntrance)
-                moveCameraToActiveSpawn();
+            // Opening a map updates entrance metadata, never the editor camera.
         }
     });
 }
