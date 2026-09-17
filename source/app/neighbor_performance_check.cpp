@@ -272,6 +272,14 @@ int runNeighborPerformanceCheck()
         view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
         check(view.m_neighborPlacements.size()==5 && view.m_neighborPlacements.first().zoneId=="8",
               "explicit added map takes priority over the five-neighbor budget without travel links");
+        const auto unchangedGeneration=view.m_neighborSceneGeneration->load();
+        view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
+        check(view.m_neighborSceneGeneration->load()==unchangedGeneration,
+              "unchanged world context keeps neighbor scenes and pending workers");
+        zones[8].origin+=QPointF(16,0);
+        view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
+        check(view.m_neighborSceneGeneration->load()!=unchangedGeneration,
+              "changed placement invalidates the neighbor context");
     }
     view.clearNeighborLandscapes();
     check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"live MPR and MOB remain byte-identical");

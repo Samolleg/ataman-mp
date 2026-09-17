@@ -11,6 +11,7 @@
 #include <QMessageBox>
 #include <QGridLayout>
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QOpenGLFramebufferObject>
 #include <QFrame>
 #include <QLabel>
@@ -3034,18 +3035,34 @@ void CView::setNeighborMapContext(
     const QString& profileId, const QString& activeAllodId,
     const QString& activeZoneId, const QString& layoutWarning)
 {
+    const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
+        topology, worldOrigins, profileId, activeAllodId, activeZoneId, topology.size());
+    auto placements = layout.placements;
+    for(int i=0; i<placements.size(); ++i)
+        if(placements[i].zoneId == m_preferredWorldMap)
+        { placements.move(i, 0); break; }
+    if(placements.size() > 5) placements.resize(5);
+    QByteArray contextKey;
+    QDataStream stream(&contextKey,QIODevice::WriteOnly);
+    stream << profileId << activeAllodId << activeZoneId << layoutWarning
+           << layout.activeWorldOrigin << layout.componentAnchorZoneId << layout.hasActiveWorldOrigin
+           << isValid() << m_neighborLandscapesVisible;
+    const auto resourceRevision=[&stream](const QString& path) {
+        const QFileInfo info(path);
+        stream << path << info.canonicalFilePath() << info.size() << info.lastModified();
+    };
+    for(const auto& placement : placements) {
+        stream << placement.zoneId << placement.origin << placement.worldOrigin << placement.size << placement.fixedAnchor;
+        resourceRevision(placement.mprPath);resourceRevision(placement.mobPath);
+    }
+    for(const auto& archive:CTextureList::getInstance()->configuredResourceArchivePaths()) resourceRevision(archive);
+    if(contextKey == m_neighborContextKey) return;
     clearNeighborLandscapes();
     m_activeMapWorldOrigin = QPointF();
     m_neighborMapAnchorZoneId.clear();
     m_hasActiveMapWorldOrigin = false;
     m_neighborLayoutStorageWritable = layoutWarning.isEmpty();
-    const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
-        topology, worldOrigins, profileId, activeAllodId, activeZoneId, topology.size());
-    m_neighborPlacements = layout.placements;
-    for(int i=0; i<m_neighborPlacements.size(); ++i)
-        if(m_neighborPlacements[i].zoneId == m_preferredWorldMap)
-        { m_neighborPlacements.move(i, 0); break; }
-    if(m_neighborPlacements.size() > 5) m_neighborPlacements.resize(5);
+    m_neighborPlacements = placements;
     if(layout.hasActiveWorldOrigin)
     {
         m_activeMapWorldOrigin = layout.activeWorldOrigin;
@@ -3077,10 +3094,12 @@ void CView::setNeighborMapContext(
         loadNeighborLandscapes();
     updateNeighborLayoutStatus();
     updateVisualChannelAvailability();
+    m_neighborContextKey = contextKey;
 }
 
 void CView::clearNeighborLandscapes()
 {
+    m_neighborContextKey.clear();
     ++(*m_neighborSceneGeneration);
     m_neighborObjectUploadScheduled = false;
     if(m_neighborLayoutDragActive)

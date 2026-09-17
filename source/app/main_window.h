@@ -400,6 +400,7 @@ private:
     SWorldMapZoneOrigin m_editorActiveMap;
     QString m_preferredEditorActiveMap;
     QMap<QString, QSize> m_worldMapSizeCache;
+    QFutureWatcher<QMap<QString,QSize>>* m_worldMetadataWatcher{nullptr};
     void refreshEditorWorld();
     void addMapToWorld();
     void manageWorldMaps();

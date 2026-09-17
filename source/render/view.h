@@ -159,6 +159,9 @@ public:
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
     bool prepareForApplicationShutdown();
+    QSize activeTerrainSectorSize() const {
+        return QSize(m_mprDocument.mapInfo().sectorCountX,m_mprDocument.mapInfo().sectorCountY);
+    }
 
     void loadLandscape(const QFileInfo& filePath);
     void refreshAfterResourceSetup();
@@ -917,6 +920,7 @@ private:
     QSet<QString> m_worldTerrainEnabledPaths;
     bool m_worldTerrainEnabled{false};
     QVector<SNeighborMapPlacement> m_neighborPlacements;
+    QByteArray m_neighborContextKey;
     QPointF m_activeMapWorldOrigin;
     QString m_neighborMapAnchorZoneId;
     bool m_hasActiveMapWorldOrigin{false};

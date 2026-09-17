@@ -23,6 +23,7 @@
 #include <QStatusBar>
 #include <QUuid>
 #include "world_coordinate_edit.h"
+#include <QtConcurrent/QtConcurrentRun>
 
 namespace {
 QString newId() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -31,6 +32,11 @@ QString pathKey(const QString& path)
     if(path.isEmpty()) return QString();
     const QFileInfo info(path);
     return (info.exists() ? info.canonicalFilePath() : info.absoluteFilePath()).toCaseFolded();
+}
+QString metadataKey(const QFileInfo& info)
+{
+    return pathKey(info.absoluteFilePath()) + "|" + QString::number(info.size())
+        + "|" + QString::number(info.lastModified().toMSecsSinceEpoch());
 }
 }
 
@@ -74,23 +80,27 @@ void MainWindow::refreshEditorWorld()
     const QString loaded = CLandscape::getInstance()->isMprLoad()
         ? pathKey(CLandscape::getInstance()->filePath().absoluteFilePath()) : QString();
     QVector<SMapCatalogEntry> topology;
+    QMap<QString,QString> pendingMetadata;
     for(auto& map : m_editorWorldMaps)
     {
         const QString path = m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath);
         const QFileInfo info(path);
         if(path.isEmpty() || !info.isFile()) continue;
         // Dimensions come from the actual MPR, not map.txt or a stale JSON size.
-        const QString cacheKey = pathKey(path) + QString::number(info.size())
-            + info.lastModified().toString(Qt::ISODateWithMs);
-        if(!m_worldMapSizeCache.contains(cacheKey))
+        const QString cacheKey = metadataKey(info);
+        const bool verified=m_worldMapSizeCache.contains(cacheKey);
+        QSize size=m_worldMapSizeCache.value(cacheKey);
+        if(!verified)
         {
-            CMprDocument doc; CValidationReport report;
-            if(!doc.load(info,&report) || report.hasErrors()) continue;
-            m_worldMapSizeCache.insert(cacheKey,QSize(doc.mapInfo().sectorCountX,doc.mapInfo().sectorCountY));
+            pendingMetadata.insert(cacheKey,path);
+            // The open terrain already has dimensions for immediate placement.
+            // Disk metadata is still verified by the worker before persistence.
+            if(pathKey(path)==loaded) size=m_pView->activeTerrainSectorSize();
+            else continue;
         }
-        const QSize size = m_worldMapSizeCache.value(cacheKey);
+        if(size.width()<=0 || size.height()<=0) continue;
         map.sectorWidth=size.width();map.sectorHeight=size.height();
-        m_worldMapLayoutDocument.updateResourceMetadata(map);
+        if(verified) m_worldMapLayoutDocument.updateResourceMetadata(map);
         SMapCatalogEntry entry;
         entry.zoneId=map.zoneId;entry.allodId=map.allodId;entry.mprName=map.mprIdentity;
         entry.mprPath=path;entry.mobPath=m_worldMapLayoutDocument.absoluteResourcePath(map.mobPath);
@@ -103,6 +113,28 @@ void MainWindow::refreshEditorWorld()
     if(!result.warning.isEmpty() && result.warning!=m_lastWorldMapLayoutWarning)
         statusBar()->showMessage(result.warning,15000);
     m_lastWorldMapLayoutWarning=result.warning;
+    if(!pendingMetadata.isEmpty() && !m_worldMetadataWatcher)
+    {
+        auto* watcher=new QFutureWatcher<QMap<QString,QSize>>(this);
+        m_worldMetadataWatcher=watcher;
+        connect(watcher,&QFutureWatcher<QMap<QString,QSize>>::finished,this,[this,watcher]() {
+            const auto sizes=watcher->result();
+            m_worldMetadataWatcher=nullptr;watcher->deleteLater();
+            for(auto it=sizes.constBegin();it!=sizes.constEnd();++it) m_worldMapSizeCache.insert(it.key(),it.value());
+            refreshEditorWorld(); // Re-evaluate current profile and resource revisions.
+        });
+        watcher->setFuture(QtConcurrent::run([pendingMetadata]() {
+            QMap<QString,QSize> result;
+            for(auto it=pendingMetadata.constBegin();it!=pendingMetadata.constEnd();++it) {
+                CMprDocument doc;CValidationReport report;
+                QSize size;
+                if(doc.load(QFileInfo(it.value()),&report) && !report.hasErrors())
+                    size=QSize(doc.mapInfo().sectorCountX,doc.mapInfo().sectorCountY);
+                if(metadataKey(QFileInfo(it.value()))==it.key()) result.insert(it.key(),size);
+            }
+            return result;
+        }));
+    }
 }
 
 void MainWindow::addMapToWorld()
@@ -239,9 +271,10 @@ void MainWindow::commitWorldMapPlacement(const QPointF& origin)
 void MainWindow::manageWorldMaps()
 {
     m_pView->cancelWorldMapPlacement();refreshEditorWorld();
+    const auto maps=m_editorWorldMaps; // Async metadata refresh must not retarget list rows.
     QDialog dialog(this);dialog.setWindowTitle(tr("World maps"));
     auto* layout=new QVBoxLayout(&dialog);auto* list=new QListWidget(&dialog);layout->addWidget(list);
-    for(const auto& map:m_editorWorldMaps)
+    for(const auto& map:maps)
     {
         const QString path=m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath);
         auto* item=new QListWidgetItem(QString("%1 / %2 — X %3, Y %4%5")
@@ -259,20 +292,20 @@ void MainWindow::manageWorldMaps()
     connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(open,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
-        const auto map=m_editorWorldMaps[index];dialog.accept();
+        const auto map=maps[index];dialog.accept();
         openNeighborMapPair(m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath),
             m_worldMapLayoutDocument.absoluteResourcePath(map.mobPath),map.zoneId,m_editorActiveMap.origin,map.origin);
     });
     connect(show,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
-        const auto map=m_editorWorldMaps[index];
+        const auto map=maps[index];
         if(m_editorActiveMap.zoneId.isEmpty() || map.allodId!=m_editorActiveMap.allodId || map.zoneId==m_editorActiveMap.zoneId)
         {QMessageBox::information(&dialog,tr("World maps"),tr("Open another map of this world first."));return;}
         m_pView->showWorldMap(map.zoneId);dialog.accept();refreshEditorWorld();
     });
     connect(locate,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
-        auto map=m_editorWorldMaps[index];
+        auto map=maps[index];
         QDialog edit(&dialog);edit.setWindowTitle(tr("Map files and position"));
         auto* form=new QFormLayout(&edit);
         auto* name=new QLineEdit(map.displayName,&edit);
@@ -309,7 +342,7 @@ void MainWindow::manageWorldMaps()
     });
     connect(remove,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
-        const auto map=m_editorWorldMaps[index];
+        const auto map=maps[index];
         if(QMessageBox::question(&dialog,tr("Remove from world"),tr("Remove this map from the world layout? MPR and MOB files will remain on disk."))!=QMessageBox::Yes)return;
         QString error;
         if(!m_worldMapLayoutDocument.removeEditorMap(map.profileId,map.allodId,map.zoneId,&error))
