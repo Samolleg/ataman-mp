@@ -10667,6 +10667,34 @@ Save all, discard the entire session, or cancel?</source>
         <source>Point the map view at the terrain before placing an object.</source>
         <translation>Перед размещением объекта направьте камеру на поверхность карты.</translation>
     </message>
+        <message>
+            <source>Add map to world...</source>
+            <translation>Добавить карту в мир…</translation>
+        </message>
+        <message>
+            <source>World maps...</source>
+            <translation>Карты мира…</translation>
+        </message>
+        <message>
+            <source>Place map: X %1, Y %2 — %3 × %4. Left click: place; Esc: cancel.%5</source>
+            <translation>Размещение: X %1, Y %2 — %3 × %4. ЛКМ — поставить; Esc — отменить.%5</translation>
+        </message>
+        <message>
+            <source> Overlaps another map.</source>
+            <translation> Пересекается с другой картой.</translation>
+        </message>
+        <message>
+            <source>%1 is the reference map. Use World maps to edit its coordinates.</source>
+            <translation>%1 — опорная карта. Изменить её координаты можно в окне «Карты мира».</translation>
+        </message>
+        <message>
+            <source>Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The reference map stays fixed while dragging; its coordinates can be edited in World maps. Double-click navigation is paused while arranging.</source>
+            <translation>Включите режим и перетаскивайте соседнюю карту левой кнопкой мыши. Координаты X/Y сохраняются в раскладке мира. Координаты опорной карты доступны в окне «Карты мира». Переход двойным щелчком при расстановке отключён.</translation>
+        </message>
+        <message>
+            <source>Reference map: %1. Edit its coordinates in World maps.</source>
+            <translation>Опорная карта: %1. Её координаты доступны в окне «Карты мира».</translation>
+        </message>
 </context>
     <context>
         <name>CViewportMinimapWidget</name>
@@ -14678,7 +14706,115 @@ It could not be opened automatically.</source>
             <source>%1 map positions were reset from map.txt.</source>
             <translation>Положения карт %1 восстановлены из map.txt.</translation>
         </message>
-    </context>
+            <message>
+            <source>Add map to world</source>
+            <translation>Добавить карту в мир</translation>
+        </message>
+        <message>
+            <source>World:</source>
+            <translation>Мир:</translation>
+        </message>
+        <message>
+            <source>Name:</source>
+            <translation>Название:</translation>
+        </message>
+        <message>
+            <source>MOB (optional):</source>
+            <translation>MOB (необязательно):</translation>
+        </message>
+        <message>
+            <source>New world</source>
+            <translation>Новый мир</translation>
+        </message>
+        <message>
+            <source>Select MPR</source>
+            <translation>Выбрать MPR</translation>
+        </message>
+        <message>
+            <source>Select MOB</source>
+            <translation>Выбрать MOB</translation>
+        </message>
+        <message>
+            <source>Enter a world name without path separators.</source>
+            <translation>Укажите название мира без разделителей пути.</translation>
+        </message>
+        <message>
+            <source>This MPR is already in the world layout. Use World maps to open or arrange it.</source>
+            <translation>Этот MPR уже добавлен. Откройте «Карты мира», чтобы выбрать или переместить его.</translation>
+        </message>
+        <message>
+            <source>Size: %1 × %2</source>
+            <translation>Размер: %1 × %2</translation>
+        </message>
+        <message>
+            <source>Select a profile MPR or browse for a file. Files stay in place. After validation, click in the scene to place the map; Esc cancels. An unregistered open map is added to this world as its base.</source>
+            <translation>Выберите MPR профиля или файл с диска. Файлы останутся на месте. Для размещения щёлкните на сцене; Esc — отмена. Открытая карта, ещё не включённая в мир, будет добавлена как его основа.</translation>
+        </message>
+        <message>
+            <source>Cannot read MPR:
+%1
+%2</source>
+            <translation>Не удалось прочитать MPR:
+%1
+%2</translation>
+        </message>
+        <message>
+            <source>Cannot read MOB:
+%1
+%2</source>
+            <translation>Не удалось прочитать MOB:
+%1
+%2</translation>
+        </message>
+        <message>
+            <source>The MPR dimensions are invalid.</source>
+            <translation>Некорректные размеры MPR.</translation>
+        </message>
+        <message>
+            <source>The resource profile changed; placement was cancelled.</source>
+            <translation>Профиль ресурсов изменился; размещение отменено.</translation>
+        </message>
+        <message>
+            <source>Map added to world. Source files were not changed.</source>
+            <translation>Карта добавлена в мир. Исходные файлы не изменялись.</translation>
+        </message>
+        <message>
+            <source>World maps</source>
+            <translation>Карты мира</translation>
+        </message>
+        <message>
+            <source> — File not found</source>
+            <translation> — Файл не найден</translation>
+        </message>
+        <message>
+            <source>Remove from world</source>
+            <translation>Убрать из мира</translation>
+        </message>
+        <message>
+            <source>Map files and position...</source>
+            <translation>Файлы и положение карты…</translation>
+        </message>
+        <message>
+            <source>Map files and position</source>
+            <translation>Файлы и положение карты</translation>
+        </message>
+        <message>
+            <source>Select map file</source>
+            <translation>Выбрать файл карты</translation>
+        </message>
+        <message>
+            <source>Remove this map from the world layout? MPR and MOB files will remain on disk.</source>
+            <translation>Убрать карту из мира? Файлы MPR и MOB останутся на диске.</translation>
+        </message>
+        <message>
+            <source>Show among neighbors</source>
+            <translation>Показать среди соседей</translation>
+        </message>
+        <message>
+            <source>Open another map of this world first.</source>
+            <translation>Сначала откройте другую карту этого мира.</translation>
+        </message>
+</context>
     <context>
         <name>MobDiffTerms</name>
         <message>

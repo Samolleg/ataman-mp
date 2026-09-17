@@ -9,8 +9,21 @@ class NeighborMapLayoutTests : public QObject
     Q_OBJECT
 
 private slots:
+
+    void duplicatePhysicalMprIsNotRenderedTwice()
+    {
+        SMapCatalogEntry a;a.zoneId="a";a.allodId="world";a.mprName="terrain";
+        a.mprPath="same.mpr";a.sectorWidth=2;a.sectorHeight=2;
+        auto b=a;b.zoneId="alias";
+        SWorldMapZoneOrigin x;x.profileId="p";x.allodId="world";x.zoneId="a";
+        x.mprIdentity="terrain";x.componentAnchorZoneId="a";
+        auto y=x;y.zoneId="alias";y.origin=QPointF(64,0);
+        const auto result=CNeighborMapLayout::build({a,b},{x,y},"p","world","a",5);
+        QVERIFY(result.placements.isEmpty());QVERIFY(!result.messages.isEmpty());
+        QCOMPARE(result.activeWorldOrigin,QPointF());
+    }
     void placesNearestZone7BackgroundsFromPairedEntrances();
-    void rejectsNonOppositeDeployEdges();
+    void jsonWorldDoesNotRequireMatchingDeployEdges();
     void worldOriginsDoNotDependOnActiveZone();
     void doesNotCombineDifferentAllods();
 };
@@ -84,7 +97,7 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
              QStringLiteral("zone3obr.mob"));
 }
 
-void NeighborMapLayoutTests::rejectsNonOppositeDeployEdges()
+void NeighborMapLayoutTests::jsonWorldDoesNotRequireMatchingDeployEdges()
 {
     const QString table = QString::fromUtf8(
         "#zone a allod game\n#res\na a\n#maps\n4 4\na b\n"
@@ -103,8 +116,8 @@ void NeighborMapLayoutTests::rejectsNonOppositeDeployEdges()
         topology, world.zones, QStringLiteral("test-profile"),
         QStringLiteral("allod"), QStringLiteral("a"), 5);
 
-    QVERIFY(result.placements.isEmpty());
-    QVERIFY(!result.messages.isEmpty());
+    QCOMPARE(result.placements.size(), 1);
+    QCOMPARE(result.placements.first().zoneId, QStringLiteral("b"));
 }
 
 void NeighborMapLayoutTests::worldOriginsDoNotDependOnActiveZone()

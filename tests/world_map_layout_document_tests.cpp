@@ -111,6 +111,56 @@ class WorldMapLayoutDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+
+    void editorWorldIsJsonOnlyAndDetectsConcurrentChanges()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const QString path=dir.filePath("world-map-layouts.json");
+        const auto makeFile=[&](const QString& name){QFile file(dir.filePath(name));QVERIFY(file.open(QIODevice::WriteOnly));file.write("fixture");};
+        makeFile("a.mpr");makeFile("b.mpr");
+        CWorldMapLayoutDocument doc(path);
+        QVERIFY(doc.loadEditorWorld("profile",{}).zones.isEmpty());
+        QVERIFY(!QFileInfo::exists(path)); // No map.txt inference or automatic membership.
+        SWorldMapZoneOrigin a;a.profileId="profile";a.allodId="world";a.zoneId="a";
+        a.componentAnchorZoneId="a";a.mprIdentity="a";a.mprPath="a.mpr";a.sectorWidth=4;a.sectorHeight=3;
+        auto b=a;b.zoneId="b";b.mprIdentity="b";b.mprPath="b.mpr";b.origin=QPointF(128,0);
+        QString error;QVERIFY2(doc.addEditorMaps({a,b},&error),qPrintable(error));
+        CWorldMapLayoutDocument reopened(path);
+        const auto loaded=reopened.loadEditorWorld("profile",{});
+        QCOMPARE(loaded.zones.size(),2);QCOMPARE(loaded.zones[1].origin,b.origin);
+        QVERIFY(reopened.loadEditorWorld("other-profile",{}).zones.isEmpty());
+        auto duplicate=b;duplicate.zoneId="duplicate";
+        QVERIFY(!doc.addEditorMaps({duplicate},&error));
+        auto edited=b;edited.displayName="New label";edited.origin=QPointF(200,5);
+        QVERIFY(doc.replaceEditorMap(edited,&error));
+        auto invalid=edited;invalid.mprPath="missing.mpr";
+        QVERIFY(!doc.replaceEditorMap(invalid,&error));
+        QVERIFY(doc.setZoneOrigin("profile","world","b",QPointF(300,20),&error));
+        QVERIFY(!reopened.setZoneOrigin("profile","world","b",QPointF(999,999),&error));
+        reopened.reload();QCOMPARE(reopened.loadEditorWorld("profile",{}).zones[1].origin,QPointF(300,20));
+        QVERIFY(reopened.removeEditorMap("profile","world","a",&error));
+        CWorldMapLayoutDocument afterRemoval(path);const auto retained=afterRemoval.loadEditorWorld("profile",{});
+        QCOMPARE(retained.zones.size(),1);QCOMPARE(retained.zones[0].componentAnchorZoneId,QStringLiteral("b"));
+        QCOMPARE(retained.zones[0].origin,QPointF(300,20));
+        QVERIFY(QFileInfo::exists(dir.filePath("a.mpr")));QVERIFY(QFileInfo::exists(dir.filePath("b.mpr")));
+        QVERIFY(QFile::remove(dir.filePath("b.mpr")));
+        afterRemoval.reload();QCOMPARE(afterRemoval.loadEditorWorld("profile",{}).zones.size(),1);
+    }
+    void legacyEditorWorldResolvesFilesWithoutMapTableAndBacksUp()
+    {
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        const QString path=dir.filePath("world-map-layouts.json");
+        const QByteArray legacy=R"({"schemaVersion":1,"layoutAlgorithmVersion":1,"coordinateSystem":"mpr-local-xy","profiles":[{"profileId":"p","allods":[{"allodId":"island","zones":[{"zoneId":"old","mprIdentity":"terrain","origin":{"x":31,"y":42},"provenance":"manual","componentAnchorZoneId":"old"}]}]}]})";
+        QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(legacy);file.close();
+        QFile terrain(dir.filePath("terrain.mpr"));QVERIFY(terrain.open(QIODevice::WriteOnly));terrain.write("fixture");terrain.close();
+        CWorldMapLayoutDocument doc(path);const auto result=doc.loadEditorWorld("p",{dir.path()});
+        QCOMPARE(result.zones.size(),1);QCOMPARE(result.zones[0].origin,QPointF(31,42));
+        QCOMPARE(result.zones[0].mprPath,QStringLiteral("terrain.mpr"));
+        QVERIFY(result.zones[0].mobPath.isEmpty());
+        QString error;QVERIFY2(doc.setZoneOrigin("p","island","old",QPointF(50,60),&error),qPrintable(error));
+        QFile backup(path+".before-v2.bak");QVERIFY(backup.open(QIODevice::ReadOnly));QCOMPARE(backup.readAll(),legacy);
+        CWorldMapLayoutDocument reopen(path);QCOMPARE(reopen.loadEditorWorld("p",{}).zones[0].origin,QPointF(50,60));
+    }
     void seedsDeterministicWorldOriginsFromMapTable();
     void separatesProfilesAndAllods();
     void persistsAndReloads();
@@ -402,7 +452,7 @@ void WorldMapLayoutDocumentTests::serializedDocumentContainsNoAbsolutePaths()
     const QJsonDocument parsed = QJsonDocument::fromJson(bytes);
     QVERIFY(parsed.isObject());
     const QJsonObject root = parsed.object();
-    QCOMPARE(root.value(QStringLiteral("schemaVersion")).toInt(), 1);
+    QCOMPARE(root.value(QStringLiteral("schemaVersion")).toInt(), 2);
     QCOMPARE(root.value(QStringLiteral("layoutAlgorithmVersion")).toInt(), 1);
     QCOMPARE(root.value(QStringLiteral("coordinateSystem")).toString(),
              QStringLiteral("mpr-local-xy"));

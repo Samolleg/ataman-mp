@@ -24,6 +24,12 @@ struct SWorldMapZoneOrigin
     EWorldMapOriginProvenance provenance{
         EWorldMapOriginProvenance::Inferred};
     QString componentAnchorZoneId;
+    // Editor-world resources. Relative paths are relative to the profile root.
+    QString displayName;
+    QString mprPath;
+    QString mobPath;
+    int sectorWidth{0};
+    int sectorHeight{0};
 };
 
 struct SWorldMapInferenceResult

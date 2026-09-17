@@ -2623,21 +2623,20 @@ void CView::initEnvironmentPreviewWidget()
         m_neighborLandscapesVisible);
     m_neighborLayoutEditToggle = makeToggle(
         "visualsArrangeNeighborMaps", tr("Arrange maps"), tr(
-        "Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The allod anchor stays fixed at X 0, Y 0. Double-click navigation is paused while arranging."),
+        "Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The reference map stays fixed while dragging; its coordinates can be edited in World maps. Double-click navigation is paused while arranging."),
         false);
-    m_neighborLayoutResetButton = new QToolButton(m_environmentPreviewBody);
-    m_neighborLayoutResetButton->setObjectName(
-        QStringLiteral("visualsResetNeighborMapLayout"));
-    m_neighborLayoutResetButton->setText(tr("Reset map positions..."));
-    const QString resetMapLayoutToolTip = tr(
-        "Discard manual positions for the active allod and infer them again from map.txt.");
-    m_neighborLayoutResetButton->setProperty(
-        "availableToolTip", resetMapLayoutToolTip);
-    m_neighborLayoutResetButton->setToolTip(resetMapLayoutToolTip);
-    m_neighborLayoutResetButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_neighborLayoutResetButton->setSizePolicy(
-        QSizePolicy::Expanding, QSizePolicy::Preferred);
-    body->addWidget(m_neighborLayoutResetButton);
+    auto* addWorld = new QToolButton(m_environmentPreviewBody);
+    addWorld->setObjectName(QStringLiteral("addWorldMap"));
+    addWorld->setText(tr("Add map to world..."));
+    addWorld->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    body->addWidget(addWorld);
+    connect(addWorld, &QToolButton::clicked, this, &CView::addWorldMapRequested);
+    auto* manageWorld = new QToolButton(m_environmentPreviewBody);
+    manageWorld->setObjectName(QStringLiteral("manageWorldMaps"));
+    manageWorld->setText(tr("World maps..."));
+    manageWorld->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    body->addWidget(manageWorld);
+    connect(manageWorld, &QToolButton::clicked, this, &CView::manageWorldMapsRequested);
     m_neighborLayoutStatus = new QLabel(m_environmentPreviewBody);
     m_neighborLayoutStatus->setObjectName(
         QStringLiteral("visualsNeighborMapCoordinates"));
@@ -2790,8 +2789,6 @@ void CView::initEnvironmentPreviewWidget()
         }
         update();
     });
-    connect(m_neighborLayoutResetButton, &QToolButton::clicked,
-            this, &CView::neighborMapLayoutResetRequested);
     connect(m_objectHelpersVisualToggle, &QToolButton::toggled, this, [this](bool visible) {
         m_objectHelpersVisible = visible;
         persistViewportVisualState();
@@ -3043,8 +3040,12 @@ void CView::setNeighborMapContext(
     m_hasActiveMapWorldOrigin = false;
     m_neighborLayoutStorageWritable = layoutWarning.isEmpty();
     const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
-        topology, worldOrigins, profileId, activeAllodId, activeZoneId, 5);
+        topology, worldOrigins, profileId, activeAllodId, activeZoneId, topology.size());
     m_neighborPlacements = layout.placements;
+    for(int i=0; i<m_neighborPlacements.size(); ++i)
+        if(m_neighborPlacements[i].zoneId == m_preferredWorldMap)
+        { m_neighborPlacements.move(i, 0); break; }
+    if(m_neighborPlacements.size() > 5) m_neighborPlacements.resize(5);
     if(layout.hasActiveWorldOrigin)
     {
         m_activeMapWorldOrigin = layout.activeWorldOrigin;
@@ -3530,7 +3531,7 @@ void CView::updateNeighborLayoutStatus(const QString& zoneId,
     }
     QString text;
     if(!m_neighborMapAnchorZoneId.isEmpty())
-        text = tr("Base map: %1 (fixed at X 0, Y 0).")
+        text = tr("Reference map: %1. Edit its coordinates in World maps.")
             .arg(m_neighborMapAnchorZoneId);
     if(zoneId.isEmpty())
     {
@@ -6065,7 +6066,7 @@ void CView::drawTestOverlaysOpenGl()
         && (m_paintIssueHoverValid || !m_paintIssueSelectedCells.isEmpty());
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
-        && !paintIssueOverlay
+        && !paintIssueOverlay && !m_worldPlacementActive
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
         && !showOverlayMaterialSlots
@@ -6132,6 +6133,24 @@ void CView::drawTestOverlaysOpenGl()
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_FALSE);
+
+    if(m_worldPlacementActive && m_worldPlacementValid)
+    {
+        const QPointF local = m_worldPlacementOrigin - m_activeMapWorldOrigin;
+        const float x=local.x(), y=local.y(), z=m_worldPlacementZ+0.15f;
+        const float w=m_worldPlacementSize.width(), h=m_worldPlacementSize.height();
+        QVector<QVector3D> corners{{x,y,z},{x+w,y,z},{x+w,y+h,z},{x,y+h,z}};
+        QVector<QVector3D> fill{corners[0],corners[1],corners[2],corners[0],corners[2],corners[3]};
+        ei::gl::Disable(GL_DEPTH_TEST);
+        m_program.setUniformValue("customColor", m_worldPlacementOverlaps
+            ? QVector4D(1.f,0.5f,0.1f,0.25f) : QVector4D(0.1f,0.9f,1.f,0.25f));
+        m_program.setAttributeArray(position, fill.constData());
+        ei::gl::DrawArrays(GL_TRIANGLES, 0, fill.size());
+        m_program.setUniformValue("customColor", QVector4D(0.1f,0.9f,1.f,1.f));
+        m_program.setAttributeArray(position, corners.constData());
+        ei::gl::DrawArrays(GL_LINE_LOOP, 0, corners.size());
+        ei::gl::Enable(GL_DEPTH_TEST);
+    }
 
     // Transient scenario glyphs: no editable objects or picking IDs are created.
     // Use the established clean native-GL overlay state, never QPainter on QGLWidget.
@@ -9407,6 +9426,7 @@ bool CView::ensureTerrainAutoCatalogReady()
 
 void CView::unloadLand(bool promptForSave)
 {
+    cancelWorldMapPlacement();
     finishSculptStroke();
     syncWorldTerrainActive();
     if(promptForSave && !resolveWorldTerrainClose(false)) return;
@@ -22109,6 +22129,20 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    if(m_worldPlacementActive)
+    {
+        m_neighborPointerGestureCaptured = true;
+        m_neighborPointerGestureButton = event->button();
+        if(event->button() == Qt::RightButton) cancelWorldMapPlacement();
+        else if(event->button() == Qt::LeftButton && updateWorldMapPlacement(event->pos()))
+        {
+            const QPointF origin = m_worldPlacementOrigin;
+            m_worldPlacementActive = false;
+            unsetCursor(); update();
+            emit worldMapPlacementConfirmed(origin);
+        }
+        event->accept(); return;
+    }
     if(m_pendingDatabasePlacement && event->button() == Qt::RightButton)
     {
         cancelPendingOperation();
@@ -22143,7 +22177,7 @@ void CView::mousePressEvent(QMouseEvent* event)
                     updateNeighborLayoutStatus(target.zoneId,
                                                   target.worldOrigin);
                     emit updateMsg(tr(
-                        "%1 is the fixed base map for this allod and stays at X 0, Y 0.")
+                        "%1 is the reference map. Use World maps to edit its coordinates.")
                         .arg(target.zoneId));
                     event->accept();
                     return;
@@ -22298,6 +22332,7 @@ void CView::mousePressEvent(QMouseEvent* event)
 
 void CView::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if(m_worldPlacementActive) { event->accept(); return; }
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
     if(event->button() != Qt::LeftButton)
@@ -22778,6 +22813,8 @@ void CView::updateLandscapeSculptCoordinates(const QVector3D& position, bool val
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    if(m_worldPlacementActive)
+    { updateWorldMapPlacement(event->pos()); event->accept(); return; }
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)
@@ -23607,6 +23644,7 @@ void CView::changeOperation(EButtonOp type, bool preserveLandscapeEditing)
 
 bool CView::cancelPendingOperation()
 {
+    if(m_worldPlacementActive) { cancelWorldMapPlacement(); return true; }
     if(!m_pOp)
         return false;
 

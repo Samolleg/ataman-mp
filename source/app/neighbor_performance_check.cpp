@@ -18,6 +18,8 @@
 #include <QTextStream>
 #include <QThread>
 #include <QtConcurrent>
+#include <QMouseEvent>
+#include <QKeyEvent>
 #include <QCryptographicHash>
 
 // Opt-in hidden integration check. Real resources are read only; output and
@@ -189,13 +191,53 @@ int runNeighborPerformanceCheck()
     view.m_cam->setLocation(center+QVector3D(0,0,400),center,QVector3D());
     view.m_projection.setToIdentity();
     view.m_projection.perspective(45,640.0f/480.0f,1,2000);
-    view.makeCurrent(); view.paintGL();
+    view.updateGL();
     const auto frame=view.grabFrameBuffer();
     QSet<QRgb> colors;
     for(int y=0;y<frame.height();y+=2) for(int x=0;x<frame.width();x+=2) colors.insert(frame.pixel(x,y));
     check(!frame.isNull() && colors.size()>64,"hidden scene renders terrain and cached object queue");
     const QString imagePath=qEnvironmentVariable("EI_NEIGHBOR_PERF_IMAGE");
     if(!imagePath.isEmpty()) frame.save(imagePath);
+    if(qEnvironmentVariableIsSet("EI_WORLD_JSON_CHECK"))
+    {
+        view.m_mprDocument=document;
+        const QMatrix4x4 cameraBefore=view.m_cam->viewMatrix();
+        int cancelled=0,confirmed=0;QPointF chosen;
+        QObject::connect(&view,&CView::worldMapPlacementCancelled,&view,[&](){++cancelled;});
+        QObject::connect(&view,&CView::worldMapPlacementConfirmed,&view,[&](const QPointF& point){++confirmed;chosen=point;});
+        view.beginWorldMapPlacement(QSizeF(64,64));
+        view.m_worldPlacementZ=center.z();view.updateWorldMapPlacement(view.rect().center());
+        check(view.m_worldPlacementActive && view.m_worldPlacementValid,"world placement previews without changing documents");
+        view.updateGL();
+        const auto placementFrame=view.grabFrameBuffer();
+        if(!imagePath.isEmpty()) placementFrame.save(imagePath + ".placement.png");
+        out<<"Placement origin "<<view.m_worldPlacementOrigin.x()<<","<<view.m_worldPlacementOrigin.y()<<" z "<<view.m_worldPlacementZ<<"\n";
+        check(!placementFrame.isNull() && placementFrame!=frame,"world placement outline reaches rendered frame");
+        QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);
+        QApplication::sendEvent(&view,&escape);
+        check(cancelled==1 && confirmed==0 && !view.m_worldPlacementActive,"Escape cancels placement without commit");
+        view.beginWorldMapPlacement(QSizeF(64,64));
+        view.m_worldPlacementZ=center.z();
+        QMouseEvent click(QEvent::MouseButtonPress,QPointF(view.rect().center()),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(&view,&click);
+        check(confirmed==1 && !view.m_worldPlacementActive && std::isfinite(chosen.x()),"left click confirms one world placement");
+        check(view.m_cam->viewMatrix()==cameraBefore,"world placement preserves camera");
+        view.clearNeighborLandscapes();view.m_neighborLandscapesVisible=false;
+        QVector<SMapCatalogEntry> topology;QVector<SWorldMapZoneOrigin> zones;
+        for(int i=0;i<9;++i)
+        {
+            SMapCatalogEntry entry;entry.zoneId=QString::number(i);entry.allodId="json-world";
+            entry.mprName=zone;entry.mprPath=QString("layout-fixture-%1.mpr").arg(i);entry.sectorWidth=4;entry.sectorHeight=4;
+            topology.append(entry);
+            SWorldMapZoneOrigin item;item.profileId="json-profile";item.allodId="json-world";
+            item.zoneId=entry.zoneId;item.mprIdentity=zone;item.componentAnchorZoneId=item.zoneId;
+            item.origin=QPointF(i*128,0);zones.append(item);
+        }
+        view.m_preferredWorldMap="8";
+        view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
+        check(view.m_neighborPlacements.size()==5 && view.m_neighborPlacements.first().zoneId=="8",
+              "explicit added map takes priority over the five-neighbor budget without travel links");
+    }
     view.clearNeighborLandscapes();
     check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"live MPR and MOB remain byte-identical");
     view.m_pLand=CLandscape::getInstance();

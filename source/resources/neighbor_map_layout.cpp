@@ -1,6 +1,9 @@
 #include "neighbor_map_layout.h"
 
 #include <QRectF>
+#include <QDir>
+#include <QFileInfo>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -59,7 +62,7 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
     if(!active || !renderable(*active))
     {
         result.messages.append(QStringLiteral(
-            "The active map has no renderable map.txt topology entry."));
+            "The active map has no renderable world-layout entry."));
         return result;
     }
     const SWorldMapZoneOrigin* activeWorld = CWorldMapLayout::zone(
@@ -84,12 +87,15 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         double distance{0.0};
     };
     QVector<SCandidate> candidates;
+    const auto physicalKey=[](const QString& path) {
+        const QFileInfo info(path);
+        return (info.exists()?info.canonicalFilePath():QDir::cleanPath(path)).toCaseFolded();
+    };
+    QSet<QString> physicalMaps{physicalKey(active->mprPath)};
     for(const SWorldMapZoneOrigin& world : worldOrigins)
     {
         if(key(world.profileId) != key(profileId)
            || key(world.allodId) != key(activeAllodId)
-           || key(world.componentAnchorZoneId)
-                != key(activeWorld->componentAnchorZoneId)
            || key(world.zoneId) == key(activeZoneId))
             continue;
         const SMapCatalogEntry* entry = catalogEntry(
@@ -99,11 +105,18 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         if(key(world.mprIdentity) != key(entry->mprName))
         {
             result.messages.append(QStringLiteral(
-                "A stored world-map coordinate was ignored because its MPR identity no longer matches map.txt: %1")
+                "A stored world-map coordinate was ignored because its MPR identity no longer matches its world resource: %1")
                 .arg(world.zoneId));
             continue;
         }
 
+        const QString physical = physicalKey(entry->mprPath);
+        if(physicalMaps.contains(physical))
+        {
+            result.messages.append(QStringLiteral("Duplicate MPR reference retained in JSON but not rendered twice: %1").arg(world.zoneId));
+            continue;
+        }
+        physicalMaps.insert(physical);
         SCandidate candidate;
         candidate.placement.zoneId = entry->zoneId;
         candidate.placement.mprPath = entry->mprPath;

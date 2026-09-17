@@ -395,6 +395,16 @@ private:
     SMapCatalogResult m_mapCatalog;
     SMapCatalogEntry m_mapTestEntry;
     CWorldMapLayoutDocument m_worldMapLayoutDocument;
+    QVector<SWorldMapZoneOrigin> m_editorWorldMaps;
+    QVector<SWorldMapZoneOrigin> m_pendingWorldMaps;
+    SWorldMapZoneOrigin m_editorActiveMap;
+    QString m_preferredEditorActiveMap;
+    QMap<QString, QSize> m_worldMapSizeCache;
+    void refreshEditorWorld();
+    void addMapToWorld();
+    void manageWorldMaps();
+    void commitWorldMapPlacement(const QPointF& origin);
+    bool validateWorldMap(SWorldMapZoneOrigin* map, QString* error);
     QString m_lastWorldMapLayoutWarning;
     QVector<SMapTravelZone> m_validEntrances;
     QString m_openedMapZoneId;

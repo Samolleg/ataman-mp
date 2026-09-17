@@ -27,6 +27,16 @@ public:
     void setProfileDirectory(const QString& root, const QString& profileId,
                              const QString& legacyPath = defaultPath());
     QString path() const { return m_path; }
+    SWorldMapLayoutUpdateResult loadEditorWorld(const QString& profileId,
+                                              const QStringList& mapRoots);
+    bool addEditorMaps(const QVector<SWorldMapZoneOrigin>& maps, QString* error);
+    bool replaceEditorMap(const SWorldMapZoneOrigin& map, QString* error);
+    void reload() { m_loadState = ELoadState::NotLoaded; m_hasPersistentFile = false;
+                    m_zones.clear(); m_diskBytes.clear(); m_loadWarning.clear(); }
+    bool removeEditorMap(const QString& profileId, const QString& worldId,
+                         const QString& mapId, QString* error);
+    QString absoluteResourcePath(const QString& path) const;
+    QString portableResourcePath(const QString& path) const;
     SWorldMapLayoutUpdateResult loadAndUpdate(
         const QString& profileId,
         const QVector<SMapCatalogEntry>& topology);
@@ -68,6 +78,7 @@ private:
     bool m_hasPersistentFile{false};
     QString m_loadWarning;
     QVector<SWorldMapZoneOrigin> m_zones;
+    mutable QByteArray m_diskBytes;
 };
 
 #endif // WORLD_MAP_LAYOUT_DOCUMENT_H

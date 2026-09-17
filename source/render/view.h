@@ -283,6 +283,9 @@ public:
         const QString& activeZoneId,
         const QString& layoutWarning = QString());
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
+    void beginWorldMapPlacement(const QSizeF& size);
+    void cancelWorldMapPlacement();
+    void showWorldMap(const QString& mapId);
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
@@ -722,10 +725,22 @@ signals:
     void neighborMapOriginChangeRequested(const QString& zoneId,
                                           const QPointF& worldOrigin);
     void neighborMapLayoutResetRequested();
+    void addWorldMapRequested();
+    void manageWorldMapsRequested();
+    void worldMapPlacementConfirmed(const QPointF& origin);
+    void worldMapPlacementCancelled();
     void unitVisualPreparationComplete();
     void aiGraphPersistenceRequested();
 
 private:
+    bool m_worldPlacementActive{false};
+    bool m_worldPlacementValid{false};
+    bool m_worldPlacementOverlaps{false};
+    QSizeF m_worldPlacementSize;
+    QPointF m_worldPlacementOrigin;
+    float m_worldPlacementZ{0};
+    QString m_preferredWorldMap;
+    bool updateWorldMapPlacement(const QPoint& position);
     int m_height; //for redraw window
     int m_width;
     QSharedPointer<CCamera> m_cam;

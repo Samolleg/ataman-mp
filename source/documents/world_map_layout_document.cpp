@@ -8,6 +8,8 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QMap>
+#include <QDirIterator>
+#include <QLockFile>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
@@ -16,7 +18,7 @@
 #include <cmath>
 
 namespace {
-const int kSchemaVersion = 1;
+const int kSchemaVersion = 2;
 const int kLayoutAlgorithmVersion = 1;
 
 QString key(const QString& value)
@@ -142,6 +144,11 @@ QByteArray serialize(const QVector<SWorldMapZoneOrigin>& input,
                 zoneObject.insert(QStringLiteral("mprIdentity"),
                                   zone.mprIdentity);
                 zoneObject.insert(QStringLiteral("origin"), origin);
+                zoneObject.insert(QStringLiteral("name"), zone.displayName);
+                zoneObject.insert(QStringLiteral("mprPath"), zone.mprPath);
+                zoneObject.insert(QStringLiteral("mobPath"), zone.mobPath);
+                zoneObject.insert(QStringLiteral("sectorWidth"), zone.sectorWidth);
+                zoneObject.insert(QStringLiteral("sectorHeight"), zone.sectorHeight);
                 zoneObject.insert(QStringLiteral("provenance"),
                     worldMapOriginProvenanceName(zone.provenance));
                 zoneObject.insert(QStringLiteral("componentAnchorZoneId"),
@@ -187,7 +194,8 @@ bool parse(const QByteArray& bytes, QVector<SWorldMapZoneOrigin>* output,
     const QJsonValue layoutAlgorithmVersion = root.value(
         QStringLiteral("layoutAlgorithmVersion"));
     if(!schemaVersion.isDouble()
-       || schemaVersion.toDouble() != double(kSchemaVersion))
+       || (schemaVersion.toDouble() != 1.0
+           && schemaVersion.toDouble() != double(kSchemaVersion)))
     {
         if(error)
             *error = QStringLiteral(
@@ -293,6 +301,11 @@ bool parse(const QByteArray& bytes, QVector<SWorldMapZoneOrigin>* output,
                 zone.zoneId = object.value(QStringLiteral("zoneId")).toString();
                 zone.mprIdentity = object.value(
                     QStringLiteral("mprIdentity")).toString();
+                zone.displayName = object.value(QStringLiteral("name")).toString();
+                zone.mprPath = object.value(QStringLiteral("mprPath")).toString();
+                zone.mobPath = object.value(QStringLiteral("mobPath")).toString();
+                zone.sectorWidth = object.value(QStringLiteral("sectorWidth")).toInt();
+                zone.sectorHeight = object.value(QStringLiteral("sectorHeight")).toInt();
                 zone.origin = QPointF(origin.value(QStringLiteral("x")).toDouble(),
                                       origin.value(QStringLiteral("y")).toDouble());
                 zone.componentAnchorZoneId = object.value(
@@ -368,6 +381,7 @@ void CWorldMapLayoutDocument::setProfileDirectory(
     m_hasPersistentFile = false;
     m_loadWarning.clear();
     m_zones.clear();
+    m_diskBytes.clear();
 }
 
 bool CWorldMapLayoutDocument::ensureLoaded()
@@ -410,11 +424,12 @@ bool CWorldMapLayoutDocument::ensureLoaded()
     }
     QString parseError;
     QVector<SWorldMapZoneOrigin> parsed;
-    if(!parse(file.readAll(), &parsed, &parseError))
+    m_diskBytes = file.readAll();
+    if(!parse(m_diskBytes, &parsed, &parseError))
     {
         m_loadState = ELoadState::Blocked;
         m_loadWarning = QStringLiteral(
-            "The world-map layout document is damaged or unsupported and was left unchanged. Inferred positions are being used temporarily. %1")
+            "The world-map layout document is damaged or unsupported and was left unchanged. No editor-world maps were loaded. %1")
             .arg(parseError);
         return false;
     }
@@ -447,6 +462,44 @@ bool CWorldMapLayoutDocument::save(
                 "Could not create the world-map layout directory.");
         return false;
     }
+    QLockFile lock(m_path + QStringLiteral(".lock"));
+    if(!lock.tryLock(0))
+    {
+        if(error) *error = QStringLiteral("Another editor is updating this world. Retry after it finishes.");
+        return false;
+    }
+    if(m_hasPersistentFile)
+    {
+        QFile current(m_path);
+        if(!current.open(QIODevice::ReadOnly) || current.readAll() != m_diskBytes)
+        {
+            if(error) *error = QStringLiteral("The world file changed outside this editor. Reload the profile before saving.");
+            return false;
+        }
+        if(QJsonDocument::fromJson(m_diskBytes).object().value("schemaVersion").toInt() == 1)
+        {
+            const QString backup = m_path + QStringLiteral(".before-v2.bak");
+            if(QFileInfo::exists(backup))
+            {
+                QFile prior(backup);
+                if(!prior.open(QIODevice::ReadOnly) || prior.readAll() != m_diskBytes)
+                {
+                    if(error) *error = QStringLiteral("A different migration backup already exists; it was preserved.");
+                    return false;
+                }
+            }
+            else if(!QFile::copy(m_path, backup))
+            {
+                if(error) *error = QStringLiteral("Could not back up the old world layout before migration.");
+                return false;
+            }
+        }
+    }
+    else if(QFileInfo::exists(m_path))
+    {
+        if(error) *error = QStringLiteral("A world file appeared after loading. Reload before saving.");
+        return false;
+    }
     QSaveFile file(m_path);
     file.setDirectWriteFallback(false);
     if(!file.open(QIODevice::WriteOnly))
@@ -465,6 +518,7 @@ bool CWorldMapLayoutDocument::save(
         if(error) *error = file.errorString();
         return false;
     }
+    m_diskBytes = bytes;
     if(error) error->clear();
     return true;
 }
@@ -703,4 +757,173 @@ bool CWorldMapLayoutDocument::resetAllodLayout(
     m_zones = candidate;
     m_hasPersistentFile = true;
     return true;
+}
+
+
+QString CWorldMapLayoutDocument::absoluteResourcePath(const QString& path) const
+{
+    if(path.isEmpty()) return QString();
+    return QDir::cleanPath(QDir(QFileInfo(m_path).absolutePath()).absoluteFilePath(path));
+}
+
+QString CWorldMapLayoutDocument::portableResourcePath(const QString& path) const
+{
+    if(path.isEmpty()) return QString();
+    const QString absolute = QFileInfo(path).absoluteFilePath();
+    const QString relative = QDir(QFileInfo(m_path).absolutePath()).relativeFilePath(absolute);
+    return relative.startsWith("../") || QDir::isAbsolutePath(relative) ? absolute : relative;
+}
+
+SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
+    const QString& profileId, const QStringList& mapRoots)
+{
+    SWorldMapLayoutUpdateResult result;
+    if(!ensureLoaded())
+    {
+        result.warning = m_loadWarning;
+        result.storageBlocked = true;
+        return result;
+    }
+    // Legacy JSON stores MPR identities, never consult map.txt to resolve them.
+    QMap<QString, QStringList> files;
+    bool needsResolution = false;
+    for(const auto& zone : m_zones)
+        needsResolution |= key(zone.profileId) == key(profileId) && zone.mprPath.isEmpty();
+    if(needsResolution)
+    {
+        QStringList roots = mapRoots;
+        roots.append(QDir(QFileInfo(m_path).absolutePath()).filePath("Maps"));
+        QSet<QString> seen;
+        for(const QString& root : roots)
+        {
+            QDirIterator it(root, QDir::Files, QDirIterator::Subdirectories);
+            while(it.hasNext())
+            {
+                const QFileInfo info(it.next());
+                const QString suffix = info.suffix().toLower();
+                if(suffix != "mpr" && suffix != "mob") continue;
+                const QString path = info.canonicalFilePath();
+                if(path.isEmpty() || seen.contains(key(path))) continue;
+                seen.insert(key(path));
+                files[key(info.fileName())].append(path);
+            }
+        }
+    }
+    for(auto& zone : m_zones)
+    {
+        if(key(zone.profileId) != key(profileId)) continue;
+        if(zone.mprPath.isEmpty())
+        {
+            const auto mprs = files.value(key(zone.mprIdentity + ".mpr"));
+            if(mprs.size() == 1)
+            {
+                zone.mprPath = portableResourcePath(mprs.first());
+                // Only an unambiguous sibling MOB is inferred. Different names
+                // can be attached explicitly in the world manager.
+                const auto mobs = files.value(key(zone.mprIdentity + ".mob"));
+                if(mobs.size() == 1) zone.mobPath = portableResourcePath(mobs.first());
+            }
+            else result.diagnostics.append(QStringLiteral("Locate MPR for %1: missing or ambiguous file.").arg(zone.mprIdentity));
+        }
+    }
+    result.zones = profileZones(m_zones, profileId);
+    result.persisted = m_hasPersistentFile;
+    return result;
+}
+
+bool CWorldMapLayoutDocument::addEditorMaps(
+    const QVector<SWorldMapZoneOrigin>& maps, QString* error)
+{
+    if(!ensureLoaded()) { if(error) *error = m_loadWarning; return false; }
+    QVector<SWorldMapZoneOrigin> candidate = m_zones;
+    for(auto map : maps)
+    {
+        if(!validZone(map, error) || map.mprPath.isEmpty()
+           || map.sectorWidth <= 0 || map.sectorHeight <= 0)
+        {
+            if(error && error->isEmpty()) *error = QStringLiteral("A map requires a valid MPR and positive dimensions.");
+            return false;
+        }
+        const QString full = absoluteResourcePath(map.mprPath);
+        if(!QFileInfo(full).isFile() || (!map.mobPath.isEmpty()
+            && !QFileInfo(absoluteResourcePath(map.mobPath)).isFile()))
+        {
+            if(error) *error = QStringLiteral("A selected map file is missing.");
+            return false;
+        }
+        const QString physical = QFileInfo(full).canonicalFilePath();
+        for(const auto& existing : candidate)
+        {
+            if(key(existing.profileId) != key(map.profileId)) continue;
+            if(key(existing.zoneId) == key(map.zoneId)
+               || (!existing.mprPath.isEmpty() && key(QFileInfo(
+                   absoluteResourcePath(existing.mprPath)).canonicalFilePath()) == key(physical)))
+            {
+                if(error) *error = QStringLiteral("This map is already in the profile world layout.");
+                return false;
+            }
+        }
+        map.mprPath = portableResourcePath(full);
+        map.mobPath = portableResourcePath(absoluteResourcePath(map.mobPath));
+        candidate.append(map);
+    }
+    // Validate anchor references before committing even for a newly created world.
+    QVector<SWorldMapZoneOrigin> checked;
+    const QByteArray bytes = serialize(candidate, error);
+    if(bytes.isEmpty() || !parse(bytes, &checked, error) || !save(candidate, error)) return false;
+    m_zones = candidate; m_hasPersistentFile = true;
+    return true;
+}
+
+bool CWorldMapLayoutDocument::removeEditorMap(const QString& profileId,
+    const QString& worldId, const QString& mapId, QString* error)
+{
+    if(!ensureLoaded()) { if(error) *error = m_loadWarning; return false; }
+    auto candidate = m_zones;
+    int removed = 0;
+    for(int i = candidate.size()-1; i >= 0; --i)
+        if(key(candidate[i].profileId) == key(profileId)
+           && key(candidate[i].allodId) == key(worldId) && key(candidate[i].zoneId) == key(mapId))
+        { candidate.remove(i); ++removed; }
+    if(!removed) { if(error) *error = QStringLiteral("The map is no longer in this world."); return false; }
+    QString replacement;
+    for(const auto& zone : candidate)
+        if(key(zone.profileId) == key(profileId) && key(zone.allodId) == key(worldId))
+        { replacement = zone.zoneId; break; }
+    for(auto& zone : candidate)
+        if(key(zone.profileId) == key(profileId) && key(zone.allodId) == key(worldId)
+           && key(zone.componentAnchorZoneId) == key(mapId)) zone.componentAnchorZoneId = replacement;
+    if(!save(candidate, error)) return false;
+    m_zones = candidate; m_hasPersistentFile = true;
+    return true;
+}
+
+
+bool CWorldMapLayoutDocument::replaceEditorMap(const SWorldMapZoneOrigin& map, QString* error)
+{
+    if(!ensureLoaded()) {if(error)*error=m_loadWarning;return false;}
+    if(!validZone(map,error) || map.mprPath.isEmpty() || map.sectorWidth<=0 || map.sectorHeight<=0) return false;
+    const QString full=absoluteResourcePath(map.mprPath);
+    if(!QFileInfo(full).isFile() || (!map.mobPath.isEmpty() && !QFileInfo(absoluteResourcePath(map.mobPath)).isFile()))
+    {if(error)*error=QStringLiteral("A selected map file is missing.");return false;}
+    auto candidate=m_zones;int index=-1;
+    bool resourceChanged=true;
+    for(const auto& old:candidate)
+        if(old.profileId==map.profileId && old.allodId==map.allodId && old.zoneId==map.zoneId)
+            resourceChanged=key(absoluteResourcePath(old.mprPath))!=key(full);
+    for(int i=0;i<candidate.size();++i)
+    {
+        const auto& existing=candidate[i];
+        if(key(existing.profileId)!=key(map.profileId))continue;
+        if(existing.zoneId==map.zoneId && existing.allodId==map.allodId) {index=i;continue;}
+        if(resourceChanged && !existing.mprPath.isEmpty() && key(QFileInfo(absoluteResourcePath(existing.mprPath)).canonicalFilePath())
+            ==key(QFileInfo(full).canonicalFilePath()))
+        {if(error)*error=QStringLiteral("This MPR already belongs to another map in the layout.");return false;}
+    }
+    if(index<0){if(error)*error=QStringLiteral("The map is no longer in the world layout.");return false;}
+    candidate[index]=map;
+    candidate[index].mprPath=portableResourcePath(full);
+    candidate[index].mobPath=portableResourcePath(absoluteResourcePath(map.mobPath));
+    if(!save(candidate,error))return false;
+    m_zones=candidate;return true;
 }
