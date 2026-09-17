@@ -1,7 +1,10 @@
 # Local tester-build handoff contract
 
 This is the Ataman local build-and-handoff contract for main and all worktrees.
-Executable names and version remain Endurance until a separate branding change.
+Executable names remain Endurance until a separate branding change.
+Ataman versions are integers starting at 1, stored in root VERSION; each separate
+fix or feature increments the number under AGENTS.md. Historical Endurance
+versions remain historical evidence only.
 Builds are local deliverables, never an implicit upload or publication request.
 
 ## 1. Build the application
@@ -99,12 +102,20 @@ The package's one current changelist should state:
 Do not turn routine tests into a long engineering report. Link deeper validation
 documents only when the tester needs them.
 
-The current packaging scripts are not a complete quality gate: at version
-0.5.0-alpha their changelist check is not enforced, and the distribution validator
+The current packaging scripts are not a complete quality gate: their changelist
+check only handles alpha.N, not integer Ataman versions (nor 0.5.0-alpha),
+and the distribution validator
 does not compare manifest digests to actual file hashes. Until separately fixed,
 explicitly verify exactly one current changelist, every manifest entry/hash,
 coverage of all packaged files, and equality of fresh/packaged executable hashes.
 Package completeness is distinct from functional test success.
+
+For each Ataman version use a fresh shadow-build directory: changing VERSION
+changes a compiler definition, which incremental Make builds may fail to notice.
+Check the freshly built executable with --version before staging and require its
+reported version to match VERSION (the output also includes the application name).
+Include one current CHANGELOG.md containing only that
+version's entry and focused test notes, not the entire historical changelog.
 
 ## 5. Handoff format
 

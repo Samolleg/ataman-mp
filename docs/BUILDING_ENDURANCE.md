@@ -147,10 +147,11 @@ regenerates `SHA256SUMS.txt`; and then runs the strict distribution validator.
 Never use a folder that has already been launched as an unsanitized package
 source. A fresh package must enter first-run game/mod setup.
 
-For a minor incremental correction to the same version and test scope, update
-the existing tester folder and run the finalizer again. Do not create a new
-folder for every tiny correction. Once a build has been distributed and must
-remain reproducible, preserve it and use a new version or explicit revision.
+For Ataman, every separate fix advances VERSION under root AGENTS.md. Build each
+version in a fresh shadow directory and stage a new tester folder. Never update
+or finalize a user-run or previously delivered folder. Reuse is limited to an
+owned, never-delivered staging area verified to contain no user-generated data,
+as specified in TEST_BUILD_HANDOFF.md.
 
 The normal handoff is the unpacked, user-runnable folder. Do not create a ZIP or
 launch the packaged editor unless the user explicitly requests that action.
