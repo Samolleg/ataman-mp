@@ -111,6 +111,27 @@ class WorldMapLayoutDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void preservesExtensionsAcrossMigrationEditsAndRemoval()
+    {
+        QTemporaryDir dir;QVERIFY(dir.isValid());const auto path=dir.filePath("world.json");
+        const QByteArray original=R"({"schemaVersion":1,"layoutAlgorithmVersion":1,"coordinateSystem":"mpr-local-xy","extra":{"root":[1,2]},"profiles":[{"profileId":"p","extra":"profile","allods":[{"allodId":"w","extra":"world","zones":[{"zoneId":"a","mprIdentity":"a","origin":{"x":0,"y":0,"extra":"origin"},"provenance":"manual","componentAnchorZoneId":"a","extra":{"zone":true}}]}]}]})";
+        QVERIFY(writeFile(path,original));CWorldMapLayoutDocument doc(path);
+        QVERIFY(!doc.loadEditorWorld("p",{}).storageBlocked);QString error;
+        for(int x : {10,20}) { // v1 migration, then normal v2 save.
+            QVERIFY2(doc.setZoneOrigin("p","w","a",QPointF(x,0),&error),qPrintable(error));
+            auto root=QJsonDocument::fromJson(readFile(path)).object();
+            auto profile=root["profiles"].toArray()[0].toObject();auto world=profile["allods"].toArray()[0].toObject();auto zone=world["zones"].toArray()[0].toObject();
+            QVERIFY(root["extra"].isObject());QCOMPARE(profile["extra"].toString(),QString("profile"));
+            QCOMPARE(world["extra"].toString(),QString("world"));QVERIFY(zone["extra"].toObject()["zone"].toBool());
+            QCOMPARE(zone["origin"].toObject()["extra"].toString(),QString("origin"));
+            doc.reload();QCOMPARE(doc.loadEditorWorld("p",{}).zones[0].origin.x(),double(x));
+        }
+        QCOMPARE(readFile(path+".before-v2.bak"),original);
+        QVERIFY(doc.removeEditorMap("p","w","a",&error));
+        auto root=QJsonDocument::fromJson(readFile(path)).object();auto world=root["profiles"].toArray()[0].toObject()["allods"].toArray()[0].toObject();
+        QVERIFY(world["zones"].toArray().isEmpty());QCOMPARE(world["extra"].toString(),QString("world"));
+        doc.reload();QVERIFY(doc.loadEditorWorld("p",{}).zones.isEmpty());
+    }
     void verifiedMetadataPersistsOnlyWithIntentionalEdit()
     {
         QTemporaryDir dir; QVERIFY(dir.isValid());

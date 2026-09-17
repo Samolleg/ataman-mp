@@ -84,6 +84,56 @@ bool zoneLess(const SWorldMapZoneOrigin& left,
     return key(left.zoneId) < key(right.zoneId);
 }
 
+// Merge known fields by stable identities, retaining extension properties and
+// empty world/profile containers. Removed zone identities are never resurrected.
+QJsonArray preserveGroupProperties(const QJsonArray& previous, const QJsonArray& current, int level)
+{
+    const QString identity = level == 0 ? "profileId" : level == 1 ? "allodId" : "zoneId";
+    const QString children = level == 0 ? "allods" : "zones";
+    QJsonArray merged;
+    QSet<QString> present;
+    for(const auto& value : current)
+    {
+        const QJsonObject fresh = value.toObject();
+        const QString id = key(fresh.value(identity).toString());
+        present.insert(id);
+        QJsonObject old;
+        for(const auto& prior : previous)
+            if(key(prior.toObject().value(identity).toString()) == id) {old=prior.toObject();break;}
+        QJsonObject result = old;
+        for(auto field=fresh.constBegin();field!=fresh.constEnd();++field) result.insert(field.key(),field.value());
+        if(level < 2)
+            result.insert(children,preserveGroupProperties(old.value(children).toArray(),fresh.value(children).toArray(),level+1));
+        else
+        {
+            QJsonObject origin=old.value("origin").toObject();
+            const auto coordinates=fresh.value("origin").toObject();
+            for(auto field=coordinates.constBegin();field!=coordinates.constEnd();++field) origin.insert(field.key(),field.value());
+            result.insert("origin",origin);
+        }
+        merged.append(result);
+    }
+    if(level < 2)
+        for(const auto& prior : previous)
+        {
+            auto group=prior.toObject();
+            if(present.contains(key(group.value(identity).toString()))) continue;
+            group.insert(children,preserveGroupProperties(group.value(children).toArray(),{},level+1));
+            merged.append(group);
+        }
+    return merged;
+}
+
+QByteArray preserveDocumentProperties(const QByteArray& previous, const QByteArray& current)
+{
+    QJsonObject result=QJsonDocument::fromJson(previous).object();
+    const auto fresh=QJsonDocument::fromJson(current).object();
+    const auto profiles=preserveGroupProperties(result.value("profiles").toArray(),fresh.value("profiles").toArray(),0);
+    for(auto field=fresh.constBegin();field!=fresh.constEnd();++field) result.insert(field.key(),field.value());
+    result.insert("profiles",profiles);
+    return QJsonDocument(result).toJson(QJsonDocument::Indented);
+}
+
 QByteArray serialize(const QVector<SWorldMapZoneOrigin>& input,
                      QString* error)
 {
@@ -449,12 +499,13 @@ bool CWorldMapLayoutDocument::save(
         return false;
     }
     QString serializationError;
-    const QByteArray bytes = serialize(zones, &serializationError);
+    QByteArray bytes = serialize(zones, &serializationError);
     if(bytes.isEmpty())
     {
         if(error) *error = serializationError;
         return false;
     }
+    bytes = preserveDocumentProperties(m_diskBytes, bytes);
     if(!QDir().mkpath(QFileInfo(m_path).absolutePath()))
     {
         if(error)
