@@ -51,6 +51,11 @@ class HiddenCheckWidgets : public QObject {
 
 int runScenarioLayerCheck()
 {
+    if(!qEnvironmentVariableIsEmpty("EI_NEIGHBOR_PERF_ROOT"))
+    {
+        extern int runNeighborPerformanceCheck();
+        return runNeighborPerformanceCheck();
+    }
     QTextStream output(stdout);
     int failures=0,checks=0;
     auto check=[&](bool pass,const char* name) { ++checks; if(!pass) ++failures; output << (pass?"PASS: ":"FAIL: ") << name << "\n"; output.flush(); };

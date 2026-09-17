@@ -12,6 +12,8 @@
 #include "node.h"
 #include "part.h"
 #include "unit_animation.h"
+#include "prepared_static_visual.h"
+#include "render_queue.h"
 
 class CMob;
 
@@ -93,6 +95,8 @@ public:
     bool isOperationAxisAllow(EOperationAxisType type) override {Q_UNUSED(type); return true;};
     QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
     QVector<SNavigationCollisionProxy> navigationCollisionProxies() const;
+    void installPreparedStaticParts(const QVector<SPreparedStaticPart>& parts);
+    QVector<SRenderItem> staticRenderItems(const QVector<QSharedPointer<CPart>>& alternate = {}) const;
 
 protected:
     // Editor-only helper figures (lights, particle anchors) can be presented

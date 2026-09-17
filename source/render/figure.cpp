@@ -305,9 +305,9 @@ void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3
     generateTriangles(aVrtData, aMorphVertex, sourceVertexIndices);
 }
 
-void ei::CFigure::getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts)
+void ei::CFigure::getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts, bool upload)
 {
-    appendVertexData(model, complection, aBodyParts);
+    appendVertexData(model, complection, aBodyParts, upload);
 }
 
 void ei::CFigure::getAssemblyHierarchy(QMap<QString, QString>& parents,
@@ -323,7 +323,7 @@ void ei::CFigure::getAssemblyHierarchy(QMap<QString, QString>& parents,
 }
 
 void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complection,
-                                   QList<QString>& aBodyParts)
+                                   QList<QString>& aBodyParts, bool upload)
 {
     if (aBodyParts.isEmpty() || aBodyParts.contains(m_name)) // calc only visible body parts
     {
@@ -354,11 +354,11 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         QVector<int> sourceVertexIndices;
         calculateConstitution(part->vertData(), complection, &sourceVertexIndices);
         part->setSourceVertexIndices(sourceVertexIndices);
-        part->update();
+        if(upload) part->update();
         model.append(part);
     }
     for(auto& child : m_aChild)
-        child->appendVertexData(model, complection, aBodyParts);
+        child->appendVertexData(model, complection, aBodyParts, upload);
 }
 
 void ei::CFigure::getMinimumBboxZ(float& value, QVector3D& complection)

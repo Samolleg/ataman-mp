@@ -11,6 +11,7 @@
 #include "figure.h"
 #include "types.h"
 #include "render_material.h"
+#include "prepared_static_visual.h"
 
 //forward declarations
 class CSettings;
@@ -47,8 +48,11 @@ public:
 
     void initResource();
     void refreshConfiguredSources();
+    static QVector<SPreparedStaticPart> prepareStaticAssembly(
+        const QMap<QString,QByteArray>& files, const QString& model,
+        QVector3D complexion, QStringList parts);
 private:
-    CObjectList();
+    explicit CObjectList(bool loadAuxiliary = true);
     ~CObjectList();
     ei::CFigure* figureDefault();
 
@@ -187,6 +191,9 @@ public:
     // Expanded, ordered RES files from the active resource profile. Used to
     // bind a finalized atlas to one coherent archive before renderer loading.
     QStringList configuredResourceArchivePaths() const;
+    static SPreparedStaticTexture prepareStaticTexture(const QByteArray& data);
+    QOpenGLTexture* uploadStaticTexture(const SPreparedStaticTexture& data,
+                                       const QString& name, const QString& model);
 
 private:
     CTextureList();

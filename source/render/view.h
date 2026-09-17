@@ -54,6 +54,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "map_catalog.h"
 #include "neighbor_map_layout.h"
 #include "neighbor_scene_data.h"
+#include "neighbor_render_cache.h"
 #include <atomic>
 #include "world_terrain_session.h"
 
@@ -144,6 +145,7 @@ class CView : public QGLWidget
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
+    friend int runNeighborPerformanceCheck();
 
 public:
     struct SNidRepair
@@ -879,10 +881,17 @@ private:
         QSharedPointer<CLandscape> landscape;
         QMap<QPair<int,int>,QByteArray> terrainPreviewPayloads;
         QVector<QJsonObject> pendingObjects;
+        QVector<QSharedPointer<const SPreparedStaticVisual>> pendingVisuals;
         int nextObject{0};
         QVector<QSharedPointer<CNode>> staticObjects;
         QVector<QVector3D> staticLocalPositions;
+        QVector<QVector<QSharedPointer<CPart>>> distantParts;
+        QVector<SNeighborDrawRecord> drawRecords;
+        QMap<QPair<int,int>,SNeighborSpatialGroup> spatialGroups;
+        QPointF cachedOrigin;
+        bool drawCacheDirty{true};
     };
+    void refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor);
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
     QThreadPool* m_neighborScenePool{nullptr};
     bool m_neighborObjectUploadScheduled{false};

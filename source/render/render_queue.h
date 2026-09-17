@@ -186,6 +186,11 @@ public:
                 bool castsShadow = false, bool dynamicShadow = false,
                 const QVector3D& materialEmission = QVector3D(),
                 quintptr shadowOwner = 0);
+    static SRenderItem prepareStaticItem(CPart* part, QOpenGLTexture* texture,
+                                        const QMatrix4x4& matrix,
+                                        ERenderMaterialClass material, bool shadow,
+                                        quintptr owner);
+    void submitPrepared(const SRenderItem& item, bool colorVisible, bool shadow);
     void submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
                          const QVector4D& pickingColor);
     void flush();

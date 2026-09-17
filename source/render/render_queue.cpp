@@ -182,6 +182,35 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     m_items.append(item);
 }
 
+SRenderItem RenderQueueContext::prepareStaticItem(CPart* part,QOpenGLTexture* texture,
+    const QMatrix4x4& matrix,ERenderMaterialClass material,bool shadow,quintptr owner)
+{
+    SRenderItem item;
+    item.part=part; item.texture=texture; item.modelMatrix=matrix;
+    item.instanceMatrix=matrix*part->poseMatrix();
+    item.materialClass=material; item.meshIdentity=part->meshIdentity();
+    item.textureUvScale=part->textureUvScale(); item.instanceEligible=part->canInstance();
+    item.castsShadow=shadow; item.shadowOwner=owner;
+    item.shadowBoundsCenter=item.instanceMatrix.map(part->localBoundsCenter());
+    const auto& m=item.instanceMatrix;
+    const float scale=qMax(QVector3D(m(0,0),m(1,0),m(2,0)).length(),
+        qMax(QVector3D(m(0,1),m(1,1),m(2,1)).length(),QVector3D(m(0,2),m(1,2),m(2,2)).length()));
+    item.shadowBoundsRadius=part->localBoundsRadius()*scale;
+    return item;
+}
+
+void RenderQueueContext::submitPrepared(const SRenderItem& cached,bool colorVisible,bool shadow)
+{
+    if(!m_collecting || !cached.part || !cached.texture) return;
+    SRenderItem item=cached;
+    const QVector3D position(item.modelMatrix(0,3),item.modelMatrix(1,3),item.modelMatrix(2,3));
+    item.cameraDistanceSquared=(position-m_cameraPosition).lengthSquared();
+    item.cullingDistanceSquared=(position-m_cullingPosition).lengthSquared();
+    item.colorVisible=colorVisible; item.castsShadow=cached.castsShadow && shadow;
+    item.sequence=m_sequence++;
+    m_items.append(item);
+}
+
 QVector<SShadowCasterGroup> RenderQueueContext::shadowCasterGroups(
         float maximumDistance) const
 {

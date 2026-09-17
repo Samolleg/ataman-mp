@@ -34,7 +34,8 @@ public:
     CFigure();
     ~CFigure();
     //void getVertexData(QVector<SVertexData>& aVrtData, QVector3D& complection);
-    void getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts);
+    void getVertexData(QVector<CPart*>& model, QVector3D& complection, QList<QString>& aBodyParts,
+                       bool upload = true);
     void getMinimumBboxZ(float& value, QVector3D& complection);
     void uvCoords();
     void boundBox();
@@ -62,7 +63,7 @@ private:
     void calculateConstitution (QVector<SVertexData>& aVrtData, QVector3D& constitute,
                                 QVector<int>* sourceVertexIndices = nullptr);
     void appendVertexData(QVector<CPart*>& model, QVector3D& complection,
-                          QList<QString>& aBodyParts);
+                          QList<QString>& aBodyParts, bool upload);
 
 private:
     //TODO: change vector to array

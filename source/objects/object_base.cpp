@@ -298,6 +298,41 @@ void CObjectBase::updateFigure(ei::CFigure* fig)
     recalcFigure();
 }
 
+void CObjectBase::installPreparedStaticParts(const QVector<SPreparedStaticPart>& parts)
+{
+    qDeleteAll(m_aPart); m_aPart.clear();
+    m_bboxDirty=true;
+    for(const auto& data:parts)
+    {
+        auto* part=new CPart;
+        QString name=data.name; part->setName(name);
+        part->setTextureNumber(data.textureNumber);
+        part->vertData()=data.vertices; part->update();
+        m_aPart.append(part);
+    }
+}
+
+QVector<SRenderItem> CObjectBase::staticRenderItems(const QVector<QSharedPointer<CPart>>& alternate) const
+{
+    QMatrix4x4 matrix; matrix.translate(m_drawPosition); matrix.rotate(m_rotation);
+    matrix.scale(editorVisualScale());
+    QVector<SRenderItem> items;
+    const int count=alternate.isEmpty() ? m_aPart.size() : alternate.size();
+    for(int i=0;i<count;++i)
+    {
+        CPart* part=alternate.isEmpty() ? m_aPart[i] : alternate[i].data();
+        if(!part->isDrawable() || !m_texture) continue;
+        auto* texture=m_partTextures.value(part->name().toLower(),nullptr);
+        if(!texture) texture=part->textureNumber()==2 && m_secondaryTexture ? m_secondaryTexture : m_texture;
+        auto item=RenderQueueContext::prepareStaticItem(part,texture,matrix,
+            CTextureList::getInstance()->materialClass(texture),
+            const_cast<CObjectBase*>(this)->castsRenderShadow(),quintptr(this));
+        item.materialEmission=m_partEmissions.value(part->name().toLower());
+        items.append(item);
+    }
+    return items;
+}
+
 void CObjectBase::loadFigure()
 {
     updateFigure(CObjectList::getInstance()->getFigure(m_modelName));

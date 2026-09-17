@@ -83,6 +83,7 @@ void CView::refreshWorldTerrainNeighbors()
         if(changed)
         {
             loaded.landscape->invalidateTerrainShadowField();
+            loaded.drawCacheDirty=true;
             for(int index=0; index<loaded.staticObjects.size(); ++index)
             {
                 loaded.landscape->projectPosition(loaded.staticObjects.at(index).data());

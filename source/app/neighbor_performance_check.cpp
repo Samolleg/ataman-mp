@@ -1,0 +1,205 @@
+#include "view.h"
+#include "landscape.h"
+#include "worldobj.h"
+#include "mob.h"
+#include "settings.h"
+#include "tree_view.h"
+#include "progressview.h"
+#include "tile_form.h"
+#include "neighbor_visual_preparation.h"
+#include "resourcemanager.h"
+#include "endurance_document.h"
+#include "camera.h"
+#include <QApplication>
+#include <QTemporaryDir>
+#include <QSettings>
+#include <QLineEdit>
+#include <QUndoStack>
+#include <QTextStream>
+#include <QThread>
+#include <QtConcurrent>
+#include <QCryptographicHash>
+
+// Opt-in hidden integration check. Real resources are read only; output and
+// settings are restricted to scratch. No normal editor window is shown.
+int runNeighborPerformanceCheck()
+{
+    QTextStream out(stdout); int failures=0;
+    const auto check=[&](bool pass,const char* label) {
+        out<<(pass?"PASS: ":"FAIL: ")<<label<<"\n"; out.flush(); if(!pass) ++failures;
+    };
+    QTemporaryDir scratch;
+    if(!scratch.isValid()) return 1;
+    struct Restore { QString path=QDir::currentPath(); ~Restore(){QDir::setCurrent(path);} } restore;
+    QDir::setCurrent(scratch.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,scratch.path());
+    CSettings settings;
+    auto* roots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots"));
+    if(!roots) return 1;
+    roots->setValue(qEnvironmentVariable("EI_NEIGHBOR_PERF_RES").split(';',QString::SkipEmptyParts).toVector());
+    CTextureList::getInstance()->attachSettings(&settings);
+    CObjectList::getInstance()->attachSettings(&settings);
+    QUndoStack history; CTreeView tree; QTableWidget properties; properties.setColumnCount(2);
+    CProgressView progress; QLineEdit coordinates; CTileForm tiles;
+    CView view(nullptr,nullptr); view.setAttribute(Qt::WA_DontShowOnScreen);
+    view.attach(&settings,&properties,&history,&progress,&coordinates,&tree,&tiles);
+    view.resize(640,480);
+    // WA_DontShowOnScreen creates the backing surface without displaying an
+    // interactive window. renderPixmap would reinitialize this legacy widget's
+    // shaders on each call and cannot capture its bindDefault() presentation.
+    view.show(); QCoreApplication::processEvents();
+    check(view.isValid(),"hidden desktop OpenGL context");
+    if(!view.isValid()) return 1;
+    const QString root=qEnvironmentVariable("EI_NEIGHBOR_PERF_ROOT");
+    SNeighborMapPlacement placement;
+    placement.zoneId="neighbor-test";
+    const QString zone=qEnvironmentVariable("EI_NEIGHBOR_PERF_ZONE","zone9");
+    placement.mprPath=root+"/Maps/"+zone+".mpr"; placement.mobPath=root+"/Maps/"+zone+".mob";
+    CMprDocument document; CValidationReport report;
+    if(!document.load(QFileInfo(placement.mprPath),&report)) return 1;
+    placement.size=QSizeF(document.mapInfo().sectorCountX*32,document.mapInfo().sectorCountY*32);
+    const auto digest=[](const QString& path) {
+        QFile file(path); if(!file.open(QIODevice::ReadOnly)) return QByteArray();
+        QCryptographicHash hash(QCryptographicHash::Sha256); hash.addData(&file); return hash.result();
+    };
+    const auto terrainHash=digest(placement.mprPath),mobHash=digest(placement.mobPath);
+    const auto archives=CTextureList::getInstance()->configuredResourceArchivePaths();
+    QElapsedTimer timer; timer.start();
+    bool workerHasNoGl=false;
+    auto future=QtConcurrent::run([&]() {
+        workerHasNoGl=QOpenGLContext::currentContext()==nullptr && QThread::currentThread()!=qApp->thread();
+        auto scene=prepareNeighborScene(placement);
+        prepareNeighborVisuals(scene,archives,[]{return true;}); return scene;
+    });
+    future.waitForFinished();
+    auto prepared=future.result();
+    check(workerHasNoGl,"model/texture preparation on CPU worker without GL context");
+    check(prepared.valid && prepared.visuals.size()==prepared.staticObjects.size(),"real scene visual preparation complete");
+    quint64 high=0,low=0; int usable=0,textured=0;
+    for(const auto& visual:prepared.visuals)
+    {
+        if(!visual->parts.isEmpty() || visual->specializedVisual) ++usable;
+        if(visual->texture.valid()) ++textured;
+        for(const auto& part:visual->parts) { high+=part.vertices.size()/3; low+=part.distantVertices.size()/3; }
+    }
+    out<<"Prepared "<<usable<<"/"<<prepared.visuals.size()<<" objects, textures "<<textured
+       <<", triangles "<<high<<" -> "<<low<<", CPU ms "<<timer.elapsed()<<"\n"; out.flush();
+    check(usable>1000 && textured>1000,"real zone9 geometry and textures available");
+    check(low<high,"real scene distant geometry reduces triangles");
+    view.makeCurrent();
+    QSet<QString> compared;
+    bool sameGeometry=true;
+    for(int i=0;i<prepared.visuals.size() && compared.size()<24;++i)
+    {
+        const auto& visual=prepared.visuals[i];
+        if(visual->specializedVisual || compared.contains(visual->key)) continue;
+        compared.insert(visual->key);
+        CWorldObj reference(prepared.staticObjects[i]);
+        reference.loadFigure(); reference.loadTexture();
+        const auto oldItems=reference.staticRenderItems();
+        QVector<const SPreparedStaticPart*> drawableParts;
+        for(const auto& part:visual->parts)
+            if(!part.vertices.isEmpty()) drawableParts.append(&part);
+        // e.g. stst8 also contains an empty assembly helper. The legacy queue
+        // excludes it through isDrawable(); compare the same rendered parts.
+        if(oldItems.size()!=drawableParts.size()) {
+            out<<"Mismatch model "<<prepared.staticObjects[i].value("Model name").toString()
+               <<" parts "<<oldItems.size()<<" vs "<<drawableParts.size()<<"\n";
+            sameGeometry=false; continue;
+        }
+        for(int p=0;p<oldItems.size();++p)
+        {
+            const auto& oldVertices=oldItems[p].part->vertData();
+            const auto& newVertices=drawableParts[p]->vertices;
+            if(oldVertices.size()!=newVertices.size()) {
+                out<<"Mismatch model "<<prepared.staticObjects[i].value("Model name").toString()
+                   <<" part "<<p<<" vertices "<<oldVertices.size()<<" vs "<<newVertices.size()<<"\n";
+                sameGeometry=false; continue;
+            }
+            for(int v=0;v<oldVertices.size();++v)
+                if(oldVertices[v].position!=newVertices[v].position
+                    || oldVertices[v].normal!=newVertices[v].normal || oldVertices[v].texCoord!=newVertices[v].texCoord)
+                {
+                    out<<"Mismatch model "<<prepared.staticObjects[i].value("Model name").toString()
+                       <<" part "<<p<<" vertex "<<v<<" position "<<(oldVertices[v].position==newVertices[v].position)
+                       <<" normal "<<(oldVertices[v].normal==newVertices[v].normal)<<" UV "<<(oldVertices[v].texCoord==newVertices[v].texCoord)<<"\n";
+                    sameGeometry=false; break;
+                }
+        }
+    }
+    check(sameGeometry && compared.size()==24,"24 real visual variants match legacy full-detail vertices/normals/UV");
+    auto landscape=CLandscape::createReadOnlyBackground();
+    check(landscape->readPreparedBackground(QFileInfo(placement.mprPath),prepared.terrainMembers),"prepared read-only terrain upload");
+    view.m_pLand=landscape.data();
+    CView::SLoadedNeighborLandscape neighbor;
+    neighbor.placement=placement; neighbor.landscape=landscape;
+    neighbor.pendingObjects=prepared.staticObjects; neighbor.pendingVisuals=prepared.visuals;
+    view.m_neighborLandscapesVisible=true;
+    view.m_neighborLandscapes.append(neighbor);
+    timer.restart();
+    while(!view.m_neighborLandscapes[0].pendingObjects.isEmpty() && timer.elapsed()<60000)
+        view.populateNeighborObjects(view.m_neighborSceneGeneration->load());
+    auto& loaded=view.m_neighborLandscapes[0];
+    check(loaded.pendingObjects.isEmpty() && loaded.staticObjects.size()==usable,"bounded GPU upload completes");
+    view.refreshNeighborRenderCache(loaded);
+    check(loaded.drawRecords.size()==usable && loaded.spatialGroups.size()>1,"spatial groups and draw cache constructed");
+    if(!loaded.drawRecords.isEmpty() && !loaded.drawRecords.first().full.isEmpty())
+    {
+        const auto first=loaded.drawRecords.first().full.first();
+        const auto* storage=loaded.drawRecords.constData();
+        view.refreshNeighborRenderCache(loaded);
+        check(storage==loaded.drawRecords.constData(),"stationary frame reuses cached records");
+        loaded.placement.origin+=QPointF(32,-64);
+        view.refreshNeighborRenderCache(loaded);
+        const auto moved=loaded.drawRecords.first().full.first();
+        check(qAbs(moved.modelMatrix(0,3)-first.modelMatrix(0,3)-32)<0.001f
+            && qAbs(moved.modelMatrix(1,3)-first.modelMatrix(1,3)+64)<0.001f,"moving neighbor invalidates world transforms");
+        loaded.staticLocalPositions[0]+=QVector3D(0,0,3); loaded.drawCacheDirty=true;
+        view.refreshNeighborRenderCache(loaded);
+        check(qAbs(loaded.drawRecords.first().full.first().modelMatrix(2,3)-moved.modelMatrix(2,3)-3)<0.001f,"terrain reprojection invalidates cached height");
+        view.makeCurrent();
+        auto& queue=RenderQueueContext::instance();
+        queue.begin(&view.m_program,QVector3D(0,0,100));
+        for(const auto& item:loaded.drawRecords.first().full) queue.submitPrepared(item,true,true);
+        check(!queue.shadowCasterBounds(10000).isEmpty(),"cached commands retain shadow caster bounds");
+        queue.end();
+    }
+    else check(false,"nonempty render commands");
+    view.m_neighborPlacements={placement};
+    view.loadNeighborLandscapes();
+    view.clearNeighborLandscapes();
+    view.m_neighborScenePool->waitForDone();
+    QCoreApplication::processEvents();
+    check(view.m_neighborLandscapes.isEmpty(),"cancelled generation cannot repopulate neighbor scene");
+    view.loadNeighborLandscapes();
+    timer.restart();
+    while(timer.elapsed()<60000)
+    {
+        QCoreApplication::processEvents();
+        if(!view.m_neighborLandscapes.isEmpty() && view.m_neighborLandscapes.first().pendingObjects.isEmpty()) break;
+        QThread::msleep(2);
+    }
+    check(view.m_neighborLandscapes.size()==1 && view.m_neighborLandscapes.first().staticObjects.size()==usable,
+          "current asynchronous generation reaches complete GPU scene");
+    auto* mob=new CMob; view.m_aMob.append(mob); view.m_activeMob=mob;
+    QVector3D center(float(placement.size.width()/2),float(placement.size.height()/2),0);
+    landscape->projectPt(center);
+    view.m_cam->setTelephotoEnabled(false);
+    view.m_cam->setLocation(center+QVector3D(0,0,400),center,QVector3D());
+    view.m_projection.setToIdentity();
+    view.m_projection.perspective(45,640.0f/480.0f,1,2000);
+    view.makeCurrent(); view.paintGL();
+    const auto frame=view.grabFrameBuffer();
+    QSet<QRgb> colors;
+    for(int y=0;y<frame.height();y+=2) for(int x=0;x<frame.width();x+=2) colors.insert(frame.pixel(x,y));
+    check(!frame.isNull() && colors.size()>64,"hidden scene renders terrain and cached object queue");
+    const QString imagePath=qEnvironmentVariable("EI_NEIGHBOR_PERF_IMAGE");
+    if(!imagePath.isEmpty()) frame.save(imagePath);
+    view.clearNeighborLandscapes();
+    check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"live MPR and MOB remain byte-identical");
+    view.m_pLand=CLandscape::getInstance();
+    view.makeCurrent(); neighbor.landscape.clear(); landscape.clear(); view.doneCurrent();
+    out<<"Neighbor performance integration failures: "<<failures<<"\n"; out.flush();
+    return failures?1:0;
+}

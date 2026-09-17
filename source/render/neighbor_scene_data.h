@@ -4,13 +4,16 @@
 #include <QJsonObject>
 #include <QVector>
 #include <QStringList>
+#include <QSharedPointer>
 #include "neighbor_map_layout.h"
 class CMobDocument;
+struct SPreparedStaticVisual;
 struct SNeighborSceneData
 {
     SNeighborMapPlacement placement;
     QMap<QString, QByteArray> terrainMembers;
     QVector<QJsonObject> staticObjects;
+    QVector<QSharedPointer<const SPreparedStaticVisual>> visuals;
     QStringList diagnostics;
     bool valid{false};
 };

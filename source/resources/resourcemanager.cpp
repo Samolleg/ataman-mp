@@ -442,9 +442,10 @@ CObjectList *CObjectList::getInstance()
     return m_pObjectContainer;
 }
 
-CObjectList::CObjectList():
+CObjectList::CObjectList(bool loadAuxiliary):
     m_pSettings(nullptr)
 {
+    if(!loadAuxiliary) return;
     //read figures for aux objects.
     //TODO: can be conflict with user model name. load aux figures in separate map
     auto auxFile = QFileInfo(":/auxData.res");
@@ -462,9 +463,41 @@ CObjectList::CObjectList():
 
 CObjectList::~CObjectList()
 {
-    ei::CFigure* pFig = nullptr;
-    foreach (pFig, m_aFigure)
-        pFig->~CFigure();
+    QSet<ei::CFigure*> owned;
+    QList<ei::CFigure*> pending = m_aFigure.values();
+    while(!pending.isEmpty())
+    {
+        auto* figure = pending.takeLast();
+        if(!figure || owned.contains(figure)) continue;
+        owned.insert(figure);
+        pending.append(figure->children());
+    }
+    qDeleteAll(owned);
+}
+
+QVector<SPreparedStaticPart> CObjectList::prepareStaticAssembly(
+    const QMap<QString,QByteArray>& files, const QString& model,
+    QVector3D complexion, QStringList parts)
+{
+    CObjectList local(false);
+    const QString name = model.toLower() + ".mod";
+    local.readAssembly(files, name);
+    auto* figure = local.m_aFigure.value(name, nullptr);
+    if(!figure) return {};
+    QVector<CPart*> cpuParts;
+    figure->getVertexData(cpuParts, complexion, parts, false);
+    QVector<SPreparedStaticPart> result;
+    for(auto* part : cpuParts)
+    {
+        SPreparedStaticPart prepared;
+        prepared.name = part->name();
+        prepared.textureNumber = part->textureNumber();
+        prepared.vertices = part->vertData();
+        prepared.distantVertices = simplifyStaticMesh(prepared.vertices);
+        result.append(prepared);
+    }
+    qDeleteAll(cpuParts);
+    return result;
 }
 
 
@@ -1006,6 +1039,84 @@ void CTextureList::parse(QByteArray& data, const QString& name)
     }
     m_aTexture.insert(name.toLower(), texture);
     m_textureMaterialClasses.insert(texture, materialClass);
+}
+
+SPreparedStaticTexture CTextureList::prepareStaticTexture(const QByteArray& data)
+{
+    SPreparedStaticTexture result;
+    if(data.size()<76) return result;
+    QDataStream stream(data); util::formatStream(stream);
+    SMmpHeader h; stream>>h;
+    if(h.m_signature!=0x00504D4D || h.m_width<=0 || h.m_height<=0
+       || h.m_width>8192 || h.m_height>8192) return result;
+    result.width=h.m_width; result.height=h.m_height; result.format=h.m_format;
+    QString error;
+    if(h.m_format==eMMP_DXT1 || h.m_format==eMMP_DXT2 || h.m_format==eMMP_DXT3
+       || h.m_format==eMMP_DXT4 || h.m_format==eMMP_DXT5)
+    {
+        const int block=h.m_format==eMMP_DXT1 ? 8 : 16;
+        int offset=76;
+        const int levels=qMax(1,h.m_mipcount);
+        if(levels>14) return {};
+        for(int i=0;i<levels;++i)
+        {
+            const int bytes=dxtLevelSize(qMax(1,h.m_width>>i),qMax(1,h.m_height>>i),block);
+            if(bytes>data.size()-offset) return {};
+            result.mipSizes.append(bytes); offset+=bytes;
+        }
+        result.compressed=data.mid(76,offset-76);
+        const auto format=h.m_format==eMMP_DXT1 ? ei::DxtFormat::Dxt1
+            : (h.m_format==eMMP_DXT2 || h.m_format==eMMP_DXT3) ? ei::DxtFormat::Dxt3 : ei::DxtFormat::Dxt5;
+        if(!ei::decodeDxtImage(result.compressed.left(result.mipSizes.first()),h.m_width,h.m_height,format,&result.image,&error)) return {};
+    }
+    else if(h.m_format==eMMP_PNT3)
+    {
+        result.image=QImage(h.m_width,h.m_height,QImage::Format_RGBA64);
+        if(!decompressPnt3(result.image,data,uint(h.m_mipcount),&error)) return {};
+    }
+    else if(h.m_format==eMMP_5650 || h.m_format==eMMP_5551 || h.m_format==eMMP_4444 || h.m_format==eMMP_8888)
+    {
+        if(!ei::decodeDirectDrawImage(data.mid(20),h.m_width,h.m_height,&result.image,&error)) return {};
+    }
+    else return {};
+    result.material=classifyTextureAlpha(result.image);
+    return result;
+}
+
+QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& data,
+                                                const QString& name,const QString& model)
+{
+    const QString key=ei::textureCacheKey(name,model);
+    if(m_aTexture.contains(key)) return m_aTexture.value(key);
+    if(!data.valid()) return textureDefault();
+    auto* texture=new QOpenGLTexture(QOpenGLTexture::Target2D);
+    texture->setMagnificationFilter(QOpenGLTexture::Linear);
+    texture->setWrapMode(QOpenGLTexture::Repeat);
+    const auto* context=QOpenGLContext::currentContext();
+    if(!data.mipSizes.isEmpty() && context && !context->isOpenGLES())
+    {
+        texture->setMinificationFilter(QOpenGLTexture::NearestMipMapNearest);
+        texture->setFormat(data.format==eMMP_DXT1 ? QOpenGLTexture::RGBA_DXT1
+            : (data.format==eMMP_DXT2 || data.format==eMMP_DXT3) ? QOpenGLTexture::RGBA_DXT3 : QOpenGLTexture::RGBA_DXT5);
+        texture->setSize(data.width,data.height);
+        texture->setMipLevels(data.mipSizes.size());
+        texture->allocateStorage(QOpenGLTexture::RGBA,QOpenGLTexture::UInt8);
+        int offset=0;
+        for(int i=0;i<data.mipSizes.size();++i)
+        {
+            texture->setCompressedData(i,0,data.mipSizes[i],data.compressed.constData()+offset);
+            offset+=data.mipSizes[i];
+        }
+    }
+    else
+    {
+        texture->setMinificationFilter(data.format!=eMMP_PNT3 && context && !context->isOpenGLES()
+            ? QOpenGLTexture::NearestMipMapNearest : QOpenGLTexture::Nearest);
+        texture->setData(data.image);
+    }
+    m_aTexture.insert(key,texture);
+    m_textureMaterialClasses.insert(texture,data.material);
+    return texture;
 }
 
 void CTextureList::initAuxTexture()

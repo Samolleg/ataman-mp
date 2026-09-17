@@ -35,6 +35,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "neighbor_visual_preparation.h"
 #include "map_object_placement_policy.h"
 #include "landscape_operation_policy.h"
 #include "terrain_save_flow_policy.h"
@@ -2121,6 +2122,10 @@ void CView::updateReadState(EReadState state)
 CView::~CView()
 {
     ++(*m_neighborSceneGeneration);
+    // Workers may own CPU-only CPart wrappers. Join before process-exit GPU
+    // cleanup changes the shared CPart destruction policy.
+    m_neighborScenePool->clear();
+    m_neighborScenePool->waitForDone();
     // Child QObject destruction happens after CView's members are gone. Retire
     // script-window callbacks now, while their map and buffer registry is alive.
     const auto scriptWindows = m_scriptWindows.values();
@@ -3105,6 +3110,7 @@ void CView::loadNeighborLandscapes()
         return;
     const quint64 generation = m_neighborSceneGeneration->load();
     const auto epoch = m_neighborSceneGeneration;
+    const QStringList archives=CTextureList::getInstance()->configuredResourceArchivePaths();
     for(const SNeighborMapPlacement& placement : m_neighborPlacements)
     {
         auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
@@ -3136,6 +3142,7 @@ void CView::loadNeighborLandscapes()
             loaded.landscape->setWorldOffset(QVector3D(
                 float(loaded.placement.origin.x()), float(loaded.placement.origin.y()), 0));
             loaded.pendingObjects = result.staticObjects;
+            loaded.pendingVisuals = result.visuals;
             m_neighborLandscapes.append(loaded);
             doneCurrent();
             ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3")
@@ -3148,9 +3155,13 @@ void CView::loadNeighborLandscapes()
             }
             update();
         });
-        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, epoch, generation]() {
+        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, epoch, generation, archives]() {
             if(epoch->load() != generation) return SNeighborSceneData();
-            return prepareNeighborScene(placement);
+            auto scene=prepareNeighborScene(placement);
+            if(scene.valid) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
+                return epoch->load()==generation;
+            });
+            return scene;
         }));
     }
 }
@@ -3169,18 +3180,42 @@ void CView::populateNeighborObjects(quint64 generation)
         while(neighbor.nextObject < neighbor.pendingObjects.size())
         {
             if(added >= 16 || budget.elapsed() >= 4) { pending = true; break; }
-            const auto data = neighbor.pendingObjects.at(neighbor.nextObject++);
-            QSharedPointer<CNode> node(new CWorldObj(data));
-            node->loadFigure();
-            node->loadTexture();
+            const int index=neighbor.nextObject++;
+            const auto data = neighbor.pendingObjects.at(index);
+            const auto visual=neighbor.pendingVisuals.value(index);
+            if(!visual || (visual->parts.isEmpty() && !visual->specializedVisual)) continue;
+            QSharedPointer<CWorldObj> object(new CWorldObj(data));
+            CPart::setCacheScope("neighbor-static");
+            if(visual->specializedVisual)
+            {
+                object->loadFigure(); object->loadTexture();
+            }
+            else
+            {
+                object->installPreparedStaticParts(visual->parts);
+                object->setTexture(CTextureList::getInstance()->uploadStaticTexture(
+                    visual->texture,data.value("Primary texture").toString(),data.value("Model name").toString()));
+            }
+            QSharedPointer<CNode> node=object;
+            QVector<QSharedPointer<CPart>> distant;
+            for(const auto& source:visual->parts)
+            {
+                QSharedPointer<CPart> part(new CPart);
+                QString name=source.name; part->setName(name);
+                part->setTextureNumber(source.textureNumber);
+                part->vertData()=source.distantVertices;
+                part->update(); distant.append(part);
+            }
             neighbor.landscape->projectPosition(node.data());
             neighbor.staticLocalPositions.append(node->drawPosition());
             neighbor.staticObjects.append(node);
+            neighbor.distantParts.append(distant);
             ++added;
         }
         if(neighbor.nextObject == neighbor.pendingObjects.size())
         {
             neighbor.pendingObjects.clear();
+            neighbor.pendingVisuals.clear();
             neighbor.nextObject = 0;
         }
     }
@@ -3190,6 +3225,31 @@ void CView::populateNeighborObjects(quint64 generation)
     {
         m_neighborObjectUploadScheduled = true;
         QTimer::singleShot(8, this, [this, generation]() { populateNeighborObjects(generation); });
+    }
+}
+
+void CView::refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor)
+{
+    if(neighbor.drawCacheDirty || neighbor.cachedOrigin!=neighbor.placement.origin)
+    {
+        neighbor.drawRecords.clear(); neighbor.spatialGroups.clear();
+        neighbor.cachedOrigin=neighbor.placement.origin;
+        neighbor.drawCacheDirty=false;
+    }
+    // Append just the newly uploaded objects; unchanged objects retain their
+    // matrices, transformed bounds and material/mesh lookup results.
+    for(int i=neighbor.drawRecords.size();i<neighbor.staticObjects.size();++i)
+    {
+        auto* object=static_cast<CWorldObj*>(neighbor.staticObjects[i].data());
+        object->setDrawPosition(neighbor.staticLocalPositions[i]+QVector3D(
+            float(neighbor.placement.origin.x()),float(neighbor.placement.origin.y()),0));
+        SNeighborDrawRecord record;
+        record.full=object->staticRenderItems();
+        record.distant=object->staticRenderItems(neighbor.distantParts[i]);
+        CBox bounds=object->getBBox();
+        record.center=bounds.center()+object->drawPosition(); record.radius=bounds.radius();
+        neighbor.drawRecords.append(record);
+        neighbor.spatialGroups[neighborCell(record.center)].append(i,record.center,record.radius);
     }
 }
 
@@ -8336,21 +8396,46 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         QSet<CNode*> colorSubmittedNodes;
         if(!m_minimapCaptureActive && m_neighborLandscapesVisible && m_staticObjectsVisible)
             for(auto& neighbor : m_neighborLandscapes)
-                for(int index=0; index<neighbor.staticObjects.size(); ++index)
+            {
+                refreshNeighborRenderCache(neighbor);
+                const float shadowDistance=qMin(maximumShadowDistance,128.0f);
+                const bool shadows=environmentEnabled && shadowsEnabled;
+                const QMatrix4x4 clipMatrix=m_projection*camMatrix;
+                for(const auto& group:neighbor.spatialGroups)
                 {
-                    CNode* node=neighbor.staticObjects.at(index).data();
-                    node->setDrawPosition(neighbor.staticLocalPositions.at(index)
-                        + QVector3D(float(neighbor.placement.origin.x()),
-                                    float(neighbor.placement.origin.y()),0));
-                    CBox bounds=node->getBBox();
-                    const QVector3D center=bounds.center()+node->drawPosition();
-                    const bool visible=!cullingEnabled || frustum.intersectsSphere(center,bounds.radius());
-                    const bool caster=environmentEnabled && shadowsEnabled && node->castsRenderShadow()
-                        && (center-logicalCameraPosition).length() <= maximumShadowDistance+bounds.radius();
-                    if(!visible && !caster) continue;
-                    renderQueue.setShadowOnlyCollection(!visible);
-                    node->drawObjectVisual(false,&m_program);
+                    if(performance.collecting()) ++performance.counters().spatialCellsTested;
+                    const bool groupVisible=!cullingEnabled || frustum.intersectsAabb(group.minimum,group.maximum);
+                    const bool groupShadow=shadows && group.withinDistance(logicalCameraPosition,shadowDistance);
+                    if(!groupVisible && !groupShadow) continue;
+                    if(performance.collecting())
+                    {
+                        ++performance.counters().spatialCellsVisible;
+                        performance.counters().spatialCandidates+=quint64(group.objects.size());
+                    }
+                    for(int index:group.objects)
+                    {
+                        if(performance.collecting()) ++performance.counters().nodesVisited;
+                        auto& record=neighbor.drawRecords[index];
+                        const float distance=(record.center-logicalCameraPosition).length();
+                        const auto clip=clipMatrix*QVector4D(record.center,1);
+                        const float pixelRadius=record.radius*qAbs(m_projection(1,1))*height()
+                            /(2.0f*qMax(0.01f,qAbs(clip.w())));
+                        const bool visible=groupVisible && pixelRadius>=0.5f
+                            && (!cullingEnabled || frustum.intersectsSphere(record.center,record.radius));
+                        const bool caster=groupShadow && distance<=shadowDistance+record.radius;
+                        if(!visible && !caster)
+                        {
+                            if(performance.collecting()) ++performance.counters().nodesCulled;
+                            continue;
+                        }
+                        if(performance.collecting()) ++performance.counters().nodesSubmitted;
+                        record.distantSelected=neighborDistantLod(distance,pixelRadius,record.distantSelected);
+                        const auto& items=record.distantSelected ? record.distant : record.full;
+                        for(const auto& item:items)
+                            renderQueue.submitPrepared(item,visible,caster);
+                    }
                 }
+            }
         renderQueue.setShadowOnlyCollection(false);
         for(auto& mob: m_aMob) //TODO: draw inactive mobs with custom color|alfa or something
         {
