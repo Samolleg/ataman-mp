@@ -1,4 +1,11 @@
-# EI Mapper: Endurance Edition
+# EI Mapper Ataman — локальный форк
+
+Самостоятельная локальная линия от
+`19168b91a10562525fb6c83b665275c2fd43cf4c` (2026-09-17).
+Git-история сохранена, remotes отсутствуют. Разработка, ветки и коммиты локальные;
+GitHub и PR не используются. Правила: [AGENTS.md](AGENTS.md),
+[порядок разработки](CONTRIBUTING.md), [дорожная карта](ROADMAP.md).
+Название приложения и бинарников пока остаётся Endurance: код не переименован.
 
 EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
@@ -18,9 +25,9 @@ timestamped pre-save revisions before replacing existing files. Backups and thei
 are stored under `%LOCALAPPDATA%\\EI Mapper Endurance\\backups`; use **Tools → Open Backup
 Folder** to inspect them. A save is refused if its pre-save backup cannot be completed.
 
-This private development line preserves the complete upstream history. The
-public project remains configured as the read-only `upstream` remote, with
-commit `1cebe83d` tagged as `upstream-1cebe83d`.
+This local fork preserves the baseline's Git ancestry and upstream attribution.
+No origin/upstream remote is configured. Historical GitHub links are attribution
+and evidence only, not a synchronization or publication workflow.
 
 ## Alpha scope
 

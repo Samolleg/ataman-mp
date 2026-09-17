@@ -1,87 +1,73 @@
-# EI Mapper Endurance contributor instructions
+# EI Mapper Ataman — правила локального проекта
 
-For every local tester build, package, or handoff, follow
-`docs/TEST_BUILD_HANDOFF.md`. These rules apply equally to main and feature
-worktrees.
+## Проект и база
 
-## EI research and delegation boundaries
+- Это самостоятельный локальный репозиторий ei-mapper-ataman, не worktree Endurance.
+  Исходный проект, его рабочие копии и сборки не изменять.
+- Основа кода: 19168b91a10562525fb6c83b665275c2fd43cf4c. Новые задачи начинаются
+  от принятого локального main — потомка этой основы, либо от базы владельца.
+  Не импортировать более новые изменения Endurance автоматически.
+- Перед работой читать AGENTS.md и текущие пункты ROADMAP.md. Действующие правила:
+  CONTRIBUTING.md, docs/PROJECT_CONTRACT.md, docs/TEST_BUILD_HANDOFF.md и при
+  делегировании docs/PARALLEL_THREAD_WORKERS.md. Старые upstream-документы,
+  примеры и GitHub-ссылки являются историей, не разрешением на действия.
+- Новое явное решение владельца важнее старой проектной записи; системные
+  ограничения сохраняются. Неоднозначность сначала исследовать без изменений,
+  затем уточнять у владельца.
 
-- Read-only inspection of the user's installed games, mods, proprietary corpus,
-  tools, binaries, data, and authorized private source is allowed for in-scope
-  EI work. Prefer direct research over unsupported assumptions.
-- "Do not touch" means "do not modify" and does not prohibit reading, hashing,
-  parsing, comparing, disassembling, or researching unless the user explicitly
-  forbids read access.
-- Ask before copying installed game/mod files into a working area for editing;
-  edit the copy. Live mutation requires explicit authorization and backups.
-- Use `evil-islands-modding` for artifact safety and
-  `evil-islands-private-engine-reference` for the exact private-source privacy,
-  clean-room, and disclosure rules. Read-only internal source inspection is
-  permitted, but private source must not be copied into this repository or any
-  public/test artifact.
-- Delegation prompts must state read permissions and write restrictions
-  separately. Never use ambiguous standalone "do not touch" wording.
-- If there is material ambiguity about intent, workflow, scope, evidence, or
-  implementation choice, ask the user instead of guessing. Concisely identify
-  the source of confusion and the viable options with their practical effects.
-  First resolve anything answerable through safe read-only inspection of files,
-  source, or documentation; ask only about the remaining user decision. This
-  requirement does not apply when the user explicitly authorizes best judgment,
-  reasonable assumptions, or autonomous selection among the available options.
-- Before every substantive handoff, ask: "While working on this, which choices
-  did I make that I am not confident of? List all." Report all material
-  low-confidence choices, assumptions, evidence gaps, and unverified
-  interpretations; state briefly when there are none. Do not defer a material
-  ambiguity to this audit when it should have been raised before implementation.
+## Локальный Git
 
-## Root-cause implementation and debugging
+- Remotes отсутствуют. Без нового явного поручения не выполнять fetch/pull/push,
+  не создавать PR/issues, не добавлять remote и не подключать публикацию.
+  Не менять OAuth, токены, аккаунты и глобальные настройки Git.
+- Одна ограниченная реализация — одна ветка codex/<task>. Проверять исходный SHA,
+  рабочий каталог и статус; GitHub-логин не нужен.
+- Локальный scoped-коммит согласованной реализации входит в работу. Анализ
+  сам по себе не разрешает исправления. Проверять staged diff; не брать чужие правки.
+- Интеграция в main требует отдельного поручения владельца. Не переписывать
+  историю, не выполнять reset --hard/force, не удалять ветки/worktrees без
+  отдельного разрешения. Первичная настройка этого форка включает один коммит
+  правил поверх выбранной основы непосредственно в его новом локальном main.
+- Не коммитить сборки, настройки, журналы, дампы, сохранения, игровые ресурсы,
+  секреты и приватные исходники. Сохранять LICENSE, NOTICE, авторство и историю.
 
-- Before changing code, capture the original issue as a repeatable test with
-  explicit expected results. Trace the pipeline to the first incorrect value,
-  state, ownership transition, or decision. A fix is complete only when the
-  original test passes and proportionate regression checks remain clean.
-  Fixing only a side effect, hiding a symptom, or repairing a newly introduced
-  problem does not count as resolving the original issue.
+## Дорожная карта и проверка
 
-## Parallel thread workers
+- Каноническая карта — ROADMAP.md этого репозитория. Вести ID, исходную проблему,
+  результат, разрешённый объём, критерии завершения, доказательства, вопросы
+  и следующий шаг. Текущий статус отделять от явно помеченной истории.
+- Не подменять основную цель последним симптомом. Связанные дефекты учитывать
+  отдельно. Не закрывать родительскую задачу по выполнению части работы.
+- Для исправления сначала воспроизвести дефект и найти первое неверное значение
+  или состояние. Для новой функции определить проверяемое ожидаемое поведение.
+- Проверять исходный случай и соразмерный регресс. Таймаут/сбой — не PASS;
+  успешная упаковка не подтверждает исправность редактора.
+- Перед итогом проверять все сомнительные решения. Сообщать ветку, полный SHA,
+  изменения, результаты тестов, ручные пробелы и существенные неопределённости.
 
-- Read `docs/PARALLEL_THREAD_WORKERS.md` before creating a parallel Endurance
-  implementation task.
-- Create worktree workers through the saved Endurance Codex project, never from
-  the non-repository parent workspace. Use `list_projects`, then `create_thread`
-  with the Endurance `projectId` and `environment: worktree`.
-- Wait for worktree setup to complete before sending follow-up work. Do not use
-  same-directory forks for parallel edits.
+## Данные и исследование
 
-## External Codex collaborators
+- Чтение установленных игр, модов и разрешённых данных допустимо в рамках задачи.
+  «Не трогать» означает не изменять, если чтение отдельно не запрещено.
+- Перед копированием игровых/модовых файлов для правок спросить владельца;
+  редактировать копию. Живые данные менять только с разрешением и резервной копией.
+- Не переносить приватный код и игровые данные в репозиторий или сборки.
+- При наличии навыков evil-islands-modding и evil-islands-private-engine-reference
+  прочитать относящиеся инструкции до соответствующего исследования. При их
+  отсутствии сообщить ограничение: работа с обычным кодом проекта допустима,
+  работу, зависящую от неизвестных правил приватных источников, приостановить.
+  Не придумывать разрешения на доступ или раскрытие приватного кода.
+- Диагностика не разрешает автоматический ремонт данных.
+  Совместимость и сохранение: docs/PROJECT_CONTRACT.md.
 
-- Read `CONTRIBUTING.md` before starting work for an external collaborator. Its
-  Russian quick-start is the preferred handoff for contributors who are not
-  comfortable with Git or English-only project documentation.
-- External contributors work only on a dedicated branch created from the latest
-  `origin/main`. Use `contrib/<github-user>/<short-task>` unless the maintainer
-  assigns another name. Never commit, merge, or push directly to `main`.
-- Keep one bounded issue per branch. Do not mix cleanup, refactors, formatting,
-  generated artifacts, or unrelated fixes into the requested change.
-- Let the contributor's Codex agent perform fetch, branch creation, testing,
-  commits, and branch pushes. If `origin/main` moves, fetch and rebase the
-  contributor branch; stop and report any conflict instead of guessing.
-- Push only the assigned contributor branch, never force-push, and open a pull
-  request for review. The maintainer owns integration and the final `main`
-  validation/push.
-- The final handoff must name the branch and full commit, summarize changed
-  files and behavior, report tests/builds and manual gaps, and list every
-  material uncertainty. Installed game/mod data and private source must never
-  be committed or uploaded.
+## Задачи и сборки
 
-## Tester build handoff
-
-- Deliver an unpacked, user-runnable tester folder, not raw compiler output.
-- Do not launch the packaged editor interactively; the user runs it.
-- Provide a clear changelist, useful test steps, and a clickable folder link.
-- Do not create a ZIP unless explicitly requested.
-- Prefer updating and re-finalizing the existing folder for a minor incremental
-  fix to the same test target. Use a new folder for a new version, a materially
-  different test scope, or to preserve an already-shared immutable build.
-- Never ship settings, logs, dumps, saves, object files, generated Makefiles,
-  stale changelists, or local/private paths.
+- Новые пользовательские задачи и делегирование — только по соответствующей
+  явной просьбе владельца. Следовать docs/PARALLEL_THREAD_WORKERS.md.
+- Поручения разделяют разрешения на чтение и запреты на изменение; назначать
+  конкретное владение файлами, не использовать неоднозначное «не трогать».
+- Для сборок соблюдать docs/TEST_BUILD_HANDOFF.md. Не запускать редактор
+  интерактивно вместо пользователя; не создавать ZIP без просьбы.
+- Финализатор удаляет настройки, логи, сохранения и кэш. Запускать его только
+  на новой собственной staging-папке, никогда на пользовательской установке.
+  Существующие сборки и настройки без отдельного разрешения не заменять.

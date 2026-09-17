@@ -1,7 +1,8 @@
 # Local tester-build handoff contract
 
-This is the universal Endurance build-and-handoff contract for `main` and every
-feature or integration worktree.
+This is the Ataman local build-and-handoff contract for main and all worktrees.
+Executable names and version remain Endurance until a separate branding change.
+Builds are local deliverables, never an implicit upload or publication request.
 
 ## 1. Build the application
 
@@ -23,9 +24,15 @@ runtime, or packaging checks for the changed area. Headless commands may run
 automatically. Do not open the packaged GUI for the user or begin their manual
 test on their behalf.
 
+Report every failure, timeout and skipped check. A historical exact-commit
+rebuild may be delivered as an explicitly unvalidated test artifact with these
+limits, not as a verified release. For a new fix/feature, failure of its original
+reproduction or relevant regression blocks declaring the task complete. Do not
+change an explicitly requested historical commit to make checks pass.
+
 ## 2. Stage one runnable tester folder
 
-Create or update:
+Create a new, previously nonexistent owned staging folder:
 
 ```text
 artifacts/EI-Mapper-Endurance-<version>-<purpose>-test/
@@ -55,14 +62,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   <tester-folder>
 ```
 
+Before finalization, resolve the exact absolute target and verify it is that
+new owned staging folder, not the repository root, a game installation or a
+folder already handed to a user. The finalizer deletes settings, logs, saves
+and caches. Never point it at a user-run or existing distributed folder.
+
 The finalizer must pass. Do not run the finalized package afterwards: that
 would recreate user settings/logs and invalidate its clean first-run state.
 
 ## 3. Reuse versus create
 
-Prefer updating the existing tester folder when a minor fix refines the same
-version and test workload. Replace the executable/runtime and changed notes,
-then run the finalizer again. This avoids a stream of nearly identical folders.
+Reusing a folder is allowed only for the agent's own never-delivered staging
+area, after verifying it has no user-generated data. For an existing user build,
+make a separate revision/commit-named package, even for a small fix. Do not
+replace or delete prior builds/settings without a separate owner instruction.
 
 Create a new folder when:
 
@@ -85,6 +98,13 @@ The package's one current changelist should state:
 
 Do not turn routine tests into a long engineering report. Link deeper validation
 documents only when the tester needs them.
+
+The current packaging scripts are not a complete quality gate: at version
+0.5.0-alpha their changelist check is not enforced, and the distribution validator
+does not compare manifest digests to actual file hashes. Until separately fixed,
+explicitly verify exactly one current changelist, every manifest entry/hash,
+coverage of all packaged files, and equality of fresh/packaged executable hashes.
+Package completeness is distinct from functional test success.
 
 ## 5. Handoff format
 
