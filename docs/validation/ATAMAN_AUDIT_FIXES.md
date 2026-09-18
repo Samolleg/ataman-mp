@@ -70,3 +70,32 @@ SetNoConstraint позволял дочерним элементам выход�
 64 px под тайлы плюс высоту своего оформления. На длинной панели палитра растёт.
 Скрытый native Windows UI-тест завершился с exit 0; дополнительные проверки
 короткой панели 320x600 включены в итоговый прогон свежей сборки.
+
+## Итоговая сборка 24
+
+- Исходники: bf327d22c05ceeec29f5340e02e616f9b5bb04aa, codex/audit-fixes.
+- Fresh shadow: build-release-24-audit; build-audit24.log, exit 0.
+  Переводы сгенерированы lrelease из текущего TS; сгенерированный QM в рабочем
+  дереве возвращён к tracked-версии после сборки, бинарник содержит новый перевод.
+- EXE SHA256: 9C536FD551D9BE6F96B1856B92BC750F6E526C9C9B71DC076C45D993752B8C0D.
+- Восемь наборов: 260 PASS / 0 FAIL / 19 SKIP, build-audit24-tests.log.
+  Координаты отдельно: 4 PASS, build-tests-audit-coordinate/results.txt.
+  19 SKIP относятся к opt-in внешним/private fixtures; они не объявляются PASS.
+- Свежее приложение: --version = 24; database-creation-check,
+  resource-navigation-check, scenario-layer-check (47 PASS), ui-widget-check PASS.
+  UI запускался скрыто с native Windows platform и временными INI;
+  shortLandscapeDockScrollsWithoutOverlap, native docks, clipboard и первый
+  мастер прошли. Прежние timeout/нулевая палитра воспроизведены до исправления.
+  Ранний sandbox-прогон native UI не имел доступа к clipboard; полный итоговый
+  прогон вне sandbox прошёл. Восстановление clipboard выполняет сам тест.
+- Read-only проверка живого мира и GPU: 41 PASS, 0 FAIL;
+  build-release-24-audit/neighbor-perf.stdout.txt. Тест подтвердил неизменность
+  прочитанных MPR/MOB и удержание поколений соседей при неизменном контексте.
+- Packaging regression: 9 PASS; packaging-tests.txt в том же build-каталоге.
+- Новая owned staging: build-staging-24-audit. Finalizer/validator PASS,
+  независимо проверены 100 хешей, покрытие, текущие VERSION/changelog и совпадение
+  EXE со свежей проверенной сборкой. После финализатора программа не запускалась.
+- Обновление постоянной установки ожидает закрытия пользовательского процесса
+  PID 22924. Договор запрещает заменять загруженный EXE или завершать сессию.
+- Визуальная приёмка реальной сцены и замеры FPS остаются за владельцем;
+  автоматические проверки не доказывают отсутствие всех возможных дефектов.
