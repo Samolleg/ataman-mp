@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QBuffer>
+#include <QQuaternion>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -482,6 +483,7 @@ class EnduranceDocumentTests : public QObject
 
 private slots:
     void neighborStaticScenePreservesVisualsWithoutGameplayNodes();
+    void neighborRotationsPreserveTransformedVertices();
     void neighborSceneRejectsInvalidTerrain();
     void neighborRealMapReadOnly();
     void terrainTileInformationPersistsWithoutBlinking();
@@ -14264,9 +14266,48 @@ void EnduranceDocumentTests::neighborStaticScenePreservesVisualsWithoutGameplayN
     QCOMPARE(visual["Object parts"].toArray(),QJsonArray({"trunk","leaves"}));
     QCOMPARE(visual["Base object"].toObject()["Position"].toArray(),QJsonArray({12,24,3}));
     QCOMPARE(visual["Base object"].toObject()["Complection"].toArray(),QJsonArray({1,2,3}));
-    QCOMPARE(visual["Base object"].toObject()["Rotation"].toArray(),QJsonArray({0,0,1,0}));
+    QCOMPARE(visual["Base object"].toObject()["Rotation"].toArray(),QJsonArray({0,1,0,0}));
     QVERIFY(!visual["Is shadow?"].toBool());
     QCOMPARE(document.serialize(),bytes);
+}
+
+void EnduranceDocumentTests::neighborRotationsPreserveTransformedVertices()
+{
+    const QVector<QQuaternion> rotations={QQuaternion(),
+        QQuaternion::fromAxisAndAngle(0,0,1,90),
+        QQuaternion::fromAxisAndAngle(1,0,0,180),
+        QQuaternion(1,2,3,4).normalized()};
+    for(const auto& expected:rotations)
+    {
+        QByteArray rotation;
+        QDataStream stream(&rotation,QIODevice::WriteOnly);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        stream << expected.scalar() << expected.x() << expected.y() << expected.z();
+        const QByteArray bytes=validMob(section(0xB000,section(0xB001,
+            section(0xB002,u32(42))+section(0xB006,"building")
+            +section(0xB009,plot(12,24,3))+section(0xB00A,rotation))));
+        CMobDocument document; CValidationReport report;
+        QVERIFY(document.loadBytes(bytes,"rotation.mob",&report));
+        const auto visuals=neighborStaticObjects(document);
+        QCOMPARE(visuals.size(),1);
+        const auto a=visuals[0]["Base object"].toObject()["Rotation"].toArray();
+        QCOMPARE(a.size(),4);
+        const QQuaternion actual(float(a[3].toDouble()),float(a[0].toDouble()),
+                                 float(a[1].toDouble()),float(a[2].toDouble()));
+        for(const auto& vertex:QVector<QVector3D>{{1,0,0},{0,1,0},{0,0,1},{2,-3,5}})
+            QVERIFY2((actual.rotatedVector(vertex)-expected.rotatedVector(vertex)).length()<0.00001f,
+                     "Neighbor MOB rotation changes the object's transformed vertices");
+        QCOMPARE(document.serialize(),bytes);
+    }
+    const QByteArray bytes=validMob(section(0xB000,section(0xB001,
+        section(0xB002,u32(42))+section(0xB006,"building")
+        +section(0xB009,plot(12,24,3)))));
+    CMobDocument document; CValidationReport report;
+    QVERIFY(document.loadBytes(bytes,"no-rotation.mob",&report));
+    const auto visuals=neighborStaticObjects(document);
+    QCOMPARE(visuals.size(),1);
+    QCOMPARE(visuals[0]["Base object"].toObject()["Rotation"].toArray(),QJsonArray({0,0,0,1}));
 }
 
 void EnduranceDocumentTests::neighborSceneRejectsInvalidTerrain()

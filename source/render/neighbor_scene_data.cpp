@@ -65,7 +65,10 @@ QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document)
         base["Map name"]=object.name;
         base["Position"]=position;
         base["Complection"]=floats(leaf(*section,0xB00C),3,{1,1,1});
-        base["Rotation"]=floats(leaf(*section,0xB00A),4,{0,0,0,1});
+        // MOB stores scalar first (w,x,y,z); object JSON / QVector4D stores
+        // scalar last (x,y,z,w), as in CMobParser::readQuaternion.
+        const auto rotation=floats(leaf(*section,0xB00A),4,{1,0,0,0});
+        base["Rotation"]=QJsonArray{rotation[1],rotation[2],rotation[3],rotation[0]};
         QJsonObject visual;
         visual["Base object"]=base;
         visual["Model name"]=object.model;

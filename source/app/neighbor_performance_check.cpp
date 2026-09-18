@@ -1,6 +1,8 @@
 #include "view.h"
 #include "landscape.h"
 #include "worldobj.h"
+#include "utils.h"
+#include <QJsonArray>
 #include "mob.h"
 #include "settings.h"
 #include "tree_view.h"
@@ -113,6 +115,41 @@ int runNeighborPerformanceCheck()
     auto prepared=future.result();
     check(workerHasNoGl,"model/texture preparation on CPU worker without GL context");
     check(prepared.valid && prepared.visuals.size()==prepared.staticObjects.size(),"real scene visual preparation complete");
+    // Compare the worker's JSON convention with the active MOB reader, not
+    // with a second object constructed from the same potentially wrong JSON.
+    CMobDocument rotationDocument; CValidationReport rotationReport;
+    bool sameRotations=rotationDocument.load(QFileInfo(placement.mobPath),&rotationReport);
+    QHash<QString,const SMobSection*> indexed;
+    std::function<void(const QVector<SMobSection>&)> indexSections;
+    indexSections=[&](const QVector<SMobSection>& sections) {
+        for(const auto& section:sections) {
+            indexed.insert(section.path,&section); indexSections(section.children);
+        }
+    };
+    indexSections(rotationDocument.sections());
+    int rotationCount=0;
+    for(const auto& object:rotationDocument.objects()) {
+        if(object.unit || object.sectionType!=0xB001 || !object.hasPosition || object.model.isEmpty()) continue;
+        const auto* section=indexed.value(object.sectionPath,nullptr);
+        if(!section || rotationCount>=prepared.staticObjects.size()) {sameRotations=false;break;}
+        QVector4D activeRotation(0,0,0,1);
+        for(const auto& field:section->children)
+            if(field.type==0xB00A) {
+                QByteArray raw=field.rawBytes.mid(8);
+                util::CMobParser parser(raw); parser.readQuaternion(activeRotation);
+            }
+        const auto a=prepared.staticObjects[rotationCount++].value("Base object").toObject().value("Rotation").toArray();
+        if(a.size()!=4) {sameRotations=false;continue;}
+        const QQuaternion neighbor(float(a[3].toDouble()),float(a[0].toDouble()),
+                                   float(a[1].toDouble()),float(a[2].toDouble()));
+        const QQuaternion active(activeRotation);
+        for(const auto& vertex:QVector<QVector3D>{{1,0,0},{0,1,0},{0,0,1},{2,-3,5}})
+            if((active.rotatedVector(vertex)-neighbor.rotatedVector(vertex)).length()>0.00001f)
+                sameRotations=false;
+    }
+    out<<"Compared active/neighbor rotations: "<<rotationCount<<"\n";
+    check(sameRotations && rotationCount>0 && rotationCount==prepared.staticObjects.size(),
+          "all real static object rotations match active MOB parser and transformed vertices");
     quint64 high=0,low=0; int usable=0,textured=0;
     for(const auto& visual:prepared.visuals)
     {
