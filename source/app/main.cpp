@@ -668,6 +668,37 @@ int runHeadlessCommand(QApplication& app)
 
     if(uiWidgetCheck)
     {
+        // Keep every synthetic widget off the desktop, including modal dialogs,
+        // while allowing the Windows platform to create real native handles.
+        class HiddenWidgetFilter final : public QObject
+        {
+            bool eventFilter(QObject* object, QEvent* event) override
+            {
+                if(event->type() == QEvent::Polish)
+                    if(QWidget* widget = qobject_cast<QWidget*>(object))
+                        widget->setAttribute(Qt::WA_DontShowOnScreen);
+                return false;
+            }
+        } hiddenWidgetFilter;
+        app.installEventFilter(&hiddenWidgetFilter);
+        // Native-platform checks must restore the user's clipboard afterwards.
+        struct ClipboardRestore
+        {
+            QMimeData* saved = new QMimeData;
+            ClipboardRestore()
+            {
+                if(const QMimeData* current = QApplication::clipboard()->mimeData())
+                    for(const QString& format : current->formats())
+                        saved->setData(format, current->data(format));
+            }
+            ~ClipboardRestore() { QApplication::clipboard()->setMimeData(saved); }
+        } clipboardRestore;
+        QTemporaryDir uiSettingsDirectory;
+        if(!uiSettingsDirectory.isValid())
+            return 2;
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           uiSettingsDirectory.path());
         app.setQuitOnLastWindowClosed(false);
         CTreeView behaviorFilterTree;
         CObjectBase behaviorFilterNode;
@@ -2166,6 +2197,8 @@ int runHeadlessCommand(QApplication& app)
             && manualAtlasTileList->item(0)->toolTip().contains(
                 QStringLiteral("Grass / Dark"));
         terrainPaintFilter->clear();
+        landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        QApplication::processEvents();
         const QList<QToolButton*> paletteButtons =
             landscapeTools.findChildren<QToolButton*>();
         const bool materialPaletteScrollsAndFillsWidth = groundMaterialScroll
@@ -2466,6 +2499,11 @@ int runHeadlessCommand(QApplication& app)
                         autosaveInterval->setText("1");
                     if(cameraWheelGesture)
                         cameraWheelGesture->setCurrentIndex(2);
+                    // Exercise an actual language change independently of the
+                    // application's default language or the host's locale.
+                    if(COptString* originalLanguage = dynamic_cast<COptString*>(
+                           settingsWindow.opt(eOptSetGeneral, "language")))
+                        originalLanguage->setValue("en");
                     if(language)
                         language->setCurrentIndex(language->findData("ru"));
                     if(uiScale)
@@ -3043,7 +3081,24 @@ int runHeadlessCommand(QApplication& app)
         // constructing it earlier contaminates otherwise independent probes.
         qApp->setProperty("enduranceDatabasePrototypeNavigationProbe", true);
         qApp->setProperty("enduranceDatabasePrototypeNavigationReceived", QString());
+        const QString productionPreviousDirectory=QDir::currentPath();
+        QTemporaryDir productionSettingsDirectory;
+        if(!productionSettingsDirectory.isValid()) return 2;
+        QDir::setCurrent(productionSettingsDirectory.path());
+        bool firstRunSetupCancelled=false;
+        QTimer firstRunSetupDriver;
+        QObject::connect(&firstRunSetupDriver,&QTimer::timeout,[&]() {
+            for(QWidget* widget:QApplication::topLevelWidgets())
+                if(auto* setup=qobject_cast<CResourceSetupDialog*>(widget))
+                    if(setup->isVisible()) {
+                        firstRunSetupCancelled=true;
+                        setup->reject();firstRunSetupDriver.stop();break;
+                    }
+        });
+        firstRunSetupDriver.start(1);
         MainWindow* productionWindow = new MainWindow;
+        firstRunSetupDriver.stop();
+        QDir::setCurrent(productionPreviousDirectory);
         const bool productionRouteInvoked = productionWindow->view()
             && QMetaObject::invokeMethod(productionWindow->view(),
                 "openDatabasePrototypeRequested", Qt::DirectConnection,
@@ -3088,7 +3143,7 @@ int runHeadlessCommand(QApplication& app)
         const bool expandedWorkingTileSelectionRejected =
             !tileForm.selectTile(1393);
 
-        const bool passed = behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        const bool passed = firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -3255,6 +3310,7 @@ int runHeadlessCommand(QApplication& app)
                << " clickCommit=" << clickCommit
                << " databasePrototypeMenuEmissionWorks="
                << databasePrototypeMenuEmissionWorks
+               << " firstRunSetupCancelled=" << firstRunSetupCancelled
                << " databasePrototypeMainWindowRouteWorks="
                << databasePrototypeMainWindowRouteWorks
                << " detachedPreviewSharesViewportContext="
