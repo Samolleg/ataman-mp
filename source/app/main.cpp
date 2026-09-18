@@ -2224,6 +2224,17 @@ int runHeadlessCommand(QApplication& app)
             // former prose help into tab tooltips. Font metrics can make this
             // 38 px in the retained headless Qt 5.12 configuration.
             && groundMaterialScroll && groundMaterialScroll->height() >= 38;
+        landscapeTools.resize(320, 600);
+        QApplication::processEvents();
+        QScrollArea* toolScroll = landscapeTools.findChild<QScrollArea*>(
+            "landscapeToolScroll");
+        const bool shortLandscapeDockScrollsWithoutOverlap = toolScroll
+            && toolScroll->verticalScrollBar()->maximum() > 0
+            && groundMaterialScroll && groundMaterialScroll->height() >= 64
+            && materialPaletteTabs && terrainPaintRadius
+            && materialPaletteTabs->mapTo(&landscapeTools,
+                   materialPaletteTabs->rect().bottomLeft()).y()
+                < terrainPaintRadius->mapTo(&landscapeTools, QPoint()).y();
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
@@ -3273,6 +3284,7 @@ int runHeadlessCommand(QApplication& app)
             && materialVariantsRemainDistinctAndGrouped
             && materialPaletteScrollsAndFillsWidth
             && landscapeToolsAreCompactAndPaletteFillsHeight
+                && shortLandscapeDockScrollsWithoutOverlap
             && threeTerrainPaintModesAvailable
             && classicPaletteFirstOpenDoesNotOverlapControls
             && terrainPaintBetaControlsAreExplicit
@@ -3504,6 +3516,7 @@ int runHeadlessCommand(QApplication& app)
                << " landscapeToolsWidth=" << landscapeTools.width()
                << " materialPaletteTabsHeight="
                << (materialPaletteTabs ? materialPaletteTabs->height() : -1)
+               << " shortLandscapeDockScrollsWithoutOverlap=" << shortLandscapeDockScrollsWithoutOverlap
                << " groundMaterialScrollHeight="
                << (groundMaterialScroll ? groundMaterialScroll->height() : -1)
                << " defaultAtlasSourceVisible=" << defaultAtlasSourceVisible

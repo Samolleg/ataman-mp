@@ -169,8 +169,21 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_sculptControls(new QWidget(this))
     , m_paintControls(new QWidget(this))
 {
-    QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setSizeConstraint(QLayout::SetNoConstraint);
+    // A short dock scrolls the complete tool panel instead of overlapping its
+    // controls or collapsing the material palette to an empty viewport.
+    QVBoxLayout* outerLayout = new QVBoxLayout(this);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    QScrollArea* toolScroll = new QScrollArea(this);
+    toolScroll->setObjectName(QStringLiteral("landscapeToolScroll"));
+    toolScroll->setWidgetResizable(true);
+    toolScroll->setFrameShape(QFrame::NoFrame);
+    toolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    QWidget* toolContents = new QWidget(toolScroll);
+    toolContents->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+    QVBoxLayout* layout = new QVBoxLayout(toolContents);
+    layout->setSizeConstraint(QLayout::SetMinimumSize);
+    toolScroll->setWidget(toolContents);
+    outerLayout->addWidget(toolScroll);
     QLabel* warning = new QLabel(tr(
         "Terrain edits are undoable. Changed MPR saves use staged validation, backup, and atomic replacement."), this);
     warning->setWordWrap(true);
@@ -460,13 +473,17 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Manual paints the selected physical atlas tile and rotation directly, "
         "without semantic blending. Hold right-click and move to sample a tile; "
         "Shift+Wheel rotates it."));
-    // The palette consumes the remaining height, but it must be allowed to
-    // shrink and scroll when the dock is short. A fixed minimum here makes Qt
-    // place the following brush controls inside the tab geometry on the first
-    // Classic Auto layout.
+    // Reserve a visible tile row below both tab bars and the mode checkbox.
+    // A 100 px minimum could leave the actual scroll viewport at zero height.
     m_paintModeTabs->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
-    m_paintModeTabs->setMinimumHeight(100);
+    const int paletteChromeHeight = m_paintModeTabs->tabBar()->sizeHint().height()
+        + qMax(m_materialTabs->tabBar()->sizeHint().height(),
+               m_classicMaterialTabs->tabBar()->sizeHint().height())
+        + qMax(m_modernAutoResolveBlends->sizeHint().height(),
+               m_classicAutoSafe->sizeHint().height())
+        + qMax(modernModeLayout->spacing(), classicModeLayout->spacing()) + 12;
+    m_paintModeTabs->setMinimumHeight(paletteChromeHeight + 64);
     paintLayout->addWidget(m_paintModeTabs, 1);
 
     m_paintRadius->setRange(1, 33);
