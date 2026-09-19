@@ -7,6 +7,8 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QComboBox>
+#include <QCompleter>
+#include <QAbstractItemView>
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
@@ -705,8 +707,8 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     SMapTableZone z;z.zoneId="test";SMapTableExit e;e.exitId=1;e.destinationZoneId="none";
     e.hasDeployRectangle=true;e.deployRectangle=r;e.hasRemoveRectangle=true;e.removeRectangle=QRectF(60,60,10,10);z.exits.append(e);
     CTravelPanel panel;panel.populate({z},0,0,false);
-    int edits=0;SMapTableExit changed;
-    QObject::connect(&panel,&CTravelPanel::exitEdited,[&](int index,const SMapTableExit& value){QCOMPARE(index,0);++edits;changed=value;});
+    int edits=0;int expectedIndex=0;SMapTableExit changed;
+    QObject::connect(&panel,&CTravelPanel::exitEdited,[&](int index,const SMapTableExit& value){QCOMPARE(index,expectedIndex);++edits;changed=value;});
     int requested=-1,focus=-1;bool preference=false;
     QObject::connect(&panel,&CTravelPanel::drawRequested,[&](bool remove,bool create){QVERIFY(create);requested=remove?1:0;});
     panel.findChild<QPushButton*>("travelAdd0")->click();QCOMPARE(requested,0);
@@ -749,6 +751,28 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     QObject::connect(&panel,&CTravelPanel::incomingRequested,[&](int a,int b){linkedZone=a;linkedExit=b;});
     source->setCurrentIndex(1);link->click();QCOMPARE(linkedZone,1);QCOMPARE(linkedExit,0);
     QCOMPARE(edits,1); // Choosing arrival source does not edit this record's outgoing link.
+    expectedIndex=1;
+    // Search does not commit arbitrary text or invent destination records.
+    auto* destination=panel.findChild<QComboBox*>("travelDestination");
+    auto* entry=panel.findChild<QComboBox*>("travelDestinationEntry");
+    QVERIFY(destination && entry);QCOMPARE(destination->maxVisibleItems(),10);
+    QCOMPARE(destination->completer()->filterMode(),Qt::MatchContains);
+    destination->setEditText("unselected search");QVERIFY(!panel.flush());QCOMPARE(edits,1);
+    panel.populate({z,other},0,1,false);
+    destination->setCurrentIndex(destination->findData("other"));
+    QMetaObject::invokeMethod(destination,"activated",Q_ARG(int,destination->currentIndex()));
+    QCOMPARE(entry->findData(17)>0,true);QCOMPARE(entry->currentData().toInt(),0);
+    entry->setCurrentIndex(entry->findData(17));QVERIFY(panel.flush());
+    QCOMPARE(changed.destinationZoneId,QString("other"));QCOMPARE(changed.destinationExitId,17);
+    other.exits[0].hasDeployRectangle=false;
+    z.exits[1].destinationZoneId="other";z.exits[1].destinationExitId=17;
+    panel.populate({z,other},0,1,false);
+    QCOMPARE(entry->currentData().toInt(),17);
+    QVERIFY(!(entry->model()->flags(entry->model()->index(entry->currentIndex(),0)) & Qt::ItemIsEnabled));
+    QVERIFY(panel.findChild<QLabel*>("travelDirectionNote")->text().contains(QString::fromUtf8("не готово")));
+    int routeRequests=0;QObject::connect(&panel,&CTravelPanel::routeRequested,[&](){++routeRequests;});
+    panel.findChild<QPushButton*>("travelDestinationCreate")->click();QCOMPARE(routeRequests,1);
+
     panel.populate({z,other},0,2,false);QVERIFY(!link->isEnabled());
     QVERIFY(incoming->text().contains(QString::fromUtf8("пока никто")));
 }

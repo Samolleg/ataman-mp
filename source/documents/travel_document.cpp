@@ -153,7 +153,7 @@ bool CTravelDocument::prepareSave(SMapSaveFile* file,QString* error) const
             if(target.zoneId.compare(exit.destinationZoneId,Qt::CaseInsensitive)==0)
                 for(const auto& entry:target.exits)if(entry.exitId==exit.destinationExitId
                     && (target.zoneType.compare("edge",Qt::CaseInsensitive)==0 || entry.hasDeployRectangle))found=true;
-        if(!found){if(error)*error=QString("%1:%2: target %3:%4 does not exist or has no party deployment area.")
+        if(!found){if(error)*error=QStringLiteral("Переход %1:%2 направлен в %3:%4, но там нет записи с областью появления. Создайте область появления у записи №%4 на карте %3 либо выберите другой существующий вход. Для полного парного маршрута используйте «Создать маршрут между картами…».")
             .arg(zone.zoneId).arg(exit.exitId).arg(exit.destinationZoneId).arg(exit.destinationExitId);return false;}
     }
     QByteArray bytes;QStringList errors;

@@ -27,6 +27,7 @@
 #include <QApplication>
 #include <QMouseEvent>
 #include <QTableWidget>
+#include "travel_combo.h"
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QTimer>
@@ -279,6 +280,7 @@ void MainWindow::createPairedTravelRoute()
     QLabel note(tr("Два конца маршрута будут связаны через новую edge-зону. Выбранные существующие записи сохранят номера, но их направления и четыре области будут заменены значениями ниже. Остальные записи не меняются."));
     note.setWordWrap(true);layout.addWidget(&note);
     QComboBox sourceExit,targetZone,targetExit;
+    for(auto* combo:{&sourceExit,&targetZone,&targetExit})configureTravelCombo(combo);
     const auto fillExits=[&](QComboBox& combo,const SMapTableZone& zone) {
         combo.clear();combo.addItem(tr("Новая запись (свободный номер)"),0);
         for(const auto& e:zone.exits)combo.addItem(tr("№%1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId),e.exitId);
@@ -346,6 +348,10 @@ void MainWindow::createPairedTravelRoute()
     QDialogButtonBox buttons(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);buttons.button(QDialogButtonBox::Ok)->setText(tr("Создать маршрут"));layout.addWidget(&buttons);
     connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(&buttons,&QDialogButtonBox::accepted,&dialog,[&](){
+        for(auto* combo:{&sourceExit,&targetZone,&targetExit})
+            if(combo->currentText()!=combo->itemText(combo->currentIndex())) {
+                error.setText(tr("Выберите карту и записи из результатов поиска; для нового входа выберите «Новая запись»."));return;
+            }
         STravelRoute route;route.sourceZone=source.zoneId;route.targetZone=zones[targetZone.currentData().toInt()].zoneId;
         route.sourceExit=sourceExit.currentData().toInt();route.targetExit=targetExit.currentData().toInt();route.edgeZone=edgeId.text().trimmed();
         QRectF rectangles[4];

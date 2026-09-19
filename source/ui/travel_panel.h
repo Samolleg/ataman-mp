@@ -39,6 +39,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void fillExit();
+    void fillDestinationEntries(int selected);
     bool m_filling{false};
     QVector<SMapTableZone> m_zones;
     int m_zone{-1};
@@ -46,7 +47,7 @@ private:
     QComboBox* m_zoneCombo;
     QListWidget* m_exits;
     QComboBox* m_destination;
-    QSpinBox* m_destinationExit;
+    QComboBox* m_destinationExit;
     QCheckBox* m_visible[2];
     QCheckBox* m_present[2];
     CWorldCoordinateEdit* m_rect[2][4];
