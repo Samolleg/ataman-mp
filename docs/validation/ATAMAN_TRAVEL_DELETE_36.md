@@ -44,3 +44,14 @@ No installed game archive or map was changed by implementation/testing.
 
 Manual acceptance of the user's scene and parent EI-TRAVEL-EDITOR gameplay remain
 open. No claim of watching the submitted video or runtime game acceptance.
+
+## Handoff
+
+Source 662cb046651046e036909e8fc129af278b668fb8.
+Fresh build-staging-36-delete version and executable identity PASS; finalizer and
+independent 101-file manifest verification PASS. Not run after finalization.
+EXE SHA256 815e593846a98038048e0872820dd54fbed44ad857f15497dc6e8b29f94f329d.
+Installed artifacts/EI-Mapper-Ataman-2-first-test version 36: 7 managed files
+replaced, 0 removed, 9721 user files preserved and hash-verified.
+Version-35 rollback retained as build-rollback-delete36. Positively identified
+older version-34 rollback removed only after successful installation verification.
