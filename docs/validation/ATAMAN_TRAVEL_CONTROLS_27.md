@@ -17,7 +17,18 @@ EI-TRAVEL-CONTROLS-027, ветка codex/travel-controls-v27 от
   записи до рисования; наведение на точные координаты deploy/remove и fallback.
 - Чистая сборка build-release-27-travel создана после смены VERSION на 27.
   --ui-widget-check PASS (travelEditorProductionRouteWorks=1);
-  --scenario-layer-check: 50 PASS / 0 FAIL. Все окна скрыты. Упаковка — следующий шаг.
+  --scenario-layer-check: 50 PASS / 0 FAIL. Все окна скрыты.
+- Исходники: b07009933a9fc5ec73ae5a5ba74dfe072e6b31ce.
+- EXE SHA256: C86332B64E9F45C03B19989285F69A697A36DC9B0A98FFD8DB9B0DDE088173E3.
+- build-staging-27-travel: --version=27 до финализации; finalizer/validator PASS.
+  Независимо проверены 101 SHA256, покрытие, пути и совпадение EXE со сборкой.
+  После финализации staging не запускался.
+- Установлена в artifacts/EI-Mapper-Ataman-2-first-test после проверки процессов:
+  101 managed file проверен, 5845 пользовательских файлов сохранены по SHA256;
+  заменены 7 файлов, удалений нет. Отчёты: build-release-27-travel/stage-result.txt,
+  independent-package-check.json, install-result.txt.
+- Резерв предыдущей программы 26: build-rollback-travel27. Старый собственный
+  rollback 25 удалён после проверки пути, версии, состава, хешей и отсутствия ссылок.
 
 Игровые данные не изменялись. Ручная проверка рисования мышью на реальной карте
 и игровая приёмка переходов остаются открытыми пунктами родительской задачи.
