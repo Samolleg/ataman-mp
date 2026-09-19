@@ -3180,9 +3180,10 @@ void MainWindow::updateEntranceOverlays()
             if(mapPath.isEmpty())continue;
         }
         for(const auto& entry:zone.exits)for(int type=0;type<2;++type) {
-            if(type?!entry.hasRemoveRectangle:!entry.hasDeployRectangle)continue;
+            if(type?!entry.hasEffectiveRemove():!entry.hasDeployRectangle)continue;
             STravelArea area;area.remove=type!=0;area.mapPath=mapPath;
-            area.rectangle=type?entry.removeRectangle:entry.deployRectangle;
+            area.rectangle=type?entry.effectiveRemove():entry.deployRectangle;
+            area.angle=type?entry.effectiveRemoveAngle():0;
             area.label=type?tr("Переход №%1 → %2:%3").arg(entry.exitId).arg(entry.destinationZoneId).arg(entry.destinationExitId)
                            :tr("Появление №%1").arg(entry.exitId);
             if(!active)area.label=zone.zoneId+" · "+area.label;

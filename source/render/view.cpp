@@ -6272,7 +6272,7 @@ void CView::drawTestOverlaysOpenGl()
             QVector<QVector3D> handles;
             for(const auto& p:travelAreaHandles(area)) {
                 QVector3D v(p.x(),p.y(),0);
-                if(CLandscape::getInstance()->projectPt(v)) {v.setZ(v.z()+0.2f);handles.append(v);}
+                if(projectTravelOverlay(index,v)) {v.setZ(v.z()+0.2f);handles.append(v);}
             }
             if(!handles.isEmpty()) {
                 m_program.setUniformValue("customColor",QVector4D(1,1,1,1));

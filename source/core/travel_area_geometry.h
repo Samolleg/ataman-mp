@@ -2,15 +2,23 @@
 #include <QRectF>
 #include <QVector>
 #include <QString>
+#include <cmath>
 
 struct STravelArea
 {
     int exitIndex{-1};
     bool remove{false};
     QRectF rectangle;
+    double angle{0};
     QString label;
     QString mapPath; // Empty for the active map; otherwise read-only neighbor terrain.
 };
+inline QPointF travelRotatedPoint(const QPointF& p,const QPointF& center,double degrees)
+{
+    const double radians=degrees*3.14159265358979323846/180.0;
+    const auto d=p-center;const double c=std::cos(radians),s=std::sin(radians);
+    return center+QPointF(c*d.x()-s*d.y(),s*d.x()+c*d.y());
+}
 inline QVector<QPointF> travelAreaHandles(const QRectF& r)
 {
     return {r.topLeft(),QPointF(r.center().x(),r.top()),r.topRight(),

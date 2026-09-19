@@ -3,6 +3,7 @@
 #include "travel_area_geometry.h"
 #include "travel_panel.h"
 #include <QLineEdit>
+#include <QLineF>
 #include <QListWidget>
 #include <QPushButton>
 #include <QLabel>
@@ -124,6 +125,7 @@ class ResArchiveDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void pairedTravelRoute();
+    void travelOrderRepairPanel();
     void travelRoundTripAndConflict();
     void travelSaveBatchRollback();
     void travelGeometryAndPanel();
@@ -647,6 +649,25 @@ void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChec
         reinterpret_cast<const uchar*>(checker.constData() + 60)), quint32(0x000000FF));
 }
 
+void ResArchiveDocumentTests::travelOrderRepairPanel()
+{
+    CMapTableDocument table;
+    QVERIFY(table.loadBytes("#zone a g game\n#res\na a\n#exit 6\nnone 0\n#remove\n10 10 12 12 30\n#deploy\n1 1 3 3 15\n"));
+    CTravelPanel panel;panel.populate(table.zones(),0,0,false);
+    int edits=0;SMapTableExit changed;
+    connect(&panel,&CTravelPanel::exitEdited,[&](int i,const SMapTableExit& e){QCOMPARE(i,0);++edits;changed=e;});
+    QVERIFY(panel.flush());QCOMPARE(edits,0);
+    auto* repair=panel.findChild<QPushButton*>("travelRepairOrder");QVERIFY(repair);QVERIFY(!repair->isHidden());
+    repair->click();QCOMPARE(edits,1);QVERIFY(changed.removeOverridesDeploy);
+    QCOMPARE(changed.removeExitAngle,30.0);QCOMPARE(changed.deployExitAngle,15.0);
+    auto zone=table.zones()[0];zone.exits[0]=changed;QVERIFY(table.replaceZoneAt(0,zone).success);
+    panel.populate(table.zones(),0,0,true);QVERIFY(repair->isHidden());
+    QCOMPARE(table.zones()[0].exits[0].effectiveRemove(),QRectF(10,10,2,2));
+    const auto p=travelRotatedPoint(QPointF(2,1),QPointF(1,1),90);
+    QVERIFY(QLineF(p,QPointF(1,2)).length()<0.000001);
+    QVERIFY(QLineF(travelRotatedPoint(p,QPointF(1,1),-90),QPointF(2,1)).length()<0.000001);
+}
+
 void ResArchiveDocumentTests::travelRoundTripAndConflict()
 {
     QTemporaryDir dir; QVERIFY(dir.isValid());
@@ -744,7 +765,7 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     }
     panel.populate({z},0,2,false);
     QCOMPARE(list->item(0)->text(),QString::fromUtf8("Запись без областей №6 → gz7g, вход №1"));
-    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Связь с областью появления №7 → gz7g, вход №1"));
+    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Появление и переход №7 → gz7g, вход №1"));
     QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 → gz7g, вход не выбран"));
     QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и переход №9 → gz7g, вход №1"));
     z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
@@ -813,7 +834,7 @@ void ResArchiveDocumentTests::pairedTravelRoute()
         "#zone b island game\r\n#res\r\nb b\r\n#exit 6\r\na 4\r\n#deploy\r\n10 20 30 40\r\n";
     CResFile archive;archive.addFiledata("map.txt",map);archive.addFiledata("opaque.bin","untouched");archive.saveToFile(path);
     CTravelDocument doc;QString error;QVERIFY(doc.open(path,&error));const auto before=doc.snapshot();
-    STravelRoute r;r.sourceZone="a";r.targetZone="b";r.edgeZone="a_b";r.sourceExit=r.targetExit=6;
+    STravelRoute r;r.sourceZone="a";r.targetZone="b";r.edgeZone="a_b";r.sourceExit=r.targetExit=1;
     r.sourceDeploy=QRectF(1,2,2,2);r.sourceRemove=QRectF(3,2,2,2);
     r.targetDeploy=QRectF(10,20,20,20);r.targetRemove=QRectF(5,20,5,20);r.worldMapPosition=QVector3D(-2,0.5f,0.25f);
     auto bad=r;bad.targetRemove.setWidth(0);QVERIFY(!doc.createPairedRoute(bad,&error));QCOMPARE(doc.snapshot(),before);
@@ -824,8 +845,8 @@ void ResArchiveDocumentTests::pairedTravelRoute()
     QCOMPARE(zones[0].exits[0].destinationZoneId,QString("a_b"));QCOMPARE(zones[0].exits[0].destinationExitId,1);
     QCOMPARE(zones[1].exits[0].destinationZoneId,QString("a_b"));QCOMPARE(zones[1].exits[0].destinationExitId,2);
     QCOMPARE(zones[2].zoneType,QString("edge"));QCOMPARE(zones[2].exits.size(),2);
-    QCOMPARE(zones[2].exits[0].destinationZoneId,QString("a"));QCOMPARE(zones[2].exits[0].destinationExitId,6);
-    QCOMPARE(zones[2].exits[1].destinationZoneId,QString("b"));QCOMPARE(zones[2].exits[1].destinationExitId,6);
+    QCOMPARE(zones[2].exits[0].destinationZoneId,QString("a"));QCOMPARE(zones[2].exits[0].destinationExitId,1);
+    QCOMPARE(zones[2].exits[1].destinationZoneId,QString("b"));QCOMPARE(zones[2].exits[1].destinationExitId,1);
     QCOMPARE(zones[0].exits[0].viewAngle,90.0);QVERIFY(after.contains("#opaque\r\nkeep"));
     QVERIFY(after.contains("#position\r\n-2 0.5 0.25"));
     QVERIFY(!doc.createPairedRoute(r,&error));QCOMPARE(doc.snapshot(),after);
@@ -837,7 +858,7 @@ void ResArchiveDocumentTests::pairedTravelRoute()
     QVERIFY(doc.restore(before));r.sourceExit=r.targetExit=0;r.edgeZone="new_route";
     QVERIFY2(doc.createPairedRoute(r,&error),qPrintable(error));
     QCOMPARE(doc.table().zones()[0].exits.size(),2);QCOMPARE(doc.table().zones()[0].exits[0].destinationZoneId,QString("b"));
-    QCOMPARE(doc.table().zones()[2].exits[0].destinationExitId,1);
+    QCOMPARE(doc.table().zones()[2].exits[0].destinationExitId,2);
 }
 QTEST_MAIN(ResArchiveDocumentTests)
 #include "res_archive_document_tests.moc"

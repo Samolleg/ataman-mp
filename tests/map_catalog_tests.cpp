@@ -63,7 +63,7 @@ void MapCatalogTests::parsesTravelZoneSpawnData()
     QCOMPARE(entries.size(), 1);
     QCOMPARE(entries.first().travelZones.size(), 2);
     const SMapTravelZone& spawn = entries.first().travelZones.first();
-    QCOMPARE(spawn.exitId, 2);
+    QCOMPARE(spawn.exitId, 1);
     QCOMPARE(spawn.destinationZoneId, QString("bz1g"));
     QCOMPARE(spawn.destinationExitId, 1);
     QVERIFY(spawn.hasDeployRectangle);
@@ -106,7 +106,7 @@ void MapCatalogTests::parsesCompleteMapsIdentityAndRepeatedRoutes()
     QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 0),
              QString("1|bz1g|2|0"));
     QCOMPARE(mapTravelRouteKey(entries.first().travelZones, 1),
-             QString("1|bz1g|2|1"));
+             QString("2|bz1g|2|0"));
 }
 
 void MapCatalogTests::topologyRetainsTravelOnlyZones()

@@ -472,7 +472,10 @@ void CMapTableEditorDialog::loadZone(const SMapTableZone& zone)
     {
         const int row = m_exitTable->rowCount();
         m_exitTable->insertRow(row);
-        m_exitTable->setItem(row, ExitId, item(QString::number(exit.exitId)));
+        auto* ordinalItem=item(QString::number(exit.exitId));
+        ordinalItem->setFlags(ordinalItem->flags() & ~Qt::ItemIsEditable);
+        ordinalItem->setToolTip(tr("Порядковый номер записи в игре. Исходная метка #exit: %1").arg(exit.sourceLabel));
+        m_exitTable->setItem(row, ExitId, ordinalItem);
         m_exitTable->setItem(row, DestinationZone, item(exit.destinationZoneId));
         m_exitTable->setItem(row, DestinationExit, item(QString::number(exit.destinationExitId)));
         if(exit.hasDeployRectangle)
@@ -523,6 +526,7 @@ bool CMapTableEditorDialog::collectZone(SMapTableZone* zone, QString* error) con
         zone->maps.minimapTexture = m_minimapEdit->text().trimmed();
         zone->maps.objectivesTexture = m_objectivesEdit->text().trimmed();
     }
+    const auto originalExits=zone->exits;
     zone->exits.clear();
     const auto parseDouble = [this, error](int row, int column, double* value) {
         const QString text = cellText(row, column);
@@ -539,6 +543,11 @@ bool CMapTableEditorDialog::collectZone(SMapTableZone* zone, QString* error) con
         bool idOk = false;
         bool destinationOk = false;
         exit.exitId = cellText(row, ExitId).toInt(&idOk);
+        for(const auto& old:originalExits)if(old.exitId==exit.exitId) {
+            exit.sourceLabel=old.sourceLabel;exit.removeOverridesDeploy=old.removeOverridesDeploy;
+            exit.hasDeployExitAngle=old.hasDeployExitAngle;exit.deployExitAngle=old.deployExitAngle;
+            exit.hasRemoveExitAngle=old.hasRemoveExitAngle;exit.removeExitAngle=old.removeExitAngle;
+        }
         exit.destinationZoneId = cellText(row, DestinationZone);
         exit.destinationExitId = cellText(row, DestinationExit).toInt(&destinationOk);
         if(!idOk || !destinationOk)
@@ -716,7 +725,9 @@ void CMapTableEditorDialog::addExit()
     int nextId = 1;
     for(int existing = 0; existing < row; ++existing)
         nextId = qMax(nextId, cellText(existing, ExitId).toInt() + 1);
-    m_exitTable->setItem(row, ExitId, item(QString::number(nextId)));
+    auto* ordinalItem=item(QString::number(nextId));
+    ordinalItem->setFlags(ordinalItem->flags() & ~Qt::ItemIsEditable);
+    m_exitTable->setItem(row, ExitId, ordinalItem);
     m_exitTable->setItem(row, DestinationExit, item("0"));
     m_exitTable->setCurrentCell(row, DestinationZone);
 }

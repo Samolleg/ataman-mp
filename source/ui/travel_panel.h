@@ -54,6 +54,7 @@ private:
     QLabel* m_status;
     QLabel* m_incoming;
     QLabel* m_directionNote;
+    QPushButton* m_repairOrder;
     QComboBox* m_source;
     QPushButton* m_linkIncoming;
     QWidget* m_properties;

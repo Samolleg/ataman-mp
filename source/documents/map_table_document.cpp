@@ -56,11 +56,11 @@ QString number(double value)
     return QString::number(value, 'g', 15);
 }
 
-QString rectangleText(const QRectF& rect)
+QString rectangleText(const QRectF& rect, bool hasAngle = false, double angle = 0)
 {
     return QStringLiteral("%1 %2 %3 %4")
         .arg(number(rect.left()), number(rect.top()),
-             number(rect.right()), number(rect.bottom()));
+             number(rect.right()), number(rect.bottom())) + (hasAngle ? QString(" %1").arg(number(angle)) : QString());
 }
 
 bool parseRectangle(const QString& line, QRectF* rectangle)
@@ -106,6 +106,9 @@ bool SMapTableExit::operator==(const SMapTableExit& other) const
 {
     return exitId == other.exitId && destinationZoneId == other.destinationZoneId &&
         destinationExitId == other.destinationExitId &&
+        removeOverridesDeploy == other.removeOverridesDeploy &&
+        hasDeployExitAngle == other.hasDeployExitAngle && equalDouble(deployExitAngle, other.deployExitAngle) &&
+        hasRemoveExitAngle == other.hasRemoveExitAngle && equalDouble(removeExitAngle, other.removeExitAngle) &&
         hasDeployRectangle == other.hasDeployRectangle &&
         (!hasDeployRectangle || equalRect(deployRectangle, other.deployRectangle)) &&
         hasRemoveRectangle == other.hasRemoveRectangle &&
@@ -328,9 +331,9 @@ bool CMapTableDocument::reparse(QStringList* errors)
         while(exitStart < span.end)
         {
             const QStringList exitHeader = tokens(decoded(exitStart));
-            bool exitIdOk = false;
             SMapTableExit exit;
-            exit.exitId = exitHeader.size() >= 2 ? exitHeader.at(1).toInt(&exitIdOk) : 0;
+            exit.exitId = span.value.exits.size() + 1;
+            exit.sourceLabel = exitHeader.value(1);
             int exitEnd = span.end;
             for(int index = exitStart + 1; index < span.end; ++index)
             {
@@ -341,7 +344,7 @@ bool CMapTableDocument::reparse(QStringList* errors)
                 }
             }
             const int targetIndex = nextValueLine(exitStart, exitEnd);
-            if(exitIdOk && targetIndex >= 0)
+            if(targetIndex >= 0)
             {
                 const QStringList target = tokens(decoded(targetIndex));
                 bool targetExitOk = false;
@@ -359,9 +362,21 @@ bool CMapTableDocument::reparse(QStringList* errors)
                         if(valueIndex < 0)
                             continue;
                         if(tag == QStringLiteral("#deploy"))
+                        {
                             exit.hasDeployRectangle = parseRectangle(decoded(valueIndex), &exit.deployRectangle);
+                            exit.removeOverridesDeploy = false;
+                            const auto values = tokens(decoded(valueIndex));
+                            exit.deployExitAngle = values.value(4, "0").toDouble();
+                            exit.hasDeployExitAngle = values.size() > 4;
+                        }
                         else if(tag == QStringLiteral("#remove"))
+                        {
                             exit.hasRemoveRectangle = parseRectangle(decoded(valueIndex), &exit.removeRectangle);
+                            exit.removeOverridesDeploy = true;
+                            const auto values = tokens(decoded(valueIndex));
+                            exit.removeExitAngle = values.value(4, "0").toDouble();
+                            exit.hasRemoveExitAngle = values.size() > 4;
+                        }
                         else if(tag == QStringLiteral("#passtime"))
                         {
                             bool ok = false;
@@ -381,9 +396,9 @@ bool CMapTableDocument::reparse(QStringList* errors)
                             exit.hasDeployAngle = ok;
                         }
                     }
-                    span.value.exits.append(exit);
                 }
             }
+            span.value.exits.append(exit);
             exitStart = exitEnd;
         }
 
@@ -661,6 +676,29 @@ SMapTableEditResult CMapTableDocument::replaceZoneAt(
         return result;
 
     const SMapTableZone original = m_spans.at(spanIndex).value;
+    // Existing IDs identify their original ordinal while a structured edit is
+    // assembled. Permit deletion and append, but never silently reorder entries.
+    QMap<int,int> renumber;
+    int previousId=0;
+    for(int i=0;i<replacement.exits.size();++i) {
+        const int id=replacement.exits[i].exitId;
+        if(id<=previousId) {
+            result.success=false;result.errors.append("Changing entry order requires explicit reference migration.");return result;
+        }
+        previousId=id;renumber.insert(id,i+1);
+    }
+    bool ordinalsChanged=false;
+    for(const auto& old:original.exits)
+        if(renumber.value(old.exitId,0)!=old.exitId)ordinalsChanged=true;
+    if(ordinalsChanged)for(const auto& z:m_zones)for(const auto& e:z.exits) {
+        if(e.destinationZoneId.compare(original.zoneId,Qt::CaseInsensitive)==0
+            && e.destinationExitId>0 && e.destinationExitId<=original.exits.size()
+            && !renumber.contains(e.destinationExitId)) {
+            result.success=false;
+            result.errors.append(QString("Запись №%1 используется переходом %2:%3. Сначала измените его назначение.")
+                .arg(e.destinationExitId).arg(z.zoneId).arg(e.exitId));return result;
+        }
+    }
     const bool headerChanged = original.zoneId != replacement.zoneId ||
         original.allodId != replacement.allodId || original.zoneType != replacement.zoneType;
     const bool resourcesChanged = original.mprName != replacement.mprName ||
@@ -811,14 +849,13 @@ SMapTableEditResult CMapTableDocument::replaceZoneAt(
             const SMapTableExit oldExit = original.exits.at(oldIndex);
             int exitStart = -1;
             int exitEnd = block.size();
+            int ordinal = 0;
             for(int index = 1; index < block.size(); ++index)
             {
                 if(tagAt(index) != QStringLiteral("#exit"))
                     continue;
-                const QStringList header = tokens(decodeLine(block.at(index).content));
-                bool ok = false;
-                const int id = header.size() >= 2 ? header.at(1).toInt(&ok) : 0;
-                if(ok && id == oldExit.exitId)
+                ++ordinal;
+                if(ordinal == oldExit.exitId)
                 {
                     exitStart = index;
                     for(int next = index + 1; next < block.size(); ++next)
@@ -865,19 +902,43 @@ SMapTableEditResult CMapTableDocument::replaceZoneAt(
                     break;
                 }
             }
-            const auto optional = [&setSection, exitStart, &exitEnd](
-                const QString& tag, bool present, const QString& value) {
-                setSection(tag, present ? QStringList(value) : QStringList(),
-                           exitStart + 1, exitEnd, exitEnd, 1);
+            // Recompute the boundary after each insertion/removal. A stale end can
+            // append a tag to another entry or fail to find a newly inserted tag.
+            const auto endOfExit = [&]() {
+                for(int n=exitStart+1;n<block.size();++n)
+                    if(tagAt(n)=="#exit")return n;
+                return block.size();
             };
-            optional(QStringLiteral("#deploy"), wanted.hasDeployRectangle,
-                     rectangleText(wanted.deployRectangle));
-            optional(QStringLiteral("#remove"), wanted.hasRemoveRectangle,
-                     rectangleText(wanted.removeRectangle));
-            optional(QStringLiteral("#passtime"), wanted.hasPassTime, number(wanted.passTime));
-            optional(QStringLiteral("#view"), wanted.hasViewAngle, number(wanted.viewAngle));
-            optional(QStringLiteral("#deployangle"), wanted.hasDeployAngle,
-                     number(wanted.deployAngle));
+            const auto optional = [&](const QString& tag, bool present, const QString& value) {
+                const int end=endOfExit();
+                setSection(tag, present ? QStringList(value) : QStringList(),
+                           exitStart + 1, end, end, 1);
+            };
+            const bool geometryChanged = oldExit.hasDeployRectangle!=wanted.hasDeployRectangle
+                || oldExit.hasRemoveRectangle!=wanted.hasRemoveRectangle
+                || oldExit.deployRectangle!=wanted.deployRectangle || oldExit.removeRectangle!=wanted.removeRectangle
+                || oldExit.removeOverridesDeploy!=wanted.removeOverridesDeploy
+                || oldExit.hasDeployExitAngle!=wanted.hasDeployExitAngle || oldExit.deployExitAngle!=wanted.deployExitAngle
+                || oldExit.hasRemoveExitAngle!=wanted.hasRemoveExitAngle || oldExit.removeExitAngle!=wanted.removeExitAngle;
+            if(geometryChanged) {
+                // Only an intentional geometry edit canonicalizes these assignments.
+                // Unchanged entries (including legacy remove-before-deploy) remain exact.
+                for(const QString& tag: {QString("#deploy"),QString("#remove")}) {
+                    int at;
+                    while((at=findTag(tag,exitStart+1,endOfExit()))>=0)
+                        eraseSection(at,1,endOfExit());
+                }
+                optional("#deploy", wanted.hasDeployRectangle,
+                    rectangleText(wanted.deployRectangle,wanted.hasDeployExitAngle,wanted.deployExitAngle));
+                optional("#remove", wanted.hasRemoveRectangle,
+                    rectangleText(wanted.removeRectangle,wanted.hasRemoveExitAngle,wanted.removeExitAngle));
+            }
+            if(oldExit.hasPassTime!=wanted.hasPassTime || oldExit.passTime!=wanted.passTime)
+                optional("#passtime", wanted.hasPassTime, number(wanted.passTime));
+            if(oldExit.hasViewAngle!=wanted.hasViewAngle || oldExit.viewAngle!=wanted.viewAngle)
+                optional("#view", wanted.hasViewAngle, number(wanted.viewAngle));
+            if(oldExit.hasDeployAngle!=wanted.hasDeployAngle || oldExit.deployAngle!=wanted.deployAngle)
+                optional("#deployangle", wanted.hasDeployAngle, number(wanted.deployAngle));
             result.changedFields.append(QString("exit %1").arg(wanted.exitId));
         }
 
@@ -893,12 +954,12 @@ SMapTableEditResult CMapTableDocument::replaceZoneAt(
             if(wanted.hasDeployRectangle)
             {
                 block.append(makeLine("#deploy"));
-                block.append(makeLine(rectangleText(wanted.deployRectangle)));
+                block.append(makeLine(rectangleText(wanted.deployRectangle,wanted.hasDeployExitAngle,wanted.deployExitAngle)));
             }
             if(wanted.hasRemoveRectangle)
             {
                 block.append(makeLine("#remove"));
-                block.append(makeLine(rectangleText(wanted.removeRectangle)));
+                block.append(makeLine(rectangleText(wanted.removeRectangle,wanted.hasRemoveExitAngle,wanted.removeExitAngle)));
             }
             if(wanted.hasPassTime)
             {
@@ -941,6 +1002,21 @@ SMapTableEditResult CMapTableDocument::replaceZoneAt(
         result.success = false;
         return result;
     }
+    if(ordinalsChanged) {
+        for(int z=0;z<m_zones.size();++z) {
+            auto migrated=m_zones[z];bool changed=false;
+            for(auto& e:migrated.exits)if(e.destinationZoneId.compare(original.zoneId,Qt::CaseInsensitive)==0
+                && renumber.contains(e.destinationExitId) && renumber[e.destinationExitId]!=e.destinationExitId) {
+                e.destinationExitId=renumber[e.destinationExitId];changed=true;
+            }
+            if(changed) {
+                const auto update=replaceZoneAt(z,migrated);
+                if(!update.success) {
+                    m_lines=previousLines;m_dirty=previousDirty;reparse(nullptr);return update;
+                }
+            }
+        }
+    }
     result.success = true;
     return result;
 }
@@ -977,8 +1053,8 @@ SMapTableEditResult CMapTableDocument::appendZone(const SMapTableZone& zone)
     {
         append(QStringLiteral("#exit %1").arg(exit.exitId));
         append(exit.destinationZoneId + ' ' + QString::number(exit.destinationExitId));
-        if(exit.hasDeployRectangle) { append("#deploy"); append(rectangleText(exit.deployRectangle)); }
-        if(exit.hasRemoveRectangle) { append("#remove"); append(rectangleText(exit.removeRectangle)); }
+        if(exit.hasDeployRectangle) { append("#deploy"); append(rectangleText(exit.deployRectangle,exit.hasDeployExitAngle,exit.deployExitAngle)); }
+        if(exit.hasRemoveRectangle) { append("#remove"); append(rectangleText(exit.removeRectangle,exit.hasRemoveExitAngle,exit.removeExitAngle)); }
         if(exit.hasPassTime) { append("#passtime"); append(number(exit.passTime)); }
         if(exit.hasViewAngle) { append("#view"); append(number(exit.viewAngle)); }
         if(exit.hasDeployAngle) { append("#deployangle"); append(number(exit.deployAngle)); }

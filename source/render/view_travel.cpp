@@ -43,6 +43,12 @@ void CView::setWorldTravelAreas(const QVector<STravelArea>& areas)
 }
 bool CView::projectTravelOverlay(int index,QVector3D& point) const
 {
+    if(index>=0 && index<m_displayTravelAreas.size()) {
+        const auto& area=m_displayTravelAreas[index];
+        const auto rect=index<m_testEntranceRectangles.size()?m_testEntranceRectangles[index]:area.rectangle;
+        const auto rotated=travelRotatedPoint(QPointF(point.x(),point.y()),rect.center(),area.angle);
+        point.setX(rotated.x());point.setY(rotated.y());
+    }
     if(index>=m_displayTravelAreas.size() || m_displayTravelAreas[index].mapPath.isEmpty())
         return m_pLand->projectPt(point);
     if(!m_neighborLandscapesVisible)return false;
@@ -106,14 +112,14 @@ bool CView::travelMousePress(QMouseEvent* event)
         const auto handles=travelAreaHandles(m_travelAreas[i].rectangle);
         for(int h=0;h<handles.size();++h) {
             QVector3D p(handles[h].x(),handles[h].y(),0);
-            if(!m_pLand->projectPt(p))continue;
+            if(!projectTravelOverlay(i,p))continue;
             p.setZ(p.z()+0.2f);
             const auto screen=p.project(m_cam->viewMatrix(),m_projection,QRect(0,0,width(),height()));
             if(QLineF(event->pos(),QPointF(screen.x(),height()-screen.y())).length()<=10) {hit=i;handle=h;}
         }
     }
     if(hit<0)for(int i=m_travelAreas.size()-1;i>=0;--i)
-        if(m_travelAreas[i].rectangle.contains(point)){hit=i;break;}
+        if(m_travelAreas[i].rectangle.contains(travelRotatedPoint(point,m_travelAreas[i].rectangle.center(),-m_travelAreas[i].angle))){hit=i;break;}
     if(hit<0)return true;
     const int exit=m_travelAreas[hit].exitIndex;
     m_travelSelectedRemove=m_travelAreas[hit].remove;
@@ -137,8 +143,15 @@ bool CView::travelMouseMove(QMouseEvent* event)
         const QPointF p(position.x(),position.y());
         const QSize size=activeTerrainSectorSize();
         const QRectF bounds(0,0,size.width()*32,size.height()*32);
-        const QRectF r=m_travelDrawing?QRectF(m_travelStart,p).normalized().intersected(bounds)
-            :travelDraggedRect(m_travelOriginal,p-m_travelStart,m_travelHandle,bounds);
+        QPointF delta=p-m_travelStart;
+        if(!m_travelDrawing && m_travelHandle>=0)
+            delta=travelRotatedPoint(delta,QPointF(),-m_travelAreas[m_travelHit].angle);
+        QRectF r=m_travelDrawing?QRectF(m_travelStart,p).normalized().intersected(bounds)
+            :travelDraggedRect(m_travelOriginal,delta,m_travelHandle,bounds);
+        if(!m_travelDrawing && m_travelHandle>=0) {
+            const auto shift=r.center()-m_travelOriginal.center();
+            r.moveCenter(m_travelOriginal.center()+travelRotatedPoint(shift,QPointF(),m_travelAreas[m_travelHit].angle));
+        }
         m_testEntranceRectangles[m_travelHit]=r;update();
     }
     event->accept();return true;

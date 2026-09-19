@@ -96,9 +96,9 @@ void MainWindow::createTravelEditor(QMenu* menu)
         if(index<0 || index>=zone.exits.size())return;
         m_pView->cancelTravelGesture();m_travelExit=index;
         const auto exit=zone.exits[index];
-        if(remove && !exit.hasRemoveRectangle)remove=false;
+        if(remove && !exit.hasEffectiveRemove())remove=false;
         else if(!remove && !exit.hasDeployRectangle)remove=true;
-        if(remove?!exit.hasRemoveRectangle:!exit.hasDeployRectangle){
+        if(remove?!exit.hasEffectiveRemove():!exit.hasDeployRectangle){
             m_travelPanel->setStatus(tr("У этой записи пока нет области. Сначала нарисуйте её."));return;}
         m_travelPanel->revealArea(remove);refreshTravelAreas();
         m_pView->focusTravelArea(index,remove);
@@ -142,7 +142,10 @@ void MainWindow::createTravelEditor(QMenu* menu)
         if(create){SMapTableExit e;e.exitId=nextExit(zone);e.destinationZoneId="none";index=zone.exits.size();zone.exits.append(e);}
         if(index<0 || index>=zone.exits.size())return;
         auto& e=zone.exits[index];
-        if(remove){e.hasRemoveRectangle=true;e.removeRectangle=rect;}
+        if(remove){
+            if(!e.hasRemoveRectangle){e.removeExitAngle=e.effectiveRemoveAngle();e.hasRemoveExitAngle=e.removeExitAngle!=0;}
+            e.hasRemoveRectangle=true;e.removeRectangle=rect;
+        }
         else {e.hasDeployRectangle=true;e.deployRectangle=rect;}
         m_travelExit=index;changeTravelZone(m_travelZone,zone,create?tr("Создать вход/переход"):tr("Переместить область"));
     });
@@ -202,8 +205,9 @@ void MainWindow::refreshTravelAreas()
         for(int i=0;i<zone.exits.size();++i){
             const auto e=zone.exits[i];
             for(int k=0;k<2;++k){
-                if(k?(!e.hasRemoveRectangle||!m_travelPanel->showRemove()):(!e.hasDeployRectangle||!m_travelPanel->showDeploy()))continue;
-                STravelArea area;area.exitIndex=i;area.remove=k;area.rectangle=k?e.removeRectangle:e.deployRectangle;
+                if(k?(!e.hasEffectiveRemove()||!m_travelPanel->showRemove()):(!e.hasDeployRectangle||!m_travelPanel->showDeploy()))continue;
+                STravelArea area;area.exitIndex=i;area.remove=k;area.rectangle=k?e.effectiveRemove():e.deployRectangle;
+                area.angle=k?e.effectiveRemoveAngle():0;
                 area.label=(k?tr("Переход %1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId):tr("Появление %1").arg(e.exitId));
                 areas.append(area);
             }

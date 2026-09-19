@@ -78,9 +78,8 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
         if(line.startsWith("#exit", Qt::CaseInsensitive))
         {
             const QStringList parts = line.split(whitespace, QString::SkipEmptyParts);
-            bool validExit = false;
-            const int exitId = parts.size() >= 2 ? parts.at(1).toInt(&validExit) : 0;
-            if(!current.zoneId.isEmpty() && validExit)
+            const int exitId = current.travelZones.size()+1;
+            if(!current.zoneId.isEmpty())
             {
                 SMapTravelZone travelZone;
                 travelZone.exitId = exitId;

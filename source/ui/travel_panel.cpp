@@ -77,6 +77,13 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             connect(createRoute,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
             m_directionNote=new QLabel;m_directionNote->setWordWrap(true);
             m_directionNote->setObjectName("travelDirectionNote");form->addRow(m_directionNote);
+            m_repairOrder=new QPushButton(tr("Восстановить раздельные области"));
+            m_repairOrder->setObjectName("travelRepairOrder");form->addRow(m_repairOrder);
+            connect(m_repairOrder,&QPushButton::clicked,this,[this](){
+                if(!flush() || m_zone<0 || m_exit<0)return;
+                auto e=m_zones[m_zone].exits[m_exit];e.removeOverridesDeploy=true;
+                emit exitEdited(m_exit,e);
+            });
         }
         m_present[k]=new QCheckBox(tr("Область задана"));form->addRow(m_present[k]);
         const QStringList labels={tr("X:"),tr("Y:"),tr("Ширина:"),tr("Высота:")};
@@ -138,7 +145,7 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
         for(const auto& e:zones[zoneIndex].exits) {
             const bool linked=e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0;
             const QString kind=e.hasDeployRectangle
-                ? (e.hasRemoveRectangle?tr("Появление и переход"):(linked?tr("Связь с областью появления"):tr("Появление")))
+                ? (linked?tr("Появление и переход"):tr("Появление"))
                 : (e.hasRemoveRectangle?tr("Переход"):tr("Запись без областей"));
             QString label=tr("%1 №%2").arg(kind).arg(e.exitId);
             if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)
@@ -148,7 +155,7 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
             else
                 label+=tr(" → %1, вход №%2").arg(e.destinationZoneId).arg(e.destinationExitId);
             auto* item=new QListWidgetItem(label,m_exits);
-            item->setToolTip(label);
+            item->setToolTip(label+(e.sourceLabel!=QString::number(e.exitId)?tr("\nМетка в файле: %1; игра использует порядковый номер %2.").arg(e.sourceLabel).arg(e.exitId):QString()));
         }
     m_exits->setCurrentRow(exitIndex);
     m_status->setText(dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
@@ -172,7 +179,7 @@ void CTravelPanel::fillExit()
             if(z==m_zone)continue;
             const QString label=tr("%1, запись №%2 → %3:%4%5").arg(m_zones[z].zoneId).arg(source.exitId)
                 .arg(source.destinationZoneId).arg(source.destinationExitId)
-                .arg(source.hasRemoveRectangle?QString():tr(" (область перехода не задана)"));
+                .arg(source.hasEffectiveRemove()?QString():tr(" (область перехода не задана)"));
             m_source->addItem(label,QVariantList{z,i});
             m_source->setItemData(m_source->count()-1,label,Qt::ToolTipRole);
         }
@@ -181,9 +188,13 @@ void CTravelPanel::fillExit()
             m_incoming->setText(m_incoming->text()+tr("\nУ этой записи также есть исходящая связь → %1:%2. Она настраивается на вкладке «Переход».")
                 .arg(e.destinationZoneId).arg(e.destinationExitId));
         m_linkIncoming->setEnabled(e.hasDeployRectangle);
-        m_directionNote->setText(!e.hasRemoveRectangle && e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0
-            ?tr("Исходящая связь задана, хотя области перехода нет. Отсутствие оранжевой области не гарантирует запрет перехода в игре. Для появления без исходящей связи выберите «Без перехода».")
-            :tr("Эта связь направлена с текущей карты на целевую. Она не задаёт, откуда прибывают сюда."));
+        const bool overwritten=e.hasDeployRectangle && e.hasRemoveRectangle && !e.removeOverridesDeploy;
+        m_repairOrder->setVisible(overwritten);
+        m_directionNote->setText(overwritten
+            ?tr("Ошибка порядка: поздний #deploy заменяет область #remove. Оранжевым показан действующий выход, совпадающий с появлением. «Восстановить раздельные области» применит записанную область #remove; затем сохраните карту.")
+            :(!e.hasRemoveRectangle && e.hasDeployRectangle
+                ?tr("Отдельная область перехода не задана: игра использует область появления. Для отдельного выхода нарисуйте переход. Для появления без выхода выберите «Без перехода».")
+                :tr("Назначение относится к выходу с текущей карты. Номер входа — порядковый номер записи на целевой карте. После сохранения полностью перезапустите игру.")));
         m_destination->clear();m_destination->addItem(tr("Без перехода"),"none");
         for(const auto& z:m_zones)if(m_destination->findData(z.zoneId)<0)m_destination->addItem(z.zoneId+(z.zoneType=="edge"?tr(" — маршрут"):tr(" — карта")),z.zoneId);
         int row=m_destination->findData(e.destinationZoneId);
@@ -207,7 +218,7 @@ void CTravelPanel::fillDestinationEntries(int selected)
     for(const auto& zone:m_zones)if(zone.zoneId.compare(id,Qt::CaseInsensitive)==0)
         for(const auto& entry:zone.exits) {
             const bool valid=zone.zoneType.compare("edge",Qt::CaseInsensitive)==0 || entry.hasDeployRectangle;
-            m_destinationExit->addItem(tr("№%1 — %2").arg(entry.exitId).arg(valid?tr("доступен"):tr("нет области появления")),entry.exitId);
+            m_destinationExit->addItem(tr("№%1 — %2").arg(entry.exitId).arg(valid?tr("есть появление"):tr("нет области появления")),entry.exitId);
             if(!valid)static_cast<QStandardItemModel*>(m_destinationExit->model())->item(m_destinationExit->count()-1)->setEnabled(false);
             if(entry.exitId==selected && valid)usable=true;
         }

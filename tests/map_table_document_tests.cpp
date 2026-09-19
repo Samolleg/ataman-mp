@@ -7,6 +7,7 @@ class MapTableDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void sequentialAreasAndOrdinalMigration();
     void noOpIsByteIdentical();
     void parsesMapsAndEntranceMetadata();
     void preservesUnknownZoneText();
@@ -16,13 +17,49 @@ private slots:
     void rejectsUnknownZoneTypeAcrossDocument();
     void allowsDuplicateEdgeIdsAndEditsByIndex();
     void allowsRepeatedExitIdsWithinEdgeZone();
-    void rejectsRepeatedExitIdsWithinGameZone();
+    void usesOrdinalsWithRepeatedGameLabels();
     void rejectsDuplicateNonEdgeIds();
     void rejectsGameRegistrationWithoutResources();
     void editsOnlyRequestedKnownLines();
     void editsEntranceWithoutRewritingUnknownText();
     void appendsExplicitRegistrationBeforeGlobalQuests();
 };
+
+void MapTableDocumentTests::sequentialAreasAndOrdinalMigration()
+{
+    const QByteArray bytes="#zone a g game\n#res\na a\n"
+        "#exit 9\nnone 0\n#remove\n20 30 24 36 45\n## keep\n#deploy\n1 2 5 8 15\n"
+        "#exit 9\nnone 0\n#remove\n40 50 44 56 30\n"
+        "#zone b g game\n#res\nb b\n#exit 8\na 2\n#deploy\n1 1 3 3\n";
+    CMapTableDocument doc;QVERIFY(doc.loadBytes(bytes));
+    auto a=doc.zones()[0];
+    QCOMPARE(a.exits[0].exitId,1);QCOMPARE(a.exits[1].exitId,2);
+    QCOMPARE(a.exits[0].effectiveRemove(),a.exits[0].deployRectangle);
+    QCOMPARE(a.exits[0].effectiveRemoveAngle(),15.0);
+    QVERIFY(doc.replaceZoneAt(0,a).success);QCOMPARE(doc.serialize(),bytes);
+    // An unrelated edit preserves the historical effective geometry and order.
+    a.exits[0].hasViewAngle=true;a.exits[0].viewAngle=90;
+    QVERIFY(doc.replaceZoneAt(0,a).success);
+    QCOMPARE(doc.zones()[0].exits[0].effectiveRemove(),a.exits[0].deployRectangle);
+    // Explicit repair applies the authored remove. Unknown text and fifth values survive.
+    a=doc.zones()[0];a.exits[0].removeOverridesDeploy=true;
+    QVERIFY(doc.replaceZoneAt(0,a).success);
+    QCOMPARE(doc.zones()[0].exits[0].effectiveRemove(),a.exits[0].removeRectangle);
+    QCOMPARE(doc.zones()[0].exits[0].effectiveRemoveAngle(),45.0);
+    QVERIFY(doc.serialize().contains("## keep\n"));
+    QVERIFY(doc.serialize().contains("1 2 5 8 15"));
+    // Original regression: add deploy to a remove-only entry before another zone.
+    a=doc.zones()[0];a.exits[1].hasDeployRectangle=true;a.exits[1].deployRectangle=QRectF(7,8,2,3);
+    QVERIFY(doc.replaceZoneAt(0,a).success);
+    QCOMPARE(doc.zones()[0].exits[1].effectiveRemove(),a.exits[1].removeRectangle);
+    QCOMPARE(doc.zones()[0].exits[1].effectiveRemoveAngle(),30.0);
+    QCOMPARE(doc.zones()[1].exits[0].deployRectangle,QRectF(1,1,2,2));
+    // Deleting an unreferenced first record migrates references to the second.
+    a=doc.zones()[0];a.exits.removeFirst();QVERIFY(doc.replaceZoneAt(0,a).success);
+    QCOMPARE(doc.zones()[1].exits[0].destinationExitId,1);
+    const auto before=doc.serialize();a=doc.zones()[0];a.exits.clear();
+    QVERIFY(!doc.replaceZoneAt(0,a).success);QCOMPARE(doc.serialize(),before);
+}
 
 void MapTableDocumentTests::noOpIsByteIdentical()
 {
@@ -65,7 +102,8 @@ void MapTableDocumentTests::parsesMapsAndEntranceMetadata()
     QCOMPARE(zone.maps.objectivesTexture, QString("zone1quest"));
     QCOMPARE(zone.exits.size(), 1);
     const SMapTableExit& exit = zone.exits.first();
-    QCOMPARE(exit.exitId, 2);
+    QCOMPARE(exit.exitId, 1);
+    QCOMPARE(exit.sourceLabel, QString("2"));
     QCOMPARE(exit.destinationZoneId, QString("bz1g"));
     QCOMPARE(exit.destinationExitId, 1);
     QVERIFY(exit.hasDeployRectangle);
@@ -209,7 +247,7 @@ void MapTableDocumentTests::allowsRepeatedExitIdsWithinEdgeZone()
     QVERIFY(!document.isDirty());
 }
 
-void MapTableDocumentTests::rejectsRepeatedExitIdsWithinGameZone()
+void MapTableDocumentTests::usesOrdinalsWithRepeatedGameLabels()
 {
     const QByteArray bytes =
         "#zone gz1g gipat game\r\n"
@@ -219,8 +257,8 @@ void MapTableDocumentTests::rejectsRepeatedExitIdsWithinGameZone()
     CMapTableDocument document;
     QVERIFY(document.loadBytes(bytes));
     const SMapTableEditResult result = document.validateAllZones();
-    QVERIFY(!result.success);
-    QVERIFY(result.toText().contains("gz1g: Exit ID 1 is duplicated."));
+    QVERIFY(result.success);
+    QCOMPARE(document.zones()[0].exits[1].exitId,2);
 }
 
 void MapTableDocumentTests::rejectsDuplicateNonEdgeIds()

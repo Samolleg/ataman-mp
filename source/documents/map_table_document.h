@@ -22,12 +22,28 @@ struct SMapTableMaps
 struct SMapTableExit
 {
     int exitId{0};
+    // Game identity is the one-based position, not the ignored #exit label.
+    QString sourceLabel;
     QString destinationZoneId;
     int destinationExitId{0};
     QRectF deployRectangle;
     bool hasDeployRectangle{false};
     QRectF removeRectangle;
     bool hasRemoveRectangle{false};
+    bool removeOverridesDeploy{true};
+    bool hasDeployExitAngle{false};
+    double deployExitAngle{0};
+    bool hasRemoveExitAngle{false};
+    double removeExitAngle{0};
+    bool hasEffectiveRemove() const { return hasDeployRectangle || hasRemoveRectangle; }
+    QRectF effectiveRemove() const {
+        return hasRemoveRectangle && (!hasDeployRectangle || removeOverridesDeploy)
+            ? removeRectangle : deployRectangle;
+    }
+    double effectiveRemoveAngle() const {
+        return hasRemoveRectangle && (!hasDeployRectangle || removeOverridesDeploy)
+            ? removeExitAngle : deployExitAngle;
+    }
     double passTime{0.0};
     bool hasPassTime{false};
     double viewAngle{0.0};
