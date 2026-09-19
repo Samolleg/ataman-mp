@@ -18,3 +18,13 @@ User video was readable after escalation, but native thumbnail extraction failed
 (WinRT collection projection); its full gesture sequence was not visually verified.
 Exact in-scene user reproduction and gameplay remain manual acceptance gates.
 No live game data modified. Existing parent travel gameplay acceptance remains open.
+
+Handoff source: 2aaf382ef83aaafc228d26a5b5793571789986a8.
+Installed C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test.
+Fresh staging build-staging-33-draw finalized, --version Edition 33 before finalization.
+Independent hash/coverage/path/reparse checks PASS: 101 managed files.
+EXE SHA256 abab2dfe5ad9d7efd30f1cbf2badfec55a4e507c4fd32f122a0c60cc740d7557.
+Install PASS: 7 replacements, 0 removals, 8121 user files unchanged.
+Verified rollback version 32 retained; older owned generation removed.
+Logs: build-release-33-draw/{checks.json,stage.log,independent-package-check.json,
+install-result.txt}. Finalized staging not launched afterwards.
