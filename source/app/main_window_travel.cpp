@@ -19,10 +19,17 @@
 #include <QDir>
 #include <functional>
 #include <limits>
+#include <cmath>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QTemporaryDir>
 #include <QPushButton>
 #include <QApplication>
 #include <QMouseEvent>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QRegularExpression>
+#include <QTimer>
 #include "res_file.h"
 
 namespace {
@@ -59,6 +66,7 @@ void MainWindow::createTravelEditor(QMenu* menu)
     m_travelDock=new QDockWidget(tr("Появления и переходы"),this);
     m_travelDock->setObjectName("TravelEditorDock");
     m_travelPanel=new CTravelPanel(m_travelDock);m_travelDock->setWidget(m_travelPanel);
+    connect(m_travelPanel,&CTravelPanel::routeRequested,this,&MainWindow::createPairedTravelRoute);
     addDockWidget(Qt::RightDockWidgetArea,m_travelDock);m_travelDock->hide();
     menu->addAction(m_travelDock->toggleViewAction());
     connect(m_travelDock,&QDockWidget::visibilityChanged,this,[this](bool visible){
@@ -259,6 +267,102 @@ void MainWindow::createReverseTravel()
     if(index<0)zone.exits.append(reverse);else zone.exits[index]=reverse;
     changeTravelZone(target,zone,tr("Создать обратный переход"));
 }
+void MainWindow::createPairedTravelRoute()
+{
+    if(!m_travelDocument || m_travelZone<0){m_travelPanel->setStatus(tr("Сначала откройте зарегистрированную игровую карту."));return;}
+    const auto zones=m_travelDocument->table().zones();
+    const auto source=zones[m_travelZone];
+    if(source.zoneType!="game"){m_travelPanel->setStatus(tr("Выберите игровую карту (game)."));return;}
+    QDialog dialog(this);dialog.setWindowTitle(tr("Маршрут между картами"));
+    dialog.setAttribute(Qt::WA_DontShowOnScreen,testAttribute(Qt::WA_DontShowOnScreen));
+    dialog.resize(760,700);QVBoxLayout layout(&dialog);QFormLayout form;layout.addLayout(&form);
+    QLabel note(tr("Два конца маршрута будут связаны через новую edge-зону. Выбранные существующие записи сохранят номера, но их направления и четыре области будут заменены значениями ниже. Остальные записи не меняются."));
+    note.setWordWrap(true);layout.addWidget(&note);
+    QComboBox sourceExit,targetZone,targetExit;
+    const auto fillExits=[&](QComboBox& combo,const SMapTableZone& zone) {
+        combo.clear();combo.addItem(tr("Новая запись (свободный номер)"),0);
+        for(const auto& e:zone.exits)combo.addItem(tr("№%1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId),e.exitId);
+    };
+    fillExits(sourceExit,source);
+    if(m_travelExit>=0 && m_travelExit<source.exits.size())sourceExit.setCurrentIndex(m_travelExit+1);
+    for(int i=0;i<zones.size();++i)if(i!=m_travelZone && zones[i].zoneType=="game"
+        && zones[i].allodId.compare(source.allodId,Qt::CaseInsensitive)==0)targetZone.addItem(zones[i].zoneId,i);
+    if(targetZone.count()==0){m_travelPanel->setStatus(tr("Нет другой игровой карты в этом аллоде."));return;}
+    if(m_travelExit>=0 && m_travelExit<source.exits.size()) {
+        const int found=targetZone.findText(source.exits[m_travelExit].destinationZoneId);
+        if(found>=0)targetZone.setCurrentIndex(found);
+    }
+    form.addRow(tr("Текущая карта: %1").arg(source.zoneId),&sourceExit);
+    form.addRow(tr("Другая карта:"),&targetZone);form.addRow(tr("Запись на другой карте:"),&targetExit);
+    QTableWidget areas(4,4);areas.setObjectName("routeAreas");areas.setHorizontalHeaderLabels({"X","Y",tr("Ширина"),tr("Высота")});
+    areas.setVerticalHeaderLabels({tr("Здесь: появление"),tr("Здесь: переход"),tr("Там: появление"),tr("Там: переход")});
+    areas.horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);areas.setMinimumHeight(180);layout.addWidget(&areas);
+    for(int row=0;row<4;++row)for(int col=0;col<4;++col)areas.setCellWidget(row,col,new CWorldCoordinateEdit(0,&areas));
+    const auto fillAreas=[&](const SMapTableZone& zone,int id,int row) {
+        const SMapTableExit* entry=nullptr;for(const auto& e:zone.exits)if(e.exitId==id)entry=&e;
+        for(int type=0;type<2;++type){
+            const bool present=entry && (type?entry->hasRemoveRectangle:entry->hasDeployRectangle);
+            const QRectF rect=entry?(type?entry->removeRectangle:entry->deployRectangle):QRectF();
+            const double values[]={rect.x(),rect.y(),rect.width(),rect.height()};
+            for(int col=0;col<4;++col)static_cast<CWorldCoordinateEdit*>(areas.cellWidget(row+type,col))->setText(present?QString::number(values[col],'g',17):QString());
+        }
+    };
+    QLineEdit edgeId;edgeId.setObjectName("routeEdge");form.addRow(tr("ID новой связующей зоны:"),&edgeId);
+    QLabel positionNote(tr("Положение связующей зоны на игровой глобальной карте (не метры рельефа). Предложена середина между позициями карт, если они заданы. Проверьте X/Y/Z перед созданием."));
+    positionNote.setWordWrap(true);layout.addWidget(&positionNote);
+    QHBoxLayout positionLayout;layout.addLayout(&positionLayout);
+    CWorldCoordinateEdit px(0),py(0),pz(0);
+    px.setObjectName("routeX");py.setObjectName("routeY");pz.setObjectName("routeZ");
+    positionLayout.addWidget(new QLabel("X"));positionLayout.addWidget(&px);
+    positionLayout.addWidget(new QLabel("Y"));positionLayout.addWidget(&py);
+    positionLayout.addWidget(new QLabel("Z"));positionLayout.addWidget(&pz);
+    const auto mapPosition=[](const SMapTableZone& zone,QVector3D* value) {
+        const QRegularExpression re(QStringLiteral(R"((?:^|\n)[ \t]*#position[ \t]*\r?\n[ \t]*(\S+)[ \t]+(\S+)[ \t]+(\S+))"));
+        const auto match=re.match(zone.rawBlock);if(!match.hasMatch())return false;
+        bool ok[3];float a=match.captured(1).toFloat(&ok[0]),b=match.captured(2).toFloat(&ok[1]),c=match.captured(3).toFloat(&ok[2]);
+        if(!ok[0]||!ok[1]||!ok[2]||!std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c))return false;
+        *value=QVector3D(a,b,c);return true;
+    };
+    const auto refreshTarget=[&]() {
+        const auto& target=zones[targetZone.currentData().toInt()];fillExits(targetExit,target);
+        if(m_travelExit>=0 && m_travelExit<source.exits.size()) {
+            const auto& e=source.exits[m_travelExit];
+            if(e.destinationZoneId==target.zoneId){const int found=targetExit.findData(e.destinationExitId);if(found>=0)targetExit.setCurrentIndex(found);}
+        }
+        fillAreas(target,targetExit.currentData().toInt(),2);
+        const QString base=source.zoneId+"_"+target.zoneId;QString name=base;int suffix=2;
+        while(m_travelDocument->uniqueZone(name)>=0)name=base+QString::number(suffix++);
+        edgeId.setText(name);
+        QVector3D a,b;const bool valid=mapPosition(source,&a)&&mapPosition(target,&b);const auto midpoint=(a+b)*0.5f;
+        px.setText(valid?QString::number(midpoint.x(),'g',9):QString());
+        py.setText(valid?QString::number(midpoint.y(),'g',9):QString());
+        pz.setText(valid?QString::number(midpoint.z(),'g',9):QString());
+    };
+    connect(&sourceExit,QOverload<int>::of(&QComboBox::activated),&dialog,[&](int){fillAreas(source,sourceExit.currentData().toInt(),0);});
+    connect(&targetZone,QOverload<int>::of(&QComboBox::activated),&dialog,[&](int){refreshTarget();});
+    connect(&targetExit,QOverload<int>::of(&QComboBox::activated),&dialog,[&](int){fillAreas(zones[targetZone.currentData().toInt()],targetExit.currentData().toInt(),2);});
+    fillAreas(source,sourceExit.currentData().toInt(),0);refreshTarget();
+    QLabel error;error.setWordWrap(true);layout.addWidget(&error);
+    QDialogButtonBox buttons(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);buttons.button(QDialogButtonBox::Ok)->setText(tr("Создать маршрут"));layout.addWidget(&buttons);
+    connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    connect(&buttons,&QDialogButtonBox::accepted,&dialog,[&](){
+        STravelRoute route;route.sourceZone=source.zoneId;route.targetZone=zones[targetZone.currentData().toInt()].zoneId;
+        route.sourceExit=sourceExit.currentData().toInt();route.targetExit=targetExit.currentData().toInt();route.edgeZone=edgeId.text().trimmed();
+        QRectF rectangles[4];
+        for(int row=0;row<4;++row){double v[4];for(int col=0;col<4;++col)
+            if(!static_cast<CWorldCoordinateEdit*>(areas.cellWidget(row,col))->coordinate(&v[col])){error.setText(tr("Заполните все четыре области числовыми координатами."));return;}
+            rectangles[row]=QRectF(v[0],v[1],v[2],v[3]);
+        }
+        route.sourceDeploy=rectangles[0];route.sourceRemove=rectangles[1];route.targetDeploy=rectangles[2];route.targetRemove=rectangles[3];
+        double x,y,z;if(!px.coordinate(&x)||!py.coordinate(&y)||!pz.coordinate(&z)){error.setText(tr("Задайте позицию связующей зоны на игровой глобальной карте."));return;}
+        route.worldMapPosition=QVector3D(x,y,z);
+        const auto before=m_travelDocument->snapshot();QString message;
+        if(!m_travelDocument->createPairedRoute(route,&message)){error.setText(message);return;}
+        recordTravelEdit(before,tr("Создать парный маршрут"));dialog.accept();
+    });
+    dialog.exec();
+}
+
 bool MainWindow::resolveTravelClose()
 {
     if(m_travelPanel && !m_travelPanel->flush())return false;
@@ -376,6 +480,31 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     passed=passed && reopened.open(path,&error) && reopened.snapshot()==doc->snapshot();
     window->on_actionUndo_triggered();passed=passed && doc->dirty() && doc->snapshot()==beforeLink;
     window->on_actionUndo_triggered();passed=passed && doc->snapshot()==initial;
+    doc->discard();
+    window->m_travelZone=0;window->m_travelExit=0;window->refreshTravelEditor();
+    const auto beforeRoute=doc->snapshot();
+    bool routeDialogVisited=false;
+    QTimer::singleShot(0,window,[&](){
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if(!dialog)return;
+        auto* areas=dialog->findChild<QTableWidget*>("routeAreas");
+        auto* buttons=dialog->findChild<QDialogButtonBox*>();
+        if(!areas || !buttons){dialog->reject();return;}
+        for(int row=0;row<4;++row)for(int col=0;col<4;++col)
+            static_cast<QLineEdit*>(areas->cellWidget(row,col))->setText(QString::number(col<2?10+row*5:3));
+        for(const auto& name:{"routeX","routeY","routeZ"}) {
+            auto* field=dialog->findChild<QLineEdit*>(name);if(!field){dialog->reject();return;}field->setText("0.5");
+        }
+        routeDialogVisited=true;buttons->button(QDialogButtonBox::Ok)->click();
+        if(dialog->isVisible())dialog->reject(); // Failed validation must not leave a test modal waiting.
+    });
+    window->m_travelPanel->findChild<QPushButton*>("travelCreateRoute")->click();
+    passed=passed && routeDialogVisited && doc->table().zones().size()==3;
+    const auto paired=doc->snapshot();
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==beforeRoute;
+    window->on_actionRedo_triggered();passed=passed && doc->snapshot()==paired;
+    passed=passed && window->saveMapWithTravel(scratch.filePath("backups"));
+    CTravelDocument pairedReload;passed=passed && pairedReload.open(path,&error) && pairedReload.snapshot()==paired;
     doc->discard();
     window->m_undoStack->clear();window->m_travelDocuments.clear();window->m_travelDocument.clear();
     window->m_travelZone=-1;window->m_travelExit=-1;window->refreshTravelEditor();

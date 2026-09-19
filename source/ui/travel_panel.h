@@ -30,6 +30,7 @@ signals:
     void drawRequested(bool remove,bool newExit);
     void deleteRequested();
     void reverseRequested();
+    void routeRequested();
     void registerRequested();
     void visibilityChanged();
     void focusRequested(int index, bool remove);

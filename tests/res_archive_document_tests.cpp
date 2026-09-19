@@ -120,6 +120,7 @@ class ResArchiveDocumentTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void pairedTravelRoute();
     void travelRoundTripAndConflict();
     void travelSaveBatchRollback();
     void travelGeometryAndPanel();
@@ -731,7 +732,7 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     }
     panel.populate({z},0,2,false);
     QCOMPARE(list->item(0)->text(),QString::fromUtf8("Запись без областей №6 → gz7g, вход №1"));
-    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Появление №7 → gz7g, вход №1"));
+    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Связь с областью появления №7 → gz7g, вход №1"));
     QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 → gz7g, вход не выбран"));
     QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и переход №9 → gz7g, вход №1"));
     z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
@@ -770,6 +771,39 @@ void ResArchiveDocumentTests::travelMergeAndLinkValidation()
     const auto failed=commitMapSaveBatch({added,save},dir.filePath("backups"),1);
     QVERIFY(!failed.success);QVERIFY(failed.rollbackComplete);QVERIFY(!QFileInfo::exists(added.path));
     QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),external);
+}
+void ResArchiveDocumentTests::pairedTravelRoute()
+{
+    QTemporaryDir dir;QVERIFY(dir.isValid());const auto path=dir.filePath("texts.res");
+    const QByteArray map="#zone a island game\r\n#res\r\na a\r\n#exit 6\r\nb 6\r\n#deploy\r\n1 2 3 4\r\n#view\r\n90\r\n#opaque\r\nkeep\r\n"
+        "#zone b island game\r\n#res\r\nb b\r\n#exit 6\r\na 4\r\n#deploy\r\n10 20 30 40\r\n";
+    CResFile archive;archive.addFiledata("map.txt",map);archive.addFiledata("opaque.bin","untouched");archive.saveToFile(path);
+    CTravelDocument doc;QString error;QVERIFY(doc.open(path,&error));const auto before=doc.snapshot();
+    STravelRoute r;r.sourceZone="a";r.targetZone="b";r.edgeZone="a_b";r.sourceExit=r.targetExit=6;
+    r.sourceDeploy=QRectF(1,2,2,2);r.sourceRemove=QRectF(3,2,2,2);
+    r.targetDeploy=QRectF(10,20,20,20);r.targetRemove=QRectF(5,20,5,20);r.worldMapPosition=QVector3D(-2,0.5f,0.25f);
+    auto bad=r;bad.targetRemove.setWidth(0);QVERIFY(!doc.createPairedRoute(bad,&error));QCOMPARE(doc.snapshot(),before);
+    bad=r;bad.targetExit=100;QVERIFY(!doc.createPairedRoute(bad,&error));QCOMPARE(doc.snapshot(),before);
+    bad=r;bad.edgeZone="a";QVERIFY(!doc.createPairedRoute(bad,&error));QCOMPARE(doc.snapshot(),before);
+    QVERIFY2(doc.createPairedRoute(r,&error),qPrintable(error));const auto after=doc.snapshot();
+    const auto zones=doc.table().zones();QCOMPARE(zones.size(),3);
+    QCOMPARE(zones[0].exits[0].destinationZoneId,QString("a_b"));QCOMPARE(zones[0].exits[0].destinationExitId,1);
+    QCOMPARE(zones[1].exits[0].destinationZoneId,QString("a_b"));QCOMPARE(zones[1].exits[0].destinationExitId,2);
+    QCOMPARE(zones[2].zoneType,QString("edge"));QCOMPARE(zones[2].exits.size(),2);
+    QCOMPARE(zones[2].exits[0].destinationZoneId,QString("a"));QCOMPARE(zones[2].exits[0].destinationExitId,6);
+    QCOMPARE(zones[2].exits[1].destinationZoneId,QString("b"));QCOMPARE(zones[2].exits[1].destinationExitId,6);
+    QCOMPARE(zones[0].exits[0].viewAngle,90.0);QVERIFY(after.contains("#opaque\r\nkeep"));
+    QVERIFY(after.contains("#position\r\n-2 0.5 0.25"));
+    QVERIFY(!doc.createPairedRoute(r,&error));QCOMPARE(doc.snapshot(),after);
+    SMapSaveFile save;QVERIFY2(doc.prepareSave(&save,&error),qPrintable(error));
+    const auto result=commitMapSaveBatch({save},dir.filePath("backups"));QVERIFY2(result.success,qPrintable(result.error));
+    CTravelDocument reopened;QVERIFY(reopened.open(path,&error));QCOMPARE(reopened.snapshot(),after);
+    CResArchiveDocument saved;QStringList errors;QVERIFY(saved.loadBytes(save.after,path,&errors));
+    QCOMPARE(saved.memberPayload("opaque.bin"),QByteArray("untouched"));
+    QVERIFY(doc.restore(before));r.sourceExit=r.targetExit=0;r.edgeZone="new_route";
+    QVERIFY2(doc.createPairedRoute(r,&error),qPrintable(error));
+    QCOMPARE(doc.table().zones()[0].exits.size(),2);QCOMPARE(doc.table().zones()[0].exits[0].destinationZoneId,QString("b"));
+    QCOMPARE(doc.table().zones()[2].exits[0].destinationExitId,1);
 }
 QTEST_MAIN(ResArchiveDocumentTests)
 #include "res_archive_document_tests.moc"

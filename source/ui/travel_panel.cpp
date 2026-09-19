@@ -25,6 +25,9 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     m_zoneCombo=new QComboBox;layout->addWidget(m_zoneCombo);
     auto* reg=new QPushButton(tr("Зарегистрировать текущую карту…"));layout->addWidget(reg);
     connect(reg,&QPushButton::clicked,this,&CTravelPanel::registerRequested);
+    auto* route=new QPushButton(tr("Создать маршрут между картами…"));
+    route->setObjectName("travelCreateRoute");layout->addWidget(route);
+    connect(route,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
     for(int k=0;k<2;++k) {
         m_visible[k]=new QCheckBox(k?tr("Показать переходы (оранжевые)"):tr("Показать появление (синие)"));
         m_visible[k]->setChecked(true);layout->addWidget(m_visible[k]);
@@ -111,8 +114,9 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
     m_exits->clear();
     if(zoneIndex>=0 && zoneIndex<zones.size())
         for(const auto& e:zones[zoneIndex].exits) {
+            const bool linked=e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0;
             const QString kind=e.hasDeployRectangle
-                ? (e.hasRemoveRectangle?tr("Появление и переход"):tr("Появление"))
+                ? (e.hasRemoveRectangle?tr("Появление и переход"):(linked?tr("Связь с областью появления"):tr("Появление")))
                 : (e.hasRemoveRectangle?tr("Переход"):tr("Запись без областей"));
             QString label=tr("%1 №%2").arg(kind).arg(e.exitId);
             if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)

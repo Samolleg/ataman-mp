@@ -118,6 +118,7 @@ private:
     void recordTravelEdit(const QByteArray& before, const QString& label);
     void registerTravelMap();
     void createReverseTravel();
+    void createPairedTravelRoute();
     bool saveMapWithTravel(const QString& backupRoot = QString());
     bool hasTravelChanges() const;
     bool flushTravelEditor();

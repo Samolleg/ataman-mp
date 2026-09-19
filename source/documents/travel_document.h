@@ -1,6 +1,15 @@
 #pragma once
 #include "map_table_document.h"
 #include "map_save_batch.h"
+#include <QVector3D>
+
+struct STravelRoute
+{
+    QString sourceZone, targetZone, edgeZone;
+    int sourceExit{0}, targetExit{0}; // Zero allocates a new ID; nonzero explicitly replaces that record's link.
+    QRectF sourceDeploy, sourceRemove, targetDeploy, targetRemove;
+    QVector3D worldMapPosition;
+};
 
 class CTravelDocument
 {
@@ -15,6 +24,7 @@ public:
     int uniqueZone(const QString& id) const;
     bool replaceZone(int index, const SMapTableZone& zone, QString* error);
     bool appendZone(const SMapTableZone& zone, QString* error);
+    bool createPairedRoute(const STravelRoute& route, QString* error);
     bool prepareSave(SMapSaveFile* file, QString* error) const;
     void acceptSaved() {m_baseline=snapshot();}
 private:

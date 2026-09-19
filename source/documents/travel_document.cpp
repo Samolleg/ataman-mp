@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QCryptographicHash>
 #include <cmath>
+#include <QSet>
+#include <limits>
 
 namespace {
 bool loadArchive(const QString& path,CResArchiveDocument* archive,QString* error)
@@ -22,6 +24,67 @@ bool validRect(const QRectF& r)
         && std::isfinite(r.height()) && r.width()>0 && r.height()>0;
 }
 }
+bool CTravelDocument::createPairedRoute(const STravelRoute& r,QString* error)
+{
+    const auto fail=[error](const QString& message){if(error)*error=message;return false;};
+    const int a=uniqueZone(r.sourceZone),b=uniqueZone(r.targetZone);
+    if(a<0 || b<0 || a==b)return fail(QStringLiteral("Нужны две разные однозначные карты."));
+    auto first=m_table.zones()[a],second=m_table.zones()[b];
+    if(first.zoneType!="game" || second.zoneType!="game" || first.allodId.compare(second.allodId,Qt::CaseInsensitive)!=0)
+        return fail(QStringLiteral("Маршрут создаётся между игровыми картами одного аллода."));
+    for(const auto& zone:m_table.zones())if(zone.zoneId.compare(r.edgeZone,Qt::CaseInsensitive)==0)
+        return fail(QStringLiteral("ID связующей зоны уже занят. Существующая зона не перезаписывается."));
+    if(!validRect(r.sourceDeploy)||!validRect(r.sourceRemove)||!validRect(r.targetDeploy)||!validRect(r.targetRemove))
+        return fail(QStringLiteral("Задайте четыре области с конечными координатами и положительными размерами."));
+    if(!std::isfinite(r.worldMapPosition.x())||!std::isfinite(r.worldMapPosition.y())||!std::isfinite(r.worldMapPosition.z()))
+        return fail(QStringLiteral("Нужна конечная позиция на игровой глобальной карте."));
+    const auto endpoint=[&](SMapTableZone& zone,int id,const QRectF& deploy,const QRectF& remove,int edgeExit)->int {
+        int index=-1;QSet<int> ids;
+        for(int i=0;i<zone.exits.size();++i){
+            const int existing=zone.exits[i].exitId;
+            if(ids.contains(existing))return -1;
+            ids.insert(existing);if(existing==id)index=i;
+        }
+        if(id<0 || (id>0 && index<0))return -1;
+        if(id==0){
+            id=1;while(ids.contains(id) && id<std::numeric_limits<int>::max())++id;
+            if(ids.contains(id))return -1;
+            SMapTableExit entry;entry.exitId=id;zone.exits.append(entry);index=zone.exits.size()-1;
+        }
+        auto& entry=zone.exits[index];entry.destinationZoneId=r.edgeZone;entry.destinationExitId=edgeExit;
+        entry.hasDeployRectangle=entry.hasRemoveRectangle=true;
+        entry.deployRectangle=deploy;entry.removeRectangle=remove;return id;
+    };
+    const int aid=endpoint(first,r.sourceExit,r.sourceDeploy,r.sourceRemove,1);
+    const int bid=endpoint(second,r.targetExit,r.targetDeploy,r.targetRemove,2);
+    if(aid<0 || bid<0)return fail(QStringLiteral("Номер конца маршрута отсутствует или неоднозначен."));
+    SMapTableZone edge;edge.zoneId=r.edgeZone;edge.allodId=first.allodId;edge.zoneType="edge";
+    SMapTableExit left;left.exitId=1;left.destinationZoneId=first.zoneId;left.destinationExitId=aid;
+    SMapTableExit right;right.exitId=2;right.destinationZoneId=second.zoneId;right.destinationExitId=bid;
+    edge.exits={left,right};
+    // Build all three records on a private document. No partial mutation on failure.
+    CTravelDocument candidate=*this;
+    if(!candidate.replaceZone(a,first,error)||!candidate.replaceZone(b,second,error)||!candidate.appendZone(edge,error))return false;
+    const int edgeIndex=candidate.uniqueZone(edge.zoneId);
+    auto raw=candidate.table().zones()[edgeIndex].rawBlock;
+    const int header=raw.indexOf("#zone "),lineEnd=raw.indexOf('\n',header);
+    if(header<0 || lineEnd<0)return fail(QStringLiteral("Не удалось сформировать связующую зону."));
+    raw.insert(lineEnd+1,QString("#position\n%1 %2 %3\n")
+        .arg(r.worldMapPosition.x(),0,'g',9).arg(r.worldMapPosition.y(),0,'g',9).arg(r.worldMapPosition.z(),0,'g',9));
+    const auto positioned=candidate.m_table.replaceRawZoneSpanAt(edgeIndex,raw);
+    if(!positioned.success)return fail(positioned.toText());
+    const auto& zones=candidate.table().zones();
+    const auto matching=[&](int zone,int id,const QString& target,int targetId){
+        int count=0;for(const auto& exit:zones[zone].exits)
+            if(exit.exitId==id && exit.destinationZoneId==target && exit.destinationExitId==targetId)++count;
+        return count==1;
+    };
+    if(!matching(a,aid,edge.zoneId,1)||!matching(b,bid,edge.zoneId,2)
+       ||!matching(edgeIndex,1,first.zoneId,aid)||!matching(edgeIndex,2,second.zoneId,bid))
+        return fail(QStringLiteral("Проверка парных связей не пройдена."));
+    m_table=candidate.m_table;return true;
+}
+
 bool CTravelDocument::open(const QString& path,QString* error)
 {
     CResArchiveDocument archive;
