@@ -26,3 +26,14 @@ fixed fixture cleanup by clearing active test sources before temp removal. Rerun
 exit 0, travelEditorProductionRouteWorks=1, watcher restored before fixture cleanup.
 No claim that the initial timeout passed. Original crash sequence is prevented at
 the publication boundary; full external-resource texture lifetime remains separate.
+
+Handoff source 58f2a53bdc11f866a51e2f54cf67c94f90760932.
+Native hidden zone1 OpenGL/neighbor scenario PASS, zero integration failures,
+live MPR/MOB byte-identical (build-release-34-save/zone1.stdout.txt).
+Installed C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test.
+Fresh staging build-staging-34-save finalized; staged version Edition 34 checked.
+Independent manifest hashes/coverage/paths/reparse check PASS, 101 managed files.
+EXE SHA256 14ee64c941408b90895205aa5a6787f413a8fd9f5ee2652969ce5e52c9f5d497.
+6 program replacements, 0 removals, 8541 user files preserved; version33 rollback
+verified and retained. Finalized staging not launched afterwards. User scene save
+acceptance pending; no live archive changed during implementation/testing.
