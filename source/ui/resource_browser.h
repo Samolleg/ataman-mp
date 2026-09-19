@@ -55,7 +55,7 @@ public:
     bool uiContractSatisfied() const;
     void beginInternalPublication(const QString& archivePath);
     void finishInternalPublication(const QString& archivePath,
-                                   bool committed);
+                                   bool committed, bool refreshVisualResources = true);
 
 signals:
     void databaseEditorRequested(const QString& archivePath);

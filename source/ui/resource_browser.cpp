@@ -828,7 +828,7 @@ void CResourceBrowser::beginInternalPublication(const QString& archivePath)
 }
 
 void CResourceBrowser::finishInternalPublication(
-    const QString& archivePath, bool committed)
+    const QString& archivePath, bool committed, bool refreshVisualResources)
 {
     const QString absolute = QFileInfo(archivePath).absoluteFilePath();
     const QString normalized = QDir::cleanPath(absolute).toLower();
@@ -850,7 +850,7 @@ void CResourceBrowser::finishInternalPublication(
         const QString label = m_activeProfileMode ? m_activeProfileName
             : QFileInfo(m_loadedSources.value(0)).fileName();
         beginLoad(m_loadedSources, m_activeProfileMode, label);
-        if(m_activeProfileMode)
+        if(m_activeProfileMode && refreshVisualResources)
             emit activeResourcesPublished(absolute);
         return;
     }

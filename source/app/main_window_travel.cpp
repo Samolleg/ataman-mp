@@ -1,3 +1,5 @@
+#include "resource_browser.h"
+#include <QFileSystemWatcher>
 #include "main_window.h"
 #include "travel_panel.h"
 #include "travel_document.h"
@@ -407,7 +409,18 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         if(!checked.success){QMessageBox::warning(this,tr("MOB не сохранён"),checked.error);return false;}
         SMapSaveFile file;file.path=mob->filePath().absoluteFilePath();file.before=mob->originalData();file.after=mobBytes;files.append(file);
     }
-    if(!m_pView->saveMapCompanions(files,&error,backupRoot)){
+    // map.txt writes are ours, not external visual-resource publications. Remove
+    // the watcher before commit so its queued notification cannot clear textures
+    // still referenced by the current scene. Reindex without a GPU cache reset.
+    QStringList travelArchives;
+    for(const auto& file:files)if(file.path.endsWith(".res",Qt::CaseInsensitive)) {
+        travelArchives.append(file.path);
+        if(m_resourceBrowser)m_resourceBrowser->beginInternalPublication(file.path);
+    }
+    const bool saved=m_pView->saveMapCompanions(files,&error,backupRoot);
+    for(const auto& archive:travelArchives)
+        if(m_resourceBrowser)m_resourceBrowser->finishInternalPublication(archive,saved,false);
+    if(!saved){
         QMessageBox::warning(this,tr("Карта не сохранена"),error);return false;}
     for(const auto& doc:changed)doc->acceptSaved();
     if(mob && !mobBytes.isEmpty())mob->adoptCommittedBytes(mobBytes);
@@ -440,6 +453,10 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     archive.addFiledata("unrelated.bin","untouched");archive.saveToFile(path);
     auto doc=QSharedPointer<CTravelDocument>::create();QString error;
     if(!doc->open(path,&error) || doc->table().zones().size()!=2)return false;
+    int visualRefreshes=0;
+    const auto publicationConnection=QObject::connect(window->m_resourceBrowser,&CResourceBrowser::activeResourcesPublished,
+        window,[&](const QString&){++visualRefreshes;});
+    window->m_resourceBrowser->setActiveProfileSources({path},"synthetic travel save");
     const auto initial=doc->snapshot();
     emit window->m_travelDock->visibilityChanged(true);
     bool passed=window->m_pView->travelEditing();
@@ -531,6 +548,12 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     QTimer::singleShot(0,window,[&](){auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
         if(box){sawDiscard=true;box->button(QMessageBox::Discard)->click();}});
     passed=window->resolveTravelClose() && sawDiscard && window->m_travelPanel->flush() && passed;
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const auto* resourceWatcher=window->m_resourceBrowser->findChild<QFileSystemWatcher*>();
+    passed=passed && visualRefreshes==0 && resourceWatcher
+        && resourceWatcher->files().contains(QFileInfo(path).absoluteFilePath(),Qt::CaseInsensitive);
+    QObject::disconnect(publicationConnection);
+    window->m_resourceBrowser->setActiveProfileSources({},"test completed");
     window->m_undoStack->clear();window->m_travelDocuments.clear();window->m_travelDocument.clear();
     window->m_travelZone=-1;window->m_travelExit=-1;window->refreshTravelEditor();
     return passed;
