@@ -12,6 +12,7 @@
 #include <QTabWidget>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QMouseEvent>
 #include <cmath>
 
 CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
@@ -30,17 +31,23 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
         connect(m_visible[k],&QCheckBox::toggled,this,&CTravelPanel::visibilityChanged);
     }
     m_exits=new QListWidget; m_exits->setMinimumHeight(100);layout->addWidget(m_exits);
+    m_exits->setObjectName("travelExitList");
+    m_exits->viewport()->installEventFilter(this);
+    m_exits->setToolTip(tr("ПКМ по строке — камера к области выбранной вкладки."));
     auto* newRow=new QHBoxLayout;
     auto* addDeploy=new QPushButton(tr("+ Появление"));auto* addRemove=new QPushButton(tr("+ Переход"));
+    m_add[0]=addDeploy;m_add[1]=addRemove;
+    for(int k=0;k<2;++k){m_add[k]->setCheckable(true);m_add[k]->setObjectName(QString("travelAdd%1").arg(k));
+        m_add[k]->setToolTip(tr("Нажмите, затем зажмите ЛКМ на карте и протяните прямоугольник. Esc — отмена."));}
     newRow->addWidget(addDeploy);newRow->addWidget(addRemove);layout->addLayout(newRow);
-    connect(addDeploy,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(false,true);});
-    connect(addRemove,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(true,true);});
+    connect(addDeploy,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(false,true);else m_add[0]->setChecked(false);});
+    connect(addRemove,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(true,true);else m_add[1]->setChecked(false);});
     m_properties=new QWidget;auto* props=new QVBoxLayout(m_properties);props->setContentsMargins(0,0,0,0);
     auto* target=new QFormLayout;m_destination=new QComboBox;
     m_destinationExit=new QSpinBox;m_destinationExit->setRange(0,2147483647);
     target->addRow(tr("Куда:"),m_destination);target->addRow(tr("Номер входа там:"),m_destinationExit);
     props->addLayout(target);
-    auto* tabs=new QTabWidget;props->addWidget(tabs);
+    auto* tabs=new QTabWidget;m_tabs=tabs;props->addWidget(tabs);
     for(int k=0;k<2;++k) {
         auto* page=new QWidget;auto* form=new QFormLayout(page);
         m_present[k]=new QCheckBox(tr("Область задана"));form->addRow(m_present[k]);
@@ -74,7 +81,7 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
 }
 void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,int exitIndex,bool dirty)
 {
-    m_filling=true;m_zones=zones;m_zone=zoneIndex;m_exit=exitIndex;
+    m_filling=true;m_zones=zones;m_zone=zoneIndex;m_exit=exitIndex;m_dirty=dirty;
     m_zoneCombo->clear();
     for(int i=0;i<zones.size();++i)m_zoneCombo->addItem(zones[i].zoneId,i);
     m_zoneCombo->setCurrentIndex(zoneIndex);
@@ -134,3 +141,39 @@ void CTravelPanel::setStatus(const QString& text){m_status->setText(text);}
 int CTravelPanel::selectedExit() const {return m_exit;}
 bool CTravelPanel::showDeploy() const {return m_visible[0]->isChecked();}
 bool CTravelPanel::showRemove() const {return m_visible[1]->isChecked();}
+
+void CTravelPanel::setDrawingState(bool active,bool remove,bool newExit)
+{
+    for(int k=0;k<2;++k){QSignalBlocker block(m_add[k]);m_add[k]->setChecked(active && newExit && k==int(remove));}
+    if(active){
+        revealArea(remove);
+        setStatus((remove?tr("Рисование области выхода. "):tr("Рисование области появления. "))
+            +tr("Зажмите ЛКМ на карте и протяните прямоугольник. Esc или ПКМ — отмена."));
+    } else setStatus(m_dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
+        tr("Перетащите область или её маркеры. ПКМ по списку — перейти к области."));
+}
+void CTravelPanel::revealArea(bool remove)
+{
+    m_tabs->setCurrentIndex(remove?1:0);m_visible[remove?1:0]->setChecked(true);
+}
+bool CTravelPanel::eventFilter(QObject* watched,QEvent* event)
+{
+    if(watched==m_exits->viewport()){
+        if(event->type()==QEvent::MouseButtonPress){
+            auto* mouse=static_cast<QMouseEvent*>(event);
+            if(mouse->button()==Qt::RightButton){
+                auto* item=m_exits->itemAt(mouse->pos());
+                const int row=item?m_exits->row(item):-1;
+                if(row>=0 && flush() && row<m_exits->count()){
+                    m_exits->setCurrentRow(row);
+                    emit focusRequested(row,m_tabs->currentIndex()==1);
+                }
+                return true;
+            }
+        }
+        if(event->type()==QEvent::ContextMenu)return true;
+        if(event->type()==QEvent::MouseButtonRelease
+           && static_cast<QMouseEvent*>(event)->button()==Qt::RightButton)return true;
+    }
+    return QWidget::eventFilter(watched,event);
+}

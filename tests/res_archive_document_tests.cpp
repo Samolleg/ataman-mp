@@ -3,6 +3,8 @@
 #include "travel_area_geometry.h"
 #include "travel_panel.h"
 #include <QLineEdit>
+#include <QListWidget>
+#include <QPushButton>
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
@@ -702,6 +704,17 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     CTravelPanel panel;panel.populate({z},0,0,false);
     int edits=0;SMapTableExit changed;
     QObject::connect(&panel,&CTravelPanel::exitEdited,[&](int index,const SMapTableExit& value){QCOMPARE(index,0);++edits;changed=value;});
+    int requested=-1,focus=-1;bool preference=false;
+    QObject::connect(&panel,&CTravelPanel::drawRequested,[&](bool remove,bool create){QVERIFY(create);requested=remove?1:0;});
+    panel.findChild<QPushButton*>("travelAdd0")->click();QCOMPARE(requested,0);
+    panel.findChild<QPushButton*>("travelAdd1")->click();QCOMPARE(requested,1);
+    QObject::connect(&panel,&CTravelPanel::focusRequested,[&](int index,bool remove){focus=index;preference=remove;});
+    panel.resize(400,900);panel.setAttribute(Qt::WA_DontShowOnScreen);panel.show();QApplication::processEvents();
+    auto* list=panel.findChild<QListWidget*>("travelExitList");QVERIFY(list);
+    panel.revealArea(true);
+    QTest::mouseClick(list->viewport(),Qt::RightButton,Qt::NoModifier,list->visualItemRect(list->item(0)).center());
+    QCOMPARE(focus,0);QVERIFY(preference);
+    focus=-1;QTest::mouseClick(list->viewport(),Qt::RightButton,Qt::NoModifier,QPoint(5,list->viewport()->height()-2));QCOMPARE(focus,-1);
     auto* x=panel.findChild<QLineEdit*>("travelRect_0_0");QVERIFY(x);x->setText("12.125");
     QVERIFY(panel.flush());QCOMPARE(edits,1);QCOMPARE(changed.deployRectangle.x(),12.125);QCOMPARE(changed.removeRectangle,e.removeRectangle);
     auto* width=panel.findChild<QLineEdit*>("travelRect_0_2");QVERIFY(width);width->setText("-1");

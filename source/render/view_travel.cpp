@@ -4,6 +4,17 @@
 #include <QMouseEvent>
 #include <QLineF>
 
+void CView::focusTravelArea(int exitIndex,bool remove)
+{
+    cancelTravelGesture();m_travelSelectedRemove=remove;
+    setTravelAreas(m_travelAreas,exitIndex);
+    for(const auto& area:m_travelAreas)if(area.exitIndex==exitIndex && area.remove==remove){
+        const auto center=area.rectangle.center();QVector3D point(center.x(),center.y(),0);
+        if(m_pLand->isMprLoad())m_pLand->projectPt(point);
+        focusScenarioPosition(point);return;
+    }
+}
+
 void CView::setTravelAreas(const QVector<STravelArea>& areas,int selectedExit)
 {
     if(m_travelDragging)return;
@@ -24,9 +35,11 @@ void CView::beginTravelArea(bool remove,bool newExit)
     cancelTravelGesture();m_travelDrawing=true;m_travelRemove=remove;m_travelNewExit=newExit;
     m_travelSelectedRemove=remove;
     setCursor(Qt::CrossCursor);setFocus();
+    emit travelDrawingStateChanged(true,remove,newExit);
 }
 void CView::cancelTravelGesture()
 {
+    const bool wasDrawing=m_travelDrawing;
     if(m_travelDragging && m_travelHit>=0 && m_travelHit<m_testEntranceRectangles.size()) {
         if(m_travelDrawing) {
             m_travelAreas.removeLast();m_testEntranceRectangles.removeLast();
@@ -37,6 +50,7 @@ void CView::cancelTravelGesture()
     for(int i=0;i<m_travelAreas.size();++i)if(m_travelAreas[i].exitIndex==m_travelSelectedExit
         && (m_selectedTestEntrance<0 || m_travelAreas[i].remove==m_travelSelectedRemove))m_selectedTestEntrance=i;
     unsetCursor();update();
+    if(wasDrawing)emit travelDrawingStateChanged(false,m_travelRemove,m_travelNewExit);
 }
 bool CView::travelMousePress(QMouseEvent* event)
 {
@@ -83,7 +97,11 @@ bool CView::travelMousePress(QMouseEvent* event)
 bool CView::travelMouseMove(QMouseEvent* event)
 {
     if(!m_travelEditing)return false;
-    if(!m_travelDragging)return (event->buttons()&(Qt::LeftButton|Qt::RightButton))!=0;
+    if(!m_travelDragging){
+        if(event->buttons()&Qt::MiddleButton)return false;
+        if(m_travelDrawing)setCursor(Qt::CrossCursor);
+        event->accept();return true;
+    }
     QVector3D position;
     if(terrainPositionAt(event->pos(),&position)) {
         const QPointF p(position.x(),position.y());

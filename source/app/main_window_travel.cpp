@@ -20,6 +20,9 @@
 #include <functional>
 #include <limits>
 #include <QTemporaryDir>
+#include <QPushButton>
+#include <QApplication>
+#include <QMouseEvent>
 #include "res_file.h"
 
 namespace {
@@ -73,8 +76,22 @@ void MainWindow::createTravelEditor(QMenu* menu)
             refreshTravelEditor();m_travelPanel->setStatus(tr("Сначала откройте карту выбранной зоны."));return;}
         m_travelZone=index;m_travelExit=-1;refreshTravelEditor();
     });
-    connect(m_travelPanel,&CTravelPanel::exitSelected,this,[this](int index){m_travelExit=index;refreshTravelAreas();});
+    connect(m_travelPanel,&CTravelPanel::exitSelected,this,[this](int index){m_pView->cancelTravelGesture();m_travelExit=index;refreshTravelAreas();});
     connect(m_travelPanel,&CTravelPanel::visibilityChanged,this,&MainWindow::refreshTravelAreas);
+    connect(m_pView,&CView::travelDrawingStateChanged,m_travelPanel,&CTravelPanel::setDrawingState);
+    connect(m_travelPanel,&CTravelPanel::focusRequested,this,[this](int index,bool remove){
+        if(!m_travelDocument || m_travelZone<0)return;
+        const auto zone=m_travelDocument->table().zones()[m_travelZone];
+        if(index<0 || index>=zone.exits.size())return;
+        m_pView->cancelTravelGesture();m_travelExit=index;
+        const auto exit=zone.exits[index];
+        if(remove && !exit.hasRemoveRectangle)remove=false;
+        else if(!remove && !exit.hasDeployRectangle)remove=true;
+        if(remove?!exit.hasRemoveRectangle:!exit.hasDeployRectangle){
+            m_travelPanel->setStatus(tr("У этой записи пока нет области. Сначала нарисуйте её."));return;}
+        m_travelPanel->revealArea(remove);refreshTravelAreas();
+        m_pView->focusTravelArea(index,remove);
+    });
     connect(m_travelPanel,&CTravelPanel::exitEdited,this,[this](int index,const SMapTableExit& exit){
         if(!m_travelDocument || m_travelZone<0)return;
         auto zone=m_travelDocument->table().zones()[m_travelZone];
@@ -82,7 +99,7 @@ void MainWindow::createTravelEditor(QMenu* menu)
         zone.exits[index]=exit;changeTravelZone(m_travelZone,zone,tr("Изменить вход/переход"));
     });
     connect(m_travelPanel,&CTravelPanel::drawRequested,this,[this](bool remove,bool create){
-        if(!m_travelDocument || m_travelZone<0){m_travelPanel->setStatus(tr("Сначала выберите или зарегистрируйте текущую карту."));return;}
+        if(!m_travelDocument || m_travelZone<0){m_travelPanel->setDrawingState(false,remove,create);m_travelPanel->setStatus(tr("Сначала выберите или зарегистрируйте текущую карту."));return;}
         if(!create && m_travelExit<0)return;
         m_pView->beginTravelArea(remove,create);
     });
@@ -290,6 +307,18 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     bool passed=window->m_pView->travelEditing();
     window->m_travelDocument=doc;window->m_travelDocuments.insert(path,doc);
     window->m_travelZone=0;window->m_travelExit=0;window->refreshTravelEditor();
+    for(int type=0;type<2;++type){
+        auto* button=window->m_travelPanel->findChild<QPushButton*>(QString("travelAdd%1").arg(type));
+        if(!button)return false;
+        button->click();
+        passed=passed && button->isChecked() && window->m_pView->cursor().shape()==Qt::CrossCursor && !doc->dirty();
+        QMouseEvent hover(QEvent::MouseMove,QPointF(10,10),Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(window->m_pView,&hover);
+        passed=passed && window->m_pView->cursor().shape()==Qt::CrossCursor;
+        QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);
+        QApplication::sendEvent(window->m_pView,&escape);
+        passed=passed && !button->isChecked() && !doc->dirty();
+    }
     const QRectF rectangle(7.125,8.25,9.5,10.75);
     emit window->m_pView->travelAreaCommitted(0,false,rectangle,false);
     passed=passed && doc->dirty() && doc->table().zones()[0].exits[0].deployRectangle==rectangle;
@@ -300,6 +329,13 @@ bool travelEditorIntegrationCheck(MainWindow* window)
         && doc->table().zones()[0].exits[1].exitId==2
         && doc->table().zones()[0].exits[1].hasRemoveRectangle
         && !doc->table().zones()[0].exits[1].hasDeployRectangle;
+    QVector3D camera,pivot,rotation;
+    emit window->m_travelPanel->focusRequested(1,false); // no deploy: use remove
+    passed=passed && window->m_pView->captureCameraLocation(&camera,&pivot,&rotation)
+        && pivot==QVector3D(22,22.5f,0);
+    emit window->m_travelPanel->focusRequested(0,false);
+    passed=passed && window->m_pView->captureCameraLocation(&camera,&pivot,&rotation)
+        && pivot==QVector3D(rectangle.center().x(),rectangle.center().y(),0);
     emit window->m_travelDock->visibilityChanged(false);
     passed=passed && !window->m_pView->travelEditing();
     window->on_actionUndo_triggered();passed=passed && doc->table().zones()[0].exits.size()==1;

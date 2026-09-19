@@ -173,6 +173,7 @@ public:
     void setTravelEditing(bool enabled);
     bool travelEditing() const {return m_travelEditing;}
     void beginTravelArea(bool remove,bool newExit);
+    void focusTravelArea(int exitIndex,bool remove);
     void cancelTravelGesture();
     void saveLand();
     bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString());
@@ -724,6 +725,7 @@ public slots:
 
 signals:
     void travelAreaSelected(int exitIndex, bool* accepted);
+    void travelDrawingStateChanged(bool active, bool remove, bool newExit);
     void travelAreaCommitted(int exitIndex,bool remove,const QRectF& rectangle,bool newExit);
 
     void updateMsg(QString msg);

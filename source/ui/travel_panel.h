@@ -7,6 +7,7 @@ class QCheckBox;
 class QLabel;
 class QPushButton;
 class QSpinBox;
+class QTabWidget;
 class CWorldCoordinateEdit;
 
 class CTravelPanel : public QWidget
@@ -20,6 +21,8 @@ public:
     int selectedExit() const;
     bool showDeploy() const;
     bool showRemove() const;
+    void setDrawingState(bool active, bool remove, bool newExit);
+    void revealArea(bool remove);
 signals:
     void zoneSelected(int index);
     void exitSelected(int index);
@@ -29,6 +32,9 @@ signals:
     void reverseRequested();
     void registerRequested();
     void visibilityChanged();
+    void focusRequested(int index, bool remove);
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void fillExit();
     bool m_filling{false};
@@ -44,4 +50,7 @@ private:
     CWorldCoordinateEdit* m_rect[2][4];
     QLabel* m_status;
     QWidget* m_properties;
+    QPushButton* m_add[2];
+    QTabWidget* m_tabs;
+    bool m_dirty{false};
 };
