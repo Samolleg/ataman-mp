@@ -54,3 +54,15 @@ User must explicitly repair old affected records and save, then fully restart
 the game. Verify arrival, orange-area departure, reverse direction, and actual
 quest/party eligibility. Automated editor checks do not establish in-game
 acceptance. Parent EI-TRAVEL-EDITOR remains open until that verification.
+
+## Handoff
+
+Source 13c04f0866ef0fd970bf5a88359a474befb3eb1f, version 35.
+Fresh build-staging-35-semantics: staged --version PASS, finalizer and independent
+101-file hash/path/coverage verification PASS; not launched after finalization.
+EXE SHA256 05271d2a808d5c07206e909bf1d08c3d50119fcf572b9202e87c05352bba4446.
+Permanent installation artifacts/EI-Mapper-Ataman-2-first-test updated:
+7 managed replacements, no removals, 9075 user files preserved and verified.
+Verified version-34 rollback retained in build-rollback-semantics35; positively
+identified older version-33 rollback removed only after successful installation.
+No archive/map auto-repair performed. Manual game acceptance remains open.
