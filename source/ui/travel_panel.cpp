@@ -26,7 +26,7 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     auto* reg=new QPushButton(tr("Зарегистрировать текущую карту…"));layout->addWidget(reg);
     connect(reg,&QPushButton::clicked,this,&CTravelPanel::registerRequested);
     for(int k=0;k<2;++k) {
-        m_visible[k]=new QCheckBox(k?tr("Показать выходы (оранжевые)"):tr("Показать появление (синие)"));
+        m_visible[k]=new QCheckBox(k?tr("Показать переходы (оранжевые)"):tr("Показать появление (синие)"));
         m_visible[k]->setChecked(true);layout->addWidget(m_visible[k]);
         connect(m_visible[k],&QCheckBox::toggled,this,&CTravelPanel::visibilityChanged);
     }
@@ -62,7 +62,7 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             auto* note=new QLabel(tr("Команда изменит назначение выбранной записи на другой карте. Её области останутся на месте. Ctrl+S сохранит связь."));
             note->setWordWrap(true);form->addRow(note);
         } else {
-            form->addRow(new QLabel(tr("Куда ведёт выход отсюда")));
+            form->addRow(new QLabel(tr("Куда ведёт переход отсюда")));
             form->addRow(target);
             m_directionNote=new QLabel;m_directionNote->setWordWrap(true);
             m_directionNote->setObjectName("travelDirectionNote");form->addRow(m_directionNote);
@@ -82,7 +82,7 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             auto* reverse=new QPushButton(tr("Создать обратный переход…"));form->addRow(reverse);
             connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
         }
-        tabs->addTab(page,k?tr("Выход"):tr("Появление"));
+        tabs->addTab(page,k?tr("Переход"):tr("Появление"));
     }
     connect(m_linkIncoming,&QPushButton::clicked,this,[this](){
         const auto pair=m_source->currentData().toList();
@@ -112,8 +112,8 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
     if(zoneIndex>=0 && zoneIndex<zones.size())
         for(const auto& e:zones[zoneIndex].exits) {
             const QString kind=e.hasDeployRectangle
-                ? (e.hasRemoveRectangle?tr("Появление и выход"):tr("Появление"))
-                : (e.hasRemoveRectangle?tr("Выход"):tr("Запись без областей"));
+                ? (e.hasRemoveRectangle?tr("Появление и переход"):tr("Появление"))
+                : (e.hasRemoveRectangle?tr("Переход"):tr("Запись без областей"));
             QString label=tr("%1 №%2").arg(kind).arg(e.exitId);
             if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)
                 label+=tr(" — без перехода");
@@ -146,17 +146,17 @@ void CTravelPanel::fillExit()
             if(z==m_zone)continue;
             const QString label=tr("%1, запись №%2 → %3:%4%5").arg(m_zones[z].zoneId).arg(source.exitId)
                 .arg(source.destinationZoneId).arg(source.destinationExitId)
-                .arg(source.hasRemoveRectangle?QString():tr(" (область выхода не задана)"));
+                .arg(source.hasRemoveRectangle?QString():tr(" (область перехода не задана)"));
             m_source->addItem(label,QVariantList{z,i});
             m_source->setItemData(m_source->count()-1,label,Qt::ToolTipRole);
         }
         m_incoming->setText(incoming.isEmpty()?tr("На эту запись пока никто не ссылается."):incoming.join("\n"));
         if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0)
-            m_incoming->setText(m_incoming->text()+tr("\nУ этой записи также есть исходящая связь → %1:%2. Она настраивается на вкладке «Выход».")
+            m_incoming->setText(m_incoming->text()+tr("\nУ этой записи также есть исходящая связь → %1:%2. Она настраивается на вкладке «Переход».")
                 .arg(e.destinationZoneId).arg(e.destinationExitId));
         m_linkIncoming->setEnabled(e.hasDeployRectangle);
         m_directionNote->setText(!e.hasRemoveRectangle && e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0
-            ?tr("Исходящая связь задана, хотя области выхода нет. Отсутствие оранжевой области не гарантирует запрет перехода в игре. Для появления без исходящей связи выберите «Без перехода».")
+            ?tr("Исходящая связь задана, хотя области перехода нет. Отсутствие оранжевой области не гарантирует запрет перехода в игре. Для появления без исходящей связи выберите «Без перехода».")
             :tr("Эта связь направлена с текущей карты на целевую. Она не задаёт, откуда прибывают сюда."));
         m_destination->clear();m_destination->addItem(tr("Без перехода"),"none");
         for(const auto& z:m_zones)if(m_destination->findData(z.zoneId)<0)m_destination->addItem(z.zoneId,z.zoneId);
@@ -204,7 +204,7 @@ void CTravelPanel::setDrawingState(bool active,bool remove,bool newExit)
     for(int k=0;k<2;++k){QSignalBlocker block(m_add[k]);m_add[k]->setChecked(active && newExit && k==int(remove));}
     if(active){
         revealArea(remove);
-        setStatus((remove?tr("Рисование области выхода. "):tr("Рисование области появления. "))
+        setStatus((remove?tr("Рисование области перехода. "):tr("Рисование области появления. "))
             +tr("Зажмите ЛКМ на карте и протяните прямоугольник. Esc или ПКМ — отмена."));
     } else setStatus(m_dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
         tr("Перетащите область или её маркеры. ПКМ по списку — перейти к области."));

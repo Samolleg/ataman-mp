@@ -2615,12 +2615,12 @@ void CView::initEnvironmentPreviewWidget()
         body->addWidget(button);
         return button;
     };
-    m_entranceVisualToggle = makeToggle("visualsEntrances", tr("Entrances"), tr(
-        "Show map.txt entrance areas and labels in the viewport."),
+    m_entranceVisualToggle = makeToggle("visualsEntrances", tr("Переходы"), tr(
+        "Показать области появления и перехода текущей и соседних карт."),
         m_entranceOverlaysVisible);
     m_neighborLandscapesVisualToggle = makeToggle(
         "visualsNeighborLandscapes", tr("Neighbor maps"), tr(
-        "Show up to five nearby MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map."),
+        "Show all neighboring MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map."),
         m_neighborLandscapesVisible);
     m_neighborLayoutEditToggle = makeToggle(
         "visualsArrangeNeighborMaps", tr("Arrange maps"), tr(
@@ -3041,7 +3041,6 @@ void CView::setNeighborMapContext(
     for(int i=0; i<placements.size(); ++i)
         if(placements[i].zoneId == m_preferredWorldMap)
         { placements.move(i, 0); break; }
-    if(placements.size() > 5) placements.resize(5);
     QByteArray contextKey;
     QDataStream stream(&contextKey,QIODevice::WriteOnly);
     stream << profileId << activeAllodId << activeZoneId << layoutWarning
@@ -3072,7 +3071,7 @@ void CView::setNeighborMapContext(
     if(m_neighborLandscapesVisualToggle)
     {
         QString tooltip = tr(
-            "Show up to five nearby MPR maps from the active profile as a background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.");
+            "Show all neighboring MPR maps from the active profile as a background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.");
         if(!m_neighborPlacements.isEmpty())
         {
             QStringList zones;
@@ -6241,7 +6240,7 @@ void CView::drawTestOverlaysOpenGl()
         for(const QPointF& corner : corners)
         {
             QVector3D world(corner.x(), corner.y(), 0.0f);
-            if(!CLandscape::getInstance()->projectPt(world))
+            if(!projectTravelOverlay(index,world))
             {
                 vertices.clear();
                 break;
@@ -6254,8 +6253,8 @@ void CView::drawTestOverlaysOpenGl()
 
         const bool selected = index == m_selectedTestEntrance;
         m_program.setUniformValue("customColor",
-            m_travelEditing && index<m_travelAreas.size()
-                ? (m_travelAreas[index].remove ? QVector4D(1.0f,0.48f,0.1f,selected?0.4f:0.22f)
+            index<m_displayTravelAreas.size()
+                ? (m_displayTravelAreas[index].remove ? QVector4D(1.0f,0.48f,0.1f,selected?0.4f:0.22f)
                                               : QVector4D(0.12f,0.55f,1.0f,selected?0.4f:0.22f))
                 : (selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
                      : QVector4D(0.92f, 0.70f, 0.12f, 0.20f)));
@@ -6263,8 +6262,8 @@ void CView::drawTestOverlaysOpenGl()
         ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
         m_program.setUniformValue("customColor",
-            m_travelEditing && index<m_travelAreas.size()
-                ? (m_travelAreas[index].remove?QVector4D(1,0.48f,0.1f,0.95f):QVector4D(0.12f,0.55f,1,0.95f))
+            index<m_displayTravelAreas.size()
+                ? (m_displayTravelAreas[index].remove?QVector4D(1,0.48f,0.1f,0.95f):QVector4D(0.12f,0.55f,1,0.95f))
                 : (selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
                      : QVector4D(0.92f, 0.75f, 0.18f, 0.80f)));
         ei::gl::LineWidth(selected ? 3.0f : 1.0f);
@@ -6319,7 +6318,7 @@ void CView::drawTestOverlaysOpenGl()
         {
             const QRectF area = m_testEntranceRectangles.at(index).normalized();
             QVector3D center(area.center().x(), area.center().y(), 0.0f);
-            if(!CLandscape::getInstance()->projectPt(center))
+            if(!projectTravelOverlay(index,center))
                 continue;
             center.setZ(center.z() + 0.25f);
             const QVector3D projected = center.project(
@@ -23297,6 +23296,7 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
                                     const QStringList& labels,
                                     int selectedIndex)
 {
+    m_displayTravelAreas.clear();
     m_testEntranceRectangles = rectangles;
     m_testEntranceLabels = labels;
     m_testEntranceLabelImages.clear();
@@ -23351,8 +23351,10 @@ void CView::setTestEntranceOverlays(const QVector<QRectF>& rectangles,
 
 void CView::refreshUiScale()
 {
+    const auto display=m_displayTravelAreas;
     setTestEntranceOverlays(m_testEntranceRectangles, m_testEntranceLabels,
                             m_selectedTestEntrance);
+    m_displayTravelAreas=display;
     m_overlayMaterialSlotLabelsDirty = true;
 }
 

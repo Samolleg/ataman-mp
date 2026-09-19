@@ -732,10 +732,10 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     panel.populate({z},0,2,false);
     QCOMPARE(list->item(0)->text(),QString::fromUtf8("Запись без областей №6 → gz7g, вход №1"));
     QCOMPARE(list->item(1)->text(),QString::fromUtf8("Появление №7 → gz7g, вход №1"));
-    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Выход №8 → gz7g, вход не выбран"));
-    QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и выход №9 → gz7g, вход №1"));
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 → gz7g, вход не выбран"));
+    QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и переход №9 → gz7g, вход №1"));
     z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
-    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Выход №8 — без перехода"));
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 — без перехода"));
     QVERIFY(panel.flush());QCOMPARE(edits,1);
     SMapTableZone other;other.zoneId="other";
     auto from=e;from.exitId=17;from.destinationZoneId="TEST";from.destinationExitId=7;other.exits.append(from);

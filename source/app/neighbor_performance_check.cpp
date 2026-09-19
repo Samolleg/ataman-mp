@@ -268,6 +268,26 @@ int runNeighborPerformanceCheck()
     QSet<QRgb> colors;
     for(int y=0;y<frame.height();y+=2) for(int x=0;x<frame.width();x+=2) colors.insert(frame.pixel(x,y));
     check(!frame.isNull() && colors.size()>64,"hidden scene renders terrain and cached object queue");
+    STravelArea arrival;arrival.mapPath=placement.mprPath;arrival.label="Arrival";
+    arrival.rectangle=QRectF(center.x()-6,center.y()-6,12,12);
+    auto transition=arrival;transition.remove=true;transition.label="Transition";
+    transition.rectangle.translate(15,0);
+    view.m_entranceOverlaysVisible=true;view.setWorldTravelAreas({arrival,transition});
+    QVector3D probe(center.x(),center.y(),0);
+    const auto oldOrigin=view.m_neighborLandscapes[0].placement.origin;
+    view.m_neighborLandscapes[0].placement.origin=QPointF(70,-30);
+    check(view.projectTravelOverlay(0,probe) && (probe-(center+QVector3D(70,-30,0))).length()<0.01f,
+          "neighbor travel overlay uses its terrain height and world offset");
+    view.m_neighborLandscapes[0].placement.origin=oldOrigin;
+    view.updateGL();
+    check(view.m_displayTravelAreas.size()==2 && view.grabFrameBuffer()!=frame,
+          "arrival and transition reach rendered neighbor frame");
+    view.m_neighborLandscapesVisible=false;probe=QVector3D(center.x(),center.y(),0);
+    check(!view.projectTravelOverlay(0,probe),"hidden neighbor has no travel overlay");
+    view.m_neighborLandscapesVisible=true;
+    view.m_entranceOverlaysVisible=false;view.setWorldTravelAreas({arrival,transition});
+    check(view.m_testEntranceRectangles.isEmpty(),"transition display toggle hides both area kinds");
+    view.m_entranceOverlaysVisible=true;view.setWorldTravelAreas({});
     const QString imagePath=qEnvironmentVariable("EI_NEIGHBOR_PERF_IMAGE");
     if(!imagePath.isEmpty()) frame.save(imagePath);
     if(qEnvironmentVariableIsSet("EI_WORLD_JSON_CHECK"))
@@ -307,8 +327,8 @@ int runNeighborPerformanceCheck()
         }
         view.m_preferredWorldMap="8";
         view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
-        check(view.m_neighborPlacements.size()==5 && view.m_neighborPlacements.first().zoneId=="8",
-              "explicit added map takes priority over the five-neighbor budget without travel links");
+        check(view.m_neighborPlacements.size()==8 && view.m_neighborPlacements.first().zoneId=="8",
+              "all eight neighbors remain available with preferred map first");
         const auto unchangedGeneration=view.m_neighborSceneGeneration->load();
         view.setNeighborMapContext(topology,zones,"json-profile","json-world","0");
         check(view.m_neighborSceneGeneration->load()==unchangedGeneration,

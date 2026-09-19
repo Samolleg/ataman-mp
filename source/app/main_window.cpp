@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "travel_document.h"
 #include "loaded_map_panel_policy.h"
 #include "ui/graphite_caption.h"
 #include "ui/flat_tree_widget.h"
@@ -3162,30 +3163,34 @@ void MainWindow::populateEntranceCombo()
 
 void MainWindow::updateEntranceOverlays()
 {
-    if(m_pView && m_pView->travelEditing()){refreshTravelAreas();return;}
-    if(!m_pView)
-        return;
-    QVector<QRectF> rectangles;
-    QStringList labels;
-    const bool showEntrances = !m_pView || m_pView->entranceOverlaysVisible();
-    if(showEntrances)
-    {
-        for(const SMapTravelZone& entrance : m_validEntrances)
-        {
-            rectangles.append(entrance.deployRectangle.normalized());
-            labels.append(entrance.destinationZoneId.isEmpty()
-                ? tr("Entrance %1").arg(entrance.exitId)
-                : tr("Entrance %1 -> %2:%3")
-                    .arg(entrance.exitId)
-                    .arg(entrance.destinationZoneId)
-                    .arg(entrance.destinationExitId));
+    if(!m_pView)return;
+    QVector<STravelArea> areas;
+    const auto path=m_mapCatalog.sourceArchive;
+    auto document=m_travelDocuments.value(QFileInfo(path).absoluteFilePath().toCaseFolded());
+    CTravelDocument diskDocument;QString error;
+    const CTravelDocument* source=document.data();
+    if(!source && !path.isEmpty() && diskDocument.open(path,&error))source=&diskDocument;
+    if(source)for(const auto& zone:source->table().zones()) {
+        const bool active=zone.zoneId.compare(m_mapTestEntry.zoneId,Qt::CaseInsensitive)==0;
+        QString mapPath;
+        if(!active) {
+            for(const auto& entry:m_mapCatalog.entries)
+                if(entry.zoneId.compare(zone.zoneId,Qt::CaseInsensitive)==0
+                   && entry.allodId.compare(zone.allodId,Qt::CaseInsensitive)==0){mapPath=entry.mprPath;break;}
+            if(mapPath.isEmpty())continue;
+        }
+        for(const auto& entry:zone.exits)for(int type=0;type<2;++type) {
+            if(type?!entry.hasRemoveRectangle:!entry.hasDeployRectangle)continue;
+            STravelArea area;area.remove=type!=0;area.mapPath=mapPath;
+            area.rectangle=type?entry.removeRectangle:entry.deployRectangle;
+            area.label=type?tr("Переход №%1 → %2:%3").arg(entry.exitId).arg(entry.destinationZoneId).arg(entry.destinationExitId)
+                           :tr("Появление №%1").arg(entry.exitId);
+            if(!active)area.label=zone.zoneId+" · "+area.label;
+            areas.append(area);
         }
     }
-    const bool customSpawnActive = m_customSpawn.valid && m_customSpawn.custom
-        && m_customSpawnContextKey == currentMapContextKey();
-    const int selected = (!showEntrances || customSpawnActive) ? -1
-        : (m_entranceCombo ? m_entranceCombo->currentData().toInt() : -1);
-    m_pView->setTestEntranceOverlays(rectangles, labels, selected);
+    m_pView->setWorldTravelAreas(areas);
+    if(m_pView->travelEditing())refreshTravelAreas();
     updateCustomSpawnControls();
 }
 

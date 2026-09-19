@@ -56,7 +56,7 @@ QString resourceName(const QString& path) {
 
 void MainWindow::createTravelEditor(QMenu* menu)
 {
-    m_travelDock=new QDockWidget(tr("Входы и переходы"),this);
+    m_travelDock=new QDockWidget(tr("Появления и переходы"),this);
     m_travelDock->setObjectName("TravelEditorDock");
     m_travelPanel=new CTravelPanel(m_travelDock);m_travelDock->setWidget(m_travelPanel);
     addDockWidget(Qt::RightDockWidgetArea,m_travelDock);m_travelDock->hide();
@@ -180,7 +180,7 @@ void MainWindow::refreshTravelEditor()
     m_travelPanel->populate(zones,m_travelZone,m_travelExit,m_travelDocument && m_travelDocument->dirty());
     if(!m_travelDocument)m_travelPanel->setStatus(tr("Откройте карту профиля с доступным texts.res / map.txt."));
     else if(m_travelZone<0)m_travelPanel->setStatus(tr("У текущей карты нет однозначной записи map.txt. Выберите соответствующую зону или зарегистрируйте карту."));
-    refreshTravelAreas();updateDocumentActionAvailability();
+    updateEntranceOverlays();updateDocumentActionAvailability();
 }
 void MainWindow::refreshTravelAreas()
 {
@@ -193,7 +193,7 @@ void MainWindow::refreshTravelAreas()
             for(int k=0;k<2;++k){
                 if(k?(!e.hasRemoveRectangle||!m_travelPanel->showRemove()):(!e.hasDeployRectangle||!m_travelPanel->showDeploy()))continue;
                 STravelArea area;area.exitIndex=i;area.remove=k;area.rectangle=k?e.removeRectangle:e.deployRectangle;
-                area.label=(k?tr("Выход %1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId):tr("Появление %1").arg(e.exitId));
+                area.label=(k?tr("Переход %1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId):tr("Появление %1").arg(e.exitId));
                 areas.append(area);
             }
         }

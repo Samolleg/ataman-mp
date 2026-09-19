@@ -3,6 +3,7 @@
 #include "landscape.h"
 #include <QMouseEvent>
 #include <QLineF>
+#include <QDir>
 
 void CView::focusTravelArea(int exitIndex,bool remove)
 {
@@ -24,7 +25,34 @@ void CView::setTravelAreas(const QVector<STravelArea>& areas,int selectedExit)
         if(area.exitIndex==selectedExit && (selected<0 || area.remove==m_travelSelectedRemove))selected=rectangles.size();
         rectangles.append(area.rectangle);labels.append(area.label);
     }
+    auto display=areas;
+    if(m_entranceOverlaysVisible)for(const auto& area:m_worldTravelAreas)if(!area.mapPath.isEmpty()) {
+        display.append(area);rectangles.append(area.rectangle);labels.append(area.label);
+    }
     setTestEntranceOverlays(rectangles,labels,selected);
+    m_displayTravelAreas=display;
+}
+void CView::setWorldTravelAreas(const QVector<STravelArea>& areas)
+{
+    m_worldTravelAreas=areas;
+    if(m_travelEditing){setTravelAreas(m_travelAreas,m_travelSelectedExit);return;}
+    QVector<QRectF> rectangles;QStringList labels;
+    if(m_entranceOverlaysVisible)for(const auto& area:areas){rectangles.append(area.rectangle);labels.append(area.label);}
+    setTestEntranceOverlays(rectangles,labels,-1);
+    if(m_entranceOverlaysVisible)m_displayTravelAreas=areas;
+}
+bool CView::projectTravelOverlay(int index,QVector3D& point) const
+{
+    if(index>=m_displayTravelAreas.size() || m_displayTravelAreas[index].mapPath.isEmpty())
+        return m_pLand->projectPt(point);
+    if(!m_neighborLandscapesVisible)return false;
+    const auto& path=m_displayTravelAreas[index].mapPath;
+    for(const auto& neighbor:m_neighborLandscapes)if(QDir::cleanPath(neighbor.placement.mprPath).compare(QDir::cleanPath(path),Qt::CaseInsensitive)==0) {
+        if(!neighbor.landscape->projectPt(point))return false;
+        point+=QVector3D(neighbor.placement.origin.x(),neighbor.placement.origin.y(),0);
+        return true;
+    }
+    return false;
 }
 void CView::setTravelEditing(bool enabled)
 {
@@ -42,10 +70,11 @@ void CView::cancelTravelGesture()
     const bool wasDrawing=m_travelDrawing;
     if(m_travelDragging && m_travelHit>=0 && m_travelHit<m_testEntranceRectangles.size()) {
         if(m_travelDrawing) {
-            m_travelAreas.removeLast();m_testEntranceRectangles.removeLast();
+            m_travelAreas.removeLast();
         } else m_testEntranceRectangles[m_travelHit]=m_travelOriginal;
     }
     m_travelDragging=false;m_travelDrawing=false;m_travelHit=-1;
+    if(wasDrawing)setTravelAreas(m_travelAreas,m_travelSelectedExit);
     m_selectedTestEntrance=-1;
     for(int i=0;i<m_travelAreas.size();++i)if(m_travelAreas[i].exitIndex==m_travelSelectedExit
         && (m_selectedTestEntrance<0 || m_travelAreas[i].remove==m_travelSelectedRemove))m_selectedTestEntrance=i;
@@ -65,7 +94,8 @@ bool CView::travelMousePress(QMouseEvent* event)
     if(m_travelDrawing) {
         STravelArea a;a.exitIndex=m_travelNewExit?-1:m_travelSelectedExit;
         a.remove=m_travelRemove;a.rectangle=QRectF(point,QSizeF(0,0));
-        m_travelHit=m_travelAreas.size();m_travelAreas.append(a);m_testEntranceRectangles.append(a.rectangle);
+        m_travelHit=m_travelAreas.size();m_travelAreas.append(a);
+        setTravelAreas(m_travelAreas,m_travelSelectedExit);
         m_travelOriginal=a.rectangle;m_travelStart=point;m_travelDragging=true;
         m_selectedTestEntrance=m_travelHit;return true;
     }

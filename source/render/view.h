@@ -295,6 +295,8 @@ public:
         const QString& activeZoneId,
         const QString& layoutWarning = QString());
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
+    void setWorldTravelAreas(const QVector<STravelArea>& areas);
+    bool projectTravelOverlay(int index, QVector3D& point) const;
     void beginWorldMapPlacement(const QSizeF& size);
     void cancelWorldMapPlacement();
     void showWorldMap(const QString& mapId);
@@ -1237,6 +1239,8 @@ private:
     QVector<QVector3D> m_aiGraphNodes;
     QVector<QVector3D> m_aiGraphIsolatedNodes;
     bool m_environmentPreviewSyncing{false};
+    QVector<STravelArea> m_worldTravelAreas;
+    QVector<STravelArea> m_displayTravelAreas;
     bool m_entranceOverlaysVisible{true};
     bool m_neighborLandscapesVisible{false};
     bool m_objectHelpersVisible{true};

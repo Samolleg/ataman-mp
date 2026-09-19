@@ -77,7 +77,7 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
     result.activeWorldOrigin = activeWorld->origin;
     result.componentAnchorZoneId = activeWorld->componentAnchorZoneId;
     result.hasActiveWorldOrigin = true;
-    if(maximumNeighbors <= 0)
+    if(maximumNeighbors == 0)
         return result;
 
     const QRectF activeBounds(QPointF(), worldSize(*active));
@@ -138,7 +138,7 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
         return left.placement.zoneId.toCaseFolded()
             < right.placement.zoneId.toCaseFolded();
     });
-    const int count = qMin(maximumNeighbors, candidates.size());
+    const int count = maximumNeighbors < 0 ? candidates.size() : qMin(maximumNeighbors, candidates.size());
     for(int index = 0; index < count; ++index)
         result.placements.append(candidates.at(index).placement);
     if(result.placements.isEmpty())

@@ -10,6 +10,21 @@ class NeighborMapLayoutTests : public QObject
 
 private slots:
 
+    void defaultsToAllNeighbors()
+    {
+        QVector<SMapCatalogEntry> catalog;QVector<SWorldMapZoneOrigin> origins;
+        for(int i=0;i<9;++i) {
+            SMapCatalogEntry map;map.zoneId=QString::number(i);map.allodId="world";
+            map.mprName=map.zoneId;map.mprPath=map.zoneId+".mpr";map.sectorWidth=map.sectorHeight=2;
+            catalog.append(map);
+            SWorldMapZoneOrigin origin;origin.zoneId=map.zoneId;origin.profileId="p";
+            origin.allodId="world";origin.mprIdentity=map.mprName;origin.origin=QPointF(i*64,0);
+            origin.componentAnchorZoneId="0";origins.append(origin);
+        }
+        QCOMPARE(CNeighborMapLayout::build(catalog,origins,"p","world","0").placements.size(),8);
+        QCOMPARE(CNeighborMapLayout::build(catalog,origins,"p","world","0",0).placements.size(),0);
+    }
+
     void duplicatePhysicalMprIsNotRenderedTwice()
     {
         SMapCatalogEntry a;a.zoneId="a";a.allodId="world";a.mprName="terrain";

@@ -9,6 +9,7 @@ struct STravelArea
     bool remove{false};
     QRectF rectangle;
     QString label;
+    QString mapPath; // Empty for the active map; otherwise read-only neighbor terrain.
 };
 inline QVector<QPointF> travelAreaHandles(const QRectF& r)
 {

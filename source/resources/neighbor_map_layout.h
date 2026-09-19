@@ -38,7 +38,7 @@ public:
         const QVector<SMapCatalogEntry>& topology,
         const QVector<SWorldMapZoneOrigin>& worldOrigins,
         const QString& profileId, const QString& activeAllodId,
-        const QString& activeZoneId, int maximumNeighbors = 5);
+        const QString& activeZoneId, int maximumNeighbors = -1);
 };
 
 #endif // NEIGHBOR_MAP_LAYOUT_H
