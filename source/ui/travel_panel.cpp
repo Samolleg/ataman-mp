@@ -1,0 +1,136 @@
+#include "travel_panel.h"
+#include "world_coordinate_edit.h"
+#include <QComboBox>
+#include <QListWidget>
+#include <QCheckBox>
+#include <QLabel>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QVBoxLayout>
+#include <QFormLayout>
+#include <QHBoxLayout>
+#include <QTabWidget>
+#include <QScrollArea>
+#include <QSignalBlocker>
+#include <cmath>
+
+CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
+{
+    auto* outer=new QVBoxLayout(this);outer->setContentsMargins(0,0,0,0);
+    auto* scroll=new QScrollArea(this);scroll->setWidgetResizable(true);
+    auto* body=new QWidget(scroll);auto* layout=new QVBoxLayout(body);
+    scroll->setWidget(body);outer->addWidget(scroll);
+    m_status=new QLabel; m_status->setWordWrap(true);layout->addWidget(m_status);
+    m_zoneCombo=new QComboBox;layout->addWidget(m_zoneCombo);
+    auto* reg=new QPushButton(tr("Зарегистрировать текущую карту…"));layout->addWidget(reg);
+    connect(reg,&QPushButton::clicked,this,&CTravelPanel::registerRequested);
+    for(int k=0;k<2;++k) {
+        m_visible[k]=new QCheckBox(k?tr("Показать выходы (оранжевые)"):tr("Показать появление (синие)"));
+        m_visible[k]->setChecked(true);layout->addWidget(m_visible[k]);
+        connect(m_visible[k],&QCheckBox::toggled,this,&CTravelPanel::visibilityChanged);
+    }
+    m_exits=new QListWidget; m_exits->setMinimumHeight(100);layout->addWidget(m_exits);
+    auto* newRow=new QHBoxLayout;
+    auto* addDeploy=new QPushButton(tr("+ Появление"));auto* addRemove=new QPushButton(tr("+ Переход"));
+    newRow->addWidget(addDeploy);newRow->addWidget(addRemove);layout->addLayout(newRow);
+    connect(addDeploy,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(false,true);});
+    connect(addRemove,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(true,true);});
+    m_properties=new QWidget;auto* props=new QVBoxLayout(m_properties);props->setContentsMargins(0,0,0,0);
+    auto* target=new QFormLayout;m_destination=new QComboBox;
+    m_destinationExit=new QSpinBox;m_destinationExit->setRange(0,2147483647);
+    target->addRow(tr("Куда:"),m_destination);target->addRow(tr("Номер входа там:"),m_destinationExit);
+    props->addLayout(target);
+    auto* tabs=new QTabWidget;props->addWidget(tabs);
+    for(int k=0;k<2;++k) {
+        auto* page=new QWidget;auto* form=new QFormLayout(page);
+        m_present[k]=new QCheckBox(tr("Область задана"));form->addRow(m_present[k]);
+        const QStringList labels={tr("X:"),tr("Y:"),tr("Ширина:"),tr("Высота:")};
+        for(int c=0;c<4;++c) {
+            m_rect[k][c]=new CWorldCoordinateEdit(c<2?0:1,page);
+            m_rect[k][c]->setObjectName(QString("travelRect_%1_%2").arg(k).arg(c));
+            form->addRow(labels[c],m_rect[k][c]);
+            connect(m_rect[k][c],&QLineEdit::editingFinished,this,[this](){flush();});
+        }
+        auto* draw=new QPushButton(tr("Нарисовать заново"));form->addRow(draw);
+        connect(draw,&QPushButton::clicked,this,[this,k](){if(flush())emit drawRequested(k!=0,false);});
+        connect(m_present[k],&QCheckBox::clicked,this,[this](){flush();});
+        tabs->addTab(page,k?tr("Выход"):tr("Появление"));
+    }
+    auto* reverse=new QPushButton(tr("Создать обратный переход…"));props->addWidget(reverse);
+    auto* remove=new QPushButton(tr("Удалить запись входа/перехода"));props->addWidget(remove);
+    layout->addWidget(m_properties);layout->addStretch();
+    connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
+    connect(remove,&QPushButton::clicked,this,&CTravelPanel::deleteRequested);
+    connect(m_destination,QOverload<int>::of(&QComboBox::activated),this,[this](){flush();});
+    connect(m_destinationExit,&QSpinBox::editingFinished,this,[this](){flush();});
+    connect(m_zoneCombo,QOverload<int>::of(&QComboBox::activated),this,[this](int row){
+        if(flush())emit zoneSelected(m_zoneCombo->itemData(row).toInt());
+    });
+    connect(m_exits,&QListWidget::currentRowChanged,this,[this](int row){
+        if(m_filling)return;
+        if(!flush()){const QSignalBlocker blocker(m_exits);m_exits->setCurrentRow(m_exit);return;}
+        m_exit=row;fillExit();emit exitSelected(row);
+    });
+}
+void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,int exitIndex,bool dirty)
+{
+    m_filling=true;m_zones=zones;m_zone=zoneIndex;m_exit=exitIndex;
+    m_zoneCombo->clear();
+    for(int i=0;i<zones.size();++i)m_zoneCombo->addItem(zones[i].zoneId,i);
+    m_zoneCombo->setCurrentIndex(zoneIndex);
+    m_exits->clear();
+    if(zoneIndex>=0 && zoneIndex<zones.size())
+        for(const auto& e:zones[zoneIndex].exits)
+            m_exits->addItem(tr("Вход %1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId));
+    m_exits->setCurrentRow(exitIndex);
+    m_status->setText(dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
+        tr("Перетащите область или её маркеры. Esc отменяет жест. Координаты локальные."));
+    m_filling=false;fillExit();
+}
+void CTravelPanel::fillExit()
+{
+    m_filling=true;
+    const bool valid=m_zone>=0 && m_zone<m_zones.size() && m_exit>=0 && m_exit<m_zones[m_zone].exits.size();
+    m_properties->setEnabled(valid);
+    if(valid) {
+        const auto& e=m_zones[m_zone].exits[m_exit];
+        m_destination->clear();m_destination->addItem(tr("Без перехода"),"none");
+        for(const auto& z:m_zones)if(m_destination->findData(z.zoneId)<0)m_destination->addItem(z.zoneId,z.zoneId);
+        int row=m_destination->findData(e.destinationZoneId);
+        if(row<0){m_destination->addItem(e.destinationZoneId,e.destinationZoneId);row=m_destination->count()-1;}
+        m_destination->setCurrentIndex(row);m_destinationExit->setValue(e.destinationExitId);
+        for(int k=0;k<2;++k) {
+            m_present[k]->setChecked(k?e.hasRemoveRectangle:e.hasDeployRectangle);
+            const auto r=k?e.removeRectangle:e.deployRectangle;
+            const double values[]={r.x(),r.y(),r.width(),r.height()};
+            for(int c=0;c<4;++c)m_rect[k][c]->setText(QString::number(values[c],'g',17));
+        }
+    }
+    m_filling=false;
+}
+bool CTravelPanel::flush()
+{
+    if(m_filling || m_zone<0 || m_zone>=m_zones.size() || m_exit<0 || m_exit>=m_zones[m_zone].exits.size())return true;
+    auto e=m_zones[m_zone].exits[m_exit];
+    e.destinationZoneId=m_destination->currentData().toString();
+    e.destinationExitId=m_destinationExit->value();
+    if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)e.destinationExitId=0;
+    for(int k=0;k<2;++k) {
+        const bool present=m_present[k]->isChecked();
+        if(k)e.hasRemoveRectangle=present;else e.hasDeployRectangle=present;
+        if(!present)continue;
+        double v[4];
+        for(int c=0;c<4;++c)if(!m_rect[k][c]->coordinate(&v[c])) {
+            setStatus(tr("Нужны конечные числовые координаты."));return false;
+        }
+        if(v[2]<=0 || v[3]<=0) {setStatus(tr("Ширина и высота должны быть больше нуля."));return false;}
+        const QRectF r(v[0],v[1],v[2],v[3]);
+        if(k)e.removeRectangle=r;else e.deployRectangle=r;
+    }
+    if(e!=m_zones[m_zone].exits[m_exit])emit exitEdited(m_exit,e);
+    return true;
+}
+void CTravelPanel::setStatus(const QString& text){m_status->setText(text);}
+int CTravelPanel::selectedExit() const {return m_exit;}
+bool CTravelPanel::showDeploy() const {return m_visible[0]->isChecked();}
+bool CTravelPanel::showRemove() const {return m_visible[1]->isChecked();}

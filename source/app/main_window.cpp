@@ -1827,6 +1827,7 @@ MainWindow::MainWindow(QWidget* parent) :
     addDockWidget(Qt::BottomDockWidgetArea, scenarioDock);
     scenarioDock->hide();
     m_ui->menuTools->addAction(scenarioDock->toggleViewAction());
+    createTravelEditor(m_ui->menuTools);
     connect(scenarioDock, &QDockWidget::visibilityChanged, m_scenarioPanel, &CScenarioPanel::setLayerEnabled);
     connect(m_scenarioPanel, &CScenarioPanel::showRequested, this, [this, scenarioDock]() {
         scenarioDock->show(); scenarioDock->raise();
@@ -2761,6 +2762,10 @@ void MainWindow::keepFloatingHistoryRaised()
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_pView && watched==m_pView && m_pView->travelEditing()
+       && (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease
+           || event->type()==QEvent::MouseButtonPress || event->type()==QEvent::MouseButtonRelease
+           || event->type()==QEvent::MouseMove))return false;
     if(m_pView && watched == m_pView && event->type() == QEvent::Resize)
         positionViewportMinimap();
     if(m_pView && watched == m_pView && event->type() == QEvent::KeyPress)
@@ -3157,6 +3162,7 @@ void MainWindow::populateEntranceCombo()
 
 void MainWindow::updateEntranceOverlays()
 {
+    if(m_pView && m_pView->travelEditing()){refreshTravelAreas();return;}
     if(!m_pView)
         return;
     QVector<QRectF> rectangles;
@@ -3271,6 +3277,7 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
         refreshEditorWorld();
     }
+    refreshTravelContext();
     populateEntranceCombo();
     if(preserveWorkspaceState && !previousRouteKey.isEmpty())
     {
@@ -6976,10 +6983,10 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionOpen_recent->setEnabled(idle);
     if(m_recentFilesMenu) m_recentFilesMenu->setEnabled(idle);
     if(m_mapsBrowser) m_mapsBrowser->setEnabled(idle);
-    m_ui->actionSave->setEnabled(idle && hasActiveMob);
+    m_ui->actionSave->setEnabled(idle && (hasActiveMob || hasTravelChanges()));
     m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
-    m_ui->actionSave_landscape_MPR->setEnabled(idle && dirtyMpr);
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && (dirtyMpr || hasTravelChanges()));
     m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
     m_ui->actionMap_parameters->setEnabled(idle);
     m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));
@@ -7013,6 +7020,7 @@ void MainWindow::endWorkspaceLoad()
 
 void MainWindow::showLandscapeTools()
 {
+    if(m_travelDock)m_travelDock->hide();
     if(!m_landscapeToolsDock)
         return;
     if(m_landscapeToolsDock->isVisible())
@@ -7199,6 +7207,7 @@ void MainWindow::closeHotReloadProgress()
 
 bool MainWindow::isExitAllowed(bool retainWorldTerrain)
 {
+    if(!resolveTravelClose())return false;
     if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
     if(m_pView)
@@ -8555,6 +8564,8 @@ void MainWindow::on_actionClose_all_triggered()
 
 void MainWindow::on_actionSave_triggered()
 {
+    if(!flushTravelEditor())return;
+    if(hasTravelChanges()){saveMapWithTravel();return;}
     notifyFamilyPreflight(tr("Save"));
     m_pView->saveActiveMob();
 }
@@ -8568,7 +8579,8 @@ void MainWindow::on_action_Mob_parameters_triggered()
 
 void MainWindow::on_actionUndo_triggered()
 {
-    if(m_pView->worldTerrainHistory(false)) return;
+    if(m_pView->travelEditing())m_pView->cancelTravelGesture();
+    if(!travelHistoryPending(false) && m_pView->worldTerrainHistory(false)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
     else
@@ -8589,7 +8601,8 @@ void MainWindow::on_moveButton_clicked()
 
 void MainWindow::on_actionRedo_triggered()
 {
-    if(m_pView->worldTerrainHistory(true)) return;
+    if(m_pView->travelEditing())m_pView->cancelTravelGesture();
+    if(!travelHistoryPending(true) && m_pView->worldTerrainHistory(true)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() + 1);
     else
@@ -8923,6 +8936,8 @@ void MainWindow::on_tileBrushButton_clicked()
 
 void MainWindow::on_actionSave_landscape_MPR_triggered()
 {
+    if(!flushTravelEditor())return;
+    if(hasTravelChanges()){saveMapWithTravel();return;}
     m_pView->saveLand();
 }
 

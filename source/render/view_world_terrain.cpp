@@ -281,9 +281,16 @@ bool CView::saveWorldTerrainMaps()
         }
         items.append(item);
     }
-    const auto saved=saveWorldTerrainCohort(items);
-    if(!saved.success)
-    { QMessageBox::critical(this,tr("World terrain save failed"),saved.error+"\n"+saved.recoveryMarker);return false; }
+    if(m_mapCohortActive) {
+        auto files=m_mapCompanions;
+        for(const auto& item:items){SMapSaveFile file;file.path=item.path;file.before=item.original;file.after=item.candidate;files.append(file);}
+        const auto saved=commitMapSaveBatch(files,m_mapCohortBackupRoot);m_mapCohortCommitted=saved.success;
+        if(!saved.success){QMessageBox::critical(this,tr("World terrain save failed"),saved.error);return false;}
+    } else {
+        const auto saved=saveWorldTerrainCohort(items);
+        if(!saved.success)
+        { QMessageBox::critical(this,tr("World terrain save failed"),saved.error+"\n"+saved.recoveryMarker);return false; }
+    }
     for(const auto& item:items)
     {
         const QString id=CWorldTerrainSession::key(item.path);

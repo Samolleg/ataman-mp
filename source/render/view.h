@@ -1,5 +1,7 @@
 #ifndef MYGLWIDGET_H
 #define MYGLWIDGET_H
+#include "travel_area_geometry.h"
+#include "map_save_batch.h"
 
 #include <QGLWidget>
 #include <QOpenGLShader>
@@ -167,7 +169,13 @@ public:
     void refreshAfterResourceSetup();
     void setWorkspaceLoadInProgress(bool inProgress);
     void unloadLand(bool promptForSave = true);
+    void setTravelAreas(const QVector<STravelArea>& areas,int selectedExit);
+    void setTravelEditing(bool enabled);
+    bool travelEditing() const {return m_travelEditing;}
+    void beginTravelArea(bool remove,bool newExit);
+    void cancelTravelGesture();
     void saveLand();
+    bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString());
     void saveLandAs();
     void saveModernDraftAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
@@ -451,6 +459,28 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    bool stageMapCompanion(const QString& path, const QByteArray& bytes, QString* error, const QByteArray* expected = nullptr);
+    bool commitMapCohortMpr(const QFileInfo& destination, const QByteArray& bytes, QString* error);
+    bool m_mapCohortActive{false};
+    bool m_mapCohortCommitted{false};
+    QVector<SMapSaveFile> m_mapCompanions;
+    QString m_mapCohortBackupRoot;
+    bool travelMousePress(QMouseEvent* event);
+    bool travelMouseMove(QMouseEvent* event);
+    bool travelMouseRelease(QMouseEvent* event);
+    QVector<STravelArea> m_travelAreas;
+    bool m_travelEditing{false};
+    bool m_travelSelectedRemove{false};
+    bool m_travelDrawing{false};
+    bool m_travelNewExit{false};
+    bool m_travelRemove{false};
+    bool m_travelDragging{false};
+    int m_travelHit{-1};
+    int m_travelHandle{-1};
+    int m_travelSelectedExit{-1};
+    QRectF m_travelOriginal;
+    QPointF m_travelStart;
+
     void updateCameraProjection();
     CUnit* behaviorCollectionOwner(const QList<CNode*>& selection) const;
     CMagicTrap* trapCollectionOwner(const QList<CNode*>& selection) const;
@@ -693,6 +723,9 @@ public slots:
     void exportTerrainPaintDiagnostic();
 
 signals:
+    void travelAreaSelected(int exitIndex, bool* accepted);
+    void travelAreaCommitted(int exitIndex,bool remove,const QRectF& rectangle,bool newExit);
+
     void updateMsg(QString msg);
     void unloadMob(CMob*);
     void selectionChanged();

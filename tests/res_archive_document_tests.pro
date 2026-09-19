@@ -29,3 +29,9 @@ HEADERS += \
     ../source/resources/mmp_codec.h \
     ../source/resources/res_file.h \
     ../source/core/log.h
+
+SOURCES += ../source/documents/travel_document.cpp ../source/documents/map_save_batch.cpp
+
+INCLUDEPATH += ../source/ui
+SOURCES += ../source/ui/travel_panel.cpp
+HEADERS += ../source/ui/travel_panel.h ../source/ui/world_coordinate_edit.h

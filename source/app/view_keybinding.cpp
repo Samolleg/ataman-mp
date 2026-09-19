@@ -123,6 +123,11 @@ bool CView::eventFilter(QObject* watched, QEvent* event)
 
 void CView::keyPressEvent(QKeyEvent* event)
 {
+    if(m_travelEditing) {
+        if(event->key()==Qt::Key_Escape)cancelTravelGesture();
+        event->accept();return;
+    }
+
     if(m_worldPlacementActive)
     {
         if(event->key() == Qt::Key_Escape) cancelWorldMapPlacement();
@@ -138,6 +143,7 @@ void CView::keyPressEvent(QKeyEvent* event)
 
 void CView::keyReleaseEvent(QKeyEvent* event)
 {
+    if(m_travelEditing){event->accept();return;}
     if(handleLandscapeShortcut(event, false))
     {
         event->accept();

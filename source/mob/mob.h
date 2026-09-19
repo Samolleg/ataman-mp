@@ -118,6 +118,7 @@ public:
     bool refreshDirtyFromProjection();
     const QVector<uint>& duplicateIds() const {return m_duplicateIds;}
     const QByteArray& originalData() const {return m_originalData;}
+    void adoptCommittedBytes(const QByteArray& bytes);
     void generateDiplomacyTable();
     void clearDiplomacyTable();
     void setRanges(bool bMain, const QVector<SRange>& range);

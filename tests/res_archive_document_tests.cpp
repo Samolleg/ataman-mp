@@ -1,4 +1,8 @@
 #include <QtTest>
+#include "travel_document.h"
+#include "travel_area_geometry.h"
+#include "travel_panel.h"
+#include <QLineEdit>
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
@@ -112,6 +116,10 @@ class ResArchiveDocumentTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void travelRoundTripAndConflict();
+    void travelSaveBatchRollback();
+    void travelGeometryAndPanel();
+    void travelMergeAndLinkValidation();
     void ordinaryMapSaveUsesBoundHdArchiveWithBackup()
     {
         QTemporaryDir temp;QVERIFY(temp.isValid());
@@ -631,5 +639,94 @@ void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChec
         reinterpret_cast<const uchar*>(checker.constData() + 60)), quint32(0x000000FF));
 }
 
-QTEST_APPLESS_MAIN(ResArchiveDocumentTests)
+void ResArchiveDocumentTests::travelRoundTripAndConflict()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto path=dir.filePath("texts.res");
+    QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(syntheticRes());file.close();
+    CTravelDocument doc;QString error;QVERIFY2(doc.open(path,&error),qPrintable(error));
+    QVERIFY(!doc.dirty());
+    SMapSaveFile initial;QVERIFY(doc.prepareSave(&initial,&error));
+    QCOMPARE(initial.before,initial.after);
+    const auto original=doc.snapshot();auto zone=doc.table().zones()[0];
+    SMapTableExit exit;exit.exitId=1;exit.destinationZoneId="none";exit.destinationExitId=0;
+    exit.hasDeployRectangle=true;exit.deployRectangle=QRectF(0.125,2.5,10,15);
+    exit.hasRemoveRectangle=true;exit.removeRectangle=QRectF(25,30,6,7);zone.exits.append(exit);
+    QVERIFY(doc.replaceZone(0,zone,&error));QVERIFY(doc.dirty());
+    const auto edited=doc.snapshot();QVERIFY(doc.restore(original));QVERIFY(!doc.dirty());
+    QVERIFY(doc.restore(edited));QVERIFY(doc.dirty());
+    SMapSaveFile save;QVERIFY2(doc.prepareSave(&save,&error),qPrintable(error));
+    const auto result=commitMapSaveBatch({save},dir.filePath("backups"));
+    QVERIFY2(result.success,qPrintable(result.error));doc.acceptSaved();QVERIFY(!doc.dirty());
+    CTravelDocument reopened;QVERIFY(reopened.open(path,&error));
+    QCOMPARE(reopened.table().zones()[0].exits[0].deployRectangle,exit.deployRectangle);
+    QCOMPARE(reopened.table().zones()[0].exits[0].removeRectangle,exit.removeRectangle);
+    CResArchiveDocument archive;QStringList errors;
+    QVERIFY(archive.loadBytes(save.after,path,&errors));
+    QCOMPARE(archive.memberPayload("opaque.bin"),QByteArray::fromHex("001122334455"));
+    // Undo after saving is a new dirty edit, and stale table changes are refused.
+    QVERIFY(doc.restore(original));QVERIFY(doc.dirty());
+    QVERIFY(file.open(QIODevice::WriteOnly));file.write(syntheticRes());file.close();
+    QVERIFY(!doc.prepareSave(&save,&error));
+}
+
+void ResArchiveDocumentTests::travelSaveBatchRollback()
+{
+    QTemporaryDir dir;QVERIFY(dir.isValid());
+    QVector<SMapSaveFile> files;
+    for(int i=0;i<3;++i) {
+        SMapSaveFile item;item.path=dir.filePath(QString::number(i));
+        item.before="old";item.after="new";files.append(item);
+        QFile f(item.path);QVERIFY(f.open(QIODevice::WriteOnly));f.write(item.before);
+    }
+    auto failed=commitMapSaveBatch(files,dir.filePath("backup"),1);
+    QVERIFY(!failed.success);QVERIFY(failed.rollbackComplete);
+    for(const auto& item:files){QFile f(item.path);QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),item.before);}
+    auto passed=commitMapSaveBatch(files,dir.filePath("backup"));QVERIFY2(passed.success,qPrintable(passed.error));
+    for(const auto& item:files){QFile f(item.path);QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),item.after);}
+    // A stale baseline aborts before replacing any destination.
+    QVERIFY(!commitMapSaveBatch(files,dir.filePath("backup")).success);
+}
+
+void ResArchiveDocumentTests::travelGeometryAndPanel()
+{
+    const QRectF r(10,20,30,40),bounds(0,0,100,100);
+    QCOMPARE(travelDraggedRect(r,QPointF(7,-3),-1,bounds),QRectF(17,17,30,40));
+    QCOMPARE(travelDraggedRect(r,QPointF(100,100),-1,bounds),QRectF(70,60,30,40));
+    QCOMPARE(travelDraggedRect(r,QPointF(5,8),0,bounds),QRectF(15,28,25,32));
+    QCOMPARE(travelDraggedRect(r,QPointF(5,8),3,bounds),QRectF(10,20,35,40));
+    QCOMPARE(travelDraggedRect(r,QPointF(-35,0),3,bounds),QRectF(5,20,5,40));
+    QCOMPARE(travelAreaHandles(r).size(),8);
+    SMapTableZone z;z.zoneId="test";SMapTableExit e;e.exitId=1;e.destinationZoneId="none";
+    e.hasDeployRectangle=true;e.deployRectangle=r;e.hasRemoveRectangle=true;e.removeRectangle=QRectF(60,60,10,10);z.exits.append(e);
+    CTravelPanel panel;panel.populate({z},0,0,false);
+    int edits=0;SMapTableExit changed;
+    QObject::connect(&panel,&CTravelPanel::exitEdited,[&](int index,const SMapTableExit& value){QCOMPARE(index,0);++edits;changed=value;});
+    auto* x=panel.findChild<QLineEdit*>("travelRect_0_0");QVERIFY(x);x->setText("12.125");
+    QVERIFY(panel.flush());QCOMPARE(edits,1);QCOMPARE(changed.deployRectangle.x(),12.125);QCOMPARE(changed.removeRectangle,e.removeRectangle);
+    auto* width=panel.findChild<QLineEdit*>("travelRect_0_2");QVERIFY(width);width->setText("-1");
+    QVERIFY(!panel.flush());QCOMPARE(edits,1);
+    width->setText("30");x->setText("nan");QVERIFY(!panel.flush());QCOMPARE(edits,1);
+}
+void ResArchiveDocumentTests::travelMergeAndLinkValidation()
+{
+    QTemporaryDir dir;QVERIFY(dir.isValid());QString error;QStringList errors;const auto path=dir.filePath("texts.res");
+    QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(syntheticRes());file.close();
+    CTravelDocument doc;QVERIFY(doc.open(path,&error));auto zone=doc.table().zones()[0];
+    SMapTableExit e;e.exitId=1;e.destinationZoneId="missing";e.destinationExitId=1;
+    e.hasDeployRectangle=true;e.deployRectangle=QRectF(1,2,3,4);zone.exits.append(e);
+    QVERIFY(doc.replaceZone(0,zone,&error));SMapSaveFile save;QVERIFY(!doc.prepareSave(&save,&error));
+    zone.exits[0].destinationZoneId="old";QVERIFY(doc.replaceZone(0,zone,&error));QVERIFY2(doc.prepareSave(&save,&error),qPrintable(error));
+    // An independent member update after opening must survive this edit.
+    CResArchiveDocument archive;QVERIFY(archive.loadBytes(syntheticRes(),path,&errors));QByteArray external;
+    QVERIFY(archive.replaceMember("opaque.bin",QCryptographicHash::hash(archive.memberPayload("opaque.bin"),QCryptographicHash::Sha256).toHex(),"external",&external,&errors));
+    QVERIFY(file.open(QIODevice::WriteOnly));file.write(external);file.close();
+    QVERIFY(doc.prepareSave(&save,&error));QVERIFY(archive.loadBytes(save.after,path,&errors));QCOMPARE(archive.memberPayload("opaque.bin"),QByteArray("external"));
+    // Roll back a newly-created resource as well as an existing resource.
+    SMapSaveFile added;added.path=dir.filePath("new.res");added.existed=false;added.after="new";
+    const auto failed=commitMapSaveBatch({added,save},dir.filePath("backups"),1);
+    QVERIFY(!failed.success);QVERIFY(failed.rollbackComplete);QVERIFY(!QFileInfo::exists(added.path));
+    QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),external);
+}
+QTEST_MAIN(ResArchiveDocumentTests)
 #include "res_archive_document_tests.moc"

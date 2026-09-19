@@ -2386,6 +2386,14 @@ bool CMob::save(const SaveProgress& progress)
     return saveAs(m_filePath, progress);
 }
 
+void CMob::adoptCommittedBytes(const QByteArray& bytes)
+{
+    m_originalData=bytes;
+    CMobDocument document;CValidationReport report;
+    if(document.loadBytes(bytes,m_filePath.filePath(),&report))m_hasObjectSection=document.hasSection(0xB000);
+    captureCleanProjection();rebindRawObjectProvenance();setDirty(false);
+}
+
 bool CMob::persistAiGraph(const QByteArray* graph, QString* error,
                           const SaveProgress& progress)
 {

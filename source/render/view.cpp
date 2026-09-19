@@ -6254,16 +6254,33 @@ void CView::drawTestOverlaysOpenGl()
 
         const bool selected = index == m_selectedTestEntrance;
         m_program.setUniformValue("customColor",
-            selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
-                     : QVector4D(0.92f, 0.70f, 0.12f, 0.20f));
+            m_travelEditing && index<m_travelAreas.size()
+                ? (m_travelAreas[index].remove ? QVector4D(1.0f,0.48f,0.1f,selected?0.4f:0.22f)
+                                              : QVector4D(0.12f,0.55f,1.0f,selected?0.4f:0.22f))
+                : (selected ? QVector4D(0.20f, 1.0f, 0.38f, 0.37f)
+                     : QVector4D(0.92f, 0.70f, 0.12f, 0.20f)));
         m_program.setAttributeArray(position, vertices.constData());
         ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
         m_program.setUniformValue("customColor",
-            selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
-                     : QVector4D(0.92f, 0.75f, 0.18f, 0.80f));
+            m_travelEditing && index<m_travelAreas.size()
+                ? (m_travelAreas[index].remove?QVector4D(1,0.48f,0.1f,0.95f):QVector4D(0.12f,0.55f,1,0.95f))
+                : (selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
+                     : QVector4D(0.92f, 0.75f, 0.18f, 0.80f)));
         ei::gl::LineWidth(selected ? 3.0f : 1.0f);
         ei::gl::DrawArrays(GL_LINE_LOOP, 0, vertices.size());
+        if(m_travelEditing && selected) {
+            QVector<QVector3D> handles;
+            for(const auto& p:travelAreaHandles(area)) {
+                QVector3D v(p.x(),p.y(),0);
+                if(CLandscape::getInstance()->projectPt(v)) {v.setZ(v.z()+0.2f);handles.append(v);}
+            }
+            if(!handles.isEmpty()) {
+                m_program.setUniformValue("customColor",QVector4D(1,1,1,1));
+                m_program.setAttributeArray(position,handles.constData());
+                glPointSize(9);ei::gl::DrawArrays(GL_POINTS,0,handles.size());glPointSize(1);
+            }
+        }
     }
 
     drawTerrainPaintOutline(&m_program);
@@ -10174,8 +10191,11 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         atlasRequest.destination = QFileInfo(atlasPath);
         atlasRequest.candidateBytes = draft.resourceArchiveBytes;
         atlasRequest.createBackup = true;
-        const SResArchiveBytesSaveResult atlasResult =
-            commitValidatedResArchiveBytes(atlasRequest);
+        SResArchiveBytesSaveResult atlasResult;
+        if(m_mapCohortActive) {
+            atlasResult.success=stageMapCompanion(atlasPath,draft.resourceArchiveBytes,&atlasResult.error);
+            atlasResult.phase=QStringLiteral("no-op"); // deferred to the complete cohort
+        } else atlasResult=commitValidatedResArchiveBytes(atlasRequest);
         if(!atlasResult.success)
         {
             QMessageBox::critical(this, tr("Modern draft save failed"),
@@ -10205,8 +10225,12 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         mprRequest.destination = destination;
         mprRequest.expectedSourceBytes = m_mprDocument.originalBytes();
         mprRequest.candidateBytes = draft.mprBytes;
-        const SMprBytesSaveCommitResult mprResult =
-            commitValidatedMprBytes(mprRequest);
+        SMprBytesSaveCommitResult mprResult;
+        if(m_mapCohortActive) {
+            mprResult.success=commitMapCohortMpr(destination,draft.mprBytes,&mprResult.error);
+            mprResult.candidateSha256=QString::fromLatin1(QCryptographicHash::hash(draft.mprBytes,QCryptographicHash::Sha256).toHex());
+            mprResult.phase=QStringLiteral("map-cohort");
+        } else mprResult=commitValidatedMprBytes(mprRequest);
         if(!mprResult.success)
         {
             const bool atlasRestored = restoreDraftAtlas();
@@ -10326,9 +10350,16 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             if(!semanticPublicationReady)
                 return false;
             semanticPublicationStarted = true;
-            const SResPublishedMembersSaveResult semanticResult =
-                commitStagedResPublishedMembers(
-                    semanticArchive, semanticRequest);
+            SResPublishedMembersSaveResult semanticResult;
+            if(m_mapCohortActive) {
+                QByteArray candidate;QStringList errors;
+                semanticResult.success=semanticArchive.buildWithPublishedMembers(
+                    {semanticFieldMember},true,&candidate,&errors)
+                    && stageMapCompanion(semanticResPath,candidate,&semanticResult.error,&semanticResOriginalBytes);
+                if(!errors.isEmpty())semanticResult.error=errors.join('\n');
+                semanticResult.noOp=true;
+                semanticResult.phase=QStringLiteral("deferred-map-cohort");
+            } else semanticResult=commitStagedResPublishedMembers(semanticArchive,semanticRequest);
             if(!semanticResult.success)
             {
                 emit terrainPublicationFinished(semanticResPath, false);
@@ -10348,8 +10379,12 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     SMprSaveCommitRequest request;
     request.source = m_pLand->filePath();
     request.destination = destination;
-    const SMprSaveCommitResult result =
-        commitStagedMprTransaction(m_mprDocument, transaction, request);
+    SMprSaveCommitResult result;
+    if(m_mapCohortActive) {
+        result.success=commitMapCohortMpr(destination,preview.candidateBytes,&result.error);
+        result.candidateSha256=preview.sha256;result.changedMembers=preview.changedMembers;
+        result.semanticDiff=preview.semanticDiff;result.phase=QStringLiteral("map-cohort");
+    } else result=commitStagedMprTransaction(m_mprDocument,transaction,request);
     if(!result.success)
     {
         const bool semanticRestored = restoreSemanticRes();
@@ -15178,6 +15213,11 @@ void CView::finalizeVirtualTerrainAtlas()
     resRequest.published = pages;
     resRequest.allowReplaceExisting = replaceIdentity;
     resRequest.createBackup = createTexturesBackup;
+    SResPublishedMembersSaveResult resResult;
+    if(m_mapCohortActive) {
+        resResult.success=stageMapCompanion(texturesPath,stagedResBytes,&resResult.error,&originalTexturesBytes);
+        resResult.phase=QStringLiteral("no-op");
+    } else {
     QFuture<SResPublishedMembersSaveResult> publishFuture =
         QtConcurrent::run([sourceArchive, resRequest]() {
             return commitStagedResPublishedMembers(sourceArchive, resRequest);
@@ -15188,7 +15228,8 @@ void CView::finalizeVirtualTerrainAtlas()
             &publishLoop, &QEventLoop::quit);
     publishWatcher.setFuture(publishFuture);
     publishLoop.exec(QEventLoop::ExcludeUserInputEvents);
-    const SResPublishedMembersSaveResult resResult = publishFuture.result();
+    resResult = publishFuture.result();
+    }
     if(!resResult.success)
     {
         publishProgress.close();
@@ -15214,6 +15255,7 @@ void CView::finalizeVirtualTerrainAtlas()
             && restore.commit();
     };
     const auto restorePublishedMpr = [&]() {
+        if(m_mapCohortActive)return true; // cohort already performed compare-and-restore
         QFile currentMpr(mprDestination.absoluteFilePath());
         if(!currentMpr.open(QIODevice::ReadOnly))
             return !mprDestinationExisted
@@ -15236,8 +15278,12 @@ void CView::finalizeVirtualTerrainAtlas()
     mprRequest.destination = mprDestination;
     mprRequest.expectedSourceBytes = m_mprDocument.originalBytes();
     mprRequest.candidateBytes = package.mprBytes;
-    const SMprBytesSaveCommitResult mprResult =
-        commitValidatedMprBytes(mprRequest);
+    SMprBytesSaveCommitResult mprResult;
+    if(m_mapCohortActive) {
+        mprResult.success=commitMapCohortMpr(mprDestination,package.mprBytes,&mprResult.error);
+        mprResult.candidateSha256=QString::fromLatin1(QCryptographicHash::hash(package.mprBytes,QCryptographicHash::Sha256).toHex());
+        mprResult.phase=QStringLiteral("map-cohort");
+    } else mprResult=commitValidatedMprBytes(mprRequest);
     if(!mprResult.success)
     {
         publishProgress.close();
@@ -22148,6 +22194,7 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    if(travelMousePress(event)) return;
     if(m_worldPlacementActive)
     {
         m_neighborPointerGestureCaptured = true;
@@ -22351,6 +22398,7 @@ void CView::mousePressEvent(QMouseEvent* event)
 
 void CView::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if(m_travelEditing){event->accept();return;}
     if(m_worldPlacementActive) { event->accept(); return; }
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
@@ -22832,6 +22880,7 @@ void CView::updateLandscapeSculptCoordinates(const QVector3D& position, bool val
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    if(travelMouseMove(event)) return;
     if(m_worldPlacementActive)
     { updateWorldMapPlacement(event->pos()); event->accept(); return; }
     m_lastViewportMousePos = event->pos();
@@ -22976,6 +23025,7 @@ void CView::mouseMoveEvent(QMouseEvent* event)
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if(travelMouseRelease(event)) return;
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
     if(m_landscapeInteractionSuspended)

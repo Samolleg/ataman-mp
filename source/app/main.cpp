@@ -3118,6 +3118,7 @@ int runHeadlessCommand(QApplication& app)
         const bool databasePrototypeMainWindowRouteWorks = productionRouteInvoked
             && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
                 == QStringLiteral("Human Test");
+        const bool travelEditorProductionRouteWorks=travelEditorIntegrationCheck(productionWindow);
         CPreview detachedPreview(nullptr, productionWindow->view());
         detachedPreview.resize(160,120);
         detachedPreview.show();
@@ -3174,7 +3175,7 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && databasePrototypeMenuEmissionWorks
-                && databasePrototypeMainWindowRouteWorks
+                && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
                 && detachedPreviewSharesViewportContext
                 && itemConstructorCloseReopenSafe
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -3323,6 +3324,7 @@ int runHeadlessCommand(QApplication& app)
                << " databasePrototypeMenuEmissionWorks="
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
+               << " travelEditorProductionRouteWorks=" << travelEditorProductionRouteWorks
                << " databasePrototypeMainWindowRouteWorks="
                << databasePrototypeMainWindowRouteWorks
                << " detachedPreviewSharesViewportContext="

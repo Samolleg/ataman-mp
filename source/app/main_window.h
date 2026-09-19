@@ -69,6 +69,9 @@ class CCameraTelephotoControls;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CScenarioPanel;
+class CTravelPanel;
+class CTravelDocument;
+struct SMapTableZone;
 class CDockHiddenTab;
 class CResourceBrowser;
 namespace ei { class DatabaseDocument; class DatabaseEditorDialog; class ItemSpellConstructorDialog; }
@@ -90,6 +93,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
+    friend bool travelEditorIntegrationCheck(MainWindow* window);
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
@@ -106,6 +110,25 @@ public:
     void testFunc1();
 
 private:
+    void createTravelEditor(QMenu* menu);
+    void refreshTravelContext();
+    void refreshTravelEditor();
+    void refreshTravelAreas();
+    void changeTravelZone(int index, const SMapTableZone& zone, const QString& label);
+    void recordTravelEdit(const QByteArray& before, const QString& label);
+    void registerTravelMap();
+    void createReverseTravel();
+    bool saveMapWithTravel(const QString& backupRoot = QString());
+    bool hasTravelChanges() const;
+    bool flushTravelEditor();
+    bool travelHistoryPending(bool redo) const;
+    bool resolveTravelClose();
+    CTravelPanel* m_travelPanel{nullptr};
+    QDockWidget* m_travelDock{nullptr};
+    QSharedPointer<CTravelDocument> m_travelDocument;
+    QMap<QString,QSharedPointer<CTravelDocument>> m_travelDocuments;
+    int m_travelZone{-1};
+    int m_travelExit{-1};
     enum class ETransientNotificationAction
     {
         None,
