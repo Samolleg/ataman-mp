@@ -17,7 +17,7 @@ public:
     explicit CTravelPanel(QWidget* parent=nullptr);
     void populate(const QVector<SMapTableZone>& zones,int zoneIndex,int exitIndex,bool dirty);
     void setStatus(const QString& text);
-    bool flush();
+    bool flush(int redrawArea=-1);
     int selectedExit() const;
     bool showDeploy() const;
     bool showRemove() const;

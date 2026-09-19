@@ -45,8 +45,10 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     for(int k=0;k<2;++k){m_add[k]->setCheckable(true);m_add[k]->setObjectName(QString("travelAdd%1").arg(k));
         m_add[k]->setToolTip(tr("Нажмите, затем зажмите ЛКМ на карте и протяните прямоугольник. Esc — отмена."));}
     newRow->addWidget(addDeploy);newRow->addWidget(addRemove);layout->addLayout(newRow);
-    connect(addDeploy,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(false,true);else m_add[0]->setChecked(false);});
-    connect(addRemove,&QPushButton::clicked,this,[this](){if(flush())emit drawRequested(true,true);else m_add[1]->setChecked(false);});
+    connect(addDeploy,&QPushButton::clicked,this,[this](){const bool existing=m_zone>=0 && m_zone<m_zones.size() && m_exit>=0 && m_exit<m_zones[m_zone].exits.size() && !m_zones[m_zone].exits[m_exit].hasDeployRectangle;
+        if(flush(0))emit drawRequested(false,!existing);else m_add[0]->setChecked(false);});
+    connect(addRemove,&QPushButton::clicked,this,[this](){const bool existing=m_zone>=0 && m_zone<m_zones.size() && m_exit>=0 && m_exit<m_zones[m_zone].exits.size() && !m_zones[m_zone].exits[m_exit].hasRemoveRectangle;
+        if(flush(1))emit drawRequested(true,!existing);else m_add[1]->setChecked(false);});
     m_properties=new QWidget;auto* props=new QVBoxLayout(m_properties);props->setContentsMargins(0,0,0,0);
     auto* target=new QFormLayout;m_destination=new QComboBox;
     configureTravelCombo(m_destination);m_destination->setObjectName("travelDestination");
@@ -84,9 +86,20 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             form->addRow(labels[c],m_rect[k][c]);
             connect(m_rect[k][c],&QLineEdit::editingFinished,this,[this](){flush();});
         }
-        auto* draw=new QPushButton(tr("Нарисовать заново"));form->addRow(draw);
-        connect(draw,&QPushButton::clicked,this,[this,k](){if(flush())emit drawRequested(k!=0,false);});
-        connect(m_present[k],&QCheckBox::clicked,this,[this](){flush();});
+        auto* draw=new QPushButton(tr("Нарисовать заново"));draw->setObjectName(QString("travelRedraw%1").arg(k));form->addRow(draw);
+        connect(draw,&QPushButton::clicked,this,[this,k](){if(flush(k))emit drawRequested(k!=0,false);});
+        m_present[k]->setObjectName(QString("travelPresent%1").arg(k));
+        connect(m_present[k],&QCheckBox::clicked,this,[this,k](bool checked){
+            if(checked && m_zone>=0 && m_exit>=0) {
+                const auto& entry=m_zones[m_zone].exits[m_exit];
+                if(!(k?entry.hasRemoveRectangle:entry.hasDeployRectangle)) {
+                    {QSignalBlocker block(m_present[k]);m_present[k]->setChecked(false);}
+                    if(flush(k))emit drawRequested(k!=0,false);
+                    return;
+                }
+            }
+            flush();
+        });
         if(k==1) {
             auto* reverse=new QPushButton(tr("Создать обратный переход…"));form->addRow(reverse);
             connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
@@ -204,7 +217,7 @@ void CTravelPanel::fillDestinationEntries(int selected)
     if(id.compare("none",Qt::CaseInsensitive)!=0 && !usable)
         m_directionNote->setText(tr("Назначение %1:%2 не готово: выберите существующую запись с областью появления. Если нужен новый вход, создайте его на целевой карте или используйте «Создать маршрут между картами…». Сохранение новой неверной связи будет отклонено.").arg(id).arg(selected));
 }
-bool CTravelPanel::flush()
+bool CTravelPanel::flush(int redrawArea)
 {
     if(m_filling || m_zone<0 || m_zone>=m_zones.size() || m_exit<0 || m_exit>=m_zones[m_zone].exits.size())return true;
     auto e=m_zones[m_zone].exits[m_exit];
@@ -216,6 +229,7 @@ bool CTravelPanel::flush()
     e.destinationExitId=m_destinationExit->currentData().toInt();
     if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)e.destinationExitId=0;
     for(int k=0;k<2;++k) {
+        if(k==redrawArea)continue; // The drawing gesture will replace this area atomically.
         const bool present=m_present[k]->isChecked();
         if(k)e.hasRemoveRectangle=present;else e.hasDeployRectangle=present;
         if(!present)continue;
@@ -237,7 +251,8 @@ bool CTravelPanel::showRemove() const {return m_visible[1]->isChecked();}
 
 void CTravelPanel::setDrawingState(bool active,bool remove,bool newExit)
 {
-    for(int k=0;k<2;++k){QSignalBlocker block(m_add[k]);m_add[k]->setChecked(active && newExit && k==int(remove));}
+    for(int k=0;k<2;++k){QSignalBlocker block(m_add[k]);m_add[k]->setChecked(active && k==int(remove));}
+    Q_UNUSED(newExit);
     if(active){
         revealArea(remove);
         setStatus((remove?tr("Рисование области перехода. "):tr("Рисование области появления. "))

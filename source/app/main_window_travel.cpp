@@ -371,7 +371,15 @@ void MainWindow::createPairedTravelRoute()
 
 bool MainWindow::resolveTravelClose()
 {
-    if(m_travelPanel && !m_travelPanel->flush())return false;
+    if(m_travelPanel && !m_travelPanel->flush()) {
+        const auto choice=QMessageBox::question(this,tr("Незавершённые поля перехода"),
+            tr("В панели переходов есть незавершённые или неверные значения. Отбросить несохранённые изменения переходов и продолжить закрытие? Остальные изменённые документы будут проверены отдельно."),
+            QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Cancel);
+        if(choice!=QMessageBox::Discard)return false;
+        m_pView->cancelTravelGesture();
+        for(const auto& doc:m_travelDocuments)doc->discard();
+        refreshTravelEditor();return true;
+    }
     bool dirty=false;for(const auto& doc:m_travelDocuments)dirty|=doc->dirty();if(!dirty)return true;
     const auto choice=QMessageBox::question(this,tr("Изменены входы и переходы"),tr("Сохранить карту и изменения map.txt перед продолжением?"),QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Save);
     if(choice==QMessageBox::Cancel)return false;
@@ -512,6 +520,17 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     passed=passed && window->saveMapWithTravel(scratch.filePath("backups"));
     CTravelDocument pairedReload;passed=passed && pairedReload.open(path,&error) && pairedReload.snapshot()==paired;
     doc->discard();
+    window->refreshTravelEditor();
+    auto* width=window->m_travelPanel->findChild<QLineEdit*>("travelRect_0_2");
+    width->setText("-1");
+    bool sawCancel=false;
+    QTimer::singleShot(0,window,[&](){auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if(box){sawCancel=true;box->button(QMessageBox::Cancel)->click();}});
+    passed= !window->resolveTravelClose() && sawCancel && passed;
+    bool sawDiscard=false;
+    QTimer::singleShot(0,window,[&](){auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if(box){sawDiscard=true;box->button(QMessageBox::Discard)->click();}});
+    passed=window->resolveTravelClose() && sawDiscard && window->m_travelPanel->flush() && passed;
     window->m_undoStack->clear();window->m_travelDocuments.clear();window->m_travelDocument.clear();
     window->m_travelZone=-1;window->m_travelExit=-1;window->refreshTravelEditor();
     return passed;

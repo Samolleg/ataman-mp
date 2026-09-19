@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCompleter>
 #include <QAbstractItemView>
 
@@ -709,8 +710,8 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     CTravelPanel panel;panel.populate({z},0,0,false);
     int edits=0;int expectedIndex=0;SMapTableExit changed;
     QObject::connect(&panel,&CTravelPanel::exitEdited,[&](int index,const SMapTableExit& value){QCOMPARE(index,expectedIndex);++edits;changed=value;});
-    int requested=-1,focus=-1;bool preference=false;
-    QObject::connect(&panel,&CTravelPanel::drawRequested,[&](bool remove,bool create){QVERIFY(create);requested=remove?1:0;});
+    int requested=-1,focus=-1;bool preference=false;bool expectNew=true;
+    QObject::connect(&panel,&CTravelPanel::drawRequested,[&](bool remove,bool create){QCOMPARE(create,expectNew);requested=remove?1:0;});
     panel.findChild<QPushButton*>("travelAdd0")->click();QCOMPARE(requested,0);
     panel.findChild<QPushButton*>("travelAdd1")->click();QCOMPARE(requested,1);
     QObject::connect(&panel,&CTravelPanel::focusRequested,[&](int index,bool remove){focus=index;preference=remove;});
@@ -725,6 +726,15 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     auto* width=panel.findChild<QLineEdit*>("travelRect_0_2");QVERIFY(width);width->setText("-1");
     QVERIFY(!panel.flush());QCOMPARE(edits,1);
     width->setText("30");x->setText("nan");QVERIFY(!panel.flush());QCOMPARE(edits,1);
+    // Redrawing can replace invalid numeric draft fields rather than deadlocking.
+    requested=-1;expectNew=false;
+    panel.findChild<QPushButton*>("travelRedraw0")->click();QCOMPARE(requested,0);QCOMPARE(edits,1);
+    z.exits[0].hasDeployRectangle=false;z.exits[0].deployRectangle=QRectF();
+    panel.populate({z},0,0,false);requested=-1;
+    panel.findChild<QCheckBox*>("travelPresent0")->click();QCOMPARE(requested,0);
+    QVERIFY(!panel.findChild<QCheckBox*>("travelPresent0")->isChecked());
+    QVERIFY(panel.flush());QCOMPARE(edits,1);
+    requested=-1;panel.findChild<QPushButton*>("travelAdd0")->click();QCOMPARE(requested,0);
     // Display every area combination without changing identifiers or links.
     z.exits.clear();
     for(int mask=0;mask<4;++mask) {
