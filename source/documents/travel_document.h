@@ -23,6 +23,7 @@ public:
     void discard() {restore(m_baseline);}
     int uniqueZone(const QString& id) const;
     bool replaceZone(int index, const SMapTableZone& zone, QString* error);
+    bool deleteExit(int zoneIndex, int exitIndex, QString* error);
     bool appendZone(const SMapTableZone& zone, QString* error);
     bool createPairedRoute(const STravelRoute& route, QString* error);
     bool prepareSave(SMapSaveFile* file, QString* error) const;

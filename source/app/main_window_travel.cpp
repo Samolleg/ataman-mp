@@ -151,10 +151,33 @@ void MainWindow::createTravelEditor(QMenu* menu)
     });
     connect(m_travelPanel,&CTravelPanel::deleteRequested,this,[this](){
         if(!m_travelDocument || m_travelZone<0 || m_travelExit<0)return;
-        auto zone=m_travelDocument->table().zones()[m_travelZone];
-        if(m_travelExit>=zone.exits.size())return;
-        if(QMessageBox::question(this,tr("Удалить запись"),tr("Удалить выбранную запись вместе с областями появления и выхода?"))!=QMessageBox::Yes)return;
-        zone.exits.removeAt(m_travelExit);m_travelExit=-1;changeTravelZone(m_travelZone,zone,tr("Удалить вход/переход"));
+        const auto zones=m_travelDocument->table().zones();
+        if(m_travelZone>=zones.size() || m_travelExit>=zones[m_travelZone].exits.size())return;
+        const auto& zone=zones[m_travelZone];const int ordinal=m_travelExit+1;
+        QStringList incoming;
+        for(int z=0;z<zones.size();++z)for(int i=0;i<zones[z].exits.size();++i) {
+            if(z==m_travelZone && i==m_travelExit)continue;
+            const auto& e=zones[z].exits[i];
+            if(e.destinationZoneId.compare(zone.zoneId,Qt::CaseInsensitive)==0 && e.destinationExitId==ordinal)
+                incoming.append(tr("%1, запись №%2").arg(zones[z].zoneId).arg(i+1));
+        }
+        QString message=tr("Удалить запись %1 №%2 вместе с её областями появления и перехода?").arg(zone.zoneId).arg(ordinal);
+        if(!incoming.isEmpty())message+=tr("\n\nВходящих ссылок: %1. У перечисленных записей будет установлено «Без перехода»; их области останутся на месте.").arg(incoming.size());
+        message+=tr("\n\nСсылки на последующие записи будут пересчитаны. Действие можно отменить через Undo. Ctrl+S сохранит изменения.");
+        QMessageBox confirm(QMessageBox::Question,tr("Удалить запись"),message,QMessageBox::Yes|QMessageBox::Cancel,this);
+        confirm.setObjectName("travelDeleteConfirm");confirm.setDefaultButton(QMessageBox::Cancel);
+        confirm.button(QMessageBox::Yes)->setText(tr("Удалить"));
+        if(!incoming.isEmpty())confirm.setDetailedText(incoming.join("\n"));
+        if(confirm.exec()!=QMessageBox::Yes)return;
+        const auto before=m_travelDocument->snapshot();QString error;
+        const int selected=m_travelExit;
+        if(!m_travelDocument->deleteExit(m_travelZone,selected,&error)) {
+            m_travelPanel->setStatus(error);
+            QMessageBox::warning(this,tr("Запись не удалена"),error);return;
+        }
+        m_pView->cancelTravelGesture();
+        m_travelExit=qMin(selected,m_travelDocument->table().zones()[m_travelZone].exits.size()-1);
+        recordTravelEdit(before,tr("Удалить запись и отключить входящие переходы"));
     });
     connect(m_travelPanel,&CTravelPanel::registerRequested,this,&MainWindow::registerTravelMap);
     connect(m_travelPanel,&CTravelPanel::reverseRequested,this,&MainWindow::createReverseTravel);
@@ -510,6 +533,32 @@ bool travelEditorIntegrationCheck(MainWindow* window)
         && doc->table().zones()[0].exits[0].destinationZoneId=="none";
     window->on_actionUndo_triggered();passed=passed && doc->snapshot()==beforeLink;
     window->on_actionRedo_triggered();
+    const auto linkedBeforeDelete=doc->snapshot();
+    window->m_travelZone=0;window->m_travelExit=0;window->refreshTravelEditor();
+    bool cancelVisited=false;
+    QTimer::singleShot(0,window,[&](){
+        auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if(box && box->objectName()=="travelDeleteConfirm") {
+            cancelVisited=box->detailedText().contains("other");box->button(QMessageBox::Cancel)->click();
+        }
+    });
+    emit window->m_travelPanel->deleteRequested();
+    passed=passed && cancelVisited && doc->snapshot()==linkedBeforeDelete && window->m_travelExit==0;
+    bool deleteVisited=false;
+    QTimer::singleShot(0,window,[&](){
+        auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if(box && box->objectName()=="travelDeleteConfirm") {
+            deleteVisited=true;box->button(QMessageBox::Yes)->click();
+        }
+    });
+    emit window->m_travelPanel->deleteRequested();
+    const auto deleted=doc->snapshot();
+    passed=passed && deleteVisited && doc->table().zones()[0].exits.isEmpty()
+        && doc->table().zones()[1].exits[0].destinationZoneId=="none" && window->m_travelExit==-1;
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==linkedBeforeDelete;
+    window->on_actionRedo_triggered();passed=passed && doc->snapshot()==deleted;
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==linkedBeforeDelete;
+    window->m_travelZone=0;window->m_travelExit=0;window->refreshTravelEditor();
     passed=passed && window->saveMapWithTravel(scratch.filePath("backups")) && !doc->dirty();
     CTravelDocument reopened;
     passed=passed && reopened.open(path,&error) && reopened.snapshot()==doc->snapshot();

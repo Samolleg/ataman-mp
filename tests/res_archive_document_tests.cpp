@@ -125,6 +125,7 @@ class ResArchiveDocumentTests : public QObject
     Q_OBJECT
 private slots:
     void pairedTravelRoute();
+    void travelDeleteLinkedRecord();
     void travelOrderRepairPanel();
     void travelRoundTripAndConflict();
     void travelSaveBatchRollback();
@@ -647,6 +648,37 @@ void ResArchiveDocumentTests::syntheticPlaceholderBuildsStandaloneResolvableChec
         reinterpret_cast<const uchar*>(checker.constData() + 48)), quint32(0x0000FF00));
     QCOMPARE(qFromLittleEndian<quint32>(
         reinterpret_cast<const uchar*>(checker.constData() + 60)), quint32(0x000000FF));
+}
+
+void ResArchiveDocumentTests::travelDeleteLinkedRecord()
+{
+    QTemporaryDir dir;QVERIFY(dir.isValid());const auto path=dir.filePath("texts.res");
+    const QByteArray map="#zone a g game\n#res\na a\n"
+        "#exit 9\nnone 0\n#deploy\n1 1 3 3\n"
+        "#exit 9\na 2\n#deploy\n4 4 6 6\n"
+        "#exit 8\na 2\n#deploy\n7 7 9 9\n"
+        "#zone b g game\n#res\nb b\n#exit 5\nA 2\n#remove\n10 10 12 12 45\n#deploy\n13 13 15 15 30\n"
+        "#exit 5\na 3\n#deploy\n20 20 22 22\n#unknown\nkeep\n";
+    CResFile archive;archive.addFiledata("map.txt",map);archive.addFiledata("other.bin","untouched");archive.saveToFile(path);
+    CTravelDocument doc;QString error;QVERIFY(doc.open(path,&error));const auto before=doc.snapshot();
+    QVERIFY(!doc.deleteExit(0,99,&error));QCOMPARE(doc.snapshot(),before);
+    QVERIFY2(doc.deleteExit(0,1,&error),qPrintable(error));const auto after=doc.snapshot();
+    const auto zones=doc.table().zones();QCOMPARE(zones[0].exits.size(),2);
+    QCOMPARE(zones[0].exits[1].destinationZoneId,QString("none")); // self-map incoming
+    QCOMPARE(zones[1].exits[0].destinationZoneId,QString("none"));
+    QCOMPARE(zones[1].exits[0].destinationExitId,0);
+    QCOMPARE(zones[1].exits[1].destinationExitId,2); // third moved to second
+    QCOMPARE(zones[1].exits[0].effectiveRemove(),QRectF(13,13,2,2)); // no accidental repair
+    QCOMPARE(zones[1].exits[0].effectiveRemoveAngle(),30.0);
+    QVERIFY(after.contains("#unknown\nkeep"));
+    QVERIFY(doc.restore(before));QCOMPARE(doc.snapshot(),before);
+    QVERIFY(doc.restore(after));SMapSaveFile save;QVERIFY2(doc.prepareSave(&save,&error),qPrintable(error));
+    const auto result=commitMapSaveBatch({save},dir.filePath("backups"));QVERIFY(result.success);
+    CTravelDocument reopened;QVERIFY(reopened.open(path,&error));QCOMPARE(reopened.snapshot(),after);
+    CResArchiveDocument saved;QVERIFY(saved.loadBytes(save.after,path));QCOMPARE(saved.memberPayload("other.bin"),QByteArray("untouched"));
+    QVERIFY(doc.deleteExit(0,1,&error));QVERIFY(doc.deleteExit(0,0,&error));
+    QVERIFY(doc.table().zones()[0].exits.isEmpty());
+    QVERIFY(!doc.deleteExit(0,0,&error));
 }
 
 void ResArchiveDocumentTests::travelOrderRepairPanel()

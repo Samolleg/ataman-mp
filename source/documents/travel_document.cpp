@@ -123,6 +123,37 @@ bool CTravelDocument::replaceZone(int index,const SMapTableZone& zone,QString* e
     if(!result.success && error)*error=result.toText();
     return result.success;
 }
+bool CTravelDocument::deleteExit(int zoneIndex,int exitIndex,QString* error)
+{
+    const auto zones=m_table.zones();
+    if(zoneIndex<0 || zoneIndex>=zones.size() || exitIndex<0 || exitIndex>=zones[zoneIndex].exits.size()) {
+        if(error)*error=QStringLiteral("Запись для удаления не найдена.");return false;
+    }
+    const auto zoneId=zones[zoneIndex].zoneId;
+    if(uniqueZone(zoneId)!=zoneIndex) {
+        if(error)*error=QStringLiteral("Имя зоны неоднозначно; удаление отменено.");return false;
+    }
+    const int ordinal=exitIndex+1;
+    CMapTableDocument candidate=m_table;
+    // Disconnect incoming links before deleting the target. Keep all other
+    // records and geometry; the table migrates ordinals after removal.
+    for(int z=0;z<zones.size();++z) {
+        auto zone=candidate.zones()[z];bool changed=false;
+        for(auto& entry:zone.exits)
+            if(entry.destinationZoneId.compare(zoneId,Qt::CaseInsensitive)==0 && entry.destinationExitId==ordinal) {
+                entry.destinationZoneId="none";entry.destinationExitId=0;changed=true;
+            }
+        if(changed) {
+            const auto result=candidate.replaceZoneAt(z,zone);
+            if(!result.success){if(error)*error=result.toText();return false;}
+        }
+    }
+    auto zone=candidate.zones()[zoneIndex];zone.exits.removeAt(exitIndex);
+    const auto result=candidate.replaceZoneAt(zoneIndex,zone);
+    if(!result.success){if(error)*error=result.toText();return false;}
+    m_table=candidate;return true;
+}
+
 bool CTravelDocument::appendZone(const SMapTableZone& zone,QString* error)
 {
     const auto result=m_table.appendZone(zone);
