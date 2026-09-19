@@ -5,6 +5,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QLabel>
+#include <QComboBox>
 
 #include "res_archive_document.h"
 #include "res_save_coordinator.h"
@@ -735,6 +737,19 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
     QCOMPARE(list->item(2)->text(),QString::fromUtf8("Выход №8 — без перехода"));
     QVERIFY(panel.flush());QCOMPARE(edits,1);
+    SMapTableZone other;other.zoneId="other";
+    auto from=e;from.exitId=17;from.destinationZoneId="TEST";from.destinationExitId=7;other.exits.append(from);
+    panel.populate({z,other},0,1,false);
+    auto* incoming=panel.findChild<QLabel*>("travelIncoming");QVERIFY(incoming);
+    QVERIFY(incoming->text().contains(QString::fromUtf8("other, запись №17 → сюда")));
+    auto* source=panel.findChild<QComboBox*>("travelSource");QVERIFY(source);
+    auto* link=panel.findChild<QPushButton*>("travelLinkIncoming");QVERIFY(link);QVERIFY(link->isEnabled());
+    int linkedZone=-1,linkedExit=-1;
+    QObject::connect(&panel,&CTravelPanel::incomingRequested,[&](int a,int b){linkedZone=a;linkedExit=b;});
+    source->setCurrentIndex(1);link->click();QCOMPARE(linkedZone,1);QCOMPARE(linkedExit,0);
+    QCOMPARE(edits,1); // Choosing arrival source does not edit this record's outgoing link.
+    panel.populate({z,other},0,2,false);QVERIFY(!link->isEnabled());
+    QVERIFY(incoming->text().contains(QString::fromUtf8("пока никто")));
 }
 void ResArchiveDocumentTests::travelMergeAndLinkValidation()
 {

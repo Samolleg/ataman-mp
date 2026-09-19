@@ -48,10 +48,25 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     m_destinationExit->setSpecialValueText(tr("Не выбран"));
     m_destinationExit->setToolTip(tr("Номер существующего входа на целевой карте, не номер этой записи."));
     target->addRow(tr("Целевая зона:"),m_destination);target->addRow(tr("Вход на целевой карте:"),m_destinationExit);
-    props->addLayout(target);
     auto* tabs=new QTabWidget;m_tabs=tabs;props->addWidget(tabs);
     for(int k=0;k<2;++k) {
         auto* page=new QWidget;auto* form=new QFormLayout(page);
+        if(k==0) {
+            form->addRow(new QLabel(tr("Откуда прибывают сюда")));
+            m_incoming=new QLabel;m_incoming->setWordWrap(true);
+            m_incoming->setObjectName("travelIncoming");form->addRow(m_incoming);
+            m_source=new QComboBox;m_source->setObjectName("travelSource");
+            form->addRow(tr("Запись на другой карте:"),m_source);
+            m_linkIncoming=new QPushButton(tr("Направить выбранную запись сюда"));
+            m_linkIncoming->setObjectName("travelLinkIncoming");form->addRow(m_linkIncoming);
+            auto* note=new QLabel(tr("Команда изменит назначение выбранной записи на другой карте. Её области останутся на месте. Ctrl+S сохранит связь."));
+            note->setWordWrap(true);form->addRow(note);
+        } else {
+            form->addRow(new QLabel(tr("Куда ведёт выход отсюда")));
+            form->addRow(target);
+            m_directionNote=new QLabel;m_directionNote->setWordWrap(true);
+            m_directionNote->setObjectName("travelDirectionNote");form->addRow(m_directionNote);
+        }
         m_present[k]=new QCheckBox(tr("Область задана"));form->addRow(m_present[k]);
         const QStringList labels={tr("X:"),tr("Y:"),tr("Ширина:"),tr("Высота:")};
         for(int c=0;c<4;++c) {
@@ -63,12 +78,18 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
         auto* draw=new QPushButton(tr("Нарисовать заново"));form->addRow(draw);
         connect(draw,&QPushButton::clicked,this,[this,k](){if(flush())emit drawRequested(k!=0,false);});
         connect(m_present[k],&QCheckBox::clicked,this,[this](){flush();});
+        if(k==1) {
+            auto* reverse=new QPushButton(tr("Создать обратный переход…"));form->addRow(reverse);
+            connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
+        }
         tabs->addTab(page,k?tr("Выход"):tr("Появление"));
     }
-    auto* reverse=new QPushButton(tr("Создать обратный переход…"));props->addWidget(reverse);
+    connect(m_linkIncoming,&QPushButton::clicked,this,[this](){
+        const auto pair=m_source->currentData().toList();
+        if(pair.size()==2 && flush())emit incomingRequested(pair[0].toInt(),pair[1].toInt());
+    });
     auto* remove=new QPushButton(tr("Удалить запись входа/перехода"));props->addWidget(remove);
     layout->addWidget(m_properties);layout->addStretch();
-    connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
     connect(remove,&QPushButton::clicked,this,&CTravelPanel::deleteRequested);
     connect(m_destination,QOverload<int>::of(&QComboBox::activated),this,[this](){flush();});
     connect(m_destinationExit,&QSpinBox::editingFinished,this,[this](){flush();});
@@ -115,6 +136,28 @@ void CTravelPanel::fillExit()
     m_properties->setEnabled(valid);
     if(valid) {
         const auto& e=m_zones[m_zone].exits[m_exit];
+        QStringList incoming;
+        m_source->clear();m_source->addItem(tr("Выберите запись…"));
+        for(int z=0;z<m_zones.size();++z)for(int i=0;i<m_zones[z].exits.size();++i) {
+            const auto& source=m_zones[z].exits[i];
+            const bool linked=source.destinationZoneId.compare(m_zones[m_zone].zoneId,Qt::CaseInsensitive)==0
+                && source.destinationExitId==e.exitId;
+            if(linked)incoming.append(tr("%1, запись №%2 → сюда").arg(m_zones[z].zoneId).arg(source.exitId));
+            if(z==m_zone)continue;
+            const QString label=tr("%1, запись №%2 → %3:%4%5").arg(m_zones[z].zoneId).arg(source.exitId)
+                .arg(source.destinationZoneId).arg(source.destinationExitId)
+                .arg(source.hasRemoveRectangle?QString():tr(" (область выхода не задана)"));
+            m_source->addItem(label,QVariantList{z,i});
+            m_source->setItemData(m_source->count()-1,label,Qt::ToolTipRole);
+        }
+        m_incoming->setText(incoming.isEmpty()?tr("На эту запись пока никто не ссылается."):incoming.join("\n"));
+        if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0)
+            m_incoming->setText(m_incoming->text()+tr("\nУ этой записи также есть исходящая связь → %1:%2. Она настраивается на вкладке «Выход».")
+                .arg(e.destinationZoneId).arg(e.destinationExitId));
+        m_linkIncoming->setEnabled(e.hasDeployRectangle);
+        m_directionNote->setText(!e.hasRemoveRectangle && e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0
+            ?tr("Исходящая связь задана, хотя области выхода нет. Отсутствие оранжевой области не гарантирует запрет перехода в игре. Для появления без исходящей связи выберите «Без перехода».")
+            :tr("Эта связь направлена с текущей карты на целевую. Она не задаёт, откуда прибывают сюда."));
         m_destination->clear();m_destination->addItem(tr("Без перехода"),"none");
         for(const auto& z:m_zones)if(m_destination->findData(z.zoneId)<0)m_destination->addItem(z.zoneId,z.zoneId);
         int row=m_destination->findData(e.destinationZoneId);

@@ -98,6 +98,25 @@ void MainWindow::createTravelEditor(QMenu* menu)
         if(index<0 || index>=zone.exits.size())return;
         zone.exits[index]=exit;changeTravelZone(m_travelZone,zone,tr("Изменить вход/переход"));
     });
+    connect(m_travelPanel,&CTravelPanel::incomingRequested,this,[this](int sourceZone,int sourceExit){
+        if(!m_travelDocument || m_travelZone<0 || m_travelExit<0)return;
+        const auto zones=m_travelDocument->table().zones();
+        if(m_travelZone>=zones.size() || m_travelExit>=zones[m_travelZone].exits.size()
+           || sourceZone<0 || sourceZone>=zones.size() || sourceZone==m_travelZone
+           || sourceExit<0 || sourceExit>=zones[sourceZone].exits.size())return;
+        const auto& target=zones[m_travelZone].exits[m_travelExit];
+        if(!target.hasDeployRectangle){m_travelPanel->setStatus(tr("Сначала задайте область появления здесь."));return;}
+        if(m_travelDocument->uniqueZone(zones[m_travelZone].zoneId)!=m_travelZone
+           || m_travelDocument->uniqueZone(zones[sourceZone].zoneId)!=sourceZone)return;
+        int targetCount=0;for(const auto& e:zones[m_travelZone].exits)if(e.exitId==target.exitId)++targetCount;
+        if(targetCount!=1){m_travelPanel->setStatus(tr("Номер появления неоднозначен."));return;}
+        auto source=zones[sourceZone];
+        int sourceCount=0;for(const auto& e:source.exits)if(e.exitId==source.exits[sourceExit].exitId)++sourceCount;
+        if(sourceCount!=1){m_travelPanel->setStatus(tr("Номер записи на другой карте неоднозначен."));return;}
+        source.exits[sourceExit].destinationZoneId=zones[m_travelZone].zoneId;
+        source.exits[sourceExit].destinationExitId=target.exitId;
+        changeTravelZone(sourceZone,source,tr("Направить переход к появлению"));
+    });
     connect(m_travelPanel,&CTravelPanel::drawRequested,this,[this](bool remove,bool create){
         if(!m_travelDocument || m_travelZone<0){m_travelPanel->setDrawingState(false,remove,create);m_travelPanel->setStatus(tr("Сначала выберите или зарегистрируйте текущую карту."));return;}
         if(!create && m_travelExit<0)return;
@@ -298,10 +317,11 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     QTemporaryDir scratch;if(!scratch.isValid())return false;
     const QString path=scratch.filePath("texts.res");
     CResFile archive;archive.addFiledata("map.txt",
-        "#zone test island game\r\n#res\r\ntest test\r\n#exit 1\r\nnone 0\r\n#deploy\r\n1 2 3 4\r\n");
+        "#zone test island game\r\n#res\r\ntest test\r\n#exit 1\r\nnone 0\r\n#deploy\r\n1 2 3 4\r\n"
+        "#zone other island game\r\n#res\r\nother other\r\n#exit 6\r\ntest 4\r\n#remove\r\n10 20 30 40\r\n");
     archive.addFiledata("unrelated.bin","untouched");archive.saveToFile(path);
     auto doc=QSharedPointer<CTravelDocument>::create();QString error;
-    if(!doc->open(path,&error) || doc->table().zones().size()!=1)return false;
+    if(!doc->open(path,&error) || doc->table().zones().size()!=2)return false;
     const auto initial=doc->snapshot();
     emit window->m_travelDock->visibilityChanged(true);
     bool passed=window->m_pView->travelEditing();
@@ -339,10 +359,23 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     emit window->m_travelDock->visibilityChanged(false);
     passed=passed && !window->m_pView->travelEditing();
     window->on_actionUndo_triggered();passed=passed && doc->table().zones()[0].exits.size()==1;
+    const auto beforeLink=doc->snapshot();
+    window->m_travelExit=0;window->refreshTravelEditor();
+    auto* sources=window->m_travelPanel->findChild<QComboBox*>("travelSource");
+    auto* link=window->m_travelPanel->findChild<QPushButton*>("travelLinkIncoming");
+    if(!sources || !link || sources->count()!=2)return false;
+    sources->setCurrentIndex(1);link->click();
+    passed=passed && doc->table().zones()[1].exits[0].destinationZoneId=="test"
+        && doc->table().zones()[1].exits[0].destinationExitId==1
+        && doc->table().zones()[1].exits[0].removeRectangle==QRectF(10,20,20,20)
+        && doc->table().zones()[0].exits[0].destinationZoneId=="none";
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==beforeLink;
+    window->on_actionRedo_triggered();
     passed=passed && window->saveMapWithTravel(scratch.filePath("backups")) && !doc->dirty();
     CTravelDocument reopened;
     passed=passed && reopened.open(path,&error) && reopened.snapshot()==doc->snapshot();
-    window->on_actionUndo_triggered();passed=passed && doc->dirty() && doc->snapshot()==initial;
+    window->on_actionUndo_triggered();passed=passed && doc->dirty() && doc->snapshot()==beforeLink;
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==initial;
     doc->discard();
     window->m_undoStack->clear();window->m_travelDocuments.clear();window->m_travelDocument.clear();
     window->m_travelZone=-1;window->m_travelExit=-1;window->refreshTravelEditor();

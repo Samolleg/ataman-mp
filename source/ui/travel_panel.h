@@ -33,6 +33,7 @@ signals:
     void registerRequested();
     void visibilityChanged();
     void focusRequested(int index, bool remove);
+    void incomingRequested(int zoneIndex, int exitIndex);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
@@ -49,6 +50,10 @@ private:
     QCheckBox* m_present[2];
     CWorldCoordinateEdit* m_rect[2][4];
     QLabel* m_status;
+    QLabel* m_incoming;
+    QLabel* m_directionNote;
+    QComboBox* m_source;
+    QPushButton* m_linkIncoming;
     QWidget* m_properties;
     QPushButton* m_add[2];
     QTabWidget* m_tabs;
