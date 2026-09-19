@@ -720,6 +720,21 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     auto* width=panel.findChild<QLineEdit*>("travelRect_0_2");QVERIFY(width);width->setText("-1");
     QVERIFY(!panel.flush());QCOMPARE(edits,1);
     width->setText("30");x->setText("nan");QVERIFY(!panel.flush());QCOMPARE(edits,1);
+    // Display every area combination without changing identifiers or links.
+    z.exits.clear();
+    for(int mask=0;mask<4;++mask) {
+        auto entry=e;entry.exitId=6+mask;entry.hasDeployRectangle=(mask&1)!=0;
+        entry.hasRemoveRectangle=(mask&2)!=0;entry.destinationZoneId="gz7g";
+        entry.destinationExitId=mask==2?0:1;z.exits.append(entry);
+    }
+    panel.populate({z},0,2,false);
+    QCOMPARE(list->item(0)->text(),QString::fromUtf8("Запись без областей №6 → gz7g, вход №1"));
+    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Появление №7 → gz7g, вход №1"));
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Выход №8 → gz7g, вход не выбран"));
+    QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и выход №9 → gz7g, вход №1"));
+    z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Выход №8 — без перехода"));
+    QVERIFY(panel.flush());QCOMPARE(edits,1);
 }
 void ResArchiveDocumentTests::travelMergeAndLinkValidation()
 {

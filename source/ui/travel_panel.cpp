@@ -45,7 +45,9 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     m_properties=new QWidget;auto* props=new QVBoxLayout(m_properties);props->setContentsMargins(0,0,0,0);
     auto* target=new QFormLayout;m_destination=new QComboBox;
     m_destinationExit=new QSpinBox;m_destinationExit->setRange(0,2147483647);
-    target->addRow(tr("Куда:"),m_destination);target->addRow(tr("Номер входа там:"),m_destinationExit);
+    m_destinationExit->setSpecialValueText(tr("Не выбран"));
+    m_destinationExit->setToolTip(tr("Номер существующего входа на целевой карте, не номер этой записи."));
+    target->addRow(tr("Целевая зона:"),m_destination);target->addRow(tr("Вход на целевой карте:"),m_destinationExit);
     props->addLayout(target);
     auto* tabs=new QTabWidget;m_tabs=tabs;props->addWidget(tabs);
     for(int k=0;k<2;++k) {
@@ -87,8 +89,20 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
     m_zoneCombo->setCurrentIndex(zoneIndex);
     m_exits->clear();
     if(zoneIndex>=0 && zoneIndex<zones.size())
-        for(const auto& e:zones[zoneIndex].exits)
-            m_exits->addItem(tr("Вход %1 → %2:%3").arg(e.exitId).arg(e.destinationZoneId).arg(e.destinationExitId));
+        for(const auto& e:zones[zoneIndex].exits) {
+            const QString kind=e.hasDeployRectangle
+                ? (e.hasRemoveRectangle?tr("Появление и выход"):tr("Появление"))
+                : (e.hasRemoveRectangle?tr("Выход"):tr("Запись без областей"));
+            QString label=tr("%1 №%2").arg(kind).arg(e.exitId);
+            if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)
+                label+=tr(" — без перехода");
+            else if(e.destinationExitId==0)
+                label+=tr(" → %1, вход не выбран").arg(e.destinationZoneId);
+            else
+                label+=tr(" → %1, вход №%2").arg(e.destinationZoneId).arg(e.destinationExitId);
+            auto* item=new QListWidgetItem(label,m_exits);
+            item->setToolTip(label);
+        }
     m_exits->setCurrentRow(exitIndex);
     m_status->setText(dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
         tr("Перетащите область или её маркеры. Esc отменяет жест. Координаты локальные."));
