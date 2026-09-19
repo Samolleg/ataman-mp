@@ -1,12 +1,15 @@
 # EI Mapper Ataman — roadmap
 
-Current Ataman version: `29` (исходники; установка пока 28).
+Current Ataman version: `29` (исходники и постоянная установка).
 
 ## EI-TRAVEL-DIRECTION — появление и направление связи
 
 - Версия 29: 21 тест PASS, Release и UI/MainWindow PASS (перепривязка,
   геометрия, Undo/Redo, save/reopen). Доказательства:
-  docs/validation/ATAMAN_TRAVEL_DIRECTION_29.md. Подготовка установки.
+  docs/validation/ATAMAN_TRAVEL_DIRECTION_29.md. Версия 29 установлена:
+  97948fd92edec8132d160fcca5a4b22fc4955c14; 101 программный файл проверен,
+  7153 пользовательских файла сохранены. Следующий шаг: ручная проверка
+  привязки и прибытия в игре. Родительская игровая приёмка остаётся открытой.
 
 - Разрешено «делай»: версия 29, codex/travel-direction-v29 от
   daeb00c2edca76d9092ffd17dd119ef096a5e500. Реализованы раздельные направления,

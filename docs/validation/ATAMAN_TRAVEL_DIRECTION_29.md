@@ -15,7 +15,14 @@
 - build-travel26-tests/results-v29.txt: 21 PASS, 0 FAIL, 0 SKIP.
 - Добавлена интеграционная проверка реальной кнопки через MainWindow,
   перенаправления, сохранности областей, Undo/Redo, save/reopen.
-- Свежая Release build-release-29-direction PASS; --ui-widget-check PASS (exit 0), включая новый путь MainWindow. Установка ожидает проверки пакета.
+- Свежая Release build-release-29-direction PASS; --ui-widget-check PASS (exit 0), включая новый путь MainWindow. Установка завершена.
+- Источник: 97948fd92edec8132d160fcca5a4b22fc4955c14.
+- Finalizer/validator и независимые проверки путей, хешей и покрытия PASS.
+- EXE SHA256: B236CE0208A81BB49F300F6CDD07A00D1E188F971D783BBDF53D73AB78CD9EC0.
+- Постоянная artifacts/EI-Mapper-Ataman-2-first-test: проверены 101 файл;
+  сохранены по хешам 7153 пользовательских файла; заменены 7, удалены 0.
+- Резерв предыдущей версии 28: build-rollback-direction29. Старый проверенный
+  резерв версии 27 build-rollback-labels28 удалён после успешной установки.
 
 Живые данные не изменялись. Приватные engine-reference навыки недоступны,
 исходники движка не использовались. Причина игрового выхода без #remove
