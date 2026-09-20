@@ -281,9 +281,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     form->addRow(m_falloffLabel, m_falloff);
     QPushButton* worldMaps = new QPushButton(tr("World terrain: choose maps..."), m_sculptControls);
     worldMaps->setObjectName(QStringLiteral("worldTerrainMaps"));
-    worldMaps->setToolTip(tr("Enable a shared brush for explicitly selected neighboring maps. Background maps are protected by default."));
+    worldMaps->setToolTip(tr("Общая кисть включена по умолчанию для всех доступных карт. Здесь можно отключить её или исключить отдельные карты."));
     form->addRow(worldMaps);
-    m_worldTerrainStatus=new QLabel(tr("World terrain disabled; neighbors protected."),m_sculptControls);
+    m_worldTerrainStatus=new QLabel(tr("Общая кисть включена; выбраны все доступные карты."),m_sculptControls);
     m_worldTerrainStatus->setWordWrap(true);
     m_worldTerrainStatus->setObjectName(QStringLiteral("worldTerrainStatus"));
     form->addRow(m_worldTerrainStatus);

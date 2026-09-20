@@ -955,7 +955,8 @@ private:
     CWorldTerrainSession m_worldTerrainSession;
     SWorldTerrainStroke m_worldTerrainStroke;
     QSet<QString> m_worldTerrainEnabledPaths;
-    bool m_worldTerrainEnabled{false};
+    QSet<QString> m_worldTerrainExcludedPaths;
+    bool m_worldTerrainEnabled{true};
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QByteArray m_neighborContextKey;
     QPointF m_activeMapWorldOrigin;

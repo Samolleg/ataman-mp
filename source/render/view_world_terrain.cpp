@@ -151,14 +151,17 @@ void CView::chooseWorldTerrainMaps()
             auto item=list->item(row);
             if(item->checkState()!=Qt::Checked) continue;
             const QString path=item->data(Qt::UserRole).toString();
-            if(!m_worldTerrainSession.load(path,&error))
-            { QMessageBox::warning(this,tr("Neighbor unavailable"),error);return; }
             selected.insert(CWorldTerrainSession::key(path));
         }
         if(m_neighborLandscapesVisualToggle) m_neighborLandscapesVisualToggle->setChecked(true);
         if(m_neighborLayoutEditToggle) m_neighborLayoutEditToggle->setChecked(false);
     }
     m_worldTerrainEnabled=enabled->isChecked();
+    for(int row=0;row<list->count();++row) {
+        const auto item=list->item(row);const auto id=CWorldTerrainSession::key(item->data(Qt::UserRole).toString());
+        if(item->checkState()==Qt::Checked)m_worldTerrainExcludedPaths.remove(id);
+        else m_worldTerrainExcludedPaths.insert(id);
+    }
     m_worldTerrainEnabledPaths=selected;
     updateWorldTerrainStatus();
     refreshWorldTerrainNeighbors();
@@ -179,7 +182,8 @@ bool CView::worldTerrainPosition(const QPoint& viewport,QVector3D* position)
 bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
 {
     if(!m_worldTerrainEnabled || !m_landscapeTools || m_landscapeTools->overlaySculptEnabled()) return false;
-    if(!m_hasActiveMapWorldOrigin || !m_terrainEditAvailable || m_neighborLayoutEditEnabled) return true;
+    if(!m_hasActiveMapWorldOrigin || !m_neighborLayoutStorageWritable) return false;
+    if(!m_terrainEditAvailable || m_neighborLayoutEditEnabled) return true;
     if(m_landscapeTools->sculptTool()==ELandscapeSculptTool::Noise)
     { emit updateMsg(tr("World terrain supports Raise, Lower, Flatten and Smooth. Disable it to use local Noise."));return true; }
     QString error;
@@ -197,7 +201,10 @@ bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
         const QString id=CWorldTerrainSession::key(placement.mprPath);
         if(seen.contains(id) || !m_worldTerrainEnabledPaths.contains(id)) continue;
         seen.insert(id);
-        if(!m_worldTerrainSession.documents.contains(id)) continue;
+        const double radius=m_landscapeTools->radius()+2;
+        const QPointF center(position.x()+m_activeMapWorldOrigin.x(),position.y()+m_activeMapWorldOrigin.y());
+        if(!QRectF(placement.worldOrigin,placement.size).adjusted(-radius,-radius,radius,radius).contains(center))continue;
+        if(!m_worldTerrainSession.load(placement.mprPath,&error)){emit updateMsg(error);return true;}
         SWorldTerrainTarget t;t.id=id;t.origin=placement.worldOrigin;
         t.model=&m_worldTerrainSession.documents[id]->terrain;t.editable=true;targets.append(t);
     }
@@ -349,7 +356,7 @@ bool CView::resolveWorldTerrainClose(bool retain)
         }
     }
     for(auto& loaded:m_neighborLandscapes) loaded.landscape->setCanonicalTerrainModel(nullptr);
-    m_worldTerrainSession.clear();m_worldTerrainEnabledPaths.clear();m_worldTerrainEnabled=false;
+    m_worldTerrainSession.clear();m_worldTerrainEnabledPaths.clear();m_worldTerrainExcludedPaths.clear();m_worldTerrainEnabled=true;
     updateWorldTerrainStatus();
     return true;
 }

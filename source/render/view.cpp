@@ -3062,6 +3062,12 @@ void CView::setNeighborMapContext(
     m_hasActiveMapWorldOrigin = false;
     m_neighborLayoutStorageWritable = layoutWarning.isEmpty();
     m_neighborPlacements = placements;
+    m_worldTerrainEnabledPaths.clear();
+    for(const auto& placement:placements) {
+        const auto id=CWorldTerrainSession::key(placement.mprPath);
+        if(!m_worldTerrainExcludedPaths.contains(id))m_worldTerrainEnabledPaths.insert(id);
+    }
+    updateWorldTerrainStatus();
     if(layout.hasActiveWorldOrigin)
     {
         m_activeMapWorldOrigin = layout.activeWorldOrigin;
