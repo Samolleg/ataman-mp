@@ -153,7 +153,7 @@ int runNeighborPerformanceCheck()
         if(!view.m_terrainEditAvailable)return 1;
         view.m_hasActiveMapWorldOrigin=true;view.m_activeMapWorldOrigin={0,0};view.m_neighborLayoutStorageWritable=true;
         view.m_worldTerrainEnabled=true;view.m_neighborPlacements.clear();
-        SNeighborMapPlacement adjacent;adjacent.mprPath=root+"/Maps/zone2.mpr";
+        SNeighborMapPlacement adjacent;adjacent.mprPath=root+"/Maps/"+qEnvironmentVariable("EI_WORLD_BRUSH_NEIGHBOR","zone2")+".mpr";
         CMprDocument other;CValidationReport validation;
         if(!other.load(QFileInfo(adjacent.mprPath),&validation))return 1;
         adjacent.worldOrigin={view.m_terrainEdit.tileCountX()*2.0,0};adjacent.origin=adjacent.worldOrigin;
@@ -203,6 +203,43 @@ int runNeighborPerformanceCheck()
         for(int y=0;y<qMin(field.vertexHeight(),landFields.first().field.vertexHeight());++y)
             check(field.material(field.tileWidth(),y)==landFields.first().field.material(0,y),"border semantic vertex matches touching neighbor");
         check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"installed files unchanged by painter regression");
+        if(qEnvironmentVariableIsSet("EI_WORLD_ATLAS_SWITCH_CHECK")) {
+            CTileForm reopenedPicker;
+            reopenedPicker.fillTable(other.mapInfo().innerNamespace,int(other.mapInfo().textureCount));
+            view.m_authoredTerrainTileImages=reopenedPicker.tileImages();
+            const auto stage=view.m_worldTerrainSession.documents[neighborId]->atlas->createStagingCopy();
+            const auto images=stage->activeTileImages();const int count=stage->authoredSlotCount();
+            int first=-1;for(int i=0;i<qMin(count,view.m_authoredTerrainTileImages.size());++i)
+                if(images[i]!=view.m_authoredTerrainTileImages[i]){first=i;break;}
+            out<<"Authored mismatch slot "<<first<<" counts "<<count<<"/"<<view.m_authoredTerrainTileImages.size()<<"\n";
+            if(first>=0)out<<"formats "<<int(images[first].format())<<"/"<<int(view.m_authoredTerrainTileImages[first].format())
+                <<" RGBA equal "<<(images[first].convertToFormat(QImage::Format_RGBA8888)==view.m_authoredTerrainTileImages[first].convertToFormat(QImage::Format_RGBA8888))<<"\n";
+            CValidationReport upload;check(view.syncWorkingTerrainAtlas(&upload,stage.data()),"retained neighbor atlas passes authored protection");
+            out<<upload.toText()<<"\n";
+            const auto stale=view.m_workingTerrainAtlas->createStagingCopy();
+            CValidationReport staleReport;QImage pending=stale->authoredTileImages().first();pending.fill(QColor(31,57,91));
+            check(stale->importPhysicalTile(pending,0,nullptr,"regression",0,&staleReport)>=0,"stage repair upload while another map baseline is selected");
+            check(!view.syncWorkingTerrainAtlas(&staleReport,stale.data()) && staleReport.hasErrors(),"reproduce authored protection refusal with stale same-sized baseline");
+            // Same slot count is not proof of the same map. Rebind the retained
+            // active cache after loading another map's reference/picker.
+            check(view.previewWorldPaintState(activeId),"restore retained active atlas and immutable baseline together");
+            const auto restored=view.m_workingTerrainAtlas->createStagingCopy();
+            CValidationReport restoredUpload;
+            check(view.m_authoredTerrainTileImages==restored->authoredTileImages(),"restored baseline belongs to the retained document");
+            check(view.syncWorkingTerrainAtlas(&restoredUpload,restored.data()),"repair upload accepts restored atlas without disabling protection");
+            out<<restoredUpload.toText()<<"\n";
+            CValidationReport retry;
+            check(view.syncWorkingTerrainAtlas(&retry,stale.data()),"identical refused candidate passes after restoring its own baseline");
+            if(!view.m_authoredTerrainTileImages.isEmpty()) {
+                view.m_authoredTerrainTileImages[0].fill(Qt::magenta);
+                CValidationReport rejected;
+                const auto tamperedStage=restored->createStagingCopy();
+                QImage probe=restored->authoredTileImages().first();probe.fill(QColor(17,33,71));
+                check(tamperedStage->importPhysicalTile(probe,0,nullptr,"regression",0,&rejected)>=0,"stage a pending upload for protection test");
+                check(!view.syncWorkingTerrainAtlas(&rejected,tamperedStage.data()) && rejected.hasErrors(),"real authored pixel mismatch remains rejected");
+                view.previewWorldPaintState(activeId);
+            }
+        }
         view.m_worldTerrainSession.clear();view.m_worldTerrainStroke={};
         view.attachLandscapeTools(nullptr);view.m_pLand->setDirty(false);
         return failures?1:0;

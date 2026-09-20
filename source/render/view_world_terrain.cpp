@@ -864,6 +864,14 @@ bool CView::previewWorldPaintState(const QString& id)
     if(id==active) {
         if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
         m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
+        // Restore the immutable source together with its working cache. The
+        // renderer/picker contain edited slots and cannot serve as that source.
+        m_authoredTerrainTileImages=doc->atlas->authoredTileImages();
+        const auto source=m_worldTerrainAtlasSources.constFind(id);
+        if(source!=m_worldTerrainAtlasSources.cend()) {
+            m_terrainAtlasProfile=source->profile;
+            m_activeTerrainArchivePath=source->archive;
+        }
         m_workingTerrainAtlas=doc->atlas->createStagingCopy();
         m_pLand->setCanonicalTerrainModel(&m_terrainEdit);syncMprDirtyState();
         m_landscapeTools->setOverlayMaterials(worldRenderMaterials(m_mprMaterials));

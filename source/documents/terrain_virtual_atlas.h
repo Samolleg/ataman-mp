@@ -452,6 +452,7 @@ public:
         CValidationReport* report = nullptr) const;
     int capacityLimit() const { return m_capacityLimit; }
     int authoredSlotCount() const { return m_authoredSlotCount; }
+    const QVector<QImage>& authoredTileImages() const { return m_authoredImages; }
     int generatedTileCount() const;
     int activeTextureCount() const;
     // Resolve Missing Blends plans against an isolated copy.  The live cache
