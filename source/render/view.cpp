@@ -20378,6 +20378,9 @@ void CView::resolveMissingTerrainBlends()
     };
     QMap<QByteArray, SMissingMapSignature> missing;
     CTerrainVirtualMaterialField repairFields[2];
+    bool worldBoundaryChanged=false;
+    QVector<SWorldMaterialField> worldNeighbors[2];
+    if(!report.hasErrors())worldMaterialNeighbors(&worldNeighbors[0],&worldNeighbors[1],&report);
     bool completeRepairFields[2] = {false, false};
     const ETerrainTileLayer layers[] = {
         ETerrainTileLayer::Land, ETerrainTileLayer::Overlay};
@@ -20408,6 +20411,19 @@ void CView::resolveMissingTerrainBlends()
                     EValidationSeverity::Error,
                     "The map-wide resolver could not copy the recovered material field");
                 break;
+            }
+            const int boundaryChanges=reconcileWorldMaterialBoundary(
+                m_activeMapWorldOrigin,&field,worldNeighbors[layerIndex]);
+            if(boundaryChanges>0) {
+                worldBoundaryChanged=true;
+                QVector<qint32> current,baseline;
+                staged.terrainEdit.copyVirtualMaterialFieldState(layer,&current,&baseline);
+                current.resize(field.vertexWidth()*field.vertexHeight());
+                for(int fy=0;fy<field.vertexHeight();++fy)for(int fx=0;fx<field.vertexWidth();++fx)
+                    current[fy*field.vertexWidth()+fx]=field.material(fx,fy);
+                if(!staged.terrainEdit.restoreVirtualMaterialFieldState(layer,current,baseline,&report))break;
+                report.add("terrain.world.boundary",EValidationSeverity::Info,
+                    tr("Проверены стыки соседних карт: исправлено вершин материалов — %1.").arg(boundaryChanges));
             }
             for(int y = 0; y < field.tileHeight(); ++y)
                 for(int x = 0; x < field.tileWidth(); ++x)
@@ -20556,7 +20572,7 @@ void CView::resolveMissingTerrainBlends()
         finishAudit(QStringLiteral("validation-refused"));
         return;
     }
-    if(combined.isEmpty())
+    if(combined.isEmpty() && !worldBoundaryChanged)
     {
         progress.setValue(5);
         const QString visibleReport = userResolveReportText();
