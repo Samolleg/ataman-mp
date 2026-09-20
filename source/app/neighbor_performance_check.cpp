@@ -14,6 +14,9 @@
 #include "tree_view.h"
 #include "progressview.h"
 #include "tile_form.h"
+#include "landscape_tools.h"
+#include <QAbstractButton>
+#include <QMessageBox>
 #include "neighbor_visual_preparation.h"
 #include "resourcemanager.h"
 #include "endurance_document.h"
@@ -138,6 +141,72 @@ int runNeighborPerformanceCheck()
         QCryptographicHash hash(QCryptographicHash::Sha256); hash.addData(&file); return hash.result();
     };
     const auto terrainHash=digest(placement.mprPath),mobHash=digest(placement.mobPath);
+    if(qEnvironmentVariableIsSet("EI_WORLD_BRUSH_CHECK")) {
+        QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,&view,[&]() {
+            for(auto* widget:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(widget)) {
+                out<<"Unexpected dialog: "<<box->text()<<"\n";out.flush();++failures;box->reject();
+            }
+        });dismiss.start(50);
+        CLandscapeTools tools;view.attachLandscapeTools(&tools);
+        view.loadLandscape(QFileInfo(placement.mprPath));
+        check(view.ensureTerrainAutoCatalogReady() && view.m_terrainEditAvailable,"active real map and material catalog load");
+        if(!view.m_terrainEditAvailable)return 1;
+        view.m_hasActiveMapWorldOrigin=true;view.m_activeMapWorldOrigin={0,0};view.m_neighborLayoutStorageWritable=true;
+        view.m_worldTerrainEnabled=true;view.m_neighborPlacements.clear();
+        SNeighborMapPlacement adjacent;adjacent.mprPath=root+"/Maps/zone2.mpr";
+        CMprDocument other;CValidationReport validation;
+        if(!other.load(QFileInfo(adjacent.mprPath),&validation))return 1;
+        adjacent.worldOrigin={view.m_terrainEdit.tileCountX()*2.0,0};adjacent.origin=adjacent.worldOrigin;
+        adjacent.size={other.mapInfo().sectorCountX*32.0,other.mapInfo().sectorCountY*32.0};
+        view.m_neighborPlacements.append(adjacent);
+        view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(adjacent.mprPath));
+        tools.activateMode(ELandscapeEditMode::TilePaint,true);tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        bool selected=false;
+        for(const auto& family:view.m_terrainGlobalFamilies)if(tools.selectPaintTerrainType(family.id)){selected=true;break;}
+        check(selected,"select a global painting family");
+        const auto activeId=CWorldTerrainSession::key(placement.mprPath),neighborId=CWorldTerrainSession::key(adjacent.mprPath);
+        const auto before=view.m_terrainEdit;
+        QString message;QObject::connect(&view,&CView::updateMsg,&view,[&](const QString& text){message=text;});
+        view.beginTileBrushGroup();
+        check(view.paintWorldTerrainAt(QVector3D(adjacent.origin.x(),16,0),true),"shared painter handles boundary stamp");
+        out<<"Painter message: "<<message<<"\n";
+        check(view.m_worldTerrainStroke.paint.contains(activeId)&&view.m_worldTerrainStroke.paint.contains(neighborId),"one stroke changes both real independent atlases");
+        view.endTileBrushGroup();
+        QString error;check(view.m_worldTerrainSession.undo(&error),"undo complete paint cohort");out<<error<<"\n";
+        check(view.m_worldTerrainSession.documents.value(activeId) && view.m_worldTerrainSession.documents[activeId]->terrain.sectorPayload(0,0)==before.sectorPayload(0,0),"undo restores active terrain");
+        check(view.m_worldTerrainSession.redo(&error),"redo complete paint cohort");
+        for(const auto& id:QStringList{activeId,neighborId})check(view.previewWorldPaintState(id),"restore redo preview for each world document");
+        tools.activateMode(ELandscapeEditMode::OverlaySurface,true);tools.adjustPaintSize(1);
+        selected=false;
+        for(const auto& family:view.m_terrainGlobalFamilies)if(tools.selectPaintTerrainType(family.id)){selected=true;break;}
+        check(selected,"select a compatible overlay family");
+        int surfaceY=-1;
+        for(int y=2;y<qMin(view.m_terrainEdit.tileCountY(),int(other.mapInfo().sectorCountY)*16)-2;++y) {
+            bool a=false,b=false;
+            const auto left=view.m_terrainEdit.packedTile(view.m_terrainEdit.tileCountX()-1,y,ETerrainTileLayer::Overlay,&a);
+            const auto right=view.m_worldTerrainSession.documents[neighborId]->terrain.packedTile(0,y,ETerrainTileLayer::Overlay,&b);
+            if((!a || left==0xffff)&&(!b || right==0xffff)){surfaceY=y;break;}
+        }
+        check(surfaceY>=0,"find boundary without existing surfaces on either map");
+        view.beginTileBrushGroup();message.clear();
+        check(view.paintWorldTerrainAt(QVector3D(adjacent.origin.x(),surfaceY*2,0),false),"shared surface creation handles boundary");
+        out<<"Surface message: "<<message<<" mode "<<int(tools.editMode())<<" operation "<<int(tools.overlaySurfaceOperation())<<" paint "<<view.m_worldTerrainStroke.paint.size()<<" overlays "<<view.m_worldTerrainStroke.overlays.size()<<" history "<<view.m_worldTerrainSession.canUndo()<<"\n";
+        check(view.m_worldTerrainStroke.paint.contains(activeId)&&view.m_worldTerrainStroke.paint.contains(neighborId),"surface creation changes both maps");
+        view.endTileBrushGroup();
+        check(view.worldTerrainHistory(false,true),"surface undo through view history");
+        check(view.worldTerrainHistory(true,true),"surface redo through view history");
+        QVector<SWorldMaterialField> landFields,overlayFields;
+        check(view.worldMaterialNeighbors(&landFields,&overlayFields,&validation)&&!landFields.isEmpty(),"boundary repair reads retained neighbor material field");
+        CTerrainVirtualMaterialField field;
+        check(view.m_terrainEdit.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false),"active semantic field available");
+        reconcileWorldMaterialBoundary(view.m_activeMapWorldOrigin,&field,landFields);
+        for(int y=0;y<qMin(field.vertexHeight(),landFields.first().field.vertexHeight());++y)
+            check(field.material(field.tileWidth(),y)==landFields.first().field.material(0,y),"border semantic vertex matches touching neighbor");
+        check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"installed files unchanged by painter regression");
+        view.m_worldTerrainSession.clear();view.m_worldTerrainStroke={};
+        view.attachLandscapeTools(nullptr);view.m_pLand->setDirty(false);
+        return failures?1:0;
+    }
     const auto archives=CTextureList::getInstance()->configuredResourceArchivePaths();
     QElapsedTimer timer; timer.start();
     bool workerHasNoGl=false;

@@ -8,6 +8,10 @@
 #include "world_terrain_session.h"
 #include "endurance_document.h"
 #include "terrain_boundary_fill.h"
+#include "world_material_boundary.h"
+#include "terrain_virtual_atlas.h"
+#include "res_archive_document.h"
+#include "mmp_codec.h"
 
 class WorldTerrainTests : public QObject
 {
@@ -37,6 +41,124 @@ class WorldTerrainTests : public QObject
     double z(CWorldTerrainSession& s,const QString& id,int x,int y)
     { auto& t=s.documents[id]->terrain;return t.height(x,y)*double(t.maxZ())/65535; }
 private slots:
+    void physicalTileImportPreservesIdentity()
+    {
+        CTerrainTransitionCatalog catalog;catalog.declareMaterial(1);catalog.declareMaterial(2);
+        STerrainTransitionVariant v;v.packedTile=0;v.signature.northWest=v.signature.northEast=v.signature.southWest=v.signature.southEast=1;
+        CValidationReport report;QVERIFY(catalog.addVariant(v,&report));
+        QImage green(64,64,QImage::Format_RGBA8888);green.fill(Qt::green);
+        CTerrainWorkingAtlas atlas(catalog,QVector<QImage>(64,green),0,256,{}, {},QVector<qint32>(64,0));
+        QVERIFY2(atlas.isValid(),qPrintable(atlas.error()));
+        auto signature=v.signature;signature.northWest=signature.northEast=signature.southWest=signature.southEast=2;
+        const int imported=atlas.importPhysicalTile(green,0,&signature,"other",4,&report);
+        QVERIFY(imported>=64); // Same artwork does not imply the same material.
+        QCOMPARE(atlas.importPhysicalTile(green,0,&signature,"other",4,&report),imported);
+        SMprPackedTile packed;packed.atlasIndex=imported/64;packed.tileIndex=imported%64;
+        bool found=false;QVERIFY(atlas.catalog().gridSignatureForPacked(packed.encode(),&found)==signature);QVERIFY(found);
+        const auto snapshot=atlas.createStagingCopy();
+        QImage red=green;red.fill(Qt::red);
+        QVERIFY(atlas.importPhysicalTile(red,3,nullptr,"other",5,&report)>imported);
+        QCOMPARE(snapshot->activeTileTypes().size(),imported+1);
+        QCOMPARE(snapshot->activeTileImages()[imported],green);
+    }
+    void paintingSnapshotsAreAtomicAndUndoable()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");QString error;CValidationReport report;
+        SWorldTerrainStroke stroke;
+        for(const QString& id:QStringList{"a","b"}) {
+            auto doc=s.documents[id];doc->materials=doc->baseline.mapInfo().materials;
+            SWorldTerrainPaintChange change;change.before.terrain=doc->terrain;change.before.materials=doc->materials;
+            change.after=change.before;
+            STerrainTileBrush brush;brush.centerX=3;brush.centerY=4;brush.radius=2;
+            const auto overlay=change.after.terrain.makeOverlayActivation(brush,0,0,0,0,&report);
+            QVERIFY(!overlay.isEmpty());QVERIFY(change.after.terrain.apply(overlay,true,&report));
+            stroke.paint[id]=change;
+        }
+        const auto before=s.documents["a"]->terrain.sectorPayload(0,0);
+        auto invalid=stroke;invalid.paint["b"].before.materials.clear();
+        QVERIFY(!s.apply(invalid,true,&error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),before);
+        QVERIFY2(s.apply(stroke,true,&error),qPrintable(error));s.record(stroke);
+        const auto after=s.documents["a"]->terrain.sectorPayload(0,0);QVERIFY(after!=before);
+        QVERIFY2(s.undo(&error),qPrintable(error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),before);
+        QCOMPARE(s.documents["b"]->terrain.sectorPayload(0,0),before);
+        QVERIFY2(s.redo(&error),qPrintable(error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),after);
+        s.clearHistory();QVERIFY(!s.canUndo());QVERIFY(!s.canRedo());
+    }
+    void extendedAtlasAndOverlaySaveRoundTrip()
+    {
+        CWorldTerrainSession s;add(s,"a");const auto doc=s.documents["a"];CValidationReport report;
+        const int count=int(doc->baseline.mapInfo().textureCount)*64;
+        QImage image(64,64,QImage::Format_RGBA8888);image.fill(Qt::green);
+        QVector<QImage> images(count+64,image);QVector<QByteArray> pages;
+        for(int i=0;i<count;i+=64)pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,i,64),static_cast<QString*>(nullptr)));
+        QVector<qint32> types(count+1,0);types[count]=3;
+        auto materials=doc->baseline.mapInfo().materials;QVERIFY(!materials.isEmpty());materials.append(materials.first());
+        auto model=doc->terrain;model.enableWorkingAtlasSlots(count+64);model.installWorkingAtlasSlotTypes(types);model.extendMaterialTable(materials.size());
+        STerrainTileBrush brush;brush.centerX=4;brush.centerY=4;brush.radius=2;
+        const auto overlay=model.makeOverlayActivation(brush,materials.size()-1,count/64,0,0,&report);
+        QVERIFY2(!overlay.isEmpty(),qPrintable(report.toText()));QVERIFY(model.apply(overlay,true,&report));
+        const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(doc->baseline,images,types,pages,materials,doc->baseline.mapInfo().animatedTiles,&report);
+        QVERIFY2(package.success,qPrintable(package.error+report.toText()));
+        CMprDocument staged;QVERIFY(staged.loadBytes(package.mprBytes,"a.mpr",&report));
+        CMprEditTransaction edit("paint");QVERIFY(model.appendSectorEdits(&edit,&report));QByteArray candidate;QVERIFY(staged.applyTransaction(edit,&candidate,&report));
+        CMprDocument reopened;CTerrainEditModel check;QVERIFY(reopened.loadBytes(candidate,"a.mpr",&report));
+        QVERIFY2(check.load(reopened,&report),qPrintable(report.toText()));QCOMPARE(check.sectorPayload(0,0),model.sectorPayload(0,0));
+        QCOMPARE(reopened.mapInfo().tileTypes,types);QCOMPARE(reopened.mapInfo().materials,materials);
+        CResArchiveDocument archive;QStringList errors;QVERIFY(archive.loadBytes(package.resourceArchiveBytes,"atlas.res",&errors));
+        QCOMPARE(package.resourceMembers.size(),images.size()/64);
+        for(int i=0;i<pages.size();++i)QCOMPARE(archive.memberPayload(package.resourceMembers[i]),pages[i]);
+    }
+    void materialBoundaryUsesWorldAdjacency()
+    {
+        CTerrainVirtualMaterialField active;QVERIFY(active.resize(16,16,1));
+        SWorldMaterialField neighbor;neighbor.origin={32,0};QVERIFY(neighbor.field.resize(16,16,2));
+        QCOMPARE(reconcileWorldMaterialBoundary({0,0},&active,{neighbor}),17);
+        QCOMPARE(active.material(16,8),2);QCOMPARE(active.material(15,8),1);
+        active.resize(16,16,1);neighbor.origin={33,0};
+        QCOMPARE(reconcileWorldMaterialBoundary({0,0},&active,{neighbor}),0);
+        neighbor.origin={31,0};QCOMPARE(reconcileWorldMaterialBoundary({0,0},&active,{neighbor}),0);
+        neighbor.origin={32,32};QCOMPARE(reconcileWorldMaterialBoundary({0,0},&active,{neighbor}),0);
+        neighbor.origin={32,0.5};QVERIFY(reconcileWorldMaterialBoundary({0,0},&active,{neighbor})>0);
+        QCOMPARE(active.material(16,8),2);QCOMPARE(active.material(16,0),1);
+        active.resize(16,16,1);neighbor.field.setMaterial(0,8,3);
+        reconcileWorldMaterialBoundary({0,0},&active,{neighbor});
+        QCOMPARE(active.material(16,8),1); // no interpolation of material IDs
+        QCOMPARE(active.material(16,12),2);
+    }
+    void noiseWorldCoordinatesAndMixedScaleUndo()
+    {
+        CWorldTerrainSession s;add(s,"a",100,20000);add(s,"b",200,10000);
+        const auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,0})};
+        STerrainBrush brush;brush.centerX=32;brush.centerY=16;brush.radius=5;
+        const auto stamp=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::Noise,2,0,1,731);
+        QVERIFY(stamp.maps.contains("a"));QVERIFY(stamp.maps.contains("b"));
+        const auto beforeA=s.documents["a"]->terrain.sectorPayload(0,0);
+        const auto beforeB=s.documents["b"]->terrain.sectorPayload(0,0);
+        QString error;QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));s.record(stamp);
+        for(int y=12;y<21;++y)QVERIFY(qAbs(z(s,"a",32,y)-z(s,"b",0,y))<0.0031);
+        QVERIFY(s.undo(&error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),beforeA);
+        QCOMPARE(s.documents["b"]->terrain.sectorPayload(0,0),beforeB);
+        QVERIFY(s.redo(&error));
+    }
+    void overlayCohortIsTransactionalAndUndoable()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");QString error;
+        STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=3;
+        SWorldTerrainStroke activate;
+        for(const QString& id:QStringList{"a","b"}) {
+            CValidationReport report;
+            activate.overlays[id]=s.documents[id]->terrain.makeOverlayActivation(brush,0,0,0,0,&report);
+            QVERIFY2(!activate.overlays[id].isEmpty(),qPrintable(report.toText()));
+        }
+        const auto before=s.documents["a"]->terrain.sectorPayload(0,0);
+        auto invalid=activate;invalid.overlays.insert("missing",activate.overlays["a"]);
+        QVERIFY(!s.apply(invalid,true,&error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),before);
+        QVERIFY2(s.apply(activate,true,&error),qPrintable(error));s.record(activate);
+        const auto after=s.documents["a"]->terrain.sectorPayload(0,0);QVERIFY(before!=after);
+        QVERIFY(s.undo(&error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),before);
+        QCOMPARE(s.documents["b"]->terrain.sectorPayload(0,0),before);
+        QVERIFY(s.redo(&error));QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),after);
+    }
     void boundaryFillLargeContourAndOverlay()
     {
         QElapsedTimer timer;timer.start();

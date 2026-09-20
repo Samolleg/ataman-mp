@@ -1530,7 +1530,8 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
 
 bool CTerrainEditModel::isDirty() const
 {
-    if(m_maxZ != m_originalMaxZ)
+    if(m_maxZ != m_originalMaxZ || m_virtualLandMaterials!=m_originalVirtualLandMaterials
+       || m_virtualOverlayMaterials!=m_originalVirtualOverlayMaterials)
         return true;
     for(const SSector& sector : m_sectors)
         if(sector.dirty)
@@ -6432,8 +6433,10 @@ STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
     std::sort(requested.begin(),requested.end(),[](const QPoint& left,
         const QPoint& right){return left.y()!=right.y()
             ?left.y()<right.y():left.x()<right.x();});
+    if(requested.isEmpty())return {};
     STerrainTileCommand command=makeVirtualMaterialPaintVertices(
-        qRound(tileBrush.centerX),qRound(tileBrush.centerY),requested,
+        qBound(0,qRound(tileBrush.centerX),tileCountX()-1),
+        qBound(0,qRound(tileBrush.centerY),tileCountY()-1),requested,
         previewCoreCells,tileBrush,layer,materialId,catalog,
         distributionSeed,report,randomizeUniformRotation);
     QVector<int> sortedCore=previewCoreCells.values().toVector();

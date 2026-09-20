@@ -9,6 +9,8 @@ struct SWorldTerrainDocument
     QString path;
     CMprDocument baseline;
     CTerrainEditModel terrain;
+    QSharedPointer<CTerrainWorkingAtlas> atlas;
+    QVector<SMprMaterialRecord> materials;
 };
 class CWorldTerrainSession
 {
@@ -24,6 +26,7 @@ public:
     bool canUndo() const { return m_index>0; }
     bool canRedo() const { return m_index<m_history.size(); }
     const SWorldTerrainStroke* nextCommand(bool forward) const;
+    void clearHistory() { m_history.clear(); m_index=0; }
     void clear() { documents.clear(); m_history.clear(); m_index=0; }
 private:
     QVector<SWorldTerrainStroke> m_history;

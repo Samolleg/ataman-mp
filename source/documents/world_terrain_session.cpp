@@ -28,6 +28,7 @@ bool CWorldTerrainSession::load(const QString& path, QString* error)
     if(!doc->baseline.load(QFileInfo(path),&report) || report.hasErrors()
        || !doc->terrain.load(doc->baseline,&report) || report.hasErrors())
     { *error=report.toText(); return false; }
+    doc->materials=doc->baseline.mapInfo().materials;
     documents.insert(id,doc);
     return true;
 }
@@ -42,13 +43,51 @@ bool CWorldTerrainSession::apply(const SWorldTerrainStroke& stroke,bool forward,
         if(!staged[it.key()].apply(it.value(),forward,&report))
         { *error=report.toText(); return false; }
     }
+    for(auto it=stroke.overlays.cbegin();it!=stroke.overlays.cend();++it) {
+        if(!documents.contains(it.key())){*error="A stroke document is unavailable.";return false;}
+        if(!staged.contains(it.key()))staged[it.key()]=documents[it.key()]->terrain;
+        CValidationReport report;
+        if(!staged[it.key()].apply(it.value(),forward,&report)){*error=report.toText();return false;}
+    }
+    for(auto it=stroke.tiles.cbegin();it!=stroke.tiles.cend();++it) {
+        if(!documents.contains(it.key())){*error="A stroke document is unavailable.";return false;}
+        if(!staged.contains(it.key()))staged[it.key()]=documents[it.key()]->terrain;
+        CValidationReport report;
+        if(!staged[it.key()].apply(it.value(),forward,&report)){*error=report.toText();return false;}
+    }
+    for(auto it=stroke.paint.cbegin();it!=stroke.paint.cend();++it) {
+        if(!documents.contains(it.key()) || staged.contains(it.key())) {
+            *error="Missing or mixed snapshot stroke document.";return false;
+        }
+        const auto doc=documents[it.key()];
+        const auto& expected=forward?it.value().before:it.value().after;
+        const auto& target=forward?it.value().after:it.value().before;
+        if(doc->materials!=expected.materials) {*error="Material table changed outside the world stroke.";return false;}
+        if(doc->terrain.maxZ()!=expected.terrain.maxZ()) {*error="Terrain scale changed outside the world stroke.";return false;}
+        for(const auto& sector:doc->baseline.sectors())
+            if(doc->terrain.sectorPayload(sector.sectorX,sector.sectorY)!=expected.terrain.sectorPayload(sector.sectorX,sector.sectorY)) {
+                *error="Terrain changed outside the world stroke.";return false;
+            }
+        for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+            QVector<qint32> current,baseline,other,otherBaseline;
+            doc->terrain.copyVirtualMaterialFieldState(layer,&current,&baseline);
+            expected.terrain.copyVirtualMaterialFieldState(layer,&other,&otherBaseline);
+            if(current!=other || baseline!=otherBaseline){*error="Material field changed outside the world stroke.";return false;}
+        }
+        staged.insert(it.key(),target.terrain);
+    }
     for(auto it=staged.cbegin();it!=staged.cend();++it) documents[it.key()]->terrain=it.value();
+    for(auto it=stroke.paint.cbegin();it!=stroke.paint.cend();++it) {
+        const auto& target=forward?it.value().after:it.value().before;
+        documents[it.key()]->atlas=target.atlas;
+        documents[it.key()]->materials=target.materials;
+    }
     return true;
 }
 QStringList CWorldTerrainSession::dirtyPaths() const
 {
     QStringList result;
-    for(const auto& doc:documents) if(doc->terrain.isDirty()) result.append(doc->path);
+    for(const auto& doc:documents) if(doc->terrain.isDirty() || doc->materials!=doc->baseline.mapInfo().materials) result.append(doc->path);
     return result;
 }
 void CWorldTerrainSession::record(const SWorldTerrainStroke& stroke)

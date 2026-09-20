@@ -59,6 +59,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "neighbor_render_cache.h"
 #include <atomic>
 #include "world_terrain_session.h"
+#include "world_material_boundary.h"
 
 class QLineEdit;
 class QFrame;
@@ -109,7 +110,27 @@ class IPropertyBase;
 class CTileForm;
 class CLandscapeTools;
 class CTerrainWorkingAtlas;
-struct SWorkingTerrainResolveStage;
+struct SWorkingTerrainResolveStage
+{
+    QSharedPointer<CTerrainWorkingAtlas> atlas;
+    CTerrainEditModel terrainEdit;
+    QSet<int> protectedSlots;
+    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
+        importedTransitions;
+    QMap<QString, STerrainAtlasArchiveBindingResult> boundAtlasCache;
+    QSet<QString> missingPages;
+    QMap<QString, QImage> decodedTileCache;
+    QMap<QString, QImage> uniformTileCache;
+    QMap<qint32, QImage> materialSources;
+    QMap<qint32, STerrainGlobalMaterialSource> materialSourceIdentities;
+    bool undoCheckpointRequired{false};
+};
+
+struct SWorldTerrainAtlasSource {
+    STerrainAtlasProfile profile;
+    QString archive;
+    QVector<QByteArray> pages;
+};
 class CLight;
 class QOpenGLFramebufferObject;
 class RenderQueueContext;
@@ -555,13 +576,18 @@ private:
     void refreshWorldTerrainNeighbors();
     bool saveWorldTerrainMaps();
     bool resolveWorldTerrainClose(bool retain);
+    bool ensureWorldTerrainAtlas(const QString& id,CValidationReport* report);
+    bool paintWorldTerrainAt(const QVector3D& position,bool land);
+    bool previewWorldPaintState(const QString& id);
+    bool eraseWorldOverlayAt(const QVector3D& position);
+    bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();
     bool neighborMapAtViewport(const QPoint& viewportPosition,
                                SNeighborMapPlacement* placement,
                                QVector3D* hitPoint = nullptr,
-                               bool preferNeighbor = false);
+                               bool preferNeighbor = false, bool land = true);
     bool viewportPointOnHorizontalPlane(const QPoint& viewportPosition,
                                         float planeZ,
                                         QPointF* worldPoint) const;
@@ -935,6 +961,7 @@ private:
         SNeighborMapPlacement placement;
         QSharedPointer<CLandscape> landscape;
         QMap<QPair<int,int>,QByteArray> terrainPreviewPayloads;
+        QSharedPointer<CTerrainWorkingAtlas> terrainPreviewAtlas;
         QVector<QJsonObject> pendingObjects;
         QVector<QSharedPointer<const SPreparedStaticVisual>> pendingVisuals;
         int nextObject{0};
@@ -953,6 +980,7 @@ private:
     QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{
         new std::atomic<quint64>(0)};
     CWorldTerrainSession m_worldTerrainSession;
+    QMap<QString,SWorldTerrainAtlasSource> m_worldTerrainAtlasSources;
     SWorldTerrainStroke m_worldTerrainStroke;
     QSet<QString> m_worldTerrainEnabledPaths;
     QSet<QString> m_worldTerrainExcludedPaths;

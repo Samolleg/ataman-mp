@@ -4442,6 +4442,7 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_virtualToWorking = staged.m_virtualToWorking;
     m_workingToVirtual = staged.m_workingToVirtual;
     m_animationCopySources = staged.m_animationCopySources;
+    m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
@@ -4850,6 +4851,7 @@ qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
 ETerrainWorkingTileOrigin CTerrainWorkingAtlas::tileOriginForSlot(
     int slot) const
 {
+    if(m_foreignPhysicalTiles.contains(slot))return ETerrainWorkingTileOrigin::ImportedAuthored;
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
         return ETerrainWorkingTileOrigin::Unknown;
@@ -4875,6 +4877,9 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     if(slot < 0 || slot >= m_workingImages.size()
        || m_workingImages.at(slot).isNull())
         return false;
+    if(m_foreignPhysicalTiles.contains(slot)) {
+        *identity=m_foreignPhysicalTiles.value(slot);return true;
+    }
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
         return false;
@@ -5303,4 +5308,41 @@ quint16 CTerrainWorkingAtlas::resolve(
     if(generated)
         *generated = isGenerated;
     return packed.encode();
+}
+
+int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtimeType,
+        const STerrainTransitionSignature* signature,const QString& sourceNamespace,
+        int sourceSlot,CValidationReport* report)
+{
+    if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
+       || pixels.size()!=m_authoredImages.first().size()) {
+        if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
+            "The selected physical tile has incompatible pixels or runtime type.");return -1;
+    }
+    for(int slot=0;slot<activeTileCount();++slot)
+        if(m_workingToVirtual.contains(slot) && m_workingTileTypes.value(slot)==runtimeType
+           && m_workingImages.at(slot)==pixels) {
+            SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
+            bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);
+            if(!signature || (known && existing==*signature))return slot;
+        }
+    const int slot=activeTileCount();
+    if(slot>=m_capacityLimit) {
+        if(report)report->add("terrain.world.capacity",EValidationSeverity::Error,"The neighboring atlas is full.");return -1;
+    }
+    m_workingImages[slot]=pixels;m_workingTileTypes[slot]=runtimeType;
+    m_workingToVirtual.insert(slot,qMakePair(3,slot));
+    STerrainWorkingTileIdentity identity;identity.origin=ETerrainWorkingTileOrigin::ImportedAuthored;
+    identity.workingSlot=slot;identity.sourceNamespace=sourceNamespace;identity.sourceSlot=sourceSlot;
+    identity.sourceSlotAliases={sourceSlot};identity.physicalPixelSha256=imageHash(pixels);identity.runtimeTerrainType=runtimeType;
+    if(signature) {
+        identity.canonicalSignature=*signature;
+        const auto base=m_workingCatalog.paintGridMirrored()?CTerrainTransitionCatalog::mirroredGridY(*signature):*signature;
+        for(int rotation=0;rotation<4;++rotation) {
+            SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);packed.rotation=quint8(rotation);
+            STerrainTransitionVariant variant;variant.packedTile=packed.encode();
+            variant.signature=CTerrainTransitionCatalog::rotated(base,-rotation);m_workingCatalog.addVariant(variant,report);
+        }
+    }
+    m_foreignPhysicalTiles.insert(slot,identity);m_changedSlots.insert(slot);return slot;
 }

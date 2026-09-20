@@ -346,13 +346,22 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
 
 void SWorldTerrainStroke::append(const SWorldTerrainStroke& stamp)
 {
+    for(auto it=stamp.paint.cbegin();it!=stamp.paint.cend();++it) {
+        if(paint.contains(it.key()))paint[it.key()].after=it.value().after;
+        else paint.insert(it.key(),it.value());
+    }
+
     for(auto it=stamp.maps.cbegin(); it!=stamp.maps.cend(); ++it)
         appendTerrainHeightCommand(&maps[it.key()], it.value());
+    for(auto it=stamp.overlays.cbegin();it!=stamp.overlays.cend();++it)
+        appendOverlaySurfaceCommand(&overlays[it.key()],it.value());
+    for(auto it=stamp.tiles.cbegin();it!=stamp.tiles.cend();++it)
+        appendTerrainTileCommand(&tiles[it.key()],it.value());
 }
 
 SWorldTerrainStroke makeWorldTerrainStamp(
     const QVector<SWorldTerrainTarget>& targets, const STerrainBrush& brush,
-    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength)
+    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed)
 {
     SWorldTerrainStroke result;
     if(!std::isfinite(brush.centerX) || !std::isfinite(brush.centerY)
@@ -414,6 +423,11 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         double after=before;
         if(mode==EWorldSculptMode::Raise || mode==EWorldSculptMode::Lower)
             after+= (mode==EWorldSculptMode::Raise ? 1 : -1)*worldDelta*weight*strength;
+        else if(mode==EWorldSculptMode::Noise) {
+            quint32 hash=noiseSeed ^ quint32(qRound64(p.first*1024))*73856093u ^ quint32(qRound64(p.second*1024))*19349663u;
+            hash^=hash>>16;hash*=0x7feb352du;hash^=hash>>15;hash*=0x846ca68bu;hash^=hash>>16;
+            after+=(double(hash)/double(0xffffffffu)*2-1)*worldDelta*weight*strength;
+        }
         else
         {
             double target=worldFlatten;

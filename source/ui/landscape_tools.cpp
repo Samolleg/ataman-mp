@@ -279,16 +279,19 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     form->addRow(m_deltaLabel, m_delta);
     form->addRow(m_flattenLabel, m_flatten);
     form->addRow(m_falloffLabel, m_falloff);
-    QPushButton* worldMaps = new QPushButton(tr("World terrain: choose maps..."), m_sculptControls);
+    QWidget* worldControls = new QWidget(this);
+    QVBoxLayout* worldLayout = new QVBoxLayout(worldControls);
+    worldLayout->setContentsMargins(0,0,0,0);
+    QPushButton* worldMaps = new QPushButton(tr("World terrain: choose maps..."), worldControls);
     worldMaps->setObjectName(QStringLiteral("worldTerrainMaps"));
     worldMaps->setToolTip(tr("Общая кисть включена по умолчанию для всех доступных карт. Здесь можно отключить её или исключить отдельные карты."));
-    form->addRow(worldMaps);
-    m_worldTerrainStatus=new QLabel(tr("Общая кисть включена; выбраны все доступные карты."),m_sculptControls);
+    worldLayout->addWidget(worldMaps);
+    m_worldTerrainStatus=new QLabel(tr("Общая кисть включена; выбраны все доступные карты."),worldControls);
     m_worldTerrainStatus->setWordWrap(true);
     m_worldTerrainStatus->setObjectName(QStringLiteral("worldTerrainStatus"));
-    form->addRow(m_worldTerrainStatus);
+    worldLayout->addWidget(m_worldTerrainStatus);
     connect(worldMaps, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSelectionRequested);
-    QWidget* worldActions = new QWidget(m_sculptControls);
+    QWidget* worldActions = new QWidget(worldControls);
     QHBoxLayout* worldButtons = new QHBoxLayout(worldActions);
     worldButtons->setContentsMargins(0,0,0,0);
     QPushButton* worldUndo = new QPushButton(tr("Undo world stroke"), worldActions);
@@ -300,10 +303,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     worldSave->setObjectName(QStringLiteral("worldTerrainSave"));
     worldUndo->setEnabled(false);worldRedo->setEnabled(false);worldSave->setEnabled(false);
     worldButtons->addWidget(worldUndo); worldButtons->addWidget(worldRedo);
-    form->addRow(worldActions); form->addRow(worldSave);
+    worldLayout->addWidget(worldActions); worldLayout->addWidget(worldSave);
     connect(worldUndo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptUndoRequested);
     connect(worldRedo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptRedoRequested);
     connect(worldSave, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSaveRequested);
+    layout->addWidget(worldControls);
     layout->addWidget(m_sculptControls);
 
     QLabel* help = new QLabel(tr(

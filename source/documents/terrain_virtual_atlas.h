@@ -481,6 +481,10 @@ public:
     bool addExternalMaterialSource(qint32 material, const QImage& pixels)
     { return m_resolver && m_resolver->addExternalMaterialSource(material, pixels); }
     QSet<int> takeChangedSlots();
+    int importPhysicalTile(const QImage& pixels, qint32 runtimeType,
+        const STerrainTransitionSignature* signature, const QString& sourceNamespace,
+        int sourceSlot, CValidationReport* report);
+
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
         const QString& sourceLabel = QString(),
@@ -535,6 +539,7 @@ private:
     // Contiguous runtime flipbook copies retain the exact source working-slot
     // identity without pretending to be a new authored/generated provenance.
     QMap<int, int> m_animationCopySources;
+    QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
 };

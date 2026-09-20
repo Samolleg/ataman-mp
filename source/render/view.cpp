@@ -1534,21 +1534,6 @@ QVector<SSkyVertex> decodeLegacySkyFigure(const QByteArray& bytes, QString* diag
 // realization can otherwise mutate.  It is intentionally separate from a
 // brush stroke: the map-wide repair must be a complete no-op if command
 // validation or preview upload is refused.
-struct SWorkingTerrainResolveStage
-{
-    QSharedPointer<CTerrainWorkingAtlas> atlas;
-    CTerrainEditModel terrainEdit;
-    QSet<int> protectedSlots;
-    QMultiMap<QByteArray, QPair<STerrainTransitionSignature, QImage>>
-        importedTransitions;
-    QMap<QString, STerrainAtlasArchiveBindingResult> boundAtlasCache;
-    QSet<QString> missingPages;
-    QMap<QString, QImage> decodedTileCache;
-    QMap<QString, QImage> uniformTileCache;
-    QMap<qint32, QImage> materialSources;
-    QMap<qint32, STerrainGlobalMaterialSource> materialSourceIdentities;
-    bool undoCheckpointRequired{false};
-};
 
 struct STerrainFamilyPrewarmResult
 {
@@ -1959,10 +1944,6 @@ void CView::syncLandscapeToolState()
 {
     cancelTileBrushGroup();
     finishSculptStroke();
-    if(m_landscapeTools && m_landscapeTools->editMode()!=ELandscapeEditMode::Sculpt
-       && !m_worldTerrainSession.documents.isEmpty()
-       && !resolveWorldTerrainClose(false))
-        m_landscapeTools->activateMode(ELandscapeEditMode::Sculpt,false);
     m_overlayPointerTimer->stop();
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
@@ -3281,7 +3262,7 @@ void CView::refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor)
 bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
                                   SNeighborMapPlacement* placement,
                                   QVector3D* hitPoint,
-                                  bool preferNeighbor)
+                                  bool preferNeighbor, bool land)
 {
     if(placement)
         *placement = SNeighborMapPlacement();
@@ -3353,7 +3334,7 @@ bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
                 rayPoint.y() - float(origin.y()), 0.0f);
             if(ground.x() < 0.0f || ground.y() < 0.0f
                || ground.x() >= size.width() || ground.y() >= size.height()
-               || !landscape->projectPt(ground, true))
+               || !landscape->projectPt(ground, land))
             {
                 havePrevious = false;
                 continue;
@@ -3375,7 +3356,7 @@ bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
                     if(sampleGround.x() < 0.0f || sampleGround.y() < 0.0f
                        || sampleGround.x() >= size.width()
                        || sampleGround.y() >= size.height()
-                       || !landscape->projectPt(sampleGround, true))
+                       || !landscape->projectPt(sampleGround, land))
                     {
                         low = middle;
                         continue;
@@ -9320,7 +9301,7 @@ bool CView::ensureTerrainAutoCatalogReady()
         && !canonicalReport.hasErrors();
     m_pLand->setCanonicalTerrainModel(
         m_terrainEditAvailable ? &m_terrainEdit : nullptr);
-    if(m_terrainEditAvailable) restoreWorldTerrainActive();
+
     const qint64 canonicalLoadMs = phaseTimer.elapsed();
     if(!m_terrainEditAvailable)
     {
@@ -9430,6 +9411,7 @@ bool CView::ensureTerrainAutoCatalogReady()
     phaseTimer.restart();
     restoreTerrainSemanticFieldFromArchive(
         filePath, m_activeTerrainArchivePath, false);
+    if(m_terrainEditAvailable)restoreWorldTerrainActive();
     // The authoritative field is restored after the lightweight catalog was
     // built.  Publish its actual material usage immediately; otherwise every
     // family appears unused until the first paint triggers another scan.
@@ -11369,12 +11351,12 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
                 QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
                                 m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
                 bool projected=m_pLand->projectPt(point, landSculpt);
-                if(!projected && landSculpt && m_worldTerrainEnabled)
+                if(!projected && m_worldTerrainEnabled)
                     for(const auto& loaded:m_neighborLandscapes)
                     {
                         if(!m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(loaded.placement.mprPath))) continue;
                         QVector3D local(point.x()-loaded.placement.origin.x(),point.y()-loaded.placement.origin.y(),0);
-                        if(loaded.landscape->projectPt(local,true))
+                        if(loaded.landscape->projectPt(local,landSculpt))
                         { point.setZ(local.z());projected=true;break; }
                     }
                 if(!projected && (landSculpt || !m_pLand->projectPt(point,true)))
@@ -13694,8 +13676,8 @@ bool CView::buildTerrainSemanticFieldMember(
     document.atlasPixelSha256 = rawAtlasHash;
     document.profileSha256 = QCryptographicHash::hash(
         profileBytes, QCryptographicHash::Sha256);
-    document.vertexWidth = semanticTerrain.vertexCountX();
-    document.vertexHeight = semanticTerrain.vertexCountY();
+    document.vertexWidth = semanticTerrain.tileCountX()+1;
+    document.vertexHeight = semanticTerrain.tileCountY()+1;
     const int count = document.vertexWidth * document.vertexHeight;
     QVector<qint32> ignored;
     semanticTerrain.copyVirtualMaterialFieldState(
@@ -13777,7 +13759,7 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
        || !document.validateBinding(
            mprDocument.mapInfo().innerNamespace, rawMprHash, rawAtlasHash,
            rawProfileHash,
-           terrain->vertexCountX(), terrain->vertexCountY(), &report)
+           terrain->tileCountX()+1, terrain->tileCountY()+1, &report)
        || !terrain->restoreVirtualMaterialFieldState(
            ETerrainTileLayer::Land, document.land, document.land, &report)
        || !terrain->restoreVirtualMaterialFieldState(
@@ -15582,6 +15564,15 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
 {
     if(hit)
         *hit = false;
+    if(m_worldTerrainEnabled && m_hasActiveMapWorldOrigin && m_landscapeTools) {
+        const bool overlay=m_landscapeTools->overlayPaintEnabled() || m_landscapeTools->overlaySurfaceEnabled();
+        const bool adding=m_landscapeTools->overlaySurfaceEnabled() && m_landscapeTools->overlaySurfaceOperation()==EOverlaySurfaceOperation::Activate;
+        SNeighborMapPlacement placement;QVector3D point;
+        if(neighborMapAtViewport(QPoint(cursorPosX,cursorPosY),&placement,&point,false,!overlay || adding)
+           && m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(placement.mprPath))) {
+            if(hit)*hit=true;return point;
+        }
+    }
     const bool addingSurface = m_landscapeTools
         && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
         && m_landscapeTools->overlaySurfaceOperation()
@@ -18861,6 +18852,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
         return;
 
+    if(paintWorldTerrainAt(posOnLand,bLand))return;
+
     CTile* pTile = nullptr;
     STileLocation tileLoc;
     STerrainTileBrush brush;
@@ -19730,6 +19723,12 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
+    if(m_tilePaintStrokeActive && !m_worldTerrainStroke.isEmpty()) {
+        m_worldTerrainStroke.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;
+        m_worldTerrainSession.record(m_worldTerrainStroke);
+        m_worldTerrainStroke=SWorldTerrainStroke();
+        updateWorldTerrainStatus();syncMprDirtyState();
+    }
     const bool strokeWasActive = m_tilePaintStrokeActive;
     if(strokeWasActive)
     {
@@ -20041,6 +20040,15 @@ void CView::cancelTileBrushGroup()
     if(m_tileStrokeFinishing)
         return;
 
+    if(m_tilePaintStrokeActive && !m_worldTerrainStroke.isEmpty()) {
+        QString error;
+        if(!m_worldTerrainSession.apply(m_worldTerrainStroke,false,&error)) {emit updateMsg(error);return;}
+        const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+        if(m_worldTerrainStroke.overlays.contains(active))
+            applyOverlaySurfacePreview(m_worldTerrainStroke.overlays[active],false);
+        for(const auto& id:m_worldTerrainStroke.paint.keys())previewWorldPaintState(id);
+        m_worldTerrainStroke=SWorldTerrainStroke();refreshWorldTerrainNeighbors();updateWorldTerrainStatus();
+    }
     const bool strokeWasActive = m_tilePaintStrokeActive;
     if(strokeWasActive)
     {
@@ -22278,7 +22286,7 @@ void CView::mousePressEvent(QMouseEvent* event)
     if((event->button() == Qt::LeftButton
         || event->button() == Qt::RightButton)
        && !(m_worldTerrainEnabled && m_landscapeTools
-            && m_landscapeTools->sculptEnabled() && !m_landscapeTools->overlaySculptEnabled())
+            && m_landscapeTools->editingEnabled())
        && neighborMapAtViewport(event->pos(), nullptr))
     {
         m_neighborPointerGestureCaptured = true;
@@ -22292,7 +22300,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         QVector3D position;
         bool positionValid = false;
         if(m_landscapeTools->overlaySculptEnabled())
-            positionValid = terrainPositionAt(event->pos(), &position, false);
+            positionValid = worldTerrainPosition(event->pos(), &position);
         else
             positionValid = worldTerrainPosition(event->pos(), &position);
         updateLandscapeSculptCoordinates(position, positionValid);
@@ -22363,9 +22371,7 @@ void CView::mousePressEvent(QMouseEvent* event)
         QElapsedTimer pickTimer;
         if(overlaySculpt)
             pickTimer.start();
-        const bool positionValid = overlaySculpt
-            ? terrainPositionAt(event->pos(), &position, false)
-            : worldTerrainPosition(event->pos(), &position);
+        const bool positionValid = worldTerrainPosition(event->pos(), &position);
         if(overlaySculpt)
         {
             m_overlayPickNsecs += pickTimer.nsecsElapsed();
@@ -22843,7 +22849,7 @@ void CView::updateOverlaySculptPointer()
     QElapsedTimer pickTimer;
     pickTimer.start();
     QVector3D position;
-    const bool valid = terrainPositionAt(m_lastViewportMousePos, &position, false);
+    const bool valid = worldTerrainPosition(m_lastViewportMousePos, &position);
     m_overlayPickNsecs += pickTimer.nsecsElapsed();
     ++m_overlayPickCount;
     m_sculptPointerValid = valid;
@@ -25361,6 +25367,7 @@ void CView::finishSculptStroke()
     m_sculptPointerValid = false;
     if(!m_worldTerrainStroke.isEmpty())
     {
+        m_worldTerrainStroke.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;
         m_worldTerrainSession.record(m_worldTerrainStroke);
         updateWorldTerrainStatus();
         const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
@@ -25370,8 +25377,12 @@ void CView::finishSculptStroke()
                 m_terrainEdit.vertexCountX(),m_terrainEdit.vertexCountY());
             for(CMob* mob:m_aMob) mob->reprojectForCurrentTerrain(bounds);
         }
+        QSet<QString> changedMaps;
+        for(const auto& id:m_worldTerrainStroke.maps.keys())changedMaps.insert(id);
+        for(const auto& id:m_worldTerrainStroke.overlays.keys())changedMaps.insert(id);
+        for(const auto& id:m_worldTerrainStroke.tiles.keys())changedMaps.insert(id);
         emit updateMsg(tr("World terrain stroke: %1 MPR(s). Undo/redo applies to the complete stroke.")
-            .arg(m_worldTerrainStroke.maps.size()));
+            .arg(changedMaps.size()));
         m_worldTerrainStroke=SWorldTerrainStroke();
         m_sculptStrokeCommand=STerrainHeightCommand();
         m_sculptGestureCaptured=false;
