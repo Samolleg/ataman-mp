@@ -1,6 +1,6 @@
 # EI Mapper Ataman — roadmap
 
-Current Ataman version: `44` (сборка; установлена 43).
+Current Ataman version: `44` (проверена; установка ожидает закрытия 43).
 
 ## EI-WORLD-BRUSH-LONG-SEAM — длинный разрыв при подъёме/опускании
 
@@ -24,7 +24,10 @@ Current Ataman version: `44` (сборка; установлена 43).
 - Тест нелокальности FAIL до исправления / PASS после. Набор: 26 PASS,
   один optional SKIP; отдельно installedTripleReadOnly PASS на трёх реальных
   картах без записи. Граница неизменна, прежнее расхождение 1.18215 сохранено.
-  Следующий шаг: Release, UI-check, упаковка и замена после закрытия маппера.
+  Release и UI-check PASS (clipboard-check потребовал запуска вне sandbox),
+  staging44 финализирован, 101 файл независимо проверен. Установка ожидает
+  закрытия PID18936. Следующий шаг: build-release-44-seam/install.ps1,
+  проверка сохранности пользовательских файлов и завершение передачи.
   Ручная проверка пользовательского мазка остаётся открытой.
   Доказательства: docs/validation/ATAMAN_LOCAL_SCULPT_SEAM_44.md.
 
