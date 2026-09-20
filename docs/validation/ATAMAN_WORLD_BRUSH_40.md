@@ -49,3 +49,20 @@ MPR и RES подготавливаются и перечитываются до
 Синтетический roundtrip подтверждает структуру MPR+атлас+покрытия; не является
 проверкой игры. Полная UI-публикация в живые ресурсы не запускалась.
 Итоговая упаковка и обновление установки фиксируются ниже после проверки.
+
+## Передача 2026-09-20
+
+- Исходный коммит: 47df6e777f08914e1d72be3d01bb3ea8d3ca62e9.
+- EXE SHA256: e10fb49765b8b162a91e76f09452763e49ca72dcd6b04377b7d440e29af047d5.
+- Fresh build: C:/GOG Games/maped/ei-mapper-ataman/build-release-40-world.
+- Fresh stage: C:/GOG Games/maped/ei-mapper-ataman/build-staging-40-world.
+  --version = EI Mapper Endurance Edition 40. После финализации не запускалась.
+- stage.log: finalize/validate PASS. independent-package.json: синтаксис,
+  границы путей, покрытие101 файла, SHA256 всех файлов и совпадение EXE PASS.
+- install.log: постоянная artifacts/EI-Mapper-Ataman-2-first-test, версия40,
+  101 managed files verified, 12176 user files unchanged, 6 replaced, 0 removed.
+- Предыдущая37 сохранена в build-rollback-world40. Старая собственная резервная
+ 36 удалена только после проверки нового отката и старых manifest hashes,
+  по TEST_BUILD_HANDOFF. Пользовательские папки сборок не изменялись.
+- Ручная приёмка: мазок через свой стык для земли/покрытия, Undo/Redo,
+  ремонт границы, сохранение/повторное открытие всех изменённых карт и игра.
