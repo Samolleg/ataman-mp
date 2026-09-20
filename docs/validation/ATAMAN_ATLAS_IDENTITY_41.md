@@ -41,3 +41,14 @@ Hidden OpenGL regression EI_WORLD_ATLAS_SWITCH_CHECK:
 - zone2-identity.txt и zone3obr-identity.txt: все проверки PASS, exit0.
   Один и тот же candidate отклонён с чужим baseline и принят после восстановления;
   реально изменённый исходный пиксель всё ещё отклоняется.
+
+## Пакет и ожидание установки
+
+Source: ca678f64826a81e0ca90e8991163b3fd134f1e16.
+Fresh stage build-staging-41-identity, finalize/validate PASS; независимая
+проверка101 файла, SHA256/полное покрытие и совпадение EXE PASS.
+EXE SHA256: b77e82fbdb827ef8fbee1f1195355d6833184b3980bdf349809ec5193f5d5fae.
+--version =41. После финализации пакет не запускался.
+Установка отказала ДО изменения файлов: открыт пользовательский редактор
+PID17596. Постоянная программа пока40; ожидается закрытие, затем запуск
+build-release-41-identity/install.ps1 и проверка результатов.
