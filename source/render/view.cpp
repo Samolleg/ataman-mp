@@ -20172,19 +20172,19 @@ void CView::resolveMissingTerrainBlends()
         return;
 
     CValidationReport report;
-    const auto userResolveReportText = [&report]() {
-        CValidationReport visible;
-        for(const SValidationFinding& finding : report.findings())
+    // Keep diagnostics out of the main label: large multi-map reports must
+    // remain scrollable and must not expand the message box beyond the screen.
+    const auto showResolveResult = [this, &report](QMessageBox::Icon icon,
+                                                  const QString& summary) {
+        QMessageBox dialog(icon, tr("Исправить недостающие переходы"),
+                           summary, QMessageBox::Ok, this);
+        dialog.setTextFormat(Qt::PlainText);
+        if(!report.findings().isEmpty())
         {
-            if(finding.code == QStringLiteral(
-                   "terrain.virtual_repair_ambiguous_vertices")
-               || finding.code == QStringLiteral(
-                   "terrain.virtual_identity_topology_recovered"))
-                continue;
-            visible.add(finding.code, finding.severity,
-                        finding.message, finding.location);
+            dialog.setInformativeText(tr("Технический отчёт доступен в подробностях."));
+            dialog.setDetailedText(report.toText());
         }
-        return visible.findings().isEmpty() ? QString() : visible.toText();
+        dialog.exec();
     };
     const auto fieldAudit = [](const CTerrainEditModel& terrainEdit,
                                ETerrainTileLayer layer) {
@@ -20567,19 +20567,16 @@ void CView::resolveMissingTerrainBlends()
     }
     if(report.hasErrors())
     {
-        QMessageBox::critical(this, tr("Resolve missing blends refused"),
-            tr("No MPR cell was changed.\n\n%1").arg(report.toText()));
+        showResolveResult(QMessageBox::Critical,
+            tr("Исправление не выполнено. Ячейки MPR не изменены."));
         finishAudit(QStringLiteral("validation-refused"));
         return;
     }
     if(combined.isEmpty() && !worldBoundaryChanged)
     {
         progress.setValue(5);
-        const QString visibleReport = userResolveReportText();
-        const QString detail = visibleReport.isEmpty()
-            ? QString() : QStringLiteral("\n\n") + visibleReport;
-        QMessageBox::information(this, tr("Resolve missing blends"), tr(
-            "No terrain cell needed repair.%1").arg(detail));
+        showResolveResult(QMessageBox::Information,
+            tr("Изменений для применения не найдено. Карта не изменена."));
         finishAudit(QStringLiteral("no-op"));
         return;
     }
@@ -20588,10 +20585,9 @@ void CView::resolveMissingTerrainBlends()
         if(!report.hasErrors())
             report.add("terrain.resolve_map_apply", EValidationSeverity::Error,
                 "The repaired physical tile command could not be validated against the staged MPR model.");
-        QMessageBox::critical(this, tr("Resolve missing blends refused"), tr(
-            "The repaired physical tile command could not be applied. No MPR, "
-            "atlas, preview, or undo state was changed.\n\n%1")
-                .arg(report.toText()));
+        showResolveResult(QMessageBox::Critical,
+            tr("Исправление не удалось применить. MPR, атлас, предпросмотр "
+               "и история отмены не изменены."));
         finishAudit(QStringLiteral("apply-refused"));
         return;
     }
@@ -20628,9 +20624,9 @@ void CView::resolveMissingTerrainBlends()
     {
         report.add("terrain.resolve_map_stage", EValidationSeverity::Error,
             "The isolated working-atlas stage no longer matches the live authored cache.");
-        QMessageBox::critical(this, tr("Resolve missing blends refused"),
-            tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
-                .arg(report.toText()));
+        showResolveResult(QMessageBox::Critical,
+            tr("Исправление отклонено. MPR, атлас, предпросмотр "
+               "и история отмены не изменены."));
         finishAudit(QStringLiteral("staging-commit-refused"));
         return;
     }
@@ -20639,9 +20635,9 @@ void CView::resolveMissingTerrainBlends()
         if(!report.hasErrors())
             report.add("terrain.resolve_map_upload", EValidationSeverity::Error,
                 "The resolved atlas tiles could not be installed in the live renderer.");
-        QMessageBox::critical(this, tr("Resolve missing blends refused"),
-            tr("No MPR, atlas, preview, or undo state was changed.\n\n%1")
-                .arg(report.toText()));
+        showResolveResult(QMessageBox::Critical,
+            tr("Исправление отклонено. MPR, атлас, предпросмотр "
+               "и история отмены не изменены."));
         finishAudit(QStringLiteral("upload-refused"));
         return;
     }
@@ -20686,10 +20682,9 @@ void CView::resolveMissingTerrainBlends()
     progress.setValue(5);
     QString resolvedMessage = tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
         .arg(combined.deltas.size()).arg(generated);
-    const QString visibleReport = userResolveReportText();
-    if(!visibleReport.isEmpty())
-        resolvedMessage += QStringLiteral(" ") + visibleReport;
     emit updateMsg(resolvedMessage);
+    if(!report.findings().isEmpty())
+        showResolveResult(QMessageBox::Information, resolvedMessage);
     finishAudit(QStringLiteral("committed"));
 }
 
