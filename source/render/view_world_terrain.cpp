@@ -23,7 +23,7 @@ void CView::updateWorldTerrainStatus()
         .arg(m_worldTerrainEnabled?tr("on"):tr("off"))
         .arg(m_worldTerrainEnabledPaths.size()).arg(names.isEmpty()?tr("none"):names.join(", "));
     m_landscapeTools->setWorldTerrainStatus(status,m_worldTerrainSession.canUndo(),
-        m_worldTerrainSession.canRedo(),!names.isEmpty());
+        m_worldTerrainSession.canRedo(),!names.isEmpty(),m_worldTerrainEnabled,m_worldTerrainEnabledPaths.size());
 }
 
 void CView::syncWorldTerrainActive()

@@ -2084,9 +2084,9 @@ int runHeadlessCommand(QApplication& app)
             materialPaletteTabs->setCurrentIndex(1);
         const bool threeTerrainPaintModesAvailable = materialPaletteTabs
             && materialPaletteTabs->count() == 3
-            && materialPaletteTabs->tabText(0) == QStringLiteral("Modern (Z)")
-            && materialPaletteTabs->tabText(1) == QStringLiteral("Classic Auto (X)")
-            && materialPaletteTabs->tabText(2) == QStringLiteral("Manual (C)")
+            && materialPaletteTabs->tabText(0) == QStringLiteral("Авто")
+            && materialPaletteTabs->tabText(1) == QStringLiteral("Классика")
+            && materialPaletteTabs->tabText(2) == QStringLiteral("Вручную")
             && modernMaterialLayerTabs && classicMaterialLayerTabs
             && terrainPaintFilter && manualAtlasTileList;
         landscapeTools.setClassicAutoMaterials(
@@ -2118,7 +2118,7 @@ int runHeadlessCommand(QApplication& app)
             : -1;
         const bool classicPaletteFirstOpenDoesNotOverlapControls =
             materialPaletteTabs && terrainPaintRadius
-            && paletteBottom < radiusTop
+            && radiusTop < paletteBottom
             && classicPaletteStartsInMultipleColumns;
         QToolButton* circlePaintShape =
             landscapeTools.findChild<QToolButton*>("circlePaintShape");
@@ -2229,12 +2229,54 @@ int runHeadlessCommand(QApplication& app)
         QScrollArea* toolScroll = landscapeTools.findChild<QScrollArea*>(
             "landscapeToolScroll");
         const bool shortLandscapeDockScrollsWithoutOverlap = toolScroll
-            && toolScroll->verticalScrollBar()->maximum() > 0
+            && toolScroll->horizontalScrollBar()->maximum() == 0
             && groundMaterialScroll && groundMaterialScroll->height() >= 64
             && materialPaletteTabs && terrainPaintRadius
-            && materialPaletteTabs->mapTo(&landscapeTools,
-                   materialPaletteTabs->rect().bottomLeft()).y()
-                < terrainPaintRadius->mapTo(&landscapeTools, QPoint()).y();
+            && terrainPaintRadius->mapTo(&landscapeTools,
+                   terrainPaintRadius->rect().bottomLeft()).y()
+                < materialPaletteTabs->mapTo(&landscapeTools, QPoint()).y();
+        bool landscapeRedesignGeometry = true;
+        for(const QSize size : {QSize(320,700),QSize(320,1200),QSize(600,1000)}) {
+            landscapeTools.resize(size);
+            for(auto mode:{ELandscapeEditMode::Sculpt,ELandscapeEditMode::TilePaint,
+                           ELandscapeEditMode::OverlaySurface,ELandscapeEditMode::OverlayPaint,
+                           ELandscapeEditMode::OverlaySculpt}) {
+                landscapeTools.activateMode(mode);
+                for(int i=0;i<4;++i)QApplication::processEvents();
+                auto selector=landscapeTools.findChild<QComboBox*>("landscapeMode");
+                auto advanced=landscapeTools.findChild<QToolButton*>("landscapePaintAdvancedToggle");
+                auto diagnostic=landscapeTools.findChild<QToolButton*>("landscapeDiagnosticsToggle");
+                landscapeRedesignGeometry &= selector && !selector->itemIcon(selector->currentIndex()).isNull()
+                    && selector->mapTo(&landscapeTools,QPoint()).y()<80
+                    && toolScroll->horizontalScrollBar()->maximum()==0;
+                if(mode==ELandscapeEditMode::TilePaint) {
+                    landscapeRedesignGeometry &= advanced && diagnostic && !advanced->isChecked() && !diagnostic->isChecked()
+                        && groundMaterialScroll->viewport()->height()>=64
+                        && terrainPaintRadius->mapTo(&landscapeTools,QPoint()).y()<materialPaletteTabs->mapTo(&landscapeTools,QPoint()).y();
+                    if(diagnostic && advanced) {
+                        diagnostic->click();advanced->click();
+                        for(int i=0;i<4;++i)QApplication::processEvents();
+                        landscapeRedesignGeometry &= landscapeTools.findChild<QWidget*>("landscapeDiagnostics")->isVisible()
+                            && toolScroll->horizontalScrollBar()->maximum()==0;
+                        const QString shots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
+                        if(!shots.isEmpty()) {QDir().mkpath(shots);landscapeTools.grab().save(QDir(shots).filePath(
+                            QString("panel-%1-%2-expanded.png").arg(size.width()).arg(size.height())));}
+                        diagnostic->click();advanced->click();
+                        for(int i=0;i<4;++i)QApplication::processEvents();
+                    }
+                }
+                for(const char* name:{"worldTerrainMaps","worldTerrainUndo","worldTerrainRedo","worldTerrainSave"}) {
+                    auto action=landscapeTools.findChild<QPushButton*>(name);
+                    landscapeRedesignGeometry &= action && !action->icon().isNull()
+                        && action->mapTo(&landscapeTools,action->rect().bottomRight()).x()<landscapeTools.width();
+                }
+                const QString shots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
+                if(!shots.isEmpty()) {
+                    QDir().mkpath(shots);landscapeTools.grab().save(QDir(shots).filePath(
+                    QString("panel-%1-%2-%3.png").arg(size.width()).arg(size.height()).arg(int(mode))));}
+            }
+        }
+        landscapeTools.activateMode(ELandscapeEditMode::TilePaint);
         landscapeTools.hide();
         QLabel* atlasSourceStatus =
             landscapeTools.findChild<QLabel*>("materialAtlasSourceStatus");
@@ -2297,7 +2339,7 @@ int runHeadlessCommand(QApplication& app)
         QPushButton* modernDraftButton =
             landscapeTools.findChild<QPushButton*>("saveModernDraftButton");
         const bool modernDraftActionWorks = modernDraftButton
-            && modernDraftButton->text().contains(QStringLiteral("draft"),
+            && modernDraftButton->text().contains(QStringLiteral("черновик"),
                                                    Qt::CaseInsensitive);
         if(modernDraftButton)
             modernDraftButton->click();
@@ -3285,6 +3327,7 @@ int runHeadlessCommand(QApplication& app)
             && materialVariantsRemainDistinctAndGrouped
             && materialPaletteScrollsAndFillsWidth
             && landscapeToolsAreCompactAndPaletteFillsHeight
+            && landscapeRedesignGeometry
                 && shortLandscapeDockScrollsWithoutOverlap
             && threeTerrainPaintModesAvailable
             && classicPaletteFirstOpenDoesNotOverlapControls
@@ -3495,6 +3538,7 @@ int runHeadlessCommand(QApplication& app)
                << materialVariantsRemainDistinctAndGrouped
                << " materialPaletteScrollsAndFillsWidth="
                << materialPaletteScrollsAndFillsWidth
+               << " landscapeRedesignGeometry=" << landscapeRedesignGeometry
                << " landscapeToolsAreCompactAndPaletteFillsHeight="
                << landscapeToolsAreCompactAndPaletteFillsHeight
                << " threeTerrainPaintModesAvailable="

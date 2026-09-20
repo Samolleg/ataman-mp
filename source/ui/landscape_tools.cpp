@@ -47,6 +47,71 @@ QIcon brushShapeIcon(bool circle)
     return QIcon(pixmap);
 }
 
+// Small vector-style glyphs drawn at 2x for crisp high-DPI controls.
+QIcon landscapeActionIcon(int kind)
+{
+    QPixmap image(48, 48); image.fill(Qt::transparent);
+    image.setDevicePixelRatio(2);
+    QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(QColor("#b9d6e9"), 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.setBrush(QColor("#527e96"));
+    if(kind == 0) { // terrain
+        QPolygonF mountain; mountain << QPointF(2,20) << QPointF(9,5)
+            << QPointF(14,13) << QPointF(18,8) << QPointF(22,20);
+        p.drawPolygon(mountain);
+    } else if(kind == 1) { // brush
+        p.drawLine(9,14,20,3); p.drawLine(12,17,23,6);
+        p.setBrush(QColor("#d4b36a")); p.drawEllipse(QRectF(3,14,9,7));
+    } else if(kind == 2) { // layered surface
+        for(int y : {6,12,18}) {p.drawLine(2,y,8,y-2);p.drawLine(8,y-2,16,y+2);p.drawLine(16,y+2,22,y);}
+    } else if(kind == 3 || kind == 4) { // undo / redo
+        if(kind == 4) {p.translate(24,0);p.scale(-1,1);}
+        p.drawArc(QRectF(5,7,15,13),-30*16,210*16);
+        p.drawLine(4,5,4,12);p.drawLine(4,12,11,12);
+    } else if(kind == 5) { // save
+        p.drawRoundedRect(QRectF(4,3,16,18),1,1);p.setBrush(QColor("#c7deeb"));
+        p.drawRect(QRectF(8,4,8,6));p.drawRect(QRectF(8,15,8,5));
+    } else if(kind == 6) { // maps
+        p.drawRect(QRectF(3,4,18,16));p.drawLine(9,4,9,20);p.drawLine(15,4,15,20);
+        p.drawLine(3,12,21,12);
+    } else if(kind == 7) { // settings
+        p.drawLine(3,6,21,6);p.drawLine(3,12,21,12);p.drawLine(3,18,21,18);
+        p.drawEllipse(QPointF(8,6),2,2);p.drawEllipse(QPointF(16,12),2,2);p.drawEllipse(QPointF(10,18),2,2);
+    } else if(kind == 8) { // inspection
+        p.setBrush(Qt::NoBrush);p.drawEllipse(QRectF(3,3,12,12));p.drawLine(14,14,21,21);
+    } else if(kind == 9) { // repair
+        p.drawLine(5,19,19,5);p.drawLine(14,4,20,10);p.drawLine(4,14,10,20);
+    } else if(kind == 10 || kind == 11) { // raise/lower
+        if(kind == 11){p.translate(0,24);p.scale(1,-1);}
+        p.drawLine(12,20,12,4);p.drawLine(6,10,12,4);p.drawLine(18,10,12,4);
+    } else { // help / import
+        p.drawRoundedRect(QRectF(4,3,16,18),2,2);p.drawLine(8,8,16,8);
+        p.drawLine(8,12,16,12);p.drawLine(8,16,13,16);
+    }
+    return QIcon(image);
+}
+
+QVBoxLayout* landscapeFold(QVBoxLayout* parent, const QString& title,
+                           const QString& name, int icon)
+{
+    QWidget* section = new QWidget;
+    section->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    QVBoxLayout* box = new QVBoxLayout(section); box->setContentsMargins(0,0,0,0); box->setSpacing(4);
+    QToolButton* toggle = new QToolButton(section);
+    toggle->setObjectName(name + QStringLiteral("Toggle"));
+    toggle->setText(title + QStringLiteral("  ▸")); toggle->setIcon(landscapeActionIcon(icon));
+    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toggle->setCheckable(true);
+    toggle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    QWidget* body = new QWidget(section); body->setObjectName(name);
+    QVBoxLayout* content = new QVBoxLayout(body); content->setContentsMargins(6,2,0,4);content->setSpacing(5);
+    box->addWidget(toggle);box->addWidget(body);body->hide();
+    QObject::connect(toggle,&QToolButton::toggled,body,[toggle,body,title](bool open){
+        body->setVisible(open);toggle->setText(title + (open?QStringLiteral("  ▾"):QStringLiteral("  ▸")));
+    });
+    parent->addWidget(section);return content;
+}
+
 QString normalizedTerrainFilterText(const QString& value)
 {
     QString normalized;
@@ -189,11 +254,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     warning->setWordWrap(true);
     warning->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
-    layout->addWidget(warning);
+    warning->hide();
+    setToolTip(warning->text());
     m_showMainTerrain->setChecked(true);
     m_showOverlays->setChecked(true);
-    layout->addWidget(m_showMainTerrain);
-    layout->addWidget(m_showOverlays);
+
+
 
     m_mode->addItem(tr("Sculpt terrain"));
     m_mode->addItem(tr("Paint land tiles"));
@@ -201,8 +267,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_mode->addItem(tr("Paint existing overlays"));
     m_mode->addItem(tr("Sculpt overlay surfaces"));
     QFormLayout* modeForm = new QFormLayout();
-    modeForm->addRow(tr("Landscape tool"), m_mode);
+    m_mode->setObjectName(QStringLiteral("landscapeMode"));
+    for(int i=0;i<m_mode->count();++i) m_mode->setItemIcon(i,landscapeActionIcon(i==0?0:i==1?1:2));
+    modeForm->addRow(m_mode);
     layout->addLayout(modeForm);
+    QHBoxLayout* visibility = new QHBoxLayout;
+    m_showMainTerrain->setText(tr("Земля")); m_showOverlays->setText(tr("Поверхности"));
+    m_showMainTerrain->setToolTip(tr("Показать землю (M)"));m_showOverlays->setToolTip(tr("Показать поверхности (O)"));
+    visibility->addWidget(m_showMainTerrain); visibility->addWidget(m_showOverlays);
+    layout->addLayout(visibility);
 
     m_tool->setObjectName(QStringLiteral("landscapeSculptTool"));
     m_tool->addItem(tr("Raise"), int(ELandscapeSculptTool::Raise));
@@ -274,7 +347,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QFormLayout* form = new QFormLayout(m_sculptControls);
     form->addRow(tr("Tool"), m_tool);
-    form->addRow(tr("Radius (vertices)"), m_radius);
+    form->addRow(tr("Радиус"), m_radius);m_radius->setToolTip(tr("Радиус кисти в вершинах (Alt+колесо)"));
     form->addRow(tr("Strength"), m_strength);
     form->addRow(m_deltaLabel, m_delta);
     form->addRow(m_flattenLabel, m_flatten);
@@ -285,11 +358,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QPushButton* worldMaps = new QPushButton(tr("World terrain: choose maps..."), worldControls);
     worldMaps->setObjectName(QStringLiteral("worldTerrainMaps"));
     worldMaps->setToolTip(tr("Общая кисть включена по умолчанию для всех доступных карт. Здесь можно отключить её или исключить отдельные карты."));
-    worldLayout->addWidget(worldMaps);
+
     m_worldTerrainStatus=new QLabel(tr("Общая кисть включена; выбраны все доступные карты."),worldControls);
     m_worldTerrainStatus->setWordWrap(true);
     m_worldTerrainStatus->setObjectName(QStringLiteral("worldTerrainStatus"));
-    worldLayout->addWidget(m_worldTerrainStatus);
+    m_worldTerrainStatus->hide();
     connect(worldMaps, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSelectionRequested);
     QWidget* worldActions = new QWidget(worldControls);
     QHBoxLayout* worldButtons = new QHBoxLayout(worldActions);
@@ -302,8 +375,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     worldRedo->setObjectName(QStringLiteral("worldTerrainRedo"));
     worldSave->setObjectName(QStringLiteral("worldTerrainSave"));
     worldUndo->setEnabled(false);worldRedo->setEnabled(false);worldSave->setEnabled(false);
-    worldButtons->addWidget(worldUndo); worldButtons->addWidget(worldRedo);
-    worldLayout->addWidget(worldActions); worldLayout->addWidget(worldSave);
+    worldMaps->setText(tr("Общая кисть")); worldMaps->setIcon(landscapeActionIcon(6));
+    worldUndo->setText(QString()); worldUndo->setIcon(landscapeActionIcon(3));worldUndo->setToolTip(tr("Отменить общий мазок"));worldUndo->setAccessibleName(worldUndo->toolTip());
+    worldRedo->setText(QString()); worldRedo->setIcon(landscapeActionIcon(4));worldRedo->setToolTip(tr("Повторить общий мазок"));worldRedo->setAccessibleName(worldRedo->toolTip());
+    worldSave->setText(QString()); worldSave->setIcon(landscapeActionIcon(5));worldSave->setToolTip(tr("Сохранить все изменённые карты…"));worldSave->setAccessibleName(worldSave->toolTip());
+    for(auto button:{worldUndo,worldRedo,worldSave}) button->setFixedWidth(30);
+    worldButtons->addWidget(worldMaps,1);worldButtons->addWidget(worldUndo);worldButtons->addWidget(worldRedo);worldButtons->addWidget(worldSave);
+    worldLayout->addWidget(worldActions);
     connect(worldUndo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptUndoRequested);
     connect(worldRedo, &QPushButton::clicked, this, &CLandscapeTools::worldSculptRedoRequested);
     connect(worldSave, &QPushButton::clicked, this, &CLandscapeTools::worldSculptSaveRequested);
@@ -315,15 +393,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Alt+Wheel changes radius; Shift+Wheel changes strength; Alt+Shift+Wheel changes raise/lower step, Noise range, or the Flatten target. "
         "Z/X/C/V select Raise/Lower/Smooth/Flatten; Noise is available in the Tool list. Wheel keeps camera zoom. Each drag is one undo step."), this);
     help->setWordWrap(true);
-    form->addRow(help);
-    form->addRow(tr("Heightmap import"), m_flipVertical);
+    m_tool->setToolTip(help->text()); help->hide();
+
     QPushButton* importButton = new QPushButton(
         tr("Import grayscale heightmap..."), m_sculptControls);
-    form->addRow(importButton);
+
     QPushButton* mprSettingsButton = new QPushButton(
         tr("Open MPR Settings..."), m_sculptControls);
     mprSettingsButton->setObjectName(QStringLiteral("openMprSettingsFromLandscape"));
-    form->addRow(mprSettingsButton);
+
 
     QVBoxLayout* paintLayout = new QVBoxLayout(m_paintControls);
     paintLayout->setContentsMargins(0, 0, 0, 0);
@@ -331,7 +409,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_tilesetStatus->setObjectName(
         QStringLiteral("terrainPaintTilesetStatus"));
     m_tilesetStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    paintLayout->addWidget(m_tilesetStatus);
+
 
     QVBoxLayout* groundPalette = new QVBoxLayout(m_groundMaterialPage);
     groundPalette->setContentsMargins(6, 6, 6, 6);
@@ -424,7 +502,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "When enabled, Modern strokes realize exact transition tiles around "
         "the painted uniform cells. Disable it to stamp only uniform tiles "
         "without creating or selecting blend tiles."));
-    modernModeLayout->addWidget(m_modernAutoResolveBlends);
+
     modernModeLayout->addWidget(m_materialTabs);
     QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
@@ -435,7 +513,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Apply every exact authored connection that is available and leave "
         "unsupported boundary cells untouched. Disable this only when a local "
         "uniform hard edge is preferable to an unchanged gap."));
-    classicModeLayout->addWidget(m_classicAutoSafe);
+
     classicModeLayout->addWidget(m_classicMaterialTabs);
     QVBoxLayout* manualModeLayout = new QVBoxLayout(m_manualModePage);
     manualModeLayout->setContentsMargins(0, 0, 0, 0);
@@ -457,6 +535,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintFilter->setPlaceholderText(tr("Filter materials or atlas slots..."));
     m_paintFilter->setClearButtonEnabled(true);
     paintLayout->addWidget(m_paintFilter);
+    m_usedMaterialsOnly->setText(tr("Только используемые"));
     m_usedMaterialsOnly->setObjectName(QStringLiteral("terrainUsedMaterialsOnly"));
     m_usedMaterialsOnly->setChecked(settings.value(
         QStringLiteral("ui/landscape/usedMaterialsOnly"), false).toBool());
@@ -564,20 +643,20 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     targetRow->addStretch(1);
     QWidget* targetWidget = new QWidget(this);
     targetWidget->setLayout(targetRow);
-    paintForm->addRow(tr("Brush size (Alt+Wheel)"), sizeWidget);
-    paintForm->addRow(tr("Brush shape"), shapeWidget);
-    paintForm->addRow(tr("Paint target"), targetWidget);
-    paintForm->addRow(m_randomizeUniformRotation);
+    paintForm->addRow(tr("Размер"), sizeWidget);sizeWidget->setToolTip(tr("Размер кисти (Alt+колесо)"));
+    paintForm->addRow(tr("Форма"), shapeWidget);
+    paintForm->addRow(tr("Закрашивать"), targetWidget);
+
     m_showOverlayMaterialSlots->setObjectName(
         QStringLiteral("showOverlayMaterialSlotLabels"));
     m_showOverlayMaterialSlots->setToolTip(tr(
         "Labels every active overlay cell with the MPR surface-material table slot it references. "
         "This is an inspection overlay only and does not change the MPR."));
-    paintForm->addRow(m_showOverlayMaterialSlots);
+
     paintForm->addRow(m_overlaySurfaceOperationLabel, m_overlaySurfaceOperation);
     paintForm->addRow(m_overlayMaterialLabel, m_overlayMaterial);
-    paintForm->addRow(m_overlayMprMaterials);
-    paintLayout->addLayout(paintForm);
+
+    paintLayout->insertLayout(0, paintForm);
     QPushButton* resolveMissing = new QPushButton(
         tr("Resolve missing blends... (Shift+R)"), this);
     resolveMissing->setObjectName(QStringLiteral("resolveMissingBlendsButton"));
@@ -585,7 +664,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Scan the complete map and rebuild missing or inconsistent physical "
         "blend tiles from its shared-corner material field. The map repair is "
         "committed as one undo step. Shortcut: Shift+R."));
-    paintLayout->addWidget(resolveMissing);
+
     QPushButton* reviewAtlas = new QPushButton(tr("Material atlas..."), this);
     reviewAtlas->setObjectName("materialAtlasButton");
     reviewAtlas->setToolTip(tr(
@@ -607,7 +686,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     atlasRow->addWidget(m_generatedAtlasTiles);
     atlasRow->addWidget(m_atlasCapacity);
     atlasRow->addWidget(m_atlasCapacityWarning);
-    paintLayout->addLayout(atlasRow);
+
     QPushButton* exportDiagnostic = new QPushButton(tr("Export paint diagnostic..."), this);
     m_paintIssueCategory->addItem(tr("No / wrong blend"), QStringLiteral("no-blend"));
     m_paintIssueCategory->addItem(tr("Wrong material / family"), QStringLiteral("tile-mismatch"));
@@ -624,7 +703,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Choose an issue type, enable marking, then drag across every visibly bad tile. "
         "Painting is disabled while marking. Each drag appends exact tile, corner, rotation, "
         "atlas-binding, and stroke information to a portable diagnostic JSON."));
-    QHBoxLayout* issueRow = new QHBoxLayout;
+    QVBoxLayout* issueRow = new QVBoxLayout;
     issueRow->addWidget(m_paintIssueCategory, 1);
     issueRow->addWidget(m_markPaintIssue);
     QPushButton* saveDraft = new QPushButton(
@@ -635,11 +714,73 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "itself has no unsaved changes. "
         "Normal Save MPR and Save MPR As publish game-ready atlas pages into "
         "textures.res instead."));
-    paintLayout->addWidget(exportDiagnostic);
-    paintLayout->addLayout(issueRow);
-    paintLayout->addWidget(saveDraft);
+    auto advanced = landscapeFold(paintLayout,tr("Дополнительно"),QStringLiteral("landscapePaintAdvanced"),7);
+    QComboBox* paintAlgorithm = new QComboBox(this);
+    paintAlgorithm->setObjectName(QStringLiteral("landscapePaintAlgorithm"));
+    paintAlgorithm->addItem(landscapeActionIcon(1),tr("Современное рисование (Z)"));
+    paintAlgorithm->addItem(landscapeActionIcon(6),tr("Классическое рисование (X)"));
+    paintAlgorithm->addItem(landscapeActionIcon(7),tr("Ручное рисование (C)"));
+    paintAlgorithm->setToolTip(tr("Способ подбора тайлов; горячие клавиши Z / X / C"));
+    connect(paintAlgorithm,QOverload<int>::of(&QComboBox::currentIndexChanged),m_paintModeTabs,&QTabWidget::setCurrentIndex);
+    connect(m_paintModeTabs,&QTabWidget::currentChanged,paintAlgorithm,[paintAlgorithm](int index){
+        const QSignalBlocker blocker(paintAlgorithm);paintAlgorithm->setCurrentIndex(index);
+    });
+    connect(m_paintModeTabs,&QTabWidget::currentChanged,this,[this](int index){
+        m_modernAutoResolveBlends->setVisible(index==0);
+        m_classicAutoSafe->setVisible(index==1);
+    });
+    advanced->addWidget(paintAlgorithm);
+    m_paintModeTabs->tabBar()->hide();
+    m_modernAutoResolveBlends->setText(tr("Автоматические переходы"));
+    m_classicAutoSafe->setText(tr("Только точные переходы"));
+    m_randomizeUniformRotation->setText(tr("Менять поворот тайлов"));
+    m_showOverlayMaterialSlots->setText(tr("Номера материалов"));
+    m_markPaintIssue->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    importButton->setToolTip(importButton->text());importButton->setText(tr("Импорт карты высот…"));
+    mprSettingsButton->setText(tr("Настройки карты…"));
+    resolveMissing->setText(tr("Исправить переходы…"));
+    saveDraft->setText(tr("Сохранить черновик…"));
+    exportDiagnostic->setText(tr("Экспорт диагностики…"));
+    reviewAtlas->setText(tr("Редактор атласа…"));
+    m_overlayMprMaterials->setText(tr("Материалы поверхности…"));
+    advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
+    advanced->addWidget(m_randomizeUniformRotation); advanced->addWidget(m_overlayMprMaterials);
+    advanced->addWidget(resolveMissing);advanced->addWidget(saveDraft);
+    auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
+    diagnostics->addWidget(m_tilesetStatus);diagnostics->addLayout(atlasRow);
+    diagnostics->addWidget(m_showOverlayMaterialSlots);diagnostics->addWidget(exportDiagnostic);diagnostics->addLayout(issueRow);
+    QWidget* sculptExtra = new QWidget(m_sculptControls);
+    QVBoxLayout* sculptExtraLayout = new QVBoxLayout(sculptExtra);sculptExtraLayout->setContentsMargins(0,0,0,0);
+    auto sculptAdvanced=landscapeFold(sculptExtraLayout,tr("Дополнительно"),QStringLiteral("landscapeSculptAdvanced"),7);
+    sculptAdvanced->addWidget(m_flipVertical);sculptAdvanced->addWidget(importButton);sculptAdvanced->addWidget(mprSettingsButton);
+    form->addRow(sculptExtra);
+    auto sculptHelp=landscapeFold(sculptExtraLayout,tr("Справка"),QStringLiteral("landscapeHelp"),12);
+    sculptHelp->addWidget(help);help->show();sculptHelp->addWidget(warning);warning->show();
+    for(auto button:{resolveMissing,reviewAtlas,exportDiagnostic,saveDraft,importButton,mprSettingsButton,m_overlayMprMaterials})
+        button->setIcon(landscapeActionIcon(button==resolveMissing?9:button==saveDraft?5:button==exportDiagnostic?8:7));
+    for(int i=0;i<m_tool->count();++i)m_tool->setItemIcon(i,landscapeActionIcon(i==0?10:i==1?11:i==2?2:i==3?6:i==4?1:0));
+    m_overlaySurfaceOperation->setItemIcon(0,landscapeActionIcon(2));m_overlaySurfaceOperation->setItemIcon(1,landscapeActionIcon(9));
+    m_paintModeTabs->setTabIcon(0,landscapeActionIcon(1));m_paintModeTabs->setTabIcon(1,landscapeActionIcon(6));m_paintModeTabs->setTabIcon(2,landscapeActionIcon(7));
+    m_paintModeTabs->setTabText(0,tr("Авто"));m_paintModeTabs->setTabText(1,tr("Классика"));m_paintModeTabs->setTabText(2,tr("Вручную"));
     // The material palette is the primary authoring surface.
     layout->addWidget(m_paintControls, 1);
+    QWidget* sculptSpace = new QWidget(toolContents);sculptSpace->setObjectName(QStringLiteral("landscapeSculptSpace"));
+    sculptSpace->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);layout->addWidget(sculptSpace,1);
+    layout->setSpacing(6);layout->setContentsMargins(8,8,8,8);
+    form->setContentsMargins(0,0,0,0);form->setVerticalSpacing(5);
+    paintForm->setVerticalSpacing(4);
+    for(auto f:{form,paintForm,modeForm}) {f->setRowWrapPolicy(QFormLayout::WrapLongRows);f->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);}
+    for(auto combo:findChildren<QComboBox*>()) {combo->setMinimumWidth(0);combo->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);}
+    for(auto button:findChildren<QPushButton*>()) button->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    for(auto row:{sizeRow,shapeRow,targetRow})row->setContentsMargins(0,0,0,0);
+    for(auto label:findChildren<QLabel*>()) {auto policy=label->sizePolicy();policy.setVerticalPolicy(QSizePolicy::Fixed);label->setSizePolicy(policy);}
+    for(auto check:findChildren<QCheckBox*>())check->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
+    m_sculptControls->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Maximum);
+    worldControls->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
+    for(auto button:{worldUndo,worldRedo,worldSave})button->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
+    m_overlaySurfaceOperationLabel->setText(tr("Действие"));
+    m_overlayMaterialLabel->setText(tr("Свойства поверхности"));
+    m_overlayMaterialLabel->setToolTip(tr("Материал MPR: оттенок, прозрачность и анимация поверхности"));
     connect(importButton, &QPushButton::clicked, this, &CLandscapeTools::importHeightmapRequested);
     connect(mprSettingsButton, &QPushButton::clicked,
             this, &CLandscapeTools::openMprSettingsRequested);
@@ -849,6 +990,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             });
     connect(m_flatten, QOverload<int>::of(&QSpinBox::valueChanged), this,
             [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
+    m_modernAutoResolveBlends->setVisible(m_paintModeTabs->currentIndex()==0);
+    m_classicAutoSafe->setVisible(m_paintModeTabs->currentIndex()==1);
     updateModeVisibility();
     updatePaintIssueUi();
     updatePaintShapeUi();
@@ -922,6 +1065,7 @@ void CLandscapeTools::updateModeVisibility()
         || editMode() == ELandscapeEditMode::OverlaySculpt;
     m_sculptControls->setVisible(sculpt);
     m_paintControls->setVisible(!sculpt);
+    if(auto space=findChild<QWidget*>(QStringLiteral("landscapeSculptSpace")))space->setVisible(sculpt);
     const bool overlaySurface = editMode() == ELandscapeEditMode::OverlaySurface;
     const bool overlayMode = overlaySurface
         || editMode() == ELandscapeEditMode::OverlayPaint;
@@ -992,9 +1136,13 @@ void CLandscapeTools::setSculptTool(ELandscapeSculptTool tool)
 }
 float CLandscapeTools::radius() const { return float(m_radius->value()); }
 float CLandscapeTools::strength() const { return float(m_strength->value()); }
-void CLandscapeTools::setWorldTerrainStatus(const QString& status,bool canUndo,bool canRedo,bool dirty)
+void CLandscapeTools::setWorldTerrainStatus(const QString& status,bool canUndo,bool canRedo,bool dirty,bool enabled,int neighbors)
 {
     m_worldTerrainStatus->setText(status);
+    if(auto maps=findChild<QPushButton*>(QStringLiteral("worldTerrainMaps"))) {
+        maps->setToolTip(status + tr("\nНажмите, чтобы включить общую кисть или выбрать карты."));
+        maps->setText(enabled ? tr("Кисть: %1 карт").arg(neighbors+1) : tr("Кисть: одна карта"));
+    }
     m_worldUndo->setEnabled(canUndo);m_worldRedo->setEnabled(canRedo);m_worldSave->setEnabled(dirty);
 }
 

@@ -83,7 +83,7 @@ public:
     explicit CLandscapeTools(QWidget* parent = nullptr);
 
     QSize minimumSizeHint() const override;
-    void setWorldTerrainStatus(const QString& status, bool canUndo, bool canRedo, bool dirty);
+    void setWorldTerrainStatus(const QString& status, bool canUndo, bool canRedo, bool dirty, bool enabled, int neighbors);
 
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
