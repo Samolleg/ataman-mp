@@ -42,3 +42,10 @@ Current rollback: build-rollback-global37 (previous 36). Installation log:
 build-release-37-global/install.log. The first installer preflight rejected
 its stale expected VERSION 36 before any writes; corrected to 37 and passed.
 
+## User acceptance — 2026-09-20
+
+After delivery of version 37 the user reported: «всё работает как надо».
+EI-TRAVEL-GLOBAL-POSITION is accepted for the reported route-marker case.
+This resolves the above pending user acceptance; it is user-reported evidence,
+not a new automated gameplay run. Other travel-editor cases remain scoped
+to their own open acceptance records. No binary or version change.
