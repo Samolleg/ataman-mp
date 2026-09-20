@@ -30,4 +30,15 @@ custom allods need an explicit resource binding. Real visual check used Gipat.
 Unavailable private-engine skills were not used; implementation relies on the
 existing public project FIG8/MMP readers and installed resources read-only.
 
-Packaging/install evidence will be appended after manifest verification.
+Source commit: 1e786f657ed47ab945e2792d43ab8f21bd9a67bf.
+Release/staged/installed executable SHA256:
+499bdcb8dd50ac2173945d913e885c144b05a4db4b1a543f4a1e6f5f93ce8a32.
+Fresh staging build-staging-37-global finalized successfully, independent
+manifest/hash/coverage verification passed for 101 managed files. Staged
+--version: EI Mapper Endurance Edition 37. Finalized staging was not run.
+Permanent installation artifacts/EI-Mapper-Ataman-2-first-test updated:
+7 replaced program files, 0 removals, 10194 user files preserved by hashes.
+Current rollback: build-rollback-global37 (previous 36). Installation log:
+build-release-37-global/install.log. The first installer preflight rejected
+its stale expected VERSION 36 before any writes; corrected to 37 and passed.
+
