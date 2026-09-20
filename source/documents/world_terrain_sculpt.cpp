@@ -222,18 +222,16 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
 double cross(const XY& a,const XY& b) { return a.first*b.second-a.second*b.first; }
 XY subtract(const XY& a,const XY& b) { return {a.first-b.first,a.second-b.second}; }
 
-void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
+int protectShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
                           const QVector<QVector<Vertex>>& groups,
-                          QVector<double>& proposed,const QVector<double>& limits,
+                          const QVector<double>& proposed,
                           QVector<bool>& affected)
 {
     QVector<QMap<QPair<int,int>,int>> indices(targets.size());
-    QVector<XY> positions(groups.size());
     QVector<int> parent(groups.size());
     for(int i=0;i<groups.size();++i)
     {
         parent[i]=i;
-        const auto v=groups[i].first();positions[i]=point(targets[v.map],v.x,v.y);
         if(!std::isfinite(proposed[i])) continue;
         for(const auto& vertex:groups[i])
             indices[vertex.map][{vertex.x,vertex.y}]=i;
@@ -245,8 +243,8 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
     {
         if(indices[m].isEmpty()) continue;
         const int w=targets[m].model->vertexCountX(),h=targets[m].model->vertexCountY();
-        // Trace complete enabled-map boundaries, including outside the brush.
-        // Only connected components reached by this stamp are reconciled.
+        // Trace full boundaries to identify incompatible staggered chains.
+        // This discovery must never enlarge the write footprint.
         for(auto it=indices[m].cbegin();it!=indices[m].cend();++it)
         {
             const int x=it.key().first,y=it.key().second;
@@ -295,8 +293,8 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
                && qAbs(cross(direction,subtract(t.q,s.p)))<=1e-9*length
                && !(s.a==t.a && s.b==t.b))
             {
-                // With staggered knots, equality of both piecewise-linear
-                // profiles requires one affine profile across this chain.
+                // Different knots on the same edge: retain the shared chain.
+                // An affine refit would destroy remote terrain features.
                 join(s.a,s.b);join(s.a,t.a);join(s.a,t.b);
             }
           }
@@ -304,48 +302,26 @@ void reconcileShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
     }
     QMap<int,QVector<int>> components;
     for(int i=0;i<groups.size();++i) if(std::isfinite(proposed[i])) components[root(i)].append(i);
-    for(auto component:components)
+    int protectedVertices=0;
+    for(const auto& component:components)
     {
         if(component.size()<3) continue;
-        bool touched=false;
-        for(int i:component) touched=touched||affected[i];
-        if(!touched) continue;
-        // Geometric ordering makes fitting independent of target enumeration.
-        std::sort(component.begin(),component.end(),[&](int a,int b){return positions[a]<positions[b];});
-        const XY anchor=positions[component.first()];
-        double mx=0,my=0,mz=0,limit=std::numeric_limits<double>::max();
-        for(int i:component)
-        { mx+=positions[i].first-anchor.first;my+=positions[i].second-anchor.second;mz+=proposed[i];limit=qMin(limit,limits[i]); }
-        mx/=component.size();my/=component.size();mz/=component.size();
-        double xx=0,yy=0,xy=0,xz=0,yz=0;
-        for(int i:component)
-        {
-            double x=positions[i].first-anchor.first-mx,y=positions[i].second-anchor.second-my,z=proposed[i]-mz;
-            xx+=x*x;yy+=y*y;xy+=x*y;xz+=x*z;yz+=y*z;
-        }
-        double sx=0,sy=0,det=xx*yy-xy*xy;
-        if(det>1e-12*(xx+yy)*(xx+yy)) {sx=(xz*yy-yz*xy)/det;sy=(yz*xx-xz*xy)/det;}
-        else if(xx>=yy && xx>0) sx=xz/xx;
-        else if(yy>0) sy=yz/yy;
-        const double base=qBound(0.0,mz,limit);
-        double scale=1;
-        for(int i:component)
-        {
-            const double delta=sx*(positions[i].first-anchor.first-mx)+sy*(positions[i].second-anchor.second-my);
-            if(delta>0) scale=qMin(scale,(limit-base)/delta);
-            if(delta<0) scale=qMin(scale,-base/delta);
-        }
-        for(int i:component)
-        {
-            proposed[i]=base+scale*(sx*(positions[i].first-anchor.first-mx)+sy*(positions[i].second-anchor.second-my));
-            affected[i]=true;
+        // Staggered piecewise-linear edges cannot acquire a local, identical
+        // height profile without changing their knots. Never flatten the whole
+        // connected rim to achieve equality. Preserve its original samples,
+        // including any pre-existing mismatch, and edit only the interior.
+        for(int i:component) {
+            if(affected[i]) ++protectedVertices;
+            affected[i]=false;
         }
     }
+    return protectedVertices;
 }
 }
 
 void SWorldTerrainStroke::append(const SWorldTerrainStroke& stamp)
 {
+    protectedBoundaryVertices += stamp.protectedBoundaryVertices;
     for(auto it=stamp.paint.cbegin();it!=stamp.paint.cend();++it) {
         if(paint.contains(it.key()))paint[it.key()].after=it.value().after;
         else paint.insert(it.key(),it.value());
@@ -395,7 +371,7 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         }
     }
     for(const auto& edge : edges) groups.append(edge);
-    QVector<double> proposed(groups.size(),std::numeric_limits<double>::quiet_NaN()),limits(groups.size());
+    QVector<double> proposed(groups.size(),std::numeric_limits<double>::quiet_NaN());
     QVector<bool> affected(groups.size(),false);
     for(int groupIndex=0;groupIndex<groups.size();++groupIndex)
     {
@@ -417,7 +393,7 @@ SWorldTerrainStroke makeWorldTerrainStamp(
             limit=qMin(limit,double(targets[v.map].model->maxZ()));
         }
         const double before=mean(initial);
-        proposed[groupIndex]=before;limits[groupIndex]=limit;
+        proposed[groupIndex]=before;
         if(distance>brush.radius || weight<=0) continue;
         affected[groupIndex]=true;
         double after=before;
@@ -453,9 +429,9 @@ SWorldTerrainStroke makeWorldTerrainStamp(
         // The shared target is representable within each map's existing range.
         // Each file rounds only once to its own uint16 height quantum.
         after=qBound(0.0,after,limit);
-        proposed[groupIndex]=after;limits[groupIndex]=limit;
+        proposed[groupIndex]=after;
     }
-    reconcileShiftedEdges(targets,groups,proposed,limits,affected);
+    result.protectedBoundaryVertices=protectShiftedEdges(targets,groups,proposed,affected);
     for(int groupIndex=0;groupIndex<groups.size();++groupIndex)
     {
         const auto& group=groups[groupIndex];

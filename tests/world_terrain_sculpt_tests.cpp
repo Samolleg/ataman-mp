@@ -41,6 +41,32 @@ class WorldTerrainTests : public QObject
     double z(CWorldTerrainSession& s,const QString& id,int x,int y)
     { auto& t=s.documents[id]->terrain;return t.height(x,y)*double(t.maxZ())/65535; }
 private slots:
+    void localBrushDoesNotRewriteDistantShiftedRim()
+    {
+        for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower})
+        for(bool horizontal:{false,true}) {
+            CWorldTerrainSession session;add(session,"a");add(session,"b");
+            auto targets=QVector<SWorldTerrainTarget>{target(session,"a",{0,0}),target(session,"b",{32,0.5})};
+            if(horizontal) targets[1].origin=QPointF(0.5,32);
+            // A distant peak on the edge must not be flattened by a local stroke.
+            STerrainHeightCommand peak;STerrainHeightDelta d;
+            d.globalX=horizontal?2:32;d.globalY=horizontal?32:2;d.before=10000;d.after=45000;peak.deltas.append(d);
+            QVERIFY(session.documents["a"]->terrain.apply(peak,true));
+            STerrainBrush brush;brush.centerX=horizontal?16:32;brush.centerY=horizontal?32:16;brush.radius=3;
+            const auto stamp=makeWorldTerrainStamp(targets,brush,mode,2,0,1);
+            QVERIFY(!stamp.isEmpty());
+            for(const auto& t:targets) for(const auto& delta:stamp.maps[t.id].deltas) {
+                const QPointF p=t.model->terrainVertexPosition(delta.globalX,delta.globalY)+t.origin;
+                QVERIFY2(std::hypot(p.x()-brush.centerX,p.y()-brush.centerY)<=brush.radius,
+                         "Local sculpt must never rewrite vertices outside its footprint");
+            }
+            const auto before=session.documents["a"]->terrain.sectorPayload(0,0);
+            QString error;QVERIFY(session.apply(stamp,true,&error));session.record(stamp);
+            QCOMPARE(session.documents["a"]->terrain.height(d.globalX,d.globalY),quint16(45000));
+            QVERIFY(session.undo(&error));QCOMPARE(session.documents["a"]->terrain.sectorPayload(0,0),before);
+            QVERIFY(session.redo(&error));
+        }
+    }
     void physicalTileImportPreservesIdentity()
     {
         CTerrainTransitionCatalog catalog;catalog.declareMaterial(1);catalog.declareMaterial(2);
@@ -356,7 +382,7 @@ private slots:
         for(int y=0;y<33;++y) QCOMPARE(s.documents["a"]->terrain.height(32,y),s.documents["b"]->terrain.height(0,y));
         QVERIFY(makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,1).isEmpty());
     }
-    void movingStaggeredStrokeKeepsWholeTouchedSeamClosed()
+    void movingStaggeredStrokeKeepsRimAndFootprint()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");add(s,"c");
         auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{0,32}),target(s,"c",{32,16.5})};
@@ -384,7 +410,7 @@ private slots:
         }
         qInfo("Moving stroke: maximum gap %.9f at y %.3f",worst,where);
         QVERIFY2(worst<200.0/65535,"Moving brush must not leave a crack behind at a previously covered rim");
-        QVERIFY(expanded);s.record(whole);QString error;QVERIFY(s.undo(&error));
+        QVERIFY(!expanded);s.record(whole);QString error;QVERIFY(s.undo(&error));
         for(auto it=s.documents.cbegin();it!=s.documents.cend();++it) QCOMPARE(it.value()->terrain.sectorPayload(0,0),before[it.key()]);
         QVERIFY(s.redo(&error));
     }
@@ -403,6 +429,12 @@ private slots:
             targets.append(target(s,CWorldTerrainSession::key(path),origins[i]));
         }
             STerrainBrush brush;brush.centerX=352;brush.centerY=288;brush.radius=5;
+        QVector<QVector<quint16>> rimBefore;
+        for(int m=0;m<targets.size();++m) {
+            QVector<quint16> rim;const auto& model=*targets[m].model;
+            for(int y=0;y<model.vertexCountY();++y) rim.append(model.height(m==2?0:model.vertexCountX()-1,y));
+            rimBefore.append(rim);
+        }
         QElapsedTimer timer;timer.start();
         for(int pass=0;pass<8;++pass)
         {
@@ -422,7 +454,14 @@ private slots:
             worst=qMax(worst,qAbs(sample(left,targets[left].model->vertexCountX()-1)-sample(2,0)));
         }
         qInfo("Installed triple: eight stamps %lld ms, maximum covered-edge gap %.9f",timer.elapsed(),worst);
-        QVERIFY2(worst<0.002,"Installed covered seam exceeds height quantization");
+        for(int m=0;m<targets.size();++m) {
+            const auto& model=*targets[m].model;
+            for(int y=0;y<model.vertexCountY();++y) {
+                const double worldY=targets[m].origin.y()+y;
+                if(worldY>=63.5 && worldY<=383.5)
+                    QCOMPARE(model.height(m==2?0:model.vertexCountX()-1,y),rimBefore[m][y]);
+            }
+        }
     }
     void staggeredTripleJunction()
     {
@@ -446,7 +485,8 @@ private slots:
                 QCOMPARE(actual,expected);
             }
             QString error;QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));s.record(stamp);
-            // Compare actual piecewise-linear surfaces, not just coincident vertices.
+            // Existing mismatched rims must be preserved, not repaired globally.
+            QCOMPARE(stamp.protectedBoundaryVertices>0,true);
             for(double y=16.5;y<=48.5;y+=0.125)
             {
                 auto interpolate=[&](const QString& id,int x,double localY){
@@ -456,14 +496,16 @@ private slots:
                 };
                 const double left=y<32?interpolate("a",32,y):interpolate("b",32,y-32);
                 const double right=interpolate("c",0,y-16.5);
-                QVERIFY2(qAbs(left-right)<180.0/65535,"Staggered boundary surfaces must agree throughout covered segments");
+                const double baselineLeft=y<32?10000.0*100/65535:16000.0*80/65535;
+                const double baselineRight=25000.0*60/65535;
+                QVERIFY(qAbs(left-baselineLeft)<1e-9);
+                QVERIFY(qAbs(right-baselineRight)<1e-9);
             }
             for(auto it=stamp.maps.cbegin();it!=stamp.maps.cend();++it)
             {
                 const auto t=*std::find_if(targets.begin(),targets.end(),[&](const SWorldTerrainTarget& t){return t.id==it.key();});
                 for(const auto& d:it->deltas)
-                    QVERIFY(std::hypot(t.origin.x()+d.globalX-32,t.origin.y()+d.globalY-32)<=5
-                            || d.globalX==0 || d.globalX==32 || d.globalY==0 || d.globalY==32);
+                    QVERIFY(std::hypot(t.origin.x()+d.globalX-32,t.origin.y()+d.globalY-32)<=5);
             }
             QVERIFY(s.undo(&error));
             for(const auto& doc:s.documents)

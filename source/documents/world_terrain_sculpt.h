@@ -27,6 +27,7 @@ struct SWorldTerrainPaintChange
 struct SWorldTerrainStroke
 {
     int localUndoIndex{-1};
+    int protectedBoundaryVertices{0}; // Per-stamp count; repeated stamps may revisit a vertex.
     QMap<QString, STerrainHeightCommand> maps;
     QMap<QString, SOverlaySurfaceCommand> overlays;
     QMap<QString, STerrainTileCommand> tiles;

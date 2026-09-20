@@ -25392,8 +25392,12 @@ void CView::finishSculptStroke()
         for(const auto& id:m_worldTerrainStroke.maps.keys())changedMaps.insert(id);
         for(const auto& id:m_worldTerrainStroke.overlays.keys())changedMaps.insert(id);
         for(const auto& id:m_worldTerrainStroke.tiles.keys())changedMaps.insert(id);
-        emit updateMsg(tr("World terrain stroke: %1 MPR(s). Undo/redo applies to the complete stroke.")
-            .arg(changedMaps.size()));
+        QString message=tr("World terrain stroke: %1 MPR(s). Undo/redo applies to the complete stroke.").arg(changedMaps.size());
+        if(m_worldTerrainStroke.protectedBoundaryVertices>0)
+            message+=QString::fromUtf8(" Стык со смещёнными вершинами сохранён; дальние участки границы не изменены.");
+        emit updateMsg(message);
+        ei::log(eLogInfo,QString("World sculpt completed maps=%1 protectedBoundarySamples=%2")
+            .arg(changedMaps.size()).arg(m_worldTerrainStroke.protectedBoundaryVertices));
         m_worldTerrainStroke=SWorldTerrainStroke();
         m_sculptStrokeCommand=STerrainHeightCommand();
         m_sculptGestureCaptured=false;
