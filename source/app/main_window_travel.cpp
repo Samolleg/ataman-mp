@@ -2,6 +2,7 @@
 #include <QFileSystemWatcher>
 #include "main_window.h"
 #include "travel_panel.h"
+#include "travel_global_map.h"
 #include "travel_document.h"
 #include "view.h"
 #include "landscape.h"
@@ -70,6 +71,25 @@ void MainWindow::createTravelEditor(QMenu* menu)
     m_travelDock->setObjectName("TravelEditorDock");
     m_travelPanel=new CTravelPanel(m_travelDock);m_travelDock->setWidget(m_travelPanel);
     connect(m_travelPanel,&CTravelPanel::routeRequested,this,&MainWindow::createPairedTravelRoute);
+    connect(m_travelPanel,&CTravelPanel::globalPositionRequested,this,[this](){
+        if(!m_travelDocument||m_travelZone<0)return;
+        const auto zones=m_travelDocument->table().zones();
+        int index=m_travelZone;
+        if(zones[index].zoneType!="edge") {
+            if(m_travelExit<0||m_travelExit>=zones[index].exits.size())return;
+            index=m_travelDocument->uniqueZone(zones[index].exits[m_travelExit].destinationZoneId);
+        }
+        if(index<0||zones[index].zoneType!="edge") {
+            m_travelPanel->setStatus(tr("У выбранной записи нет связующей edge-зоны. Создайте маршрут между картами."));return;
+        }
+        QVector3D position;QString error;const bool present=travelGlobalPosition(zones[index],&position);
+        if(!chooseTravelGlobalPosition(this,zones,zones[index].allodId,zones[index].zoneId,&position,present,&error)) {
+            if(!error.isEmpty())m_travelPanel->setStatus(error);return;
+        }
+        const auto before=m_travelDocument->snapshot();
+        if(!m_travelDocument->setZonePosition(index,position,&error)){m_travelPanel->setStatus(error);return;}
+        recordTravelEdit(before,tr("Переместить метку маршрута"));
+    });
     addDockWidget(Qt::RightDockWidgetArea,m_travelDock);m_travelDock->hide();
     menu->addAction(m_travelDock->toggleViewAction());
     connect(m_travelDock,&QDockWidget::visibilityChanged,this,[this](bool visible){
@@ -339,7 +359,7 @@ void MainWindow::createPairedTravelRoute()
         }
     };
     QLineEdit edgeId;edgeId.setObjectName("routeEdge");form.addRow(tr("ID новой связующей зоны:"),&edgeId);
-    QLabel positionNote(tr("Положение связующей зоны на игровой глобальной карте (не метры рельефа). Предложена середина между позициями карт, если они заданы. Проверьте X/Y/Z перед созданием."));
+    QLabel positionNote(tr("Положение связующей зоны на игровой глобальной карте (не метры рельефа). Выберите точку на поверхности глобальной карты либо введите известные X/Y/Z."));
     positionNote.setWordWrap(true);layout.addWidget(&positionNote);
     QHBoxLayout positionLayout;layout.addLayout(&positionLayout);
     CWorldCoordinateEdit px(0),py(0),pz(0);
@@ -347,13 +367,15 @@ void MainWindow::createPairedTravelRoute()
     positionLayout.addWidget(new QLabel("X"));positionLayout.addWidget(&px);
     positionLayout.addWidget(new QLabel("Y"));positionLayout.addWidget(&py);
     positionLayout.addWidget(new QLabel("Z"));positionLayout.addWidget(&pz);
-    const auto mapPosition=[](const SMapTableZone& zone,QVector3D* value) {
-        const QRegularExpression re(QStringLiteral(R"((?:^|\n)[ \t]*#position[ \t]*\r?\n[ \t]*(\S+)[ \t]+(\S+)[ \t]+(\S+))"));
-        const auto match=re.match(zone.rawBlock);if(!match.hasMatch())return false;
-        bool ok[3];float a=match.captured(1).toFloat(&ok[0]),b=match.captured(2).toFloat(&ok[1]),c=match.captured(3).toFloat(&ok[2]);
-        if(!ok[0]||!ok[1]||!ok[2]||!std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c))return false;
-        *value=QVector3D(a,b,c);return true;
-    };
+    QPushButton choosePosition(tr("Выбрать на глобальной карте…"));
+    choosePosition.setObjectName("routeChoosePosition");layout.addWidget(&choosePosition);
+    connect(&choosePosition,&QPushButton::clicked,&dialog,[&](){
+        double x=0,y=0,z=0;const bool present=px.coordinate(&x)&&py.coordinate(&y)&&pz.coordinate(&z);
+        QVector3D position(x,y,z);QString error;
+        if(chooseTravelGlobalPosition(&dialog,zones,source.allodId,QString(),&position,present,&error)) {
+            px.setText(QString::number(position.x(),'g',9));py.setText(QString::number(position.y(),'g',9));pz.setText(QString::number(position.z(),'g',9));
+        } else if(!error.isEmpty())QMessageBox::warning(&dialog,tr("Глобальная карта"),error);
+    });
     const auto refreshTarget=[&]() {
         const auto& target=zones[targetZone.currentData().toInt()];fillExits(targetExit,target);
         if(m_travelExit>=0 && m_travelExit<source.exits.size()) {
@@ -364,10 +386,7 @@ void MainWindow::createPairedTravelRoute()
         const QString base=source.zoneId+"_"+target.zoneId;QString name=base;int suffix=2;
         while(m_travelDocument->uniqueZone(name)>=0)name=base+QString::number(suffix++);
         edgeId.setText(name);
-        QVector3D a,b;const bool valid=mapPosition(source,&a)&&mapPosition(target,&b);const auto midpoint=(a+b)*0.5f;
-        px.setText(valid?QString::number(midpoint.x(),'g',9):QString());
-        py.setText(valid?QString::number(midpoint.y(),'g',9):QString());
-        pz.setText(valid?QString::number(midpoint.z(),'g',9):QString());
+        px.clear();py.clear();pz.clear();
     };
     connect(&sourceExit,QOverload<int>::of(&QComboBox::activated),&dialog,[&](int){fillAreas(source,sourceExit.currentData().toInt(),0);});
     connect(&targetZone,QOverload<int>::of(&QComboBox::activated),&dialog,[&](int){refreshTarget();});
@@ -472,6 +491,7 @@ bool MainWindow::travelHistoryPending(bool redo) const
 // Invoked only by --ui-widget-check with its hidden, isolated production window.
 bool travelEditorIntegrationCheck(MainWindow* window)
 {
+    if(!travelGlobalSurfaceCheck())return false;
     QTemporaryDir scratch;if(!scratch.isValid())return false;
     const QString path=scratch.filePath("texts.res");
     CResFile archive;archive.addFiledata("map.txt",

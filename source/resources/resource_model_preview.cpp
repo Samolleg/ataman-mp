@@ -41,6 +41,7 @@ struct Triangle
 {
     QVector3D a; QVector3D b; QVector3D c;
     int sourceA{-1}; int sourceB{-1}; int sourceC{-1};
+    QVector2D uvA, uvB, uvC;
 };
 
 quint16 u16(const QByteArray& bytes, quint64 offset)
@@ -154,17 +155,21 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
                     stream >> value;
                     if(morph == 0) vertices[int(block * 4 + lane)][axis] = value;
                 }
-    stream.skipRawData(int(normalBytes + uvBytes));
+    stream.skipRawData(int(normalBytes));
+    QVector<QVector2D> uvs;uvs.resize(int(uvCount));
+    for(auto& uv:uvs) {float u,v;stream>>u>>v;uv=QVector2D(u,v);}
     QVector<quint16> indices;
     indices.resize(int(indexCount));
     for(quint16& value : indices) stream >> value;
+    QVector<quint16> componentUvs;componentUvs.resize(int(componentCount));
     QVector<quint16> componentVertices;
     componentVertices.resize(int(componentCount));
     for(quint32 component = 0; component < componentCount; ++component)
     {
         quint16 vertex = 0, normal = 0, uv = 0;
         stream >> vertex >> normal >> uv;
-        Q_UNUSED(normal); Q_UNUSED(uv);
+        Q_UNUSED(normal);
+        componentUvs[int(component)] = uv;
         componentVertices[int(component)] = vertex;
     }
     if(stream.status() != QDataStream::Ok)
@@ -193,6 +198,9 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
         triangle.sourceA = va;
         triangle.sourceB = vb;
         triangle.sourceC = vc;
+        if(componentUvs[ia]<uvs.size())triangle.uvA=uvs[componentUvs[ia]];
+        if(componentUvs[ib]<uvs.size())triangle.uvB=uvs[componentUvs[ib]];
+        if(componentUvs[ic]<uvs.size())triangle.uvC=uvs[componentUvs[ic]];
         triangles->append(triangle);
     }
     return !triangles->isEmpty();
@@ -443,6 +451,7 @@ SResourceModelScene buildFig8Scene(const QByteArray& bytes)
         output.vertices[0].position = triangle.a; output.vertices[0].sourceIndex = triangle.sourceA;
         output.vertices[1].position = triangle.b; output.vertices[1].sourceIndex = triangle.sourceB;
         output.vertices[2].position = triangle.c; output.vertices[2].sourceIndex = triangle.sourceC;
+        output.vertices[0].uv=triangle.uvA; output.vertices[1].uv=triangle.uvB; output.vertices[2].uv=triangle.uvC;
         part.triangles.append(output);
     }
     scene.parts.append(part);
@@ -546,6 +555,7 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
             output.vertices[0].position = triangle.a; output.vertices[0].sourceIndex = triangle.sourceA;
             output.vertices[1].position = triangle.b; output.vertices[1].sourceIndex = triangle.sourceB;
             output.vertices[2].position = triangle.c; output.vertices[2].sourceIndex = triangle.sourceC;
+        output.vertices[0].uv=triangle.uvA; output.vertices[1].uv=triangle.uvB; output.vertices[2].uv=triangle.uvC;
             part.triangles.append(output);
         }
         scene.parts.append(part);

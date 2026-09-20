@@ -75,6 +75,9 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             auto* createRoute=new QPushButton(tr("Создать новый маршрут…"));
             createRoute->setObjectName("travelDestinationCreate");form->addRow(createRoute);
             connect(createRoute,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
+            auto* globalPosition=new QPushButton(tr("Положение маршрута на глобальной карте…"));
+            globalPosition->setObjectName("travelGlobalPosition");form->addRow(globalPosition);
+            connect(globalPosition,&QPushButton::clicked,this,[this](){if(flush())emit globalPositionRequested();});
             m_directionNote=new QLabel;m_directionNote->setWordWrap(true);
             m_directionNote->setObjectName("travelDirectionNote");form->addRow(m_directionNote);
             m_repairOrder=new QPushButton(tr("Восстановить раздельные области"));

@@ -1,4 +1,10 @@
 #include "view.h"
+#include "travel_global_map.h"
+#include "travel_document.h"
+#include <QDialog>
+#include <QTimer>
+#include <QDialogButtonBox>
+#include <QPushButton>
 #include "landscape.h"
 #include "worldobj.h"
 #include "utils.h"
@@ -46,6 +52,35 @@ int runNeighborPerformanceCheck()
     roots->setValue(qEnvironmentVariable("EI_NEIGHBOR_PERF_RES").split(';',QString::SkipEmptyParts).toVector());
     CTextureList::getInstance()->attachSettings(&settings);
     CObjectList::getInstance()->attachSettings(&settings);
+    if(qEnvironmentVariableIsSet("EI_GLOBAL_MAP_CHECK")) {
+        CTravelDocument travel;QString error;
+        check(travel.open(qEnvironmentVariable("EI_NEIGHBOR_PERF_ROOT")+"/res/texts.res",&error),"read real map.txt");
+        QWidget parent;parent.setAttribute(Qt::WA_DontShowOnScreen);QVector3D point;
+        const QString image=qEnvironmentVariable("EI_GLOBAL_MAP_IMAGE");
+        bool clicked=false;
+        QTimer::singleShot(500,&parent,[&](){
+            auto* dialog=parent.findChild<QDialog*>("travelGlobalDialog");
+            auto* surface=parent.findChild<QWidget*>("travelGlobalSurface");
+            if(!dialog||!surface)return;
+            // Search the surface, verifying that a real selectable pixel exists.
+            auto* buttons=dialog->findChild<QDialogButtonBox*>();
+            for(int y=surface->height()/4;y<surface->height()*3/4&&!clicked;y+=10)
+                for(int x=surface->width()/4;x<surface->width()*3/4&&!clicked;x+=10){
+                    QMouseEvent event(QEvent::MouseButtonPress,QPointF(x,y),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+                    QApplication::sendEvent(surface,&event);clicked=buttons->button(QDialogButtonBox::Ok)->isEnabled();
+                }
+            if(!image.isEmpty())dialog->grab().save(image);
+            if(clicked)dialog->accept();else dialog->reject();
+        });
+        check(chooseTravelGlobalPosition(&parent,travel.table().zones(),"gipat",QString(),&point,false,&error)&&clicked,"real global model point selection");
+        const auto accepted=point;
+        QTimer::singleShot(100,&parent,[&](){auto* dialog=parent.findChild<QDialog*>("travelGlobalDialog");if(dialog)dialog->reject();});
+        error.clear();
+        check(!chooseTravelGlobalPosition(&parent,travel.table().zones(),"gipat",QString(),&point,true,&error)
+            &&error.isEmpty()&&point==accepted,"cancel retains original marker");
+        out<<error<<" point "<<point.x()<<","<<point.y()<<","<<point.z()<<"\n";
+        return failures?1:0;
+    }
     QUndoStack history; CTreeView tree; QTableWidget properties; properties.setColumnCount(2);
     CProgressView progress; QLineEdit coordinates; CTileForm tiles;
     CView view(nullptr,nullptr); view.setAttribute(Qt::WA_DontShowOnScreen);

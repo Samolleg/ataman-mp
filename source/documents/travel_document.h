@@ -25,6 +25,7 @@ public:
     bool replaceZone(int index, const SMapTableZone& zone, QString* error);
     bool deleteExit(int zoneIndex, int exitIndex, QString* error);
     bool appendZone(const SMapTableZone& zone, QString* error);
+    bool setZonePosition(int index, const QVector3D& position, QString* error);
     bool createPairedRoute(const STravelRoute& route, QString* error);
     bool prepareSave(SMapSaveFile* file, QString* error) const;
     void acceptSaved() {m_baseline=snapshot();}

@@ -10,6 +10,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector3D>
+#include <QVector2D>
 
 #include "runtime/unit_animation.h"
 
@@ -29,6 +30,7 @@ struct SResourceModelVertex
 {
     QVector3D position;
     int sourceIndex{-1};
+    QVector2D uv;
 };
 
 struct SResourceModelTriangle

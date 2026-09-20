@@ -31,6 +31,7 @@ signals:
     void deleteRequested();
     void reverseRequested();
     void routeRequested();
+    void globalPositionRequested();
     void registerRequested();
     void visibilityChanged();
     void focusRequested(int index, bool remove);

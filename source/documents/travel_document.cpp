@@ -5,6 +5,7 @@
 #include <QCryptographicHash>
 #include <cmath>
 #include <QSet>
+#include <QRegularExpression>
 #include <limits>
 
 namespace {
@@ -199,4 +200,32 @@ bool CTravelDocument::prepareSave(SMapSaveFile* file,QString* error) const
     }
     file->path=m_path;file->before=archive.originalBytes();file->after=bytes;file->existed=true;
     return true;
+}
+
+// Change only the global marker: links, rectangles and unrelated source text survive.
+bool CTravelDocument::setZonePosition(int index,const QVector3D& position,QString* error)
+{
+    const auto fail=[error](const QString& text){if(error)*error=text;return false;};
+    if(index<0 || index>=m_table.zones().size() || !std::isfinite(position.x())
+        || !std::isfinite(position.y()) || !std::isfinite(position.z()))
+        return fail(QStringLiteral("Неверная зона или координаты метки."));
+    QString raw=m_table.zones()[index].rawBlock;
+    const QRegularExpression tag(QStringLiteral(R"((?:^|\n)[ \t]*#position[^\r\n]*\r?\n)"));
+    auto matches=tag.globalMatch(raw);
+    if(!matches.hasNext())return fail(QStringLiteral("У зоны отсутствует #position."));
+    const auto match=matches.next();
+    if(matches.hasNext())return fail(QStringLiteral("У зоны несколько #position; положение неоднозначно."));
+    const int start=match.capturedEnd();
+    int end=raw.indexOf('\n',start);if(end<0)end=raw.size();
+    if(end>start && raw[end-1]=='\r')--end;
+    const QRegularExpression values(QStringLiteral(R"(^([ \t]*)([^ \t]+)[ \t]+([^ \t]+)[ \t]+([^ \t]+))"));
+    const auto old=values.match(raw.mid(start,end-start));
+    if(!old.hasMatch())return fail(QStringLiteral("Не удалось прочитать #position."));
+    for(int i=2;i<=4;++i){bool ok=false;const double v=old.captured(i).toDouble(&ok);if(!ok||!std::isfinite(v))return fail(QStringLiteral("Неверное значение #position."));}
+    const int valueStart=start+old.capturedStart(2);
+    raw.replace(valueStart,old.capturedEnd(4)-old.capturedStart(2),QString("%1 %2 %3")
+        .arg(position.x(),0,'g',9).arg(position.y(),0,'g',9).arg(position.z(),0,'g',9));
+    const auto result=m_table.replaceRawZoneSpanAt(index,raw);
+    if(!result.success && error)*error=result.toText();
+    return result.success;
 }

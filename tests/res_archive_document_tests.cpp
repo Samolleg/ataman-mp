@@ -124,6 +124,22 @@ class ResArchiveDocumentTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void globalPositionChangesOnlyCoordinates()
+    {
+        CTravelDocument doc;QString error;
+        const QByteArray original="#zone route gipat edge\r\n#position\r\n  1 2 3  ## marker\r\n#exit first\r\nzone1 6\r\n#exit second\r\nzone7 6\r\n";
+        QVERIFY(doc.restore(original,&error));
+        const auto before=doc.snapshot();
+        QVERIFY(doc.setZonePosition(0,QVector3D(-2.5f,.75f,1.25f),&error));
+        QByteArray expected=original;expected.replace("1 2 3","-2.5 0.75 1.25");
+        QCOMPARE(doc.snapshot(),expected);
+        QVERIFY(doc.restore(before,&error));QCOMPARE(doc.snapshot(),original);
+        QVERIFY(!doc.setZonePosition(-1,QVector3D(),&error));QCOMPARE(doc.snapshot(),original);
+        QVERIFY(!doc.setZonePosition(0,QVector3D(qQNaN(),0,0),&error));QCOMPARE(doc.snapshot(),original);
+        QVERIFY(doc.restore("#zone route gipat edge\n#position\n1 2 3\n#position\n4 5 6\n",&error));
+        const auto duplicate=doc.snapshot();QVERIFY(!doc.setZonePosition(0,QVector3D(),&error));QCOMPARE(doc.snapshot(),duplicate);
+    }
+
     void pairedTravelRoute();
     void travelDeleteLinkedRecord();
     void travelOrderRepairPanel();
