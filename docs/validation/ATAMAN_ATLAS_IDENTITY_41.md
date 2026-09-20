@@ -52,3 +52,16 @@ EXE SHA256: b77e82fbdb827ef8fbee1f1195355d6833184b3980bdf349809ec5193f5d5fae.
 Установка отказала ДО изменения файлов: открыт пользовательский редактор
 PID17596. Постоянная программа пока40; ожидается закрытие, затем запуск
 build-release-41-identity/install.ps1 и проверка результатов.
+
+## Установка после закрытия — 2026-09-20
+
+Пользователь подтвердил «закрыл». install.ps1 завершился PASS:
+101 managed files verified, 12433 user files preserved by SHA256,
+6 program files replaced, 0 obsolete files removed.
+Постоянный путь: C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test.
+Установлена VERSION41; EXE SHA256 совпадает с указанной проверенной сборкой.
+Сохранён откат40 build-rollback-identity41. Старый owned build-rollback-world40
+проверен по своему manifest (без неизвестных файлов/ссылок) и удалён только
+после проверки новой установки. Пользовательский GUI не запускался.
+Исходный сценарий zone2/zone3obr остаётся на ручной проверке; родительская
+задача EI-WORLD-BRUSH не закрыта одной установкой.
