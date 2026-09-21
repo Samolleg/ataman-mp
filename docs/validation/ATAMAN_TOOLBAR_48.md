@@ -14,4 +14,12 @@ Release build-release-48-toolbar PASS. Native --ui-widget-check PASS (exit0).
 Снимок build-release-48-toolbar/screenshots/compact-toolbar.png просмотрен:
 все11 значков видны полностью в одном ряду, элементы камеры доступны.
 Ручная приёмка удобства на пользовательском масштабе Windows не выполнялась.
-Упаковка и установка — следующий шаг.
+Источник: e445a3989b40f9eeb238a1ca86a26200a0e4a04e.
+Staging build-staging-48-toolbar: finalizer/validator PASS, независимая
+проверка путей,полноты101 файлов и SHA-256 PASS; --version48 PASS.
+EXE SHA-256:14ddf08481a3a289b3009b292c593d46831548f2b351c720033af24446b6a6f2.
+Постоянная установка artifacts/EI-Mapper-Ataman-2-first-test обновлена:
+101 managed-файл проверен,6 заменены,0 удалены;18258 пользовательских файлов
+сохранены по SHA-256. Запущенных компонентов перед заменой не было.
+Rollback47 сохранён в build-rollback-toolbar48. Предыдущий rollback46
+проверен по манифесту и удалён по договору. Редактор не запускался за пользователя.
