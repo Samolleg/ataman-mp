@@ -19,6 +19,7 @@ signals:
     void movePatrolPoint(int from, int to);
     void moveLookPoint(int patrol, int from, int to);
     void addPatrolPoint();
+    void useSavedPatrol();
     void addLookPoint(int patrol);
 
 private:

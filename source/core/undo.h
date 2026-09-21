@@ -144,7 +144,8 @@ class CChangeLogicParam : public QObject, public QUndoCommand
 public:
     enum { Id = 107 };
     CChangeLogicParam() = delete;
-    CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr);
+    CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent = nullptr, bool reusePatrol = false);
+    ~CChangeLogicParam() override;
 
     void undo() override;
     void redo() override;
@@ -170,6 +171,9 @@ protected:
     int m_auxPointId;
     int m_logicSlot;
     bool m_oldValueCaptured;
+    bool m_reusePatrol;
+    bool m_resetsPatrol{false};
+    QVector<CPatrolPoint*> m_savedPatrol;
 };
 
 class CChangeMobParametersCommand : public QUndoCommand

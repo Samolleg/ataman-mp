@@ -15,9 +15,11 @@
     </context>
     <context>
         <name>CBehaviorCollectionWidget</name>
+<message><source>Use saved route</source><translation>Использовать сохранённый маршрут</translation></message>
+<message><source>Enable Patrol using the existing points without changing their positions.</source><translation>Включить патруль по сохранённым точкам без изменения их координат.</translation></message>
     <message><source>Inactive saved route — Logic %1 — %2 patrols — %3 looks</source><translation>Сохранённый маршрут не используется — логика %1 — точек: %2, обзора: %3</translation></message>
     <message><source>+ New patrol</source><translation>+ Новый патруль</translation></message>
-    <message><source>Start a new route and enable Patrol. Undo restores the saved route. To use the saved points, change Behavior to Patrol instead.</source><translation>Начать новый маршрут и включить патрулирование. Отмена вернёт сохранённый маршрут. Чтобы использовать старые точки, выберите «Патруль» в поле «Поведение».</translation></message>
+    <message><source>Start a new route and enable Patrol. Undo restores the saved route. To use the saved points, choose Use saved route.</source><translation>Начать новый маршрут и включить патрулирование. Отмена вернёт сохранённый маршрут. Чтобы использовать старые точки, нажмите «Использовать сохранённый маршрут».</translation></message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="369" />
             <source>Patrol route — Logic %1 — %2 patrols — %3 looks</source>

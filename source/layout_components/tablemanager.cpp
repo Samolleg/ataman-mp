@@ -604,6 +604,8 @@ void CTableManager::setBehaviorCollection(CUnit* unit, int logicSlot)
     connect(editor, &CBehaviorCollectionWidget::moveLookPoint, this,
             [this, unit, logicSlot](int patrol, int from, int to)
             { emit onBehaviorLookMove(unit, logicSlot, patrol, from, to); });
+    connect(editor, &CBehaviorCollectionWidget::useSavedPatrol, this,
+            [this, unit, logicSlot]() { emit onBehaviorPatrolResume(unit, logicSlot); });
     connect(editor, &CBehaviorCollectionWidget::addPatrolPoint, this,
             [this, unit]() { emit onBehaviorPatrolAdd(unit); });
     connect(editor, &CBehaviorCollectionWidget::addLookPoint, this,

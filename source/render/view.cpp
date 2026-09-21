@@ -2295,6 +2295,20 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
                 this, mob, unitId, logicSlot, patrol, from, to, true));
         });
     });
+    connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolResume, this,
+            [this](CUnit* unit, int slot) {
+        CMob* mob=ownerMob(unit);
+        const QPointer<CUnit> owner(unit);
+        QTimer::singleShot(0,this,[this,mob,owner,slot]() {
+            cancelPendingOperation();
+            if(!owner || !mob || !m_aMob.contains(mob) || !mob->nodes().contains(owner.data())
+                || m_activeMob!=mob || m_logicSlotIndex!=slot) return;
+            QSharedPointer<IPropertyBase> value(new propUint(eObjParam_LOGIC_BEHAVIOUR,uint(ePath)));
+            auto* command=new CChangeLogicParam(this,owner.data(),value,nullptr,true);
+            connect(command,&CChangeLogicParam::updateParam,this,&CView::viewParameters);
+            m_pUndoStack->push(command);
+        });
+    });
     connect(m_tableManager.get(), &CTableManager::onBehaviorPatrolAdd,
             this, [this](CUnit* unit)
     {
@@ -26255,6 +26269,9 @@ int CView::renameActiveMobUnits(QMap<QString, QString> &mapName)
 bool patrolAuthoringIntegrationCheck(CView* view)
 {
     QSignalBlocker blocked(view);
+    QSignalBlocker blockedScene(CScene::getInstance());
+    const auto previousMode=CScene::getInstance()->getMode();
+    CScene::getInstance()->changeMode(eEditModeLogic);
     CMob* previousMob = view->m_activeMob;
     const int previousSlot = view->m_logicSlotIndex;
     CMob mob;
@@ -26275,6 +26292,40 @@ bool patrolAuthoringIntegrationCheck(CView* view)
         logic->createViewByIndex(0,-1);
         logic->patrolPoints()[2]->markAsDeleted(true);
         guard(unit);
+    }
+    // Exercise the actual Behavior combobox signal -> selection fanout -> undo command.
+    {
+        QUndoStack history;
+        QUndoStack* previousHistory=view->m_pUndoStack;
+        view->m_pUndoStack=&history;
+        mob.logicNodesUpdate();
+        mob.clearSelect(true);
+        first->setState(eDraw); second->setState(eSelect);
+        QJsonObject before=snapshot(second->logicAt(0));
+        QSharedPointer<IPropertyBase> value(new propUint(eObjParam_LOGIC_BEHAVIOUR,uint(eRadius)));
+        CComboStItem combo(value);
+        QObject::connect(&combo,&CComboStItem::onParamChange,view,&CView::onParamChange);
+        combo.setCurrentIndex(int(ePath));
+        bool result=second->logicAt(0)->isBehaviourPath() && second->logicAt(0)->patrolPoints().isEmpty()
+            && first->logicAt(0)->patrolPoints().size()==4 && history.count()==1;
+        history.undo(); result=result && snapshot(second->logicAt(0))==before;
+        history.redo(); result=result && second->logicAt(0)->patrolPoints().isEmpty();
+        history.undo(); history.clear();
+        first->setState(eDraw); second->setState(eDraw);
+        combo.setCurrentIndex(int(eRadius));
+        first->setState(eSelect); second->setState(eSelect);
+        combo.setCurrentIndex(int(ePath));
+        result=result && first->logicAt(0)->patrolPoints().isEmpty()
+            && second->logicAt(0)->patrolPoints().isEmpty() && history.count()==1;
+        history.undo(); history.clear();
+        value.reset(new propUint(eObjParam_LOGIC_BEHAVIOUR,uint(ePath)));
+        history.push(new CChangeLogicParam(view,second,value,nullptr,true));
+        result=result && second->logicAt(0)->isBehaviourPath() && second->logicAt(0)->patrolPoints().size()==4;
+        history.undo(); result=result && snapshot(second->logicAt(0))==before;
+        history.clear();
+        view->m_pUndoStack=previousHistory;
+        if(!result) { fprintf(stderr,"Behavior combobox regression failed\n");
+            view->m_activeMob=previousMob;view->m_logicSlotIndex=previousSlot;CScene::getInstance()->changeMode(previousMode);return false; }
     }
     const auto firstBefore = snapshot(first->logicAt(0));
     const auto secondBefore = snapshot(second->logicAt(0));
@@ -26349,5 +26400,6 @@ bool patrolAuthoringIntegrationCheck(CView* view)
     }
     view->m_activeMob=previousMob; view->m_logicSlotIndex=previousSlot;
     view->collectObjectTreeData(); view->viewParameters();
+    CScene::getInstance()->changeMode(previousMode);
     return passed;
 }

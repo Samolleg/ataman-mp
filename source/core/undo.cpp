@@ -291,7 +291,7 @@ void CSelectionCommand::redo()
         m_pView->restoreSelection(m_after);
 }
 
-CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent):
+CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPointer<IPropertyBase>& prop, QUndoCommand *parent, bool reusePatrol):
     QUndoCommand(parent)
   ,m_pView(pView)
   ,m_pMob(pView ? pView->currentMob() : nullptr)
@@ -304,6 +304,7 @@ CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPo
   ,m_auxPointId(-1)
   ,m_logicSlot(pView ? pView->logicSlotIndex() : 0)
   ,m_oldValueCaptured(false)
+  ,m_reusePatrol(reusePatrol)
 {
     m_newValue.reset(prop->clone());
     if(!m_pMob || !pNode)
@@ -358,6 +359,11 @@ CNode* CChangeLogicParam::resolveNode() const
     }
 }
 
+CChangeLogicParam::~CChangeLogicParam()
+{
+    qDeleteAll(m_savedPatrol);
+}
+
 void CChangeLogicParam::undo()
 {
     m_pNode = resolveNode();
@@ -366,11 +372,13 @@ void CChangeLogicParam::undo()
         ei::log(eLogWarning, "Logic property undo skipped because its target no longer exists");
         return;
     }
+    if(m_resetsPatrol) m_unitOwner->logicAt(m_logicSlot)->swapPatrolPoints(m_savedPatrol);
     if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
         unit->applyLogicParamAt(m_logicSlot, m_oldValue);
     else
         m_pNode->applyLogicParam(m_oldValue);
 
+    if(m_resetsPatrol) m_pMob->logicNodesUpdate();
     emit updateParam();
     if(m_newValue && (m_newValue->type() == eObjParam_LOGIC_USE
                       || m_newValue->type() == eObjParam_LOGIC_BEHAVIOUR))
@@ -393,12 +401,20 @@ void CChangeLogicParam::redo()
         else
             m_pNode->getLogicParam(m_oldValue, m_newValue->type());
         m_oldValueCaptured = !m_oldValue.isNull();
+        if(m_unitOwner && !m_reusePatrol && m_newValue->type()==eObjParam_LOGIC_BEHAVIOUR)
+        {
+            const auto* before=dynamic_cast<const propUint*>(m_oldValue.get());
+            const auto* after=dynamic_cast<const propUint*>(m_newValue.get());
+            m_resetsPatrol=before && after && before->value()!=uint(ePath) && after->value()==uint(ePath);
+        }
     }
+    if(m_resetsPatrol) m_unitOwner->logicAt(m_logicSlot)->swapPatrolPoints(m_savedPatrol);
     if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
         unit->applyLogicParamAt(m_logicSlot, m_newValue);
     else
         m_pNode->applyLogicParam(m_newValue);
 
+    if(m_resetsPatrol) m_pMob->logicNodesUpdate();
     emit updateParam();
     if(m_newValue && (m_newValue->type() == eObjParam_LOGIC_USE
                       || m_newValue->type() == eObjParam_LOGIC_BEHAVIOUR))

@@ -379,6 +379,7 @@ signals:
     void onBehaviorPatrolMove(CUnit* unit, int logicSlot, int from, int to);
     void onBehaviorLookMove(CUnit* unit, int logicSlot, int patrol, int from, int to);
     void onBehaviorPatrolAdd(CUnit* unit);
+    void onBehaviorPatrolResume(CUnit* unit, int slot);
     void onBehaviorLookAdd(CPatrolPoint* patrol);
     void onTrapActivationAreaMove(CMagicTrap* trap, int from, int to);
     void onTrapCastTargetMove(CMagicTrap* trap, int from, int to);

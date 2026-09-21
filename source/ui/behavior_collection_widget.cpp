@@ -365,12 +365,13 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
                         ++lookCount;
             }
 
-    QHBoxLayout* heading = new QHBoxLayout;
+    QVBoxLayout* heading = new QVBoxLayout;
     QLabel* title = new QLabel(tr("Patrol route — Logic %1 — %2 patrols — %3 looks")
                                .arg(logicSlot).arg(patrolCount).arg(lookCount), this);
     QFont titleFont = title->font();
     titleFont.setBold(true);
     title->setFont(titleFont);
+    title->setWordWrap(true);
     heading->addWidget(title, 1);
     const bool activeRoute = logic && logic->isBehaviourPath();
     title->setObjectName("behaviorRouteState");
@@ -383,9 +384,18 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
     addPatrol->setObjectName("behaviorAddPatrol");
     addPatrol->setToolTip(activeRoute ? tr("Append a patrol point to this Logic slot.")
         : tr("Start a new route and enable Patrol. Undo restores the saved route. "
-             "To use the saved points, change Behavior to Patrol instead."));
+             "To use the saved points, choose Use saved route."));
     connect(addPatrol, &QPushButton::clicked, this, &CBehaviorCollectionWidget::addPatrolPoint);
-    heading->addWidget(addPatrol);
+    QHBoxLayout* actions=new QHBoxLayout;
+    actions->addWidget(addPatrol);
+    if(!activeRoute && patrolCount>0) {
+        QPushButton* resume=new QPushButton(tr("Use saved route"),this);
+        resume->setObjectName("behaviorUseSavedPatrol");
+        resume->setToolTip(tr("Enable Patrol using the existing points without changing their positions."));
+        connect(resume,&QPushButton::clicked,this,&CBehaviorCollectionWidget::useSavedPatrol);
+        actions->addWidget(resume);
+    }
+    heading->addLayout(actions);
     layout->addLayout(heading);
 
     CBehaviorCollectionTree* collectionTree = new CBehaviorCollectionTree(this);
