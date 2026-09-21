@@ -195,6 +195,8 @@ private:
     CMob* mapTestStagingMob() const;
     void launchCurrentMapTest();
     void createViewportToolbars();
+    void setupCompactViewportTools();
+    void updateLandscapeToolButtons();
     void refreshMapTestContext(bool preserveWorkspaceState = false,
                                bool reloadCatalog = false);
     void populateEntranceCombo();
@@ -341,6 +343,7 @@ private:
     QWidget* m_logicSlotBar{nullptr};
     QComboBox* m_logicSlotCombo{nullptr};
     QToolButton* m_behaviorModeButton{nullptr};
+    QToolButton* m_groundPaintButton{nullptr};
     QDockWidget* m_loadedMapDock;
     QTreeWidget* m_loadedMapTree;
     bool m_loadedMapPanelRefreshPending{false};

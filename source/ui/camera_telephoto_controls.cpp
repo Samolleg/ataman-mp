@@ -3,6 +3,7 @@
 #include "camera_telephoto.h"
 
 #include <QCheckBox>
+#include <QPainter>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
@@ -22,6 +23,12 @@ CCameraTelephotoControls::CCameraTelephotoControls(QWidget* parent)
 
     m_enabled->setObjectName("telephotoCameraEnabled");
     m_enabled->setChecked(false);
+    m_enabled->setText(QString());
+    QPixmap camera(44,44);camera.setDevicePixelRatio(2);camera.fill(Qt::transparent);
+    {QPainter p(&camera);p.setRenderHint(QPainter::Antialiasing);
+     p.setPen(QPen(QColor("#c5deed"),1.6));p.setBrush(QColor("#477f98"));
+     p.drawRoundedRect(2,6,17,13,2,2);p.drawRect(6,3,8,3);p.drawEllipse(7,9,7,7);}
+    m_enabled->setIcon(QIcon(camera));m_enabled->setIconSize(QSize(22,22));
     const QString help = tr(
         "JamaisVu telephoto camera. Uses the selected fixed diagonal direction "
         "and a pitch of 35.264 degrees, moves the render eye back, and narrows "
@@ -59,9 +66,9 @@ CCameraTelephotoControls::CCameraTelephotoControls(QWidget* parent)
     m_direction->setAccessibleName(tr("Direction:"));
 
     layout->addWidget(m_enabled);
-    layout->addWidget(multiplierLabel);
+    multiplierLabel->hide();
     layout->addWidget(m_multiplier);
-    layout->addWidget(directionLabel);
+    directionLabel->hide();
     layout->addWidget(m_direction);
 
     connect(m_enabled, &QCheckBox::toggled,

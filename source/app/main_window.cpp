@@ -438,6 +438,26 @@ private:
     bool m_overlayTapered{false};
 };
 
+// Small vector-style icons rendered at 2x for high-DPI toolbars.
+QIcon viewportToolIcon(int kind)
+{
+    QPixmap pm(48,48);pm.setDevicePixelRatio(2);pm.fill(Qt::transparent);
+    QPainter p(&pm);p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(QColor("#c5deed"),1.7,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    p.setBrush(QColor("#477f98"));
+    switch(kind) {
+    case 0: p.drawPolygon(QPolygonF() << QPointF(2,20) << QPointF(9,5) << QPointF(13,13) << QPointF(17,8) << QPointF(22,20));break;
+    case 1: for(int y=3;y<20;y+=6)for(int x=3;x<20;x+=6)p.drawRect(x,y,5,5);
+        p.setPen(QPen(QColor("#edc36c"),3));p.drawLine(8,17,20,4);break;
+    case 2: p.drawRect(2,5,6,14);p.drawRect(16,5,6,14);p.setPen(QPen(QColor("#edc36c"),2));p.drawLine(7,12,18,12);p.drawLine(14,8,18,12);p.drawLine(14,16,18,12);break;
+    case 3: p.drawEllipse(9,2,6,6);p.drawRect(2,17,6,5);p.drawRect(16,17,6,5);p.drawLine(12,8,12,12);p.drawLine(5,12,19,12);p.drawLine(5,12,5,17);p.drawLine(19,12,19,17);break;
+    case 4: p.drawPolygon(QPolygonF()<<QPointF(3,8)<<QPointF(10,4)<<QPointF(17,8)<<QPointF(17,17)<<QPointF(10,21)<<QPointF(3,17));p.drawLine(3,8,10,12);p.drawLine(10,12,17,8);p.drawLine(10,12,10,21);p.setPen(QPen(QColor("#9de38c"),2));p.drawLine(19,2,19,10);p.drawLine(15,6,23,6);break;
+    case 5: p.drawRoundedRect(3,2,18,20,2,2);p.setPen(QPen(QColor("#edc36c"),1.7));p.drawPolyline(QPolygonF()<<QPointF(9,8)<<QPointF(6,12)<<QPointF(9,16));p.drawPolyline(QPolygonF()<<QPointF(15,8)<<QPointF(18,12)<<QPointF(15,16));break;
+    default: p.drawArc(QRectF(3,4,18,18),0,180*16);p.drawLine(12,13,18,7);p.drawEllipse(10,11,4,4);break;
+    }
+    return QIcon(pm);
+}
+
 QIcon behaviorModeIcon(bool active, const QColor& foreground)
 {
     QPixmap pixmap(28, 28);
@@ -1839,7 +1859,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->actionMap_parameters->setText(tr("MPR Settings..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
-    m_ui->tileBrushButton->setIconSize(QSize(32, 32));
+    m_ui->tileBrushButton->setIconSize(QSize(22, 22));
     m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
@@ -1909,6 +1929,7 @@ MainWindow::MainWindow(QWidget* parent) :
         }
     }, Qt::DirectConnection);
     initShortcuts();
+    setupCompactViewportTools();
     QAction* viewportOnlyAction = new QAction(tr("Maximize viewport"), this);
     viewportOnlyAction->setObjectName("actionViewportOnly");
     viewportOnlyAction->setShortcut(QKeySequence(Qt::Key_F11));
@@ -2073,7 +2094,8 @@ MainWindow::MainWindow(QWidget* parent) :
         if(m_ui->tileBrushButton)
         {
             const QSignalBlocker blocker(m_ui->tileBrushButton);
-            m_ui->tileBrushButton->setChecked(visible);
+            m_ui->tileBrushButton->setChecked(visible && m_landscapeTools->editMode()==ELandscapeEditMode::Sculpt);
+            updateLandscapeToolButtons();
         }
         if(m_ui->selectButton) m_ui->selectButton->setVisible(!visible);
         if(m_ui->moveButton) m_ui->moveButton->setVisible(!visible);
@@ -3578,6 +3600,51 @@ void MainWindow::initShortcuts()
     updateBehaviorModeUi();
 }
 
+void MainWindow::updateLandscapeToolButtons()
+{
+    if(!m_landscapeTools || !m_groundPaintButton) return;
+    const bool visible=m_landscapeToolsDock->isVisible();
+    const QSignalBlocker sculptBlock(m_ui->tileBrushButton),paintBlock(m_groundPaintButton);
+    m_ui->tileBrushButton->setChecked(visible && m_landscapeTools->editMode()==ELandscapeEditMode::Sculpt);
+    m_groundPaintButton->setChecked(visible && m_landscapeTools->editMode()==ELandscapeEditMode::TilePaint);
+    m_groundPaintButton->setEnabled(m_ui->tileBrushButton->isEnabled());
+}
+
+void MainWindow::setupCompactViewportTools()
+{
+    QWidget* bar=findChild<QWidget*>("viewportOperationToolbar");
+    auto* layout=qobject_cast<QHBoxLayout*>(bar->layout());
+    layout->setSpacing(2);
+    m_ui->tileBrushButton->setIcon(viewportToolIcon(0));
+    m_ui->tileBrushButton->setToolTip(QString::fromUtf8("Правка рельефа"));
+    m_ui->tileBrushButton->setAccessibleName(m_ui->tileBrushButton->toolTip());
+    const auto button=[&](const char* name,const QString& title,int icon,int index) {
+        auto* b=new QToolButton(bar);b->setObjectName(name);b->setIcon(viewportToolIcon(icon));
+        b->setText(title);b->setToolTip(title);b->setAccessibleName(title);
+        b->setToolButtonStyle(Qt::ToolButtonIconOnly);b->setAutoRaise(true);
+        b->setIconSize(QSize(22,22));b->setFixedSize(30,30);layout->insertWidget(index,b);return b;
+    };
+    m_groundPaintButton=button("groundPaintToolbarButton",QString::fromUtf8("Рисовать тайлы суши"),1,5);
+    m_groundPaintButton->setCheckable(true);
+    connect(m_groundPaintButton,&QToolButton::clicked,this,[this]() {
+        if(m_landscapeToolsDock->isVisible() && m_landscapeTools->editMode()==ELandscapeEditMode::TilePaint) hideLandscapeTools();
+        else {m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint);showLandscapeTools();}
+        updateLandscapeToolButtons();
+    });
+    connect(m_landscapeTools,&CLandscapeTools::editingStateChanged,this,&MainWindow::updateLandscapeToolButtons);
+    connect(m_landscapeToolsDock,&QDockWidget::visibilityChanged,this,&MainWindow::updateLandscapeToolButtons);
+    connect(m_pView,&CView::loadedMapStateChanged,this,&MainWindow::updateLandscapeToolButtons);
+    auto* travel=button("travelToolbarButton",QString::fromUtf8("Появления и переходы"),2,7);
+    m_travelDock->toggleViewAction()->setIcon(viewportToolIcon(2));travel->setDefaultAction(m_travelDock->toggleViewAction());
+    auto* scenario=button("scenarioToolbarButton",QString::fromUtf8("Сценарий карты"),3,8);
+    auto* scenarioAction=findChild<QDockWidget*>("mapScenarioDock")->toggleViewAction();scenarioAction->setIcon(viewportToolIcon(3));scenario->setDefaultAction(scenarioAction);
+    auto* create=button("createObjectToolbarButton",QString::fromUtf8("Создать объект"),4,9);
+    m_ui->actionCreate_new_object->setIcon(viewportToolIcon(4));create->setDefaultAction(m_ui->actionCreate_new_object);
+    auto* script=button("mobScriptToolbarButton",QString::fromUtf8("Открыть скрипт MOB"),5,10);
+    m_ui->actionOpen_MOB_Script->setIcon(viewportToolIcon(5));script->setDefaultAction(m_ui->actionOpen_MOB_Script);
+    updateLandscapeToolButtons();
+}
+
 void MainWindow::createViewportToolbars()
 {
     QWidget* testBar = new QWidget(m_ui->workspaceContainer);
@@ -3642,7 +3709,10 @@ void MainWindow::createViewportToolbars()
         m_operationActions.insert(operation.type, action);
         operation.button->setCheckable(true);
         operation.button->setAutoRaise(true);
-        operation.button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        operation.button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        operation.button->setIconSize(QSize(22,22));
+        operation.button->setFixedSize(30,30);
+        operation.button->setAccessibleName(tr(operation.text));
         operation.button->setText(tr(operation.text));
         operationLayout->addWidget(operation.button);
         connect(action, &QAction::triggered, this, [this, operation]()
@@ -3692,19 +3762,24 @@ void MainWindow::createViewportToolbars()
     m_behaviorModeButton->setObjectName("behaviorModeButton");
     m_behaviorModeButton->setCheckable(true);
     m_behaviorModeButton->setAutoRaise(true);
-    m_behaviorModeButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_behaviorModeButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_behaviorModeButton->setIconSize(QSize(22,22));
+    m_behaviorModeButton->setFixedSize(30,30);
     operationLayout->addWidget(m_behaviorModeButton);
     connect(m_behaviorModeButton, &QToolButton::clicked,
             m_ui->actionChange_mod_e, &QAction::trigger);
     updateBehaviorModeUi();
     operationLayout->addStretch(1);
-    operationLayout->addWidget(new QLabel(tr("Camera Speed:"), operationBar));
+    QLabel* cameraIcon=new QLabel(operationBar);
+    cameraIcon->setPixmap(viewportToolIcon(6).pixmap(22,22));
+    cameraIcon->setToolTip(tr("Camera Speed:"));cameraIcon->setAccessibleName(tr("Camera Speed:"));
+    operationLayout->addWidget(cameraIcon);
     m_cameraSpeedSlider = new QSlider(Qt::Horizontal, operationBar);
     m_cameraSpeedSlider->setObjectName("cameraSpeedSlider");
     m_cameraSpeedSlider->setRange(1, 100);
     m_cameraSpeedSlider->setSingleStep(1);
     m_cameraSpeedSlider->setPageStep(5);
-    m_cameraSpeedSlider->setFixedWidth(150);
+    m_cameraSpeedSlider->setFixedWidth(90);
     m_cameraSpeedSlider->setToolTip(tr(
         "Camera movement and zoom speed. Hold the configured modifier (Ctrl by default) "
         "and use the mouse wheel over the viewport to adjust it."));
@@ -6748,6 +6823,7 @@ void MainWindow::updateOperationAvailability(bool hasSelection)
     if(m_convertWorldObjectToLeverAction)
         m_convertWorldObjectToLeverAction->setEnabled(
             m_pView && m_pView->canConvertSelectedWorldObjectToLever());
+    updateLandscapeToolButtons();
 }
 
 void MainWindow::updateLoadedMapPanel()
@@ -8935,8 +9011,13 @@ void MainWindow::on_actionMap_parameters_triggered()
 
 void MainWindow::on_tileBrushButton_clicked()
 {
-    if(QAction* action = m_operationActions.value(EButtonOpTilebrush, nullptr))
-        action->trigger();
+    if(m_landscapeToolsDock->isVisible() && m_landscapeTools->editMode()==ELandscapeEditMode::Sculpt)
+        hideLandscapeTools();
+    else {
+        m_landscapeTools->activateMode(ELandscapeEditMode::Sculpt);
+        showLandscapeTools();
+    }
+    updateLandscapeToolButtons();
 }
 
 

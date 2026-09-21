@@ -3161,6 +3161,30 @@ int runHeadlessCommand(QApplication& app)
             && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
                 == QStringLiteral("Human Test");
         const bool travelEditorProductionRouteWorks=travelEditorIntegrationCheck(productionWindow);
+        bool compactToolbarWorks=true;
+        QWidget* operationBar=productionWindow->findChild<QWidget*>("viewportOperationToolbar");
+        const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
+            "groundPaintToolbarButton","behaviorModeButton","travelToolbarButton","scenarioToolbarButton",
+            "createObjectToolbarButton","mobScriptToolbarButton"};
+        for(const auto& name:toolbarNames) {
+            auto* button=productionWindow->findChild<QToolButton*>(name);
+            compactToolbarWorks=compactToolbarWorks && button && !button->icon().isNull()
+                && button->toolButtonStyle()==Qt::ToolButtonIconOnly && button->width()<=32
+                && !button->toolTip().isEmpty() && !button->accessibleName().isEmpty();
+        }
+        auto* groundButton=productionWindow->findChild<QToolButton*>("groundPaintToolbarButton");
+        auto* sculptButton=productionWindow->findChild<QToolButton*>("tileBrushButton");
+        auto* productionLandscape=productionWindow->findChild<CLandscapeTools*>();
+        if(groundButton && sculptButton && productionLandscape) {
+            groundButton->setEnabled(true);groundButton->click();
+            compactToolbarWorks=compactToolbarWorks && productionLandscape->editMode()==ELandscapeEditMode::TilePaint;
+            sculptButton->setEnabled(true);sculptButton->click();
+            compactToolbarWorks=compactToolbarWorks && productionLandscape->editMode()==ELandscapeEditMode::Sculpt;
+        } else compactToolbarWorks=false;
+        if(operationBar && !qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS").isEmpty()) {
+            operationBar->resize(operationBar->sizeHint());
+            operationBar->grab().save(QDir(qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS")).filePath("compact-toolbar.png"));
+        }
         CPreview detachedPreview(nullptr, productionWindow->view());
         detachedPreview.resize(160,120);
         detachedPreview.show();
@@ -3217,7 +3241,7 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && databasePrototypeMenuEmissionWorks
-                && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
+                && compactToolbarWorks && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
                 && detachedPreviewSharesViewportContext
                 && itemConstructorCloseReopenSafe
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -3368,6 +3392,7 @@ int runHeadlessCommand(QApplication& app)
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
                << " travelEditorProductionRouteWorks=" << travelEditorProductionRouteWorks
+               << " compactToolbarWorks=" << compactToolbarWorks
                << " databasePrototypeMainWindowRouteWorks="
                << databasePrototypeMainWindowRouteWorks
                << " detachedPreviewSharesViewportContext="
