@@ -50,5 +50,23 @@ Native-тест проверяет команды и модель, не восп
 
 ## Передача
 
-Пакет и постоянная установка: проверка готовится. Единственный пользовательский
-путь остаётся artifacts/EI-Mapper-Ataman-2-first-test. ZIP не создаётся.
+Источник: b50a79f3283ce79280d6bbd3bfce81d4ac4cdf86.
+Пакет: C:/GOG Games/maped/ei-mapper-ataman/build-staging-46-patrol.
+Постоянная установка: C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test.
+
+- Finalizer и distribution validator PASS. Независимо проверены синтаксис,
+  уникальность, границы путей, все101 SHA-256 и полное покрытие файлов.
+- Staged --version: EI Mapper Endurance Edition46; EXE совпадает с проверенной
+  сборкой. SHA-256: 9cc171d6d65246fb32cfec4e151d30fcfbefdb5687f1a00dc3af46485e608ddd.
+- Дополнительный запуск raw --version без QT_PLUGIN_PATH не завершился;
+  остановлен только собственный probe32116 из build-release-46-patrol.
+  С настроенным Qt-окружением raw --version PASS:46 (fresh-version.txt).
+- Перед установкой процессов постоянной установки не было. Установка PASS:
+  101 managed-файл проверен;6 заменены,0 удалены;17760 пользовательских файлов
+  сохранены по SHA-256. VERSION46 и установленный EXE проверены повторно.
+- install.log содержит старое число45 в текстовом шаблоне сообщения PASS;
+  проверка входного VERSION уже требовала46. Фактические VERSION/EXE и
+  независимый package-check подтверждают46; шаблон инженерного скрипта поправлен.
+- Сохранён rollback45 в build-rollback-patrol46. Предыдущий rollback44 в
+  build-rollback-toolbar45 проверен по манифесту и удалён согласно договору.
+- ZIP не создавался; редактор в постоянной установке не запускался.
