@@ -441,8 +441,8 @@ private:
 // Small vector-style icons rendered at 2x for high-DPI toolbars.
 QIcon viewportToolIcon(int kind)
 {
-    QPixmap pm(48,48);pm.setDevicePixelRatio(2);pm.fill(Qt::transparent);
-    QPainter p(&pm);p.setRenderHint(QPainter::Antialiasing);
+    QPixmap pm(96,96);pm.setDevicePixelRatio(2);pm.fill(Qt::transparent);
+    QPainter p(&pm);p.scale(2,2);p.setRenderHint(QPainter::Antialiasing);
     p.setPen(QPen(QColor("#c5deed"),1.7,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
     p.setBrush(QColor("#477f98"));
     switch(kind) {
@@ -460,9 +460,11 @@ QIcon viewportToolIcon(int kind)
 
 QIcon behaviorModeIcon(bool active, const QColor& foreground)
 {
-    QPixmap pixmap(28, 28);
+    QPixmap pixmap(112, 112);
+    pixmap.setDevicePixelRatio(2);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
+    painter.scale(2, 2);
     painter.setRenderHint(QPainter::Antialiasing, true);
     const QColor color = active ? QColor(52, 152, 219) : foreground;
     painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
@@ -1859,7 +1861,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->actionMap_parameters->setText(tr("MPR Settings..."));
     m_ui->tileBrushButton->setText(tr("Landscape Tools"));
     m_ui->tileBrushButton->setIcon(*ei::icon("landscape.ico"));
-    m_ui->tileBrushButton->setIconSize(QSize(22, 22));
+    m_ui->tileBrushButton->setIconSize(QSize(44, 44));
     m_ui->tileBrushButton->setToolTip(tr("Landscape tools (L)"));
     connect(m_pView, &CView::mobStateChanged, this, [this]()
     {
@@ -3622,7 +3624,7 @@ void MainWindow::setupCompactViewportTools()
         auto* b=new QToolButton(bar);b->setObjectName(name);b->setIcon(viewportToolIcon(icon));
         b->setText(title);b->setToolTip(title);b->setAccessibleName(title);
         b->setToolButtonStyle(Qt::ToolButtonIconOnly);b->setAutoRaise(true);
-        b->setIconSize(QSize(22,22));b->setFixedSize(30,30);layout->insertWidget(index,b);return b;
+        b->setIconSize(QSize(44,44));b->setFixedSize(60,60);layout->insertWidget(index,b);return b;
     };
     m_groundPaintButton=button("groundPaintToolbarButton",QString::fromUtf8("Рисовать тайлы суши"),1,5);
     m_groundPaintButton->setCheckable(true);
@@ -3710,8 +3712,8 @@ void MainWindow::createViewportToolbars()
         operation.button->setCheckable(true);
         operation.button->setAutoRaise(true);
         operation.button->setToolButtonStyle(Qt::ToolButtonIconOnly);
-        operation.button->setIconSize(QSize(22,22));
-        operation.button->setFixedSize(30,30);
+        operation.button->setIconSize(QSize(44,44));
+        operation.button->setFixedSize(60,60);
         operation.button->setAccessibleName(tr(operation.text));
         operation.button->setText(tr(operation.text));
         operationLayout->addWidget(operation.button);
@@ -3763,8 +3765,8 @@ void MainWindow::createViewportToolbars()
     m_behaviorModeButton->setCheckable(true);
     m_behaviorModeButton->setAutoRaise(true);
     m_behaviorModeButton->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_behaviorModeButton->setIconSize(QSize(22,22));
-    m_behaviorModeButton->setFixedSize(30,30);
+    m_behaviorModeButton->setIconSize(QSize(44,44));
+    m_behaviorModeButton->setFixedSize(60,60);
     operationLayout->addWidget(m_behaviorModeButton);
     connect(m_behaviorModeButton, &QToolButton::clicked,
             m_ui->actionChange_mod_e, &QAction::trigger);
@@ -6787,6 +6789,12 @@ void MainWindow::connectUiButtons()
     CButtonConnector::getInstance()->addButton(EButtonOpMove, m_ui->moveButton);
     CButtonConnector::getInstance()->addButton(EButtonOpRotate, m_ui->rotateButton);
     CButtonConnector::getInstance()->addButton(EButtonOpScale, m_ui->scaleButton);
+    // Connector assigns the legacy artwork; toolbar geometry owns its display size.
+    for(auto* button : {m_ui->selectButton,m_ui->moveButton,m_ui->rotateButton,m_ui->scaleButton}) {
+        button->setIcon(QIcon(button->icon().pixmap(88,88)
+            .scaled(88,88,Qt::KeepAspectRatio,Qt::SmoothTransformation)));
+        button->setIconSize(QSize(44,44));
+    }
     // Landscape Tools is a persistent dock/mode toggle, not an exclusive
     // transform operation. Its checked state mirrors dock visibility.
     connect(m_pView, &CView::selectionStateChanged,

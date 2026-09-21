@@ -3170,7 +3170,8 @@ int runHeadlessCommand(QApplication& app)
         for(const auto& name:toolbarNames) {
             auto* button=productionWindow->findChild<QToolButton*>(name);
             compactToolbarWorks=compactToolbarWorks && button && !button->icon().isNull()
-                && button->toolButtonStyle()==Qt::ToolButtonIconOnly && button->width()<=32
+                && button->toolButtonStyle()==Qt::ToolButtonIconOnly && button->size()==QSize(60,60)
+                && button->iconSize()==QSize(44,44)
                 && !button->toolTip().isEmpty() && !button->accessibleName().isEmpty();
         }
         auto* groundButton=productionWindow->findChild<QToolButton*>("groundPaintToolbarButton");
