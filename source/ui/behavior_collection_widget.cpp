@@ -372,8 +372,18 @@ CBehaviorCollectionWidget::CBehaviorCollectionWidget(
     titleFont.setBold(true);
     title->setFont(titleFont);
     heading->addWidget(title, 1);
-    QPushButton* addPatrol = new QPushButton(tr("+ Add patrol"), this);
-    addPatrol->setToolTip(tr("Append a patrol point to this Logic slot."));
+    const bool activeRoute = logic && logic->isBehaviourPath();
+    title->setObjectName("behaviorRouteState");
+    title->setProperty("patrolRouteActive", activeRoute);
+    if(!activeRoute)
+        title->setText(tr("Inactive saved route — Logic %1 — %2 patrols — %3 looks")
+                       .arg(logicSlot).arg(patrolCount).arg(lookCount));
+    QPushButton* addPatrol = new QPushButton(activeRoute ? tr("+ Add patrol")
+                                                       : tr("+ New patrol"), this);
+    addPatrol->setObjectName("behaviorAddPatrol");
+    addPatrol->setToolTip(activeRoute ? tr("Append a patrol point to this Logic slot.")
+        : tr("Start a new route and enable Patrol. Undo restores the saved route. "
+             "To use the saved points, change Behavior to Patrol instead."));
     connect(addPatrol, &QPushButton::clicked, this, &CBehaviorCollectionWidget::addPatrolPoint);
     heading->addWidget(addPatrol);
     layout->addLayout(heading);

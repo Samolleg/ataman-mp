@@ -63,6 +63,7 @@
 #include "objects/worldobj.h"
 #include "objects/lever.h"
 #include "objects/unit.h"
+#include "ui/behavior_collection_widget.h"
 #include "objects/magictrap.h"
 #include "mob\mob_parameters.h"
 #include "layout_components/progressview.h"
@@ -2298,42 +2299,28 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             this, [this](CUnit* unit)
     {
         CMob* mob = ownerMob(unit);
-        const uint unitId = unit ? unit->mapId() : 0;
-        QTimer::singleShot(0, this, [this, mob, unitId]()
+        const QPointer<CUnit> owner(unit);
+        const int logicSlot = m_logicSlotIndex;
+        QTimer::singleShot(0, this, [this, mob, owner, logicSlot]()
         {
             cancelPendingOperation();
-            CUnit* owner = mob && m_aMob.contains(mob)
-                ? dynamic_cast<CUnit*>(mob->nodeByMapId(unitId)) : nullptr;
-            CPatrolPoint* lastVisiblePatrol = nullptr;
-            CLogic* logic = owner ? owner->logicAt(m_logicSlotIndex) : nullptr;
-            if(logic)
-                for(CPatrolPoint* patrol : logic->patrolPoints())
-                    if(patrol && !patrol->isMarkDeleted())
-                        lastVisiblePatrol = patrol;
-            CNode* appendAfter = lastVisiblePatrol
-                ? static_cast<CNode*>(lastVisiblePatrol)
-                : static_cast<CNode*>(owner);
-            if(appendAfter && selectNode(appendAfter, false))
-                addLogicPoint(false);
+            if(!owner || !mob || !m_aMob.contains(mob)
+                || !mob->nodes().contains(owner.data()) || logicSlot != m_logicSlotIndex)
+                return;
+            if(selectNode(owner.data(), false)) addLogicPoint(false);
         });
     });
     connect(m_tableManager.get(), &CTableManager::onBehaviorLookAdd,
             this, [this](CPatrolPoint* patrol)
     {
         CMob* mob = ownerMob(patrol);
-        int unitId = -1;
-        int patrolId = -1;
-        if(mob && patrol)
-            mob->getPatrolHash(unitId, patrolId, patrol);
+        const QPointer<CPatrolPoint> point(patrol);
         const int logicSlot = m_logicSlotIndex;
-        QTimer::singleShot(0, this, [this, mob, unitId, patrolId, logicSlot]()
+        QTimer::singleShot(0, this, [this, mob, point, logicSlot]()
         {
             cancelPendingOperation();
-            CUnit* unit = mob && m_aMob.contains(mob) && unitId >= 0
-                ? dynamic_cast<CUnit*>(mob->nodeByMapId(uint(unitId))) : nullptr;
-            CPatrolPoint* resolvedPatrol = unit && patrolId >= 0
-                ? unit->patrolByIndex(logicSlot, patrolId) : nullptr;
-            if(resolvedPatrol && selectNode(resolvedPatrol, false))
+            if(point && mob && m_aMob.contains(mob) && logicSlot == m_logicSlotIndex
+                && mob->logicNodes().contains(point.data()) && selectNode(point.data(), false))
                 addLogicPoint(true);
         });
     });
@@ -25882,7 +25869,7 @@ void CView::addLogicPoint(bool bLookPoint)
             m_activeMob->getViewHash(unitId, patrolId, viewId, pLook);
             QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, pNode, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
             createdForTarget = true;
@@ -25902,7 +25889,7 @@ void CView::addLogicPoint(bool bLookPoint)
                 hash = QString("%1.%2").arg(unitId).arg(patrolId); // for creating patrol point
 
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, pNode, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
             createdForTarget = true;
@@ -25927,7 +25914,7 @@ void CView::addLogicPoint(bool bLookPoint)
                 const QString hash = QString("%1.%2.%3")
                     .arg(unitId).arg(patrolId).arg(-1);
                 beginPlacement();
-                m_pUndoStack->push(new CCreatePatrolCommand(this, hash, targets));
+                m_pUndoStack->push(new CCreatePatrolCommand(this, pNode, hash, targets));
                 bChangeToMove = true;
                 createdForTarget = true;
                 break;
@@ -25935,7 +25922,7 @@ void CView::addLogicPoint(bool bLookPoint)
 
             QString hash = QString("%1.%2").arg(pNode->mapId()).arg(-1);
             beginPlacement();
-            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, hash, targets);
+            CCreatePatrolCommand* pUndo = new CCreatePatrolCommand(this, pNode, hash, targets);
             m_pUndoStack->push(pUndo);
             bChangeToMove = true;
             createdForTarget = true;
@@ -26262,4 +26249,105 @@ int CView::renameActiveMobUnits(QMap<QString, QString> &mapName)
     }
     ei::log(ELogMessageType::eLogInfo, "processing map finished:" + m_activeMob->mobName());
     return n;
+}
+
+// Synthetic production-command regression. Never reads or writes game resources.
+bool patrolAuthoringIntegrationCheck(CView* view)
+{
+    QSignalBlocker blocked(view);
+    CMob* previousMob = view->m_activeMob;
+    const int previousSlot = view->m_logicSlotIndex;
+    CMob mob;
+    CUnit* first = new CUnit;
+    CUnit* second = new CUnit;
+    first->setMapId(1398); second->setMapId(1398);
+    mob.nodes().append(first); mob.nodes().append(second);
+    view->m_activeMob = &mob; view->m_logicSlotIndex = 0;
+    const auto snapshot = [](CLogic* logic) { QJsonObject data; logic->serializeJson(data); return data; };
+    const auto guard = [](CUnit* unit) {
+        QSharedPointer<IPropertyBase> value(new propUint(eObjParam_LOGIC_BEHAVIOUR, uint(eRadius)));
+        unit->applyLogicParamAt(0, value);
+    };
+    for(CUnit* unit : {first, second}) {
+        CLogic* logic = unit->logicAt(0);
+        logic->setGuardPlacement(QVector3D(unit == first ? 10 : 90, 20, 3));
+        for(int i=0;i<4;++i) logic->createPatrolByIndex(i-1);
+        logic->createViewByIndex(0,-1);
+        logic->patrolPoints()[2]->markAsDeleted(true);
+        guard(unit);
+    }
+    const auto firstBefore = snapshot(first->logicAt(0));
+    const auto secondBefore = snapshot(second->logicAt(0));
+    const auto otherSlot = snapshot(second->logicAt(1));
+    CPatrolPoint* retained = second->logicAt(0)->patrolPoints()[0];
+    bool passed = true;
+    const auto check = [&passed](bool condition, const char* label) {
+        if(!condition) fprintf(stderr, "Patrol regression failed: %s\n", label);
+        passed = passed && condition;
+    };
+    {
+        CBehaviorCollectionWidget inactive(second,0);
+        QLabel* label=inactive.findChild<QLabel*>("behaviorRouteState");
+        check(label && !label->property("patrolRouteActive").toBool(), "inactive label");
+    }
+    {
+        QUndoStack history;
+        // Both owners have the same ID; the second must not mutate the first.
+        history.push(new CCreatePatrolCommand(view,second,"1398.-1",{second}));
+        check(snapshot(first->logicAt(0))==firstBefore
+            && second->logicAt(0)->patrolPoints().size()==1
+            && second->logicAt(0)->isBehaviourPath(), "case 1");
+        CPatrolPoint* created=second->logicAt(0)->patrolPoints().value(0);
+        if(created) {
+            const QVector3D destination(92,24,0);
+            QSharedPointer<IPropertyBase> pos(new prop3D(eObjParam_POSITION,destination));
+            history.push(new CChangeLogicParam(view,created,pos));
+            if(created->position()!=destination || snapshot(first->logicAt(0))!=firstBefore)
+                fprintf(stderr,"Patrol moved to %f,%f,%f; first unchanged=%d\n",
+                    created->position().x(),created->position().y(),created->position().z(),
+                    int(snapshot(first->logicAt(0))==firstBefore));
+            check(created->position()==destination && snapshot(first->logicAt(0))==firstBefore, "case 2");
+        } else passed=false;
+        history.setIndex(0);
+        check(snapshot(second->logicAt(0))==secondBefore
+            && second->logicAt(0)->patrolPoints().value(0)==retained, "case 3");
+        history.setIndex(history.count());
+        check(second->logicAt(0)->patrolPoints().size()==1
+            && second->logicAt(0)->patrolPoints()[0]->position()==QVector3D(92,24,0), "case 4");
+        // Patrol Z is projected by the existing path recalculation (zero without terrain).
+        const auto fresh=snapshot(second->logicAt(0));
+        CPatrolPoint* active=second->logicAt(0)->patrolPoints()[0];
+        history.push(new CCreatePatrolCommand(view,active,"1398.0.-1",{active}));
+        check(active->lookPoint().size()==1 && snapshot(first->logicAt(0))==firstBefore,
+              "look owner with duplicate ID");
+        history.undo();
+        check(snapshot(second->logicAt(0))==fresh,"look undo");
+
+        history.push(new CCreatePatrolCommand(view,second,"1398.-1",{second}));
+        check(second->logicAt(0)->patrolPoints().size()==2
+            && second->logicAt(0)->patrolPoints()[0]->position()==QVector3D(92,24,0), "case 5");
+        history.undo(); check(snapshot(second->logicAt(0))==fresh, "case 6");
+        history.setIndex(0); history.clear();
+        // Multi-owner creation is one undoable action; switching the UI slot cannot retarget Undo.
+        history.beginMacro("two creatures");
+        history.push(new CCreatePatrolCommand(view,first,"1398.-1",{first,second}));
+        history.push(new CCreatePatrolCommand(view,second,"1398.-1",{first,second}));
+        history.endMacro();
+        check(first->logicAt(0)->patrolPoints().size()==1
+            && second->logicAt(0)->patrolPoints().size()==1, "case 7");
+        view->m_logicSlotIndex=1;
+        history.undo();
+        check(snapshot(first->logicAt(0))==firstBefore
+            && snapshot(second->logicAt(0))==secondBefore && snapshot(second->logicAt(1))==otherSlot, "case 8");
+        history.redo();
+        QJsonObject saved=snapshot(second->logicAt(0));
+        CLogic loaded(second); loaded.deSerializeJson(saved);
+        check(snapshot(&loaded)==saved, "case 9");
+        // Clearing applied history releases only the detached old route.
+        history.clear();
+        check(second->logicAt(0)->patrolPoints().size()==1, "case 10");
+    }
+    view->m_activeMob=previousMob; view->m_logicSlotIndex=previousSlot;
+    view->collectObjectTreeData(); view->viewParameters();
+    return passed;
 }

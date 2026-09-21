@@ -168,6 +168,7 @@ class CView : public QGLWidget
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
+    friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
 
 public:
@@ -1297,5 +1298,7 @@ private:
     QString m_sessionWorkspaceDisplayName;
     QString m_sessionWorkspaceMapZoneId;
 };
+
+bool patrolAuthoringIntegrationCheck(CView* view);
 
 #endif // MYGLWIDGET_H

@@ -298,6 +298,7 @@ CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPo
   ,m_pNode(pNode)
   ,m_nodeType(pNode ? pNode->nodeType() : eUnknown)
   ,m_ownerMapId(pNode ? pNode->mapId() : 0)
+  ,m_unitOwner(nullptr)
   ,m_patrolId(-1)
   ,m_viewId(-1)
   ,m_auxPointId(-1)
@@ -307,18 +308,20 @@ CChangeLogicParam::CChangeLogicParam(CView* pView, CNode* pNode, const QSharedPo
     m_newValue.reset(prop->clone());
     if(!m_pMob || !pNode)
         return;
-    if(m_nodeType == ePatrolPoint)
+    for(CNode* candidate : m_pMob->nodes())
     {
-        int owner = 0;
-        m_pMob->getPatrolHash(owner, m_patrolId, static_cast<CPatrolPoint*>(pNode));
-        m_ownerMapId = uint(owner);
+        CUnit* unit = dynamic_cast<CUnit*>(candidate);
+        CLogic* logic = unit ? unit->logicAt(m_logicSlot) : nullptr;
+        if(logic && (pNode == unit || logic->owns(dynamic_cast<CPatrolPoint*>(pNode))
+                                  || logic->owns(dynamic_cast<CLookPoint*>(pNode))))
+        { m_unitOwner = unit; break; }
     }
-    else if(m_nodeType == eLookPoint)
-    {
-        int owner = 0;
-        m_pMob->getViewHash(owner, m_patrolId, m_viewId, static_cast<CLookPoint*>(pNode));
-        m_ownerMapId = uint(owner);
-    }
+    if(m_nodeType == ePatrolPoint && m_unitOwner)
+        m_patrolId = m_unitOwner->logicAt(m_logicSlot)->patrolPoints().indexOf(
+            static_cast<CPatrolPoint*>(pNode));
+    else if(m_nodeType == eLookPoint && m_unitOwner)
+        m_unitOwner->logicAt(m_logicSlot)->owns(static_cast<CLookPoint*>(pNode),
+                                              &m_patrolId, &m_viewId);
     else if(m_nodeType == eTrapActZone)
     {
         int owner = 0;
@@ -337,10 +340,18 @@ CNode* CChangeLogicParam::resolveNode() const
 {
     if(!m_pMob)
         return nullptr;
+    if(m_nodeType == eUnit) return m_unitOwner;
+    if(m_nodeType == ePatrolPoint || m_nodeType == eLookPoint)
+    {
+        CLogic* logic = m_unitOwner ? m_unitOwner->logicAt(m_logicSlot) : nullptr;
+        if(!logic || m_patrolId < 0 || m_patrolId >= logic->patrolPoints().size()) return nullptr;
+        CPatrolPoint* patrol = logic->patrolPoints()[m_patrolId];
+        if(m_nodeType == ePatrolPoint) return patrol;
+        return m_viewId >= 0 && m_viewId < patrol->lookPoint().size()
+            ? patrol->lookPoint()[m_viewId] : nullptr;
+    }
     switch(m_nodeType)
     {
-    case ePatrolPoint: return m_pMob->patrolPointById(int(m_ownerMapId), m_patrolId, m_logicSlot);
-    case eLookPoint: return m_pMob->viewPointById(int(m_ownerMapId), m_patrolId, m_viewId, m_logicSlot);
     case eTrapActZone: return m_pMob->actZoneById(int(m_ownerMapId), m_auxPointId);
     case eTrapCastPoint: return m_pMob->trapCastById(int(m_ownerMapId), m_auxPointId);
     default: return m_pMob->nodeByMapId(m_ownerMapId);
@@ -466,7 +477,7 @@ void CChangeMobScriptCommand::redo()
 }
 
 CCreatePatrolCommand::CCreatePatrolCommand(
-    CView* pView, QString pointHash, const QList<CNode*>& originalSelection,
+    CView* pView, CNode* source, QString pointHash, const QList<CNode*>& originalSelection,
     QUndoCommand *parent):
     QUndoCommand(parent)
   ,m_pView(pView)
@@ -478,35 +489,54 @@ CCreatePatrolCommand::CCreatePatrolCommand(
   ,m_switchesToPath(false)
   ,m_originalSelection(originalSelection)
 {
-    const QStringList parts = pointHash.split(".");
-    if(m_mob && parts.size() == 2 && parts[1].toInt() == -1)
-    {
-        m_firstPointUnit = dynamic_cast<CUnit*>(m_mob->nodeByMapId(parts[0].toUInt()));
-        if(m_firstPointUnit)
+    // Map IDs are not unique in every MOB. Bind to the selected object itself.
+    if(m_mob)
+        for(CNode* candidate : m_mob->nodes())
         {
-            QSharedPointer<IPropertyBase> behaviour;
-            m_firstPointUnit->getLogicParamAt(m_logicSlot, behaviour, eObjParam_LOGIC_BEHAVIOUR);
-            const propUint* value = dynamic_cast<const propUint*>(behaviour.get());
-            if(value)
+            CUnit* unit = dynamic_cast<CUnit*>(candidate);
+            CLogic* logic = unit ? unit->logicAt(m_logicSlot) : nullptr;
+            if(logic && (source == unit
+                || logic->owns(dynamic_cast<CPatrolPoint*>(source))
+                || logic->owns(dynamic_cast<CLookPoint*>(source))))
             {
-                m_previousBehaviour = value->value();
-                m_switchesToPath = m_previousBehaviour != uint(EBehaviourType::ePath);
+                m_firstPointUnit = unit;
+                break;
             }
         }
+    if(!m_firstPointUnit) { setObsolete(true); return; }
+    CLogic* logic = m_firstPointUnit->logicAt(m_logicSlot);
+    QStringList parts = pointHash.split(".");
+    if(source == m_firstPointUnit && parts.size() == 2)
+    {
+        m_previousBehaviour = uint(logic->behaviorType());
+        m_switchesToPath = !logic->isBehaviourPath();
+        // A new route starts at the creature; an active route extends at its end.
+        parts[1] = QString::number(m_switchesToPath ? -1 : logic->patrolPoints().size()-1);
+        m_pointHash = parts.join(".");
     }
+}
+
+CCreatePatrolCommand::~CCreatePatrolCommand()
+{
+    // Detached points belong to the command until Undo restores them.
+    qDeleteAll(m_inactivePatrol);
 }
 
 void CCreatePatrolCommand::undo()
 {
-    if(!m_mob)
-        return;
-    m_mob->undo_createPatrolByHash(m_pointHash, m_logicSlot);
-    if(m_switchesToPath && m_firstPointUnit)
+    if(!m_mob || !m_firstPointUnit) return;
+    CLogic* logic = m_firstPointUnit->logicAt(m_logicSlot);
+    const QStringList parts = m_pointHash.split(".");
+    if(parts.size() == 2) logic->undo_createPatrolByIndex(parts[1].toInt());
+    else logic->undo_createViewByIndex(parts[1].toInt(), parts[2].toInt());
+    if(m_switchesToPath)
     {
+        logic->swapPatrolPoints(m_inactivePatrol);
         QSharedPointer<IPropertyBase> behaviour(
             new propUint(eObjParam_LOGIC_BEHAVIOUR, m_previousBehaviour));
         m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
+    m_mob->logicNodesUpdate();
     m_pView->collectObjectTreeData();
     m_pView->restoreSelection(m_originalSelection);
     m_pView->setDurty(m_mob);
@@ -515,21 +545,23 @@ void CCreatePatrolCommand::undo()
 
 void CCreatePatrolCommand::redo()
 {
+    if(!m_mob || !m_firstPointUnit) return;
     for(CNode* node : m_originalSelection)
-        if(node)
-            node->setState(ENodeState::eDraw);
-    if(m_switchesToPath && m_firstPointUnit)
+        if(node) node->setState(ENodeState::eDraw);
+    CLogic* logic = m_firstPointUnit->logicAt(m_logicSlot);
+    if(m_switchesToPath)
     {
+        logic->swapPatrolPoints(m_inactivePatrol);
         QSharedPointer<IPropertyBase> behaviour(
             new propUint(eObjParam_LOGIC_BEHAVIOUR, uint(EBehaviourType::ePath)));
         m_firstPointUnit->applyLogicParamAt(m_logicSlot, behaviour);
     }
-    if(!m_mob)
-        return;
-    m_mob->createPatrolByHash(m_pointHash, m_logicSlot);
+    const QStringList parts = m_pointHash.split(".");
+    if(parts.size() == 2) logic->createPatrolByIndex(parts[1].toInt());
+    else logic->createViewByIndex(parts[1].toInt(), parts[2].toInt());
+    m_mob->logicNodesUpdate();
     setText(m_switchesToPath
-        ? QCoreApplication::translate("UndoCommands",
-            "Create first patrol point and enable Path behavior")
+        ? QCoreApplication::translate("UndoCommands", "Start a new patrol route")
         : QCoreApplication::translate("UndoCommands", "Create patrol point"));
     m_pView->collectObjectTreeData();
     m_pView->viewParameters();

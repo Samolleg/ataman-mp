@@ -164,6 +164,7 @@ protected:
     QSharedPointer<IPropertyBase> m_newValue;
     ENodeType m_nodeType;
     uint m_ownerMapId;
+    CUnit* m_unitOwner;
     int m_patrolId;
     int m_viewId;
     int m_auxPointId;
@@ -212,13 +213,13 @@ class CCreatePatrolCommand: public QUndoCommand
 public:
     enum { Id = 108 };
     CCreatePatrolCommand() = delete;
-    CCreatePatrolCommand(CView* pView, QString pointHash,
+    CCreatePatrolCommand(CView* pView, CNode* source, QString pointHash,
                          const QList<CNode*>& originalSelection,
                          QUndoCommand *parent = nullptr);
 
     void undo() override;
     void redo() override;
-    //bool mergeWith(const QUndoCommand *command) override;
+    ~CCreatePatrolCommand() override;
     int id() const override { return Id; }
 
 private:
@@ -227,6 +228,7 @@ private:
     QString m_pointHash;
     int m_logicSlot;
     CUnit* m_firstPointUnit;
+    QVector<CPatrolPoint*> m_inactivePatrol;
     uint m_previousBehaviour;
     bool m_switchesToPath;
     QList<CNode*> m_originalSelection;

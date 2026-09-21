@@ -3161,6 +3161,7 @@ int runHeadlessCommand(QApplication& app)
             && qApp->property("enduranceDatabasePrototypeNavigationReceived").toString()
                 == QStringLiteral("Human Test");
         const bool travelEditorProductionRouteWorks=travelEditorIntegrationCheck(productionWindow);
+        const bool patrolAuthoringWorks=patrolAuthoringIntegrationCheck(productionWindow->view());
         bool compactToolbarWorks=true;
         QWidget* operationBar=productionWindow->findChild<QWidget*>("viewportOperationToolbar");
         const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
@@ -3241,7 +3242,7 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && databasePrototypeMenuEmissionWorks
-                && compactToolbarWorks && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
+                && patrolAuthoringWorks && compactToolbarWorks && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
                 && detachedPreviewSharesViewportContext
                 && itemConstructorCloseReopenSafe
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -3392,6 +3393,7 @@ int runHeadlessCommand(QApplication& app)
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
                << " travelEditorProductionRouteWorks=" << travelEditorProductionRouteWorks
+               << " patrolAuthoringWorks=" << patrolAuthoringWorks
                << " compactToolbarWorks=" << compactToolbarWorks
                << " databasePrototypeMainWindowRouteWorks="
                << databasePrototypeMainWindowRouteWorks

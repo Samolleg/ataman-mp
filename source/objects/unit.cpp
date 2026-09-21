@@ -2118,6 +2118,12 @@ void CLogic::getViewId(int &parentPatrol, int &parentView, CLookPoint *pPoint)
    }
 }
 
+void CLogic::swapPatrolPoints(QVector<CPatrolPoint*>& points)
+{
+    m_aPatrolPt.swap(points);
+    createLogicLines();
+}
+
 void CLogic::createPatrolByIndex(int index)
 {
     CPatrolPoint* pPoint = new CPatrolPoint();

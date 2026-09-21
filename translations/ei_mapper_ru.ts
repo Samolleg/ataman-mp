@@ -15,6 +15,9 @@
     </context>
     <context>
         <name>CBehaviorCollectionWidget</name>
+    <message><source>Inactive saved route — Logic %1 — %2 patrols — %3 looks</source><translation>Сохранённый маршрут не используется — логика %1 — точек: %2, обзора: %3</translation></message>
+    <message><source>+ New patrol</source><translation>+ Новый патруль</translation></message>
+    <message><source>Start a new route and enable Patrol. Undo restores the saved route. To use the saved points, change Behavior to Patrol instead.</source><translation>Начать новый маршрут и включить патрулирование. Отмена вернёт сохранённый маршрут. Чтобы использовать старые точки, выберите «Патруль» в поле «Поведение».</translation></message>
         <message>
             <location filename="../source/ui/behavior_collection_widget.cpp" line="369" />
             <source>Patrol route — Logic %1 — %2 patrols — %3 looks</source>
@@ -15536,6 +15539,7 @@ It could not be opened automatically.</source>
     </context>
     <context>
         <name>UndoCommands</name>
+    <message><source>Start a new patrol route</source><translation>Начать новый маршрут патруля</translation></message>
         <message>
             <location filename="../source/core/undo.cpp" line="82" />
             <source>Delete object ID: %1</source>

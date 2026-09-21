@@ -131,6 +131,7 @@ public:
     bool isBehaviourPath() {return m_behaviour == EBehaviourType::ePath;}
     int getPatrolId(CPatrolPoint* pPoint);
     void getViewId(int& parentPatrol, int& parentView, CLookPoint* pPoint);
+    void swapPatrolPoints(QVector<CPatrolPoint*>& points);
     void createPatrolByIndex(int index);
     void undo_createPatrolByIndex(int index);
     void createViewByIndex(int pointId, int viewId);
