@@ -288,6 +288,11 @@ CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
 
 void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
 {
+    if(m_pView->isLogicPlacementPending()) {
+        if(key == eKey_Esc) m_pView->cancelPendingOperation();
+        // Placement is confirmed by a map click, not transform-axis/numeric keys.
+        return;
+    }
     switch (key) {
     case eKey_Esc:
     {
@@ -449,6 +454,7 @@ void CMoveAxis::mousePressEvent(COperation *pOp, QMouseEvent *pEvent)
     case Qt::LeftButton:
     {
         Q_UNUSED(pOp);
+        m_placementPress = true;
         break;
     }
     default:
@@ -465,6 +471,11 @@ void CMoveAxis::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
     switch (pEvent->button()) {
     case Qt::LeftButton:
     {
+        if(m_pView->isLogicPlacementPending()) {
+            const bool pressed = m_placementPress;
+            m_placementPress = false;
+            if(!pressed || !m_pView->updateLogicPlacementPointer(pEvent->pos())) return;
+        }
         if(m_pView->isDatabasePlacementPending()
            && !m_pView->updateDatabasePlacementPointer(pEvent->pos())) return;
         m_pView->operationApply(EOperationAxisType::eMove);
@@ -491,6 +502,10 @@ void CMoveAxis::synchronizePointerAfterCameraNavigation(const QPoint& position)
 void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
 {
     Q_UNUSED(pOp);
+    if(m_pView->isLogicPlacementPending()) {
+        m_pView->updateLogicPlacementPointer(pEvent->pos());
+        return;
+    }
     if(m_pView->isDatabasePlacementPending())
     {
         m_pView->updateDatabasePlacementPointer(pEvent->pos());

@@ -301,6 +301,8 @@ public:
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
     bool isDatabasePlacementPending() const { return m_pendingDatabasePlacement; }
     bool updateDatabasePlacementPointer(const QPoint& position);
+    bool isLogicPlacementPending() const { return m_pendingLogicPlacementMacro; }
+    bool updateLogicPlacementPointer(const QPoint& position);
     void setTestSpawnMarker(const QVector3D& position, bool adjusted = false);
     void setTestSpawnMarkerSelected(bool selected);
     bool testSpawnMarkerAt(const QPoint& viewportPosition, int padding = 8) const;

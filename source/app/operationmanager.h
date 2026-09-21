@@ -121,6 +121,7 @@ private:
     EOperateAxis axis;
     QString value;
     QVector3D lastLandPos;
+    bool m_placementPress = false;
 };
 
 class CRotateAxis : public CState

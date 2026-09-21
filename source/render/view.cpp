@@ -23211,6 +23211,20 @@ bool CView::updateDatabasePlacementPointer(const QPoint& position)
     return true;
 }
 
+bool CView::updateLogicPlacementPointer(const QPoint& position)
+{
+    if(!m_pendingLogicPlacementMacro || m_operationBackup.isEmpty()) return false;
+    QVector3D point;
+    if(!objectPlacementPositionAt(position, &point)) return false;
+    // New points belong under the pointer, not at an offset from their owner.
+    // Each selected creature receives its own point at the clicked location.
+    for(CNode* node : m_operationBackup.keys())
+        node->updatePos(point);
+    updateParameter(EObjParam::eObjParam_POSITION);
+    update();
+    return true;
+}
+
 void CView::setTestSpawnMarker(const QVector3D& position, bool adjusted)
 {
     m_testSpawnMarker = position;
@@ -25997,6 +26011,8 @@ void CView::addLogicPoint(bool bLookPoint)
         m_pendingLogicPlacementMacro = true;
         m_pendingLogicPlacementOriginalSelection = targets;
         m_pOp->changeState(new CMoveAxis(this, EOperateAxisXY));
+        setFocus(Qt::OtherFocusReason);
+        updateLogicPlacementPointer(mapFromGlobal(QCursor::pos()));
     }
 }
 
@@ -26336,6 +26352,61 @@ bool patrolAuthoringIntegrationCheck(CView* view)
         if(!condition) fprintf(stderr, "Patrol regression failed: %s\n", label);
         passed = passed && condition;
     };
+    {
+        QUndoStack history;
+        auto* previousHistory=view->m_pUndoStack;
+        const auto previousMobs=view->m_aMob;
+        view->m_pUndoStack=&history;
+        view->m_aMob={&mob};
+        const QPoint cursor=view->rect().center();
+        const QPoint moved=cursor+QPoint(30,20);
+        QVector3D expected;
+        const bool pick=view->objectPlacementPositionAt(moved,&expected);
+        check(pick,"placement terrain/grid pick");
+        for(bool group : {false,true}) {
+            mob.clearSelect(true);
+            first->setState(group ? eSelect : eDraw);second->setState(eSelect);
+            view->addLogicPoint(false);
+            check(view->isLogicPlacementPending(),"placement transaction starts");
+            QMouseEvent move(QEvent::MouseMove,moved,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+            view->m_pOp->mouseMoveEvent(&move);
+            check(!pick || (second->logicAt(0)->patrolPoints()[0]->position()-expected).length()<0.001f,
+                  "point under pointer without owner offset");
+            if(group) check(!pick || (first->logicAt(0)->patrolPoints()[0]->position()-expected).length()<0.001f,
+                            "group point under pointer");
+            QMouseEvent strayRelease(QEvent::MouseButtonRelease,moved,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+            view->m_pOp->mouseReleaseEvent(&strayRelease);
+            check(view->isLogicPlacementPending(),"release without map press must not commit");
+            QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);
+            QApplication::sendEvent(view,&escape);
+            check(!view->isLogicPlacementPending() && !view->hasPendingOperation()
+                  && snapshot(first->logicAt(0))==firstBefore && snapshot(second->logicAt(0))==secondBefore,
+                  "Escape restores route and removes preview");
+            check(second->nodeState()==eSelect && (!group || first->nodeState()==eSelect),
+                  "Escape restores owners selection");
+            view->addLogicPoint(false);
+            QMouseEvent press(QEvent::MouseButtonPress,moved,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+            view->m_pOp->mousePressEvent(&press);
+            view->m_pOp->mouseReleaseEvent(&strayRelease);
+            check(!view->isLogicPlacementPending() && !view->hasPendingOperation(),"map click commits placement");
+            check(!pick || (second->logicAt(0)->patrolPoints()[0]->position()-expected).length()<0.001f,
+                  "click position committed");
+            const auto placed=snapshot(second->logicAt(0));
+            // A look-point preview uses the same placement path, without moving its patrol parent.
+            view->addLogicPoint(true);
+            view->m_pOp->mouseMoveEvent(&move);
+            QApplication::sendEvent(view,&escape);
+            check(snapshot(second->logicAt(0))==placed && !view->hasPendingOperation(),
+                  "look preview Escape preserves committed patrol");
+            history.undo();
+            check(snapshot(first->logicAt(0))==firstBefore && snapshot(second->logicAt(0))==secondBefore,
+                  "placement undo atomic");
+            history.redo();
+            check(second->logicAt(0)->patrolPoints().size()==1,"placement redo");
+            history.undo(); history.clear();
+        }
+        view->m_pUndoStack=previousHistory;view->m_aMob=previousMobs;
+    }
     {
         CBehaviorCollectionWidget inactive(second,0);
         QLabel* label=inactive.findChild<QLabel*>("behaviorRouteState");

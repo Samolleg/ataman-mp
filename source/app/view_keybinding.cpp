@@ -123,6 +123,11 @@ bool CView::eventFilter(QObject* watched, QEvent* event)
 
 void CView::keyPressEvent(QKeyEvent* event)
 {
+    if(event->key() == Qt::Key_Escape && isLogicPlacementPending()) {
+        cancelPendingOperation();
+        event->accept();
+        return;
+    }
     if(m_travelEditing) {
         if(event->key()==Qt::Key_Escape)cancelTravelGesture();
         event->accept();return;
