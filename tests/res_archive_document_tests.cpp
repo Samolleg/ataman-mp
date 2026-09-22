@@ -145,6 +145,7 @@ private slots:
     void travelOrderRepairPanel();
     void travelRoundTripAndConflict();
     void travelSaveBatchRollback();
+    void draftPublicationKeepsPathsAndRollsBackEveryStage();
     void travelGeometryAndPanel();
     void travelMergeAndLinkValidation();
     void ordinaryMapSaveUsesBoundHdArchiveWithBackup()
@@ -745,6 +746,45 @@ void ResArchiveDocumentTests::travelRoundTripAndConflict()
     QVERIFY(doc.restore(original));QVERIFY(doc.dirty());
     QVERIFY(file.open(QIODevice::WriteOnly));file.write(syntheticRes());file.close();
     QVERIFY(!doc.prepareSave(&save,&error));
+}
+
+void ResArchiveDocumentTests::draftPublicationKeepsPathsAndRollsBackEveryStage()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const QStringList names={"textures.res","gipat1-atlas.res","gipat1.mpr"};
+    CResArchiveDocument old; QStringList errors;
+    QVERIFY(old.loadBytes(syntheticRes(),"old.res",&errors));
+    SResArchiveNewMember page;page.name="new_identity000.mmp";page.payload="new physical tiles";
+    SResArchiveNewMember profile;profile.name="new-profile.json";profile.payload="finalized profile";
+    QByteArray published;
+    QVERIFY(old.buildWithPublishedMembers({page,profile},false,&published,&errors));
+    QVector<SMapSaveFile> files;
+    for(int i=0;i<names.size();++i) {
+        SMapSaveFile item; item.path=dir.filePath(names[i]);
+        item.before=i==2?QByteArray("draft mpr"):syntheticRes();
+        item.after=i==2?QByteArray("final mpr"):published;
+        QFile f(item.path);QVERIFY(f.open(QIODevice::WriteOnly));QCOMPARE(f.write(item.before),qint64(item.before.size()));
+        files.append(item);
+    }
+    const QByteArray world="{\"mprPath\":\"gipat1.mpr\",\"origin\":{\"x\":10,\"y\":20}}";
+    QFile layout(dir.filePath("world-map-layouts.json"));QVERIFY(layout.open(QIODevice::WriteOnly));layout.write(world);layout.close();
+    for(int stage=0;stage<3;++stage) {
+        const auto result=commitMapSaveBatch(files,dir.filePath("backup"),stage);
+        QVERIFY(!result.success);QVERIFY(result.rollbackComplete);
+        for(const auto& item:files) {QFile f(item.path);QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),item.before);}
+    }
+    const auto saved=commitMapSaveBatch(files,dir.filePath("backup"));QVERIFY2(saved.success,qPrintable(saved.error));
+    QCOMPARE(saved.backups.size(),3);
+    for(int i=0;i<2;++i) {
+        QFile f(files[i].path);QVERIFY(f.open(QIODevice::ReadOnly));
+        CResArchiveDocument reopened;QVERIFY(reopened.loadBytes(f.readAll(),files[i].path,&errors));
+        QCOMPARE(reopened.memberPayload(page.name),page.payload);
+        QCOMPARE(reopened.memberPayload(profile.name),profile.payload);
+        QCOMPARE(reopened.memberPayload("opaque.bin"),old.memberPayload("opaque.bin"));
+    }
+    QVERIFY(layout.open(QIODevice::ReadOnly));QCOMPARE(layout.readAll(),world);
+    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true),ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true,true),ETerrainMprSaveRoute::PublishModernAtlas);
 }
 
 void ResArchiveDocumentTests::travelSaveBatchRollback()

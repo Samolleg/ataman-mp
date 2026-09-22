@@ -8982,6 +8982,19 @@ void CView::loadLandscape(const QFileInfo& filePath)
                 embeddedCandidates,
                 bindingDocument.mapInfo().innerNamespace,
                 QFileInfo(mapLocalAtlas).isFile() ? mapLocalAtlas : QString());
+        // A finalized sidecar mirrors the publication, but subsequent ordinary
+        // saves update semantic state in the recorded runtime archive. Prefer
+        // that exact bound archive; keep the sidecar as a portable fallback.
+        if(embedded.success() && embedded.profile.provenance.startsWith(
+               QStringLiteral("portable-finalized-modern-atlas-v1"))
+           && !embedded.profile.resourceArchiveHint.isEmpty()) {
+            const QString publishedPath = filePath.dir().absoluteFilePath(
+                embedded.profile.resourceArchiveHint);
+            const auto published = CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+                {publishedPath}, bindingDocument.mapInfo().innerNamespace, publishedPath);
+            if(published.success() && published.decodedAtlasPixelSha256 == embedded.decodedAtlasPixelSha256)
+                embedded = published;
+        }
         bool embeddedBound = embedded.success();
         if(embeddedBound)
         {
@@ -9524,8 +9537,17 @@ void CView::unloadLand(bool promptForSave)
 void CView::saveLand()
 {
     syncWorldTerrainActive();
-    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
-    { saveWorldTerrainMaps(); return; }
+    const auto dirtyWorld = m_worldTerrainSession.dirtyPaths();
+    if(!dirtyWorld.isEmpty()
+       && (dirtyWorld.size()!=1 || CWorldTerrainSession::key(dirtyWorld.first())
+           != CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())))
+    {
+        if(!saveWorldTerrainMaps()) return;
+        // Travel companions were already committed by the world batch. A
+        // subsequent atlas publication must compare against that new baseline.
+        if(m_mapCohortActive && m_mapCohortCommitted)
+            for(auto& file : m_mapCompanions) { file.before=file.after; file.existed=true; }
+    }
     if(m_pLand->isMprLoad())
     {
         if(!ensureTerrainAutoCatalogReady())
@@ -9543,16 +9565,6 @@ void CView::saveLand()
                      : (route == ETerrainMprSaveRoute::PublishModernAtlas
                             ? QStringLiteral("publish-current-target")
                             : QStringLiteral("plain-mpr"))));
-        if(route == ETerrainMprSaveRoute::SaveEditableModernDraft)
-        {
-            if(!m_pLand->isDirty())
-                return;
-            if(saveChangedLandscapeDocument(
-                   m_pLand->filePath(), true, true))
-                emit updateMainWindowTitle(
-                    eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
-            return;
-        }
         if(route == ETerrainMprSaveRoute::PublishModernAtlas)
         {
             m_requestedTerrainMprDestination = m_pLand->filePath();
@@ -9567,12 +9579,8 @@ void CView::saveLand()
 void CView::saveLandAs()
 {
     syncWorldTerrainActive();
-    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
-    {
-        QMessageBox::information(this,tr("World terrain save"),
-            tr("Save the affected world MPRs together before creating a separate copy."));
-        saveWorldTerrainMaps(); return;
-    }
+    if(!m_worldTerrainSession.dirtyPaths().isEmpty() && !saveWorldTerrainMaps())
+        return;
     if(!m_pLand->isMprLoad())
         return;
     if(!ensureTerrainAutoCatalogReady())
@@ -9583,48 +9591,6 @@ void CView::saveLandAs()
         m_pLand->filePath().absoluteFilePath(), tr("Landscape (*.mpr);;)"));
     if(fileName.filePath().isEmpty())
         return;
-
-    const bool workingAtlasAvailable = m_workingTerrainAtlas
-        && m_workingTerrainAtlas->isValid();
-    const bool modernDraftRequired = m_pLand->isDirty()
-        && terrainSaveAsNeedsModernDraftConfirmation(
-            workingAtlasAvailable,
-            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
-            terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay));
-    const bool persistedDraft = persistedModernDraftRequiresPublication();
-    if(modernDraftRequired || persistedDraft)
-    {
-        QMessageBox confirmation(this);
-        confirmation.setIcon(QMessageBox::Information);
-        confirmation.setWindowTitle(tr("Modern Draft pair required"));
-        confirmation.setText(tr(
-            "This map has unsaved working-atlas tiles. They cannot be stored "
-            "in an MPR alone: Save As must write a paired MPR plus adjacent "
-            "RES Modern Draft."));
-        confirmation.setInformativeText(tr(
-            "Save as Modern Draft keeps the editable working atlas beside the "
-            "selected MPR. Finalize and Save As publishes a clean runtime "
-            "atlas. Cancel leaves the current map and destination unchanged."));
-        QPushButton* saveDraft = confirmation.addButton(
-            tr("Save as Modern Draft"), QMessageBox::AcceptRole);
-        QPushButton* finalizeAndSaveAs = confirmation.addButton(
-            tr("Finalize and Save As"), QMessageBox::ActionRole);
-        confirmation.addButton(QMessageBox::Cancel);
-        confirmation.exec();
-        if(confirmation.clickedButton() == saveDraft)
-        {
-            saveChangedLandscapeDocument(fileName, true, true);
-            return;
-        }
-        if(confirmation.clickedButton() == finalizeAndSaveAs)
-        {
-            m_requestedTerrainMprDestination = fileName;
-            finalizeVirtualTerrainAtlas();
-        }
-        else
-            return;
-        return;
-    }
 
     const bool publishModern = modernTerrainPublicationRequired(true);
     ei::log(eLogInfo, QStringLiteral(
@@ -9711,7 +9677,9 @@ bool CView::persistedModernDraftRequiresPublication() const
 {
     return CTerrainAtlasProfileStore::isWorkingAtlasProfile(
                m_terrainAtlasProfile)
-        || (m_pLand && terrainMprUsesAdjacentModernAtlas(
+        || (!m_terrainAtlasProfile.provenance.startsWith(
+                   QStringLiteral("portable-finalized-modern-atlas-v1"))
+            && m_pLand && terrainMprUsesAdjacentModernAtlas(
                m_pLand->filePath().absoluteFilePath(),
                m_activeTerrainArchivePath));
 }
@@ -14372,18 +14340,6 @@ void CView::finalizeVirtualTerrainAtlas()
                             : QStringLiteral("false"),
              identityOnlyRequest ? QStringLiteral("true")
                                  : QStringLiteral("false")));
-    if(terrainPublicationWouldOverwriteWorkingDraft(
-           m_pLand->filePath().absoluteFilePath(),
-           preselectedMprDestination.absoluteFilePath(), persistedDraft))
-    {
-        QMessageBox::critical(this, tr("Modern MPR publication refused"),
-            tr("The selected destination is the currently open editable draft. "
-               "Publishing over it would replace the draft MPR's atlas layout "
-               "while its adjacent draft RES still owns the working layout.\n\n"
-               "Use Save MPR to update the editable draft, or use Save MPR As "
-               "and choose the final game MPR destination. No file was changed."));
-        return;
-    }
     bool landActive=m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land)
         ||terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
         ||persistedDraft;
@@ -14632,8 +14588,7 @@ void CView::finalizeVirtualTerrainAtlas()
             QDir::cleanPath(preselectedMprDestination.absoluteFilePath()),
             QDir::cleanPath(m_pLand->filePath().absoluteFilePath()),
             Qt::CaseInsensitive) == 0;
-    const bool ordinarySave = saveOverCurrentMpr && !persistedDraft
-        && !identityOnlyRequest && requestedIdentity.isEmpty();
+    const bool ordinarySave = !identityOnlyRequest && requestedIdentity.isEmpty();
     if(ordinarySave)
     {
         // New artwork gets its own content identity. Do not replace shared
@@ -15185,6 +15140,27 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
 
+    const QString adjacentPath = mprDestination.dir().filePath(
+        mprDestination.completeBaseName() + QStringLiteral("-atlas.res"));
+    const bool synchronizeAdjacent = QFileInfo::exists(adjacentPath)
+        && QFileInfo(adjacentPath).absoluteFilePath().compare(
+            QFileInfo(texturesPath).absoluteFilePath(), Qt::CaseInsensitive) != 0;
+    SMapSaveFile adjacent;
+    if(synchronizeAdjacent) {
+        adjacent.path = adjacentPath;
+        QFile file(adjacentPath);
+        CResArchiveDocument archive, verified;
+        QStringList errors;
+        if(!file.open(QIODevice::ReadOnly)
+           || !archive.loadBytes(adjacent.before = file.readAll(), adjacentPath, &errors)
+           || !archive.buildWithPublishedMembers(pages, replaceIdentity, &adjacent.after, &errors)
+           || !verified.loadBytes(adjacent.after, adjacentPath, &errors)) {
+            emit terrainPublicationFinished(texturesPath, false);
+            QMessageBox::critical(this, tr("Atlas publication refused"), errors.join("\n"));
+            return;
+        }
+    }
+
     publishProgress.setLabelText(createTexturesBackup ? tr(
         "Backing up and atomically replacing textures.res...")
         : tr("Atomically replacing textures.res..."));
@@ -15197,8 +15173,14 @@ void CView::finalizeVirtualTerrainAtlas()
     resRequest.createBackup = createTexturesBackup;
     SResPublishedMembersSaveResult resResult;
     if(m_mapCohortActive) {
-        resResult.success=stageMapCompanion(texturesPath,stagedResBytes,&resResult.error,&originalTexturesBytes);
+        resResult.success=(!synchronizeAdjacent || stageMapCompanion(
+            adjacent.path, adjacent.after, &resResult.error, &adjacent.before))
+            && stageMapCompanion(texturesPath,stagedResBytes,&resResult.error,&originalTexturesBytes);
         resResult.phase=QStringLiteral("no-op");
+    } else if(synchronizeAdjacent) {
+        // Defer all three files to the same backed-up, compare-and-restore batch.
+        resResult.success = true;
+        resResult.phase = QStringLiteral("no-op");
     } else {
     QFuture<SResPublishedMembersSaveResult> publishFuture =
         QtConcurrent::run([sourceArchive, resRequest]() {
@@ -15265,6 +15247,24 @@ void CView::finalizeVirtualTerrainAtlas()
         mprResult.success=commitMapCohortMpr(mprDestination,package.mprBytes,&mprResult.error);
         mprResult.candidateSha256=QString::fromLatin1(QCryptographicHash::hash(package.mprBytes,QCryptographicHash::Sha256).toHex());
         mprResult.phase=QStringLiteral("map-cohort");
+    } else if(synchronizeAdjacent) {
+        SMapSaveFile res; res.path=texturesPath; res.before=originalTexturesBytes; res.after=stagedResBytes;
+        SMapSaveFile mpr; mpr.path=mprDestination.absoluteFilePath();
+        mpr.before=previousMprBytes; mpr.after=package.mprBytes; mpr.existed=mprDestinationExisted;
+        // Detect edits to the open document made outside the mapper before publishing.
+        if(saveOverCurrentMpr && previousMprBytes != m_mprDocument.originalBytes()) {
+            emit terrainPublicationFinished(texturesPath, false);
+            QMessageBox::critical(this,tr("Atlas publication refused"),tr("The source MPR changed outside the editor."));
+            return;
+        }
+        const auto batch = commitMapSaveBatch({res, adjacent, mpr});
+        if(!batch.success) {
+            emit terrainPublicationFinished(texturesPath, false);
+            QMessageBox::critical(this,tr("MPR publication failed"),batch.error);
+            return;
+        }
+        mprResult.success=true;
+        mprResult.candidateSha256=QString::fromLatin1(QCryptographicHash::hash(package.mprBytes,QCryptographicHash::Sha256).toHex());
     } else mprResult=commitValidatedMprBytes(mprRequest);
     if(!mprResult.success)
     {
@@ -15294,6 +15294,10 @@ void CView::finalizeVirtualTerrainAtlas()
                "could not adopt them. Reopen the MPR before editing further."));
         return;
     }
+    m_worldTerrainSession.clearHistory();
+    m_worldTerrainSession.documents.remove(CWorldTerrainSession::key(mprRequest.source.absoluteFilePath()));
+    m_worldTerrainAtlasSources.remove(CWorldTerrainSession::key(mprRequest.source.absoluteFilePath()));
+    updateWorldTerrainStatus();
     publishProgress.close();
     emit terrainPublicationFinished(texturesPath, true);
     m_requestedTerrainResourceIdentity.clear();

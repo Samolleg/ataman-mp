@@ -43,11 +43,7 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
     bool persistedWorkingDraft = false,
     bool saveAs = false)
 {
-    // A persisted working draft is already a coherent MPR + adjacent RES pair.
-    // Ordinary Save must keep updating that pair; publication is the explicit
-    // Save As operation where the final MPR destination is selected first.
-    if(persistedWorkingDraft && !saveAs && !identityPublicationRequested)
-        return ETerrainMprSaveRoute::SaveEditableModernDraft;
+    Q_UNUSED(saveAs);
     // A semantic paint field is not new artwork. Authored physical tiles can
     // be saved by the ordinary MPR transaction (and its semantic-state store).
     Q_UNUSED(landMaterialFieldActive);
@@ -56,20 +52,6 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
             || overlayUsesWorkingExtension || persistedWorkingDraft
         ? ETerrainMprSaveRoute::PublishModernAtlas
         : ETerrainMprSaveRoute::PlainMpr;
-}
-
-inline bool terrainPublicationWouldOverwriteWorkingDraft(
-    const QString& currentMprPath, const QString& publicationMprPath,
-    bool persistedWorkingDraft)
-{
-    if(!persistedWorkingDraft || currentMprPath.trimmed().isEmpty()
-       || publicationMprPath.trimmed().isEmpty())
-        return false;
-    const QString current = QDir::cleanPath(
-        QFileInfo(currentMprPath).absoluteFilePath());
-    const QString publication = QDir::cleanPath(
-        QFileInfo(publicationMprPath).absoluteFilePath());
-    return QString::compare(current, publication, Qt::CaseInsensitive) == 0;
 }
 
 inline bool terrainMprUsesAdjacentModernAtlas(
@@ -83,14 +65,6 @@ inline bool terrainMprUsesAdjacentModernAtlas(
     const QString actual = QDir::cleanPath(
         QFileInfo(terrainArchivePath).absoluteFilePath());
     return QString::compare(expected, actual, Qt::CaseInsensitive) == 0;
-}
-
-inline bool terrainSaveAsNeedsModernDraftConfirmation(
-    bool workingAtlasAvailable, bool landUsesWorkingExtension,
-    bool overlayUsesWorkingExtension)
-{
-    return workingAtlasAvailable
-        && (landUsesWorkingExtension || overlayUsesWorkingExtension);
 }
 
 inline bool terrainMprSaveActionEnabled(bool hasMpr, bool mprDirty,
@@ -214,9 +188,12 @@ inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePla
         plan.initialPath = activeArchive.absoluteFilePath();
         plan.requiresExplicitChoice = false;
     }
-    else
+    else {
         plan.initialPath = terrainPublicationInitialResourcePath(
             configuredResourceRoots, mprPath);
+        plan.requiresExplicitChoice = !QFileInfo(plan.initialPath).isFile()
+            || !terrainPublicationPathInResourceRoots(plan.initialPath, configuredResourceRoots);
+    }
     return plan;
 }
 

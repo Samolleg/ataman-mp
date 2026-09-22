@@ -7043,28 +7043,9 @@ void MainWindow::updateDocumentActionAvailability()
     const bool dirtyMpr = terrainMprSaveActionEnabled(
         hasMpr, CLandscape::getInstance()->isDirty(),
         m_pView && m_pView->hasPendingTerrainPublication());
-    const ETerrainMprSavePresentation savePresentation =
-        hasMpr && m_pView ? m_pView->terrainMprSavePresentation()
-                          : ETerrainMprSavePresentation::PlainMpr;
-    switch(savePresentation)
-    {
-    case ETerrainMprSavePresentation::EditableModernDraft:
-        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR Draft"));
-        m_ui->actionSave_landscape_MPR_as->setText(
-            tr("Finalize Draft MPR As..."));
-        break;
-    case ETerrainMprSavePresentation::PendingModernPublication:
-        m_ui->actionSave_landscape_MPR->setText(
-            tr("Save MPR"));
-        m_ui->actionSave_landscape_MPR_as->setText(
-            tr("Finalize MPR As..."));
-        break;
-    case ETerrainMprSavePresentation::PlainMpr:
-    default:
-        m_ui->actionSave_landscape_MPR->setText(tr("Save MPR"));
-        m_ui->actionSave_landscape_MPR_as->setText(tr("Save MPR As..."));
-        break;
-    }
+    m_ui->actionSave_landscape_MPR->setText(tr("Save MPR"));
+    m_ui->actionSave_landscape_MPR_as->setText(tr("Save MPR As..."));
+    m_ui->actionSave->setText(hasActiveMob ? tr("Save active MOB") : tr("Save MPR"));
     m_ui->actionOpen->setEnabled(idle);
     m_ui->actionNew_MPR->setEnabled(idle);
     m_ui->actionNew_MOB->setEnabled(idle);
@@ -7073,7 +7054,7 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionOpen_recent->setEnabled(idle);
     if(m_recentFilesMenu) m_recentFilesMenu->setEnabled(idle);
     if(m_mapsBrowser) m_mapsBrowser->setEnabled(idle);
-    m_ui->actionSave->setEnabled(idle && (hasActiveMob || hasTravelChanges()));
+    m_ui->actionSave->setEnabled(idle && (hasActiveMob || hasMpr || hasTravelChanges()));
     m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
     m_ui->actionSave_landscape_MPR->setEnabled(idle && (dirtyMpr || hasTravelChanges()));
@@ -8656,6 +8637,7 @@ void MainWindow::on_actionSave_triggered()
 {
     if(!flushTravelEditor())return;
     if(hasTravelChanges()){saveMapWithTravel();return;}
+    if(!m_pView->hasActiveMob()) { m_pView->saveLand(); return; }
     notifyFamilyPreflight(tr("Save"));
     m_pView->saveActiveMob();
 }
