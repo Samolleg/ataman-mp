@@ -1835,11 +1835,13 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
             .arg(archive.size())
             .arg(archive.lastModified().toMSecsSinceEpoch());
     }
-    const QString cacheKey = name.toLower() + archiveFingerprint;
+    const QString cacheKey = QStringLiteral("terrain|%1|%2%3")
+        .arg(name.toLower()).arg(expectedTexCount).arg(archiveFingerprint);
     if(m_aTexture.contains(cacheKey))
     {
         texCount = qMax(1, expectedTexCount);
         atlasColumns = CTile::preferredAtlasColumns(texCount);
+        ++m_terrainTextureUsers[m_aTexture[cacheKey]];
         return m_aTexture[cacheKey];
     }
 
@@ -2005,6 +2007,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         texture->setData(atlas);
         m_aTexture[cacheKey] = texture;
         m_terrainTextures.insert(texture);
+        m_terrainTextureUsers.insert(texture, 1);
         ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 ANGLE-RGBA")
                 .arg(name).arg(expectedTexCount).arg(texCount));
         return texture;
@@ -2020,6 +2023,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                                    combinedMips[level].constData());
     m_aTexture[cacheKey] = texture;
     m_terrainTextures.insert(texture);
+    m_terrainTextureUsers.insert(texture, 1);
     ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 mips:%4")
             .arg(name).arg(expectedTexCount).arg(texCount).arg(uploadedMipCount));
     return texture;
@@ -2029,6 +2033,10 @@ void CTextureList::releaseTerrainTexture(QOpenGLTexture* texture)
 {
     if(!texture || !m_terrainTextures.contains(texture))
         return;
+    auto user = m_terrainTextureUsers.find(texture);
+    if(user == m_terrainTextureUsers.end() || --user.value() > 0)
+        return;
+    m_terrainTextureUsers.erase(user);
     for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
     {
         if(it.value() == texture)

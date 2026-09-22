@@ -75,6 +75,7 @@ class CLandscape
 public:
     using SaveProgress = std::function<void(const QString&, int, int)>;
     static CLandscape* getInstance();
+    static bool atlasLifetimeRegressionCheck();
     static QSharedPointer<CLandscape> createReadOnlyBackground();
     ~CLandscape();
     bool isMprLoad() {return !m_aSector.isEmpty();}

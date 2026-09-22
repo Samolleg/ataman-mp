@@ -3095,15 +3095,9 @@ void CView::clearNeighborLandscapes()
         return;
     if(isValid())
         makeCurrent();
-    QSet<QOpenGLTexture*> textures;
-    for(const SLoadedNeighborLandscape& loaded : m_neighborLandscapes)
-        if(loaded.landscape && loaded.landscape->glTexture()
-           && (!m_pLand
-               || loaded.landscape->glTexture() != m_pLand->glTexture()))
-            textures.insert(loaded.landscape->glTexture());
+    // Each landscape owns a lease on its base atlas and its own preview.
+    // glTexture() may be a preview, so it cannot identify base-atlas owners.
     m_neighborLandscapes.clear();
-    for(QOpenGLTexture* texture : textures)
-        CTextureList::getInstance()->releaseTerrainTexture(texture);
     if(isValid())
         doneCurrent();
     ei::log(eLogInfo, "Neighbor render backgrounds released; retained terrain documents preserved");

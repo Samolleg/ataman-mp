@@ -2,6 +2,9 @@
 #include "database_creation_check.h"
 #include "scenario_layer_check.h"
 #include <QApplication>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include "render/landscape.h"
 #include <QProgressBar>
 #include <QStyleFactory>
 #include <QProxyStyle>
@@ -700,6 +703,17 @@ int runHeadlessCommand(QApplication& app)
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            uiSettingsDirectory.path());
         app.setQuitOnLastWindowClosed(false);
+        {
+            QOffscreenSurface surface;
+            surface.create();
+            QOpenGLContext context;
+            const bool current = context.create() && context.makeCurrent(&surface);
+            const bool passed = current && CLandscape::atlasLifetimeRegressionCheck();
+            QTextStream(passed ? stdout : stderr)
+                << (passed ? "PASS" : "FAIL")
+                << ": shared terrain atlas survives neighbor cleanup and repeated GPU regrid\n";
+            if(!passed) return 1;
+        }
         CTreeView behaviorFilterTree;
         CObjectBase behaviorFilterNode;
         auto behaviorOwner = new QTreeWidgetItem(&behaviorFilterTree);

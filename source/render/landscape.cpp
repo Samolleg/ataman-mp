@@ -49,6 +49,7 @@ void CLandscape::unloadMpr()
 {
     m_canonicalTerrain = nullptr;
     clearPreviewTerrainAtlas();
+    CTextureList::getInstance()->releaseTerrainTexture(m_baseAtlasTexture);
     m_baseAtlasTexture = nullptr;
     m_baseAtlasColumns = 1;
     m_texture = nullptr;
@@ -1448,4 +1449,59 @@ void CLandscape::projectPositions(QList<CNode*>& aNode)
     {
         projectPosition(node);
     }
+}
+
+// Native regression using only the bundled fallback atlas, never user maps.
+// Run with a current context before the UI harness attaches game settings.
+bool CLandscape::atlasLifetimeRegressionCheck()
+{
+    auto resources = CTextureList::getInstance();
+    auto makeLandscape = [resources]() {
+        auto land = createReadOnlyBackground();
+        land->m_header = {};
+        land->m_header.nTexture = 1;
+        int count = 0;
+        land->m_baseAtlasTexture = resources->buildLandTex(
+            QStringLiteral("__atlas_lifetime_regression__"), 1, count,
+            land->m_baseAtlasColumns);
+        land->m_texture = land->m_baseAtlasTexture;
+        return land;
+    };
+    auto active = makeLandscape();
+    auto neighbor = makeLandscape();
+    auto secondNeighbor = makeLandscape();
+    auto base = active->m_baseAtlasTexture;
+    if(!base || !base->isCreated() || base != neighbor->m_baseAtlasTexture
+       || base != secondNeighbor->m_baseAtlasTexture) return false;
+    auto gl = QOpenGLContext::currentContext()->functions();
+    const GLuint baseId = base->textureId();
+    const int tileSize = base->width() / 8;
+    QImage tile(tileSize, tileSize, QImage::Format_RGBA8888);
+    tile.fill(Qt::blue);
+    QVector<QImage> tiles(128, tile);
+    QSet<int> added;
+    for(int i=64; i<128; ++i) added.insert(i);
+    if(!active->previewTerrainAtlas(tiles, 2, added)) return false;
+    if(active->glTexture() == base) return false;
+    // Clearing a neighbor with its own preview used to confuse ownership too.
+    if(!secondNeighbor->previewTerrainAtlas(tiles, 2, added)) return false;
+    const GLuint neighborPreview = secondNeighbor->glTexture()->textureId();
+    neighbor.clear();
+    secondNeighbor.clear();
+    if(!gl->glIsTexture(baseId) || gl->glIsTexture(neighborPreview)) return false;
+    for(int repeat=0; repeat<3; ++repeat) {
+        active->clearPreviewTerrainAtlas();
+        // Exercise the exact crash path, not just the full-upload fallback.
+        if(!active->previewTerrainAtlasRegridCopy(tiles, 2, 2, 1, added)) return false;
+        if(!active->glTexture()->isCreated()) return false;
+    }
+    const GLuint finalPreview = active->glTexture()->textureId();
+    active.clear();
+    if(gl->glIsTexture(baseId) || gl->glIsTexture(finalPreview)) return false;
+    // A released cache entry must reload cleanly, including double unload.
+    auto reloaded = makeLandscape();
+    if(!reloaded->glTexture() || !reloaded->glTexture()->isCreated()) return false;
+    reloaded->unloadMpr();
+    reloaded->unloadMpr();
+    return true;
 }

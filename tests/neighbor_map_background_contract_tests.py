@@ -57,7 +57,9 @@ class NeighborMapBackgroundContractTests(unittest.TestCase):
             view.index("void CView::loadNeighborLandscapes()")
         ]
         self.assertIn("m_neighborLandscapes.clear()", clear_section)
-        self.assertIn("releaseTerrainTexture", clear_section)
+        self.assertNotIn("releaseTerrainTexture", clear_section)
+        self.assertIn("releaseTerrainTexture(m_baseAtlasTexture)",
+                      source("source/render/landscape.cpp"))
         self.assertIn("texture->destroy()", resources)
         self.assertIn("delete texture", resources)
 

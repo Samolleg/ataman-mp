@@ -142,6 +142,7 @@ public:
     QImage textureImage(const QString& name, const QString& modelName);
     QImage layeredTextureImage(const QStringList& layerNames, const QString& modelName,
                                QString* diagnostic = nullptr);
+    // Acquires one landscape lease, including cache hits. Release on unload.
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount,
                                  int& texCount, int& atlasColumns);
     void releaseTerrainTexture(QOpenGLTexture* texture);
@@ -212,6 +213,7 @@ private:
     ei::CVisualCacheLru m_textureImageLru;
     QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
     QSet<QOpenGLTexture*> m_terrainTextures;
+    QHash<QOpenGLTexture*, int> m_terrainTextureUsers;
     bool m_terrainMipmappingEnabled{true};
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;
