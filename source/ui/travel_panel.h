@@ -33,6 +33,7 @@ signals:
     void routeRequested();
     void globalPositionRequested();
     void registerRequested();
+    void editMapTextRequested();
     void visibilityChanged();
     void focusRequested(int index, bool remove);
     void incomingRequested(int zoneIndex, int exitIndex);

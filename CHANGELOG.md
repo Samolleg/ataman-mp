@@ -1,3 +1,8 @@
+# Ataman 55 — EI-MAPTXT-DIRECT-EDIT
+
+- Панель переходов открывает полный текст `map.txt` для ручного редактирования; проверяет CP1251 и структуру зон перед применением. Изменение участвует в Undo/Redo и штатной транзакции Ctrl+S для `texts.res`.
+- Проверка: `travelEditorIntegrationCheck` включает ручную правку текста, Undo/Redo; детали в `docs/validation/ATAMAN_MAPTXT_DIRECT_EDIT_55.md`.
+
 # Ataman 54 — EI-NEIGHBOR-OBJECT-CONTACT
 
 - Статические объекты читаются из MOB и подготавливаются только для карт,

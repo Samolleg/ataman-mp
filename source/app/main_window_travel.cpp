@@ -34,6 +34,8 @@
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QTimer>
+#include <QPlainTextEdit>
+#include <QTextCodec>
 #include "res_file.h"
 
 namespace {
@@ -70,6 +72,43 @@ void MainWindow::createTravelEditor(QMenu* menu)
     m_travelDock=new QDockWidget(tr("Появления и переходы"),this);
     m_travelDock->setObjectName("TravelEditorDock");
     m_travelPanel=new CTravelPanel(m_travelDock);m_travelDock->setWidget(m_travelPanel);
+    connect(m_travelPanel,&CTravelPanel::editMapTextRequested,this,[this](){
+        if(!m_travelDocument){m_travelPanel->setStatus(tr("Нет открытого texts.res с map.txt."));return;}
+        const QByteArray before=m_travelDocument->snapshot();
+        QTextCodec* codec=QTextCodec::codecForName("CP1251");
+        if(!codec || codec->fromUnicode(codec->toUnicode(before))!=before){
+            QMessageBox::warning(this,tr("map.txt"),tr("Текст содержит байты, которые нельзя без потерь показать в CP1251."));return;
+        }
+        QDialog dialog(this);dialog.setWindowTitle(tr("Редактировать map.txt — %1").arg(m_travelDocument->path()));
+        dialog.resize(900,650);
+        auto* layout=new QVBoxLayout(&dialog);
+        auto* note=new QLabel(tr("Текст сохраняется вместе с картой (Ctrl+S). Перед применением проверяется структура зон. Esc отменяет изменения в окне."));
+        note->setWordWrap(true);layout->addWidget(note);
+        auto* editor=new QPlainTextEdit(&dialog);editor->setObjectName("travelRawMapText");
+        editor->setLineWrapMode(QPlainTextEdit::NoWrap);editor->setPlainText(codec->toUnicode(before));layout->addWidget(editor);
+        const QString displayedOriginal=editor->toPlainText();
+        auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);
+        layout->addWidget(buttons);
+        connect(buttons->button(QDialogButtonBox::Ok),&QPushButton::clicked,&dialog,[&](){
+            const QString value=editor->toPlainText();
+            if(value==displayedOriginal){dialog.accept();return;}
+            QByteArray bytes=codec->fromUnicode(value);
+            if(codec->toUnicode(bytes)!=value){QMessageBox::warning(&dialog,tr("map.txt"),tr("Некоторые символы нельзя записать в CP1251."));return;}
+            if(before.contains("\r\n") && before.count("\r\n")>=before.count('\n')/2)
+                bytes.replace("\n","\r\n");
+            CMapTableDocument parsed;QStringList errors;
+            if(!parsed.loadBytes(bytes,&errors) || !parsed.validateAllZones().success){
+                if(errors.isEmpty())errors=parsed.validateAllZones().errors;
+                QMessageBox::warning(&dialog,tr("map.txt"),errors.join('\n'));return;
+            }
+            if(!m_travelDocument->restore(bytes)){QMessageBox::warning(&dialog,tr("map.txt"),tr("Не удалось применить текст."));return;}
+            recordTravelEdit(before,tr("Редактировать map.txt"));
+            m_travelZone=m_travelDocument->uniqueZone(m_mapTestEntry.zoneId);
+            m_travelExit=-1;refreshTravelEditor();dialog.accept();
+        });
+        connect(buttons->button(QDialogButtonBox::Cancel),&QPushButton::clicked,&dialog,&QDialog::reject);
+        dialog.exec();
+    });
     connect(m_travelPanel,&CTravelPanel::routeRequested,this,&MainWindow::createPairedTravelRoute);
     connect(m_travelPanel,&CTravelPanel::globalPositionRequested,this,[this](){
         if(!m_travelDocument||m_travelZone<0)return;
@@ -509,6 +548,22 @@ bool travelEditorIntegrationCheck(MainWindow* window)
     bool passed=window->m_pView->travelEditing();
     window->m_travelDocument=doc;window->m_travelDocuments.insert(path,doc);
     window->m_travelZone=0;window->m_travelExit=0;window->refreshTravelEditor();
+    const auto rawBefore=doc->snapshot();
+    bool rawEditorOpened=false;
+    QTimer::singleShot(0,window,[&](){
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        auto* editor=dialog?dialog->findChild<QPlainTextEdit*>("travelRawMapText"):nullptr;
+        if(!editor){if(dialog)dialog->reject();return;}
+        rawEditorOpened=true;
+        editor->insertPlainText(QStringLiteral("# manual map.txt edit\r\n"));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+        if(dialog->isVisible())dialog->reject();
+    });
+    window->m_travelPanel->findChild<QPushButton*>("travelEditMapText")->click();
+    passed=passed && rawEditorOpened && doc->dirty() && doc->snapshot()!=rawBefore;
+    window->on_actionUndo_triggered();passed=passed && doc->snapshot()==rawBefore;
+    window->on_actionRedo_triggered();passed=passed && doc->snapshot()!=rawBefore;
+    window->on_actionUndo_triggered();
     for(int type=0;type<2;++type){
         auto* button=window->m_travelPanel->findChild<QPushButton*>(QString("travelAdd%1").arg(type));
         if(!button)return false;

@@ -27,6 +27,9 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     m_zoneCombo=new QComboBox;configureTravelCombo(m_zoneCombo);layout->addWidget(m_zoneCombo);
     auto* reg=new QPushButton(tr("Зарегистрировать текущую карту…"));layout->addWidget(reg);
     connect(reg,&QPushButton::clicked,this,&CTravelPanel::registerRequested);
+    auto* editText=new QPushButton(tr("Редактировать map.txt…"));
+    editText->setObjectName("travelEditMapText");layout->addWidget(editText);
+    connect(editText,&QPushButton::clicked,this,[this](){if(flush())emit editMapTextRequested();});
     auto* route=new QPushButton(tr("Создать маршрут между картами…"));
     route->setObjectName("travelCreateRoute");layout->addWidget(route);
     connect(route,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
