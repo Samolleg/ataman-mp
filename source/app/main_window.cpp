@@ -3637,7 +3637,14 @@ void MainWindow::setupCompactViewportTools()
     connect(m_landscapeToolsDock,&QDockWidget::visibilityChanged,this,&MainWindow::updateLandscapeToolButtons);
     connect(m_pView,&CView::loadedMapStateChanged,this,&MainWindow::updateLandscapeToolButtons);
     auto* travel=button("travelToolbarButton",QString::fromUtf8("Появления и переходы"),2,7);
-    m_travelDock->toggleViewAction()->setIcon(viewportToolIcon(2));travel->setDefaultAction(m_travelDock->toggleViewAction());
+    // The dock may be present but covered by another tab. Qt's toggle action
+    // then considers it open and a toolbar click hides it instead of showing it.
+    // This button is an entry point: always expose and focus the editor.
+    connect(travel,&QToolButton::clicked,this,[this]() {
+        m_travelDock->show();
+        m_travelDock->raise();
+        if(m_travelDock->isFloating())m_travelDock->activateWindow();
+    });
     auto* scenario=button("scenarioToolbarButton",QString::fromUtf8("Сценарий карты"),3,8);
     auto* scenarioAction=findChild<QDockWidget*>("mapScenarioDock")->toggleViewAction();scenarioAction->setIcon(viewportToolIcon(3));scenario->setDefaultAction(scenarioAction);
     auto* create=button("createObjectToolbarButton",QString::fromUtf8("Создать объект"),4,9);

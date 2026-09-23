@@ -3197,6 +3197,18 @@ int runHeadlessCommand(QApplication& app)
             sculptButton->setEnabled(true);sculptButton->click();
             compactToolbarWorks=compactToolbarWorks && productionLandscape->editMode()==ELandscapeEditMode::Sculpt;
         } else compactToolbarWorks=false;
+        auto* travelButton=productionWindow->findChild<QToolButton*>("travelToolbarButton");
+        auto* travelDock=productionWindow->findChild<QDockWidget*>("TravelEditorDock");
+        if(travelButton && travelDock) {
+            travelDock->hide();
+            travelButton->click();
+            compactToolbarWorks=compactToolbarWorks && !travelDock->isHidden();
+            // A second click must keep the editor available even if it is
+            // already part of a tab stack rather than toggling it closed.
+            travelButton->click();
+            compactToolbarWorks=compactToolbarWorks && !travelDock->isHidden();
+            travelDock->hide();
+        } else compactToolbarWorks=false;
         if(operationBar && !qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS").isEmpty()) {
             operationBar->resize(operationBar->sizeHint());
             operationBar->grab().save(QDir(qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS")).filePath("compact-toolbar.png"));
