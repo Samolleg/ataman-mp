@@ -3,6 +3,7 @@
 Date: 2026-09-23
 Base: Ataman 53, `e5923d0d0a8156b34642df237d47ff1a9445b37e`
 Branch: `codex/neighbor-object-contact-v54`
+Source commit: `1bdc1b87bcdc09bc15aea0794e950f60ef3d6cb3`
 
 ## Cause and change
 
@@ -41,6 +42,13 @@ selection again.
   validator PASS; independent coverage and SHA-256 verification PASS for all
   101 managed files. Staged EXE matches the Release EXE:
   `ca2c196241b2899af69495b53b65f568515b504681fa14209d73c07e56ab8baf`.
+- Permanent install `artifacts/EI-Mapper-Ataman-2-first-test`: version 54;
+  previous 101 managed hashes verified before replacement, 6 changed managed
+  files backed up and replaced, and all 101 current managed hashes verified
+  afterward. The 19,254 then-present unlisted files retained their paths and
+  lengths. Rollback: `artifacts/rollback-EI-Mapper-Ataman-v53-to-54-20260923`.
+- The previous v52-to-v53 rollback was left untouched. Automatic approval
+  review rejected its recursive deletion as potentially user-owned data.
 
 Manual verification remains: open a real world with both touching and distant
 maps, check static objects at the active border and terrain-only distant maps,
