@@ -2386,6 +2386,49 @@ bool CMob::save(const SaveProgress& progress)
     return saveAs(m_filePath, progress);
 }
 
+bool CMob::prepareFreshLightNode(CNode* node, QJsonObject* data,
+                                CValidationReport* report)
+{
+    if(!node || !data || node->nodeType()!=eLight)return false;
+    const uint previousId=node->mapId();
+    node->setMapId(1);
+    QByteArray seed;
+    {
+        util::CMobParser writer(seed,true);
+        writer.startSection("OBJECT_DB_FILE");
+        writer.startSection("SC_OBJECT_DB_FILE");writer.endSection();
+        writer.startSection("OBJECT_SECTION");
+        node->serialize(writer);
+        writer.endSection();writer.endSection();
+    }
+    const QJsonObject authored=node->toJson();
+    node->setMapId(previousId);
+    CMobDocument document;
+    CMob projection;
+    if(!document.loadBytes(seed,"new-light.mob",report)
+       || document.objects().size()!=1
+       || !projection.deserialize(seed) || projection.nodes().size()!=1
+       || projection.nodes().first()->nodeType()!=eLight
+       || projection.nodes().first()->toJson()!=authored)
+    {
+        if(report)report->add("mob.light_creation.roundtrip",EValidationSeverity::Error,
+                              "The new light did not retain its fields on reopen.");
+        return false;
+    }
+    const auto& object=document.objects().first();
+    QByteArray raw;
+    if(!document.objectSubtreeBytes(object.sectionPath,object.subtreeSha256,&raw))return false;
+    QJsonObject provenance;
+    provenance.insert("origin","lightCreation");
+    provenance.insert("sourceDocumentSha256",QString::fromLatin1(QCryptographicHash::hash(seed,QCryptographicHash::Sha256).toHex()));
+    provenance.insert("sourceObjectPath",object.sectionPath);
+    provenance.insert("sourceSubtreeSha256",QString::fromLatin1(object.subtreeSha256.toHex()));
+    provenance.insert("sourceSubtreeBase64",QString::fromLatin1(raw.toBase64()));
+    provenance.insert("cleanSubtreeBase64",QString::fromLatin1(raw.toBase64()));
+    *data=authored;data->insert("_Endurance raw provenance",provenance);
+    return true;
+}
+
 void CMob::adoptCommittedBytes(const QByteArray& bytes)
 {
     m_originalData=bytes;

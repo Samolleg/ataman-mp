@@ -4,6 +4,7 @@
 #include "mob.h"
 #include "unit.h"
 #include "lever.h"
+#include "light.h"
 #include "utils.h"
 #include "view.h"
 #include "undo.h"
@@ -159,6 +160,31 @@ int runDatabaseCreationCheck()
             return fail("undo in populated destination: " + destination.lastSaveError());
         output << "PASS: " << entry.name << " creation, reopen, removal, repeat and hash rejection\n";
         output << "PASS: real create command undo/redo and save/undo/save/redo/save\n";
+    }
+    {
+        CLight light;
+        QVector3D position(7,9,3);light.updatePos(position);
+        QJsonObject prepared;
+        if(!CMob::prepareFreshLightNode(&light,&prepared,&report))return fail("standalone light template");
+        CMob destination;
+        destination.m_originalData=baseline;
+        if(!destination.deserialize(baseline))return fail("light destination");
+        destination.captureCleanProjection();
+        CNode* created=destination.createNode(prepared,false);
+        QByteArray candidate;
+        if(!created || created->nodeType()!=eLight || created->mapId()==0
+           || !destination.buildValidatedCandidate(&candidate,&report))return fail("light guarded save");
+        CMob reopened;
+        if(!reopened.deserialize(candidate) || reopened.nodes().size()!=1
+           || reopened.nodes().first()->nodeType()!=eLight
+           || reopened.nodes().first()->position()!=position)return fail("light reopen");
+        QUndoStack history;history.push(new CCreateNodeCommand(&view,&destination,created));
+        history.undo();
+        if(!destination.nodes().isEmpty())return fail("light undo");
+        history.redo();
+        if(destination.nodes().size()!=1 || !destination.buildValidatedCandidate(&candidate,&report))
+            return fail("light redo and save");
+        output << "PASS: standalone light creation without selected object, guarded save, reopen and undo/redo\n";
     }
     output.flush(); return 0;
 }

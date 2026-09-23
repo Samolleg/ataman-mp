@@ -4,9 +4,9 @@
 #include "property.h"
 
 CLight::CLight():
-    m_range(0.0f)
+    m_range(10.0f)
     ,m_bShadow(false)
-    ,m_color(0.0f, 0.0f, 0.0f)
+    ,m_color(1.0f, 1.0f, 1.0f)
 {
     updateFigure(CObjectList::getInstance()->getFigure("light"));
     setTexture(CTextureList::getInstance()->texture("light"));

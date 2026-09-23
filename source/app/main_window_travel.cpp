@@ -75,6 +75,9 @@ void MainWindow::createTravelEditor(QMenu* menu)
     connect(m_travelPanel,&CTravelPanel::editMapTextRequested,this,[this](){
         if(!m_travelDocument){m_travelPanel->setStatus(tr("Нет открытого texts.res с map.txt."));return;}
         const QByteArray before=m_travelDocument->snapshot();
+        const auto currentZones=m_travelDocument->table().zones();
+        const QString currentZoneId=m_travelZone>=0 && m_travelZone<currentZones.size()
+            ?currentZones[m_travelZone].zoneId:QString();
         QTextCodec* codec=QTextCodec::codecForName("CP1251");
         if(!codec || codec->fromUnicode(codec->toUnicode(before))!=before){
             QMessageBox::warning(this,tr("map.txt"),tr("Текст содержит байты, которые нельзя без потерь показать в CP1251."));return;
@@ -92,10 +95,26 @@ void MainWindow::createTravelEditor(QMenu* menu)
         connect(buttons->button(QDialogButtonBox::Ok),&QPushButton::clicked,&dialog,[&](){
             const QString value=editor->toPlainText();
             if(value==displayedOriginal){dialog.accept();return;}
-            QByteArray bytes=codec->fromUnicode(value);
-            if(codec->toUnicode(bytes)!=value){QMessageBox::warning(&dialog,tr("map.txt"),tr("Некоторые символы нельзя записать в CP1251."));return;}
-            if(before.contains("\r\n") && before.count("\r\n")>=before.count('\n')/2)
-                bytes.replace("\n","\r\n");
+            int prefix=0;
+            while(prefix<displayedOriginal.size() && prefix<value.size()
+                  && displayedOriginal[prefix]==value[prefix])++prefix;
+            int suffix=0;
+            while(suffix<displayedOriginal.size()-prefix && suffix<value.size()-prefix
+                  && displayedOriginal[displayedOriginal.size()-suffix-1]==value[value.size()-suffix-1])++suffix;
+            const auto byteOffset=[&](int characterOffset){
+                int byte=0;
+                for(int character=0;character<characterOffset && byte<before.size();++character,++byte)
+                    if(before[byte]=='\r' && byte+1<before.size() && before[byte+1]=='\n')++byte;
+                return byte;
+            };
+            const int firstByte=byteOffset(prefix);
+            const int lastByte=byteOffset(displayedOriginal.size()-suffix);
+            QByteArray replacement=codec->fromUnicode(value.mid(prefix,value.size()-prefix-suffix));
+            if(codec->toUnicode(replacement)!=value.mid(prefix,value.size()-prefix-suffix)){
+                QMessageBox::warning(&dialog,tr("map.txt"),tr("Некоторые символы нельзя записать в CP1251."));return;
+            }
+            if(before.contains("\r\n"))replacement.replace("\n","\r\n");
+            QByteArray bytes=before.left(firstByte)+replacement+before.mid(lastByte);
             CMapTableDocument parsed;QStringList errors;
             if(!parsed.loadBytes(bytes,&errors) || !parsed.validateAllZones().success){
                 if(errors.isEmpty())errors=parsed.validateAllZones().errors;
@@ -103,7 +122,7 @@ void MainWindow::createTravelEditor(QMenu* menu)
             }
             if(!m_travelDocument->restore(bytes)){QMessageBox::warning(&dialog,tr("map.txt"),tr("Не удалось применить текст."));return;}
             recordTravelEdit(before,tr("Редактировать map.txt"));
-            m_travelZone=m_travelDocument->uniqueZone(m_mapTestEntry.zoneId);
+            m_travelZone=m_travelDocument->uniqueZone(currentZoneId.isEmpty()?m_mapTestEntry.zoneId:currentZoneId);
             m_travelExit=-1;refreshTravelEditor();dialog.accept();
         });
         connect(buttons->button(QDialogButtonBox::Cancel),&QPushButton::clicked,&dialog,&QDialog::reject);

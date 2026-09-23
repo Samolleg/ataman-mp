@@ -63,7 +63,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_databaseCategory = new QComboBox(this);
     m_databaseCategory->setObjectName("databaseCategory");
     m_databaseCategory->addItems({tr("Creatures"), tr("Items"), tr("Usable objects / levers"),
-                                  tr("Technical object (from selected template)")});
+                                  tr("Technical objects")});
     m_itemMaterial = new QComboBox(this);
     m_itemMaterial->setObjectName("databaseItemMaterial");
     m_itemMaterial->setToolTip(tr("Object material"));
@@ -355,7 +355,7 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     if(selected.size() == 1 && selected.front()->nodeType() == type &&
        selected.front()->hasRawObjectProvenance())
         rawTemplate = selected.front();
-    if(!rawTemplate)
+    if(!rawTemplate && type!=eLight)
     {
         QMessageBox::information(this, tr("Select a creation template"),
             tr("To preserve complete MOB data, select one existing object of the same type "
@@ -387,13 +387,25 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     CLandscape::getInstance()->projectPosition(m_pNode);
 
     QJsonObject nodeData = m_pNode->toJson();
-    QJsonObject provenance;
-    provenance.insert("sourceDocumentSha256",
-        QString::fromLatin1(rawTemplate->rawSourceDocumentSha256().toHex()));
-    provenance.insert("sourceObjectPath", rawTemplate->rawSourceObjectPath());
-    provenance.insert("sourceSubtreeSha256",
-        QString::fromLatin1(rawTemplate->rawSourceSubtreeSha256().toHex()));
-    nodeData.insert("_Endurance raw provenance", provenance);
+    if(type==eLight)
+    {
+        CValidationReport report;
+        if(!CMob::prepareFreshLightNode(m_pNode,&nodeData,&report))
+        {
+            QMessageBox::warning(this,tr("Не удалось создать источник света"),report.toText());
+            return;
+        }
+    }
+    else
+    {
+        QJsonObject provenance;
+        provenance.insert("sourceDocumentSha256",
+            QString::fromLatin1(rawTemplate->rawSourceDocumentSha256().toHex()));
+        provenance.insert("sourceObjectPath", rawTemplate->rawSourceObjectPath());
+        provenance.insert("sourceSubtreeSha256",
+            QString::fromLatin1(rawTemplate->rawSourceSubtreeSha256().toHex()));
+        nodeData.insert("_Endurance raw provenance", provenance);
+    }
     CCreateNodeCommand* pUndo = new CCreateNodeCommand(m_pView, nodeData);
     QObject::connect(pUndo, SIGNAL(addNodeSignal(CNode*)), m_pView->objectTree(), SLOT(addNodeToTree(CNode*)));
     QObject::connect(pUndo, SIGNAL(undo_addNodeSignal(uint)), m_pView->objectTree(), SLOT(onNodeDelete(uint)));
