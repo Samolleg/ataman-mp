@@ -3112,8 +3112,12 @@ void CView::loadNeighborLandscapes()
     const quint64 generation = m_neighborSceneGeneration->load();
     const auto epoch = m_neighborSceneGeneration;
     const QStringList archives=CTextureList::getInstance()->configuredResourceArchivePaths();
+    const QSizeF activeSize(m_pLand->widthInWorldUnits(),
+                            m_pLand->heightInWorldUnits());
     for(const SNeighborMapPlacement& placement : m_neighborPlacements)
     {
+        const bool loadStaticObjects = CNeighborMapLayout::touchesActiveMap(
+            activeSize, placement);
         auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
         connect(watcher, &QFutureWatcher<SNeighborSceneData>::finished, this,
                 [this, watcher, generation]() {
@@ -3156,10 +3160,10 @@ void CView::loadNeighborLandscapes()
             }
             update();
         });
-        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, epoch, generation, archives]() {
+        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, epoch, generation, archives]() {
             if(epoch->load() != generation) return SNeighborSceneData();
-            auto scene=prepareNeighborScene(placement);
-            if(scene.valid) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
+            auto scene=prepareNeighborScene(placement, loadStaticObjects);
+            if(scene.valid && !scene.staticObjects.isEmpty()) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
                 return epoch->load()==generation;
             });
             return scene;

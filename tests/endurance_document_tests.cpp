@@ -14276,6 +14276,10 @@ void EnduranceDocumentTests::neighborSceneRejectsInvalidTerrain()
     QVERIFY(result.valid); QVERIFY(!result.terrainMembers.isEmpty());
     QVERIFY(result.staticObjects.isEmpty()); // Missing MOB never drops valid terrain.
     QVERIFY(!result.diagnostics.isEmpty());
+    result=prepareNeighborScene(placement,false);
+    QVERIFY(result.valid); QVERIFY(!result.terrainMembers.isEmpty());
+    QVERIFY(result.staticObjects.isEmpty());
+    QVERIFY(result.diagnostics.isEmpty()); // Distant MOB was never read.
     placement.size=QSizeF(64,32);
     QVERIFY(!prepareNeighborScene(placement).valid);
     QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate)); file.write("broken"); file.close();

@@ -47,6 +47,18 @@ double rectangleDistance(const QRectF& left, const QRectF& right)
 }
 }
 
+bool CNeighborMapLayout::touchesActiveMap(
+    const QSizeF& activeSize, const SNeighborMapPlacement& placement)
+{
+    if(activeSize.width() <= 0 || activeSize.height() <= 0
+       || placement.size.width() <= 0 || placement.size.height() <= 0)
+        return false;
+    // World-map origins can be snapped to quarter units. Accept a small
+    // rounding gap, but do not load objects from another part of the world.
+    return rectangleDistance(QRectF(QPointF(), activeSize),
+                             QRectF(placement.origin, placement.size)) <= 0.5;
+}
+
 SNeighborMapLayoutResult CNeighborMapLayout::build(
     const QVector<SMapCatalogEntry>& topology,
     const QVector<SWorldMapZoneOrigin>& worldOrigins,

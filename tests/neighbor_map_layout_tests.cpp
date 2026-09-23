@@ -10,6 +10,26 @@ class NeighborMapLayoutTests : public QObject
 
 private slots:
 
+    void onlyTouchingMapsNeedObjects()
+    {
+        const QSizeF active(64,64);
+        SNeighborMapPlacement map;map.size=QSizeF(64,64);
+        map.origin=QPointF(64,0);
+        QVERIFY(CNeighborMapLayout::touchesActiveMap(active,map));
+        map.origin=QPointF(64,64);
+        QVERIFY(CNeighborMapLayout::touchesActiveMap(active,map));
+        map.origin=QPointF(32,32);
+        QVERIFY(CNeighborMapLayout::touchesActiveMap(active,map));
+        map.origin=QPointF(64.25,0);
+        QVERIFY(CNeighborMapLayout::touchesActiveMap(active,map));
+        map.origin=QPointF(65,0);
+        QVERIFY(!CNeighborMapLayout::touchesActiveMap(active,map));
+        map.origin=QPointF(128,0);
+        QVERIFY(!CNeighborMapLayout::touchesActiveMap(active,map));
+        map.size=QSizeF();
+        QVERIFY(!CNeighborMapLayout::touchesActiveMap(active,map));
+    }
+
     void defaultsToAllNeighbors()
     {
         QVector<SMapCatalogEntry> catalog;QVector<SWorldMapZoneOrigin> origins;

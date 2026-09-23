@@ -82,7 +82,8 @@ QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document)
     return result;
 }
 
-SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement)
+SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
+                                        bool loadStaticObjects)
 {
     SNeighborSceneData result; result.placement=placement;
     CMprDocument terrain; CValidationReport report;
@@ -96,7 +97,7 @@ SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement)
     for(const auto& member : terrain.members())
         result.terrainMembers.insert(member.name,member.payload);
     result.valid=true;
-    if(!placement.mobPath.isEmpty())
+    if(loadStaticObjects && !placement.mobPath.isEmpty())
     {
         CMobDocument mob; CValidationReport mobReport;
         if(mob.load(QFileInfo(placement.mobPath),&mobReport) && !mobReport.hasErrors())

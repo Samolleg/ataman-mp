@@ -34,6 +34,8 @@ struct SNeighborMapLayoutResult
 class CNeighborMapLayout
 {
 public:
+    static bool touchesActiveMap(const QSizeF& activeSize,
+                                 const SNeighborMapPlacement& placement);
     static SNeighborMapLayoutResult build(
         const QVector<SMapCatalogEntry>& topology,
         const QVector<SWorldMapZoneOrigin>& worldOrigins,
