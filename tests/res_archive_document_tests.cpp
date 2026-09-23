@@ -177,7 +177,7 @@ private slots:
         const auto refused=commitStagedResPublishedMembers(reopened,request);
         QVERIFY(!refused.success);
         QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),result);file.close();
-        QVERIFY(terrainPublicationResourceChoicePlan({temp.path()},"copy.mpr",archivePath,false,false).requiresExplicitChoice);
+        QVERIFY(!terrainPublicationResourceChoicePlan({temp.path()},"copy.mpr",archivePath,false,false).requiresExplicitChoice);
         QVERIFY(terrainPublicationResourceChoicePlan({temp.path()},"zone3obr.mpr",QString(),true,false).requiresExplicitChoice);
     }
     void noOpIsByteIdentical();

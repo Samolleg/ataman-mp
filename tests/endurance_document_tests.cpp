@@ -1385,7 +1385,8 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QVERIFY(finalizeStart >= 0 && finalizeEnd > finalizeStart);
     const QByteArray finalize = source.mid(
         finalizeStart, finalizeEnd - finalizeStart);
-    QVERIFY(finalize.contains("commitMapSaveBatch({res, adjacent, mpr})"));
+    QVERIFY(finalize.contains("HDPack_Terrain.res"));
+    QVERIFY(!finalize.contains("synchronizeAdjacent"));
     QVERIFY(finalize.contains("archive.buildWithPublishedMembers(pages"));
     QVERIFY2(finalize.contains(
                  "const QFileInfo mprDestination = preselectedMprDestination;"),
@@ -1405,8 +1406,8 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
              "Publication does not defer the owned-runtime/watcher boundary until immediately before archive mutation");
     QVERIFY2(finalize.contains("createTexturesBackup ? tr(")
              && finalize.contains(
-                 "Backing up and atomically replacing textures.res...")
-             && finalize.contains("Atomically replacing textures.res..."),
+                 "Backing up and atomically replacing HDPack_Terrain.res...")
+             && finalize.contains("Atomically replacing HDPack_Terrain.res..."),
              "The no-backup path still claims that it is creating a backup");
     QVERIFY2(source.contains("Modern terrain publication succeeded mpr:%1 res:%2"),
              "Publication no longer records the exact committed MPR/RES pair after both commits succeed");
@@ -1537,7 +1538,7 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     const QString target = terrainPublicationInitialResourcePath(
         {missing, modRes}, mprPath);
     QCOMPARE(QDir::cleanPath(target),
-             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+             QDir::cleanPath(QDir(modRes).filePath("HDPack_Terrain.res")));
     QVERIFY(terrainPublicationPathInResourceRoots(target, {missing, modRes}));
     QVERIFY(!terrainPublicationPathInResourceRoots(
         QDir(resources.path()).filePath("external/textures.res"),
@@ -1552,10 +1553,8 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
         terrainPublicationResourceChoicePlan(
             {missing, modRes}, mprPath, publishedRes, true, false);
     QCOMPARE(QDir::cleanPath(normalSave.initialPath),
-             QDir::cleanPath(publishedRes));
-    // Ordinary Save already authorizes this map's bound resource update.
-    // The exact source can be HDPack_Terrain.res, not necessarily textures.res.
-    QVERIFY(!normalSave.requiresExplicitChoice);
+             QDir::cleanPath(QDir(modRes).filePath("HDPack_Terrain.res")));
+    QVERIFY(normalSave.requiresExplicitChoice);
 
     const QString outsideMaps = QDir(resources.path()).filePath("maps");
     QVERIFY(QDir().mkpath(outsideMaps));
@@ -1570,7 +1569,7 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
             {missing, modRes}, mprPath, outsideSidecar, true, false);
     QVERIFY(recoveredPublishedSave.requiresExplicitChoice);
     QCOMPARE(QDir::cleanPath(recoveredPublishedSave.initialPath),
-             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+             QDir::cleanPath(QDir(modRes).filePath("HDPack_Terrain.res")));
 
     const QString draftSidecar = QDir(resources.path()).filePath(
         "maps/zone2 test-atlas.res");
@@ -1579,7 +1578,7 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
             {missing, modRes}, mprPath, draftSidecar, false, true);
     QVERIFY(draftSaveAs.requiresExplicitChoice);
     QCOMPARE(QDir::cleanPath(draftSaveAs.initialPath),
-             QDir::cleanPath(QDir(modRes).filePath("textures.res")));
+             QDir::cleanPath(QDir(modRes).filePath("HDPack_Terrain.res")));
 
     const QString maps = outsideMaps;
     QVERIFY(QDir().mkpath(maps));

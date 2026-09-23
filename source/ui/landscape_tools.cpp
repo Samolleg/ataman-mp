@@ -710,10 +710,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         tr("Save MPR as modern draft..."), this);
     saveDraft->setObjectName(QStringLiteral("saveModernDraftButton"));
     saveDraft->setToolTip(tr(
-        "Save a portable MPR plus adjacent map-local atlas, even when the MPR "
-        "itself has no unsaved changes. "
-        "Normal Save MPR and Save MPR As publish game-ready atlas pages into "
-        "textures.res instead."));
+        "Save the working MPR and its exact atlas pages/material profile into "
+        "the configured HDPack_Terrain.res, even when the MPR itself has no "
+        "unsaved changes. Normal Save MPR and Save MPR As publish finalized "
+        "pages into the same archive."));
     auto advanced = landscapeFold(paintLayout,tr("Дополнительно"),QStringLiteral("landscapePaintAdvanced"),7);
     QComboBox* paintAlgorithm = new QComboBox(this);
     paintAlgorithm->setObjectName(QStringLiteral("landscapePaintAlgorithm"));

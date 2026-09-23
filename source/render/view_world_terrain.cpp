@@ -10,6 +10,7 @@
 #include "endurance_document.h"
 #include "staged_save_validator.h"
 #include "res_archive_document.h"
+#include "terrain_save_flow_policy.h"
 #include <QtWidgets>
 #include <QCryptographicHash>
 #include <cmath>
@@ -600,12 +601,22 @@ bool CView::ensureWorldTerrainAtlas(const QString& id,CValidationReport* report)
         QStringList archives;
         const QString privateAtlas=file.dir().filePath(file.completeBaseName()+QStringLiteral("-atlas.res"));
         const QString adjacent=file.dir().filePath(QStringLiteral("textures.res"));
+        QStringList otherConfiguredArchives;
+        QString preferredHDPack;
+        for(const QString& configured : CTextureList::getInstance()
+                ->configuredResourceArchivePaths()) {
+            if(terrainPublicationIsHDPackArchive(configured)) {
+                archives.append(configured);
+                if(preferredHDPack.isEmpty())preferredHDPack=configured;
+            }
+            else otherConfiguredArchives.append(configured);
+        }
         if(QFileInfo::exists(privateAtlas))archives.append(privateAtlas);
         if(QFileInfo::exists(adjacent))archives.append(adjacent);
-        archives.append(CTextureList::getInstance()->configuredResourceArchivePaths());
+        archives.append(otherConfiguredArchives);
         archives.removeDuplicates();
         const auto embedded=CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(archives,ns,
-            QFileInfo::exists(privateAtlas)?privateAtlas:QString());
+            preferredHDPack);
         STerrainAtlasProfile profile;
         QVector<QImage> images;
         if(embedded.success()) {profile=embedded.profile;images=embedded.decodedAtlasTiles;source.archive=embedded.archivePath;}

@@ -153,12 +153,12 @@ inline QString terrainPublicationInitialResourcePath(
         const QFileInfo root(configuredRoot);
         if(root.isDir())
             return QDir(root.absoluteFilePath()).filePath(
-                QStringLiteral("textures.res"));
+                QStringLiteral("HDPack_Terrain.res"));
     }
     const QFileInfo mpr(mprPath);
     const QString fallback = mpr.absolutePath().isEmpty()
         ? QDir::homePath() : mpr.absolutePath();
-    return QDir(fallback).filePath(QStringLiteral("textures.res"));
+    return QDir(fallback).filePath(QStringLiteral("HDPack_Terrain.res"));
 }
 
 struct STerrainPublicationResourceChoicePlan
@@ -176,25 +176,36 @@ inline STerrainPublicationResourceChoicePlan terrainPublicationResourceChoicePla
     bool persistedModernDraft)
 {
     STerrainPublicationResourceChoicePlan plan;
-    const QFileInfo activeArchive(activeArchivePath);
-    const bool canReuseActiveArchive = saveOverCurrentMpr
-        && !persistedModernDraft && activeArchive.isFile()
-        && activeArchive.suffix().compare(
-               QStringLiteral("res"), Qt::CaseInsensitive) == 0
-        && terrainPublicationPathInResourceRoots(
-               activeArchive.absoluteFilePath(), configuredResourceRoots);
-    if(canReuseActiveArchive)
+    Q_UNUSED(activeArchivePath);
+    Q_UNUSED(saveOverCurrentMpr);
+    Q_UNUSED(persistedModernDraft);
+    for(const QString& configuredRoot : configuredResourceRoots)
     {
-        plan.initialPath = activeArchive.absoluteFilePath();
-        plan.requiresExplicitChoice = false;
+        const QFileInfo root(configuredRoot);
+        if(!root.isDir())
+            continue;
+        const QString expected = QDir(root.absoluteFilePath()).filePath(
+            QStringLiteral("HDPack_Terrain.res"));
+        const QFileInfo archive(expected);
+        if(archive.isFile()
+           && archive.fileName().compare(QStringLiteral("HDPack_Terrain.res"),
+                                         Qt::CaseInsensitive) == 0)
+        {
+            plan.initialPath = archive.absoluteFilePath();
+            plan.requiresExplicitChoice = false;
+            return plan;
+        }
     }
-    else {
-        plan.initialPath = terrainPublicationInitialResourcePath(
-            configuredResourceRoots, mprPath);
-        plan.requiresExplicitChoice = !QFileInfo(plan.initialPath).isFile()
-            || !terrainPublicationPathInResourceRoots(plan.initialPath, configuredResourceRoots);
-    }
+    plan.initialPath = terrainPublicationInitialResourcePath(
+        configuredResourceRoots, mprPath);
+    plan.requiresExplicitChoice = true;
     return plan;
+}
+
+inline bool terrainPublicationIsHDPackArchive(const QString& archivePath)
+{
+    return QFileInfo(archivePath).fileName().compare(
+        QStringLiteral("HDPack_Terrain.res"), Qt::CaseInsensitive) == 0;
 }
 
 inline QString terrainMapTestResourcePath(
