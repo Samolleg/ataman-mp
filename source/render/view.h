@@ -552,6 +552,7 @@ private:
     void initShaders();
     void draw(SFramePresentationTelemetry* frameTelemetry = nullptr);
     void scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
+                                           const QMatrix4x4& cameraMatrix,
                                            bool cameraMoving);
     void drawTestOverlaysOpenGl();
     void rebuildOverlayMaterialSlotLabels();

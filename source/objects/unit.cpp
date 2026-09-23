@@ -18,6 +18,7 @@
 
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QElapsedTimer>
 
 #include <limits>
 
@@ -142,10 +143,19 @@ void CUnit::preloadVisualResources()
 {
     // Called with the viewport GL context current immediately after MOB
     // projection. Resolve the complete figure/texture/equipment plan and its
-    // initial idle pose before the unit first enters the camera frustum; this
+    // initial idle pose for a unit in the camera frustum; this
     // does not alter serialized MOB data.
-    if(refreshTransientVisual(true))
+    QElapsedTimer loadTimer;
+    loadTimer.start();
+    const bool resolved = refreshTransientVisual(true);
+    const qint64 visualMs = loadTimer.elapsed();
+    if(resolved)
         refreshAnimationPose();
+    const qint64 totalMs = loadTimer.elapsed();
+    if(totalMs >= 30)
+        ei::log(eLogInfo, QString("Unit visual finalize prototype:%1 visualMs:%2 animationMs:%3 totalMs:%4 resolved:%5")
+                .arg(m_prototypeName).arg(visualMs).arg(totalMs - visualMs)
+                .arg(totalMs).arg(resolved));
 }
 
 bool CUnit::needsVisualResolution() const

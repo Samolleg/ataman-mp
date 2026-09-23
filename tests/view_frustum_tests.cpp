@@ -13,6 +13,7 @@ private slots:
     void aabbIntersectionUsesPositiveVertex();
     void sweptSphereRetainsOffscreenShadowCasters();
     void spatialGridReturnsVisibleEntriesInSourceOrder();
+    void cameraMoveMakesPreviouslyDeferredEntriesVisible();
     void spatialGridInsertsBoundarySpanningEntriesIntoEachCell();
     void spatialGridPreservesOverflowEntries();
     void spatialGridTreatsInvalidBoundsAsDiagnosticOverflow();
@@ -69,6 +70,21 @@ void ViewFrustumTests::spatialGridReturnsVisibleEntriesInSourceOrder()
     QCOMPARE(result, QVector<int>({10, 30}));
     QVERIFY(stats.cellsTested >= 3);
     QCOMPARE(stats.entriesTested, 2);
+}
+
+void ViewFrustumTests::cameraMoveMakesPreviouslyDeferredEntriesVisible()
+{
+    CSpatialGrid<int> grid(1.0f);
+    grid.insert(1, QVector3D(0.0f, 0.0f, 0.0f), 0.1f);
+    grid.insert(2, QVector3D(5.0f, 0.0f, 0.0f), 0.1f);
+    QMatrix4x4 initialCamera;
+    initialCamera.setToIdentity();
+    const CViewFrustum initialFrustum(initialCamera);
+    QCOMPARE(grid.query(&initialFrustum), QVector<int>({1}));
+    QMatrix4x4 movedCamera;
+    movedCamera.translate(-5.0f, 0.0f, 0.0f);
+    const CViewFrustum movedFrustum(movedCamera);
+    QCOMPARE(grid.query(&movedFrustum), QVector<int>({2}));
 }
 
 void ViewFrustumTests::spatialGridPreservesOverflowEntries()

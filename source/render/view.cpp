@@ -8048,7 +8048,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     m_visualWarmupCameraRotation = cameraRotation;
     m_visualWarmupCameraValid = true;
     if(!m_minimapCaptureActive)
-        scheduleUnitAppearancePreparation(logicalCameraPosition, cameraMoving);
+        scheduleUnitAppearancePreparation(logicalCameraPosition, camMatrix,
+                                          cameraMoving);
     const COptBool* animationOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("animateUnits")) : nullptr;
     const bool animationEnabled = !m_minimapCaptureActive
@@ -15886,6 +15887,7 @@ void CView::setWorkspaceLoadInProgress(bool inProgress)
 }
 
 void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
+                                              const QMatrix4x4& cameraMatrix,
                                               bool cameraMoving)
 {
     // Workspace replacement pumps Qt events while parsing/projecting thousands
@@ -15902,11 +15904,20 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
         float distanceSquared{0.0f};
     };
     QVector<Candidate> unresolved;
+    const CViewFrustum visibleFrustum(m_projection * cameraMatrix);
+    const COptBool* cullingOption = m_pSettings
+        ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
+    const CViewFrustum* preparationFrustum = (!cullingOption || cullingOption->value())
+        ? &visibleFrustum : nullptr;
     for(CMob* mob : m_aMob)
     {
         if(!mob || !isMobVisible(mob))
             continue;
-        for(CNode* node : mob->nodes())
+        // Prepare only actors the renderer may draw in this frame. Preparing
+        // every unit on a large map made opening zone1 continue for tens of
+        // seconds after the terrain and MOB were usable. The next camera view
+        // queues newly visible actors; draw() can also resolve one on demand.
+        for(CNode* node : spatiallyVisibleNodes(mob, preparationFrustum, nullptr))
             if(CUnit* unit = dynamic_cast<CUnit*>(node))
                 if(unit->nodeState() != ENodeState::eHidden && unit->needsVisualResolution())
                 {
