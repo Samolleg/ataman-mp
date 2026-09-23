@@ -488,7 +488,14 @@ bool CSector::previewCanonicalOverlayDelta(const QByteArray& beforePayload,
                        afterPayload.constData() + materialOffset, 2) != 0)
         {
             changedTiles.insert(tile);
-            rebuildIndices = true;
+            const qint16 beforeMaterial = qFromLittleEndian<qint16>(
+                reinterpret_cast<const uchar*>(
+                    beforePayload.constData() + materialOffset));
+            const qint16 afterMaterial = qFromLittleEndian<qint16>(
+                reinterpret_cast<const uchar*>(
+                    afterPayload.constData() + materialOffset));
+            if((beforeMaterial < 0) != (afterMaterial < 0))
+                rebuildIndices = true;
         }
     }
     if(changedTiles.isEmpty())
@@ -1096,42 +1103,82 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
         }
     }
 
-    // Material edits can change the shared vertex chosen at a tile boundary.
-    // Refresh the inexpensive emissive payload for the sector while retaining
-    // the branch's incremental geometry rebuild and single orphaning upload.
+    // Material edits can change the shared vertex material at any of the
+    // edited tile's 3x3 grid points. Refresh only the copies of those points
+    // in adjacent tiles. The old full-sector pass did up to 2,304 material
+    // lookups for every mouse stamp, even when one overlay cell was removed.
     QVector<qint16> overlayMaterials;
     overlayMaterials.reserve(nTile * nTile);
     for(int row = 0; row < m_arrWater.size(); ++row)
         for(int col = 0; col < m_arrWater.at(row).size(); ++col)
             overlayMaterials.append(qint16(
                 m_arrWater.at(row).at(col).materialIndex()));
-    for(int row = 0; row < m_arrWater.size(); ++row)
-        for(int col = 0; col < m_arrWater.at(row).size(); ++col)
-            for(int vertex = 0; vertex < 9; ++vertex)
+    QSet<int> affectedVertices;
+    bool landEmissionChanged = false;
+    const auto addIncidentVertexCopies = [&affectedVertices](int gridX, int gridY)
+    {
+        const int baseTileX = gridX / 2;
+        const int baseTileY = gridY / 2;
+        const int minimumTileX = (gridX > 0 && gridX % 2 == 0)
+            ? baseTileX - 1 : baseTileX;
+        const int minimumTileY = (gridY > 0 && gridY % 2 == 0)
+            ? baseTileY - 1 : baseTileY;
+        const int maximumTileX = qMin(nTile - 1, baseTileX);
+        const int maximumTileY = qMin(nTile - 1, baseTileY);
+        for(int row = qMax(0, minimumTileY); row <= maximumTileY; ++row)
+            for(int col = qMax(0, minimumTileX); col <= maximumTileX; ++col)
             {
-                const int index = (row * nTile + col) * 9 + vertex;
-                const int gridX = col * 2 + vertex % 3;
-                const int gridY = row * 2 + vertex / 3;
-                const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
-                    overlayMaterials, nTile, nTile, gridX, gridY);
-                const SMaterial* sharedMaterial = m_materials
-                        && sharedMaterialIndex >= 0
-                        && sharedMaterialIndex < m_materials->size()
-                    ? &m_materials->at(sharedMaterialIndex) : nullptr;
-                m_arrAnimatedWaterVrtData[index].emission =
-                    ei::terrainMaterialEmission(sharedMaterial);
-                m_arrAnimatedWaterVrtData[index].opacity =
-                    ei::terrainMaterialOpacity(sharedMaterial);
-                if(index < m_arrLitLandVrtData.size())
-                {
-                    const SVertexData& land = m_arrLandVrtData.at(index);
-                    const SVertexData& overlay = m_arrWaterVrtData.at(index);
-                    m_arrLitLandVrtData[index].emission =
-                        ei::terrainUnderlayEmission(
-                            ei::terrainMaterialEmission(sharedMaterial),
-                            land.position.z(), overlay.position.z());
-                }
+                const int localX = gridX - col * 2;
+                const int localY = gridY - row * 2;
+                if(localX >= 0 && localX <= 2 && localY >= 0 && localY <= 2)
+                    affectedVertices.insert((row * nTile + col) * 9
+                                            + localY * 3 + localX);
             }
+    };
+    for(int tile : localTiles)
+    {
+        if(tile < 0 || tile >= nTile * nTile)
+            continue;
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        for(int localY = 0; localY <= 2; ++localY)
+            for(int localX = 0; localX <= 2; ++localX)
+                addIncidentVertexCopies(col * 2 + localX, row * 2 + localY);
+    }
+    for(int index : affectedVertices)
+    {
+        const int tile = index / 9;
+        const int row = tile / nTile;
+        const int col = tile % nTile;
+        const int vertex = index % 9;
+        const int gridX = col * 2 + vertex % 3;
+        const int gridY = row * 2 + vertex / 3;
+        const int sharedMaterialIndex = ei::sharedOverlayMaterialIndex(
+            overlayMaterials, nTile, nTile, gridX, gridY);
+        const SMaterial* sharedMaterial = m_materials
+                && sharedMaterialIndex >= 0
+                && sharedMaterialIndex < m_materials->size()
+            ? &m_materials->at(sharedMaterialIndex) : nullptr;
+        m_arrAnimatedWaterVrtData[index].emission =
+            ei::terrainMaterialEmission(sharedMaterial);
+        m_arrAnimatedWaterVrtData[index].opacity =
+            ei::terrainMaterialOpacity(sharedMaterial);
+        if(index < m_arrLitLandVrtData.size()
+           && index < m_arrLandVrtData.size()
+           && index < m_arrWaterVrtData.size())
+        {
+            const SVertexData& land = m_arrLandVrtData.at(index);
+            const SVertexData& overlay = m_arrWaterVrtData.at(index);
+            const QVector3D underlayEmission = ei::terrainUnderlayEmission(
+                ei::terrainMaterialEmission(sharedMaterial),
+                land.position.z(), overlay.position.z());
+            if(m_arrLitLandVrtData.at(index).emission != underlayEmission)
+            {
+                m_arrLitLandVrtData[index].emission = underlayEmission;
+                landEmissionChanged = true;
+            }
+        }
+    }
     updateBounds();
     m_waterVertexBuf.bind();
     // Match the fast terrain-sculpt ownership contract: glBufferData replaces
@@ -1142,10 +1189,13 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
     m_waterVertexBuf.allocate(m_arrAnimatedWaterVrtData.constData(),
         m_arrAnimatedWaterVrtData.size() * int(sizeof(SWaterVertexData)));
     m_waterVertexBuf.release();
-    m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
-        m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
-    m_vertexBuf.release();
+    if(landEmissionChanged)
+    {
+        m_vertexBuf.bind();
+        m_vertexBuf.allocate(m_arrLitLandVrtData.constData(),
+            m_arrLitLandVrtData.size() * int(sizeof(STerrainVertexData)));
+        m_vertexBuf.release();
+    }
     if(!rebuildIndices)
         return;
 

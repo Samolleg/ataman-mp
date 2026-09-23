@@ -20150,6 +20150,15 @@ void CView::endTileBrushGroup()
                 .arg(m_tileStrokeSolverNodes)
                 .arg(m_tileStrokeSafeSkippedVertices)
                 .arg(m_tileStrokeSafeSkippedBoundaryCells));
+        if(m_tileStrokeLayer == ETerrainTileLayer::Overlay)
+            ei::log(eLogInfo, QString(
+                "Overlay surface stroke timing: commandMs=%1 modelMs=%2 renderMs=%3 pickMs=%4 picks=%5 previewSectors=%6 stamps=%7")
+                .arg(double(m_overlayCommandNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayModelNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayRenderNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(double(m_overlayPickNsecs) / 1000000.0, 0, 'f', 2)
+                .arg(m_overlayPickCount).arg(m_overlayPreviewSectorCount)
+                .arg(m_tileStrokeActions));
         // Every preview mutation above already queued a normal viewport paint.
         // Requesting updateGL() here recursively paints and swaps from the
         // release handler, then Qt services the queued paint again. Keep the
