@@ -3,6 +3,7 @@
 Date: 2026-09-23
 Base: Ataman 52, `74adbecabcfae5911057c0497d71e69c71468557`
 Branch: `codex/overlay-remove-performance-v53`
+Source commit: `75008847d9c7366f5a3692463c22076c7b72e1de`
 
 ## Change
 
@@ -23,7 +24,22 @@ Branch: `codex/overlay-remove-performance-v53`
 - Release compilation: PASS using Qt 5.12.12 / MinGW 7.3, fresh shadow directory
   `build-release-53-overlay-remove-performance`; executable produced at
   `build-release-53-overlay-remove-performance/release/EIMapperEndurance.exe`.
-- Automated tests and interactive editor/game playback were not run. In
-  particular, performance improvement and rendered boundary continuity still
-  need confirmation with a repeat of the user's removal stroke.
-- No installed application, map, RES archive, or game data was modified.
+- Raw and staged `--version`: PASS, `EI Mapper Endurance Edition 53`.
+- `--ui-widget-check` on the staged application exited 1. The report showed
+  failures in `compatiblePaste*`, `fieldPaste*`, and
+  `numericComponentPaste` checks; other listed checks passed. A repeat against
+  the raw executable produced no output before it was stopped as our owned
+  test process. These failures are not overlay-removal checks, but the broader
+  UI suite is not a pass.
+- Package: `C:/GOG Games/maped/ei-mapper-ataman/build-staging-53-overlay-remove-performance`;
+  finalizer and distribution validator PASS. The 101 managed paths have valid
+  SHA-256 entries, and the staged executable hash matches the fresh Release.
+- Permanent install: `artifacts/EI-Mapper-Ataman-2-first-test`, version 53;
+  all 101 managed files match the package manifest. The executable hash is
+  `1dfc3d6bc45a8b3b0d5477f41bbb3d855a756e16f7b4e0e40c644a7812fbd42a`.
+  A pre-update rollback was hash-verified at
+  `artifacts/rollback-EI-Mapper-Ataman-v52-to-53-20260923`.
+- 19,407 unlisted user files remained in the installation; their paths and
+  lengths were unchanged. No map, RES archive, or game data was modified.
+- User confirmation is still needed for performance improvement and rendered
+  boundary continuity by repeating the removal stroke on the installed build.
