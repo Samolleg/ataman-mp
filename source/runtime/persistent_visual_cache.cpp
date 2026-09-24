@@ -75,31 +75,58 @@ void pruneCacheRoot(const QString& categoryPath)
         return;
     QMutexLocker pruneLocker(&s_pruneMutex);
     const QString rootPath = QFileInfo(categoryPath).dir().absolutePath();
-    QFileInfoList entries;
+    const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
+    // Writers may have queued behind another prune. Recheck after taking the
+    // prune lock so a single over-budget burst does not rescan the whole tree.
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        if(s_cacheRootBytes.value(normalizedRoot) <= budget)
+            return;
+    }
+    struct CacheEntry
+    {
+        QString path;
+        qint64 size;
+        qint64 modifiedMs;
+    };
+    QVector<CacheEntry> entries;
+    qint64 total = 0;
     QDirIterator iterator(rootPath, QDir::Files, QDirIterator::Subdirectories);
     while(iterator.hasNext())
     {
         const QFileInfo entry(iterator.next());
         if(isBudgetedCacheFile(entry))
-            entries.append(entry);
+        {
+            // Snapshot metadata once. Comparing QFileInfo::lastModified() in
+            // the sort queried the filesystem O(n log n) times; 18k entries
+            // made each prune take seconds on a full character cache.
+            const qint64 size = entry.size();
+            entries.append({entry.absoluteFilePath(), size,
+                            entry.lastModified().toMSecsSinceEpoch()});
+            total += size;
+        }
     }
-    std::sort(entries.begin(), entries.end(), [](const QFileInfo& left, const QFileInfo& right)
+    std::sort(entries.begin(), entries.end(), [](const CacheEntry& left, const CacheEntry& right)
     {
-        return left.lastModified() < right.lastModified();
+        return left.modifiedMs < right.modifiedMs;
     });
-    qint64 total = 0;
-    for(const QFileInfo& entry : entries)
-        total += entry.size();
-    for(const QFileInfo& entry : entries)
+    // Leave room for a run of new atlases. Stopping just below the ceiling
+    // caused another full scan for every following 4 MiB composite or tiny
+    // appearance plan. Only derived cache files participate in eviction.
+    const qint64 target = budget - qMax<qint64>(1, budget / 10);
+    for(const CacheEntry& entry : entries)
     {
-        if(total <= budget)
+        if(total <= target)
             break;
-        const qint64 size = entry.size();
-        if(QFile::remove(entry.absoluteFilePath()))
-            total -= size;
+        if(QFile::remove(entry.path))
+        {
+            total -= entry.size;
+        }
     }
-    QMutexLocker locker(&s_cacheMutex);
-    s_cacheRootBytes.insert(QDir::cleanPath(rootPath).toCaseFolded(), total);
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        s_cacheRootBytes.insert(normalizedRoot, total);
+    }
 }
 
 bool prepareDirectory(const QString& path)

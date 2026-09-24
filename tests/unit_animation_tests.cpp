@@ -128,6 +128,7 @@ private slots:
     void roundTripsFigureAssemblyAndUnknownPartNames();
     void retainsRecentlyUsedVisualsAcrossMapReplacement();
     void enforcesCombinedPersistentVisualCacheLimit();
+    void leavesHeadroomAfterPruningVisualCache();
     void removesSlowerDeprecatedAssemblyCache();
     void malformedAndUnknownInputsFailStatic();
 };
@@ -189,6 +190,36 @@ void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
                                         noisy + noisy));
     QVERIFY(QFileInfo(QDir(atlases).filePath(QStringLiteral("unlimited.cache"))).exists());
     ei::setVisualCacheLimitMiB(4096);
+}
+
+void UnitAnimationTests::leavesHeadroomAfterPruningVisualCache()
+{
+    QTemporaryDir application;
+    QVERIFY(application.isValid());
+    struct RestoreLimit
+    {
+        int previous = ei::visualCacheLimitMiB();
+        ~RestoreLimit() { ei::setVisualCacheLimitMiB(previous); }
+    } restoreLimit;
+    ei::setVisualCacheLimitMiB(1);
+    const QString atlases = ei::visualCacheDirectoryForApplication(
+        application.path(), QStringLiteral("character-atlases"));
+    QByteArray noisy(100 * 1024, Qt::Uninitialized);
+    QRandomGenerator random(0x45494341u);
+    for(char& byte : noisy)
+        byte = char(random.generate() & 0xffu);
+    for(int index = 0; index < 11; ++index)
+        QVERIFY(ei::writeVisualCachePayload(atlases, QString::number(index), 77, noisy));
+    const auto filesAfterPrune = QDir(atlases).entryInfoList(
+        QStringList() << QStringLiteral("*.cache"), QDir::Files);
+    qint64 bytesAfterPrune = 0;
+    for(const QFileInfo& file : filesAfterPrune)
+        bytesAfterPrune += file.size();
+    QVERIFY2(bytesAfterPrune <= (1024 * 1024) * 9 / 10,
+             "A full cache must leave room for subsequent writes");
+    QVERIFY(ei::writeVisualCachePayload(atlases, QStringLiteral("next"), 77, noisy));
+    QCOMPARE(QDir(atlases).entryInfoList(QStringList() << QStringLiteral("*.cache"),
+                                         QDir::Files).size(), filesAfterPrune.size() + 1);
 }
 
 void UnitAnimationTests::removesSlowerDeprecatedAssemblyCache()
