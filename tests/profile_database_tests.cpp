@@ -1938,37 +1938,44 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
     auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
     const int changesBefore=document->changes().size();
 
-    auto triggerHeaderAction=[](QHeaderView* header,const QString& objectName,int section) {
+    const auto openColumnMenu=[]() -> QMenu* {
+        QMenu* active=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+        if(active && active->isVisible()
+           && active->objectName()==QStringLiteral("databaseColumnMenu"))return active;
+        for(QWidget* widget:QApplication::allWidgets())
+            if(widget->isVisible()
+               && widget->objectName()==QStringLiteral("databaseColumnMenu"))
+                return qobject_cast<QMenu*>(widget);
+        return nullptr;
+    };
+    auto triggerHeaderAction=[openColumnMenu](QHeaderView* header,const QString& objectName,int section) {
         bool triggered=false;
         QTimer poll;poll.setInterval(5);
-        QObject::connect(&poll,&QTimer::timeout,[&triggered,objectName,&poll](){
-            QMenu* menu=qobject_cast<QMenu*>(QApplication::activePopupWidget());
-            for(QWidget* widget:QApplication::allWidgets())
-                if(widget->objectName()==QStringLiteral("databaseColumnMenu"))
-                    menu=qobject_cast<QMenu*>(widget);
+        QObject::connect(&poll,&QTimer::timeout,[&triggered,objectName,&poll,openColumnMenu](){
+            QMenu* menu=openColumnMenu();
             if(!menu)return;
             for(QAction* action:menu->findChildren<QAction*>())
-                if(action->objectName()==objectName){action->trigger();triggered=true;poll.stop();return;}
+                if(action->objectName()==objectName){action->trigger();triggered=true;poll.stop();menu->close();return;}
             menu->close();poll.stop();
         });
-        QTimer::singleShot(1000,[](){
-            for(QWidget* widget:QApplication::allWidgets())
-                if(QMenu* menu=qobject_cast<QMenu*>(widget))menu->close();
+        QTimer timeout;timeout.setSingleShot(true);timeout.setInterval(3000);
+        QObject::connect(&timeout,&QTimer::timeout,[openColumnMenu](){
+            if(QMenu* menu=openColumnMenu())menu->close();
         });
+        timeout.start();
         poll.start();
         const QPoint point(header->sectionViewportPosition(section)+header->sectionSize(section)/2,
                            header->height()/2);
         QMetaObject::invokeMethod(header,"customContextMenuRequested",Qt::DirectConnection,
                                   Q_ARG(QPoint,point));
-        poll.stop();
+        poll.stop();timeout.stop();
         return triggered;
     };
-    auto clickHeaderActionStaysOpen=[](QHeaderView* header,const QString& objectName,int section) {
+    auto clickHeaderActionStaysOpen=[openColumnMenu](QHeaderView* header,const QString& objectName,int section) {
         bool clicked=false,stayedOpen=false,hasDatabaseSource=false,hasEditorSource=false;
         QTimer poll;poll.setInterval(5);
         QObject::connect(&poll,&QTimer::timeout,[&](){
-            QMenu* menu=nullptr;for(QWidget* widget:QApplication::allWidgets())
-                if(widget->objectName()==QStringLiteral("databaseColumnMenu"))menu=qobject_cast<QMenu*>(widget);
+            QMenu* menu=openColumnMenu();
             if(!menu)return;
             hasDatabaseSource=menu->findChild<QMenu*>("databaseResColumnsSubmenu");
             hasEditorSource=menu->findChild<QMenu*>("databaseEditorColumnsSubmenu");
@@ -1982,10 +1989,14 @@ void ProfileDatabaseTests::databaseEditorPersistsVisualColumnControls()
                 QTimer::singleShot(0,[menu,owner,&stayedOpen](){stayedOpen=menu->isVisible();owner->close();menu->close();});return;
             }
         });
-        QTimer::singleShot(1000,[](){for(QWidget* widget:QApplication::allWidgets())if(QMenu* menu=qobject_cast<QMenu*>(widget))menu->close();});
+        QTimer timeout;timeout.setSingleShot(true);timeout.setInterval(3000);
+        QObject::connect(&timeout,&QTimer::timeout,[openColumnMenu](){
+            if(QMenu* menu=openColumnMenu())menu->close();
+        });
+        timeout.start();
         poll.start();const QPoint point(header->sectionViewportPosition(section)+header->sectionSize(section)/2,header->height()/2);
         QMetaObject::invokeMethod(header,"customContextMenuRequested",Qt::DirectConnection,Q_ARG(QPoint,point));
-        poll.stop();return clicked&&stayedOpen&&hasDatabaseSource&&hasEditorSource;
+        poll.stop();timeout.stop();return clicked&&stayedOpen&&hasDatabaseSource&&hasEditorSource;
     };
 
     {
