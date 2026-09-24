@@ -277,7 +277,7 @@ void LandscapeToolsWidgetTests::worldTerrainControlsStayProtectedAndSignal()
     QVERIFY(!undo->isEnabled());QVERIFY(!redo->isEnabled());QVERIFY(!save->isEnabled());
     QSignalSpy choose(&tools,&CLandscapeTools::worldSculptSelectionRequested);
     maps->click();QCOMPARE(choose.count(),1);
-    tools.setWorldTerrainStatus("World terrain: on. Modified: a.mpr, b.mpr",true,false,true);
+    tools.setWorldTerrainStatus("World terrain: on. Modified: a.mpr, b.mpr",true,false,true,true,2);
     QVERIFY(undo->isEnabled());QVERIFY(!redo->isEnabled());QVERIFY(save->isEnabled());
     QSignalSpy undoStroke(&tools,&CLandscapeTools::worldSculptUndoRequested);
     undo->click();QCOMPARE(undoStroke.count(),1);
@@ -366,6 +366,11 @@ void LandscapeToolsWidgetTests::modernAutoResolveBlendsIsExplicitAndModeScoped()
 
     tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
     tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QToolButton* advanced = tools.findChild<QToolButton*>(
+        QStringLiteral("landscapePaintAdvancedToggle"));
+    QVERIFY(advanced);
+    advanced->click();
+    QVERIFY(advanced->isChecked());
     QVERIFY(autoResolve->isVisibleTo(&tools));
     QVERIFY(tools.modernAutoResolveBlends());
     autoResolve->setChecked(false);
@@ -645,9 +650,9 @@ void LandscapeToolsWidgetTests::paintHelpLivesOnRelevantControls()
         QStringLiteral("materialPaletteTabs"));
     QVERIFY(tabs);
     QCOMPARE(tabs->count(), 3);
-    QCOMPARE(tabs->tabText(0), QStringLiteral("Modern (Z)"));
-    QCOMPARE(tabs->tabText(1), QStringLiteral("Classic Auto (X)"));
-    QCOMPARE(tabs->tabText(2), QStringLiteral("Manual (C)"));
+    QCOMPARE(tabs->tabText(0), QStringLiteral("Авто"));
+    QCOMPARE(tabs->tabText(1), QStringLiteral("Классика"));
+    QCOMPARE(tabs->tabText(2), QStringLiteral("Вручную"));
     for(int index = 0; index < tabs->count(); ++index)
         QVERIFY2(!tabs->tabToolTip(index).trimmed().isEmpty(),
                  "A terrain paint mode has no contextual tooltip");
@@ -655,25 +660,24 @@ void LandscapeToolsWidgetTests::paintHelpLivesOnRelevantControls()
     QPushButton* resolve = tools.findChild<QPushButton*>(
         QStringLiteral("resolveMissingBlendsButton"));
     QVERIFY(resolve);
-    QCOMPARE(resolve->text(),
-             QStringLiteral("Resolve missing blends... (Shift+R)"));
+    QCOMPARE(resolve->text(), QStringLiteral("Исправить переходы…"));
     QPushButton* saveDraft = tools.findChild<QPushButton*>(
         QStringLiteral("saveModernDraftButton"));
     QVERIFY(saveDraft);
-    QCOMPARE(saveDraft->text(),
-             QStringLiteral("Save MPR as modern draft..."));
+    QCOMPARE(saveDraft->text(), QStringLiteral("Сохранить черновик…"));
 
-    bool brushShortcutShown = false;
     for(QLabel* label : tools.findChildren<QLabel*>())
     {
         QVERIFY2(!label->text().startsWith(QStringLiteral(
                      "Z / X / C switches")),
                  "The removed terrain-paint prose block is still visible");
-        if(label->text() == QStringLiteral("Brush size (Alt+Wheel)"))
-            brushShortcutShown = true;
     }
-    QVERIFY2(brushShortcutShown,
-             "The brush-size shortcut is not shown beside its slider");
+    QSlider* brushSize = tools.findChild<QSlider*>(
+        QStringLiteral("terrainPaintRadius"));
+    QVERIFY(brushSize && brushSize->parentWidget());
+    QVERIFY2(brushSize->parentWidget()->toolTip().contains(
+                 QStringLiteral("Alt+колесо")),
+             "The brush-size shortcut is missing from the size control");
 }
 
 void LandscapeToolsWidgetTests::overlaySurfaceModeLocksTileTargetAndOverlayLayer()
@@ -725,6 +729,11 @@ void LandscapeToolsWidgetTests::overlayModesExposeMprMaterialsShortcut()
     QSignalSpy requested(&tools, SIGNAL(openMprMaterialsRequested()));
 
     tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    QToolButton* advanced = tools.findChild<QToolButton*>(
+        QStringLiteral("landscapePaintAdvancedToggle"));
+    QVERIFY(advanced);
+    advanced->click();
+    QVERIFY(advanced->isChecked());
     QVERIFY(shortcut->isVisibleTo(&tools));
     shortcut->click();
     QCOMPARE(requested.count(), 1);
@@ -753,6 +762,11 @@ void LandscapeToolsWidgetTests::overlaySurfaceModesExposeMaterialSlotLabels()
     QVERIFY(operation);
 
     tools.activateMode(ELandscapeEditMode::OverlaySurface, false);
+    QToolButton* diagnostics = tools.findChild<QToolButton*>(
+        QStringLiteral("landscapeDiagnosticsToggle"));
+    QVERIFY(diagnostics);
+    diagnostics->click();
+    QVERIFY(diagnostics->isChecked());
     operation->setCurrentIndex(0);
     QVERIFY2(labels->isVisibleTo(&tools),
              "Add Overlay Surface hides material-slot inspection");

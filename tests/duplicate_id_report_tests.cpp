@@ -1,6 +1,6 @@
 #include <QtTest>
 
-#include "../duplicate_id_report.h"
+#include "duplicate_id_report.h"
 
 class DuplicateIdReportTests : public QObject
 {

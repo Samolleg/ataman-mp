@@ -1387,7 +1387,6 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
         finalizeStart, finalizeEnd - finalizeStart);
     QVERIFY(finalize.contains("HDPack_Terrain.res"));
     QVERIFY(!finalize.contains("synchronizeAdjacent"));
-    QVERIFY(finalize.contains("archive.buildWithPublishedMembers(pages"));
     QVERIFY2(finalize.contains(
                  "const QFileInfo mprDestination = preselectedMprDestination;"),
              "Publication no longer preserves the MPR selected by Save As");
@@ -11781,6 +11780,8 @@ void EnduranceDocumentTests::embeddedTerrainAtlasProfileRoundTripsInsidePublishe
     QVERIFY(reopened.loadBytes(resultBytes, archivePath, &errors));
     QCOMPARE(reopened.memberPayload(QStringLiteral("unrelated.bin")),
              QByteArray("preserve-me"));
+    QCOMPARE(reopened.memberPayload(pageMember.name), pageMember.payload);
+    QCOMPARE(reopened.memberPayload(profileMember.name), profileMember.payload);
 
     STerrainAtlasRecoverySnapshot recovery;
     recovery.resourceIdentity = profile.mprNamespace;

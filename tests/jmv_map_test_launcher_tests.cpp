@@ -493,7 +493,10 @@ static QString createRecoveryManifest(const QString& autoexecPath,
             .filePath("test-runs");
     const QString run = QDir(root).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
     if(!QDir().mkpath(run))
+    {
+        qWarning() << "Cannot create isolated test run" << run;
         return QString();
+    }
     QJsonObject autoexec;
     autoexec.insert("path", autoexecPath);
     autoexec.insert("backupPath", backupPath);
@@ -635,8 +638,7 @@ void JmvMapTestLauncherTests::rejectsMixedJmvGameRootRegistryPaths()
 
 void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()
 {
-    const QString fixture = QDir(QCoreApplication::applicationDirPath())
-        .absoluteFilePath("../../tests/fixtures/runtime/particle-flat-7x5.mpr");
+    const QString fixture = QFINDTESTDATA("fixtures/runtime/particle-flat-7x5.mpr");
     QVERIFY2(QFileInfo::exists(fixture),
              qPrintable("The checked runtime MPR fixture is missing: " + fixture));
     QFile sourceFile(fixture);

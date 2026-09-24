@@ -178,7 +178,15 @@ private slots:
         QVERIFY(!refused.success);
         QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),result);file.close();
         QVERIFY(!terrainPublicationResourceChoicePlan({temp.path()},"copy.mpr",archivePath,false,false).requiresExplicitChoice);
-        QVERIFY(terrainPublicationResourceChoicePlan({temp.path()},"zone3obr.mpr",QString(),true,false).requiresExplicitChoice);
+        const auto existingHDPack=terrainPublicationResourceChoicePlan(
+            {temp.path()},"zone3obr.mpr",QString(),true,false);
+        QVERIFY(!existingHDPack.requiresExplicitChoice);
+        QCOMPARE(existingHDPack.initialPath,QFileInfo(archivePath).absoluteFilePath());
+        QTemporaryDir withoutHDPack;
+        QVERIFY(withoutHDPack.isValid());
+        QVERIFY(terrainPublicationResourceChoicePlan(
+            {withoutHDPack.path()},"zone3obr.mpr",QString(),true,false)
+            .requiresExplicitChoice);
     }
     void noOpIsByteIdentical();
     void legacyResReaderUsesExactNameLengthAndRejectsInvalidRanges();

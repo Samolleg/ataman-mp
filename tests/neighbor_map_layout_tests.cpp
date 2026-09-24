@@ -67,14 +67,14 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
 {
     const QString table = QString::fromUtf8(
         "#zone gz1g gipat game\n#res\nzone1 zone1\n#maps\n11 9\na b\n"
-        "#exit 4\ngz1g_gz3g 1\n#deploy\n340 195 350 209\n"
-        "#zone gz1g_gz3g gipat edge\n#exit 1\ngz1g 4\n#exit 2\ngz3g 1\n"
+        "#exit 1\ngz1g_gz3g 1\n#deploy\n340 195 350 209\n"
+        "#zone gz1g_gz3g gipat edge\n#exit 1\ngz1g 1\n#exit 2\ngz3g 1\n"
         "#zone gz3g gipat game\n#res\nzone3obr zone3obr\n#maps\n11 10\na b\n"
         "#exit 1\ngz1g_gz3g 2\n#deploy\n20 130 26 147\n"
-        "#exit 3\ngz3g_gz6g 1\n#deploy\n328 14 336 26\n"
-        "#exit 4\ngz3g_gz7g 1\n#deploy\n219 2 229 15\n"
-        "#zone gz3g_gz6g gipat edge\n#exit 1\ngz3g 3\n#exit 2\ngz6g 1\n"
-        "#zone gz3g_gz7g gipat edge\n#exit 1\ngz3g 4\n#exit 2\ngz7g 1\n"
+        "#exit 2\ngz3g_gz6g 1\n#deploy\n328 14 336 26\n"
+        "#exit 3\ngz3g_gz7g 1\n#deploy\n219 2 229 15\n"
+        "#zone gz3g_gz6g gipat edge\n#exit 1\ngz3g 2\n#exit 2\ngz6g 1\n"
+        "#zone gz3g_gz7g gipat edge\n#exit 1\ngz3g 3\n#exit 2\ngz7g 1\n"
         "#zone gz6g gipat game\n#res\nzone6 zone6\n#maps\n8 12\na b\n"
         "#exit 1\ngz3g_gz6g 2\n#deploy\n10 25 20 45\n"
         "#exit 2\ngz6g_gz7g 1\n#deploy\n40 10 53 15\n"
@@ -85,14 +85,14 @@ void NeighborMapLayoutTests::placesNearestZone7BackgroundsFromPairedEntrances()
         "#exit 3\ngz7g_gz9g 1\n#deploy\n499 235 510 246\n"
         "#exit 4\ngz7g_gz9g2 1\n#deploy\n499 173 510 178\n"
         "#exit 5\ngz7g_gz8g 1\n#deploy\n502 83 510 91\n"
-        "#zone gz7g_gz9g gipat edge\n#exit 1\ngz7g 3\n#exit 2\ngz9g 2\n"
-        "#zone gz7g_gz9g2 gipat edge\n#exit 1\ngz7g 4\n#exit 2\ngz9g 3\n"
+        "#zone gz7g_gz9g gipat edge\n#exit 1\ngz7g 3\n#exit 2\ngz9g 1\n"
+        "#zone gz7g_gz9g2 gipat edge\n#exit 1\ngz7g 4\n#exit 2\ngz9g 2\n"
         "#zone gz7g_gz8g gipat edge\n#exit 1\ngz7g 5\n#exit 2\ngz8g 1\n"
         "#zone gz8g gipat game\n#res\nzone8 zone8\n#maps\n11 11\na b\n"
         "#exit 1\ngz7g_gz8g 2\n#deploy\n9 232 15 238\n"
         "#zone gz9g gipat game\n#res\nzone9 zone9\n#maps\n14 10\na b\n"
-        "#exit 2\ngz7g_gz9g 2\n#deploy\n10 148 15 155\n"
-        "#exit 3\ngz7g_gz9g2 2\n#deploy\n10 90 15 100\n");
+        "#exit 1\ngz7g_gz9g 2\n#deploy\n10 148 15 155\n"
+        "#exit 2\ngz7g_gz9g2 2\n#deploy\n10 90 15 100\n");
 
     QVector<SMapCatalogEntry> topology = CMapCatalog::parseMapTopology(table);
     for(SMapCatalogEntry& entry : topology)
