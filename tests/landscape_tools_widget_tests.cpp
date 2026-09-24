@@ -198,7 +198,10 @@ void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation()
     QTest::qWait(100);
     QVERIFY(buttonFor(102)->isChecked());
     QVERIFY(buttonFor(100)->width() >= 64);
-    QVERIFY(buttonFor(102)->geometry().right() <= scroll->viewport()->width());
+    QVERIFY2(buttonFor(102)->geometry().right() <= scroll->viewport()->width(),
+             qPrintable(QStringLiteral("button right=%1 viewport width=%2 scroll area width=%3")
+                 .arg(buttonFor(102)->geometry().right())
+                 .arg(scroll->viewport()->width()).arg(scroll->width())));
     tools.resize(420, 1100);
     QTest::qWait(100);
     QCOMPARE(buttonFor(102)->pos(), firstPosition);

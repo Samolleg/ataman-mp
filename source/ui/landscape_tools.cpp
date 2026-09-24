@@ -431,6 +431,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     overlayPalette->addWidget(overlayGrid);
     overlayPalette->addStretch(1);
     const auto configurePaletteScroll = [this](QScrollArea* scroll, QWidget* page) {
+        // A grid rebuilt for a wider dock can retain its old minimum size until
+        // the next layout pass.  The scroll area must be allowed to resize the
+        // palette page to its viewport before the visible-column pass runs.
+        page->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         scroll->setWidgetResizable(true);
         scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
         scroll->setMinimumSize(0, 0);
