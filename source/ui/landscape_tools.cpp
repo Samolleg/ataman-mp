@@ -95,7 +95,7 @@ QVBoxLayout* landscapeFold(QVBoxLayout* parent, const QString& title,
                            const QString& name, int icon)
 {
     QWidget* section = new QWidget;
-    section->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    section->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Maximum);
     QVBoxLayout* box = new QVBoxLayout(section); box->setContentsMargins(0,0,0,0); box->setSpacing(4);
     QToolButton* toggle = new QToolButton(section);
     toggle->setObjectName(name + QStringLiteral("Toggle"));
