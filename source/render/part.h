@@ -77,6 +77,7 @@ public:
     // deletes while the UI thread is closing. Normal map unloads must not use
     // this path because their resources need to be reclaimed immediately.
     static void deferGpuCleanupToContextDestruction();
+    static void releaseRetainedVertexArrays();
     static int sharedMeshCount();
     static quint64 sharedMeshBytes();
 

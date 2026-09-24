@@ -2228,6 +2228,14 @@ CView::~CView()
         m_overlayMaterialSlotLabelTextures.clear();
     }
     m_aMob.clear();
+    // VAO wrappers register context-destruction callbacks. Release them while
+    // this context is still current, so Qt does not serialize thousands of
+    // driver context switches while the widget itself is being destroyed.
+    QElapsedTimer vertexArrayTimer;
+    vertexArrayTimer.start();
+    CPart::releaseRetainedVertexArrays();
+    ei::log(eLogInfo, QString("Shutdown retained vertex arrays released elapsedMs:%1")
+            .arg(vertexArrayTimer.elapsed()));
 
     delete m_timer;
     m_timer = nullptr;

@@ -231,6 +231,15 @@ void CPart::deferGpuCleanupToContextDestruction()
     s_deferGpuCleanupToContextDestruction = true;
 }
 
+void CPart::releaseRetainedVertexArrays()
+{
+    for(const auto& mesh: shutdownRetainedMeshes())
+    {
+        qDeleteAll(mesh->vertexArrays);
+        mesh->vertexArrays.clear();
+    }
+}
+
 int CPart::sharedMeshCount()
 {
     return liveMeshCount();
