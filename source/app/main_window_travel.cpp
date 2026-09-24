@@ -151,6 +151,7 @@ void MainWindow::createTravelEditor(QMenu* menu)
     addDockWidget(Qt::RightDockWidgetArea,m_travelDock);m_travelDock->hide();
     menu->addAction(m_travelDock->toggleViewAction());
     connect(m_travelDock,&QDockWidget::visibilityChanged,this,[this](bool visible){
+        if(m_shutdownInProgress || !m_pView)return;
         if(visible){m_pView->prepareDocumentTransition();m_pView->cancelWorldMapPlacement();m_pView->clearObjectSelection();setCustomSpawnPicking(false);}
         if(visible)hideLandscapeTools();
         m_pView->setTravelEditing(visible);
@@ -299,7 +300,7 @@ void MainWindow::refreshTravelEditor()
 }
 void MainWindow::refreshTravelAreas()
 {
-    if(!m_travelPanel || !m_pView->travelEditing())return;
+    if(m_shutdownInProgress || !m_travelPanel || !m_pView || !m_pView->travelEditing())return;
     QVector<STravelArea> areas;
     if(m_travelDocument && m_travelZone>=0){
         const auto zone=m_travelDocument->table().zones()[m_travelZone];

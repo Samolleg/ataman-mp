@@ -4,6 +4,7 @@
 #include "ui/graphite_caption.h"
 #include "ui/flat_tree_widget.h"
 #include "scenario_panel.h"
+#include "ui/travel_panel.h"
 #include "ui_main_window.h"
 
 #include <QWidget>
@@ -8879,6 +8880,12 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // is destroyed; a queued timeout after view teardown used to crash during
     // otherwise clean shutdown.
     m_shutdownInProgress = true;
+    // Dock visibility can change while child widgets and the viewport are
+    // destroyed. No travel-panel callback may reach CView after this point.
+    if(m_travelDock)
+        QObject::disconnect(m_travelDock, nullptr, this, nullptr);
+    if(m_travelPanel)
+        QObject::disconnect(m_travelPanel, nullptr, this, nullptr);
     if(m_autosaveTimer)
         m_autosaveTimer->stop();
     if(m_autosaveCountdownTimer)

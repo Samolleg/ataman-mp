@@ -3938,7 +3938,17 @@ int main(int argc, char *argv[])
     splash.showCentered();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
+    QTimer smokeSetupDriver;
+    if(qApp->property("workspaceLoadSmoke").toBool()) {
+        QObject::connect(&smokeSetupDriver,&QTimer::timeout,[](){
+            for(QWidget* widget:QApplication::topLevelWidgets())
+                if(auto* setup=qobject_cast<CResourceSetupDialog*>(widget))
+                    if(setup->isVisible())setup->reject();
+        });
+        smokeSetupDriver.start(1);
+    }
     MainWindow window;
+    smokeSetupDriver.stop();
     window.setWindowTitle(QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion()));
     //window.resize(window.sizeHint());
 
@@ -4174,9 +4184,54 @@ int main(int argc, char *argv[])
                 }
                 ei::log(eLogInfo, QString("Workspace load smoke complete documents:%1")
                         .arg(startupDocuments.size()));
-                window.close();
+                const QString dockMode=qEnvironmentVariable("EI_MAPPER_SHUTDOWN_DOCK");
+                if(!dockMode.isEmpty()) {
+                    auto* travel=window.findChild<QDockWidget*>("TravelEditorDock");
+                    if(!travel) {QCoreApplication::exit(7);return;}
+                    if(dockMode==QStringLiteral("shown"))travel->show();
+                    else if(dockMode==QStringLiteral("tabbed")) {
+                        QDockWidget* peer=nullptr;
+                        for(auto* dock:window.findChildren<QDockWidget*>())
+                            if(dock!=travel && window.dockWidgetArea(dock)==Qt::RightDockWidgetArea) {
+                                peer=dock;break;
+                            }
+                        if(!peer) {QCoreApplication::exit(8);return;}
+                        window.tabifyDockWidget(peer,travel);
+                        travel->show();travel->raise();
+                    } else if(dockMode!=QStringLiteral("hidden")) {
+                        QCoreApplication::exit(9);return;
+                    }
+                    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                }
+                const bool closed=window.close();
+                ei::log(closed && !window.view()?eLogInfo:eLogWarning,
+                    QString("Workspace shutdown smoke mode:%1 closed:%2 viewDeleted:%3")
+                    .arg(dockMode.isEmpty()?QStringLiteral("default"):dockMode)
+                    .arg(closed).arg(!window.view()));
+                if(!closed || window.view())QCoreApplication::exit(10);
             }
         });
     }
+    if(qApp->property("workspaceLoadSmoke").toBool()
+       && qEnvironmentVariableIsSet("EI_MAPPER_SHUTDOWN_EMPTY"))
+        QTimer::singleShot(0,&window,[&window](){
+            auto* travel=window.findChild<QDockWidget*>("TravelEditorDock");
+            if(!travel){QCoreApplication::exit(7);return;}
+            const QString mode=qEnvironmentVariable("EI_MAPPER_SHUTDOWN_DOCK");
+            if(mode==QStringLiteral("shown"))travel->show();
+            else if(mode==QStringLiteral("tabbed")) {
+                QDockWidget* peer=nullptr;
+                for(auto* dock:window.findChildren<QDockWidget*>())
+                    if(dock!=travel && window.dockWidgetArea(dock)==Qt::RightDockWidgetArea){peer=dock;break;}
+                if(!peer){QCoreApplication::exit(8);return;}
+                window.tabifyDockWidget(peer,travel);travel->show();travel->raise();
+            }
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            const bool closed=window.close();
+            ei::log(closed && !window.view()?eLogInfo:eLogWarning,
+                QString("Workspace shutdown smoke empty mode:%1 closed:%2 viewDeleted:%3")
+                .arg(mode).arg(closed).arg(!window.view()));
+            if(!closed || window.view())QCoreApplication::exit(10);
+        });
     return app.exec();
 }
