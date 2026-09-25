@@ -48,6 +48,30 @@ atomic-transaction checks remain enabled. No user map is repaired on opening.
 - Existing pair seams, previous triple orientation, four-map corners,
   moving strokes, save failures, consent and geometry atomicity also pass.
 
-Release/package/native UI validation and installation are pending.
+## Build and handoff
+
+Source commit: `715968b8c6b4686c3a515753c44ef2e00ddd211f`.
+Fresh Release: `build-release-67-triple-junction`, wrapper completed with runtime
+components. Staged `--version`: `EI Mapper Endurance Edition 67`.
+Sandbox UI-check exit1: ten clipboard copy/paste fields failed; this is not PASS.
+Native Windows UI-check exit0, all widget/lifecycle checks PASS. Logs:
+`build-test-world-tools/v67-ui.txt`, `v67-ui-native.txt`. The prior clipboard
+instability remains open; no unrelated copy/paste fix is claimed.
+
+Fresh `build-staging-67-triple-junction` finalized and independently validated.
+Manifest paths/coverage/hashes independently rechecked by the installer.
+EXE SHA256: `2AA948ACF39A4A919993446C624BA0E44824C4F37738B38E74CBCE41EA035FE3`.
+Manifest SHA256: `9D4F2C811286B9EC0D86067D58CFAC5A4FAD26FAB3C6853A3557C461CE057038`.
+Staging was not launched after finalization.
+
+Installed at `C:\GOG Games\maped\ei-mapper-ataman\artifacts\EI-Mapper-Ataman-2-first-test`.
+No running target process or reparse points before replacement. 101 managed
+files verified, 6 program files replaced, 0 obsolete removed, 14501 unmanaged
+user files verified unchanged. Installation log:
+`build-release-67-triple-junction/install.log`. Current rollback:
+`artifacts/rollback-EI-Mapper-Ataman-v66-to-67-20260925`.
+Older rollback directories retained after the earlier auto-review cleanup
+rejection; no deletion retry or bypass was performed.
+
 Interactive acceptance on the user's edited maps and game rendering remain
 open. Synthetic and read-only in-memory checks do not replace them.
