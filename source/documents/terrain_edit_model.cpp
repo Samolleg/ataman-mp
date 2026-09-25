@@ -7634,8 +7634,25 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
     }
     QSet<int> changedVertices;
     for(int index = 0; index < m_heights.size(); ++index)
+    {
         if(m_heights.at(index) != m_originalHeights.at(index))
+        {
             changedVertices.insert(index);
+            continue;
+        }
+        if(m_refs.at(index).isEmpty())
+            continue;
+        const SVertexRef& originalRef = m_refs.at(index).first();
+        const QByteArray& original = m_sectors.at(originalRef.sectorIndex).source.payload;
+        // A seam brush can move a vertex in XY without changing its raw
+        // height. Its neighboring normals are still part of the canonical
+        // geometry transaction and must be regenerated for serialization.
+        if(m_xOffsets.at(index) != readOffset(original, originalRef.localX,
+                                                  originalRef.localY, 0)
+           || m_yOffsets.at(index) != readOffset(original, originalRef.localX,
+                                                  originalRef.localY, 1))
+            changedVertices.insert(index);
+    }
     QSet<int> affectedNormals;
     if(m_maxZ != m_originalMaxZ)
         for(int index = 0; index < m_heights.size(); ++index)
@@ -7745,7 +7762,7 @@ bool CTerrainEditModel::appendSectorEdits(CMprEditTransaction* transaction,
     }
     if(report)
         report->add("terrain.transaction", EValidationSeverity::Info,
-                    QString("Prepared %1 sector patch(es) for %2 changed height vertex/vertices, %3 affected normal(s), and localized tile edits")
+                    QString("Prepared %1 sector patch(es) for %2 changed land vertex/vertices, %3 affected normal(s), and localized tile edits")
                         .arg(editedSectorCount).arg(changedVertices.size())
                         .arg(affectedNormals.size()));
     return true;

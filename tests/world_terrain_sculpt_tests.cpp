@@ -225,6 +225,89 @@ private slots:
         QVERIFY(!s.documents["a"]->terrain.apply(collapsed,true));
         QCOMPARE(targets[0].model->sectorPayload(0,0),snapshot);
     }
+    void offsetOnlyTerrainEditCanBeSaved()
+    {
+        CWorldTerrainSession session;
+        add(session,"offset-only");
+        auto document=session.documents.value("offset-only");
+        QVERIFY(document);
+        // A flat surface has identical normals after an XY move. Persist a
+        // small slope first so the position-only edit changes nearby normals.
+        CValidationReport report;
+        STerrainHeightCommand slope;
+        STerrainHeightDelta raised;
+        raised.globalX=17;
+        raised.globalY=16;
+        raised.before=document->terrain.height(17,16);
+        raised.after=quint16(raised.before+5000);
+        slope.deltas.append(raised);
+        QVERIFY2(document->terrain.apply(slope,true,&report),qPrintable(report.toText()));
+        CMprEditTransaction slopeTransaction;
+        QVERIFY2(document->terrain.appendSectorEdits(&slopeTransaction,&report),qPrintable(report.toText()));
+        QByteArray slopeBytes;
+        QVERIFY2(document->baseline.applyTransaction(slopeTransaction,&slopeBytes,&report),qPrintable(report.toText()));
+        QVERIFY2(document->baseline.loadBytes(slopeBytes,"offset-only.mpr",&report),qPrintable(report.toText()));
+        QVERIFY2(document->terrain.load(document->baseline,&report),qPrintable(report.toText()));
+        const QByteArray before=document->terrain.sectorPayload(0,0);
+        STerrainHeightDelta delta;
+        delta.globalX=16;
+        delta.globalY=16;
+        delta.before=delta.after=document->terrain.height(16,16);
+        delta.beforeOffset=document->terrain.terrainVertexOffset(16,16);
+        delta.afterOffset=delta.beforeOffset+QPoint(16,0);
+        delta.changesPosition=true;
+        STerrainHeightCommand command;
+        command.deltas.append(delta);
+        QVERIFY2(document->terrain.apply(command,true,&report),qPrintable(report.toText()));
+        QVERIFY(document->terrain.sectorPayload(0,0)!=before);
+        CMprEditTransaction transaction;
+        QVERIFY2(document->terrain.appendSectorEdits(&transaction,&report),qPrintable(report.toText()));
+        QByteArray saved;
+        QVERIFY2(document->baseline.applyTransaction(transaction,&saved,&report),qPrintable(report.toText()));
+        CMprDocument reopened;
+        CTerrainEditModel terrain;
+        QVERIFY2(reopened.loadBytes(saved,"offset-only.mpr",&report),qPrintable(report.toText()));
+        QVERIFY2(terrain.load(reopened,&report),qPrintable(report.toText()));
+        QCOMPARE(terrain.terrainVertexOffset(16,16),delta.afterOffset);
+        QCOMPARE(terrain.height(16,16),delta.before);
+        QCOMPARE(terrain.sectorPayload(0,0),document->terrain.sectorPayload(0,0));
+        QVERIFY2(document->terrain.apply(command,false,&report),qPrintable(report.toText()));
+        QCOMPARE(document->terrain.sectorPayload(0,0),before);
+    }
+    void installedZone2OffsetOnlyReadOnly()
+    {
+        const QString directory=qEnvironmentVariable("EI_WORLD_SCULPT_MAPS");
+        if(directory.isEmpty()) QSKIP("Optional installed data, read only");
+        const QString path=QDir(directory).filePath("zone2.mpr");
+        CMprDocument baseline;
+        CTerrainEditModel terrain;
+        CValidationReport report;
+        QVERIFY2(baseline.load(QFileInfo(path),&report),qPrintable(report.toText()));
+        QVERIFY2(terrain.load(baseline,&report),qPrintable(report.toText()));
+        QVERIFY(terrain.vertexCountX()>160 && terrain.vertexCountY()>96);
+        STerrainHeightDelta delta;
+        delta.globalX=160;
+        delta.globalY=96;
+        delta.before=delta.after=terrain.height(160,96);
+        delta.beforeOffset=terrain.terrainVertexOffset(160,96);
+        delta.afterOffset=delta.beforeOffset+QPoint(delta.beforeOffset.x()<123?4:-4,0);
+        delta.changesPosition=true;
+        STerrainHeightCommand command;
+        command.deltas.append(delta);
+        QVERIFY2(terrain.apply(command,true,&report),qPrintable(report.toText()));
+        CMprEditTransaction transaction;
+        QVERIFY2(terrain.appendSectorEdits(&transaction,&report),qPrintable(report.toText()));
+        QByteArray candidate;
+        QVERIFY2(baseline.applyTransaction(transaction,&candidate,&report),qPrintable(report.toText()));
+        CMprDocument reopened;
+        CTerrainEditModel reopenedTerrain;
+        QVERIFY2(reopened.loadBytes(candidate,"zone2-in-memory.mpr",&report),qPrintable(report.toText()));
+        QVERIFY2(reopenedTerrain.load(reopened,&report),qPrintable(report.toText()));
+        QCOMPARE(reopenedTerrain.terrainVertexOffset(160,96),delta.afterOffset);
+        QFile original(path);
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        QCOMPARE(original.readAll(),baseline.originalBytes());
+    }
     void allBrushesMatchOneCanvas()
     {
         for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,EWorldSculptMode::Flatten,
