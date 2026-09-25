@@ -712,8 +712,14 @@ void appendTerrainHeightCommand(STerrainHeightCommand* stroke,
         {
             STerrainHeightDelta& existing = stroke->deltas[existingIndex];
             existing.after = delta.after;
+            if(delta.changesPosition) {
+                if(!existing.changesPosition) existing.beforeOffset=delta.beforeOffset;
+                existing.afterOffset=delta.afterOffset;
+                existing.changesPosition=true;
+            }
             existing.clamped = existing.clamped || delta.clamped;
-            if(existing.before == existing.after)
+            if(existing.before == existing.after && (!existing.changesPosition
+               || existing.beforeOffset==existing.afterOffset))
                 stroke->deltas.remove(existingIndex);
         }
     }
@@ -3493,6 +3499,16 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
             return false;
         }
         const quint16 expected = forward ? delta.before : delta.after;
+        if(delta.changesPosition) {
+            const QPoint expectedOffset=forward?delta.beforeOffset:delta.afterOffset;
+            const QPoint next=forward?delta.afterOffset:delta.beforeOffset;
+            if(terrainVertexOffset(delta.globalX,delta.globalY)!=expectedOffset
+               || next.x() < -128 || next.x() > 127 || next.y() < -128 || next.y() > 127) {
+                if(report) report->add("terrain.command_position",EValidationSeverity::Error,
+                    "Seam geometry is out of range or no longer matches the command");
+                return false;
+            }
+        }
         if(m_heights.at(index) != expected)
         {
             if(report)
@@ -3503,6 +3519,27 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         }
     }
 
+    QMap<int,QPointF> moved;
+    for(const auto& delta:command.deltas) if(delta.changesPosition) {
+        const QPoint p=forward?delta.afterOffset:delta.beforeOffset;
+        moved.insert(globalIndex(delta.globalX,delta.globalY),
+                     QPointF(delta.globalX+p.x()/254.0,delta.globalY+p.y()/254.0));
+    }
+    // A seam edit may reparameterize a rim but cannot collapse or invert a face.
+    for(auto it=moved.cbegin();it!=moved.cend();++it) {
+        const int vx=it.key()%m_vertexCountX,vy=it.key()/m_vertexCountX;
+        for(int y=qMax(0,vy-1);y<=qMin(m_vertexCountY-2,vy);++y)
+        for(int x=qMax(0,vx-1);x<=qMin(m_vertexCountX-2,vx);++x) {
+            const auto position=[&](int px,int py){return moved.value(globalIndex(px,py),terrainVertexPosition(px,py));};
+            const QPointF a=position(x,y),b=position(x+1,y),c=position(x+1,y+1),d=position(x,y+1);
+            const auto area=[](const QPointF& u,const QPointF& v){return u.x()*v.y()-u.y()*v.x();};
+            if(forward && (area(b-a,c-a)<=1e-9 || area(c-a,d-a)<=1e-9)) {
+                if(report) report->add("terrain.command_face",EValidationSeverity::Error,
+                    "Seam alignment would collapse or invert a terrain triangle");
+                return false;
+            }
+        }
+    }
     for(int index : affectedNormals)
     {
         const int x = index % m_vertexCountX;
@@ -3522,10 +3559,19 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
         const int index = globalIndex(delta.globalX, delta.globalY);
         const quint16 value = forward ? delta.after : delta.before;
         m_heights[index] = value;
+        if(delta.changesPosition) {
+            const QPoint next=forward?delta.afterOffset:delta.beforeOffset;
+            m_xOffsets[index]=qint8(next.x());m_yOffsets[index]=qint8(next.y());
+        }
         for(const SVertexRef& ref : m_refs.at(index))
         {
             SSector& sector = m_sectors[ref.sectorIndex];
             writeHeight(sector.currentPayload, ref.localX, ref.localY, value);
+            if(delta.changesPosition) {
+                const int offset=kLandVertexOffset+(ref.localY*kSectorVertices+ref.localX)*kVertexSize;
+                sector.currentPayload[offset]=char(m_xOffsets[index]);
+                sector.currentPayload[offset+1]=char(m_yOffsets[index]);
+            }
             affectedSectors.insert(ref.sectorIndex);
         }
     }
@@ -3551,7 +3597,11 @@ bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward
                    || sampleY < 0 || sampleY >= m_vertexCountY)
                     continue;
                 const int sample = globalIndex(sampleX, sampleY);
-                if(m_heights.at(sample) != m_originalHeights.at(sample))
+                const auto& originalRef=m_refs.at(sample).first();
+                const auto& original=m_sectors.at(originalRef.sectorIndex).source.payload;
+                if(m_heights.at(sample) != m_originalHeights.at(sample)
+                   || m_xOffsets.at(sample)!=readOffset(original,originalRef.localX,originalRef.localY,0)
+                   || m_yOffsets.at(sample)!=readOffset(original,originalRef.localX,originalRef.localY,1))
                 {
                     sourceGeometry = false;
                     break;

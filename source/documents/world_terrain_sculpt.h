@@ -26,6 +26,7 @@ struct SWorldTerrainPaintChange
 };
 struct SWorldTerrainStroke
 {
+    QString error;
     int localUndoIndex{-1};
     int protectedBoundaryVertices{0}; // Per-stamp count; repeated stamps may revisit a vertex.
     QMap<QString, STerrainHeightCommand> maps;

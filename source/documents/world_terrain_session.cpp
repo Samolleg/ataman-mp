@@ -34,6 +34,7 @@ bool CWorldTerrainSession::load(const QString& path, QString* error)
 }
 bool CWorldTerrainSession::apply(const SWorldTerrainStroke& stroke,bool forward,QString* error)
 {
+    if(!stroke.error.isEmpty()) { *error=stroke.error;return false; }
     QMap<QString,CTerrainEditModel> staged;
     for(auto it=stroke.maps.cbegin();it!=stroke.maps.cend();++it)
     {

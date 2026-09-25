@@ -122,7 +122,7 @@ void CView::chooseWorldTerrainMaps()
     QVBoxLayout* layout=new QVBoxLayout(&dialog);
     QCheckBox* enabled=new QCheckBox(tr("Edit neighboring-map terrain"),&dialog);
     enabled->setChecked(m_worldTerrainEnabled);layout->addWidget(enabled);
-    QLabel* description=new QLabel(tr("The active map is editable. Check each neighbor you permit the brush to change. Unchecked maps stay protected. Brush edits stay inside its radius. Boundaries with staggered vertices stay fixed because local editing cannot preserve their shared surface with the existing grids. Saved heights use each MPR's precision."),&dialog);
+    QLabel* description=new QLabel(QString::fromUtf8("Выбранные карты редактируются как одно полотно. На стыке кисть согласует вершины обеих карт; для соединения краёв используется дополнительный ряд вершин возле мазка. Исключённые карты не изменяются. Отмена возвращает весь мазок на всех затронутых картах."),&dialog);
     description->setWordWrap(true);layout->addWidget(description);
     QListWidget* list=new QListWidget(&dialog); layout->addWidget(list);
     QSet<QString> shown;
@@ -261,8 +261,9 @@ bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
     } else stamp=makeWorldTerrainStamp(targets,brush,mode,
         m_landscapeTools->rawDelta()*quantum*fraction,
         m_landscapeTools->flattenHeight()*quantum,additive?strength:blend,m_sculptStrokeNoiseSeed);
+    if(!stamp.error.isEmpty()) {emit updateMsg(stamp.error);return true;}
     if(stamp.protectedBoundaryVertices>0)
-        emit updateMsg(QString::fromUtf8("Стык со смещёнными вершинами сохранён: его нельзя изменить локально без разрыва. Рельеф внутри карт редактируется в радиусе кисти."));
+        emit updateMsg(QString::fromUtf8("Часть стыка не согласована: проверьте размещение карт и доступность соседей для общей кисти."));
     if(stamp.isEmpty()) return true;
     if(!m_worldTerrainSession.apply(stamp,true,&error)) { emit updateMsg(error);return true; }
     if(stamp.maps.contains(active) && !applyTerrainHeightPreview(stamp.maps[active],true))

@@ -328,6 +328,11 @@ struct STerrainHeightDelta
     quint16 before{0};
     quint16 after{0};
     bool clamped{false};
+    // Local seam knitting moves existing packed vertices; topology and tile IDs
+    // stay unchanged. Keep geometry in the same atomic undo/save transaction.
+    bool changesPosition{false};
+    QPoint beforeOffset;
+    QPoint afterOffset;
 };
 
 struct STerrainHeightCommand
@@ -552,6 +557,8 @@ public:
     int vertexCountX() const { return m_vertexCountX; }
     int vertexCountY() const { return m_vertexCountY; }
     quint16 height(int globalX, int globalY) const;
+    QPoint terrainVertexOffset(int x, int y) const
+    { const int i=y*m_vertexCountX+x; return {m_xOffsets.value(i),m_yOffsets.value(i)}; }
     QPointF terrainVertexPosition(int x, int y) const
     {
         const int i=y*m_vertexCountX+x;
