@@ -58,6 +58,55 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void halfStepTJunction()
+    {
+        for(auto mode:{EWorldSculptMode::BoundaryFill,EWorldSculptMode::Raise,EWorldSculptMode::Lower,
+                      EWorldSculptMode::Flatten,EWorldSculptMode::Smooth,EWorldSculptMode::Noise})
+        for(auto falloff:{ETerrainBrushFalloff::Constant,ETerrainBrushFalloff::Linear,ETerrainBrushFalloff::Smooth})
+        for(double radius:{1.0,1.5,4.0}) for(bool horizontal:{false,true}) {
+          QVector<QByteArray> reference;QVector<int> order{0,1,2};
+          do {
+            CWorldTerrainSession s;add(s,"a",100,10000);add(s,"b",80,16000);add(s,"c",60,25000);
+            QVector<SWorldTerrainTarget> t{target(s,"a",{0,0}),target(s,"b",{32,16.5}),target(s,"c",{32,-15.5})};
+            if(horizontal)for(auto& map:t)map.origin=QPointF(map.origin.y(),map.origin.x());
+            QVector<SWorldTerrainTarget> input;for(int i:order)input.append(t[i]);
+            QVector<QByteArray> before;for(const auto& map:t)before.append(map.model->sectorPayload(0,0));
+            SWorldTerrainStroke combined;QString error;
+            for(double step:{-0.5,0.0,0.5}) {
+            STerrainBrush brush;brush.centerX=32;brush.centerY=16.5+step;brush.radius=radius;brush.falloff=falloff;
+            if(horizontal)std::swap(brush.centerX,brush.centerY);
+            const auto stroke=makeWorldTerrainStamp(input,brush,mode,2,25,0.7,123);
+            QVERIFY2(stroke.error.isEmpty(),qPrintable(stroke.error));
+            QVERIFY2(s.apply(stroke,true,&error),qPrintable(error));combined.append(stroke);
+            for(double y=16.5+step-radius+0.1;y<16.5+step+radius-0.1;y+=0.0625) {
+                const auto& right=y<16.5?t[2]:t[1];
+                QVERIFY2(qAbs(edgeHeight(t[0],32,horizontal,y)-edgeHeight(right,0,horizontal,y))<0.0031,"vertical T seam");
+            }
+            for(double x=32;x<32+std::sqrt(radius*radius-step*step)-0.1;x+=0.0625)
+                QVERIFY2(qAbs(edgeHeight(t[1],0,!horizontal,x)-edgeHeight(t[2],32,!horizontal,x))<0.0031,"horizontal T seam");
+            }
+            QVector<QByteArray> after;
+            for(const auto& map:t) {
+                const auto doc=s.documents[map.id];after.append(map.model->sectorPayload(0,0));
+                for(const auto& d:combined.maps[map.id].deltas) {
+                    const QPointF p=map.origin+QPointF(d.globalX,d.globalY);
+                    QVERIFY(std::hypot(p.x()-(horizontal?16.5:32),p.y()-(horizontal?32:16.5))<=radius+2.01);
+                }
+                CMprEditTransaction tx;CValidationReport report;QByteArray bytes;
+                QVERIFY(doc->terrain.appendSectorEdits(&tx,&report));
+                QVERIFY(doc->baseline.applyTransaction(tx,&bytes,&report));
+                CMprDocument reopened;CTerrainEditModel model;
+                QVERIFY(reopened.loadBytes(bytes,"synthetic.mpr",&report));QVERIFY(model.load(reopened,&report));
+                QCOMPARE(model.sectorPayload(0,0),after.last());
+            }
+            if(reference.isEmpty())reference=after;else QCOMPARE(after,reference);
+            QVERIFY(s.apply(combined,false,&error));
+            for(int i=0;i<3;++i)QCOMPARE(t[i].model->sectorPayload(0,0),before[i]);
+            QVERIFY(s.apply(combined,true,&error));
+            for(int i=0;i<3;++i)QCOMPARE(t[i].model->sectorPayload(0,0),after[i]);
+          } while(std::next_permutation(order.begin(),order.end()));
+        }
+    }
     void movingShiftedAllBrushes()
     {
         for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,EWorldSculptMode::Flatten,
@@ -169,6 +218,52 @@ private slots:
                 QVERIFY(std::isfinite(gap));worst=qMax(worst,gap);
             }
             qInfo("zone11/12 mode=%d ms=%lld gap-before=%.9f gap-after=%.9f",int(mode),timer.elapsed(),initialGap,worst);
+            QVERIFY(worst<qMax(targets[0].model->maxZ(),targets[1].model->maxZ())/65535.0+1e-7);
+            for(const auto& t:targets) {
+                const auto doc=s.documents[t.id];CMprEditTransaction tx;CValidationReport report;QByteArray bytes;
+                QVERIFY(doc->terrain.appendSectorEdits(&tx,&report));
+                QVERIFY2(doc->baseline.applyTransaction(tx,&bytes,&report),qPrintable(report.toText()));
+                CMprDocument reopened;CTerrainEditModel model;
+                QVERIFY(reopened.loadBytes(bytes,"memory-only.mpr",&report));QVERIFY(model.load(reopened,&report));
+                for(const auto& sec:doc->baseline.sectors())
+                    QCOMPARE(model.sectorPayload(sec.sectorX,sec.sectorY),doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
+            }
+            QVERIFY(s.apply(stamp,false,&error));
+            for(const auto& t:targets) {
+                const auto doc=s.documents[t.id];QVERIFY(!doc->terrain.isDirty());
+                QFile file(doc->path);QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),doc->baseline.originalBytes());
+            }
+        }
+    }
+    void installedZone11Zone12Zone13ReadOnly()
+    {
+        const QString directory=qEnvironmentVariable("EI_WORLD_SCULPT_MAPS");
+        if(directory.isEmpty()) QSKIP("Optional installed data, read only");
+        for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,EWorldSculptMode::Flatten,
+                      EWorldSculptMode::Smooth,EWorldSculptMode::BoundaryFill,EWorldSculptMode::Noise}) {
+            CWorldTerrainSession s;QVector<SWorldTerrainTarget> targets;QString error;
+            const QStringList names{"zone11","zone12","zone13"};const QVector<QPointF> origins{{0,0},{512,324.5},{512,-59.5}};
+            for(int i=0;i<3;++i) {
+                const QString path=QDir(directory).filePath(names[i]+".mpr");
+                QVERIFY2(s.load(path,&error),qPrintable(error));targets.append(target(s,CWorldTerrainSession::key(path),origins[i]));
+            }
+            STerrainBrush brush;brush.centerX=512;brush.centerY=324.5;brush.radius=1.5;
+            double initialGap=0;
+            for(double y=323.1;y<=325.9;y+=0.125)
+                initialGap=qMax(initialGap,qAbs(edgeHeight(targets[0],512,false,y)-edgeHeight(targets[y<324.5?2:1],0,false,y)));
+            QElapsedTimer timer;timer.start();const auto stamp=makeWorldTerrainStamp(targets,brush,mode,0.5,15,0.7,11);
+            QVERIFY2(stamp.error.isEmpty(),qPrintable(stamp.error));
+            QCOMPARE(stamp.maps.size(),3);QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));
+            double worst=0;
+            for(double y=323.1;y<=325.9;y+=0.125) {
+                const double gap=qAbs(edgeHeight(targets[0],512,false,y)-edgeHeight(targets[y<324.5?2:1],0,false,y));
+                QVERIFY(std::isfinite(gap));worst=qMax(worst,gap);
+            }
+            for(double x=512;x<=513.4;x+=0.125) {
+                const double gap=qAbs(edgeHeight(targets[1],0,true,x)-edgeHeight(targets[2],384,true,x));
+                QVERIFY(std::isfinite(gap));worst=qMax(worst,gap);
+            }
+            qInfo("zone11/12/13 mode=%d ms=%lld gap-before=%.9f gap-after=%.9f",int(mode),timer.elapsed(),initialGap,worst);
             QVERIFY(worst<qMax(targets[0].model->maxZ(),targets[1].model->maxZ())/65535.0+1e-7);
             for(const auto& t:targets) {
                 const auto doc=s.documents[t.id];CMprEditTransaction tx;CValidationReport report;QByteArray bytes;

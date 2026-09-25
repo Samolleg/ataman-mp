@@ -505,15 +505,29 @@ SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
                 // Fixed world knots make repeated strokes and active-map changes
                 // deterministic. Half-step ties consistently use the lower knot.
                 const double phase=vertical?phases[root(a)].y():phases[root(a)].x();
-                const double along=phase+std::floor(origin(ta,true)+i-phase+0.5-1e-8);
+                double along=phase+std::floor(origin(ta,true)+i-phase+0.5-1e-8);
+                // An overlap endpoint is a mandatory knot: at a T junction it
+                // is also the corner shared by the two maps on the other side.
+                // Preserve the canonical knot's inverse mapping when it lies
+                // on the shared phase; for a half-step corner select the lower
+                // vertex. Every incident edge therefore chooses the same vertex
+                // without stealing the vertex assigned to the preceding knot.
+                bool endpoint=false;double endpointTie=1e-8;
+                for(double end:{lo,hi}) {
+                    const double tie=qAbs(end-phase-std::round(end-phase))<1e-8?1e-8:-1e-8;
+                    const int nearest=int(std::floor(end-origin(ta,true)+0.5+tie));
+                    if(i==nearest && qAbs(end-origin(ta,true)-i)<=0.50000001) {
+                        along=end;endpoint=true;endpointTie=tie;break;
+                    }
+                }
                 if(along<lo || along>hi || std::hypot(along-center,perpendicular)>brush.radius+1) continue;
-                const int j=int(std::floor(along-origin(tb,true)+0.5+1e-8));
+                const int j=int(std::floor(along-origin(tb,true)+0.5+(endpoint?endpointTie:1e-8)));
                 if(j<0 || j>=count(tb,true)) continue;
                 XY xy=vertical?XY(normal,along):XY(along,normal);
                 const Vertex va{a,vertical?(side?count(ta,false)-1:0):i,vertical?i:(side?count(ta,false)-1:0)};
                 const Vertex vb{b,vertical?(side?0:count(tb,false)-1):j,vertical?j:(side?0:count(tb,false)-1)};
                 const auto oldA=point(ta,va.x,va.y),oldB=point(tb,vb.x,vb.y);
-                if(oldA==oldB) xy=oldA; // Keep already matching authored XY.
+                if(!endpoint && oldA==oldB) xy=oldA; // Keep already matching authored XY.
                 bool representable=true;
                 for(const auto& v:{va,vb}) {
                     const auto& t=targets[v.map];
