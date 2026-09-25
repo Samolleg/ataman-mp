@@ -68,3 +68,17 @@ Release build PASS. Staged --version: EI Mapper Endurance Edition 68.
 Sandbox UI-check exit1 (clipboard instability), not PASS. Native Windows
 UI-check exit0: widget and secondary-window lifecycle PASS. Logs:
 `build-test-world-tools/v68-ui.txt` and `v68-ui-native.txt`.
+
+Source commit: `2556957444256868cc3f695d079fc2536f425633`.
+Finalizer and distribution validator PASS; installer independently verified all
+manifest paths, coverage and hashes. Staging was not run after finalization.
+EXE SHA256: `40DC533F177289A1F135F2DDE5722264489F9EF437AAB8C0C770664201EBEB41`.
+Manifest SHA256: `22D5BBF6193F2732460EBB236C4AA39E873EA4052DC6542BE0EE6FC84766BF30`.
+
+Installed at `C:\GOG Games\maped\ei-mapper-ataman\artifacts\EI-Mapper-Ataman-2-first-test`.
+No running target process or reparse points before update. 101 managed files
+verified; 14877 user files hash-verified unchanged; 6 program files replaced,
+0 obsolete files removed. Log: `build-release-68-material-seams/install.log`.
+Rollback: `artifacts/rollback-EI-Mapper-Ataman-v67-to-68-20260925`.
+Older rollback generations retained because earlier automatic approval review
+rejected cleanup; no deletion retry or bypass was performed in this task.
