@@ -58,6 +58,31 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void movingShiftedAllBrushes()
+    {
+        for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,EWorldSculptMode::Flatten,
+                      EWorldSculptMode::Smooth,EWorldSculptMode::BoundaryFill,EWorldSculptMode::Noise})
+        for(auto falloff:{ETerrainBrushFalloff::Constant,ETerrainBrushFalloff::Linear,ETerrainBrushFalloff::Smooth})
+        for(bool horizontal:{false,true}) {
+            CWorldTerrainSession s;add(s,"a");add(s,"b");
+            // A fractional global translation must not select a different mesh.
+            QVector<SWorldTerrainTarget> targets{target(s,"a",{0.25,0.25}),target(s,"b",{32.25,0.75})};
+            if(horizontal)for(auto& t:targets)t.origin=QPointF(t.origin.y(),t.origin.x());
+            const auto beforeA=targets[0].model->sectorPayload(0,0),beforeB=targets[1].model->sectorPayload(0,0);
+            SWorldTerrainStroke combined;QString error;
+            for(double center:{15.25,16.25,17.25}) {
+                STerrainBrush brush;brush.radius=4;brush.falloff=falloff;
+                brush.centerX=horizontal?center:32.25;brush.centerY=horizontal?32.25:center;
+                const auto stamp=makeWorldTerrainStamp(targets,brush,mode,2,25,0.6,223);
+                QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));combined.append(stamp);
+                // Include already-painted edges outside the current stamp too.
+                for(double y=1.25;y<31;y+=0.125)
+                    QVERIFY(qAbs(edgeHeight(targets[0],32,horizontal,y)-edgeHeight(targets[1],0,horizontal,y))<0.0031);
+            }
+            QVERIFY(s.apply(combined,false,&error));
+            QCOMPARE(targets[0].model->sectorPayload(0,0),beforeA);QCOMPARE(targets[1].model->sectorPayload(0,0),beforeB);
+        }
+    }
     void seamGeometryIsAtomicAndReversible()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");
