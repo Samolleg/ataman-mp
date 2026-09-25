@@ -845,6 +845,15 @@ bool decompressPnt3(QImage& image, const QByteArray& data, uint compressedSize,
 //in. name - texture name
 void CTextureList::parse(QByteArray& data, const QString& name)
 {
+    // setData()/allocateStorage() can leave a non-created QOpenGLTexture when
+    // a caller runs during an event-loop window with no current context. Such
+    // an object must never enter the cache: bind() dereferences its null Qt GL
+    // function table on the next render frame.
+    if(!QOpenGLContext::currentContext())
+    {
+        ei::log(eLogWarning, "Deferred texture upload without OpenGL context: " + name);
+        return;
+    }
     QDataStream stream(data);
     util::formatStream(stream);
 
@@ -1037,6 +1046,12 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         return;
     }
     }
+    if(!texture->isCreated())
+    {
+        ei::log(eLogWarning, "Texture upload did not create an OpenGL texture: " + name);
+        delete texture;
+        return;
+    }
     m_aTexture.insert(name.toLower(), texture);
     m_textureMaterialClasses.insert(texture, materialClass);
 }
@@ -1089,6 +1104,8 @@ QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& 
     const QString key=ei::textureCacheKey(name,model);
     if(m_aTexture.contains(key)) return m_aTexture.value(key);
     if(!data.valid()) return textureDefault();
+    if(!QOpenGLContext::currentContext())
+        return textureDefault();
     auto* texture=new QOpenGLTexture(QOpenGLTexture::Target2D);
     texture->setMagnificationFilter(QOpenGLTexture::Linear);
     texture->setWrapMode(QOpenGLTexture::Repeat);
@@ -1113,6 +1130,12 @@ QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& 
         texture->setMinificationFilter(data.format!=eMMP_PNT3 && context && !context->isOpenGLES()
             ? QOpenGLTexture::NearestMipMapNearest : QOpenGLTexture::Nearest);
         texture->setData(data.image);
+    }
+    if(!texture->isCreated())
+    {
+        ei::log(eLogWarning, "Static texture upload failed: " + key);
+        delete texture;
+        return textureDefault();
     }
     m_aTexture.insert(key,texture);
     m_textureMaterialClasses.insert(texture,data.material);
@@ -1186,6 +1209,13 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
         if(found)*found=false;
         return textureDefault();
     }
+    // Do not negative-cache a texture that was only unavailable because a
+    // modal/progress callback released the GL context. A later render may retry.
+    if(!QOpenGLContext::currentContext())
+    {
+        if(found) *found=false;
+        return textureDefault();
+    }
 
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
     const QStringList candidates = ei::textureResourceCandidates(name, modelName);
@@ -1242,6 +1272,8 @@ QOpenGLTexture* CTextureList::texture(const QString& name)
 {
     QString texName(name.toLower());
     if(m_missingTextureNames.contains(texName))
+        return textureDefault();
+    if(!m_aTexture.contains(texName) && !QOpenGLContext::currentContext())
         return textureDefault();
     if(!m_aTexture.contains(texName))
     {
@@ -1394,6 +1426,8 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
         m_layeredTextureLru.touchExisting(cacheKey);
         return m_aTexture.value(cacheKey);
     }
+    if(!QOpenGLContext::currentContext())
+        return textureDefault();
     const QString compositeDirectory = ei::visualCacheDirectory(
         QStringLiteral("character-composites"));
     const QString compositeKey = ei::visualCacheKey(cacheKey.toUtf8());
@@ -1422,6 +1456,12 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
     texture->setMagnificationFilter(QOpenGLTexture::Nearest);
     texture->setWrapMode(QOpenGLTexture::Repeat);
     texture->setData(composite);
+    if(!texture->isCreated())
+    {
+        ei::log(eLogWarning, "Layered texture upload failed: " + cacheKey);
+        delete texture;
+        return textureDefault();
+    }
     m_aTexture.insert(cacheKey, texture);
     m_layeredTextureLru.touch(cacheKey, qint64(composite.sizeInBytes()));
     m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));

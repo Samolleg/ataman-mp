@@ -355,6 +355,11 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     for(int itemIndex = 0; itemIndex < shadowItems.size(); )
     {
         const SRenderItem& item = shadowItems.at(itemIndex);
+        if(!renderTextureReady(item.texture))
+        {
+            ++itemIndex;
+            continue;
+        }
         // EI foliage and other textured silhouettes can use either binary or
         // intermediate alpha. Shadow maps need their visible coverage, not an
         // opaque rectangle; threshold both classes conservatively.
@@ -492,6 +497,11 @@ void RenderQueueContext::flush()
     for(int itemIndex = 0; itemIndex < colorItems.size(); )
     {
         const SRenderItem& item = colorItems.at(itemIndex);
+        if(!renderTextureReady(item.texture))
+        {
+            ++itemIndex;
+            continue;
+        }
         if(item.materialClass != activeClass || !haveBatch)
         {
             activeClass = item.materialClass;

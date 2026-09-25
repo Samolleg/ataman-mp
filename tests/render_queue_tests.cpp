@@ -11,6 +11,7 @@ class RenderQueueTests : public QObject
 
 private slots:
     void alphaClassification();
+    void rejectsUncreatedRenderTextures();
     void deterministicQueueOrder();
     void groupsOnlyCompatibleInstanceRuns();
     void filtersShadowCastersByDistance();
@@ -38,6 +39,13 @@ void RenderQueueTests::alphaClassification()
     transparent.setPixelColor(0, 0, QColor(1, 2, 3, 127));
     QCOMPARE(classifyTextureAlpha(transparent), ERenderMaterialClass::Transparent);
     QCOMPARE(classifyTextureAlpha(QImage()), ERenderMaterialClass::Conservative);
+}
+
+void RenderQueueTests::rejectsUncreatedRenderTextures()
+{
+    QOpenGLTexture uncreated(QOpenGLTexture::Target2D);
+    QVERIFY(!renderTextureReady(nullptr));
+    QVERIFY(!renderTextureReady(&uncreated));
 }
 
 void RenderQueueTests::deterministicQueueOrder()

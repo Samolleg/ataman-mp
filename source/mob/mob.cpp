@@ -303,6 +303,10 @@ bool CMob::deserialize(QByteArray data)
             step = step/3;
             if(m_pProgress)
                 m_pProgress->update(step);
+            // The progress widget pumps Qt events. Reacquire the render context
+            // before constructors in this section request OpenGL textures.
+            if(m_view && m_view->isValid())
+                m_view->makeCurrent();
             uint objSecLen = parser.nodeLen();
             uint readSecByte(0);
             readByte += parser.skipHeader(); // object section
@@ -426,6 +430,8 @@ bool CMob::deserialize(QByteArray data)
 
 void CMob::updateObjects()
 {
+    if(m_view && m_view->isValid())
+        m_view->makeCurrent();
     QElapsedTimer updateTimer;
     updateTimer.start();
     qint64 unitNanoseconds = 0;

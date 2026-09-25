@@ -4794,7 +4794,8 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     // as simultaneous faces.
     QOpenGLTexture* fallback = CTextureList::getInstance()->textureDefault();
     QOpenGLTexture* skyTexture = CTextureList::getInstance()->texture("sky00");
-    const bool complete = skyTexture && skyTexture != fallback;
+    const bool complete = skyTexture && skyTexture->isCreated()
+        && skyTexture != fallback;
     if(!m_skyResourcesChecked || complete != m_skyResourcesAvailable)
     {
         m_skyResourcesChecked = true;
@@ -15821,6 +15822,11 @@ bool CView::loadMob(QFileInfo &filePath)
     m_pProgress->reset();
     CMob* pMob = new CMob;
     pMob->attach(this, m_pProgress);
+    // MOB projection constructs lights, sounds and other visual helpers whose
+    // constructors upload textures. Landscape/neighbor loading may have left
+    // this widget's OpenGL context non-current.
+    if(isValid())
+        makeCurrent();
     const int result = pMob->readMob(filePath);
     if(result != 0)
     {

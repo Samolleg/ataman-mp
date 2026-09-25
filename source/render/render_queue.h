@@ -43,6 +43,11 @@ struct SRenderItem
     quintptr shadowOwner{0};
 };
 
+inline bool renderTextureReady(const QOpenGLTexture* texture)
+{
+    return texture && texture->isCreated();
+}
+
 struct SShadowCasterBounds
 {
     QVector3D center;

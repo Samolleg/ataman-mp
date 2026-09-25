@@ -435,10 +435,9 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
     if (m_state == ENodeState::eHidden) //skip hidden object for select
         return;
 
-    Q_ASSERT(m_texture);
-    m_texture->bind(0);
-    if(m_texture == nullptr)
+    if(!m_texture || !m_texture->isCreated())
         return;
+    m_texture->bind(0);
 
     //if (!m_parent)
     {
