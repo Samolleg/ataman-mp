@@ -58,6 +58,66 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void materialRepairUsesPhysicalUniformEvidence()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");
+        CTerrainTransitionCatalog ca,cb;
+        for(const auto& id:QStringList{"a","b"}) {
+            auto& catalog=id=="a"?ca:cb;QSet<quint16> seen;
+            const auto& model=s.documents[id]->terrain;
+            for(int y=0;y<16;++y)for(int x=0;x<16;++x) {
+                const auto packed=model.packedTile(x,y,ETerrainTileLayer::Land);
+                if(seen.contains(packed))continue;seen.insert(packed);
+                STerrainTransitionVariant variant;variant.packedTile=packed;
+                variant.signature.northWest=variant.signature.northEast=2;
+                variant.signature.southWest=variant.signature.southEast=id=="a"?1:2;
+                QVERIFY(catalog.addVariant(variant));
+            }
+        }
+        SWorldMaterialRepairMap a,b;a.id="a";b.id="b";b.origin={32,0.5};
+        a.geometry=&s.documents["a"]->terrain;b.geometry=&s.documents["b"]->terrain;
+        a.catalog=&ca;b.catalog=&cb;
+        QVERIFY(a.field.resize(16,16,1));QVERIFY(b.field.resize(16,16,2));
+        b.field.setMaterial(0,8,3); // recovered field disagrees with the visible pure tile
+        auto legacy=a.field;SWorldMaterialField old;old.origin=b.origin;old.field=b.field;
+        reconcileWorldMaterialBoundary(a.origin,&legacy,{old});
+        QCOMPARE(legacy.material(16,8),1); // old repair silently leaves this mismatch
+        const auto plan=planWorldMaterialRepair({a,b});
+        QCOMPARE(plan.fields["a"].material(16,8),2);
+        QCOMPARE(plan.fields["a"].material(15,8),1);
+        QCOMPARE(plan.fields["b"].material(0,8),2);
+        const auto reverse=planWorldMaterialRepair({b,a});
+        QCOMPARE(reverse.changedCells,plan.changedCells);
+        a.field=plan.fields["a"];b.field=plan.fields["b"];
+        QCOMPARE(planWorldMaterialRepair({a,b}).changedVertices,0);
+        a.editable=false;a.field.resize(16,16,1);
+        QCOMPARE(planWorldMaterialRepair({a,b}).fields["a"].material(16,8),1);
+    }
+    void materialRepairUsesDeformedTripleGeometry()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");add(s,"c");
+        auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,16.5}),target(s,"c",{32,-15.5})};
+        STerrainBrush brush;brush.centerX=32;brush.centerY=16.5;brush.radius=3;QString error;
+        QVERIFY(s.apply(makeWorldTerrainStamp(targets,brush,EWorldSculptMode::Raise,1,0,1),true,&error));
+        QVector<SWorldMaterialRepairMap> maps;
+        for(const auto& t:targets) {
+            SWorldMaterialRepairMap m;m.id=t.id;m.origin=t.origin;m.geometry=t.model;
+            QVERIFY(m.field.resize(16,16,2));
+            if(t.id=="a") {m.field.setMaterial(16,8,1);m.field.setMaterial(15,8,1);}
+            maps.append(m);
+        }
+        const auto before=s.documents["a"]->terrain.sectorPayload(0,0);
+        const auto plan=planWorldMaterialRepair(maps);
+        QCOMPARE(plan.fields["a"].material(16,8),2);
+        QCOMPARE(plan.fields["a"].material(15,8),1);
+        QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),before);
+        std::reverse(maps.begin(),maps.end());
+        QCOMPARE(planWorldMaterialRepair(maps).changedCells,plan.changedCells);
+        // Two distinct uniformly painted materials are a real choice, not a
+        // missing transition. Never resolve it by whichever map is active.
+        maps[0].field.resize(16,16,3);
+        QVERIFY(!planWorldMaterialRepair(maps).conflicts.isEmpty());
+    }
     void halfStepTJunction()
     {
         for(auto mode:{EWorldSculptMode::BoundaryFill,EWorldSculptMode::Raise,EWorldSculptMode::Lower,
@@ -253,7 +313,12 @@ private slots:
                 initialGap=qMax(initialGap,qAbs(edgeHeight(targets[0],512,false,y)-edgeHeight(targets[y<324.5?2:1],0,false,y)));
             QElapsedTimer timer;timer.start();const auto stamp=makeWorldTerrainStamp(targets,brush,mode,0.5,15,0.7,11);
             QVERIFY2(stamp.error.isEmpty(),qPrintable(stamp.error));
-            QCOMPARE(stamp.maps.size(),3);QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));
+            if(stamp.isEmpty()) {
+                // The opt-in corpus is editable by its owner. BoundaryFill on
+                // an already healed junction may legitimately be a no-op.
+                QCOMPARE(mode,EWorldSculptMode::BoundaryFill);
+                QVERIFY(initialGap<qMax(targets[0].model->maxZ(),targets[1].model->maxZ())/65535.0+1e-7);
+            } else {QCOMPARE(stamp.maps.size(),3);QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));}
             double worst=0;
             for(double y=323.1;y<=325.9;y+=0.125) {
                 const double gap=qAbs(edgeHeight(targets[0],512,false,y)-edgeHeight(targets[y<324.5?2:1],0,false,y));
@@ -274,7 +339,7 @@ private slots:
                 for(const auto& sec:doc->baseline.sectors())
                     QCOMPARE(model.sectorPayload(sec.sectorX,sec.sectorY),doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
             }
-            QVERIFY(s.apply(stamp,false,&error));
+            if(!stamp.isEmpty())QVERIFY(s.apply(stamp,false,&error));
             for(const auto& t:targets) {
                 const auto doc=s.documents[t.id];QVERIFY(!doc->terrain.isDirty());
                 QFile file(doc->path);QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),doc->baseline.originalBytes());

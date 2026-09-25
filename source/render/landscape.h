@@ -81,7 +81,7 @@ public:
     bool isMprLoad() {return !m_aSector.isEmpty();}
     bool isReadOnlyBackground() const { return m_readOnlyBackground; }
     void unloadMpr();
-    void readMap(const QFileInfo& path);
+    void readMap(const QFileInfo& path, bool createRecoverySnapshot = true);
     bool readBackgroundMap(const QFileInfo& path);
     bool readPreparedBackground(const QFileInfo& path,
                                 const QMap<QString,QByteArray>& members);

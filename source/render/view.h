@@ -187,7 +187,7 @@ public:
         return QSize(m_mprDocument.mapInfo().sectorCountX,m_mprDocument.mapInfo().sectorCountY);
     }
 
-    void loadLandscape(const QFileInfo& filePath);
+    void loadLandscape(const QFileInfo& filePath, bool createRecoverySnapshot = true);
     void refreshAfterResourceSetup();
     void setWorkspaceLoadInProgress(bool inProgress);
     void unloadLand(bool promptForSave = true);
@@ -585,6 +585,7 @@ private:
     bool previewWorldPaintState(const QString& id);
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
+    bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();

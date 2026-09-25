@@ -640,9 +640,9 @@ QString genSectorSuffix(int x, int y)
     return name;
 }
 
-void CLandscape::readMap(const QFileInfo& path)
+void CLandscape::readMap(const QFileInfo& path,bool createRecoverySnapshot)
 {
-    readMapInternal(path, true);
+    readMapInternal(path, createRecoverySnapshot);
 }
 
 bool CLandscape::readBackgroundMap(const QFileInfo& path)

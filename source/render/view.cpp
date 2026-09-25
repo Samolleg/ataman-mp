@@ -8940,7 +8940,7 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     return result;
 }
 
-void CView::loadLandscape(const QFileInfo& filePath)
+void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
 {
     const QString recovery=filePath.absoluteFilePath()+QStringLiteral(".world-sculpt.json");
     if(QFileInfo::exists(recovery))
@@ -9321,7 +9321,7 @@ void CView::loadLandscape(const QFileInfo& filePath)
     QElapsedTimer phaseTimer;
     phaseTimer.start();
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
-    m_pLand->readMap(filePath);
+    m_pLand->readMap(filePath,createRecoverySnapshot);
     const qint64 rendererLoadMs = phaseTimer.elapsed();
     if(!m_pLand->isMprLoad())
     {
@@ -20367,6 +20367,7 @@ void CView::resolveMissingTerrainBlends()
         m_mprDocument.originalBytes(), QCryptographicHash::Sha256).toHex();
     audit.atlasPixelSha256 = m_pTileForm
         ? terrainAtlasPixelSha256(m_pTileForm->tileImages()) : QByteArray();
+
     audit.landFieldBefore = fieldAudit(m_terrainEdit,
                                        ETerrainTileLayer::Land);
     audit.overlayFieldBefore = fieldAudit(m_terrainEdit,
@@ -20458,7 +20459,12 @@ void CView::resolveMissingTerrainBlends()
     {
         QMessageBox confirm(QMessageBox::Question,
             tr("Resolve missing blends"),
-            tr("Scan Ground and Overlay and replace every unambiguous missing "
+            m_worldTerrainEnabled
+            ? tr("Исправить переходы земли и покрытий на текущей карте и общих краях соседей, выбранных для общей кисти?\n\n"
+                 "Полностью закрашенные тайлы учитываются при согласовании материалов стыка. "
+                 "Неоднозначные материалы сохраняются и перечисляются в отчёте. "
+                 "Все изменения отменяются одним шагом общей кисти; новые текстуры остаются в рабочем атласе.")
+            : tr("Scan Ground and Overlay and replace every unambiguous missing "
                "or inconsistent physical blend with the exact Modern result?\n\n"
                "Disputed shared corners are preserved exactly; this repair "
                "will not choose a side or move an existing material border. "
@@ -20481,6 +20487,12 @@ void CView::resolveMissingTerrainBlends()
 
     finishSculptStroke();
     endTileBrushGroup();
+    QString worldSummary;
+    if(resolveWorldMaterialBlends(&worldSummary,&report)) {
+        showResolveResult(report.hasErrors()?QMessageBox::Critical:QMessageBox::Information,worldSummary);
+        finishAudit(report.hasErrors()?QStringLiteral("world-refused"):QStringLiteral("world-completed"));
+        return;
+    }
     audit.landFieldBefore = fieldAudit(m_terrainEdit,
                                        ETerrainTileLayer::Land);
     audit.overlayFieldBefore = fieldAudit(m_terrainEdit,

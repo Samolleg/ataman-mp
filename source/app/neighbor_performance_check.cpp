@@ -40,6 +40,7 @@
 int runNeighborPerformanceCheck()
 {
     QTextStream out(stdout); int failures=0;
+    out.setCodec("UTF-8");
     const auto check=[&](bool pass,const char* label) {
         out<<(pass?"PASS: ":"FAIL: ")<<label<<"\n"; out.flush(); if(!pass) ++failures;
     };
@@ -148,7 +149,9 @@ int runNeighborPerformanceCheck()
             }
         });dismiss.start(50);
         CLandscapeTools tools;view.attachLandscapeTools(&tools);
-        view.loadLandscape(QFileInfo(placement.mprPath));
+        // This opt-in diagnostic changes only in-memory models: no snapshots
+        // of installed game resources are needed or written.
+        view.loadLandscape(QFileInfo(placement.mprPath),false);
         check(view.ensureTerrainAutoCatalogReady() && view.m_terrainEditAvailable,"active real map and material catalog load");
         if(!view.m_terrainEditAvailable)return 1;
         view.m_hasActiveMapWorldOrigin=true;view.m_activeMapWorldOrigin={0,0};view.m_neighborLayoutStorageWritable=true;
@@ -165,6 +168,82 @@ int runNeighborPerformanceCheck()
         for(const auto& family:view.m_terrainGlobalFamilies)if(tools.selectPaintTerrainType(family.id)){selected=true;break;}
         check(selected,"select a global painting family");
         const auto activeId=CWorldTerrainSession::key(placement.mprPath),neighborId=CWorldTerrainSession::key(adjacent.mprPath);
+        if(qEnvironmentVariableIsSet("EI_WORLD_MATERIAL_CHECK")) {
+            view.m_neighborPlacements[0].worldOrigin={512,324.5};
+            SNeighborMapPlacement third=adjacent;third.mprPath=root+"/Maps/zone13.mpr";
+            third.worldOrigin={512,-59.5};third.size={448,384};view.m_neighborPlacements.append(third);
+            view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(third.mprPath));
+            const auto thirdHash=digest(third.mprPath),neighborHash=digest(adjacent.mprPath);
+            QString summary;CValidationReport repair;
+            check(view.resolveWorldMaterialBlends(&summary,&repair) && !repair.hasErrors(),"three-map physical blend repair completes");
+            out<<summary<<"\n"<<repair.toText()<<"\n";out.flush();
+            if(repair.hasErrors())return 1;
+            QMap<QString,QVector<QByteArray>> after;
+            QMap<QString,QByteArray> materialHashes;
+            for(auto it=view.m_worldTerrainSession.documents.cbegin();it!=view.m_worldTerrainSession.documents.cend();++it)
+                for(const auto& sec:it.value()->baseline.sectors())after[it.key()].append(it.value()->terrain.sectorPayload(sec.sectorX,sec.sectorY));
+            for(auto it=view.m_worldTerrainSession.documents.cbegin();it!=view.m_worldTerrainSession.documents.cend();++it) {
+                CTerrainEditModel original;CValidationReport validation;original.load(it.value()->baseline,&validation);
+                bool exact=true,types=true,interior=true,authored=true;int changed=0;
+                for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                    CTerrainVirtualMaterialField field;it.value()->terrain.copyVirtualMaterialField(layer,&field,false);
+                    materialHashes[it.key()]+=field.stableSha256();
+                    for(int y=0;y<original.tileCountY();++y)for(int x=0;x<original.tileCountX();++x) {
+                        const auto before=original.packedTile(x,y,layer),now=it.value()->terrain.packedTile(x,y,layer);
+                        if(before==now)continue;++changed;
+                        bool physical=false,semantic=false;
+                        exact &= it.value()->atlas->catalog().gridSignatureForPacked(now,&physical)==field.cellSignature(x,y,&semantic)
+                            && physical && semantic;
+                        types &= original.tileType(before)==it.value()->terrain.tileType(now);
+                        if(it.key()!=activeId)interior &= x==0 || y==0 || x==original.tileCountX()-1 || y==original.tileCountY()-1;
+                    }
+                }
+                const auto images=it.value()->atlas->activeTileImages(),old=it.value()->atlas->authoredTileImages();
+                for(int slot=0;slot<old.size();++slot)authored &= images[slot]==old[slot];
+                out<<QFileInfo(it.key()).fileName()<<" changed physical cells: "<<changed<<"\n";
+                check(exact,"changed physical artwork has the requested material corners");
+                check(types,"repaired physical tiles retain runtime terrain types");
+                check(interior,"neighbor interiors remain unchanged");
+                check(authored,"original authored pixels remain unchanged");
+            }
+            QString error;
+            if(view.m_worldTerrainSession.canUndo()) {
+                check(view.worldTerrainHistory(false,true),"three-map repair undo");
+                check(view.worldTerrainHistory(true,true),"three-map repair redo");
+                for(auto it=after.cbegin();it!=after.cend();++it) {
+                    QVector<QByteArray> restored;const auto doc=view.m_worldTerrainSession.documents[it.key()];
+                    for(const auto& sec:doc->baseline.sectors())restored.append(doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
+                    check(restored==it.value(),"redo restores every physical sector");
+                }
+            }
+            CValidationReport repeat;check(view.resolveWorldMaterialBlends(&summary,&repeat) && !repeat.hasErrors(),"repeat repair completes");
+            out<<summary<<"\n"<<repeat.toText()<<"\n";
+            for(auto it=after.cbegin();it!=after.cend();++it) {
+                QVector<QByteArray> repeated;const auto doc=view.m_worldTerrainSession.documents[it.key()];
+                for(const auto& sec:doc->baseline.sectors())repeated.append(doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
+                check(repeated==it.value(),"repeat repair is physically idempotent");
+                QByteArray materials;for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                    CTerrainVirtualMaterialField field;doc->terrain.copyVirtualMaterialField(layer,&field,false);materials+=field.stableSha256();
+                }
+                check(materials==materialHashes[it.key()],"repeat repair preserves semantic fields");
+                CValidationReport serialized;
+                const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(doc->baseline,
+                    doc->atlas->activeTileImages(),doc->atlas->activeTileTypes(),view.m_worldTerrainAtlasSources[it.key()].pages,
+                    doc->materials,doc->baseline.mapInfo().animatedTiles,&serialized);
+                CMprDocument saved,reopened;CTerrainEditModel model;CMprEditTransaction tx;QByteArray bytes;
+                const bool valid=package.success && saved.loadBytes(package.mprBytes,"memory.mpr",&serialized)
+                    && doc->terrain.appendSectorEdits(&tx,&serialized) && saved.applyTransaction(tx,&bytes,&serialized)
+                    && reopened.loadBytes(bytes,"reopened.mpr",&serialized) && model.load(reopened,&serialized);
+                check(valid && !serialized.hasErrors(),"world repair MPR and atlas serialize and reopen in memory");
+                if(valid) {
+                    QVector<QByteArray> payloads;for(const auto& sec:doc->baseline.sectors())payloads.append(model.sectorPayload(sec.sectorX,sec.sectorY));
+                    check(payloads==it.value(),"reopened physical sectors match repaired sectors");
+                } else out<<serialized.toText()<<"\n";
+            }
+            check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash
+                && digest(adjacent.mprPath)==neighborHash && digest(third.mprPath)==thirdHash,"all real game files unchanged");
+            return failures?1:0;
+        }
         const auto before=view.m_terrainEdit;
         QString message;QObject::connect(&view,&CView::updateMsg,&view,[&](const QString& text){message=text;});
         view.beginTileBrushGroup();
