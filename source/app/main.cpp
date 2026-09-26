@@ -521,6 +521,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption textureLifetimeCheckOption("texture-lifetime-check",
+        "Verify composed character textures survive resource refresh with a live scene object.");
     QCommandLineOption scenarioCheckOption("scenario-layer-check", "Run synthetic read-only scenario integration checks.");
     QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
     QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
@@ -553,6 +555,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(textureLifetimeCheckOption);
     parser.addOption(scenarioCheckOption);
     parser.addOption(databaseCreationCheckOption);
     parser.addOption(databasePreviewCheckOption);
@@ -603,17 +606,18 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
     const bool scenarioCheck = parser.isSet(scenarioCheckOption);
     const bool databasePreviewCheck = parser.isSet(databasePreviewCheckOption);
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !scenarioCheck
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) > 1)
     {
@@ -624,6 +628,19 @@ int runHeadlessCommand(QApplication& app)
     if(databasePreviewCheck) return runDatabasePreviewCheck();
     if(databaseCreationCheck) return runDatabaseCreationCheck();
     if(scenarioCheck) return runScenarioLayerCheck();
+
+    if(textureLifetimeCheck)
+    {
+        QOffscreenSurface surface;
+        surface.create();
+        QOpenGLContext context;
+        const bool passed = context.create() && context.makeCurrent(&surface)
+            && CTextureList::getInstance()->layeredTextureRefreshLifetimeRegressionCheck();
+        QTextStream(passed ? stdout : stderr)
+            << (passed ? "PASS" : "FAIL")
+            << ": composed character texture survives repeated resource refresh and releases after scene unload\n";
+        return passed ? 0 : 1;
+    }
 
     if(resourceNavigationCheck)
     {
@@ -713,6 +730,12 @@ int runHeadlessCommand(QApplication& app)
                 << (passed ? "PASS" : "FAIL")
                 << ": shared terrain atlas survives neighbor cleanup and repeated GPU regrid\n";
             if(!passed) return 1;
+            const bool textureLifetimePassed = CTextureList::getInstance()
+                ->layeredTextureRefreshLifetimeRegressionCheck();
+            QTextStream(textureLifetimePassed ? stdout : stderr)
+                << (textureLifetimePassed ? "PASS" : "FAIL")
+                << ": composed character texture survives resource refresh while MOB is open\n";
+            if(!textureLifetimePassed) return 1;
         }
         CTreeView behaviorFilterTree;
         CObjectBase behaviorFilterNode;
@@ -4153,6 +4176,22 @@ int main(int argc, char *argv[])
             }
             if(qApp->property("workspaceLoadSmoke").toBool())
             {
+                if(qEnvironmentVariableIntValue("EI_ENDURANCE_RESOURCE_REFRESH_SMOKE") == 1)
+                {
+                    if(window.view()->mobs().isEmpty())
+                    {
+                        ei::log(eLogWarning, "Resource refresh smoke has no loaded MOB");
+                        QCoreApplication::exit(6);
+                        return;
+                    }
+                    for(int publication = 0; publication < 3; ++publication)
+                    {
+                        window.view()->refreshAfterResourceSetup();
+                        window.view()->updateGL();
+                        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                    }
+                    ei::log(eLogInfo, "Resource refresh smoke complete with live MOB");
+                }
                 const QString graphOutput = qEnvironmentVariable(
                     "EI_ENDURANCE_GRAPH_CAPTURE");
                 if(!graphOutput.isEmpty())

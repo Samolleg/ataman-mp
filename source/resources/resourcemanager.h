@@ -155,7 +155,9 @@ public:
     ERenderMaterialClass materialClass(QOpenGLTexture* texture) const;
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
-    void refreshConfiguredSources();
+    void refreshConfiguredSources(bool sceneObjectsRetainTextures = false);
+    // Reproduce a resource refresh while a rendered MOB still owns a composed texture.
+    bool layeredTextureRefreshLifetimeRegressionCheck();
     // Retain recently used composed atlases across ordinary map replacement.
     // Trimming is safe only after the last MOB has unloaded because scene
     // objects retain raw QOpenGLTexture pointers while alive.

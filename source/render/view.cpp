@@ -4441,12 +4441,12 @@ void CView::applyRenderScheduling()
 
 void CView::refreshAfterResourceSetup()
 {
-    // Texture source refresh destroys profile-scoped OpenGL resources.
+    // Texture source refresh may destroy profile-scoped OpenGL resources.
     makeCurrent();
     clearNeighborLandscapes();
     makeCurrent();
     CObjectList::getInstance()->refreshConfiguredSources();
-    CTextureList::getInstance()->refreshConfiguredSources();
+    CTextureList::getInstance()->refreshConfiguredSources(!m_aMob.isEmpty());
     m_terrainGlobalUniformTileCache.clear();
     m_terrainGlobalBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();

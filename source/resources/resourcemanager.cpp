@@ -2108,22 +2108,57 @@ void CTextureList::setTerrainMipmappingEnabled(bool enabled)
     }
 }
 
-void CTextureList::refreshConfiguredSources()
+void CTextureList::refreshConfiguredSources(bool sceneObjectsRetainTextures)
 {
-    clearTransientVisualCache();
+    // Scene objects and queued draw items keep raw pointers to composed GPU
+    // atlases. A resource publication can happen while those objects are still
+    // loaded; deleting the atlases here leaves QOpenGLTexture::bind() with a
+    // dangling pointer on the next frame. Their source fingerprint is part of
+    // the cache key, so changed resources still create new compositions.
+    if(sceneObjectsRetainTextures)
+    {
+        m_textureImageLru.clear();
+    }
+    else
+    {
+        clearTransientVisualCache();
+    }
     ei::invalidateResourceSourceFingerprintCache();
     m_missingTextureNames.clear();
     m_aTextureImages.clear();
     m_catalogTerrainTileCache.clear();
-    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
-    {
-        if(it.key().startsWith("layers|"))
-            it = m_aTexture.erase(it);
-        else
-            ++it;
-    }
     QSet<QString> empty;
     loadTexture(empty);
+}
+
+bool CTextureList::layeredTextureRefreshLifetimeRegressionCheck()
+{
+    if(!QOpenGLContext::currentContext())
+        return false;
+    const QString key = QStringLiteral("layers|lifetime-regression|unit|skin");
+    QImage pixels(4, 4, QImage::Format_RGBA8888);
+    pixels.fill(Qt::magenta);
+    QOpenGLTexture* heldBySceneObject = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    heldBySceneObject->setData(pixels);
+    if(!heldBySceneObject->isCreated())
+    {
+        delete heldBySceneObject;
+        return false;
+    }
+    m_aTexture.insert(key, heldBySceneObject);
+    m_layeredTextureLru.touch(key, qint64(pixels.sizeInBytes()));
+    for(int publication = 0; publication < 3; ++publication)
+    {
+        refreshConfiguredSources(true);
+        // Inspect the cache before touching the scene object's pointer: the
+        // old implementation deleted it and a bind would reproduce the crash.
+        if(m_aTexture.value(key) != heldBySceneObject)
+            return false;
+        heldBySceneObject->bind(0);
+        heldBySceneObject->release(0);
+    }
+    refreshConfiguredSources(false);
+    return !m_aTexture.contains(key);
 }
 
 void CTextureList::trimTransientVisualCache()
