@@ -378,6 +378,98 @@ private slots:
             }
         }
     }
+    void installedZone6Zone4QuarterShiftReadOnly()
+    {
+        const QString directory=qEnvironmentVariable("EI_WORLD_SCULPT_MAPS");
+        if(directory.isEmpty()) QSKIP("Optional installed data, read only");
+        for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,
+                      EWorldSculptMode::Flatten,EWorldSculptMode::Smooth,
+                      EWorldSculptMode::BoundaryFill,EWorldSculptMode::Noise}) {
+            CWorldTerrainSession s;QVector<SWorldTerrainTarget> targets;QString error;
+            const QStringList names{"zone6","zone4"};
+            const QVector<QPointF> origins{{704,63.5},{960,189.25}};
+            for(int i=0;i<names.size();++i) {
+                const QString path=QDir(directory).filePath(names[i]+".mpr");
+                QVERIFY2(s.load(path,&error),qPrintable(error));
+                targets.append(target(s,CWorldTerrainSession::key(path),origins[i]));
+            }
+            // Both installed rims are zero-height here. Shape only in-memory
+            // terrain so lowering, smoothing and fill have a meaningful edge.
+            QVector<QByteArray> before;
+            for(int i=0;i<targets.size();++i) {
+                auto& terrain=s.documents[targets[i].id]->terrain;STerrainHeightCommand shape;
+                const int left=i==0?248:0,right=i==0?256:8;
+                for(int y=qMax(0,int(std::floor(192-targets[i].origin.y())));
+                    y<=qMin(terrain.vertexCountY()-1,int(std::ceil(208-targets[i].origin.y())));++y)
+                    for(int x=left;x<=right;++x) {
+                        const double wy=targets[i].origin.y()+y;
+                        const double worldHeight=20+0.05*(wy-200)*(wy-200);
+                        STerrainHeightDelta d;d.globalX=x;d.globalY=y;
+                        d.before=terrain.height(x,y);
+                        d.after=quint16(qRound(worldHeight*65535/terrain.maxZ()));
+                        if(d.before!=d.after) shape.deltas.append(d);
+                    }
+                QVERIFY(terrain.apply(shape,true));
+                before.append(terrain.sectorPayload(i==0?7:0,i==0?4:0));
+            }
+            STerrainBrush brush;brush.centerX=960;brush.centerY=200;brush.radius=5;
+            const auto stamp=makeWorldTerrainStamp(targets,brush,mode,1,25,1,0);
+            QVERIFY2(stamp.error.isEmpty(),qPrintable(stamp.error));
+            QCOMPARE(stamp.maps.size(),2);
+            auto excluded=targets;excluded[1].editable=false;
+            const auto excludedStamp=makeWorldTerrainStamp(excluded,brush,mode,1,25,1,0);
+            QVERIFY2(excludedStamp.error.isEmpty(),qPrintable(excludedStamp.error));
+            QVERIFY(!excludedStamp.maps.contains(targets[1].id));
+            auto reversed=targets;std::reverse(reversed.begin(),reversed.end());
+            const auto reverseStamp=makeWorldTerrainStamp(reversed,brush,mode,1,25,1,0);
+            QVERIFY2(reverseStamp.error.isEmpty(),qPrintable(reverseStamp.error));
+            QCOMPARE(reverseStamp.maps.size(),stamp.maps.size());
+            for(auto it=stamp.maps.cbegin();it!=stamp.maps.cend();++it) {
+                const auto other=reverseStamp.maps.value(it.key());
+                QCOMPARE(other.deltas.size(),it.value().deltas.size());
+                for(int k=0;k<other.deltas.size();++k) {
+                    const auto& a=it.value().deltas[k];const auto& b=other.deltas[k];
+                    QCOMPARE(qMakePair(a.globalX,a.globalY),qMakePair(b.globalX,b.globalY));
+                    QCOMPARE(a.after,b.after);QCOMPARE(a.afterOffset,b.afterOffset);
+                }
+            }
+            for(int i=0;i<targets.size();++i) {
+                const auto& command=stamp.maps[targets[i].id];
+                int rimChanges=0;
+                const int rimX=i==0?256:0;
+                for(const auto& delta:command.deltas)
+                    if(delta.globalX==rimX && (delta.before!=delta.after || delta.changesPosition)) ++rimChanges;
+                QVERIFY2(rimChanges>0,"The shared rim was omitted from the brush stroke");
+            }
+            QVERIFY2(s.apply(stamp,true,&error),qPrintable(error));
+            double worst=0;
+            for(double y=196;y<=204;y+=0.125) {
+                const double a=edgeHeight(targets[0],256,false,y);
+                const double b=edgeHeight(targets[1],0,false,y);
+                QVERIFY(std::isfinite(a));QVERIFY(std::isfinite(b));
+                worst=qMax(worst,qAbs(a-b));
+            }
+            qInfo("zone6/4 mode=%d max-seam-gap=%.9f",int(mode),worst);
+            QVERIFY(worst<0.01);
+            for(const auto& t:targets) {
+                const auto doc=s.documents[t.id];CMprEditTransaction tx;CValidationReport report;QByteArray bytes;
+                QVERIFY(doc->terrain.appendSectorEdits(&tx,&report));
+                QVERIFY2(doc->baseline.applyTransaction(tx,&bytes,&report),qPrintable(report.toText()));
+                CMprDocument reopened;CTerrainEditModel model;
+                QVERIFY(reopened.loadBytes(bytes,"memory-only.mpr",&report));
+                QVERIFY(model.load(reopened,&report));
+                for(const auto& sec:doc->baseline.sectors())
+                    QCOMPARE(model.sectorPayload(sec.sectorX,sec.sectorY),doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
+            }
+            QVERIFY2(s.apply(stamp,false,&error),qPrintable(error));
+            for(int i=0;i<targets.size();++i) {
+                const auto doc=s.documents[targets[i].id];
+                QCOMPARE(doc->terrain.sectorPayload(i==0?7:0,i==0?4:0),before[i]);
+                QFile file(doc->path);QVERIFY(file.open(QIODevice::ReadOnly));
+                QCOMPARE(file.readAll(),doc->baseline.originalBytes());
+            }
+        }
+    }
     void installedZone11Zone12Zone13ReadOnly()
     {
         const QString directory=qEnvironmentVariable("EI_WORLD_SCULPT_MAPS");

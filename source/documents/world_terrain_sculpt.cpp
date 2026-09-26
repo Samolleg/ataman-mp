@@ -8,6 +8,8 @@
 namespace {
 using XY = QPair<double, double>;
 struct Vertex { int map; int x; int y; };
+using VertexKey = QPair<int,QPair<int,int>>;
+using RimKeys = QMap<VertexKey,XY>;
 double height(const SWorldTerrainTarget& t, int x, int y)
 { return double(t.model->height(x,y)) * t.model->maxZ() / 65535.0; }
 XY point(const SWorldTerrainTarget& t, int x, int y)
@@ -32,9 +34,14 @@ bool touching(const SWorldTerrainTarget& a,const SWorldTerrainTarget& b)
     const double dy=qMin(a.origin.y()+a.model->vertexCountY()-1,b.origin.y()+b.model->vertexCountY()-1)-qMax(a.origin.y(),b.origin.y());
     return dx>=-1e-8 && dy>=-1e-8 && (qAbs(dx)<1e-8 || qAbs(dy)<1e-8);
 }
+XY sharedPoint(const SWorldTerrainTarget& t,int map,int x,int y,const RimKeys& keys)
+{
+    const auto it=keys.constFind({map,{x,y}});
+    return it==keys.cend()?point(t,x,y):it.value();
+}
 
 SWorldTerrainStroke boundaryFillClipped(const QVector<SWorldTerrainTarget>& targets,
-                                const STerrainBrush& brush,double strength)
+                                const STerrainBrush& brush,double strength,const RimKeys& rimKeys)
 {
     QMap<XY,QVector<Vertex>> positions;
     for(int m=0;m<targets.size();++m) {
@@ -50,7 +57,7 @@ SWorldTerrainStroke boundaryFillClipped(const QVector<SWorldTerrainTarget>& targ
         for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
             const auto p=point(t,x,y);
             if(std::hypot(p.first-brush.centerX,p.second-brush.centerY)<=brush.radius)
-                positions[p].append({m,x,y});
+                positions[sharedPoint(t,m,x,y,rimKeys)].append({m,x,y});
         }
     }
     QVector<QVector<Vertex>> groups;
@@ -137,7 +144,7 @@ bool contourSample(const SWorldTerrainTarget& t,double wx,double wy,double* z,
 }
 
 SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
-                                const STerrainBrush& brush,double strength)
+                                const STerrainBrush& brush,double strength,const RimKeys& rimKeys)
 {
     if(brush.radius<=0) return {};
     QVector<int> maps;
@@ -162,7 +169,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
         }
         // An incomplete circle at the edge of available data uses the existing
         // clipped-domain fill. Never invent samples from an unapproved map.
-        if(values.isEmpty()) return boundaryFillClipped(targets,brush,strength);
+        if(values.isEmpty()) return boundaryFillClipped(targets,brush,strength,rimKeys);
         ring.append(p);ringHeights.append(mean(values));
     }
     SWorldTerrainStroke result;
@@ -171,7 +178,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
     QMap<XY,double> limits;
     for(int m:maps) {
         const auto& t=targets[m];
-        for(const auto& anchor:frozen[m]) frozenPositions.insert(point(t,anchor.first,anchor.second));
+        for(const auto& anchor:frozen[m]) frozenPositions.insert(sharedPoint(t,m,anchor.first,anchor.second,rimKeys));
         const int w=t.model->vertexCountX(),h=t.model->vertexCountY();
         if(w<=0 || h<=0) continue;
         const int x0=int(qBound(0.0,std::floor(brush.centerX-t.origin.x()-brush.radius-1),double(w-1)));
@@ -179,8 +186,8 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
         const int y0=int(qBound(0.0,std::floor(brush.centerY-t.origin.y()-brush.radius-1),double(h-1)));
         const int y1=int(qBound(0.0,std::ceil(brush.centerY-t.origin.y()+brush.radius+1),double(h-1)));
         for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
-            const auto p=point(t,x,y);
-            limits[p]=qMin(limits.value(p,std::numeric_limits<double>::max()),double(t.model->maxZ()));
+            const auto key=sharedPoint(t,m,x,y,rimKeys);
+            limits[key]=qMin(limits.value(key,std::numeric_limits<double>::max()),double(t.model->maxZ()));
         }
     }
     QVector<double> distances(count),tangents(count);
@@ -193,7 +200,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
         const int y0=int(qBound(0.0,std::floor(brush.centerY-t.origin.y()-brush.radius-1),double(h-1)));
         const int y1=int(qBound(0.0,std::ceil(brush.centerY-t.origin.y()+brush.radius+1),double(h-1)));
         for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
-            const auto xy=point(t,x,y);const QPointF p(xy.first,xy.second);
+            const auto xy=sharedPoint(t,m,x,y,rimKeys);const QPointF p(xy.first,xy.second);
             const double distance=std::hypot(p.x()-brush.centerX,p.y()-brush.centerY);
             if(distance>=innerRadius || frozenPositions.contains(xy)) continue;
             // Mean-value coordinates reproduce affine slopes and interpolate
@@ -234,7 +241,7 @@ XY subtract(const XY& a,const XY& b) { return {a.first-b.first,a.second-b.second
 int protectShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
                           const QVector<QVector<Vertex>>& groups,
                           const QVector<double>& proposed,
-                          QVector<bool>& affected)
+                          QVector<bool>& affected,const RimKeys& rimKeys)
 {
     QVector<QMap<QPair<int,int>,int>> indices(targets.size());
     QVector<int> parent(groups.size());
@@ -320,6 +327,16 @@ int protectShiftedEdges(const QVector<SWorldTerrainTarget>& targets,
         // connected rim to achieve equality. Preserve its original samples,
         // including any pre-existing mismatch, and edit only the interior.
         for(int i:component) {
+            QSet<int> maps;
+            bool knitted=!groups[i].isEmpty();
+            for(const auto& v:groups[i]) {
+                maps.insert(v.map);
+                if(!rimKeys.contains({v.map,{v.x,v.y}})) knitted=false;
+            }
+            // A locally knitted knot already has one shared sculpt target for
+            // every incident map. Freezing it would leave the quarter-shifted
+            // rim unchanged while only the nearby interiors move.
+            if(knitted && maps.size()>1) continue;
             if(affected[i]) ++protectedVertices;
             affected[i]=false;
         }
@@ -346,14 +363,15 @@ void SWorldTerrainStroke::append(const SWorldTerrainStroke& stamp)
 
 static SWorldTerrainStroke sculptPreparedWorld(
     const QVector<SWorldTerrainTarget>& targets, const STerrainBrush& brush,
-    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed)
+    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed,
+    const RimKeys& rimKeys)
 {
     SWorldTerrainStroke result;
     if(!std::isfinite(brush.centerX) || !std::isfinite(brush.centerY)
        || !std::isfinite(brush.radius) || brush.radius < 0
        || !std::isfinite(worldDelta) || !std::isfinite(worldFlatten)
        || !std::isfinite(strength) || strength<=0) return result;
-    if(mode==EWorldSculptMode::BoundaryFill) return boundaryFill(targets,brush,strength);
+    if(mode==EWorldSculptMode::BoundaryFill) return boundaryFill(targets,brush,strength,rimKeys);
     QMap<XY, QVector<Vertex>> edges;
     QVector<QVector<Vertex>> groups;
     for(int i=0; i<targets.size(); ++i)
@@ -362,7 +380,7 @@ static SWorldTerrainStroke sculptPreparedWorld(
         if(!t.editable || !t.model || !(t.model->maxZ()>0) || !std::isfinite(t.model->maxZ())
            || !std::isfinite(t.origin.x()) || !std::isfinite(t.origin.y())) continue;
         const int w=t.model->vertexCountX(), h=t.model->vertexCountY();
-        const auto edge=[&](int x,int y){edges[point(t,x,y)].append({i,x,y});};
+        const auto edge=[&](int x,int y){edges[sharedPoint(t,i,x,y,rimKeys)].append({i,x,y});};
         for(int x=0;x<w;++x) {edge(x,0);if(h>1) edge(x,h-1);}
         for(int y=1;y<h-1;++y) {edge(0,y);if(w>1) edge(w-1,y);}
         // Packed XY offsets are bounded by half a grid step.
@@ -386,7 +404,7 @@ static SWorldTerrainStroke sculptPreparedWorld(
     {
         const auto& group=groups[groupIndex];
         const auto& first=group.first();
-        const XY p=point(targets[first.map],first.x,first.y);
+        const XY p=sharedPoint(targets[first.map],first.map,first.x,first.y,rimKeys);
         const double distance=std::hypot(p.first-brush.centerX,p.second-brush.centerY);
         double weight=1;
         if(brush.radius>0 && brush.falloff!=ETerrainBrushFalloff::Constant)
@@ -439,7 +457,7 @@ static SWorldTerrainStroke sculptPreparedWorld(
         after=qBound(0.0,after,limit);
         proposed[groupIndex]=after;
     }
-    result.protectedBoundaryVertices=protectShiftedEdges(targets,groups,proposed,affected);
+    result.protectedBoundaryVertices=protectShiftedEdges(targets,groups,proposed,affected,rimKeys);
     for(int groupIndex=0;groupIndex<groups.size();++groupIndex)
     {
         const auto& group=groups[groupIndex];
@@ -466,7 +484,7 @@ namespace {
 // stores signed XY offsets: knitting existing knots avoids the old global
 // affine flattening and leaves sector count, triangles and tile IDs intact.
 SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
-                                 const STerrainBrush& brush)
+                                 const STerrainBrush& brush,RimKeys* rimKeys)
 {
     SWorldTerrainStroke result;
     QMap<XY,QVector<Vertex>> knots;
@@ -528,15 +546,20 @@ SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
                 const Vertex vb{b,vertical?(side?0:count(tb,false)-1):j,vertical?j:(side?0:count(tb,false)-1)};
                 const auto oldA=point(ta,va.x,va.y),oldB=point(tb,vb.x,vb.y);
                 if(!endpoint && oldA==oldB) xy=oldA; // Keep already matching authored XY.
+                // MPR stores offsets in steps of 1/254. Quarter-grid world
+                // origins (zone6/zone4) differ by half that quantum, so their
+                // actual XY cannot be bit-identical. Keep one logical knot for
+                // sculpting while rounding each file to its nearest offset.
                 bool representable=true;
                 for(const auto& v:{va,vb}) {
                     const auto& t=targets[v.map];
                     const double ox=(xy.first-t.origin.x()-v.x)*254,oy=(xy.second-t.origin.y()-v.y)*254;
-                    if(qAbs(ox)>127.000001 || qAbs(oy)>127.000001
-                       || qAbs(ox-std::round(ox))>1e-6 || qAbs(oy-std::round(oy))>1e-6) representable=false;
+                    if(qAbs(std::round(ox))>127 || qAbs(std::round(oy))>127
+                       || qAbs(ox-std::round(ox))>0.500001
+                       || qAbs(oy-std::round(oy))>0.500001) representable=false;
                 }
                 if(!representable) {
-                    result.error=QString::fromUtf8("Положение соседних карт не позволяет точно совместить вершины в формате MPR. Выровняйте карты по сетке размещения; мазок не применён.");
+                    result.error=QString::fromUtf8("Положение соседних карт не позволяет совместить вершины в пределах точности MPR. Выровняйте карты по сетке размещения; мазок не применён.");
                     return result;
                 }
                 auto& group=knots[xy];
@@ -580,6 +603,7 @@ SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
                 result.maps.clear();result.error=QStringLiteral("Ambiguous terrain junction: a rim vertex has two world positions.");return result;
             }
             assignments[key]=it.key();
+            rimKeys->insert(key,it.key());
             const auto& t=targets[v.map];STerrainHeightDelta d;
             d.globalX=v.x;d.globalY=v.y;d.before=t.model->height(v.x,v.y);
             d.after=quint16(qBound(0,qRound(shared*65535/t.model->maxZ()),65535));
@@ -602,7 +626,8 @@ SWorldTerrainStroke makeWorldTerrainStamp(const QVector<SWorldTerrainTarget>& ta
     if(!std::isfinite(brush.centerX) || !std::isfinite(brush.centerY)
        || !std::isfinite(brush.radius) || brush.radius<0 || !std::isfinite(strength) || strength<=0
        || !std::isfinite(worldDelta) || !std::isfinite(worldFlatten)) return {};
-    auto result=knitLocalRims(targets,brush);
+    RimKeys rimKeys;
+    auto result=knitLocalRims(targets,brush,&rimKeys);
     if(!result.error.isEmpty()) return result;
     QVector<CTerrainEditModel> models(targets.size());auto prepared=targets;
     for(int i=0;i<targets.size();++i) if(result.maps.contains(targets[i].id)) {
@@ -612,7 +637,7 @@ SWorldTerrainStroke makeWorldTerrainStamp(const QVector<SWorldTerrainTarget>& ta
         }
         prepared[i].model=&models[i];
     }
-    result.append(sculptPreparedWorld(prepared,brush,mode,worldDelta,worldFlatten,strength,noiseSeed));
+    result.append(sculptPreparedWorld(prepared,brush,mode,worldDelta,worldFlatten,strength,noiseSeed,rimKeys));
     // Stable order is independent of map loading order and preparatory deltas.
     for(auto it=result.maps.begin();it!=result.maps.end();++it)
         std::sort(it->deltas.begin(),it->deltas.end(),[](const STerrainHeightDelta& a,const STerrainHeightDelta& b){
