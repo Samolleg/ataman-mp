@@ -2435,6 +2435,95 @@ bool CMob::prepareFreshLightNode(CNode* node, QJsonObject* data,
     return true;
 }
 
+bool CMob::prepareFreshTechnicalNode(CNode* node, QJsonObject* data,
+                                    CValidationReport* report)
+{
+    if(!node || !data) return false;
+    const ENodeType type = node->nodeType();
+    if(type == eLight)
+        return prepareFreshLightNode(node, data, report);
+    if(type == eUnit || type == eLever || type == eWorldObject)
+        return prepareFreshDatabaseNode(node, data, report);
+    if(type != eTorch && type != eMagicTrap && type != eSound && type != eParticle)
+        return false;
+
+    // A technical object without a selected predecessor must still have a
+    // complete raw subtree. Build it from the authored values and accept it
+    // only when both the raw reader and normal MOB projection reopen exactly.
+    const uint previousId = node->mapId();
+    node->setMapId(1);
+    QByteArray seed;
+    {
+        util::CMobParser writer(seed, true);
+        writer.startSection("OBJECT_DB_FILE");
+        writer.startSection("SC_OBJECT_DB_FILE"); writer.endSection();
+        writer.startSection("OBJECT_SECTION");
+        node->serialize(writer);
+        writer.endSection(); writer.endSection();
+    }
+    QJsonObject authored = node->toJson();
+    if(type == eMagicTrap)
+    {
+        QJsonObject world = authored.value("World object").toObject();
+        const QString model = world.value("Model name").toString();
+        const QString primary = world.value("Primary texture").toString();
+        const QString secondary = world.value("Secondary texture").toString();
+        if((!model.isEmpty() && model != "efcu0")
+           || (!primary.isEmpty() && primary != "sound")
+           || (secondary != "default0" && secondary != "none"))
+        {
+            node->setMapId(previousId);
+            if(report) report->add("mob.technical_creation.fixed_trap_visual",
+                EValidationSeverity::Error,
+                "Magic trap model and textures are fixed by the MOB format.");
+            return false;
+        }
+        world.insert("Model name", "efcu0");
+        world.insert("Primary texture", "sound");
+        world.insert("Secondary texture", "none");
+        authored.insert("World object", world);
+        if(authored.value("Spell").toString().trimmed().isEmpty())
+            authored.insert("Spell", "");
+    }
+    node->setMapId(previousId);
+    CMobDocument document;
+    CMob projection;
+    if(!document.loadBytes(seed, "new-technical-object.mob", report)
+       || document.objects().size() != 1
+       || !projection.deserialize(seed) || projection.nodes().size() != 1
+       || projection.nodes().first()->nodeType() != type
+       || projection.nodes().first()->toJson() != authored)
+    {
+        if(report) report->add("mob.technical_creation.roundtrip", EValidationSeverity::Error,
+            "The new object did not retain all its fields on reopen.");
+        return false;
+    }
+    const auto& object = document.objects().first();
+    if(projection.nodes().first()->mapId() != 1
+       || ((type == eTorch || type == eMagicTrap)
+           && (!object.hasNid || object.nid != 1 || !object.hasPosition))
+       || (type == eTorch && object.model.isEmpty()))
+    {
+        if(report) report->add("mob.technical_creation.incomplete", EValidationSeverity::Error,
+            "The new object is missing a required ID, position or model.");
+        return false;
+    }
+    QByteArray raw;
+    if(!document.objectSubtreeBytes(object.sectionPath, object.subtreeSha256, &raw))
+        return false;
+    QJsonObject provenance;
+    provenance.insert("origin", "technicalCreation");
+    provenance.insert("sourceDocumentSha256", QString::fromLatin1(
+        QCryptographicHash::hash(seed, QCryptographicHash::Sha256).toHex()));
+    provenance.insert("sourceObjectPath", object.sectionPath);
+    provenance.insert("sourceSubtreeSha256", QString::fromLatin1(object.subtreeSha256.toHex()));
+    provenance.insert("sourceSubtreeBase64", QString::fromLatin1(raw.toBase64()));
+    provenance.insert("cleanSubtreeBase64", QString::fromLatin1(raw.toBase64()));
+    *data = authored;
+    data->insert("_Endurance raw provenance", provenance);
+    return true;
+}
+
 void CMob::adoptCommittedBytes(const QByteArray& bytes)
 {
     m_originalData=bytes;

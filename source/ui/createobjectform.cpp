@@ -355,15 +355,8 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     if(selected.size() == 1 && selected.front()->nodeType() == type &&
        selected.front()->hasRawObjectProvenance())
         rawTemplate = selected.front();
-    if(!rawTemplate && type!=eLight)
-    {
-        QMessageBox::information(this, tr("Select a creation template"),
-            tr("To preserve complete MOB data, select one existing object of the same type "
-            "before opening Create Object. Endurance will use its complete raw record as "
-            "the template and apply the values entered here. You can also copy and paste "
-            "an existing object."));
-        return;
-    }
+    if(rawTemplate && !pMob->nodes().contains(rawTemplate))
+        rawTemplate = nullptr;
     pMob->clearSelect();
     auto pos = QWidget::mapFromGlobal(QCursor::pos());
     auto posOnLand = m_pView->getTerrainPos(pos.x(), pos.y());
@@ -387,12 +380,13 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     CLandscape::getInstance()->projectPosition(m_pNode);
 
     QJsonObject nodeData = m_pNode->toJson();
-    if(type==eLight)
+    if(!rawTemplate)
     {
         CValidationReport report;
-        if(!CMob::prepareFreshLightNode(m_pNode,&nodeData,&report))
+        if(!CMob::prepareFreshTechnicalNode(m_pNode,&nodeData,&report))
         {
-            QMessageBox::warning(this,tr("Не удалось создать источник света"),report.toText());
+            QMessageBox::warning(this,tr("Не удалось создать объект"),
+                tr("Проверьте обязательные поля объекта.\n\n%1").arg(report.toText()));
             return;
         }
     }

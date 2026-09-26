@@ -82,6 +82,8 @@ public:
                                          CValidationReport* report = nullptr);
     static bool prepareFreshLightNode(CNode* node, QJsonObject* data,
                                       CValidationReport* report = nullptr);
+    static bool prepareFreshTechnicalNode(CNode* node, QJsonObject* data,
+                                          CValidationReport* report = nullptr);
     void undo_createNode(uint mapId);
     CNode* restoreDeletedNode(CNode* pNode, int restoreIndex = -1);
     bool replaceNode(CNode* current, CNode* replacement, int index = -1);

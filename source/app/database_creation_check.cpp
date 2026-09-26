@@ -5,6 +5,11 @@
 #include "unit.h"
 #include "lever.h"
 #include "light.h"
+#include "worldobj.h"
+#include "torch.h"
+#include "magictrap.h"
+#include "sound.h"
+#include "particle.h"
 #include "utils.h"
 #include "view.h"
 #include "undo.h"
@@ -63,9 +68,115 @@ int runDatabaseCreationCheck()
     }
     CMobDocument empty;
     if(!empty.loadBytes(baseline, "synthetic-baseline.mob", &report)) return fail("baseline");
-    CView view(nullptr, nullptr);
     QTemporaryDir scratch;
     if(!scratch.isValid()) return fail("temporary directory");
+    for(int kind = 0; kind < 8; ++kind)
+    {
+        QScopedPointer<CNode> seed;
+        QString name;
+        switch(kind)
+        {
+        case 0: {
+            CWorldObj defaults;
+            QJsonObject data = defaults.toJson();
+            data.insert("Model name", "synthetic_model");
+            data.insert("Primary texture", "synthetic_skin");
+            seed.reset(new CWorldObj(data)); name = "world object"; break;
+        }
+        case 1: {
+            CLever defaults;
+            QJsonObject data = defaults.toJson();
+            QJsonObject world = data.value("World object").toObject();
+            world.insert("Model name", "synthetic_model");
+            world.insert("Primary texture", "synthetic_skin");
+            data.insert("World object", world);
+            seed.reset(new CLever(data)); name = "lever"; break;
+        }
+        case 2: {
+            CTorch defaults;
+            QJsonObject data = defaults.toJson();
+            QJsonObject world = data.value("World object").toObject();
+            world.insert("Model name", "synthetic_model");
+            world.insert("Primary texture", "synthetic_skin");
+            data.insert("World object", world);
+            seed.reset(new CTorch(data)); name = "torch"; break;
+        }
+        case 3: seed.reset(new CMagicTrap); name = "magic trap"; break;
+        case 4: seed.reset(new CSound); name = "sound"; break;
+        case 5: seed.reset(new CParticle); name = "particle"; break;
+        case 6: seed.reset(new CLight); name = "light"; break;
+        default: {
+            ei::SDatabaseMapEntry entry;
+            entry.category = ei::EDatabaseMapCategory::Creature;
+            entry.name = "Synthetic creature";
+            entry.model = "synthetic_model";
+            entry.primaryTexture = "synthetic_skin";
+            entry.unitType = 51;
+            CUnit defaults;
+            QJsonObject data;
+            if(!ei::applyDatabaseMapEntry(entry, defaults.toJson(), &data))
+                return fail("technical unit fields");
+            seed.reset(new CUnit(data)); name = "unit"; break;
+        }
+        }
+        QVector3D position(14, 19, 2);
+        seed->updatePos(position);
+        QJsonObject prepared;
+        report = CValidationReport();
+        if(!CMob::prepareFreshTechnicalNode(seed.data(), &prepared, &report))
+            return fail("fresh technical " + name);
+        if(seed->mapId() != 0) return fail("technical preview identity " + name);
+        CMob destination;
+        destination.m_originalData = baseline;
+        if(!destination.deserialize(baseline)) return fail("technical destination " + name);
+        destination.captureCleanProjection();
+        CNode* created = destination.createNode(prepared, false);
+        QByteArray candidate;
+        if(!created || created->nodeType() != seed->nodeType()
+           || !destination.buildValidatedCandidate(&candidate, &report))
+            return fail("technical guarded candidate " + name);
+        const QString path = scratch.path() + "/technical-" + QString::number(kind) + ".mob";
+        if(!destination.saveAs(QFileInfo(path)))
+            return fail("technical save " + name + ": " + destination.lastSaveError());
+        QFile saved(path);
+        if(!saved.open(QIODevice::ReadOnly)) return fail("technical file " + name);
+        const QByteArray bytes = saved.readAll();
+        CMob reopened;
+        if(!reopened.deserialize(bytes) || reopened.nodes().size() != 1
+           || reopened.nodes().first()->nodeType() != seed->nodeType()
+           || reopened.nodes().first()->position() != seed->position())
+            return fail("technical reopen " + name);
+        destination.deleteNode(created);
+        const QString removedPath = path + ".removed.mob";
+        if(!destination.saveAs(QFileInfo(removedPath)))
+            return fail("technical remove " + name + ": " + destination.lastSaveError());
+        QFile removed(removedPath);
+        if(!removed.open(QIODevice::ReadOnly) || removed.readAll() != baseline)
+            return fail("technical removal changed unrelated MOB bytes " + name);
+        output << "PASS: fresh technical " << name
+               << " without selected template, guarded save, reopen and removal\n";
+    }
+    {
+        CWorldObj missingModel;
+        QJsonObject rejectedData;
+        CValidationReport rejected;
+        if(CMob::prepareFreshTechnicalNode(&missingModel, &rejectedData, &rejected)
+           || !rejected.hasErrors())
+            return fail("missing model was accepted");
+        CMagicTrap defaults;
+        QJsonObject data = defaults.toJson();
+        QJsonObject world = data.value("World object").toObject();
+        world.insert("Model name", "unsupported_custom_trap_model");
+        data.insert("World object", world);
+        CMagicTrap invalid(data);
+        rejected = CValidationReport();
+        if(CMob::prepareFreshTechnicalNode(&invalid, &rejectedData, &rejected)
+           || !rejected.hasErrors())
+            return fail("unsupported trap model was accepted");
+        output << "PASS: incomplete and nonrepresentable technical objects rejected\n";
+    }
+    CView view(nullptr, nullptr);
+
     for(int category : {0, 1, 2})
     {
         ei::SDatabaseMapEntry entry;
