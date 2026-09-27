@@ -68,6 +68,60 @@ int runDatabaseCreationCheck()
     }
     CMobDocument empty;
     if(!empty.loadBytes(baseline, "synthetic-baseline.mob", &report)) return fail("baseline");
+    {
+        // Legacy technical records are opaque to the editor projection, but
+        // their IDs still reserve the same namespace as copied/new objects.
+        QByteArray occupied;
+        util::CMobParser writer(occupied, true);
+        writer.startSection("OBJECT_DB_FILE");
+        writer.startSection("SC_OBJECT_DB_FILE"); writer.endSection();
+        writer.startSection("OBJECT_SECTION"); writer.endSection();
+        for(const QPair<QString, QString>& record : {
+                QPair<QString, QString>("LIGHT_SECTION", "LIGHT"),
+                QPair<QString, QString>("SOUND_SECTION", "SOUND"),
+                QPair<QString, QString>("PARTICL_SECTION", "PARTICL")})
+        {
+            writer.startSection(record.first);
+            writer.startSection(record.second);
+            writer.startSection(record.second == "LIGHT" ? "LIGHT_ID"
+                : record.second == "SOUND" ? "SOUND_ID" : "PARTICL_ID");
+            writer.writeDword(record.second == "LIGHT" ? 1000
+                : record.second == "SOUND" ? 1001 : 1002);
+            writer.endSection(); writer.endSection(); writer.endSection();
+        }
+        writer.endSection();
+        CMob destination;
+        destination.m_originalData = occupied;
+        if(!destination.deserialize(occupied)
+           || destination.isFreeId(1000) || destination.isFreeId(1001)
+           || destination.isFreeId(1002) || destination.freeMapId() != 1003)
+            return fail("legacy light/sound/particle IDs reserve allocation");
+        CWorldObj seed;
+        QJsonObject data = seed.toJson();
+        data.insert("Model name", "synthetic_model");
+        data.insert("Primary texture", "synthetic_skin");
+        CWorldObj object(data);
+        QJsonObject prepared;
+        if(!CMob::prepareFreshTechnicalNode(&object, &prepared, &report))
+            return fail("legacy collision creation seed");
+        destination.captureCleanProjection();
+        CNode* created = destination.createNode(prepared, false);
+        if(!created || created->mapId() != 1003)
+            return fail("legacy collision creation ID");
+        destination.createNode(created);
+        if(destination.nodes().size() != 2 || destination.nodes().last()->mapId() != 1004)
+            return fail("legacy collision copy ID");
+        QByteArray candidate;
+        if(!destination.buildValidatedCandidate(&candidate, &report))
+            return fail("legacy collision guarded save");
+        CMobDocument reopened;
+        if(!reopened.loadBytes(candidate, "legacy-collision.mob", &report)
+           || reopened.objects().size() != 2
+           || reopened.auxiliaryIds().size() != 3
+           || !reopened.duplicateIds().isEmpty())
+            return fail("legacy collision saved IDs");
+        output << "PASS: creation and copy skip legacy light/sound/particle IDs\n";
+    }
     QTemporaryDir scratch;
     if(!scratch.isValid()) return fail("temporary directory");
     for(int kind = 0; kind < 8; ++kind)

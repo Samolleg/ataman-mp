@@ -35,6 +35,7 @@ struct SMobFamilyMember
     QByteArray sourceSha256;
     QString error;
     QVector<SMobObjectSnapshot> objects;
+    QVector<SMobAuxiliaryIdSnapshot> auxiliaryIds;
     QVector<SMobIdRangeSnapshot> ranges;
     QString script;
     bool primaryMob = false;
@@ -62,6 +63,7 @@ struct SMobNidOwner
     bool activeRuntimeFamily = true;
     bool hasParentId = false;
     quint32 parentId = 0;
+    bool editable = true;
 };
 
 struct SMobFamilyFinding

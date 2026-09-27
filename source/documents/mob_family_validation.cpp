@@ -1031,6 +1031,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             continue;
         }
         member.objects = document.objects();
+        member.auxiliaryIds = document.auxiliaryIds();
         member.ranges = document.idRanges();
         member.primaryMob = !document.isQuestMob();
         member.hasDiplomacyTable = containsSectionType(document.sections(),
@@ -1250,7 +1251,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             }
         }
         QVector<SMobIdRangeSnapshot> effective;
-        QMap<quint32, QVector<const SMobObjectSnapshot*>> ownersWithinMob;
+        QMap<quint32, QStringList> ownersWithinMob;
         for(const SMobIdRangeSnapshot& range : member.ranges)
         {
             if(range.minimum > range.maximum)
@@ -1345,7 +1346,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
             }
             if(!object.hasNid)
                 continue;
-            ownersWithinMob[object.nid].append(&object);
+            ownersWithinMob[object.nid].append(QString("%1: %2")
+                .arg(object.sectionPath, object.name));
             SMobNidOwner owner;
             owner.nid = object.nid;
             owner.mobPath = member.path;
@@ -1396,6 +1398,23 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                 report.findings.append(finding);
             }
         }
+        for(const SMobAuxiliaryIdSnapshot& auxiliary : member.auxiliaryIds)
+        {
+            if(auxiliary.id == 0)
+                continue;
+            SMobNidOwner owner;
+            owner.nid = auxiliary.id;
+            owner.mobPath = member.path;
+            owner.mobName = member.fileName;
+            owner.sectionPath = auxiliary.sectionPath;
+            owner.objectName = auxiliary.name.isEmpty()
+                ? auxiliary.kind : auxiliary.kind + ": " + auxiliary.name;
+            owner.activeRuntimeFamily = member.activeRuntimeFamily;
+            owner.editable = false;
+            report.nidOwners[auxiliary.id].append(owner);
+            ownersWithinMob[auxiliary.id].append(QString("%1: %2")
+                .arg(auxiliary.sectionPath, owner.objectName));
+        }
         for(auto ownerIt = ownersWithinMob.constBegin();
             ownerIt != ownersWithinMob.constEnd(); ++ownerIt)
         {
@@ -1409,9 +1428,7 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
                 .arg(ownerIt.key()).arg(ownerIt.value().size()).arg(member.fileName);
             finding.hasNid = true;
             finding.nid = ownerIt.key();
-            for(const SMobObjectSnapshot* object : ownerIt.value())
-                finding.locations.append(QString("%1: %2")
-                    .arg(object->sectionPath, object->name));
+            finding.locations = ownerIt.value();
             report.findings.append(finding);
         }
     }

@@ -129,9 +129,21 @@ void CMob::setActiveRange(uint rangeId)
     m_activeRangeId = rangeId;
 }
 
-bool CMob::deserialize(QByteArray data)
+bool CMob::deserialize(QByteArray data, const CMobDocument* parsed)
 {
     ei::log(eLogInfo, "Start read mob: " + m_filePath.absoluteFilePath());
+    CMobDocument localDocument;
+    if(!parsed)
+    {
+        CValidationReport report;
+        if(!localDocument.loadBytes(data, m_filePath.filePath(), &report))
+            return false;
+        parsed = &localDocument;
+    }
+    m_auxiliaryIds.clear();
+    for(const SMobAuxiliaryIdSnapshot& record : parsed->auxiliaryIds())
+        if(record.id != 0)
+            m_auxiliaryIds.insert(record.id);
     //todo: global check len of nodes
     uint readByte(0);
     util::CMobParser parser(data);
@@ -519,7 +531,8 @@ CNode *CMob::nodeByMapId(uint id)
 
 bool CMob::isFreeId(const uint id)
 {
-    QVector<uint> arrId;
+    if(id == 0 || m_auxiliaryIds.contains(id))
+        return false;
     for(auto& node: m_aNode)
     {
         if(node->mapId() == id)
@@ -1162,7 +1175,7 @@ int CMob::readMob(QFileInfo &path)
                     "Do not edit or save this file until the backup location is writable.")
                     .arg(openBackup.error));
         }
-        if(!deserialize(m_originalData))
+        if(!deserialize(m_originalData, &structuralDocument))
         {
             ei::log(eLogFatal, QString("Legacy MOB projection stopped before completing path:%1")
                 .arg(m_filePath.absoluteFilePath()));
@@ -1385,6 +1398,8 @@ void CMob::writeData(QJsonObject& mob, const QFileInfo& file, const QString key,
 
 bool CMob::isFreeMapId(uint id)
 {
+    if(id == 0 || m_auxiliaryIds.contains(id))
+        return false;
     CNode* pNode = nullptr;
     foreach(pNode, m_aNode)
     {
@@ -1398,14 +1413,19 @@ uint CMob::freeMapId()
 {
     uint id = 0; //future map ID
     // try to find suit id from active range
-    const SRange& range = activeRange();
-    for(uint i(range.minRange); i<range.maxRange; ++i)
+    const QVector<SRange>& activeRanges = isQuestMob() ? m_aSecRange : m_aMainRange;
+    if(m_activeRangeId < uint(activeRanges.size()))
     {
-        if(isFreeMapId(i))
+        const SRange& range = activeRanges.at(int(m_activeRangeId));
+        for(uint i(range.minRange); i<range.maxRange; ++i)
         {
-            id = i;
-            ei::log(ELogMessageType::eLogInfo, "Found map ID from active range:" + QString::number(i));
-            break;
+            if(isFreeMapId(i))
+            {
+                id = i;
+                ei::log(ELogMessageType::eLogInfo,
+                        "Found map ID from active range:" + QString::number(i));
+                break;
+            }
         }
     }
     //TODO: we MUST guarantee setting free id or undo creating object
@@ -1438,15 +1458,9 @@ uint CMob::freeMapId()
     if(id == 0)
     { // try to set any free number
         uint freeId(1000);
-        QVector<uint> arrId;
-        arrId.resize(m_aNode.size());
-
-        for (int i(0); i<m_aNode.size(); ++i)
-            arrId[i] = m_aNode[i]->mapId();
-
         for (; freeId<100000; ++freeId)
         {
-            if(!arrId.contains(freeId))
+            if(isFreeMapId(freeId))
             {
                 id = freeId;
                 break;
@@ -1461,11 +1475,10 @@ uint CMob::freeMapId()
     }
     if(m_view)
         id = m_view->suggestFamilyNid(this, id);
-    if(id == 0)
+    if(!isFreeMapId(id))
     {
         ei::log(ELogMessageType::eLogFatal,
-                "Family allocation rejected every positive object ID");
-        Q_ASSERT(false);
+                "Family allocation selected an ID already occupied in this MOB");
         return 0;
     }
     return id;

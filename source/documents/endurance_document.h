@@ -139,6 +139,17 @@ struct SMobObjectSnapshot
     QJsonObject toJson() const;
 };
 
+// Records in the legacy light/sound/particle sections have their own ID
+// fields. They are not editable OBJECT_SECTION projections, but reserve the
+// same runtime object-ID namespace.
+struct SMobAuxiliaryIdSnapshot
+{
+    QString sectionPath;
+    QString kind;
+    QString name;
+    quint32 id = 0;
+};
+
 struct SMobIdRangeSnapshot
 {
     QString sectionPath;
@@ -237,6 +248,7 @@ public:
     bool removeEmbeddedAiGraph(QByteArray* output,
                                CValidationReport* report = nullptr) const;
     const QVector<SMobObjectSnapshot>& objects() const { return m_objects; }
+    const QVector<SMobAuxiliaryIdSnapshot>& auxiliaryIds() const { return m_auxiliaryIds; }
     const QVector<SMobIdRangeSnapshot>& idRanges() const { return m_idRanges; }
     bool hasSection(quint32 type) const;
     bool ensureEmptyObjectSection(QByteArray* output,
@@ -304,6 +316,7 @@ private:
     QByteArray m_originalBytes;
     QVector<SMobSection> m_sections;
     QVector<SMobObjectSnapshot> m_objects;
+    QVector<SMobAuxiliaryIdSnapshot> m_auxiliaryIds;
     QVector<SMobIdRangeSnapshot> m_idRanges;
     QVector<quint32> m_duplicateIds;
     bool m_questMob = false;

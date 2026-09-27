@@ -6055,6 +6055,8 @@ void MainWindow::reviewAndRepairNidCollisions()
         }
         if(!loaded)
             blockers.prepend(tr("MOB is not loaded for editing"));
+        if(!owner.editable)
+            blockers.prepend(tr("Legacy light, sound or particle record is read-only"));
         const bool safe = blockers.isEmpty();
         check->setCheckState(safe && (owner.nid == 0 || ownerPath != primaryPath)
             ? Qt::Checked : Qt::Unchecked);

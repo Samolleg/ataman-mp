@@ -6,6 +6,7 @@
 #include <QDataStream>
 #include <QVector>
 #include <QVector3D>
+#include <QSet>
 #include <QOpenGLShader>
 #include <functional>
 
@@ -20,6 +21,7 @@ class CActivationZone;
 class CTrapCastPoint;
 class CMobEditTransaction;
 class CValidationReport;
+class CMobDocument;
 struct STerrainHeightInfluenceBounds;
 
 struct SMobParameterState
@@ -167,7 +169,7 @@ private:
                                          QString* saveClass) const;
     bool rebindRawObjectProvenance();
     QString getAuxDirName();
-    bool deserialize(QByteArray data);
+    bool deserialize(QByteArray data, const CMobDocument* parsed = nullptr);
     void updateObjects();
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, const QString value);
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, QByteArray& value);
@@ -194,6 +196,7 @@ private:
     QByteArray m_directoryElements;
     QByteArray m_aiGraph;
     QByteArray m_originalData;
+    QSet<uint> m_auxiliaryIds;
     QByteArray m_cleanProjection;
     QVector<uint> m_duplicateIds;
     QString m_lastSaveError;

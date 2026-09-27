@@ -517,6 +517,7 @@ private slots:
     void existingGraphComponentReuseIsWarningNotBlocker();
     void generatedGraphComponentReuseIsRecoloredAutomatically();
     void duplicateMobIdsAreWarningsOnly();
+    void legacySectionIdsConflictWithObjectIds();
     void vulcansmokeIsACriticalNonBlockingFinding();
     void unknownLeafIsPreservedAsOpaque();
     void suppliedOpaqueChestCanPatchKnownLeafSafely();
@@ -1704,6 +1705,25 @@ void EnduranceDocumentTests::duplicateMobIdsAreWarningsOnly()
     QCOMPARE(document.duplicateIds().front(), quint32(1000100));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!report.hasErrors());
+}
+
+void EnduranceDocumentTests::legacySectionIdsConflictWithObjectIds()
+{
+    const QByteArray bytes = validMob(
+        section(0xB000, object(334, "bridge") + object(335, "column")
+            + object(336, "third"))
+        + section(0xAA00, section(0xAA01,
+            section(0xAA05, u32(334)) + section(0xAA03, "Light-334")))
+        + section(0xCC00, section(0xCC01,
+            section(0xCC02, u32(335)) + section(0xCC05, "Sound-335")))
+        + section(0xDD00, section(0xDD01,
+            section(0xDD02, u32(336)) + section(0xDD05, "Particle-336"))));
+    CMobDocument document;
+    CValidationReport report;
+    QVERIFY(document.loadBytes(bytes, "legacy-ids.mob", &report));
+    QCOMPARE(document.objects().size(), 3);
+    QCOMPARE(document.duplicateIds(), QVector<quint32>({334, 335, 336}));
+    QCOMPARE(document.serialize(), bytes);
 }
 
 void EnduranceDocumentTests::vulcansmokeIsACriticalNonBlockingFinding()

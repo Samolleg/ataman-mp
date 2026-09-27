@@ -73,10 +73,10 @@ bool isMobContainer(quint32 type)
 {
     static const QSet<quint32> containers = {
         0x1E00, 0x1E01, 0x1E02, 0x1E03, 0x1E0B, 0x1E0E,
-        0xA000, 0xAA01, 0xABD0, 0xB000, 0xB001,
+        0xA000, 0xAA00, 0xAA01, 0xABD0, 0xB000, 0xB001,
         0xBBAB0000, 0xBBAC0000, 0xBBBB0000, 0xBBBC0000,
         0xBBBD0000, 0xBBBE0000, 0xBBBF0000,
-        0xCC01, 0xDD01, 0xDDDDDDD1,
+        0xCC00, 0xCC01, 0xDD00, 0xDD01, 0xDDDDDDD1,
         0xE000, 0xE001, 0xF000, 0xFF00, 0xFF01, 0xFF02
     };
     return containers.contains(type);
@@ -404,6 +404,44 @@ void collectObjects(const QVector<SMobSection>& sections, QVector<SMobObjectSnap
         }
         else
             collectObjects(section.children, objects);
+    }
+}
+
+void collectAuxiliaryIds(const QVector<SMobSection>& sections,
+                         QVector<SMobAuxiliaryIdSnapshot>& ids)
+{
+    for(const SMobSection& section : sections)
+    {
+        quint32 idTag = 0;
+        quint32 nameTag = 0;
+        QString kind;
+        switch(section.type)
+        {
+        case 0xAA01: idTag = 0xAA05; nameTag = 0xAA03; kind = "Light"; break;
+        case 0xCC01: idTag = 0xCC02; nameTag = 0xCC05; kind = "Sound"; break;
+        case 0xDD01: idTag = 0xDD02; nameTag = 0xDD05; kind = "Particle"; break;
+        default: break;
+        }
+        if(idTag)
+        {
+            const SMobSection* idField = findSection(section, idTag);
+            if(idField)
+            {
+                const QByteArray bytes = payload(*idField);
+                if(bytes.size() == 4)
+                {
+                    SMobAuxiliaryIdSnapshot item;
+                    item.sectionPath = section.path;
+                    item.kind = kind;
+                    item.id = readU32(bytes, 0);
+                    if(const SMobSection* nameField = findSection(section, nameTag))
+                        item.name = decodeCp1251(payload(*nameField));
+                    ids.append(item);
+                }
+            }
+        }
+        else
+            collectAuxiliaryIds(section.children, ids);
     }
 }
 
@@ -2763,6 +2801,7 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
     m_originalBytes.clear();
     m_sections.clear();
     m_objects.clear();
+    m_auxiliaryIds.clear();
     m_idRanges.clear();
     m_duplicateIds.clear();
     m_questMob = false;
@@ -2804,6 +2843,7 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
 
     m_questMob = findSection(m_sections.front(), 0xD000) != nullptr;
     collectObjects(m_sections, m_objects);
+    collectAuxiliaryIds(m_sections, m_auxiliaryIds);
     collectIdRanges(m_sections, m_questMob, m_idRanges);
     addMobSemanticWarnings(m_sections, sourcePath, report);
     QMap<quint32, int> counts;
@@ -2828,6 +2868,9 @@ bool CMobDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
             }
         }
     }
+    for(const SMobAuxiliaryIdSnapshot& item : m_auxiliaryIds)
+        if(item.id != 0)
+            counts[item.id] += 1;
     for(auto countIt = counts.constBegin(); countIt != counts.constEnd(); ++countIt)
     {
         if(countIt.value() > 1)

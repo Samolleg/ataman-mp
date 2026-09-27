@@ -17001,6 +17001,7 @@ void CView::resetSelectedId()
     {
         const quint32 familyAwareId = suggestFamilyNid(m_activeMob, startId);
         if(!CMobFamilyValidator::isAuthorableObjectNid(familyAwareId)
+           || !m_activeMob->isFreeId(familyAwareId)
            || reconnectId.values().contains(familyAwareId))
         {
             ei::log(eLogWarning,

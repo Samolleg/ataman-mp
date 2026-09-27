@@ -310,6 +310,7 @@ private slots:
     void separatelyLoadedMapSetsAreNotReportedAsOneFamily();
     void multipleLoadedPrimaryMobsAreReported();
     void duplicateIdsWithinOneMobAreAuthoritativeWarnings();
+    void legacyLightIdIsOccupiedForFamilyAllocation();
     void magicTrapRequiresContainingMobDiplomacy();
     void directionalAndSelfDiplomacyAreSupportedWithWarnings();
     void zone3HelmetHairFallbackIsReported();
@@ -725,6 +726,40 @@ void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings(
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
     QCOMPARE(finding->locations.size(), 2);
+}
+
+void MobFamilyValidationTests::legacyLightIdIsOccupiedForFamilyAllocation()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QByteArray world = section(0xB001,
+        section(0xB002, u32(334)) + section(0xB003, u32(54))
+        + section(0xB004, "bridge"));
+    const QByteArray bytes = section(0xA000, section(0xC000)
+        + section(0xFF01, section(0xFF02,
+            section(0xFF05, u32(334)) + section(0xFF06, u32(337))))
+        + section(0xB000, world)
+        + section(0xAA00, section(0xAA01,
+            section(0xAA05, u32(334)) + section(0xAA03, "Light-334"))
+            + section(0xAA01,
+                section(0xAA05, u32(335)) + section(0xAA03, "Light-335"))));
+    const QString path = writeMob(directory.path(), "legacy-light.mob", bytes);
+    QVERIFY(!path.isEmpty());
+    SMobFamilyValidationRequest request;
+    request.familyLabel = "legacy-light";
+    request.profileId = "test";
+    request.seedMobPaths << path;
+    request.explicitComposition = true;
+    request.includeProfileWideMobs = false;
+    const CMobFamilyValidationReport report = CMobFamilyValidator::validate(request);
+    QVERIFY(report.nidOwners.value(334).size() == 2);
+    quint32 suggestion = 0;
+    QVERIFY(report.suggestReplacementNid(path, &suggestion));
+    QCOMPARE(suggestion, quint32(336));
+    const auto finding = std::find_if(report.findings.cbegin(), report.findings.cend(),
+        [](const SMobFamilyFinding& item)
+        { return item.code == "nid.collision" && item.nid == 334; });
+    QVERIFY(finding != report.findings.cend());
 }
 
 void MobFamilyValidationTests::magicTrapRequiresContainingMobDiplomacy()
