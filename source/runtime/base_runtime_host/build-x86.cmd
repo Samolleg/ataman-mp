@@ -9,5 +9,5 @@ if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 cl /nologo /std:c++14 /O2 /EHsc /W4 /DUNICODE /D_UNICODE /Brepro /Fo"%OUT_DIR%\\" ^
   "%~dp0base_runtime_host.cpp" /link /SUBSYSTEM:CONSOLE ^
   /OUT:"%OUT_DIR%\EIMapperEnduranceRuntimeHost.exe" ^
-  /PDB:"%OUT_DIR%\EIMapperEnduranceRuntimeHost.pdb" /DEBUG:FULL /INCREMENTAL:NO
+  /PDB:"%OUT_DIR%\EIMapperEnduranceRuntimeHost.pdb" /DEBUG:FULL /INCREMENTAL:NO advapi32.lib user32.lib
 exit /b %errorlevel%

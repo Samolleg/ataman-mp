@@ -30,6 +30,7 @@ class JmvMapTestLauncherTests : public QObject
 
 private slots:
     void initTestCase();
+    void portableLaunchPassesStarterGateWithoutStarter();
     void injectsIntoExistingWorldScript();
     void injectsAfterLeadingWorldScriptDelay();
     void ignoresWorldScriptInStringsAndComments();
@@ -92,6 +93,43 @@ private slots:
 static QString hash(const QByteArray& data)
 {
     return QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+}
+
+void JmvMapTestLauncherTests::portableLaunchPassesStarterGateWithoutStarter()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString mod = temp.path()+"/MODS/DejaVu";
+    QVERIFY(QDir().mkpath(mod+"/Maps"));
+    QVERIFY(QDir().mkpath(temp.path()+"/Base/Res"));
+    QVERIFY(QDir().mkpath(temp.path()+"/Engine"));
+    auto save = [](const QString& path, const QByteArray& bytes) {
+        QFile file(path); return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+    };
+    QVERIFY(save(temp.path()+"/Engine/game.exe", "not an executable: this test must never reach process creation"));
+    QVERIFY(save(temp.path()+"/portable-defaults.xml", "<profile version='1'><value section='Settings' name='WideScreen' kind='4'>1</value></profile>"));
+    SJmvMapTestLaunchInput input;
+    input.profile.valid = true;
+    input.profile.runtimeStackValidated = true;
+    input.profile.profileId = "deja-vu";
+    input.profile.gameRoot = temp.path();
+    input.profile.modRoot = mod;
+    input.profile.mapDirectories << mod+"/Maps";
+    input.spawn.valid = true;
+    input.mapEntry.mprName = "zone1";
+    input.mprData = "invalid MPR";
+    input.mobData = "invalid MOB";
+    input.databaseSourcePath = mod+"/res/database.res";
+    input.databaseData = "invalid DB";
+    CJmvMapTestLauncher launcher;
+    QString error;
+    QVERIFY(!launcher.launch(input, &error));
+    QVERIFY2(!launcher.runId().isEmpty(), qPrintable(error));
+    const QString run = QDir(CJmvMapTestLauncher::testRunsRootPath()).filePath(launcher.runId());
+    QVERIFY2(QFileInfo::exists(run+"/portable-profile.bin"), qPrintable(error));
+    QVERIFY2(!error.contains("Starter") && !error.contains("Portable launch requires"), qPrintable(error));
+    QVERIFY(!launcher.isRunning());
+    QVERIFY(QDir(run).removeRecursively());
 }
 
 static QByteArray launcherSource()

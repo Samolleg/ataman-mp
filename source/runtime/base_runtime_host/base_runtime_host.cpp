@@ -7,8 +7,21 @@
 #include <cwchar>
 #include <string>
 #include <vector>
+#include "../portable_registry.h"
 
 namespace {
+bool stopRequested()
+{
+    MSG message{};
+    while(PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+    {
+        if(message.message == WM_CLOSE || message.message == WM_QUIT)
+            return true;
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    return false;
+}
 bool writeText(const wchar_t* path, const wchar_t* text)
 {
     FILE* file = nullptr;
@@ -219,6 +232,8 @@ bool waitForJmvPatchQuiescence(HANDLE process, uintptr_t imageBase,
     DWORD lastMutation = started;
     while(DWORD(GetTickCount() - started) < 30000)
     {
+        if(stopRequested())
+            return false;
         if(WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
         {
             writeText(logPath, L"RUNTIME_HOST JMV process exited during runtime patch initialization");
@@ -259,6 +274,18 @@ int wmain(int argc, wchar_t** argv)
     const wchar_t* pidPath = argv[4];
     const wchar_t* logPath = argv[5];
     const bool deferredJmvActivation = _wcsicmp(argv[6], L"jmv") == 0;
+    MSG initialMessage{};
+    PeekMessageW(&initialMessage, nullptr, 0, 0, PM_NOREMOVE);
+
+    // Do not inherit an unrelated supervisor's private registry branch.
+    SetEnvironmentVariableW(PortableRegistry::keyEnvironment, nullptr);
+    PortableRegistry::Session portable;
+    const std::wstring profile = PortableRegistry::environment(PortableRegistry::fileEnvironment);
+    if(!profile.empty() && (!deferredJmvActivation || !portable.prepare(profile.c_str())))
+    {
+        writeText(logPath, L"PORTABLE_PROFILE_V1 preparation failed before process creation");
+        return 69;
+    }
 
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -286,6 +313,7 @@ int wmain(int argc, wchar_t** argv)
                               "EndurancePrepareRuntime", logPath))
     {
         TerminateProcess(process.hProcess, 67);
+        WaitForSingleObject(process.hProcess, INFINITE);
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
         CloseHandle(job);
@@ -326,6 +354,7 @@ int wmain(int argc, wchar_t** argv)
     {
         writeText(logPath, L"RUNTIME_HOST could not activate the Endurance runtime bridge safely");
         TerminateProcess(process.hProcess, 68);
+        WaitForSingleObject(process.hProcess, INFINITE);
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
         CloseHandle(job);
@@ -335,7 +364,18 @@ int wmain(int argc, wchar_t** argv)
         ? L"RUNTIME_HOST bridge activated after JMV patch quiescence"
         : L"RUNTIME_HOST bridge activated before Base process resume");
     CloseHandle(process.hThread);
-    WaitForSingleObject(process.hProcess, INFINITE);
+    // QProcess::terminate posts WM_CLOSE to the supervisor thread. Pump it so
+    // Stop Test can finish the child and release the private profile normally.
+    while(WaitForSingleObject(process.hProcess, 0) != WAIT_OBJECT_0)
+    {
+        if(stopRequested())
+        {
+            TerminateProcess(process.hProcess, 0);
+            WaitForSingleObject(process.hProcess, INFINITE);
+            break;
+        }
+        MsgWaitForMultipleObjects(1, &process.hProcess, FALSE, 100, QS_ALLINPUT);
+    }
     DWORD exitCode = 0;
     GetExitCodeProcess(process.hProcess, &exitCode);
     CloseHandle(process.hProcess);

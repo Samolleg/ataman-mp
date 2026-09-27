@@ -27,6 +27,7 @@
 #include "hot_reload_protocol.h"
 #include "res_archive_document.h"
 #include "runtime_providers.h"
+#include "portable_launch_profile.h"
 #include "synthetic_map_table_archive.h"
 
 #ifdef Q_OS_WIN
@@ -2231,6 +2232,13 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
         m_process->setArguments(QStringList());
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.remove("EI_MAPPER_PORTABLE_PROFILE");
+    environment.remove("EI_MAPPER_PORTABLE_REGISTRY_KEY");
+    if(usesJmvRuntime(input.profile.profileId) && isPortableGameInstallation(input.profile.gameRoot))
+    {
+        environment.insert("EI_MAPPER_PORTABLE_PROFILE", QDir(m_runRoot).filePath("portable-profile.bin"));
+        environment.insert("__COMPAT_LAYER", "HIGHDPIAWARE PERPROCESSSYSTEMDPIFORCEON");
+    }
     environment.insert("EI_MAPPER_ENDURANCE_GAME_ROOT",
                        resourceGameDataRoot(input.profile.gameRoot));
     environment.insert("EI_MAPPER_ENDURANCE_STARTER_ROOT",
@@ -2454,7 +2462,29 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     QString starterStoredSelection;
     QString starterRegistryAddonPath;
     QString selectedModConfig;
-    if(isJmv)
+    const bool portable = isJmv && isPortableGameInstallation(input.profile.gameRoot);
+    if(portable)
+    {
+        QFile bridge(m_bridgeSourcePath);
+        QFile host(QDir(QCoreApplication::applicationDirPath()).filePath("runtime/EIMapperEnduranceRuntimeHost.exe"));
+        const QByteArray marker = PortableLaunchProfile::wide("PORTABLE_PROFILE_V1");
+        const QByteArray prefix = marker.left(marker.size() - 2);
+        if(!bridge.open(QIODevice::ReadOnly) || !host.open(QIODevice::ReadOnly)
+           || !bridge.readAll().contains(prefix) || !host.readAll().contains(prefix))
+        {
+            if(error) *error = "Portable launch requires the matching runtime bridge and host. Reinstall the complete mapper package.";
+            return false;
+        }
+        if(!QDir().mkpath(m_runRoot))
+        {
+            if(error) *error = "Could not create the portable test run directory.";
+            return false;
+        }
+        if(!PortableLaunchProfile::write(input.profile.gameRoot, input.profile.modRoot,
+                                         QDir(m_runRoot).filePath("portable-profile.bin"), error))
+            return false;
+    }
+    if(isJmv && !portable)
     {
         selectedModConfig = findCaseInsensitiveFile(
             QStringList() << input.profile.modRoot, "config.reg");

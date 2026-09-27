@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "../portable_registry.h"
 #include <tlhelp32.h>
 #include <wincrypt.h>
 
@@ -103,6 +104,7 @@ wchar_t g_selectedModRoot[MAX_PATH * 4] = {};
 HKEY g_pathSettingsKeys[16] = {};
 HKEY g_starterSettingsKeys[16] = {};
 CRITICAL_SECTION g_registryPathLock{};
+bool g_portableRegistryActive = false;
 volatile LONG g_registryPathLockReady = 0;
 volatile LONG g_registryOverrideLogCount = 0;
 volatile LONG g_modRootRedirectLogCount = 0;
@@ -2137,6 +2139,8 @@ bool SelectedStarterPath(LPCWSTR valueName, wchar_t* output, size_t capacity)
 LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved,
                                     LPDWORD type, LPBYTE data, LPDWORD dataSize)
 {
+    if(g_portableRegistryActive)
+        return g_originalRegQueryValueExA(key, valueName, reserved, type, data, dataSize);
     char selected[MAX_PATH * 4]{};
     const bool nivalOverride = IsPathSettingsKey(key)
         && SelectedRegistryPath(valueName, selected, sizeof(selected));
@@ -2180,6 +2184,8 @@ LSTATUS WINAPI HookRegQueryValueExA(HKEY key, LPCSTR valueName, LPDWORD reserved
 LSTATUS WINAPI HookRegQueryValueExW(HKEY key, LPCWSTR valueName, LPDWORD reserved,
                                     LPDWORD type, LPBYTE data, LPDWORD dataSize)
 {
+    if(g_portableRegistryActive)
+        return g_originalRegQueryValueExW(key, valueName, reserved, type, data, dataSize);
     wchar_t selected[MAX_PATH * 4]{};
     const bool nivalOverride = IsPathSettingsKey(key)
         && SelectedRegistryPath(valueName, selected,
@@ -3475,6 +3481,13 @@ bool PrepareRuntime()
                             DWORD(sizeof(g_resultPath) / sizeof(g_resultPath[0])));
     if(!g_resultPath[0])
         return false;
+    if(!PortableRegistry::attach(g_portableRegistryActive))
+    {
+        Log(L"PORTABLE_PROFILE_V1 attach failed; process must not resume");
+        return false;
+    }
+    if(g_portableRegistryActive)
+        Log(L"PORTABLE_PROFILE_V1 isolated HKCU ready before game entry; Starter not required");
     InitializeCriticalSection(&g_savePathLock);
     InterlockedExchange(&g_savePathLockReady, 1);
     InitializeCriticalSection(&g_registryPathLock);

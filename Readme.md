@@ -11,13 +11,15 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `75`. Each separate fix advances the integer version.
+Current Ataman version: `76`. Each separate fix advances the integer version.
 
 Portable DejaVu: choose the package root containing `Engine`, `Base`, and `MODS`
 in Game and mod setup, then the DejaVu profile. The editor loads the selected
-mod resources before `Base/Res`. Test Current Map retains the Starter profile
-checks: open the portable Starter with that mod selected and keep it open while
-testing. Game-runtime acceptance of this portable layout is still pending.
+mod resources before `Base/Res`. Test Current Map prepares an isolated temporary
+Windows profile from portable-defaults.xml and portable-settings.xml; the portable
+Starter need not be open. Test-process settings are discarded after exit; the
+installed Windows profile and portable preferences are not changed. Game-runtime
+acceptance of this portable layout is still pending.
 See [Ataman changes](CHANGELOG.md). This numbering does not imply stable-release
 acceptance; inherited Endurance validation gaps remain open.
 
