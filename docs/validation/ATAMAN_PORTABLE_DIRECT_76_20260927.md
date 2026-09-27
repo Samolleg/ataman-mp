@@ -3,6 +3,7 @@
 Date: 2026-09-27. Task: EI-PORTABLE-DIRECT-76.
 Branch: codex/portable-direct-launch-v76.
 Base: f0ce0df9d84313f0168a4d294c7110eb7a1d2540 (installed75).
+Tested source: 92a1edf8f5ebc773af0d655abaafbc9d80f3149c.
 
 ## Cause and implementation
 
@@ -66,3 +67,16 @@ terrain/patrol/water/data compatibility tasks are not closed by this work.
 The isolated test HKCU does not inherit other user registry preferences. Its
 scope is the owned test game, not normal game launches. Administrative/system
 HKLM settings and drivers remain outside this override.
+
+## Handoff
+
+Finalizer and separate distribution validator PASS. No editor/runtime process
+from the permanent folder was running. Installed76 into
+`C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test`.
+Verified127 managed files, replaced6, preserved exact settings hash. Verified
+backup: `artifacts/rollback-EI-Mapper-Ataman-v75-to-76-20260927`. Old rollback
+generations retained under the previously blocked cleanup boundary.
+
+EXE SHA256: C9015E3E6E7CDF6E2BEFBD8AF507F1226EAC22F0B80EFBBE0658068120DC152E.
+Manifest SHA256: BDDB2B7C3D885540013F8B1B0D9BA56EE9F4A264F1BD076C59FD6C4E38F68509.
+Finalized staging was not executed afterwards; installed GUI not launched.
