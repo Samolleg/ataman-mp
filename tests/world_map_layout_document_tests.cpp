@@ -111,6 +111,49 @@ class WorldMapLayoutDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void importPortableProfilePreservesCoordinates()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const QString path=dir.filePath("world-map-layouts.json");
+        const QByteArray original=R"({"schemaVersion":1,"layoutAlgorithmVersion":1,"coordinateSystem":"mpr-local-xy","extra":true,"profiles":[{"profileId":"jamais-vu","extra":"profile","allods":[{"allodId":"w","zones":[{"zoneId":"a","mprIdentity":"a","origin":{"x":0.125,"y":-42,"extra":7},"provenance":"manual","componentAnchorZoneId":"a"}]}]}]})";
+        QVERIFY(writeFile(path,original)); CWorldMapLayoutDocument doc;
+        doc.setProfileDirectory(dir.path(),"deja-vu",QString());
+        QVERIFY(doc.loadEditorWorld("deja-vu",{}).zones.isEmpty());
+        QCOMPARE(readFile(path),original); // Inspection never repairs.
+        QCOMPARE(doc.availableProfiles(),QStringList{"jamais-vu"});
+        QString error;
+        QVERIFY2(doc.importProfile("jamais-vu","deja-vu",&error),qPrintable(error));
+        QCOMPARE(readFile(path+".before-profile-import.bak"),original);
+        CWorldMapLayoutDocument reopened(path);
+        auto zones=reopened.loadEditorWorld("deja-vu",{}).zones;
+        QCOMPARE(zones.size(),1); QCOMPARE(zones[0].origin,QPointF(0.125,-42));
+        QCOMPARE(reopened.loadEditorWorld("jamais-vu",{}).zones[0].origin,zones[0].origin);
+        const auto root=QJsonDocument::fromJson(readFile(path)).object();
+        QVERIFY(root["extra"].toBool());
+        auto profiles=root["profiles"].toArray();
+        auto copied=profiles[1].toObject(); copied["profileId"]="jamais-vu";
+        QCOMPARE(copied,profiles[0].toObject());
+        const auto saved=readFile(path);
+        QVERIFY(!doc.importProfile("jamais-vu","deja-vu",&error));
+        QCOMPARE(readFile(path),saved);
+        QVERIFY(reopened.setZoneOrigin("deja-vu","w","a",QPointF(12,34),&error));
+        reopened.reload();
+        QCOMPARE(reopened.loadEditorWorld("deja-vu",{}).zones[0].origin,QPointF(12,34));
+        QCOMPARE(reopened.loadEditorWorld("jamais-vu",{}).zones[0].origin,QPointF(0.125,-42));
+        QVERIFY(writeFile(path,original)); doc.reload(); doc.loadEditorWorld("deja-vu",{});
+        QVERIFY(!doc.importProfile("missing","deja-vu",&error));
+        QVERIFY(!doc.importProfile("jamais-vu","other",&error));
+        QVERIFY(writeFile(path+".before-profile-import.bak","different backup"));
+        QVERIFY(!doc.importProfile("jamais-vu","deja-vu",&error));
+        QCOMPARE(readFile(path),original);
+        QCOMPARE(readFile(path+".before-profile-import.bak"),QByteArray("different backup"));
+        QVERIFY(writeFile(path+".before-profile-import.bak",original));
+        // A changed destination must not be overwritten.
+        QVERIFY(writeFile(path,original)); doc.reload(); doc.loadEditorWorld("deja-vu",{});
+        QVERIFY(writeFile(path,original+"\n"));
+        QVERIFY(!doc.importProfile("jamais-vu","deja-vu",&error));
+        QCOMPARE(readFile(path),original+"\n");
+    }
     void preservesExtensionsAcrossMigrationEditsAndRemoval()
     {
         QTemporaryDir dir;QVERIFY(dir.isValid());const auto path=dir.filePath("world.json");

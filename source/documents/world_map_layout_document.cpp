@@ -1009,3 +1009,63 @@ bool CWorldMapLayoutDocument::replaceEditorMap(const SWorldMapZoneOrigin& map, Q
     if(!save(candidate,error))return false;
     m_zones=candidate;return true;
 }
+QStringList CWorldMapLayoutDocument::availableProfiles()
+{
+    if(!ensureLoaded()) return {};
+    QStringList result;
+    for(const auto& zone : m_zones)
+        if(!result.contains(zone.profileId)) result.append(zone.profileId);
+    return result;
+}
+bool CWorldMapLayoutDocument::importProfile(const QString& sourceProfile,
+    const QString& targetProfile, QString* error)
+{
+    const auto fail=[&](const QString& message) { if(error) *error=message; return false; };
+    if(!ensureLoaded()) return fail(m_loadWarning);
+    if(!m_hasPersistentFile || !safeIdentity(targetProfile)
+       || key(sourceProfile)==key(targetProfile))
+        return fail(QStringLiteral("Invalid world profile import."));
+    if(!m_storageProfileId.isEmpty() && key(targetProfile)!=key(m_storageProfileId))
+        return fail(QStringLiteral("Select the destination profile before importing."));
+    auto root=QJsonDocument::fromJson(m_diskBytes).object();
+    auto profiles=root.value("profiles").toArray();
+    QJsonObject source;
+    for(const auto& value:profiles)
+    {
+        const auto profile=value.toObject();
+        const auto id=key(profile.value("profileId").toString());
+        if(id==key(targetProfile)) return fail(QStringLiteral("The destination world already exists; it was preserved."));
+        if(id==key(sourceProfile)) source=profile;
+    }
+    if(source.isEmpty()) return fail(QStringLiteral("The source world profile was not found."));
+    source.insert("profileId",targetProfile);
+    profiles.append(source); root.insert("profiles",profiles);
+    const auto bytes=QJsonDocument(root).toJson();
+    QVector<SWorldMapZoneOrigin> checked;
+    if(!parse(bytes,&checked,error)) return false;
+    QLockFile lock(m_path+".lock");
+    if(!lock.tryLock(0)) return fail(QStringLiteral("Another editor is updating this world."));
+    QFile current(m_path);
+    if(!current.open(QIODevice::ReadOnly) || current.readAll()!=m_diskBytes)
+        return fail(QStringLiteral("The world file changed. Reload before importing."));
+    current.close();
+    const QString backup=m_path+".before-profile-import.bak";
+    if(QFileInfo::exists(backup))
+    {
+        QFile prior(backup);
+        if(!prior.open(QIODevice::ReadOnly) || prior.readAll()!=m_diskBytes)
+            return fail(QStringLiteral("A different world import backup exists; it was preserved."));
+    }
+    else
+    {
+        QSaveFile prior(backup); prior.setDirectWriteFallback(false);
+        if(!prior.open(QIODevice::WriteOnly) || prior.write(m_diskBytes)!=m_diskBytes.size() || !prior.commit())
+            return fail(QStringLiteral("Could not back up the world before importing."));
+    }
+    QSaveFile file(m_path); file.setDirectWriteFallback(false);
+    if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size() || !file.commit())
+        return fail(file.errorString());
+    m_diskBytes=bytes; m_zones=checked;
+    if(error) error->clear();
+    return true;
+}

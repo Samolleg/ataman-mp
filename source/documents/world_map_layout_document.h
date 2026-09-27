@@ -27,6 +27,9 @@ public:
     void setProfileDirectory(const QString& root, const QString& profileId,
                              const QString& legacyPath = defaultPath());
     QString path() const { return m_path; }
+    QStringList availableProfiles();
+    bool importProfile(const QString& sourceProfile, const QString& targetProfile,
+                       QString* error);
     SWorldMapLayoutUpdateResult loadEditorWorld(const QString& profileId,
                                               const QStringList& mapRoots);
     bool addEditorMaps(const QVector<SWorldMapZoneOrigin>& maps, QString* error);

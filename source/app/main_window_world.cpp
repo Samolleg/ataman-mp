@@ -7,6 +7,7 @@
 #include "endurance_document.h"
 #include "mob.h"
 #include <QDialog>
+#include <QInputDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QVBoxLayout>
@@ -289,6 +290,28 @@ void MainWindow::manageWorldMaps()
     auto* locate=new QPushButton(tr("Map files and position..."),&dialog);
     auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog);
     layout->addWidget(open);layout->addWidget(show);layout->addWidget(locate);layout->addWidget(remove);layout->addWidget(close);
+    auto* importWorld=new QPushButton(QString::fromUtf8("Перенести координаты из другого профиля…"),&dialog);
+    layout->insertWidget(0,importWorld);
+    const QString target=activeResourceProfile().profileId;
+    QStringList sources=m_worldMapLayoutDocument.availableProfiles();
+    bool destinationExists=false;
+    for(const auto& id:sources) destinationExists |= id.compare(target,Qt::CaseInsensitive)==0;
+    importWorld->setEnabled(!destinationExists && !sources.isEmpty());
+    connect(importWorld,&QPushButton::clicked,&dialog,[&]() {
+        bool accepted=false;
+        const QString source=QInputDialog::getItem(&dialog,QString::fromUtf8("Перенос координат"),
+            QString::fromUtf8("Из какого профиля перенести размещение карт в %1?").arg(target),
+            sources,0,false,&accepted);
+        if(!accepted) return;
+        if(QMessageBox::question(&dialog,QString::fromUtf8("Перенос координат"),
+            QString::fromUtf8("Скопировать размещение карт из %1 в %2?\nКоординаты и пути карт сохранятся. Будет создана резервная копия файла мира.\n%3")
+                .arg(source,target,m_worldMapLayoutDocument.path()),
+            QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes) return;
+        QString error;
+        if(!m_worldMapLayoutDocument.importProfile(source,target,&error))
+        { QMessageBox::warning(&dialog,tr("World maps"),error); return; }
+        dialog.accept(); refreshEditorWorld();
+    });
     connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(open,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
