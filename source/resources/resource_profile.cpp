@@ -339,9 +339,50 @@ QVector<SResourceProfile> loadResourceProfiles(const QString& externalDirectory)
     return profiles;
 }
 
-SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
-                                                   const SResourceProfile& profile)
+bool isPortableGameInstallation(const QString& gameRoot)
 {
+    const QDir root(gameRoot);
+    return QFileInfo(root.filePath("Engine/game.exe")).isFile()
+        && QDir(root.filePath("Base/Res")).exists()
+        && QDir(root.filePath("MODS")).exists();
+}
+
+QString resourceGameDataRoot(const QString& gameRoot)
+{
+    return QDir::cleanPath(isPortableGameInstallation(gameRoot)
+        ? QDir(gameRoot).filePath("Base") : gameRoot);
+}
+
+QString resourceStarterRoot(const QString& gameRoot)
+{
+    return QDir::cleanPath(isPortableGameInstallation(gameRoot)
+        ? gameRoot : QDir(gameRoot).filePath("Starter"));
+}
+
+QString resourceGameExecutable(const QString& gameRoot, const QString& profileId)
+{
+    return usesJmvRuntime(profileId)
+        ? QDir(resourceStarterRoot(gameRoot)).filePath("Engine/game.exe")
+        : QDir(gameRoot).filePath("game.exe");
+}
+
+SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
+                                                   const SResourceProfile& requestedProfile)
+{
+    SResourceProfile profile = requestedProfile;
+    const bool portable = profile.source == "built-in" && usesJmvRuntime(profile.id)
+        && isPortableGameInstallation(gameRoot);
+    if(portable)
+    {
+        for(QString& path : profile.fixedModRoots)
+            if(path.startsWith("Starter/")) path.remove(0, 8);
+        profile.searchParent = "MODS";
+        profile.resourceDirectories = QStringList() << "{modRoot}/res" << "{gameRoot}/Base/Res";
+        profile.mapDirectories = QStringList() << "{modRoot}/Maps" << "{gameRoot}/Base/Maps";
+        for(SRuntimeComponent& component : profile.runtimeComponents)
+            if(component.id == "starter-engine")
+                component.path = "{gameRoot}/Engine/game.exe";
+    }
     SResourceProfileEvaluation result;
     result.gameRoot = QDir::cleanPath(QFileInfo(gameRoot).absoluteFilePath());
     result.profileId = profile.id;
@@ -349,7 +390,7 @@ SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
     result.runtimeManifestId = profile.runtimeManifestId;
     result.capabilities = profile.capabilities;
     result.providers = profile.providers;
-    if(!QFileInfo(QDir(result.gameRoot).filePath("game.exe")).isFile())
+    if(!portable && !QFileInfo(QDir(result.gameRoot).filePath("game.exe")).isFile())
     {
         result.messages.append("The selected folder does not contain game.exe.");
         return result;
@@ -463,11 +504,14 @@ QStringList discoverGameInstallations()
         const QString root = storage.rootPath();
         candidates << QDir(root).filePath("Evil Islands")
                    << QDir(root).filePath("GOG Games/Evil Islands")
-                   << QDir(root).filePath("Games/Evil Islands");
+                   << QDir(root).filePath("Games/Evil Islands")
+                   << QDir(root).filePath("GOG Games/PZ")
+                   << QDir(root).filePath("Games/PZ");
     }
     for(const QString& candidate : candidates)
     {
-        if(QFileInfo(QDir(candidate).filePath("game.exe")).isFile())
+        if(QFileInfo(QDir(candidate).filePath("game.exe")).isFile()
+           || isPortableGameInstallation(candidate))
             appendUnique(&result, QFileInfo(candidate).absoluteFilePath());
     }
     return result;

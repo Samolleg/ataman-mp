@@ -45,6 +45,7 @@ private slots:
     void builtInProfilesUseCanonicalRuntimeRegistry();
     void dejaVuDoesNotSelectNeighboringMod();
     void installedDejaVuProfile();
+    void portableDejaVuUsesOnlyPortableResources();
 };
 
 void ResourceProfileTests::jmvPresetFindsModAndBaseResources()
@@ -235,6 +236,43 @@ void ResourceProfileTests::dejaVuDoesNotSelectNeighboringMod()
     QVERIFY(QFile::remove(QDir(root).filePath("Starter/MODS/JamaisVu135/main.lua")));
     QVERIFY(!evaluateResourceProfile(root, builtInResourceProfiles().first()).valid);
     QVERIFY(evaluateResourceProfile(root, deja).valid);
+}
+
+void ResourceProfileTests::portableDejaVuUsesOnlyPortableResources()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString root = temporary.path();
+    createFile(root + "/Engine/game.exe");
+    createFile(root + "/Base/Res/textures.res");
+    QDir().mkpath(root + "/Base/Maps");
+    createFile(root + "/MODS/DejaVu/main.lua");
+    createFile(root + "/MODS/DejaVu/res/database.res");
+    QDir().mkpath(root + "/MODS/DejaVu/Maps");
+    const auto profiles = builtInResourceProfiles();
+    const auto selected = evaluateResourceProfile(root, profiles[2]);
+    QVERIFY2(selected.valid, qPrintable(selected.messages.join('\n')));
+    QCOMPARE(selected.gameRoot, root);
+    QCOMPARE(selected.modRoot, root + "/MODS/DejaVu");
+    QCOMPARE(selected.resourceDirectories, QStringList({root + "/MODS/DejaVu/res", root + "/Base/Res"}));
+    QCOMPARE(selected.mapDirectories, QStringList({root + "/MODS/DejaVu/Maps", root + "/Base/Maps"}));
+    QCOMPARE(selected.runtimeComponents.first().path, root + "/Engine/game.exe");
+    QCOMPARE(resourceGameDataRoot(root), root + "/Base");
+    QCOMPARE(resourceStarterRoot(root), root);
+    QCOMPARE(resourceGameExecutable(root, "deja-vu"), root + "/Engine/game.exe");
+    QVERIFY(!selected.runtimeStackValidated); // arbitrary test executable is never trusted
+    QVERIFY(!evaluateResourceProfile(root, profiles[0]).valid); // no JMV substitution
+    QVERIFY(!evaluateResourceProfile(root, profiles[1]).valid); // no base-runtime substitution
+    createFile(root + "/MODS/JamaisVu135/main.lua");
+    createFile(root + "/MODS/JamaisVu135/res/database.res");
+    QDir().mkpath(root + "/MODS/JamaisVu135/Maps");
+    const auto jmv = evaluateResourceProfile(root, profiles[0]);
+    QVERIFY(jmv.valid);
+    QCOMPARE(jmv.modRoot, root + "/MODS/JamaisVu135");
+    QCOMPARE(jmv.resourceDirectories.last(), root + "/Base/Res");
+    QCOMPARE(evaluateResourceProfile(root, profiles[2]).modRoot, selected.modRoot);
+    QVERIFY(QFile::remove(root + "/Engine/game.exe"));
+    QVERIFY(!evaluateResourceProfile(root, profiles[2]).valid);
 }
 
 void ResourceProfileTests::installedDejaVuProfile()

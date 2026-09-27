@@ -98,6 +98,7 @@ RegQueryValueExAFn g_originalRegQueryValueExA = nullptr;
 RegQueryValueExWFn g_originalRegQueryValueExW = nullptr;
 RegCloseKeyFn g_originalRegCloseKey = nullptr;
 wchar_t g_selectedGameRoot[MAX_PATH * 4] = {};
+wchar_t g_selectedStarterRoot[MAX_PATH * 4] = {};
 wchar_t g_selectedModRoot[MAX_PATH * 4] = {};
 HKEY g_pathSettingsKeys[16] = {};
 HKEY g_starterSettingsKeys[16] = {};
@@ -2098,7 +2099,7 @@ bool SelectedStarterPath(LPCSTR valueName, char* output, size_t capacity)
         wcscpy_s(selected, g_selectedModRoot);
     else if(_stricmp(valueName, "path") == 0)
         _snwprintf_s(selected, sizeof(selected) / sizeof(selected[0]), _TRUNCATE,
-                     L"%s\\Starter", g_selectedGameRoot);
+                     L"%s", g_selectedStarterRoot);
     else
         return false;
     BOOL substituted = FALSE;
@@ -2129,7 +2130,7 @@ bool SelectedStarterPath(LPCWSTR valueName, wchar_t* output, size_t capacity)
         return wcscpy_s(output, capacity, g_selectedModRoot) == 0;
     if(_wcsicmp(valueName, L"path") == 0)
         return _snwprintf_s(output, capacity, _TRUNCATE,
-                            L"%s\\Starter", g_selectedGameRoot) >= 0;
+                            L"%s", g_selectedStarterRoot) >= 0;
     return false;
 }
 
@@ -3487,6 +3488,13 @@ bool PrepareRuntime()
               || g_selectedGameRoot[gameRootLength - 1] == L'/'))
         g_selectedGameRoot[--gameRootLength] = L'\0';
     NormalizeSlashes(g_selectedGameRoot);
+    GetEnvironmentVariableW(L"EI_MAPPER_ENDURANCE_STARTER_ROOT", g_selectedStarterRoot,
+                            DWORD(sizeof(g_selectedStarterRoot) / sizeof(g_selectedStarterRoot[0])));
+    if(!g_selectedStarterRoot[0])
+        _snwprintf_s(g_selectedStarterRoot,
+                     sizeof(g_selectedStarterRoot) / sizeof(g_selectedStarterRoot[0]),
+                     _TRUNCATE, L"%s\\Starter", g_selectedGameRoot);
+    NormalizeSlashes(g_selectedStarterRoot);
     if(!g_selectedGameRoot[0])
     {
         Log(L"DIRECT_LAUNCH disabled: selected game root is missing");

@@ -20,6 +20,7 @@ SOURCES += \
     ../source/documents/terrain_virtual_atlas.cpp \
     ../source/resources/mmp_codec.cpp \
     ../source/resources/mmp_inspector.cpp \
+    ../source/resources/resource_profile.cpp \
     ../source/runtime/current_session_backup.cpp \
     ../source/runtime/hot_reload_protocol.cpp \
     ../source/runtime/jmv_map_test_launcher.cpp \

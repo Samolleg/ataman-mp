@@ -1024,7 +1024,7 @@ bool CJmvMapTestLauncher::hasAutoSpellMob(
         }
     }
     if(engineDirectory.isEmpty())
-        engineDirectory = QDir(profile.gameRoot).filePath("Starter/Engine");
+        engineDirectory = QFileInfo(resourceGameExecutable(profile.gameRoot, profile.profileId)).absolutePath();
     if(findCaseInsensitiveFile(QStringList() << engineDirectory,
                                "SpellAddonX.asi").isEmpty())
         return reject(QStringLiteral("Play from Here requires SpellAddon's autorun-MOB feature."));
@@ -2232,7 +2232,9 @@ bool CJmvMapTestLauncher::launch(const SJmvMapTestLaunchInput& input, QString* e
     m_process->setWorkingDirectory(m_engineDirectory);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert("EI_MAPPER_ENDURANCE_GAME_ROOT",
-                       QDir::cleanPath(input.profile.gameRoot));
+                       resourceGameDataRoot(input.profile.gameRoot));
+    environment.insert("EI_MAPPER_ENDURANCE_STARTER_ROOT",
+                       resourceStarterRoot(input.profile.gameRoot));
     if(!input.profile.modRoot.isEmpty())
         environment.insert("EI_MAPPER_ENDURANCE_MOD_ROOT",
                            QDir::cleanPath(input.profile.modRoot));
@@ -2373,9 +2375,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         if(error) *error = "The highest-priority Maps directory is not the active JMV mod Maps directory.";
         return false;
     }
-    m_gameExePath = isJmv
-        ? QDir(input.profile.gameRoot).filePath("Starter/Engine/game.exe")
-        : QDir(input.profile.gameRoot).filePath("game.exe");
+    m_gameExePath = resourceGameExecutable(input.profile.gameRoot, input.profile.profileId);
     m_engineDirectory = QFileInfo(m_gameExePath).absolutePath();
     m_bridgeSourcePath = QDir(QCoreApplication::applicationDirPath())
             .filePath("runtime/EIMapperEnduranceJmvBridge.plg");
@@ -2463,7 +2463,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             if(error) *error = "The selected JMV mod has no readable Starter config.reg.";
             return false;
         }
-        const QString starterRoot = QDir(input.profile.gameRoot).filePath("Starter");
+        const QString starterRoot = resourceStarterRoot(input.profile.gameRoot);
         QSettings starterConfig(QDir(starterRoot).filePath("starter.config"),
                                 QSettings::IniFormat);
         starterStoredSelection = starterConfig.value("Settings/ModSel").toString();
@@ -2503,7 +2503,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
             HKEY_CURRENT_USER, pathSettings, L"Resources path");
         const QString cdRomPath = registry32String(
             HKEY_CURRENT_USER, pathSettings, L"CD-ROM Path");
-        if(!validateJmvGameRootPaths(input.profile.gameRoot, workPath,
+        if(!validateJmvGameRootPaths(resourceGameDataRoot(input.profile.gameRoot), workPath,
                                      resourcesPath, cdRomPath, error))
             return false;
 #endif
@@ -2693,7 +2693,7 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
         }
     }
     m_liveMprSha256 = sha256(runtimeMprData);
-    const QString resourcesDirectory = QDir(input.profile.gameRoot).filePath("Res");
+    const QString resourcesDirectory = QDir(resourceGameDataRoot(input.profile.gameRoot)).filePath("Res");
     m_livePlaceholderResourcePath = QDir(resourcesDirectory).filePath(
         "EIMapperEndurance-" + m_runId + ".res");
     m_livePlaceholderResourceSha256 = sha256(placeholderArchive);

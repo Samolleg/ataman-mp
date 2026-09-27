@@ -634,6 +634,20 @@ void JmvMapTestLauncherTests::rejectsMixedJmvGameRootRegistryPaths()
     QVERIFY2(CJmvMapTestLauncher::validateJmvGameRootPaths(
         "D:/Evil Islands", "D:/Evil Islands/", "D:/Evil Islands/Res/",
         "D:/Evil Islands/", &error), qPrintable(error));
+    QTemporaryDir portable;
+    QVERIFY(portable.isValid());
+    QDir().mkpath(portable.path() + "/Engine");
+    QDir().mkpath(portable.path() + "/Base/Res");
+    QDir().mkpath(portable.path() + "/MODS");
+    QFile engine(portable.path() + "/Engine/game.exe");
+    QVERIFY(engine.open(QIODevice::WriteOnly));
+    engine.close();
+    const QString dataRoot = resourceGameDataRoot(portable.path());
+    QCOMPARE(dataRoot, portable.path() + "/Base");
+    QVERIFY(CJmvMapTestLauncher::validateJmvGameRootPaths(
+        dataRoot, dataRoot, dataRoot + "/Res", dataRoot, &error));
+    QVERIFY(!CJmvMapTestLauncher::validateJmvGameRootPaths(
+        dataRoot, "D:/Evil Islands", "D:/Evil Islands/Res", "D:/Evil Islands", &error));
 }
 
 void JmvMapTestLauncherTests::rebasesRuntimeTerrainAtlasNamespace()

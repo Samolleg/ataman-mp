@@ -106,6 +106,10 @@ QVector<SResourceProfile> loadResourceProfiles(const QString& externalDirectory 
 SResourceProfileEvaluation evaluateResourceProfile(const QString& gameRoot,
                                                    const SResourceProfile& profile);
 QStringList discoverGameInstallations();
+bool isPortableGameInstallation(const QString& gameRoot);
+QString resourceGameDataRoot(const QString& gameRoot);
+QString resourceStarterRoot(const QString& gameRoot);
+QString resourceGameExecutable(const QString& gameRoot, const QString& profileId);
 QString profileCapabilityStatusName(EProfileCapabilityStatus status);
 
 #endif // RESOURCE_PROFILE_H
