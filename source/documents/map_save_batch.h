@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <functional>
 
 struct SMapSaveFile
 {
@@ -23,4 +24,5 @@ struct SMapSaveBatchResult
 // failures restore committed files only if they still belong to this save.
 SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& files,
                                      const QString& backupRoot = QString(),
-                                     int failCommitForTest = -1);
+                                     int failCommitForTest = -1,
+                                     const std::function<void()>& committed = {});

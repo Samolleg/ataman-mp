@@ -24,7 +24,8 @@ bool matches(const SMapSaveFile& file, const QByteArray& bytes, bool existed)
 }
 }
 SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
-                                     const QString& backupRoot, int failCommitForTest)
+                                     const QString& backupRoot, int failCommitForTest,
+                                     const std::function<void()>& onCommitted)
 {
     SMapSaveBatchResult result;
     QVector<SMapSaveFile> files;
@@ -48,7 +49,7 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         std::unique_ptr<QSaveFile> stage(new QSaveFile(file.path));
         stage->setDirectWriteFallback(false);
         if(!stage->open(QIODevice::WriteOnly) || stage->write(file.after)!=file.after.size()
-           || !stage->flush()) {result.error="Cannot stage: "+file.path;return result;}
+           || !stage->flush()) {result.error="Cannot stage: "+file.path+"\n"+stage->errorString();return result;}
         staged.push_back(std::move(stage));
     }
     CBackupManager manager(backupRoot);
@@ -72,7 +73,7 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
             {"beforeSha256",QString::fromLatin1(QCryptographicHash::hash(file.before,QCryptographicHash::Sha256).toHex())},
             {"afterSha256",QString::fromLatin1(QCryptographicHash::hash(file.after,QCryptographicHash::Sha256).toHex())}});
     }
-    if(files.isEmpty()){result.success=true;return result;}
+    if(files.isEmpty()){result.success=true;if(onCommitted)onCommitted();return result;}
     const QString recoveryDir=QDir(manager.rootPath()).filePath("map-save-recovery");
     const QString recoveryPath=QDir(recoveryDir).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces)+".json");
     const QByteArray recovery=QJsonDocument(QJsonObject{{"files",recoveryFiles}}).toJson();
@@ -82,16 +83,22 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         result.error="Cannot create save recovery journal: "+recoveryPath;return result;}
     int committed=0;
     for(int i=0;i<files.size();++i) {
-        if(!matches(files[i],files[i].before,files[i].existed)
-           || i==failCommitForTest || !staged[size_t(i)]->commit()) {
-            result.error="Save failed or source changed: "+files[i].path;break;
+        if(!matches(files[i],files[i].before,files[i].existed)) {
+            result.error="Source changed or could not be read before commit: "+files[i].path;break;
+        }
+        if(i==failCommitForTest) {result.error="Injected commit failure: "+files[i].path;break;}
+        if(!staged[size_t(i)]->commit()) {
+            result.error=QString("Atomic replacement failed: %1\nQt file error %2: %3")
+                .arg(files[i].path).arg(int(staged[size_t(i)]->error()))
+                .arg(staged[size_t(i)]->errorString());break;
         }
         ++committed;
         if(!matches(files[i],files[i].after,true)) {
             result.error="Saved file verification failed: "+files[i].path;break;
         }
     }
-    if(result.error.isEmpty()) {QFile::remove(recoveryPath);result.success=true;return result;}
+    if(result.error.isEmpty()) {QFile::remove(recoveryPath);result.success=true;
+        if(onCommitted)onCommitted();return result;}
     for(int i=committed-1;i>=0;--i) {
         const auto& file=files[i];
         bool restored=false;

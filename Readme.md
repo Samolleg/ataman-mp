@@ -11,7 +11,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `77`. Each separate fix advances the integer version.
+Current Ataman version: `78`. Each separate fix advances the integer version.
 
 Portable DejaVu: choose the package root containing `Engine`, `Base`, and `MODS`
 in Game and mod setup, then the DejaVu profile. The editor loads the selected

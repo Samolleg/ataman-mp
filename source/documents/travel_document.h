@@ -29,6 +29,8 @@ public:
     bool createPairedRoute(const STravelRoute& route, QString* error);
     bool prepareSave(SMapSaveFile* file, QString* error) const;
     void acceptSaved() {m_baseline=snapshot();}
+    // Adopt exactly the serialized edit that was committed, not later UI edits.
+    void acceptCommittedSnapshot(const QByteArray& bytes) {m_baseline=bytes;}
 private:
     QString m_path;
     QString m_member;

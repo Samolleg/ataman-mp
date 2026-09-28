@@ -198,7 +198,7 @@ public:
     void focusTravelArea(int exitIndex,bool remove);
     void cancelTravelGesture();
     void saveLand();
-    bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString());
+    bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString(), const std::function<void()>& committed = {});
     void saveLandAs();
     void saveModernDraftAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
@@ -492,6 +492,8 @@ private:
     bool m_mapCohortCommitted{false};
     QVector<SMapSaveFile> m_mapCompanions;
     QString m_mapCohortBackupRoot;
+    std::function<void()> m_mapCompanionsCheckpoint;
+    void acceptMapCompanionsCheckpoint();
     bool travelMousePress(QMouseEvent* event);
     bool travelMouseMove(QMouseEvent* event);
     bool travelMouseRelease(QMouseEvent* event);

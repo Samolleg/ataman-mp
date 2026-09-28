@@ -500,9 +500,10 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
     if(m_travelPanel && !m_travelPanel->flush())return false;
     QVector<SMapSaveFile> files;QString error;
     QVector<QSharedPointer<CTravelDocument>> changed;
+    QVector<QByteArray> committedSnapshots;
     for(const auto& doc:m_travelDocuments)if(doc->dirty()){
         SMapSaveFile file;if(!doc->prepareSave(&file,&error)){QMessageBox::warning(this,tr("Переходы не сохранены"),error);return false;}
-        files.append(file);changed.append(doc);
+        files.append(file);changed.append(doc);committedSnapshots.append(doc->snapshot());
     }
     if(changed.isEmpty())return false;
     CMob* mob=m_pView->currentMob();QByteArray mobBytes;
@@ -522,13 +523,20 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         travelArchives.append(file.path);
         if(m_resourceBrowser)m_resourceBrowser->beginInternalPublication(file.path);
     }
-    const bool saved=m_pView->saveMapCompanions(files,&error,backupRoot);
+    bool companionsSaved=false;
+    const bool saved=m_pView->saveMapCompanions(files,&error,backupRoot,[&](){
+        for(int i=0;i<changed.size();++i)changed[i]->acceptCommittedSnapshot(committedSnapshots[i]);
+        if(mob && !mobBytes.isEmpty())mob->adoptCommittedBytes(mobBytes);
+        companionsSaved=true;
+    });
     for(const auto& archive:travelArchives)
-        if(m_resourceBrowser)m_resourceBrowser->finishInternalPublication(archive,saved,false);
+        if(m_resourceBrowser)m_resourceBrowser->finishInternalPublication(archive,companionsSaved,false);
     if(!saved){
-        QMessageBox::warning(this,tr("Карта не сохранена"),error);return false;}
-    for(const auto& doc:changed)doc->acceptSaved();
-    if(mob && !mobBytes.isEmpty())mob->adoptCommittedBytes(mobBytes);
+        if(companionsSaved){
+            refreshMapsBrowser();refreshTravelEditor();updateLoadedMapPanel();rebuildWindowTitle();
+            error=tr("Переходы и сопутствующие данные уже сохранены. Последующий этап сохранения карты не завершён.\n%1").arg(error);
+        }
+        QMessageBox::warning(this,tr("Сохранение карты не завершено"),error);return false;}
     refreshMapsBrowser();refreshTravelEditor();updateLoadedMapPanel();rebuildWindowTitle();
     return true;
 }

@@ -428,7 +428,9 @@ bool CView::saveWorldTerrainMaps()
         if(!ready) {for(const auto& prior:prepared)emit terrainPublicationFinished(prior,false);return refuse(tr("Архив пока недоступен для записи: %1").arg(destination));}
         prepared.append(destination);
     }
-    const auto saved=commitMapSaveBatch(files,m_mapCohortActive?m_mapCohortBackupRoot:QString());
+    const auto saved=commitMapSaveBatch(files,m_mapCohortActive?m_mapCohortBackupRoot:QString(),-1,[this](){
+        if(m_mapCohortActive)acceptMapCompanionsCheckpoint();
+    });
     if(m_mapCohortActive)m_mapCohortCommitted=saved.success;
     for(const auto& destination:destinations)emit terrainPublicationFinished(destination,saved.success);
     if(!saved.success)return refuse(saved.error);

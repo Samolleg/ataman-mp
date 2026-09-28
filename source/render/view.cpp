@@ -9649,11 +9649,17 @@ void CView::saveLand()
        && (dirtyWorld.size()!=1 || CWorldTerrainSession::key(dirtyWorld.first())
            != CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())))
     {
-        if(!saveWorldTerrainMaps()) return;
+        if(!saveWorldTerrainMaps()) {
+            if(m_mapCohortActive)m_mapCohortCommitted=false;
+            return;
+        }
         // Travel companions were already committed by the world batch. A
         // subsequent atlas publication must compare against that new baseline.
         if(m_mapCohortActive && m_mapCohortCommitted)
             for(auto& file : m_mapCompanions) { file.before=file.after; file.existed=true; }
+        // The world checkpoint is durable, but it is not success of the next
+        // publication. Cancellation/preflight failure must still return false.
+        if(m_mapCohortActive)m_mapCohortCommitted=false;
     }
     if(m_pLand->isMprLoad())
     {

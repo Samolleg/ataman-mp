@@ -23,6 +23,9 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtEndian>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 #include "res_file.h"
 
@@ -145,6 +148,8 @@ private slots:
     void travelOrderRepairPanel();
     void travelRoundTripAndConflict();
     void travelSaveBatchRollback();
+    void travelRetryAfterPublicationFailure();
+    void batchReportsLockedDestination();
     void draftPublicationKeepsPathsAndRollsBackEveryStage();
     void travelGeometryAndPanel();
     void travelMergeAndLinkValidation();
@@ -811,6 +816,65 @@ void ResArchiveDocumentTests::travelSaveBatchRollback()
     for(const auto& item:files){QFile f(item.path);QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),item.after);}
     // A stale baseline aborts before replacing any destination.
     QVERIFY(!commitMapSaveBatch(files,dir.filePath("backup")).success);
+}
+
+void ResArchiveDocumentTests::travelRetryAfterPublicationFailure()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto path=dir.filePath("texts.res");
+    QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(syntheticRes()); file.close();
+    CTravelDocument doc; QString error; QVERIFY(doc.open(path,&error));
+    auto zone=doc.table().zones()[0]; zone.mobName="first"; QVERIFY(doc.replaceZone(0,zone,&error));
+    SMapSaveFile travel; QVERIFY(doc.prepareSave(&travel,&error));
+    const auto snapshot=doc.snapshot();
+    int checkpoints=0;
+    const auto accepted=[&](){++checkpoints;doc.acceptCommittedSnapshot(snapshot);};
+    const auto failedWorld=commitMapSaveBatch({travel},dir.filePath("backups"),0,accepted);
+    QVERIFY(!failedWorld.success); QCOMPARE(checkpoints,0); QVERIFY(doc.dirty());
+    const auto world=commitMapSaveBatch({travel},dir.filePath("backups"),-1,accepted);
+    QVERIFY2(world.success,qPrintable(world.error));
+    QCOMPARE(checkpoints,1); QVERIFY(!doc.dirty());
+    SMapSaveFile atlas; atlas.path=dir.filePath("atlas.res");
+    atlas.existed=false; atlas.after="published atlas";
+    const auto publication=commitMapSaveBatch({atlas},dir.filePath("backups"),0);
+    QVERIFY(!publication.success); QVERIFY(publication.rollbackComplete);
+    zone.mobName="second"; QVERIFY(doc.replaceZone(0,zone,&error));
+    SMapSaveFile retry;
+    QVERIFY2(doc.prepareSave(&retry,&error),qPrintable(error));
+    const auto retrySnapshot=doc.snapshot();
+    // An edit newer than the serialized candidate must stay dirty.
+    zone.mobName="third"; QVERIFY(doc.replaceZone(0,zone,&error));
+    const auto repeated=commitMapSaveBatch({retry},dir.filePath("backups"),-1,[&](){doc.acceptCommittedSnapshot(retrySnapshot);});
+    QVERIFY2(repeated.success,qPrintable(repeated.error)); QVERIFY(doc.dirty());
+    SMapSaveFile next; QVERIFY2(doc.prepareSave(&next,&error),qPrintable(error));
+    CTravelDocument reopened; QVERIFY(reopened.open(path,&error)); QCOMPARE(reopened.snapshot(),retrySnapshot);
+    // Actual external changes are still refused.
+    QVERIFY(file.open(QIODevice::WriteOnly)); file.write(syntheticRes()); file.close();
+    QVERIFY(!doc.prepareSave(&next,&error)); QVERIFY(error.contains("changed outside"));
+}
+
+void ResArchiveDocumentTests::batchReportsLockedDestination()
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    SMapSaveFile item;item.path=dir.filePath("locked.res");item.before="old";item.after="new";
+    QFile file(item.path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(item.before);file.close();
+    HANDLE held=CreateFileW(reinterpret_cast<LPCWSTR>(item.path.utf16()),GENERIC_READ,
+        FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    QVERIFY(held!=INVALID_HANDLE_VALUE);
+    int accepted=0;
+    const auto blocked=commitMapSaveBatch({item},dir.filePath("backups"),-1,[&](){++accepted;});
+    CloseHandle(held);
+    QVERIFY(!blocked.success);QVERIFY(blocked.rollbackComplete);QCOMPARE(accepted,0);
+    QVERIFY2(blocked.error.contains("Atomic replacement failed"),qPrintable(blocked.error));
+    QVERIFY(blocked.error.contains("Qt file error"));
+    QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),item.before);file.close();
+    const auto retry=commitMapSaveBatch({item},dir.filePath("backups"),-1,[&](){++accepted;});
+    QVERIFY2(retry.success,qPrintable(retry.error));QCOMPARE(accepted,1);
+#else
+    QSKIP("Windows sharing semantics regression");
+#endif
 }
 
 void ResArchiveDocumentTests::travelGeometryAndPanel()
