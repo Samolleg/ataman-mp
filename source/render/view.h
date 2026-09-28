@@ -169,6 +169,7 @@ class CView : public QGLWidget
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
+    friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
 
 public:
@@ -1306,5 +1307,6 @@ private:
 };
 
 bool patrolAuthoringIntegrationCheck(CView* view);
+bool terrainBaselineAnimationIntegrationCheck(CView* view);
 
 #endif // MYGLWIDGET_H

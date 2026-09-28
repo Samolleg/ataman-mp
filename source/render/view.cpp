@@ -13778,6 +13778,14 @@ bool CView::adoptCompleteTerrainBaseline(
     m_prevalidatedTerrainTilesAdopted = false;
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
+    // Publication may compact animation frames into different atlas slots.
+    // Future world saves and painting must use the accepted MP parameters,
+    // not the pre-publication editor cache.
+    m_mprMaterials = map.materials;
+    m_mprAnimatedTiles = map.animatedTiles;
+    m_pLand->setMaterials(renderMaterials(m_mprMaterials));
+    m_pLand->setAnimTils(renderAnimatedTiles(m_mprAnimatedTiles));
+    m_overlayMaterialSlotLabelsDirty = true;
     m_terrainEditAvailable = true;
     m_legacyTerrainProfileCollision = false;
     m_terrainAtlasProfile = expectedProfile;
@@ -13790,6 +13798,8 @@ bool CView::adoptCompleteTerrainBaseline(
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                                destination.baseName());
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+    refreshMprSettingsDock();
+    emit loadedMapStateChanged();
     return true;
 }
 
@@ -26656,4 +26666,94 @@ bool patrolAuthoringIntegrationCheck(CView* view)
     view->collectObjectTreeData(); view->viewParameters();
     CScene::getInstance()->changeMode(previousMode);
     return passed;
+}
+
+// Exercises the production adoption boundary, including its next MP save.
+// All archive bytes and pixels are synthetic and live in an auto-removed directory.
+bool terrainBaselineAnimationIntegrationCheck(CView* view)
+{
+    if(!view || view->m_pLand->isMprLoad()) return false;
+    QSignalBlocker blocked(view);
+    QTemporaryDir temporary;
+    const auto archiveBytes = [](const QVector<SResArchiveNewMember>& members) {
+        QByteArray empty(16, '\0'), bytes;
+        qToLittleEndian<quint32>(0x019CE23C, reinterpret_cast<uchar*>(empty.data()));
+        qToLittleEndian<quint32>(16, reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument archive; QStringList errors;
+        if(!archive.loadBytes(empty, "synthetic", &errors)
+           || !archive.buildWithAppendedMembers(members, &bytes, &errors)) return QByteArray();
+        return bytes;
+    };
+    const auto write = [](const QString& path, const QByteArray& bytes) {
+        QFile file(path); return !bytes.isEmpty() && file.open(QIODevice::WriteOnly)
+            && file.write(bytes)==bytes.size();
+    };
+    QByteArray mp; QDataStream stream(&mp,QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream << quint32(0xCE4AF672) << float(100) << quint32(1) << quint32(1)
+           << quint32(1) << quint32(256) << quint32(64) << quint32(32)
+           << quint16(0) << quint32(1);
+    for(int i=0;i<64;++i) stream << qint32(i<32 ? 6 : 1);
+    stream << quint16(0) << quint16(32);
+    QByteArray sector; QDataStream sec(&sector,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec << quint32(0xCF4BF774) << quint8(0);
+    sector.append(QByteArray(33*33*8+16*16*2,'\0'));
+    const auto member=[](const QString& name, const QByteArray& payload) {
+        SResArchiveNewMember result; result.name=name; result.payload=payload; return result;
+    };
+    const QByteArray mpr=archiveBytes({member("WaterBaseline.MP",mp),member("WaterBaseline000000.SEC",sector)});
+    QVector<QImage> tiles;
+    for(int i=0;i<64;++i) {
+        QImage tile(32,32,QImage::Format_ARGB32);
+        tile.fill(i<32 ? QColor(0,64+i*4,192) : QColor(100+i,60,0)); tiles.append(tile);
+    }
+    QString error;
+    const QByteArray page=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(tiles,0,32),true,&error);
+    for(int i=0;i<64;++i)
+        if(!ei::decodeMmpDxt1AtlasTile(page,i,&tiles[i],&error)) return false;
+    STerrainAtlasProfile profile;
+    profile.mprNamespace="waterbaseline"; profile.atlasSlotCount=64;
+    STerrainAtlasProfileFamily family; family.id=1; family.name="Synthetic";
+    profile.families.append(family);
+    for(int i=0;i<64;++i) {
+        STerrainAtlasProfileSlot slot; slot.slot=i;
+        slot.signature.northWest=slot.signature.northEast=slot.signature.southEast=slot.signature.southWest=1;
+        profile.slotDefinitions.append(slot);
+    }
+    profile.normalizeMembership();
+    profile.textureCount=1; profile.approved=true;
+    profile.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(tiles);
+    profile.provenance="synthetic-water-baseline-regression";
+    const QByteArray res=archiveBytes({member("WaterBaseline000.mmp",page),
+        member(CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace),profile.toBytes())});
+    const QString mprPath=temporary.filePath("WaterBaseline.mpr");
+    const QString resPath=temporary.filePath("HDPack_Terrain.res");
+    if(!temporary.isValid() || !write(mprPath,mpr) || !write(resPath,res)) return false;
+    view->makeCurrent();
+    CTextureList::getInstance()->setMapLocalTerrainArchive(resPath);
+    view->m_pLand->readMap(QFileInfo(mprPath),false);
+    CValidationReport report;
+    bool ok=view->m_pLand->isMprLoad() && view->m_mprDocument.loadBytes(mpr,mprPath,&report)
+        && view->m_terrainEdit.load(view->m_mprDocument,&report);
+    view->m_terrainEditAvailable=ok;
+    view->m_mprAnimatedTiles=view->m_mprDocument.mapInfo().animatedTiles;
+    view->m_mprAnimatedTiles[0].tileIndex=16; // pre-compaction editor cache
+    const QString hash=QString::fromLatin1(QCryptographicHash::hash(mpr,QCryptographicHash::Sha256).toHex());
+    ok=ok && view->adoptCompleteTerrainBaseline(QFileInfo(mprPath),hash,tiles,resPath,profile,false);
+    CMprEditTransaction transaction; QByteArray saved; CMprDocument reopened;
+    ok=ok && view->m_mprDocument.appendMapParametersEdit(100,view->m_mprMaterials,
+            view->m_mprAnimatedTiles,&transaction,&report)
+        && view->m_mprDocument.applyTransaction(transaction,&saved,&report)
+        && reopened.loadBytes(saved,"second-save.mpr",&report)
+        && reopened.mapInfo().animatedTiles.size()==1
+        && reopened.mapInfo().animatedTiles[0].tileIndex==0
+        && reopened.mapInfo().animatedTiles[0].frameCount==32
+        && view->m_pLand->animTiles()[0].tileIndex==0;
+    fprintf(stderr,"Terrain baseline animation repeat-save: %s %s\n",ok?"PASS":"FAIL",qPrintable(report.toText()));
+    view->unloadLand(false);
+    CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
+    view->doneCurrent();
+    return ok;
 }

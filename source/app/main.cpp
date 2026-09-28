@@ -3199,6 +3199,7 @@ int runHeadlessCommand(QApplication& app)
                 == QStringLiteral("Human Test");
         const bool travelEditorProductionRouteWorks=travelEditorIntegrationCheck(productionWindow);
         const bool patrolAuthoringWorks=patrolAuthoringIntegrationCheck(productionWindow->view());
+        const bool terrainBaselineAnimationWorks=terrainBaselineAnimationIntegrationCheck(productionWindow->view());
         bool compactToolbarWorks=true;
         QWidget* operationBar=productionWindow->findChild<QWidget*>("viewportOperationToolbar");
         const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
@@ -3292,7 +3293,7 @@ int runHeadlessCommand(QApplication& app)
                 && diplomacyDirectionControlVisible && diplomacyWindowSizePersists
                 && unitCategoryIdsVisible && helperFigureCacheIdentityDistinct
                 && databasePrototypeMenuEmissionWorks
-                && patrolAuthoringWorks && compactToolbarWorks && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
+                && terrainBaselineAnimationWorks && patrolAuthoringWorks && compactToolbarWorks && databasePrototypeMainWindowRouteWorks && travelEditorProductionRouteWorks
                 && detachedPreviewSharesViewportContext
                 && itemConstructorCloseReopenSafe
                 && enterCommit && clickCommit && settingsTabsUsable && settingsShortcutsPersist
@@ -3443,6 +3444,7 @@ int runHeadlessCommand(QApplication& app)
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
                << " travelEditorProductionRouteWorks=" << travelEditorProductionRouteWorks
+               << " terrainBaselineAnimationWorks=" << terrainBaselineAnimationWorks
                << " patrolAuthoringWorks=" << patrolAuthoringWorks
                << " compactToolbarWorks=" << compactToolbarWorks
                << " databasePrototypeMainWindowRouteWorks="
