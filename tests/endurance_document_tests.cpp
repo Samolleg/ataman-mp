@@ -3,6 +3,7 @@
 #include <QQuaternion>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QPointer>
 #include <QSet>
@@ -14,6 +15,7 @@
 #include <limits>
 
 #include "endurance_document.h"
+#include "technical_texture_catalog.h"
 #include "neighbor_scene_data.h"
 #include "ai_graph_document.h"
 #include "ai_graph_persistence.h"
@@ -501,6 +503,7 @@ private slots:
     void partialFinalAtlasPageIsAValidLiveBaseline();
     void modernSaveRoutesThroughPublicationExactlyOnce();
     void unchangedMobIsByteIdentical();
+    void technicalTexturesFollowObservedModelsAndProfileRoots();
     void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void mobGraphReplacementAndInsertionAreExact();
@@ -1655,6 +1658,101 @@ void EnduranceDocumentTests::unchangedMobIsByteIdentical()
     QVERIFY(document.load(QFileInfo(file.fileName()), &report));
     QCOMPARE(document.serialize(), bytes);
     QVERIFY(!document.isDirty());
+}
+
+void EnduranceDocumentTests::technicalTexturesFollowObservedModelsAndProfileRoots()
+{
+    QTemporaryDir firstRoot;
+    QTemporaryDir secondRoot;
+    QVERIFY(firstRoot.isValid());
+    QVERIFY(secondRoot.isValid());
+    const auto texturedObject = [](const QByteArray& model, const QByteArray& texture) {
+        return section(0xB001, section(0xB006, model) + section(0xB007, texture)
+            + section(0xB008, "secondary"));
+    };
+    const auto writeMob = [](const QString& path, const QByteArray& objects) {
+        QFile file(path);
+        if(!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return false;
+        const QByteArray bytes = validMob(section(0xB000, objects));
+        return file.write(bytes) == bytes.size();
+    };
+    const QString first = firstRoot.filePath("alpha.mob");
+    const QString second = firstRoot.filePath("beta.mob");
+    QVERIFY(writeMob(first, texturedObject("Bridge", "stone")));
+    QVERIFY(writeMob(second, texturedObject("Bridge", "wood")
+        + texturedObject("Bridge", "wood")));
+    QVERIFY(writeMob(secondRoot.filePath("alpha.mob"),
+        texturedObject("Bridge", "shadowed")));
+    QVERIFY(writeMob(secondRoot.filePath("gamma.mob"),
+        texturedObject("Other", "other_texture")));
+
+    CMobDocument parsed;
+    QVERIFY(parsed.load(QFileInfo(first)));
+    QCOMPARE(parsed.objects().size(), 1);
+    QCOMPARE(parsed.objects().first().model, QStringLiteral("Bridge"));
+    QCOMPARE(parsed.objects().first().primaryTexture, QStringLiteral("stone"));
+    QCOMPARE(parsed.objects().first().secondaryTexture, QStringLiteral("secondary"));
+    QCOMPARE(parsed.serialize(), validMob(section(0xB000,
+        texturedObject("Bridge", "stone"))));
+
+    ei::TechnicalTextureCatalog catalog;
+    catalog.refreshSources({firstRoot.path(), secondRoot.path()});
+    QCOMPARE(catalog.sourceFileCount(), 3); // first root shadows alpha.mob in second
+    while(catalog.hasPendingFiles())
+        catalog.scanNextFile();
+    QCOMPARE(catalog.failedFileCount(), 0);
+    const QStringList installed = {"stone", "wood", "shadowed", "other_texture"};
+    auto choices = catalog.exactChoices("BRIDGE.mod", installed);
+    QCOMPARE(choices.size(), 2);
+    QCOMPARE(choices.at(0).name, QStringLiteral("wood"));
+    QCOMPARE(choices.at(0).observedCount, 2);
+    QCOMPARE(choices.at(1).name, QStringLiteral("stone"));
+    QVERIFY(catalog.exactChoices("Bridge", {"other_texture"}).isEmpty());
+
+    // An edited MOB refreshes its own contribution; unchanged maps stay cached.
+    QVERIFY(writeMob(second, texturedObject("Bridge", "stone")
+        + texturedObject("Bridge", "stone") + texturedObject("Bridge", "stone")));
+    catalog.refreshSources({firstRoot.path(), secondRoot.path()});
+    QCOMPARE(catalog.pendingFileCount(), 1);
+    catalog.scanNextFile();
+    choices = catalog.exactChoices("Bridge", installed);
+    QCOMPARE(choices.size(), 1);
+    QCOMPARE(choices.first().name, QStringLiteral("stone"));
+    QCOMPARE(choices.first().observedCount, 4);
+
+    // Switching profile must not retain pairs from the previous map roots.
+    catalog.refreshSources({secondRoot.path()});
+    while(catalog.hasPendingFiles())
+        catalog.scanNextFile();
+    choices = catalog.exactChoices("Bridge", installed);
+    QCOMPARE(choices.size(), 1);
+    QCOMPARE(choices.first().name, QStringLiteral("shadowed"));
+    QVERIFY(catalog.exactChoices("Other", {"stone"}).isEmpty());
+
+    // Optional read-only integration probe: scan the selected installed
+    // profile with the same parser used by the dialog, without copying MOBs.
+    const QString corpusRoot = QString::fromLocal8Bit(qgetenv("EI_TEXTURE_CATALOG_CORPUS"));
+    if(!corpusRoot.isEmpty())
+    {
+        ei::TechnicalTextureCatalog installedCatalog;
+        installedCatalog.refreshSources({corpusRoot});
+        QVERIFY(installedCatalog.sourceFileCount() > 0);
+        QElapsedTimer timer;
+        timer.start();
+        qint64 longestFileMs = 0;
+        while(installedCatalog.hasPendingFiles())
+        {
+            QElapsedTimer fileTimer;
+            fileTimer.start();
+            installedCatalog.scanNextFile();
+            longestFileMs = qMax(longestFileMs, fileTimer.elapsed());
+        }
+        QCOMPARE(installedCatalog.failedFileCount(), 0);
+        qInfo("Read-only technical texture catalog: %d MOB files in %lld ms, longest file %lld ms",
+              installedCatalog.sourceFileCount(), static_cast<long long>(timer.elapsed()),
+              static_cast<long long>(longestFileMs));
+    }
 }
 
 void EnduranceDocumentTests::authoredZeroNidCanOpenAndSaveLosslessly()

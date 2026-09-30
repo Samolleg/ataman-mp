@@ -423,6 +423,10 @@ Gold indicates the point selected in the viewport/outliner; clicking another row
         <translation>Технический объект (по выбранному образцу)</translation>
     </message>
     <message>
+        <source>Technical objects</source>
+        <translation>Технические объекты</translation>
+    </message>
+    <message>
         <source>Search by name or model</source>
         <translation>Поиск по названию или модели</translation>
     </message>
@@ -499,6 +503,58 @@ Choose a primary texture in Advanced properties before placing.</source>
     <message>
         <source>No model or material texture is available for placing this item.</source>
         <translation>Для размещения этого предмета нет доступной модели или текстуры материала.</translation>
+    </message>
+    <message>
+        <source>Primary texture for this model</source>
+        <translation>Основная текстура для этой модели</translation>
+    </message>
+    <message>
+        <source>Used with this model in MOB maps</source>
+        <translation>Используется с этой моделью в MOB-картах</translation>
+    </message>
+    <message>
+        <source>All installed textures</source>
+        <translation>Все доступные текстуры</translation>
+    </message>
+    <message>
+        <source>Seen %1 times with this model</source>
+        <translation>Встречается с этой моделью %1 раз</translation>
+    </message>
+    <message>
+        <source>Choose a model to see textures used by it.</source>
+        <translation>Выберите модель, чтобы увидеть её текстуры.</translation>
+    </message>
+    <message>
+        <source>No textures are available in the active profile. Configure its resources first.</source>
+        <translation>В активном профиле нет доступных текстур. Сначала настройте его ресурсы.</translation>
+    </message>
+    <message>
+        <source>No installed texture was found paired with this model. Choose from all installed textures.</source>
+        <translation>Для этой модели не найдено точных сочетаний с доступной текстурой. Выберите из общего списка.</translation>
+    </message>
+    <message>
+        <source>%1 texture variant(s) found for this model in MOB maps.</source>
+        <translation>Для этой модели в MOB-картах найдено вариантов текстур: %1.</translation>
+    </message>
+    <message>
+        <source>Scanning maps: %1 of %2 complete.</source>
+        <translation>Проверено карт: %1 из %2.</translation>
+    </message>
+    <message>
+        <source>Scanning MOB maps: %1 of %2 complete. You can already choose any installed texture.</source>
+        <translation>Проверено MOB-карт: %1 из %2. Общий список доступных текстур уже можно использовать.</translation>
+    </message>
+    <message>
+        <source>%1 MOB file(s) could not be read.</source>
+        <translation>Не удалось прочитать MOB-файлов: %1.</translation>
+    </message>
+    <message>
+        <source>Choose a texture</source>
+        <translation>Выберите текстуру</translation>
+    </message>
+    <message>
+        <source>Choose an installed primary texture for this model before creating the object.</source>
+        <translation>Перед созданием объекта выберите доступную основную текстуру для этой модели.</translation>
     </message>
 </context>
     <context>

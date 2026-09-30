@@ -24,9 +24,13 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QSignalBlocker>
+#include <QSet>
 #include "endurance_document.h"
 #include "database_document.h"
 #include "item_spell_constructor_dialog.h"
+#include "settings.h"
+#include <QCompleter>
+#include <QStandardItemModel>
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -82,6 +86,28 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     ui->verticalLayout_2->insertWidget(3, m_databaseDetails);
     ui->verticalLayout_2->insertWidget(4, m_itemMaterial);
     ui->verticalLayout_2->insertWidget(5, m_advanced);
+    m_technicalTextureLabel = new QLabel(tr("Primary texture for this model"), this);
+    m_technicalTexture = new QComboBox(this);
+    m_technicalTexture->setObjectName("technicalObjectTexture");
+    m_technicalTexture->setEditable(true);
+    m_technicalTexture->setInsertPolicy(QComboBox::NoInsert);
+    m_technicalTexture->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    m_technicalTexture->setMinimumContentsLength(25);
+    m_technicalTexture->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+    m_technicalTexture->completer()->setFilterMode(Qt::MatchContains);
+    m_technicalTextureStatus = new QLabel(this);
+    m_technicalTextureStatus->setObjectName("technicalTextureCatalogStatus");
+    m_technicalTextureStatus->setWordWrap(true);
+    ui->verticalLayout_2->insertWidget(6, m_technicalTextureLabel);
+    ui->verticalLayout_2->insertWidget(7, m_technicalTexture);
+    ui->verticalLayout_2->insertWidget(8, m_technicalTextureStatus);
+    connect(m_technicalTexture, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int) { applyTechnicalTextureChoice(); });
+    connect(m_technicalTexture->lineEdit(), &QLineEdit::editingFinished,
+            this, [this] { applyTechnicalTextureChoice(); });
+    connect(&m_technicalTextureScan, &QTimer::timeout,
+            this, &CCreateObjectForm::scanTechnicalTextureFile);
+    m_technicalTextureScan.setInterval(0);
     connect(m_itemMaterial, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this] { selectDatabaseEntry(); });
     connect(m_databaseCategory, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -161,6 +187,7 @@ void CCreateObjectForm::updateTable()
     }
 
     m_tableManager->setNewData(aProp);
+    refreshTechnicalTextureChoices();
     m_pPreview->updateGL();
 }
 
@@ -272,6 +299,7 @@ void CCreateObjectForm::onObjectChoose(QString& object)
         }
     }
     m_pPreview->attachNode(m_pNode);
+    m_autoPickExactTexture = m_pNode->textureName().trimmed().isEmpty();
     updateTable();
     ui->buttonCreate->setEnabled(m_pNode && m_pView && m_pView->currentMob());
 }
@@ -280,8 +308,20 @@ void CCreateObjectForm::onParamChange(const QSharedPointer<IPropertyBase> prop)
 {
     if(!m_pNode || prop.isNull())
         return;
+    const bool modelChanged = prop->type() == eObjParam_TEMPLATE
+        && m_pNode->modelName() != prop->toString();
     m_pNode->applyParam(prop);
-    if(prop->type() == eObjParam_TEMPLATE)
+    if(modelChanged && !m_databaseMode)
+    {
+        // An old texture belongs to the old model; a new model needs its own
+        // observed texture or an explicit fallback choice.
+        m_pNode->applyParam(QSharedPointer<IPropertyBase>(
+            new propStr(eObjParam_PRIM_TXTR, QString())));
+        m_autoPickExactTexture = true;
+    }
+    else if(prop->type() == eObjParam_PRIM_TXTR)
+        m_autoPickExactTexture = false;
+    if(modelChanged)
     {
         emit sendNewBbbox(m_pNode->getBBox());
     }
@@ -293,16 +333,30 @@ void CCreateObjectForm::onPropertiesChange(
 {
     if(!m_pNode || properties.isEmpty())
         return;
+    const QString previousModel = m_pNode->modelName();
     bool modelChanged = false;
+    bool textureChanged = false;
     for(const QSharedPointer<IPropertyBase>& property : properties)
     {
         if(property.isNull())
             continue;
         m_pNode->applyParam(property);
-        modelChanged = modelChanged || property->type() == eObjParam_TEMPLATE;
+        modelChanged = modelChanged || (property->type() == eObjParam_TEMPLATE
+            && previousModel != property->toString());
+        textureChanged = textureChanged || property->type() == eObjParam_PRIM_TXTR;
+        if(property->type() == eObjParam_PRIM_TXTR)
+            m_autoPickExactTexture = false;
     }
     if(modelChanged)
+    {
+        if(!textureChanged && !m_databaseMode)
+        {
+            m_pNode->applyParam(QSharedPointer<IPropertyBase>(
+                new propStr(eObjParam_PRIM_TXTR, QString())));
+            m_autoPickExactTexture = true;
+        }
         emit sendNewBbbox(m_pNode->getBBox());
+    }
     updateTable();
 }
 
@@ -350,6 +404,16 @@ void CCreateObjectForm::on_buttonCreate_clicked()
     }
     auto pMob = m_pView->currentMob();
     const ENodeType type = m_pNode->nodeType();
+    m_pPreview->makeCurrent();
+    if((type == eWorldObject || type == eUnit || type == eTorch || type == eLever)
+        && !m_pNode->modelName().trimmed().isEmpty()
+        && !CTextureList::getInstance()->hasTexture(
+            m_pNode->textureName(), m_pNode->modelName()))
+    {
+        QMessageBox::warning(this, tr("Choose a texture"),
+            tr("Choose an installed primary texture for this model before creating the object."));
+        return;
+    }
     CNode* rawTemplate = nullptr;
     const QList<CNode*> selected = m_pView->selectedNodes();
     if(selected.size() == 1 && selected.front()->nodeType() == type &&
@@ -453,6 +517,22 @@ void CCreateObjectForm::filterDatabase()
     m_databaseDetails->setVisible(m_databaseMode);
     m_advanced->setVisible(m_databaseMode);
     m_itemMaterial->setVisible(m_databaseMode && m_databaseCategory->currentIndex() == 1);
+    const bool technicalMode = !m_databaseMode;
+    m_technicalTextureLabel->setVisible(technicalMode);
+    m_technicalTexture->setVisible(technicalMode);
+    m_technicalTextureStatus->setVisible(technicalMode);
+    if(technicalMode && m_pView)
+    {
+        QStringList roots;
+        if(auto* option = dynamic_cast<COptStringList*>(
+               m_pView->settings()->opt(eOptSetResource, "mapRoots")))
+            roots = option->value().toList();
+        m_technicalTextures.refreshSources(roots);
+        if(m_technicalTextures.hasPendingFiles())
+            m_technicalTextureScan.start();
+    }
+    else
+        m_technicalTextureScan.stop();
     ui->tableParameters->setVisible(!m_databaseMode || m_advanced->isChecked());
     ui->buttonCreate->setText(m_databaseMode ? tr("Place on map") : tr("Create"));
     if(!m_databaseMode)
@@ -480,6 +560,136 @@ void CCreateObjectForm::filterDatabase()
     }
     if(m_databaseList->count()) m_databaseList->setCurrentRow(0);
     selectDatabaseEntry();
+}
+
+void CCreateObjectForm::scanTechnicalTextureFile()
+{
+    if(!m_technicalTextures.hasPendingFiles())
+    {
+        m_technicalTextureScan.stop();
+        return;
+    }
+    m_technicalTextures.scanNextFile();
+    if(!m_technicalTextures.hasPendingFiles())
+    {
+        m_technicalTextureScan.stop();
+        refreshTechnicalTextureChoices();
+    }
+    else if(m_technicalTextures.pendingFileCount() % 20 == 0)
+        m_technicalTextureStatus->setText(tr("Scanning MOB maps: %1 of %2 complete. You can already choose any installed texture.")
+            .arg(m_technicalTextures.sourceFileCount() - m_technicalTextures.pendingFileCount())
+            .arg(m_technicalTextures.sourceFileCount()));
+}
+
+void CCreateObjectForm::refreshTechnicalTextureChoices()
+{
+    if(!m_technicalTexture || m_databaseMode)
+        return;
+    const bool supportsTexture = m_pNode &&
+        (m_pNode->nodeType() == eWorldObject || m_pNode->nodeType() == eUnit
+         || m_pNode->nodeType() == eTorch || m_pNode->nodeType() == eLever);
+    m_technicalTextureLabel->setVisible(supportsTexture);
+    m_technicalTexture->setVisible(supportsTexture);
+    m_technicalTextureStatus->setVisible(supportsTexture);
+    if(!supportsTexture)
+        return;
+
+    const QString model = m_pNode->modelName().trimmed();
+    const QString current = m_pNode->textureName().trimmed();
+    QStringList available = CTextureList::getInstance()->textureList();
+    available.removeDuplicates();
+    available.sort(Qt::CaseInsensitive);
+    const auto exact = m_technicalTextures.exactChoices(model, available);
+    const QSignalBlocker blocker(m_technicalTexture);
+    m_rebuildingTextureChoices = true;
+    m_technicalTexture->clear();
+    QSet<QString> exactNames;
+    if(!exact.isEmpty())
+    {
+        m_technicalTexture->addItem(tr("Used with this model in MOB maps"));
+        static_cast<QStandardItemModel*>(m_technicalTexture->model())->item(0)->setEnabled(false);
+        for(const auto& choice : exact)
+        {
+            m_technicalTexture->addItem(choice.name, choice.name);
+            m_technicalTexture->setItemData(m_technicalTexture->count() - 1,
+                tr("Seen %1 times with this model").arg(choice.observedCount), Qt::ToolTipRole);
+            exactNames.insert(choice.name.toLower());
+        }
+        m_technicalTexture->insertSeparator(m_technicalTexture->count());
+    }
+    const int allHeader = m_technicalTexture->count();
+    m_technicalTexture->addItem(tr("All installed textures"));
+    static_cast<QStandardItemModel*>(m_technicalTexture->model())->item(allHeader)->setEnabled(false);
+    for(const QString& name : available)
+        if(!exactNames.contains(name.toLower()))
+            m_technicalTexture->addItem(name, name);
+
+    int selection = -1;
+    for(int index = 0; index < m_technicalTexture->count(); ++index)
+    {
+        if(m_technicalTexture->itemData(index).toString().compare(current, Qt::CaseInsensitive) == 0
+            && !current.isEmpty())
+        {
+            selection = index;
+            break;
+        }
+    }
+    if(m_autoPickExactTexture && !m_technicalTextures.hasPendingFiles()
+        && !exact.isEmpty() &&
+        (current.isEmpty() || !exactNames.contains(current.toLower())))
+    {
+        m_pNode->applyParam(QSharedPointer<IPropertyBase>(
+            new propStr(eObjParam_PRIM_TXTR, exact.first().name)));
+        selection = 1;
+        m_autoPickExactTexture = false;
+    }
+    m_technicalTexture->setCurrentIndex(selection);
+    if(selection < 0)
+        m_technicalTexture->setEditText(current);
+    m_rebuildingTextureChoices = false;
+
+    QString status;
+    if(available.isEmpty())
+        status = tr("No textures are available in the active profile. Configure its resources first.");
+    else if(model.isEmpty())
+        status = tr("Choose a model to see textures used by it.");
+    else if(exact.isEmpty())
+        status = tr("No installed texture was found paired with this model. Choose from all installed textures.");
+    else
+        status = tr("%1 texture variant(s) found for this model in MOB maps.").arg(exact.size());
+    if(m_technicalTextures.hasPendingFiles())
+        status += tr(" Scanning maps: %1 of %2 complete.")
+            .arg(m_technicalTextures.sourceFileCount() - m_technicalTextures.pendingFileCount())
+            .arg(m_technicalTextures.sourceFileCount());
+    if(m_technicalTextures.failedFileCount())
+        status += tr(" %1 MOB file(s) could not be read.").arg(m_technicalTextures.failedFileCount());
+    m_technicalTextureStatus->setText(status);
+}
+
+void CCreateObjectForm::applyTechnicalTextureChoice()
+{
+    if(m_rebuildingTextureChoices || m_databaseMode || !m_pNode)
+        return;
+    const QString input = m_technicalTexture->currentText().trimmed();
+    QString selected;
+    for(int index = 0; index < m_technicalTexture->count(); ++index)
+        if(m_technicalTexture->itemData(index).toString().compare(input, Qt::CaseInsensitive) == 0)
+        {
+            selected = m_technicalTexture->itemData(index).toString();
+            break;
+        }
+    if(selected.isEmpty())
+    {
+        m_technicalTexture->setEditText(m_pNode->textureName());
+        return;
+    }
+    m_autoPickExactTexture = false;
+    if(selected.compare(m_pNode->textureName(), Qt::CaseInsensitive) != 0)
+    {
+        m_pNode->applyParam(QSharedPointer<IPropertyBase>(
+            new propStr(eObjParam_PRIM_TXTR, selected)));
+        updateTable();
+    }
 }
 
 void CCreateObjectForm::selectDatabaseEntry()

@@ -8,6 +8,8 @@
 #include "node.h"
 #include "database_map_catalog.h"
 #include "item_spell_constructor.h"
+#include "technical_texture_catalog.h"
+#include <QTimer>
 
 namespace Ui {
 class CCreateObjectForm;
@@ -57,6 +59,9 @@ private:
     void refreshDatabase();
     void filterDatabase();
     void selectDatabaseEntry();
+    void refreshTechnicalTextureChoices();
+    void scanTechnicalTextureFile();
+    void applyTechnicalTextureChoice();
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -76,6 +81,13 @@ private:
     QVector<ei::SDatabaseMapEntry> m_databaseEntries;
     quint64 m_databaseGeneration{0};
     bool m_databaseMode{true};
+    QComboBox* m_technicalTexture{nullptr};
+    QLabel* m_technicalTextureLabel{nullptr};
+    QLabel* m_technicalTextureStatus{nullptr};
+    ei::TechnicalTextureCatalog m_technicalTextures;
+    QTimer m_technicalTextureScan;
+    bool m_autoPickExactTexture{false};
+    bool m_rebuildingTextureChoices{false};
 };
 
 #endif // CREATEOBJECTFORM_H

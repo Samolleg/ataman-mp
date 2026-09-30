@@ -117,6 +117,8 @@ struct SMobObjectSnapshot
     QString name;
     QString prototype;
     QString model;
+    QString primaryTexture;
+    QString secondaryTexture;
     bool unit = false;
     bool hasImportMode = false;
     bool importMode = false;

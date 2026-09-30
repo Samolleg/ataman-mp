@@ -273,6 +273,10 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
         object.name = decodeCp1251(payload(*name));
     if(const SMobSection* model = findSection(section, 0xB006))
         object.model = decodeCp1251(payload(*model));
+    if(const SMobSection* primaryTexture = findSection(section, 0xB007))
+        object.primaryTexture = decodeCp1251(payload(*primaryTexture));
+    if(const SMobSection* secondaryTexture = findSection(section, 0xB008))
+        object.secondaryTexture = decodeCp1251(payload(*secondaryTexture));
     if(const SMobSection* bodyParts = findSection(section, 0xB00D))
     {
         object.bodyPartsSectionPath = bodyParts->path;
@@ -1333,6 +1337,10 @@ QJsonObject SMobObjectSnapshot::toJson() const
         result.insert("prototype", prototype);
     if(!model.isEmpty())
         result.insert("model", model);
+    if(!primaryTexture.isEmpty())
+        result.insert("primaryTexture", primaryTexture);
+    if(!secondaryTexture.isEmpty())
+        result.insert("secondaryTexture", secondaryTexture);
     result.insert("unit", unit);
     if(hasImportMode)
         result.insert("import", importMode);

@@ -12,6 +12,7 @@ SOURCES += \
     endurance_document_tests.cpp \
     ../source/render/neighbor_scene_data.cpp \
     ../source/documents/endurance_document.cpp \
+    ../source/documents/technical_texture_catalog.cpp \
     ../source/documents/ai_graph_persistence.cpp \
     ../source/documents/ai_graph_document.cpp \
     ../source/documents/mpr_document.cpp \
@@ -43,6 +44,7 @@ HEADERS += \
     ../source/core/operation_history_policy.h \
     ../source/core/tile_brush_stroke_policy.h \
     ../source/documents/endurance_document.h \
+    ../source/documents/technical_texture_catalog.h \
     ../source/documents/ai_graph_persistence.h \
     ../source/documents/ai_graph_document.h \
     ../source/documents/mpr_document.h \
