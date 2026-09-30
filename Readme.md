@@ -11,7 +11,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `81`. Each separate fix advances the integer version.
+Current Ataman version: `82`. Each separate fix advances the integer version.
 
 Technical objects have a model gallery with lazy previews and search by model ID
 or editable Russian name. `model-catalog.json` next to the executable is user
@@ -26,6 +26,13 @@ Russian names start empty, and do not rename model resources or MOB objects.
 For a manual JSON edit, use `models.<model-id>.russianName` and the ordered
 `profiles.<profile-key>.modelTextures.<model-id>` array. Keep `schemaVersion: 1`;
 the profile key identifies ordered map roots. Reopen the gallery to load edits.
+Gallery sections have icons and three island tabs: Gipat, Ingos, Suslanger.
+**All models** includes unassigned resources. Choose **Section** and **Island**
+then **Save section** to assign/move a model; **Unassigned** clears placement.
+The JSON fields `models.<model-id>.category` and `.region` are optional, so older
+catalogs stay readable. Categories: `houses`, `architecture`, `gates`, `utensils`,
+`trees`, `bushes`, `levers_chests`, `decor`; regions: `gipat`, `ingos`, `suslanger`.
+No subtitle is displayed when the Russian name is empty.
 Open **Create object → Technical objects → Choose model from gallery**. Select a
 tile, edit its Russian name and press **Save name**. Texture choices begin with
 the model's bindings; **Bind texture** adds an installed texture. Double-click a

@@ -13,6 +13,7 @@ class QListWidgetItem;
 class QLabel;
 class QPushButton;
 class QComboBox;
+class QTabBar;
 class CModelGallery final : public QDialog
 {
     Q_OBJECT
@@ -32,6 +33,7 @@ private:
     void selectionChanged();
     void saveName();
     void saveTexture();
+    void savePlacement();
     void loadVisibleThumbnail();
     void finishThumbnail();
     QString textureForModel(const QString& model) const;
@@ -46,6 +48,9 @@ private:
     QListWidget* m_list;
     QLabel* m_status;
     QComboBox* m_texture;
+    QTabBar *m_categories, *m_regions;
+    QComboBox *m_categoryChoice, *m_regionChoice;
+    QPushButton* m_savePlacement;
     QPushButton *m_saveName, *m_saveTexture, *m_choose;
     QTimer m_thumbnailTimer;
     QFutureWatcher<QImage> m_thumbnailWatcher;

@@ -13,8 +13,54 @@
 #include <QPainter>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QSignalBlocker>
+#include <QTabBar>
+#include <QStyle>
+#include <QPainterPath>
+#include <QtMath>
 
 namespace {
+// Small vector symbols keep tabs recognizable at any display scale and do
+// not depend on a theme icon pack being installed on the user's computer.
+QIcon categoryIcon(int category)
+{
+    QPixmap image(64,64); image.fill(Qt::transparent);
+    QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(QColor(38,45,53),3,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    switch(category)
+    {
+    case 0: // house
+        p.setBrush(QColor(233,195,125)); p.drawRect(12,28,40,28);
+        p.setBrush(QColor(199,95,66)); p.drawPolygon(QPolygonF(QVector<QPointF>{QPointF(6,29),QPointF(32,7),QPointF(58,29)}));
+        p.setBrush(QColor(105,76,58)); p.drawRect(27,39,11,17); break;
+    case 1: // architecture: columns and lintel
+        p.setBrush(QColor(201,212,225)); p.drawRect(7,13,50,8); p.drawRect(9,51,46,7);
+        for(int x:{14,29,44}) {p.drawRect(x,21,6,30);} break;
+    case 2: // gates
+        p.setBrush(QColor(167,185,206)); p.drawRect(7,11,9,47); p.drawRect(48,11,9,47);
+        p.setBrush(QColor(207,153,79)); p.drawRect(17,25,30,30);
+        for(int x:{24,32,40}) p.drawLine(x,26,x,54);
+        p.drawLine(18,38,46,38); break;
+    case 3: // utensils: jar and bowl
+        p.setBrush(QColor(205,141,89)); p.drawRoundedRect(10,21,25,33,9,9); p.drawRect(15,12,15,10);
+        p.setBrush(QColor(237,202,142)); p.drawEllipse(34,37,24,17); p.drawLine(35,40,57,40); break;
+    case 4: // tree
+        p.setBrush(QColor(151,104,69)); p.drawRect(27,31,10,27);
+        p.setBrush(QColor(88,167,107)); p.drawEllipse(12,17,24,24); p.drawEllipse(29,17,24,24); p.drawEllipse(21,5,23,25); break;
+    case 5: // bush
+        p.setBrush(QColor(111,180,100)); p.drawEllipse(7,32,23,22); p.drawEllipse(34,30,24,24); p.drawEllipse(19,20,27,32);
+        p.setPen(QPen(QColor(229,197,104),4)); p.drawPoint(23,38); p.drawPoint(40,41); break;
+    case 6: // chest and lever
+        p.setBrush(QColor(196,135,69)); p.drawRoundedRect(6,28,36,28,4,4); p.drawLine(7,38,41,38);
+        p.setBrush(QColor(240,203,94)); p.drawRect(21,36,7,12);
+        p.setPen(QPen(QColor(157,185,214),5)); p.drawLine(48,51,57,18);
+        p.setBrush(QColor(209,97,74)); p.drawEllipse(51,10,11,11); break;
+    default: // decorative star
+        QPolygonF star;
+        for(int i=0;i<10;++i) {const double a=qDegreesToRadians(double(i*36-90));const double r=i%2?12:26;star<<QPointF(32+qCos(a)*r,32+qSin(a)*r);}
+        p.setBrush(QColor(197,152,224)); p.drawPolygon(star); break;
+    }
+    return QIcon(image);
+}
 class ModelTileDelegate : public QStyledItemDelegate
 {
 public:
@@ -41,12 +87,26 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     ThumbnailProvider provider,QWidget* parent):QDialog(parent),m_models(models),m_textures(textures),
     m_catalog(catalog),m_scan(scan),m_profile(profile),m_provider(std::move(provider))
 {
-    setObjectName("modelGallery"); setWindowTitle(tr("Model gallery")); resize(960,720);
+    setObjectName("modelGallery"); setWindowTitle(tr("Model gallery")); resize(1120,760);
     setMinimumSize(600,440); setWindowFlag(Qt::WindowContextHelpButtonHint,false);
     m_models.removeDuplicates(); m_models.sort(Qt::CaseInsensitive);
     auto* layout=new QVBoxLayout(this);
     m_search=new QLineEdit(this); m_search->setObjectName("modelGallerySearch");
     m_search->setPlaceholderText(tr("Search by model ID or Russian name")); layout->addWidget(m_search);
+    const QStringList categoryLabels{tr("Houses"),tr("Architecture"),tr("Gates"),tr("Utensils"),
+        tr("Trees"),tr("Bushes"),tr("Levers and chests"),tr("Decor")};
+    const QStringList regionLabels{tr("Gipat"),tr("Ingos"),tr("Suslanger")};
+    m_categories=new QTabBar(this); m_categories->setObjectName("modelGalleryCategories");
+    m_categories->setExpanding(false); m_categories->setUsesScrollButtons(true); m_categories->setIconSize(QSize(28,28));
+    m_categories->addTab(style()->standardIcon(QStyle::SP_DirIcon),tr("All models"));
+    m_categories->setTabToolTip(0,tr("All models, including those not yet assigned to a section"));
+    const auto categories=ei::TechnicalModelCatalog::categoryIds();
+    for(int i=0;i<categories.size();++i) {const int tab=m_categories->addTab(categoryIcon(i),categoryLabels[i]);m_categories->setTabData(tab,categories[i]);m_categories->setTabToolTip(tab,categoryLabels[i]);}
+    layout->addWidget(m_categories);
+    m_regions=new QTabBar(this); m_regions->setObjectName("modelGalleryRegions"); m_regions->setExpanding(false);
+    const auto regions=ei::TechnicalModelCatalog::regionIds();
+    for(int i=0;i<regions.size();++i) {const int tab=m_regions->addTab(regionLabels[i]);m_regions->setTabData(tab,regions[i]);}
+    layout->addWidget(m_regions);
     m_list=new QListWidget(this); m_list->setObjectName("modelGalleryTiles");
     m_list->setViewMode(QListView::IconMode); m_list->setResizeMode(QListView::Adjust);
     m_list->setMovement(QListView::Static); m_list->setGridSize(QSize(216,198));
@@ -58,6 +118,18 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     m_name=new QLineEdit(this); m_name->setObjectName("modelGalleryRussianName");
     m_name->setPlaceholderText(tr("Enter a recognizable name")); nameRow->addWidget(m_name,1);
     m_saveName=new QPushButton(tr("Save name"),this); m_saveName->setObjectName("modelGallerySaveName"); nameRow->addWidget(m_saveName); layout->addLayout(nameRow);
+    auto* placementRow=new QHBoxLayout;
+    placementRow->addWidget(new QLabel(tr("Section:"),this));
+    m_categoryChoice=new QComboBox(this); m_categoryChoice->setObjectName("modelGalleryCategoryChoice");
+    m_categoryChoice->addItem(tr("Unassigned"),QString());
+    for(int i=0;i<categories.size();++i) m_categoryChoice->addItem(categoryIcon(i),categoryLabels[i],categories[i]);
+    placementRow->addWidget(m_categoryChoice,1); placementRow->addWidget(new QLabel(tr("Island:"),this));
+    m_regionChoice=new QComboBox(this); m_regionChoice->setObjectName("modelGalleryRegionChoice");
+    m_regionChoice->addItem(tr("Not selected"),QString());
+    for(int i=0;i<regions.size();++i) m_regionChoice->addItem(regionLabels[i],regions[i]);
+    placementRow->addWidget(m_regionChoice,1);
+    m_savePlacement=new QPushButton(tr("Save section"),this); m_savePlacement->setObjectName("modelGallerySavePlacement");
+    placementRow->addWidget(m_savePlacement); layout->addLayout(placementRow);
     auto* textureRow=new QHBoxLayout; textureRow->addWidget(new QLabel(tr("Primary texture:"),this));
     m_texture=new QComboBox(this); m_texture->setObjectName("modelGalleryTexture"); m_texture->setEditable(true);
     m_texture->setInsertPolicy(QComboBox::NoInsert); m_texture->setMinimumContentsLength(20);
@@ -73,6 +145,14 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     connect(m_list,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem*){ accept(); });
     connect(m_list,&QListWidget::currentItemChanged,this,[this]{selectionChanged();});
     connect(m_search,&QLineEdit::textChanged,this,[this]{filter();});
+    connect(m_categories,&QTabBar::currentChanged,this,[this]{filter();});
+    connect(m_regions,&QTabBar::currentChanged,this,[this]{filter();});
+    connect(m_savePlacement,&QPushButton::clicked,this,&CModelGallery::savePlacement);
+    connect(m_categoryChoice,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int index){
+        m_regionChoice->setEnabled(index>0 && m_catalog->writable() && !selectedModel().isEmpty());
+        if(index==0) m_regionChoice->setCurrentIndex(0);
+        else if(m_regionChoice->currentIndex()==0) m_regionChoice->setCurrentIndex(m_regions->currentIndex()+1);
+    });
     connect(m_saveName,&QPushButton::clicked,this,&CModelGallery::saveName);
     connect(m_saveTexture,&QPushButton::clicked,this,&CModelGallery::saveTexture);
     connect(m_texture,QOverload<int>::of(&QComboBox::activated),this,[this]{ if(m_list->currentItem()) {m_list->currentItem()->setIcon({}); m_thumbnailTimer.start();} });
@@ -100,19 +180,25 @@ void CModelGallery::setCurrentModel(const QString& model)
 }
 void CModelGallery::filter()
 {
-    const QString previous=selectedModel(); const QSignalBlocker block(m_list);
+    const QString previous=selectedModel(),previousTexture=selectedTexture(); const QSignalBlocker block(m_list);
+    const QString category=m_categories->tabData(m_categories->currentIndex()).toString();
+    const QString region=m_regions->tabData(m_regions->currentIndex()).toString();
+    m_regions->setVisible(!category.isEmpty());
     m_list->clear();
     for(const auto& model:m_models)
     {
         const QString russian=m_catalog->russianName(model);
+        if(!category.isEmpty() && (m_catalog->category(model)!=category || m_catalog->region(model)!=region)) continue;
         if(!ei::TechnicalModelCatalog::matches(model,russian,m_search->text())) continue;
         auto* item=new QListWidgetItem(m_list); item->setData(Qt::UserRole,model);
-        item->setData(Qt::UserRole+1,russian.isEmpty()?tr("Russian name not set"):russian);
+        item->setData(Qt::UserRole+1,russian);
         item->setToolTip(model+"\n"+russian); item->setSizeHint(QSize(208,192));
         if(model==previous) m_list->setCurrentItem(item);
     }
     if(!m_list->currentItem() && m_list->count()) m_list->setCurrentRow(0);
-    selectionChanged(); m_thumbnailTimer.start();
+    selectionChanged();
+    if(selectedModel()==previous && m_textures.contains(previousTexture,Qt::CaseInsensitive)) m_texture->setCurrentText(previousTexture);
+    m_thumbnailTimer.start();
 }
 void CModelGallery::selectionChanged()
 {
@@ -120,6 +206,14 @@ void CModelGallery::selectionChanged()
     m_choose->setEnabled(!model.isEmpty());
     m_saveName->setEnabled(!model.isEmpty() && m_catalog->writable());
     m_saveTexture->setEnabled(!model.isEmpty() && m_catalog->writable());
+    m_savePlacement->setEnabled(!model.isEmpty() && m_catalog->writable());
+    m_categoryChoice->setEnabled(m_savePlacement->isEnabled());
+    {
+        const QSignalBlocker categoryBlock(m_categoryChoice), regionBlock(m_regionChoice);
+        m_categoryChoice->setCurrentIndex(qMax(0,m_categoryChoice->findData(m_catalog->category(model))));
+        m_regionChoice->setCurrentIndex(qMax(0,m_regionChoice->findData(m_catalog->region(model))));
+        m_regionChoice->setEnabled(m_savePlacement->isEnabled() && m_categoryChoice->currentIndex()>0);
+    }
     const QSignalBlocker block(m_texture); m_texture->clear();
     const auto exact=m_catalog->textureChoices(m_profile,model,m_textures,*m_scan);
     QStringList names;
@@ -148,6 +242,21 @@ void CModelGallery::saveTexture()
     reportSave(m_catalog->save(&error),error);
     if(m_list->currentItem()) m_list->currentItem()->setIcon(QIcon());
     m_thumbnailTimer.start();
+}
+void CModelGallery::savePlacement()
+{
+    const QString model=selectedModel(),category=m_categoryChoice->currentData().toString(),region=m_regionChoice->currentData().toString();
+    if(model.isEmpty()) return;
+    if(!m_catalog->setPlacement(model,category,region)) {m_status->setText(tr("Choose a section and an island before saving."));return;}
+    QString error; const bool saved=m_catalog->save(&error);
+    if(saved)
+    {
+        const QSignalBlocker categoryBlock(m_categories),regionBlock(m_regions);
+        m_categories->setCurrentIndex(category.isEmpty()?0:ei::TechnicalModelCatalog::categoryIds().indexOf(category)+1);
+        m_regions->setCurrentIndex(qMax(0,ei::TechnicalModelCatalog::regionIds().indexOf(region)));
+        filter();
+    }
+    reportSave(saved,error);
 }
 void CModelGallery::loadVisibleThumbnail()
 {

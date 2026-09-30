@@ -15,6 +15,11 @@ public:
     bool writable() const { return m_valid; }
     QString russianName(const QString& model) const;
     void setRussianName(const QString& model, const QString& name);
+    QString category(const QString& model) const;
+    QString region(const QString& model) const;
+    bool setPlacement(const QString& model, const QString& category, const QString& region);
+    static QStringList categoryIds();
+    static QStringList regionIds();
     void registerModels(const QStringList& models);
     static QString modelKey(QString name);
     static QString profileKey(const QStringList& roots);

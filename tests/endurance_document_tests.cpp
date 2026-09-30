@@ -506,6 +506,7 @@ private slots:
     void unchangedMobIsByteIdentical();
     void technicalTexturesFollowObservedModelsAndProfileRoots();
     void modelCatalogPersistsNamesBindingsAndScanWithoutRescanning();
+    void modelGalleryPlacementPreservesLegacyCatalogAndMetadata();
     void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void mobGraphReplacementAndInsertionAreExact();
@@ -1755,6 +1756,41 @@ void EnduranceDocumentTests::technicalTexturesFollowObservedModelsAndProfileRoot
               installedCatalog.sourceFileCount(), static_cast<long long>(timer.elapsed()),
               static_cast<long long>(longestFileMs));
     }
+}
+
+void EnduranceDocumentTests::modelGalleryPlacementPreservesLegacyCatalogAndMetadata()
+{
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const QString path=temp.filePath("model-catalog.json");
+    QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("{\"schemaVersion\":1,\"models\":{\"house\":{\"russianName\":\"old\",\"userNote\":42}},\"userNote\":\"keep\"}"); file.close();
+    ei::TechnicalModelCatalog catalog; QString error; QVERIFY(catalog.load(path,&error));
+    QVERIFY(catalog.category("house").isEmpty()); QVERIFY(catalog.region("house").isEmpty());
+    QCOMPARE(catalog.russianName("house"),QStringLiteral("old"));
+    catalog.bindTexture("profile","house","stone");
+    QCOMPARE(ei::TechnicalModelCatalog::categoryIds().size(),8);
+    QCOMPARE(ei::TechnicalModelCatalog::regionIds().size(),3);
+    for(const QString& category:ei::TechnicalModelCatalog::categoryIds()) for(const QString& region:ei::TechnicalModelCatalog::regionIds()) {
+        QVERIFY(catalog.setPlacement("HOUSE.mod",category,region)); QVERIFY(catalog.save(&error));
+        ei::TechnicalModelCatalog reopened; QVERIFY(reopened.load(path,&error));
+        QCOMPARE(reopened.category("house"),category); QCOMPARE(reopened.region("house"),region);
+        QCOMPARE(reopened.russianName("house"),QStringLiteral("old"));
+        ei::TechnicalTextureCatalog scan;
+        QCOMPARE(reopened.textureChoices("profile","house",{"stone"},scan).size(),1);
+    }
+    const QString category=catalog.category("house"),region=catalog.region("house");
+    QVERIFY(!catalog.setPlacement("house","unknown","gipat"));
+    QVERIFY(!catalog.setPlacement("house","houses","unknown"));
+    QVERIFY(!catalog.setPlacement("house","houses",""));
+    QVERIFY(!catalog.setPlacement("house","","gipat"));
+    QCOMPARE(catalog.category("house"),category); QCOMPARE(catalog.region("house"),region);
+    catalog.setRussianName("house",QString::fromUtf8("Дом"));
+    QVERIFY(catalog.setPlacement("house","","")); QVERIFY(catalog.save(&error));
+    QVERIFY(file.open(QIODevice::ReadOnly)); const auto json=QJsonDocument::fromJson(file.readAll()).object();
+    QCOMPARE(json.value("userNote").toString(),QStringLiteral("keep"));
+    const auto model=json.value("models").toObject().value("house").toObject();
+    QCOMPARE(model.value("userNote").toInt(),42); QVERIFY(!model.contains("category")); QVERIFY(!model.contains("region"));
+    QCOMPARE(model.value("russianName").toString(),QString::fromUtf8("Дом"));
 }
 
 void EnduranceDocumentTests::modelCatalogPersistsNamesBindingsAndScanWithoutRescanning()

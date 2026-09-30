@@ -92,6 +92,31 @@ void TechnicalModelCatalog::registerModels(const QStringList& names)
         if(!models.contains(modelKey(name))) models.insert(modelKey(name), QJsonObject{{"russianName", ""}});
     m_document.insert("models", models);
 }
+QStringList TechnicalModelCatalog::categoryIds()
+{
+    return {"houses", "architecture", "gates", "utensils", "trees", "bushes", "levers_chests", "decor"};
+}
+QStringList TechnicalModelCatalog::regionIds() { return {"gipat", "ingos", "suslanger"}; }
+QString TechnicalModelCatalog::category(const QString& model) const
+{
+    return m_document.value("models").toObject().value(modelKey(model)).toObject().value("category").toString();
+}
+QString TechnicalModelCatalog::region(const QString& model) const
+{
+    return m_document.value("models").toObject().value(modelKey(model)).toObject().value("region").toString();
+}
+bool TechnicalModelCatalog::setPlacement(const QString& model, const QString& category, const QString& region)
+{
+    if(!m_valid || modelKey(model).isEmpty()) return false;
+    if(!category.isEmpty() && (!categoryIds().contains(category) || !regionIds().contains(region))) return false;
+    if(category.isEmpty() && !region.isEmpty()) return false;
+    auto models = m_document.value("models").toObject();
+    auto entry = models.value(modelKey(model)).toObject();
+    if(category.isEmpty()) { entry.remove("category"); entry.remove("region"); }
+    else { entry.insert("category", category); entry.insert("region", region); }
+    models.insert(modelKey(model), entry); m_document.insert("models", models);
+    return true;
+}
 bool TechnicalModelCatalog::matches(const QString& model, const QString& name, const QString& query)
 {
     const QStringList words = query.simplified().split(' ', QString::SkipEmptyParts);

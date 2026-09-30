@@ -17036,6 +17036,82 @@ Conditions: %5</source>
         <source>Preview unavailable</source>
         <translation>Превью недоступно</translation>
     </message>
+    <message>
+        <source>Houses</source>
+        <translation>Дома</translation>
+    </message>
+    <message>
+        <source>Architecture</source>
+        <translation>Архитектура</translation>
+    </message>
+    <message>
+        <source>Gates</source>
+        <translation>Ворота</translation>
+    </message>
+    <message>
+        <source>Utensils</source>
+        <translation>Утварь</translation>
+    </message>
+    <message>
+        <source>Trees</source>
+        <translation>Деревья</translation>
+    </message>
+    <message>
+        <source>Bushes</source>
+        <translation>Кусты</translation>
+    </message>
+    <message>
+        <source>Levers and chests</source>
+        <translation>Рычаги и сундуки</translation>
+    </message>
+    <message>
+        <source>Decor</source>
+        <translation>Декор</translation>
+    </message>
+    <message>
+        <source>Gipat</source>
+        <translation>Гипат</translation>
+    </message>
+    <message>
+        <source>Ingos</source>
+        <translation>Ингос</translation>
+    </message>
+    <message>
+        <source>Suslanger</source>
+        <translation>Суслангер</translation>
+    </message>
+    <message>
+        <source>All models</source>
+        <translation>Все модели</translation>
+    </message>
+    <message>
+        <source>All models, including those not yet assigned to a section</source>
+        <translation>Все модели, включая ещё не распределённые по разделам</translation>
+    </message>
+    <message>
+        <source>Section:</source>
+        <translation>Раздел:</translation>
+    </message>
+    <message>
+        <source>Island:</source>
+        <translation>Остров:</translation>
+    </message>
+    <message>
+        <source>Unassigned</source>
+        <translation>Без раздела</translation>
+    </message>
+    <message>
+        <source>Not selected</source>
+        <translation>Не выбран</translation>
+    </message>
+    <message>
+        <source>Save section</source>
+        <translation>Сохранить раздел</translation>
+    </message>
+    <message>
+        <source>Choose a section and an island before saving.</source>
+        <translation>Перед сохранением выберите раздел и остров.</translation>
+    </message>
 </context>
 <context>
     <name>TechnicalModelCatalog</name>
