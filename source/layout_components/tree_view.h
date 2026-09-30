@@ -125,6 +125,7 @@ private:
     QSet<QString> m_usedRows;
     QHash<QTreeWidgetItem*, int> m_nextPosition;
     QString m_catalogPath;
+    bool m_autoCatalogPath{true};
     qint64 m_catalogStamp{-1}, m_catalogSize{-1};
     QHash<QString, QString> m_aliases;
     CView* m_pView;

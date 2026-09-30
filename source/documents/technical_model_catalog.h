@@ -10,6 +10,10 @@ class TechnicalModelCatalog
 {
 public:
     bool load(const QString& path, QString* error = nullptr);
+    // Import the old executable-side catalog only when this profile has none.
+    bool loadProfile(const QString& databasePath, const QString& legacyPath,
+                     const QString& profile, QString* error = nullptr);
+    static QString pathForDatabase(const QString& databasePath);
     bool save(QString* error = nullptr);
     QString path() const { return m_path; }
     bool writable() const { return m_valid; }

@@ -24,6 +24,7 @@
 #include <QPainter>
 #include <QScopedValueRollback>
 #include "technical_model_catalog.h"
+#include "profile_database.h"
 #include "objects/unit.h"
 #include "mob/mob.h"
 #include "log.h"
@@ -38,7 +39,7 @@ CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     setWordWrap(false);
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_catalogPath = QCoreApplication::applicationDirPath() + "/model-catalog.json";
+    m_catalogPath.clear();
     connect(this, &QTreeWidget::itemSelectionChanged, this, &CTreeView::syncSelectionToView);
     m_filterTimer->setSingleShot(true);
     m_filterTimer->setInterval(150);
@@ -74,10 +75,19 @@ void CTreeView::beginRefresh()
     m_refreshSignals = blockSignals(true);
     setUpdatesEnabled(false);
     m_usedRows.clear(); m_nextPosition.clear();
-    const QFileInfo info(m_catalogPath);
+    if(m_autoCatalogPath) {
+        const auto database = ei::ProfileDatabaseContext::instance().current();
+        const QString path = ei::TechnicalModelCatalog::pathForDatabase(database ? database->sourceArchivePath : QString());
+        if(path != m_catalogPath) { m_catalogPath = path; m_catalogStamp = m_catalogSize = -1; }
+    }
+    // Until the first explicit catalog save migrates this profile, read aliases
+    // from the retained legacy source without writing its resource directory.
+    const QString readPath = m_autoCatalogPath && !m_catalogPath.isEmpty() && !QFileInfo::exists(m_catalogPath)
+        ? QCoreApplication::applicationDirPath() + "/model-catalog.json" : m_catalogPath;
+    const QFileInfo info(readPath);
     if(info.lastModified().toMSecsSinceEpoch() != m_catalogStamp || info.size() != m_catalogSize) {
         m_catalogStamp = info.lastModified().toMSecsSinceEpoch(); m_catalogSize = info.size();
-        m_aliases.clear(); QFile file(m_catalogPath);
+        m_aliases.clear(); QFile file(readPath);
         if(file.open(QIODevice::ReadOnly)) {
             const auto models = QJsonDocument::fromJson(file.readAll()).object().value("models").toObject();
             for(auto it = models.begin(); it != models.end(); ++it)
@@ -110,7 +120,7 @@ QIcon CTreeView::objectIcon(ENodeType type) const
 QString CTreeView::modelAlias(const QString& model) const
 { return m_aliases.value(ei::TechnicalModelCatalog::modelKey(model)); }
 void CTreeView::setModelCatalogPath(const QString& path)
-{ m_catalogPath = path; m_catalogStamp = m_catalogSize = -1; }
+{ m_autoCatalogPath = false; m_catalogPath = path; m_catalogStamp = m_catalogSize = -1; }
 void CTreeView::setShowAllMobs(bool all)
 {
     if(m_showAllMobs == all) return;

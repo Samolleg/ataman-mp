@@ -15,6 +15,8 @@
 #include "types.h"
 #include "undo.h"
 #include "property.h"
+#include "technical_model_catalog.h"
+class CSettings;
 
 class CLineEditEventFilter;
 class CMultiLineEditForm;
@@ -149,6 +151,7 @@ public:
         if(hasFocus())
             QComboBox::wheelEvent(e);
     }
+    void setPreferredOptions(const QStringList& preferred);
     void showPopup() override;
     void hidePopup() override;
     bool popupActive() const { return m_popupActive; }
@@ -345,6 +348,8 @@ public:
     CTableManager() = delete;
     CTableManager(QTableWidget* pTable);
 
+    void setCatalogContext(CSettings* settings) { m_catalogSettings = settings; }
+    void openModelGallery();
     void reset();
     void setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp,
                     bool magicTrapContext = false,
@@ -386,6 +391,7 @@ signals:
     void onTrapActivationAreaAdd(CMagicTrap* trap);
     void onTrapCastTargetAdd(CMagicTrap* trap);
     void openDatabasePrototypeRequested(const QString& prototype);
+    void catalogChanged();
 
 public slots:
     void onParamChange(const QSharedPointer<IPropertyBase>& pProp); //get value for translating it to view class
@@ -393,6 +399,13 @@ public slots:
 
 private:
     QTableWidget* m_pTable;
+    CSettings* m_catalogSettings{nullptr};
+    ei::TechnicalModelCatalog m_catalog;
+    ei::TechnicalTextureCatalog m_textureScan;
+    QString m_catalogProfile;
+    QString m_catalogSourceToken;
+    QString m_selectedModel;
+    quint64 m_dataRevision{0};
     QMap<EObjParam, QString> m_aRowName;
     QMap<EObjParam, QString> m_aRowToolTip;
     QMap<EObjParam, QMap<uint, QString>> m_comboMap;

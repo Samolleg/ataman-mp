@@ -2264,6 +2264,8 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     m_cam->attachSettings(pSettings);
     m_cam->reset();
     m_tableManager.reset(new CTableManager(pParam));
+    m_tableManager->setCatalogContext(pSettings);
+    connect(m_tableManager.get(), &CTableManager::catalogChanged, this, [this]() { viewParameters(); collectObjectTreeData(); });
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperty(const QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(const QSharedPointer<IPropertyBase>&)));
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));

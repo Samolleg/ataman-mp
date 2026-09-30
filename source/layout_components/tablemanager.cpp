@@ -36,6 +36,11 @@
 #include "unitstat_form.h"
 #include "bodypartedit_form.h"
 #include "profile_database.h"
+#include "settings.h"
+#include "model_gallery.h"
+#include <QPointer>
+#include <QDir>
+#include <QPushButton>
 #include "behavior_collection_widget.h"
 #include "trap_collection_widget.h"
 #include "objects/magictrap.h"
@@ -526,6 +531,7 @@ CTableManager::CTableManager(QTableWidget* pTable):
 
 void CTableManager::reset()
 {
+    ++m_dataRevision;
     m_collectionRow = -1;
     m_rowValues.clear();
     m_pTable->clear();
@@ -1314,6 +1320,12 @@ void CTableManager::onParamChange(const QSharedPointer<IPropertyBase>& pProp)
             break;
         }
     }
+    if(m_catalogSettings && pProp && pProp->type()==eObjParam_PRIM_TXTR && !m_selectedModel.isEmpty()
+       && QStringList(CTextureList::getInstance()->textureList()).contains(pProp->toString(),Qt::CaseInsensitive)) {
+        m_catalog.bindTexture(m_catalogProfile,m_selectedModel,pProp->toString());
+        QString error; m_catalog.save(&error);
+        if(!error.isEmpty()) QToolTip::showText(m_pTable->mapToGlobal(QPoint(0,0)),error,m_pTable);
+    }
     emit onUpdateProperty(pProp);
 }
 
@@ -1348,6 +1360,28 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
     m_savedHorizontalScroll = m_pTable->horizontalScrollBar()->value();
     reset();
     m_logicZeroContext = false;
+    m_selectedModel.clear();
+    const auto modelProperty = util::constProp(aProp, eObjParam_TEMPLATE);
+    if(modelProperty && modelProperty->isInit()) m_selectedModel = modelProperty->toString();
+    if(m_catalogSettings) {
+        QStringList roots;
+        if(auto* option = dynamic_cast<COptStringList*>(m_catalogSettings->opt(eOptSetResource, "mapRoots"))) roots = option->value().toList();
+        const QString profile = ei::TechnicalModelCatalog::profileKey(roots);
+        const auto database = ei::ProfileDatabaseContext::instance().current();
+        const QString databasePath = database ? database->sourceArchivePath : QString();
+        const QString target = ei::TechnicalModelCatalog::pathForDatabase(databasePath);
+        const QString legacy = QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json");
+        const QFileInfo source(!target.isEmpty() && QFileInfo::exists(target) ? target : legacy);
+        const QString token = target + '|' + profile + '|' + source.absoluteFilePath() + '|'
+            + QString::number(source.size()) + '|' + QString::number(source.lastModified().toMSecsSinceEpoch());
+        // Position/rotation drags rebuild this table often. Reuse unchanged JSON
+        // and scan metadata rather than rereading it for every mouse movement.
+        if(token != m_catalogSourceToken) {
+            m_catalogSourceToken = token; m_catalogProfile = profile;
+            m_catalog.loadProfile(databasePath, legacy, profile);
+            m_catalog.restoreScan(profile, &m_textureScan);
+        }
+    }
     m_torchPropertyContext = false;
     m_magicTrapPropertyContext = magicTrapContext;
     m_lookPointPropertyContext = lookPointContext;
@@ -1434,6 +1468,13 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             blockEditWidget(m_pTable->item(i, 0));
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+            if(type == eObjParam_PRIM_TXTR && m_catalogSettings && !m_selectedModel.isEmpty()) {
+                QStringList preferred;
+                for(const auto& choice : m_catalog.textureChoices(m_catalogProfile, m_selectedModel,
+                    CTextureList::getInstance()->textureList(), m_textureScan)) preferred.append(choice.name);
+                pCombo->setPreferredOptions(preferred);
+                pCombo->setObjectName("objectModelTextureChoices");
+            }
             if(type == eObjParam_UNIT_PROTOTYPE)
                 QObject::connect(pCombo, &CComboDynItem::openDatabasePrototypeRequested,
                                  this, &CTableManager::openDatabasePrototypeRequested);
@@ -1477,9 +1518,25 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             blockEditWidget(m_pTable->item(i, 0));
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
-            m_pTable->setCellWidget(i, 1, pCombo);
+            if(m_catalogSettings) {
+                auto* container = new QWidget;
+                auto* layout = new QVBoxLayout(container); layout->setContentsMargins(0,0,0,0); layout->setSpacing(2);
+                layout->addWidget(pCombo);
+                auto* gallery = new QPushButton(QString::fromUtf8("Витрина моделей…"), container);
+                gallery->setObjectName("objectModelGallery"); layout->addWidget(gallery);
+                connect(gallery, &QPushButton::clicked, this, &CTableManager::openModelGallery);
+                m_pTable->setCellWidget(i, 1, container);
+                m_pTable->setRowHeight(i, pCombo->sizeHint().height() + gallery->sizeHint().height() + 4);
+            } else m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
+            const QString russian = m_catalogSettings ? m_catalog.russianName(m_selectedModel) : QString();
+            if(!russian.isEmpty()) {
+                m_pTable->insertRow(i);
+                auto* label = new QTableWidgetItem(QString::fromUtf8("Русское название модели")); blockEditWidget(label);
+                auto* name = new QTableWidgetItem(russian); blockEditWidget(name);
+                m_pTable->setItem(i,0,label); m_pTable->setItem(i,1,name); ++i;
+            }
             auto bodyPart = util::constProp(aProp, eObjParam_BODYPARTS);
             if(!bodyPart.isNull())
             {
@@ -2006,6 +2063,17 @@ void CColorButtonItem::keyPressEvent(QKeyEvent* event)
         return;
     }
     QToolButton::keyPressEvent(event);
+}
+
+void CComboDynItem::setPreferredOptions(const QStringList& preferred)
+{
+    ensureOptionsLoaded();
+    const QString current = currentText(); const QSignalBlocker blocker(this);
+    QStringList options = preferred;
+    for(const QString& name : m_pListModel->stringList())
+        if(!options.contains(name, Qt::CaseInsensitive)) options.append(name);
+    m_pListModel->setStringList(options); setCurrentIndex(-1); setEditText(current);
+    setToolTip(QString::fromUtf8("Сначала текстуры из каталога этой модели, затем остальные текстуры профиля."));
 }
 
 void CComboDynItem::ensureOptionsLoaded()
@@ -2685,4 +2753,60 @@ void CTrapTargetItem::onTargetViewOpen()
     m_pTargetDialog->show();
     m_pTargetDialog->raise();
     m_pTargetDialog->activateWindow();
+}
+
+void CTableManager::openModelGallery()
+{
+    if(!m_catalogSettings || m_readOnly) return;
+    const quint64 revision = m_dataRevision;
+    const quint64 generation = ei::ProfileDatabaseContext::instance().generation();
+    ei::TechnicalModelCatalog catalog;
+    QString catalogError;
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    catalog.loadProfile(database ? database->sourceArchivePath : QString(),
+        QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), m_catalogProfile, &catalogError);
+    catalog.registerModels(CObjectList::getInstance()->figureList());
+    if(catalogError.isEmpty()) catalog.save(&catalogError);
+    ei::TechnicalTextureCatalog scan = m_textureScan;
+    QStringList roots;
+    if(auto* option = dynamic_cast<COptStringList*>(m_catalogSettings->opt(eOptSetResource, "mapRoots"))) roots = option->value().toList();
+    scan.refreshSources(roots);
+    QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
+    CModelGallery gallery(CObjectList::getInstance()->figureList(), &catalog, m_catalogProfile,
+        textures, &scan, CModelGallery::resourceThumbnails(configuredResourceSourcePaths(m_catalogSettings)), m_pTable);
+    gallery.setCurrentModel(m_selectedModel);
+    for(const auto& value : m_rowValues) if(value->type()==eObjParam_PRIM_TXTR && value->isInit()) gallery.setCurrentTexture(value->toString());
+    gallery.requireTextureSelection();
+    if(!catalogError.isEmpty()) gallery.showCatalogError(catalogError);
+    QTimer scanner;
+    scanner.setInterval(0);
+    connect(&scanner, &QTimer::timeout, &gallery, [&]() {
+        if(generation != ei::ProfileDatabaseContext::instance().generation()) { scanner.stop(); gallery.reject(); return; }
+        if(scan.hasPendingFiles()) scan.scanNextFile();
+        if(!scan.hasPendingFiles()) {
+            scanner.stop(); catalog.captureScan(m_catalogProfile, scan);
+            QString error; catalog.save(&error);
+            gallery.refreshCatalog();
+            if(!error.isEmpty()) gallery.showCatalogError(error);
+        }
+    });
+    if(scan.hasPendingFiles()) scanner.start();
+    const QPointer<CTableManager> guard(this);
+    const int result = gallery.exec(); scanner.stop();
+    if(!guard || revision != m_dataRevision || generation != ei::ProfileDatabaseContext::instance().generation() || m_readOnly) return;
+    if(result == QDialog::Accepted && !gallery.selectedModel().isEmpty()) {
+        QList<QSharedPointer<IPropertyBase>> values;
+        if(m_selectedModel != gallery.selectedModel())
+            values.append(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE, gallery.selectedModel())));
+        bool textureUnchanged = false;
+        for(const auto& value : m_rowValues)
+            if(value->type()==eObjParam_PRIM_TXTR && value->isInit() && value->toString()==gallery.selectedTexture()) textureUnchanged = true;
+        if(!textureUnchanged && !gallery.selectedTexture().isEmpty() && textures.contains(gallery.selectedTexture(), Qt::CaseInsensitive))
+            values.append(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, gallery.selectedTexture())));
+        catalog.bindTexture(m_catalogProfile, gallery.selectedModel(), gallery.selectedTexture());
+        QString saveError; catalog.save(&saveError);
+        if(!values.isEmpty()) emit onUpdateProperties(values);
+        if(!saveError.isEmpty()) QToolTip::showText(m_pTable->mapToGlobal(QPoint(0,0)),saveError,m_pTable);
+    }
+    emit catalogChanged();
 }

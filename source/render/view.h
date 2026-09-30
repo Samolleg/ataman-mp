@@ -170,6 +170,7 @@ class CView : public QGLWidget
     friend int runScenarioLayerCheck();
     friend int runObjectHierarchyCheck();
     friend int runGroupRotationCheck();
+    friend int runProfileModelCatalogCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();

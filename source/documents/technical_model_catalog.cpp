@@ -11,6 +11,36 @@
 #include <QSet>
 
 namespace ei {
+QString TechnicalModelCatalog::pathForDatabase(const QString& databasePath)
+{
+    return databasePath.isEmpty() ? QString()
+        : QFileInfo(databasePath).dir().filePath("model-catalog.json");
+}
+bool TechnicalModelCatalog::loadProfile(const QString& databasePath,
+    const QString& legacyPath, const QString& profile, QString* error)
+{
+    const QString destination = pathForDatabase(databasePath);
+    if(destination.isEmpty())
+    {
+        m_path.clear(); m_document = {}; m_valid = false;
+        if(error) *error = QCoreApplication::translate("TechnicalModelCatalog",
+            "The active profile has no database.res. Configure profile resources first.");
+        return false;
+    }
+    const bool exists = QFileInfo::exists(destination);
+    if(!load(destination, error)) return false;
+    if(exists || !QFileInfo::exists(legacyPath)) return true;
+    TechnicalModelCatalog legacy;
+    if(!legacy.load(legacyPath, error)) { m_valid = false; return false; }
+    // Retain all global model metadata/unknown fields, but import only this
+    // profile's texture bindings and scan cache. The source remains recoverable.
+    m_document = legacy.m_document;
+    const auto profiles = legacy.m_document.value("profiles").toObject();
+    QJsonObject imported;
+    if(profiles.contains(profile)) imported.insert(profile, profiles.value(profile));
+    m_document.insert("profiles", imported);
+    return true; // Persist on an explicit catalog operation, never on selection.
+}
 QString TechnicalModelCatalog::modelKey(QString name)
 {
     name = name.trimmed().toLower();

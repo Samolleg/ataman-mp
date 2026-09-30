@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "database_creation_check.h"
 #include "model_gallery_check.h"
+#include "profile_model_catalog_check.h"
 #include "object_hierarchy_check.h"
 #include "group_rotation_check.h"
 #include "dark_theme_check.h"
@@ -526,6 +527,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption profileCatalogCheckOption("profile-model-catalog-check", "Run profile catalog migration and existing object property checks.");
     QCommandLineOption modelGalleryCheckOption("model-gallery-check", "Run non-interactive model gallery and catalog checks.");
     QCommandLineOption hierarchyCheckOption("object-hierarchy-check", "Check object hierarchy and selection on synthetic maps.");
     QCommandLineOption darkThemeCheckOption("dark-theme-check", "Check text contrast in dark UI widgets and scripts.");
@@ -565,6 +567,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
     parser.addOption(modelGalleryCheckOption);
+    parser.addOption(profileCatalogCheckOption);
     parser.addOption(hierarchyCheckOption);
     parser.addOption(groupRotationCheckOption);
     parser.addOption(darkThemeCheckOption);
@@ -619,6 +622,7 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool profileCatalogCheck = parser.isSet(profileCatalogCheckOption);
     const bool modelGalleryCheck = parser.isSet(modelGalleryCheckOption);
     const bool hierarchyCheck = parser.isSet(hierarchyCheckOption);
     const bool darkThemeCheck = parser.isSet(darkThemeCheckOption);
@@ -629,12 +633,12 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) > 1)
     {
@@ -644,6 +648,7 @@ int runHeadlessCommand(QApplication& app)
 
     if(databasePreviewCheck) return runDatabasePreviewCheck();
     if(databaseCreationCheck) return runDatabaseCreationCheck();
+    if(profileCatalogCheck) return runProfileModelCatalogCheck();
     if(hierarchyCheck) return runObjectHierarchyCheck();
     if(groupRotationCheck) return runGroupRotationCheck();
     if(darkThemeCheck) return runDarkThemeCheck();
@@ -3325,7 +3330,8 @@ int runHeadlessCommand(QApplication& app)
         const bool objectHierarchyWorks = runObjectHierarchyCheck() == 0;
         const bool groupRotationWorks = runGroupRotationCheck() == 0;
         const bool darkThemeWorks = runDarkThemeCheck() == 0;
-        const bool passed = darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
+        const bool passed = profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild

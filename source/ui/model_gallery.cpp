@@ -1,3 +1,7 @@
+#include "model_gallery_thumbnail.h"
+#include "resource_catalog.h"
+#include "resource_name.h"
+#include "resourcemanager.h"
 #include "model_gallery.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -141,6 +145,9 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     m_choose=new QPushButton(tr("Choose model"),this); m_choose->setObjectName("modelGalleryChoose"); m_choose->setDefault(true); buttons->addWidget(m_choose);
     auto* cancel=new QPushButton(tr("Cancel"),this); buttons->addWidget(cancel); layout->addLayout(buttons);
     connect(cancel,&QPushButton::clicked,this,&QDialog::reject);
+    connect(m_texture,&QComboBox::currentTextChanged,this,[this]{
+        m_choose->setEnabled(!selectedModel().isEmpty() && (!m_textureRequired || m_textures.contains(selectedTexture(),Qt::CaseInsensitive)));
+    });
     connect(m_choose,&QPushButton::clicked,this,[this]{ if(!selectedModel().isEmpty()) accept(); });
     connect(m_list,&QListWidget::itemDoubleClicked,this,[this](QListWidgetItem*){ accept(); });
     connect(m_list,&QListWidget::currentItemChanged,this,[this]{selectionChanged();});
@@ -221,6 +228,7 @@ void CModelGallery::selectionChanged()
     for(const auto& name:m_textures) if(!names.contains(name,Qt::CaseInsensitive)) names.append(name);
     m_texture->addItems(names); if(exact.isEmpty()) m_texture->setCurrentIndex(-1);
     m_status->setText(tr("%1 model(s). Names and texture bindings: %2").arg(m_list->count()).arg(m_catalog->path()));
+    m_choose->setEnabled(!model.isEmpty() && (!m_textureRequired || m_textures.contains(selectedTexture(),Qt::CaseInsensitive)));
     m_thumbnailTimer.start();
 }
 void CModelGallery::reportSave(bool ok,const QString& error)
@@ -283,4 +291,57 @@ void CModelGallery::finishThumbnail()
         if(model==m_loadingModel && cacheKey(model,textureForModel(model))==m_loadingKey && !image.isNull()) item->setIcon(QPixmap::fromImage(image));
     }
     m_thumbnailTimer.start();
+}
+
+CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QStringList& sourcePaths)
+{
+    struct PreviewSources { CResourceCatalog catalog; bool indexed = false; QVector<QString> paths; };
+    QSharedPointer<PreviewSources> sources(new PreviewSources);
+    sources->paths = sourcePaths.toVector();
+    return [sources](const QString& model, const QString& texture) -> QImage {
+        if(!sources->indexed) { sources->catalog.build(sources->paths); sources->indexed = true; }
+        const auto read = [sources](const QString& name) -> QByteArray {
+            const auto entries = sources->catalog.providers(name);
+              if(entries.isEmpty() || entries.first().size > 64 * 1024 * 1024) return {};
+            const auto* archive = sources->catalog.archive(entries.first().archivePriority);
+            return archive ? archive->readMember(entries.first().memberIndex) : QByteArray();
+        };
+        const QString stem = ei::TechnicalModelCatalog::modelKey(model);
+        QByteArray payload = read(stem + ".mod");
+        const ei::SResourceModelScene scene = payload.isEmpty()
+            ? ei::buildFig8Scene(read(stem + ".fig")) : ei::buildModScene(payload, read(stem + ".bon"));
+        QImage image;
+        if(!texture.isEmpty()) for(const QString& candidate : ei::textureResourceCandidates(texture, stem))
+        {
+            const QByteArray bytes = read(candidate);
+            if(bytes.isEmpty()) continue;
+            image = CTextureList::prepareStaticTexture(bytes).image; break;
+        }
+        float minU=0,maxU=0,minV=0,maxV=0;
+        for(const auto& part:scene.parts) for(const auto& triangle:part.triangles) for(const auto& vertex:triangle.vertices)
+        { minU=qMin(minU,vertex.uv.x());maxU=qMax(maxU,vertex.uv.x());minV=qMin(minV,vertex.uv.y());maxV=qMax(maxV,vertex.uv.y()); }
+        return ei::renderModelGalleryThumbnail(scene,image,stem,
+            ei::textureUvScaleForBounds(texture,minU,maxU,minV,maxV));
+    };
+}
+
+void CModelGallery::showCatalogError(const QString& error) { m_status->setText(error); }
+
+void CModelGallery::requireTextureSelection()
+{
+    m_textureRequired = true;
+    m_choose->setEnabled(!selectedModel().isEmpty() && m_textures.contains(selectedTexture(),Qt::CaseInsensitive));
+}
+void CModelGallery::accept()
+{
+    if(m_textureRequired && (selectedModel().isEmpty() || !m_textures.contains(selectedTexture(),Qt::CaseInsensitive))) {
+        showCatalogError(QString::fromUtf8("Выберите установленную основную текстуру для этой модели."));
+        return;
+    }
+    QDialog::accept();
+}
+
+void CModelGallery::setCurrentTexture(const QString& texture)
+{
+    if(m_textures.contains(texture,Qt::CaseInsensitive)) m_texture->setCurrentText(texture);
 }

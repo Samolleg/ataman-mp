@@ -11,17 +11,21 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `85`. Each separate fix advances the integer version.
+Current Ataman version: `86`. Each separate fix advances the integer version.
 
 The default dark theme uses readable hierarchy text, disabled controls, status messages
 and script highlighting. `--dark-theme-check` checks real widgets and text contrast;
 `--ui-widget-check` uses the same production palette and includes this check.
 
 Technical objects have a model gallery with lazy previews and search by model ID
-or editable Russian name. `model-catalog.json` next to the executable is user
+or editable Russian name. `model-catalog.json` next to the active profile database.res is user
 data: `models` stores Russian names, `profiles` stores per-profile `modelTextures`
 bindings and `scanCache`. Unchanged MOBs reuse their saved metadata and pairs
 after restarting; Russian names and texture bindings survive program updates.
+Existing object properties use the same gallery and matched texture choices,
+with an optional Russian model-name row and one undo action for a model/texture choice.
+The old executable-side JSON is retained as a migration backup; existing profile
+catalogs take precedence. Invalid or externally modified JSON is never overwritten.
 Open **Create object → Technical objects → Choose model from gallery**. Select a
 tile, edit its Russian name and press **Save name**. Texture choices begin with
 the model's bindings; **Bind texture** adds an installed texture. Double-click a

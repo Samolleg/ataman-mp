@@ -544,7 +544,10 @@ void CCreateObjectForm::filterDatabase()
             roots = option->value().toList();
         m_modelCatalogProfile = ei::TechnicalModelCatalog::profileKey(roots);
         m_modelCatalogError.clear();
-        m_modelCatalog.load(QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), &m_modelCatalogError);
+        const auto database = ei::ProfileDatabaseContext::instance().current();
+    m_modelCatalog.loadProfile(database ? database->sourceArchivePath : QString(),
+            QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"),
+            m_modelCatalogProfile, &m_modelCatalogError);
         m_modelCatalog.registerModels(CObjectList::getInstance()->figureList());
         m_modelCatalog.restoreScan(m_modelCatalogProfile, &m_technicalTextures);
         m_technicalTextures.refreshSources(roots);
@@ -732,43 +735,19 @@ void CCreateObjectForm::openModelGallery()
 {
     if(m_databaseMode || !m_pNode || !m_pView) return;
     m_modelCatalogError.clear();
-    m_modelCatalog.load(QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), &m_modelCatalogError);
+    const auto database = ei::ProfileDatabaseContext::instance().current();
+    m_modelCatalog.loadProfile(database ? database->sourceArchivePath : QString(),
+            QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"),
+            m_modelCatalogProfile, &m_modelCatalogError);
     const QStringList models = CObjectList::getInstance()->figureList();
     m_modelCatalog.registerModels(models);
     m_modelCatalog.save(&m_modelCatalogError);
-    // A serial worker owns archive indexes and CPU payloads; it never touches
-    // viewport nodes, GL contexts or the singleton visual caches.
-    struct PreviewSources { CResourceCatalog catalog; bool indexed = false; QVector<QString> paths; };
-    QSharedPointer<PreviewSources> sources(new PreviewSources);
-    sources->paths = configuredResourceSourcePaths(m_pView->settings()).toVector();
-    auto provider = [sources](const QString& model, const QString& texture) -> QImage {
-        if(!sources->indexed) { sources->catalog.build(sources->paths); sources->indexed = true; }
-        const auto read = [sources](const QString& name) -> QByteArray {
-            const auto entries = sources->catalog.providers(name);
-              if(entries.isEmpty() || entries.first().size > 64 * 1024 * 1024) return {};
-            const auto* archive = sources->catalog.archive(entries.first().archivePriority);
-            return archive ? archive->readMember(entries.first().memberIndex) : QByteArray();
-        };
-        const QString stem = ei::TechnicalModelCatalog::modelKey(model);
-        QByteArray payload = read(stem + ".mod");
-        const ei::SResourceModelScene scene = payload.isEmpty()
-            ? ei::buildFig8Scene(read(stem + ".fig")) : ei::buildModScene(payload, read(stem + ".bon"));
-        QImage image;
-        if(!texture.isEmpty()) for(const QString& candidate : ei::textureResourceCandidates(texture, stem))
-        {
-            const QByteArray bytes = read(candidate);
-            if(bytes.isEmpty()) continue;
-            image = CTextureList::prepareStaticTexture(bytes).image; break;
-        }
-        float minU=0,maxU=0,minV=0,maxV=0;
-        for(const auto& part:scene.parts) for(const auto& triangle:part.triangles) for(const auto& vertex:triangle.vertices)
-        { minU=qMin(minU,vertex.uv.x());maxU=qMax(maxU,vertex.uv.x());minV=qMin(minV,vertex.uv.y());maxV=qMax(maxV,vertex.uv.y()); }
-        return ei::renderModelGalleryThumbnail(scene,image,stem,
-            ei::textureUvScaleForBounds(texture,minU,maxU,minV,maxV));
-    };
+    auto provider = CModelGallery::resourceThumbnails(configuredResourceSourcePaths(m_pView->settings()));
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this);
     gallery.setCurrentModel(m_pNode->modelName());
+    gallery.setCurrentTexture(m_pNode->textureName());
+    if(!m_modelCatalogError.isEmpty()) gallery.showCatalogError(m_modelCatalogError);
     if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
     {
         onParamChange(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,gallery.selectedModel())));

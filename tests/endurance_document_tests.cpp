@@ -506,6 +506,7 @@ private slots:
     void unchangedMobIsByteIdentical();
     void technicalTexturesFollowObservedModelsAndProfileRoots();
     void modelCatalogPersistsNamesBindingsAndScanWithoutRescanning();
+    void profileCatalogMigrationPreservesDataAndIsolation();
     void modelGalleryPlacementPreservesLegacyCatalogAndMetadata();
     void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
@@ -14519,3 +14520,39 @@ void EnduranceDocumentTests::neighborRealMapReadOnly()
 
 QTEST_APPLESS_MAIN(EnduranceDocumentTests)
 #include "endurance_document_tests.moc"
+
+void EnduranceDocumentTests::profileCatalogMigrationPreservesDataAndIsolation()
+{
+    QTemporaryDir scratch; QVERIFY(scratch.isValid());
+    QDir dir(scratch.path()); QVERIFY(dir.mkdir("exe")); QVERIFY(dir.mkdir("a")); QVERIFY(dir.mkdir("b"));
+    const QString legacyPath = dir.filePath("exe/model-catalog.json");
+    ei::TechnicalModelCatalog legacy; QString error; QVERIFY(legacy.load(legacyPath,&error));
+    legacy.setRussianName("House", QString::fromUtf8("Дом"));
+    QVERIFY(legacy.setPlacement("House","houses","gipat"));
+    legacy.bindTexture("a","House","stone"); legacy.bindTexture("b","House","wood");
+    QVERIFY(legacy.save(&error));
+    QFile old(legacyPath); QVERIFY(old.open(QIODevice::ReadOnly)); const QByteArray baseline = old.readAll(); old.close();
+    ei::TechnicalModelCatalog a, b; ei::TechnicalTextureCatalog scan;
+    QVERIFY(a.loadProfile(dir.filePath("a/database.res"),legacyPath,"a",&error));
+    QCOMPARE(a.path(),dir.filePath("a/model-catalog.json"));
+    QVERIFY(!QFileInfo::exists(a.path())); // Selection itself does not write a resource directory.
+    QCOMPARE(a.russianName("HOUSE"),QString::fromUtf8("Дом")); QCOMPARE(a.category("house"),QString("houses"));
+    QCOMPARE(a.textureChoices("a","house",{"stone","wood"},scan).first().name,QString("stone"));
+    QVERIFY(a.textureChoices("b","house",{"stone","wood"},scan).isEmpty());
+    QVERIFY(a.save(&error));
+    QVERIFY(b.loadProfile(dir.filePath("b/database.res"),legacyPath,"b",&error)); QVERIFY(b.save(&error));
+    b.setRussianName("house",QString::fromUtf8("Другой дом")); QVERIFY(b.save(&error));
+    QVERIFY(a.loadProfile(dir.filePath("a/database.res"),legacyPath,"a",&error));
+    QCOMPARE(a.russianName("house"),QString::fromUtf8("Дом"));
+    // Existing target wins over the legacy source and is never reimported.
+    QVERIFY(b.loadProfile(dir.filePath("b/database.res"),legacyPath,"b",&error));
+    QCOMPARE(b.russianName("house"),QString::fromUtf8("Другой дом"));
+    QVERIFY(old.open(QIODevice::ReadOnly)); QCOMPARE(old.readAll(),baseline); old.close();
+    QFile target(a.path()); QVERIFY(target.open(QIODevice::WriteOnly|QIODevice::Truncate)); target.write("broken"); target.close();
+    QVERIFY(!a.save(&error)); QVERIFY(!a.loadProfile(dir.filePath("a/database.res"),legacyPath,"a",&error));
+    QVERIFY(!a.save(&error)); QVERIFY(target.open(QIODevice::ReadOnly)); QCOMPARE(target.readAll(),QByteArray("broken")); target.close();
+    QVERIFY(!a.loadProfile(QString(),legacyPath,"a",&error)); QVERIFY(a.path().isEmpty()); QVERIFY(!a.save(&error));
+    // Missing database directory/read-only destinations cannot silently fall back to EXE.
+    QVERIFY(a.loadProfile(dir.filePath("missing/database.res"),legacyPath,"a",&error));
+    QVERIFY(!a.save(&error)); QVERIFY(old.open(QIODevice::ReadOnly)); QCOMPARE(old.readAll(),baseline);
+}

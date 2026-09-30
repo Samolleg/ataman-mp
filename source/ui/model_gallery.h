@@ -23,9 +23,16 @@ public:
         const QString& profile, const QStringList& textures, const ei::TechnicalTextureCatalog* scan,
         ThumbnailProvider provider, QWidget* parent = nullptr);
     ~CModelGallery() override;
+    static ThumbnailProvider resourceThumbnails(const QStringList& sourcePaths);
     QString selectedModel() const;
     QString selectedTexture() const;
     void setCurrentModel(const QString& model);
+    void setCurrentTexture(const QString& texture);
+    void refreshCatalog() { filter(); }
+    void showCatalogError(const QString& error);
+    void requireTextureSelection();
+public slots:
+    void accept() override;
 protected:
     void resizeEvent(QResizeEvent* event) override;
 private:
@@ -43,6 +50,7 @@ private:
     ei::TechnicalModelCatalog* m_catalog;
     const ei::TechnicalTextureCatalog* m_scan;
     QString m_profile;
+    bool m_textureRequired{false};
     ThumbnailProvider m_provider;
     QLineEdit *m_search, *m_name;
     QListWidget* m_list;
