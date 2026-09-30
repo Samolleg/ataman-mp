@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include <QtWidgets>
 #include "terrain_preview_context.h"
 #include <QDebug>
@@ -3842,7 +3843,8 @@ void CView::syncAiGraphPreviewWidget()
         return;
     const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
     const QVector4D color = aiGraphLayerColor(layer);
-    const QColor profileColor = QColor::fromRgbF(color.x(), color.y(), color.z());
+    // Graph overlays need saturated colors; text on the dark panel needs lighter tones.
+    const QColor profileColor = QColor::fromRgbF(color.x(), color.y(), color.z()).lighter(180);
     m_aiGraphLayerLabel->setText(tr("Layer %1 - <b><span style=\"color:%2\">%3</span></b> (%4 m)")
         .arg(layer).arg(profileColor.name())
         .arg(localizedAiGraphLayerLabel(layer).toHtmlEscaped())
@@ -14855,8 +14857,7 @@ void CView::finalizeVirtualTerrainAtlas()
             "headroom depends on the rest of the map. The package may still be "
             "created and staged for controlled testing."),&preview);
         warning->setWordWrap(true);
-        warning->setStyleSheet(QStringLiteral(
-            "QLabel { color: #c73737; font-weight: bold; }"));
+        warning->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Error) + "font-weight: bold;");
         previewLayout->addWidget(warning);
     }
     QLabel* addedHeading=new QLabel(tr(
@@ -17383,7 +17384,7 @@ void CView::openMapParameters()
                             : tr("Invalid: exceeds atlas"));
                 state->setForeground(valid
                     ? readableAnimationRangeForeground
-                    : QBrush(QColor(220, 80, 80)));
+                    : QBrush(ei::uiTextColor(ei::UiTextTone::Error)));
                 *materialDraftDirty = true;
                 applyMaterials->setEnabled(true); resetMaterials->setEnabled(true);
             };
@@ -17399,7 +17400,7 @@ void CView::openMapParameters()
                         : tr("Invalid: exceeds atlas"));
             rangeState->setForeground(end < atlasSlotCount
                 ? readableAnimationRangeForeground
-                : QBrush(QColor(220, 80, 80)));
+                : QBrush(ei::uiTextColor(ei::UiTextTone::Error)));
             animationTable->setItem(row, 2, rangeState);
         }
         *materialUiLoading = false;
@@ -18006,7 +18007,7 @@ void CView::openMapParameters()
             identityStatus->setText(QObject::tr(
                 "Next Save will create a new content-hash identity."));
             identityStatus->setStyleSheet(
-                QStringLiteral("QLabel { color: #69c37d; }"));
+                ei::uiTextStyle(ei::UiTextTone::Success));
             return;
         }
         QString error;
@@ -18016,8 +18017,8 @@ void CView::openMapParameters()
             ? QObject::tr("Valid identity. Existing consumers may also resolve these pages.")
             : error);
         identityStatus->setStyleSheet(valid
-            ? QStringLiteral("QLabel { color: #69c37d; }")
-            : QStringLiteral("QLabel { color: #df6b62; }"));
+            ? ei::uiTextStyle(ei::UiTextTone::Success)
+            : ei::uiTextStyle(ei::UiTextTone::Error));
     };
     connect(resetIdentity, &QPushButton::clicked, dock,
             [this, identityEdit, refreshIdentityStatus]() {
@@ -21809,7 +21810,7 @@ void CView::collectObjectTreeData()
             QList<QTreeWidgetItem*> pending{mobItem};
             while(!pending.isEmpty()) {
                 auto* item=pending.takeLast();
-                for(int column=0;column<3;++column) item->setForeground(column, QBrush(QColor(128,128,128)));
+                for(int column=0;column<3;++column) item->setForeground(column, QBrush(ei::uiTextColor(ei::UiTextTone::Muted)));
                 for(int i=0;i<item->childCount();++i) pending.append(item->child(i));
             }
         }

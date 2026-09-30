@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "message_log_panel.h"
 
 #include <QApplication>
@@ -40,9 +41,9 @@ CMessageLogPanel::CMessageLogPanel(QWidget* parent) : QWidget(parent)
     m_warning = addType(tr("Warnings"), QStringLiteral("messageLogWarnings"));
     m_info = addType(tr("Info"), QStringLiteral("messageLogInfo"));
     m_debug = addType(tr("Debug"), QStringLiteral("messageLogDebug"));
-    m_error->setStyleSheet(QStringLiteral("QToolButton:checked { color: #ef5b5b; }"));
-    m_warning->setStyleSheet(QStringLiteral("QToolButton:checked { color: #e7c34f; }"));
-    m_debug->setStyleSheet(QStringLiteral("QToolButton:checked { color: #8f969e; }"));
+    m_error->setStyleSheet(QStringLiteral("QToolButton:checked { %1 }").arg(ei::uiTextStyle(ei::UiTextTone::Error)));
+    m_warning->setStyleSheet(QStringLiteral("QToolButton:checked { %1 }").arg(ei::uiTextStyle(ei::UiTextTone::Warning)));
+    m_debug->setStyleSheet(QStringLiteral("QToolButton:checked { %1 }").arg(ei::uiTextStyle(ei::UiTextTone::Muted)));
     m_search = new QLineEdit(this);
     m_search->setObjectName(QStringLiteral("messageLogSearch"));
     m_search->setPlaceholderText(tr("Filter messages..."));
@@ -151,11 +152,11 @@ void CMessageLogPanel::appendRow(const SLogMessage& message)
     body->setData(Qt::UserRole, message.formatted);
     body->setData(Qt::UserRole + 1, int(message.type));
     if(message.type == eLogFatal)
-        type->setForeground(QColor(239, 91, 91));
+        type->setForeground(ei::uiTextColor(ei::UiTextTone::Error));
     else if(message.type == eLogWarning)
-        type->setForeground(QColor(231, 195, 79));
+        type->setForeground(ei::uiTextColor(ei::UiTextTone::Warning));
     else if(message.type == eLogDebug)
-        type->setForeground(QColor(143, 150, 158));
+        type->setForeground(ei::uiTextColor(ei::UiTextTone::Muted));
     m_table->setItem(row, 0, time);
     m_table->setItem(row, 1, type);
     m_table->setItem(row, 2, body);

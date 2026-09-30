@@ -233,6 +233,9 @@ void CMobParameters::generateTitle()
 
 void colorizeCell(QTableWidgetItem* pCell, int value)
 {
+    // Neutral cells have an olive background: black is readable there,
+    // whereas ally/war cells need white. Reapply after each relation change.
+    pCell->setForeground(value == 1 ? Qt::black : Qt::white);
     switch (value)
     {
     case 0: // if diplomacy table - friend. if scripts - neutral
@@ -243,6 +246,9 @@ void colorizeCell(QTableWidgetItem* pCell, int value)
         break;
     case 2:
         pCell->setBackground(Qt::darkRed);
+        break;
+    default:
+        pCell->setData(Qt::BackgroundRole, QVariant());
         break;
     }
 }
@@ -332,7 +338,6 @@ void CMobParameters::updateWindow()
                 val = dipTable[i][j];
                 setDiplomacyCellPresentation(pCell.get(), uint(val));
                 colorizeCell(pCell.get(), val);
-                pCell->setTextColor(Qt::white);
                 pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
         }

@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "item_spell_constructor_dialog.h"
 
 #include "database_document.h"
@@ -629,7 +630,7 @@ void ItemSpellConstructorDialog::updateOutput()
         {
             const auto report=m_catalog.limits(*item,currentMaterial(),spell,parsed.runeCodes);
             warnings+=report.warnings;
-            const auto marked=[](const QString&value,bool exceeded){return exceeded?QStringLiteral("<span style='color:#ff6666'><b>%1</b></span>").arg(value):value;};
+            const auto marked=[](const QString&value,bool exceeded){return exceeded?QStringLiteral("<span style='color:%1'><b>%2</b></span>").arg(ei::uiTextColor(ei::UiTextTone::Error).name(),value):value;};
             detail<<tr("Inserted spell: energy %1 (%2 per second) | difficulty %3")
                         .arg(marked(QString::number(report.spellMana,'g',8),report.spellMana>report.itemMana),QString::number(report.spellManaPerSecond,'g',8),marked(QString::number(report.spellComplexity),report.spellComplexity>report.itemSlots));
         }

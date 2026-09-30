@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "map_table_editor_dialog.h"
 
 #include <QCheckBox>
@@ -1013,5 +1014,5 @@ bool CMapTableEditorDialog::stageMinimapTextureForZone(
 void CMapTableEditorDialog::setStatus(const QString& text, bool error)
 {
     m_statusEdit->setText(text.simplified());
-    m_statusEdit->setStyleSheet(error ? "color: #b00020;" : QString());
+    m_statusEdit->setStyleSheet(error ? ei::uiTextStyle(ei::UiTextTone::Error) : QString());
 }

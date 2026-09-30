@@ -16,7 +16,7 @@ CScriptEditor::CScriptEditor(QWidget *parent) : QPlainTextEdit(parent)
 void CScriptEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
 {
     QPainter painter(m_pLineNumberArea);
-    painter.fillRect(event->rect(), Qt::gray);
+    painter.fillRect(event->rect(), palette().color(QPalette::Window));
 
 //![extraAreaPaintEvent_0]
 
@@ -31,7 +31,7 @@ void CScriptEditor::lineNumberAreaPaintEvent(QPaintEvent *event)
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
             QString number = QString::number(blockNumber + 1);
-            painter.setPen(Qt::black);
+            painter.setPen(palette().color(QPalette::Mid));
             painter.drawText(0, top, m_pLineNumberArea->width(), fontMetrics().height(),
                              Qt::AlignRight, number);
         }
@@ -77,7 +77,7 @@ void CScriptEditor::highlightCurrentLine()
     if (!isReadOnly()) {
         QTextEdit::ExtraSelection selection;
 
-        QColor lineColor = QColor(Qt::green).lighter(20);
+        const QColor lineColor = palette().color(QPalette::AlternateBase);
 
         selection.format.setBackground(lineColor);
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);

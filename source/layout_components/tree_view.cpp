@@ -132,7 +132,10 @@ QTreeWidgetItem* CTreeView::acquireRow(const QString& key, QTreeWidgetItem* pare
     }
     if(auto* object = dynamic_cast<CTreeObject*>(item)) object->setNode(node);
     item->setFlags(Qt::ItemIsEnabled | ((node || plain) ? Qt::ItemIsSelectable : Qt::NoItemFlags));
-    item->setForeground(0, QBrush()); item->setForeground(1, QBrush()); item->setForeground(2, QBrush());
+    // An empty QBrush is still a valid foreground role and paints black.
+    // Clear the role so normal, selected and disabled rows inherit the palette.
+    for(int column = 0; column < 3; ++column)
+        item->setData(column, Qt::ForegroundRole, QVariant());
     const int desired = m_nextPosition[parent]++;
     const int actual = parent ? parent->indexOfChild(item) : indexOfTopLevelItem(item);
     if(actual != desired) {

@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "landscape_tools.h"
 #include "types.h"
 
@@ -253,7 +254,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "Terrain edits are undoable. Changed MPR saves use staged validation, backup, and atomic replacement."), this);
     warning->setWordWrap(true);
     warning->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    warning->setStyleSheet("QLabel { color: #b06000; font-weight: bold; }");
+    warning->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Warning) + "font-weight: bold;");
     warning->hide();
     setToolTip(warning->text());
     m_showMainTerrain->setChecked(true);
@@ -1218,7 +1219,7 @@ void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
         "Potential instability: this atlas is above 4096 slots. Staging remains available, but runtime memory limits depend on the rest of the map.")
         : QString());
     m_atlasCapacityWarning->setStyleSheet(
-        QStringLiteral("QLabel { color: #c73737; font-weight: bold; }"));
+        ei::uiTextStyle(ei::UiTextTone::Error) + "font-weight: bold;");
 }
 ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {

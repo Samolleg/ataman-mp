@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "multiline_edit_form.h"
 #include "ui_multiline_edit_form.h"
 #include "profile_database.h"
@@ -23,7 +24,7 @@ CMultiLineEditForm::CMultiLineEditForm(QWidget *parent) :
     picker->addWidget(add);
     ui->verticalLayout->insertLayout(0, picker);
     m_diagnostic->setWordWrap(true);
-    m_diagnostic->setStyleSheet("QLabel { color: #c88b2a; }");
+    m_diagnostic->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Warning));
     ui->verticalLayout->insertWidget(1, m_diagnostic);
     connect(add, &QPushButton::clicked, this, [this]()
     {

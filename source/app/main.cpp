@@ -3,6 +3,8 @@
 #include "model_gallery_check.h"
 #include "object_hierarchy_check.h"
 #include "group_rotation_check.h"
+#include "dark_theme_check.h"
+#include "ui_theme.h"
 #include "scenario_layer_check.h"
 #include <QApplication>
 #include <QOffscreenSurface>
@@ -526,6 +528,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
     QCommandLineOption modelGalleryCheckOption("model-gallery-check", "Run non-interactive model gallery and catalog checks.");
     QCommandLineOption hierarchyCheckOption("object-hierarchy-check", "Check object hierarchy and selection on synthetic maps.");
+    QCommandLineOption darkThemeCheckOption("dark-theme-check", "Check text contrast in dark UI widgets and scripts.");
     QCommandLineOption groupRotationCheckOption("group-rotation-check", "Check grouped rotation, cancellation and history on synthetic objects.");
     QCommandLineOption textureLifetimeCheckOption("texture-lifetime-check",
         "Verify composed character textures survive resource refresh with a live scene object.");
@@ -564,6 +567,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(modelGalleryCheckOption);
     parser.addOption(hierarchyCheckOption);
     parser.addOption(groupRotationCheckOption);
+    parser.addOption(darkThemeCheckOption);
     parser.addOption(textureLifetimeCheckOption);
     parser.addOption(scenarioCheckOption);
     parser.addOption(databaseCreationCheckOption);
@@ -617,6 +621,7 @@ int runHeadlessCommand(QApplication& app)
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
     const bool modelGalleryCheck = parser.isSet(modelGalleryCheckOption);
     const bool hierarchyCheck = parser.isSet(hierarchyCheckOption);
+    const bool darkThemeCheck = parser.isSet(darkThemeCheckOption);
     const bool groupRotationCheck = parser.isSet(groupRotationCheckOption);
     const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
     const bool scenarioCheck = parser.isSet(scenarioCheckOption);
@@ -624,12 +629,12 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) > 1)
     {
@@ -641,6 +646,7 @@ int runHeadlessCommand(QApplication& app)
     if(databaseCreationCheck) return runDatabaseCreationCheck();
     if(hierarchyCheck) return runObjectHierarchyCheck();
     if(groupRotationCheck) return runGroupRotationCheck();
+    if(darkThemeCheck) return runDarkThemeCheck();
     if(modelGalleryCheck)
     {
         QString diagnostic;
@@ -2938,6 +2944,8 @@ int runHeadlessCommand(QApplication& app)
         bool messageLogSeverityColorsWork = messageTable != nullptr;
         if(messageTable)
         {
+            int severitySamples = 0;
+            QSet<QRgb> severityColors;
             for(int column = 0; column < messageTable->columnCount(); ++column)
                 messageLogColumnsResizable = messageLogColumnsResizable
                         && messageTable->horizontalHeader()->sectionResizeMode(column)
@@ -2952,18 +2960,32 @@ int runHeadlessCommand(QApplication& app)
                             && type->foreground().style() == Qt::NoBrush;
                 else if(body && type && body->text() == QStringLiteral("ui-check searchable warning"))
                     messageLogSeverityColorsWork = messageLogSeverityColorsWork
-                            && type->foreground().color() == QColor(231, 195, 79);
+                            && type->foreground().color().red() > type->foreground().color().blue()
+                            && type->foreground().color().green() > type->foreground().color().blue();
                 else if(body && type && body->text() == QStringLiteral("ui-check severity debug"))
                     messageLogSeverityColorsWork = messageLogSeverityColorsWork
-                            && type->foreground().color() == QColor(143, 150, 158);
+                            && qAbs(type->foreground().color().red() - type->foreground().color().blue()) < 8;
                 else if(body && type && body->text() == QStringLiteral("ui-check severity error"))
                     messageLogSeverityColorsWork = messageLogSeverityColorsWork
-                            && type->foreground().color() == QColor(239, 91, 91);
+                            && type->foreground().color().red() > type->foreground().color().green()
+                            && type->foreground().color().red() > type->foreground().color().blue();
+                if(body && type && (body->text().startsWith("ui-check searchable")
+                                   || body->text().startsWith("ui-check severity"))) {
+                    ++severitySamples;
+                    const QColor text = type->data(Qt::ForegroundRole).isValid()
+                        ? type->foreground().color() : messageTable->palette().color(QPalette::Text);
+                    messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                        && darkThemeTextContrast(text, messageTable->palette().color(QPalette::Base)) >= 4.5
+                        && darkThemeTextContrast(text, messageTable->palette().color(QPalette::AlternateBase)) >= 4.5;
+                    if(type->data(Qt::ForegroundRole).isValid()) severityColors.insert(text.rgb());
+                }
                 if(body && body->text().startsWith(QStringLiteral("ui-check searchable")))
                     messageTable->selectionModel()->select(
                         messageTable->model()->index(row, 0),
                         QItemSelectionModel::Select | QItemSelectionModel::Rows);
             }
+            messageLogSeverityColorsWork = messageLogSeverityColorsWork
+                && severitySamples == 4 && severityColors.size() == 3;
         }
         QApplication::clipboard()->clear();
         QMetaObject::invokeMethod(&messageLog, "copySelectedMessages",
@@ -3302,7 +3324,8 @@ int runHeadlessCommand(QApplication& app)
         QTextStream(stderr) << "Model gallery: " << modelGalleryDiagnostic << "\n";
         const bool objectHierarchyWorks = runObjectHierarchyCheck() == 0;
         const bool groupRotationWorks = runGroupRotationCheck() == 0;
-        const bool passed = groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        const bool darkThemeWorks = runDarkThemeCheck() == 0;
+        const bool passed = darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -3472,6 +3495,7 @@ int runHeadlessCommand(QApplication& app)
                << " databasePrototypeMenuEmissionWorks="
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
+               << " darkThemeWorks=" << darkThemeWorks
                << " groupRotationWorks=" << groupRotationWorks
                << " objectHierarchyWorks=" << objectHierarchyWorks
                << " modelGalleryWorks=" << modelGalleryWorks
@@ -3944,6 +3968,10 @@ int main(int argc, char *argv[])
                  renderBenchmark ? "uncapped-benchmark"
                                  : (configuredVsync ? "display-vsync" : "vsync-off")));
 
+    // Checks and the editor must construct widgets with the same production theme.
+    qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
+    ei::installDarkUiPalette();
+
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)
         return commandResult;
@@ -3952,38 +3980,6 @@ int main(int argc, char *argv[])
     // Headless validation and runtime diagnostics deliberately stay English.
     ei::installApplicationTranslator(app);
 
-    qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
-
-    QPalette darkPalette;
-    darkPalette.setColor(QPalette::Window, QColor(53,53,53));
-    darkPalette.setColor(QPalette::WindowText, Qt::white);
-    darkPalette.setColor(QPalette::Base, QColor(25,25,25));
-    darkPalette.setColor(QPalette::AlternateBase, QColor(53,53,53));
-    darkPalette.setColor(QPalette::ToolTipBase, QColor(250, 248, 240));
-    darkPalette.setColor(QPalette::ToolTipText, QColor(32, 32, 32));
-    darkPalette.setColor(QPalette::Text, Qt::white);
-    darkPalette.setColor(QPalette::Button, QColor(53,53,53));
-    darkPalette.setColor(QPalette::ButtonText, Qt::white);
-    darkPalette.setColor(QPalette::BrightText, Qt::red);
-    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-    //darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::Highlight, QColor(20, 208, 28));
-    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-
-    darkPalette.setColor(QPalette::Disabled, QPalette::Base, QColor(65, 65, 65));
-    const QColor disabledText(128, 128, 128);
-    darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
-    darkPalette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
-    darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
-    darkPalette.setColor(QPalette::Disabled, QPalette::HighlightedText, disabledText);
-
-    qApp->setPalette(darkPalette);
-
-    qApp->setStyleSheet(
-        "QToolTip { color: #202020; background-color: #faf8f0; border: 1px solid #8a8a8a; }"
-        "QToolButton:pressed { background-color: #3c583d; }"
-        "QWidget:disabled { color: #808080; }"
-        "QMenu::item:disabled { color: #808080; }");
 
     // Apply the saved scale before constructing the splash, first-run dialogs,
     // or main window so a high-DPI user never has to navigate an undersized

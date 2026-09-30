@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "main_window.h"
 #include "travel_document.h"
 #include "loaded_map_panel_policy.h"
@@ -5621,13 +5622,13 @@ void MainWindow::updateMobFamilyValidationPanel()
         switch(finding.severity)
         {
         case EMobFamilyFindingSeverity::Critical:
-            severity = tr("CRITICAL"); color = QColor(220, 70, 70); break;
+            severity = tr("CRITICAL"); color = ei::uiTextColor(ei::UiTextTone::Error); break;
         case EMobFamilyFindingSeverity::Warning:
-            severity = tr("WARNING"); color = QColor(230, 160, 45); break;
+            severity = tr("WARNING"); color = ei::uiTextColor(ei::UiTextTone::Warning); break;
         case EMobFamilyFindingSeverity::Incomplete:
-            severity = tr("INCOMPLETE"); color = QColor(190, 120, 230); break;
+            severity = tr("INCOMPLETE"); color = ei::uiTextColor(ei::UiTextTone::Incomplete); break;
         case EMobFamilyFindingSeverity::Info:
-            severity = tr("INFO"); color = QColor(130, 160, 190); break;
+            severity = tr("INFO"); color = ei::uiTextColor(ei::UiTextTone::Link); break;
         }
         QTreeWidgetItem* item = new QTreeWidgetItem(m_validationTree,
             QStringList() << severity << localizedMobFamilyText(finding.category)
@@ -5713,7 +5714,7 @@ void MainWindow::updateMobFamilyValidationPanel()
             const QString severity=error?tr("CRITICAL"):(warning?tr("WARNING"):tr("INFO"));
             auto* item=new QTreeWidgetItem(databaseRoot,
                 QStringList()<<severity<<finding.code<<finding.rowKey<<finding.message);
-            item->setForeground(0,QBrush(error?QColor(220,70,70):warning?QColor(230,160,45):QColor(130,160,190)));
+            item->setForeground(0,QBrush(error?ei::uiTextColor(ei::UiTextTone::Error):warning?ei::uiTextColor(ei::UiTextTone::Warning):ei::uiTextColor(ei::UiTextTone::Link)));
             item->setData(0,kValidationDatabaseTableRole,finding.tableKey);
             item->setData(0,kValidationDatabaseRowRole,finding.rowKey);
             item->setData(0,kValidationCopyRole,finding.message);
@@ -5874,8 +5875,8 @@ void MainWindow::showTransientResultNotification(
 
     m_mapTestResultIcon->setText(failed ? QString::fromUtf8("\xE2\x9C\x95")
                                        : (warned ? "!" : QString::fromUtf8("\xE2\x9C\x93")));
-    m_mapTestResultIcon->setStyleSheet(QString("color: %1;")
-        .arg(failed ? "#ff5c5c" : (warned ? "#ffc547" : "#4bd66f")));
+    m_mapTestResultIcon->setStyleSheet(ei::uiTextStyle(failed ? ei::UiTextTone::Error
+        : (warned ? ei::UiTextTone::Warning : ei::UiTextTone::Success)));
     m_mapTestResultLabel->setText(text);
     m_transientNotificationAction = action;
     m_mapTestResultActionButton->setText(actionText);

@@ -1,3 +1,4 @@
+#include "ui_theme.h"
 #include "minimap_export_dialog.h"
 
 #include <QtWidgets>
@@ -258,7 +259,7 @@ CMinimapExportDialog::CMinimapExportDialog(
         : tr("Complete MPR + MOB capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
     m_summary->setStyleSheet(capture.bake.incomplete
-        ? "QLabel { color: #e6a23c; font-weight: 600; }" : QString());
+        ? ei::uiTextStyle(ei::UiTextTone::Warning) + "font-weight: 600;" : QString());
     contentRoot->addWidget(m_summary);
 
     m_details = new QLabel(tr(
@@ -493,7 +494,7 @@ void CMinimapExportDialog::setCapture(const SMinimapSceneCaptureResult& capture)
         : tr("Complete MPR + MOB capture. Terrain, overlays, and %1 static objects are included; %2 dynamic units were excluded.")
             .arg(capture.staticObjectCount).arg(capture.excludedDynamicUnitCount));
     m_summary->setStyleSheet(capture.bake.incomplete
-        ? "color: #e6a23c; font-weight: 600;" : QString());
+        ? ei::uiTextStyle(ei::UiTextTone::Warning) + "font-weight: 600;" : QString());
     m_details->setText(tr(
         "Review: %1 x %2 (%3 x %4 sectors)\nOutput: %5\nFraming: %6\nOrientation: %7")
         .arg(capture.bake.reviewImage.width()).arg(capture.bake.reviewImage.height())
@@ -534,7 +535,7 @@ void CMinimapExportDialog::applyAndLock()
     updateGradePreview();
     m_lockRequested = true;
     setGenerationLocked(true);
-    m_status->setStyleSheet("color: #2e9d44;");
+    m_status->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Success));
     m_status->setText(tr(
         "This graded minimap is applied and locked. Use Unlock in the viewport minimap to permit regeneration."));
     emit appliedAndLocked();
@@ -601,7 +602,7 @@ void CMinimapExportDialog::setUnavailable(const QString& reason)
     m_gradedImage = QImage();
     m_generatedPreview->setImage(QImage());
     m_embeddedPreview->setImage(QImage());
-    m_summary->setStyleSheet("color: #e6a23c; font-weight: 600;");
+    m_summary->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Warning) + "font-weight: 600;");
     m_summary->setText(reason.isEmpty() ? tr("No map loaded.") : reason);
     m_details->setText(tr("Load an MPR or collection to enable minimap generation and export."));
     for(QSlider* slider : {m_shading, m_saturation, m_contrast,
@@ -760,12 +761,12 @@ void CMinimapExportDialog::exportTexture()
             [request]() { return exportMmpToRes(request); });
     if(!result.success)
     {
-        m_status->setStyleSheet("color: #b00020;");
+        m_status->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Error));
         m_status->setText(tr("%1: %2").arg(result.phase, result.error));
         return;
     }
     m_exportSucceeded = true;
-    m_status->setStyleSheet("color: #2e9d44;");
+    m_status->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Success));
     m_status->setText(tr("Verified %1 %2 in %3. SHA-256: %4%5")
         .arg(result.createdArchive ? tr("new archive containing")
                                    : result.replacedMember ? tr("replacement of")

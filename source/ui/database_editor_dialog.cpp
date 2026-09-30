@@ -169,7 +169,7 @@ public:
         if(role==ChoicesRole)return choicesForColumn(index.column());
         if(role==PaintLinkRole)return !field->referenceTable.isEmpty()||field->resourceReference;
         if(role==FilterTextRole)return filterText(index.row(),*table,*row,rowNumber);
-        if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QColor(35,110,190));
+        if(role==Qt::ForegroundRole&&(!field->referenceTable.isEmpty()||field->resourceReference))return QBrush(QApplication::palette().color(QPalette::Link));
         if(role==Qt::FontRole&&(!field->referenceTable.isEmpty()||field->resourceReference)){QFont font=QApplication::font();font.setUnderline(true);return font;}
         if(role==Qt::ToolTipRole)
         {
@@ -328,7 +328,7 @@ public:
             background.setBlue((background.blue()*82+accent.blue()*18)/100);
         }
         const bool link=index.data(PaintLinkRole).toBool();
-        if(!selected&&link)foreground=QColor(35,110,190);
+        if(!selected&&link)foreground=option.palette.color(QPalette::Link);
         QFont font=option.font;
         if(link)font.setUnderline(true);
         const int alignment=index.column()==0

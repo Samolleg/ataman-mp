@@ -73,7 +73,7 @@ public:
         const QRect imageRect(option.rect.x()+10,option.rect.y()+8,option.rect.width()-20,132);
         const QIcon icon=qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
         if(!icon.isNull()) icon.paint(painter,imageRect);
-        else { painter->setPen(option.palette.color(QPalette::Mid)); painter->drawText(imageRect,Qt::AlignCenter,QStringLiteral("…")); }
+        else { painter->setPen(option.palette.color(option.state&QStyle::State_Selected ? QPalette::HighlightedText : QPalette::Mid)); painter->drawText(imageRect,Qt::AlignCenter,QStringLiteral("…")); }
         painter->setPen(option.state&QStyle::State_Selected ? option.palette.highlightedText().color() : option.palette.text().color());
         const QRect title(option.rect.x()+10,option.rect.y()+146,option.rect.width()-20,20);
         painter->drawText(title,Qt::AlignCenter,option.fontMetrics.elidedText(index.data(Qt::UserRole).toString(),Qt::ElideMiddle,title.width()));
