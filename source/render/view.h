@@ -169,6 +169,7 @@ class CView : public QGLWidget
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
     friend int runObjectHierarchyCheck();
+    friend int runGroupRotationCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
@@ -930,6 +931,10 @@ private:
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
+    QMap<CNode*, QVector3D> m_rotationPositionBackup;
+    QMap<CNode*, QQuaternion> m_rotationOrientationBackup;
+    QVector3D m_rotationPivot;
+    QQuaternion m_rotationDelta;
     QMap<CUnit*, QVector<QVector3D>> m_unitMovementBackup;
     bool m_pendingOperationOwnsPaste;
     bool m_pendingLogicPlacementMacro;

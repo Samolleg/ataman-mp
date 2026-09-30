@@ -161,6 +161,7 @@ public:
 
 private:
     friend int runDatabaseCreationCheck();
+    friend int runGroupRotationCheck();
     friend int runDatabasePreviewCheck();
     bool buildRawObjectSequenceCandidate(const QByteArray& currentProjection,
                                          CMobEditTransaction* transaction,

@@ -79,6 +79,7 @@ public:
     void setPos(QVector3D& pos) {m_position = pos;}
     void setRot(const QVector4D& quat) {m_rotation = QQuaternion(quat);}
     QVector3D getEulerRotation();
+    const QQuaternion& rotation() const { return m_rotation; }
     void move(float x, float y, float z);
     QVector3D& position() {return m_position; }
     QVector3D& drawPosition() {return m_drawPosition;}

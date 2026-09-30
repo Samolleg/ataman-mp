@@ -606,10 +606,9 @@ void CRotateAxis::keyPress(COperation *pOp, EKeyCode key)
         if(!value.isEmpty())
             value.remove(value.length()-1, 1);
         qDebug() << value << endl;
+        m_pView->operationRevert(EOperationAxisType::eRotate);
         if(value.isEmpty())
             break;
-
-        m_pView->operationRevert(EOperationAxisType::eRotate);
         QVector3D rot(0.0f, 0.0f, 0.0f);
         strToOperValue(rot, axis, value);
         m_pView->rotateTo(rot);
@@ -617,8 +616,7 @@ void CRotateAxis::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_Enter:
     {
-        if(!value.isEmpty())
-            m_pView->operationApply(EOperationAxisType::eRotate);
+        m_pView->operationApply(EOperationAxisType::eRotate);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;
         break;

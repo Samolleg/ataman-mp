@@ -1645,6 +1645,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     m_mprModifyTimer = new QTimer;
     connect(m_mprModifyTimer, SIGNAL(timeout()), this, SLOT(checkNewLandVersion()));
     m_operationBackup.clear();
+    m_rotationPositionBackup.clear();
+    m_rotationOrientationBackup.clear();
+    m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     m_selectFrame.reset(new CSelectFrame);
     //qDebug() << format();
@@ -23852,6 +23855,9 @@ bool CView::cancelPendingOperation()
 
     const int trackedObjects = m_operationBackup.size();
     m_operationBackup.clear();
+    m_rotationPositionBackup.clear();
+    m_rotationOrientationBackup.clear();
+    m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
@@ -23999,6 +24005,9 @@ void CView::operationSetBackup(EOperationAxisType operationType)
         return;
 
     m_operationBackup.clear();
+    m_rotationPositionBackup.clear();
+    m_rotationOrientationBackup.clear();
+    m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     const QList<CNode*> candidates = CScene::getInstance()->getMode() == eEditModeLogic
         ? m_activeMob->logicNodes() : m_activeMob->nodes();
@@ -24050,16 +24059,32 @@ void CView::operationSetBackup(EOperationAxisType operationType)
                 m_unitMovementBackup.insert(unit, unit->movementState());
             break;
         case EOperationAxisType::eRotate:
-            m_operationBackup[node] = node->getEulerRotation(); break;
+            m_operationBackup[node] = node->getEulerRotation();
+            m_rotationPositionBackup[node] = node->position();
+            m_rotationOrientationBackup[node] = node->rotation();
+            if(CUnit* unit = dynamic_cast<CUnit*>(node))
+                m_unitMovementBackup.insert(unit, unit->movementState());
+            break;
         case EOperationAxisType::eScale:
             m_operationBackup[node] = node->constitution(); break;
         }
+    }
+    if(operationType == EOperationAxisType::eRotate && !m_rotationPositionBackup.isEmpty())
+    {
+        auto minimum = m_rotationPositionBackup.first();
+        auto maximum = minimum;
+        for(const auto& position : m_rotationPositionBackup)
+            for(int component=0; component<3; ++component)
+            {
+                minimum[component] = qMin(minimum[component], position[component]);
+                maximum[component] = qMax(maximum[component], position[component]);
+            }
+        m_rotationPivot = (minimum+maximum)*0.5f;
     }
 }
 
 void CView::operationRevert(EOperationAxisType operationType)
 {
-    QQuaternion quat;
     if(m_operationBackup.isEmpty())
         return;
 
@@ -24077,14 +24102,23 @@ void CView::operationRevert(EOperationAxisType operationType)
         }
         case EOperationAxisType::eRotate:
         {
-            quat = QQuaternion::fromEulerAngles(pair.second);
-            pair.first->setRot(quat);
+            CUnit* unit = dynamic_cast<CUnit*>(pair.first);
+            if(unit && m_unitMovementBackup.contains(unit))
+                unit->restoreMovementState(m_unitMovementBackup.value(unit));
+            else if(m_rotationPositionBackup.contains(pair.first))
+            {
+                auto position = m_rotationPositionBackup.value(pair.first);
+                pair.first->updatePos(position);
+            }
+            pair.first->setRot(m_rotationOrientationBackup.value(pair.first));
             break;
         }
         case EOperationAxisType::eScale:
             pair.first->setConstitution(pair.second); break;
         }
 
+    if(operationType == EOperationAxisType::eRotate)
+        m_rotationDelta = QQuaternion();
 }
 
 void CView::operationApply(EOperationAxisType operationType)
@@ -24118,7 +24152,6 @@ void CView::operationApply(EOperationAxisType operationType)
         emit loadedMapStateChanged();
     }
 
-    QQuaternion quat;
     QVector3D rot;
     // A paste and its automatically-started placement transform are one user
     // action. Keep the Paste macro open through the transform commands so one
@@ -24229,12 +24262,29 @@ void CView::operationApply(EOperationAxisType operationType)
         }
         case EOperationAxisType::eRotate:
         {
+            auto position = pair.first->position();
             rot = pair.first->getEulerRotation();
+            // Restore the full preview before pushing commands: property history
+            // must capture the original position and unit logic, not the preview.
+            CUnit* unit = dynamic_cast<CUnit*>(pair.first);
+            if(unit && m_unitMovementBackup.contains(unit))
+                unit->restoreMovementState(m_unitMovementBackup.value(unit));
+            else
+            {
+                auto original = m_rotationPositionBackup.value(pair.first);
+                pair.first->updatePos(original);
+            }
+            pair.first->setRot(m_rotationOrientationBackup.value(pair.first));
+            if(position != pair.first->position())
+            {
+                QSharedPointer<IPropertyBase> value(new prop3D(eObjParam_POSITION, position));
+                CChangeProp* move = new CChangeProp(this, pair.first, value);
+                QObject::connect(move, SIGNAL(updateParam()), this, SLOT(viewParameters()));
+                m_pUndoStack->push(move);
+            }
             QSharedPointer<IPropertyBase> rotation (new prop3D(eObjParam_ROTATION, rot));
             CChangeProp* pOp = new CChangeProp(this, pair.first, rotation);
             QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-            quat = QQuaternion::fromEulerAngles(m_operationBackup[pair.first]);
-            pair.first->setRot(quat);
             m_pUndoStack->push(pOp);
             break;
         }
@@ -24257,6 +24307,9 @@ void CView::operationApply(EOperationAxisType operationType)
     if(m_pendingLogicPlacementMacro)
         m_pUndoStack->endMacro();
     m_operationBackup.clear();
+    m_rotationPositionBackup.clear();
+    m_rotationOrientationBackup.clear();
+    m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
@@ -24289,42 +24342,24 @@ void CView::moveTo(QVector3D &dir)
 
 void CView::rotateTo(QVector3D &rot)
 {
-    const float gimbalAvoidStep = 0.001f;
-    QVector3D rotation; //this rotation will be tested
-    QQuaternion quat; //this rotation as quat be applied to object
-    QVector3D eulerRot; // temp variable
-    const auto setNotNan = [&quat, &eulerRot, &gimbalAvoidStep](QVector3D& ch_rot)
+    // Compose world-axis increments, then evaluate from the gesture baseline.
+    // A shared fixed pivot prevents drift and preserves the group's shape.
+    m_rotationDelta = (QQuaternion::fromEulerAngles(rot)*m_rotationDelta).normalized();
+    for(CNode* node : m_operationBackup.keys())
     {
-        for(int i(0); i< 100; ++i)
-        {
-            quat = QQuaternion::fromEulerAngles(ch_rot);
-            eulerRot = quat.toEulerAngles();
-            if(eulerRot.x() != eulerRot.x())
-            {
-                ch_rot.setX(ch_rot.x() + gimbalAvoidStep);
-            }
-            else if(eulerRot.y() != eulerRot.y())
-            {
-                ch_rot.setY(ch_rot.y() + gimbalAvoidStep);
-            }
-            else if(eulerRot.z() != eulerRot.z())
-            {
-                ch_rot.setZ(ch_rot.z() + gimbalAvoidStep);
-            }
-            else
-                return;
-        }
-        return;
-    };
-
-
-    for(auto& node : m_operationBackup.keys())
-    {
-        rotation = node->getEulerRotation() + rot;
-        setNotNan(rotation);
-        node->setRot(quat);
+        if(!m_rotationPositionBackup.contains(node))
+            continue;
+        auto position = m_rotationPositionBackup.value(node);
+        if(m_operationBackup.size() > 1)
+            position = m_rotationPivot + m_rotationDelta.rotatedVector(position-m_rotationPivot);
+        CUnit* unit = dynamic_cast<CUnit*>(node);
+        if(unit && m_unitMovementBackup.contains(unit))
+            unit->restoreMovementState(m_unitMovementBackup.value(unit));
+        if(position != node->position())
+            node->updatePos(position);
+        node->setRot((m_rotationDelta*m_rotationOrientationBackup.value(node)).normalized());
     }
-
+    updateParameter(EObjParam::eObjParam_POSITION);
     updateParameter(EObjParam::eObjParam_ROTATION);
 }
 
