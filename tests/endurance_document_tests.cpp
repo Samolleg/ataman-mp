@@ -16,6 +16,7 @@
 
 #include "endurance_document.h"
 #include "technical_texture_catalog.h"
+#include "technical_model_catalog.h"
 #include "neighbor_scene_data.h"
 #include "ai_graph_document.h"
 #include "ai_graph_persistence.h"
@@ -504,6 +505,7 @@ private slots:
     void modernSaveRoutesThroughPublicationExactlyOnce();
     void unchangedMobIsByteIdentical();
     void technicalTexturesFollowObservedModelsAndProfileRoots();
+    void modelCatalogPersistsNamesBindingsAndScanWithoutRescanning();
     void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
     void mobGraphReplacementAndInsertionAreExact();
@@ -1753,6 +1755,57 @@ void EnduranceDocumentTests::technicalTexturesFollowObservedModelsAndProfileRoot
               installedCatalog.sourceFileCount(), static_cast<long long>(timer.elapsed()),
               static_cast<long long>(longestFileMs));
     }
+}
+
+void EnduranceDocumentTests::modelCatalogPersistsNamesBindingsAndScanWithoutRescanning()
+{
+    QTemporaryDir temp; QVERIFY(temp.isValid());
+    const QString path = temp.filePath("model-catalog.json");
+    QFile mob(temp.filePath("alpha.mob")); QVERIFY(mob.open(QIODevice::WriteOnly));
+    const QByteArray bytes = validMob(section(0xB000, section(0xB001,
+        section(0xB006,"House") + section(0xB007,"stone"))));
+    QCOMPARE(mob.write(bytes),qint64(bytes.size())); mob.close();
+    const QString profile=ei::TechnicalModelCatalog::profileKey({temp.path()});
+    ei::TechnicalTextureCatalog scan; scan.refreshSources({temp.path()});
+    QCOMPARE(scan.pendingFileCount(),1); scan.scanNextFile();
+    ei::TechnicalModelCatalog catalog; QString error;
+    QVERIFY(catalog.load(path,&error)); catalog.registerModels({"House", "Bridge"});
+    catalog.setRussianName("HOUSE.mod",QString::fromUtf8("Каменный дом"));
+    catalog.captureScan(profile,scan); QVERIFY2(catalog.save(&error),qPrintable(error));
+
+    ei::TechnicalModelCatalog restarted; QVERIFY(restarted.load(path,&error));
+    QCOMPARE(restarted.russianName("house"),QString::fromUtf8("Каменный дом"));
+    QVERIFY(ei::TechnicalModelCatalog::matches("house",restarted.russianName("house"),QString::fromUtf8("ДОМ house")));
+    QVERIFY(!ei::TechnicalModelCatalog::matches("house",restarted.russianName("house"),"bridge"));
+    ei::TechnicalTextureCatalog resumed; restarted.restoreScan(profile,&resumed);
+    resumed.refreshSources({temp.path()}); QCOMPARE(resumed.pendingFileCount(),0);
+    auto choices=restarted.textureChoices(profile,"house",{"stone","wood"},resumed);
+    QCOMPARE(choices.size(),1); QCOMPARE(choices.first().name,QStringLiteral("stone"));
+    restarted.bindTexture(profile,"House","wood"); QVERIFY(restarted.save(&error));
+    choices=restarted.textureChoices(profile,"house",{"wood"},resumed);
+    QCOMPARE(choices.size(),1); QCOMPARE(choices.first().name,QStringLiteral("wood"));
+    ei::TechnicalTextureCatalog otherProfile;
+    QVERIFY(restarted.textureChoices("other-profile","house",{"wood"},otherProfile).isEmpty());
+
+    // External JSON edits remain authoritative and unknown user keys survive.
+    QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+    auto json=QJsonDocument::fromJson(file.readAll()).object(); file.close();
+    json.insert("userNote",QStringLiteral("keep"));
+    auto profiles=json.value("profiles").toObject(); auto entry=profiles.value(profile).toObject();
+    auto bindings=entry.value("modelTextures").toObject(); bindings.insert("house",QJsonArray{"wood"});
+    entry.insert("modelTextures",bindings); profiles.insert(profile,entry); json.insert("profiles",profiles);
+    QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate)); file.write(QJsonDocument(json).toJson()); file.close();
+    QVERIFY(!restarted.save(&error)); QVERIFY(!error.isEmpty());
+    QVERIFY(restarted.load(path,&error)); restarted.captureScan(profile,resumed);
+    QVERIFY(restarted.save(&error)); choices=restarted.textureChoices(profile,"house",{"wood","stone"},resumed);
+    QCOMPARE(choices.size(),1); QCOMPARE(choices.first().name,QStringLiteral("wood"));
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("userNote").toString(),QStringLiteral("keep")); file.close();
+    // Cache reuses unchanged files, but a changed source needs exactly one read.
+    QVERIFY(mob.open(QIODevice::WriteOnly|QIODevice::Append)); mob.write("changed"); mob.close();
+    resumed.refreshSources({temp.path()}); QCOMPARE(resumed.pendingFileCount(),1);
+    QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate)); file.write("broken-json"); file.close();
+    QVERIFY(!restarted.load(path,&error)); QVERIFY(!restarted.save(&error));
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),QByteArray("broken-json"));
 }
 
 void EnduranceDocumentTests::authoredZeroNidCanOpenAndSaveLosslessly()

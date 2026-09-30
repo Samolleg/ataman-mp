@@ -11,7 +11,29 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `80`. Each separate fix advances the integer version.
+Current Ataman version: `81`. Each separate fix advances the integer version.
+
+Technical objects have a model gallery with lazy previews and search by model ID
+or editable Russian name. `model-catalog.json` next to the executable is user
+data: `models` stores Russian names, `profiles` stores per-profile `modelTextures`
+bindings and `scanCache`. Unchanged MOBs reuse their saved metadata and pairs
+after restarting; Russian names and texture bindings survive program updates.
+Open **Create object → Technical objects → Choose model from gallery**. Select a
+tile, edit its Russian name and press **Save name**. Texture choices begin with
+the model's bindings; **Bind texture** adds an installed texture. Double-click a
+tile or press **Choose model** to apply its technical ID and selected texture.
+Russian names start empty, and do not rename model resources or MOB objects.
+For a manual JSON edit, use `models.<model-id>.russianName` and the ordered
+`profiles.<profile-key>.modelTextures.<model-id>` array. Keep `schemaVersion: 1`;
+the profile key identifies ordered map roots. Reopen the gallery to load edits.
+Open **Create object → Technical objects → Choose model from gallery**. Select a
+tile, edit its Russian name and press **Save name**. Texture choices begin with
+the model's bindings; **Bind texture** adds an installed texture. Double-click a
+tile or press **Choose model** to apply its technical ID and selected texture.
+Russian names start empty, and do not rename model resources or MOB objects.
+For a manual JSON edit, use `models.<model-id>.russianName` and the ordered
+`profiles.<profile-key>.modelTextures.<model-id>` array. Keep `schemaVersion: 1`;
+the profile key identifies ordered map roots. Reopen the gallery to load edits.
 
 Portable DejaVu: choose the package root containing `Engine`, `Base`, and `MODS`
 in Game and mod setup, then the DejaVu profile. The editor loads the selected

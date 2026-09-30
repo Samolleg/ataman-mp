@@ -556,6 +556,26 @@ Choose a primary texture in Advanced properties before placing.</source>
         <source>Choose an installed primary texture for this model before creating the object.</source>
         <translation>Перед созданием объекта выберите доступную основную текстуру для этой модели.</translation>
     </message>
+    <message>
+        <source>Choose model from gallery…</source>
+        <translation>Выбрать модель из витрины…</translation>
+    </message>
+    <message>
+        <source>Model gallery: %1</source>
+        <translation>Витрина моделей: %1</translation>
+    </message>
+    <message>
+        <source>Textures bound to this model</source>
+        <translation>Текстуры, привязанные к этой модели</translation>
+    </message>
+    <message>
+        <source>Stored model texture binding</source>
+        <translation>Сохранённая связь модели и текстуры</translation>
+    </message>
+    <message>
+        <source>%1 texture binding(s) available from the model catalog.</source>
+        <translation>Для этой модели доступно текстур из каталога: %1.</translation>
+    </message>
 </context>
     <context>
         <name>CJmvMapTestLauncher</name>
@@ -16960,6 +16980,80 @@ Conditions: %5</source>
     <message>
         <source>Participant changed since analysis. Refresh the family and select the reference again.</source>
         <translation>Участник изменился после анализа. Обновите семейство и снова выберите обращение.</translation>
+    </message>
+</context>
+<context>
+    <name>CModelGallery</name>
+    <message>
+        <source>Model gallery</source>
+        <translation>Витрина моделей</translation>
+    </message>
+    <message>
+        <source>Search by model ID or Russian name</source>
+        <translation>Поиск по имени модели или русскому названию</translation>
+    </message>
+    <message>
+        <source>Russian name:</source>
+        <translation>Русское название:</translation>
+    </message>
+    <message>
+        <source>Enter a recognizable name</source>
+        <translation>Введите понятное название</translation>
+    </message>
+    <message>
+        <source>Save name</source>
+        <translation>Сохранить название</translation>
+    </message>
+    <message>
+        <source>Primary texture:</source>
+        <translation>Основная текстура:</translation>
+    </message>
+    <message>
+        <source>Bind texture</source>
+        <translation>Привязать текстуру</translation>
+    </message>
+    <message>
+        <source>Choose model</source>
+        <translation>Выбрать модель</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Russian name not set</source>
+        <translation>Русское название не задано</translation>
+    </message>
+    <message>
+        <source>%1 model(s). Names and texture bindings: %2</source>
+        <translation>Моделей: %1. Названия и связи с текстурами: %2</translation>
+    </message>
+    <message>
+        <source>Saved to %1</source>
+        <translation>Сохранено в %1</translation>
+    </message>
+    <message>
+        <source>Preview unavailable</source>
+        <translation>Превью недоступно</translation>
+    </message>
+</context>
+<context>
+    <name>TechnicalModelCatalog</name>
+    <message>
+        <source>Cannot read model catalog: %1</source>
+        <translation>Не удалось прочитать каталог моделей: %1</translation>
+    </message>
+    <message>
+        <source>Invalid model catalog. The existing file was preserved: %1</source>
+        <translation>Некорректный каталог моделей. Существующий файл сохранён без изменений: %1</translation>
+    </message>
+    <message>
+        <source>Model catalog changed outside this window. Reopen the gallery before saving.</source>
+        <translation>Каталог изменён вне этого окна. Перед сохранением откройте витрину заново.</translation>
+    </message>
+    <message>
+        <source>Cannot save model catalog: %1</source>
+        <translation>Не удалось сохранить каталог моделей: %1</translation>
     </message>
 </context>
 </TS>

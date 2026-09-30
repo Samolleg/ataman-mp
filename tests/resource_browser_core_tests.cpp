@@ -3,6 +3,7 @@
 #include "res_archive_index.h"
 #include "resource_catalog.h"
 #include "resource_model_preview.h"
+#include "model_gallery_thumbnail.h"
 #include "mmp_inspector.h"
 
 #include <QCryptographicHash>
@@ -70,6 +71,8 @@ class ResourceBrowserCoreTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void galleryThumbnailRendersTextureAndBoundsSafely();
+    void galleryThumbnailReadOnlyModelProbe();
     void fileIndexIsMetadataOnlyAndReadsLazily();
     void sparse765MiBArchiveIndexesWithoutPayloadRead();
     void staleArchiveRejectsLazyRead();
@@ -91,6 +94,29 @@ private slots:
     void transactionRejectsCaseAndCp1251Collisions();
     void representativeArchivesIndexReadOnly();
 };
+
+void ResourceBrowserCoreTests::galleryThumbnailRendersTextureAndBoundsSafely()
+{
+    ei::SResourceModelScene scene; scene.valid=true;
+    ei::SResourceModelPart part; part.name="building";
+    ei::SResourceModelTriangle triangle;
+    triangle.vertices[0].position=QVector3D(-1,0,0);
+    triangle.vertices[1].position=QVector3D(1,0,0);
+    triangle.vertices[2].position=QVector3D(0,0,2);
+    for(auto& vertex:triangle.vertices) vertex.uv=QVector2D(0.25f,0.25f);
+    part.triangles.append(triangle); scene.parts.append(part);
+    QImage texture(4,4,QImage::Format_ARGB32); texture.fill(QColor(255,0,0));
+    const QImage image=ei::renderModelGalleryThumbnail(scene,texture,"building",1,QSize(192,132));
+    QCOMPARE(image.size(),QSize(192,132)); int red=0;
+    for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x)
+        if(qRed(image.pixel(x,y))>100 && qGreen(image.pixel(x,y))==0) ++red;
+    QVERIFY(red>100); QVERIFY(red<image.width()*image.height());
+    texture.fill(Qt::transparent);
+    const QImage transparent=ei::renderModelGalleryThumbnail(scene,texture,"building");
+    QCOMPARE(transparent.pixel(96,66),qRgb(48,51,56));
+    QVERIFY(ei::renderModelGalleryThumbnail({},texture,"missing").isNull());
+    QCOMPARE(ei::renderModelGalleryThumbnail(scene,{},"building",1,QSize(9999,9999)).size(),QSize(512,512));
+}
 
 void ResourceBrowserCoreTests::fileIndexIsMetadataOnlyAndReadsLazily()
 {
@@ -453,6 +479,33 @@ void ResourceBrowserCoreTests::transactionRejectsCaseAndCp1251Collisions()
     error.clear();
     QVERIFY(!transaction.add(QString::fromUtf8("日本語.txt"), "two", 0, &error));
     QVERIFY(error.contains("CP1251", Qt::CaseInsensitive));
+}
+
+void ResourceBrowserCoreTests::galleryThumbnailReadOnlyModelProbe()
+{
+    const QString paths = qEnvironmentVariable("EI_GALLERY_PROBE_ARCHIVES");
+    if(paths.isEmpty()) QSKIP("No read-only model probe archives configured.");
+    CResourceCatalog catalog;
+    QStringList errors;
+    QVERIFY2(catalog.build(paths.split(';').toVector(), &errors), qPrintable(errors.join('\n')));
+    const auto read = [&catalog](const QString& name) {
+        const auto entries = catalog.providers(name);
+        return entries.isEmpty() ? QByteArray() : catalog.archive(entries.first().archivePriority)->readMember(entries.first().memberIndex);
+    };
+    const QString model = qEnvironmentVariable("EI_GALLERY_PROBE_MODEL", "stbuho45");
+    const auto scene = ei::buildModScene(read(model + ".mod"), read(model + ".bon"));
+    QVERIFY2(scene.valid, qPrintable(scene.diagnostics.join('\n')));
+    const auto texture = ei::inspectMmp(read(qEnvironmentVariable("EI_GALLERY_PROBE_TEXTURE", "hadoganveranda00") + ".mmp"));
+    QVERIFY2(texture.valid, qPrintable(texture.diagnostic));
+    const QImage image = ei::renderModelGalleryThumbnail(scene, texture.baseImage, model);
+    QVERIFY(!image.isNull());
+    int pixels = 0;
+    for(int y=0; y<image.height(); ++y) for(int x=0; x<image.width(); ++x)
+        if(image.pixel(x,y) != qRgb(48,51,56)) ++pixels;
+    QVERIFY(pixels > 100);
+    const QString output = qEnvironmentVariable("EI_GALLERY_PROBE_OUTPUT");
+    if(!output.isEmpty()) QVERIFY(image.save(output));
+    qInfo() << "read-only model thumbnail" << model << "parts" << scene.parts.size() << "paintedPixels" << pixels;
 }
 
 void ResourceBrowserCoreTests::representativeArchivesIndexReadOnly()

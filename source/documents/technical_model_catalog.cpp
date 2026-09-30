@@ -1,0 +1,150 @@
+#include "technical_model_catalog.h"
+#include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QSaveFile>
+#include <QSet>
+
+namespace ei {
+QString TechnicalModelCatalog::modelKey(QString name)
+{
+    name = name.trimmed().toLower();
+    if(name.endsWith(".mod") || name.endsWith(".fig")) name.chop(4);
+    return name;
+}
+QString TechnicalModelCatalog::profileKey(const QStringList& roots)
+{
+    QStringList normalized;
+    for(const QString& root : roots)
+        normalized.append(QDir::cleanPath(QFileInfo(root).absoluteFilePath()).replace('\\', '/').toLower());
+    return QString::fromLatin1(QCryptographicHash::hash(normalized.join('\n').toUtf8(),
+        QCryptographicHash::Sha256).toHex());
+}
+bool TechnicalModelCatalog::load(const QString& path, QString* error)
+{
+    m_path = path; m_valid = false; m_original.clear(); m_document = {};
+    m_existed = QFileInfo::exists(path);
+    if(!m_existed)
+    {
+        m_document.insert("schemaVersion", 1); m_valid = true; return true;
+    }
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly) || file.size() > 32 * 1024 * 1024)
+    {
+        if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Cannot read model catalog: %1").arg(path);
+        return false;
+    }
+    m_original = file.readAll();
+    QJsonParseError parse;
+    const QJsonDocument document = QJsonDocument::fromJson(m_original, &parse);
+    if(parse.error != QJsonParseError::NoError || !document.isObject()
+        || document.object().value("schemaVersion").toInt() != 1
+        || (document.object().contains("models") && !document.object().value("models").isObject())
+        || (document.object().contains("profiles") && !document.object().value("profiles").isObject()))
+    {
+        if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Invalid model catalog. The existing file was preserved: %1").arg(path);
+        return false;
+    }
+    m_document = document.object(); m_valid = true; return true;
+}
+bool TechnicalModelCatalog::save(QString* error)
+{
+    if(!m_valid) return false;
+    QFile current(m_path);
+    const bool exists = QFileInfo::exists(m_path);
+    if(exists != m_existed || (exists && (!current.open(QIODevice::ReadOnly)
+        || current.readAll() != m_original)))
+    {
+        if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Model catalog changed outside this window. Reopen the gallery before saving.");
+        return false;
+    }
+    current.close();
+    const QByteArray bytes = QJsonDocument(m_document).toJson(QJsonDocument::Indented);
+    if(m_existed && bytes == m_original) return true;
+    QSaveFile file(m_path);
+    if(!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+    {
+        if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Cannot save model catalog: %1").arg(file.errorString());
+        return false;
+    }
+    m_original = bytes; m_existed = true; return true;
+}
+QString TechnicalModelCatalog::russianName(const QString& model) const
+{
+    return m_document.value("models").toObject().value(modelKey(model)).toObject().value("russianName").toString();
+}
+void TechnicalModelCatalog::setRussianName(const QString& model, const QString& name)
+{
+    QJsonObject models = m_document.value("models").toObject();
+    QJsonObject entry = models.value(modelKey(model)).toObject();
+    entry.insert("russianName", name.trimmed()); models.insert(modelKey(model), entry);
+    m_document.insert("models", models);
+}
+void TechnicalModelCatalog::registerModels(const QStringList& names)
+{
+    QJsonObject models = m_document.value("models").toObject();
+    for(const QString& name : names)
+        if(!models.contains(modelKey(name))) models.insert(modelKey(name), QJsonObject{{"russianName", ""}});
+    m_document.insert("models", models);
+}
+bool TechnicalModelCatalog::matches(const QString& model, const QString& name, const QString& query)
+{
+    const QStringList words = query.simplified().split(' ', QString::SkipEmptyParts);
+    const QString text = model + ' ' + name;
+    for(const QString& word : words) if(!text.contains(word, Qt::CaseInsensitive)) return false;
+    return true;
+}
+void TechnicalModelCatalog::restoreScan(const QString& profile, TechnicalTextureCatalog* scan) const
+{
+    scan->restoreCache(m_document.value("profiles").toObject().value(profile).toObject().value("scanCache").toObject());
+}
+void TechnicalModelCatalog::captureScan(const QString& profile, const TechnicalTextureCatalog& scan)
+{
+    QJsonObject profiles = m_document.value("profiles").toObject();
+    QJsonObject entry = profiles.value(profile).toObject();
+    entry.insert("scanCache", scan.saveCache());
+    QJsonObject textures = entry.value("modelTextures").toObject();
+    const auto observed = scan.observedModelTextures();
+    for(auto model = observed.constBegin(); model != observed.constEnd(); ++model)
+        if(!textures.contains(model.key())) textures.insert(model.key(), QJsonArray::fromStringList(model.value()));
+    entry.insert("modelTextures", textures); profiles.insert(profile, entry); m_document.insert("profiles", profiles);
+}
+QVector<STechnicalTextureChoice> TechnicalModelCatalog::textureChoices(const QString& profile,
+    const QString& model, const QStringList& available, const TechnicalTextureCatalog& scan) const
+{
+    const QJsonObject bindings = m_document.value("profiles").toObject().value(profile).toObject().value("modelTextures").toObject();
+    const QString key = modelKey(model);
+    if(!bindings.contains(key)) return scan.exactChoices(model, available);
+    QVector<STechnicalTextureChoice> result;
+    QSet<QString> added;
+    for(const QJsonValue& value : bindings.value(key).toArray())
+        for(const QString& installed : available)
+        {
+            QString wanted = value.toString().trimmed();
+            if(wanted.endsWith(".mmp", Qt::CaseInsensitive)) wanted.chop(4);
+            if(wanted.compare(installed, Qt::CaseInsensitive) == 0 && !added.contains(installed.toLower()))
+            {
+                STechnicalTextureChoice choice; choice.name = installed;
+                result.append(choice); added.insert(installed.toLower()); break;
+            }
+        }
+    return result;
+}
+void TechnicalModelCatalog::bindTexture(const QString& profile, const QString& model, const QString& texture)
+{
+    QJsonObject profiles = m_document.value("profiles").toObject();
+    QJsonObject entry = profiles.value(profile).toObject();
+    QJsonObject bindings = entry.value("modelTextures").toObject();
+    QJsonArray names = bindings.value(modelKey(model)).toArray();
+    bool exists = false;
+    for(const auto& name : names) if(name.toString().compare(texture, Qt::CaseInsensitive) == 0) exists = true;
+    if(!exists) names.append(texture);
+    bindings.insert(modelKey(model), names); entry.insert("modelTextures", bindings);
+    profiles.insert(profile, entry); m_document.insert("profiles", profiles);
+}
+}

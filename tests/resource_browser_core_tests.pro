@@ -10,6 +10,7 @@ SOURCES += \
     ../source/resources/res_archive_index.cpp \
     ../source/resources/resource_catalog.cpp \
     ../source/resources/resource_model_preview.cpp \
+    ../source/resources/model_gallery_thumbnail.cpp \
     ../source/runtime/unit_animation.cpp \
     ../source/runtime/persistent_visual_cache.cpp \
     ../source/resources/mmp_inspector.cpp \

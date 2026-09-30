@@ -5,6 +5,8 @@
 #include <QHash>
 #include <QStringList>
 #include <QVector>
+#include <QJsonObject>
+#include <QMap>
 
 namespace ei {
 
@@ -26,6 +28,9 @@ public:
     int sourceFileCount() const { return m_sources.size(); }
     int failedFileCount() const;
     void scanNextFile();
+    QJsonObject saveCache() const;
+    void restoreCache(const QJsonObject& cache);
+    QMap<QString, QStringList> observedModelTextures() const;
     QVector<STechnicalTextureChoice> exactChoices(const QString& model,
                                                    const QStringList& available) const;
 

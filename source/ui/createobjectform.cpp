@@ -31,6 +31,14 @@
 #include "settings.h"
 #include <QCompleter>
 #include <QStandardItemModel>
+#include <QPushButton>
+#include <QCoreApplication>
+#include <QDir>
+#include <QStyle>
+#include "model_gallery.h"
+#include "model_gallery_thumbnail.h"
+#include "resource_catalog.h"
+#include "resource_name.h"
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -101,6 +109,11 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     ui->verticalLayout_2->insertWidget(6, m_technicalTextureLabel);
     ui->verticalLayout_2->insertWidget(7, m_technicalTexture);
     ui->verticalLayout_2->insertWidget(8, m_technicalTextureStatus);
+    m_modelGalleryButton = new QPushButton(tr("Choose model from gallery…"), this);
+    m_modelGalleryButton->setObjectName("technicalModelGallery");
+    m_modelGalleryButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    ui->verticalLayout_2->insertWidget(6, m_modelGalleryButton);
+    connect(m_modelGalleryButton, &QPushButton::clicked, this, &CCreateObjectForm::openModelGallery);
     connect(m_technicalTexture, QOverload<int>::of(&QComboBox::activated),
             this, [this](int) { applyTechnicalTextureChoice(); });
     connect(m_technicalTexture->lineEdit(), &QLineEdit::editingFinished,
@@ -521,15 +534,24 @@ void CCreateObjectForm::filterDatabase()
     m_technicalTextureLabel->setVisible(technicalMode);
     m_technicalTexture->setVisible(technicalMode);
     m_technicalTextureStatus->setVisible(technicalMode);
+    m_modelGalleryButton->setVisible(technicalMode);
     if(technicalMode && m_pView)
     {
+        m_technicalTextureScan.stop();
         QStringList roots;
         if(auto* option = dynamic_cast<COptStringList*>(
                m_pView->settings()->opt(eOptSetResource, "mapRoots")))
             roots = option->value().toList();
+        m_modelCatalogProfile = ei::TechnicalModelCatalog::profileKey(roots);
+        m_modelCatalogError.clear();
+        m_modelCatalog.load(QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), &m_modelCatalogError);
+        m_modelCatalog.registerModels(CObjectList::getInstance()->figureList());
+        m_modelCatalog.restoreScan(m_modelCatalogProfile, &m_technicalTextures);
         m_technicalTextures.refreshSources(roots);
         if(m_technicalTextures.hasPendingFiles())
             m_technicalTextureScan.start();
+        else
+            saveTechnicalCatalog();
     }
     else
         m_technicalTextureScan.stop();
@@ -573,6 +595,7 @@ void CCreateObjectForm::scanTechnicalTextureFile()
     if(!m_technicalTextures.hasPendingFiles())
     {
         m_technicalTextureScan.stop();
+        saveTechnicalCatalog();
         refreshTechnicalTextureChoices();
     }
     else if(m_technicalTextures.pendingFileCount() % 20 == 0)
@@ -591,6 +614,7 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     m_technicalTextureLabel->setVisible(supportsTexture);
     m_technicalTexture->setVisible(supportsTexture);
     m_technicalTextureStatus->setVisible(supportsTexture);
+    m_modelGalleryButton->setVisible(supportsTexture);
     if(!supportsTexture)
         return;
 
@@ -599,20 +623,23 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     QStringList available = CTextureList::getInstance()->textureList();
     available.removeDuplicates();
     available.sort(Qt::CaseInsensitive);
-    const auto exact = m_technicalTextures.exactChoices(model, available);
+    const auto exact = m_modelCatalog.textureChoices(m_modelCatalogProfile, model, available, m_technicalTextures);
+    const QString russian = m_modelCatalog.russianName(model);
+    m_modelGalleryButton->setText(russian.isEmpty() ? tr("Choose model from gallery…")
+        : tr("Model gallery: %1").arg(russian));
     const QSignalBlocker blocker(m_technicalTexture);
     m_rebuildingTextureChoices = true;
     m_technicalTexture->clear();
     QSet<QString> exactNames;
     if(!exact.isEmpty())
     {
-        m_technicalTexture->addItem(tr("Used with this model in MOB maps"));
+        m_technicalTexture->addItem(tr("Textures bound to this model"));
         static_cast<QStandardItemModel*>(m_technicalTexture->model())->item(0)->setEnabled(false);
         for(const auto& choice : exact)
         {
             m_technicalTexture->addItem(choice.name, choice.name);
             m_technicalTexture->setItemData(m_technicalTexture->count() - 1,
-                tr("Seen %1 times with this model").arg(choice.observedCount), Qt::ToolTipRole);
+                tr("Stored model texture binding"), Qt::ToolTipRole);
             exactNames.insert(choice.name.toLower());
         }
         m_technicalTexture->insertSeparator(m_technicalTexture->count());
@@ -656,13 +683,14 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     else if(exact.isEmpty())
         status = tr("No installed texture was found paired with this model. Choose from all installed textures.");
     else
-        status = tr("%1 texture variant(s) found for this model in MOB maps.").arg(exact.size());
+        status = tr("%1 texture binding(s) available from the model catalog.").arg(exact.size());
     if(m_technicalTextures.hasPendingFiles())
         status += tr(" Scanning maps: %1 of %2 complete.")
             .arg(m_technicalTextures.sourceFileCount() - m_technicalTextures.pendingFileCount())
             .arg(m_technicalTextures.sourceFileCount());
     if(m_technicalTextures.failedFileCount())
         status += tr(" %1 MOB file(s) could not be read.").arg(m_technicalTextures.failedFileCount());
+    if(!m_modelCatalogError.isEmpty()) status += "\n" + m_modelCatalogError;
     m_technicalTextureStatus->setText(status);
 }
 
@@ -688,8 +716,70 @@ void CCreateObjectForm::applyTechnicalTextureChoice()
     {
         m_pNode->applyParam(QSharedPointer<IPropertyBase>(
             new propStr(eObjParam_PRIM_TXTR, selected)));
+        m_modelCatalog.bindTexture(m_modelCatalogProfile, m_pNode->modelName(), selected);
+        m_modelCatalog.save(&m_modelCatalogError);
         updateTable();
     }
+}
+
+void CCreateObjectForm::saveTechnicalCatalog()
+{
+    m_modelCatalog.captureScan(m_modelCatalogProfile, m_technicalTextures);
+    if(m_modelCatalog.save(&m_modelCatalogError)) m_modelCatalogError.clear();
+}
+
+void CCreateObjectForm::openModelGallery()
+{
+    if(m_databaseMode || !m_pNode || !m_pView) return;
+    m_modelCatalogError.clear();
+    m_modelCatalog.load(QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), &m_modelCatalogError);
+    const QStringList models = CObjectList::getInstance()->figureList();
+    m_modelCatalog.registerModels(models);
+    m_modelCatalog.save(&m_modelCatalogError);
+    // A serial worker owns archive indexes and CPU payloads; it never touches
+    // viewport nodes, GL contexts or the singleton visual caches.
+    struct PreviewSources { CResourceCatalog catalog; bool indexed = false; QVector<QString> paths; };
+    QSharedPointer<PreviewSources> sources(new PreviewSources);
+    sources->paths = configuredResourceSourcePaths(m_pView->settings()).toVector();
+    auto provider = [sources](const QString& model, const QString& texture) -> QImage {
+        if(!sources->indexed) { sources->catalog.build(sources->paths); sources->indexed = true; }
+        const auto read = [sources](const QString& name) -> QByteArray {
+            const auto entries = sources->catalog.providers(name);
+              if(entries.isEmpty() || entries.first().size > 64 * 1024 * 1024) return {};
+            const auto* archive = sources->catalog.archive(entries.first().archivePriority);
+            return archive ? archive->readMember(entries.first().memberIndex) : QByteArray();
+        };
+        const QString stem = ei::TechnicalModelCatalog::modelKey(model);
+        QByteArray payload = read(stem + ".mod");
+        const ei::SResourceModelScene scene = payload.isEmpty()
+            ? ei::buildFig8Scene(read(stem + ".fig")) : ei::buildModScene(payload, read(stem + ".bon"));
+        QImage image;
+        if(!texture.isEmpty()) for(const QString& candidate : ei::textureResourceCandidates(texture, stem))
+        {
+            const QByteArray bytes = read(candidate);
+            if(bytes.isEmpty()) continue;
+            image = CTextureList::prepareStaticTexture(bytes).image; break;
+        }
+        float minU=0,maxU=0,minV=0,maxV=0;
+        for(const auto& part:scene.parts) for(const auto& triangle:part.triangles) for(const auto& vertex:triangle.vertices)
+        { minU=qMin(minU,vertex.uv.x());maxU=qMax(maxU,vertex.uv.x());minV=qMin(minV,vertex.uv.y());maxV=qMax(maxV,vertex.uv.y()); }
+        return ei::renderModelGalleryThumbnail(scene,image,stem,
+            ei::textureUvScaleForBounds(texture,minU,maxU,minV,maxV));
+    };
+    QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
+    CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this);
+    gallery.setCurrentModel(m_pNode->modelName());
+    if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
+    {
+        onParamChange(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,gallery.selectedModel())));
+        if(textures.contains(gallery.selectedTexture(),Qt::CaseInsensitive))
+        {
+            onParamChange(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,gallery.selectedTexture())));
+            m_modelCatalog.bindTexture(m_modelCatalogProfile,gallery.selectedModel(),gallery.selectedTexture());
+            m_modelCatalog.save(&m_modelCatalogError);
+        }
+    }
+    refreshTechnicalTextureChoices();
 }
 
 void CCreateObjectForm::selectDatabaseEntry()

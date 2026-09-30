@@ -1,5 +1,6 @@
 #include "main_window.h"
 #include "database_creation_check.h"
+#include "model_gallery_check.h"
 #include "scenario_layer_check.h"
 #include <QApplication>
 #include <QOffscreenSurface>
@@ -521,6 +522,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption modelGalleryCheckOption("model-gallery-check", "Run non-interactive model gallery and catalog checks.");
     QCommandLineOption textureLifetimeCheckOption("texture-lifetime-check",
         "Verify composed character textures survive resource refresh with a live scene object.");
     QCommandLineOption scenarioCheckOption("scenario-layer-check", "Run synthetic read-only scenario integration checks.");
@@ -555,6 +557,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(modelGalleryCheckOption);
     parser.addOption(textureLifetimeCheckOption);
     parser.addOption(scenarioCheckOption);
     parser.addOption(databaseCreationCheckOption);
@@ -606,18 +609,19 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool modelGalleryCheck = parser.isSet(modelGalleryCheckOption);
     const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
     const bool scenarioCheck = parser.isSet(scenarioCheckOption);
     const bool databasePreviewCheck = parser.isSet(databasePreviewCheckOption);
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !modelGalleryCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
-            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
+            + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) > 1)
     {
@@ -627,6 +631,13 @@ int runHeadlessCommand(QApplication& app)
 
     if(databasePreviewCheck) return runDatabasePreviewCheck();
     if(databaseCreationCheck) return runDatabaseCreationCheck();
+    if(modelGalleryCheck)
+    {
+        QString diagnostic;
+        const bool passed = runModelGalleryWidgetCheck(&diagnostic);
+        QTextStream(stdout) << "Model gallery: " << diagnostic << "\n";
+        return passed ? 0 : 1;
+    }
     if(scenarioCheck) return runScenarioLayerCheck();
 
     if(textureLifetimeCheck)
@@ -3207,10 +3218,13 @@ int runHeadlessCommand(QApplication& app)
             "createObjectToolbarButton","mobScriptToolbarButton"};
         for(const auto& name:toolbarNames) {
             auto* button=productionWindow->findChild<QToolButton*>(name);
-            compactToolbarWorks=compactToolbarWorks && button && !button->icon().isNull()
+            const bool validButton=button && !button->icon().isNull()
                 && button->toolButtonStyle()==Qt::ToolButtonIconOnly && button->size()==QSize(60,60)
                 && button->iconSize()==QSize(44,44)
                 && !button->toolTip().isEmpty() && !button->accessibleName().isEmpty();
+            if(!validButton) QTextStream(stderr) << "Toolbar probe failed: " << name
+                << " size=" << (button ? QString::number(button->width())+'x'+QString::number(button->height()) : QStringLiteral("missing")) << "\n";
+            compactToolbarWorks=compactToolbarWorks && validButton;
         }
         auto* groundButton=productionWindow->findChild<QToolButton*>("groundPaintToolbarButton");
         auto* sculptButton=productionWindow->findChild<QToolButton*>("tileBrushButton");
@@ -3273,7 +3287,10 @@ int runHeadlessCommand(QApplication& app)
         const bool expandedWorkingTileSelectionRejected =
             !tileForm.selectTile(1393);
 
-        const bool passed = firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        QString modelGalleryDiagnostic;
+        const bool modelGalleryWorks = runModelGalleryWidgetCheck(&modelGalleryDiagnostic);
+        QTextStream(stderr) << "Model gallery: " << modelGalleryDiagnostic << "\n";
+        const bool passed = modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -3443,6 +3460,7 @@ int runHeadlessCommand(QApplication& app)
                << " databasePrototypeMenuEmissionWorks="
                << databasePrototypeMenuEmissionWorks
                << " firstRunSetupCancelled=" << firstRunSetupCancelled
+               << " modelGalleryWorks=" << modelGalleryWorks
                << " travelEditorProductionRouteWorks=" << travelEditorProductionRouteWorks
                << " terrainBaselineAnimationWorks=" << terrainBaselineAnimationWorks
                << " patrolAuthoringWorks=" << patrolAuthoringWorks

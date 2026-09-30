@@ -9,6 +9,7 @@
 #include "database_map_catalog.h"
 #include "item_spell_constructor.h"
 #include "technical_texture_catalog.h"
+#include "technical_model_catalog.h"
 #include <QTimer>
 
 namespace Ui {
@@ -23,6 +24,7 @@ class QLineEdit;
 class QListWidget;
 class QLabel;
 class QCheckBox;
+class QPushButton;
 
 ///
 /// \brief The CCreateObjectForm class provides a form for creating a new object in the scene
@@ -62,6 +64,8 @@ private:
     void refreshTechnicalTextureChoices();
     void scanTechnicalTextureFile();
     void applyTechnicalTextureChoice();
+    void openModelGallery();
+    void saveTechnicalCatalog();
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -88,6 +92,10 @@ private:
     QTimer m_technicalTextureScan;
     bool m_autoPickExactTexture{false};
     bool m_rebuildingTextureChoices{false};
+    QPushButton* m_modelGalleryButton{nullptr};
+    ei::TechnicalModelCatalog m_modelCatalog;
+    QString m_modelCatalogProfile;
+    QString m_modelCatalogError;
 };
 
 #endif // CREATEOBJECTFORM_H

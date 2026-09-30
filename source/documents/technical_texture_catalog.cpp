@@ -5,6 +5,7 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QSet>
+#include <QJsonArray>
 #include <algorithm>
 
 namespace ei {
@@ -19,6 +20,79 @@ QString normalizedName(QString value, const QString& extension)
 }
 
 } // namespace
+
+QJsonObject TechnicalTextureCatalog::saveCache() const
+{
+    QJsonArray files;
+    for(const SourceFile& source : m_sources)
+    {
+        const auto found = m_results.constFind(source.path);
+        if(found == m_results.constEnd()) continue;
+        QJsonObject pairs;
+        for(auto model = found->pairs.constBegin(); model != found->pairs.constEnd(); ++model)
+        {
+            QJsonObject textures;
+            for(auto texture = model->constBegin(); texture != model->constEnd(); ++texture)
+                textures.insert(texture.key(), texture.value());
+            pairs.insert(model.key(), textures);
+        }
+        files.append(QJsonObject{{"path", source.path}, {"size", QString::number(source.size)},
+            {"modified", QString::number(source.modified.toMSecsSinceEpoch())},
+            {"loaded", found->loaded}, {"pairs", pairs}});
+    }
+    return QJsonObject{{"files", files}};
+}
+
+void TechnicalTextureCatalog::restoreCache(const QJsonObject& cache)
+{
+    m_results.clear(); m_pending.clear(); m_sources.clear();
+    const QJsonArray files = cache.value("files").toArray();
+    if(files.size() > 20000) return;
+    for(const QJsonValue& value : files)
+    {
+        const QJsonObject file = value.toObject();
+        FileResult result;
+        result.source.path = file.value("path").toString();
+        bool sizeOk = false, timeOk = false;
+        result.source.size = file.value("size").toString().toLongLong(&sizeOk);
+        const qint64 modified = file.value("modified").toString().toLongLong(&timeOk);
+        if(result.source.path.isEmpty() || !sizeOk || !timeOk || result.source.size < 0) continue;
+        result.source.modified = QDateTime::fromMSecsSinceEpoch(modified);
+        result.loaded = file.value("loaded").toBool();
+        const QJsonObject pairs = file.value("pairs").toObject();
+        for(auto model = pairs.constBegin(); model != pairs.constEnd(); ++model)
+        {
+            const QJsonObject textures = model.value().toObject();
+            for(auto texture = textures.constBegin(); texture != textures.constEnd(); ++texture)
+                if(texture.value().toInt() > 0)
+                    result.pairs[model.key()][texture.key()] = texture.value().toInt();
+        }
+        m_results.insert(result.source.path, result);
+    }
+}
+
+QMap<QString, QStringList> TechnicalTextureCatalog::observedModelTextures() const
+{
+    QMap<QString, QHash<QString, int>> totals;
+    for(const SourceFile& source : m_sources)
+    {
+        const auto file = m_results.constFind(source.path);
+        if(file == m_results.constEnd() || !file->loaded) continue;
+        for(auto model = file->pairs.constBegin(); model != file->pairs.constEnd(); ++model)
+            for(auto texture = model->constBegin(); texture != model->constEnd(); ++texture)
+                totals[model.key()][texture.key()] += texture.value();
+    }
+    QMap<QString, QStringList> result;
+    for(auto model = totals.constBegin(); model != totals.constEnd(); ++model)
+    {
+        QStringList names = model->keys();
+        std::sort(names.begin(), names.end(), [&model](const QString& a, const QString& b) {
+            return model->value(a) == model->value(b) ? a < b : model->value(a) > model->value(b);
+        });
+        result.insert(model.key(), names);
+    }
+    return result;
+}
 
 void TechnicalTextureCatalog::refreshSources(const QStringList& mapRoots)
 {
