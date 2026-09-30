@@ -20,6 +20,12 @@
 #include <QTextStream>
 #include <QUndoStack>
 #include <QApplication>
+#include <QLabel>
+#include <QMouseEvent>
+#include <QItemSelectionModel>
+#include <QKeyEvent>
+#include <QFocusEvent>
+#include <QHeaderView>
 
 int runProfileModelCatalogCheck()
 {
@@ -32,6 +38,7 @@ int runProfileModelCatalogCheck()
     struct DatabaseGuard { QSharedPointer<const ei::SProfileDatabaseSnapshot> original;
         ~DatabaseGuard(){ei::ProfileDatabaseContext::instance().publishEditedSnapshot(original);} } databaseGuard{originalDatabase};
     CSettings settings; QUndoStack history; CTreeView tree; QTableWidget properties;
+    properties.horizontalHeader()->setStretchLastSection(true);
     CProgressView progress; QLineEdit coordinates; CTileForm tiles;
     CView view(nullptr,nullptr); view.setAttribute(Qt::WA_DontShowOnScreen);
     view.attach(&settings,&properties,&history,&progress,&coordinates,&tree,&tiles);
@@ -65,14 +72,79 @@ int runProfileModelCatalogCheck()
             if(auto* button=widget->findChild<QPushButton*>("objectModelGallery")) return button;
         return nullptr;
     };
-    bool russian=false;
+    auto modelCombo=[&]() -> CComboDynItem* {
+        for(int row=0;row<properties.rowCount();++row) if(auto* widget=properties.cellWidget(row,1))
+            if(auto* combo=widget->findChild<CComboDynItem*>())
+                if(combo->value()->type()==eObjParam_TEMPLATE) return combo;
+        return nullptr;
+    };
+    auto inlineName=[&]() -> QLabel* {
+        for(int row=0;row<properties.rowCount();++row) if(auto* widget=properties.cellWidget(row,1))
+            if(auto* label=widget->findChild<QLabel*>("objectModelRussianName")) return label;
+        return nullptr;
+    };
+    bool separateName=false;
     for(int row=0;row<properties.rowCount();++row)
-        if(properties.item(row,1) && properties.item(row,1)->text()==QString::fromUtf8("Каменный дом")) russian=true;
-    check(russian,"Russian name in existing object properties");
+        if(properties.item(row,0) && properties.item(row,0)->text()==QString::fromUtf8("Русское название модели")) separateName=true;
+    check(inlineName() && inlineName()->text()==QString::fromUtf8("Каменный дом") && !separateName,
+          "Russian name beside model; no separate property row");
+    auto* combo=modelCombo();
+    combo->setEditText(QString::fromUtf8("каменный")); combo->_onFilterTextChanged(combo->currentText());
+    check(combo->completer()->completionCount()==1 && combo->completer()->completionModel()->index(0,0).data().toString().contains("fixture-house"),
+          "model search finds Russian alias");
+    combo->setEditText("fixture-house"); combo->_onFilterTextChanged(combo->currentText());
+    check(combo->completer()->completionCount()==1,"model search finds technical ID");
+    QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);
+    QApplication::sendEvent(combo->lineEdit(),&escape);
+    check(combo->currentText()=="fixture-house" && object->modelName()=="fixture-house" && history.count()==0,"alias search cancel preserves technical value");
+    // A compound editor must consume its mouse drag instead of forwarding it
+    // to the table viewport, where it becomes a multi-row selection gesture.
+    properties.setAttribute(Qt::WA_DontShowOnScreen); properties.resize(760,900); properties.show();
+    QApplication::processEvents(); properties.selectionModel()->clear();
+    check(inlineName() && inlineName()->width()>40 && inlineName()->x()>combo->x(),"inline alias has visible space to the right of model");
+    QWidget* editor=combo->parentWidget();
+    QMouseEvent press(QEvent::MouseButtonPress,QPointF(1,1),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+    QMouseEvent move(QEvent::MouseMove,QPointF(1,editor->height()+60),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease,QPointF(1,editor->height()+60),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+    QApplication::sendEvent(editor,&press); QApplication::sendEvent(editor,&move); QApplication::sendEvent(editor,&release);
+    QSet<int> selectedRows; for(auto* item:properties.selectedItems()) selectedRows.insert(item->row());
+    check(selectedRows.size()<=1,"model editor mouse drag does not select neighbouring property rows");
+    properties.selectAll();
+    QFocusEvent editorFocus(QEvent::FocusIn,Qt::MouseFocusReason);
+    QApplication::sendEvent(combo->lineEdit(),&editorFocus);
+    check(properties.selectedItems().isEmpty(),"entering model editor clears stale property selection");
+    properties.hide();
     view.collectObjectTreeData();
     check(tree.modelAlias("fixture-house")==QString::fromUtf8("Каменный дом"),"hierarchy reads profile-adjacent aliases");
     auto* texture=properties.findChild<CComboDynItem*>("objectModelTextureChoices");
-    check(texture && texture->itemText(0)=="stone" && texture->currentText()=="other","matched textures first, current value preserved");
+    bool groups=false;
+    if(texture) {
+        const int stone=texture->findData("stone"), other=texture->findData("other");
+        groups=stone>0 && other>stone+1 && !(texture->model()->flags(texture->model()->index(0,0)) & Qt::ItemIsEnabled)
+            && !(texture->model()->flags(texture->model()->index(other-1,0)) & Qt::ItemIsEnabled);
+    }
+    check(groups && texture->currentText()=="other","nonselectable texture group headings; current value preserved");
+    QMetaObject::invokeMethod(texture,"activated",Q_ARG(QString,texture->itemText(0)));
+    check(texture->currentText()=="other" && object->textureName()=="other" && history.count()==0,"texture heading cannot become an object value");
+    combo=modelCombo(); combo->setEditText(QString::fromUtf8("каменный")); combo->_onFilterTextChanged(combo->currentText());
+    const QString completion=combo->completer()->currentCompletion();
+    QMetaObject::invokeMethod(combo->completer(),"activated",Q_ARG(QString,completion));
+    check(combo->currentText()=="fixture-house" && object->modelName()=="fixture-house" && history.count()==0,
+          "alias completion commits technical ID, never its displayed caption");
+    combo->hidePopup(); combo->completer()->popup()->hide();
+    properties.show(); QApplication::processEvents(); combo->showPopup(); QApplication::processEvents();
+    const int bridgeRow=combo->findData("fixture-bridge");
+    const QPoint choice=combo->view()->visualRect(combo->model()->index(bridgeRow,0)).center();
+    QMouseEvent choosePress(QEvent::MouseButtonPress,choice,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+    QMouseEvent chooseRelease(QEvent::MouseButtonRelease,choice,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+    QApplication::sendEvent(combo->view()->viewport(),&choosePress);
+    QApplication::sendEvent(combo->view()->viewport(),&chooseRelease);
+    out << "Popup click: row=" << bridgeRow << "; choice=" << choice.x() << "," << choice.y()
+        << "; model=" << object->modelName() << "; history=" << history.count() << "\n";
+    check(object->modelName()=="fixture-bridge" && history.count()==1,"real model popup click applies technical ID once");
+    history.undo(); check(object->modelName()=="fixture-house" && object->textureName()=="other","popup model choice supports undo");
+    history.clear(); view.viewParameters();
+    properties.hide();
     const auto position=object->position(); const auto instanceName=object->mapName();
     bool currentTextureRetained=false;
     QTimer::singleShot(0,[&](){for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* gallery=qobject_cast<CModelGallery*>(widget)) {
@@ -101,7 +173,7 @@ int runProfileModelCatalogCheck()
     history.redo(); check(object->modelName()=="fixture-bridge" && object->textureName()=="wood","redo restores both chosen fields");
     bool emptyNameHidden=true;
     for(int row=0;row<properties.rowCount();++row) if(properties.item(row,0) && properties.item(row,0)->text()==QString::fromUtf8("Русское название модели")) emptyNameHidden=false;
-    check(emptyNameHidden,"no Russian-name row for unnamed model");
+    check(emptyNameHidden && !inlineName(),"no Russian-name row or subtitle for unnamed model");
     auto* secondObject=new CWorldObj; secondObject->setMapId(129); secondObject->setState(eSelect);
     secondObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,"fixture-house")));
     secondObject->applyParam(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,"stone")));
@@ -129,8 +201,7 @@ int runProfileModelCatalogCheck()
     ei::TechnicalModelCatalog second; second.load(ei::TechnicalModelCatalog::pathForDatabase(other->sourceArchivePath));
     second.setRussianName("fixture-bridge",QString::fromUtf8("Другой мост")); second.save();
     ei::ProfileDatabaseContext::instance().publishEditedSnapshot(other); view.viewParameters();
-    bool otherName=false;
-    for(int row=0;row<properties.rowCount();++row) if(properties.item(row,1) && properties.item(row,1)->text()==QString::fromUtf8("Другой мост")) otherName=true;
+    bool otherName=inlineName() && inlineName()->text()==QString::fromUtf8("Другой мост");
     check(otherName,"profile switch uses its database-adjacent JSON");
     view.collectObjectTreeData();
     check(tree.modelAlias("fixture-bridge")==QString::fromUtf8("Другой мост") && tree.modelAlias("fixture-house").isEmpty(),"hierarchy switches profile without alias leakage");

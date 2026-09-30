@@ -3,6 +3,7 @@
 #include "resource_name.h"
 #include "resourcemanager.h"
 #include "model_gallery.h"
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -223,10 +224,20 @@ void CModelGallery::selectionChanged()
     }
     const QSignalBlocker block(m_texture); m_texture->clear();
     const auto exact=m_catalog->textureChoices(m_profile,model,m_textures,*m_scan);
+    auto header=[&](const QString& text) {
+        const int row=m_texture->count(); m_texture->addItem(text);
+        auto* item=static_cast<QStandardItemModel*>(m_texture->model())->item(row);
+        item->setFlags(Qt::NoItemFlags);
+        QFont font=item->font(); font.setBold(true); item->setFont(font);
+    };
     QStringList names;
-    for(const auto& choice:exact) names.append(choice.name);
-    for(const auto& name:m_textures) if(!names.contains(name,Qt::CaseInsensitive)) names.append(name);
-    m_texture->addItems(names); if(exact.isEmpty()) m_texture->setCurrentIndex(-1);
+    header(exact.isEmpty() ? QString::fromUtf8("Текстуры модели — не найдены")
+                          : QString::fromUtf8("Текстуры этой модели"));
+    for(const auto& choice:exact) { names.append(choice.name); m_texture->addItem(choice.name,choice.name); }
+    m_texture->insertSeparator(m_texture->count());
+    header(QString::fromUtf8("Другие текстуры профиля"));
+    for(const auto& name:m_textures) if(!names.contains(name,Qt::CaseInsensitive)) m_texture->addItem(name,name);
+    m_texture->setCurrentIndex(exact.isEmpty() ? -1 : m_texture->findData(exact.first().name));
     m_status->setText(tr("%1 model(s). Names and texture bindings: %2").arg(m_list->count()).arg(m_catalog->path()));
     m_choose->setEnabled(!model.isEmpty() && (!m_textureRequired || m_textures.contains(selectedTexture(),Qt::CaseInsensitive)));
     m_thumbnailTimer.start();

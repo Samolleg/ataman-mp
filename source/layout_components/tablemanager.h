@@ -8,7 +8,7 @@
 #include <QToolButton>
 #include <QSharedPointer>
 #include <QLineEdit>
-#include <QStringListModel>
+#include <QStandardItemModel>
 #include <QCompleter>
 #include <QMap>
 
@@ -27,6 +27,7 @@ class QContextMenuEvent;
 class CMagicTrap;
 class QBoxLayout;
 class QResizeEvent;
+class QSortFilterProxyModel;
 
 ///
 /// \brief The CValueItem class supports any type of property that can be displayed with a single line.
@@ -152,6 +153,7 @@ public:
             QComboBox::wheelEvent(e);
     }
     void setPreferredOptions(const QStringList& preferred);
+    void setModelNames(const ei::TechnicalModelCatalog& catalog);
     void showPopup() override;
     void hidePopup() override;
     bool popupActive() const { return m_popupActive; }
@@ -176,8 +178,10 @@ private:
 
     QSharedPointer<IPropertyBase> m_pValue; //stored value;
     QStringList m_valueList;
-    QSharedPointer<QStringListModel> m_pListModel;
+    QSharedPointer<QStandardItemModel> m_pListModel;
     QCompleter* m_pCompleter;
+    QSortFilterProxyModel* m_completionChoices = nullptr;
+    bool m_aliasSearch = false;
     bool m_optionsLoaded;
     bool m_popupActive;
     QString m_committedText;

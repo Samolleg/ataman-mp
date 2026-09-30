@@ -200,6 +200,9 @@ void CCreateObjectForm::updateTable()
     }
 
     m_tableManager->setNewData(aProp);
+    for(int row=0;row<ui->tableParameters->rowCount();++row)
+        if(auto* combo=qobject_cast<CComboDynItem*>(ui->tableParameters->cellWidget(row,1)))
+            if(combo->value()->type()==eObjParam_TEMPLATE) combo->setModelNames(m_modelCatalog);
     refreshTechnicalTextureChoices();
     m_pPreview->updateGL();
 }

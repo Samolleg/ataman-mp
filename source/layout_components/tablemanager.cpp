@@ -20,6 +20,7 @@
 #include <QSet>
 #include <QScrollBar>
 #include <QItemSelectionModel>
+#include <QSortFilterProxyModel>
 #include <QResizeEvent>
 #include <QTimer>
 #include <QDialog>
@@ -47,6 +48,30 @@
 #include "objects/unit.h"
 
 namespace {
+class AssetChoiceModel : public QStandardItemModel
+{
+public:
+    QVariant data(const QModelIndex& index, int role=Qt::DisplayRole) const override {
+        // Editable combo text and completion commit only the resource ID.
+        // The popup still paints the caption (ID + optional Russian name).
+        if(role==Qt::EditRole) {
+            const QVariant id=QStandardItemModel::data(index,Qt::UserRole);
+            if(id.isValid()) return id;
+        }
+        return QStandardItemModel::data(index,role);
+    }
+};
+// QAbstractItemView treats an ignored mouse move bubbling out of a cell widget
+// as a table-selection drag. Compound editors own these mouse gestures.
+class PropertyEditorContainer : public QWidget
+{
+public:
+    using QWidget::QWidget;
+protected:
+    void mousePressEvent(QMouseEvent* event) override { event->accept(); }
+    void mouseMoveEvent(QMouseEvent* event) override { event->accept(); }
+    void mouseReleaseEvent(QMouseEvent* event) override { event->accept(); }
+};
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
 QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
 
@@ -1519,10 +1544,24 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             if(m_catalogSettings) {
-                auto* container = new QWidget;
+                pCombo->setModelNames(m_catalog);
+                auto* container = new PropertyEditorContainer;
                 auto* layout = new QVBoxLayout(container); layout->setContentsMargins(0,0,0,0); layout->setSpacing(2);
-                layout->addWidget(pCombo);
+                layout->setSizeConstraint(QLayout::SetNoConstraint);
+                auto* modelLine = new QHBoxLayout; modelLine->setSpacing(8);
+                modelLine->addWidget(pCombo, 1);
+                const QString russian = m_catalog.russianName(m_selectedModel);
+                if(!russian.isEmpty()) {
+                    auto* name = new QLabel(russian, container);
+                    name->setObjectName("objectModelRussianName");
+                    name->setToolTip(russian); name->setTextFormat(Qt::PlainText);
+                    name->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+                    name->setMaximumWidth(220);
+                    modelLine->addWidget(name,1);
+                }
+                layout->addLayout(modelLine);
                 auto* gallery = new QPushButton(QString::fromUtf8("Витрина моделей…"), container);
+                gallery->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
                 gallery->setObjectName("objectModelGallery"); layout->addWidget(gallery);
                 connect(gallery, &QPushButton::clicked, this, &CTableManager::openModelGallery);
                 m_pTable->setCellWidget(i, 1, container);
@@ -1530,13 +1569,6 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             } else m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
-            const QString russian = m_catalogSettings ? m_catalog.russianName(m_selectedModel) : QString();
-            if(!russian.isEmpty()) {
-                m_pTable->insertRow(i);
-                auto* label = new QTableWidgetItem(QString::fromUtf8("Русское название модели")); blockEditWidget(label);
-                auto* name = new QTableWidgetItem(russian); blockEditWidget(name);
-                m_pTable->setItem(i,0,label); m_pTable->setItem(i,1,name); ++i;
-            }
             auto bodyPart = util::constProp(aProp, eObjParam_BODYPARTS);
             if(!bodyPart.isNull())
             {
@@ -1977,12 +2009,20 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     setFocusPolicy(Qt::FocusPolicy::StrongFocus);
     setStyleSheet("combobox-popup: 0;");
     setMaxVisibleItems(20);
+    setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    setMinimumContentsLength(8);
     setEditable(true);
     setInsertPolicy(QComboBox::NoInsert);
     view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_pListModel.reset(new QStringListModel());
+    m_pListModel.reset(new AssetChoiceModel());
     setModel(m_pListModel.get());
-    m_pCompleter = new QCompleter(m_pListModel.get(), this);
+    auto* choices = new QSortFilterProxyModel(this);
+    m_completionChoices = choices;
+    choices->setSourceModel(m_pListModel.get());
+    choices->setFilterRole(Qt::UserRole);
+    choices->setFilterRegExp(".+"); // Group headings have no resource ID.
+    m_pCompleter = new QCompleter(choices, this);
+    m_pCompleter->setCompletionRole(Qt::UserRole);
     m_pCompleter->setCaseSensitivity(Qt::CaseInsensitive);
     m_pCompleter->setCompletionMode(QCompleter::PopupCompletion);
     m_pCompleter->setFilterMode(Qt::MatchStartsWith);
@@ -2006,6 +2046,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(returnPressed()), this, SLOT(_onEditingFinished()));
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
+    installEventFilter(this);
     updateDatabaseDiagnostic(m_committedText);
 }
 
@@ -2069,11 +2110,53 @@ void CComboDynItem::setPreferredOptions(const QStringList& preferred)
 {
     ensureOptionsLoaded();
     const QString current = currentText(); const QSignalBlocker blocker(this);
-    QStringList options = preferred;
-    for(const QString& name : m_pListModel->stringList())
-        if(!options.contains(name, Qt::CaseInsensitive)) options.append(name);
-    m_pListModel->setStringList(options); setCurrentIndex(-1); setEditText(current);
-    setToolTip(QString::fromUtf8("Сначала текстуры из каталога этой модели, затем остальные текстуры профиля."));
+    QStringList all;
+    for(int row=0;row<count();++row) {
+        const QString name=itemData(row).toString();
+        if(!name.isEmpty()) all.append(name);
+    }
+    m_pListModel->clear();
+    auto header=[&](const QString& text) {
+        auto* item=new QStandardItem(text);
+        item->setFlags(Qt::NoItemFlags);
+        QFont font=item->font(); font.setBold(true); item->setFont(font);
+        m_pListModel->appendRow(item);
+    };
+    auto choice=[&](const QString& name, bool matched) {
+        auto* item=new QStandardItem(name);
+        item->setData(name,Qt::UserRole); item->setData(name,Qt::UserRole+1);
+        item->setData(matched ? QString::fromUtf8("Текстура этой модели")
+                              : QString::fromUtf8("Другая текстура профиля"),Qt::ToolTipRole);
+        m_pListModel->appendRow(item);
+    };
+    header(preferred.isEmpty() ? QString::fromUtf8("Текстуры модели — не найдены")
+                              : QString::fromUtf8("Текстуры этой модели"));
+    QSet<QString> matched;
+    for(const QString& name:preferred)
+        if(all.contains(name,Qt::CaseInsensitive) && !matched.contains(name.toLower())) {
+            choice(name,true); matched.insert(name.toLower());
+        }
+    insertSeparator(count());
+    header(QString::fromUtf8("Другие текстуры профиля"));
+    for(const QString& name:all) if(!matched.contains(name.toLower())) choice(name,false);
+    setCurrentIndex(-1); setEditText(current);
+}
+
+void CComboDynItem::setModelNames(const ei::TechnicalModelCatalog& catalog)
+{
+    if(m_pValue->type()!=eObjParam_TEMPLATE) return;
+    ensureOptionsLoaded();
+    const QString current=currentText(); const QSignalBlocker blocker(this);
+    for(int row=0;row<count();++row) {
+        const QString id=itemData(row).toString(), name=catalog.russianName(id);
+        const QString caption=name.isEmpty() ? id : id + "   " + name;
+        setItemData(row,caption,Qt::DisplayRole);
+        setItemData(row,caption,Qt::UserRole+1);
+    }
+    m_aliasSearch = true;
+    m_completionChoices->setFilterRole(Qt::UserRole+1);
+    m_completionChoices->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    setCurrentIndex(-1); setEditText(current);
 }
 
 void CComboDynItem::ensureOptionsLoaded()
@@ -2082,24 +2165,28 @@ void CComboDynItem::ensureOptionsLoaded()
         return;
     const QString current = currentText();
     const QSignalBlocker blocker(this);
+    QStringList names;
     if(m_pValue->type() == eObjParam_PRIM_TXTR)
-        m_pListModel->setStringList(CTextureList::getInstance()->textureList());
+        names=CTextureList::getInstance()->textureList();
     else if(m_pValue->type() == eObjParam_TEMPLATE)
-        m_pListModel->setStringList(CObjectList::getInstance()->figureList());
+        names=CObjectList::getInstance()->figureList();
     else if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
     {
-        QStringList names;
         const auto database = ei::ProfileDatabaseContext::instance().current();
         if(!database.isNull())
             for(const ei::SMonsterDatabaseRecord& monster : database->monsters)
                 names.append(monster.name);
         names.sort(Qt::CaseInsensitive);
-        m_pListModel->setStringList(names);
     }
     else
     {
         Q_ASSERT(false && "not defined");
         return;
+    }
+    for(const QString& name:names) {
+        auto* item=new QStandardItem(name);
+        item->setData(name,Qt::UserRole); item->setData(name,Qt::UserRole+1);
+        m_pListModel->appendRow(item);
     }
     setCurrentIndex(-1);
     setEditText(current);
@@ -2124,6 +2211,13 @@ void CComboDynItem::hidePopup()
 
 void CComboDynItem::_onChange(QString str)
 {
+    // A displayed alias or a group heading must never become the MOB value.
+    for(int row=0;row<count();++row) if(itemText(row)==str || itemData(row,Qt::DisplayRole).toString()==str) {
+        const QString id=itemData(row).toString();
+        if(id.isEmpty()) { cancelPendingEdit(); return; }
+        str=id; break;
+    }
+    { const QSignalBlocker blocker(this); setEditText(str); }
     m_committedText = str;
     updateDatabaseDiagnostic(str);
     if(m_pValue->isEqual(str))
@@ -2225,10 +2319,12 @@ void CComboDynItem::_onEditingFinished()
 void CComboDynItem::_onFilterTextChanged(const QString& text)
 {
     ensureOptionsLoaded();
-    // Keep the combo model stable while typing. Filtering the combo's own
-    // model promotes its first row to the current value; a popup completer
-    // provides prefix-only suggestions without changing or applying a value.
-    m_pCompleter->setCompletionPrefix(text);
+    // Filter a separate suggestion model, never the combo's current value.
+    // Alias search uses captions, but QCompleter returns only resource IDs.
+    if(m_aliasSearch) {
+        m_completionChoices->setFilterRegExp(text.isEmpty() ? ".+" : QRegExp::escape(text));
+        m_pCompleter->setCompletionPrefix(QString());
+    } else m_pCompleter->setCompletionPrefix(text);
     m_pCompleter->complete();
 }
 
@@ -2272,6 +2368,17 @@ void CComboDynItem::focusOutEvent(QFocusEvent* event)
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
+    if((watched==this || watched==lineEdit())
+       && (event->type()==QEvent::FocusIn || event->type()==QEvent::MouseButtonPress)) {
+        QWidget* parent=parentWidget();
+        while(parent && !qobject_cast<QTableWidget*>(parent)) parent=parent->parentWidget();
+        if(auto* table=qobject_cast<QTableWidget*>(parent))
+            table->selectionModel()->clear();
+    }
+    if(watched==this && event->type()==QEvent::MouseMove
+       && !m_popupActive && static_cast<QMouseEvent*>(event)->buttons().testFlag(Qt::LeftButton)) {
+        event->accept(); return true;
+    }
     if(watched == lineEdit() && event->type() == QEvent::ContextMenu
        && m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
     {
