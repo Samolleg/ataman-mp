@@ -21610,26 +21610,27 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
-    m_pTree->prepareForRebuild();
-    m_pTree->clear();
-    if(m_aMob.isEmpty())
-    {
-        m_pTree->applyFilter();
-        return;
-    }
+    m_pTree->beginRefresh();
 
-    m_pTree->setColumnCount(2);
+    m_pTree->setColumnCount(3);
     QStringList labels;
-    labels << tr("Objects") << tr("Count");
+    labels << tr("Objects") << "ID" << tr("Count");
     m_pTree->setHeaderLabels(labels);
     m_pTree->header()->setStretchLastSection(false);
     m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_pTree->resizeColumnToContents(1);
+    // Numeric columns have bounded widths. ResizeToContents repeatedly measures
+    // every exposed row during header/layout changes on large native trees.
+    m_pTree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
+    m_pTree->header()->setSectionResizeMode(2, QHeaderView::Interactive);
+    m_pTree->setColumnWidth(1, m_pTree->fontMetrics().horizontalAdvance("4294967295") + 18);
+    m_pTree->setColumnWidth(2, qMax(m_pTree->fontMetrics().horizontalAdvance(tr("Count")),
+                                 m_pTree->fontMetrics().horizontalAdvance("999999")) + 18);
     const auto appendBehaviorTreeChildren = [this](CTreeObject* ownerItem, CNode* node)
     {
         if(!ownerItem || !node
            || CScene::getInstance()->getMode() != eEditModeLogic)
             return;
+        const QString ownerKey = ownerItem->data(0, CTreeView::RowKeyRole).toString();
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
         {
             QMap<uint, QString> behaviorNames;
@@ -21652,7 +21653,7 @@ void CView::collectObjectTreeData()
                 const bool effectivelyEnabled = logicIndex == 0 || logic->isUse();
                 const QString enabledStatus = effectivelyEnabled
                     ? tr("enabled") : tr("disabled");
-                auto slotItem = new QTreeWidgetItem(ownerItem);
+                auto slotItem = m_pTree->acquireRow(ownerKey + "/logic/" + QString::number(logicIndex), ownerItem, nullptr, true);
                 const QString slotLabel = tr("Logic %1%2 — %3 — %4")
                     .arg(logicIndex).arg(suffix)
                     .arg(behaviorName).arg(enabledStatus);
@@ -21661,7 +21662,7 @@ void CView::collectObjectTreeData()
                 slotItem->setData(0, CTreeView::FilterTextRole,
                     tr("Logic %1 behavior setup %2 %3")
                         .arg(logicIndex).arg(behaviorName).arg(enabledStatus));
-                slotItem->setText(1, QString::number(patrolCount));
+                slotItem->setText(2, QString::number(patrolCount));
                 slotItem->setData(0, Qt::UserRole + 10, logicIndex);
                 slotItem->setData(0, Qt::UserRole + 11,
                     QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(unit)));
@@ -21671,14 +21672,13 @@ void CView::collectObjectTreeData()
                     : tr("Behavior setup %1: %2; %3; %4 patrol points")
                         .arg(logicIndex).arg(behaviorName)
                         .arg(enabledStatus).arg(patrolCount));
-                slotItem->setExpanded(logicIndex == m_logicSlotIndex);
+
                 int patrolNumber = 0;
                 for(CPatrolPoint* patrol : logic->patrolPoints())
                 {
                     if(!patrol || patrol->isMarkDeleted())
                         continue;
-                    auto patrolItem = new CTreeObject(
-                        static_cast<QTreeWidgetItem*>(slotItem), patrol);
+                    auto patrolItem = m_pTree->acquireRow(ownerKey + "/patrol/" + QString::number(patrol->innerId()), slotItem, patrol);
                     patrolItem->setText(0, tr("Patrol point %1").arg(++patrolNumber));
                     patrolItem->setData(0, CTreeView::BehaviorItemRole, true);
                     patrolItem->setData(0, CTreeView::FilterTextRole,
@@ -21687,14 +21687,13 @@ void CView::collectObjectTreeData()
                         patrol->lookPoint().cbegin(), patrol->lookPoint().cend(),
                         [](CLookPoint* look)
                         { return look && !look->isMarkDeleted(); });
-                    patrolItem->setText(1, QString::number(lookCount));
+                    patrolItem->setText(2, QString::number(lookCount));
                     int lookNumber = 0;
                     for(CLookPoint* look : patrol->lookPoint())
                     {
                         if(!look || look->isMarkDeleted())
                             continue;
-                        auto lookItem = new CTreeObject(
-                            static_cast<QTreeWidgetItem*>(patrolItem), look);
+                        auto lookItem = m_pTree->acquireRow(ownerKey + "/look/" + QString::number(look->innerId()), patrolItem, look);
                         lookItem->setText(0, tr("Look point %1").arg(++lookNumber));
                         lookItem->setData(0, CTreeView::BehaviorItemRole, true);
                         lookItem->setData(0, CTreeView::FilterTextRole,
@@ -21710,7 +21709,7 @@ void CView::collectObjectTreeData()
                 trap->actZones().cbegin(), trap->actZones().cend(),
                 [](CActivationZone* area)
                 { return area && !area->isMarkDeleted(); });
-            auto areasItem = new QTreeWidgetItem(ownerItem);
+            auto areasItem = m_pTree->acquireRow(ownerKey + "/areas", ownerItem, nullptr, true);
             areasItem->setText(0, tr("Activation areas (%1)").arg(areaCount));
             areasItem->setData(0, CTreeView::BehaviorItemRole, true);
             areasItem->setData(0, CTreeView::FilterTextRole, areasItem->text(0));
@@ -21719,7 +21718,7 @@ void CView::collectObjectTreeData()
             {
                 if(!area || area->isMarkDeleted())
                     continue;
-                auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(areasItem), area);
+                auto item = m_pTree->acquireRow(ownerKey + "/area/" + QString::number(area->innerId()), areasItem, area);
                 item->setText(0, tr("Activation area %1").arg(++areaNumber));
                 item->setData(0, CTreeView::BehaviorItemRole, true);
                 item->setData(0, CTreeView::FilterTextRole, item->text(0));
@@ -21728,7 +21727,7 @@ void CView::collectObjectTreeData()
                 trap->castPoints().cbegin(), trap->castPoints().cend(),
                 [](CTrapCastPoint* target)
                 { return target && !target->isMarkDeleted(); });
-            auto targetsItem = new QTreeWidgetItem(ownerItem);
+            auto targetsItem = m_pTree->acquireRow(ownerKey + "/targets", ownerItem, nullptr, true);
             targetsItem->setText(0, tr("Cast targets (%1)").arg(targetCount));
             targetsItem->setData(0, CTreeView::BehaviorItemRole, true);
             targetsItem->setData(0, CTreeView::FilterTextRole, targetsItem->text(0));
@@ -21737,7 +21736,7 @@ void CView::collectObjectTreeData()
             {
                 if(!target || target->isMarkDeleted())
                     continue;
-                auto item = new CTreeObject(static_cast<QTreeWidgetItem*>(targetsItem), target);
+                auto item = m_pTree->acquireRow(ownerKey + "/target/" + QString::number(target->innerId()), targetsItem, target);
                 item->setText(0, tr("Cast target %1").arg(++targetNumber));
                 item->setData(0, CTreeView::BehaviorItemRole, true);
                 item->setData(0, CTreeView::FilterTextRole, item->text(0));
@@ -21746,96 +21745,73 @@ void CView::collectObjectTreeData()
     };
     for(CMob* mob : m_aMob)
     {
-        if(!mob)
-            continue;
+        if(!mob || (!m_pTree->showAllMobs() && mob != m_activeMob)) continue;
         const bool visible = isMobVisible(mob);
-        auto mobItem = new CTreeObject(m_pTree);
-        QString mobLabel = mob->mobName() + (mob->isDirty() ? " *" : "");
-        if(mob == m_activeMob)
-            mobLabel += tr(" [Active]");
-        else
-            mobLabel += tr(" [Locked]");
-        if(!visible)
-            mobLabel += tr(" [Hidden]");
-        mobItem->setText(0, mobLabel);
-        mobItem->setText(1, QString::number(mob->nodes().size()));
-        mobItem->setData(0, Qt::UserRole + 1,
-                         QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
-        mobItem->setExpanded(true);
-        m_pTree->addTopLevelItem(mobItem);
-
+        const QString mobKey = "mob/" + QString::number(reinterpret_cast<quintptr>(mob));
+        auto* mobItem = m_pTree->acquireRow(mobKey, nullptr);
+        QString label = mob->mobName() + (mob->isDirty() ? " *" : "");
+        label += mob == m_activeMob ? tr(" [Active]") : tr(" [Locked]");
+        if(!visible) label += tr(" [Hidden]");
+        mobItem->setText(0, label);
+        mobItem->setText(2, QString::number(mob->nodes().size()));
+        mobItem->setIcon(0, m_pTree->style()->standardIcon(QStyle::SP_DriveHDIcon));
+        mobItem->setData(0, Qt::UserRole + 1, QVariant::fromValue<qulonglong>(reinterpret_cast<qulonglong>(mob)));
         QMap<QString, QMap<QString, QList<CNode*>>> objects;
-        for(CNode* node : mob->nodes())
-        {
-            if(!node)
-                continue;
+        for(CNode* node : mob->nodes()) {
+            if(!node || node->isMarkDeleted()) continue;
             const QString typeName = m_pTree->objectNameByType(node->nodeType());
-            if(typeName.isEmpty())
-                continue;
+            if(typeName.isEmpty()) continue;
+            // Behavior presentation excludes unrelated scenery, but does not alter MOB data.
+            if(CScene::getInstance()->getMode() == eEditModeLogic
+               && node->nodeType() != eUnit && node->nodeType() != eMagicTrap) continue;
             CUnit* unit = dynamic_cast<CUnit*>(node);
-            const QString group = unit ? unit->databaseName() : node->mapName();
+            QString group = unit ? unit->databaseName() : node->modelName();
+            if(group.isEmpty()) group = typeName;
             objects[typeName][group].append(node);
         }
-
-        for(auto typeIt = objects.constBegin(); typeIt != objects.constEnd(); ++typeIt)
-        {
-            auto typeItem = new CTreeObject(mobItem, nullptr);
+        int mobCount = 0;
+        for(auto typeIt = objects.constBegin(); typeIt != objects.constEnd(); ++typeIt) {
+            auto* typeItem = m_pTree->acquireRow(mobKey + "/type/" + typeIt.key(), mobItem);
             typeItem->setText(0, typeIt.key());
+            typeItem->setIcon(0, m_pTree->objectIcon(typeIt.value().first().first()->nodeType()));
             int typeCount = 0;
-            for(const QList<CNode*>& nodes : typeIt.value())
-                typeCount += nodes.size();
-            typeItem->setText(1, QString::number(typeCount));
-            for(auto groupIt = typeIt.value().constBegin(); groupIt != typeIt.value().constEnd(); ++groupIt)
-            {
-                auto groupItem = new CTreeObject(typeItem, nullptr);
-                groupItem->setText(0, groupIt.key());
-                groupItem->setText(1, QString::number(groupIt.value().size()));
-                if(groupIt.value().size() == 1)
-                {
-                    groupItem->setNode(groupIt.value().front());
-                    appendBehaviorTreeChildren(groupItem, groupIt.value().front());
-                    groupItem->setToolTip(0, mob == m_activeMob
+            for(auto groupIt = typeIt.value().constBegin(); groupIt != typeIt.value().constEnd(); ++groupIt) {
+                auto* groupItem = m_pTree->acquireRow(mobKey + "/type/" + typeIt.key() + "/model/" + groupIt.key(), typeItem);
+                const QString alias = m_pTree->modelAlias(groupIt.key());
+                groupItem->setText(0, alias.isEmpty() ? groupIt.key() : alias + " (" + groupIt.key() + ")");
+                groupItem->setIcon(0, m_pTree->style()->standardIcon(QStyle::SP_DirIcon));
+                groupItem->setText(2, QString::number(groupIt.value().size()));
+                for(CNode* node : groupIt.value()) {
+                    auto* objectItem = static_cast<CTreeObject*>(m_pTree->acquireRow(
+                        mobKey + "/node/" + QString::number(node->innerId()), groupItem, node));
+                    objectItem->setText(0, node->mapName().isEmpty() ? groupIt.key() : node->mapName());
+                    objectItem->setText(1, QString::number(node->mapId()));
+                    objectItem->setText(2, QString());
+                    objectItem->setIcon(0, m_pTree->objectIcon(node->nodeType()));
+                    appendBehaviorTreeChildren(objectItem, node);
+                    objectItem->setToolTip(0, mob == m_activeMob
                         ? tr("Belongs to active MOB %1").arg(mob->mobName())
-                        : tr("Belongs to locked MOB %1. Double-click to make it active.")
-                            .arg(mob->mobName()));
+                        : tr("Belongs to locked MOB %1. Double-click to make it active.").arg(mob->mobName()));
+                    if(!visible) objectItem->setFlags(objectItem->flags() & ~Qt::ItemIsSelectable);
                 }
-                else
-                    for(CNode* node : groupIt.value())
-                    {
-                        auto objectItem = new CTreeObject(groupItem, node);
-                        objectItem->setText(0, QString::number(node->mapId()));
-                        appendBehaviorTreeChildren(objectItem, node);
-                        objectItem->setToolTip(0, mob == m_activeMob
-                            ? tr("Belongs to active MOB %1").arg(mob->mobName())
-                            : tr("Belongs to locked MOB %1. Double-click to make it active.")
-                                .arg(mob->mobName()));
-                        if(!visible)
-                            objectItem->setFlags(objectItem->flags() & ~Qt::ItemIsSelectable);
-                    }
-                if(!visible)
-                    groupItem->setFlags(groupItem->flags() & ~Qt::ItemIsSelectable);
+                groupItem->sortChildren(0, Qt::AscendingOrder);
+                typeCount += groupIt.value().size();
             }
+            typeItem->setText(2, QString::number(typeCount));
+            typeItem->sortChildren(0, Qt::AscendingOrder); mobCount += typeCount;
         }
-
-        if(!visible)
-        {
-            const QBrush hiddenTextBrush(QColor(128, 128, 128));
-            QList<QTreeWidgetItem*> pendingItems;
-            pendingItems.append(mobItem);
-            while(!pendingItems.isEmpty())
-            {
-                QTreeWidgetItem* item = pendingItems.takeLast();
-                for(int column = 0; column < item->columnCount(); ++column)
-                    item->setForeground(column, hiddenTextBrush);
-                for(int childIndex = 0; childIndex < item->childCount(); ++childIndex)
-                    pendingItems.append(item->child(childIndex));
+        mobItem->setText(2, QString::number(mobCount));
+        mobItem->sortChildren(0, Qt::AscendingOrder);
+        if(!visible) {
+            QList<QTreeWidgetItem*> pending{mobItem};
+            while(!pending.isEmpty()) {
+                auto* item=pending.takeLast();
+                for(int column=0;column<3;++column) item->setForeground(column, QBrush(QColor(128,128,128)));
+                for(int i=0;i<item->childCount();++i) pending.append(item->child(i));
             }
         }
     }
-    m_pTree->applyFilter();
-    const QList<CNode*> selected = selectionSnapshot();
-    if(!selected.isEmpty())
-        m_pTree->markNode(selected.back(), false);
+    m_pTree->finishRefresh();
 }
 
 void CView::refreshSelectContextHelp()
@@ -21901,123 +21877,9 @@ void CView::refreshSelectContextHelp()
 
 void CView::refreshBehaviorOrder(CNode* owner, int logicSlot)
 {
-    if(!owner || !m_pTree
-       || CScene::getInstance()->getMode() != eEditModeLogic)
-        return;
-
-    const auto reorderChildren = [](QTreeWidgetItem* parent,
-                                    const QList<CNode*>& desired,
-                                    const QString& label)
-    {
-        if(!parent)
-            return;
-        QHash<CNode*, QTreeWidgetItem*> existing;
-        while(parent->childCount())
-        {
-            QTreeWidgetItem* item = parent->takeChild(0);
-            CTreeObject* objectItem = dynamic_cast<CTreeObject*>(item);
-            if(objectItem && objectItem->node())
-                existing.insert(objectItem->node(), item);
-            else
-                delete item;
-        }
-        int visible = 0;
-        for(CNode* node : desired)
-        {
-            if(!node || node->isMarkDeleted())
-                continue;
-            QTreeWidgetItem* item = existing.take(node);
-            if(!item)
-                item = new CTreeObject(parent, node);
-            else
-                parent->addChild(item);
-            item->setText(0, label.arg(++visible));
-            item->setData(0, CTreeView::BehaviorItemRole, true);
-            item->setData(0, CTreeView::FilterTextRole, item->text(0));
-        }
-        qDeleteAll(existing);
-    };
-
-    if(CUnit* unit = dynamic_cast<CUnit*>(owner))
-    {
-        CLogic* logic = unit->logicAt(logicSlot);
-        if(!logic)
-            return;
-        QTreeWidgetItem* logicItem = nullptr;
-        QTreeWidgetItemIterator iterator(m_pTree);
-        while(*iterator)
-        {
-            QTreeWidgetItem* item = *iterator;
-            const CUnit* itemOwner = reinterpret_cast<CUnit*>(quintptr(
-                item->data(0, Qt::UserRole + 11).toULongLong()));
-            if(item->data(0, CTreeView::BehaviorItemRole).toBool()
-               && itemOwner == unit
-               && item->data(0, Qt::UserRole + 10).toInt() == logicSlot)
-            {
-                logicItem = item;
-                break;
-            }
-            ++iterator;
-        }
-        QList<CNode*> patrols;
-        for(CPatrolPoint* patrol : logic->patrolPoints())
-            patrols.append(patrol);
-        reorderChildren(logicItem, patrols, tr("Patrol point %1"));
-        if(logicItem)
-            for(int patrolIndex = 0; patrolIndex < logicItem->childCount(); ++patrolIndex)
-            {
-                CTreeObject* patrolItem = dynamic_cast<CTreeObject*>(
-                    logicItem->child(patrolIndex));
-                CPatrolPoint* patrol = patrolItem
-                    ? dynamic_cast<CPatrolPoint*>(patrolItem->node()) : nullptr;
-                if(!patrol)
-                    continue;
-                QList<CNode*> looks;
-                for(CLookPoint* look : patrol->lookPoint())
-                    looks.append(look);
-                reorderChildren(patrolItem, looks, tr("Look point %1"));
-                patrolItem->setText(1, QString::number(patrolItem->childCount()));
-            }
-        return;
-    }
-
-    CMagicTrap* trap = dynamic_cast<CMagicTrap*>(owner);
-    if(!trap)
-        return;
-    QTreeWidgetItem* trapItem = nullptr;
-    QTreeWidgetItemIterator iterator(m_pTree);
-    while(*iterator)
-    {
-        CTreeObject* item = dynamic_cast<CTreeObject*>(*iterator);
-        if(item && item->node() == trap)
-        {
-            trapItem = item;
-            break;
-        }
-        ++iterator;
-    }
-    if(!trapItem)
-        return;
-    for(int sectionIndex = 0; sectionIndex < trapItem->childCount(); ++sectionIndex)
-    {
-        QTreeWidgetItem* section = trapItem->child(sectionIndex);
-        const bool areas = section->text(0).startsWith(tr("Activation areas"));
-        const bool targets = section->text(0).startsWith(tr("Cast targets"));
-        if(areas)
-        {
-            QList<CNode*> points;
-            for(CActivationZone* point : trap->actZones()) points.append(point);
-            reorderChildren(section, points, tr("Activation area %1"));
-            section->setText(0, tr("Activation areas (%1)").arg(section->childCount()));
-        }
-        else if(targets)
-        {
-            QList<CNode*> points;
-            for(CTrapCastPoint* point : trap->castPoints()) points.append(point);
-            reorderChildren(section, points, tr("Cast target %1"));
-            section->setText(0, tr("Cast targets (%1)").arg(section->childCount()));
-        }
-    }
+    Q_UNUSED(logicSlot);
+    if(owner && m_pTree && CScene::getInstance()->getMode() == eEditModeLogic)
+        collectObjectTreeData(); // Reconcile keyed rows, including their displayed order.
 }
 
 void CView::refreshLogicSlotOutliner()

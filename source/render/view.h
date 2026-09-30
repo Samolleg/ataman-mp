@@ -168,6 +168,7 @@ class CView : public QGLWidget
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
+    friend int runObjectHierarchyCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();

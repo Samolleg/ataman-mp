@@ -22,6 +22,7 @@ public:
     CTreeObject(QTreeWidget* pParent);
     CTreeObject(QTreeWidgetItem* pParent, CNode* pNode);
     CTreeObject(CTreeObject* pParent, CNode* pNode);
+    bool operator<(const QTreeWidgetItem& other) const override;
     uint nodeId() const;
     uint storedId() const {return m_nodeId;}
     void setId(uint id) {m_nodeId = id;}
@@ -37,14 +38,15 @@ private:
 /// \brief The CTreeView class provides display of objects on the scene
 /// \todo display of patrol points (partially implemented)
 ///
-class CTreeView : public CFlatTreeWidget
+class CTreeView : public QTreeWidget
 {
     Q_OBJECT
 public:
     enum EItemDataRole
     {
         BehaviorItemRole = Qt::UserRole + 20,
-        FilterTextRole
+        FilterTextRole,
+        RowKeyRole
     };
 
     explicit CTreeView(QWidget *parent = nullptr);
@@ -61,6 +63,18 @@ public:
     void focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToItem = false);
     void clearLogicSlotFocus();
     void prepareForRebuild();
+    void beginRefresh();
+    void clear();
+    QTreeWidgetItem* acquireRow(const QString& key, QTreeWidgetItem* parent,
+                                CNode* node = nullptr, bool plain = false);
+    void finishRefresh();
+    void setShowAllMobs(bool all);
+    bool showAllMobs() const { return m_showAllMobs; }
+    QIcon objectIcon(ENodeType type) const;
+    QString modelAlias(const QString& model) const;
+    void setModelCatalogPath(const QString& path);
+    void selectGroup(QTreeWidgetItem* group, bool foundOnly);
+    QTreeWidgetItem* rowForNode(CNode* node) const;
     void setValidationNids(const QSet<uint>& critical, const QSet<uint>& warning);
 
 signals:
@@ -69,6 +83,7 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
 
 private:
     enum class ETextMatchMode
@@ -101,6 +116,17 @@ private slots:
     void onChangeObjectName(CNode* pNode);
 
 private:
+    void syncSelectionToView();
+    bool m_syncing{false};
+    bool m_showAllMobs{false};
+    bool m_refreshSignals{false};
+    int m_savedScroll{0};
+    QHash<QString, QTreeWidgetItem*> m_rows;
+    QSet<QString> m_usedRows;
+    QHash<QTreeWidgetItem*, int> m_nextPosition;
+    QString m_catalogPath;
+    qint64 m_catalogStamp{-1}, m_catalogSize{-1};
+    QHash<QString, QString> m_aliases;
     CView* m_pView;
     QTimer* m_filterTimer;
     QString m_filterText;

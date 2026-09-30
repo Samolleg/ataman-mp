@@ -13,28 +13,214 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <algorithm>
+#include <QCollator>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QScrollBar>
+#include <QMouseEvent>
+#include <QStyle>
+#include <QPainter>
+#include <QScopedValueRollback>
+#include "technical_model_catalog.h"
 #include "objects/unit.h"
 #include "mob/mob.h"
 #include "log.h"
 #include "scene.h"
 
-CTreeView::CTreeView(QWidget *parent) : CFlatTreeWidget(parent), m_pView(nullptr),
+CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
 {
+    setIndentation(18);
+    setRootIsDecorated(true);
+    setUniformRowHeights(true);
+    setWordWrap(false);
+    setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_catalogPath = QCoreApplication::applicationDirPath() + "/model-catalog.json";
+    connect(this, &QTreeWidget::itemSelectionChanged, this, &CTreeView::syncSelectionToView);
     m_filterTimer->setSingleShot(true);
     m_filterTimer->setInterval(150);
     connect(m_filterTimer, &QTimer::timeout, this, &CTreeView::applyFilter);
-    QObject::connect(this, SIGNAL(itemClicked(QTreeWidgetItem*,int)), this, SLOT(itemClickedOver(QTreeWidgetItem*,int)));
+    connect(this, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int column) {
+        if(item->data(0, Qt::UserRole + 10).isValid() && !dynamic_cast<CTreeObject*>(item))
+            itemClickedOver(item, column);
+    });
     QObject::connect(this, SIGNAL(itemDoubleClicked(QTreeWidgetItem*,int)), this, SLOT(itemDoubleClickedOver(QTreeWidgetItem*,int)));
+}
+
+bool CTreeObject::operator<(const QTreeWidgetItem& other) const
+{
+    QCollator order(QLocale(QLocale::English));
+    order.setNumericMode(true); order.setCaseSensitivity(Qt::CaseInsensitive);
+    return order.compare(text(0), other.text(0)) < 0;
 }
 
 void CTreeView::prepareForRebuild()
 {
-    // A delayed filter must never run against QTreeWidgetItems that are about
-    // to be destroyed by collectObjectTreeData().
+    m_filterTimer->stop(); m_expansionBeforeFilter.clear();
+}
+void CTreeView::clear()
+{
+    const QSignalBlocker guard(this);
+    prepareForRebuild(); m_rows.clear(); m_usedRows.clear(); m_nextPosition.clear();
+    QTreeWidget::clear();
+}
+void CTreeView::beginRefresh()
+{
     m_filterTimer->stop();
-    m_expansionBeforeFilter.clear();
+    m_savedScroll = verticalScrollBar()->value();
+    m_refreshSignals = blockSignals(true);
+    setUpdatesEnabled(false);
+    m_usedRows.clear(); m_nextPosition.clear();
+    const QFileInfo info(m_catalogPath);
+    if(info.lastModified().toMSecsSinceEpoch() != m_catalogStamp || info.size() != m_catalogSize) {
+        m_catalogStamp = info.lastModified().toMSecsSinceEpoch(); m_catalogSize = info.size();
+        m_aliases.clear(); QFile file(m_catalogPath);
+        if(file.open(QIODevice::ReadOnly)) {
+            const auto models = QJsonDocument::fromJson(file.readAll()).object().value("models").toObject();
+            for(auto it = models.begin(); it != models.end(); ++it)
+                m_aliases.insert(ei::TechnicalModelCatalog::modelKey(it.key()), it.value().toObject().value("russianName").toString());
+        }
+    }
+}
+
+QIcon CTreeView::objectIcon(ENodeType type) const
+{
+    // Distinct type pictograms; no dependency on a model or game texture.
+    static QHash<int, QIcon> icons;
+    if(icons.contains(int(type))) return icons.value(int(type));
+    QPixmap image(32,32); image.fill(Qt::transparent);
+    QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(QColor(120,200,225),2)); p.setBrush(QColor(65,115,130));
+    switch(type) {
+    case eLight: p.setBrush(QColor(255,205,65)); p.drawEllipse(QRectF(8,8,16,16)); break;
+    case eSound: p.drawRect(QRectF(5,12,7,9)); p.drawArc(QRectF(10,5,17,23),-70*16,140*16); break;
+    case eUnit: p.drawEllipse(QRectF(12,3,8,8)); p.drawRoundedRect(QRectF(8,13,16,16),5,5); break;
+    case eParticle: p.drawLine(5,5,27,27); p.drawLine(5,27,27,5); p.drawEllipse(QRectF(11,11,10,10)); break;
+    case eLever: p.drawRect(QRectF(6,24,20,4)); p.drawLine(16,25,23,7); p.drawEllipse(QRectF(20,3,7,7)); break;
+    case eMagicTrap: p.drawEllipse(QRectF(4,4,24,24)); p.drawLine(7,25,25,7); break;
+    case eTorch: p.setBrush(QColor(255,155,60)); p.drawEllipse(QRectF(10,3,12,14)); p.drawLine(16,17,16,29); break;
+    default: p.drawRect(QRectF(6,8,20,20)); p.drawLine(6,8,16,3); p.drawLine(16,3,26,8); break;
+    }
+    const QIcon icon(image); icons.insert(int(type), icon); return icon;
+}
+
+QString CTreeView::modelAlias(const QString& model) const
+{ return m_aliases.value(ei::TechnicalModelCatalog::modelKey(model)); }
+void CTreeView::setModelCatalogPath(const QString& path)
+{ m_catalogPath = path; m_catalogStamp = m_catalogSize = -1; }
+void CTreeView::setShowAllMobs(bool all)
+{
+    if(m_showAllMobs == all) return;
+    m_showAllMobs = all;
+    if(m_pView) m_pView->collectObjectTreeData();
+}
+QTreeWidgetItem* CTreeView::acquireRow(const QString& key, QTreeWidgetItem* parent, CNode* node, bool plain)
+{
+    auto* item = m_rows.value(key, nullptr);
+    if(!item) {
+        item = plain ? new QTreeWidgetItem : new CTreeObject(static_cast<QTreeWidgetItem*>(nullptr), node);
+        if(parent) parent->addChild(item); else addTopLevelItem(item);
+        m_rows.insert(key, item); item->setData(0, RowKeyRole, key);
+        item->setExpanded(!parent);
+    } else if(item->parent() != parent) {
+        if(item->parent()) item->parent()->takeChild(item->parent()->indexOfChild(item));
+        else takeTopLevelItem(indexOfTopLevelItem(item));
+        if(parent) parent->addChild(item); else addTopLevelItem(item);
+    }
+    if(auto* object = dynamic_cast<CTreeObject*>(item)) object->setNode(node);
+    item->setFlags(Qt::ItemIsEnabled | ((node || plain) ? Qt::ItemIsSelectable : Qt::NoItemFlags));
+    item->setForeground(0, QBrush()); item->setForeground(1, QBrush()); item->setForeground(2, QBrush());
+    const int desired = m_nextPosition[parent]++;
+    const int actual = parent ? parent->indexOfChild(item) : indexOfTopLevelItem(item);
+    if(actual != desired) {
+        const bool expanded = item->isExpanded();
+        if(parent) { parent->takeChild(actual); parent->insertChild(desired, item); }
+        else { takeTopLevelItem(actual); insertTopLevelItem(desired, item); }
+        item->setExpanded(expanded);
+    }
+    m_usedRows.insert(key); return item;
+}
+void CTreeView::finishRefresh()
+{
+    // Remove obsolete subtrees once; retained rows keep their identity and expansion.
+    QList<QTreeWidgetItem*> obsolete;
+    QTreeWidgetItemIterator it(this);
+    while(*it) { auto* item = *it; ++it;
+        if(!m_usedRows.contains(item->data(0, RowKeyRole).toString())) obsolete.append(item);
+    }
+    QSet<QTreeWidgetItem*> stale = QSet<QTreeWidgetItem*>::fromList(obsolete);
+    for(auto* item : obsolete) {
+        m_rows.remove(item->data(0, RowKeyRole).toString()); m_expansionBeforeFilter.remove(item);
+    }
+    QList<QTreeWidgetItem*> roots;
+    for(auto* item : obsolete) if(!stale.contains(item->parent())) roots.append(item);
+    qDeleteAll(roots);
+    blockSignals(m_refreshSignals); setUpdatesEnabled(true);
+    applyFilter();
+    if(m_pView) {
+        const auto selected = m_pView->selectionSnapshot();
+        markNodes(selected, selected.isEmpty() ? nullptr : selected.back());
+    }
+    verticalScrollBar()->setValue(m_savedScroll);
+}
+QTreeWidgetItem* CTreeView::rowForNode(CNode* node) const
+{
+    QTreeWidgetItemIterator it(const_cast<CTreeView*>(this));
+    while(*it) { auto* row=dynamic_cast<CTreeObject*>(*it); if(row && row->node()==node) return row; ++it; }
+    return nullptr;
+}
+void CTreeView::mousePressEvent(QMouseEvent* event)
+{
+    auto* item=itemAt(event->pos()); auto* row=dynamic_cast<CTreeObject*>(item);
+    if(event->button()==Qt::LeftButton && row && !row->node()) {
+        item->setExpanded(!item->isExpanded()); event->accept(); return;
+    }
+    QTreeWidget::mousePressEvent(event);
+}
+void CTreeView::syncSelectionToView()
+{
+    if(m_syncing || !m_pView) return;
+    QScopedValueRollback<bool> guard(m_syncing, true);
+    if(currentItem() && currentItem()->data(0, Qt::UserRole + 10).isValid()
+       && !dynamic_cast<CTreeObject*>(currentItem())) {
+        itemClickedOver(currentItem(), 0); return;
+    }
+    const QString currentKey = currentItem() ? currentItem()->data(0, RowKeyRole).toString() : QString();
+    QList<CNode*> nodes;
+    for(auto* item : selectedItems()) if(auto* row=dynamic_cast<CTreeObject*>(item))
+        if(row->node()) nodes.append(row->node());
+    if(nodes.isEmpty()) {
+        if(currentItem() && !dynamic_cast<CTreeObject*>(currentItem())) return;
+        m_pView->clearObjectSelection();
+    } else {
+        int slot = -1;
+        for(auto* item = currentItem(); item; item = item->parent())
+            if(item->data(0, Qt::UserRole + 10).isValid()) {
+                slot = item->data(0, Qt::UserRole + 10).toInt(); break;
+            }
+        if(slot >= 0) m_pView->setLogicSlotIndex(slot);
+        clearLogicSlotFocus(); m_pView->selectNodes(nodes, false);
+    }
+    const QSignalBlocker block(this);
+    if(auto* current = m_rows.value(currentKey)) setCurrentItem(current, 0, QItemSelectionModel::NoUpdate);
+}
+void CTreeView::selectGroup(QTreeWidgetItem* group, bool foundOnly)
+{
+    if(!group || !m_pView) return;
+    QList<CNode*> nodes; QList<QTreeWidgetItem*> pending{group};
+    while(!pending.isEmpty()) {
+        auto* item=pending.takeLast();
+        if(foundOnly && item->isHidden()) continue;
+        if(auto* row=dynamic_cast<CTreeObject*>(item)) if(row->node()) {
+            if(item->flags().testFlag(Qt::ItemIsSelectable)) nodes.append(row->node());
+            continue; // Behavior points are not instances of the object group.
+        }
+        for(int i=0;i<item->childCount();++i) pending.append(item->child(i));
+    }
+    if(!nodes.isEmpty()) m_pView->selectNodes(nodes, false);
 }
 
 void CTreeView::setValidationNids(const QSet<uint>& critical,
@@ -103,7 +289,7 @@ bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
     CMob* owner = m_pView ? m_pView->ownerMob(node) : nullptr;
     const QString mob = owner ? owner->mobName() : QString();
     const QMap<QString, QString> fields{
-        {"name", node->mapName()}, {"id", QString::number(node->mapId())},
+        {"name", node->mapName()}, {"alias", modelAlias(node->modelName())}, {"id", QString::number(node->mapId())},
         {"nid", QString::number(node->mapId())}, {"type", type},
         {"model", node->modelName()}, {"texture", node->textureName()},
         {"db", database}, {"database", database}, {"prototype", database},
@@ -263,10 +449,10 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
         return;
     }
     auto key = pEvent->nativeVirtualKey();
-    if(key == eKey_Delete)
+    if(key == eKey_Delete || pEvent->key() == Qt::Key_Delete)
     {
         auto pItem = currentItem();
-        if(currentColumn() != 0 || nullptr == pItem) // clicked on count field. ignore it
+        if(nullptr == pItem)
             return;
 
         int parentCount = parentDeepCount(pItem);
@@ -284,6 +470,14 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
 void CTreeView::contextMenuEvent(QContextMenuEvent* event)
 {
     QTreeWidgetItem* item = itemAt(event->pos());
+    if(auto* group = dynamic_cast<CTreeObject*>(item)) if(!group->node()) {
+        QMenu menu(this);
+        auto* found = menu.addAction(tr("Выделить найденные объекты группы"));
+        auto* all = menu.addAction(tr("Выделить всю группу"));
+        auto* chosen = menu.exec(event->globalPos());
+        if(chosen == found || chosen == all) selectGroup(item, chosen == found);
+        return;
+    }
     if(!item || !item->data(0, Qt::UserRole + 10).isValid()
        || dynamic_cast<CTreeObject*>(item))
     {
@@ -397,10 +591,10 @@ ENodeType CTreeView::objectTypeByString(QString str) const
 
 void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
 {
-    if(column != 0) // clicked on count field. ignore it
-    {
-        clearSelection();
-        return;
+    Q_UNUSED(column);
+    if(!pItem || !m_pView) return;
+    if(auto* group = dynamic_cast<CTreeObject*>(pItem)) if(!group->node()) {
+        group->setExpanded(!group->isExpanded()); return;
     }
 
     if(pItem->data(0, Qt::UserRole + 10).isValid()
@@ -432,23 +626,6 @@ void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
     QList<CNode*> nodes;
     if(objectItem->node())
         nodes.append(objectItem->node());
-    else if(parentDeepCount(pItem) > 0)
-    {
-        QList<QTreeWidgetItem*> pending;
-        pending.append(pItem);
-        while(!pending.isEmpty())
-        {
-            QTreeWidgetItem* next = pending.takeLast();
-            if(CTreeObject* childObject = dynamic_cast<CTreeObject*>(next))
-                if(childObject->node() && !nodes.contains(childObject->node()))
-                {
-                    nodes.append(childObject->node());
-                    continue;
-                }
-            for(int index = 0; index < next->childCount(); ++index)
-                pending.append(next->child(index));
-        }
-    }
     int logicSlot = -1;
     for(QTreeWidgetItem* ancestor = pItem; ancestor; ancestor = ancestor->parent())
         if(ancestor->data(0, Qt::UserRole + 10).isValid())
@@ -592,6 +769,7 @@ void CTreeView::markNode(CNode* pNode, bool scrollToNode)
 void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
                           bool scrollToPrimary)
 {
+    const QSignalBlocker signalGuard(this);
     QSet<CNode*> wanted;
     for(CNode* node : nodes)
         if(node) wanted.insert(node);
@@ -638,6 +816,7 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
 
 void CTreeView::focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToFocused)
 {
+    const QSignalBlocker signalGuard(this);
     m_focusedLogicUnit = owner;
     m_focusedLogicSlot = logicSlot;
     QTreeWidgetItemIterator it(this);
@@ -690,6 +869,7 @@ void CTreeView::expandBehaviorHierarchy(QTreeWidgetItem* ownerItem)
 
 void CTreeView::clearViewportSelectionMarker()
 {
+    const QSignalBlocker signalGuard(this);
     clearLogicSlotFocus();
     clearSelection();
     setCurrentItem(nullptr);

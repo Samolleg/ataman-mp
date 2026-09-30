@@ -795,6 +795,14 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->addWidget(m_outlinerFilterEdit, 1);
     filterLayout->addWidget(m_outlinerFilterStatus);
     outlinerLayout->addLayout(filterLayout);
+    auto* scope = new QComboBox(outlinerContainer);
+    scope->setObjectName("outlinerDocumentScope");
+    scope->addItem(tr("Активный MOB"));
+    scope->addItem(tr("Все загруженные MOB"));
+    scope->setToolTip(tr("Другие документы заблокированы для правки. Двойной щелчок делает документ активным."));
+    outlinerLayout->addWidget(scope);
+    connect(scope, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+        [this](int index) { m_ui->treeWidget->setShowAllMobs(index == 1); });
     m_outlinerSelectionPath = new CElidedPathLabel(outlinerContainer);
     m_outlinerSelectionPath->setTextFormat(Qt::PlainText);
     m_outlinerSelectionPath->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -888,7 +896,13 @@ MainWindow::MainWindow(QWidget* parent) :
             this, [this](int visible, int total)
     {
         m_outlinerFilterStatus->setText(tr("%1 / %2").arg(visible).arg(total));
-        m_outlinerFilterStatus->setToolTip(tr("%1 matching objects out of %2").arg(visible).arg(total));
+        int hiddenSelection = 0;
+        if(m_pView) for(CNode* node : m_pView->selectionSnapshot()) {
+            auto* row = m_ui->treeWidget->rowForNode(node);
+            if(!row || row->isHidden()) ++hiddenSelection;
+        }
+        m_outlinerFilterStatus->setToolTip(tr("%1 matching objects out of %2").arg(visible).arg(total)
+            + (hiddenSelection ? tr("; вне списка выбрано: %1").arg(hiddenSelection) : QString()));
         updateOutlinerSelectionPath();
     });
     connect(m_ui->treeWidget, &QTreeWidget::currentItemChanged,
@@ -6981,6 +6995,13 @@ void MainWindow::updateOutlinerSelectionPath()
     const QList<CNode*> selectedNodes = m_pView
         ? m_pView->selectionSnapshot() : QList<CNode*>();
     QTreeWidgetItem* item = m_ui->treeWidget->currentItem();
+    if(selectedNodes.size() == 1) {
+        auto* object = dynamic_cast<CTreeObject*>(item);
+        if(!object || object->node() != selectedNodes.front()) {
+            if(!(item && item->data(0, Qt::UserRole + 10).isValid()))
+                item = m_ui->treeWidget->rowForNode(selectedNodes.front());
+        }
+    }
     const bool virtualLogicSelection = item
         && item->data(0, Qt::UserRole + 10).isValid()
         && !dynamic_cast<CTreeObject*>(item);
