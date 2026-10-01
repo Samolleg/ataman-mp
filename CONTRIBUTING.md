@@ -1,14 +1,17 @@
-# Разработка EI Mapper Ataman без GitHub
+# Разработка EI Mapper Ataman
 
-Проект ведётся локально. Git сохраняет историю, GitHub не используется.
+Проект ведётся в отдельном локальном репозитории. Git сохраняет историю;
+приватный GitHub-репозиторий — Samolleg/ataman-mp. Первоначальная публикация
+версии88 разрешена владельцем 2026-10-01; последующие сетевые операции требуют
+соответствующего явного поручения.
 Основа: 19168b91a10562525fb6c83b665275c2fd43cf4c.
 main — принятая владельцем линия, а не обещание отсутствия всех дефектов.
 
 ## Порядок работы
 
 1. Открыть именно ei-mapper-ataman, прочитать AGENTS.md и ROADMAP.md.
-2. Проверить HEAD, затрагиваемые файлы и отсутствие remotes. Не обращаться
-   к GitHub и не изменять исходный Endurance.
+2. Проверить HEAD, затрагиваемые файлы и адреса remotes. Обращаться к GitHub
+   только в пределах текущего поручения; не изменять исходный Endurance.
 3. Для реализации создать codex/<задача> от принятого локального main или явно
    назначенной базы. Не переносить чужие/более новые изменения автоматически.
    Для запрошенного исправления только что переданного результата использовать
@@ -21,7 +24,8 @@ main — принятая владельцем линия, а не обещан�
    сборок/личных данных. Аудит без исправлений и повторная сборка номер не меняют.
 6. Передать ветку, полный SHA, результаты и ограничения. Запрос сборки включает
    обновление одной постоянной установки по docs/TEST_BUILD_HANDOFF.md
-   с сохранением пользовательских данных. Push и PR не нужны.
+   с сохранением пользовательских данных. Push и PR выполняются только по
+   соответствующему явному поручению владельца.
 7. Интеграция в main — отдельное поручение владельца. При конфликте остановиться,
    сохранить состояние и сообщить о конфликте, не угадывать решение.
 
@@ -53,8 +57,10 @@ GitHub, remotes, fetch/pull/push, PR и публикация не нужны.
 
 ## English summary
 
-Local-only fork from the full SHA above. Follow AGENTS.md and ROADMAP.md.
+Independent fork from the full SHA above, mirrored to the private
+Samolleg/ataman-mp repository by the owner's 2026-10-01 request.
+Follow AGENTS.md and ROADMAP.md.
 One codex/<task> implementation branch from accepted local main; scoped local
-commits. No remotes, network Git operations, PRs or publication without a new
+commits. No further network Git operations, PRs or publication without a new
 explicit owner request. Main integration is separately authorized. Preserve
 user data, upstream attribution and unrelated changes.

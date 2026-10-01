@@ -4,8 +4,10 @@
 
 This product/data contract is retained by the local ei-mapper-ataman fork from
 19168b91a10562525fb6c83b665275c2fd43cf4c. Active development and authorization
-rules are in root AGENTS.md and CONTRIBUTING.md: local Git only, no remotes or
-GitHub workflow. Historical upstream references grant no permission to publish,
+rules are in root AGENTS.md and CONTRIBUTING.md. The owner's 2026-10-01 request
+authorizes initial publication of Ataman88 to private Samolleg/ataman-mp;
+further network/publication work needs its own explicit authorization.
+Historical upstream references grant no permission to publish,
 integrate, delete or mutate user data. Licensing and attribution remain intact.
 
 This document contains enduring product and compatibility rules. The roadmap

@@ -34,6 +34,11 @@ target_wrapper.*
 CMakeLists.txt.user*
 
 # Local toolchains and generated packages
+/artifacts/EI-Mapper-Ataman-*/
+/artifacts/rollback-*/
+/artifacts/cleanup-*/
+/endurance-options.json
+/model-catalog.json
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r1-test/
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r2-test/
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r3-test/

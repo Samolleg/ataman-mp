@@ -1,4 +1,4 @@
-name: Endurance preview report
+name: Ataman preview report
 description: Report a bug, crash, save test, or successful validation result
 title: "[alpha preview] "
 body:
@@ -9,8 +9,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Endurance version
-      placeholder: 0.1.0-alpha.12
+      label: Ataman version
+      placeholder: "88"
     validations:
       required: true
   - type: dropdown
@@ -34,7 +34,7 @@ body:
       label: Reproduction steps
       description: Start from launching the editor and include MPR/MOB opening order.
       placeholder: |
-        1. Launch Endurance
+        1. Launch Ataman
         2. Open ...
         3. Change ...
         4. Save/reopen/test ...

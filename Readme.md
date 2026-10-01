@@ -1,11 +1,14 @@
-# EI Mapper Ataman — локальный форк
+# EI Mapper Ataman
 
 Самостоятельная локальная линия от
 `19168b91a10562525fb6c83b665275c2fd43cf4c` (2026-09-17).
-Git-история сохранена, remotes отсутствуют. Разработка, ветки и коммиты локальные;
-GitHub и PR не используются. Правила: [AGENTS.md](AGENTS.md),
+Git-история и авторство сохранены. Приватный репозиторий исходников:
+[Samolleg/ataman-mp](https://github.com/Samolleg/ataman-mp).
+Публикация текущей версии88 разрешена владельцем 2026-10-01; дальнейшая
+публикация и интеграция требуют соответствующего поручения.
+Правила: [AGENTS.md](AGENTS.md),
 [порядок разработки](CONTRIBUTING.md), [дорожная карта](ROADMAP.md).
-Название приложения и бинарников пока остаётся Endurance: код не переименован.
+Имя исполняемого файла остаётся `EIMapperEndurance.exe`; код не переименован.
 
 EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
