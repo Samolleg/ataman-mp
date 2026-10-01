@@ -1,6 +1,6 @@
 # EI Mapper: Endurance Edition project contract
 
-## Ataman local-fork scope
+## Ataman fork scope
 
 This product/data contract is retained by the local ei-mapper-ataman fork from
 19168b91a10562525fb6c83b665275c2fd43cf4c. Active development and authorization
@@ -11,6 +11,11 @@ builds, with the original local history preserved.
 further network/publication work needs its own explicit authorization.
 Historical upstream references grant no permission to publish,
 integrate, delete or mutate user data. Licensing and attribution remain intact.
+
+Contributor onboarding is in [COAUTHOR_HANDOFF.md](COAUTHOR_HANDOFF.md).
+The cleaned GitHub lineage has different commit IDs from the original local
+history. A fresh clone uses its assigned accepted base, not a missing historical
+SHA. This distinction changes neither the editing contract nor data ownership.
 
 This document contains enduring product and compatibility rules. The roadmap
 contains only version goals and approved implementation evidence.

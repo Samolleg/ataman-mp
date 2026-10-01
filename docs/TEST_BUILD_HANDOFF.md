@@ -7,6 +7,20 @@ fix or feature increments the number under AGENTS.md. Historical Endurance
 versions remain historical evidence only.
 Builds are local deliverables, never an implicit upload or publication request.
 
+## Another contributor's computer
+
+Read [COAUTHOR_HANDOFF.md](COAUTHOR_HANDOFF.md) before the first build from a
+clean GitHub clone. Paths are relative to that contributor's actual checkout;
+historical absolute paths refer to the report author's machine. The repository
+does not include Qt/MinGW, Visual Studio, installed game data or old runtime
+binaries. Obtain dependencies under the current task's authorization and build
+the runtime components from source. Do not recover private game fixtures from
+old history or add them to Git/distributions. Required packaged test data must
+be owned distributable synthetic data; an unavailable private-data check is
+recorded as unavailable, never PASS. All staging, manifest and permanent-target
+preservation rules below still apply. Another permanent target needs an explicit
+request; a build never authorizes touching someone else's installation.
+
 ## 1. Build the application
 
 Use the documented release wrapper from the active worktree:
