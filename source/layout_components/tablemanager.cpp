@@ -1493,17 +1493,19 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             blockEditWidget(m_pTable->item(i, 0));
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+            // Reparent/style the empty editor before installing thousands of
+            // choices: Qt's stylesheet repolish measures the attached list.
+            m_pTable->setCellWidget(i, 1, pCombo);
             if(type == eObjParam_PRIM_TXTR && m_catalogSettings && !m_selectedModel.isEmpty()) {
                 QStringList preferred;
                 for(const auto& choice : m_catalog.textureChoices(m_catalogProfile, m_selectedModel,
                     CTextureList::getInstance()->textureList(), m_textureScan)) preferred.append(choice.name);
-                pCombo->setPreferredOptions(preferred);
                 pCombo->setObjectName("objectModelTextureChoices");
+                pCombo->setPreferredOptions(preferred);
             }
             if(type == eObjParam_UNIT_PROTOTYPE)
                 QObject::connect(pCombo, &CComboDynItem::openDatabasePrototypeRequested,
                                  this, &CTableManager::openDatabasePrototypeRequested);
-            m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
             break;
@@ -1544,7 +1546,6 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             CComboDynItem* pCombo = new CComboDynItem(item);
             QObject::connect(pCombo, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
             if(m_catalogSettings) {
-                pCombo->setModelNames(m_catalog);
                 auto* container = new PropertyEditorContainer;
                 auto* layout = new QVBoxLayout(container); layout->setContentsMargins(0,0,0,0); layout->setSpacing(2);
                 layout->setSizeConstraint(QLayout::SetNoConstraint);
@@ -1566,6 +1567,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                 connect(gallery, &QPushButton::clicked, this, &CTableManager::openModelGallery);
                 m_pTable->setCellWidget(i, 1, container);
                 m_pTable->setRowHeight(i, pCombo->sizeHint().height() + gallery->sizeHint().height() + 4);
+                pCombo->setModelNames(m_catalog);
             } else m_pTable->setCellWidget(i, 1, pCombo);
             registerPropertyRow(i, item);
             ++i;
