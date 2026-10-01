@@ -120,6 +120,18 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     // the first population. Shared preview keys must include the resources.
     std::atomic<int> sharedCalls{0};
     const auto fastProvider=[&sharedCalls](const QString&,const QString& tex){++sharedCalls;QImage image(192,132,QImage::Format_ARGB32);image.fill(tex=="wood"?Qt::red:Qt::blue);return image;};
+    // A worker may finish before its queued GUI notification. A resize/scroll
+    // timer in that interval must not replace its future or submit it twice.
+    {
+        std::atomic<int> jobs{0};
+        CModelGallery notification({"a","b"},&catalog,"test",{},&scan,
+            [&jobs](const QString&,const QString&){++jobs;QImage image(192,132,QImage::Format_ARGB32);image.fill(Qt::red);return image;});
+        notification.setAttribute(Qt::WA_DontShowOnScreen);notification.show();
+        notification.m_thumbnailTimer.stop();notification.loadVisibleThumbnail();
+        notification.m_thumbnailWatcher.waitForFinished();
+        notification.loadVisibleThumbnail();notification.m_thumbnailWatcher.waitForFinished();
+        if(jobs.load()!=1) return fail("finished worker must await GUI result notification without resubmission");
+    }
     const auto ready=[&](CModelGallery& dialog,int limit) {
         auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");QElapsedTimer timer;timer.start();
         do {

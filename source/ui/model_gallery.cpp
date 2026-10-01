@@ -328,7 +328,9 @@ void CModelGallery::savePlacement()
 }
 void CModelGallery::loadVisibleThumbnail()
 {
-    if(!isVisible() || m_thumbnailWatcher.isRunning() || !m_provider) return;
+    // isRunning() becomes false before the queued finished notification. Keep
+    // ownership until that notification consumes the result and loading key.
+    if(!isVisible() || m_thumbnailJobActive || !m_provider) return;
     for(int i=0;i<m_list->count();++i)
     {
         auto* item=m_list->item(i);
@@ -349,6 +351,7 @@ void CModelGallery::loadVisibleThumbnail()
         item->setIcon(QIcon()); item->setData(Qt::UserRole+2,QVariant());
         m_loadingKey=key; m_loadingModel=model;
         const auto provider=m_provider;
+        m_thumbnailJobActive=true;
         m_thumbnailWatcher.setFuture(QtConcurrent::run([provider,model,texture]{return provider(model,texture);}));
         return;
     }
@@ -356,6 +359,7 @@ void CModelGallery::loadVisibleThumbnail()
 void CModelGallery::finishThumbnail()
 {
     const QImage image=m_thumbnailWatcher.result(); m_thumbnails.insert(m_loadingKey,new QImage(image),imageCost(image));
+    m_thumbnailJobActive=false;
     if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(m_thumbnailNamespace+'|'+m_loadingKey,new QImage(image),imageCost(image));
     for(int i=0;i<m_list->count();++i)
     {

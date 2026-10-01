@@ -40,6 +40,7 @@ public slots:
 protected:
     void resizeEvent(QResizeEvent* event) override;
 private:
+    friend bool runModelGalleryWidgetCheck(QString* diagnostic);
     void filter(const QString& preferredModel = QString(), const QString& preferredTexture = QString());
     void selectionChanged();
     void saveName();
@@ -71,6 +72,7 @@ private:
     QPushButton *m_saveName, *m_saveTexture, *m_choose;
     QTimer m_thumbnailTimer;
     QFutureWatcher<QImage> m_thumbnailWatcher;
+    bool m_thumbnailJobActive = false;
     QCache<QString,QImage> m_thumbnails{16*1024};
     QString m_loadingKey, m_loadingModel;
 };
