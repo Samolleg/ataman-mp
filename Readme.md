@@ -79,9 +79,10 @@ timestamped pre-save revisions before replacing existing files. Backups and thei
 are stored under `%LOCALAPPDATA%\\EI Mapper Endurance\\backups`; use **Tools → Open Backup
 Folder** to inspect them. A save is refused if its pre-save backup cannot be completed.
 
-This local fork preserves the baseline's Git ancestry and upstream attribution.
-No origin/upstream remote is configured. Historical GitHub links are attribution
-and evidence only, not a synchronization or publication workflow.
+This fork preserves upstream attribution and exports its history without game
+fixtures or old builds to the private Samolleg/ataman-mp repository. The original
+local history remains intact. Historical upstream GitHub links are attribution
+and evidence, not authorization to synchronize with upstream projects.
 
 ## Alpha scope
 
