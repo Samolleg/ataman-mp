@@ -6,6 +6,7 @@
 #include <QFutureWatcher>
 #include <QImage>
 #include <QTimer>
+#include <QSet>
 #include <functional>
 class QLineEdit;
 class QListWidget;
@@ -21,14 +22,17 @@ public:
     using ThumbnailProvider = std::function<QImage(const QString&, const QString&)>;
     CModelGallery(const QStringList& models, ei::TechnicalModelCatalog* catalog,
         const QString& profile, const QStringList& textures, const ei::TechnicalTextureCatalog* scan,
-        ThumbnailProvider provider, QWidget* parent = nullptr);
+        ThumbnailProvider provider, QWidget* parent = nullptr,
+        const QString& initialModel = QString(), const QString& initialTexture = QString(),
+        const QString& thumbnailNamespace = QString());
     ~CModelGallery() override;
     static ThumbnailProvider resourceThumbnails(const QStringList& sourcePaths);
+    static QString resourceThumbnailNamespace(const QStringList& sourcePaths);
     QString selectedModel() const;
     QString selectedTexture() const;
     void setCurrentModel(const QString& model);
     void setCurrentTexture(const QString& texture);
-    void refreshCatalog() { filter(); }
+    void refreshCatalog();
     void showCatalogError(const QString& error);
     void requireTextureSelection();
 public slots:
@@ -36,7 +40,7 @@ public slots:
 protected:
     void resizeEvent(QResizeEvent* event) override;
 private:
-    void filter();
+    void filter(const QString& preferredModel = QString(), const QString& preferredTexture = QString());
     void selectionChanged();
     void saveName();
     void saveTexture();
@@ -45,11 +49,16 @@ private:
     void finishThumbnail();
     QString textureForModel(const QString& model) const;
     QString cacheKey(const QString& model, const QString& texture) const;
+    QVector<ei::STechnicalTextureChoice> textureChoices(const QString& model) const;
     void reportSave(bool success, const QString& error);
     QStringList m_models, m_textures;
     ei::TechnicalModelCatalog* m_catalog;
     const ei::TechnicalTextureCatalog* m_scan;
     QString m_profile;
+    QString m_thumbnailNamespace;
+    QSet<QString> m_availableTextures;
+    mutable QHash<QString,QVector<ei::STechnicalTextureChoice>> m_textureChoices;
+    mutable quint64 m_catalogRevision = 0, m_scanRevision = 0;
     bool m_textureRequired{false};
     ThumbnailProvider m_provider;
     QLineEdit *m_search, *m_name;
@@ -62,7 +71,7 @@ private:
     QPushButton *m_saveName, *m_saveTexture, *m_choose;
     QTimer m_thumbnailTimer;
     QFutureWatcher<QImage> m_thumbnailWatcher;
-    QCache<QString,QImage> m_thumbnails{128};
+    QCache<QString,QImage> m_thumbnails{16*1024};
     QString m_loadingKey, m_loadingModel;
 };
 #endif

@@ -2904,14 +2904,18 @@ void CTableManager::openModelGallery()
     catalog.registerModels(CObjectList::getInstance()->figureList());
     if(catalogError.isEmpty()) catalog.save(&catalogError);
     ei::TechnicalTextureCatalog scan = m_textureScan;
+    // The freshly loaded JSON can contain a newer scan than the table snapshot.
+    catalog.restoreScan(m_catalogProfile,&scan);
     QStringList roots;
     if(auto* option = dynamic_cast<COptStringList*>(m_catalogSettings->opt(eOptSetResource, "mapRoots"))) roots = option->value().toList();
     scan.refreshSources(roots);
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
+    QString initialTexture;
+    for(const auto& value : m_rowValues) if(value->type()==eObjParam_PRIM_TXTR && value->isInit()) initialTexture=value->toString();
+    const QStringList sources=configuredResourceSourcePaths(m_catalogSettings);
     CModelGallery gallery(CObjectList::getInstance()->figureList(), &catalog, m_catalogProfile,
-        textures, &scan, CModelGallery::resourceThumbnails(configuredResourceSourcePaths(m_catalogSettings)), m_pTable);
-    gallery.setCurrentModel(m_selectedModel);
-    for(const auto& value : m_rowValues) if(value->type()==eObjParam_PRIM_TXTR && value->isInit()) gallery.setCurrentTexture(value->toString());
+        textures, &scan, CModelGallery::resourceThumbnails(sources), m_pTable,m_selectedModel,initialTexture,
+        CModelGallery::resourceThumbnailNamespace(sources));
     gallery.requireTextureSelection();
     if(!catalogError.isEmpty()) gallery.showCatalogError(catalogError);
     QTimer scanner;
@@ -2930,6 +2934,7 @@ void CTableManager::openModelGallery()
     const QPointer<CTableManager> guard(this);
     const int result = gallery.exec(); scanner.stop();
     if(!guard || revision != m_dataRevision || generation != ei::ProfileDatabaseContext::instance().generation() || m_readOnly) return;
+    m_textureScan=scan;
     if(result == QDialog::Accepted && !gallery.selectedModel().isEmpty()) {
         QList<QSharedPointer<IPropertyBase>> values;
         if(m_selectedModel != gallery.selectedModel())

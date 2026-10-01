@@ -745,11 +745,11 @@ void CCreateObjectForm::openModelGallery()
     const QStringList models = CObjectList::getInstance()->figureList();
     m_modelCatalog.registerModels(models);
     m_modelCatalog.save(&m_modelCatalogError);
-    auto provider = CModelGallery::resourceThumbnails(configuredResourceSourcePaths(m_pView->settings()));
+    const QStringList sources=configuredResourceSourcePaths(m_pView->settings());
+    auto provider = CModelGallery::resourceThumbnails(sources);
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
-    CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this);
-    gallery.setCurrentModel(m_pNode->modelName());
-    gallery.setCurrentTexture(m_pNode->textureName());
+    CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this,
+        m_pNode->modelName(),m_pNode->textureName(),CModelGallery::resourceThumbnailNamespace(sources));
     if(!m_modelCatalogError.isEmpty()) gallery.showCatalogError(m_modelCatalogError);
     if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
     {

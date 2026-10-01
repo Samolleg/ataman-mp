@@ -11,6 +11,9 @@
 #include <QElapsedTimer>
 #include <QTabBar>
 #include <QSet>
+#include <QCompleter>
+#include <QScrollBar>
+#include <QFile>
 #include <atomic>
 
 bool runModelGalleryWidgetCheck(QString* diagnostic)
@@ -92,6 +95,88 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     bool rejected=false; QObject::connect(&cancel,&QDialog::rejected,[&rejected]{rejected=true;});
     QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier); QApplication::sendEvent(&cancel,&escape);
     if(!rejected) return fail("Escape cancellation");
-    if(diagnostic) *diagnostic="empty subtitles, eight icon sections, three islands, assignment/move/unassign, search, persistence, selection, visible-only thumbnails and Escape PASS";
+    // The real profile has thousands of textures. The small functional fixture
+    // above cannot detect per-row updates of an attached completer.
+    QStringList manyModels={"house","bridge"}, manyTextures={"stone","wood"};
+    for(int i=0;i<495;++i) manyModels.append(QString("asset%1").arg(i));
+    for(int i=0;i<7163;++i) manyTextures.append(QString("texture%1").arg(i));
+    clock.restart();
+    CModelGallery large(manyModels,&catalog,"test",manyTextures,&scan,{},nullptr);
+    const qint64 openMs=clock.elapsed();
+    clock.restart(); large.setCurrentModel("house"); const qint64 selectMs=clock.elapsed();
+    if(openMs>=100 || selectMs>=100) return fail(QString("full catalog responsiveness: open=%1 ms select=%2 ms (limit100)").arg(openMs).arg(selectMs));
+    auto* largeTexture=large.findChild<QComboBox*>("modelGalleryTexture");
+    if(!largeTexture || largeTexture->count()!=manyTextures.size()+3 || largeTexture->findData("texture7162")<0 || !largeTexture->completer()) return fail("full texture list/completer preserved");
+    auto* largeSearch=large.findChild<QLineEdit*>("modelGallerySearch");
+    clock.restart(); largeSearch->setText(QString::fromUtf8("Каменный house"));
+    if(clock.elapsed()>=100 || large.selectedModel()!="house") return fail("full catalog Russian search responsiveness");
+    largeSearch->clear();
+    if(largeTexture->model()->flags(largeTexture->model()->index(0,0))!=Qt::NoItemFlags
+        || largeTexture->findData("stone")<0 || largeTexture->findData("wood")<0) return fail("non-selectable texture sections and exact choices");
+    largeTexture->completer()->setCompletionPrefix("texture7162");
+    if(largeTexture->completer()->completionModel()->rowCount()!=1
+        || largeTexture->completer()->completionModel()->index(0,0).data().toString()!="texture7162") return fail("full-list completion content");
+    // The two production entry points provide the initial model/texture before
+    // the first population. Shared preview keys must include the resources.
+    std::atomic<int> sharedCalls{0};
+    const auto fastProvider=[&sharedCalls](const QString&,const QString& tex){++sharedCalls;QImage image(192,132,QImage::Format_ARGB32);image.fill(tex=="wood"?Qt::red:Qt::blue);return image;};
+    const auto ready=[&](CModelGallery& dialog,int limit) {
+        auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");QElapsedTimer timer;timer.start();
+        do {
+            QApplication::processEvents(QEventLoop::AllEvents,10);
+            bool complete=true;
+            for(int i=0;i<tiles->count();++i) if(tiles->visualItemRect(tiles->item(i)).intersects(tiles->viewport()->rect()) && tiles->item(i)->icon().isNull()) complete=false;
+            if(complete) return true;
+        } while(timer.elapsed()<limit);
+        return false;
+    };
+    const QString space=temp.path()+"/resources-1";
+    const QString resourcePath=temp.filePath("preview-resource.res");
+    QFile resource(resourcePath);
+    if(!resource.open(QIODevice::WriteOnly) || resource.write("first")!=5) return fail("resource identity fixture");
+    resource.close();
+    const QString firstIdentity=CModelGallery::resourceThumbnailNamespace({resourcePath});
+    if(firstIdentity!=CModelGallery::resourceThumbnailNamespace({resourcePath})) return fail("stable resource identity");
+    if(!resource.open(QIODevice::WriteOnly|QIODevice::Truncate) || resource.write("replacement")!=11) return fail("changed resource identity fixture");
+    resource.close();
+    if(firstIdentity==CModelGallery::resourceThumbnailNamespace({resourcePath})) return fail("resource metadata invalidates identity");
+    {
+        CModelGallery cold(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space);
+        if(cold.selectedModel()!="house" || cold.selectedTexture()!="wood") return fail("initial model and explicit texture");
+        cold.setAttribute(Qt::WA_DontShowOnScreen);cold.show();clock.restart();
+        if(!ready(cold,300)) return fail("visible thumbnail queue responsiveness (limit300ms)");
+        auto* tiles=cold.findChild<QListWidget*>("modelGalleryTiles");
+        if(sharedCalls.load()==0 || sharedCalls.load()>=manyModels.size()) return fail("full-profile visible-only jobs");
+        const int before=sharedCalls.load();
+        tiles->verticalScrollBar()->setValue(0);
+        if(!ready(cold,300) || sharedCalls.load()<=before) return fail("new viewport thumbnails");
+        tiles->scrollToItem(tiles->currentItem());
+        const int back=sharedCalls.load();
+        if(!ready(cold,300) || sharedCalls.load()!=back) return fail("return to cached viewport");
+    }
+    {
+        const int before=sharedCalls.load();
+        CModelGallery warm(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space);
+        warm.setAttribute(Qt::WA_DontShowOnScreen);warm.show();
+        if(!ready(warm,300) || sharedCalls.load()!=before) return fail("preview cache survives gallery reopening");
+        warm.setCurrentTexture("stone");
+        if(!ready(warm,300)) return fail("changed texture preview");
+        // ready() may observe the old icon until the queued job finishes. Wait
+        // for the actual new cache key before examining the displayed result.
+        auto* tiles=warm.findChild<QListWidget*>("modelGalleryTiles");clock.restart();
+        while(tiles->currentItem()->data(Qt::UserRole+2).toString()!="house|stone" && clock.elapsed()<300) QApplication::processEvents(QEventLoop::AllEvents,10);
+        if(tiles->currentItem()->data(Qt::UserRole+2).toString()!="house|stone"
+            || tiles->currentItem()->icon().pixmap(192,132).toImage().pixelColor(0,0)!=QColor(Qt::blue)) return fail("texture change invalidates tile identity");
+    }
+    {
+        const int before=sharedCalls.load();
+        CModelGallery changed(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space+"-changed");
+        changed.setAttribute(Qt::WA_DontShowOnScreen);changed.show();
+        if(!ready(changed,300) || sharedCalls.load()<=before) return fail("resource generation invalidates shared previews");
+    }
+    catalog.bindTexture("test","asset0","texture99");
+    large.setCurrentModel("asset0");
+    if(large.selectedTexture()!="texture99") return fail("catalog revision invalidates cached texture choices");
+    if(diagnostic) *diagnostic=QString("functional sections/search/persistence/Escape; 497 models/7165 textures: open=%1ms select=%2ms; groups/completion, initial selection, visible queue, scroll/reopen cache and resource/texture invalidation PASS").arg(openMs).arg(selectMs);
     return true;
 }

@@ -17,6 +17,7 @@ public:
     bool save(QString* error = nullptr);
     QString path() const { return m_path; }
     bool writable() const { return m_valid; }
+    quint64 revision() const { return m_revision; }
     QString russianName(const QString& model) const;
     void setRussianName(const QString& model, const QString& name);
     QString category(const QString& model) const;
@@ -39,6 +40,7 @@ private:
     QByteArray m_original;
     bool m_existed = false;
     bool m_valid = false;
+    quint64 m_revision = 0;
 };
 }
 #endif

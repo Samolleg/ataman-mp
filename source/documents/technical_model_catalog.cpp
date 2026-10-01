@@ -57,6 +57,7 @@ QString TechnicalModelCatalog::profileKey(const QStringList& roots)
 }
 bool TechnicalModelCatalog::load(const QString& path, QString* error)
 {
+    ++m_revision;
     m_path = path; m_valid = false; m_original.clear(); m_document = {};
     m_existed = QFileInfo::exists(path);
     if(!m_existed)
@@ -110,6 +111,7 @@ QString TechnicalModelCatalog::russianName(const QString& model) const
 }
 void TechnicalModelCatalog::setRussianName(const QString& model, const QString& name)
 {
+    ++m_revision;
     QJsonObject models = m_document.value("models").toObject();
     QJsonObject entry = models.value(modelKey(model)).toObject();
     entry.insert("russianName", name.trimmed()); models.insert(modelKey(model), entry);
@@ -117,6 +119,7 @@ void TechnicalModelCatalog::setRussianName(const QString& model, const QString& 
 }
 void TechnicalModelCatalog::registerModels(const QStringList& names)
 {
+    ++m_revision;
     QJsonObject models = m_document.value("models").toObject();
     for(const QString& name : names)
         if(!models.contains(modelKey(name))) models.insert(modelKey(name), QJsonObject{{"russianName", ""}});
@@ -160,6 +163,7 @@ void TechnicalModelCatalog::restoreScan(const QString& profile, TechnicalTexture
 }
 void TechnicalModelCatalog::captureScan(const QString& profile, const TechnicalTextureCatalog& scan)
 {
+    ++m_revision;
     QJsonObject profiles = m_document.value("profiles").toObject();
     QJsonObject entry = profiles.value(profile).toObject();
     entry.insert("scanCache", scan.saveCache());
@@ -192,6 +196,7 @@ QVector<STechnicalTextureChoice> TechnicalModelCatalog::textureChoices(const QSt
 }
 void TechnicalModelCatalog::bindTexture(const QString& profile, const QString& model, const QString& texture)
 {
+    ++m_revision;
     QJsonObject profiles = m_document.value("profiles").toObject();
     QJsonObject entry = profiles.value(profile).toObject();
     QJsonObject bindings = entry.value("modelTextures").toObject();

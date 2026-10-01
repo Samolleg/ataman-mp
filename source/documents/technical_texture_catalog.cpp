@@ -45,6 +45,7 @@ QJsonObject TechnicalTextureCatalog::saveCache() const
 
 void TechnicalTextureCatalog::restoreCache(const QJsonObject& cache)
 {
+    ++m_revision;
     m_results.clear(); m_pending.clear(); m_sources.clear();
     const QJsonArray files = cache.value("files").toArray();
     if(files.size() > 20000) return;
@@ -96,6 +97,7 @@ QMap<QString, QStringList> TechnicalTextureCatalog::observedModelTextures() cons
 
 void TechnicalTextureCatalog::refreshSources(const QStringList& mapRoots)
 {
+    ++m_revision;
     QVector<SourceFile> sources;
     QSet<QString> logicalNames;
     QSet<QString> paths;
@@ -150,6 +152,7 @@ void TechnicalTextureCatalog::scanNextFile()
 {
     if(m_pending.isEmpty())
         return;
+    ++m_revision;
     const QString path = m_pending.takeFirst();
     const auto source = std::find_if(m_sources.constBegin(), m_sources.constEnd(),
         [&path](const SourceFile& item) { return item.path == path; });

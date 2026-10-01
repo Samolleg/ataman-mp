@@ -26,6 +26,7 @@ public:
     bool hasPendingFiles() const { return !m_pending.isEmpty(); }
     int pendingFileCount() const { return m_pending.size(); }
     int sourceFileCount() const { return m_sources.size(); }
+    quint64 revision() const { return m_revision; }
     int failedFileCount() const;
     void scanNextFile();
     QJsonObject saveCache() const;
@@ -51,6 +52,7 @@ private:
     QVector<SourceFile> m_sources;
     QStringList m_pending;
     QHash<QString, FileResult> m_results;
+    quint64 m_revision = 0;
 };
 
 } // namespace ei
