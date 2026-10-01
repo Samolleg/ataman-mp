@@ -26,6 +26,8 @@
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QHeaderView>
+#include <QElapsedTimer>
+#include <algorithm>
 
 int runProfileModelCatalogCheck()
 {
@@ -205,6 +207,39 @@ int runProfileModelCatalogCheck()
     check(otherName,"profile switch uses its database-adjacent JSON");
     view.collectObjectTreeData();
     check(tree.modelAlias("fixture-bridge")==QString::fromUtf8("Другой мост") && tree.modelAlias("fixture-house").isEmpty(),"hierarchy switches profile without alias leakage");
+    // Selection must remain responsive with a real-sized profile, not just
+    // the three textures used by the functional fixtures above.
+    for(int i=models.size(); i<493; ++i) models.append(QString("model-%1").arg(i));
+    for(int i=textures.size(); i<7164; ++i) textures.append(QString("texture-%1").arg(i));
+    const QString firstModel=object->modelName(), firstTexture=object->textureName();
+    const QString secondModel=secondObject->modelName(), secondTexture=secondObject->textureName();
+    QList<qint64> selectionTimes;
+    for(int i=0;i<5;++i) {
+        QElapsedTimer timer; timer.start();
+        view.selectNodes(QList<CNode*>() << (i%2 ? secondObject : object), false);
+        selectionTimes.append(timer.nsecsElapsed());
+        // Retire replaced cell editors between ordinary UI events.
+        QApplication::sendPostedEvents(nullptr,QEvent::DeferredDelete);
+    }
+    std::sort(selectionTimes.begin(),selectionTimes.end());
+    out << "Selection timings, 7164 textures/493 models: median_ms="
+        << selectionTimes.at(2)/1e6 << "; maximum_ms=" << selectionTimes.last()/1e6 << "\n";
+    check(selectionTimes.at(2)<200000000,
+          "repeated object selection with 7164 textures stays below 200 ms median");
+    texture=properties.findChild<CComboDynItem*>("objectModelTextureChoices");
+    check(texture && texture->count()==7167 && texture->findData("texture-7163")>=0
+          && texture->currentText()==firstTexture,
+          "large texture list remains complete and preserves selected value");
+    const int historyBeforeSearch=history.index();
+    texture->_onFilterTextChanged("texture-7163");
+    check(texture->completer()->completionCount()==1
+          && texture->completer()->currentCompletion()=="texture-7163",
+          "large grouped texture list still searches resource IDs");
+    texture->completer()->popup()->hide();
+    check(object->modelName()==firstModel && object->textureName()==firstTexture
+          && secondObject->modelName()==secondModel && secondObject->textureName()==secondTexture
+          && history.index()==historyBeforeSearch,
+          "repeated selection does not mutate objects; search does not add undo commands");
     const QString screenshot=qEnvironmentVariable("EI_PROFILE_CATALOG_CHECK_SCREENSHOT");
     if(!screenshot.isEmpty()){properties.resize(760,900);properties.show();QApplication::processEvents();check(properties.grab().save(screenshot),"property screenshot");}
     out<<"Profile catalog checks: "<<failures<<" failure(s)\n";

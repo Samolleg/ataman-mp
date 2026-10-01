@@ -173,6 +173,9 @@ signals:
 
 private:
     void ensureOptionsLoaded();
+    QStringList optionNames() const;
+    void installOptions(const QSharedPointer<QStandardItemModel>& model,
+                        const QString& current, bool aliasSearch);
     void updateDatabaseDiagnostic(const QString& value);
     void showDatabasePrototypeContextMenu(const QPoint& globalPosition);
 

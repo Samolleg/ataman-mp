@@ -2108,63 +2108,58 @@ void CColorButtonItem::keyPressEvent(QKeyEvent* event)
 
 void CComboDynItem::setPreferredOptions(const QStringList& preferred)
 {
-    ensureOptionsLoaded();
-    const QString current = currentText(); const QSignalBlocker blocker(this);
-    QStringList all;
-    for(int row=0;row<count();++row) {
-        const QString name=itemData(row).toString();
-        if(!name.isEmpty()) all.append(name);
-    }
-    m_pListModel->clear();
+    const QString current = currentText();
+    const QStringList all = optionNames();
+    QSet<QString> available;
+    for(const QString& name:all) available.insert(name.toLower());
+    QSharedPointer<QStandardItemModel> model(new AssetChoiceModel());
     auto header=[&](const QString& text) {
         auto* item=new QStandardItem(text);
         item->setFlags(Qt::NoItemFlags);
         QFont font=item->font(); font.setBold(true); item->setFont(font);
-        m_pListModel->appendRow(item);
+        model->appendRow(item);
     };
     auto choice=[&](const QString& name, bool matched) {
         auto* item=new QStandardItem(name);
         item->setData(name,Qt::UserRole); item->setData(name,Qt::UserRole+1);
         item->setData(matched ? QString::fromUtf8("Текстура этой модели")
                               : QString::fromUtf8("Другая текстура профиля"),Qt::ToolTipRole);
-        m_pListModel->appendRow(item);
+        model->appendRow(item);
     };
     header(preferred.isEmpty() ? QString::fromUtf8("Текстуры модели — не найдены")
                               : QString::fromUtf8("Текстуры этой модели"));
     QSet<QString> matched;
     for(const QString& name:preferred)
-        if(all.contains(name,Qt::CaseInsensitive) && !matched.contains(name.toLower())) {
+        if(available.contains(name.toLower()) && !matched.contains(name.toLower())) {
             choice(name,true); matched.insert(name.toLower());
         }
-    insertSeparator(count());
+    auto* separator=new QStandardItem();
+    separator->setFlags(Qt::NoItemFlags);
+    separator->setData(QStringLiteral("separator"),Qt::AccessibleDescriptionRole);
+    model->appendRow(separator);
     header(QString::fromUtf8("Другие текстуры профиля"));
     for(const QString& name:all) if(!matched.contains(name.toLower())) choice(name,false);
-    setCurrentIndex(-1); setEditText(current);
+    installOptions(model,current,false);
 }
 
 void CComboDynItem::setModelNames(const ei::TechnicalModelCatalog& catalog)
 {
     if(m_pValue->type()!=eObjParam_TEMPLATE) return;
-    ensureOptionsLoaded();
-    const QString current=currentText(); const QSignalBlocker blocker(this);
-    for(int row=0;row<count();++row) {
-        const QString id=itemData(row).toString(), name=catalog.russianName(id);
+    const QString current=currentText();
+    QSharedPointer<QStandardItemModel> model(new AssetChoiceModel());
+    for(const QString& id:optionNames()) {
+        const QString name=catalog.russianName(id);
         const QString caption=name.isEmpty() ? id : id + "   " + name;
-        setItemData(row,caption,Qt::DisplayRole);
-        setItemData(row,caption,Qt::UserRole+1);
+        auto* item=new QStandardItem(caption);
+        item->setData(id,Qt::UserRole);
+        item->setData(caption,Qt::UserRole+1);
+        model->appendRow(item);
     }
-    m_aliasSearch = true;
-    m_completionChoices->setFilterRole(Qt::UserRole+1);
-    m_completionChoices->setFilterCaseSensitivity(Qt::CaseInsensitive);
-    setCurrentIndex(-1); setEditText(current);
+    installOptions(model,current,true);
 }
 
-void CComboDynItem::ensureOptionsLoaded()
+QStringList CComboDynItem::optionNames() const
 {
-    if(m_optionsLoaded)
-        return;
-    const QString current = currentText();
-    const QSignalBlocker blocker(this);
     QStringList names;
     if(m_pValue->type() == eObjParam_PRIM_TXTR)
         names=CTextureList::getInstance()->textureList();
@@ -2181,16 +2176,48 @@ void CComboDynItem::ensureOptionsLoaded()
     else
     {
         Q_ASSERT(false && "not defined");
-        return;
+        return names;
     }
+    return names;
+}
+
+void CComboDynItem::installOptions(const QSharedPointer<QStandardItemModel>& model,
+                                  const QString& current, bool aliasSearch)
+{
+    // Prepare all rows before connecting combo/proxy/completer. Their per-row
+    // updates during a clear/refill otherwise make selection quadratic.
+    const QSignalBlocker blocker(this);
+    const auto previous=m_pListModel; // Keep the old model alive until detached.
+    m_completionChoices->setSourceModel(nullptr);
+    m_aliasSearch=aliasSearch;
+    m_completionChoices->setFilterRole(aliasSearch ? Qt::UserRole+1 : Qt::UserRole);
+    m_completionChoices->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    m_completionChoices->setFilterRegExp(".+");
+    m_pListModel=model;
+    setModel(model.get());
+    m_completionChoices->setSourceModel(model.get());
+    // QComboBox::setModel also changes the editable combo's completer model.
+    m_pCompleter->setModel(m_completionChoices);
+    m_pCompleter->setCompletionRole(Qt::UserRole);
+    m_pCompleter->setCompletionPrefix(QString());
+    setCurrentIndex(-1);
+    setEditText(current);
+    m_optionsLoaded=true;
+}
+
+void CComboDynItem::ensureOptionsLoaded()
+{
+    if(m_optionsLoaded)
+        return;
+    const QString current=currentText();
+    QSharedPointer<QStandardItemModel> model(new AssetChoiceModel());
+    const QStringList names=optionNames();
     for(const QString& name:names) {
         auto* item=new QStandardItem(name);
         item->setData(name,Qt::UserRole); item->setData(name,Qt::UserRole+1);
-        m_pListModel->appendRow(item);
+        model->appendRow(item);
     }
-    setCurrentIndex(-1);
-    setEditText(current);
-    m_optionsLoaded = true;
+    installOptions(model,current,false);
 }
 
 void CComboDynItem::showPopup()
