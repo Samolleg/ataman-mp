@@ -133,14 +133,21 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         if(jobs.load()!=1) return fail("finished worker must await GUI result notification without resubmission");
     }
     const auto ready=[&](CModelGallery& dialog,int limit) {
-        auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");QElapsedTimer timer;timer.start();
-        do {
-            QApplication::processEvents(QEventLoop::AllEvents,10);
-            bool complete=true;
+        auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");
+        QEventLoop loop; QTimer deadline,probe; bool complete=false;
+        const auto inspect=[&] {
+            complete=true;
             for(int i=0;i<tiles->count();++i) if(tiles->visualItemRect(tiles->item(i)).intersects(tiles->viewport()->rect()) && tiles->item(i)->icon().isNull()) complete=false;
-            if(complete) return true;
-        } while(timer.elapsed()<limit);
-        return false;
+            if(complete) loop.quit();
+        };
+        // Exercise the normal queued event loop, including completion ordering;
+        // a busy processEvents loop can repeatedly repaint other UI fixtures.
+        deadline.setSingleShot(true);probe.setTimerType(Qt::PreciseTimer);probe.setInterval(5);
+        QObject::connect(&deadline,&QTimer::timeout,&loop,&QEventLoop::quit);
+        QObject::connect(&probe,&QTimer::timeout,&loop,inspect);
+        const auto finished=QObject::connect(&dialog.m_thumbnailWatcher,&QFutureWatcher<QImage>::finished,&loop,inspect);
+        deadline.start(limit);probe.start();loop.exec();QObject::disconnect(finished);
+        return complete;
     };
     const QString space=temp.path()+"/resources-1";
     const QString resourcePath=temp.filePath("preview-resource.res");
