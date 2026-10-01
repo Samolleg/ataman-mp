@@ -39,6 +39,19 @@ CMakeLists.txt.user*
 /artifacts/cleanup-*/
 /endurance-options.json
 /model-catalog.json
+# Publication excludes game fixtures and generated program builds.
+*.exe
+*.pdb
+*.lib
+*.obj
+*.dmp
+*.zip
+*.7z
+*.mob
+*.mpr
+*.grp
+*.res
+!/assets/resources/auxData.res
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r1-test/
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r2-test/
 /artifacts/EI-Mapper-Endurance-0.5.0-alpha-mob-scenario-r3-test/
