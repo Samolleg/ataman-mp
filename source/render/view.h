@@ -173,6 +173,7 @@ class CView : public QGLWidget
     friend int runGroupRotationCheck();
     friend int runProfileModelCatalogCheck();
     friend int runModelConnectionCheck();
+    friend int runAssemblyCatalogCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
@@ -306,6 +307,16 @@ public:
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
     bool beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic = nullptr);
+    bool beginPreparedAssemblyPlacement(const ei::ObjectAssembly& assembly, const QPoint& cursor, const QVector3D& anchor, QString* error = nullptr);
+    bool captureSelectedAssembly(const QString& name, ei::ObjectAssembly* assembly, QString* error = nullptr);
+    bool beginAssemblyPlacement(const ei::ObjectAssembly& assembly, QString* error = nullptr);
+    void openAssemblyCatalog();
+    void saveSelectionAsAssembly();
+    void groupSelectedAssembly(const QString& name, const QString& catalogId = QString());
+    void disassembleSelection();
+    QList<CNode*> assemblySelection(const QList<CNode*>& nodes);
+    void normalizeAssemblySelection(const QList<CNode*>& before);
+    static void setAssemblyWorldPosition(CNode* node, const QVector3D& world);
     bool isDatabasePlacementPending() const { return m_pendingDatabasePlacement; }
     bool updateDatabasePlacementPointer(const QPoint& position);
     bool isLogicPlacementPending() const { return m_pendingLogicPlacementMacro; }
@@ -981,6 +992,10 @@ private:
     CMob* m_pendingPasteMob;
     QList<CNode*> m_pendingPasteNodes;
     bool m_pendingDatabasePlacement{false};
+    bool m_pendingAssemblyPlacement{false};
+    QHash<CNode*,QVector3D> m_pendingAssemblyOffsets;
+    QMap<CNode*,QVector3D> m_assemblyRotationWorldBackup;
+    QVector3D m_assemblyRotationPivot;
     QList<CNode*> m_pendingPasteOriginalSelection;
     QList<CNode*> m_pendingBehaviorPasteNodes;
     QList<CNode*> m_pendingBehaviorPasteOriginalSelection;

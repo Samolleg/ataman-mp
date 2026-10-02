@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include "model_connections.h"
+#include "object_assembly.h"
 
 namespace ei {
 // User-owned JSON: never part of the managed executable manifest.
@@ -26,6 +27,11 @@ public:
     QString category(const QString& model) const;
     QString region(const QString& model) const;
     bool setPlacement(const QString& model, const QString& category, const QString& region);
+    QVector<ObjectAssembly> assemblies(QString* error = nullptr) const;
+    bool setAssembly(const ObjectAssembly& assembly, QString* error = nullptr);
+    bool removeAssembly(const QString& id);
+    QJsonObject assemblyInstances(const QString& mobPath) const;
+    void setAssemblyInstances(const QString& mobPath, const QJsonObject& instances);
     static QStringList categoryIds();
     static QStringList regionIds();
     void registerModels(const QStringList& models);

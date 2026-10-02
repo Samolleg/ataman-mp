@@ -1,4 +1,4 @@
-# EI Mapper Ataman
+﻿# EI Mapper Ataman
 
 Соавтору и новому Codex: [вход в проект](docs/COAUTHOR_HANDOFF.md),
 [шаблон задания](docs/CODEX_TASK_TEMPLATE.md). Начните с них перед настройкой
@@ -21,7 +21,10 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `94`. Each separate fix advances the integer version.
+Current Ataman version: `95`. Each separate fix advances the integer version.
+Selected architecture parts can be saved as catalog assemblies, placed and copied
+as one rigid group, then disassembled. Definitions and editor membership live in
+the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
 Rigid building modules can snap by authored connector frames stored in the profile
 model catalog. The gallery includes a connector editor; moving/creating a module
 supports a magnet, connector choice, Esc and atomic Undo/Redo. See

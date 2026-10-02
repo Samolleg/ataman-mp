@@ -14,6 +14,8 @@ SOURCES += \
     ../source/documents/endurance_document.cpp \
     ../source/documents/technical_texture_catalog.cpp \
     ../source/documents/technical_model_catalog.cpp \
+    ../source/documents/object_assembly.cpp \
+    ../source/documents/model_connections.cpp \
     ../source/documents/ai_graph_persistence.cpp \
     ../source/documents/ai_graph_document.cpp \
     ../source/documents/mpr_document.cpp \
@@ -47,6 +49,8 @@ HEADERS += \
     ../source/documents/endurance_document.h \
     ../source/documents/technical_texture_catalog.h \
     ../source/documents/technical_model_catalog.h \
+    ../source/documents/object_assembly.h \
+    ../source/documents/model_connections.h \
     ../source/documents/ai_graph_persistence.h \
     ../source/documents/ai_graph_document.h \
     ../source/documents/mpr_document.h \

@@ -380,7 +380,7 @@ void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_Enter:
     {
-        if(!value.isEmpty())
+        if(!value.isEmpty() || m_pView->isDatabasePlacementPending() || m_pView->isLogicPlacementPending())
             m_pView->operationApply(EOperationAxisType::eMove);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;

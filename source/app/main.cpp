@@ -5,6 +5,7 @@
 #include "object_hierarchy_check.h"
 #include "group_rotation_check.h"
 #include "model_connection_check.h"
+#include "assembly_catalog_check.h"
 #include "dark_theme_check.h"
 #include "ui_theme.h"
 #include "scenario_layer_check.h"
@@ -575,6 +576,8 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileCatalogCheckOption);
     parser.addOption(hierarchyCheckOption);
     parser.addOption(groupRotationCheckOption);
+    QCommandLineOption assemblyCatalogCheckOption("assembly-catalog-check","Check assembly capture, grouped placement and catalog with synthetic data.");
+    parser.addOption(assemblyCatalogCheckOption);
     parser.addOption(modelConnectionCheckOption);
     parser.addOption(darkThemeCheckOption);
     parser.addOption(textureLifetimeCheckOption);
@@ -633,6 +636,7 @@ int runHeadlessCommand(QApplication& app)
     const bool modelGalleryCheck = parser.isSet(modelGalleryCheckOption);
     const bool hierarchyCheck = parser.isSet(hierarchyCheckOption);
     const bool darkThemeCheck = parser.isSet(darkThemeCheckOption);
+    const bool assemblyCatalogCheck=parser.isSet(assemblyCatalogCheckOption);
     const bool modelConnectionCheck = parser.isSet(modelConnectionCheckOption);
     const bool groupRotationCheck = parser.isSet(groupRotationCheckOption);
     const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
@@ -641,11 +645,11 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!assemblyCatalogCheck && !validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
-    if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
+    if((assemblyCatalogCheck ? 1 : 0) + (validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (modelConnectionCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) > 1)
@@ -667,6 +671,7 @@ int runHeadlessCommand(QApplication& app)
     if(profileCatalogCheck) return runProfileModelCatalogCheck();
     if(hierarchyCheck) return runObjectHierarchyCheck();
     if(groupRotationCheck) return runGroupRotationCheck();
+    if(assemblyCatalogCheck)return runAssemblyCatalogCheck();
     if(modelConnectionCheck) return runModelConnectionCheck();
     if(darkThemeCheck) return runDarkThemeCheck();
     if(modelGalleryCheck)

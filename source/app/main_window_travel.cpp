@@ -532,7 +532,10 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
     });
     for(const auto& archive:travelArchives)
         if(m_resourceBrowser)m_resourceBrowser->finishInternalPublication(archive,companionsSaved,false);
-    if(!saved){
+    QString assemblyError;
+    const bool assembliesSaved=!companionsSaved || !mob || mobBytes.isEmpty() || mob->saveAssemblyInstances(mob->filePath().absoluteFilePath(),&assemblyError);
+    if(!assembliesSaved) {mob->setDirty(true);error+=tr("\nMOB сохранён, но группировка сборок не записана: %1").arg(assemblyError);}
+    if(!saved || !assembliesSaved){
         if(companionsSaved){
             refreshMapsBrowser();refreshTravelEditor();updateLoadedMapPanel();rebuildWindowTitle();
             error=tr("Переходы и сопутствующие данные уже сохранены. Последующий этап сохранения карты не завершён.\n%1").arg(error);

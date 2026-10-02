@@ -4,19 +4,16 @@
 #include <limits>
 
 namespace ei {
-QImage renderModelGalleryThumbnail(const SResourceModelScene& scene, const QImage& sourceTexture,
-    const QString& model, float uvScale, const QSize& requested)
+QImage renderGalleryTriangles(const QVector<SGalleryTriangle>& triangles, const QVector<QImage>& sourceTextures, const QSize& requested, const std::atomic_bool* cancelled)
 {
-    if(!scene.valid) return {};
+    if(triangles.isEmpty())return {};
     const QSize size(qBound(32, requested.width(), 512), qBound(32, requested.height(), 512));
     QImage image(size, QImage::Format_ARGB32); image.fill(QColor(48, 51, 56));
-    const QImage texture = sourceTexture.convertToFormat(QImage::Format_ARGB32);
-    const QSet<QString> parts = defaultVisibleModelParts(scene, model);
+    QVector<QImage> textures;for(const auto& source:sourceTextures)textures.append(source.convertToFormat(QImage::Format_ARGB32));
     QMatrix4x4 rotation; rotation.rotate(-62.0f, 1, 0, 0); rotation.rotate(-40.0f, 0, 0, 1);
     QVector3D minimum(1e20f,1e20f,1e20f), maximum(-1e20f,-1e20f,-1e20f);
     int count = 0;
-    for(const auto& part : scene.parts) if(parts.contains(part.name.toLower()))
-        for(const auto& triangle : part.triangles) for(const auto& vertex : triangle.vertices)
+    for(const auto& entry:triangles) for(const auto& vertex:entry.triangle.vertices)
         {
             const QVector3D point = rotation * vertex.position;
             if(!qIsFinite(point.x()) || !qIsFinite(point.y()) || !qIsFinite(point.z())) continue;
@@ -28,9 +25,11 @@ QImage renderModelGalleryThumbnail(const SResourceModelScene& scene, const QImag
         size.height()/qMax(0.0001f,maximum.y()-minimum.y()));
     const QVector3D center = (minimum+maximum)*0.5f;
     QVector<float> depth(size.width()*size.height(), -std::numeric_limits<float>::infinity());
-    for(const auto& part : scene.parts) if(parts.contains(part.name.toLower()))
-        for(const auto& triangle : part.triangles)
+    for(const auto& entry:triangles)
         {
+            if(cancelled && cancelled->load())return {};
+            const auto& triangle=entry.triangle;
+            const QImage texture=textures.value(entry.textureIndex);
             QVector3D point[3]; bool finite = true;
             for(int i=0;i<3;++i)
             {
@@ -63,7 +62,7 @@ QImage renderModelGalleryThumbnail(const SResourceModelScene& scene, const QImag
                 QRgb color=qRgb(165,174,185);
                 if(!texture.isNull())
                 {
-                    const QVector2D uv=(a*triangle.vertices[0].uv+b*triangle.vertices[1].uv+c*triangle.vertices[2].uv)*uvScale;
+                    const QVector2D uv=(a*triangle.vertices[0].uv+b*triangle.vertices[1].uv+c*triangle.vertices[2].uv)*entry.uvScale;
                     if(!qIsFinite(uv.x()) || !qIsFinite(uv.y())) continue;
                     const int tx=qBound(0,int((uv.x()-std::floor(uv.x()))*texture.width()),texture.width()-1);
                     const int ty=qBound(0,int((uv.y()-std::floor(uv.y()))*texture.height()),texture.height()-1);
@@ -76,4 +75,14 @@ QImage renderModelGalleryThumbnail(const SResourceModelScene& scene, const QImag
         }
     return image;
 }
+QImage renderModelGalleryThumbnail(const SResourceModelScene& scene,const QImage& texture,
+    const QString& model,float uvScale,const QSize& size) {
+    if(!scene.valid)return {};
+    const auto visible=defaultVisibleModelParts(scene,model);QVector<SGalleryTriangle> triangles;
+    for(const auto& part:scene.parts)if(visible.contains(part.name.toLower()))for(const auto& triangle:part.triangles) {
+        SGalleryTriangle entry;entry.triangle=triangle;entry.uvScale=uvScale;triangles.append(entry);
+    }
+    return renderGalleryTriangles(triangles,{texture},size);
+}
+
 }

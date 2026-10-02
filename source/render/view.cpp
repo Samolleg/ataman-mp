@@ -1648,6 +1648,7 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     connect(m_mprModifyTimer, SIGNAL(timeout()), this, SLOT(checkNewLandVersion()));
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
+    m_assemblyRotationWorldBackup.clear();
     m_rotationOrientationBackup.clear();
     m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
@@ -11397,7 +11398,7 @@ bool CView::selectNodes(const QList<CNode*>& nodes, bool addToSelection)
     if(hasPendingOperation())
         cancelPendingOperation();
     QList<CNode*> selectable;
-    for(CNode* node : nodes)
+    for(CNode* node : assemblySelection(nodes))
     {
         CMob* owner = ownerMob(node);
         if(node && owner && isMobVisible(owner) && !selectable.contains(node))
@@ -16884,6 +16885,7 @@ void CView::clearObjectSelection()
 
 void CView::recordSelectionChange(const QList<CNode*>& before, const QString& text)
 {
+    normalizeAssemblySelection(before);
     const QList<CNode*> after = selectionSnapshot();
     QSet<CNode*> beforeSet;
     QSet<CNode*> afterSet;
@@ -23304,6 +23306,11 @@ bool CView::beginPreparedObjectPlacement(const QJsonObject& data,const QPoint& c
 
 bool CView::updateDatabasePlacementPointer(const QPoint& position)
 {
+    if(m_pendingAssemblyPlacement && m_pendingPasteMob==m_activeMob) {
+        QVector3D anchor;if(!objectPlacementPositionAt(position,&anchor))return false;
+        for(auto it=m_pendingAssemblyOffsets.begin();it!=m_pendingAssemblyOffsets.end();++it)setAssemblyWorldPosition(it.key(),anchor+it.value());
+        update();return true;
+    }
     if(!m_pendingDatabasePlacement || m_pendingPasteMob != m_activeMob
        || m_pendingPasteNodes.size() != 1) return false;
     QVector3D point;
@@ -23904,12 +23911,15 @@ bool CView::cancelPendingOperation()
     clearModelMagnet();
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
+    m_assemblyRotationWorldBackup.clear();
     m_rotationOrientationBackup.clear();
     m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
     m_pendingDatabasePlacement = false;
+    m_pendingAssemblyPlacement = false;
+    m_pendingAssemblyOffsets.clear();
     m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
@@ -24054,6 +24064,7 @@ void CView::operationSetBackup(EOperationAxisType operationType)
 
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
+    m_assemblyRotationWorldBackup.clear();
     m_rotationOrientationBackup.clear();
     m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
@@ -24067,7 +24078,7 @@ void CView::operationSetBackup(EOperationAxisType operationType)
     {
         if (node->nodeState() != ENodeState::eSelect)
             continue;
-        if(!node->isOperationAxisAllow(operationType))
+        if(!node->isOperationAxisAllow(operationType) && node->assemblyTag().isEmpty())
             continue;
         // A selected hierarchy root owns its descendants' translation. Do not
         // back up or transform the same child separately, which would apply
@@ -24110,6 +24121,7 @@ void CView::operationSetBackup(EOperationAxisType operationType)
             m_operationBackup[node] = node->getEulerRotation();
             m_rotationPositionBackup[node] = node->position();
             m_rotationOrientationBackup[node] = node->rotation();
+            m_assemblyRotationWorldBackup[node]=node->drawPosition();
             if(CUnit* unit = dynamic_cast<CUnit*>(node))
                 m_unitMovementBackup.insert(unit, unit->movementState());
             break;
@@ -24130,6 +24142,13 @@ void CView::operationSetBackup(EOperationAxisType operationType)
                 maximum[component] = qMax(maximum[component], position[component]);
             }
         m_rotationPivot = (minimum+maximum)*0.5f;
+        bool assemblySelected=false;for(auto* node:m_assemblyRotationWorldBackup.keys())assemblySelected|=!node->assemblyTag().isEmpty();
+        if(!assemblySelected)m_assemblyRotationWorldBackup.clear();
+        if(m_assemblyRotationWorldBackup.size()==m_rotationPositionBackup.size()) {
+            minimum=m_assemblyRotationWorldBackup.first();maximum=minimum;
+            for(const auto& world:m_assemblyRotationWorldBackup)for(int j=0;j<3;++j){minimum[j]=qMin(minimum[j],world[j]);maximum[j]=qMax(maximum[j],world[j]);}
+            m_assemblyRotationPivot=(minimum+maximum)*0.5f;
+        }
     }
 }
 
@@ -24184,7 +24203,7 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
-        m_pUndoStack->beginMacro(m_pendingDatabasePlacement ? QString::fromUtf8("Разместить объект")
+        m_pUndoStack->beginMacro(m_pendingAssemblyPlacement ? QString::fromUtf8("Разместить сборку") : m_pendingDatabasePlacement ? QString::fromUtf8("Разместить объект")
             : tr("Paste objects: %1").arg(m_pendingPasteNodes.size()));
         for(CNode* node : m_pendingPasteNodes)
         {
@@ -24371,12 +24390,15 @@ void CView::operationApply(EOperationAxisType operationType)
     clearModelMagnet();
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
+    m_assemblyRotationWorldBackup.clear();
     m_rotationOrientationBackup.clear();
     m_rotationDelta = QQuaternion();
     m_unitMovementBackup.clear();
     m_pendingOperationOwnsPaste = false;
     m_pendingLogicPlacementMacro = false;
     m_pendingDatabasePlacement = false;
+    m_pendingAssemblyPlacement = false;
+    m_pendingAssemblyOffsets.clear();
     m_pendingLogicPlacementOriginalSelection.clear();
     m_pendingPasteMob = nullptr;
     m_pendingPasteNodes.clear();
@@ -24397,6 +24419,7 @@ void CView::moveTo(QVector3D &dir)
     // selected descendants whose parent will carry them.
     for(CNode* node : m_operationBackup.keys())
     {
+        if(!node->assemblyTag().isEmpty()) {setAssemblyWorldPosition(node,node->drawPosition()+dir);continue;}
         pos = node->position() + dir;
         node->updatePos(pos);
     }
@@ -24414,6 +24437,11 @@ void CView::rotateTo(QVector3D &rot)
         if(!m_rotationPositionBackup.contains(node))
             continue;
         auto position = m_rotationPositionBackup.value(node);
+        if(m_assemblyRotationWorldBackup.size()==m_rotationPositionBackup.size() && m_assemblyRotationWorldBackup.contains(node)) {
+            const auto world=m_assemblyRotationPivot+m_rotationDelta.rotatedVector(m_assemblyRotationWorldBackup.value(node)-m_assemblyRotationPivot);
+            node->setRot((m_rotationDelta*m_rotationOrientationBackup.value(node)).normalized());
+            setAssemblyWorldPosition(node,world);continue;
+        }
         if(m_operationBackup.size() > 1)
             position = m_rotationPivot + m_rotationDelta.rotatedVector(position-m_rotationPivot);
         CUnit* unit = dynamic_cast<CUnit*>(node);
@@ -24804,6 +24832,18 @@ void CView::selectedObjectToClipboardBuffer()
         }
     }
 
+    const auto selectedAssemblyNodes=selectionSnapshot();
+    if(!selectedAssemblyNodes.isEmpty() && !selectedAssemblyNodes.first()->assemblyTag().isEmpty()) {
+        const auto tag=selectedAssemblyNodes.first()->assemblyTag();bool oneAssembly=true;
+        for(auto* node:selectedAssemblyNodes)oneAssembly &= node->assemblyTag()==tag;
+        if(oneAssembly) {
+            ei::ObjectAssembly assembly;QString error;
+            if(!captureSelectedAssembly(tag.value("name").toString(),&assembly,&error)){emit updateMsg(error);return;}
+            QJsonObject clipboard{{"Version",5},{"Content","Object assembly"},{"Assembly",ei::writeObjectAssembly(assembly)}};
+            if(m_clipboard_buffer_file.open(QIODevice::WriteOnly)){m_clipboard_buffer_file.write(QJsonDocument(clipboard).toJson());m_clipboard_buffer_file.close();}
+            return;
+        }
+    }
     QJsonArray arrObj;
     for(CNode* pNode : selectedNodes())
         if (pNode->nodeState() & ENodeState::eSelect)
@@ -24891,6 +24931,11 @@ void CView::clipboradObjectsToScene()
     if(obj["Content"].toString() == QStringLiteral("Behavior points"))
     {
         pasteBehaviorPoints(obj);
+        return;
+    }
+    if(obj.value("Content").toString()=="Object assembly") {
+        ei::ObjectAssembly assembly;QString error;
+        if(!ei::readObjectAssembly(obj.value("Assembly").toObject(),&assembly,&error) || !beginAssemblyPlacement(assembly,&error))emit updateMsg(error);
         return;
     }
     if (obj["Version"].toInt() != 2)

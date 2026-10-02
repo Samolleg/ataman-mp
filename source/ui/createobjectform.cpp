@@ -120,6 +120,11 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_modelGalleryButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     ui->verticalLayout_2->insertWidget(6, m_modelGalleryButton);
     connect(m_modelGalleryButton, &QPushButton::clicked, this, &CCreateObjectForm::openModelGallery);
+    auto* assemblyButton=new QPushButton(QString::fromUtf8("Готовые сборки…"),this);
+    assemblyButton->setObjectName("createAssemblyCatalog");
+    assemblyButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    ui->verticalLayout_2->insertWidget(6,assemblyButton);
+    connect(assemblyButton,&QPushButton::clicked,this,[this]{if(m_pView){hide();m_pView->openAssemblyCatalog();}});
     connect(m_technicalTexture, QOverload<int>::of(&QComboBox::activated),
             this, [this](int) { applyTechnicalTextureChoice(); });
     connect(m_technicalTexture->lineEdit(), &QLineEdit::editingFinished,

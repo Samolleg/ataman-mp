@@ -76,7 +76,9 @@ bool TechnicalModelCatalog::load(const QString& path, QString* error)
     if(parse.error != QJsonParseError::NoError || !document.isObject()
         || document.object().value("schemaVersion").toInt() != 1
         || (document.object().contains("models") && !document.object().value("models").isObject())
-        || (document.object().contains("profiles") && !document.object().value("profiles").isObject()))
+        || (document.object().contains("profiles") && !document.object().value("profiles").isObject())
+        || (document.object().contains("assemblies") && !document.object().value("assemblies").isObject())
+        || (document.object().contains("assemblyInstances") && !document.object().value("assemblyInstances").isObject()))
     {
         if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Invalid model catalog. The existing file was preserved: %1").arg(path);
         return false;
@@ -96,6 +98,10 @@ bool TechnicalModelCatalog::save(QString* error)
     }
     current.close();
     const QByteArray bytes = QJsonDocument(m_document).toJson(QJsonDocument::Indented);
+    if(bytes.size()>32*1024*1024) {
+        if(error)*error=QString::fromUtf8("Каталог превышает 32 МиБ. Изменения не записаны.");
+        return false;
+    }
     if(m_existed && bytes == m_original) return true;
     QSaveFile file(m_path);
     if(!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
@@ -143,6 +149,38 @@ QStringList TechnicalModelCatalog::categoryIds()
     return {"houses", "architecture", "gates", "utensils", "trees", "bushes", "levers_chests", "decor"};
 }
 QStringList TechnicalModelCatalog::regionIds() { return {"gipat", "ingos", "suslanger"}; }
+QVector<ObjectAssembly> TechnicalModelCatalog::assemblies(QString* error) const {
+    QVector<ObjectAssembly> result;const auto entries=m_document.value("assemblies").toObject();
+    for(auto it=entries.begin();it!=entries.end();++it) {
+        ObjectAssembly a;
+        if(!readObjectAssembly(it.value().toObject(),&a,error) || a.id!=it.key()) {
+            if(error && error->isEmpty())*error=QString::fromUtf8("ID сборки не совпадает с ключом каталога.");
+            return {};
+        }
+        result.append(a);
+    }
+    return result;
+}
+bool TechnicalModelCatalog::setAssembly(const ObjectAssembly& assembly,QString* error) {
+    ObjectAssembly checked;
+    if(!m_valid || !readObjectAssembly(writeObjectAssembly(assembly),&checked,error))return false;
+    auto entries=m_document.value("assemblies").toObject();entries.insert(checked.id,writeObjectAssembly(checked));
+    m_document.insert("assemblies",entries);++m_revision;return true;
+}
+bool TechnicalModelCatalog::removeAssembly(const QString& id) {
+    auto entries=m_document.value("assemblies").toObject();if(!m_valid || !entries.contains(id))return false;
+    entries.remove(id);m_document.insert("assemblies",entries);++m_revision;return true;
+}
+QJsonObject TechnicalModelCatalog::assemblyInstances(const QString& mobPath) const {
+    const QString key=QFileInfo(m_path).dir().relativeFilePath(QFileInfo(mobPath).absoluteFilePath()).replace('\\','/').toCaseFolded();
+    return m_document.value("assemblyInstances").toObject().value(key).toObject();
+}
+void TechnicalModelCatalog::setAssemblyInstances(const QString& mobPath,const QJsonObject& instances) {
+    const QString key=QFileInfo(m_path).dir().relativeFilePath(QFileInfo(mobPath).absoluteFilePath()).replace('\\','/').toCaseFolded();
+    auto entries=m_document.value("assemblyInstances").toObject();
+    if(instances.isEmpty())entries.remove(key);else entries.insert(key,instances);
+    m_document.insert("assemblyInstances",entries);++m_revision;
+}
 QString TechnicalModelCatalog::category(const QString& model) const
 {
     return m_document.value("models").toObject().value(modelKey(model)).toObject().value("category").toString();

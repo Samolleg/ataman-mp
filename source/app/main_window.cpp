@@ -3681,6 +3681,18 @@ void MainWindow::setupCompactViewportTools()
     m_ui->actionCreate_new_object->setIcon(viewportToolIcon(4));create->setDefaultAction(m_ui->actionCreate_new_object);
     auto* script=button("mobScriptToolbarButton",QString::fromUtf8("Открыть скрипт MOB"),5,10);
     m_ui->actionOpen_MOB_Script->setIcon(viewportToolIcon(5));script->setDefaultAction(m_ui->actionOpen_MOB_Script);
+    auto* assemblies=button("assemblyToolbarButton",QString::fromUtf8("Сборки: каталог, собрать и разобрать"),4,11);
+    assemblies->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    auto* assemblyMenu=new QMenu(assemblies);
+    auto* open=assemblyMenu->addAction(QString::fromUtf8("Каталог сборок…"));open->setObjectName("openAssemblyCatalogAction");
+    auto* save=assemblyMenu->addAction(QString::fromUtf8("Сохранить выделенное как сборку…"));save->setObjectName("saveAssemblyAction");
+    auto* ungroup=assemblyMenu->addAction(QString::fromUtf8("Разобрать выделенную сборку"));ungroup->setObjectName("disassembleAction");
+    assemblies->setPopupMode(QToolButton::InstantPopup);assemblies->setMenu(assemblyMenu);
+    connect(open,&QAction::triggered,this,[this]{if(m_pView){if(m_createDialog)m_createDialog->hide();m_pView->openAssemblyCatalog();}});
+    connect(save,&QAction::triggered,this,[this]{if(m_pView)m_pView->saveSelectionAsAssembly();});
+    connect(ungroup,&QAction::triggered,this,[this]{if(m_pView)m_pView->disassembleSelection();});
+    auto* toolsMenu=m_ui->menuTools->addMenu(QString::fromUtf8("Сборки"));toolsMenu->setIcon(assemblies->icon());
+    toolsMenu->addActions({open,save,ungroup});
     updateLandscapeToolButtons();
 }
 

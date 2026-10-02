@@ -63,6 +63,8 @@ public:
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
+    void restoreAssemblyInstances();
+    bool saveAssemblyInstances(const QString& destination, QString* error = nullptr);
     const QString& lastSaveError() const { return m_lastSaveError; }
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
@@ -91,6 +93,7 @@ public:
     bool replaceNode(CNode* current, CNode* replacement, int index = -1);
     bool rebaseCopiedObjectProvenance(CNode* node, const QString& templatePath,
                                       const QByteArray& templateSubtreeSha256);
+    bool rawObjectTemplatesBytes(const QList<CNode*>& nodes, QHash<CNode*,QPair<QByteArray,QByteArray>>* templates) const;
     bool rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,
                                 QByteArray* cleanSubtree) const;
     QList<CNode*>& nodes();
@@ -163,6 +166,7 @@ private:
     friend int runDatabaseCreationCheck();
     friend int runGroupRotationCheck();
     friend int runModelConnectionCheck();
+    friend int runAssemblyCatalogCheck();
     friend int runDatabasePreviewCheck();
     bool buildRawObjectSequenceCandidate(const QByteArray& currentProjection,
                                          CMobEditTransaction* transaction,
@@ -200,6 +204,10 @@ private:
     QByteArray m_originalData;
     QSet<uint> m_auxiliaryIds;
     QByteArray m_cleanProjection;
+    QByteArray m_cleanAssemblyProjection;
+    bool m_assemblyMetadataPending{false};
+    QByteArray assemblyProjection() const;
+    bool writeAssemblyInstances(const QString& destination, QString* error);
     QVector<uint> m_duplicateIds;
     QString m_lastSaveError;
 

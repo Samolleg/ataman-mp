@@ -1,9 +1,12 @@
 #include "window_geometry.h"
+#include "model_catalog_icons.h"
 #include "model_gallery_thumbnail.h"
 #include "resource_catalog.h"
 #include "resource_name.h"
 #include "resourcemanager.h"
 #include "model_gallery.h"
+#include "view.h"
+#include "createobjectform.h"
 #include <QStandardItemModel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -41,48 +44,6 @@ int imageCost(const QImage& image)
 {
     return int(qMax<qint64>(1,(qint64(image.bytesPerLine())*image.height()+1023)/1024));
 }
-// Small vector symbols keep tabs recognizable at any display scale and do
-// not depend on a theme icon pack being installed on the user's computer.
-QIcon categoryIcon(int category)
-{
-    QPixmap image(64,64); image.fill(Qt::transparent);
-    QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(QColor(38,45,53),3,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
-    switch(category)
-    {
-    case 0: // house
-        p.setBrush(QColor(233,195,125)); p.drawRect(12,28,40,28);
-        p.setBrush(QColor(199,95,66)); p.drawPolygon(QPolygonF(QVector<QPointF>{QPointF(6,29),QPointF(32,7),QPointF(58,29)}));
-        p.setBrush(QColor(105,76,58)); p.drawRect(27,39,11,17); break;
-    case 1: // architecture: columns and lintel
-        p.setBrush(QColor(201,212,225)); p.drawRect(7,13,50,8); p.drawRect(9,51,46,7);
-        for(int x:{14,29,44}) {p.drawRect(x,21,6,30);} break;
-    case 2: // gates
-        p.setBrush(QColor(167,185,206)); p.drawRect(7,11,9,47); p.drawRect(48,11,9,47);
-        p.setBrush(QColor(207,153,79)); p.drawRect(17,25,30,30);
-        for(int x:{24,32,40}) p.drawLine(x,26,x,54);
-        p.drawLine(18,38,46,38); break;
-    case 3: // utensils: jar and bowl
-        p.setBrush(QColor(205,141,89)); p.drawRoundedRect(10,21,25,33,9,9); p.drawRect(15,12,15,10);
-        p.setBrush(QColor(237,202,142)); p.drawEllipse(34,37,24,17); p.drawLine(35,40,57,40); break;
-    case 4: // tree
-        p.setBrush(QColor(151,104,69)); p.drawRect(27,31,10,27);
-        p.setBrush(QColor(88,167,107)); p.drawEllipse(12,17,24,24); p.drawEllipse(29,17,24,24); p.drawEllipse(21,5,23,25); break;
-    case 5: // bush
-        p.setBrush(QColor(111,180,100)); p.drawEllipse(7,32,23,22); p.drawEllipse(34,30,24,24); p.drawEllipse(19,20,27,32);
-        p.setPen(QPen(QColor(229,197,104),4)); p.drawPoint(23,38); p.drawPoint(40,41); break;
-    case 6: // chest and lever
-        p.setBrush(QColor(196,135,69)); p.drawRoundedRect(6,28,36,28,4,4); p.drawLine(7,38,41,38);
-        p.setBrush(QColor(240,203,94)); p.drawRect(21,36,7,12);
-        p.setPen(QPen(QColor(157,185,214),5)); p.drawLine(48,51,57,18);
-        p.setBrush(QColor(209,97,74)); p.drawEllipse(51,10,11,11); break;
-    default: // decorative star
-        QPolygonF star;
-        for(int i=0;i<10;++i) {const double a=qDegreesToRadians(double(i*36-90));const double r=i%2?12:26;star<<QPointF(32+qCos(a)*r,32+qSin(a)*r);}
-        p.setBrush(QColor(197,152,224)); p.drawPolygon(star); break;
-    }
-    return QIcon(image);
-}
 class ModelTileDelegate : public QStyledItemDelegate
 {
 public:
@@ -117,6 +78,18 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     setMinimumSize(600,440); setWindowFlag(Qt::WindowContextHelpButtonHint,false);
     m_models.removeDuplicates(); m_models.sort(Qt::CaseInsensitive);
     auto* layout=new QVBoxLayout(this);
+    CView* assemblyView=nullptr;
+    for(QWidget* owner=parent;owner && !assemblyView;owner=owner->parentWidget()) {
+        assemblyView=qobject_cast<CView*>(owner);if(!assemblyView)assemblyView=owner->findChild<CView*>();
+    }
+    if(assemblyView) {
+        auto* assemblies=new QPushButton(QString::fromUtf8("Готовые сборки…"),this);assemblies->setObjectName("modelGalleryAssemblies");
+        assemblies->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));layout->addWidget(assemblies);
+        connect(assemblies,&QPushButton::clicked,this,[this,assemblyView]{
+            if(auto* creation=qobject_cast<CCreateObjectForm*>(parentWidget()))creation->hide();
+            reject();QTimer::singleShot(0,assemblyView,[assemblyView]{assemblyView->openAssemblyCatalog();});
+        });
+    }
     m_search=new QLineEdit(this); m_search->setObjectName("modelGallerySearch");
     m_search->setPlaceholderText(tr("Search by model ID or Russian name")); layout->addWidget(m_search);
     const QStringList categoryLabels{tr("Houses"),tr("Architecture"),tr("Gates"),tr("Utensils"),
@@ -127,7 +100,7 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     m_categories->addTab(style()->standardIcon(QStyle::SP_DirIcon),tr("All models"));
     m_categories->setTabToolTip(0,tr("All models, including those not yet assigned to a section"));
     const auto categories=ei::TechnicalModelCatalog::categoryIds();
-    for(int i=0;i<categories.size();++i) {const int tab=m_categories->addTab(categoryIcon(i),categoryLabels[i]);m_categories->setTabData(tab,categories[i]);m_categories->setTabToolTip(tab,categoryLabels[i]);}
+    for(int i=0;i<categories.size();++i) {const int tab=m_categories->addTab(ei::modelCatalogCategoryIcon(i),categoryLabels[i]);m_categories->setTabData(tab,categories[i]);m_categories->setTabToolTip(tab,categoryLabels[i]);}
     layout->addWidget(m_categories);
     m_regions=new QTabBar(this); m_regions->setObjectName("modelGalleryRegions"); m_regions->setExpanding(false);
     const auto regions=ei::TechnicalModelCatalog::regionIds();
@@ -148,7 +121,7 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     placementRow->addWidget(new QLabel(tr("Section:"),this));
     m_categoryChoice=new QComboBox(this); m_categoryChoice->setObjectName("modelGalleryCategoryChoice");
     m_categoryChoice->addItem(tr("Unassigned"),QString());
-    for(int i=0;i<categories.size();++i) m_categoryChoice->addItem(categoryIcon(i),categoryLabels[i],categories[i]);
+    for(int i=0;i<categories.size();++i) m_categoryChoice->addItem(ei::modelCatalogCategoryIcon(i),categoryLabels[i],categories[i]);
     placementRow->addWidget(m_categoryChoice,1); placementRow->addWidget(new QLabel(tr("Island:"),this));
     m_regionChoice=new QComboBox(this); m_regionChoice->setObjectName("modelGalleryRegionChoice");
     m_regionChoice->addItem(tr("Not selected"),QString());

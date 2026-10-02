@@ -85,6 +85,9 @@ public:
     QVector3D& drawPosition() {return m_drawPosition;}
     void setState(ENodeState state) {m_state = state;}
     ENodeState nodeState() const {return m_state;}
+    // Editor-only membership, deliberately absent from toJson()/MOB records.
+    QJsonObject assemblyTag() const { return m_editorAssembly; }
+    void setAssemblyTag(const QJsonObject& tag) { m_editorAssembly=tag; }
 
     void setRawObjectProvenance(const QByteArray& documentSha256,
                                 const QString& sectionPath,
@@ -137,6 +140,7 @@ public:
 
 private:
     void init();
+    QJsonObject m_editorAssembly;
 
 protected:
     QVector3D m_position; // offset from landscape

@@ -1261,6 +1261,8 @@ int CMob::readMob(QFileInfo &path)
     updateObjects();
     logicNodesUpdate();
     captureCleanProjection();
+    restoreAssemblyInstances();
+    m_cleanAssemblyProjection=assemblyProjection();
     return 0;
 }
 
@@ -1739,6 +1741,7 @@ void CMob::captureCleanProjection()
 {
     m_cleanProjection.clear();
     serializeMob(m_cleanProjection, false);
+    m_cleanAssemblyProjection=assemblyProjection();
     m_bDirty = false;
 }
 
@@ -1753,7 +1756,7 @@ bool CMob::refreshDirtyFromProjection()
 
     QByteArray currentProjection;
     serializeMob(currentProjection, false);
-    m_bDirty = currentProjection != m_cleanProjection;
+    m_bDirty = currentProjection != m_cleanProjection || assemblyProjection()!=m_cleanAssemblyProjection || m_assemblyMetadataPending;
     if(wasDirty != m_bDirty)
     {
         ei::log(eLogInfo, QString("MOB projected dirty state changed mob:%1 dirty:%2")
@@ -2388,6 +2391,14 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         if(!rebindRawObjectProvenance())
             ei::log(eLogWarning, QString("Saved MOB reopened, but raw object provenance could not be rebound path:%1")
                     .arg(filePath));
+        QString assemblyError;
+        if(!saveAssemblyInstances(filePath,&assemblyError)) {
+            m_lastSaveError=QString::fromUtf8("MOB сохранён, но группировка сборок в каталоге не записана. Повторите сохранение после устранения ошибки:\n")+assemblyError;
+            setDirty(true);
+            m_assemblyMetadataPending=true;
+            return false;
+        }
+        m_assemblyMetadataPending=false;
         if(progress) progress("MOB save complete.", 5, 5);
         return true;
     }
@@ -2648,6 +2659,13 @@ bool CMob::persistAiGraph(const QByteArray* graph, QString* error,
     if(!rebindRawObjectProvenance())
         ei::log(eLogWarning, QString("AI graph MOB save could not rebind raw object provenance path:%1")
                 .arg(m_filePath.absoluteFilePath()));
+    QString assemblyError;
+    if(!saveAssemblyInstances(m_filePath.absoluteFilePath(),&assemblyError)) {
+        m_assemblyMetadataPending=true;setDirty(true);
+        if(error)*error=QString::fromUtf8("MOB и граф сохранены, но группировка сборок не записана:\n")+assemblyError;
+        return false;
+    }
+    m_assemblyMetadataPending=false;
     if(progress) progress("AI graph MOB save complete.", 6, 6);
     return true;
 }
@@ -2837,4 +2855,33 @@ bool CMob::rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,
     }
     sourceSubtree->clear();
     return false;
+}
+
+// Assembly capture parses and aligns a MOB once for the complete selection.
+// Embedded raw templates already carry their exact original/clean byte pairs.
+bool CMob::rawObjectTemplatesBytes(const QList<CNode*>& nodes,QHash<CNode*,QPair<QByteArray,QByteArray>>* templates) const {
+    if(!templates)return false;templates->clear();bool needsDocument=false;
+    for(auto* node:nodes)if(!node || !node->hasRawObjectProvenance())return false;else needsDocument |= !node->hasRawObjectTemplateBytes();
+    CMobDocument sourceDocument,cleanDocument;QHash<QString,int> aligned;
+    QByteArray documentHash;
+    if(needsDocument) {
+        documentHash=QCryptographicHash::hash(m_originalData,QCryptographicHash::Sha256);CValidationReport report;
+        if(!sourceDocument.loadBytes(m_originalData,m_filePath.filePath(),&report) || !cleanDocument.loadBytes(m_cleanProjection,"clean-ui-projection.mob",&report))return false;
+        const auto diff=CMobSemanticDiff::compare(sourceDocument,cleanDocument);
+        for(const auto& entry:diff.entries())if(entry.baselineIndex>=0 && entry.candidateIndex>=0)
+            aligned.insert(sourceDocument.objects().at(entry.baselineIndex).sectionPath,entry.candidateIndex);
+    }
+    for(auto* node:nodes) {
+        QByteArray source,clean;
+        if(node->hasRawObjectTemplateBytes()) {source=node->rawTemplateSourceSubtree();clean=node->rawTemplateCleanSubtree();}
+        else {
+            if(node->rawSourceDocumentSha256()!=documentHash || !aligned.contains(node->rawSourceObjectPath())
+               || !sourceDocument.objectSubtreeBytes(node->rawSourceObjectPath(),node->rawSourceSubtreeSha256(),&source))return false;
+            const auto& record=cleanDocument.objects().at(aligned.value(node->rawSourceObjectPath()));
+            if(!cleanDocument.objectSubtreeBytes(record.sectionPath,record.subtreeSha256,&clean))return false;
+        }
+        if(QCryptographicHash::hash(source,QCryptographicHash::Sha256)!=node->rawSourceSubtreeSha256() || clean.isEmpty())return false;
+        templates->insert(node,qMakePair(source,clean));
+    }
+    return true;
 }
