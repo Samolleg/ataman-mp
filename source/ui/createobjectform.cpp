@@ -36,6 +36,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QStyle>
+#include <QSplitter>
+#include <QHeaderView>
+#include <QSettings>
+#include <QHideEvent>
+#include <QScopedValueRollback>
 #include "model_gallery.h"
 #include "model_gallery_thumbnail.h"
 #include "resource_catalog.h"
@@ -129,12 +134,33 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     connect(m_databaseSearch, &QLineEdit::textChanged, this, [this] { filterDatabase(); });
     connect(m_databaseList, &QListWidget::currentRowChanged, this, [this] { selectDatabaseEntry(); });
     connect(m_advanced, &QCheckBox::toggled, ui->tableParameters, &QWidget::setVisible);
+    // Both panes expand; the divider is a real mouse handle rather than a layout gap.
+    ui->creationSplitter->setChildrenCollapsible(false);
+    ui->creationSplitter->setStyleSheet("QSplitter::handle { background:palette(mid); } QSplitter::handle:hover { background:palette(highlight); }");
+    ui->creationProperties->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
+    ui->creationSplitter->setStretchFactor(0,1);
+    ui->creationSplitter->setStretchFactor(1,1);
+    ui->creationProperties->setMinimumWidth(qMax(440,fontMetrics().horizontalAdvance(QString(32,'x'))));
+    ui->creationPreview->setMinimumWidth(180);
+    ui->creationSplitter->setSizes({460,360});
+    ui->creationSplitter->handle(1)->setToolTip(QString::fromUtf8("Потяните, чтобы изменить ширину свойств и предпросмотра"));
+    ui->tableParameters->installEventFilter(this);
+    ui->tableParameters->viewport()->installEventFilter(this);
+    m_parameterColumnWidth=qMax(0,QSettings().value("ui/windows/createObject/parameterWidth",0).toInt());
+    connect(ui->tableParameters->horizontalHeader(),&QHeaderView::sectionResized,this,
+            [this](int section,int,int width) {
+        if(section==0 && m_layoutSeen && !m_updatingTable && !m_adjustingColumns) {
+            m_parameterColumnWidth=width;
+            QTimer::singleShot(0,this,[this]{adjustPropertyColumns();});
+        }
+    });
     ei::rememberWindowGeometry(this, QStringLiteral("createObject"));
     resize(860, 600);
 }
 
 CCreateObjectForm::~CCreateObjectForm()
 {
+    saveInnerLayout();
     m_pPreview->attachNode(nullptr, false);
     delete m_pNode;
     //delete m_pPreview; // it will remove as children of Form (inherited behaviour from parent widget)
@@ -160,6 +186,7 @@ void CCreateObjectForm::initViewWidget()
 
 void CCreateObjectForm::updateTable()
 {
+    QScopedValueRollback<bool> updating(m_updatingTable,true);
     m_tableManager->reset();
     if(!m_pNode)
         return;
@@ -205,6 +232,7 @@ void CCreateObjectForm::updateTable()
     for(int row=0;row<ui->tableParameters->rowCount();++row)
         if(auto* combo=qobject_cast<CComboDynItem*>(ui->tableParameters->cellWidget(row,1)))
             if(combo->value()->type()==eObjParam_TEMPLATE) combo->setModelNames(m_modelCatalog);
+    adjustPropertyColumns();
     refreshTechnicalTextureChoices();
     m_pPreview->updateGL();
 }
@@ -507,6 +535,12 @@ void CCreateObjectForm::on_buttonCreate_clicked()
 
 void CCreateObjectForm::showEvent(QShowEvent *pEvent)
 {
+    if(!m_layoutSeen) {
+        const auto state=QSettings().value("ui/windows/createObject/splitterState").toByteArray();
+        if(!state.isEmpty())ui->creationSplitter->restoreState(state);
+        ui->creationSplitter->setChildrenCollapsible(false);
+        m_layoutSeen=true;
+    }
     if(m_pView && m_pView->isDatabasePlacementPending())
         m_pView->cancelPendingOperation();
     refreshDatabase();
@@ -516,6 +550,44 @@ void CCreateObjectForm::showEvent(QShowEvent *pEvent)
         onObjectChoose(text);
     }
     QWidget::showEvent(pEvent);
+    adjustPropertyColumns();
+}
+
+void CCreateObjectForm::saveInnerLayout()
+{
+    if(!m_layoutSeen)return;
+    QSettings settings;
+    settings.setValue("ui/windows/createObject/splitterState",ui->creationSplitter->saveState());
+    settings.setValue("ui/windows/createObject/parameterWidth",m_parameterColumnWidth);
+    settings.sync();
+}
+
+void CCreateObjectForm::hideEvent(QHideEvent* event)
+{
+    saveInnerLayout();
+    QDialog::hideEvent(event);
+}
+
+bool CCreateObjectForm::eventFilter(QObject* watched,QEvent* event)
+{
+    if((watched==ui->tableParameters || watched==ui->tableParameters->viewport()) && event->type()==QEvent::Resize)
+        QTimer::singleShot(0,this,[this]{adjustPropertyColumns();});
+    return QDialog::eventFilter(watched,event);
+}
+
+void CCreateObjectForm::adjustPropertyColumns()
+{
+    auto* table=ui->tableParameters;
+    const int available=table->viewport()->width();
+    if(available<=0)return;
+    // Auto-sizing a long parameter label must never consume the value editor.
+    const int minimumValue=qMax(140,fontMetrics().horizontalAdvance(QString(16,'x'))+24);
+    const int desired=m_parameterColumnWidth>0?m_parameterColumnWidth:available/2;
+    QScopedValueRollback<bool> adjusting(m_adjustingColumns,true);
+    table->setColumnWidth(0,qBound(80,desired,qMax(80,available-minimumValue)));
+    // Stretch-last-section otherwise retains its earlier wide minimum when
+    // the splitter/window shrinks and creates a horizontal scrollbar.
+    table->setColumnWidth(1,minimumValue);
 }
 
 void CCreateObjectForm::refreshDatabase()

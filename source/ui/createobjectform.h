@@ -54,9 +54,13 @@ private slots:
 
 protected:
     void showEvent(QShowEvent* pEvent) override;
+    void hideEvent(QHideEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void initViewWidget();
+    void adjustPropertyColumns();
+    void saveInnerLayout();
     void updateTable();
     void refreshDatabase();
     void filterDatabase();
@@ -69,6 +73,8 @@ private:
 
 private:
     Ui::CCreateObjectForm *ui;
+    bool m_layoutSeen{false}, m_updatingTable{false}, m_adjustingColumns{false};
+    int m_parameterColumnWidth{0};
     QMap<ENodeType, QString> m_objType;
     CNode* m_pNode;
     QSharedPointer<CTableManager> m_tableManager;

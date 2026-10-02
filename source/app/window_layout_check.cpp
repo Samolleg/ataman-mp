@@ -21,6 +21,11 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QToolButton>
+#include <QSplitter>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QScrollBar>
+#include "layout_components/dynamiccombobox.h"
 
 namespace {
 class HiddenCheckWindows : public QObject
@@ -84,8 +89,49 @@ int runWindowLayoutCheck()
             QSettings settings;settings.setValue("expectedTravelSize",travel->size());settings.setValue("expectedScenarioSize",scenario->size());
             if(mode==0)
             {
-                form->show();pump();form->resize(1050,740);form->move(60,85);pump();
+                form->show();pump();form->resize(1500,800);pump();
+                auto* table=form->findChild<QTableWidget*>("tableParameters");
+                auto* divider=form->findChild<QSplitter*>("creationSplitter");
+                auto* preview=form->findChild<QWidget*>("openGLWidget");
+                auto* type=form->findChild<QComboBox*>("comboObjectType");
+                auto* category=form->findChild<QComboBox*>("databaseCategory");
+                if(category)category->setCurrentIndex(3);pump();
+                if(auto* dynamic=qobject_cast<CDynamicComboBox*>(type)){dynamic->showPopup();dynamic->setCurrentIndex(dynamic->findText(CCreateObjectForm::tr("World object")));dynamic->hidePopup();}pump();
+                check("create properties receive usable share of wide dialog",table&&table->isVisible()&&table->rowCount()>0&&table->width()>form->width()*0.4);
+                bool moved=false;
+                if(divider&&table&&preview) {
+                    const int propertiesBefore=table->width(),previewBefore=preview->width();
+                    auto* handle=divider->handle(1);const auto point=handle->rect().center();const auto global=handle->mapToGlobal(point);
+                    QMouseEvent press(QEvent::MouseButtonPress,point,global,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(handle,&press);
+                    QMouseEvent move(QEvent::MouseMove,point+QPoint(140,0),global+QPoint(140,0),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(handle,&move);pump();
+                    QMouseEvent release(QEvent::MouseButtonRelease,point+QPoint(140,0),global+QPoint(140,0),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(handle,&release);pump();
+                    moved=table->width()>propertiesBefore+80&&preview->width()<previewBefore-80;
+                }
+                check("create inner divider mouse drag resizes both panes",moved);
+                if(table) {
+                    auto* header=table->horizontalHeader();
+                    auto* viewport=header->viewport();const auto point=QPoint(header->sectionSize(0)-1,header->height()/2);const auto target=QPoint(185,point.y());
+                    QMouseEvent press(QEvent::MouseButtonPress,point,viewport->mapToGlobal(point),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(viewport,&press);
+                    QMouseEvent move(QEvent::MouseMove,target,viewport->mapToGlobal(target),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(viewport,&move);
+                    QMouseEvent release(QEvent::MouseButtonRelease,target,viewport->mapToGlobal(target),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(viewport,&release);pump();
+                    check("create parameter boundary responds to mouse drag",qAbs(table->columnWidth(0)-185)<=2);
+                    settings.setValue("expectedCreateColumn",table->columnWidth(0));
+                    table->horizontalHeader()->resizeSection(0,600);pump();
+                    form->resize(720,740);pump();
+                    check("create narrow dialog keeps value column and no horizontal scroll",table->columnWidth(1)>=140&&table->horizontalScrollBar()->maximum()==0);
+                    form->resize(1500,800);pump();
+                    check("create expanding dialog restores preferred parameter width",table->columnWidth(0)==600);
+                    table->horizontalHeader()->resizeSection(0,settings.value("expectedCreateColumn").toInt());pump();
+                }
+                form->resize(1050,740);form->move(60,85);pump();
+                check("create value editor remains usable without horizontal scroll",table&&table->horizontalScrollBar()->maximum()==0&&table->columnWidth(1)>=140);
+                const QString screenshot=qEnvironmentVariable("EI_CREATE_LAYOUT_CHECK_SCREENSHOT");
+                if(!screenshot.isEmpty())form->grab().save(screenshot);
+                if(divider)settings.setValue("expectedCreateSplitSizes",QVariantList{divider->sizes().value(0),divider->sizes().value(1)});
                 settings.setValue("expectedFormSize",form->size());settings.setValue("expectedFormPosition",form->pos());form->close();check("production create form close hides",form->isHidden());
+                form->show();pump();
+                check("create parameter column survives reused form refresh",table&&table->columnWidth(0)==settings.value("expectedCreateColumn").toInt());
+                form->close();
             }
         }
         else
@@ -94,7 +140,16 @@ int runWindowLayoutCheck()
             if(mode==0)
             {
                 check("late production docks restore floating geometry",travel->isFloating() && scenario->isFloating() && travel->size()==settings.value("expectedTravelSize").toSize() && scenario->size()==settings.value("expectedScenarioSize").toSize());
-                form->show();pump();check("production create form restores geometry",form->size()==settings.value("expectedFormSize").toSize() && form->pos()==settings.value("expectedFormPosition").toPoint());form->close();
+                form->show();pump();check("production create form restores geometry",form->size()==settings.value("expectedFormSize").toSize() && form->pos()==settings.value("expectedFormPosition").toPoint());
+                auto* divider=form->findChild<QSplitter*>("creationSplitter");
+                auto* table=form->findChild<QTableWidget*>("tableParameters");
+                const auto expected= settings.value("expectedCreateSplitSizes").toList();
+                check("create divider survives independent process reopen",divider&&expected.size()==2&&divider->sizes()==QList<int>{expected[0].toInt(),expected[1].toInt()});
+                auto* type=form->findChild<QComboBox*>("comboObjectType");
+                auto* category=form->findChild<QComboBox*>("databaseCategory");
+                if(category)category->setCurrentIndex(3);pump();
+                if(auto* dynamic=qobject_cast<CDynamicComboBox*>(type)){dynamic->showPopup();dynamic->setCurrentIndex(dynamic->findText(CCreateObjectForm::tr("World object")));dynamic->hidePopup();}pump();
+                check("create parameter column survives independent process and object refresh",table&&table->columnWidth(0)==settings.value("expectedCreateColumn").toInt());form->close();
             }
             if(mode==1) check("late production docks retain hidden state",travel->isHidden() && scenario->isHidden());
             if(mode==2) check("late production docks retain tab topology",window.tabifiedDockWidgets(travel).contains(scenario));
