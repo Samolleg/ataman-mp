@@ -74,10 +74,25 @@ selectedComponentCopy, componentPlatePaste, componentContextPaste.
 ## Передача и границы
 
 EXE SHA256: E2CFD965C0A1B0634E92F9D10CFA7F4A01994B549D91BF3B74DA424CD1CA44D0.
-Полный SHA исходников и окончательные результаты передачи дополняются после коммита/финализации.
+Проверенный SHA исходников: `34fecd68df49ba3d19a125b126b01229e84752aa`. Staging:
+`C:/GOG Games/maped/ei-mapper-ataman/build-staging-90-layout`.
+Финализатор и отдельный validate_distribution PASS,127 файлов в manifest; staged --version90
+проверен до финализации, raw/staged EXE hashes совпадают. Finalized staging больше не запускался.
+Доказательства build-tests-90-layout/stage-result.log, finalize.log, validate-package.log.
+Версия90 установлена в постоянную папку `C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test`.
+После просьбы закрыть редактор обнаружено0 editor/runtime процессов; повторная проверка проведена
+перед заменой. Установка:6 изменённых файлов и прежний manifest сохранены с проверенными хэшами;
+manifest заменён последним. Все127 установленных managed hashes совпадают с пакетом;13416
+пользовательских файлов до/после byte-identical (install-result.log, user-files-before.json,
+user-files-after.json). Raw/staged/installed EXE hashes совпадают.
+Откат: artifacts/rollback-EI-Mapper-Ataman-v89-to-90-20261002,7 файлов. Старый собственный
+v88-to-89 rollback удалён только после проверки точных абсолютных путей, отсутствия ссылок
+и всех7 файлов по его manifest; новая7-файловая резервная копия тоже проверена.
+Доказательство rollback-retention.log. Финализатор не запускался на постоянной папке;
+установленный редактор не запускался вместо владельца.
 Постоянная цель: artifacts/EI-Mapper-Ataman-2-first-test; финализатор применяется только к
 свежему собственному staging90. Пользовательские файлы и прежняя установка сохраняются
-до проверки пакета и закрытия пользовательского редактора. В момент подготовки работал PID2016.
+до проверки пакета и закрытия пользовательского редактора. Чужие report52/QM хэши неизменны; чужие ROADMAP и отчёт86 не вошли в коммиты.
 
 Ручной жест в установленном редакторе, пользовательская раскладка с настоящими картами,
 физическое отключение монитора/DPI и плавающая частная Qt-группа на двух мониторах не выполнены.
