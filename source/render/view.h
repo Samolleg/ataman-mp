@@ -773,6 +773,7 @@ public slots:
 signals:
     void modelConnectionSourcesChanged(const QStringList& labels,const QStringList& ids);
     void modelConnectionStatusChanged(const QString& status);
+    void modelConnectionTargetsChanged(int availablePairs);
     void travelAreaSelected(int exitIndex, bool* accepted);
     void travelDrawingStateChanged(bool active, bool remove, bool newExit);
     void travelAreaCommitted(int exitIndex,bool remove,const QRectF& rectangle,bool newExit);

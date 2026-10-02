@@ -28,7 +28,10 @@ void CView::clearModelMagnet() {
     m_connectionHeldTarget=-1;m_connectionHeldSource=-1;m_modelMagnetApplied=false;m_connectionOrientations.clear();
     m_connectionSourceId.clear();
     m_connectionGhostNode.clear();m_connectionGhostVertices.clear();
-    emit modelConnectionSourcesChanged({},{});emit modelConnectionStatusChanged(QString());
+    emit modelConnectionSourcesChanged({},{});
+    emit modelConnectionTargetsChanged(0);
+    emit modelConnectionStatusChanged(m_modelMagnetEnabled
+        ? QString::fromUtf8("Выберите одну деталь → G. Стыки задаются в витрине.") : QString());
 }
 void CView::prepareModelMagnet() {
     clearModelMagnet();
@@ -71,13 +74,16 @@ void CView::prepareModelMagnet() {
     if(m_neighborLandscapesVisible && m_staticObjectsVisible) for(const auto& neighbor:m_neighborLandscapes)
         for(int i=0;i<neighbor.staticObjects.size();++i) if(i<neighbor.staticLocalPositions.size())
             add(neighbor.staticObjects[i].data(),neighbor.staticLocalPositions[i]+QVector3D(neighbor.placement.origin.x(),neighbor.placement.origin.y(),0),neighbor.placement.zoneId);
-    emit modelConnectionStatusChanged(QString::fromUtf8("Магнит: подведите стык к детали; Tab — другой вариант, Esc — отмена"));
+    emit modelConnectionStatusChanged(m_connectionTargets.isEmpty()
+        ? QString::fromUtf8("Нет стыков у видимых соседних деталей. Задайте их в витрине.")
+        : QString::fromUtf8("Подведите стык к детали. Tab — вариант; ЛКМ — поставить; Esc — отмена."));
 }
 void CView::setModelMagnetEnabled(bool enabled) {
     restoreFreeModelMove();m_modelMagnetEnabled=enabled;
     // A toggle during a move preserves the original gesture orientation.
     const auto originals=m_connectionOrientations;
     if(!m_operationBackup.isEmpty() && m_pOp && m_pOp->operationMethod()==eOperationMethodMoveAxis) {prepareModelMagnet();for(auto it=originals.begin();it!=originals.end();++it)m_connectionOrientations[it.key()]=it.value();}
+    else clearModelMagnet();
     update();
 }
 void CView::setModelConnectionSource(const QString& id) {
@@ -136,12 +142,15 @@ void CView::updateModelMagnet(const QPoint& pointer) {
     }
     std::stable_sort(matches.begin(),matches.end(),[](const Match& a,const Match& b){return a.distance<b.distance;});
     for(const auto& match:matches)m_connectionChoices.append(qMakePair(match.source,match.target));
+    emit modelConnectionTargetsChanged(matches.size());
     const int show=qMin(matches.size(),32);
     for(int i=0;i<show;++i) {const auto& t=m_connectionTargets[matches[i].target];
         m_connectionGlyphs<<t.world+QVector3D(-0.25f,0,0)<<t.world+QVector3D(0.25f,0,0)<<t.world+QVector3D(0,-0.25f,0)<<t.world+QVector3D(0,0.25f,0);
     }
     if(!matches.isEmpty()) {const auto best=matches.first();applyModelConnection(held?m_connectionHeldSource:best.source,held?m_connectionHeldTarget:best.target);}
-    else {m_connectionHeldSource=-1;m_connectionHeldTarget=-1;emit modelConnectionStatusChanged(QString::fromUtf8("Магнит: ищу совместимый стык"));update();}
+    else {m_connectionHeldSource=-1;m_connectionHeldTarget=-1;emit modelConnectionStatusChanged(m_connectionTargets.isEmpty()
+        ? QString::fromUtf8("Нет стыков у видимых соседних деталей. Задайте их в витрине.")
+        : QString::fromUtf8("Подведите стык ближе: ищу совместимый стык. Esc — отмена."));update();}
 }
 void CView::cycleModelConnectionTarget() {
     if(m_connectionChoices.isEmpty())return;

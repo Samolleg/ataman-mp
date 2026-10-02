@@ -17,6 +17,10 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QTimer>
+#include <QMouseEvent>
+#include <QComboBox>
+#include <QLabel>
+#include <QToolButton>
 
 namespace {
 class HiddenCheckWindows : public QObject
@@ -96,6 +100,26 @@ int runWindowLayoutCheck()
             if(mode==2) check("late production docks retain tab topology",window.tabifiedDockWidgets(travel).contains(scenario));
             check("landscape does not automatically resume editing",window.findChild<QDockWidget*>("landscapeToolsDock")->isHidden());
         }
+        auto* magnet=window.findChild<QToolButton*>("modelMagnetButton");
+        auto* sourceChoice=window.findChild<QComboBox*>("modelConnectionSource");
+        if(!magnet || !sourceChoice) return 2;
+        magnet->setChecked(true);pump();
+        auto* feedback=window.findChild<QLabel*>("modelConnectionFeedback");
+        check("idle magnet visibly explains selection and G",feedback && feedback->isVisible() && feedback->text().contains("G"));
+        check("idle source choice cannot suggest ready anchors",!sourceChoice->isEnabled());
+        check("next pair is unavailable before a match",!window.findChild<QToolButton*>("nextModelConnection")->isEnabled());
+        auto* movable=window.findChild<QDockWidget*>("objectOutlinerDock");
+        if(!movable) return 2;
+        movable->show();pump();
+        const auto initial=movable->mapToGlobal(QPoint(40,8));
+        const auto destination=initial+QPoint(180,180);
+        QMouseEvent press(QEvent::MouseButtonPress,QPointF(40,8),QPointF(initial),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(movable,&press);
+        QMouseEvent move(QEvent::MouseMove,QPointF(220,188),QPointF(destination),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+        QApplication::sendEvent(movable,&move);pump();
+        QMouseEvent release(QEvent::MouseButtonRelease,QPointF(220,188),QPointF(destination),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(movable,&release);pump();
+        check("title drag detaches restored production dock",movable->isFloating());
         check("production window closes normally",window.close());pump();
         return failures ? 1 : 0;
     }

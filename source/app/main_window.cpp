@@ -3816,26 +3816,38 @@ void MainWindow::createViewportToolbars()
     magnet->setIcon(QIcon(magnetImage));magnet->setToolTip(QString::fromUtf8("Магнит деталей: совместить точки стыковки. Точки задаются в витрине моделей."));
     magnet->setAccessibleName(QString::fromUtf8("Магнит деталей"));operationLayout->addWidget(magnet);
     auto* connectionSource=new QComboBox(operationBar);connectionSource->setObjectName("modelConnectionSource");
-    connectionSource->setFixedWidth(180);connectionSource->setToolTip(QString::fromUtf8("Стык переносимой детали. Авто перебирает все её стыки."));operationLayout->addWidget(connectionSource);
-    connectionSource->addItem(QString::fromUtf8("Авто: все стыки"),QString());
+    auto* connectionControls=new QWidget(operationBar);
+    auto* connectionLayout=new QVBoxLayout(connectionControls);
+    connectionLayout->setContentsMargins(0,0,0,0);connectionLayout->setSpacing(2);
+    connectionControls->setFixedWidth(300);
+    connectionSource->setToolTip(QString::fromUtf8("Стык переносимой детали. Авто перебирает все её стыки."));
+    connectionSource->addItem(QString::fromUtf8("Нет перемещаемой детали"),QString());connectionSource->setEnabled(false);
+    connectionLayout->addWidget(connectionSource);
+    auto* connectionFeedback=new QLabel(connectionControls);connectionFeedback->setObjectName("modelConnectionFeedback");
+    connectionFeedback->setTextFormat(Qt::PlainText);connectionFeedback->setWordWrap(true);
+    connectionLayout->addWidget(connectionFeedback);operationLayout->addWidget(connectionControls);
     auto* nextConnection=new QToolButton(operationBar);nextConnection->setObjectName("nextModelConnection");
     nextConnection->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));nextConnection->setIconSize(QSize(28,28));nextConnection->setFixedSize(44,44);
     nextConnection->setToolTip(QString::fromUtf8("Следующий вариант стыковки (Tab при перемещении)"));operationLayout->addWidget(nextConnection);
+    nextConnection->setEnabled(false);
     connect(magnet,&QToolButton::toggled,this,[=](bool enabled){
-        m_pView->setModelMagnetEnabled(enabled);connectionSource->setVisible(enabled);nextConnection->setVisible(enabled);
+        m_pView->setModelMagnetEnabled(enabled);connectionControls->setVisible(enabled);nextConnection->setVisible(enabled);
         QSettings().setValue("ui/modelMagnetEnabled",enabled);m_pView->setFocus();});
     connect(connectionSource,QOverload<int>::of(&QComboBox::activated),this,[=](int){m_pView->setModelConnectionSource(connectionSource->currentData().toString());m_pView->setFocus();});
     connect(nextConnection,&QToolButton::clicked,this,[=]{m_pView->cycleModelConnectionTarget();m_pView->setFocus();});
     connect(m_pView,&CView::modelConnectionSourcesChanged,this,[=](const QStringList& labels,const QStringList& ids){
         const auto previous=connectionSource->currentData().toString();const QSignalBlocker block(connectionSource);connectionSource->clear();
         for(int i=0;i<labels.size() && i<ids.size();++i)connectionSource->addItem(labels[i],ids[i]);
-        if(connectionSource->count()==0)connectionSource->addItem(QString::fromUtf8("Авто: все стыки"),QString());
+        connectionSource->setEnabled(labels.size()>1);
+        if(connectionSource->count()==0)connectionSource->addItem(QString::fromUtf8("Нет перемещаемой детали"),QString());
         const int found=connectionSource->findData(previous);connectionSource->setCurrentIndex(qMax(0,found));});
     connect(m_pView,&CView::modelConnectionStatusChanged,this,[=](const QString& status){
         if(!status.isEmpty())CStatusConnector::getInstance()->updateStatus("move.ico",status);
+        connectionFeedback->setText(status);
         connectionSource->setToolTip(status);nextConnection->setToolTip(status);magnet->setToolTip(status.isEmpty()?QString::fromUtf8("Магнит деталей. Точки стыковки задаются в витрине моделей."):status);});
+    connect(m_pView,&CView::modelConnectionTargetsChanged,this,[=](int count){nextConnection->setEnabled(count>1);});
     const bool magnetEnabled=QSettings().value("ui/modelMagnetEnabled",false).toBool();
-    connectionSource->setVisible(magnetEnabled);nextConnection->setVisible(magnetEnabled);magnet->setChecked(magnetEnabled);
+    connectionControls->setVisible(magnetEnabled);nextConnection->setVisible(magnetEnabled);magnet->setChecked(magnetEnabled);
     operationLayout->addStretch(1);
     QLabel* cameraIcon=new QLabel(operationBar);
     cameraIcon->setPixmap(viewportToolIcon(6).pixmap(22,22));

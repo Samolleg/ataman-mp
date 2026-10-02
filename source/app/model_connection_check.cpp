@@ -75,7 +75,11 @@ int runModelConnectionCheck() {
     {QSignalBlocker block(CScene::getInstance());CScene::getInstance()->changeMode(eEditModeObjects);}
     QVector3D start(1,1,0),destination(7,9,4);a->updatePos(start);b->updatePos(destination);b->setRot(target.rotation);a->setState(eSelect);b->setState(eDraw);
     a->installSyntheticGeometry();
-    const auto initialRotation=a->rotation();const auto initialScale=a->constitution();view.setModelMagnetEnabled(true);view.operationSetBackup(eMove);
+    QString magnetStatus;
+    QObject::connect(&view,&CView::modelConnectionStatusChanged,[&](const QString& status){magnetStatus=status;});
+    const auto initialRotation=a->rotation();const auto initialScale=a->constitution();view.setModelMagnetEnabled(true);
+    check(magnetStatus.contains("G") && view.m_sourceConnections.isEmpty(),"enabling idle magnet explains G without preparing a false source");
+    view.operationSetBackup(eMove);
     check(view.m_connectionGhostNode==a&&view.m_connectionGhostVertices.size()==3&&positionsNear(view.m_connectionGhostVertices[1],{1,0,0}),"preview snapshots complete visible geometry once per gesture");
     check(view.m_sourceConnections.size()==2 && view.m_connectionTargets.size()==2,"gesture indexes loaded objects once and excludes moving source despite duplicate IDs");
     check(view.applyModelConnection(0,1)&&positionsNear(a->drawPosition()+a->rotation().rotatedVector(left.position),b->drawPosition()+b->rotation().rotatedVector(right.position))&&a->constitution()==initialScale,"sloping terrain uses stored height offset with unchanged scale");
