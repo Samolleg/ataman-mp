@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "mob_script_window.h"
 
 #include <QCloseEvent>
@@ -23,6 +24,7 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
     setAttribute(Qt::WA_QuitOnClose, false);
     setWindowTitle(tr("MOB Script: %1").arg(
         mob ? mob->filePath().absoluteFilePath() : QString()));
+    ei::rememberWindowGeometry(this, QStringLiteral("mobScript"));
     resize(900, 650);
 
     QVBoxLayout* layout = new QVBoxLayout(this);

@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -14,6 +15,7 @@ CSelectForm::CSelectForm(QWidget *parent) :
     ,m_pView(nullptr)
     ,m_selected_num(0)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("selectObjects"));
     ui->setupUi(this);
     setAttribute(Qt::WA_ShowWithoutActivating);
     init();

@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include <QTableWidget>
 #include <QMessageBox>
 #include <QTextBlock>
@@ -36,6 +37,7 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
   ,m_closeAccepted(false)
   ,m_pShortcut(nullptr)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("mobParameters"));
     ui->setupUi(this);
     ui->verticalLayout_2->removeWidget(ui->diplomacyButton);
     ui->verticalLayout_3->insertWidget(1, ui->diplomacyButton);
@@ -60,6 +62,7 @@ CMobParameters::CMobParameters(QWidget* parent, CMob* pMob, CView* pView):
     generateTitle();
     ui->listRanges->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     m_pDiplomacyWindow = new QWidget(this, Qt::Window);
+    ei::rememberWindowGeometry(m_pDiplomacyWindow, QStringLiteral("diplomacy"));
     m_pDiplomacyWindow->setObjectName(QStringLiteral("diplomacyWindow"));
     m_pDiplomacyWindow->setWindowTitle(tr("MOB Diplomacy"));
     m_pDiplomacyWindow->setAttribute(Qt::WA_QuitOnClose, false);

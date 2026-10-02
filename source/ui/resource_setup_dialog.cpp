@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "resource_setup_dialog.h"
 
 #include <QComboBox>
@@ -57,6 +58,7 @@ CResourceSetupDialog::CResourceSetupDialog(const QString& initialGameRoot,
     , m_buttons(new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this))
     , m_profiles(loadResourceProfiles())
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("resourceSetup"));
     setWindowTitle(tr("Game and mod setup"));
     setMinimumWidth(650);
     setModal(true);

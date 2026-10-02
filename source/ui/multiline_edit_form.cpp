@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "ui_theme.h"
 #include "multiline_edit_form.h"
 #include "ui_multiline_edit_form.h"
@@ -15,6 +16,7 @@ CMultiLineEditForm::CMultiLineEditForm(QWidget *parent) :
     m_suggestions(new QComboBox(this)),
     m_diagnostic(new QLabel(this))
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("multilineEditor"));
     ui->setupUi(this);
     m_suggestions->setEditable(true);
     m_suggestions->setInsertPolicy(QComboBox::NoInsert);

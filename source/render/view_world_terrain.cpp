@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "view.h"
 #include "node.h"
 #include "resourcemanager.h"
@@ -118,7 +119,7 @@ void CView::chooseWorldTerrainMaps()
             tr("Open a map with a saved world layout and available canonical terrain first.")); return;
     }
     syncWorldTerrainActive();
-    QDialog dialog(this); dialog.setWindowTitle(tr("World terrain maps"));
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("worldBrushMaps")); dialog.setWindowTitle(tr("World terrain maps"));
     QVBoxLayout* layout=new QVBoxLayout(&dialog);
     QCheckBox* enabled=new QCheckBox(tr("Edit neighboring-map terrain"),&dialog);
     enabled->setChecked(m_worldTerrainEnabled);layout->addWidget(enabled);

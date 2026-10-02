@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "randomize_form.h"
 #include "ui_randomize_form.h"
 #include "view.h"
@@ -7,6 +8,7 @@ CRandomizeForm::CRandomizeForm(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::CRandomizeForm)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("randomize"));
     ui->setupUi(this);
     init();
 }

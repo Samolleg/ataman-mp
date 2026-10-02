@@ -21,7 +21,10 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `89`. Each separate fix advances the integer version.
+Current Ataman version: `90`. Each separate fix advances the integer version.
+Working dialogs remember their position and size. Workspace docks, including
+Travel and Map Scenario, restore their floating geometry and tab arrangement
+after initialization; unavailable monitors do not leave windows off screen.
 
 The default dark theme uses readable hierarchy text, disabled controls, status messages
 and script highlighting. `--dark-theme-check` checks real widgets and text contrast;

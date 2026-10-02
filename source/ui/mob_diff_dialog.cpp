@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "mob_diff_dialog.h"
 
 #include <QDialogButtonBox>
@@ -74,6 +75,7 @@ CMobDiffDialog::CMobDiffDialog(const QFileInfo& baseline, const QFileInfo& candi
 {
     setWindowTitle(tr("Perspective MOB Diff - Details"));
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+    ei::rememberWindowGeometry(this, QStringLiteral("mobDiff"));
     resize(1200, 720);
     setModal(false);
 

@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "travel_global_map.h"
 #include "resource_model_preview.h"
 #include "resourcemanager.h"
@@ -100,7 +101,7 @@ bool chooseTravelGlobalPosition(QWidget* parent,const QVector<SMapTableZone>& zo
     const QMap<QString,QString> textures={{"gipat","gipatmap.mmp"},{"ingos","ingosmap.mmp"},{"suslanger","suslangermap.mmp"}};
     const auto textureName=textures.value(allod.toLower());
     if(textureName.isEmpty())return fail(QObject::tr("Для аллода %1 не задана текстура глобальной карты.").arg(allod));
-    QDialog dialog(parent);dialog.setObjectName("travelGlobalDialog");dialog.setWindowTitle(QObject::tr("Метка маршрута — %1").arg(allod));
+    QDialog dialog(parent);ei::rememberWindowGeometry(&dialog, QStringLiteral("travelGlobalMap"));dialog.setObjectName("travelGlobalDialog");dialog.setWindowTitle(QObject::tr("Метка маршрута — %1").arg(allod));
     dialog.setAttribute(Qt::WA_DontShowOnScreen,parent->testAttribute(Qt::WA_DontShowOnScreen));
     QVBoxLayout layout(&dialog);QLabel help(QObject::tr("Вид сверху. Нажмите на поверхность или перетащите метку ЛКМ. Высота определяется по модели. Золотые точки — существующие маршруты (название при наведении)."));help.setWordWrap(true);layout.addWidget(&help);
     GlobalSurface surface(&dialog);layout.addWidget(&surface,1);

@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "range_dialog.h"
 #include "ui_range_dialog.h"
 #include "mob_parameters.h"
@@ -11,6 +12,7 @@ CRangeDialog::CRangeDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::CRangeDialog)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("mobIdRange"));
     ui->setupUi(this);
     m_pParentWidget = dynamic_cast<CMobParameters*>(parent);
     Q_ASSERT(m_pParentWidget);

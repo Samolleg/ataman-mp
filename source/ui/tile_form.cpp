@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QKeyEvent>
@@ -22,6 +23,7 @@ CTileForm::CTileForm(QWidget *parent) :
   ,m_nTextureAtlas(0)
   ,m_tileRot(0)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("atlasTiles"));
     ui->setupUi(this);
     setWindowTitle(tr("MPR Atlas Tiles"));
     ui->label->setText(tr("Atlas category (read-only)"));

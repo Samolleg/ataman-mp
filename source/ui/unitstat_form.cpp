@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "unitstat_form.h"
 #include "ui_unitstat_form.h"
 #include "resourcemanager.h"
@@ -7,6 +8,7 @@ CUnitStatForm::CUnitStatForm(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::CUnitStatForm)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("unitStats"));
     ui->setupUi(this);
     setWindowTitle(tr("Unit parameters"));
     ui->tableUnitStat->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);

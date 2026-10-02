@@ -327,6 +327,8 @@ private:
     QAction* m_convertWorldObjectToLeverAction;
     QAction* m_landscapeToolsAction{nullptr};
     QDockWidget* m_mapsDock;
+    // Floating tab groups can reparent docks away from their original owner.
+    QList<QPointer<QDockWidget>> m_workspaceDocks;
     QDockWidget* m_landscapeToolsDock;
     CLandscapeTools* m_landscapeTools;
     quint64 m_landscapeVisibilityGeneration{0};

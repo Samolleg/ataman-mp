@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "ui_theme.h"
 #include "item_spell_constructor_dialog.h"
 
@@ -135,6 +136,7 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     // deferred delete; reopening before that event ran could resurrect the
     // closing OpenGL child and then destroy it while visible.
     setAttribute(Qt::WA_DeleteOnClose, false);
+    ei::rememberWindowGeometry(this, QStringLiteral("itemSpellConstructor"));
     resize(1100, 720);
     setMinimumSize(780, 520);
     const SGameTextCatalog texts = loadGameTextCatalog(resourceRoots);

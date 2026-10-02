@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "bodypartedit_form.h"
 #include "ui_bodypartedit_form.h"
 #include "layout_components/bodypart_checkbox.h"
@@ -69,6 +70,7 @@ CBodyPartEditForm::CBodyPartEditForm(QWidget *parent) :
   ,ui(new Ui::CBodyPartEditForm)
   ,m_clipboardFile(QString("%1%2%3").arg(QDir::tempPath()).arg(QDir::separator()).arg("bodypart_buffer.json"))
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("bodyParts"));
     ui->setupUi(this);
     setWindowTitle(tr("Model part visibility"));
     const QSize savedSize = QSettings().value(

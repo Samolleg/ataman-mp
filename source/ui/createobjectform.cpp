@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "createobjectform.h"
 #include "ui_createobjectform.h"
 #include "objects\lever.h"
@@ -128,6 +129,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     connect(m_databaseSearch, &QLineEdit::textChanged, this, [this] { filterDatabase(); });
     connect(m_databaseList, &QListWidget::currentRowChanged, this, [this] { selectDatabaseEntry(); });
     connect(m_advanced, &QCheckBox::toggled, ui->tableParameters, &QWidget::setVisible);
+    ei::rememberWindowGeometry(this, QStringLiteral("createObject"));
     resize(860, 600);
 }
 

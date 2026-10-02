@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "ui_theme.h"
 #include <QtWidgets>
 #include "terrain_preview_context.h"
@@ -14806,7 +14807,7 @@ void CView::finalizeVirtualTerrainAtlas()
         selectedIdentity = m_mprDocument.mapInfo().innerNamespace.toLower();
         replaceIdentity = true;
     }
-    QDialog preview(this);
+    QDialog preview(this);ei::rememberWindowGeometry(&preview, QStringLiteral("terrainPublicationPreview"));
     preview.setWindowTitle(tr("Review modern MPR save"));
     preview.resize(900,700);
     QVBoxLayout* previewLayout=new QVBoxLayout(&preview);
@@ -14938,7 +14939,7 @@ void CView::finalizeVirtualTerrainAtlas()
 
     if(selectedIdentity.isEmpty())
     {
-        QDialog identityDialog(this);
+        QDialog identityDialog(this);ei::rememberWindowGeometry(&identityDialog, QStringLiteral("terrainPublicationIdentity"));
         identityDialog.setWindowTitle(tr("Choose terrain resource identity"));
         QVBoxLayout* identityLayout = new QVBoxLayout(&identityDialog);
         QRadioButton* createIdentity = new QRadioButton(
@@ -25724,7 +25725,7 @@ void CView::convertSelectedWorldObjectToLever()
                                          tr("convert this world object to a lever")))
         return;
 
-    QDialog conversion(this);
+    QDialog conversion(this);ei::rememberWindowGeometry(&conversion, QStringLiteral("prototypeConversion"));
     conversion.setWindowTitle(tr("Convert World Object to Lever"));
     QVBoxLayout* layout = new QVBoxLayout(&conversion);
     QLabel* explanation = new QLabel(tr(

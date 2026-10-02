@@ -8,6 +8,7 @@
 #include "ui_theme.h"
 #include "scenario_layer_check.h"
 #include <QApplication>
+#include "window_layout_check.h"
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include "render/landscape.h"
@@ -527,6 +528,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption profileLoadOption("profile-load", "Discover the recommended resource profile for a game installation.", "game-root");
     QCommandLineOption mobDiffOption("mob-diff", "Compare a baseline MOB with another MOB.", "baseline");
     QCommandLineOption uiWidgetCheckOption("ui-widget-check", "Run non-interactive asset-picker regression checks.");
+    QCommandLineOption windowLayoutCheckOption("window-layout-check", "Check window and dock geometry persistence with isolated settings.");
     QCommandLineOption profileCatalogCheckOption("profile-model-catalog-check", "Run profile catalog migration and existing object property checks.");
     QCommandLineOption modelGalleryCheckOption("model-gallery-check", "Run non-interactive model gallery and catalog checks.");
     QCommandLineOption hierarchyCheckOption("object-hierarchy-check", "Check object hierarchy and selection on synthetic maps.");
@@ -566,6 +568,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(profileLoadOption);
     parser.addOption(mobDiffOption);
     parser.addOption(uiWidgetCheckOption);
+    parser.addOption(windowLayoutCheckOption);
     parser.addOption(modelGalleryCheckOption);
     parser.addOption(profileCatalogCheckOption);
     parser.addOption(hierarchyCheckOption);
@@ -622,6 +625,7 @@ int runHeadlessCommand(QApplication& app)
     const bool profileLoad = parser.isSet(profileLoadOption);
     const bool mobDiff = parser.isSet(mobDiffOption);
     const bool uiWidgetCheck = parser.isSet(uiWidgetCheckOption);
+    const bool windowLayoutCheck = parser.isSet(windowLayoutCheckOption);
     const bool profileCatalogCheck = parser.isSet(profileCatalogCheckOption);
     const bool modelGalleryCheck = parser.isSet(modelGalleryCheckOption);
     const bool hierarchyCheck = parser.isSet(hierarchyCheckOption);
@@ -633,19 +637,27 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
     if((validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
-            + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) > 1)
+            + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
     }
 
+    // UI checks may show/hide real working dialogs. Their geometry persistence
+    // must never write the owner's normal preferences, even for standalone checks.
+    QTemporaryDir headlessWindowPreferences;
+    if(!headlessWindowPreferences.isValid()) return 2;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, headlessWindowPreferences.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, headlessWindowPreferences.path());
+    if(windowLayoutCheck) return runWindowLayoutCheck();
     if(databasePreviewCheck) return runDatabasePreviewCheck();
     if(databaseCreationCheck) return runDatabaseCreationCheck();
     if(profileCatalogCheck) return runProfileModelCatalogCheck();

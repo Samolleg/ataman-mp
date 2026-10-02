@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "model_gallery_thumbnail.h"
 #include "resource_catalog.h"
 #include "resource_name.h"
@@ -110,6 +111,7 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     m_catalog(catalog),m_scan(scan),m_profile(profile),m_thumbnailNamespace(thumbnailNamespace),m_provider(std::move(provider))
 {
     for(const auto& texture:m_textures) m_availableTextures.insert(texture.toCaseFolded());
+    ei::rememberWindowGeometry(this, QStringLiteral("modelGallery"));
     setObjectName("modelGallery"); setWindowTitle(tr("Model gallery")); resize(1120,760);
     setMinimumSize(600,440); setWindowFlag(Qt::WindowContextHelpButtonHint,false);
     m_models.removeDuplicates(); m_models.sort(Qt::CaseInsensitive);

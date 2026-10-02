@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "main_window.h"
 #include "view.h"
 #include "landscape.h"
@@ -146,7 +147,7 @@ void MainWindow::addMapToWorld()
     if(!m_lastWorldMapLayoutWarning.isEmpty())
     { QMessageBox::warning(this,tr("Add map to world"),m_lastWorldMapLayoutWarning);return; }
     const auto profile = activeResourceProfile();
-    QDialog dialog(this);dialog.setWindowTitle(tr("Add map to world"));
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("worldAddMap"));dialog.setWindowTitle(tr("Add map to world"));
     auto* layout=new QVBoxLayout(&dialog);auto* form=new QFormLayout;
     layout->addLayout(form);
     auto* name=new QLineEdit(&dialog);
@@ -273,7 +274,7 @@ void MainWindow::manageWorldMaps()
 {
     m_pView->cancelWorldMapPlacement();refreshEditorWorld();
     const auto maps=m_editorWorldMaps; // Async metadata refresh must not retarget list rows.
-    QDialog dialog(this);dialog.setWindowTitle(tr("World maps"));
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("worldMaps"));dialog.setWindowTitle(tr("World maps"));
     auto* layout=new QVBoxLayout(&dialog);auto* list=new QListWidget(&dialog);layout->addWidget(list);
     for(const auto& map:maps)
     {
@@ -329,7 +330,7 @@ void MainWindow::manageWorldMaps()
     connect(locate,&QPushButton::clicked,&dialog,[&](){
         const int index=list->currentRow();if(index<0)return;
         auto map=maps[index];
-        QDialog edit(&dialog);edit.setWindowTitle(tr("Map files and position"));
+        QDialog edit(&dialog);ei::rememberWindowGeometry(&edit, QStringLiteral("worldMapProperties"));edit.setWindowTitle(tr("Map files and position"));
         auto* form=new QFormLayout(&edit);
         auto* name=new QLineEdit(map.displayName,&edit);
         auto* mpr=new QLineEdit(m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath),&edit);

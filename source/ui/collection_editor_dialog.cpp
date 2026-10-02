@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "collection_editor_dialog.h"
 
 #include <QComboBox>
@@ -23,6 +24,7 @@ CCollectionEditorDialog::CCollectionEditorDialog(
     , m_mobs(new QListWidget(this))
 {
     setWindowTitle(tr("Edit Endurance Collection"));
+    ei::rememberWindowGeometry(this, QStringLiteral("collectionEditor"));
     resize(720, 480);
     m_map->setEditable(true);
     m_map->addItem(tr("No map.txt mapping"), QString());

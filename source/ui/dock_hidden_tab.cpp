@@ -15,6 +15,7 @@
 #include <QSettings>
 #include <QWindow>
 #include "endurance_ui_scale.h"
+#include "window_geometry.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -212,6 +213,7 @@ void restoreHostFromDock(QDockWidget* dock)
         if(screen->name() == screenName) { target = screen; break; }
     if(target && host->windowHandle()) host->windowHandle()->setScreen(target);
     if(normal.isValid()) host->setGeometry(normal);
+    ei::keepWindowOnScreen(host);
     if(wantsMaximized) host->showMaximized();
     applyTaskbarIdentity(host);
     refreshUiScaleForHostScreen(host);

@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "ui_theme.h"
 #include "main_window.h"
 #include "travel_document.h"
@@ -512,6 +513,8 @@ QRect preferredDialogScreenGeometry(const QWidget* owner)
 void centerDialogOnPreferredScreen(QWidget* dialog, const QWidget* owner)
 {
     if(!dialog)
+        return;
+    if(dialog->property("windowGeometryRestored").toBool())
         return;
     const QRect available = preferredDialogScreenGeometry(owner);
     if(!available.isValid())
@@ -1533,16 +1536,12 @@ MainWindow::MainWindow(QWidget* parent) :
             uiSettings.value("ui/mainWindowState").toByteArray();
     const bool initializeDefaultDockLayout = firstRunSetup && savedMainWindowState.isEmpty();
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
-    restoreState(savedMainWindowState);
-    ei::restoreFloatingDockWindowState(m_messageLogDock);
-    ei::restoreFloatingDockWindowState(m_validationDock);
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // QMainWindow's opaque state reliably restores ownership and tab topology,
     // but Qt 5.12 can collapse the other dock columns to their minimum widths
     // after a floating tab group is reconstructed. Restore explicit extents
     // once the shown window has its final screen geometry.
-    QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
     // Landscape editing is an explicit working mode, not session layout.
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
@@ -2245,6 +2244,20 @@ MainWindow::MainWindow(QWidget* parent) :
                 m_landscapeTools->setEditingEnabled(false, false);
         });
     }
+    // Restore only after every dock, resource manager and visibility handler
+    // has its live dependencies. Restoring earlier loses late docks and can
+    // deliver visibilityChanged into a partially initialized editor.
+    for(QDockWidget* dock : findChildren<QDockWidget*>(QString(), Qt::FindDirectChildrenOnly))
+        m_workspaceDocks.append(dock);
+    restoreState(savedMainWindowState);
+    for(const auto& dock : m_workspaceDocks)
+    {
+        if(!dock) continue;
+        ei::enableNativeFloatingDockControls(dock);
+        ei::restoreFloatingDockWindowState(dock);
+    }
+    hideLandscapeTools();
+    QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -2281,6 +2294,7 @@ void MainWindow::showUnitTexturePreview()
     if(!m_unitTextureDialog)
     {
         m_unitTextureDialog = new QDialog(this);
+        ei::rememberWindowGeometry(m_unitTextureDialog, QStringLiteral("unitTextures"));
         m_unitTextureDialog->setAttribute(Qt::WA_QuitOnClose, false);
         m_unitTextureDialog->setWindowTitle(tr("Final character texture"));
         QVBoxLayout* layout = new QVBoxLayout(m_unitTextureDialog);
@@ -6025,7 +6039,7 @@ void MainWindow::reviewAndRepairNidCollisions()
             loadedPaths.insert(QDir::cleanPath(mob->filePath().absoluteFilePath()).toLower());
     const QString primaryPath = QDir::cleanPath(m_mapTestEntry.mobPath).toLower();
 
-    QDialog dialog(this);
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("objectIdReview"));
     dialog.setWindowTitle(tr("Review and Repair Object IDs"));
     dialog.resize(1080, 520);
     QVBoxLayout* layout = new QVBoxLayout(&dialog);
@@ -7223,8 +7237,8 @@ void MainWindow::saveUiState()
     if(m_landscapeToolsDock)
         hideLandscapeTools();
     QSettings uiSettings;
-    ei::saveFloatingDockWindowState(m_messageLogDock);
-    ei::saveFloatingDockWindowState(m_validationDock);
+    for(const auto& dock : m_workspaceDocks)
+        if(dock) ei::saveFloatingDockWindowState(dock);
     uiSettings.setValue("ui/mainWindowGeometry", saveGeometry());
     uiSettings.setValue("ui/mainWindowState", saveState());
     uiSettings.setValue("ui/workspaceSplitter", m_ui->workspaceSplitter->saveState());
@@ -7872,7 +7886,7 @@ void MainWindow::on_actionOpen_MPR_triggered()
 
 void MainWindow::on_actionNew_MPR_triggered()
 {
-    QDialog dialog(this);
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("newMpr"));
     dialog.setWindowTitle(tr("Create New MPR"));
     dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
     QScreen* activeScreen = QGuiApplication::screenAt(
@@ -8307,7 +8321,7 @@ void MainWindow::on_actionNew_MPR_triggered()
 
 void MainWindow::on_actionNew_MOB_triggered()
 {
-    QDialog dialog(this);
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("newMob"));
     dialog.setWindowTitle(tr("Create New MOB"));
     dialog.setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     QScreen* activeScreen = QGuiApplication::screenAt(

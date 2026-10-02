@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "resource_browser.h"
 #include <QFileSystemWatcher>
 #include "main_window.h"
@@ -82,7 +83,7 @@ void MainWindow::createTravelEditor(QMenu* menu)
         if(!codec || codec->fromUnicode(codec->toUnicode(before))!=before){
             QMessageBox::warning(this,tr("map.txt"),tr("Текст содержит байты, которые нельзя без потерь показать в CP1251."));return;
         }
-        QDialog dialog(this);dialog.setWindowTitle(tr("Редактировать map.txt — %1").arg(m_travelDocument->path()));
+        QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("rawMapText"));dialog.setWindowTitle(tr("Редактировать map.txt — %1").arg(m_travelDocument->path()));
         dialog.resize(900,650);
         auto* layout=new QVBoxLayout(&dialog);
         auto* note=new QLabel(tr("Текст сохраняется вместе с картой (Ctrl+S). Перед применением проверяется структура зон. Esc отменяет изменения в окне."));
@@ -339,7 +340,7 @@ void MainWindow::registerTravelMap()
        || resolvedResource(activeMapRoots(),mprFile.fileName(),".mpr").compare(mprFile.canonicalFilePath(),Qt::CaseInsensitive)!=0
        || resolvedResource(activeMapRoots(),mobFile.fileName(),".mob").compare(mobFile.canonicalFilePath(),Qt::CaseInsensitive)!=0){
         m_travelPanel->setStatus(tr("Сначала сохраните MPR/MOB и добавьте их папки в пути карт текущего профиля. Имена должны разрешаться именно в открытые файлы."));return;}
-    QDialog dialog(this);dialog.setWindowTitle(tr("Запись карты в map.txt"));QFormLayout form(&dialog);
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("travelZone"));dialog.setWindowTitle(tr("Запись карты в map.txt"));QFormLayout form(&dialog);
     QLineEdit id,allod;id.setText(m_mapTestEntry.zoneId);allod.setText(m_mapTestEntry.allodId);
     QComboBox type;type.addItems({"game","brief"});
     QLineEdit mpr(resourceName(CLandscape::getInstance()->filePath().absoluteFilePath())),mobName(resourceName(mob->filePath().absoluteFilePath()));
@@ -364,7 +365,7 @@ void MainWindow::createReverseTravel()
     for(int i=0;i<zone.exits.size();++i)if(zone.exits[i].exitId==exit.destinationExitId){if(index>=0){m_travelPanel->setStatus(tr("Целевой вход неоднозначен."));return;}index=i;}
     if(exit.destinationExitId<=0){m_travelPanel->setStatus(tr("Задайте положительный номер целевого входа."));return;}
     SMapTableExit reverse;if(index>=0)reverse=zone.exits[index];else reverse.exitId=exit.destinationExitId;
-    QDialog dialog(this);dialog.setWindowTitle(tr("Обратный переход из %1").arg(zone.zoneId));QFormLayout form(&dialog);
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("travelReverse"));dialog.setWindowTitle(tr("Обратный переход из %1").arg(zone.zoneId));QFormLayout form(&dialog);
     QLabel note(tr("Локальные координаты целевой карты. Будут заданы обе области; затем их можно независимо изменить на той карте."));note.setWordWrap(true);form.addRow(&note);
     const QRectF r=reverse.hasDeployRectangle?reverse.deployRectangle:QRectF(0,0,1,1);
     CWorldCoordinateEdit x(r.x()),y(r.y()),w(r.width()),h(r.height());form.addRow("X:",&x);form.addRow("Y:",&y);form.addRow(tr("Ширина:"),&w);form.addRow(tr("Высота:"),&h);
@@ -382,7 +383,7 @@ void MainWindow::createPairedTravelRoute()
     const auto zones=m_travelDocument->table().zones();
     const auto source=zones[m_travelZone];
     if(source.zoneType!="game"){m_travelPanel->setStatus(tr("Выберите игровую карту (game)."));return;}
-    QDialog dialog(this);dialog.setWindowTitle(tr("Маршрут между картами"));
+    QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("travelRoute"));dialog.setWindowTitle(tr("Маршрут между картами"));
     dialog.setAttribute(Qt::WA_DontShowOnScreen,testAttribute(Qt::WA_DontShowOnScreen));
     dialog.resize(760,700);QVBoxLayout layout(&dialog);QFormLayout form;layout.addLayout(&form);
     QLabel note(tr("Два конца маршрута будут связаны через новую edge-зону. Выбранные существующие записи сохранят номера, но их направления и четыре области будут заменены значениями ниже. Остальные записи не меняются."));

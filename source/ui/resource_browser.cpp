@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include "resource_browser.h"
 
 #include "mmp_inspector.h"
@@ -1145,7 +1146,7 @@ bool CResourceBrowser::publishTransaction(CResArchiveTransaction& transaction,
     const bool modOwnedSource = portableSource.contains(QStringLiteral("/mods/"));
     const bool sourceCanBeUpdated = !sourceIsActive || modOwnedSource;
 
-    QDialog reviewDialog(this);
+    QDialog reviewDialog(this);ei::rememberWindowGeometry(&reviewDialog, QStringLiteral("resourceChangeReview"));
     reviewDialog.setWindowTitle(tr("Apply RES changes"));
     auto* layout = new QVBoxLayout(&reviewDialog);
     auto* summary = new QLabel(operationSummary, &reviewDialog);

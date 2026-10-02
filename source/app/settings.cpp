@@ -1,3 +1,4 @@
+#include "window_geometry.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -29,6 +30,7 @@ CSettings::CSettings(QWidget *parent) :
     ,m_fileOpt("endurance-options.json")
   ,m_version(1.0)
 {
+    ei::rememberWindowGeometry(this, QStringLiteral("settings"));
     ui->setupUi(this);
     const QStringList cameraWheelGestures = {
         "Ctrl+Wheel", "Alt+Wheel", "Shift+Wheel", "Meta+Wheel"
