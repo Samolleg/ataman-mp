@@ -77,7 +77,6 @@ bool TechnicalModelCatalog::loadProfile(const QString& databasePath,
     const auto profiles = legacy.m_document.value("profiles").toObject();
     if(profiles.contains(profile)) {
         m_document.insert("profiles",QJsonObject{{profile,profiles.value(profile)}});
-        m_document.remove("modelTextures");
     }
     refreshPortableBindings();
     return true; // Persist on an explicit catalog operation, never on selection.

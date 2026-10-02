@@ -14532,6 +14532,11 @@ void EnduranceDocumentTests::profileCatalogMigrationPreservesDataAndIsolation()
     QVERIFY(legacy.setPlacement("House","houses","gipat"));
     legacy.bindTexture("a","House","stone"); legacy.bindTexture("b","House","wood");
     QVERIFY(legacy.save(&error));
+    // This fixture represents the old EXE-side format, predating the portable
+    // field. Keep its conflicting A/B bindings rather than creating v96 data.
+    QFile legacyFile(legacyPath); QVERIFY(legacyFile.open(QIODevice::ReadOnly));
+    auto legacyObject=QJsonDocument::fromJson(legacyFile.readAll()).object();legacyFile.close();legacyObject.remove("modelTextures");
+    QVERIFY(legacyFile.open(QIODevice::WriteOnly|QIODevice::Truncate));legacyFile.write(QJsonDocument(legacyObject).toJson());legacyFile.close();
     QFile old(legacyPath); QVERIFY(old.open(QIODevice::ReadOnly)); const QByteArray baseline = old.readAll(); old.close();
     ei::TechnicalModelCatalog a, b; ei::TechnicalTextureCatalog scan;
     QVERIFY(a.loadProfile(dir.filePath("a/database.res"),legacyPath,"a",&error));
@@ -14618,6 +14623,12 @@ void EnduranceDocumentTests::modelCatalogBindingsSurviveRelocationWithoutForeign
     QCOMPARE(imported.textureChoices(recipient,"house",{"Stone"},empty).size(),1);
     QVERIFY(!QFileInfo::exists(imported.path()));
     QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),baseline); file.close();
+    auto portableSource=saved;
+    auto portableOnly=portableSource.value("modelTextures").toObject();portableOnly.insert("portable-only",QJsonArray{"roof"});portableSource.insert("modelTextures",portableOnly);
+    QFile portableFile(dir.filePath("portable-source.json"));QVERIFY(portableFile.open(QIODevice::WriteOnly));portableFile.write(QJsonDocument(portableSource).toJson());portableFile.close();
+    ei::TechnicalModelCatalog portableImport;
+    QVERIFY(portableImport.loadProfile(dir.filePath("another-mod/database.res"),portableFile.fileName(),author,&error));
+    QCOMPARE(portableImport.textureChoices(author,"portable-only",{"roof"},empty).size(),1); // Exact-profile import retains portable-only bindings too.
     auto conflicting=original;
     auto legacyProfiles=conflicting.value("profiles").toObject();
     legacyProfiles.insert("different-mod",QJsonObject{{"modelTextures",QJsonObject{{"house",QJsonArray{"brick"}}}}});
