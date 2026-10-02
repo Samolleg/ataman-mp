@@ -1,6 +1,6 @@
 # EI-ASSEMBLY-CATALOG-95 — каталог готовых модульных сборок
 
-Дата: 2026-10-02. База: cca391778890cd61076fc7ff8f40fd601df8ef45 (94). Ветка: codex/assembly-catalog-v95; VERSION95. SHA реализации будет записан в разделе передачи после scoped-коммита. Постоянный путь не меняется.
+Дата: 2026-10-02. База: cca391778890cd61076fc7ff8f40fd601df8ef45 (94). Ветка: codex/assembly-catalog-v95; VERSION95. SHA реализации: 3cbf3cedb9390cc1d490de000592d0b7b7006319. Постоянный путь не меняется.
 
 ## Поручение и критерии
 
@@ -51,4 +51,8 @@ Native снимок assembly-catalog-check-native/assemblies.png просмот�
 
 ## Передача
 
-Подготавливается свежая build-staging-95-assembly. Постоянная папка: C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test. Требуются равенство staged/raw EXE, version95 до финализации, finalizer/independent validator,127 managed hashes, сохранность всех unlisted пользовательских файлов и verified rollback94→95. Итог записывается после выполнения; ещё не выполненная передача не объявляется PASS.
+Свежая собственная build-staging-95-assembly подготовлена по коммиту 3cbf3cedb9390cc1d490de000592d0b7b7006319. До финализации проверены --version95 и равенство raw/staged EXE SHA-256. Finalizer и независимый validate_distribution завершены exit0;127 managed файлов. Финализированная staging повторно не запускалась.
+
+Постоянная папка C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test обновлена94→95 после проверки отсутствия editor/runtime процессов. Все127 управляемых файлов и новый manifest проверены. Изменены6 программных файлов; они и прежний manifest сохранены/сверены в artifacts/rollback-EI-Mapper-Ataman-v94-to-95-20261002. Все14718 файлов вне manifest сохранены byte-identical. Финализатор на постоянной установке не запускался. Installed EXE соответствует указанному выше hash, VERSION95. Предыдущий собственный7-файловый rollback93→94 удалён только после проверки новой установки и каждой записи обоих rollback manifests; нынешний7-файловый откат сохранён.
+
+Журналы: build-tests-95-assembly/stage.log, finalize.log, validate-package.log, stage-version.out, install.log, retire-rollback.log; user-files-before.json/user-files-after.json подтверждают сохранность пользовательских данных. Эта последняя запись передачи меняет только документацию. Отсутствие ручной игровой/GUI приёмки и прежние широкие отказы сохраняются.
