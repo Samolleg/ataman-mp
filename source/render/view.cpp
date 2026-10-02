@@ -6090,7 +6090,7 @@ void CView::drawTestOverlaysOpenGl()
         && !paintIssueOverlay && !m_worldPlacementActive
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
-        && !showOverlayMaterialSlots
+        && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty()
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
        || width() <= 0 || height() <= 0)
         return;
@@ -6193,6 +6193,20 @@ void CView::drawTestOverlaysOpenGl()
         ei::gl::DrawArrays(GL_LINES, 0, lines.size());
     };
     ei::gl::LineWidth(2.0f);
+    if(!m_connectionGlyphs.isEmpty()) {
+        m_program.setUniformValue("customColor",m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,1.f):QVector4D(0.1f,0.9f,1.f,1.f));
+        m_program.setAttributeArray(position,m_connectionGlyphs.constData());
+        ei::gl::DrawArrays(GL_LINES,0,m_connectionGlyphs.size());
+    }
+    if(m_connectionGhostNode && !m_connectionGhostVertices.isEmpty()) {
+        QMatrix4x4 preview;preview.translate(m_connectionGhostNode->drawPosition());preview.rotate(m_connectionGhostNode->rotation());
+        m_program.setUniformValue("u_modelMmatrix",preview);
+        m_program.setUniformValue("customColor",m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,0.4f):QVector4D(0.1f,0.9f,1.f,0.4f));
+        ei::gl::DepthMask(GL_FALSE);ei::gl::Enable(GL_BLEND);ei::gl::BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+        m_program.setAttributeArray(position,m_connectionGhostVertices.constData());
+        ei::gl::DrawArrays(GL_TRIANGLES,0,m_connectionGhostVertices.size());
+        m_program.setUniformValue("u_modelMmatrix",identity);
+    }
     scenarioGlyphs(m_scenarioParticipants, QVector4D(0.1f,0.9f,1.f,1.f), false);
     scenarioGlyphs(m_scenarioSpawns, QVector4D(0.9f,0.35f,1.f,1.f), true);
     scenarioGlyphs(m_scenarioDestinations, QVector4D(1.f,0.75f,0.15f,1.f), true);
@@ -8610,6 +8624,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                 for(CNode* node : mob->nodes())
                     if(node->nodeState() == ENodeState::eSelect)
                     {
+                        if(node==m_connectionGhostNode && !m_connectionGhostVertices.isEmpty())continue;
                         if(!isObjectVisualVisible(node))
                             continue;
                         m_program.setUniformValue("u_highlightColor",
@@ -23234,10 +23249,36 @@ bool CView::beginDatabasePlacement(CNode* prototype, QString* diagnostic)
         if(diagnostic) *diagnostic = report.toText();
         return false;
     }
+    return beginPreparedObjectPlacement(data,cursor,diagnostic);
+}
+
+bool CView::beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic)
+{
+    if(diagnostic) diagnostic->clear();
+    if(!m_activeMob || !m_pOp || !m_pUndoStack || !m_pTree) return false;
+    cancelPendingOperation();
+    QPoint cursor=mapFromGlobal(QCursor::pos());
+    if(!rect().contains(cursor))cursor=rect().center();
+    QVector3D point;
+    if(!objectPlacementPositionAt(cursor,&point)) {
+        cursor=rect().center();
+        if(!objectPlacementPositionAt(cursor,&point)) {
+            if(diagnostic)*diagnostic=QString::fromUtf8("Наведите камеру на рельеф для размещения детали.");return false;
+        }
+    }
+    return beginPreparedObjectPlacement(descriptor,cursor,diagnostic);
+}
+
+bool CView::beginPreparedObjectPlacement(const QJsonObject& data,const QPoint& cursor,QString* diagnostic)
+{
     makeCurrent();
     const QList<CNode*> originalSelection = selectionSnapshot();
     CNode* node = m_activeMob->createNode(data);
-    QByteArray candidate;
+    if(node) {
+        QVector3D initial;
+        if(objectPlacementPositionAt(cursor,&initial)) {initial.setZ(node->position().z());node->updatePos(initial);}
+    }
+    QByteArray candidate; CValidationReport report;
     if(!node || !m_activeMob->buildValidatedCandidate(&candidate, &report))
     {
         if(node) m_activeMob->discardUncommittedNode(node);
@@ -23267,8 +23308,10 @@ bool CView::updateDatabasePlacementPointer(const QPoint& position)
        || m_pendingPasteNodes.size() != 1) return false;
     QVector3D point;
     if(!objectPlacementPositionAt(position, &point)) return false;
+    restoreFreeModelMove();
     point.setZ(m_pendingPasteNodes.first()->position().z());
     m_pendingPasteNodes.first()->updatePos(point);
+    updateModelMagnet(position);
     update();
     return true;
 }
@@ -23858,6 +23901,7 @@ bool CView::cancelPendingOperation()
     }
 
     const int trackedObjects = m_operationBackup.size();
+    clearModelMagnet();
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
     m_rotationOrientationBackup.clear();
@@ -24073,6 +24117,8 @@ void CView::operationSetBackup(EOperationAxisType operationType)
             m_operationBackup[node] = node->constitution(); break;
         }
     }
+    if(operationType == EOperationAxisType::eMove) prepareModelMagnet();
+    else clearModelMagnet();
     if(operationType == EOperationAxisType::eRotate && !m_rotationPositionBackup.isEmpty())
     {
         auto minimum = m_rotationPositionBackup.first();
@@ -24097,6 +24143,7 @@ void CView::operationRevert(EOperationAxisType operationType)
         {
         case EOperationAxisType::eMove:
         {
+            if(m_connectionOrientations.contains(pair.first)) pair.first->setRot(m_connectionOrientations.value(pair.first));
             CUnit* unit = dynamic_cast<CUnit*>(pair.first);
             if(unit && m_unitMovementBackup.contains(unit))
                 unit->restoreMovementState(m_unitMovementBackup.value(unit));
@@ -24123,6 +24170,11 @@ void CView::operationRevert(EOperationAxisType operationType)
 
     if(operationType == EOperationAxisType::eRotate)
         m_rotationDelta = QQuaternion();
+    if(operationType == EOperationAxisType::eMove) {
+        m_modelMagnetApplied=false;m_connectionHeldSource=-1;m_connectionHeldTarget=-1;
+        m_connectionGlyphs.clear();
+        if(m_operationBackup.size()==1)m_connectionFreePosition=m_operationBackup.first();
+    }
 }
 
 void CView::operationApply(EOperationAxisType operationType)
@@ -24132,7 +24184,7 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
-        m_pUndoStack->beginMacro(m_pendingDatabasePlacement ? tr("Add from database")
+        m_pUndoStack->beginMacro(m_pendingDatabasePlacement ? QString::fromUtf8("Разместить объект")
             : tr("Paste objects: %1").arg(m_pendingPasteNodes.size()));
         for(CNode* node : m_pendingPasteNodes)
         {
@@ -24182,6 +24234,12 @@ void CView::operationApply(EOperationAxisType operationType)
         {
         case EOperationAxisType::eMove:
         {
+            if(m_connectionOrientations.contains(pair.first) && pair.first->rotation()!=m_connectionOrientations.value(pair.first)) {
+                const auto after=pair.first->position();const auto afterRotation=pair.first->rotation();
+                m_pUndoStack->push(new CAlignModelCommand(this,m_activeMob,pair.first,pair.second,
+                    m_connectionOrientations.value(pair.first),after,afterRotation));
+                break;
+            }
             if(CScene::getInstance()->getMode() == eEditModeLogic)
             {
                 ENodeType type = pair.first->nodeType();
@@ -24310,6 +24368,7 @@ void CView::operationApply(EOperationAxisType operationType)
         m_pUndoStack->endMacro();
     if(m_pendingLogicPlacementMacro)
         m_pUndoStack->endMacro();
+    clearModelMagnet();
     m_operationBackup.clear();
     m_rotationPositionBackup.clear();
     m_rotationOrientationBackup.clear();
@@ -24332,6 +24391,7 @@ void CView::moveTo(QVector3D &dir)
     if(nullptr == m_activeMob)
         return;
 
+    restoreFreeModelMove();
     QVector3D pos;
     // operationSetBackup() contains the canonical transform roots and removes
     // selected descendants whose parent will carry them.

@@ -163,7 +163,7 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         CModelGallery cold(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space);
         if(cold.selectedModel()!="house" || cold.selectedTexture()!="wood") return fail("initial model and explicit texture");
         cold.setAttribute(Qt::WA_DontShowOnScreen);cold.show();clock.restart();
-        if(!ready(cold,300)) return fail("visible thumbnail queue responsiveness (limit300ms)");
+        if(!ready(cold,300)) return fail(QString("visible thumbnail queue responsiveness (limit300ms): calls=%1 viewport=%2x%3 elapsed=%4ms").arg(sharedCalls.load()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->width()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->height()).arg(clock.elapsed()));
         auto* tiles=cold.findChild<QListWidget*>("modelGalleryTiles");
         if(sharedCalls.load()==0 || sharedCalls.load()>=manyModels.size()) return fail("full-profile visible-only jobs");
         const int before=sharedCalls.load();

@@ -332,6 +332,15 @@ QVector<SRenderItem> CObjectBase::staticRenderItems(const QVector<QSharedPointer
     }
     return items;
 }
+QVector<QVector3D> CObjectBase::connectionPreviewVertices() const
+{
+    int count=0;for(const auto* part:m_aPart)if(part->isDrawable())count+=part->vertData().size();
+    // Very large models keep their usual selected preview; never truncate geometry.
+    if(count>120000)return {};
+    QVector<QVector3D> vertices;vertices.reserve(count);
+    for(const auto* part:m_aPart)if(part->isDrawable())for(const auto& vertex:part->vertData())vertices.append(vertex.position*editorVisualScale());
+    return vertices;
+}
 
 void CObjectBase::loadFigure()
 {

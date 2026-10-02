@@ -1,6 +1,7 @@
 #ifndef MODEL_GALLERY_H
 #define MODEL_GALLERY_H
 #include "technical_model_catalog.h"
+#include "model_connection_editor.h"
 #include <QDialog>
 #include <QCache>
 #include <QFutureWatcher>
@@ -24,7 +25,7 @@ public:
         const QString& profile, const QStringList& textures, const ei::TechnicalTextureCatalog* scan,
         ThumbnailProvider provider, QWidget* parent = nullptr,
         const QString& initialModel = QString(), const QString& initialTexture = QString(),
-        const QString& thumbnailNamespace = QString());
+        const QString& thumbnailNamespace = QString(), ModelSceneProvider sceneProvider = {});
     ~CModelGallery() override;
     static ThumbnailProvider resourceThumbnails(const QStringList& sourcePaths);
     static QString resourceThumbnailNamespace(const QStringList& sourcePaths);
@@ -62,6 +63,7 @@ private:
     mutable quint64 m_catalogRevision = 0, m_scanRevision = 0;
     bool m_textureRequired{false};
     ThumbnailProvider m_provider;
+    ModelSceneProvider m_sceneProvider;
     QLineEdit *m_search, *m_name;
     QListWidget* m_list;
     QLabel* m_status;

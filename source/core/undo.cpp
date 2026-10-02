@@ -13,6 +13,16 @@
 #include <QElapsedTimer>
 #include <QCoreApplication>
 
+CAlignModelCommand::CAlignModelCommand(CView* view,CMob* mob,CNode* node,const QVector3D& before,
+    const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation):
+    m_view(view),m_mob(mob),m_node(node),m_before(before),m_after(after),m_beforeRotation(beforeRotation),m_afterRotation(afterRotation)
+{setText(QString::fromUtf8("Стыковка детали"));}
+void CAlignModelCommand::apply(const QVector3D& position,const QQuaternion& rotation) {
+    auto p=position;m_node->setRot(rotation);m_node->updatePos(p);m_view->setDurty(m_mob);m_view->viewParameters();m_view->update();
+}
+void CAlignModelCommand::undo() {apply(m_before,m_beforeRotation);}
+void CAlignModelCommand::redo() {apply(m_after,m_afterRotation);}
+
 
 //CChangeModelParam::CChangeModelParam(CView* pView, uint nodeId, EObjParam &objParam, QString value, QUndoCommand *parent):
 //    CChangeStringParam(pView, nodeId, objParam, value, parent)

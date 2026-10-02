@@ -3,6 +3,7 @@
 #include "technical_texture_catalog.h"
 #include <QByteArray>
 #include <QJsonObject>
+#include "model_connections.h"
 
 namespace ei {
 // User-owned JSON: never part of the managed executable manifest.
@@ -20,6 +21,8 @@ public:
     quint64 revision() const { return m_revision; }
     QString russianName(const QString& model) const;
     void setRussianName(const QString& model, const QString& name);
+    bool connections(const QString& model, QVector<ModelConnection>* points, QString* error = nullptr) const;
+    bool setConnections(const QString& model, const QVector<ModelConnection>& points, QString* error = nullptr);
     QString category(const QString& model) const;
     QString region(const QString& model) const;
     bool setPlacement(const QString& model, const QString& category, const QString& region);

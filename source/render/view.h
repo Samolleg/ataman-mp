@@ -2,6 +2,7 @@
 #define MYGLWIDGET_H
 #include "travel_area_geometry.h"
 #include "map_save_batch.h"
+#include "technical_model_catalog.h"
 
 #include <QGLWidget>
 #include <QOpenGLShader>
@@ -171,6 +172,7 @@ class CView : public QGLWidget
     friend int runObjectHierarchyCheck();
     friend int runGroupRotationCheck();
     friend int runProfileModelCatalogCheck();
+    friend int runModelConnectionCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
@@ -303,6 +305,7 @@ public:
         const QVector3D& sourceRotation);
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
+    bool beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic = nullptr);
     bool isDatabasePlacementPending() const { return m_pendingDatabasePlacement; }
     bool updateDatabasePlacementPointer(const QPoint& position);
     bool isLogicPlacementPending() const { return m_pendingLogicPlacementMacro; }
@@ -342,6 +345,10 @@ public:
     bool hasPendingOperation() const;
     bool prepareUndo();
     void moveTo(QVector3D& dir);
+    void setModelMagnetEnabled(bool enabled);
+    void setModelConnectionSource(const QString& id);
+    void cycleModelConnectionTarget();
+    void updateModelMagnet(const QPoint& pointer);
     void rotateTo(QVector3D& rot);
     void scaleTo(QVector3D& scale);
     void resetUnitLogicPaths();
@@ -475,6 +482,7 @@ public:
     QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:
+    bool event(QEvent* event) override;
     void initializeGL() override;
     void paintGL() override;
     void resizeGL(int width, int height) override;
@@ -763,6 +771,8 @@ public slots:
     void exportTerrainPaintDiagnostic();
 
 signals:
+    void modelConnectionSourcesChanged(const QStringList& labels,const QStringList& ids);
+    void modelConnectionStatusChanged(const QString& status);
     void travelAreaSelected(int exitIndex, bool* accepted);
     void travelDrawingStateChanged(bool active, bool remove, bool newExit);
     void travelAreaCommitted(int exitIndex,bool remove,const QRectF& rectangle,bool newExit);
@@ -932,6 +942,33 @@ private:
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
+    void prepareModelMagnet();
+    bool beginPreparedObjectPlacement(const QJsonObject& descriptor,const QPoint& cursor,QString* diagnostic);
+    void clearModelMagnet();
+    void restoreFreeModelMove();
+    bool applyModelConnection(int source,int target);
+    bool connectionScreenPoint(const QVector3D& world,QPointF* screen) const;
+    ei::TechnicalModelCatalog m_connectionCatalog;
+    QVector<ei::ModelConnection> m_sourceConnections;
+    struct ConnectionTarget {
+        QPointer<CNode> owner;
+        ei::ModelConnection point;
+        ei::ConnectionPose pose;
+        QVector3D world;
+        QString label;
+    };
+    QVector<ConnectionTarget> m_connectionTargets;
+    ei::ConnectionIndex m_connectionIndex;
+    QMap<CNode*,QQuaternion> m_connectionOrientations;
+    QVector3D m_connectionFreePosition;
+    bool m_modelMagnetEnabled=false,m_modelMagnetApplied=false;
+    QString m_connectionSourceId;
+    QPoint m_connectionPointer;
+    int m_connectionHeldTarget=-1,m_connectionHeldSource=-1;
+    QVector<QPair<int,int>> m_connectionChoices;
+    QVector<QVector3D> m_connectionGlyphs;
+    QPointer<CNode> m_connectionGhostNode;
+    QVector<QVector3D> m_connectionGhostVertices;
     QMap<CNode*, QVector3D> m_rotationPositionBackup;
     QMap<CNode*, QQuaternion> m_rotationOrientationBackup;
     QVector3D m_rotationPivot;

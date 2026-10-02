@@ -45,6 +45,19 @@ private:
     int m_originalIndex;
 };
 
+class CAlignModelCommand : public QUndoCommand, public IAiGraphPreviewInvalidatingCommand {
+public:
+    CAlignModelCommand(CView* view,CMob* mob,CNode* node,const QVector3D& before,
+        const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation);
+    void undo() override;
+    void redo() override;
+    bool invalidatesAiGraphPreview() const override { return true; }
+private:
+    void apply(const QVector3D& position,const QQuaternion& rotation);
+    CView* m_view; CMob* m_mob; CNode* m_node;
+    QVector3D m_before,m_after; QQuaternion m_beforeRotation,m_afterRotation;
+};
+
 class CDeleteLogicPoint: public QUndoCommand
 {
 public:

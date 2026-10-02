@@ -2915,7 +2915,7 @@ void CTableManager::openModelGallery()
     const QStringList sources=configuredResourceSourcePaths(m_catalogSettings);
     CModelGallery gallery(CObjectList::getInstance()->figureList(), &catalog, m_catalogProfile,
         textures, &scan, CModelGallery::resourceThumbnails(sources), m_pTable,m_selectedModel,initialTexture,
-        CModelGallery::resourceThumbnailNamespace(sources));
+        CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
     gallery.requireTextureSelection();
     if(!catalogError.isEmpty()) gallery.showCatalogError(catalogError);
     QTimer scanner;

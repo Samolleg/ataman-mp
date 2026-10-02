@@ -21,7 +21,11 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `90`. Each separate fix advances the integer version.
+Current Ataman version: `91`. Each separate fix advances the integer version.
+Rigid building modules can snap by authored connector frames stored in the profile
+model catalog. The gallery includes a connector editor; moving/creating a module
+supports a magnet, connector choice, Esc and atomic Undo/Redo. See
+[modular building guide](docs/MODULAR_BUILDING_SNAP.md) for setup and limits.
 Working dialogs remember their position and size. Workspace docks, including
 Travel and Map Scenario, restore their floating geometry and tab arrangement
 after initialization; unavailable monitors do not leave windows off screen.

@@ -107,10 +107,11 @@ public:
 CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog* catalog,
     const QString& profile,const QStringList& textures,const ei::TechnicalTextureCatalog* scan,
     ThumbnailProvider provider,QWidget* parent,const QString& initialModel,const QString& initialTexture,
-    const QString& thumbnailNamespace):QDialog(parent),m_models(models),m_textures(textures),
+    const QString& thumbnailNamespace,ModelSceneProvider sceneProvider):QDialog(parent),m_models(models),m_textures(textures),
     m_catalog(catalog),m_scan(scan),m_profile(profile),m_thumbnailNamespace(thumbnailNamespace),m_provider(std::move(provider))
 {
     for(const auto& texture:m_textures) m_availableTextures.insert(texture.toCaseFolded());
+    m_sceneProvider=std::move(sceneProvider);
     ei::rememberWindowGeometry(this, QStringLiteral("modelGallery"));
     setObjectName("modelGallery"); setWindowTitle(tr("Model gallery")); resize(1120,760);
     setMinimumSize(600,440); setWindowFlag(Qt::WindowContextHelpButtonHint,false);
@@ -163,6 +164,13 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     m_saveTexture=new QPushButton(tr("Bind texture"),this); m_saveTexture->setObjectName("modelGalleryBindTexture"); textureRow->addWidget(m_saveTexture); layout->addLayout(textureRow);
     m_status=new QLabel(this); m_status->setWordWrap(true); m_status->setTextFormat(Qt::PlainText); layout->addWidget(m_status);
     auto* buttons=new QHBoxLayout; buttons->addStretch();
+    auto* connections=new QPushButton(QString::fromUtf8("Точки стыковки…"),this);
+    connections->setObjectName("modelGalleryConnections");buttons->insertWidget(0,connections);
+    connect(connections,&QPushButton::clicked,this,[this]{
+        if(selectedModel().isEmpty())return;
+        CModelConnectionEditor editor(m_catalog,selectedModel(),m_sceneProvider,this);
+        if(editor.exec()==QDialog::Accepted)refreshCatalog();
+    });
     m_choose=new QPushButton(tr("Choose model"),this); m_choose->setObjectName("modelGalleryChoose"); m_choose->setDefault(true); buttons->addWidget(m_choose);
     auto* cancel=new QPushButton(tr("Cancel"),this); buttons->addWidget(cancel); layout->addLayout(buttons);
     connect(cancel,&QPushButton::clicked,this,&QDialog::reject);

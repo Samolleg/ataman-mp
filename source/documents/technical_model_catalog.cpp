@@ -117,6 +117,19 @@ void TechnicalModelCatalog::setRussianName(const QString& model, const QString& 
     entry.insert("russianName", name.trimmed()); models.insert(modelKey(model), entry);
     m_document.insert("models", models);
 }
+bool TechnicalModelCatalog::connections(const QString& model,QVector<ModelConnection>* points,QString* error) const
+{
+    return readConnections(m_document.value("models").toObject().value(modelKey(model)).toObject().value("connections"),points,error);
+}
+bool TechnicalModelCatalog::setConnections(const QString& model,const QVector<ModelConnection>& points,QString* error)
+{
+    if(!m_valid || modelKey(model).isEmpty()) return false;
+    QVector<ModelConnection> checked;
+    if(!readConnections(writeConnections(points),&checked,error)) return false;
+    auto models=m_document.value("models").toObject(); auto entry=models.value(modelKey(model)).toObject();
+    entry.insert("connections",writeConnections(checked)); models.insert(modelKey(model),entry);
+    m_document.insert("models",models); ++m_revision; return true;
+}
 void TechnicalModelCatalog::registerModels(const QStringList& names)
 {
     ++m_revision;

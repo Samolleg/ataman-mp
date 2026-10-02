@@ -97,6 +97,8 @@ public:
     QVector<SNavigationCollisionProxy> navigationCollisionProxies() const;
     void installPreparedStaticParts(const QVector<SPreparedStaticPart>& parts);
     QVector<SRenderItem> staticRenderItems(const QVector<QSharedPointer<CPart>>& alternate = {}) const;
+    QVector<QVector3D> connectionPreviewVertices() const;
+    float connectionScale() const { return editorVisualScale(); }
 
 protected:
     // Editor-only helper figures (lights, particle anchors) can be presented

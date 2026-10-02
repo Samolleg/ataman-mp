@@ -439,7 +439,6 @@ void CCreateObjectForm::on_buttonCreate_clicked()
         rawTemplate = selected.front();
     if(rawTemplate && !pMob->nodes().contains(rawTemplate))
         rawTemplate = nullptr;
-    pMob->clearSelect();
     auto pos = QWidget::mapFromGlobal(QCursor::pos());
     auto posOnLand = m_pView->getTerrainPos(pos.x(), pos.y());
     switch (type)
@@ -482,6 +481,14 @@ void CCreateObjectForm::on_buttonCreate_clicked()
             QString::fromLatin1(rawTemplate->rawSourceSubtreeSha256().toHex()));
         nodeData.insert("_Endurance raw provenance", provenance);
     }
+    if(type==eWorldObject || type==eLever) {
+        QString diagnostic;
+        const bool placed=m_pView->beginTechnicalPlacement(nodeData,&diagnostic);
+        m_pNode->setPos(posBackup);m_pNode->setDrawPosition(posBackup);
+        if(!placed) {QMessageBox::warning(this,tr("Не удалось создать объект"),diagnostic);return;}
+        hide();m_pView->setFocus();m_pView->updateGL();return;
+    }
+    pMob->clearSelect();
     CCreateNodeCommand* pUndo = new CCreateNodeCommand(m_pView, nodeData);
     QObject::connect(pUndo, SIGNAL(addNodeSignal(CNode*)), m_pView->objectTree(), SLOT(addNodeToTree(CNode*)));
     QObject::connect(pUndo, SIGNAL(undo_addNodeSignal(uint)), m_pView->objectTree(), SLOT(onNodeDelete(uint)));
@@ -751,7 +758,7 @@ void CCreateObjectForm::openModelGallery()
     auto provider = CModelGallery::resourceThumbnails(sources);
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this,
-        m_pNode->modelName(),m_pNode->textureName(),CModelGallery::resourceThumbnailNamespace(sources));
+        m_pNode->modelName(),m_pNode->textureName(),CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
     if(!m_modelCatalogError.isEmpty()) gallery.showCatalogError(m_modelCatalogError);
     if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
     {

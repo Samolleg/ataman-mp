@@ -288,6 +288,7 @@ CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
 
 void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
 {
+    if(key==eKey_Tab && !pOp->keyManager()->isPressed(eKey_Ctrl)) {m_pView->cycleModelConnectionTarget();return;}
     if(m_pView->isLogicPlacementPending()) {
         if(key == eKey_Esc) m_pView->cancelPendingOperation();
         // Placement is confirmed by a map click, not transform-axis/numeric keys.
@@ -544,6 +545,7 @@ void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
         moveDir.setX(0.0f); break;
     }
     m_pView->moveTo(moveDir);
+    m_pView->updateModelMagnet(pEvent->pos());
     //m_pView->viewParameters();
     lastLandPos = newPos;
 }
