@@ -136,9 +136,14 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     textureRow->addWidget(m_texture,1);
     m_saveTexture=new QPushButton(tr("Bind texture"),this); m_saveTexture->setObjectName("modelGalleryBindTexture"); textureRow->addWidget(m_saveTexture); layout->addLayout(textureRow);
     m_status=new QLabel(this); m_status->setWordWrap(true); m_status->setTextFormat(Qt::PlainText); layout->addWidget(m_status);
+    m_scanTextures=new QPushButton(QString::fromUtf8("Обновить связи из MOB…"),this);
+    m_scanTextures->setObjectName("modelGalleryScanTextures"); m_scanTextures->setEnabled(false);
+    m_scanTextures->setToolTip(QString::fromUtf8("Прочитать MOB-карты текущего профиля. Сохранённые вручную связи остаются приоритетными."));
+    connect(m_scanTextures,&QPushButton::clicked,this,&CModelGallery::textureScanRequested);
     auto* buttons=new QHBoxLayout; buttons->addStretch();
     auto* connections=new QPushButton(QString::fromUtf8("Точки стыковки…"),this);
     connections->setObjectName("modelGalleryConnections");buttons->insertWidget(0,connections);
+    buttons->insertWidget(1,m_scanTextures);
     connect(connections,&QPushButton::clicked,this,[this]{
         if(selectedModel().isEmpty())return;
         CModelConnectionEditor editor(m_catalog,selectedModel(),m_sceneProvider,this);
@@ -177,6 +182,7 @@ CModelGallery::~CModelGallery() { m_thumbnailTimer.stop(); m_thumbnailWatcher.wa
 void CModelGallery::resizeEvent(QResizeEvent* event) { QDialog::resizeEvent(event); m_thumbnailTimer.start(); }
 QString CModelGallery::selectedModel() const { return m_list->currentItem() ? m_list->currentItem()->data(Qt::UserRole).toString() : QString(); }
 QString CModelGallery::selectedTexture() const { return m_texture->currentText().trimmed(); }
+void CModelGallery::enableTextureScan() { m_scanTextures->setEnabled(m_catalog->writable()); }
 QString CModelGallery::cacheKey(const QString& model,const QString& texture) const { return model.toLower()+'|'+texture.toLower(); }
 QVector<ei::STechnicalTextureChoice> CModelGallery::textureChoices(const QString& model) const
 {

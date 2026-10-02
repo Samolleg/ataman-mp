@@ -11,6 +11,44 @@
 #include <QSet>
 
 namespace ei {
+namespace {
+QStringList bindingNames(const QJsonValue& value)
+{
+    QStringList result;
+    for(const auto& item : value.toArray()) {
+        QString name=item.toString().trimmed().toLower();
+        if(name.endsWith(".mmp")) name.chop(4);
+        if(!name.isEmpty() && !result.contains(name)) result.append(name);
+    }
+    return result;
+}
+}
+void TechnicalModelCatalog::refreshPortableBindings()
+{
+    // Old files can contain several installation/profile keys. Only identical
+    // per-model collections may be adopted; never union conflicting libraries.
+    QJsonObject candidates;
+    QSet<QString> conflicts;
+    const auto profiles=m_document.value("profiles").toObject();
+    for(auto profile=profiles.begin();profile!=profiles.end();++profile) {
+        const auto bindings=profile.value().toObject().value("modelTextures").toObject();
+        for(auto it=bindings.begin();it!=bindings.end();++it) {
+            const QString key=modelKey(it.key());
+            QStringList names=bindingNames(it.value());
+            if(key.isEmpty() || names.isEmpty()) continue;
+            if(candidates.contains(key)) {
+                auto previous=bindingNames(candidates.value(key));
+                if(previous!=names) conflicts.insert(key);
+            } else candidates.insert(key,it.value());
+        }
+    }
+    for(const auto& key:conflicts) candidates.remove(key);
+    // Explicit portable bindings are author data, unlike machine caches.
+    const auto portable=m_document.value("modelTextures").toObject();
+    for(auto it=portable.begin();it!=portable.end();++it)
+        candidates.insert(modelKey(it.key()),it.value());
+    m_portableBindings=candidates;
+}
 QString TechnicalModelCatalog::pathForDatabase(const QString& databasePath)
 {
     return databasePath.isEmpty() ? QString()
@@ -22,7 +60,7 @@ bool TechnicalModelCatalog::loadProfile(const QString& databasePath,
     const QString destination = pathForDatabase(databasePath);
     if(destination.isEmpty())
     {
-        m_path.clear(); m_document = {}; m_valid = false;
+        m_path.clear(); m_document = {}; m_portableBindings = {}; m_valid = false;
         if(error) *error = QCoreApplication::translate("TechnicalModelCatalog",
             "The active profile has no database.res. Configure profile resources first.");
         return false;
@@ -32,13 +70,16 @@ bool TechnicalModelCatalog::loadProfile(const QString& databasePath,
     if(exists || !QFileInfo::exists(legacyPath)) return true;
     TechnicalModelCatalog legacy;
     if(!legacy.load(legacyPath, error)) { m_valid = false; return false; }
-    // Retain all global model metadata/unknown fields, but import only this
-    // profile's texture bindings and scan cache. The source remains recoverable.
+    // An exact EXE-side profile migration remains scoped to that profile. A
+    // relocated source retains its old entries for unambiguous library adoption;
+    // foreign scan caches are never restored under a new installation key.
     m_document = legacy.m_document;
     const auto profiles = legacy.m_document.value("profiles").toObject();
-    QJsonObject imported;
-    if(profiles.contains(profile)) imported.insert(profile, profiles.value(profile));
-    m_document.insert("profiles", imported);
+    if(profiles.contains(profile)) {
+        m_document.insert("profiles",QJsonObject{{profile,profiles.value(profile)}});
+        m_document.remove("modelTextures");
+    }
+    refreshPortableBindings();
     return true; // Persist on an explicit catalog operation, never on selection.
 }
 QString TechnicalModelCatalog::modelKey(QString name)
@@ -58,7 +99,7 @@ QString TechnicalModelCatalog::profileKey(const QStringList& roots)
 bool TechnicalModelCatalog::load(const QString& path, QString* error)
 {
     ++m_revision;
-    m_path = path; m_valid = false; m_original.clear(); m_document = {};
+    m_path = path; m_valid = false; m_original.clear(); m_document = {}; m_portableBindings = {};
     m_existed = QFileInfo::exists(path);
     if(!m_existed)
     {
@@ -77,13 +118,24 @@ bool TechnicalModelCatalog::load(const QString& path, QString* error)
         || document.object().value("schemaVersion").toInt() != 1
         || (document.object().contains("models") && !document.object().value("models").isObject())
         || (document.object().contains("profiles") && !document.object().value("profiles").isObject())
+        || (document.object().contains("modelTextures") && !document.object().value("modelTextures").isObject())
         || (document.object().contains("assemblies") && !document.object().value("assemblies").isObject())
         || (document.object().contains("assemblyInstances") && !document.object().value("assemblyInstances").isObject()))
     {
         if(error) *error = QCoreApplication::translate("TechnicalModelCatalog", "Invalid model catalog. The existing file was preserved: %1").arg(path);
         return false;
     }
-    m_document = document.object(); m_valid = true; return true;
+    m_document = document.object();
+    const auto portable=m_document.value("modelTextures").toObject();
+    for(auto it=portable.begin();it!=portable.end();++it) {
+        bool valid=it.value().isArray() && !modelKey(it.key()).isEmpty();
+        for(const auto& item:it.value().toArray()) valid=valid && item.isString() && !item.toString().trimmed().isEmpty();
+        if(!valid) {
+            if(error) *error=QCoreApplication::translate("TechnicalModelCatalog","Invalid model catalog. The existing file was preserved: %1").arg(path);
+            m_document={}; return false;
+        }
+    }
+    refreshPortableBindings(); m_valid = true; return true;
 }
 bool TechnicalModelCatalog::save(QString* error)
 {
@@ -97,6 +149,8 @@ bool TechnicalModelCatalog::save(QString* error)
         return false;
     }
     current.close();
+    if(!m_portableBindings.isEmpty() || m_document.contains("modelTextures"))
+        m_document.insert("modelTextures",m_portableBindings);
     const QByteArray bytes = QJsonDocument(m_document).toJson(QJsonDocument::Indented);
     if(bytes.size()>32*1024*1024) {
         if(error)*error=QString::fromUtf8("Каталог превышает 32 МиБ. Изменения не записаны.");
@@ -223,16 +277,18 @@ void TechnicalModelCatalog::captureScan(const QString& profile, const TechnicalT
     for(auto model = observed.constBegin(); model != observed.constEnd(); ++model)
         if(!textures.contains(model.key())) textures.insert(model.key(), QJsonArray::fromStringList(model.value()));
     entry.insert("modelTextures", textures); profiles.insert(profile, entry); m_document.insert("profiles", profiles);
+    refreshPortableBindings();
 }
 QVector<STechnicalTextureChoice> TechnicalModelCatalog::textureChoices(const QString& profile,
     const QString& model, const QStringList& available, const TechnicalTextureCatalog& scan) const
 {
     const QJsonObject bindings = m_document.value("profiles").toObject().value(profile).toObject().value("modelTextures").toObject();
     const QString key = modelKey(model);
-    if(!bindings.contains(key)) return scan.exactChoices(model, available);
+    const QJsonValue names=bindings.contains(key) ? bindings.value(key) : m_portableBindings.value(key);
+    if(names.isUndefined()) return scan.exactChoices(model, available);
     QVector<STechnicalTextureChoice> result;
     QSet<QString> added;
-    for(const QJsonValue& value : bindings.value(key).toArray())
+    for(const QJsonValue& value : names.toArray())
         for(const QString& installed : available)
         {
             QString wanted = value.toString().trimmed();
@@ -251,11 +307,20 @@ void TechnicalModelCatalog::bindTexture(const QString& profile, const QString& m
     QJsonObject profiles = m_document.value("profiles").toObject();
     QJsonObject entry = profiles.value(profile).toObject();
     QJsonObject bindings = entry.value("modelTextures").toObject();
-    QJsonArray names = bindings.value(modelKey(model)).toArray();
+    const QString key=modelKey(model);
+    QJsonArray names = (bindings.contains(key) ? bindings.value(key) : m_portableBindings.value(key)).toArray();
     bool exists = false;
     for(const auto& name : names) if(name.toString().compare(texture, Qt::CaseInsensitive) == 0) exists = true;
     if(!exists) names.append(texture);
     bindings.insert(modelKey(model), names); entry.insert("modelTextures", bindings);
     profiles.insert(profile, entry); m_document.insert("profiles", profiles);
+    auto portable=m_document.value("modelTextures").toObject();
+    portable.insert(key,names); m_document.insert("modelTextures",portable);
+    refreshPortableBindings();
+}
+bool TechnicalModelCatalog::hasTextureBindings(const QString& profile) const
+{
+    return !m_portableBindings.isEmpty() || !m_document.value("profiles").toObject()
+        .value(profile).toObject().value("modelTextures").toObject().isEmpty();
 }
 }

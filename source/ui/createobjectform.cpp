@@ -639,11 +639,11 @@ void CCreateObjectForm::filterDatabase()
             m_modelCatalogProfile, &m_modelCatalogError);
         m_modelCatalog.registerModels(CObjectList::getInstance()->figureList());
         m_modelCatalog.restoreScan(m_modelCatalogProfile, &m_technicalTextures);
-        m_technicalTextures.refreshSources(roots);
-        if(m_technicalTextures.hasPendingFiles())
-            m_technicalTextureScan.start();
-        else
-            saveTechnicalCatalog();
+        if(!m_modelCatalog.hasTextureBindings(m_modelCatalogProfile)) {
+            m_technicalTextures.refreshSources(roots);
+            if(m_technicalTextures.hasPendingFiles()) m_technicalTextureScan.start();
+            else saveTechnicalCatalog();
+        } else m_modelCatalog.save(&m_modelCatalogError); // Do not replace an unvisited scan cache with an empty one.
     }
     else
         m_technicalTextureScan.stop();
@@ -836,6 +836,19 @@ void CCreateObjectForm::openModelGallery()
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this,
         m_pNode->modelName(),m_pNode->textureName(),CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
+    gallery.enableTextureScan();
+    const quint64 catalogGeneration=ei::ProfileDatabaseContext::instance().generation();
+    connect(&gallery,&CModelGallery::textureScanRequested,&gallery,[&]{
+        if(catalogGeneration!=ei::ProfileDatabaseContext::instance().generation()) {m_technicalTextureScan.stop();gallery.reject();return;}
+        QStringList roots;
+        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots"))) roots=option->value().toList();
+        m_technicalTextures.refreshSources(roots);
+        if(m_technicalTextures.hasPendingFiles()) m_technicalTextureScan.start();
+        else {saveTechnicalCatalog();gallery.refreshCatalog();}
+    });
+    connect(&m_technicalTextureScan,&QTimer::timeout,&gallery,[&]{
+        if(!m_technicalTextures.hasPendingFiles()) gallery.refreshCatalog();
+    });
     if(!m_modelCatalogError.isEmpty()) gallery.showCatalogError(m_modelCatalogError);
     if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
     {

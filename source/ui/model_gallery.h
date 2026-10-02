@@ -36,6 +36,9 @@ public:
     void refreshCatalog();
     void showCatalogError(const QString& error);
     void requireTextureSelection();
+    void enableTextureScan();
+signals:
+    void textureScanRequested();
 public slots:
     void accept() override;
 protected:
@@ -72,6 +75,7 @@ private:
     QComboBox *m_categoryChoice, *m_regionChoice;
     QPushButton* m_savePlacement;
     QPushButton *m_saveName, *m_saveTexture, *m_choose;
+    QPushButton* m_scanTextures;
     QTimer m_thumbnailTimer;
     QFutureWatcher<QImage> m_thumbnailWatcher;
     bool m_thumbnailJobActive = false;

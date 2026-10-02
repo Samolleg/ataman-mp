@@ -27,6 +27,9 @@
 #include <QFocusEvent>
 #include <QHeaderView>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <algorithm>
 
 int runProfileModelCatalogCheck()
@@ -53,8 +56,19 @@ int runProfileModelCatalogCheck()
     ei::TechnicalModelCatalog catalog; QString error;
     catalog.load(ei::TechnicalModelCatalog::pathForDatabase(database->sourceArchivePath),&error);
     catalog.setRussianName("fixture-house",QString::fromUtf8("Каменный дом"));
-    catalog.bindTexture(profile,"fixture-house","stone"); catalog.bindTexture(profile,"fixture-bridge","wood");
+    const QString authorProfile=ei::TechnicalModelCatalog::profileKey({scratch.filePath("author-machine/Maps")});
+    catalog.bindTexture(authorProfile,"fixture-house","stone"); catalog.bindTexture(authorProfile,"fixture-bridge","wood");
     check(catalog.save(&error),"profile catalog fixture");
+    // Reproduce a copied v95 file: different absolute map roots, no portable
+    // field yet. Every property/gallery action below must work with this file.
+    QFile legacyFixture(catalog.path()); legacyFixture.open(QIODevice::ReadOnly);
+    auto legacyJson=QJsonDocument::fromJson(legacyFixture.readAll()).object();legacyFixture.close();
+    legacyJson.remove("modelTextures"); legacyFixture.open(QIODevice::WriteOnly|QIODevice::Truncate);
+    legacyFixture.write(QJsonDocument(legacyJson).toJson());legacyFixture.close();
+    catalog.load(catalog.path(),&error);
+    ei::TechnicalTextureCatalog relocatedScan;
+    check(catalog.hasTextureBindings(profile) && catalog.textureChoices(profile,"fixture-bridge",{"wood"},relocatedScan).size()==1,
+        "copied v95 catalog resolves bindings under different map roots without MOB scanning");
     auto& models=CObjectList::getInstance()->figureList(); const auto originalModels=models;
     auto& textures=const_cast<QList<QString>&>(CTextureList::getInstance()->textureList()); const auto originalTextures=textures;
     struct ResourceGuard { QList<QString>& models; QList<QString>& textures; QList<QString> oldModels,oldTextures;
@@ -148,12 +162,27 @@ int runProfileModelCatalogCheck()
     history.clear(); view.viewParameters();
     properties.hide();
     const auto position=object->position(); const auto instanceName=object->mapName();
+    QFile scanSentinel(scratch.filePath("explicit-scan-only.mob"));
+    check(scanSentinel.open(QIODevice::WriteOnly) && scanSentinel.write("synthetic-invalid-mob")==21,"scan sentinel fixture");scanSentinel.close();
     bool currentTextureRetained=false;
     QTimer::singleShot(0,[&](){for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* gallery=qobject_cast<CModelGallery*>(widget)) {
-        currentTextureRetained = gallery->selectedTexture()=="other"; gallery->accept();
+        currentTextureRetained = gallery->selectedTexture()=="other";
+        QTimer::singleShot(60,gallery,&CModelGallery::accept);
     }});
     galleryButton()->click();
     check(currentTextureRetained && history.count()==0 && object->textureName()=="other","unchanged gallery choice preserves current texture and history");
+    auto cachedFiles=[&]{QFile json(catalog.path());json.open(QIODevice::ReadOnly);
+        return QJsonDocument::fromJson(json.readAll()).object().value("profiles").toObject().value(profile).toObject().value("scanCache").toObject().value("files").toArray().size();};
+    check(cachedFiles()==0,"populated relocated library opens gallery without scanning MOB files");
+    bool refreshAvailable=false;
+    QTimer::singleShot(0,[&](){for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* gallery=qobject_cast<CModelGallery*>(widget)) {
+        auto* refresh=gallery->findChild<QPushButton*>("modelGalleryScanTextures");
+        refreshAvailable=refresh && refresh->isEnabled(); if(refreshAvailable)refresh->click();
+        QTimer::singleShot(60,gallery,&CModelGallery::reject);
+    }});
+    galleryButton()->click();
+    check(refreshAvailable && cachedFiles()==1,"explicit gallery refresh scans current roots and saves local cache");
+    check(object->modelName()=="fixture-house" && object->textureName()=="other" && history.count()==0,"refresh cancel does not alter MOB object");
     bool badTextureBlocked=false;
     QTimer::singleShot(0,[&](){for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* gallery=qobject_cast<CModelGallery*>(widget)) {
         gallery->setCurrentModel("fixture-bridge"); gallery->findChild<QComboBox*>("modelGalleryTexture")->setEditText("missing-texture");

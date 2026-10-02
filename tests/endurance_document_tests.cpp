@@ -507,6 +507,7 @@ private slots:
     void technicalTexturesFollowObservedModelsAndProfileRoots();
     void modelCatalogPersistsNamesBindingsAndScanWithoutRescanning();
     void profileCatalogMigrationPreservesDataAndIsolation();
+    void modelCatalogBindingsSurviveRelocationWithoutForeignCache();
     void modelGalleryPlacementPreservesLegacyCatalogAndMetadata();
     void authoredZeroNidCanOpenAndSaveLosslessly();
     void mobGraphRemovalPreservesAllOtherTopLevelBytes();
@@ -1822,7 +1823,7 @@ void EnduranceDocumentTests::modelCatalogPersistsNamesBindingsAndScanWithoutResc
     choices=restarted.textureChoices(profile,"house",{"wood"},resumed);
     QCOMPARE(choices.size(),1); QCOMPARE(choices.first().name,QStringLiteral("wood"));
     ei::TechnicalTextureCatalog otherProfile;
-    QVERIFY(restarted.textureChoices("other-profile","house",{"wood"},otherProfile).isEmpty());
+    QCOMPARE(restarted.textureChoices("other-profile","house",{"wood"},otherProfile).first().name,QStringLiteral("wood"));
 
     // External JSON edits remain authoritative and unknown user keys survive.
     QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
@@ -14538,7 +14539,9 @@ void EnduranceDocumentTests::profileCatalogMigrationPreservesDataAndIsolation()
     QVERIFY(!QFileInfo::exists(a.path())); // Selection itself does not write a resource directory.
     QCOMPARE(a.russianName("HOUSE"),QString::fromUtf8("Дом")); QCOMPARE(a.category("house"),QString("houses"));
     QCOMPARE(a.textureChoices("a","house",{"stone","wood"},scan).first().name,QString("stone"));
-    QVERIFY(a.textureChoices("b","house",{"stone","wood"},scan).isEmpty());
+    // The migrated database-side library follows its owner when map roots move;
+    // it must retain A's stone, never import B's conflicting wood.
+    QCOMPARE(a.textureChoices("relocated-a","house",{"stone","wood"},scan).first().name,QString("stone"));
     QVERIFY(a.save(&error));
     QVERIFY(b.loadProfile(dir.filePath("b/database.res"),legacyPath,"b",&error)); QVERIFY(b.save(&error));
     b.setRussianName("house",QString::fromUtf8("Другой дом")); QVERIFY(b.save(&error));
@@ -14555,4 +14558,89 @@ void EnduranceDocumentTests::profileCatalogMigrationPreservesDataAndIsolation()
     // Missing database directory/read-only destinations cannot silently fall back to EXE.
     QVERIFY(a.loadProfile(dir.filePath("missing/database.res"),legacyPath,"a",&error));
     QVERIFY(!a.save(&error)); QVERIFY(old.open(QIODevice::ReadOnly)); QCOMPARE(old.readAll(),baseline);
+}
+
+void EnduranceDocumentTests::modelCatalogBindingsSurviveRelocationWithoutForeignCache()
+{
+    QTemporaryDir temp; QVERIFY(temp.isValid()); QDir dir(temp.path());
+    QVERIFY(dir.mkdir("author")); QVERIFY(dir.mkdir("recipient")); QVERIFY(dir.mkdir("another-mod"));
+    const QString author=ei::TechnicalModelCatalog::profileKey({dir.filePath("author/Maps")});
+    const QString recipient=ei::TechnicalModelCatalog::profileKey({dir.filePath("recipient/Maps")});
+    QVERIFY(author!=recipient);
+    // Actual v95 shape, no portable bindings: names/sockets/assemblies/unknown
+    // fields must survive. Only synthetic data, never the installed catalog.
+    const QJsonObject original{{"schemaVersion",1},{"userNote",42},
+        {"models",QJsonObject{{"house",QJsonObject{{"russianName",QString::fromUtf8("Дом")},{"userNote","keep"}}}}},
+        {"assemblies",QJsonObject{}},{"assemblyInstances",QJsonObject{{"author.mob",QJsonObject{{"unknown",true}}}}},
+        {"profiles",QJsonObject{{author,QJsonObject{{"modelTextures",QJsonObject{{"house",QJsonArray{"stone.mmp","wood"}}}},
+            {"scanCache",QJsonObject{{"files",QJsonArray{QJsonObject{{"path",dir.filePath("author/old.mob")},{"size","1"},{"modified","1"},{"loaded",true},{"pairs",QJsonObject{}}}}}}}}}}}};
+    const QByteArray baseline=QJsonDocument(original).toJson();
+    const QString source=dir.filePath("author/model-catalog.json"),destination=dir.filePath("recipient/model-catalog.json");
+    QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly)); QCOMPARE(file.write(baseline),qint64(baseline.size())); file.close();
+    QVERIFY(QFile::copy(source,destination));
+    ei::TechnicalModelCatalog catalog; QString error; ei::TechnicalTextureCatalog empty;
+    QVERIFY(catalog.loadProfile(dir.filePath("recipient/database.res"),QString(),recipient,&error));
+    auto choices=catalog.textureChoices(recipient,"HOUSE.mod",{"Stone","wood","unrelated"},empty);
+    QVERIFY(catalog.hasTextureBindings(recipient));
+    QCOMPARE(choices.size(),2); QCOMPARE(choices[0].name,QString("Stone")); QCOMPARE(choices[1].name,QString("wood"));
+    QCOMPARE(empty.sourceFileCount(),0); QCOMPARE(empty.pendingFileCount(),0);
+    ei::TechnicalTextureCatalog foreignCache; catalog.restoreScan(recipient,&foreignCache);
+    QCOMPARE(foreignCache.saveCache().value("files").toArray().size(),0);
+    QCOMPARE(catalog.russianName("house"),QString::fromUtf8("Дом"));
+    for(int i=0;i<100;++i) QCOMPARE(catalog.textureChoices(recipient,"house",{"Stone"},empty).size(),1);
+    QVERIFY(catalog.textureChoices(recipient,"house",{"missing"},empty).isEmpty());
+    // Merely reading/migrating a v95 catalog does not rewrite the user's file.
+    QFile copied(destination); QVERIFY(copied.open(QIODevice::ReadOnly)); QCOMPARE(copied.readAll(),baseline); copied.close();
+    QVERIFY(catalog.save(&error)); QVERIFY(copied.open(QIODevice::ReadOnly));
+    const auto saved=QJsonDocument::fromJson(copied.readAll()).object(); copied.close();
+    QCOMPARE(saved.value("models"),original.value("models")); QCOMPARE(saved.value("profiles"),original.value("profiles"));
+    QCOMPARE(saved.value("assemblyInstances"),original.value("assemblyInstances")); QCOMPARE(saved.value("userNote").toInt(),42);
+    QCOMPARE(saved.value("modelTextures").toObject().value("house").toArray().size(),2);
+    ei::TechnicalModelCatalog reopened; QVERIFY(reopened.load(destination,&error));
+    QCOMPARE(reopened.textureChoices("third-computer","house",{"Stone","wood"},empty).size(),2);
+    catalog.bindTexture(recipient,"house","brick"); QVERIFY(catalog.save(&error));
+    QVERIFY(reopened.load(destination,&error));
+    // An explicit new binding updates the portable library, retaining the old
+    // choices when the current machine profile has not been written before.
+    QCOMPARE(reopened.textureChoices("unknown-computer","house",{"stone","wood","brick"},empty).size(),3);
+    QCOMPARE(reopened.textureChoices(recipient,"house",{"brick"},empty).first().name,QString("brick"));
+    // Another profile's independent database-side catalog never inherits ours.
+    ei::TechnicalModelCatalog other; QVERIFY(other.loadProfile(dir.filePath("another-mod/database.res"),QString(),"other",&error));
+    QVERIFY(!other.hasTextureBindings("other"));
+    QVERIFY(other.textureChoices("other","house",{"Stone","wood"},empty).isEmpty());
+    // Explicit portable author data works even with no legacy profiles.
+    auto portable=saved; portable.remove("profiles");
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(portable).toJson()); copied.close();
+    QVERIFY(!reopened.save(&error)); QVERIFY(reopened.load(destination,&error));
+    QCOMPARE(reopened.textureChoices(recipient,"house",{"wood"},empty).first().name,QString("wood"));
+    // EXE-side v95 import must also survive changed paths; source is untouched.
+    ei::TechnicalModelCatalog imported; QVERIFY(imported.loadProfile(dir.filePath("another-mod/database.res"),source,recipient,&error));
+    QCOMPARE(imported.textureChoices(recipient,"house",{"Stone"},empty).size(),1);
+    QVERIFY(!QFileInfo::exists(imported.path()));
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),baseline); file.close();
+    auto conflicting=original;
+    auto legacyProfiles=conflicting.value("profiles").toObject();
+    legacyProfiles.insert("different-mod",QJsonObject{{"modelTextures",QJsonObject{{"house",QJsonArray{"brick"}}}}});
+    conflicting.insert("profiles",legacyProfiles);
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(conflicting).toJson()); copied.close();
+    QVERIFY(reopened.load(destination,&error));
+    QVERIFY(reopened.textureChoices("unknown-computer","house",{"stone","wood","brick"},empty).isEmpty());
+    QCOMPARE(reopened.textureChoices(author,"house",{"stone","wood","brick"},empty).size(),2);
+    legacyProfiles.insert("different-mod",QJsonObject{{"modelTextures",QJsonObject{{"house",QJsonArray{"WOOD.mmp","Stone"}}}}});
+    conflicting.insert("profiles",legacyProfiles);
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(conflicting).toJson()); copied.close();
+    QVERIFY(reopened.load(destination,&error));
+    QVERIFY(reopened.textureChoices("unknown-computer","house",{"stone","wood"},empty).isEmpty()); // Different preferred texture is also a conflict.
+    legacyProfiles.insert("different-mod",QJsonObject{{"modelTextures",QJsonObject{{"house",QJsonArray{"STONE","wood.MMP"}}}}});
+    conflicting.insert("profiles",legacyProfiles);
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(conflicting).toJson()); copied.close();
+    QVERIFY(reopened.load(destination,&error));
+    QCOMPARE(reopened.textureChoices("unknown-computer","house",{"stone","wood"},empty).size(),2);
+    portable.insert("modelTextures",QJsonArray{"bad"});
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); const auto invalid=QJsonDocument(portable).toJson(); copied.write(invalid); copied.close();
+    QVERIFY(!reopened.load(destination,&error)); QVERIFY(!reopened.save(&error));
+    QVERIFY(copied.open(QIODevice::ReadOnly)); QCOMPARE(copied.readAll(),invalid);
+    copied.close(); portable.insert("modelTextures",QJsonObject{{"house",QJsonArray{4}}});
+    QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(portable).toJson());copied.close();
+    QVERIFY(!reopened.load(destination,&error)); QVERIFY(!reopened.save(&error));
 }

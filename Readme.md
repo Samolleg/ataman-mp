@@ -1,4 +1,4 @@
-﻿# EI Mapper Ataman
+# EI Mapper Ataman
 
 Соавтору и новому Codex: [вход в проект](docs/COAUTHOR_HANDOFF.md),
 [шаблон задания](docs/CODEX_TASK_TEMPLATE.md). Начните с них перед настройкой
@@ -21,7 +21,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `95`. Each separate fix advances the integer version.
+Current Ataman version: `96`. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
@@ -39,8 +39,10 @@ and script highlighting. `--dark-theme-check` checks real widgets and text contr
 
 Technical objects have a model gallery with lazy previews and search by model ID
 or editable Russian name. `model-catalog.json` next to the active profile database.res is user
-data: `models` stores Russian names, `profiles` stores per-profile `modelTextures`
-bindings and `scanCache`. Unchanged MOBs reuse their saved metadata and pairs
+data: `models` stores Russian names, root `modelTextures` is the portable texture
+library, and `profiles` retains legacy overrides and local `scanCache`. Moving
+the same mod to another computer no longer loses the bindings. Old JSON is read
+without manual editing; conflicting legacy profile bindings are not merged. Unchanged MOBs reuse their saved metadata and pairs
 after restarting; Russian names and texture bindings survive program updates.
 Existing object properties use the same gallery and matched texture choices,
 with the Russian name beside the model ID, search by either name, clearly grouped
@@ -53,8 +55,10 @@ the model's bindings; **Bind texture** adds an installed texture. Double-click a
 tile or press **Choose model** to apply its technical ID and selected texture.
 Russian names start empty, and do not rename model resources or MOB objects.
 For a manual JSON edit, use `models.<model-id>.russianName` and the ordered
-`profiles.<profile-key>.modelTextures.<model-id>` array. Keep `schemaVersion: 1`;
-the profile key identifies ordered map roots. Reopen the gallery to load edits.
+`modelTextures.<model-id>` array for portable bindings. Keep `schemaVersion: 1`;
+legacy profile-specific overrides remain supported. Reopen the gallery to load edits.
+A populated library is used immediately without automatic MOB scanning. Use
+**Обновить связи из MOB…** in the gallery to refresh observations when maps change.
 Gallery sections have icons and three island tabs: Gipat, Ingos, Suslanger.
 **All models** includes unassigned resources. Choose **Section** and **Island**
 then **Save section** to assign/move a model; **Unassigned** clears placement.
@@ -68,8 +72,10 @@ the model's bindings; **Bind texture** adds an installed texture. Double-click a
 tile or press **Choose model** to apply its technical ID and selected texture.
 Russian names start empty, and do not rename model resources or MOB objects.
 For a manual JSON edit, use `models.<model-id>.russianName` and the ordered
-`profiles.<profile-key>.modelTextures.<model-id>` array. Keep `schemaVersion: 1`;
-the profile key identifies ordered map roots. Reopen the gallery to load edits.
+`modelTextures.<model-id>` array for portable bindings. Keep `schemaVersion: 1`;
+legacy profile-specific overrides remain supported. Reopen the gallery to load edits.
+A populated library is used immediately without automatic MOB scanning. Use
+**Обновить связи из MOB…** in the gallery to refresh observations when maps change.
 
 Portable DejaVu: choose the package root containing `Engine`, `Base`, and `MODS`
 in Game and mod setup, then the DejaVu profile. The editor loads the selected

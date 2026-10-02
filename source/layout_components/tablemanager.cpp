@@ -2908,7 +2908,7 @@ void CTableManager::openModelGallery()
     catalog.restoreScan(m_catalogProfile,&scan);
     QStringList roots;
     if(auto* option = dynamic_cast<COptStringList*>(m_catalogSettings->opt(eOptSetResource, "mapRoots"))) roots = option->value().toList();
-    scan.refreshSources(roots);
+    if(!catalog.hasTextureBindings(m_catalogProfile)) scan.refreshSources(roots);
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     QString initialTexture;
     for(const auto& value : m_rowValues) if(value->type()==eObjParam_PRIM_TXTR && value->isInit()) initialTexture=value->toString();
@@ -2920,6 +2920,12 @@ void CTableManager::openModelGallery()
     if(!catalogError.isEmpty()) gallery.showCatalogError(catalogError);
     QTimer scanner;
     scanner.setInterval(0);
+    gallery.enableTextureScan();
+    connect(&gallery,&CModelGallery::textureScanRequested,&gallery,[&]{
+        scan.refreshSources(roots);
+        if(scan.hasPendingFiles()) scanner.start();
+        else {catalog.captureScan(m_catalogProfile,scan);QString error;catalog.save(&error);gallery.refreshCatalog();if(!error.isEmpty())gallery.showCatalogError(error);}
+    });
     connect(&scanner, &QTimer::timeout, &gallery, [&]() {
         if(generation != ei::ProfileDatabaseContext::instance().generation()) { scanner.stop(); gallery.reject(); return; }
         if(scan.hasPendingFiles()) scan.scanNextFile();

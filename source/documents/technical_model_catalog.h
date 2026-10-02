@@ -43,9 +43,14 @@ public:
     QVector<STechnicalTextureChoice> textureChoices(const QString& profile, const QString& model,
         const QStringList& available, const TechnicalTextureCatalog& scan) const;
     void bindTexture(const QString& profile, const QString& model, const QString& texture);
+    bool hasTextureBindings(const QString& profile) const;
 private:
+    // Portable library belongs to this database-side catalog. Absolute-root
+    // profile keys remain solely for legacy overrides and local scan caches.
+    void refreshPortableBindings();
     QString m_path;
     QJsonObject m_document;
+    QJsonObject m_portableBindings;
     QByteArray m_original;
     bool m_existed = false;
     bool m_valid = false;
