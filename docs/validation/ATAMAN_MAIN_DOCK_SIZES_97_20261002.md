@@ -73,7 +73,15 @@ writer. Writer теперь явно показывает все четыре п
 Fresh build-staging-97-dock-sizes: raw/staged EXE hash совпадает, staged version97
 exit0 до финализатора. Finalizer и independent distribution validator PASS,
 127 managed. Финализированная папка больше не запускалась.
-Постоянная установка96 работает PID27700; закрытие запрошено по договору.
-Замена ожидает штатного закрытия, пользовательские файлы сохраняются.
+После ответа владельца «закрыл» отсутствие процессов подтверждено. Постоянная
+artifacts/EI-Mapper-Ataman-2-first-test обновлена до97: все127 managed hashes
+и manifest совпадают со staging;6 программных файлов заменены с проверенным
+откатом. Все14214 unlisted пользовательских файлов сохранились byte-identical
+(user-files-before.json/user-files-after.json, install.log). Новый7-файловый
+artifacts/rollback-EI-Mapper-Ataman-v96-to-97-20261002 сохраняет прежнюю96.
+Предыдущий собственный2-файловый rollback-v96-portability-final проверен по
+manifest/точному EXE hash и удалён после успешной проверки установленной97
+(retire-old-rollback.log). Другие установки и игровые данные не изменялись.
+Редактор интерактивно не запускался; ручная приёмка владельца остаётся открытой.
 Чужие QM/отчёт52/11 строк ROADMAP/untracked86 сохраняются.
 Прежние патруль/вода/стыки/сборки и широкие clipboard/scenario отказы не закрываются.
