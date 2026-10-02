@@ -1,6 +1,6 @@
 # EI-CREATE-WINDOW-LAYOUT-94 — внутренние границы «Создать объект»
 
-Дата: 2026-10-02. База установленной93: c7b83904adf7e7f4ace64b2c90a4a653ca677985. Ветка: codex/create-window-splitter-v94. VERSION:94. Полный SHA реализации и передача записываются ниже после scoped-коммита.
+Дата: 2026-10-02. База установленной93: c7b83904adf7e7f4ace64b2c90a4a653ca677985. Ветка: codex/create-window-splitter-v94. VERSION:94. Полный SHA реализации: 9b99d1a22f9a29e7418a16d7830d2affcb185d9b. Следующая запись передачи меняет только документацию.
 
 ## Исходный случай и границы
 
@@ -52,4 +52,8 @@ EXE SHA256: F26672AA35170C579FB7B34CC36C7A6C721298F1DF095773574A9615CE92EAA7.
 
 ## Передача
 
-Ожидает scoped-коммита, финализации новой собственной staging-папки, независимой проверки manifest/hash/version и обновления постоянной установки по docs/TEST_BUILD_HANDOFF.md. Пользовательские файлы сохраняются; исходные Endurance/игра/main/GitHub не меняются.
+Свежая build-staging-94-layout: staged --version94 и равенство raw/staged EXE SHA256 подтверждены до финализации; finalizer и независимый validator exit0,127 managed файлов. После финализации staging не запускалась.
+
+После проверки отсутствия EIMapperEndurance/RuntimeHost постоянная папка C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test обновлена93→94. Все127 installed hashes/manifest проверены;6 заменённых файлов и прежний manifest сохранены и проверены в artifacts/rollback-EI-Mapper-Ataman-v93-to-94-20261002. Все14513 пользовательских файлов вне manifest остались byte-identical; финализатор на установке не запускался. Предыдущий проверенный собственный7-файловый откат91→93 удалён только после успешной проверки новой установки/отката. EXE совпадает с указанным выше hash. Журналы: stage.log, finalize.log, validate-package.log, install.log, retire-rollback.log в build-tests-94-layout.
+
+Чужие изменения ROADMAP(EI-DISTRIBUTION-86), отчёта52, QM и незакоммиченный отчёт86 сохранены и не вошли в scoped-коммит. Игровые данные, профильный каталог, исходные Endurance/main/GitHub не менялись. Результат передан для ручной приёмки владельца; это не полный PASS всего маппера.
