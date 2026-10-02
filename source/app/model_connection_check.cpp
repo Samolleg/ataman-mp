@@ -133,15 +133,55 @@ int runModelConnectionCheck() {
         QMouseEvent release(QEvent::MouseButtonRelease,center,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(canvas,&release);}
     const auto fields=editor.findChildren<QDoubleSpinBox*>();
     check(!preview.isNull()&&fields.size()==9&&qAbs(fields[2]->value())<0.001,"real orbit preview surface click places connector in model coordinates");
+    if(canvas && fields.size()==9) {
+        auto vector=[&](int offset){return QVector3D(fields[offset]->value(),fields[offset+1]->value(),fields[offset+2]->value());};
+        auto mouse=[&](QEvent::Type type,const QPointF& point,Qt::MouseButton button,Qt::MouseButtons buttons,Qt::KeyboardModifiers modifiers){
+            QMouseEvent event(type,point,button,buttons,modifiers);QApplication::sendEvent(canvas,&event);};
+        auto drag=[&](const QPointF& start,const QPointF& end,Qt::MouseButton button,Qt::KeyboardModifiers modifiers){
+            mouse(QEvent::MouseButtonPress,start,button,button,modifiers);mouse(QEvent::MouseMove,end,Qt::NoButton,button,modifiers);
+            mouse(QEvent::MouseButtonRelease,end,button,Qt::NoButton,modifiers);canvas->grab();};
+        const auto position=vector(0),normal=vector(3),up=vector(6);
+        const QPointF start=canvas->rect().center()+QPoint(40,-30);
+        drag(start,start+QPointF(70,35),Qt::LeftButton,Qt::AltModifier);
+        check(positionsNear(vector(0),position)&&(vector(3)-normal).length()>0.1f,"Alt mouse drag rotates direction without moving socket on surface");
+        check(qAbs(vector(3).length()-normal.length())<0.001f&&qAbs(vector(6).length()-up.length())<0.001f
+            &&qAbs(QVector3D::dotProduct(vector(3).normalized(),vector(6).normalized()))<0.001f,"mouse rotation preserves valid normal/up frame and vector lengths");
+        const auto beforeTip=vector(3);const auto handle=canvas->property("connectionDirectionHandle");
+        if(handle.isValid())drag(handle.toPointF(),handle.toPointF()+QPointF(-35,55),Qt::LeftButton,Qt::NoModifier);
+        check(handle.isValid()&&positionsNear(vector(0),position)&&(vector(3)-beforeTip).length()>0.05f,"yellow handle mouse drag rotates arrow instead of relocating socket");
+        const auto beforeEscape=vector(3),upBeforeEscape=vector(6);
+        mouse(QEvent::MouseButtonPress,start,Qt::LeftButton,Qt::LeftButton,Qt::AltModifier);
+        mouse(QEvent::MouseMove,start+QPointF(50,-50),Qt::NoButton,Qt::LeftButton,Qt::AltModifier);
+        const bool changed=(vector(3)-beforeEscape).length()>0.05f;
+        QKeyEvent escape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);QApplication::sendEvent(canvas,&escape);
+        mouse(QEvent::MouseButtonRelease,start,Qt::LeftButton,Qt::NoButton,Qt::AltModifier);
+        check(changed&&editor.isVisible()&&positionsNear(vector(3),beforeEscape)&&positionsNear(vector(6),upBeforeEscape)
+            &&positionsNear(vector(0),position),"Escape cancels active arrow drag without closing editor or moving socket");
+        const auto beforeOrbit=vector(3);
+        drag(start,start+QPointF(40,20),Qt::RightButton,Qt::NoModifier);
+        check(positionsNear(vector(0),position)&&positionsNear(vector(3),beforeOrbit),"right mouse orbit leaves connector coordinates unchanged");
+    } else check(false,"arrow mouse checks require loaded production canvas and fields");
     const auto screenshot=qEnvironmentVariable("EI_MODEL_CONNECTION_CHECK_SCREENSHOT");if(!screenshot.isEmpty())editor.grab().save(screenshot);
     auto* list=editor.findChild<QListWidget*>("connectionList");auto* name=editor.findChild<QLineEdit*>("connectionLabel");
     check(list&&list->count()==2&&name,"real connector editor displays catalog points");
     if(name)name->setText("Edited");editor.reject();reopened.connections("test_wall",&points);
     check(points.size()==2&&points[0].label=="Left","cancel editor preserves catalog");
     CModelConnectionEditor saving(&reopened,"test_wall",{});saving.setAttribute(Qt::WA_DontShowOnScreen);saving.show();QApplication::processEvents();
+    auto* savingCanvas=saving.findChild<QWidget*>("connectionCanvas");
+    auto savingFields=saving.findChildren<QDoubleSpinBox*>();
+    QVector3D savedDirection;
+    if(savingCanvas&&savingFields.size()==9) {
+        const auto start=savingCanvas->rect().center();
+        QMouseEvent press(QEvent::MouseButtonPress,start,Qt::LeftButton,Qt::LeftButton,Qt::AltModifier);QApplication::sendEvent(savingCanvas,&press);
+        QMouseEvent move(QEvent::MouseMove,start+QPoint(50,30),Qt::NoButton,Qt::LeftButton,Qt::AltModifier);QApplication::sendEvent(savingCanvas,&move);
+        QMouseEvent release(QEvent::MouseButtonRelease,start+QPoint(50,30),Qt::LeftButton,Qt::NoButton,Qt::AltModifier);QApplication::sendEvent(savingCanvas,&release);
+        savedDirection={float(savingFields[3]->value()),float(savingFields[4]->value()),float(savingFields[5]->value())};
+    }
     saving.findChild<QLineEdit*>("connectionLabel")->setText("Saved");saving.findChild<QPushButton*>("connectionSave")->click();
     ei::TechnicalModelCatalog saved;saved.load(catalogPath,&error);saved.connections("test_wall",&points);
     check(saving.result()==QDialog::Accepted&&points[0].label=="Saved","editor explicit save survives fresh catalog reopen");
+    check(points.size()==2&&positionsNear(points[0].normal,savedDirection)&&(points[0].normal-left.normal).length()>0.1f
+        &&positionsNear(points[0].position,left.position)&&ei::validConnection(points[0]),"mouse-edited direction saves and reloads valid frame even without geometry");
     auto* creationMob=new CMob;creationMob->setFileName(QFileInfo(scratch.filePath("creation.mob")));
     const bool loaded=creationMob->deserialize(bytes,&document);view.m_aMob.append(creationMob);view.m_activeMob=creationMob;
     if(loaded) {creationMob->m_originalData=bytes;creationMob->serializeMob(creationMob->m_cleanProjection,false);creationMob->rebindRawObjectProvenance();}

@@ -13,6 +13,10 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QKeyEvent>
+#include <QQuaternion>
+#include <QLineF>
+#include <QtMath>
 #include <QFutureWatcher>
 #include <QtConcurrent>
 #include <QUuid>
@@ -25,7 +29,10 @@ public:
     int selected=-1;
     std::function<void()> changed;
     ei::SResourceModelScene scene;
-    explicit ConnectionCanvas(QWidget* parent):QWidget(parent) { setMinimumSize(360,300); setObjectName("connectionCanvas"); }
+    explicit ConnectionCanvas(QWidget* parent):QWidget(parent) {
+        setMinimumSize(360,300);setObjectName("connectionCanvas");
+        setFocusPolicy(Qt::StrongFocus);setMouseTracking(true);
+    }
     void fit() {
         QVector3D lo(1e20f,1e20f,1e20f),hi(-1e20f,-1e20f,-1e20f); bool any=false;
         for(const auto& part:scene.parts) for(const auto& t:part.triangles) for(const auto& v:t.vertices)
@@ -35,8 +42,8 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this); painter.fillRect(rect(),palette().base()); painter.setRenderHint(QPainter::Antialiasing);
-        matrix.setToIdentity(); matrix.rotate(pitch,1,0,0); matrix.rotate(yaw,0,0,1);
-        scale=qMin(width(),height())*zoom/extent;
+        updateProjection();
+        setProperty("connectionDirectionHandle",QVariant());
         struct Face { QPolygonF polygon; float z; }; QVector<Face> faces;
         const auto visible=ei::defaultVisibleModelParts(scene,model);
         for(const auto& part:scene.parts) if(visible.contains(part.name.toLower())) for(const auto& t:part.triangles) {
@@ -49,25 +56,92 @@ protected:
             const auto& p=points[i]; const auto xy=project(p.position);
             painter.setPen(QPen(i==selected?QColor(255,205,60):QColor(80,210,235),2));
             painter.setBrush(i==selected?QColor(255,205,60):QColor(80,210,235)); painter.drawEllipse(xy,6,6);
-            painter.drawLine(xy,project(p.position+p.normal.normalized()*extent*0.15f));
+            const auto tip=project(p.position+p.normal.normalized()*extent*0.15f);
+            painter.drawLine(xy,tip);
+            if(i==selected) {
+                // A visible handle separates rotating the frame from moving its origin.
+                painter.drawEllipse(tip,5,5);
+                setProperty("connectionDirectionHandle",tip);
+            }
             painter.setPen(QPen(QColor(110,230,140),2)); painter.drawLine(xy,project(p.position+p.up.normalized()*extent*0.10f));
             painter.setPen(palette().text().color()); painter.drawText(xy+QPointF(9,-9),p.label.isEmpty()?p.id:p.label);
         }
     }
     void mousePressEvent(QMouseEvent* e) override {
-        last=e->pos(); dragging=e->button();
-        if(e->button()==Qt::LeftButton && selected>=0) place(e->pos());
+        updateProjection();last=e->pos();dragging=e->button();
+        if(e->button()!=Qt::LeftButton || selected<0 || selected>=points.size())return;
+        setFocus(Qt::MouseFocusReason);
+        dragIndex=selected;beforeDrag=points[selected];dragStart=e->localPos();
+        rotating=e->modifiers().testFlag(Qt::AltModifier) || directionHit(e->localPos());
+        freeRotation=e->modifiers().testFlag(Qt::AltModifier);
+        if(rotating) {
+            dragCenter=project(beforeDrag.position);
+            dragRadius=qMax(20.f,extent*0.15f*scale);
+            depthSign=matrix.mapVector(beforeDrag.normal).z()<0 ? -1.f : 1.f;
+            dragVector=trackball(dragStart);
+            dragView=QQuaternion::fromRotationMatrix(matrix.normalMatrix());
+            setCursor(Qt::ClosedHandCursor);
+        } else place(e->pos());
     }
     void mouseMoveEvent(QMouseEvent* e) override {
         const auto delta=e->pos()-last; last=e->pos();
         if(dragging==Qt::RightButton || dragging==Qt::MiddleButton) {yaw+=delta.x()*0.5f; pitch+=delta.y()*0.5f;update();}
-        else if(dragging==Qt::LeftButton && selected>=0) place(e->pos());
+        else if(dragging==Qt::LeftButton && selected>=0) {
+            if(rotating) rotateDirection(e->localPos());else place(e->pos());
+        } else {updateProjection();setCursor(directionHit(e->localPos())?Qt::OpenHandCursor:Qt::ArrowCursor);}
     }
-    void mouseReleaseEvent(QMouseEvent*) override {dragging=Qt::NoButton;}
-    void wheelEvent(QWheelEvent* e) override { zoom=qBound(0.2f,zoom*(e->angleDelta().y()>0?1.12f:0.89f),8.0f); update(); }
+    void mouseReleaseEvent(QMouseEvent*) override {dragging=Qt::NoButton;rotating=false;dragIndex=-1;unsetCursor();}
+    void keyPressEvent(QKeyEvent* e) override {
+        if(e->key()==Qt::Key_Escape && dragging==Qt::LeftButton && dragIndex>=0) {
+            if(dragIndex<points.size())points[dragIndex]=beforeDrag;
+            dragging=Qt::NoButton;rotating=false;dragIndex=-1;unsetCursor();
+            update();if(changed)changed();e->accept();return;
+        }
+        QWidget::keyPressEvent(e);
+    }
+    void wheelEvent(QWheelEvent* e) override {
+        if(dragging!=Qt::NoButton){e->accept();return;}
+        zoom=qBound(0.2f,zoom*(e->angleDelta().y()>0?1.12f:0.89f),8.0f);update();
+    }
 public:
     QString model;
 private:
+    void updateProjection() {
+        matrix.setToIdentity();matrix.rotate(pitch,1,0,0);matrix.rotate(yaw,0,0,1);
+        scale=qMin(width(),height())*zoom/extent;
+    }
+    bool directionHit(const QPointF& mouse) const {
+        if(selected<0 || selected>=points.size())return false;
+        const auto& p=points[selected];const auto origin=project(p.position);
+        const auto tip=project(p.position+p.normal.normalized()*extent*0.15f);
+        const auto segment=tip-origin;const double length2=segment.x()*segment.x()+segment.y()*segment.y();
+        // A foreshortened handle overlaps the origin: leave it movable, use Alt.
+        if(length2<18*18 || QLineF(mouse,origin).length()<14)return false;
+        if(QLineF(mouse,tip).length()<=11)return true;
+        const auto relative=mouse-origin;
+        const double t=(relative.x()*segment.x()+relative.y()*segment.y())/length2;
+        return t>0 && t<1 && QLineF(mouse,origin+segment*t).length()<=7;
+    }
+    QVector3D trackball(const QPointF& mouse) const {
+        const auto delta=(mouse-dragCenter)/dragRadius;
+        QVector3D v(delta.x(),-delta.y(),0);const float radius2=v.lengthSquared();
+        if(radius2>1)return v.normalized();
+        v.setZ(depthSign*qSqrt(qMax(0.f,1-radius2)));return v.normalized();
+    }
+    void rotateDirection(const QPointF& mouse) {
+        if(dragIndex!=selected || selected<0 || selected>=points.size())return;
+        QQuaternion viewRotation;
+        if(freeRotation) {
+            const auto delta=mouse-dragStart;
+            viewRotation=QQuaternion::fromAxisAndAngle(0,1,0,delta.x()*0.6f)
+                *QQuaternion::fromAxisAndAngle(1,0,0,delta.y()*0.6f);
+        } else viewRotation=QQuaternion::rotationTo(dragVector,trackball(mouse));
+        const auto rotation=(dragView.conjugated()*viewRotation*dragView).normalized();
+        // Rotate the full connector frame to retain a valid up direction when tilted.
+        points[selected].normal=rotation.rotatedVector(beforeDrag.normal);
+        points[selected].up=rotation.rotatedVector(beforeDrag.up);
+        update();if(changed)changed();
+    }
     QPointF project(const QVector3D& p) const {const auto v=matrix*(p-center); return QPointF(width()*0.5+v.x()*scale,height()*0.5-v.y()*scale);}
     void place(const QPointF& mouse) {
         float best=-1e30f; QVector3D hit; bool found=false;
@@ -87,6 +161,13 @@ private:
     QVector3D center;
     float extent=1,scale=1,zoom=0.85f,pitch=-62,yaw=-40;
     QPoint last; Qt::MouseButton dragging=Qt::NoButton;
+    bool rotating=false,freeRotation=false;
+    int dragIndex=-1;
+    ei::ModelConnection beforeDrag;
+    QPointF dragStart,dragCenter;
+    float dragRadius=20,depthSign=1;
+    QVector3D dragVector;
+    QQuaternion dragView;
 };
 }
 ModelSceneProvider CModelConnectionEditor::resourceScenes(const QStringList& paths) {
@@ -114,7 +195,7 @@ CModelConnectionEditor::CModelConnectionEditor(ei::TechnicalModelCatalog* catalo
     }
     auto* actions=new QHBoxLayout;auto* add=new QPushButton(QString::fromUtf8("Добавить"),this);add->setObjectName("connectionAdd");auto* remove=new QPushButton(QString::fromUtf8("Удалить"),this);actions->addWidget(add);actions->addWidget(remove);form->addRow(actions);
     auto* status=new QLabel(error,this);status->setWordWrap(true);root->addWidget(status);
-    auto* help=new QLabel(QString::fromUtf8("ЛКМ по модели — поставить или передвинуть выбранный стык. ПКМ — вращать вид. Колесо — масштаб вида. Жёлтая стрелка — направление наружу, зелёная — верх. Соединяются одинаковые типы; направления смотрят друг на друга. Координаты заданы относительно начала модели."),this);help->setWordWrap(true);root->addWidget(help);
+    auto* help=new QLabel(QString::fromUtf8("ЛКМ за жёлтый конец или линию — повернуть направление. Alt+ЛКМ в любом месте превью — повернуть, даже если стрелка смотрит в камеру. Esc во время жеста — отменить жест. ЛКМ по модели — передвинуть стык. ПКМ — вращать вид; колесо — масштаб. Зелёная стрелка поворачивается вместе с направлением и задаёт верх детали. Направление смотрит наружу; одинаковые типы соединяются друг с другом. Координаты заданы относительно начала модели."),this);help->setWordWrap(true);root->addWidget(help);
     auto* buttons=new QHBoxLayout;buttons->addStretch();auto* save=new QPushButton(QString::fromUtf8("Сохранить стыки"),this);save->setObjectName("connectionSave");save->setEnabled(valid && catalog->writable());auto* cancel=new QPushButton(QString::fromUtf8("Отмена"),this);buttons->addWidget(save);buttons->addWidget(cancel);root->addLayout(buttons);
     auto loading=QSharedPointer<bool>::create(false);
     auto select=[=] { *loading=true;canvas->selected=list->currentRow();const int i=canvas->selected;const bool exists=i>=0 && i<canvas->points.size();label->setEnabled(exists);type->setEnabled(exists);remove->setEnabled(exists);
