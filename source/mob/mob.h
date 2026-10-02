@@ -167,6 +167,7 @@ private:
     friend int runGroupRotationCheck();
     friend int runModelConnectionCheck();
     friend int runAssemblyCatalogCheck();
+    friend int runWindowLayoutCheck();
     friend int runDatabasePreviewCheck();
     bool buildRawObjectSequenceCandidate(const QByteArray& currentProjection,
                                          CMobEditTransaction* transaction,

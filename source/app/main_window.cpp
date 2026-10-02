@@ -1538,10 +1538,8 @@ MainWindow::MainWindow(QWidget* parent) :
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
-    // QMainWindow's opaque state reliably restores ownership and tab topology,
-    // but Qt 5.12 can collapse the other dock columns to their minimum widths
-    // after a floating tab group is reconstructed. Restore explicit extents
-    // once the shown window has its final screen geometry.
+    // Restore widths after floating tab hosts reach their final geometry.
+    // Split heights and topology are owned exclusively by QMainWindow state.
     // Landscape editing is an explicit working mode, not session layout.
     // Always start closed while preserving the user's last sculpt controls.
     m_landscapeToolsDock->hide();
@@ -7302,67 +7300,46 @@ void MainWindow::saveUiState()
 
 void MainWindow::saveMainDockExtents(QSettings& settings) const
 {
-    const QString prefix = QStringLiteral("ui/mainDockExtentsV1/");
-    auto saveDock = [&settings, &prefix](const QString& name, QDockWidget* dock) {
-        if(!dock || dock->isFloating()) return;
-        const QSize size = dock->size();
-        if(size.width() > 0) settings.setValue(prefix + name + "/width", size.width());
-        if(size.height() > 0) settings.setValue(prefix + name + "/height", size.height());
-    };
-    saveDock(QStringLiteral("maps"), m_mapsDock);
-    saveDock(QStringLiteral("loadedMap"), m_loadedMapDock);
-    saveDock(QStringLiteral("outliner"), m_outlinerDock);
-    saveDock(QStringLiteral("properties"), m_propertiesDock);
-    saveDock(QStringLiteral("messageLog"), m_messageLogDock);
-    ei::log(eLogInfo, QStringLiteral(
-            "MAIN_DOCK_EXTENTS saved maps:%1 loaded:%2 outliner:%3 properties:%4")
-            .arg(m_mapsDock ? m_mapsDock->width() : 0)
-            .arg(m_loadedMapDock ? m_loadedMapDock->width() : 0)
-            .arg(m_outlinerDock ? m_outlinerDock->width() : 0)
-            .arg(m_propertiesDock ? m_propertiesDock->width() : 0));
+    // Hidden/inactive tabs retain stale sizes. Persist only the actual visible
+    // side-column representatives; the opaque Qt state owns split heights.
+    const QString prefix = QStringLiteral("ui/mainDockWidthsV2/");
+    settings.remove(QStringLiteral("ui/mainDockWidthsV2"));
+    for(const auto& dock : m_workspaceDocks)
+    {
+        if(!dock || dock->isFloating() || dock->isHidden()
+           || !rect().intersects(dock->geometry())) continue;
+        const auto area = dockWidgetArea(dock);
+        if(area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea)
+            settings.setValue(prefix + dock->objectName(), dock->width());
+    }
 }
 
 void MainWindow::restoreMainDockExtents()
 {
     QSettings settings;
-    const QString prefix = QStringLiteral("ui/mainDockExtentsV1/");
-    const int mapsWidth = settings.value(prefix + "maps/width", 0).toInt();
-    const int loadedWidth = settings.value(prefix + "loadedMap/width", 0).toInt();
-    const int outlinerWidth = settings.value(prefix + "outliner/width", 0).toInt();
-    const int propertiesWidth = settings.value(prefix + "properties/width", 0).toInt();
-    const int rightWidth = qMax(loadedWidth, qMax(outlinerWidth, propertiesWidth));
-    if(mapsWidth > 0 && m_mapsDock && !m_mapsDock->isFloating())
-        resizeDocks(QList<QDockWidget*>() << m_mapsDock,
-                    QList<int>() << mapsWidth, Qt::Horizontal);
-    if(rightWidth > 0 && m_loadedMapDock && !m_loadedMapDock->isFloating())
-        resizeDocks(QList<QDockWidget*>() << m_loadedMapDock,
-                    QList<int>() << rightWidth, Qt::Horizontal);
-
-    QList<QDockWidget*> rightDocks;
-    QList<int> rightHeights;
-    auto addHeight = [&settings, &prefix, &rightDocks, &rightHeights](
-            const QString& name, QDockWidget* dock) {
-        const int height = settings.value(prefix + name + "/height", 0).toInt();
-        if(height > 0 && dock && !dock->isFloating()) {
-            rightDocks.append(dock);
-            rightHeights.append(height);
-        }
-    };
-    addHeight(QStringLiteral("loadedMap"), m_loadedMapDock);
-    addHeight(QStringLiteral("outliner"), m_outlinerDock);
-    addHeight(QStringLiteral("properties"), m_propertiesDock);
-    if(!rightDocks.isEmpty()) resizeDocks(rightDocks, rightHeights, Qt::Vertical);
-
-    const int logHeight = settings.value(prefix + "messageLog/height", 0).toInt();
-    if(logHeight > 0 && m_messageLogDock && !m_messageLogDock->isFloating())
-        resizeDocks(QList<QDockWidget*>() << m_messageLogDock,
-                    QList<int>() << logHeight, Qt::Vertical);
-    QStringList heightValues;
-    for(int value : rightHeights) heightValues.append(QString::number(value));
-    ei::log(eLogInfo, QStringLiteral(
-            "MAIN_DOCK_EXTENTS restored maps:%1 right:%2 heights:%3")
-            .arg(mapsWidth).arg(rightWidth)
-            .arg(heightValues.join(',')));
+    const QString prefix = QStringLiteral("ui/mainDockWidthsV2/");
+    QList<QDockWidget*> docks;
+    QList<int> widths;
+    for(const auto& guarded : m_workspaceDocks)
+    {
+        QDockWidget* dock = guarded.data();
+        if(!dock || dock->isFloating() || dock->isHidden()
+           || !rect().intersects(dock->geometry())) continue;
+        const auto area = dockWidgetArea(dock);
+        if(area != Qt::LeftDockWidgetArea && area != Qt::RightDockWidgetArea) continue;
+        bool represented = false;
+        for(QDockWidget* representative : docks)
+            represented = represented || tabifiedDockWidgets(representative).contains(dock);
+        if(represented) continue;
+        const int width = settings.value(prefix + dock->objectName(), 0).toInt();
+        if(width <= 0) continue;
+        docks.append(dock); widths.append(width);
+    }
+    if(!docks.isEmpty()) resizeDocks(docks, widths, Qt::Horizontal);
+    // Never reapply V1's assumed right-column heights/maximum width. Qt's
+    // saveState/restoreState retains the real split topology and tab-bar sizes.
+    // Existing installations migrate using their Qt state, without resetting
+    // their preferences or applying stale dimensions from invisible tabs.
 }
 
 void MainWindow::closeHotReloadProgress()

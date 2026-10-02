@@ -4,6 +4,11 @@
 #include "model_gallery.h"
 #include "createobjectform.h"
 #include "window_geometry.h"
+#include "utils.h"
+#include "view.h"
+#include "mob.h"
+#include <QStatusBar>
+#include <QFile>
 #include <QApplication>
 #include <QDialog>
 #include <QEvent>
@@ -80,6 +85,89 @@ int runWindowLayoutCheck()
         auto* scenario=window.findChild<QDockWidget*>("mapScenarioDock");
         auto* form=window.findChild<CCreateObjectForm*>();
         if(!travel || !scenario || !form) return 2;
+        if(mode >= 3)
+        {
+            auto* maps=window.findChild<QDockWidget*>("mapsAndCollectionsDock");
+            auto* outliner=window.findChild<QDockWidget*>("objectOutlinerDock");
+            auto* properties=window.findChild<QDockWidget*>("objectPropertiesDock");
+            auto* loaded=window.findChild<QDockWidget*>("loadedMapDock");
+            auto* validation=window.findChild<QDockWidget*>("mobFamilyValidationDock");
+            auto* log=window.findChild<QDockWidget*>("messageLogDock");
+            if(!maps || !outliner || !properties || !loaded || !validation || !log) return 2;
+            // Independent processes exercise the owner's two vertically split
+            // columns, rather than only floating travel/scenario windows.
+            const QList<QDockWidget*> docks{outliner,maps,mode==6 ? log : properties,loaded};
+            QSettings settings;
+            if(saving)
+            {
+                for(auto* dock:window.findChildren<QDockWidget*>()) dock->hide();
+                const auto left=mode==4 ? Qt::RightDockWidgetArea : Qt::LeftDockWidgetArea;
+                const auto right=mode==4 ? Qt::LeftDockWidgetArea : Qt::RightDockWidgetArea;
+                window.addDockWidget(left,outliner);
+                window.splitDockWidget(outliner,maps,Qt::Vertical);
+                window.addDockWidget(right,properties);
+                window.splitDockWidget(properties,loaded,Qt::Vertical);
+                window.tabifyDockWidget(properties,validation);
+                window.tabifyDockWidget(properties,log);
+                for(auto* dock:{outliner,maps,properties,loaded}) dock->show();
+                validation->show();log->show();properties->raise();
+                if(mode==6) log->raise();
+                check("fixture properties has both diagnostic tabs",window.tabifiedDockWidgets(properties).contains(validation)&&window.tabifiedDockWidgets(properties).contains(log));
+                window.showNormal();
+                window.resize(1700,900);
+                if(mode!=4) window.showMaximized();
+                pump();
+                window.resizeDocks({outliner,properties},{520,410},Qt::Horizontal);
+                window.resizeDocks({outliner,maps},{320,590},Qt::Vertical);
+                window.resizeDocks({properties,loaded},{590,240},Qt::Vertical);
+                pump();
+                if(mode==5) {
+                    QByteArray bytes;
+                    util::CMobParser writer(bytes,true);
+                    writer.startSection("OBJECT_DB_FILE");
+                    writer.startSection("SC_OBJECT_DB_FILE");writer.endSection();
+                    writer.startSection("OBJECT_SECTION");writer.endSection();writer.endSection();
+                    QFile fixture(QDir(settingsPath).filePath("layout-fixture.mob"));
+                    const bool written=fixture.open(QIODevice::WriteOnly)&&fixture.write(bytes)==bytes.size();fixture.close();
+                    auto* mob=new CMob;
+                    const bool decoded=written&&mob->deserialize(bytes);
+                    mob->setFileName(QFileInfo(fixture.fileName()));mob->adoptCommittedBytes(bytes);
+                    window.view()->m_aMob.append(mob);window.view()->m_activeMob=mob;
+                    window.view()->collectObjectTreeData();emit window.view()->mobStateChanged();pump();
+                    check("synthetic MOB displayed by production panels",decoded);
+                }
+                for(auto* dock:docks) {
+                    settings.setValue("expectedDock/"+dock->objectName()+"/size",dock->size());
+                    settings.setValue("expectedDock/"+dock->objectName()+"/area",int(window.dockWidgetArea(dock)));
+                }
+                check("fixture has different left/right widths",qAbs(outliner->width()-loaded->width())>60);
+            }
+            else
+            {
+                check("main window maximized state survives restart",window.isMaximized()==(mode!=4));
+                auto checkSizes=[&]() { for(auto* dock:docks) {
+                    const QSize expected=settings.value("expectedDock/"+dock->objectName()+"/size").toSize();
+                    QTextStream(stdout)<<dock->objectName()<<" expected "<<expected.width()<<"x"<<expected.height()<<" actual "<<dock->width()<<"x"<<dock->height()<<"\n";
+                    check(qPrintable(dock->objectName()+" area restored"),int(window.dockWidgetArea(dock))==settings.value("expectedDock/"+dock->objectName()+"/area").toInt());
+                    check(qPrintable(dock->objectName()+" width restored"),qAbs(dock->width()-expected.width())<=2);
+                    check(qPrintable(dock->objectName()+" height restored"),qAbs(dock->height()-expected.height())<=2);
+                }};
+                checkSizes();
+                if(mode==5) {
+                    QFile fixture(QDir(settingsPath).filePath("layout-fixture.mob"));
+                    const bool read=fixture.open(QIODevice::ReadOnly);const auto bytes=fixture.readAll();
+                    auto* mob=new CMob;const bool decoded=read&&mob->deserialize(bytes);
+                    mob->setFileName(QFileInfo(fixture.fileName()));mob->adoptCommittedBytes(bytes);
+                    window.view()->m_aMob.append(mob);window.view()->m_activeMob=mob;
+                    window.view()->collectObjectTreeData();emit window.view()->mobStateChanged();pump();
+                    check("synthetic MOB reopens after layout restoration",decoded);
+                    checkSizes();
+                }
+                check("properties retain validation/log tabs",window.tabifiedDockWidgets(properties).contains(validation)&&window.tabifiedDockWidgets(properties).contains(log));
+            }
+            check("split-column production window closes normally",window.close());pump();
+            return failures ? 1 : 0;
+        }
         if(saving)
         {
             if(mode==2) {window.tabifyDockWidget(travel,scenario);travel->show();scenario->show();}
@@ -215,11 +303,22 @@ int runWindowLayoutCheck()
         CModelGallery gallery({}, &catalog, "synthetic", {}, &scan, {}); hidden(gallery);
         gallery.show(); pump(); check("production gallery remembers position and size",gallery.size()==QSize(980,700) && gallery.pos()==position); gallery.reject();
     }
-    for(int mode=0; mode<3; ++mode)
+    for(int mode=0; mode<7; ++mode)
     {
         QSettings().remove("ui/mainWindowState");
-        for(const QString& phase : {QString("save%1").arg(mode),QString("restore%1").arg(mode)})
+        QStringList phases{QString("save%1").arg(mode),QString("restore%1").arg(mode)};
+        if(mode>=3) phases.append(QString("restore%1").arg(mode));
+        if(mode==3) phases.append(QStringLiteral("restore7"));
+        for(const QString& phase : phases)
         {
+            if(phase==QStringLiteral("restore7")) {
+                // Migration from an existing Qt state must ignore obsolete,
+                // stale side extents without resetting the user's topology.
+                QSettings settings;settings.remove("ui/mainDockWidthsV2");
+                settings.setValue("ui/mainDockExtentsV1/properties/width",119);
+                settings.setValue("ui/mainDockExtentsV1/properties/height",145);
+                settings.setValue("ui/mainDockExtentsV1/messageLog/width",2976);settings.sync();
+            }
             QProcess child;
             auto environment=QProcessEnvironment::systemEnvironment();
             environment.insert("EI_WINDOW_LAYOUT_FIXTURE_PATH",temporary.path());
