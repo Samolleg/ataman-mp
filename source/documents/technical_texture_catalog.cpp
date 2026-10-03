@@ -192,7 +192,7 @@ QVector<STechnicalTextureChoice> TechnicalTextureCatalog::exactChoices(
     const QString& model, const QStringList& available) const
 {
     const QString modelKey = normalizedName(model, QStringLiteral(".mod"));
-    if(modelKey.isEmpty())
+    if(modelKey.isEmpty() || m_sources.isEmpty())
         return {};
 
     QHash<QString, QString> availableNames;

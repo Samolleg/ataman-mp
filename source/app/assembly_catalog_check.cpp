@@ -14,6 +14,7 @@
 #include "property.h"
 #include "assembly_gallery.h"
 #include "model_gallery_thumbnail.h"
+#include "ai_graph_preview_invalidation.h"
 #include "main_window.h"
 #include "camera.h"
 #include <QMouseEvent>
@@ -189,5 +190,42 @@ int runAssemblyCatalogCheck() {
         auto* list=preview.findChild<QListWidget*>("assemblyTiles");if(list&&list->count())list->item(0)->setIcon(QPixmap::fromImage(thumbnail));
         QApplication::processEvents();check(preview.grab().save(screenshot),"assembly gallery screenshot captured from native widgets");preview.reject();}
 
+    auto* largeMob=new CMob;largeMob->setFileName(QFileInfo(scratch.filePath("large.mob")));
+    for(int i=0;i<1451;++i){auto* node=new Module;node->setMapId(5000+i);largeMob->nodes()<<node;}
+    QByteArray largeBaseline;largeMob->serializeMob(largeBaseline,false);largeMob->adoptCommittedBytes(largeBaseline);
+    view.m_aMob<<largeMob;view.m_activeMob=largeMob;view.restoreSelection({});view.collectObjectTreeData();history.clear();
+    auto largeBatch=assembly;largeBatch.parts.clear();
+    for(int i=0;i<143;++i){auto part=assembly.parts[0];part.parentPart=-1;part.offset={float(i%12)*4,float(i/12)*4,0};largeBatch.parts<<part;}
+    int refreshes=0;const auto refreshConnection=QObject::connect(&tree,&CTreeView::filterMatchCountChanged,[&](int,int){++refreshes;});
+    QElapsedTimer batchTimer;batchTimer.start();const bool largePending=view.beginPreparedAssemblyPlacement(largeBatch,{300,200},anchor,&error,false);
+    const auto batchMs=batchTimer.elapsed();QObject::disconnect(refreshConnection);
+    out<<"143 objects /1451 existing: preview="<<batchMs<<"ms tree-refreshes="<<refreshes<<"\n";
+    check(largePending&&largeMob->nodes().size()==1594&&view.m_pendingPasteNodes.size()==143,"143 model batch creates every member");
+    check(largePending&&refreshes==1,"143 model batch reconciles tree exactly once");
+    refreshes=0;const auto batchRefresh=QObject::connect(&tree,&CTreeView::filterMatchCountChanged,[&](int,int){++refreshes;});
+    batchTimer.restart();if(largePending)view.m_pOp->keyPress(eKey_Esc);const auto cancelMs=batchTimer.elapsed();
+    check(largeMob->nodes().size()==1451&&history.count()==0,"143 model batch Escape restores prior scene and history");
+    check(refreshes==1,"143 batch Escape reconciles tree once");
+    const bool largeCommitted=view.beginPreparedAssemblyPlacement(largeBatch,{300,200},anchor,&error,false);
+    const auto largeNodes=view.m_pendingPasteNodes;QVector<QJsonObject> finalFields;for(auto* node:largeNodes)finalFields<<node->toJson();
+    batchTimer.restart();if(largeCommitted)view.m_pOp->keyPress(eKey_Enter);const auto commitMs=batchTimer.elapsed();
+    check(largeCommitted&&history.count()==1&&largeMob->nodes().size()==1594,"143 model batch commits as one history action");
+    check(largeCommitted&&aiGraphUndoCommandInvalidatesPreview(history.command(0)),"143 creation invalidates static navigation preview");
+    if(largeCommitted){
+        QByteArray saved;CValidationReport saveReport;
+        const bool savedBatch=largeMob->buildValidatedCandidate(&saved,&saveReport);check(savedBatch,"143 batch validates before save");
+        if(savedBatch)largeMob->adoptCommittedBytes(saved);
+        refreshes=0;batchTimer.restart();history.undo();const auto undoMs=batchTimer.elapsed();
+        check(largeMob->nodes().size()==1451&&refreshes==1,"143 batch Undo removes entire package with one tree update after save");
+        const bool savedDeletion=largeMob->buildValidatedCandidate(&saved,&saveReport);check(savedDeletion,"143 undone batch validates deletion after saved insertion");
+        if(savedDeletion)largeMob->adoptCommittedBytes(saved);
+        refreshes=0;batchTimer.restart();history.redo();const auto redoMs=batchTimer.elapsed();
+        check(largeMob->nodes().size()==1594&&refreshes==1,"143 batch Redo restores entire package with one tree update after saved deletion");
+        bool exact=largeNodes.size()==143;for(int i=0;i<largeNodes.size();++i)exact&=largeNodes[i]->toJson()==finalFields[i];
+        check(exact&&largeMob->buildValidatedCandidate(&saved,&saveReport),"143 saved deletion Redo retains exact transforms IDs textures and raw provenance");
+        out<<"143 batch stages: commit="<<commitMs<<"ms cancel="<<cancelMs<<"ms undo-after-save="<<undoMs<<"ms redo="<<redoMs<<"ms\n";
+        check(batchMs<2000 && commitMs<500 && cancelMs<500 && undoMs<2000 && redoMs<500,"143 batch bounded responsiveness on synthetic map");
+    }
+    QObject::disconnect(batchRefresh);
     out<<"assembly-catalog-check: "<<failures<<" failures\n";return failures?1:0;
 }

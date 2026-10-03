@@ -23934,11 +23934,9 @@ bool CView::cancelPendingOperation()
         {
             if(!node || !pasteMob->nodes().contains(node))
                 continue;
-            const uint nodeId = node->mapId();
             pasteMob->discardUncommittedNode(node);
-            if(m_pTree)
-                m_pTree->onNodeDelete(nodeId);
         }
+        if(m_pTree)collectObjectTreeData();
         restoreSelection(originalSelection);
         setDurty(pasteMob);
     }
@@ -24203,18 +24201,10 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool committingBehaviorPaste = !m_pendingBehaviorPasteNodes.isEmpty();
     if(committingPaste)
     {
-        m_pUndoStack->beginMacro(m_pendingAssemblyPlacement ? QString::fromUtf8("Разместить сборку") : m_pendingDatabasePlacement ? QString::fromUtf8("Разместить объект")
-            : tr("Paste objects: %1").arg(m_pendingPasteNodes.size()));
-        for(CNode* node : m_pendingPasteNodes)
-        {
-            CCreateNodeCommand* create = new CCreateNodeCommand(this, m_pendingPasteMob, node);
-            QObject::connect(create, SIGNAL(addNodeSignal(CNode*)), m_pTree, SLOT(addNodeToTree(CNode*)));
-            QObject::connect(create, SIGNAL(undo_addNodeSignal(uint)), m_pTree, SLOT(onNodeDelete(uint)));
-            m_pUndoStack->push(create);
-        }
-        m_pUndoStack->push(new CSelectionCommand(this, m_pendingPasteOriginalSelection,
-                                                  m_pendingPasteNodes,
-                                                  tr("Select pasted objects")));
+        m_pUndoStack->push(new CCreateNodesCommand(this,m_pendingPasteMob,m_pendingPasteNodes,
+            m_pendingPasteOriginalSelection,m_pendingAssemblyPlacement ? QString::fromUtf8("Разместить сборку")
+            :m_pendingDatabasePlacement ? QString::fromUtf8("Разместить объекты: %1").arg(m_pendingPasteNodes.size())
+            :tr("Paste objects: %1").arg(m_pendingPasteNodes.size())));
     }
     if(committingBehaviorPaste)
     {
@@ -24246,7 +24236,7 @@ void CView::operationApply(EOperationAxisType operationType)
         m_pUndoStack->beginMacro(tr("%1 objects: %2")
             .arg(action).arg(m_operationBackup.size()));
     }
-    if(!committingBehaviorPaste)
+    if(!committingBehaviorPaste && !committingPaste)
     for(auto& pair : m_operationBackup.toStdMap())
     {
         switch (operationType)
@@ -24382,8 +24372,6 @@ void CView::operationApply(EOperationAxisType operationType)
 
     }
     if(grouped)
-        m_pUndoStack->endMacro();
-    if(committingPaste)
         m_pUndoStack->endMacro();
     if(m_pendingLogicPlacementMacro)
         m_pUndoStack->endMacro();

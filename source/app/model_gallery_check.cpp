@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QApplication>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QEventLoop>
 #include <QElapsedTimer>
 #include <QTabBar>
@@ -112,6 +113,36 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     clock.restart(); largeSearch->setText(QString::fromUtf8("Каменный house"));
     if(clock.elapsed()>=100 || large.selectedModel()!="house") return fail("full catalog Russian search responsiveness");
     largeSearch->clear();
+    large.enableMultiSelection();large.setAttribute(Qt::WA_DontShowOnScreen);large.show();
+    auto* rangeList=large.findChild<QListWidget*>("modelGalleryTiles");
+    const auto click=[&](int row,Qt::KeyboardModifiers modifiers) {
+        rangeList->scrollToItem(rangeList->item(row));rangeList->doItemsLayout();
+        const QPoint point=rangeList->visualItemRect(rangeList->item(row)).center();
+        QMouseEvent press(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton,modifiers);
+        QMouseEvent release(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton,modifiers);
+        QApplication::sendEvent(rangeList->viewport(),&press);QApplication::sendEvent(rangeList->viewport(),&release);
+    };
+    click(0,Qt::NoModifier);clock.restart();click(142,Qt::ShiftModifier);
+    const qint64 rangeMs=clock.elapsed();
+    if(rangeList->selectedItems().size()!=143) return fail(QString("Shift range across scroll: expected143 actual%1").arg(rangeList->selectedItems().size()));
+    for(int i=0;i<rangeList->count();++i)if(rangeList->item(i)->isSelected()!=(i<=142))return fail("Shift must follow model order rather than grid rectangle");
+    clock.restart();const auto rangeEntries=large.selectedEntries();const qint64 entriesMs=clock.elapsed();
+    if(rangeEntries.size()!=143 || rangeMs>=100 || entriesMs>=100)return fail(QString("143 selection responsiveness range=%1 entries=%2ms").arg(rangeMs).arg(entriesMs));
+    click(9,Qt::ShiftModifier);if(rangeList->selectedItems().size()!=10)return fail("Shift shrinking retains original anchor");
+    click(25,Qt::ControlModifier);if(rangeList->selectedItems().size()!=11)return fail("Ctrl toggles independent tile");
+    click(30,Qt::ControlModifier|Qt::ShiftModifier);if(rangeList->selectedItems().size()!=16)return fail("Ctrl Shift adds range from latest Ctrl anchor");
+    click(20,Qt::NoModifier);click(5,Qt::ShiftModifier);
+    if(rangeList->selectedItems().size()!=16)return fail("reverse Shift range");
+    click(2,Qt::NoModifier);rangeList->scrollToItem(rangeList->item(13));rangeList->doItemsLayout();
+    const auto dragStart=rangeList->visualItemRect(rangeList->item(13)).center();
+    QMouseEvent shiftPress(QEvent::MouseButtonPress,dragStart,Qt::LeftButton,Qt::LeftButton,Qt::ShiftModifier);
+    QMouseEvent shiftMove(QEvent::MouseMove,dragStart+QPoint(20,20),Qt::NoButton,Qt::LeftButton,Qt::ShiftModifier);
+    QMouseEvent shiftRelease(QEvent::MouseButtonRelease,dragStart+QPoint(20,20),Qt::LeftButton,Qt::NoButton,Qt::ShiftModifier);
+    QApplication::sendEvent(rangeList->viewport(),&shiftPress);QApplication::sendEvent(rangeList->viewport(),&shiftMove);QApplication::sendEvent(rangeList->viewport(),&shiftRelease);
+    if(rangeList->selectedItems().size()!=12)return fail(QString("Shift click with pointer motion: expected12 actual%1").arg(rangeList->selectedItems().size()));
+    QKeyEvent shiftRight(QEvent::KeyPress,Qt::Key_Right,Qt::ShiftModifier);QApplication::sendEvent(rangeList,&shiftRight);
+    if(rangeList->selectedItems().size()!=13)return fail("Shift arrow extends ordered range");
+    large.hide();large.setCurrentModel("house");
     if(largeTexture->model()->flags(largeTexture->model()->index(0,0))!=Qt::NoItemFlags
         || largeTexture->findData("stone")<0 || largeTexture->findData("wood")<0) return fail("non-selectable texture sections and exact choices");
     largeTexture->completer()->setCompletionPrefix("texture7162");
@@ -218,6 +249,6 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     if(!started->load()){delete slow;return fail("slow worker started");}
     clock.restart();delete slow;const auto closeMs=clock.elapsed();
     if(closeMs>150)return fail("closing gallery waits for thumbnail worker");
-    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms; close during600ms worker=%3ms; thumbnail cache PASS").arg(openMs).arg(selectMs).arg(closeMs);
+    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms;143 Shift=%4ms entries=%5ms; Shift pointer-motion/keyboard/Ctrl/reverse PASS; close during600ms worker=%3ms; thumbnail cache PASS").arg(openMs).arg(selectMs).arg(closeMs).arg(rangeMs).arg(entriesMs);
     return true;
 }

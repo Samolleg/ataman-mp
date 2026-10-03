@@ -32,8 +32,69 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
+#include <QMouseEvent>
+#include <QKeyEvent>
 
 namespace {
+// Pointer motion can turn IconMode's Shift click into a geometric rectangle.
+// Explorer-style ranges
+// must instead use the ordered model rows, including rows outside the viewport.
+class ModelTileList : public QListWidget {
+public:
+    using QListWidget::QListWidget;
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        const auto target=indexAt(event->pos());
+        m_shiftDrag=false;
+        if(selectionMode()==ExtendedSelection && event->button()==Qt::LeftButton && target.isValid()) {
+            if(event->modifiers().testFlag(Qt::ShiftModifier)) {
+                m_shiftDrag=true;selectRange(target,event->modifiers());event->accept();return;
+            }
+            m_anchor=target;
+        }
+        QListWidget::mousePressEvent(event);
+    }
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if(m_shiftDrag && event->buttons().testFlag(Qt::LeftButton)) {
+            const auto target=indexAt(event->pos());
+            if(target.isValid())selectRange(target,event->modifiers());
+            event->accept();return;
+        }
+        QListWidget::mouseMoveEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if(m_shiftDrag && event->button()==Qt::LeftButton){m_shiftDrag=false;event->accept();return;}
+        QListWidget::mouseReleaseEvent(event);
+    }
+    void keyPressEvent(QKeyEvent* event) override {
+        CursorAction action=MoveNext;bool navigation=true;
+        switch(event->key()) {
+        case Qt::Key_Left:action=MoveLeft;break;case Qt::Key_Right:action=MoveRight;break;
+        case Qt::Key_Up:action=MoveUp;break;case Qt::Key_Down:action=MoveDown;break;
+        case Qt::Key_Home:action=MoveHome;break;case Qt::Key_End:action=MoveEnd;break;
+        case Qt::Key_PageUp:action=MovePageUp;break;case Qt::Key_PageDown:action=MovePageDown;break;
+        default:navigation=false;break;
+        }
+        if(selectionMode()==ExtendedSelection && navigation && event->modifiers().testFlag(Qt::ShiftModifier)) {
+            const auto target=moveCursor(action,event->modifiers());
+            if(target.isValid())selectRange(target,event->modifiers());
+            event->accept();return;
+        }
+        QListWidget::keyPressEvent(event);
+        if(navigation && !event->modifiers().testFlag(Qt::ShiftModifier))m_anchor=currentIndex();
+    }
+private:
+    void selectRange(const QModelIndex& target,Qt::KeyboardModifiers modifiers) {
+        if(!m_anchor.isValid())m_anchor=currentIndex().isValid()?currentIndex():target;
+        const int first=qMin(m_anchor.row(),target.row()),last=qMax(m_anchor.row(),target.row());
+        selectionModel()->setCurrentIndex(target,QItemSelectionModel::NoUpdate);
+        selectionModel()->select(QItemSelection(model()->index(first,0),model()->index(last,0)),
+            modifiers.testFlag(Qt::ControlModifier)?QItemSelectionModel::Select:QItemSelectionModel::ClearAndSelect);
+        scrollTo(target);
+    }
+    QPersistentModelIndex m_anchor;
+    bool m_shiftDrag=false;
+};
 QCache<QString,QImage>& sharedThumbnails()
 {
     // Accessed only on the GUI thread. Cost is KiB, including failed results.
@@ -106,7 +167,7 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     const auto regions=ei::TechnicalModelCatalog::regionIds();
     for(int i=0;i<regions.size();++i) {const int tab=m_regions->addTab(regionLabels[i]);m_regions->setTabData(tab,regions[i]);}
     layout->addWidget(m_regions);
-    m_list=new QListWidget(this); m_list->setObjectName("modelGalleryTiles");
+    m_list=new ModelTileList(this); m_list->setObjectName("modelGalleryTiles");
     m_list->setViewMode(QListView::IconMode); m_list->setResizeMode(QListView::Adjust);
     m_list->setMovement(QListView::Static); m_list->setGridSize(QSize(216,198));
     m_list->setIconSize(QSize(192,132)); m_list->setSpacing(4); m_list->setUniformItemSizes(true);

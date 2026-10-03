@@ -138,7 +138,8 @@ bool CView::beginPreparedAssemblyPlacement(const ei::ObjectAssembly& a,const QPo
         restoreSelection(selection);if(error)*error=QString::fromUtf8("Сборка не размещена:\n")+report.toText();return false;
     }
     for(auto* mob:m_aMob)if(mob)mob->clearSelect(true);
-    for(auto* node:nodes){node->setState(eSelect);m_pTree->addNodeToTree(node);}
+    for(auto* node:nodes)node->setState(eSelect);
+    collectObjectTreeData();
     m_pendingOperationOwnsPaste=true;m_pendingDatabasePlacement=true;m_pendingAssemblyPlacement=true;
     m_pendingPasteMob=m_activeMob;m_pendingPasteNodes=nodes;m_pendingPasteOriginalSelection=selection;
     m_pendingAssemblyOffsets.clear();for(int i=0;i<nodes.size();++i)m_pendingAssemblyOffsets.insert(nodes[i],a.parts[i].offset);

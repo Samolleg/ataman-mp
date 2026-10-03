@@ -112,7 +112,7 @@ CCreateNodeCommand::CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndo
 }
 
 CCreateNodeCommand::CCreateNodeCommand(CView* pView, CMob* pMob,
-                                       CNode* existingNode, QUndoCommand *parent):
+                                       CNode* existingNode, QUndoCommand *parent, bool deferRefresh):
     QUndoCommand(parent)
     ,m_pView(pView)
     ,m_pMob(pMob)
@@ -122,6 +122,7 @@ CCreateNodeCommand::CCreateNodeCommand(CView* pView, CMob* pMob,
     ,m_created(existingNode != nullptr)
     ,m_skipInitialRedo(existingNode != nullptr)
 {
+    m_deferRefresh=deferRefresh;
     if(existingNode && existingNode->hasRawObjectProvenance())
     {
         m_rawTemplatePath = existingNode->rawSourceObjectPath();
@@ -153,7 +154,7 @@ void CCreateNodeCommand::undo()
         m_rawTemplateSubtreeSha256 = m_pCreatedNode->rawSourceSubtreeSha256();
     }
     m_pMob->deleteNode(m_pCreatedNode);
-    m_pView->setDurty(m_pMob);
+    if(!m_deferRefresh)m_pView->setDurty(m_pMob);
     emit undo_addNodeSignal(m_createdNodeId);
 }
 
@@ -210,9 +211,34 @@ void CCreateNodeCommand::redo()
     pNode->setState(ENodeState::eSelect);
     setText(QCoreApplication::translate("UndoCommands", "Created object ID: %1")
             .arg(m_createdNodeId));
-    m_pView->setDurty(m_pMob);
+    if(!m_deferRefresh)m_pView->setDurty(m_pMob);
     if(!adoptingExistingNode)
         emit addNodeSignal(pNode);
+}
+
+CCreateNodesCommand::CCreateNodesCommand(CView* view,CMob* mob,const QList<CNode*>& nodes,
+    const QList<CNode*>& originalSelection,const QString& text):m_view(view),m_mob(mob),m_nodes(nodes),m_originalSelection(originalSelection)
+{
+    setText(text);
+    for(auto* node:nodes)new CCreateNodeCommand(view,mob,node,this,true);
+}
+bool CCreateNodesCommand::invalidatesAiGraphPreview() const {
+    for(auto* node:m_nodes)if(node && ei::contributesStaticNavigationCollision(node->nodeType()))return true;
+    return false;
+}
+void CCreateNodesCommand::undo() {
+    // After a save, capture all exact records in one raw-document pass before
+    // the child commands detach them. They retain the existing provenance rules.
+    QHash<CNode*,QPair<QByteArray,QByteArray>> templates;
+    if(m_mob->rawObjectTemplatesBytes(m_nodes,&templates))
+        for(auto it=templates.cbegin();it!=templates.cend();++it)it.key()->setRawObjectTemplateBytes(it.value().first,it.value().second);
+    QUndoCommand::undo();m_view->setDurty(m_mob);
+    m_view->collectObjectTreeData();m_view->restoreSelection(m_originalSelection);m_view->update();
+}
+void CCreateNodesCommand::redo() {
+    QUndoCommand::redo();m_view->setDurty(m_mob);
+    if(m_firstRedo){m_firstRedo=false;return;} // The preview already owns its final transforms and tree rows.
+    m_view->collectObjectTreeData();m_view->restoreSelection(m_nodes);m_view->update();
 }
 
 CSelectionCommand::CSelectionCommand(CView* pView, const QList<CNode*>& before,

@@ -86,7 +86,7 @@ public:
     CCreateNodeCommand() = delete;
     CCreateNodeCommand(CView* pView, QJsonObject nodeData, QUndoCommand *parent = nullptr);
     CCreateNodeCommand(CView* pView, CMob* pMob, CNode* existingNode,
-                       QUndoCommand *parent = nullptr);
+                       QUndoCommand *parent = nullptr, bool deferRefresh = false);
 
     void undo() override;
     void redo() override;
@@ -107,8 +107,24 @@ private:
     int m_createdNodeIndex;
     bool m_created;
     bool m_skipInitialRedo;
+    bool m_deferRefresh{false};
     QString m_rawTemplatePath;
     QByteArray m_rawTemplateSubtreeSha256;
+};
+
+class CCreateNodesCommand : public QUndoCommand, public IAiGraphPreviewInvalidatingCommand
+{
+public:
+    CCreateNodesCommand(CView* view, CMob* mob, const QList<CNode*>& nodes,
+                        const QList<CNode*>& originalSelection, const QString& text);
+    void undo() override;
+    void redo() override;
+    bool invalidatesAiGraphPreview() const override;
+private:
+    CView* m_view;
+    CMob* m_mob;
+    QList<CNode*> m_nodes, m_originalSelection;
+    bool m_firstRedo{true};
 };
 
 class CSelectionCommand: public QUndoCommand
