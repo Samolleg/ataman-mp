@@ -136,14 +136,9 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     textureRow->addWidget(m_texture,1);
     m_saveTexture=new QPushButton(tr("Bind texture"),this); m_saveTexture->setObjectName("modelGalleryBindTexture"); textureRow->addWidget(m_saveTexture); layout->addLayout(textureRow);
     m_status=new QLabel(this); m_status->setWordWrap(true); m_status->setTextFormat(Qt::PlainText); layout->addWidget(m_status);
-    m_scanTextures=new QPushButton(QString::fromUtf8("Обновить связи из MOB…"),this);
-    m_scanTextures->setObjectName("modelGalleryScanTextures"); m_scanTextures->setEnabled(false);
-    m_scanTextures->setToolTip(QString::fromUtf8("Прочитать MOB-карты текущего профиля. Сохранённые вручную связи остаются приоритетными."));
-    connect(m_scanTextures,&QPushButton::clicked,this,&CModelGallery::textureScanRequested);
     auto* buttons=new QHBoxLayout; buttons->addStretch();
     auto* connections=new QPushButton(QString::fromUtf8("Точки стыковки…"),this);
     connections->setObjectName("modelGalleryConnections");buttons->insertWidget(0,connections);
-    buttons->insertWidget(1,m_scanTextures);
     connect(connections,&QPushButton::clicked,this,[this]{
         if(selectedModel().isEmpty())return;
         CModelConnectionEditor editor(m_catalog,selectedModel(),m_sceneProvider,this);
@@ -170,7 +165,8 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     });
     connect(m_saveName,&QPushButton::clicked,this,&CModelGallery::saveName);
     connect(m_saveTexture,&QPushButton::clicked,this,&CModelGallery::saveTexture);
-    connect(m_texture,QOverload<int>::of(&QComboBox::activated),this,[this]{m_thumbnailTimer.start();});
+    connect(m_texture,QOverload<int>::of(&QComboBox::activated),this,[this]{m_chosenTextures.insert(selectedModel(),selectedTexture());m_thumbnailTimer.start();});
+    connect(m_texture->lineEdit(),&QLineEdit::editingFinished,this,[this]{m_chosenTextures.insert(selectedModel(),selectedTexture());});
     connect(m_list->verticalScrollBar(),&QScrollBar::valueChanged,this,[this]{m_thumbnailTimer.start();});
     connect(&m_thumbnailTimer,&QTimer::timeout,this,&CModelGallery::loadVisibleThumbnail);
     // A queued GUI callback starts one CPU worker, without an artificial pause.
@@ -178,11 +174,27 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     connect(&m_thumbnailWatcher,&QFutureWatcher<QImage>::finished,this,&CModelGallery::finishThumbnail);
     filter(initialModel,initialTexture);
 }
-CModelGallery::~CModelGallery() { m_thumbnailTimer.stop(); m_thumbnailWatcher.waitForFinished(); }
+CModelGallery::~CModelGallery() { m_thumbnailTimer.stop(); }
 void CModelGallery::resizeEvent(QResizeEvent* event) { QDialog::resizeEvent(event); m_thumbnailTimer.start(); }
 QString CModelGallery::selectedModel() const { return m_list->currentItem() ? m_list->currentItem()->data(Qt::UserRole).toString() : QString(); }
 QString CModelGallery::selectedTexture() const { return m_texture->currentText().trimmed(); }
-void CModelGallery::enableTextureScan() { m_scanTextures->setEnabled(m_catalog->writable()); }
+void CModelGallery::enableMultiSelection()
+{
+    m_multiSelection=true;
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_list->setToolTip(QString::fromUtf8("Ctrl — несколько моделей, Shift — диапазон. Выбранные объекты размещаются вместе; Esc отменяет добавление."));
+    const auto refresh=[this]{m_choose->setText(QString::fromUtf8("Выбрать (%1)").arg(m_list->selectedItems().size()));};
+    connect(m_list,&QListWidget::itemSelectionChanged,this,refresh);refresh();
+}
+QVector<QPair<QString,QString>> CModelGallery::selectedEntries() const
+{
+    QVector<QPair<QString,QString>> result;
+    for(int i=0;i<m_list->count();++i)if(m_list->item(i)->isSelected()) {
+        const QString model=m_list->item(i)->data(Qt::UserRole).toString();
+        result.append(qMakePair(model,model==selectedModel()?selectedTexture():textureForModel(model)));
+    }
+    return result;
+}
 QString CModelGallery::cacheKey(const QString& model,const QString& texture) const { return model.toLower()+'|'+texture.toLower(); }
 QVector<ei::STechnicalTextureChoice> CModelGallery::textureChoices(const QString& model) const
 {
@@ -201,6 +213,7 @@ void CModelGallery::refreshCatalog() { m_textureChoices.clear(); filter(); }
 QString CModelGallery::textureForModel(const QString& model) const
 {
     if(model==selectedModel() && m_availableTextures.contains(selectedTexture().toCaseFolded())) return selectedTexture();
+    if(m_chosenTextures.contains(model))return m_chosenTextures.value(model);
     const auto choices=textureChoices(model);
     return choices.isEmpty() ? QString() : choices.first().name;
 }
@@ -276,6 +289,8 @@ void CModelGallery::selectionChanged()
     m_texture->setModel(prepared); prepared->setParent(m_texture);
     if(previousModel && previousModel->parent()==m_texture) delete previousModel;
     m_texture->setCurrentIndex(exact.isEmpty() ? -1 : m_texture->findData(exact.first().name));
+    if(m_chosenTextures.contains(model))m_texture->setCurrentText(m_chosenTextures.value(model));
+    if(m_multiSelection)m_choose->setText(QString::fromUtf8("Выбрать (%1)").arg(m_list->selectedItems().size()));
     m_status->setText(tr("%1 model(s). Names and texture bindings: %2").arg(m_list->count()).arg(m_catalog->path()));
     m_choose->setEnabled(!model.isEmpty() && (!m_textureRequired || m_textures.contains(selectedTexture(),Qt::CaseInsensitive)));
     m_thumbnailTimer.start();
@@ -445,6 +460,13 @@ void CModelGallery::requireTextureSelection()
 }
 void CModelGallery::accept()
 {
+    if(m_multiSelection) {
+        const auto entries=selectedEntries();
+        if(entries.isEmpty() || entries.size()>512) {showCatalogError(QString::fromUtf8("Выберите от 1 до 512 моделей."));return;}
+        for(const auto& entry:entries)if(!m_availableTextures.contains(entry.second.toCaseFolded())) {
+            showCatalogError(QString::fromUtf8("У модели %1 не выбрана текстура. Выберите её перед добавлением.").arg(entry.first));return;
+        }
+    }
     if(m_textureRequired && (selectedModel().isEmpty() || !m_textures.contains(selectedTexture(),Qt::CaseInsensitive))) {
         showCatalogError(QString::fromUtf8("Выберите установленную основную текстуру для этой модели."));
         return;

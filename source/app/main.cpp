@@ -3275,7 +3275,7 @@ int runHeadlessCommand(QApplication& app)
         QWidget* operationBar=productionWindow->findChild<QWidget*>("viewportOperationToolbar");
         const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
             "groundPaintToolbarButton","behaviorModeButton","travelToolbarButton","scenarioToolbarButton",
-            "createObjectToolbarButton","mobScriptToolbarButton","assemblyToolbarButton",
+            "createObjectToolbarButton","objectGalleryToolbarButton","mobScriptToolbarButton","assemblyToolbarButton",
             "modelMagnetButton","cameraSettingsButton"};
         for(const auto& name:toolbarNames) {
             auto* button=productionWindow->findChild<QToolButton*>(name);

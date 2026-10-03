@@ -48,6 +48,7 @@
 #include "profile_visual_provider.h"
 #include "unit_animation.h"
 #include <QStandardPaths>
+#include <QElapsedTimer>
 
 int runDatabaseCreationCheck()
 {
@@ -512,6 +513,16 @@ int runDatabasePreviewCheck()
             || gallery->mapTo(form,QPoint()).y()>=assembly->mapTo(form,QPoint()).y()
             || gallery->iconSize()!=QSize(24,24) || assembly->iconSize()!=QSize(24,24))return fail("technical control order and icon sizes");
         form->grab().save(outputDirectory+"/technical.png");
+        form->hide();
+        const int nodeCount=destination->nodes().size();
+        QString placementError;QElapsedTimer placementTimer;placementTimer.start();
+        if(!view->beginGalleryPlacement({{"stst58","cavelevel00"},{"stst58","cavelevel00"}},&placementError))
+            return fail(QString("gallery batch placement: %1").arg(placementError));
+        output<<"Gallery batch two objects: "<<placementTimer.elapsed()<<" ms\n";
+        if(destination->nodes().size()!=nodeCount+2 || !view->isDatabasePlacementPending())return fail("gallery batch count/pending");
+        for(auto* node:view->m_pendingPasteNodes)if(!node->assemblyTag().isEmpty())return fail("gallery objects unexpectedly grouped");
+        view->cancelPendingOperation();
+        if(destination->nodes().size()!=nodeCount)return fail("gallery batch cancel");
         output<<"PASS: category visibility, original IDs, texts names/search, lever texture, technical order/icons\n";
         return 0;
     }

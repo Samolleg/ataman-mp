@@ -308,9 +308,11 @@ public:
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
     bool beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic = nullptr);
-    bool beginPreparedAssemblyPlacement(const ei::ObjectAssembly& assembly, const QPoint& cursor, const QVector3D& anchor, QString* error = nullptr);
+    bool beginPreparedAssemblyPlacement(const ei::ObjectAssembly& assembly, const QPoint& cursor, const QVector3D& anchor, QString* error = nullptr, bool groupMembers = true);
     bool captureSelectedAssembly(const QString& name, ei::ObjectAssembly* assembly, QString* error = nullptr);
-    bool beginAssemblyPlacement(const ei::ObjectAssembly& assembly, QString* error = nullptr);
+    bool beginAssemblyPlacement(const ei::ObjectAssembly& assembly, QString* error = nullptr, bool groupMembers = true);
+    bool beginGalleryPlacement(const QVector<QPair<QString,QString>>& entries,QString* error = nullptr);
+    void openObjectGallery();
     void openAssemblyCatalog();
     void saveSelectionAsAssembly();
     void groupSelectedAssembly(const QString& name, const QString& catalogId = QString());

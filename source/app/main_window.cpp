@@ -3691,6 +3691,9 @@ void MainWindow::setupCompactViewportTools()
     auto* scenarioAction=findChild<QDockWidget*>("mapScenarioDock")->toggleViewAction();scenarioAction->setIcon(viewportToolIcon(3));scenario->setDefaultAction(scenarioAction);
     auto* create=button("createObjectToolbarButton",QString::fromUtf8("Создать объект"),4,9);
     m_ui->actionCreate_new_object->setIcon(viewportToolIcon(4));create->setDefaultAction(m_ui->actionCreate_new_object);
+    auto* gallery=button("objectGalleryToolbarButton",QString::fromUtf8("Витрина объектов"),4,12);
+    gallery->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
+    connect(gallery,&QToolButton::clicked,this,[this]{if(m_pView){if(m_createDialog)m_createDialog->hide();m_pView->openObjectGallery();}});
     auto* script=button("mobScriptToolbarButton",QString::fromUtf8("Открыть скрипт MOB"),5,10);
     m_ui->actionOpen_MOB_Script->setIcon(viewportToolIcon(5));script->setDefaultAction(m_ui->actionOpen_MOB_Script);
     auto* assemblies=button("assemblyToolbarButton",QString::fromUtf8("Сборки: каталог, собрать и разобрать"),4,11);
@@ -3755,6 +3758,7 @@ void MainWindow::setupCompactViewportTools()
     actionLabel(script,m_ui->actionOpen_MOB_Script,"Скрипт","Открыть скрипт MOB");
     actionLabel(scenario,scenarioAction,"Сценарий","Сценарий карты");
     label(travel,"Переходы");label(assemblies,"Сборки");
+    label(gallery,"Витрина");
     auto* magnet=bar->findChild<QToolButton*>("modelMagnetButton");label(magnet,"Магнит");
 
     auto* camera=new QToolButton(bar);camera->setObjectName("cameraSettingsButton");
@@ -3776,7 +3780,7 @@ void MainWindow::setupCompactViewportTools()
     cameraMenu->addAction(cameraAction);camera->setMenu(cameraMenu);camera->setPopupMode(QToolButton::InstantPopup);
     delete bar->findChild<QLabel*>("cameraSpeedIcon");
     group("objectToolGroup","Объекты",{m_ui->selectButton,m_ui->moveButton,m_ui->rotateButton,m_ui->scaleButton});
-    group("creationToolGroup","Создание",{create,assemblies});
+    group("creationToolGroup","Создание",{create,gallery,assemblies});
     group("landscapeToolGroup","Ландшафт",{m_ui->tileBrushButton,m_groundPaintButton});
     group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,travel,scenario,script});
     group("helperToolGroup","Помощники",{magnet,camera});

@@ -66,10 +66,8 @@ private:
     void filterDatabase();
     void selectDatabaseEntry();
     void refreshTechnicalTextureChoices();
-    void scanTechnicalTextureFile();
     void applyTechnicalTextureChoice();
     void openModelGallery();
-    void saveTechnicalCatalog();
 
 private:
     Ui::CCreateObjectForm *ui;
@@ -90,12 +88,12 @@ private:
     QCheckBox* m_advanced{nullptr};
     QVector<ei::SDatabaseMapEntry> m_databaseEntries;
     quint64 m_databaseGeneration{0};
+    QString m_databaseRefreshToken;
     bool m_databaseMode{true};
     QComboBox* m_technicalTexture{nullptr};
     QLabel* m_technicalTextureLabel{nullptr};
     QLabel* m_technicalTextureStatus{nullptr};
     ei::TechnicalTextureCatalog m_technicalTextures;
-    QTimer m_technicalTextureScan;
     bool m_autoPickExactTexture{false};
     bool m_rebuildingTextureChoices{false};
     QPushButton* m_modelGalleryButton{nullptr};

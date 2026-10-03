@@ -1,3 +1,4 @@
+#include <QPointer>
 #include "window_geometry.h"
 #include "createobjectform.h"
 #include "ui_createobjectform.h"
@@ -149,9 +150,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
             this, [this](int) { applyTechnicalTextureChoice(); });
     connect(m_technicalTexture->lineEdit(), &QLineEdit::editingFinished,
             this, [this] { applyTechnicalTextureChoice(); });
-    connect(&m_technicalTextureScan, &QTimer::timeout,
-            this, &CCreateObjectForm::scanTechnicalTextureFile);
-    m_technicalTextureScan.setInterval(0);
+
     connect(m_itemMaterial, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this] { selectDatabaseEntry(); });
     connect(m_databaseCategory, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -617,6 +616,22 @@ void CCreateObjectForm::adjustPropertyColumns()
 
 void CCreateObjectForm::refreshDatabase()
 {
+    QStringList resourceRoots,mapRoots;
+    if(m_pView && m_pView->settings()) {
+        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"resourceRoots")))resourceRoots=option->value().toList();
+        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots")))mapRoots=option->value().toList();
+    }
+    QString token=QString::number(ei::ProfileDatabaseContext::instance().generation())+resourceRoots.join('|')+mapRoots.join('|');
+    for(const auto& root:resourceRoots) {
+        const QFileInfo file(QDir(root).filePath("texts.res"));
+        token+=QString("|%1:%2").arg(file.size()).arg(file.lastModified().toMSecsSinceEpoch());
+    }
+    if(token==m_databaseRefreshToken) {
+        const auto database=ei::ProfileDatabaseContext::instance().current();
+        m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(database?database->sourceArchivePath:QString()),&m_modelCatalogError);
+        filterDatabase();return;
+    }
+    m_databaseRefreshToken=token;
     const auto snapshot = ei::ProfileDatabaseContext::instance().current();
     m_databaseGeneration = ei::ProfileDatabaseContext::instance().generation();
     m_databaseEntries = snapshot && snapshot->usable()
@@ -625,11 +640,6 @@ void CCreateObjectForm::refreshDatabase()
                                    : QSharedPointer<ei::DatabaseDocument>();
     m_itemCatalog = document ? ei::ItemSpellConstructorCatalog::fromDocument(*document)
                             : ei::ItemSpellConstructorCatalog();
-    QStringList resourceRoots,mapRoots;
-    if(m_pView && m_pView->settings()) {
-        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"resourceRoots")))resourceRoots=option->value().toList();
-        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots")))mapRoots=option->value().toList();
-    }
     const auto texts=ei::loadGameTextCatalog(resourceRoots);
     ei::applyDatabaseMapTexts(&m_databaseEntries,texts.entries);
     m_itemCatalog.applyGameTexts(texts.entries);
@@ -656,29 +666,10 @@ void CCreateObjectForm::filterDatabase()
     m_technicalTextureStatus->setVisible(technicalMode);
     m_modelGalleryButton->setVisible(technicalMode);
     m_assemblyButton->setVisible(technicalMode);
-    if(technicalMode && m_pView)
-    {
-        m_technicalTextureScan.stop();
-        QStringList roots;
-        if(auto* option = dynamic_cast<COptStringList*>(
-               m_pView->settings()->opt(eOptSetResource, "mapRoots")))
-            roots = option->value().toList();
-        m_modelCatalogProfile = ei::TechnicalModelCatalog::profileKey(roots);
-        m_modelCatalogError.clear();
-        const auto database = ei::ProfileDatabaseContext::instance().current();
-    m_modelCatalog.loadProfile(database ? database->sourceArchivePath : QString(),
-            QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"),
-            m_modelCatalogProfile, &m_modelCatalogError);
-        m_modelCatalog.registerModels(CObjectList::getInstance()->figureList());
-        m_modelCatalog.restoreScan(m_modelCatalogProfile, &m_technicalTextures);
-        if(!m_modelCatalog.hasTextureBindings(m_modelCatalogProfile)) {
-            m_technicalTextures.refreshSources(roots);
-            if(m_technicalTextures.hasPendingFiles()) m_technicalTextureScan.start();
-            else saveTechnicalCatalog();
-        } // Browsing existing bindings does not rewrite the user's catalog.
+    if(technicalMode && m_pView) {
+        const auto database=ei::ProfileDatabaseContext::instance().current();
+        m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(database?database->sourceArchivePath:QString()),&m_modelCatalogError);
     }
-    else
-        m_technicalTextureScan.stop();
     ui->tableParameters->setVisible(!m_databaseMode || m_advanced->isChecked());
     ui->buttonCreate->setText(m_databaseMode ? tr("Place on map") : tr("Create"));
     if(!m_databaseMode)
@@ -713,26 +704,6 @@ void CCreateObjectForm::filterDatabase()
     selectDatabaseEntry();
 }
 
-void CCreateObjectForm::scanTechnicalTextureFile()
-{
-    if(!m_technicalTextures.hasPendingFiles())
-    {
-        m_technicalTextureScan.stop();
-        return;
-    }
-    m_technicalTextures.scanNextFile();
-    if(!m_technicalTextures.hasPendingFiles())
-    {
-        m_technicalTextureScan.stop();
-        saveTechnicalCatalog();
-        refreshTechnicalTextureChoices();
-    }
-    else if(m_technicalTextures.pendingFileCount() % 20 == 0)
-        m_technicalTextureStatus->setText(tr("Scanning MOB maps: %1 of %2 complete. You can already choose any installed texture.")
-            .arg(m_technicalTextures.sourceFileCount() - m_technicalTextures.pendingFileCount())
-            .arg(m_technicalTextures.sourceFileCount()));
-}
-
 void CCreateObjectForm::refreshTechnicalTextureChoices()
 {
     if(!m_technicalTexture || m_databaseMode)
@@ -759,27 +730,20 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     m_modelGalleryButton->setToolTip(russian);
     const QSignalBlocker blocker(m_technicalTexture);
     m_rebuildingTextureChoices = true;
-    m_technicalTexture->clear();
+    auto* prepared=new QStandardItemModel;
+    auto add=[prepared](const QString& text,const QVariant& value=QVariant()) {
+        auto* item=new QStandardItem(text);item->setData(value,Qt::UserRole);prepared->appendRow(item);return item;
+    };
     QSet<QString> exactNames;
-    if(!exact.isEmpty())
-    {
-        m_technicalTexture->addItem(tr("Textures bound to this model"));
-        static_cast<QStandardItemModel*>(m_technicalTexture->model())->item(0)->setEnabled(false);
-        for(const auto& choice : exact)
-        {
-            m_technicalTexture->addItem(choice.name, choice.name);
-            m_technicalTexture->setItemData(m_technicalTexture->count() - 1,
-                tr("Stored model texture binding"), Qt::ToolTipRole);
-            exactNames.insert(choice.name.toLower());
-        }
-        m_technicalTexture->insertSeparator(m_technicalTexture->count());
+    if(!exact.isEmpty()) {
+        add(tr("Textures bound to this model"))->setEnabled(false);
+        for(const auto& choice:exact) {add(choice.name,choice.name);exactNames.insert(choice.name.toLower());}
     }
-    const int allHeader = m_technicalTexture->count();
-    m_technicalTexture->addItem(tr("All installed textures"));
-    static_cast<QStandardItemModel*>(m_technicalTexture->model())->item(allHeader)->setEnabled(false);
-    for(const QString& name : available)
-        if(!exactNames.contains(name.toLower()))
-            m_technicalTexture->addItem(name, name);
+    add(tr("All installed textures"))->setEnabled(false);
+    for(const auto& name:available)if(!exactNames.contains(name.toLower()))add(name,name);
+    QPointer<QAbstractItemModel> previous=m_technicalTexture->model();
+    m_technicalTexture->setModel(prepared);prepared->setParent(m_technicalTexture);
+    if(previous && previous->parent()==m_technicalTexture)delete previous;
 
     int selection = -1;
     for(int index = 0; index < m_technicalTexture->count(); ++index)
@@ -846,16 +810,8 @@ void CCreateObjectForm::applyTechnicalTextureChoice()
     {
         m_pNode->applyParam(QSharedPointer<IPropertyBase>(
             new propStr(eObjParam_PRIM_TXTR, selected)));
-        m_modelCatalog.bindTexture(m_modelCatalogProfile, m_pNode->modelName(), selected);
-        m_modelCatalog.save(&m_modelCatalogError);
         updateTable();
     }
-}
-
-void CCreateObjectForm::saveTechnicalCatalog()
-{
-    m_modelCatalog.captureScan(m_modelCatalogProfile, m_technicalTextures);
-    if(m_modelCatalog.save(&m_modelCatalogError)) m_modelCatalogError.clear();
 }
 
 void CCreateObjectForm::openModelGallery()
@@ -863,40 +819,28 @@ void CCreateObjectForm::openModelGallery()
     if(m_databaseMode || !m_pNode || !m_pView) return;
     m_modelCatalogError.clear();
     const auto database = ei::ProfileDatabaseContext::instance().current();
-    m_modelCatalog.loadProfile(database ? database->sourceArchivePath : QString(),
-            QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"),
-            m_modelCatalogProfile, &m_modelCatalogError);
-    const QStringList models = CObjectList::getInstance()->figureList();
-    m_modelCatalog.registerModels(models);
-    m_modelCatalog.save(&m_modelCatalogError);
+    m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(database?database->sourceArchivePath:QString()),&m_modelCatalogError);
+    const auto generation=ei::ProfileDatabaseContext::instance().generation();
+    const QStringList models=CObjectList::getInstance()->figureList();
     const QStringList sources=configuredResourceSourcePaths(m_pView->settings());
     auto provider = CModelGallery::resourceThumbnails(sources);
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     CModelGallery gallery(models,&m_modelCatalog,m_modelCatalogProfile,textures,&m_technicalTextures,provider,this,
         m_pNode->modelName(),m_pNode->textureName(),CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
-    gallery.enableTextureScan();
-    const quint64 catalogGeneration=ei::ProfileDatabaseContext::instance().generation();
-    connect(&gallery,&CModelGallery::textureScanRequested,&gallery,[&]{
-        if(catalogGeneration!=ei::ProfileDatabaseContext::instance().generation()) {m_technicalTextureScan.stop();gallery.reject();return;}
-        QStringList roots;
-        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots"))) roots=option->value().toList();
-        m_technicalTextures.refreshSources(roots);
-        if(m_technicalTextures.hasPendingFiles()) m_technicalTextureScan.start();
-        else {saveTechnicalCatalog();gallery.refreshCatalog();}
-    });
-    connect(&m_technicalTextureScan,&QTimer::timeout,&gallery,[&]{
-        if(!m_technicalTextures.hasPendingFiles()) gallery.refreshCatalog();
-    });
+    gallery.enableMultiSelection();
     if(!m_modelCatalogError.isEmpty()) gallery.showCatalogError(m_modelCatalogError);
     if(gallery.exec() == QDialog::Accepted && !gallery.selectedModel().isEmpty())
     {
-        onParamChange(QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,gallery.selectedModel())));
-        if(textures.contains(gallery.selectedTexture(),Qt::CaseInsensitive))
-        {
-            onParamChange(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,gallery.selectedTexture())));
-            m_modelCatalog.bindTexture(m_modelCatalogProfile,gallery.selectedModel(),gallery.selectedTexture());
-            m_modelCatalog.save(&m_modelCatalogError);
+        if(generation!=ei::ProfileDatabaseContext::instance().generation()) {refreshDatabase();return;}
+        const auto selected=gallery.selectedEntries();
+        if(selected.size()>1) {
+            QString error;
+            if(m_pView->beginGalleryPlacement(selected,&error)) {hide();m_pView->setFocus();}
+            else QMessageBox::warning(this,tr("Не удалось создать объекты"),error);
+            return;
         }
+        onPropertiesChange({QSharedPointer<IPropertyBase>(new propStr(eObjParam_TEMPLATE,gallery.selectedModel())),
+            QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR,gallery.selectedTexture()))});
     }
     refreshTechnicalTextureChoices();
 }

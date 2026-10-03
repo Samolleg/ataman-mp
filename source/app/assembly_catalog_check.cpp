@@ -89,6 +89,14 @@ int runAssemblyCatalogCheck() {
         check(ei::assemblyWorldObject(pasted[1]->toJson()).value("Parent Id").toVariant().toUInt()==pasted[0]->mapId(),"internal gameplay parent remaps to newly allocated ID");
     }
     view.m_pOp->keyPress(eKey_Esc);check(destination->nodes().size()==1&&history.count()==0&&originalNode->nodeState()==eSelect&&!view.m_pendingAssemblyPlacement,"Escape discards all preview parts and restores original selection");
+    const bool galleryBatch=view.beginPreparedAssemblyPlacement(assembly,{300,200},anchor,&error,false);
+    auto galleryBatchNodes=view.m_pendingPasteNodes;
+    check(galleryBatch&&galleryBatchNodes.size()==2&&galleryBatchNodes[0]->assemblyTag().isEmpty()&&galleryBatchNodes[1]->assemblyTag().isEmpty(),"gallery galleryBatch remains independent objects");
+    if(galleryBatch)view.m_pOp->keyPress(eKey_Enter);
+    check(galleryBatch&&history.count()==1&&destination->nodes().size()==3,"ungrouped galleryBatch commits as one action");
+    history.undo();check(destination->nodes().size()==1,"ungrouped galleryBatch undo removes every object");
+    history.redo();check(destination->nodes().size()==3&&galleryBatchNodes[0]->assemblyTag().isEmpty(),"ungrouped galleryBatch redo preserves independence");
+    history.undo();history.clear();
     const bool pending=view.beginPreparedAssemblyPlacement(assembly,{300,200},anchor,&error);pasted=view.m_pendingPasteNodes;
     check(pending,"assembly can be placed again after cancellation");if(pending)view.m_pOp->keyPress(eKey_Enter);
     check(pending&&history.count()==1&&destination->nodes().size()==3&&!view.m_pendingAssemblyPlacement,"confirm placement is one undo action for the complete group");

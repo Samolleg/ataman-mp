@@ -162,6 +162,8 @@ int runProfileModelCatalogCheck()
     history.clear(); view.viewParameters();
     properties.hide();
     const auto position=object->position(); const auto instanceName=object->mapName();
+    auto catalogBytes=[&]{QFile file(catalog.path());file.open(QIODevice::ReadOnly);return file.readAll();};
+    const auto beforeGalleryCatalog=catalogBytes();
     QFile scanSentinel(scratch.filePath("explicit-scan-only.mob"));
     check(scanSentinel.open(QIODevice::WriteOnly) && scanSentinel.write("synthetic-invalid-mob")==21,"scan sentinel fixture");scanSentinel.close();
     bool currentTextureRetained=false;
@@ -181,7 +183,7 @@ int runProfileModelCatalogCheck()
         QTimer::singleShot(60,gallery,&CModelGallery::reject);
     }});
     galleryButton()->click();
-    check(refreshAvailable && cachedFiles()==1,"explicit gallery refresh scans current roots and saves local cache");
+    check(!refreshAvailable && cachedFiles()==0,"gallery has no MOB scanning action and does not write scan cache");
     check(object->modelName()=="fixture-house" && object->textureName()=="other" && history.count()==0,"refresh cancel does not alter MOB object");
     bool badTextureBlocked=false;
     QTimer::singleShot(0,[&](){for(QWidget* widget:QApplication::topLevelWidgets()) if(auto* gallery=qobject_cast<CModelGallery*>(widget)) {
@@ -202,6 +204,7 @@ int runProfileModelCatalogCheck()
     check(history.count()==1 && object->position()==position && object->mapId()==129 && object->mapName()==instanceName,"one undo action; position, identity, instance name preserved");
     history.undo(); check(object->modelName()=="fixture-house" && object->textureName()=="other","undo restores both original fields");
     history.redo(); check(object->modelName()=="fixture-bridge" && object->textureName()=="wood","redo restores both chosen fields");
+    check(catalogBytes()==beforeGalleryCatalog,"opening, choosing model/texture and Undo/Redo do not rewrite the ready catalog");
     bool emptyNameHidden=true;
     for(int row=0;row<properties.rowCount();++row) if(properties.item(row,0) && properties.item(row,0)->text()==QString::fromUtf8("Русское название модели")) emptyNameHidden=false;
     check(emptyNameHidden && !inlineName(),"no Russian-name row or subtitle for unnamed model");

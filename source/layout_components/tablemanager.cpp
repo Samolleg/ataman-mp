@@ -1345,12 +1345,6 @@ void CTableManager::onParamChange(const QSharedPointer<IPropertyBase>& pProp)
             break;
         }
     }
-    if(m_catalogSettings && pProp && pProp->type()==eObjParam_PRIM_TXTR && !m_selectedModel.isEmpty()
-       && QStringList(CTextureList::getInstance()->textureList()).contains(pProp->toString(),Qt::CaseInsensitive)) {
-        m_catalog.bindTexture(m_catalogProfile,m_selectedModel,pProp->toString());
-        QString error; m_catalog.save(&error);
-        if(!error.isEmpty()) QToolTip::showText(m_pTable->mapToGlobal(QPoint(0,0)),error,m_pTable);
-    }
     emit onUpdateProperty(pProp);
 }
 
@@ -1403,7 +1397,7 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         // and scan metadata rather than rereading it for every mouse movement.
         if(token != m_catalogSourceToken) {
             m_catalogSourceToken = token; m_catalogProfile = profile;
-            m_catalog.loadProfile(databasePath, legacy, profile);
+            m_catalog.load(target);
             m_catalog.restoreScan(profile, &m_textureScan);
         }
     }
@@ -2899,16 +2893,8 @@ void CTableManager::openModelGallery()
     ei::TechnicalModelCatalog catalog;
     QString catalogError;
     const auto database = ei::ProfileDatabaseContext::instance().current();
-    catalog.loadProfile(database ? database->sourceArchivePath : QString(),
-        QDir(QCoreApplication::applicationDirPath()).filePath("model-catalog.json"), m_catalogProfile, &catalogError);
-    catalog.registerModels(CObjectList::getInstance()->figureList());
-    if(catalogError.isEmpty()) catalog.save(&catalogError);
-    ei::TechnicalTextureCatalog scan = m_textureScan;
-    // The freshly loaded JSON can contain a newer scan than the table snapshot.
-    catalog.restoreScan(m_catalogProfile,&scan);
-    QStringList roots;
-    if(auto* option = dynamic_cast<COptStringList*>(m_catalogSettings->opt(eOptSetResource, "mapRoots"))) roots = option->value().toList();
-    if(!catalog.hasTextureBindings(m_catalogProfile)) scan.refreshSources(roots);
+    catalog.load(ei::TechnicalModelCatalog::pathForDatabase(database?database->sourceArchivePath:QString()),&catalogError);
+    ei::TechnicalTextureCatalog scan;
     QStringList textures = CTextureList::getInstance()->textureList(); textures.sort(Qt::CaseInsensitive);
     QString initialTexture;
     for(const auto& value : m_rowValues) if(value->type()==eObjParam_PRIM_TXTR && value->isInit()) initialTexture=value->toString();
@@ -2918,27 +2904,8 @@ void CTableManager::openModelGallery()
         CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
     gallery.requireTextureSelection();
     if(!catalogError.isEmpty()) gallery.showCatalogError(catalogError);
-    QTimer scanner;
-    scanner.setInterval(0);
-    gallery.enableTextureScan();
-    connect(&gallery,&CModelGallery::textureScanRequested,&gallery,[&]{
-        scan.refreshSources(roots);
-        if(scan.hasPendingFiles()) scanner.start();
-        else {catalog.captureScan(m_catalogProfile,scan);QString error;catalog.save(&error);gallery.refreshCatalog();if(!error.isEmpty())gallery.showCatalogError(error);}
-    });
-    connect(&scanner, &QTimer::timeout, &gallery, [&]() {
-        if(generation != ei::ProfileDatabaseContext::instance().generation()) { scanner.stop(); gallery.reject(); return; }
-        if(scan.hasPendingFiles()) scan.scanNextFile();
-        if(!scan.hasPendingFiles()) {
-            scanner.stop(); catalog.captureScan(m_catalogProfile, scan);
-            QString error; catalog.save(&error);
-            gallery.refreshCatalog();
-            if(!error.isEmpty()) gallery.showCatalogError(error);
-        }
-    });
-    if(scan.hasPendingFiles()) scanner.start();
     const QPointer<CTableManager> guard(this);
-    const int result = gallery.exec(); scanner.stop();
+    const int result = gallery.exec();
     if(!guard || revision != m_dataRevision || generation != ei::ProfileDatabaseContext::instance().generation() || m_readOnly) return;
     m_textureScan=scan;
     if(result == QDialog::Accepted && !gallery.selectedModel().isEmpty()) {
@@ -2950,10 +2917,7 @@ void CTableManager::openModelGallery()
             if(value->type()==eObjParam_PRIM_TXTR && value->isInit() && value->toString()==gallery.selectedTexture()) textureUnchanged = true;
         if(!textureUnchanged && !gallery.selectedTexture().isEmpty() && textures.contains(gallery.selectedTexture(), Qt::CaseInsensitive))
             values.append(QSharedPointer<IPropertyBase>(new propStr(eObjParam_PRIM_TXTR, gallery.selectedTexture())));
-        catalog.bindTexture(m_catalogProfile, gallery.selectedModel(), gallery.selectedTexture());
-        QString saveError; catalog.save(&saveError);
         if(!values.isEmpty()) emit onUpdateProperties(values);
-        if(!saveError.isEmpty()) QToolTip::showText(m_pTable->mapToGlobal(QPoint(0,0)),saveError,m_pTable);
     }
     emit catalogChanged();
 }

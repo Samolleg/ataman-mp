@@ -15,6 +15,7 @@
 #include <QScrollBar>
 #include <QFile>
 #include <atomic>
+#include <QThread>
 
 bool runModelGalleryWidgetCheck(QString* diagnostic)
 {
@@ -196,6 +197,27 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     catalog.bindTexture("test","asset0","texture99");
     large.setCurrentModel("asset0");
     if(large.selectedTexture()!="texture99") return fail("catalog revision invalidates cached texture choices");
-    if(diagnostic) *diagnostic=QString("functional sections/search/persistence/Escape; 497 models/7165 textures: open=%1ms select=%2ms; groups/completion, initial selection, visible queue, scroll/reopen cache and resource/texture invalidation PASS").arg(openMs).arg(selectMs);
+    catalog.bindTexture("test","house","wood");catalog.bindTexture("test","bridge","stone");
+    CModelGallery batch({"house","bridge"},&catalog,"test",{"wood","stone"},&scan,{},nullptr);
+    batch.enableMultiSelection();
+    auto* batchList=batch.findChild<QListWidget*>("modelGalleryTiles");
+    batchList->selectAll();
+    const auto entries=batch.selectedEntries();
+    if(entries.size()!=2 || batchList->selectionMode()!=QAbstractItemView::ExtendedSelection) return fail("multiple model selection");
+    auto* batchTexture=batch.findChild<QComboBox*>("modelGalleryTexture");
+    const auto originalTexture=batchTexture->currentText();batchTexture->setEditText("missing-texture");
+    batch.accept();if(batch.result()==QDialog::Accepted)return fail("batch silently substituted invalid texture");
+    batchTexture->setCurrentText(originalTexture);
+    batch.accept();if(batch.result()!=QDialog::Accepted)return fail("accept multiple models with bound textures");
+    auto started=QSharedPointer<std::atomic_bool>::create(false);
+    auto* slow=new CModelGallery({"house"},&catalog,"test",{"wood"},&scan,[started](const QString&,const QString&){
+        started->store(true);QThread::msleep(600);return QImage(8,8,QImage::Format_RGB32);
+    },nullptr);
+    slow->setAttribute(Qt::WA_DontShowOnScreen);slow->show();
+    clock.restart();while(!started->load() && clock.elapsed()<500)QApplication::processEvents();
+    if(!started->load()){delete slow;return fail("slow worker started");}
+    clock.restart();delete slow;const auto closeMs=clock.elapsed();
+    if(closeMs>150)return fail("closing gallery waits for thumbnail worker");
+    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms; close during600ms worker=%3ms; thumbnail cache PASS").arg(openMs).arg(selectMs).arg(closeMs);
     return true;
 }

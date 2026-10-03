@@ -15,6 +15,10 @@
 #include <QUuid>
 #include <QJsonArray>
 #include <QPointer>
+#include "model_gallery.h"
+#include "resource_catalog.h"
+#include "settings.h"
+#include <QtMath>
 
 namespace {
 class AssemblyTagCommand : public QUndoCommand {
@@ -103,21 +107,21 @@ bool CView::captureSelectedAssembly(const QString& name,ei::ObjectAssembly* outp
     }
     return ei::readObjectAssembly(ei::writeObjectAssembly(a),output,error);
 }
-bool CView::beginAssemblyPlacement(const ei::ObjectAssembly& supplied,QString* error) {
+bool CView::beginAssemblyPlacement(const ei::ObjectAssembly& supplied,QString* error,bool groupMembers) {
     ei::ObjectAssembly a;if(!ei::readObjectAssembly(ei::writeObjectAssembly(supplied),&a,error))return false;
     if(!m_activeMob || !m_pUndoStack || !m_pTree || !m_pOp) {if(error)*error=QString::fromUtf8("Откройте активный MOB для размещения сборки.");return false;}
     cancelPendingOperation();QPoint cursor=mapFromGlobal(QCursor::pos());if(!rect().contains(cursor))cursor=rect().center();
     QVector3D anchor;if(!objectPlacementPositionAt(cursor,&anchor)) {if(error)*error=QString::fromUtf8("Наведите мышь на рельеф для размещения сборки.");return false;}
-    return beginPreparedAssemblyPlacement(a,cursor,anchor,error);
+    return beginPreparedAssemblyPlacement(a,cursor,anchor,error,groupMembers);
 }
-bool CView::beginPreparedAssemblyPlacement(const ei::ObjectAssembly& a,const QPoint& cursor,const QVector3D& anchor,QString* error) {
+bool CView::beginPreparedAssemblyPlacement(const ei::ObjectAssembly& a,const QPoint& cursor,const QVector3D& anchor,QString* error,bool groupMembers) {
     ei::ObjectAssembly checked;
     if(!ei::readObjectAssembly(ei::writeObjectAssembly(a),&checked,error) || !m_activeMob)return false;
     const auto selection=selectionSnapshot();QList<CNode*> nodes;makeCurrent();
     const QJsonObject tag{{"instanceId",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"name",a.name},{"catalogId",a.id}};
     for(const auto& part:a.parts) {
         auto* node=m_activeMob->createNode(part.object);if(!node)break;
-        node->setAssemblyTag(tag);setAssemblyWorldPosition(node,anchor+part.offset);nodes.append(node);
+        if(groupMembers)node->setAssemblyTag(tag);setAssemblyWorldPosition(node,anchor+part.offset);nodes.append(node);
     }
     for(int i=0;nodes.size()==a.parts.size() && i<nodes.size();++i) {
         auto descriptor=nodes[i]->toJson();auto wo=ei::assemblyWorldObject(descriptor);
@@ -150,6 +154,50 @@ void CView::saveSelectionAsAssembly() {
         QMessageBox::warning(this,QString::fromUtf8("Сборка не сохранена"),error.isEmpty()?QString::fromUtf8("Настройте database.res профиля."):error);return;
     }
     groupSelectedAssembly(a.name,a.id);openAssemblyCatalog();
+}
+
+bool CView::beginGalleryPlacement(const QVector<QPair<QString,QString>>& entries,QString* error)
+{
+    if(entries.isEmpty() || entries.size()>512)return false;
+    ei::ObjectAssembly batch;batch.id=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    batch.name=QString::fromUtf8("Объекты из витрины");
+    const int columns=qCeil(qSqrt(entries.size()));
+    const QStringList models=CObjectList::getInstance()->figureList();
+    const QStringList textures=CTextureList::getInstance()->textureList();
+    for(int i=0;i<entries.size();++i) {
+        const auto& entry=entries[i];
+        if(!models.contains(entry.first,Qt::CaseInsensitive) || !textures.contains(entry.second,Qt::CaseInsensitive)) {
+            if(error)*error=QString::fromUtf8("Модель или текстура недоступна: %1 / %2").arg(entry.first,entry.second);return false;
+        }
+        CWorldObj defaults;auto data=defaults.toJson();
+        data.insert("Model name",entry.first);data.insert("Primary texture",entry.second);
+        CWorldObj node(data);ei::AssemblyPart part;CValidationReport report;
+        if(!CMob::prepareFreshTechnicalNode(&node,&part.object,&report)) {if(error)*error=report.toText();return false;}
+        part.offset=QVector3D((i%columns)*4.0f,(i/columns)*4.0f,0);
+        batch.parts.append(part);
+    }
+    return beginAssemblyPlacement(batch,error,false);
+}
+
+void CView::openObjectGallery()
+{
+    if(!m_activeMob) {emit updateMsg(QString::fromUtf8("Откройте карту с MOB для добавления объектов."));return;}
+    ei::TechnicalModelCatalog catalog;QString error;
+    const auto generation=ei::ProfileDatabaseContext::instance().generation();
+    catalog.load(profileCatalogPath(),&error);
+    ei::TechnicalTextureCatalog scan;
+    QStringList roots;
+    if(auto* option=dynamic_cast<COptStringList*>(settings()->opt(eOptSetResource,"mapRoots")))roots=option->value().toList();
+    const auto sources=configuredResourceSourcePaths(settings());
+    CModelGallery gallery(CObjectList::getInstance()->figureList(),&catalog,ei::TechnicalModelCatalog::profileKey(roots),
+        CTextureList::getInstance()->textureList(),&scan,CModelGallery::resourceThumbnails(sources),this,{}, {},
+        CModelGallery::resourceThumbnailNamespace(sources),CModelConnectionEditor::resourceScenes(sources));
+    gallery.enableMultiSelection();
+    if(!error.isEmpty())gallery.showCatalogError(error);
+    if(gallery.exec()!=QDialog::Accepted)return;
+    if(generation!=ei::ProfileDatabaseContext::instance().generation()) {emit updateMsg(QString::fromUtf8("Профиль изменился. Откройте витрину заново."));return;}
+    if(!beginGalleryPlacement(gallery.selectedEntries(),&error))
+        QMessageBox::warning(this,QString::fromUtf8("Не удалось добавить объекты"),error);
 }
 void CView::openAssemblyCatalog() {
     ei::TechnicalModelCatalog catalog;QString error;const auto path=profileCatalogPath();
