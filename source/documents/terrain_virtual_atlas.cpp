@@ -5221,8 +5221,17 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             // when this map already authored a selectable candidate for that
             // exact tuple. A different runtime class remains eligible for
             // predecessor-preserving repair.
+            // variant.signature is in the physical atlas convention, while
+            // paintVariants() takes grid corners and mirrors them itself.
+            // Passing physical corners there mirrored the lookup twice and
+            // let an authored reflected (different) three/four-material tile
+            // suppress registration of this exact generated transition.
+            const STerrainTransitionSignature paintSignature =
+                m_workingCatalog.paintGridMirrored()
+                    ? CTerrainTransitionCatalog::mirroredGridY(variant.signature)
+                    : variant.signature;
             if(hasSelectableAuthoredCandidate(
-                   variant.signature, sourceTile.runtimeTerrainType))
+                   paintSignature, sourceTile.runtimeTerrainType))
                 continue;
             m_workingCatalog.addVariant(variant);
         }

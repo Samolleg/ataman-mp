@@ -518,6 +518,9 @@ private slots:
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
+    void mirroredGeneratedBlendRemainsPaintable_data();
+    void mirroredGeneratedBlendRemainsPaintable();
+    void mirroredVertexStrokeResolvesAndUndoesExactly();
     void workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases();
     void workingAtlasKeepsMatchingRuntimeImportWhenLocalTypeDiffers();
     void workingAtlasAcceptsLazyMaterialSourcesWithoutResettingState();
@@ -4781,6 +4784,134 @@ void TerrainVirtualAtlasTests::connectedRouteOwnershipScopesPlanningToRepairCand
                  qint32(1));
     QVERIFY2(!plan.ownerByCell.contains(candidateY * tileWidth),
              "An unrelated exact transition was pulled into Resolve ownership planning");
+}
+
+void TerrainVirtualAtlasTests::mirroredGeneratedBlendRemainsPaintable_data()
+{
+    QTest::addColumn<bool>("mirrored");
+    QTest::addColumn<int>("materials");
+    for(bool mirrored : {false, true})for(int materials : {3, 4})
+        QTest::newRow(qPrintable(QString("mirror%1-materials%2").arg(mirrored).arg(materials)))
+            << mirrored << materials;
+}
+
+void TerrainVirtualAtlasTests::mirroredGeneratedBlendRemainsPaintable()
+{
+    QFETCH(bool, mirrored);
+    QFETCH(int, materials);
+    Fixture fixture;
+    fixture.catalog.setMirrorPaintGridY(mirrored);
+    const auto wanted=signature(1, 2, 3, materials==4?4:3);
+    // Only the reflected chiral blend is authored. A reflection of a
+    // three/four-material tuple cannot be obtained by rotating this artwork.
+    const auto authoredGrid=CTerrainTransitionCatalog::mirroredGridY(wanted);
+    const auto physical=mirrored
+        ? CTerrainTransitionCatalog::mirroredGridY(authoredGrid):authoredGrid;
+    fixture.images.append(solid(qRgba(80,80,80,255)));
+    for(int rotation=0;rotation<4;++rotation) {
+        SMprPackedTile packed;packed.tileIndex=4;packed.rotation=quint8(rotation);
+        STerrainTransitionVariant variant;variant.packedTile=packed.encode();
+        variant.signature=CTerrainTransitionCatalog::rotated(physical,-rotation);
+        QVERIFY(fixture.catalog.addVariant(variant));
+    }
+    bool found=true;
+    fixture.catalog.selectForPaint(wanted,3,5,23,1,&found);
+    QVERIFY(!found);
+    const auto oldImages=fixture.images;
+    CTestTerrainWorkingAtlas working(fixture.catalog,fixture.images,23,64,{}, {},
+        QVector<qint32>(5,0),{{1,0},{2,0},{3,0},{4,0}});
+    QVERIFY(working.isValid());
+    QMap<int,quint64> usage;
+    bool generated=false;CValidationReport report;
+    const auto packed=working.resolve(wanted,3,5,&usage,{},&generated,&report,1);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(generated);
+    QVERIFY(SMprPackedTile::decode(packed).atlasSlot()>=5);
+    working.catalog().selectForPaint(wanted,3,5,23,1,&found);
+    QVERIFY2(found,"Resolve reported success but did not register the exact generated blend for painting");
+    bool decoded=false;
+    QCOMPARE(working.catalog().gridSignatureForPacked(packed,&decoded),wanted);
+    QVERIFY(decoded);
+    for(int slot=0;slot<oldImages.size();++slot)
+        QCOMPARE(working.activeTileImages().at(slot),oldImages.at(slot));
+    for(int rotation=0;rotation<4;++rotation) {
+        const auto rotated=CTerrainTransitionCatalog::rotated(wanted,rotation);
+        const auto selected=working.catalog().selectForPaint(rotated,7,9,23,1,&found);
+        QVERIFY(found);
+        QCOMPARE(working.catalog().gridSignatureForPacked(selected,&decoded),rotated);
+        QVERIFY(decoded);
+    }
+}
+
+void TerrainVirtualAtlasTests::mirroredVertexStrokeResolvesAndUndoesExactly()
+{
+    Fixture fixture;
+    fixture.catalog.setMirrorPaintGridY(true);
+    const auto wanted=signature(1,2,3,3);
+    fixture.images.append(solid(qRgba(80,80,80,255)));
+    for(int rotation=0;rotation<4;++rotation) {
+        SMprPackedTile packed;packed.tileIndex=4;packed.rotation=quint8(rotation);
+        STerrainTransitionVariant variant;variant.packedTile=packed.encode();
+        // Physical wanted means authored reflected wanted in the paint grid.
+        variant.signature=CTerrainTransitionCatalog::rotated(wanted,-rotation);
+        QVERIFY(fixture.catalog.addVariant(variant));
+    }
+    CTerrainWorkingAtlas live(fixture.catalog,fixture.images,23,64,{}, {},
+        QVector<qint32>(5,0),{{1,0},{2,0},{3,0},{4,0}});
+    QVERIFY(live.isValid());
+    auto staged=live.createStagingCopy();
+    QByteArray payload;QDataStream sec(&payload,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);
+    sec<<quint32(0xCF4BF774)<<quint8(0);
+    payload.append(QByteArray(33*33*8,'\0'));
+    payload.append(QByteArray(16*16*2,'\0'));
+    STerrainSectorSource source;source.memberName="CaveSet000000.SEC";
+    source.sectorX=0;source.sectorY=0;source.type=0;
+    source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;CValidationReport report;
+    QVERIFY(model.loadSources(1,1,100.0f,{source},&report,1,QVector<qint32>(64,0),0));
+    QVector<qint32> values(17*17,1);
+    values[9*17+7]=3;values[9*17+8]=3;
+    QVERIFY(model.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,values,values));
+    const auto before=model.sectorPayload(0,0);
+    CTerrainVirtualMaterialField beforeField;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&beforeField));
+    STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=0;
+    const auto preview=model.makeVirtualMaterialPaint(8,8,brush,
+        ETerrainTileLayer::Land,2,staged->catalog(),23,&report);
+    QVERIFY2(!preview.isEmpty()&&!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(model.apply(preview,true,&report));
+    CTerrainVirtualMaterialField field;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field));
+    bool found=false;QCOMPARE(field.cellSignature(7,8,&found),wanted);QVERIFY(found);
+    QMap<int,quint64> usage;
+    for(int y:{7,8})for(int x:{7,8}) {
+        const auto realized=staged->resolve(field.cellSignature(x,y,&found),x,y,&usage,{},nullptr,&report,2);
+        ++usage[SMprPackedTile::decode(realized).atlasSlot()];
+        QVERIFY(found);
+        QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    }
+    QVERIFY(model.installWorkingAtlasSlotTypes(staged->activeTileTypes()));
+    CValidationReport release;
+    const auto resolved=model.makeVirtualStrokeResolution(preview,staged->catalog(),23,&release,false,2);
+    QVERIFY2(!release.hasErrors(),qPrintable(release.toText()));
+    QVERIFY(!resolved.isEmpty());
+    QVERIFY(model.apply(resolved,true,&report));
+    for(int y:{7,8})for(int x:{7,8}) {
+        const auto packed=model.packedTile(x,y,ETerrainTileLayer::Land,&found);QVERIFY(found);
+        QCOMPARE(staged->catalog().gridSignatureForPacked(packed,&found),field.cellSignature(x,y));
+        QVERIFY(found);
+    }
+    QVERIFY(model.apply(resolved,false,&report));
+    QVERIFY(model.apply(preview,false,&report));
+    QCOMPARE(model.sectorPayload(0,0),before);
+    CTerrainVirtualMaterialField undone;
+    QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
+    QCOMPARE(undone.stableSha256(),beforeField.stableSha256());
+    // Planning and cancelling never publishes the staging atlas into live.
+    QCOMPARE(live.activeTileCount(),5);
+    QCOMPARE(live.changedSlots().size(),0);
+    QCOMPARE(live.authoredTileImages(),fixture.images);
 }
 
 void TerrainVirtualAtlasTests::routeOwnerFiltersOppositeGeneratedExactCandidates()
