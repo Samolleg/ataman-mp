@@ -22,6 +22,6 @@ Base: main f823e90bbfcbbc21edf425c73b94571632e22203. Local implementation; no pu
 
 ## Delivery / remaining acceptance
 
-Validated staging: build-staging-100-create-catalog. Permanent installation update waits for normal shutdown of the user's running editor99. Do not finalize the permanent installation. Script build-tests-100-create-catalog/install.ps1 verifies managed hashes, creates rollback99→100 and preserves all unlisted files.
+Installed100 after owner confirmed normal shutdown. Source commit main 576c65ba18aa2c7a6216fad45d97c8fe9e572588. Target: artifacts/EI-Mapper-Ataman-2-first-test. All127 managed hashes PASS;6 changed files plus manifest replaced;14829 unlisted user files have identical before/after hashes. Logs/inventories: build-tests-100-create-catalog/install.log and user-files-{before,after}.json. Verified rollback99: artifacts/rollback-EI-Mapper-Ataman-v99-to-100-20261003 (7 files). Previous rollback98→99 removed only after both backups were verified. Permanent installation was not finalized or launched interactively.
 
 Manual acceptance remains open: actual Russian dialog on the user's DPI/profile, creation/placement of creature/item/lever, technical gallery/assembly navigation. Headless render and widget checks do not establish owner acceptance; prior task99's manual acceptance remains open.
