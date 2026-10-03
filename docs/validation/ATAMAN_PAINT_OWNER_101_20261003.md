@@ -18,6 +18,6 @@ The baseline-candidate suppression now uses the same catalog selector as final p
 
 ## Delivery and limits
 
-Staging/install results are recorded after verification. Permanent target: artifacts/EI-Mapper-Ataman-2-first-test. Do not finalize the permanent target or launch its GUI on the owner's behalf.
+Source commit main a89f3bf328929e68347d7729df5b8d02f606c017. Fresh staging version/raw hashes/finalizer/independent validator PASS. Installed101 in artifacts/EI-Mapper-Ataman-2-first-test with editor/runtime absent.127 managed hashes PASS;6 changed files plus manifest;15032 unlisted user files have identical before/after hashes. EXE SHA256359C454AE7DE0A6D2A509CDC8529F3FF6003F9869DFD9672C90CA9694BC5D738. Verified7-file rollback100 retained at artifacts/rollback-EI-Mapper-Ataman-v100-to-101-20261003; prior99 rollback removed only after verification. No finalizer or interactive GUI launch on the permanent target. Evidence: stage.log/install.log and user-files-{before,after}.json.
 
 The exact unsaved single-cell refusal from the screenshot and eight-map session have not been reconstructed. Parent painting acceptance remains open for the owner: original location, alternate materials, shared-map boundary, Undo/Redo, save/reopen. Automated evidence establishes the reproduced root-cause correction, not runtime/gameplay acceptance.
