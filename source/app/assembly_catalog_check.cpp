@@ -17,6 +17,9 @@
 #include "ai_graph_preview_invalidation.h"
 #include "main_window.h"
 #include "camera.h"
+#include "resource_setup_dialog.h"
+#include <QTimer>
+#include <QEvent>
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QTableWidget>
@@ -34,6 +37,14 @@
 #include <QApplication>
 #include <QElapsedTimer>
 namespace {
+class HiddenFamilyCheckWindows : public QObject {
+    bool eventFilter(QObject* object,QEvent* event) override {
+        if(event->type()==QEvent::Polish || event->type()==QEvent::Show)
+            if(auto* widget=qobject_cast<QWidget*>(object))
+                if(widget->isWindow()) widget->setAttribute(Qt::WA_DontShowOnScreen);
+        return false;
+    }
+};
 class Module:public CWorldObj {
 public:
     Module(){m_modelName="synthetic_wall";m_primaryTexture="synthetic_skin";}
@@ -227,5 +238,93 @@ int runAssemblyCatalogCheck() {
         check(batchMs<2000 && commitMs<500 && cancelMs<500 && undoMs<2000 && redoMs<500,"143 batch bounded responsiveness on synthetic map");
     }
     QObject::disconnect(batchRefresh);
+    // Exercise the production MainWindow hook, not a test allocator, with disk
+    // records plus unsaved IDs in another loaded MOB.
+    {
+        HiddenFamilyCheckWindows hidden; qApp->installEventFilter(&hidden);
+        QTimer setupDriver;
+        QObject::connect(&setupDriver,&QTimer::timeout,[](){
+            for(QWidget* widget:QApplication::topLevelWidgets())
+                if(auto* setup=qobject_cast<CResourceSetupDialog*>(widget)) setup->reject();
+        });
+        setupDriver.start(1);
+        qApp->setProperty("workspaceLoadSmoke",true);
+        MainWindow window; window.setAttribute(Qt::WA_DontShowOnScreen);
+        setupDriver.stop();
+        window.m_currentCollectionPath=scratch.filePath("explicit.collection");
+        auto* familyView=window.view();
+        auto addMob=[&](const QString& name,uint first,uint last,uint existingId) {
+            auto* mob=new CMob; mob->setFileName(QFileInfo(scratch.filePath(name)));
+            mob->setRanges(true,{SRange(first,last)});
+            auto* node=new Module; node->setMapId(existingId); mob->nodes()<<node;
+            QByteArray data; mob->serializeMob(data,false);
+            QFile file(mob->filePath().absoluteFilePath());file.open(QIODevice::WriteOnly);file.write(data);file.close();
+            mob->adoptCommittedBytes(data);mob->attach(familyView,&progress);
+            familyView->m_aMob<<mob;return mob;
+        };
+        auto* owner=addMob("ids-owner.mob",100,105,100);
+        auto* other=addMob("ids-other.mob",200,210,200);
+        familyView->m_activeMob=owner;
+        check(window.allocateFamilyNid(owner->filePath().absoluteFilePath())==101,"family allocation reserves first free ID");
+        const auto structuralDigest=window.m_nidAllocationContextDigest;
+        other->nodes().first()->setMapId(102); // Deliberately unsaved, cached report still has 200.
+        other->m_auxiliaryIds.insert(104); // Live auxiliary records share the ID namespace.
+        check(window.allocateFamilyNid(owner->filePath().absoluteFilePath())==103
+              && window.m_nidAllocationContextDigest==structuralDigest,"unsaved ID in another MOB is occupied without full revalidation");
+        check(window.allocateFamilyNid(owner->filePath().absoluteFilePath())==105,"family allocation includes range maximum and skips another MOB auxiliary ID");
+        quint32 fallback=1000;emit familyView->nidAllocationRequested(owner->filePath().absoluteFilePath(),&fallback);
+        check(fallback==0,"exhausted family range clears local fallback through production signal");
+        check(owner->createNode(assembly.parts[0].object,false)==nullptr&&owner->nodes().size()==1,"single creation fails without out-of-range ID or partial node");
+        owner->setRanges(true,{SRange(300,301)});owner->refreshDirtyFromProjection();
+        auto three=assembly;three.parts.append(assembly.parts[0]);three.parts.last().parentPart=-1;
+        const int historyBefore=familyView->m_pUndoStack->count();
+        familyView->restoreSelection({owner->nodes().first()});
+        error.clear();const bool rejected=!familyView->beginPreparedAssemblyPlacement(three,{300,200},anchor,&error,false);
+        check(rejected&&owner->nodes().size()==1&&familyView->m_pUndoStack->count()==historyBefore
+              &&familyView->selectionSnapshot()==QList<CNode*>{owner->nodes().first()}
+              &&!familyView->hasPendingOperation()&&error.contains("ID"),"range exhaustion midway rejects whole package and restores selection/history");
+        error.clear();
+        check(!familyView->beginPreparedObjectPlacement(assembly.parts[0].object,{300,200},&error)
+              &&error.contains("ID")&&owner->nodes().size()==1,"single placement reports exhausted family IDs");
+        owner->setRanges(true,{SRange(400,401)});owner->refreshDirtyFromProjection();
+        familyView->m_clipboard_buffer_file.setFileName(scratch.filePath("ids-clipboard.json"));
+        {QFile file(familyView->m_clipboard_buffer_file.fileName());file.open(QIODevice::WriteOnly);
+         file.write(QJsonDocument(QJsonObject{{"Version",2},{"Data",QJsonArray{
+             assembly.parts[0].object,assembly.parts[0].object,assembly.parts[0].object}}}).toJson());}
+        familyView->clipboradObjectsToScene();
+        check(owner->nodes().size()==1&&familyView->m_pUndoStack->count()==historyBefore
+              &&familyView->selectionSnapshot()==QList<CNode*>{owner->nodes().first()}
+              &&!familyView->hasPendingOperation(),"ordinary clipboard exhaustion rejects every partial object atomically");
+        auto* bulk=addMob("ids-bulk.mob",10000,10300,5000);
+        for(int i=1;i<1451;++i){auto* node=new Module;node->setMapId(5000+i);bulk->nodes()<<node;}
+        bulk->refreshDirtyFromProjection();familyView->m_activeMob=bulk;
+        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())==0,"invalid live snapshot refuses stale on-disk ID fallback");
+        QByteArray bulkBaseline;bulk->serializeMob(bulkBaseline,false);
+        {QFile file(bulk->filePath().absoluteFilePath());file.open(QIODevice::WriteOnly);file.write(bulkBaseline);}
+        bulk->adoptCommittedBytes(bulkBaseline);
+        QElapsedTimer familyTimer;familyTimer.start();
+        const bool pending=familyView->beginPreparedAssemblyPlacement(largeBatch,{300,200},anchor,&error,false);
+        const auto familyMs=familyTimer.elapsed();
+        out<<"143 family-aware objects /1451 existing: preview="<<familyMs<<"ms\n";
+        auto batchNodes=familyView->m_pendingPasteNodes;QSet<uint> ids;
+        bool safe=pending&&batchNodes.size()==143;
+        for(auto* node:batchNodes){const auto id=node->mapId();safe&=id>=10000&&id<=10300&&!ids.contains(id)&&id!=102;ids.insert(id);}
+        check(safe,"143 production family IDs are unique in effective range and avoid other MOB IDs");
+        check(safe&&familyMs<2000,"143 family-aware batch retains bounded synthetic responsiveness");
+        if(pending)familyView->m_pOp->keyPress(eKey_Enter);
+        check(pending&&familyView->m_pUndoStack->count()==historyBefore+1,"family batch commits atomically");
+        if(pending){
+            familyView->m_pUndoStack->undo();
+            const auto held=window.allocateFamilyNid(bulk->filePath().absoluteFilePath());
+            check(bulk->nodes().size()==1451&&!ids.contains(held)&&held!=0,"Undo-held IDs remain reserved against subsequent creation");
+            familyView->m_pUndoStack->redo();bool exact=bulk->nodes().size()==1594;
+            for(auto* node:batchNodes)exact&=ids.contains(node->mapId());
+            check(exact,"Redo retains every reserved family ID");
+        }
+        other->setScript("AddMob(\"missing-dependent.mob\");");other->refreshDirtyFromProjection();
+        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())==0,"unsaved script dependency invalidates allocation and incomplete family refuses creation");
+        other->setScript(QString());other->refreshDirtyFromProjection();
+        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())!=0,"resolving missing dependency rebuilds allocation snapshot");
+    }
     out<<"assembly-catalog-check: "<<failures<<" failures\n";return failures?1:0;
 }

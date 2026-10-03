@@ -763,7 +763,15 @@ bool CMobFamilyValidationReport::suggestReplacementNid(const QString& owningMobP
                                                         bool* sharedRange,
                                                         const QSet<quint32>& additionallyOccupied) const
 {
+    if(nid) *nid = 0;
     if(sharedRange) *sharedRange = false;
+    // Unknown records cannot certify that a proposed ID is free.
+    for(const SMobFamilyMember& member : members)
+        if(member.missing || !member.error.isEmpty())
+            return false;
+    for(const SMobFamilyFinding& finding : findings)
+        if(finding.code == "family.dynamic_addmob")
+            return false;
     const QString ownerFolded = foldedPath(owningMobPath);
     const SMobFamilyMember* owner = nullptr;
     for(const SMobFamilyMember& member : members)
@@ -1230,7 +1238,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
     {
         if(member.missing || !member.error.isEmpty())
             continue;
-        appendBodyPartFindings(request, member, &report);
+        if(request.validateVisualResources)
+            appendBodyPartFindings(request, member, &report);
         if(member.activeRuntimeFamily && member.magicTrapCount > 0
            && !member.hasDiplomacyTable)
         {

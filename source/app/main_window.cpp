@@ -1931,19 +1931,11 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(!suggestion)
             return;
-        bool familyContainsOwner = false;
-        for(const SMobFamilyMember& member : m_familyValidation.members)
-            familyContainsOwner = familyContainsOwner || QDir::cleanPath(member.path).compare(
-                QDir::cleanPath(mobPath), Qt::CaseInsensitive) == 0;
-        if(!familyContainsOwner)
-            m_familyValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest());
-        quint32 familySuggestion = 0;
         bool shared = false;
-        if(m_familyValidation.suggestReplacementNid(mobPath, &familySuggestion, &shared,
-                                                     m_sessionAllocatedNids))
+        const quint32 familySuggestion = allocateFamilyNid(mobPath, &shared);
+        *suggestion = familySuggestion; // Failure is zero, never the local fallback.
+        if(familySuggestion != 0)
         {
-            *suggestion = familySuggestion;
-            m_sessionAllocatedNids.insert(familySuggestion);
             ei::log(shared ? eLogWarning : eLogInfo,
                 QString("Allocated family-aware NID %1 for %2%3")
                     .arg(familySuggestion).arg(QFileInfo(mobPath).fileName())
@@ -5523,14 +5515,18 @@ QVector<QString> MainWindow::activeMapRoots() const
     return QVector<QString>();
 }
 
-SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
+SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest(bool allocationOnly)
 {
     SMobFamilyValidationRequest request;
     const SResourceProfileEvaluation profile = activeResourceProfile();
     request.profileId = profile.profileId;
-    request.database = ei::ProfileDatabaseContext::instance().current();
-    request.assemblyResourceSources = configuredResourceSourcePaths(m_settings.get());
-    request.assemblyResourceFingerprint = configuredResourceFingerprint(m_settings.get());
+    request.validateVisualResources = !allocationOnly;
+    if(!allocationOnly)
+    {
+        request.database = ei::ProfileDatabaseContext::instance().current();
+        request.assemblyResourceSources = configuredResourceSourcePaths(m_settings.get());
+        request.assemblyResourceFingerprint = configuredResourceFingerprint(m_settings.get());
+    }
     request.mapRoots = activeMapRoots().toList();
     request.explicitComposition = !m_currentCollectionPath.isEmpty();
     if(!request.explicitComposition && !m_mapTestEntry.mobPath.isEmpty())
@@ -5564,6 +5560,9 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
             QString saveClass;
             if(mob->buildValidatedCandidate(&data, &candidateReport, &saveClass))
                 request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), data);
+            else if(allocationOnly)
+                // An invalid live document must not fall back to stale disk IDs.
+                request.inMemoryMobData.insert(QDir::cleanPath(path).toLower(), QByteArray());
             else
                 ei::log(eLogWarning, QString("Family validation used the on-disk MOB because the current in-memory candidate could not be mapped safely: %1\n%2")
                     .arg(path, candidateReport.toText()));
@@ -5571,6 +5570,59 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest()
     }
     request.seedMobPaths.removeDuplicates();
     return request;
+}
+
+QByteArray MainWindow::nidAllocationContextDigest()
+{
+    QByteArray context;
+    QDataStream stream(&context, QIODevice::WriteOnly);
+    stream << activeResourceProfile().profileId << activeMapRoots().toList()
+           << m_currentCollectionPath << m_mapTestEntry.mobPath;
+    stream << (m_pView && m_pView->currentMob()
+        ? m_pView->currentMob()->filePath().absoluteFilePath() : QString());
+    if(m_pView) for(CMob* mob : m_pView->mobs()) if(mob)
+    {
+        stream << mob->filePath().absoluteFilePath() << mob->script() << mob->isQuestMob();
+        for(bool main : {true, false})
+        {
+            const auto& ranges = mob->ranges(main);
+            stream << quint32(ranges.size());
+            for(const auto& range : ranges) stream << range.minRange << range.maxRange;
+        }
+    }
+    // File metadata changes invalidate disk records, including previously missing dependencies.
+    for(const auto& member : m_nidAllocationValidation.members)
+    {
+        const QFileInfo file(member.path);
+        stream << member.path << file.exists() << file.size() << file.lastModified();
+    }
+    return QCryptographicHash::hash(context, QCryptographicHash::Sha256);
+}
+
+quint32 MainWindow::allocateFamilyNid(const QString& mobPath, bool* shared)
+{
+    const auto digest = nidAllocationContextDigest();
+    if(digest != m_nidAllocationContextDigest)
+    {
+        m_nidAllocationValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest(true));
+        m_nidAllocationContextDigest = nidAllocationContextDigest();
+        // A failed snapshot is retryable after repairing a record or restoring
+        // a dependency. Never keep a failure cached against unrelated field edits.
+        for(const auto& member : m_nidAllocationValidation.members)
+            if(member.missing || !member.error.isEmpty()) m_nidAllocationContextDigest.clear();
+        for(const auto& finding : m_nidAllocationValidation.findings)
+            if(finding.code == "family.dynamic_addmob") m_nidAllocationContextDigest.clear();
+    }
+    // Current IDs are intentionally outside the structural digest: they are read
+    // cheaply for every allocation, including unsaved edits and preceding batch nodes.
+    QSet<quint32> occupied = m_sessionAllocatedNids;
+    if(m_pView) for(CMob* mob : m_pView->mobs()) if(mob)
+        occupied.unite(mob->occupiedMapIds());
+    quint32 suggestion = 0;
+    if(!m_nidAllocationValidation.suggestReplacementNid(mobPath, &suggestion, shared, occupied))
+        return 0;
+    m_sessionAllocatedNids.insert(suggestion); // Keep IDs held by Undo/Redo reserved.
+    return suggestion;
 }
 
 void MainWindow::scheduleMobFamilyValidation(int delayMs)
@@ -5605,6 +5657,8 @@ void MainWindow::refreshMobFamilyValidation()
         m_acknowledgedFindingDigest.clear();
         m_previousFamilyRiskKeys.clear();
         m_sessionAllocatedNids.clear();
+        m_nidAllocationValidation = CMobFamilyValidationReport();
+        m_nidAllocationContextDigest.clear();
         m_warnedSharedAllocationMobs.clear();
         m_familyRiskBaselineReady = false;
         m_lastValidationRequestDigest.clear();

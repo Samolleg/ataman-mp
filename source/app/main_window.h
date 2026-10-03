@@ -94,6 +94,7 @@ class MainWindow : public QMainWindow
 
 public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
+    friend int runAssemblyCatalogCheck();
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
@@ -234,7 +235,9 @@ private:
                                     SMapTravelZone* entrance) const;
     SResourceProfileEvaluation activeResourceProfile() const;
     QString activeProfileDisplayName() const;
-    SMobFamilyValidationRequest mobFamilyValidationRequest();
+    SMobFamilyValidationRequest mobFamilyValidationRequest(bool allocationOnly = false);
+    QByteArray nidAllocationContextDigest();
+    quint32 allocateFamilyNid(const QString& mobPath, bool* shared = nullptr);
     void scheduleMobFamilyValidation(int delayMs = 300);
     void refreshMobFamilyValidation();
     void startPendingMobFamilyValidation();
@@ -397,6 +400,8 @@ private:
     ETransientNotificationAction m_transientNotificationAction{
         ETransientNotificationAction::None};
     CMobFamilyValidationReport m_familyValidation;
+    CMobFamilyValidationReport m_nidAllocationValidation;
+    QByteArray m_nidAllocationContextDigest;
     CScenarioPanel* m_scenarioPanel{nullptr};
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;

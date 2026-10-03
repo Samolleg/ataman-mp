@@ -23284,7 +23284,9 @@ bool CView::beginPreparedObjectPlacement(const QJsonObject& data,const QPoint& c
     if(!node || !m_activeMob->buildValidatedCandidate(&candidate, &report))
     {
         if(node) m_activeMob->discardUncommittedNode(node);
-        if(diagnostic) *diagnostic = report.toText();
+        if(diagnostic) *diagnostic = !node
+            ? QString::fromUtf8("Объект не добавлен: нет подтверждённого свободного ID в диапазонах семейства MOB. Проверьте диапазоны и доступность MOB.")
+            : report.toText();
         return false;
     }
     for(CMob* mob : m_aMob) if(mob) mob->clearSelect(true);
@@ -24944,7 +24946,14 @@ void CView::clipboradObjectsToScene()
     {
         CNode* node = m_activeMob->createNode(it->toObject());
         if(!node)
-            continue;
+        {
+            for(CNode* created : previewNodes) m_activeMob->discardUncommittedNode(created);
+            collectObjectTreeData();
+            restoreSelection(originalSelection);
+            ei::log(eLogWarning, "Paste cancelled completely: no verified free family ID for every object");
+            emit updateMsg(QString::fromUtf8("Вставка отменена целиком: не удалось выделить свободные ID для всех объектов. Проверьте диапазоны и доступность MOB."));
+            return;
+        }
         previewNodes.append(node);
         m_pTree->addNodeToTree(node);
     }

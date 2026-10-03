@@ -1469,14 +1469,13 @@ uint CMob::freeMapId()
             }
         }
     }
-    if(id == 0)
-    {
-        ei::log(ELogMessageType::eLogFatal, "Cant find suit ID for object");
-        Q_ASSERT(false);
-        return 0;
-    }
     if(m_view)
         id = m_view->suggestFamilyNid(this, id);
+    if(id == 0)
+    {
+        ei::log(ELogMessageType::eLogWarning, "No verified free object ID in the MOB family ranges");
+        return 0;
+    }
     if(!isFreeMapId(id))
     {
         ei::log(ELogMessageType::eLogFatal,
@@ -1484,6 +1483,14 @@ uint CMob::freeMapId()
         return 0;
     }
     return id;
+}
+
+QSet<quint32> CMob::occupiedMapIds() const
+{
+    QSet<quint32> result = m_auxiliaryIds;
+    for(CNode* node : m_aNode)
+        if(node) result.insert(node->mapId());
+    return result;
 }
 
 /// file - inout. mob file

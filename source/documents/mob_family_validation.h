@@ -96,6 +96,8 @@ struct SMobFamilyValidationRequest
     QMap<QString, ei::EHairCrownGeometry> assemblyHairGeometryByPart;
     QStringList assemblyResourceSources;
     QString assemblyResourceFingerprint;
+    // ID allocation needs structural records only, never model/resource scans.
+    bool validateVisualResources = true;
 };
 
 class CMobFamilyValidationReport

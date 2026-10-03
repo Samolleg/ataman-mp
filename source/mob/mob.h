@@ -97,6 +97,7 @@ public:
     bool rawObjectTemplateBytes(const CNode* node, QByteArray* sourceSubtree,
                                 QByteArray* cleanSubtree) const;
     QList<CNode*>& nodes();
+    QSet<quint32> occupiedMapIds() const;
     void deleteNode(uint mapId);
     CNode* undo_deleteNode(uint mapId, int restoreIndex = -1);
     void deleteNode(CNode* pNode);

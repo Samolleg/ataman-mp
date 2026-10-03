@@ -300,6 +300,9 @@ class MobFamilyValidationTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void failedAllocationClearsLocalFallback();
+    void incompleteFamilyCannotCertifyFreeIds();
+    void allocationSkipsVisualResourceValidation();
     void authoredZeroNidIsCriticalAndBlocksRuntimePreflight();
     void positiveNidWithNoParentSentinelIsClean();
     void authoringPolicyAndReplacementSuggestionsRejectZero();
@@ -726,6 +729,59 @@ void MobFamilyValidationTests::duplicateIdsWithinOneMobAreAuthoritativeWarnings(
     QCOMPARE(finding->severity, EMobFamilyFindingSeverity::Warning);
     QVERIFY(finding->message.contains("NID 568 is used by 2 objects in duplicate.mob"));
     QCOMPARE(finding->locations.size(), 2);
+}
+
+void MobFamilyValidationTests::failedAllocationClearsLocalFallback()
+{
+    CMobFamilyValidationReport report;
+    SMobFamilyMember member;
+    member.path = QFileInfo("exhausted.mob").absoluteFilePath();
+    SMobIdRangeSnapshot range;
+    range.minimum = range.maximum = 42;
+    range.effective = true;
+    member.ranges.append(range);
+    report.members.append(member);
+    quint32 suggestion = 1000;
+    QVERIFY(!report.suggestReplacementNid(member.path, &suggestion, nullptr, {42}));
+    QCOMPARE(suggestion, quint32(0));
+}
+
+void MobFamilyValidationTests::incompleteFamilyCannotCertifyFreeIds()
+{
+    CMobFamilyValidationReport report;
+    SMobFamilyMember owner; owner.path = QFileInfo("owner.mob").absoluteFilePath();
+    SMobIdRangeSnapshot range; range.minimum=1; range.maximum=2; range.effective=true;
+    owner.ranges.append(range); report.members.append(owner);
+    SMobFamilyMember unknown; unknown.path="missing.mob"; unknown.missing=true;
+    report.members.append(unknown);
+    quint32 id=1000;
+    QVERIFY(!report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(0));
+    report.members.removeLast(); unknown.missing=false; unknown.error="Unreadable records";
+    report.members.append(unknown);
+    QVERIFY(!report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(0));
+    report.members.removeLast(); SMobFamilyFinding dynamic; dynamic.code="family.dynamic_addmob";
+    report.findings.append(dynamic);
+    QVERIFY(!report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(0));
+    report.findings.clear();
+    QVERIFY(report.suggestReplacementNid(owner.path,&id,nullptr,{1}));
+    QCOMPARE(id,quint32(2)); // Inclusive maximum and occupied live ID.
+}
+
+void MobFamilyValidationTests::allocationSkipsVisualResourceValidation()
+{
+    QTemporaryDir directory;
+    const auto path=writeMob(directory.path(),"visual.mob",mobWithUnits({
+        unitObject(9,"invalid mask","Human test","unhuma",false,{})}));
+    SMobFamilyValidationRequest request; request.seedMobPaths<<path;
+    request.explicitComposition=true; request.includeProfileWideMobs=false;
+    const auto full=CMobFamilyValidator::validate(request);
+    QVERIFY(std::any_of(full.findings.cbegin(),full.findings.cend(),[](const SMobFamilyFinding& f){
+        return f.code.startsWith("mob.semantic.wearable_");}));
+    request.validateVisualResources=false;
+    const auto ids=CMobFamilyValidator::validate(request);
+    QVERIFY(ids.nidOwners.contains(9)); QCOMPARE(ids.members.size(),full.members.size());
+    QVERIFY(std::none_of(ids.findings.cbegin(),ids.findings.cend(),[](const SMobFamilyFinding& f){
+        return f.code.startsWith("mob.semantic.wearable_");}));
 }
 
 void MobFamilyValidationTests::legacyLightIdIsOccupiedForFamilyAllocation()

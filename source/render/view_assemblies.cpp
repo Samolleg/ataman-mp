@@ -135,7 +135,11 @@ bool CView::beginPreparedAssemblyPlacement(const ei::ObjectAssembly& a,const QPo
     QByteArray bytes;CValidationReport report;
     if(nodes.size()!=a.parts.size() || !m_activeMob->buildValidatedCandidate(&bytes,&report)) {
         for(auto* node:nodes)m_activeMob->discardUncommittedNode(node);
-        restoreSelection(selection);if(error)*error=QString::fromUtf8("Сборка не размещена:\n")+report.toText();return false;
+        restoreSelection(selection);
+        if(error)*error = nodes.size()!=a.parts.size()
+            ? QString::fromUtf8("Объекты не добавлены: не удалось выделить свободные ID в диапазонах семейства MOB. Проверьте диапазоны и доступность MOB. Весь пакет отменён.")
+            : QString::fromUtf8("Сборка не размещена:\n")+report.toText();
+        return false;
     }
     for(auto* mob:m_aMob)if(mob)mob->clearSelect(true);
     for(auto* node:nodes)node->setState(eSelect);
