@@ -10,6 +10,7 @@
 #include "ui_theme.h"
 #include "scenario_layer_check.h"
 #include <QApplication>
+#include <QGroupBox>
 #include "window_layout_check.h"
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
@@ -3274,13 +3275,17 @@ int runHeadlessCommand(QApplication& app)
         QWidget* operationBar=productionWindow->findChild<QWidget*>("viewportOperationToolbar");
         const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
             "groundPaintToolbarButton","behaviorModeButton","travelToolbarButton","scenarioToolbarButton",
-            "createObjectToolbarButton","mobScriptToolbarButton"};
+            "createObjectToolbarButton","mobScriptToolbarButton","assemblyToolbarButton",
+            "modelMagnetButton","cameraSettingsButton"};
         for(const auto& name:toolbarNames) {
             auto* button=productionWindow->findChild<QToolButton*>(name);
             const bool validButton=button && !button->icon().isNull()
-                && button->toolButtonStyle()==Qt::ToolButtonIconOnly && button->size()==QSize(60,60)
+                && button->toolButtonStyle()==Qt::ToolButtonTextUnderIcon
+                && button->minimumWidth()>=68 && button->minimumHeight()>=72
                 && button->iconSize()==QSize(44,44)
-                && !button->toolTip().isEmpty() && !button->accessibleName().isEmpty();
+                && button->text().contains(QRegularExpression(QString::fromUtf8("[А-Яа-я]")))
+                && button->toolTip().contains(QRegularExpression(QString::fromUtf8("[А-Яа-я]")))
+                && !button->accessibleName().isEmpty();
             if(!validButton) QTextStream(stderr) << "Toolbar probe failed: " << name
                 << " size=" << (button ? QString::number(button->width())+'x'+QString::number(button->height()) : QStringLiteral("missing")) << "\n";
             compactToolbarWorks=compactToolbarWorks && validButton;
@@ -3306,10 +3311,82 @@ int runHeadlessCommand(QApplication& app)
             compactToolbarWorks=compactToolbarWorks && !travelDock->isHidden();
             travelDock->hide();
         } else compactToolbarWorks=false;
-        if(operationBar && !qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS").isEmpty()) {
-            operationBar->resize(operationBar->sizeHint());
-            operationBar->grab().save(QDir(qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS")).filePath("compact-toolbar.png"));
-        }
+        if(operationBar) {
+            auto* groups=operationBar->findChild<QWidget*>("viewportToolGroups");
+            auto* magnet=operationBar->findChild<QToolButton*>("modelMagnetButton");
+            auto* controls=operationBar->findChild<QWidget*>("modelConnectionControls");
+            auto* source=operationBar->findChild<QComboBox*>("modelConnectionSource");
+            auto* next=operationBar->findChild<QToolButton*>("nextModelConnection");
+            auto* feedback=operationBar->findChild<QLabel*>("modelConnectionFeedback");
+            auto* camera=operationBar->findChild<QToolButton*>("cameraSettingsButton");
+            bool responsive=groups && groups->layout()->hasHeightForWidth() && magnet && controls
+                && source && next && feedback && camera && camera->menu();
+            if(responsive) {
+                const bool previousMagnet=magnet->isChecked();
+                magnet->setChecked(false);
+                responsive=controls->isHidden();
+                magnet->setChecked(true);
+                responsive=responsive && !controls->isHidden() && !feedback->text().isEmpty()
+                    && !source->isEnabled() && !next->isEnabled();
+                // Exercise the same state signals as moving a real connector.
+                productionWindow->view()->modelConnectionSourcesChanged(
+                    {QString::fromUtf8("Авто"),QString::fromUtf8("Длинное название стыка детали")},{"","joint"});
+                productionWindow->view()->modelConnectionTargetsChanged(2);
+                responsive=responsive && source->isEnabled() && next->isEnabled();
+                productionWindow->view()->modelConnectionTargetsChanged(0);
+                productionWindow->view()->modelConnectionSourcesChanged({},{});
+                auto* speed=camera->menu()->findChild<QDoubleSpinBox*>("cameraSpeedMultiplier");
+                auto* telephoto=camera->menu()->findChild<QCheckBox*>("telephotoCameraEnabled");
+                auto* direction=camera->menu()->findChild<QComboBox*>("telephotoCameraDirection");
+                if(speed && telephoto && direction) {
+                    speed->setValue(2.3);telephoto->setChecked(true);direction->setCurrentIndex(2);
+                    responsive=responsive && qAbs(productionWindow->view()->cameraSpeedMultiplier()-2.3)<0.001
+                        && productionWindow->view()->telephotoCameraEnabled()
+                        && productionWindow->view()->telephotoCameraDirection()==direction->currentData().toInt();
+                    speed->setValue(1.0);telephoto->setChecked(false);
+                } else responsive=false;
+                const QString screenshots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
+                const int priorScale=qRound(ei::uiScaleFactor()*100);
+                for(int scale:{100,150,200}) {
+                ei::applyUiScalePercent(scale);
+                operationBar->ensurePolished();
+                int wideHeight=0,narrowHeight=0;
+                for(int width:{1600,1280,900,600}) {
+                    operationBar->resize(width,operationBar->layout()->totalHeightForWidth(width));
+                    operationBar->layout()->setGeometry(operationBar->rect());
+                    groups->layout()->setGeometry(groups->rect());
+                    const auto frames=groups->findChildren<QGroupBox*>(QString(),Qt::FindDirectChildrenOnly);
+                    bool fits=frames.size()==5;
+                    for(auto* frame:frames) {
+                        frame->layout()->setGeometry(frame->contentsRect());
+                        fits=fits && groups->rect().contains(frame->geometry());
+                        for(auto* other:frames) if(frame!=other)
+                            fits=fits && !frame->geometry().intersects(other->geometry());
+                        for(auto* b:frame->findChildren<QToolButton*>()) {
+                            if(b->parentWidget()!=frame)continue;
+                            const bool buttonFits=frame->rect().contains(b->geometry())
+                                && b->width()>=b->fontMetrics().horizontalAdvance(b->text())+8;
+                            if(!buttonFits)QTextStream(stderr)<<"Toolbar clipped button="<<b->objectName()<<"\n";
+                            fits=fits && buttonFits;
+                        }
+                    }
+                    fits=fits && operationBar->rect().contains(controls->geometry());
+                    if(width==1600)wideHeight=groups->height();
+                    if(width==600)narrowHeight=groups->height();
+                    QTextStream(stderr)<<"Toolbar scale="<<scale<<" width="<<width<<" height="<<operationBar->height()<<" fits="<<fits<<"\n";
+                    responsive=responsive && fits;
+                    if(!screenshots.isEmpty())operationBar->grab().save(QDir(screenshots).filePath(QString("toolbar-%1-%2.png").arg(scale).arg(width)));
+                }
+                responsive=responsive && narrowHeight>wideHeight;
+                }
+                ei::applyUiScalePercent(100);
+                if(!screenshots.isEmpty())camera->menu()->grab().save(QDir(screenshots).filePath("camera-settings.png"));
+                ei::applyUiScalePercent(priorScale);
+                magnet->setChecked(previousMagnet);
+            }
+            QTextStream(stderr)<<"Responsive Russian toolbar="<<responsive<<"\n";
+            compactToolbarWorks=compactToolbarWorks && responsive;
+        } else compactToolbarWorks=false;
         CPreview detachedPreview(nullptr, productionWindow->view());
         detachedPreview.resize(160,120);
         detachedPreview.show();

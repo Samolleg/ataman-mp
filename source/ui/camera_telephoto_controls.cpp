@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QLabel>
 #include <QSignalBlocker>
 
@@ -17,26 +18,25 @@ CCameraTelephotoControls::CCameraTelephotoControls(QWidget* parent)
     , m_direction(new QComboBox(this))
 {
     setObjectName("cameraTelephotoControls");
-    QHBoxLayout* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(6, 0, 0, 0);
-    layout->setSpacing(4);
+    QGridLayout* layout = new QGridLayout(this);
+    layout->setContentsMargins(0, 6, 0, 0);
+    layout->setSpacing(6);
 
     m_enabled->setObjectName("telephotoCameraEnabled");
     m_enabled->setChecked(false);
-    m_enabled->setText(QString());
+    m_enabled->setText(QString::fromUtf8("Дальняя камера"));
     QPixmap camera(44,44);camera.setDevicePixelRatio(2);camera.fill(Qt::transparent);
     {QPainter p(&camera);p.setRenderHint(QPainter::Antialiasing);
      p.setPen(QPen(QColor("#c5deed"),1.6));p.setBrush(QColor("#477f98"));
      p.drawRoundedRect(2,6,17,13,2,2);p.drawRect(6,3,8,3);p.drawEllipse(7,9,7,7);}
     m_enabled->setIcon(QIcon(camera));m_enabled->setIconSize(QSize(22,22));
-    const QString help = tr(
-        "JamaisVu telephoto camera. Uses the selected fixed diagonal direction "
-        "and a pitch of 35.264 degrees, moves the render eye back, and narrows "
-        "perspective while keeping map movement and zoom available.");
+    const QString help = QString::fromUtf8(
+        "Камера Jamais Vu: фиксированное направление и наклон, уменьшенная перспектива. "
+        "Перемещение по карте и приближение остаются доступны.");
     m_enabled->setToolTip(help);
-    m_enabled->setAccessibleName(tr("Telephoto"));
+    m_enabled->setAccessibleName(m_enabled->text());
 
-    QLabel* multiplierLabel = new QLabel(tr("Multiplier:"), this);
+    QLabel* multiplierLabel = new QLabel(QString::fromUtf8("Дистанция:"), this);
     multiplierLabel->setBuddy(m_multiplier);
     m_multiplier->setObjectName("telephotoCameraMultiplier");
     m_multiplier->setRange(ei::kTelephotoMultiplierMinimum,
@@ -45,31 +45,31 @@ CCameraTelephotoControls::CCameraTelephotoControls(QWidget* parent)
     m_multiplier->setDecimals(1);
     m_multiplier->setPrefix(QString::fromUtf8("\xC3\x97"));
     m_multiplier->setValue(ei::kTelephotoMultiplierDefault);
-    m_multiplier->setFixedWidth(72);
+    m_multiplier->setMinimumWidth(72);
     m_multiplier->setToolTip(help);
-    m_multiplier->setAccessibleName(tr("Multiplier:"));
+    m_multiplier->setAccessibleName(multiplierLabel->text());
 
-    QLabel* directionLabel = new QLabel(tr("Direction:"), this);
+    QLabel* directionLabel = new QLabel(QString::fromUtf8("Направление:"), this);
     directionLabel->setBuddy(m_direction);
     m_direction->setObjectName("telephotoCameraDirection");
-    m_direction->addItem(tr("SW → NE"),
+    m_direction->addItem(QString::fromUtf8("Юго-запад → северо-восток"),
         int(ei::ETelephotoDirection::SouthwestToNortheast));
-    m_direction->addItem(tr("SE → NW"),
+    m_direction->addItem(QString::fromUtf8("Юго-восток → северо-запад"),
         int(ei::ETelephotoDirection::SoutheastToNorthwest));
-    m_direction->addItem(tr("NE → SW"),
+    m_direction->addItem(QString::fromUtf8("Северо-восток → юго-запад"),
         int(ei::ETelephotoDirection::NortheastToSouthwest));
-    m_direction->addItem(tr("NW → SE"),
+    m_direction->addItem(QString::fromUtf8("Северо-запад → юго-восток"),
         int(ei::ETelephotoDirection::NorthwestToSoutheast));
     m_direction->setCurrentIndex(int(ei::kTelephotoDirectionDefault));
     m_direction->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_direction->setToolTip(help);
-    m_direction->setAccessibleName(tr("Direction:"));
+    m_direction->setAccessibleName(directionLabel->text());
 
-    layout->addWidget(m_enabled);
-    multiplierLabel->hide();
-    layout->addWidget(m_multiplier);
-    directionLabel->hide();
-    layout->addWidget(m_direction);
+    layout->addWidget(m_enabled,0,0,1,2);
+    layout->addWidget(multiplierLabel,1,0);
+    layout->addWidget(m_multiplier,1,1);
+    layout->addWidget(directionLabel,2,0);
+    layout->addWidget(m_direction,2,1);
 
     connect(m_enabled, &QCheckBox::toggled,
             this, &CCameraTelephotoControls::telephotoEnabledChanged);

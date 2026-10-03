@@ -86,6 +86,8 @@
 #include "ui/message_log_panel.h"
 #include "ui/dock_hidden_tab.h"
 #include "ui/camera_telephoto_controls.h"
+#include "ui/viewport_tools_layout.h"
+#include <QWidgetAction>
 #include "camera_telephoto.h"
 #include "endurance_ui_scale.h"
 #include "select_window.h"
@@ -456,6 +458,18 @@ QIcon viewportToolIcon(int kind)
     case 3: p.drawEllipse(9,2,6,6);p.drawRect(2,17,6,5);p.drawRect(16,17,6,5);p.drawLine(12,8,12,12);p.drawLine(5,12,19,12);p.drawLine(5,12,5,17);p.drawLine(19,12,19,17);break;
     case 4: p.drawPolygon(QPolygonF()<<QPointF(3,8)<<QPointF(10,4)<<QPointF(17,8)<<QPointF(17,17)<<QPointF(10,21)<<QPointF(3,17));p.drawLine(3,8,10,12);p.drawLine(10,12,17,8);p.drawLine(10,12,10,21);p.setPen(QPen(QColor("#9de38c"),2));p.drawLine(19,2,19,10);p.drawLine(15,6,23,6);break;
     case 5: p.drawRoundedRect(3,2,18,20,2,2);p.setPen(QPen(QColor("#edc36c"),1.7));p.drawPolyline(QPolygonF()<<QPointF(9,8)<<QPointF(6,12)<<QPointF(9,16));p.drawPolyline(QPolygonF()<<QPointF(15,8)<<QPointF(18,12)<<QPointF(15,16));break;
+    case 7: p.drawPolygon(QPolygonF()<<QPointF(4,2)<<QPointF(20,13)<<QPointF(13,14)<<QPointF(10,21));break;
+    case 8: p.drawLine(12,2,12,22);p.drawLine(2,12,22,12);
+        p.drawPolyline(QPolygonF()<<QPointF(8,6)<<QPointF(12,2)<<QPointF(16,6));
+        p.drawPolyline(QPolygonF()<<QPointF(8,18)<<QPointF(12,22)<<QPointF(16,18));
+        p.drawPolyline(QPolygonF()<<QPointF(6,8)<<QPointF(2,12)<<QPointF(6,16));
+        p.drawPolyline(QPolygonF()<<QPointF(18,8)<<QPointF(22,12)<<QPointF(18,16));break;
+    case 9: p.setBrush(Qt::NoBrush);p.drawArc(QRectF(3,3,18,18),30*16,300*16);
+        p.drawPolyline(QPolygonF()<<QPointF(16,2)<<QPointF(21,7)<<QPointF(15,8));break;
+    case 10: p.drawRect(3,13,8,8);p.drawLine(9,15,21,3);
+        p.drawPolyline(QPolygonF()<<QPointF(14,3)<<QPointF(21,3)<<QPointF(21,10));break;
+    case 11: p.drawRect(2,13,8,8);p.drawRect(14,13,8,8);p.drawRect(8,2,8,8);
+        p.drawLine(6,13,12,10);p.drawLine(18,13,12,10);break;
     default: p.drawArc(QRectF(3,4,18,18),0,180*16);p.drawLine(12,13,18,7);p.drawEllipse(10,11,4,4);break;
     }
     return QIcon(pm);
@@ -2490,7 +2504,7 @@ void MainWindow::updateBehaviorModeUi()
 {
     const bool behaviorMode = CScene::getInstance()->getMode() == eEditModeLogic;
     const QString target = behaviorMode
-        ? tr("Switch to Object mode") : tr("Switch to Behavior mode");
+        ? QString::fromUtf8("Перейти к объектам") : QString::fromUtf8("Редактировать поведение объектов");
     const QString shortcutText = m_ui->actionChange_mod_e->shortcut()
         .toString(QKeySequence::NativeText);
     const QString tooltip = shortcutText.isEmpty()
@@ -2508,7 +2522,7 @@ void MainWindow::updateBehaviorModeUi()
         m_behaviorModeButton->setChecked(behaviorMode);
         m_behaviorModeButton->setIcon(behaviorModeIcon(behaviorMode,
             m_behaviorModeButton->palette().color(QPalette::ButtonText)));
-        m_behaviorModeButton->setText(target);
+        m_behaviorModeButton->setText(QString::fromUtf8("Поведение"));
         m_behaviorModeButton->setToolTip(tooltip);
         m_behaviorModeButton->setAccessibleName(target);
     }
@@ -3595,11 +3609,11 @@ void MainWindow::initShortcuts()
     m_mapTestAction->setShortcut(shortcut("shortcutTestMap", "Ctrl+F5"));
     m_stopMapTestAction->setShortcut(shortcut("shortcutStopMapTest", "Shift+Esc"));
     const struct { EButtonOp type; const char* option; const char* fallback; const char* label; } operations[] = {
-        {EButtonOpSelect, "shortcutSelectTool", "Esc", "Select / cancel tool"},
-        {EButtonOpMove, "shortcutMoveTool", "G", "Move selected objects"},
-        {EButtonOpRotate, "shortcutRotateTool", "R", "Rotate selected objects"},
-        {EButtonOpScale, "shortcutScaleTool", "T", "Scale selected objects"},
-        {EButtonOpTilebrush, "shortcutTileBrushTool", "Ctrl+L", "Landscape Tools"}
+        {EButtonOpSelect, "shortcutSelectTool", "Esc", "Выделение / отмена инструмента"},
+        {EButtonOpMove, "shortcutMoveTool", "G", "Переместить выделенные объекты"},
+        {EButtonOpRotate, "shortcutRotateTool", "R", "Повернуть выделенные объекты"},
+        {EButtonOpScale, "shortcutScaleTool", "T", "Изменить размер выделенных объектов"},
+        {EButtonOpTilebrush, "shortcutTileBrushTool", "Ctrl+L", "Инструменты ландшафта"}
     };
     for(const auto& operation : operations)
     {
@@ -3614,7 +3628,7 @@ void MainWindow::initShortcuts()
         const QString shortcutText = operation.type == EButtonOpSelect
             ? QKeySequence(Qt::Key_Escape).toString(QKeySequence::NativeText)
             : action->shortcut().toString(QKeySequence::NativeText);
-        const QString tip = tr(operation.label) + " (" + shortcutText + ")";
+        const QString tip = QString::fromUtf8(operation.label) + " (" + shortcutText + ")";
         action->setToolTip(tip);
     }
     if(m_ui->selectButton) m_ui->selectButton->setToolTip(m_operationActions.value(EButtonOpSelect)->toolTip());
@@ -3691,6 +3705,83 @@ void MainWindow::setupCompactViewportTools()
     connect(ungroup,&QAction::triggered,this,[this]{if(m_pView)m_pView->disassembleSelection();});
     auto* toolsMenu=m_ui->menuTools->addMenu(QString::fromUtf8("Сборки"));toolsMenu->setIcon(assemblies->icon());
     toolsMenu->addActions({open,save,ungroup});
+
+    // Reuse the original controls and connections; only their presentation changes.
+    while(QLayoutItem* item=layout->takeAt(0)) delete item;
+    delete layout;
+    auto* rows=new QVBoxLayout(bar);
+    rows->setContentsMargins(6,4,6,4);rows->setSpacing(6);
+    auto* groups=new QWidget(bar);groups->setObjectName("viewportToolGroups");
+    auto* flow=new CViewportToolsLayout(groups);
+    rows->addWidget(groups);
+    const auto group=[&](const char* name,const char* title,
+                         std::initializer_list<QToolButton*> buttons) {
+        auto* frame=new QGroupBox(QString::fromUtf8(title),groups);
+        frame->setObjectName(name);
+        auto* row=new CViewportToolsLayout(frame);
+        row->setContentsMargins(5,4,5,4);row->setSpacing(2);
+        for(auto* b:buttons) {
+            b->setMinimumSize(68,72);b->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);
+            b->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
+            b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);b->setIconSize(QSize(44,44));
+            row->addWidget(b);
+        }
+        flow->addWidget(frame);
+    };
+    const auto label=[](QToolButton* b,const char* text,const QString& tip=QString()) {
+        b->setText(QString::fromUtf8(text));b->setAccessibleName(b->text());
+        if(!tip.isEmpty())b->setToolTip(tip);
+    };
+    label(m_ui->selectButton,"Выделить");label(m_ui->moveButton,"Перенести");
+    label(m_ui->rotateButton,"Повернуть");label(m_ui->scaleButton,"Размер");
+    m_ui->selectButton->setIcon(viewportToolIcon(7));m_ui->moveButton->setIcon(viewportToolIcon(8));
+    m_ui->rotateButton->setIcon(viewportToolIcon(9));m_ui->scaleButton->setIcon(viewportToolIcon(10));
+    assemblies->setIcon(viewportToolIcon(11));toolsMenu->setIcon(assemblies->icon());
+    label(m_ui->tileBrushButton,"Рельеф",QString::fromUtf8("Изменить высоту и форму поверхности")
+        +" ("+m_operationActions.value(EButtonOpTilebrush)->shortcut().toString(QKeySequence::NativeText)+")");
+    label(m_groundPaintButton,"Покраска",QString::fromUtf8("Рисовать материалы поверхности"));
+    // QAction owns enabled state and shortcuts; its changed signal must not
+    // restore an English or long menu caption on these compact entry points.
+    const auto actionLabel=[&](QToolButton* b,QAction* action,const char* text,const char* tip) {
+        action->setIconText(QString::fromUtf8(text));action->setText(QString::fromUtf8(tip));
+        const auto refresh=[=] {
+            b->setText(QString::fromUtf8(text));b->setAccessibleName(QString::fromUtf8(tip));
+            const auto keys=action->shortcut().toString(QKeySequence::NativeText);
+            b->setToolTip(QString::fromUtf8(tip)+(keys.isEmpty()?QString():" ("+keys+")"));
+        };
+        connect(action,&QAction::changed,b,refresh);refresh();
+    };
+    actionLabel(create,m_ui->actionCreate_new_object,"Создать","Создать объект");
+    actionLabel(script,m_ui->actionOpen_MOB_Script,"Скрипт","Открыть скрипт MOB");
+    actionLabel(scenario,scenarioAction,"Сценарий","Сценарий карты");
+    label(travel,"Переходы");label(assemblies,"Сборки");
+    auto* magnet=bar->findChild<QToolButton*>("modelMagnetButton");label(magnet,"Магнит");
+
+    auto* camera=new QToolButton(bar);camera->setObjectName("cameraSettingsButton");
+    camera->setIcon(viewportToolIcon(6));camera->setAutoRaise(true);
+    label(camera,"Камера",QString::fromUtf8("Скорость перемещения и дальняя камера"));
+    auto* cameraMenu=new QMenu(camera);cameraMenu->setObjectName("cameraSettingsMenu");
+    auto* cameraPanel=new QWidget(cameraMenu);
+    auto* cameraLayout=new QVBoxLayout(cameraPanel);cameraLayout->setContentsMargins(12,12,12,12);
+    auto* speedRow=new QHBoxLayout;
+    auto* speedLabel=new QLabel(QString::fromUtf8("Скорость:"),cameraPanel);
+    speedLabel->setBuddy(m_cameraSpeedSpin);speedRow->addWidget(speedLabel);
+    m_cameraSpeedSlider->setToolTip(QString::fromUtf8("Скорость перемещения и приближения камеры. Также меняется колесом с настроенной клавишей-модификатором (по умолчанию Ctrl)."));
+    m_cameraSpeedSpin->setToolTip(m_cameraSpeedSlider->toolTip());
+    m_cameraSpeedSlider->setAccessibleName(QString::fromUtf8("Скорость камеры"));
+    m_cameraSpeedSpin->setAccessibleName(QString::fromUtf8("Множитель скорости камеры"));
+    speedRow->addWidget(m_cameraSpeedSlider);speedRow->addWidget(m_cameraSpeedSpin);
+    cameraLayout->addLayout(speedRow);cameraLayout->addWidget(m_cameraTelephotoControls);
+    auto* cameraAction=new QWidgetAction(cameraMenu);cameraAction->setDefaultWidget(cameraPanel);
+    cameraMenu->addAction(cameraAction);camera->setMenu(cameraMenu);camera->setPopupMode(QToolButton::InstantPopup);
+    delete bar->findChild<QLabel*>("cameraSpeedIcon");
+    group("objectToolGroup","Объекты",{m_ui->selectButton,m_ui->moveButton,m_ui->rotateButton,m_ui->scaleButton});
+    group("creationToolGroup","Создание",{create,assemblies});
+    group("landscapeToolGroup","Ландшафт",{m_ui->tileBrushButton,m_groundPaintButton});
+    group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,travel,scenario,script});
+    group("helperToolGroup","Помощники",{magnet,camera});
+    rows->addWidget(bar->findChild<QWidget*>("modelConnectionControls"));
+    bar->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
     updateLandscapeToolButtons();
 }
 
@@ -3827,18 +3918,31 @@ void MainWindow::createViewportToolbars()
     magnet->setAccessibleName(QString::fromUtf8("Магнит деталей"));operationLayout->addWidget(magnet);
     auto* connectionSource=new QComboBox(operationBar);connectionSource->setObjectName("modelConnectionSource");
     auto* connectionControls=new QWidget(operationBar);
+    connectionControls->setObjectName("modelConnectionControls");
     auto* connectionLayout=new QVBoxLayout(connectionControls);
     connectionLayout->setContentsMargins(0,0,0,0);connectionLayout->setSpacing(2);
-    connectionControls->setFixedWidth(300);
+    auto* connectionTop=new QWidget(connectionControls);
+    auto* connectionRow=new CViewportToolsLayout(connectionTop);
+    connectionLayout->addWidget(connectionTop);
+    auto* sourceLabel=new QLabel(QString::fromUtf8("Стык детали:"),connectionControls);
+    sourceLabel->setBuddy(connectionSource);connectionRow->addWidget(sourceLabel);
+    connectionSource->setMinimumContentsLength(18);
+    connectionSource->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    connectionSource->setMinimumWidth(160);connectionSource->setMaximumWidth(360);
+    connectionSource->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
+    connectionSource->setAccessibleName(QString::fromUtf8("Стык перемещаемой детали"));
     connectionSource->setToolTip(QString::fromUtf8("Стык переносимой детали. Авто перебирает все её стыки."));
     connectionSource->addItem(QString::fromUtf8("Нет перемещаемой детали"),QString());connectionSource->setEnabled(false);
-    connectionLayout->addWidget(connectionSource);
+    connectionRow->addWidget(connectionSource);
     auto* connectionFeedback=new QLabel(connectionControls);connectionFeedback->setObjectName("modelConnectionFeedback");
     connectionFeedback->setTextFormat(Qt::PlainText);connectionFeedback->setWordWrap(true);
     connectionLayout->addWidget(connectionFeedback);operationLayout->addWidget(connectionControls);
     auto* nextConnection=new QToolButton(operationBar);nextConnection->setObjectName("nextModelConnection");
-    nextConnection->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));nextConnection->setIconSize(QSize(28,28));nextConnection->setFixedSize(44,44);
-    nextConnection->setToolTip(QString::fromUtf8("Следующий вариант стыковки (Tab при перемещении)"));operationLayout->addWidget(nextConnection);
+    nextConnection->setText(QString::fromUtf8("Следующий"));
+    nextConnection->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    nextConnection->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));nextConnection->setIconSize(QSize(20,20));
+    nextConnection->setToolTip(QString::fromUtf8("Следующий вариант стыковки (Tab при перемещении)"));
+    nextConnection->setAccessibleName(nextConnection->text());connectionRow->addWidget(nextConnection);
     nextConnection->setEnabled(false);
     connect(magnet,&QToolButton::toggled,this,[=](bool enabled){
         m_pView->setModelMagnetEnabled(enabled);connectionControls->setVisible(enabled);nextConnection->setVisible(enabled);
@@ -3854,12 +3958,14 @@ void MainWindow::createViewportToolbars()
     connect(m_pView,&CView::modelConnectionStatusChanged,this,[=](const QString& status){
         if(!status.isEmpty())CStatusConnector::getInstance()->updateStatus("move.ico",status);
         connectionFeedback->setText(status);
-        connectionSource->setToolTip(status);nextConnection->setToolTip(status);magnet->setToolTip(status.isEmpty()?QString::fromUtf8("Магнит деталей. Точки стыковки задаются в витрине моделей."):status);});
+        magnet->setToolTip(QString::fromUtf8("Магнит деталей. Точки стыковки задаются в витрине моделей.")
+            +(status.isEmpty()?QString():"\n"+status));});
     connect(m_pView,&CView::modelConnectionTargetsChanged,this,[=](int count){nextConnection->setEnabled(count>1);});
     const bool magnetEnabled=QSettings().value("ui/modelMagnetEnabled",false).toBool();
     connectionControls->setVisible(magnetEnabled);nextConnection->setVisible(magnetEnabled);magnet->setChecked(magnetEnabled);
     operationLayout->addStretch(1);
     QLabel* cameraIcon=new QLabel(operationBar);
+    cameraIcon->setObjectName("cameraSpeedIcon");
     cameraIcon->setPixmap(viewportToolIcon(6).pixmap(22,22));
     cameraIcon->setToolTip(tr("Camera Speed:"));cameraIcon->setAccessibleName(tr("Camera Speed:"));
     operationLayout->addWidget(cameraIcon);
@@ -3878,7 +3984,7 @@ void MainWindow::createViewportToolbars()
     m_cameraSpeedSpin->setSingleStep(0.1);
     m_cameraSpeedSpin->setDecimals(1);
     m_cameraSpeedSpin->setPrefix(QString::fromUtf8("\xC3\x97"));
-    m_cameraSpeedSpin->setFixedWidth(72);
+    m_cameraSpeedSpin->setMinimumWidth(72);
     m_cameraSpeedSpin->setToolTip(m_cameraSpeedSlider->toolTip());
     double cameraSpeed = 1.0;
     if(const COptDouble* option = dynamic_cast<const COptDouble*>(
@@ -3927,7 +4033,7 @@ void MainWindow::createViewportToolbars()
                m_settings->opt(eOptSetGeneral, "cameraSpeedMultiplier")))
             option->setValue(value);
         m_cameraSpeedPersistTimer->start(250);
-        statusBar()->showMessage(tr("Camera speed: %1x").arg(value, 0, 'f', 1), 1500);
+        statusBar()->showMessage(QString::fromUtf8("Скорость камеры: ×%1").arg(value, 0, 'f', 1), 1500);
     });
     connect(m_cameraTelephotoControls,
             &CCameraTelephotoControls::telephotoEnabledChanged,
@@ -3943,9 +4049,9 @@ void MainWindow::createViewportToolbars()
     {
         m_cameraTelephotoControls->setTelephotoEnabled(enabled);
         statusBar()->showMessage(enabled
-            ? tr("Telephoto camera enabled (%1x).").arg(
+            ? QString::fromUtf8("Дальняя камера включена (×%1).").arg(
                   m_pView->telephotoCameraMultiplier(), 0, 'f', 1)
-            : tr("Telephoto camera disabled."), 1800);
+            : QString::fromUtf8("Дальняя камера выключена."), 1800);
     });
     connect(m_pView, &CView::telephotoCameraMultiplierChanged, this,
             [this](double value)
@@ -3956,7 +4062,7 @@ void MainWindow::createViewportToolbars()
             option->setValue(value);
         m_cameraSpeedPersistTimer->start(250);
         statusBar()->showMessage(
-            tr("Telephoto multiplier: %1x").arg(value, 0, 'f', 1), 1500);
+            QString::fromUtf8("Дистанция дальней камеры: ×%1").arg(value, 0, 'f', 1), 1500);
     });
     connect(m_pView, &CView::telephotoCameraDirectionChanged, this,
             [this](int direction)
@@ -9098,4 +9204,3 @@ void MainWindow::on_actionSave_landscape_MPR_triggered()
     if(hasTravelChanges()){saveMapWithTravel();return;}
     m_pView->saveLand();
 }
-
