@@ -5231,7 +5231,8 @@ void CTerrainWorkingAtlas::installCatalogVariants(
                     ? CTerrainTransitionCatalog::mirroredGridY(variant.signature)
                     : variant.signature;
             if(hasSelectableAuthoredCandidate(
-                   paintSignature, sourceTile.runtimeTerrainType))
+                   paintSignature, sourceTile.runtimeTerrainType,
+                   sourceTile.routeOwnerMaterial))
                 continue;
             m_workingCatalog.addVariant(variant);
         }
@@ -5261,10 +5262,11 @@ void CTerrainWorkingAtlas::installCatalogVariants(
 
 bool CTerrainWorkingAtlas::hasSelectableAuthoredCandidate(
     const STerrainTransitionSignature& signature,
-    qint32 runtimeTerrainType) const
+    qint32 runtimeTerrainType, qint32 preferredRouteOwnerMaterial) const
 {
     if(runtimeTerrainType < 0 || runtimeTerrainType >= 16)
         return false;
+    QSet<int> allowedSlots;
     for(const STerrainTransitionVariant& variant :
             m_authoredCatalog.paintVariants(signature))
     {
@@ -5275,9 +5277,15 @@ bool CTerrainWorkingAtlas::hasSelectableAuthoredCandidate(
            || slot >= m_workingTileTypes.size())
             continue;
         if(m_workingTileTypes.at(slot) == runtimeTerrainType)
-            return true;
+            allowedSlots.insert(slot);
     }
-    return false;
+    // A retained map can contain generated artwork owned by the opposite
+    // material. Use the same eligibility rules as final stroke selection;
+    // matching corners and runtime type alone do not make it a substitute.
+    bool found=false;
+    m_authoredCatalog.selectForPaint(signature,0,0,0,allowedSlots,
+        preferredRouteOwnerMaterial,&found);
+    return found;
 }
 
 quint16 CTerrainWorkingAtlas::resolve(

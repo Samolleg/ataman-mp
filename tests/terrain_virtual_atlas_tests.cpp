@@ -514,6 +514,8 @@ class TerrainVirtualAtlasTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void oppositeBaselineOwnerDoesNotBlockStroke_data();
+    void oppositeBaselineOwnerDoesNotBlockStroke();
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
@@ -8085,6 +8087,71 @@ void TerrainVirtualAtlasTests::generatedPaintMatrixSavesReopensAndMatchesVertexO
             "Real-map visual fixtures must be generated separately from explicitly authorized "
             "copied source maps and atlas resources.\n")));
     }
+}
+
+void TerrainVirtualAtlasTests::oppositeBaselineOwnerDoesNotBlockStroke_data()
+{
+    QTest::addColumn<bool>("mirrored");
+    QTest::addColumn<int>("paint");
+    QTest::addColumn<bool>("legacyOwner");
+    for(bool mirror:{false,true})for(int material:{1,2})for(bool legacy:{false,true})
+        QTest::newRow(qPrintable(QString("mirror%1-paint%2-legacy%3").arg(mirror).arg(material).arg(legacy)))
+            <<mirror<<material<<legacy;
+}
+
+void TerrainVirtualAtlasTests::oppositeBaselineOwnerDoesNotBlockStroke()
+{
+    QFETCH(bool,mirrored);QFETCH(int,paint);QFETCH(bool,legacyOwner);
+    const int background=3-paint;
+    Fixture fixture;fixture.catalog.setMirrorPaintGridY(mirrored);
+    const auto wanted=signature(paint,background,background,background);
+    const auto physical=mirrored?CTerrainTransitionCatalog::mirroredGridY(wanted):wanted;
+    fixture.images.append(solid(qRgba(80,80,80,255)));
+    for(int rotation=0;rotation<4;++rotation) {
+        SMprPackedTile packed;packed.tileIndex=4;packed.rotation=quint8(rotation);
+        STerrainTransitionVariant v;v.packedTile=packed.encode();
+        v.signature=CTerrainTransitionCatalog::rotated(physical,-rotation);
+        v.canonicalGeneratedRoute=true;v.routeOwnerMaterial=legacyOwner?0:background;
+        QVERIFY(fixture.catalog.addVariant(v));
+    }
+    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,23,64,{}, {},
+        QVector<qint32>(5,0),{{1,0},{2,0},{3,0},{4,0}});
+    QVERIFY(working.isValid());
+    QByteArray payload;QDataStream sec(&payload,QIODevice::WriteOnly);
+    sec.setByteOrder(QDataStream::LittleEndian);sec<<quint32(0xCF4BF774)<<quint8(0);
+    payload.append(QByteArray(33*33*8,'\0'));payload.append(QByteArray(16*16*2,'\0'));
+    STerrainSectorSource source;source.memberName="CaveSet000000.SEC";
+    source.sectorX=0;source.sectorY=0;source.type=0;source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;CValidationReport report;
+    QVERIFY(model.loadSources(1,1,100.0f,{source},&report,1,QVector<qint32>(64,0),0));
+    QVector<qint32> values(17*17,background);
+    QVERIFY(model.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,values,values));
+    const auto before=model.sectorPayload(0,0);
+    CTerrainVirtualMaterialField beforeField;QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&beforeField));
+    STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=0;
+    const auto preview=model.makeVirtualMaterialPaint(8,8,brush,ETerrainTileLayer::Land,paint,working.catalog(),23,&report);
+    QVERIFY(!preview.isEmpty());QVERIFY(model.apply(preview,true,&report));
+    CTerrainVirtualMaterialField field;QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field));
+    QMap<int,quint64> usage;
+    for(int y:{7,8})for(int x:{7,8}) {
+        const auto packed=working.resolve(field.cellSignature(x,y),x,y,&usage,{},nullptr,&report,paint);
+        ++usage[SMprPackedTile::decode(packed).atlasSlot()];
+    }
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(model.installWorkingAtlasSlotTypes(working.activeTileTypes()));
+    const auto resolution=model.makeVirtualStrokeResolution(preview,working.catalog(),23,&report,false,paint);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(model.apply(resolution,true,&report));
+    for(int y:{7,8})for(int x:{7,8}) {
+        bool found=false;const auto packed=model.packedTile(x,y,ETerrainTileLayer::Land,&found);QVERIFY(found);
+        QCOMPARE(working.catalog().gridSignatureForPacked(packed,&found),field.cellSignature(x,y));QVERIFY(found);
+        QCOMPARE(working.catalog().variantForPacked(packed).routeOwnerMaterial,qint32(paint));
+    }
+    QVERIFY(model.apply(resolution,false,&report));QVERIFY(model.apply(preview,false,&report));
+    QCOMPARE(model.sectorPayload(0,0),before);
+    CTerrainVirtualMaterialField undone;QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
+    QCOMPARE(undone.stableSha256(),beforeField.stableSha256());
+    for(int slot=0;slot<fixture.images.size();++slot)QCOMPARE(working.activeTileImages().at(slot),fixture.images.at(slot));
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

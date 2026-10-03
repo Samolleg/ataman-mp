@@ -526,7 +526,7 @@ private:
                                 int workingSlot);
     bool hasSelectableAuthoredCandidate(
         const STerrainTransitionSignature& signature,
-        qint32 runtimeTerrainType) const;
+        qint32 runtimeTerrainType, qint32 preferredRouteOwnerMaterial) const;
 
     CTerrainTransitionCatalog m_authoredCatalog;
     CTerrainTransitionCatalog m_workingCatalog;
