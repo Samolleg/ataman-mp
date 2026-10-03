@@ -14,6 +14,7 @@ struct SDatabaseMapEntry
     QString key;
     QString name;
     QString label;
+    bool labelFromTexts{false};
     QString model;
     QString primaryTexture;
     QString secondaryTexture;
@@ -24,6 +25,7 @@ struct SDatabaseMapEntry
 };
 
 QVector<SDatabaseMapEntry> databaseMapCatalog(const SProfileDatabaseSnapshot& database);
+void applyDatabaseMapTexts(QVector<SDatabaseMapEntry>* entries, const QMap<QString, QString>& texts);
 // Converted item textures use a separate map resource, without the file extension.
 QString databaseItemMapTextureName(QString textureName);
 // Applies database identity to a fresh type's defaults, never to a selected map object.

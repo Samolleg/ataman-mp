@@ -58,6 +58,22 @@ int runDatabaseCreationCheck()
     };
     QByteArray baseline;
     {
+        ei::SDatabaseMapEntry creature,item,lever;
+        creature.name="BoarTutor";creature.model="boar";
+        item.category=ei::EDatabaseMapCategory::Item;item.name="2h bone club";
+        lever.category=ei::EDatabaseMapCategory::Lever;lever.name="stst58";lever.model="stst58";lever.label="database fallback";
+        QVector<ei::SDatabaseMapEntry> entries{creature,item,lever};
+        ei::applyDatabaseMapTexts(&entries,{{"unit BOARTUTOR",QString::fromUtf8("Молодая кабаниха\r\nОписание")},
+            {"INSTR 2h_Bone_Club",QString::fromUtf8("Двуручная дубина\r\nОписание")},
+            {"LEVER stst58",QString::fromUtf8("Рычаг\r\nОписание")}});
+        if(entries[0].label!=QString::fromUtf8("Молодая кабаниха") || entries[0].name!="BoarTutor" || entries[0].model!="boar"
+            || entries[1].label!=QString::fromUtf8("Двуручная дубина") || entries[2].label!=QString::fromUtf8("Рычаг")
+            || !entries[2].labelFromTexts)return fail("texts lookup, normalization and preserved identifiers");
+        QVector<ei::SDatabaseMapEntry> missing{lever};ei::applyDatabaseMapTexts(&missing,{});
+        if(missing.first().label!="database fallback" || missing.first().labelFromTexts)return fail("explicit database fallback");
+        output<<"PASS: localized catalogue names preserve identifiers and report fallback provenance\n";
+    }
+    {
         util::CMobParser writer(baseline, true);
         writer.startSection("OBJECT_DB_FILE");
         writer.startSection("SC_OBJECT_DB_FILE"); writer.endSection();
@@ -448,6 +464,57 @@ int runDatabasePreviewCheck()
     auto* search = form->findChild<QLineEdit*>("databaseSearch");
     auto* objects = form->findChild<QListWidget*>("databaseObjects");
     if(!category || !search || !objects) return fail("picker controls");
+    const auto findCode=[&](const QString& code) {
+        QList<QListWidgetItem*> found;
+        for(int i=0;i<objects->count();++i)
+            if(objects->item(i)->data(Qt::UserRole+1).toString()==code)found.append(objects->item(i));
+        return found;
+    };
+    if(qEnvironmentVariableIsSet("EI_TEST_CREATE_CATALOG_ONLY")) {
+        form->resize(1200,800);
+        auto* assembly=form->findChild<QPushButton*>("createAssemblyCatalog");
+        auto* gallery=form->findChild<QPushButton*>("technicalModelGallery");
+        if(!assembly || !gallery)return fail("technical entry points");
+        for(int c:{0,1,2}) {
+            category->setCurrentIndex(c);search->clear();
+            if(!assembly->isHidden() || !gallery->isHidden())return fail("assembly/gallery visible in database category");
+        }
+        category->setCurrentIndex(0);search->setText("BoarTutor");
+        const auto boar=findCode("BoarTutor");
+        if(boar.size()!=1 || !boar.first()->text().startsWith("BoarTutor - "))return fail("localized creature identity");
+        const auto localized=boar.first()->text().section(" - ",1);
+        search->setText(localized);
+        if(findCode("BoarTutor").size()!=1)return fail("localized creature search");
+        form->grab().save(outputDirectory+"/creatures.png");
+        category->setCurrentIndex(1);search->setText("2h bone club");
+        const auto club=findCode("2h bone club");
+        if(club.size()!=1 || !club.first()->text().startsWith("2h bone club - "))return fail("normalized item texts identity");
+        form->grab().save(outputDirectory+"/items.png");
+        category->setCurrentIndex(2);search->setText("stst58");
+        const auto lever=findCode("stst58");
+        if(lever.size()!=1 || !lever.first()->text().startsWith("stst58"))return fail("lever model first");
+        objects->setCurrentItem(lever.first());
+        preview->makeCurrent();
+        if(!CTextureList::getInstance()->hasTexture("cavelevel00","stst58"))return fail("installed lever texture");
+        auto* properties=form->findChild<QTableWidget*>("tableParameters");
+        bool bound=false;
+        for(int row=0;properties && row<properties->rowCount();++row) {
+            auto* choice=qobject_cast<QComboBox*>(properties->cellWidget(row,1));
+            if(choice && choice->currentText()=="cavelevel00")bound=true;
+        }
+        if(!bound)return fail("lever uses catalog texture instead of name prefix");
+        preview->renderPixmap(400,400).save(outputDirectory+"/lever-texture.png");
+        form->grab().save(outputDirectory+"/lever.png");
+        category->setCurrentIndex(3);QApplication::processEvents();
+        auto* type=form->findChild<QComboBox*>("comboObjectType");
+        if(assembly->isHidden() || gallery->isHidden() || !type
+            || type->mapTo(form,QPoint()).y()>=gallery->mapTo(form,QPoint()).y()
+            || gallery->mapTo(form,QPoint()).y()>=assembly->mapTo(form,QPoint()).y()
+            || gallery->iconSize()!=QSize(24,24) || assembly->iconSize()!=QSize(24,24))return fail("technical control order and icon sizes");
+        form->grab().save(outputDirectory+"/technical.png");
+        output<<"PASS: category visibility, original IDs, texts names/search, lever texture, technical order/icons\n";
+        return 0;
+    }
     const bool jmv = usesJmvRuntime(snapshot->profileId);
     const QStringList creatures = jmv ? QStringList{"AncientCurseM25", "ArmoredTurtle110"}
                                      : QStringList{snapshot->monsters.first().name};
@@ -474,7 +541,7 @@ int runDatabasePreviewCheck()
         if(names.isEmpty()) return fail("no fixture creature in active database");
         for(const QString& name:names) {
             form->show(); category->setCurrentIndex(0); search->setText(name);
-            const auto exact=objects->findItems(name,Qt::MatchExactly);
+            const auto exact=findCode(name);
             if(exact.size()!=1) return fail("NPC selection: "+name);
             objects->setCurrentItem(exact.first());
             if(!capture(name)) return fail("NPC preview: "+name);
@@ -596,7 +663,7 @@ int runDatabasePreviewCheck()
         output << "Synthetic DXT1 map textures: binding test, not game appearance acceptance\n";
     }
     category->setCurrentIndex(1); search->setText(weaponName);
-    const auto matches = objects->findItems(weaponName, Qt::MatchExactly);
+    const auto matches = findCode(weaponName);
     if(matches.size() != 1) return fail("weapon selection " + weaponName);
     objects->setCurrentItem(matches.first());
     if(!capture("weapon"))

@@ -45,6 +45,8 @@
 #include "model_gallery_thumbnail.h"
 #include "resource_catalog.h"
 #include "resource_name.h"
+#include "game_text_catalog.h"
+#include <QPainter>
 
 CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     QDialog(parent),
@@ -120,11 +122,29 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_modelGalleryButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     ui->verticalLayout_2->insertWidget(6, m_modelGalleryButton);
     connect(m_modelGalleryButton, &QPushButton::clicked, this, &CCreateObjectForm::openModelGallery);
-    auto* assemblyButton=new QPushButton(QString::fromUtf8("Готовые сборки…"),this);
+    auto* assemblyButton=new QPushButton(QString::fromUtf8("Сборки…"),this);
+    m_assemblyButton=assemblyButton;
     assemblyButton->setObjectName("createAssemblyCatalog");
     assemblyButton->setIcon(style()->standardIcon(QStyle::SP_FileDialogContentsView));
     ui->verticalLayout_2->insertWidget(6,assemblyButton);
     connect(assemblyButton,&QPushButton::clicked,this,[this]{if(m_pView){hide();m_pView->openAssemblyCatalog();}});
+    // The technical entry points follow object type, with texture controls below.
+    ui->verticalLayout_2->removeItem(ui->horizontalLayout_2);
+    ui->verticalLayout_2->insertLayout(6,ui->horizontalLayout_2);
+    ui->verticalLayout_2->removeWidget(m_modelGalleryButton);
+    ui->verticalLayout_2->insertWidget(7,m_modelGalleryButton);
+    ui->verticalLayout_2->removeWidget(assemblyButton);
+    ui->verticalLayout_2->insertWidget(8,assemblyButton);
+    ui->labelObjectType->setText(QString::fromUtf8("Выбор объекта:"));
+    for(auto* button:{m_modelGalleryButton,assemblyButton}) {
+        QPixmap icon(48,48);icon.fill(Qt::transparent);
+        QPainter p(&icon);p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(QColor("#c5deed"),2));p.setBrush(QColor("#477f98"));
+        if(button==assemblyButton) {p.drawRect(3,26,16,16);p.drawRect(29,26,16,16);p.drawRect(16,3,16,16);p.drawLine(11,26,24,19);p.drawLine(37,26,24,19);}
+        else {for(int y:{4,26})for(int x:{4,26})p.drawRoundedRect(x,y,17,17,2,2);}
+        p.end();button->setIcon(QIcon(icon));button->setIconSize(QSize(24,24));
+        button->setMinimumHeight(32);button->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    }
     connect(m_technicalTexture, QOverload<int>::of(&QComboBox::activated),
             this, [this](int) { applyTechnicalTextureChoice(); });
     connect(m_technicalTexture->lineEdit(), &QLineEdit::editingFinished,
@@ -605,6 +625,17 @@ void CCreateObjectForm::refreshDatabase()
                                    : QSharedPointer<ei::DatabaseDocument>();
     m_itemCatalog = document ? ei::ItemSpellConstructorCatalog::fromDocument(*document)
                             : ei::ItemSpellConstructorCatalog();
+    QStringList resourceRoots,mapRoots;
+    if(m_pView && m_pView->settings()) {
+        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"resourceRoots")))resourceRoots=option->value().toList();
+        if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots")))mapRoots=option->value().toList();
+    }
+    const auto texts=ei::loadGameTextCatalog(resourceRoots);
+    ei::applyDatabaseMapTexts(&m_databaseEntries,texts.entries);
+    m_itemCatalog.applyGameTexts(texts.entries);
+    // Read the existing database-side catalog without importing or saving it.
+    m_modelCatalogProfile=ei::TechnicalModelCatalog::profileKey(mapRoots);
+    m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(snapshot?snapshot->sourceArchivePath:QString()),&m_modelCatalogError);
     filterDatabase();
 }
 
@@ -624,6 +655,7 @@ void CCreateObjectForm::filterDatabase()
     m_technicalTexture->setVisible(technicalMode);
     m_technicalTextureStatus->setVisible(technicalMode);
     m_modelGalleryButton->setVisible(technicalMode);
+    m_assemblyButton->setVisible(technicalMode);
     if(technicalMode && m_pView)
     {
         m_technicalTextureScan.stop();
@@ -643,7 +675,7 @@ void CCreateObjectForm::filterDatabase()
             m_technicalTextures.refreshSources(roots);
             if(m_technicalTextures.hasPendingFiles()) m_technicalTextureScan.start();
             else saveTechnicalCatalog();
-        } else m_modelCatalog.save(&m_modelCatalogError); // Do not replace an unvisited scan cache with an empty one.
+        } // Browsing existing bindings does not rewrite the user's catalog.
     }
     else
         m_technicalTextureScan.stop();
@@ -667,10 +699,15 @@ void CCreateObjectForm::filterDatabase()
         const auto& entry = m_databaseEntries.at(index);
         const QString searchable = entry.name + " " + entry.label + " " + entry.model;
         if(entry.category != category || !searchable.contains(query, Qt::CaseInsensitive)) continue;
-        auto* item = new QListWidgetItem(entry.label == entry.name ? entry.name
-            : entry.label + " (" + entry.name + ")", m_databaseList);
+        const QString code=entry.category==ei::EDatabaseMapCategory::Lever?entry.model:entry.name;
+        auto* item = new QListWidgetItem(entry.label == entry.name ? code
+            : code + " - " + entry.label, m_databaseList);
         item->setData(Qt::UserRole, index);
-        item->setToolTip(entry.model + "\n" + entry.unavailableReason);
+        item->setData(Qt::UserRole+1,entry.name);
+        item->setToolTip(entry.model + "\n" + (entry.labelFromTexts
+            ?QString::fromUtf8("Название из texts.res: ")+entry.label
+            :QString::fromUtf8("Название в texts.res не найдено. Показано описание базы, если оно есть."))
+            +"\n"+entry.unavailableReason);
     }
     if(m_databaseList->count()) m_databaseList->setCurrentRow(0);
     selectDatabaseEntry();
@@ -706,7 +743,8 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     m_technicalTextureLabel->setVisible(supportsTexture);
     m_technicalTexture->setVisible(supportsTexture);
     m_technicalTextureStatus->setVisible(supportsTexture);
-    m_modelGalleryButton->setVisible(supportsTexture);
+    m_modelGalleryButton->setVisible(!m_databaseMode);
+    m_modelGalleryButton->setEnabled(supportsTexture);
     if(!supportsTexture)
         return;
 
@@ -717,8 +755,8 @@ void CCreateObjectForm::refreshTechnicalTextureChoices()
     available.sort(Qt::CaseInsensitive);
     const auto exact = m_modelCatalog.textureChoices(m_modelCatalogProfile, model, available, m_technicalTextures);
     const QString russian = m_modelCatalog.russianName(model);
-    m_modelGalleryButton->setText(russian.isEmpty() ? tr("Choose model from gallery…")
-        : tr("Model gallery: %1").arg(russian));
+    m_modelGalleryButton->setText(QString::fromUtf8("Выбрать модель из витрины…"));
+    m_modelGalleryButton->setToolTip(russian);
     const QSignalBlocker blocker(m_technicalTexture);
     m_rebuildingTextureChoices = true;
     m_technicalTexture->clear();
@@ -919,6 +957,9 @@ void CCreateObjectForm::selectDatabaseEntry()
     }
     if(entry.category == ei::EDatabaseMapCategory::Lever)
     {
+        const auto bindings=m_modelCatalog.textureChoices(m_modelCatalogProfile,entry.model,
+            CTextureList::getInstance()->textureList(),m_technicalTextures);
+        if(!bindings.isEmpty())entry.primaryTexture=bindings.first().name;
         // Use only an unambiguous installed texture match; do not borrow a map object.
         QStringList matches;
         for(QString texture : CTextureList::getInstance()->textureList())
@@ -929,7 +970,7 @@ void CCreateObjectForm::selectDatabaseEntry()
             if(texture.startsWith(entry.model, Qt::CaseInsensitive)) matches.append(texture);
         }
         matches.removeDuplicates();
-        if(matches.size() == 1) entry.primaryTexture = matches.first();
+        if(entry.primaryTexture.isEmpty() && matches.size() == 1) entry.primaryTexture = matches.first();
     }
     bool hasModel = false;
     for(QString model : CObjectList::getInstance()->figureList())

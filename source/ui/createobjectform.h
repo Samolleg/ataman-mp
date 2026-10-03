@@ -99,6 +99,7 @@ private:
     bool m_autoPickExactTexture{false};
     bool m_rebuildingTextureChoices{false};
     QPushButton* m_modelGalleryButton{nullptr};
+    QPushButton* m_assemblyButton{nullptr};
     ei::TechnicalModelCatalog m_modelCatalog;
     QString m_modelCatalogProfile;
     QString m_modelCatalogError;

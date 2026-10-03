@@ -459,7 +459,9 @@ void ItemSpellConstructorCatalog::applyGameTexts(const QMap<QString, QString>& e
     {
         const QString prefix = item.category == QStringLiteral("Weapon") ? QStringLiteral("WEAPON ")
             : item.category == QStringLiteral("Armor") ? QStringLiteral("ARMOR ") : QStringLiteral("QITEM ");
-        QString name = textEntry(entries, {prefix + item.name, QStringLiteral("INSTR ") + item.name});
+        QString name = textEntry(entries, {prefix + item.name, prefix + textIdentity(item.name),
+            QStringLiteral("INSTR ") + item.name, QStringLiteral("INSTR ") + textIdentity(item.name),
+            QStringLiteral("QUESTITEM ") + textIdentity(item.name),QStringLiteral("LITEM ") + textIdentity(item.name)});
         if(!name.isEmpty()) item.displayName = name;
     }
 }

@@ -3,6 +3,7 @@
 #include "../runtime/character_bodypart_runtime.h"
 #include <QCoreApplication>
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <cmath>
 
 namespace {
@@ -17,6 +18,28 @@ QString texture(const QString& model, QString value)
 }
 
 namespace ei {
+void applyDatabaseMapTexts(QVector<SDatabaseMapEntry>* entries, const QMap<QString, QString>& texts)
+{
+    QMap<QString,QString> names;
+    for(auto it=texts.constBegin();it!=texts.constEnd();++it) {
+        QString value=it.value();value.replace('\r','\n');
+        names.insert(it.key().toCaseFolded(),value.split('\n',QString::SkipEmptyParts).value(0).trimmed());
+    }
+    for(auto& entry:*entries) {
+        QString identity=entry.name.trimmed();identity.replace(QRegularExpression("[\\s-]+"),"_");
+        QStringList prefixes;
+        if(entry.category==EDatabaseMapCategory::Creature)prefixes=QStringList{"UNIT "};
+        else if(entry.category==EDatabaseMapCategory::Item)prefixes=QStringList{"INSTR ","QUESTITEM ","LITEM ","QITEM ","WEAPON ","ARMOR "};
+        else prefixes=QStringList{"LEVER ","OBJECT ","MODEL ",""};
+        entry.labelFromTexts=false;
+        if(entry.category!=EDatabaseMapCategory::Lever)entry.label=entry.name;
+        for(const auto& prefix:prefixes) {
+            QString found=names.value((prefix+entry.name).toCaseFolded());
+            if(found.isEmpty())found=names.value((prefix+identity).toCaseFolded());
+            if(!found.isEmpty()){entry.label=found;entry.labelFromTexts=true;break;}
+        }
+    }
+}
 QString databaseItemMapTextureName(QString textureName)
 {
     textureName = texture(QString(), textureName);
