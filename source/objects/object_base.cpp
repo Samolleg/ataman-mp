@@ -927,6 +927,12 @@ void CObjectBase::recalcFigure()
         delete part;
     m_aPart.clear();
     m_figureComplexion = m_complection;
+    if(!m_pFigure)
+    {
+        // A missing preview must not prevent editing the serialized scale.
+        recalcMinPos();
+        return;
+    }
     // Editor-only helpers intentionally have no serialized model name. They
     // still need distinct cache identities; otherwise the first helper built
     // supplies its geometry to every later helper.

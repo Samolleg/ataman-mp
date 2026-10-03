@@ -470,6 +470,9 @@ QIcon viewportToolIcon(int kind)
         p.drawPolyline(QPolygonF()<<QPointF(14,3)<<QPointF(21,3)<<QPointF(21,10));break;
     case 11: p.drawRect(2,13,8,8);p.drawRect(14,13,8,8);p.drawRect(8,2,8,8);
         p.drawLine(6,13,12,10);p.drawLine(18,13,12,10);break;
+    case 12: p.setBrush(QColor("#edc36c"));p.drawRoundedRect(3,3,18,18,3,3);
+        p.setPen(Qt::NoPen);p.setBrush(QColor("#38434d"));
+        for(const QPointF point:{QPointF(7,7),QPointF(17,7),QPointF(12,12),QPointF(7,17),QPointF(17,17)})p.drawEllipse(point,1.6,1.6);break;
     default: p.drawArc(QRectF(3,4,18,18),0,180*16);p.drawLine(12,13,18,7);p.drawEllipse(10,11,4,4);break;
     }
     return QIcon(pm);
@@ -3709,6 +3712,38 @@ void MainWindow::setupCompactViewportTools()
     auto* toolsMenu=m_ui->menuTools->addMenu(QString::fromUtf8("Сборки"));toolsMenu->setIcon(assemblies->icon());
     toolsMenu->addActions({open,save,ungroup});
 
+    auto* random=button("randomObjectToolbarButton",QString::fromUtf8("Рандом"),12,13);
+    random->setToolTip(QString::fromUtf8("ЛКМ — случайный масштаб и встроенная форма выделенных объектов; ПКМ — оси и сила"));
+    auto* randomMenu=new QMenu(random);randomMenu->setObjectName("objectRandomSettingsMenu");
+    auto* axisGroup=new QActionGroup(randomMenu);axisGroup->setExclusive(true);
+    const int savedAxes=QSettings().value("ui/objectRandomAxes",7).toInt();
+    const int axes=savedAxes>=1 && savedAxes<=7 ? savedAxes : 7;
+    for(int mask:{1,2,4,3,5,6,7}) {
+        QString name;for(int axis=0;axis<3;++axis)if(mask & (1<<axis))name+=QString("XYZ")[axis];
+        auto* action=randomMenu->addAction(QString::fromUtf8("Менять только %1").arg(name));
+        action->setObjectName("objectRandomAxis"+name);action->setData(mask);action->setCheckable(true);
+        axisGroup->addAction(action);action->setChecked(mask==axes);
+    }
+    connect(axisGroup,&QActionGroup::triggered,random,[axisGroup]{
+        QSettings().setValue("ui/objectRandomAxes",axisGroup->checkedAction()->data());
+    });
+    randomMenu->addSeparator();
+    auto* strengthPanel=new QWidget(randomMenu);auto* strengthLayout=new QHBoxLayout(strengthPanel);
+    strengthLayout->setContentsMargins(12,6,12,6);
+    strengthLayout->addWidget(new QLabel(QString::fromUtf8("Сила: ±"),strengthPanel));
+    auto* strength=new QSpinBox(strengthPanel);strength->setObjectName("objectRandomStrength");
+    strength->setRange(0,100);strength->setSuffix(" %");
+    strength->setValue(qBound(0,QSettings().value("ui/objectRandomStrength",25).toInt(),100));
+    strength->setToolTip(QString::fromUtf8("Отклонение от текущего масштаба каждого объекта по выбранным осям"));
+    strengthLayout->addWidget(strength);
+    auto* strengthAction=new QWidgetAction(randomMenu);strengthAction->setDefaultWidget(strengthPanel);randomMenu->addAction(strengthAction);
+    connect(strength,QOverload<int>::of(&QSpinBox::valueChanged),random,[](int value){QSettings().setValue("ui/objectRandomStrength",value);});
+    random->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(random,&QWidget::customContextMenuRequested,random,[random,randomMenu](const QPoint& point){randomMenu->popup(random->mapToGlobal(point));});
+    connect(random,&QToolButton::clicked,this,[this,axisGroup,strength]{
+        if(m_pView)m_pView->randomizeSelectedObjects(axisGroup->checkedAction()->data().toInt(),strength->value());
+    });
+
     // Reuse the original controls and connections; only their presentation changes.
     while(QLayoutItem* item=layout->takeAt(0)) delete item;
     delete layout;
@@ -3780,7 +3815,7 @@ void MainWindow::setupCompactViewportTools()
     cameraMenu->addAction(cameraAction);camera->setMenu(cameraMenu);camera->setPopupMode(QToolButton::InstantPopup);
     delete bar->findChild<QLabel*>("cameraSpeedIcon");
     group("objectToolGroup","Объекты",{m_ui->selectButton,m_ui->moveButton,m_ui->rotateButton,m_ui->scaleButton});
-    group("creationToolGroup","Создание",{create,gallery,assemblies});
+    group("creationToolGroup","Создание",{create,gallery,assemblies,random});
     group("landscapeToolGroup","Ландшафт",{m_ui->tileBrushButton,m_groundPaintButton});
     group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,travel,scenario,script});
     group("helperToolGroup","Помощники",{magnet,camera});

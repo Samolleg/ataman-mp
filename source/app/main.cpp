@@ -6,6 +6,7 @@
 #include "group_rotation_check.h"
 #include "model_connection_check.h"
 #include "assembly_catalog_check.h"
+#include "object_randomization_check.h"
 #include "dark_theme_check.h"
 #include "ui_theme.h"
 #include "scenario_layer_check.h"
@@ -579,6 +580,8 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(groupRotationCheckOption);
     QCommandLineOption assemblyCatalogCheckOption("assembly-catalog-check","Check assembly capture, grouped placement and catalog with synthetic data.");
     parser.addOption(assemblyCatalogCheckOption);
+    QCommandLineOption objectRandomCheckOption("object-randomization-check","Check random scale axes, authored FIG forms and atomic Undo/Redo.");
+    parser.addOption(objectRandomCheckOption);
     parser.addOption(modelConnectionCheckOption);
     parser.addOption(darkThemeCheckOption);
     parser.addOption(textureLifetimeCheckOption);
@@ -638,6 +641,7 @@ int runHeadlessCommand(QApplication& app)
     const bool hierarchyCheck = parser.isSet(hierarchyCheckOption);
     const bool darkThemeCheck = parser.isSet(darkThemeCheckOption);
     const bool assemblyCatalogCheck=parser.isSet(assemblyCatalogCheckOption);
+    const bool objectRandomCheck=parser.isSet(objectRandomCheckOption);
     const bool modelConnectionCheck = parser.isSet(modelConnectionCheckOption);
     const bool groupRotationCheck = parser.isSet(groupRotationCheckOption);
     const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
@@ -646,11 +650,11 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
-    if(!assemblyCatalogCheck && !validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
+    if(!objectRandomCheck && !assemblyCatalogCheck && !validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck
        && !testRunReport)
         return -1;
-    if((assemblyCatalogCheck ? 1 : 0) + (validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
+    if((objectRandomCheck ? 1 : 0) + (assemblyCatalogCheck ? 1 : 0) + (validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (modelConnectionCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) > 1)
@@ -673,6 +677,7 @@ int runHeadlessCommand(QApplication& app)
     if(hierarchyCheck) return runObjectHierarchyCheck();
     if(groupRotationCheck) return runGroupRotationCheck();
     if(assemblyCatalogCheck)return runAssemblyCatalogCheck();
+    if(objectRandomCheck)return runObjectRandomizationCheck();
     if(modelConnectionCheck) return runModelConnectionCheck();
     if(darkThemeCheck) return runDarkThemeCheck();
     if(modelGalleryCheck)
@@ -3276,7 +3281,7 @@ int runHeadlessCommand(QApplication& app)
         const QStringList toolbarNames{"selectButton","moveButton","rotateButton","scaleButton","tileBrushButton",
             "groundPaintToolbarButton","behaviorModeButton","travelToolbarButton","scenarioToolbarButton",
             "createObjectToolbarButton","objectGalleryToolbarButton","mobScriptToolbarButton","assemblyToolbarButton",
-            "modelMagnetButton","cameraSettingsButton"};
+            "modelMagnetButton","cameraSettingsButton","randomObjectToolbarButton"};
         for(const auto& name:toolbarNames) {
             auto* button=productionWindow->findChild<QToolButton*>(name);
             const bool validButton=button && !button->icon().isNull()
@@ -3291,6 +3296,25 @@ int runHeadlessCommand(QApplication& app)
             compactToolbarWorks=compactToolbarWorks && validButton;
         }
         auto* groundButton=productionWindow->findChild<QToolButton*>("groundPaintToolbarButton");
+        auto* randomButton=productionWindow->findChild<QToolButton*>("randomObjectToolbarButton");
+        auto* randomMenu=productionWindow->findChild<QMenu*>("objectRandomSettingsMenu");
+        auto* randomStrength=productionWindow->findChild<QSpinBox*>("objectRandomStrength");
+        auto* randomXYZ=productionWindow->findChild<QAction*>("objectRandomAxisXYZ");
+        auto* randomX=productionWindow->findChild<QAction*>("objectRandomAxisX");
+        bool randomSettingsWorks=randomButton && randomMenu && randomStrength && randomXYZ && randomX
+            && randomXYZ->isChecked() && randomStrength->value()==25;
+        if(randomSettingsWorks) {
+            QContextMenuEvent context(QContextMenuEvent::Mouse,QPoint(10,10),randomButton->mapToGlobal(QPoint(10,10)));
+            QApplication::sendEvent(randomButton,&context);QApplication::processEvents();
+            randomSettingsWorks=randomMenu->isVisible();randomMenu->hide();
+            randomX->trigger();randomStrength->setValue(40);
+            randomSettingsWorks=randomSettingsWorks && randomX->isChecked() && !randomXYZ->isChecked()
+                && QSettings().value("ui/objectRandomAxes").toInt()==1
+                && QSettings().value("ui/objectRandomStrength").toInt()==40;
+            randomXYZ->trigger();randomStrength->setValue(25);
+        }
+        QTextStream(stderr)<<"Random button defaults/right-click/persist="<<randomSettingsWorks<<"\n";
+        compactToolbarWorks=compactToolbarWorks && randomSettingsWorks;
         auto* sculptButton=productionWindow->findChild<QToolButton*>("tileBrushButton");
         auto* productionLandscape=productionWindow->findChild<CLandscapeTools*>();
         if(groundButton && sculptButton && productionLandscape) {

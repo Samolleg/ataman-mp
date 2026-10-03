@@ -174,6 +174,7 @@ class CView : public QGLWidget
     friend int runProfileModelCatalogCheck();
     friend int runModelConnectionCheck();
     friend int runAssemblyCatalogCheck();
+    friend int runObjectRandomizationCheck();
     friend int runWindowLayoutCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
@@ -430,6 +431,7 @@ public:
     void clearObjectSelection();
     void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
+    void randomizeSelectedObjects(int axes = 7, double strengthPercent = 25.0);
     void resetSelectedId();
     bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
