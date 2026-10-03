@@ -47,3 +47,44 @@ Copy-Item восстановил старую дату исходника, make 
 ручную приёмку. Точные прежние несохранённые данные zone9, соседняя граница и
 игровая проверка остаются проверкой владельца. Прежние задачи патрулей, воды,
 переходов и раскладки окон этой правкой не закрываются.
+
+## Свежая сборка и передача
+
+Код: ba8873184b417afcf8275f837d1e8c805409f778.
+Официальный wrapper, свежая build-release-98-zone9-paint, runtime из исходников,
+exit0. Инженерные изменения neighbor_performance_check.cpp восстановлены до
+этой сборки; в окончательный код пробник не входит. Чужой translations QM
+восстановлен byte-identical (EDA31955A912758ACB5A7BDE043BBF2EB5F8A2606FA32DC52AFA4156CA74ED9F).
+
+Свежие проверки EXE: --version98, --ui-widget-check, --dark-theme-check,
+--window-layout-check, --profile-model-catalog-check, --scenario-layer-check:
+все exit0 и явные PASS; scenario50 PASS/0 FAIL. Исторические десять clipboard
+и две scenario ошибки в этом окружении не повторились; их причины этой правкой
+не исследованы и старые задачи не объявляются исправленными.
+
+WorldTerrainTests: первый синтетический прогон34 PASS/0 FAIL/5 SKIP — пять
+проверок установленных карт не считались успешными. Повтор с
+EI_WORLD_SCULPT_MAPS=C:/GOG Games/PZ/MODS/DejaVu/Maps:39 PASS/0 FAIL/0 SKIP,
+exit0, world-installed-final.txt. Тесты читают установленные карты и работают
+в памяти/синтетических временных данных; живые данные не ремонтируют.
+
+Новая staging build-staging-98-zone9-paint создана с нуля. --version98 до
+финализации, raw/staged EXE hashes совпали. Finalizer и отдельный validator
+PASS,127 managed files. После финализации staging не запускалась.
+
+Постоянная установка:
+C:/GOG Games/maped/ei-mapper-ataman/artifacts/EI-Mapper-Ataman-2-first-test.
+Редактор/runtime отсутствовали в проверке процессов перед заменой.127 managed
+hashes проверены;6 файлов+manifest заменены с предварительно проверенной копией.
+14625 unlisted пользовательских файлов сохранились с идентичными хэшами.
+Откат artifacts/rollback-EI-Mapper-Ataman-v97-to-98-20261003 (7 файлов)
+сохранён; прежний96→97 удалён только после проверки обеих копий и установленной98.
+EXE SHA256:8651604BE52C2D4589A3922476891F7C7E83894BD4343BDC677E37564DB98462.
+Логи stage.log/finalize.log/validate-package.log/install.log/retire-rollback.log
+в build-tests-98-zone9-paint. Все изменения локальны, main/GitHub не затронуты.
+
+Ручной следующий шаг: в прежнем месте zone9 рисование выбранного материала
+в режиме Вершина с автоматическими переходами, Undo и повтор у соседней карты.
+Несохранённое состояние владельца и игровая приёмка недоступны; отчёт не
+объявляет их успешно проверенными. Сохранение/перезапуск этого реального мазка
+также остаётся ручной проверкой.
