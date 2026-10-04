@@ -741,6 +741,21 @@ float CAiGraphPreviewBuilder::navigationWaterDepth(
 
 SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBuildInput& input)
 {
+    return buildInternal(input, false);
+}
+
+QVector<float> CAiGraphPreviewBuilder::navigationSurfaceHeights(
+    const SAiGraphPreviewBuildInput& input, QString* error)
+{
+    const SAiGraphPreviewBuildResult result = buildInternal(input, true);
+    if(error)
+        *error = result.error;
+    return result.valid ? result.navigationSurfaceHeights : QVector<float>();
+}
+
+SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::buildInternal(
+    const SAiGraphPreviewBuildInput& input, bool surfacesOnly)
+{
     SAiGraphPreviewBuildResult result;
     QElapsedTimer totalTimer;
     totalTimer.start();
@@ -850,6 +865,8 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
     for(int proxyIndex = 0; proxyIndex < input.collisionProxies.size(); ++proxyIndex)
     {
         const SAiGraphCollisionProxy& volume = input.collisionProxies.at(proxyIndex);
+        if(surfacesOnly && volume.passability != EAiGraphObjectPassability::Bridge)
+            continue;
         if(volume.authored)
             ++result.authoredCollisionProxyCount;
         if(volume.passability == EAiGraphObjectPassability::Ignored)
@@ -983,6 +1000,12 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBu
         result.navigationSurfaceHeights[index] = dequantizedHeight(
             navigationHeights.at(index), input.maximumTerrainHeight);
         result.bridgeMask[index] = bridgeTiles.at(index) ? quint8(1) : quint8(0);
+    }
+
+    if(surfacesOnly)
+    {
+        result.valid = true;
+        return result;
     }
 
     QVector<QVector<bool>> slopeBlocked(

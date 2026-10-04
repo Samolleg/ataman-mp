@@ -3912,6 +3912,8 @@ void CView::refreshAiGraphPreviewSource()
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
     m_aiGraphLoadedBytes.clear();
+    m_aiGraphLoadedSurfaceHeights.clear();
+    m_aiGraphLoadedSurfacesResolved = false;
     m_aiGraphRegeneratedDocument.clear();
     m_aiGraphRegeneratedResult = SAiGraphPreviewBuildResult();
     m_aiGraphSource.clear();
@@ -4350,6 +4352,9 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
 
 void CView::scheduleAiGraphPreviewRegeneration()
 {
+    m_aiGraphLoadedSurfaceHeights.clear();
+    m_aiGraphLoadedSurfacesResolved = false;
+    m_aiGraphOverlayDirty = true;
     m_aiGraphRegeneratedFresh = false;
     if(!m_aiGraphAutoRegenerationEnabled || m_aiGraphPreviewUsesLoadedSource
        || !m_terrainEditAvailable || !m_aiGraphRegenerationTimer)
@@ -5959,6 +5964,23 @@ void CView::rebuildAiGraphOverlayGeometry()
     const int height = m_aiGraphDocument.height();
     QVector<QVector3D> positions(width * height);
     QVector<bool> valid(width * height, false);
+    if(m_aiGraphPreviewUsesLoadedSource && !m_aiGraphLoadedSurfacesResolved)
+    {
+        m_aiGraphLoadedSurfacesResolved = true;
+        SAiGraphPreviewBuildInput input;
+        QString error;
+        if(captureAiGraphPreviewBuildInput(&input, &error))
+            m_aiGraphLoadedSurfaceHeights =
+                CAiGraphPreviewBuilder::navigationSurfaceHeights(input, &error);
+        if(!error.isEmpty())
+            ei::log(eLogWarning, "AI graph display surfaces: " + error);
+    }
+    const QVector<float> unavailableSurfaces;
+    const QVector<float>& surfaceHeights = m_aiGraphPreviewUsesLoadedSource
+        ? m_aiGraphLoadedSurfaceHeights
+        : (m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedResult.valid
+            ? m_aiGraphRegeneratedResult.navigationSurfaceHeights
+            : unavailableSurfaces);
     for(int y = 0; y < height; ++y)
         for(int x = 0; x < width; ++x)
         {
@@ -5968,17 +5990,15 @@ void CView::rebuildAiGraphOverlayGeometry()
                 continue;
             QVector3D position((x * 8 + localX + 0.5f) * 0.5f,
                                (y * 8 + localY + 0.5f) * 0.5f, 0.0f);
-            const bool regenerated = !m_aiGraphPreviewUsesLoadedSource
-                && m_aiGraphRegeneratedFresh && m_aiGraphRegeneratedResult.valid;
-            if(regenerated)
+            if(!surfaceHeights.isEmpty())
             {
                 const int aiWidth = width * CAiGraphPreviewBuilder::AiTilesPerGraphCell;
                 const int aiX = x * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localX;
                 const int aiY = y * CAiGraphPreviewBuilder::AiTilesPerGraphCell + localY;
                 const int aiIndex = aiY * aiWidth + aiX;
                 if(aiIndex >= 0
-                   && aiIndex < m_aiGraphRegeneratedResult.navigationSurfaceHeights.size())
-                    position.setZ(m_aiGraphRegeneratedResult.navigationSurfaceHeights.at(aiIndex));
+                   && aiIndex < surfaceHeights.size())
+                    position.setZ(surfaceHeights.at(aiIndex));
                 else
                     continue;
             }

@@ -92,11 +92,17 @@ public:
     static constexpr float AiTileWorldSize = 0.5f;
 
     static SAiGraphPreviewBuildResult build(const SAiGraphPreviewBuildInput& input);
+    // Restore display Z for a loaded graph without regenerating its routes.
+    static QVector<float> navigationSurfaceHeights(
+        const SAiGraphPreviewBuildInput& input, QString* error = nullptr);
     static int quantizedWaterDepth(float worldDepth, float maximumTerrainHeight);
     static float navigationWaterDepth(float landHeight, float overlayHeight,
                                       bool overlayActive, int overlayMaterialType);
     static QVector<SAiTerrainTraversal> parseTerrainTraversalRegistry(
         const QByteArray& registry, QString* error = nullptr);
+private:
+    static SAiGraphPreviewBuildResult buildInternal(
+        const SAiGraphPreviewBuildInput& input, bool surfacesOnly);
 };
 
 #endif // AI_GRAPH_PREVIEW_BUILDER_H

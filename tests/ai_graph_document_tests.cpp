@@ -126,6 +126,7 @@ private slots:
     void regenerationUsesRuntimeBridgeHeightRounding();
     void quantizesWaterBeforeOverlayTerrainSelection();
     void ignoresInactiveAndNonWaterOverlayDepth();
+    void loadedGraphSurfaceResolutionPreservesBridgeAndRoutes();
     void usesRuntimeElevationMultiplierArithmetic();
     void regenerationUsesRuntimeCrossingTraversal();
     void regenerationRasterizesAuthoredDegenerateCollisionSlab();
@@ -362,6 +363,42 @@ void AiGraphDocumentTests::regenerationRejectsGameScaleTerrainCliffs()
     QVERIFY2(flyCliff.valid, qPrintable(flyCliff.error));
     QCOMPARE(flyCliff.document.weight(0, 1, 1, 6), qint16(-1));
     QCOMPARE(flyCliff.document.weight(3, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::loadedGraphSurfaceResolutionPreservesBridgeAndRoutes()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    input.terrainHeights.fill(0.0f, 32 * 24);
+    input.waterDepths.fill(9.0f, 32 * 24);
+    auto bridge = boxVolume(0.0f, 0.0f, 2.0f, 16.0f, 12.0f, 3.0f,
+                            EAiGraphObjectPassability::Bridge);
+    for(int i : {5, 7}) bridge.boxCorners[i].setZ(4.0f);
+    input.collisionProxies.append(bridge);
+    input.collisionProxies.append(boxVolume(6.0f, 4.0f, 0.0f, 7.0f, 5.0f, 8.0f));
+    const auto generated = CAiGraphPreviewBuilder::build(input);
+    QVERIFY2(generated.valid, qPrintable(generated.error));
+    const QByteArray bytes = generated.document.serialize();
+    CAiGraphDocument reopened;
+    QVERIFY(reopened.parse(bytes));
+    QString error;
+    const auto surfaces = CAiGraphPreviewBuilder::navigationSurfaceHeights(input, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(surfaces, generated.navigationSurfaceHeights);
+    const int x = 1, y = 1;
+    const int index = (y * 8 + reopened.localY(3, x, y)) * 32
+        + x * 8 + reopened.localX(3, x, y);
+    QVERIFY(surfaces.at(index) > 2.9f);
+    QVERIFY(surfaces.at(index) < 4.1f);
+    QCOMPARE(reopened.serialize(), bytes);
+    QVERIFY(reopened.compareNavigation(generated.document).identical());
+    input.collisionProxies.clear();
+    const auto ground = CAiGraphPreviewBuilder::navigationSurfaceHeights(input, &error);
+    QCOMPARE(ground.at(index), 0.0f);
+    input.terrainHeights.clear();
+    QVERIFY(CAiGraphPreviewBuilder::navigationSurfaceHeights(input, &error).isEmpty());
+    QVERIFY(!error.isEmpty());
 }
 
 void AiGraphDocumentTests::ignoresInactiveAndNonWaterOverlayDepth()

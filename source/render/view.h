@@ -1311,6 +1311,8 @@ private:
     CAiGraphDocument m_aiGraphDocument;
     CAiGraphDocument m_aiGraphLoadedDocument;
     QByteArray m_aiGraphLoadedBytes;
+    QVector<float> m_aiGraphLoadedSurfaceHeights;
+    bool m_aiGraphLoadedSurfacesResolved{false};
     CAiGraphDocument m_aiGraphRegeneratedDocument;
     SAiGraphPreviewBuildResult m_aiGraphRegeneratedResult;
     QString m_aiGraphSource;
