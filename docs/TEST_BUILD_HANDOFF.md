@@ -69,7 +69,9 @@ Do not include:
 - `endurance-options.json`, upstream `options.json`, or developer paths;
 - workflow/runtime logs, crash dumps, saves, or autosave data;
 - unrelated source artifacts or historical alpha changelists;
-- a ZIP unless the user explicitly asks for one.
+- a ZIP inside the staging package itself. The owner's 2026-10-04 instruction
+  authorizes ZIP delivery for every future distribution request; ordinary local
+  tester builds still use the permanent installation unless an archive is requested.
 
 Always finish with:
 
@@ -178,5 +180,10 @@ The final response uses this order:
 5. Automated checks and commit hash.
 6. Known limitations, only if relevant.
 
-Never provide only a raw executable/build directory, never lead with a ZIP, and
-never launch the editor in place of the tester.
+Never provide only a raw executable/build directory or launch the editor in
+place of the tester. For distribution requests, provide a ZIP link as the
+distribution deliverable. Create the archive from the fresh finalized package,
+with one top-level application folder, and verify its complete file set and
+every payload hash against SHA256SUMS.txt without running the packaged GUI.
+Keep the archive outside staging. Include its SHA-256 in the handoff evidence.
+This is standing owner authorization from 2026-10-04, not a new approval gate.

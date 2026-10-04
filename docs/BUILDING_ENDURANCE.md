@@ -160,8 +160,11 @@ folder. Then update the single permanent Ataman installation using section 3
 of TEST_BUILD_HANDOFF.md. Preserve user data and never run the finalizer on the
 permanent installation. Do not hand the user a new versioned folder each time.
 
-The normal handoff is the unpacked, user-runnable folder. Do not create a ZIP or
-launch the packaged editor unless the user explicitly requests that action.
+Local tester builds update the permanent user-runnable installation. Under the
+owner's 2026-10-04 instruction, future distribution requests also produce a ZIP
+from the freshly finalized clean package; verify its contents and hashes under
+TEST_BUILD_HANDOFF.md and give the recipient the archive link. Do not launch
+the packaged editor unless the user explicitly requests that action.
 
 `validate_distribution.ps1` remains the non-mutating CI check. It must pass
 after finalization; do not bypass either step for convenience builds.
