@@ -3705,19 +3705,42 @@ void MainWindow::setupCompactViewportTools()
     toolsMenu->addActions({open,save,ungroup});
 
     auto* random=button("randomObjectToolbarButton",QString::fromUtf8("Рандом"),12,13);
-    random->setToolTip(QString::fromUtf8("ЛКМ — случайный масштаб и встроенная форма; ПКМ — настройки и отдельное вращение X / Y"));
+    random->setToolTip(QString::fromUtf8("ЛКМ — применить выбранные масштаб и повороты; ПКМ — галочки и сила рандома"));
     auto* randomMenu=new QMenu(random);randomMenu->setObjectName("objectRandomSettingsMenu");
-    auto* axisGroup=new QActionGroup(randomMenu);axisGroup->setExclusive(true);
+    // QWidgetAction keeps the menu open while several real checkboxes change.
+    const auto addCheck=[randomMenu](const QString& id,const QString& text,const QIcon& icon=QIcon()) {
+        auto* action=new QWidgetAction(randomMenu);action->setObjectName(id);
+        action->setText(text);action->setCheckable(true);action->setIcon(icon);
+        auto* panel=new QWidget(randomMenu);auto* row=new QHBoxLayout(panel);
+        row->setContentsMargins(12,4,12,4);
+        auto* check=new QCheckBox(text,panel);check->setObjectName(id+"Check");
+        row->addWidget(check);
+        if(!icon.isNull()) {
+            auto* image=new QLabel(panel);image->setPixmap(icon.pixmap(20,20));row->addWidget(image);
+        }
+        action->setDefaultWidget(panel);randomMenu->addAction(action);
+        connect(check,&QCheckBox::toggled,action,&QAction::setChecked);
+        connect(action,&QAction::toggled,check,&QCheckBox::setChecked);
+        return action;
+    };
+    auto* axisGroup=new QActionGroup(randomMenu);axisGroup->setExclusive(false);
     const int savedAxes=QSettings().value("ui/objectRandomAxes",7).toInt();
-    const int axes=savedAxes>=1 && savedAxes<=7 ? savedAxes : 7;
+    const int axes=savedAxes>=0 && savedAxes<=7 ? savedAxes : 7;
     for(int mask:{1,2,4,3,5,6,7}) {
         QString name;for(int axis=0;axis<3;++axis)if(mask & (1<<axis))name+=QString("XYZ")[axis];
-        auto* action=randomMenu->addAction(QString::fromUtf8("Менять только %1").arg(name));
-        action->setObjectName("objectRandomAxis"+name);action->setData(mask);action->setCheckable(true);
+        auto* action=addCheck("objectRandomAxis"+name,QString::fromUtf8("Масштаб %1").arg(name));
+        action->setData(mask);
         axisGroup->addAction(action);action->setChecked(mask==axes);
     }
-    connect(axisGroup,&QActionGroup::triggered,random,[axisGroup]{
-        QSettings().setValue("ui/objectRandomAxes",axisGroup->checkedAction()->data());
+    for(auto* action:axisGroup->actions()) connect(action,&QAction::toggled,random,[axisGroup,action](bool checked){
+        if(checked) for(auto* other:axisGroup->actions()) if(other!=action) {
+            // Block nested settings writes, but explicitly sync its checkbox.
+            const QSignalBlocker blocker(other);other->setChecked(false);
+            auto* check=other->parent()->findChild<QCheckBox*>(other->objectName()+"Check");
+            if(check) check->setChecked(false);
+        }
+        int mask=0;for(auto* option:axisGroup->actions()) if(option->isChecked()) mask=option->data().toInt();
+        QSettings().setValue("ui/objectRandomAxes",mask);
     });
     randomMenu->addSeparator();
     auto* strengthPanel=new QWidget(randomMenu);auto* strengthLayout=new QHBoxLayout(strengthPanel);
@@ -3742,19 +3765,23 @@ void MainWindow::setupCompactViewportTools()
     auto* rotationStrengthAction=new QWidgetAction(randomMenu);rotationStrengthAction->setDefaultWidget(rotationPanel);
     randomMenu->addAction(rotationStrengthAction);
     connect(rotationStrength,QOverload<int>::of(&QSpinBox::valueChanged),random,[](int value){QSettings().setValue("ui/objectRandomRotationDegrees",value);});
+    QList<QAction*> rotationActions;
     for(int axis:{0,1}) {
         const QString name=axis==0?"X":"Y";
-        auto* action=randomMenu->addAction(viewportToolIcon(9),QString::fromUtf8("Рандом вращения %1").arg(name));
-        action->setObjectName("objectRandomRotation"+name);
-        action->setToolTip(QString::fromUtf8("Повернуть каждый выделенный объект вокруг его позиции по мировой оси %1").arg(name));
-        connect(action,&QAction::triggered,this,[this,axis,rotationStrength]{
-            if(m_pView) m_pView->randomizeSelectedObjectRotation(axis,rotationStrength->value());
+        auto* action=addCheck("objectRandomRotation"+name,QString::fromUtf8("Поворот %1").arg(name),viewportToolIcon(9));
+        action->setChecked(QSettings().value("ui/objectRandomRotate"+name,false).toBool());
+        action->setToolTip(QString::fromUtf8("Включить случайный поворот по мировой оси %1 при ЛКМ на «Рандом»").arg(name));
+        rotationActions.append(action);
+        connect(action,&QAction::toggled,random,[name](bool checked){
+            QSettings().setValue("ui/objectRandomRotate"+name,checked);
         });
     }
     random->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(random,&QWidget::customContextMenuRequested,random,[random,randomMenu](const QPoint& point){randomMenu->popup(random->mapToGlobal(point));});
-    connect(random,&QToolButton::clicked,this,[this,axisGroup,strength]{
-        if(m_pView)m_pView->randomizeSelectedObjects(axisGroup->checkedAction()->data().toInt(),strength->value());
+    connect(random,&QToolButton::clicked,this,[this,axisGroup,strength,rotationActions,rotationStrength]{
+        int mask=0;for(auto* option:axisGroup->actions()) if(option->isChecked()) mask=option->data().toInt();
+        if(m_pView) m_pView->randomizeSelectedObjectsCombined(mask,strength->value(),
+            rotationActions[0]->isChecked(),rotationActions[1]->isChecked(),rotationStrength->value());
     });
 
     // Reuse the original controls and connections; only their presentation changes.

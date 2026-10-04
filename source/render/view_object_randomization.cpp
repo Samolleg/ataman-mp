@@ -8,72 +8,55 @@
 #include <cmath>
 
 namespace {
-// Store the sampled values once: Redo replays precisely the same result.
+struct RandomObjectState {
+    QVector3D scale;
+    QQuaternion rotation;
+};
+// One transaction owns sampled values, not the current selection or settings.
 class RandomizeObjectsCommand : public QUndoCommand,
                                 public IAiGraphPreviewInvalidatingCommand
 {
     QPointer<CView> m_view;
+    CMob* m_owner;
     QList<QPointer<CNode>> m_nodes;
-    QVector<QVector3D> m_before, m_after;
-    void apply(const QVector<QVector3D>& values)
+    QVector<RandomObjectState> m_before, m_after;
+    void apply(const QVector<RandomObjectState>& values)
     {
-        if(!m_view) return;
+        if(!m_view || !m_view->mobs().contains(m_owner)) return;
         m_view->makeCurrent();
-        QSet<CMob*> owners;
+        // One membership index per batch instead of a full MOB search per node.
+        const auto& ownerNodes=m_owner->nodes();
+        const QSet<CNode*> available=QSet<CNode*>::fromList(ownerNodes);
+        bool changed=false;
         for(int i=0;i<m_nodes.size();++i) {
             auto* node=m_nodes[i].data();
-            auto* owner=node ? m_view->ownerMob(node) : nullptr;
-            if(!owner) continue;
-            node->applyParam(QSharedPointer<IPropertyBase>(
-                new prop3D(eObjParam_COMPLECTION,values[i])));
-            owners.insert(owner);
+            if(!node || !available.contains(node)) continue;
+            const bool scaleChanged=m_before[i].scale!=m_after[i].scale;
+            const bool rotationChanged=m_before[i].rotation!=m_after[i].rotation;
+            if(rotationChanged) {
+                if(scaleChanged) {
+                    // recalcFigure below rebuilds bounds/projection once with
+                    // the final rotation and scale, avoiding old-mesh work.
+                    node->CNode::setRot(values[i].rotation);
+                } else node->setRot(values[i].rotation);
+            }
+            if(scaleChanged)
+                node->applyParam(QSharedPointer<IPropertyBase>(
+                    new prop3D(eObjParam_COMPLECTION,values[i].scale)));
+            changed=true;
         }
-        for(auto* owner:owners) m_view->setDurty(owner);
+        if(!changed) return;
+        m_view->setDurty(m_owner);
         m_view->viewParameters();
         m_view->update();
     }
 public:
-    RandomizeObjectsCommand(CView* view,const QList<CNode*>& nodes,
-                            const QVector<QVector3D>& before,const QVector<QVector3D>& after)
-        : m_view(view),m_before(before),m_after(after)
+    RandomizeObjectsCommand(CView* view,CMob* owner,const QList<CNode*>& nodes,
+                            const QVector<RandomObjectState>& before,
+                            const QVector<RandomObjectState>& after)
+        :m_view(view),m_owner(owner),m_before(before),m_after(after)
     {
         setText(QString::fromUtf8("Рандом: %1 объектов").arg(nodes.size()));
-        for(auto* node:nodes) m_nodes.append(node);
-    }
-    void undo() override { apply(m_before); }
-    void redo() override { apply(m_after); }
-    bool invalidatesAiGraphPreview() const override { return true; }
-};
-
-class RandomRotateObjectsCommand : public QUndoCommand,
-                                  public IAiGraphPreviewInvalidatingCommand
-{
-    QPointer<CView> m_view;
-    QList<QPointer<CNode>> m_nodes;
-    QVector<QQuaternion> m_before, m_after;
-    void apply(const QVector<QQuaternion>& rotations)
-    {
-        if(!m_view) return;
-        m_view->makeCurrent();
-        QSet<CMob*> owners;
-        for(int i=0;i<m_nodes.size();++i) {
-            auto* node=m_nodes[i].data();
-            auto* owner=node ? m_view->ownerMob(node) : nullptr;
-            if(!owner) continue;
-            node->setRot(rotations.at(i));
-            owners.insert(owner);
-        }
-        for(auto* owner:owners) m_view->setDurty(owner);
-        m_view->viewParameters();m_view->update();
-    }
-public:
-    RandomRotateObjectsCommand(CView* view,const QList<CNode*>& nodes,
-                               const QVector<QQuaternion>& before,
-                               const QVector<QQuaternion>& after,int axis)
-        :m_view(view),m_before(before),m_after(after)
-    {
-        setText(QString::fromUtf8("Рандом вращения %1: %2 объектов")
-            .arg(axis==0?"X":"Y").arg(nodes.size()));
         for(auto* node:nodes) m_nodes.append(node);
     }
     void undo() override { apply(m_before); }
@@ -84,74 +67,71 @@ public:
 
 void CView::randomizeSelectedObjects(int axes,double strengthPercent)
 {
-    if(!m_activeMob || !m_pUndoStack) return;
-    if(axes<1 || axes>7 || !std::isfinite(strengthPercent)
-       || strengthPercent<0 || strengthPercent>100) return;
+    if(axes<1 || axes>7) return;
+    randomizeSelectedObjectsCombined(axes,strengthPercent,false,false,0);
+}
+
+void CView::randomizeSelectedObjectRotation(int axis,double maximumDegrees)
+{
+    if(axis<0 || axis>1) return;
+    randomizeSelectedObjectsCombined(0,0,axis==0,axis==1,maximumDegrees);
+}
+
+void CView::randomizeSelectedObjectsCombined(int axes,double strengthPercent,
+                                            bool rotateX,bool rotateY,double maximumDegrees)
+{
+    if(!m_activeMob || !m_pUndoStack || axes<0 || axes>7
+       || !std::isfinite(strengthPercent) || strengthPercent<0 || strengthPercent>100
+       || !std::isfinite(maximumDegrees) || maximumDegrees<0 || maximumDegrees>180)
+        return;
+    const bool scale=axes!=0 && strengthPercent>0;
+    const bool rotation=(rotateX || rotateY) && maximumDegrees>0;
+    if(!scale && !rotation) return;
     if(!m_pendingPasteNodes.isEmpty() || !m_operationBackup.isEmpty()) {
         emit updateMsg(QString::fromUtf8("Завершите текущую операцию перед рандомизацией."));
         return;
     }
     QList<CNode*> nodes;
-    QVector<QVector3D> before,after;
+    QVector<RandomObjectState> before,after;
     const double strength=strengthPercent/100.0;
     for(auto* node:m_activeMob->nodes()) {
         auto* object=dynamic_cast<CWorldObj*>(node);
         if(!object || object->nodeState()!=eSelect || object->isMarkDeleted()) continue;
-        const QVector3D original=object->constitution();
-        QVector3D result=original;
-        for(int axis=0;axis<3;++axis) {
-            if(!std::isfinite(original[axis])) {
+        const RandomObjectState original{object->constitution(),object->rotation()};
+        RandomObjectState result=original;
+        if(scale) for(int axis=0;axis<3;++axis) {
+            if(!std::isfinite(original.scale[axis])) {
                 emit updateMsg(QString::fromUtf8("У выделенного объекта некорректный масштаб. Рандомизация отменена."));
                 return;
             }
             if(axes & (1<<axis)) {
                 const double factor=1.0+(QRandomGenerator::global()->generateDouble()*2.0-1.0)*strength;
-                const double value=original[axis]*factor;
-                result[axis]=float(value);
-                if(!std::isfinite(result[axis])) {
+                result.scale[axis]=float(original.scale[axis]*factor);
+                if(!std::isfinite(result.scale[axis])) {
                     emit updateMsg(QString::fromUtf8("Результат масштаба выходит за допустимый диапазон. Рандомизация отменена."));
                     return;
                 }
             }
         }
-        if(result==original) continue;
-        nodes.append(node);before.append(original);after.append(result);
-    }
-    if(nodes.isEmpty()) return;
-    // COMPLECTION recalculates FIG geometry, including its authored forms.
-    m_pUndoStack->push(new RandomizeObjectsCommand(this,nodes,before,after));
-}
-
-void CView::randomizeSelectedObjectRotation(int axis,double maximumDegrees)
-{
-    if(!m_activeMob || !m_pUndoStack || axis<0 || axis>1
-       || !std::isfinite(maximumDegrees) || maximumDegrees<=0 || maximumDegrees>180)
-        return;
-    if(!m_pendingPasteNodes.isEmpty() || !m_operationBackup.isEmpty()) {
-        emit updateMsg(QString::fromUtf8("Завершите текущую операцию перед рандомизацией."));
-        return;
-    }
-    QList<CNode*> nodes;
-    QVector<QQuaternion> before,after;
-    const QVector3D direction=axis==0?QVector3D(1,0,0):QVector3D(0,1,0);
-    for(auto* node:m_activeMob->nodes()) {
-        auto* object=dynamic_cast<CWorldObj*>(node);
-        if(!object || object->nodeState()!=eSelect || object->isMarkDeleted()) continue;
-        const QQuaternion original=object->rotation();
-        if(!std::isfinite(original.scalar()) || !std::isfinite(original.x())
-           || !std::isfinite(original.y()) || !std::isfinite(original.z())
-           || !std::isfinite(original.lengthSquared()) || original.lengthSquared()<=0) {
-            emit updateMsg(QString::fromUtf8("У выделенного объекта некорректное вращение. Рандомизация отменена."));
-            return;
+        if(rotation) {
+            const auto& q=original.rotation;
+            if(!std::isfinite(q.scalar()) || !std::isfinite(q.x()) || !std::isfinite(q.y())
+               || !std::isfinite(q.z()) || !std::isfinite(q.lengthSquared()) || q.lengthSquared()<=0) {
+                emit updateMsg(QString::fromUtf8("У выделенного объекта некорректное вращение. Рандомизация отменена."));
+                return;
+            }
+            result.rotation=q.normalized();
+            // Fixed world-axis composition: X first, then Y, about own origin.
+            for(int axis=0;axis<2;++axis) if(axis==0?rotateX:rotateY) {
+                const float degrees=float((QRandomGenerator::global()->generateDouble()*2.0-1.0)*maximumDegrees);
+                const QVector3D direction=axis==0?QVector3D(1,0,0):QVector3D(0,1,0);
+                result.rotation=(QQuaternion::fromAxisAndAngle(direction,degrees)*result.rotation).normalized();
+            }
         }
-        const float degrees=float((QRandomGenerator::global()->generateDouble()*2.0-1.0)*maximumDegrees);
-        // World-axis rotation about each object's own origin, with no Euler
-        // round-trip. Keep the exact authored quaternion for Undo.
-        const QQuaternion result=(QQuaternion::fromAxisAndAngle(direction,degrees)
-                                  * original.normalized()).normalized();
-        if(result==original) continue;
+        if(result.scale==original.scale && result.rotation==original.rotation) continue;
         nodes.append(node);before.append(original);after.append(result);
     }
     if(nodes.isEmpty()) return;
-    m_pUndoStack->push(new RandomRotateObjectsCommand(this,nodes,before,after,axis));
+    // All validation completes before any object is changed.
+    m_pUndoStack->push(new RandomizeObjectsCommand(this,m_activeMob,nodes,before,after));
 }

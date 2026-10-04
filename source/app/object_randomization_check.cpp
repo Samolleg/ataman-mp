@@ -16,6 +16,7 @@
 #include <QUndoStack>
 #include <QTextStream>
 #include <QSignalBlocker>
+#include <QElapsedTimer>
 #include <cmath>
 
 namespace {
@@ -151,5 +152,82 @@ int runObjectRandomizationCheck()
     check(history.count()==0 && first->toJson()==rotationFirst,"invalid later quaternion rejects whole batch without changing earlier object");
     second->setRot(validSecond);first->setState(eDraw);second->setState(eDraw);view.randomizeSelectedObjectRotation(0,25);
     check(history.count()==0 && light->toJson()==originalLight,"rotation ignores unselected objects and selected light");
+    first->setState(eSelect);second->setState(eSelect);
+    for(int mask:{0,1,2,4,3,5,6,7}) for(int rotations=0;rotations<4;++rotations) {
+        const auto beforeFirst=first->toJson(),beforeSecond=second->toJson();
+        const auto beforeRotationFirst=first->rotation(),beforeRotationSecond=second->rotation();
+        int changes=0;const auto connection=QObject::connect(&view,&CView::mobStateChanged,[&]{++changes;});
+        view.randomizeSelectedObjectsCombined(mask,25,rotations&1,rotations&2,25);
+        const bool effective=mask!=0 || rotations!=0;
+        check(history.count()==(effective?1:0) && changes==(effective?1:0),
+            QString("combination scale %1 rotation %2: single transaction and MOB notification").arg(mask).arg(rotations));
+        const auto afterFirst=first->toJson(),afterSecond=second->toJson();
+        bool fields=true;
+        for(auto* object:{first,second}) {
+            const auto original=object==first?beforeFirst:beforeSecond;
+            const auto initial=object==first?QVector3D(1,2,3):QVector3D(2,3,4);
+            for(int axis=0;axis<3;++axis) fields=fields && ((mask & (1<<axis))
+                ? object->constitution()[axis]>=initial[axis]*.75f && object->constitution()[axis]<=initial[axis]*1.25f
+                : object->constitution()[axis]==initial[axis]);
+            fields=fields && withoutRotation(withoutScale(object->toJson()))==withoutRotation(withoutScale(original));
+            if(!rotations) fields=fields && withoutScale(object->toJson())==withoutScale(original);
+            else {
+                const auto initialRotation=object==first?beforeRotationFirst:beforeRotationSecond;
+                const auto delta=(object->rotation()*initialRotation.conjugated()).normalized();
+                const auto angles=delta.toEulerAngles(); // Y * X, safely away from gimbal lock.
+                fields=fields && std::abs(object->rotation().lengthSquared()-1)<.00001f
+                    && std::abs(angles.z())<.001f && std::abs(angles.x())<=25.001f && std::abs(angles.y())<=25.001f
+                    && ((rotations&1) || std::abs(angles.x())<.001f)
+                    && ((rotations&2) || std::abs(angles.y())<.001f);
+            }
+        }
+        check(fields && untouched->toJson()==originalUntouched && light->toJson()==originalLight,
+              "combined changes only requested fields and preserves non-target objects");
+        if(effective) {
+            history.undo();check(first->toJson()==beforeFirst && second->toJson()==beforeSecond
+                && !mob->refreshDirtyFromProjection(),"combined Undo exact and clean");
+            history.redo();check(first->toJson()==afterFirst && second->toJson()==afterSecond,"combined Redo exact sampled states");
+            history.undo();
+        }
+        QObject::disconnect(connection);history.clear();
+    }
+    view.randomizeSelectedObjectsCombined(7,0,true,true,0);
+    check(history.count()==0 && first->toJson()==rotationFirst,"all zero strengths are no-op");
+    second->setRot(QQuaternion(0,0,0,0));view.randomizeSelectedObjectsCombined(7,25,true,true,25);
+    check(history.count()==0 && first->toJson()==rotationFirst,"combined invalid later quaternion atomically rejects scale and rotations");
+    second->setRot(validSecond);
+    // A command must retain its original owner across active-MOB switches.
+    auto* otherMob=new CMob;otherMob->setFileName(QFileInfo(scratch.filePath("other.mob")));view.m_aMob<<otherMob;
+    view.randomizeSelectedObjectsCombined(7,25,true,true,25);view.m_activeMob=otherMob;
+    history.undo();check(first->toJson()==rotationFirst && second->toJson()==rotationSecond
+        && view.m_activeMob==mob && otherMob->nodes().isEmpty(),"combined Undo after MOB switch retains original owner");history.clear();
+    first->setState(eDraw);second->setState(eDraw);light->setState(eDraw);
+    for(int count:{143,1000}) {
+        QList<CNode*> batch;
+        for(int i=0;i<count;++i) {
+            auto* object=new MorphObject(&figure);object->setMapId(100+i);object->setState(eSelect);
+            mob->nodes().append(object);batch.append(object);
+        }
+        mob->serializeMob(baseline,false);mob->adoptCommittedBytes(baseline);
+        QElapsedTimer timer;timer.start();
+        int found=0;
+        for(int repeat=0;repeat<20;++repeat) for(auto* object:batch) if(view.ownerMob(object)==mob) ++found;
+        const auto oldLookup=timer.nsecsElapsed();timer.restart();
+        int indexedFound=0;
+        for(int repeat=0;repeat<20;++repeat) {
+            const QSet<CNode*> available=QSet<CNode*>::fromList(mob->nodes());
+            for(auto* object:batch) if(available.contains(object)) ++indexedFound;
+        }
+        const auto newLookup=timer.nsecsElapsed();timer.restart();
+        int changes=0;const auto connection=QObject::connect(&view,&CView::mobStateChanged,[&]{++changes;});
+        view.randomizeSelectedObjectsCombined(7,25,true,true,25);const auto applyNs=timer.nsecsElapsed();timer.restart();
+        history.undo();const auto undoNs=timer.nsecsElapsed();timer.restart();history.redo();const auto redoNs=timer.nsecsElapsed();
+        check(found==20*count && indexedFound==found && history.count()==1 && changes==3,
+              QString("batch %1: one notification per apply/Undo/Redo and identical owner membership").arg(count));
+        out<<"TIMING: synthetic FIG8 batch="<<count<<" apply_ms="<<applyNs/1e6<<" undo_ms="<<undoNs/1e6
+           <<" redo_ms="<<redoNs/1e6<<" old_lookup_20_ms="<<oldLookup/1e6<<" indexed_lookup_20_ms="<<newLookup/1e6<<"\n";out.flush();
+        QObject::disconnect(connection);history.undo();history.clear();
+        for(auto* object:batch) {mob->nodes().removeOne(object);delete object;}
+    }
     history.clear();out<<(failures?"FAIL":"PASS")<<": object randomization checks\n";return failures?1:0;
 }

@@ -3307,13 +3307,19 @@ int runHeadlessCommand(QApplication& app)
         bool randomSettingsWorks=randomButton && randomMenu && randomStrength && randomXYZ && randomX
             && randomXYZ->isChecked() && randomStrength->value()==25
             && randomRotationX && randomRotationY && randomRotationDegrees
-            && !randomRotationX->isCheckable() && !randomRotationY->isCheckable()
+            && randomRotationX->isCheckable() && randomRotationY->isCheckable()
+            && !randomRotationX->isChecked() && !randomRotationY->isChecked()
             && !randomRotationX->icon().isNull() && !randomRotationY->icon().isNull()
             && randomRotationDegrees->value()==25;
         if(randomSettingsWorks) {
             QContextMenuEvent context(QContextMenuEvent::Mouse,QPoint(10,10),randomButton->mapToGlobal(QPoint(10,10)));
             QApplication::sendEvent(randomButton,&context);QApplication::processEvents();
-            randomSettingsWorks=randomMenu->isVisible();randomMenu->hide();
+            auto* checkbox=productionWindow->findChild<QCheckBox*>("objectRandomRotationXCheck");
+            randomSettingsWorks=randomMenu->isVisible() && checkbox;
+            if(checkbox) checkbox->click();
+            randomSettingsWorks=randomSettingsWorks && randomMenu->isVisible() && randomRotationX->isChecked();
+            if(checkbox) checkbox->click();
+            randomMenu->hide();
             randomX->trigger();randomStrength->setValue(40);
             randomSettingsWorks=randomSettingsWorks && randomX->isChecked() && !randomXYZ->isChecked()
                 && QSettings().value("ui/objectRandomAxes").toInt()==1
@@ -3322,7 +3328,28 @@ int runHeadlessCommand(QApplication& app)
             randomRotationDegrees->setValue(55);randomRotationX->trigger();randomRotationY->trigger();
             randomSettingsWorks=randomSettingsWorks
                 && QSettings().value("ui/objectRandomRotationDegrees").toInt()==55
-                && randomXYZ->isChecked() && randomStrength->value()==25;
+                && randomXYZ->isChecked() && randomStrength->value()==25
+                && randomRotationX->isChecked() && randomRotationY->isChecked()
+                && QSettings().value("ui/objectRandomRotateX").toBool()
+                && QSettings().value("ui/objectRandomRotateY").toBool();
+            const QString randomScreenshots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
+            if(!randomScreenshots.isEmpty()) {
+                randomMenu->popup(randomButton->mapToGlobal(QPoint(10,10)));
+                QApplication::processEvents();
+                QDir().mkpath(randomScreenshots);
+                randomMenu->grab().save(QDir(randomScreenshots).filePath("random-settings-combined.png"));
+                randomMenu->hide();
+            }
+            randomXYZ->trigger(); // Scale can be disabled while both rotations stay on.
+            randomSettingsWorks=randomSettingsWorks && !randomXYZ->isChecked()
+                && QSettings().value("ui/objectRandomAxes").toInt()==0
+                && randomRotationX->isChecked() && randomRotationY->isChecked();
+            randomX->trigger();randomXYZ->trigger();
+            int selectedScales=0;
+            for(auto* action:randomMenu->actions())
+                if(action->objectName().startsWith("objectRandomAxis") && action->isChecked()) ++selectedScales;
+            randomSettingsWorks=randomSettingsWorks && selectedScales==1 && randomXYZ->isChecked();
+            randomRotationX->trigger();randomRotationY->trigger();
             randomRotationDegrees->setValue(25);
         }
         QTextStream(stderr)<<"Random button defaults/right-click/persist="<<randomSettingsWorks<<"\n";
