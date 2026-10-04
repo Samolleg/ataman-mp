@@ -26,6 +26,9 @@ public:
 QJsonObject withoutScale(QJsonObject object) {
     auto base=object.value("Base object").toObject();base.remove("Complection");object.insert("Base object",base);return object;
 }
+QJsonObject withoutRotation(QJsonObject object) {
+    auto base=object.value("Base object").toObject();base.remove("Rotation");object.insert("Base object",base);return object;
+}
 }
 
 int runObjectRandomizationCheck()
@@ -104,5 +107,49 @@ int runObjectRandomizationCheck()
         && missing->constitution().y()==0 && missing->constitution().z()>=0 && missing->constitution().z()<=8,
         "100percent handles signed zero and missing-figure scales without crashing");
     history.undo();check(missing->toJson()==edgeBefore,"missing-figure scale exact Undo");
+    history.clear();missing->setState(eDraw);first->setState(eSelect);second->setState(eSelect);
+    // Start away from identity, including a near-gimbal orientation. A pure
+    // world-axis delta must remain pure even if its Euler representation folds.
+    first->setRot(QQuaternion::fromEulerAngles(89.9f,34.0f,-61.0f));
+    second->setRot(QQuaternion::fromEulerAngles(-37.0f,73.0f,125.0f));
+    mob->serializeMob(baseline,false);mob->adoptCommittedBytes(baseline);
+    const auto rotationFirst=first->toJson(),rotationSecond=second->toJson();
+    for(int axis:{0,1}) for(double degrees:{25.0,180.0}) {
+        const QQuaternion beforeFirst=first->rotation(),beforeSecond=second->rotation();
+        view.randomizeSelectedObjectRotation(axis,degrees);
+        bool bounded=history.count()==1;
+        QVector<QQuaternion> deltas;
+        for(auto* object:{first,second}) {
+            const auto before=object==first?beforeFirst:beforeSecond;
+            const auto after=object->rotation();
+            const QQuaternion delta=(after*before.conjugated()).normalized();deltas.append(delta);
+            const double angle=2.0*std::acos(qBound(-1.0,double(std::abs(delta.scalar())),1.0))*180.0/3.141592653589793;
+            bounded=bounded && std::abs(after.lengthSquared()-1.0f)<.00001f && angle<=degrees+.001
+                && std::abs(delta.z())<.00001f
+                && std::abs(axis==0?delta.y():delta.x())<.00001f;
+        }
+        check(bounded,QString("rotation %1 +/- %2 degrees: pure world axis, unit orientation, one history entry").arg(axis==0?"X":"Y").arg(degrees));
+        const auto afterFirst=first->toJson(),afterSecond=second->toJson();
+        check(withoutRotation(afterFirst)==withoutRotation(rotationFirst)
+            && withoutRotation(afterSecond)==withoutRotation(rotationSecond)
+            && untouched->toJson()==originalUntouched && light->toJson()==originalLight
+            && missing->toJson()==edgeBefore,"rotation preserves scale position IDs and non-target records");
+        check(deltas[0]!=deltas[1],"rotation samples independent angles per object");
+        history.undo();check(first->rotation()==beforeFirst && second->rotation()==beforeSecond
+            && first->toJson()==rotationFirst && second->toJson()==rotationSecond
+            && !mob->refreshDirtyFromProjection(),"rotation Undo restores exact authored quaternions and clean state");
+        history.redo();check(first->toJson()==afterFirst && second->toJson()==afterSecond,"rotation Redo replays sampled orientations exactly");
+        history.undo();history.clear();
+    }
+    for(const auto& invalid:QVector<QPair<int,double>>{{-1,25},{2,25},{0,-1},{1,181},{0,NAN},{0,0}})
+        view.randomizeSelectedObjectRotation(invalid.first,invalid.second);
+    check(history.count()==0 && first->toJson()==rotationFirst,"invalid rotation axis/range and zero degrees are no-op");
+    view.m_operationBackup.insert(first,QVector3D());view.randomizeSelectedObjectRotation(0,25);
+    check(history.count()==0 && first->toJson()==rotationFirst,"unfinished transform blocks random rotation");view.m_operationBackup.clear();
+    const auto validSecond=second->rotation();second->setRot(QQuaternion(0,0,0,0));
+    view.randomizeSelectedObjectRotation(1,25);
+    check(history.count()==0 && first->toJson()==rotationFirst,"invalid later quaternion rejects whole batch without changing earlier object");
+    second->setRot(validSecond);first->setState(eDraw);second->setState(eDraw);view.randomizeSelectedObjectRotation(0,25);
+    check(history.count()==0 && light->toJson()==originalLight,"rotation ignores unselected objects and selected light");
     history.clear();out<<(failures?"FAIL":"PASS")<<": object randomization checks\n";return failures?1:0;
 }

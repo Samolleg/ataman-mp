@@ -580,7 +580,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(groupRotationCheckOption);
     QCommandLineOption assemblyCatalogCheckOption("assembly-catalog-check","Check assembly capture, grouped placement and catalog with synthetic data.");
     parser.addOption(assemblyCatalogCheckOption);
-    QCommandLineOption objectRandomCheckOption("object-randomization-check","Check random scale axes, authored FIG forms and atomic Undo/Redo.");
+    QCommandLineOption objectRandomCheckOption("object-randomization-check","Check random scale/rotation axes, authored FIG forms and atomic Undo/Redo.");
     parser.addOption(objectRandomCheckOption);
     parser.addOption(modelConnectionCheckOption);
     parser.addOption(darkThemeCheckOption);
@@ -3301,8 +3301,15 @@ int runHeadlessCommand(QApplication& app)
         auto* randomStrength=productionWindow->findChild<QSpinBox*>("objectRandomStrength");
         auto* randomXYZ=productionWindow->findChild<QAction*>("objectRandomAxisXYZ");
         auto* randomX=productionWindow->findChild<QAction*>("objectRandomAxisX");
+        auto* randomRotationX=productionWindow->findChild<QAction*>("objectRandomRotationX");
+        auto* randomRotationY=productionWindow->findChild<QAction*>("objectRandomRotationY");
+        auto* randomRotationDegrees=productionWindow->findChild<QSpinBox*>("objectRandomRotationDegrees");
         bool randomSettingsWorks=randomButton && randomMenu && randomStrength && randomXYZ && randomX
-            && randomXYZ->isChecked() && randomStrength->value()==25;
+            && randomXYZ->isChecked() && randomStrength->value()==25
+            && randomRotationX && randomRotationY && randomRotationDegrees
+            && !randomRotationX->isCheckable() && !randomRotationY->isCheckable()
+            && !randomRotationX->icon().isNull() && !randomRotationY->icon().isNull()
+            && randomRotationDegrees->value()==25;
         if(randomSettingsWorks) {
             QContextMenuEvent context(QContextMenuEvent::Mouse,QPoint(10,10),randomButton->mapToGlobal(QPoint(10,10)));
             QApplication::sendEvent(randomButton,&context);QApplication::processEvents();
@@ -3312,6 +3319,11 @@ int runHeadlessCommand(QApplication& app)
                 && QSettings().value("ui/objectRandomAxes").toInt()==1
                 && QSettings().value("ui/objectRandomStrength").toInt()==40;
             randomXYZ->trigger();randomStrength->setValue(25);
+            randomRotationDegrees->setValue(55);randomRotationX->trigger();randomRotationY->trigger();
+            randomSettingsWorks=randomSettingsWorks
+                && QSettings().value("ui/objectRandomRotationDegrees").toInt()==55
+                && randomXYZ->isChecked() && randomStrength->value()==25;
+            randomRotationDegrees->setValue(25);
         }
         QTextStream(stderr)<<"Random button defaults/right-click/persist="<<randomSettingsWorks<<"\n";
         compactToolbarWorks=compactToolbarWorks && randomSettingsWorks;

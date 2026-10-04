@@ -3705,7 +3705,7 @@ void MainWindow::setupCompactViewportTools()
     toolsMenu->addActions({open,save,ungroup});
 
     auto* random=button("randomObjectToolbarButton",QString::fromUtf8("Рандом"),12,13);
-    random->setToolTip(QString::fromUtf8("ЛКМ — случайный масштаб и встроенная форма выделенных объектов; ПКМ — оси и сила"));
+    random->setToolTip(QString::fromUtf8("ЛКМ — случайный масштаб и встроенная форма; ПКМ — настройки и отдельное вращение X / Y"));
     auto* randomMenu=new QMenu(random);randomMenu->setObjectName("objectRandomSettingsMenu");
     auto* axisGroup=new QActionGroup(randomMenu);axisGroup->setExclusive(true);
     const int savedAxes=QSettings().value("ui/objectRandomAxes",7).toInt();
@@ -3730,6 +3730,27 @@ void MainWindow::setupCompactViewportTools()
     strengthLayout->addWidget(strength);
     auto* strengthAction=new QWidgetAction(randomMenu);strengthAction->setDefaultWidget(strengthPanel);randomMenu->addAction(strengthAction);
     connect(strength,QOverload<int>::of(&QSpinBox::valueChanged),random,[](int value){QSettings().setValue("ui/objectRandomStrength",value);});
+    randomMenu->addSeparator();
+    auto* rotationPanel=new QWidget(randomMenu);auto* rotationLayout=new QHBoxLayout(rotationPanel);
+    rotationLayout->setContentsMargins(12,6,12,6);
+    rotationLayout->addWidget(new QLabel(QString::fromUtf8("Поворот: ±"),rotationPanel));
+    auto* rotationStrength=new QSpinBox(rotationPanel);rotationStrength->setObjectName("objectRandomRotationDegrees");
+    rotationStrength->setRange(0,180);rotationStrength->setSuffix(QString::fromUtf8("°"));
+    rotationStrength->setValue(qBound(0,QSettings().value("ui/objectRandomRotationDegrees",25).toInt(),180));
+    rotationStrength->setToolTip(QString::fromUtf8("Максимальный случайный поворот от текущего положения; 0° — без изменений"));
+    rotationLayout->addWidget(rotationStrength);
+    auto* rotationStrengthAction=new QWidgetAction(randomMenu);rotationStrengthAction->setDefaultWidget(rotationPanel);
+    randomMenu->addAction(rotationStrengthAction);
+    connect(rotationStrength,QOverload<int>::of(&QSpinBox::valueChanged),random,[](int value){QSettings().setValue("ui/objectRandomRotationDegrees",value);});
+    for(int axis:{0,1}) {
+        const QString name=axis==0?"X":"Y";
+        auto* action=randomMenu->addAction(viewportToolIcon(9),QString::fromUtf8("Рандом вращения %1").arg(name));
+        action->setObjectName("objectRandomRotation"+name);
+        action->setToolTip(QString::fromUtf8("Повернуть каждый выделенный объект вокруг его позиции по мировой оси %1").arg(name));
+        connect(action,&QAction::triggered,this,[this,axis,rotationStrength]{
+            if(m_pView) m_pView->randomizeSelectedObjectRotation(axis,rotationStrength->value());
+        });
+    }
     random->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(random,&QWidget::customContextMenuRequested,random,[random,randomMenu](const QPoint& point){randomMenu->popup(random->mapToGlobal(point));});
     connect(random,&QToolButton::clicked,this,[this,axisGroup,strength]{

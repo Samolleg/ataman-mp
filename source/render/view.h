@@ -432,6 +432,7 @@ public:
     void recordSelectionChange(const QList<CNode*>& before, const QString& text = QString("Select objects"));
     void setRandomComplection(const EObjParam param, const float min, const float max);
     void randomizeSelectedObjects(int axes = 7, double strengthPercent = 25.0);
+    void randomizeSelectedObjectRotation(int axis, double maximumDegrees = 25.0);
     void resetSelectedId();
     bool applyFamilyNidRepairs(const QVector<SNidRepair>& repairs, QString* error = nullptr);
     quint32 suggestFamilyNid(CMob* mob, quint32 localSuggestion);
