@@ -1,6 +1,6 @@
 # Ataman106: добавление при отсутствующем MOB
 
-Дата:2026-10-04. Задача EI-NID-MISSING-106, продолжение EI-NID-ZONE19-RECHECK-105/EI-NID-FAMILY-105. Ветка main, база `aee7be0e50e80c10093f93e76bb25fda93da3be9`. Разрешение владельца «давай исправляй»: реализация, проверки, scoped-коммит, сборка и передача. Данные игр/каталог/чужие изменения сохраняются.
+Дата:2026-10-04. Задача EI-NID-MISSING-106, продолжение EI-NID-ZONE19-RECHECK-105/EI-NID-FAMILY-105. Ветка main, код `2357f16de7f207c31397d69de9dc2358f1d3f508`, база `aee7be0e50e80c10093f93e76bb25fda93da3be9`. Разрешение владельца «давай исправляй»: реализация, проверки, scoped-коммит, сборка и передача. Данные игр/каталог/чужие изменения сохраняются.
 
 ## Исправление
 
@@ -23,7 +23,13 @@ Missing-зависимость больше не сбрасывает струк
 
 ## Передача
 
-Свежий Release EXE SHA256 `EA3A83295D35721CD75B8B50748CDB77E93B1AB0FD139D0D5AD189F042928C7B`. Staging/финализация/постоянная установка и комплект для получателя ещё подготавливаются; результаты будут записаны после проверок. Чужой translations/ei_mapper_ru.qm восстановлен после lrelease, SHA256 `EDA31955A912758ACB5A7BDE043BBF2EB5F8A2606FA32DC52AFA4156CA74ED9F`.
+Свежая собственная staging `build-staging-106-nid-missing`:raw/staged EXE и оба runtime byte-identical, --version106 exit0 до финализации; finalizer/независимый validator PASS,127 managed файлов. После финализации не запускалась. EXE SHA256 `EA3A83295D35721CD75B8B50748CDB77E93B1AB0FD139D0D5AD189F042928C7B`; runtimebridge `4014C8642FD084A8300BF0BA0CA41C4AAF84623E5B7451FF0C908DC33C2FB38B`, runtimehost `A5F8A6D3E25EEFE3F8D79F4213F4D1C522DD452A5BF460F7911D5FAA30003488`.
+
+Постоянная установка `artifacts/EI-Mapper-Ataman-2-first-test` обновлена на106 по manifest:6 замен+manifest, все127 программных хешей проверены;15182 неуправляемых пользовательских файла byte-identical до/после. Сессии пользователя не завершались, финализатор на постоянной установке не запускался. Проверенный откат105 `artifacts/rollback-EI-Mapper-Ataman-v105-to-106-20261004` содержит6 файлов+старый manifest, EXE105 `2085EDC28A07FCBDEB9C3CADEFC3EC3144F90AE980EAACFF84635670727AC36E`. Предыдущий собственный откат104 удалён после проверки обеих копий и новой установки. Доказательства stage.log/install.log/user-files-before.json/user-files-after.json/retire-rollback.log.
+
+Новый чистый комплект для получателя `artifacts/EI-Mapper-Ataman-106-distribution`:129 managed файлов+manifest, русская инструкция START_HERE_RU.md и руководство сборок;raw/staged/version/finalizer/независимые stage/final validators PASS. Из созданной заново staging перемещён в новый проверенный путь, после финализации не запускался. Настройки/журналы/игровые ресурсы/готовый каталог мода не включены, ZIP не создан. Установка106 при упаковке повторно проверена и неизменна. Старый переданный комплект105 не менялся. Доказательства distribution.log/result.json/validate-distribution.log.
+
+Чужой translations/ei_mapper_ru.qm восстановлен после lrelease, SHA256 `EDA31955A912758ACB5A7BDE043BBF2EB5F8A2606FA32DC52AFA4156CA74ED9F`. Чужие пункты ROADMAP/отчёт52/untracked86 сохранены вне scoped-коммита; Endurance, GitHub и игровые данные не изменялись.
 
 ## Приёмка и граница гарантии
 
