@@ -3,11 +3,24 @@
 #include "mob.h"
 #include "property.h"
 #include "undo.h"
+#include "utils.h"
+#include <QMatrix4x4>
 #include <QPointer>
 #include <QRandomGenerator>
 #include <cmath>
 
 namespace {
+// Use the same matrix/quaternion path as CNode::getEulerRotation(), so the
+// previewed candidate is validated against the actual property-panel fields.
+QVector3D rotationFields(const QQuaternion& rotation)
+{
+    QMatrix4x4 matrix;matrix.rotate(rotation);
+    return QQuaternion::fromRotationMatrix(matrix.normalMatrix()).toEulerAngles();
+}
+float angleDifference(float left,float right)
+{
+    return std::remainder(left-right,360.0f);
+}
 struct RandomObjectState {
     QVector3D scale;
     QQuaternion rotation;
@@ -120,12 +133,36 @@ void CView::randomizeSelectedObjectsCombined(int axes,double strengthPercent,
                 emit updateMsg(QString::fromUtf8("У выделенного объекта некорректное вращение. Рандомизация отменена."));
                 return;
             }
-            result.rotation=q.normalized();
-            // Fixed world-axis composition: X first, then Y, about own origin.
-            for(int axis=0;axis<2;++axis) if(axis==0?rotateX:rotateY) {
-                const float degrees=float((QRandomGenerator::global()->generateDouble()*2.0-1.0)*maximumDegrees);
-                const QVector3D direction=axis==0?QVector3D(1,0,0):QVector3D(0,1,0);
-                result.rotation=(QQuaternion::fromAxisAndAngle(direction,degrees)*result.rotation).normalized();
+            const QVector3D initial=object->getEulerRotation();
+            const double fieldPrecision=std::abs(initial.x())>85?.02:.0001;
+            bool accepted=false;
+            // Changing Euler X past +/-90 folds Y/Z by180 degrees in the
+            // panel. Sample within its canonical range rather than changing
+            // unchecked fields. Leave a small margin from the singularity.
+            const double minX=qMax(-89.9,double(initial.x())-maximumDegrees);
+            const double maxX=qMin(89.9,double(initial.x())+maximumDegrees);
+            for(int attempt=0;attempt<32 && !accepted;++attempt) {
+                QVector3D edited=initial;
+                if(rotateX && minX<=maxX)
+                    edited.setX(float(minX+QRandomGenerator::global()->generateDouble()*(maxX-minX)));
+                if(rotateY) edited.setY(initial.y()+float((QRandomGenerator::global()->generateDouble()*2.0-1.0)*maximumDegrees));
+                const auto candidate=util::eulerToQuat(edited);
+                const auto shown=rotationFields(candidate);
+                // float Euler extraction loses precision near +/-90. Reject
+                // folds/drift before mutation; allow only numerical noise.
+                accepted=true;
+                for(int axis=0;axis<3;++axis) {
+                    const bool enabled=axis==0?rotateX:axis==1?rotateY:false;
+                    const double tolerance=enabled?maximumDegrees+fieldPrecision:fieldPrecision;
+                    if(!std::isfinite(shown[axis])
+                       || std::abs(angleDifference(shown[axis],initial[axis]))>tolerance)
+                        accepted=false;
+                }
+                if(accepted) result.rotation=candidate;
+            }
+            if(!accepted) {
+                emit updateMsg(QString::fromUtf8("Не удалось изменить выбранные поля вращения без изменения остальных. Рандомизация отменена."));
+                return;
             }
         }
         if(result.scale==original.scale && result.rotation==original.rotation) continue;

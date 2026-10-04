@@ -580,7 +580,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(groupRotationCheckOption);
     QCommandLineOption assemblyCatalogCheckOption("assembly-catalog-check","Check assembly capture, grouped placement and catalog with synthetic data.");
     parser.addOption(assemblyCatalogCheckOption);
-    QCommandLineOption objectRandomCheckOption("object-randomization-check","Check random scale/rotation axes, authored FIG forms and atomic Undo/Redo.");
+    QCommandLineOption objectRandomCheckOption("object-randomization-check","Check random scale/rotation property fields, authored FIG forms and atomic Undo/Redo.");
     parser.addOption(objectRandomCheckOption);
     parser.addOption(modelConnectionCheckOption);
     parser.addOption(darkThemeCheckOption);

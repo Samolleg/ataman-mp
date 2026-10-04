@@ -109,8 +109,8 @@ int runObjectRandomizationCheck()
         "100percent handles signed zero and missing-figure scales without crashing");
     history.undo();check(missing->toJson()==edgeBefore,"missing-figure scale exact Undo");
     history.clear();missing->setState(eDraw);first->setState(eSelect);second->setState(eSelect);
-    // Start away from identity, including a near-gimbal orientation. A pure
-    // world-axis delta must remain pure even if its Euler representation folds.
+    // Start away from identity, including a near-gimbal orientation. The
+    // displayed Euler fields, not world-axis deltas, are the editing contract.
     first->setRot(QQuaternion::fromEulerAngles(89.9f,34.0f,-61.0f));
     second->setRot(QQuaternion::fromEulerAngles(-37.0f,73.0f,125.0f));
     mob->serializeMob(baseline,false);mob->adoptCommittedBytes(baseline);
@@ -119,17 +119,21 @@ int runObjectRandomizationCheck()
         const QQuaternion beforeFirst=first->rotation(),beforeSecond=second->rotation();
         view.randomizeSelectedObjectRotation(axis,degrees);
         bool bounded=history.count()==1;
-        QVector<QQuaternion> deltas;
+        QVector<float> deltas;
         for(auto* object:{first,second}) {
             const auto before=object==first?beforeFirst:beforeSecond;
             const auto after=object->rotation();
-            const QQuaternion delta=(after*before.conjugated()).normalized();deltas.append(delta);
-            const double angle=2.0*std::acos(qBound(-1.0,double(std::abs(delta.scalar())),1.0))*180.0/3.141592653589793;
-            bounded=bounded && std::abs(after.lengthSquared()-1.0f)<.00001f && angle<=degrees+.001
-                && std::abs(delta.z())<.00001f
-                && std::abs(axis==0?delta.y():delta.x())<.00001f;
+            // Check the same Euler fields the user reads, not world-axis deltas.
+            MorphObject reference(&figure);reference.setRot(before);
+            const auto initialFields=reference.getEulerRotation(),fields=object->getEulerRotation();
+            deltas.append(std::remainder(fields[axis]-initialFields[axis],360.0f));
+            bounded=bounded && std::abs(after.lengthSquared()-1.0f)<.00001f;
+            for(int component=0;component<3;++component) {
+                const float difference=std::remainder(fields[component]-initialFields[component],360.0f);
+                bounded=bounded && std::abs(difference)<=(component==axis?degrees+.02:.02);
+            }
         }
-        check(bounded,QString("rotation %1 +/- %2 degrees: pure world axis, unit orientation, one history entry").arg(axis==0?"X":"Y").arg(degrees));
+        check(bounded,QString("rotation field %1 +/- %2 degrees: only selected panel component, unit orientation, one history entry").arg(axis==0?"X":"Y").arg(degrees));
         const auto afterFirst=first->toJson(),afterSecond=second->toJson();
         check(withoutRotation(afterFirst)==withoutRotation(rotationFirst)
             && withoutRotation(afterSecond)==withoutRotation(rotationSecond)
@@ -142,6 +146,28 @@ int runObjectRandomizationCheck()
         history.redo();check(first->toJson()==afterFirst && second->toJson()==afterSecond,"rotation Redo replays sampled orientations exactly");
         history.undo();history.clear();
     }
+    for(const auto& euler:QVector<QVector3D>{{2.5613f,24.6983f,-76},{0,0,-76},{-21,178,-179},{90,10,20}}) {
+        first->setRot(QQuaternion::fromEulerAngles(euler));second->setState(eDraw);
+        const auto fields=first->getEulerRotation();const auto original=first->rotation();
+        for(int axis:{0,1}) {
+            bool bounded=true;
+            for(int repeat=0;repeat<24;++repeat) {
+                view.randomizeSelectedObjectRotation(axis,25);
+                QSharedPointer<IPropertyBase> prop;
+                for(int component=0;component<3;++component) {
+                    first->getParam(prop,EObjParam(int(eObjParam_ROTATION_X)+component));
+                    const auto value=dynamic_cast<propFloat*>(prop.data())->value();
+                    const float precision=std::abs(fields.x())>85?.02f:.0001f;
+                    bounded=bounded && std::abs(std::remainder(value-fields[component],360.0f))<=(component==axis?25+precision:precision);
+                }
+                bounded=bounded && history.count()==1;
+                history.undo();bounded=bounded && first->rotation()==original;history.clear();
+            }
+            check(bounded,QString("panel property field %1: screenshot/wrapped/gimbal input %2,%3,%4,24 repeats with other components retained")
+                .arg(axis==0?"X":"Y").arg(euler.x()).arg(euler.y()).arg(euler.z()));
+        }
+    }
+    first->setRot(QQuaternion::fromEulerAngles(89.9f,34.0f,-61.0f));second->setState(eSelect);
     for(const auto& invalid:QVector<QPair<int,double>>{{-1,25},{2,25},{0,-1},{1,181},{0,NAN},{0,0}})
         view.randomizeSelectedObjectRotation(invalid.first,invalid.second);
     check(history.count()==0 && first->toJson()==rotationFirst,"invalid rotation axis/range and zero degrees are no-op");
@@ -173,12 +199,14 @@ int runObjectRandomizationCheck()
             if(!rotations) fields=fields && withoutScale(object->toJson())==withoutScale(original);
             else {
                 const auto initialRotation=object==first?beforeRotationFirst:beforeRotationSecond;
-                const auto delta=(object->rotation()*initialRotation.conjugated()).normalized();
-                const auto angles=delta.toEulerAngles(); // Y * X, safely away from gimbal lock.
-                fields=fields && std::abs(object->rotation().lengthSquared()-1)<.00001f
-                    && std::abs(angles.z())<.001f && std::abs(angles.x())<=25.001f && std::abs(angles.y())<=25.001f
-                    && ((rotations&1) || std::abs(angles.x())<.001f)
-                    && ((rotations&2) || std::abs(angles.y())<.001f);
+                MorphObject reference(&figure);reference.setRot(initialRotation);
+                const auto initialFields=reference.getEulerRotation(),fieldsNow=object->getEulerRotation();
+                fields=fields && std::abs(object->rotation().lengthSquared()-1)<.00001f;
+                for(int component=0;component<3;++component) {
+                    const bool enabled=component==0?(rotations&1):component==1?(rotations&2):false;
+                    const auto difference=std::remainder(fieldsNow[component]-initialFields[component],360.0f);
+                    fields=fields && std::abs(difference)<=(enabled?25.02:.02);
+                }
             }
         }
         check(fields && untouched->toJson()==originalUntouched && light->toJson()==originalLight,

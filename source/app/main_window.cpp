@@ -3770,7 +3770,7 @@ void MainWindow::setupCompactViewportTools()
         const QString name=axis==0?"X":"Y";
         auto* action=addCheck("objectRandomRotation"+name,QString::fromUtf8("Поворот %1").arg(name),viewportToolIcon(9));
         action->setChecked(QSettings().value("ui/objectRandomRotate"+name,false).toBool());
-        action->setToolTip(QString::fromUtf8("Включить случайный поворот по мировой оси %1 при ЛКМ на «Рандом»").arg(name));
+        action->setToolTip(QString::fromUtf8("Изменять только поле «Вращение %1» при ЛКМ на «Рандом»").arg(name));
         rotationActions.append(action);
         connect(action,&QAction::toggled,random,[name](bool checked){
             QSettings().setValue("ui/objectRandomRotate"+name,checked);
