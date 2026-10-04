@@ -93,6 +93,8 @@ public:
 
     static SAiGraphPreviewBuildResult build(const SAiGraphPreviewBuildInput& input);
     static int quantizedWaterDepth(float worldDepth, float maximumTerrainHeight);
+    static float navigationWaterDepth(float landHeight, float overlayHeight,
+                                      bool overlayActive, int overlayMaterialType);
     static QVector<SAiTerrainTraversal> parseTerrainTraversalRegistry(
         const QByteArray& registry, QString* error = nullptr);
 };

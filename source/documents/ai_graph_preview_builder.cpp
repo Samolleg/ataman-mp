@@ -728,6 +728,17 @@ QVector<SAiTerrainTraversal> CAiGraphPreviewBuilder::parseTerrainTraversalRegist
     return result;
 }
 
+float CAiGraphPreviewBuilder::navigationWaterDepth(
+    float landHeight, float overlayHeight, bool overlayActive, int overlayMaterialType)
+{
+    // Inactive SEC records retain their old heights. They are not water.
+    // Both textured and untextured water are valid; a grass overlay is not.
+    if(!overlayActive || (overlayMaterialType != eTerrainWater
+                         && overlayMaterialType != eTerrainUntexturedWater))
+        return 0.0f;
+    return qMax(0.0f, overlayHeight - landHeight);
+}
+
 SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::build(const SAiGraphPreviewBuildInput& input)
 {
     SAiGraphPreviewBuildResult result;

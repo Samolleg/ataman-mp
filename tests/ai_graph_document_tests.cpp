@@ -125,6 +125,7 @@ private slots:
     void regenerationUsesRuntimeHeightRounding();
     void regenerationUsesRuntimeBridgeHeightRounding();
     void quantizesWaterBeforeOverlayTerrainSelection();
+    void ignoresInactiveAndNonWaterOverlayDepth();
     void usesRuntimeElevationMultiplierArithmetic();
     void regenerationUsesRuntimeCrossingTraversal();
     void regenerationRasterizesAuthoredDegenerateCollisionSlab();
@@ -361,6 +362,36 @@ void AiGraphDocumentTests::regenerationRejectsGameScaleTerrainCliffs()
     QVERIFY2(flyCliff.valid, qPrintable(flyCliff.error));
     QCOMPARE(flyCliff.document.weight(0, 1, 1, 6), qint16(-1));
     QCOMPARE(flyCliff.document.weight(3, 1, 1, 6), qint16(-1));
+}
+
+void AiGraphDocumentTests::ignoresInactiveAndNonWaterOverlayDepth()
+{
+    SAiGraphPreviewBuildInput input;
+    input.graphWidth = 4;
+    input.graphHeight = 3;
+    input.terrainHeights.fill(0.0f, 32 * 24);
+    for(const auto mode : {qMakePair(false, int(eTerrainWater)),
+                           qMakePair(true, int(eTerrainTexturedGrass)),
+                           qMakePair(true, int(eTerrainUndefined))})
+    {
+        input.waterDepths.fill(CAiGraphPreviewBuilder::navigationWaterDepth(
+            0.0f, 9.0f, mode.first, mode.second), 32 * 24);
+        const auto result = CAiGraphPreviewBuilder::build(input);
+        QVERIFY2(result.valid, qPrintable(result.error));
+        QVERIFY(result.document.weight(3, 1, 1, 6) >= 0);
+        QCOMPARE(result.waterAiTiles, 0);
+    }
+    for(int material : {int(eTerrainWater), int(eTerrainUntexturedWater)})
+    {
+        input.waterDepths.fill(CAiGraphPreviewBuilder::navigationWaterDepth(
+            0.0f, 9.0f, true, material), 32 * 24);
+        const auto result = CAiGraphPreviewBuilder::build(input);
+        QVERIFY2(result.valid, qPrintable(result.error));
+        QCOMPARE(result.document.weight(3, 1, 1, 6), qint16(-1));
+        QVERIFY(result.waterAiTiles > 0);
+    }
+    QCOMPARE(CAiGraphPreviewBuilder::navigationWaterDepth(5.0f, 4.0f,
+        true, eTerrainWater), 0.0f);
 }
 
 void AiGraphDocumentTests::regenerationUsesBridgeSurfaceAndObjectSemantics()

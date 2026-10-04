@@ -4017,16 +4017,20 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                 globalTileX, globalTileY, &overlayAvailable);
             bool heightAvailable = false;
             const float overlayHeight = m_terrainEdit.navigationHeightSample(
-                x, y, ETerrainTileLayer::Overlay, &heightAvailable, false);
-            if(heightAvailable)
-                input->waterDepths[index] = qMax(
-                    0.0f, overlayHeight - input->terrainHeights.at(index));
+                x, y, ETerrainTileLayer::Overlay, &heightAvailable);
+            const int overlayMaterialType = overlayAvailable && materialIndex >= 0
+                && materialIndex < materials.size()
+                ? int(materials.at(materialIndex).type) : int(eTerrainUndefined);
+            input->waterDepths[index] = CAiGraphPreviewBuilder::navigationWaterDepth(
+                input->terrainHeights.at(index), overlayHeight,
+                heightAvailable && overlayAvailable, overlayMaterialType);
 
             if(CAiGraphPreviewBuilder::quantizedWaterDepth(
                    input->waterDepths.at(index), input->maximumTerrainHeight) > 0
                && overlayAvailable && materialIndex >= 0
                && materialIndex < materials.size()
-               && materials.at(materialIndex).type == eTerrainWater)
+               && (overlayMaterialType == eTerrainWater
+                   || overlayMaterialType == eTerrainUntexturedWater))
             {
                 bool overlayTileAvailable = false;
                 const quint16 overlayPacked = m_terrainEdit.packedTile(
