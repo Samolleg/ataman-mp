@@ -5595,6 +5595,23 @@ QByteArray MainWindow::nidAllocationContextDigest()
     {
         const QFileInfo file(member.path);
         stream << member.path << file.exists() << file.size() << file.lastModified();
+        if(member.missing)
+        {
+            // The missing member stores a logical filename. Watch every actual
+            // search directory so restoring it rebuilds the occupied-ID set.
+            QStringList roots = activeMapRoots().toList();
+            if(!member.requestedBy.isEmpty())
+                roots.append(QFileInfo(member.requestedBy).absolutePath());
+            if(m_pView) for(CMob* mob : m_pView->mobs()) if(mob)
+                roots.append(mob->filePath().absolutePath());
+            roots.removeDuplicates();
+            for(const QString& root : roots)
+            {
+                const QFileInfo candidate(QDir(root).filePath(member.fileName));
+                stream << candidate.absoluteFilePath() << candidate.exists()
+                       << candidate.size() << candidate.lastModified();
+            }
+        }
     }
     return QCryptographicHash::hash(context, QCryptographicHash::Sha256);
 }
@@ -5606,10 +5623,16 @@ quint32 MainWindow::allocateFamilyNid(const QString& mobPath, bool* shared)
     {
         m_nidAllocationValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest(true));
         m_nidAllocationContextDigest = nidAllocationContextDigest();
-        // A failed snapshot is retryable after repairing a record or restoring
-        // a dependency. Never keep a failure cached against unrelated field edits.
+        // Missing dependencies are warnings, cached through their search-path
+        // metadata. Invalid existing records must retry after live field edits.
         for(const auto& member : m_nidAllocationValidation.members)
-            if(member.missing || !member.error.isEmpty()) m_nidAllocationContextDigest.clear();
+        {
+            if(member.missing)
+                ei::log(eLogWarning, QString::fromUtf8("Добавление объектов: файл %1 отсутствует. ID проверяются по доступным MOB; после появления этого файла проверка будет обновлена.")
+                    .arg(member.fileName));
+            else if(!member.error.isEmpty())
+                m_nidAllocationContextDigest.clear();
+        }
         for(const auto& finding : m_nidAllocationValidation.findings)
             if(finding.code == "family.dynamic_addmob") m_nidAllocationContextDigest.clear();
     }

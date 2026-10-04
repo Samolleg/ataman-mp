@@ -765,9 +765,11 @@ bool CMobFamilyValidationReport::suggestReplacementNid(const QString& owningMobP
 {
     if(nid) *nid = 0;
     if(sharedRange) *sharedRange = false;
-    // Unknown records cannot certify that a proposed ID is free.
+    // A missing dependency has no on-disk records to collide with. Keep its
+    // finding visible, but allow authoring against the available family.
+    // Existing unreadable records and unresolved dynamic names remain unsafe.
     for(const SMobFamilyMember& member : members)
-        if(member.missing || !member.error.isEmpty())
+        if(!member.missing && !member.error.isEmpty())
             return false;
     for(const SMobFamilyFinding& finding : findings)
         if(finding.code == "family.dynamic_addmob")

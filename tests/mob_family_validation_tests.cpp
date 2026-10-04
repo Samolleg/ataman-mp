@@ -301,7 +301,7 @@ class MobFamilyValidationTests : public QObject
     Q_OBJECT
 private slots:
     void failedAllocationClearsLocalFallback();
-    void incompleteFamilyCannotCertifyFreeIds();
+    void missingDependencyAllowsAvailableFamilyIds();
     void allocationSkipsVisualResourceValidation();
     void authoredZeroNidIsCriticalAndBlocksRuntimePreflight();
     void positiveNidWithNoParentSentinelIsClean();
@@ -746,16 +746,19 @@ void MobFamilyValidationTests::failedAllocationClearsLocalFallback()
     QCOMPARE(suggestion, quint32(0));
 }
 
-void MobFamilyValidationTests::incompleteFamilyCannotCertifyFreeIds()
+void MobFamilyValidationTests::missingDependencyAllowsAvailableFamilyIds()
 {
     CMobFamilyValidationReport report;
     SMobFamilyMember owner; owner.path = QFileInfo("owner.mob").absoluteFilePath();
     SMobIdRangeSnapshot range; range.minimum=1; range.maximum=2; range.effective=true;
     owner.ranges.append(range); report.members.append(owner);
     SMobFamilyMember unknown; unknown.path="missing.mob"; unknown.missing=true;
+    unknown.error="File was not found";
     report.members.append(unknown);
     quint32 id=1000;
-    QVERIFY(!report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(0));
+    QVERIFY(report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(1));
+    QVERIFY(report.suggestReplacementNid(owner.path,&id,nullptr,{1})); QCOMPARE(id,quint32(2));
+    QVERIFY(!report.suggestReplacementNid(unknown.path,&id)); QCOMPARE(id,quint32(0));
     report.members.removeLast(); unknown.missing=false; unknown.error="Unreadable records";
     report.members.append(unknown);
     QVERIFY(!report.suggestReplacementNid(owner.path,&id)); QCOMPARE(id,quint32(0));

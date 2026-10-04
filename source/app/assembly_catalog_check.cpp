@@ -302,6 +302,7 @@ int runAssemblyCatalogCheck() {
         QByteArray bulkBaseline;bulk->serializeMob(bulkBaseline,false);
         {QFile file(bulk->filePath().absoluteFilePath());file.open(QIODevice::WriteOnly);file.write(bulkBaseline);}
         bulk->adoptCommittedBytes(bulkBaseline);
+        other->setScript("AddMob(\"missing-dependent.mob\");");other->refreshDirtyFromProjection();
         QElapsedTimer familyTimer;familyTimer.start();
         const bool pending=familyView->beginPreparedAssemblyPlacement(largeBatch,{300,200},anchor,&error,false);
         const auto familyMs=familyTimer.elapsed();
@@ -311,6 +312,7 @@ int runAssemblyCatalogCheck() {
         for(auto* node:batchNodes){const auto id=node->mapId();safe&=id>=10000&&id<=10300&&!ids.contains(id)&&id!=102;ids.insert(id);}
         check(safe,"143 production family IDs are unique in effective range and avoid other MOB IDs");
         check(safe&&familyMs<2000,"143 family-aware batch retains bounded synthetic responsiveness");
+        check(!window.m_nidAllocationContextDigest.isEmpty(),"missing dependency keeps allocation snapshot cached for the batch");
         if(pending)familyView->m_pOp->keyPress(eKey_Enter);
         check(pending&&familyView->m_pUndoStack->count()==historyBefore+1,"family batch commits atomically");
         if(pending){
@@ -321,10 +323,27 @@ int runAssemblyCatalogCheck() {
             for(auto* node:batchNodes)exact&=ids.contains(node->mapId());
             check(exact,"Redo retains every reserved family ID");
         }
-        other->setScript("AddMob(\"missing-dependent.mob\");");other->refreshDirtyFromProjection();
-        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())==0,"unsaved script dependency invalidates allocation and incomplete family refuses creation");
+        const auto missingDigest=window.m_nidAllocationContextDigest;
+        const uint availableId=window.allocateFamilyNid(bulk->filePath().absoluteFilePath());
+        check(availableId!=0&&window.m_nidAllocationContextDigest==missingDigest,"missing dependency allows known-family allocation without rebuilding snapshot");
+        // Restore the dependency on disk only: no loaded-MOB/script change may
+        // hide a failure to watch its previously missing search-path entry.
+        const uint restoredId=availableId+1;
+        {
+            CMob restored;restored.setFileName(QFileInfo(scratch.filePath("missing-dependent.mob")));
+            restored.setRanges(true,{SRange(restoredId,restoredId)});
+            auto* node=new Module;node->setMapId(restoredId);restored.nodes()<<node;
+            QByteArray bytes;restored.serializeMob(bytes,false);
+            QFile file(restored.filePath().absoluteFilePath());file.open(QIODevice::WriteOnly);file.write(bytes);
+        }
+        const uint afterRestore=window.allocateFamilyNid(bulk->filePath().absoluteFilePath());
+        check(afterRestore!=0&&afterRestore!=restoredId&&window.m_nidAllocationContextDigest!=missingDigest
+              &&window.m_nidAllocationValidation.nidOwners.contains(restoredId),"restored dependency invalidates missing-file cache and its IDs are occupied");
+        // Corrupt that existing synthetic file: unknown records must still fail.
+        {QFile file(scratch.filePath("missing-dependent.mob"));file.open(QIODevice::WriteOnly);file.write("invalid MOB");}
+        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())==0,"unreadable existing dependency still refuses allocation");
         other->setScript(QString());other->refreshDirtyFromProjection();
-        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())!=0,"resolving missing dependency rebuilds allocation snapshot");
+        check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())!=0,"removing unreadable dependency rebuilds allocation snapshot");
     }
     out<<"assembly-catalog-check: "<<failures<<" failures\n";return failures?1:0;
 }
