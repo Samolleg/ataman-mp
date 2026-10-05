@@ -39,6 +39,7 @@ class CState : public QObject //base state class - interface
     virtual void mouseMoveEvent(COperation *pOp, QMouseEvent* event) = 0;
     virtual void wheelEvent(COperation *pOp, QWheelEvent* event) = 0;
     virtual EOperationMethod operationMethod() = 0;
+    virtual void cancelPointerGesture() {}
     virtual void synchronizePointerAfterCameraNavigation(const QPoint& position)
     {
         m_lastPos = position;
@@ -57,6 +58,7 @@ class COperation //state manager
 public:
     COperation(CState *s);
     void changeState(CState* state);
+    void cancelPointerGesture();
     void setCurrent(CState *s) {current = s;}
     void keyPress(EKeyCode key) {current->keyPress(this, key);};
     void keyRelease(EKeyCode key) {current->keyRelease(this, key);};
@@ -87,6 +89,7 @@ class CSelect: public CState
 {
 public:
     CSelect(CView* pView);
+    void cancelPointerGesture() override { m_selectionGestureActive = false; }
     EOperationMethod operationMethod() override final {return eOperationMethodSelect;};
     ~CSelect() {}
     void keyPress(COperation* pOp, EKeyCode key) override;
@@ -97,6 +100,9 @@ public:
     void mouseReleaseEvent(COperation *pOp, QMouseEvent* pEvent) override;
     void mouseMoveEvent(COperation *pOp, QMouseEvent* pEvent) override;
     void wheelEvent(COperation *pOp, QWheelEvent* pEvent) override;
+private:
+    bool m_selectionGestureActive = false;
+    QPoint m_selectionAnchor;
 };
 
 class CMoveAxis : public CState
@@ -170,6 +176,7 @@ public:
     CTileBrush() = delete;
     EOperationMethod operationMethod() override final {return eOperationMethodTileBrush;};
     CTileBrush(CView* pView);
+    void cancelPointerGesture() override { m_leftGestureActive = false; }
     ~CTileBrush() {}
     void keyPress(COperation* pOp, EKeyCode key) override;
     void keyRelease(COperation* pOp, EKeyCode key) override;
@@ -181,6 +188,7 @@ public:
     void wheelEvent(COperation *pOp, QWheelEvent* pEvent) override final;
     void synchronizePointerAfterCameraNavigation(const QPoint& position) override;
 private:
+    bool m_leftGestureActive = false;
     QVector3D m_lastLandPos;
     bool m_lastLandPosValid{false};
 };

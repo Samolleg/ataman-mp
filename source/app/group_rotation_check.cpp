@@ -63,9 +63,15 @@ int runGroupRotationCheck()
             auto position=initial[i++]; node->updatePos(position); node->setRot(orientation); node->setState(eSelect);
         }
         QVector3D farPosition(1000,2000,3000); unsupported->updatePos(farPosition); unsupported->setState(eSelect);
-        locked->updatePos(farPosition); locked->setState(eSelect);
+        locked->updatePos(farPosition); locked->setState(eDraw);
     };
     reset();
+    // Keyboard and toolbar transforms share the same editable-selection rule.
+    locked->setState(eSelect);
+    view.m_pOp->keyPress(eKey_R);
+    check(view.m_pOp->operationMethod()==eOperationMethodSelect
+          && view.m_operationBackup.isEmpty(),"mixed locked selection rejects R before preview");
+    locked->setState(eDraw);
     const auto unitBefore=c->movementState();
     view.m_pOp->keyPress(eKey_R); view.m_pOp->keyPress(eKey_9); view.m_pOp->keyPress(eKey_0);
     const auto z=QQuaternion::fromAxisAndAngle(0,0,1,90);
@@ -85,7 +91,7 @@ int runGroupRotationCheck()
     check(positionNear(unsupported->position(),{1000,2000,3000}) && positionNear(locked->position(),{1000,2000,3000}),"unsupported and locked nodes excluded from pivot and transformation");
     check(b->constitution()==scale,"rotation preserves nonuniform object scale");
     for(int axis=0;axis<3;++axis) {
-        reset(); view.operationSetBackup(EOperationAxisType::eRotate);
+        reset(); locked->setState(eSelect); view.operationSetBackup(EOperationAxisType::eRotate);
         QVector3D delta; delta[axis]=15;
         for(int i=0;i<6;++i) view.rotateTo(delta);
         QVector3D unitAxis; unitAxis[axis]=1;

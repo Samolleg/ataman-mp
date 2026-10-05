@@ -1965,6 +1965,8 @@ void CView::closeLandscapeTools()
 
 void CView::syncLandscapeToolState()
 {
+    if(m_landscapeGestureButtons != Qt::NoButton)
+        m_landscapeGestureInterrupted = true;
     cancelTileBrushGroup();
     finishSculptStroke();
     m_overlayPointerTimer->stop();
@@ -2025,8 +2027,8 @@ void CView::syncLandscapeToolState()
     switch(m_landscapeTools->editMode())
     {
     case ELandscapeEditMode::Sculpt:
-        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
-            changeOperation(EButtonOpSelect);
+        if(m_pOp && m_pOp->operationMethod() != eOperationMethodSelect)
+            changeOperation(EButtonOpSelect, true);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
             "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Noise via Tool list, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/range/flatten target, M/O-main terrain/overlays, L/Esc-close.");
@@ -2048,8 +2050,8 @@ void CView::syncLandscapeToolState()
         emit updateMsg(tr("Overlay painting enabled for existing overlay cells only."));
         break;
     case ELandscapeEditMode::OverlaySculpt:
-        if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
-            changeOperation(EButtonOpSelect);
+        if(m_pOp && m_pOp->operationMethod() != eOperationMethodSelect)
+            changeOperation(EButtonOpSelect, true);
         CScene::getInstance()->setLandTileEditMode(false);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
@@ -22373,6 +22375,21 @@ void CView::mousePressEvent(QMouseEvent* event)
             event->accept();
         return;
     }
+    // Retain brush ownership until release, including misses and tool switches.
+    if(m_landscapeTools && m_landscapeTools->editingEnabled()
+       && (event->button() == Qt::LeftButton || event->button() == Qt::RightButton))
+    {
+        if(m_landscapeGestureButtons == Qt::NoButton)
+            m_landscapeGestureInterrupted = false;
+        m_landscapeGestureButtons |= event->button();
+        m_pOp->cancelPointerGesture();
+        m_selectFrame->reset();
+        if(!m_terrainEditAvailable)
+        {
+            event->accept();
+            return;
+        }
+    }
     if(m_neighborLayoutEditEnabled
        && (event->button() == Qt::LeftButton
            || event->button() == Qt::RightButton))
@@ -23137,6 +23154,14 @@ void CView::mouseMoveEvent(QMouseEvent* event)
     { updateWorldMapPlacement(event->pos()); event->accept(); return; }
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
+    if((event->buttons() & m_landscapeGestureButtons)
+       && !(event->buttons() & Qt::MiddleButton)
+       && (m_landscapeGestureInterrupted || !m_landscapeTools
+           || !m_landscapeTools->editingEnabled()))
+    {
+        event->accept();
+        return;
+    }
     if(m_landscapeInteractionSuspended)
     {
         if(event->buttons() & Qt::MiddleButton)
@@ -23272,11 +23297,36 @@ void CView::mouseMoveEvent(QMouseEvent* event)
             return;
         }
     }
+    if((event->buttons() & m_landscapeGestureButtons)
+       && !(event->buttons() & Qt::MiddleButton)
+       && (!m_landscapeTools || !m_landscapeTools->editingEnabled()
+           || m_landscapeTools->sculptEnabled() || !m_terrainEditAvailable))
+    {
+        event->accept();
+        return;
+    }
     m_pOp->mouseMoveEvent(event);
 }
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if(m_terrainTileInformationPolicy.rightHeld()
+       && event->button() == Qt::RightButton)
+    {
+        m_terrainTileInformationPolicy.rightRelease();
+    }
+    const bool brushRelease = (m_landscapeGestureButtons & event->button()) != 0;
+    m_landscapeGestureButtons &= ~Qt::MouseButtons(event->button());
+    if(brushRelease && (m_landscapeGestureInterrupted || !m_landscapeTools
+                       || !m_landscapeTools->editingEnabled()
+                       || !m_terrainEditAvailable))
+    {
+        m_sculptGestureCaptured = false;
+        m_pOp->cancelPointerGesture();
+        if(event->button() == Qt::RightButton) endTerrainPaintSampling();
+        event->accept();
+        return;
+    }
     if(travelMouseRelease(event)) return;
     m_lastViewportMousePos = event->pos();
     m_hasViewportMousePos = rect().contains(event->pos());
@@ -23317,12 +23367,6 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    if(m_sculptGestureCaptured && event->button() == Qt::LeftButton)
-    if(m_terrainTileInformationPolicy.rightHeld()
-       && event->button() == Qt::RightButton)
-    {
-        m_terrainTileInformationPolicy.rightRelease();
-    }
     if(m_paintIssueDragActive && event->button() == Qt::LeftButton)
     {
         QPoint cell;
@@ -23340,7 +23384,9 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    if(m_sculptStrokeActive && event->button() == Qt::LeftButton)
+    if((m_sculptGestureCaptured || (brushRelease && m_landscapeTools
+           && m_landscapeTools->sculptEnabled()))
+       && event->button() == Qt::LeftButton)
     {
         if(m_landscapeTools && m_landscapeTools->overlaySculptEnabled())
         {
@@ -23867,6 +23913,9 @@ void CView::wheelEvent(QWheelEvent* event)
 void CView::focusOutEvent(QFocusEvent *event)
 {
     Q_UNUSED(event);
+    m_landscapeGestureButtons = Qt::NoButton;
+    m_pOp->cancelPointerGesture();
+    m_selectFrame->reset();
     cancelTileBrushGroup();
     finishSculptStroke();
     endTerrainPaintSampling();
@@ -23995,14 +24044,25 @@ void CView::changeOperation(EButtonOp type, bool preserveLandscapeEditing)
     if(m_pOp && !landscapeOperationNeedsTransition(
            type, m_pOp->operationMethod()))
         return;
+    if((type == EButtonOpMove || type == EButtonOpRotate || type == EButtonOpScale)
+       && !hasEditableSelection())
+    {
+        emit updateMsg(QString::fromUtf8("Выбор недоступен для изменения. В «Загруженной карте» сделайте MOB выбранных объектов активным и выберите объекты заново."));
+        return;
+    }
+    if(m_landscapeGestureButtons != Qt::NoButton)
+        m_landscapeGestureInterrupted = true;
+    finishSculptStroke();
     cancelPendingOperation();
-    const bool landscapePaintMode = m_landscapeTools
-        && (m_landscapeTools->editMode() == ELandscapeEditMode::TilePaint
-            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
-            || m_landscapeTools->editMode() == ELandscapeEditMode::OverlayPaint);
+    m_selectFrame->reset();
     if(m_landscapeTools && landscapeOperationDisablesEditing(
-           type, landscapePaintMode, preserveLandscapeEditing))
+           type, m_landscapeTools->editingEnabled(), preserveLandscapeEditing))
+    {
         m_landscapeTools->setEditingEnabled(false, false);
+        m_overlayPointerTimer->stop();
+        m_sculptOutlineValid = false;
+        m_terrainPaintOutlineValid = false;
+    }
     switch (type) {
     case EButtonOpSelect:
         m_pOp->changeState(new CSelect(this)); break;

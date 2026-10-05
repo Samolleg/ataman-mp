@@ -63,21 +63,21 @@ void CSelect::keyPress(COperation *pOp, EKeyCode key)
     switch (key) {
     case eKey_Esc:
     {
+        pOp->cancelPointerGesture();
         m_pView->clearObjectSelection();
         break;
     }
     case eKey_G:
     {
-        pOp->setCurrent(new CMoveAxis(m_pView, EOperateAxisXY));
-        delete this;
-        break;
+        m_pView->changeOperation(EButtonOpMove);
+        return;
     }
     case eKey_R:
     {
         if(!pOp->keyManager()->isPressed(eKey_Ctrl))
         {
-            pOp->setCurrent(new CRotateAxis(m_pView, EOperateAxisZ));
-            delete this;
+            m_pView->changeOperation(EButtonOpRotate);
+            return;
         }
         break;
     }
@@ -167,9 +167,11 @@ void CSelect::keyRelease(COperation *pOp, EKeyCode key)
 
 void CSelect::mousePressEvent(COperation *pOp, QMouseEvent *pEvent)
 {
-    switch (pEvent->buttons()) {
+    switch (pEvent->button()) {
     case Qt::LeftButton:
     {
+        m_selectionGestureActive = true;
+        m_selectionAnchor = pEvent->pos();
         pOp->keyManager()->press(eKey_special1);
 //        m_pView->pickObject(event->pos(), pOp->keyManager()->isPressed(eKey_Shift));
 //        m_pView->viewParameters();
@@ -198,7 +200,9 @@ void CSelect::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
     case Qt::LeftButton:
     {
         pOp->keyManager()->release(eKey_special1);
-        QRect rect = QRect(m_lastPos, pEvent->pos()).normalized();
+        if(!m_selectionGestureActive) return;
+        m_selectionGestureActive = false;
+        QRect rect = QRect(m_selectionAnchor, pEvent->pos()).normalized();
         m_pView->pickObject(rect, pOp->keyManager()->isPressed(eKey_Shift));
         m_pView->viewParameters();
 
@@ -245,9 +249,9 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
         rotateAroundPivot(pOp->camera(), dx, dy, senseX, senseY);
         m_lastPos = pEvent->pos();
     }
-    else if (pEvent->buttons() & Qt::LeftButton)
+    else if (m_selectionGestureActive && (pEvent->buttons() & Qt::LeftButton))
     {
-        QRect rect = QRect(m_lastPos, pEvent->pos()).normalized();
+        QRect rect = QRect(m_selectionAnchor, pEvent->pos()).normalized();
         m_pView->drawSelectFrame(rect);
 
     }
@@ -1046,8 +1050,16 @@ COperation::COperation(CState *s)
     m_keyManager.reset(new CKeyManager());
 }
 
+void COperation::cancelPointerGesture()
+{
+    m_cameraNavigationActive = false;
+    m_keyManager->release(eKey_special1);
+    if(current) current->cancelPointerGesture();
+}
+
 void COperation::changeState(CState *state)
 {
+    cancelPointerGesture();
     m_cameraNavigationActive = false;
     if(nullptr!= current)
         delete current;
@@ -1231,6 +1243,7 @@ void CTileBrush::keyRelease(COperation* pOp, EKeyCode key)
 void CTileBrush::mousePressEvent(COperation* pOp, QMouseEvent* pEvent)
 {
     Q_UNUSED(pOp);
+    if(pEvent->button() == Qt::LeftButton) m_leftGestureActive = true;
     m_lastPos = pEvent->pos();
     const bool bLand = m_pView->terrainTileEditLayerIsLand();
     bool hit = false;
@@ -1264,6 +1277,8 @@ void CTileBrush::mouseReleaseEvent(COperation* pOp, QMouseEvent* pEvent)
     if(pEvent->button() == Qt::RightButton)
         m_pView->endTerrainPaintSampling();
     if (pEvent->button() == Qt::LeftButton) {
+        if(!m_leftGestureActive) return;
+        m_leftGestureActive = false;
         const bool bLand = m_pView->terrainTileEditLayerIsLand();
         // Always resolve the release position. The view de-duplicates an
         // unchanged center, while a short/fast gesture cannot lose its tail.
@@ -1312,7 +1327,7 @@ void CTileBrush::mouseMoveEvent(COperation* pOp, QMouseEvent* pEvent)
         rotateAroundPivot(pOp->camera(), dx, dy, senseX, senseY);
         m_lastPos = pEvent->pos();
     }
-    else if (pEvent->buttons() & Qt::LeftButton)
+    else if (m_leftGestureActive && (pEvent->buttons() & Qt::LeftButton))
     {
         if(m_pView->isPreviewTile())
             m_pView->setPreviewTile(false);

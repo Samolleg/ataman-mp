@@ -5,12 +5,12 @@
 #include "types.h"
 
 inline bool landscapeOperationDisablesEditing(
-    EButtonOp type, bool landscapePaintMode,
+    EButtonOp type, bool landscapeEditingEnabled,
     bool preserveLandscapeEditing = false)
 {
     return !preserveLandscapeEditing
         && type != EButtonOpTilebrush
-        && landscapePaintMode;
+        && landscapeEditingEnabled;
 }
 
 // Palette changes are emitted synchronously while viewport input handlers are

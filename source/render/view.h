@@ -181,6 +181,7 @@ class CView : public QGLWidget
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
     friend int runTerrainMobHeightCheck();
+    friend int runPointerModesCheck();
 
 public:
     struct SNidRepair
@@ -1249,6 +1250,8 @@ private:
     QVector3D m_sculptOutlineCenter;
     bool m_sculptStrokeActive;
     bool m_sculptGestureCaptured{false};
+    Qt::MouseButtons m_landscapeGestureButtons{Qt::NoButton};
+    bool m_landscapeGestureInterrupted{false};
     bool m_sculptPointerValid{false};
     STerrainHeightCommand m_sculptStrokeCommand;
     QSharedPointer<STerrainMobHeightState> m_sculptStrokeMobHeightState;
