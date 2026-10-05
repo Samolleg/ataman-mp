@@ -446,7 +446,6 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
 
     if(!m_texture || !m_texture->isCreated())
         return;
-    m_texture->bind(0);
 
     //if (!m_parent)
     {
@@ -463,15 +462,37 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         {
             const QVector4D pickingColor = m_pickingColor.toVec4();
             for(CPart* part : m_aPart)
-                queue.submitSelection(part, matrix, pickingColor);
+            {
+                QOpenGLTexture* texture = m_partTextures.value(part->name().toLower(), nullptr);
+                if(!texture)
+                    texture = part->textureNumber() == 2 && m_secondaryTexture
+                        ? m_secondaryTexture : m_texture;
+                queue.submitSelection(part, texture, matrix, pickingColor);
+            }
             return;
         }
         program->setUniformValue("u_modelMmatrix", matrix);
         program->setUniformValue("u_color", m_pickingColor.toVec4());
     }
 
+    program->setUniformValue("qt_Texture0", 0);
+    program->setUniformValue("u_instanced", false);
+    QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
+    {
+        QOpenGLTexture* texture = m_partTextures.value(part->name().toLower(), nullptr);
+        if(!texture)
+            texture = part->textureNumber() == 2 && m_secondaryTexture
+                ? m_secondaryTexture : m_texture;
+        if(!renderTextureReady(texture))
+            continue;
+        if(texture != boundTexture)
+        {
+            texture->bind(0);
+            boundTexture = texture;
+        }
         part->drawSelect(program);
+    }
     program->setUniformValue("u_partAnimated", false);
 }
 

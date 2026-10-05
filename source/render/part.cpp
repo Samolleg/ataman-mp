@@ -145,7 +145,7 @@ bool bindVertexArray(QOpenGLVertexArrayObject& vao, CSharedPartMesh* mesh,
                                         int(sizeof(QVector3D)), 3,
                                         int(sizeof(SVertexData)));
         }
-        if(!selection && locations.texture >= 0)
+        if(locations.texture >= 0)
         {
             program->enableAttributeArray(locations.texture);
             program->setAttributeBuffer(locations.texture, GL_FLOAT,
@@ -470,6 +470,7 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
     const ProgramLocations& locations = locationsFor(program);
     program->setUniformValue(locations.partAnimated, true);
     program->setUniformValue(locations.partMatrix, m_poseMatrix);
+    program->setUniformValue(locations.textureUvScale, m_textureUvScale);
 
     CSharedPartMesh::VertexArrays* arrays = arraysFor(m_mesh.data(), program);
     const bool vertexArrayBound = arrays
@@ -481,6 +482,13 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
         program->enableAttributeArray(locations.position);
         program->setAttributeBuffer(locations.position, GL_FLOAT, 0, 3,
                                     int(sizeof(SVertexData)));
+        if(locations.texture >= 0)
+        {
+            program->enableAttributeArray(locations.texture);
+            program->setAttributeBuffer(locations.texture, GL_FLOAT,
+                                        2 * int(sizeof(QVector3D)), 2,
+                                        int(sizeof(SVertexData)));
+        }
     }
 
     ei::gl::DrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
@@ -509,6 +517,7 @@ bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* in
 
     program->setUniformValue(locations.instanced, true);
     program->setUniformValue(locations.partAnimated, false);
+    program->setUniformValue(locations.textureUvScale, m_textureUvScale);
     CSharedPartMesh::VertexArrays* arrays = arraysFor(m_mesh.data(), program);
     const bool vertexArrayBound = arrays
         && bindVertexArray(arrays->selectionInstanced, m_mesh.data(), program, true);
@@ -518,6 +527,13 @@ bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* in
         program->enableAttributeArray(locations.position);
         program->setAttributeBuffer(locations.position, GL_FLOAT, 0, 3,
                                     int(sizeof(SVertexData)));
+        if(locations.texture >= 0)
+        {
+            program->enableAttributeArray(locations.texture);
+            program->setAttributeBuffer(locations.texture, GL_FLOAT,
+                                        2 * int(sizeof(QVector3D)), 2,
+                                        int(sizeof(SVertexData)));
+        }
     }
 
     instanceBuffer->bind();

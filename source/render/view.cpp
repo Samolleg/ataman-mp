@@ -38,6 +38,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "selection_region.h"
 #include "neighbor_visual_preparation.h"
 #include "map_object_placement_policy.h"
 #include "landscape_operation_policy.h"
@@ -10900,28 +10901,32 @@ QDebug operator<<(QDebug stream, const SColor& color)
 
 void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 {
-    //get colors from rectangle
-    const int component = 3; //rgb
-    //revert Oy for picking
-    const QPoint topLeft (rect.left(), m_height - rect.bottom());
-    const QPoint btmRight(rect.right(), m_height - rect.top());
-    const QRect inversedRect(topLeft, btmRight);
-
-    const int h = inversedRect.height() == 0 ? 1 : qAbs(inversedRect.height());
-    const int w = inversedRect.width() == 0 ? 1 :qAbs(inversedRect.width());
-    uint size = component * w * h;
-    QByteArray* pixel = new QByteArray();
-    pixel->resize(size);
-    ei::gl::PixelStorei(GL_PACK_ALIGNMENT, 1); // glReadPixels use 4 component by default. for RGB must define pack alignment
-    ei::gl::ReadPixels(inversedRect.left(), inversedRect.bottom(), w, h, GL_RGB, GL_UNSIGNED_BYTE, pixel->data());
-    SColor color;
-    for(int i(0); i<component * w * h; i+=3)
+    const QRect region = selectionReadRegion(rect, QSize(m_width, m_height));
+    if(region.isEmpty())
+        return;
+    const qint64 bytes = qint64(region.width()) * region.height() * 3;
+    if(bytes > std::numeric_limits<int>::max())
+        return;
+    QByteArray pixel(int(bytes), 0);
+    QSet<quint32> seen;
+    GLint oldAlignment = 4;
+    ei::gl::GetIntegerv(GL_PACK_ALIGNMENT, &oldAlignment);
+    ei::gl::PixelStorei(GL_PACK_ALIGNMENT, 1);
+    ei::gl::ReadPixels(region.left(), region.top(), region.width(), region.height(),
+                      GL_RGB, GL_UNSIGNED_BYTE, pixel.data());
+    for(int i = 0; i < pixel.size(); i += 3)
     {
-        color = SColor(pixel->at(i), pixel->at(i+1), pixel->at(i+2));
-        if (!color.isBlack() && !aColor.contains(color))
-            aColor.append(SColor(color));
+        const auto* rgb = reinterpret_cast<const uchar*>(pixel.constData() + i);
+        const quint32 id = (quint32(rgb[0]) << 16) | (quint32(rgb[1]) << 8) | rgb[2];
+        if(id && !seen.contains(id))
+        {
+            seen.insert(id);
+            const SColor color(rgb[0], rgb[1], rgb[2]);
+            if(!aColor.contains(color))
+                aColor.append(color);
+        }
     }
-    delete pixel;
+    ei::gl::PixelStorei(GL_PACK_ALIGNMENT, oldAlignment);
 }
 
 void CView::changeCurrentMob(CMob *pMob)
@@ -23914,10 +23919,12 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
             node->drawSelect(&m_selectProgram);
     }
 
-    GLubyte pixel[3];
-    ei::gl::ReadPixels(x, m_height-y, 1, 1, GL_RGB, GL_UNSIGNED_BYTE, pixel);
+    QVector<SColor> colors;
+    getColorFromRect(QRect(QPoint(x, y), QPoint(x, y)), colors);
     endEditorQueryFramebuffer();
-    SColor pickedColor(pixel[0], pixel[1], pixel[2]);
+    if(colors.isEmpty())
+        return nullptr;
+    const SColor pickedColor = colors.first();
 
     for (auto& node: aNode)
     {

@@ -198,9 +198,7 @@ void CSelect::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
     case Qt::LeftButton:
     {
         pOp->keyManager()->release(eKey_special1);
-        const QPoint topLeft(m_lastPos.x() < pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() > pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        const QPoint bottomRight(m_lastPos.x() > pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() < pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        QRect rect(topLeft, bottomRight);
+        QRect rect = QRect(m_lastPos, pEvent->pos()).normalized();
         m_pView->pickObject(rect, pOp->keyManager()->isPressed(eKey_Shift));
         m_pView->viewParameters();
 
@@ -249,13 +247,7 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
     }
     else if (pEvent->buttons() & Qt::LeftButton)
     {
-        //todo. QRubberBand
-        QPoint leftTop (m_lastPos.x() < pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() > pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        QPoint leftBottom(m_lastPos.x() < pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() < pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        QPoint rightButtom (m_lastPos.x() > pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() < pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        QPoint rightTop(m_lastPos.x() > pEvent->pos().x() ? m_lastPos.x() : pEvent->pos().x(), m_lastPos.y() > pEvent->pos().y() ? m_lastPos.y() : pEvent->pos().y());
-        //QRect rect(leftTop, rightButtom);
-        QRect rect(leftBottom, rightTop);
+        QRect rect = QRect(m_lastPos, pEvent->pos()).normalized();
         m_pView->drawSelectFrame(rect);
 
     }

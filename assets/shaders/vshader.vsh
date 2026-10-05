@@ -40,6 +40,6 @@ void main(void)
   v_worldPosition = worldPosition.xyz;
   v_viewDepth = max(0.0, -v_position.z);
   v_normal = normalize(vec3(worldMatrix * vec4(a_normal, 0.0)));
-  v_texture = a_texture * (u_partAnimated ? u_textureUvScale : 1.0);
+  v_texture = a_texture * ((u_partAnimated || u_instanced) ? u_textureUvScale : 1.0);
   v_instanceColor = a_instanceColor;
 }

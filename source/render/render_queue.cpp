@@ -92,13 +92,14 @@ void RenderQueueContext::end()
     m_program = nullptr;
 }
 
-void RenderQueueContext::submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
+void RenderQueueContext::submitSelection(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
                                          const QVector4D& pickingColor)
 {
-    if(!collectingSelection() || !part || !part->isDrawable())
+    if(!collectingSelection() || !part || !part->isDrawable() || !renderTextureReady(texture))
         return;
     SRenderItem item;
     item.part = part;
+    item.texture = texture;
     item.modelMatrix = modelMatrix;
     item.instanceMatrix = modelMatrix * part->poseMatrix();
     item.materialClass = ERenderMaterialClass::Opaque;
@@ -428,9 +429,16 @@ void RenderQueueContext::flush()
 
     if(m_selectionPass)
     {
+        m_program->setUniformValue("qt_Texture0", 0);
+        QOpenGLTexture* boundTexture = nullptr;
         for(int itemIndex = 0; itemIndex < colorItems.size(); )
         {
             const SRenderItem& item = colorItems.at(itemIndex);
+            if(item.texture != boundTexture)
+            {
+                item.texture->bind(0);
+                boundTexture = item.texture;
+            }
             const int runLength = m_instancingEnabled
                 ? instanceBatchLength(colorItems, itemIndex) : 1;
             bool instanced = false;

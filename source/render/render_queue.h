@@ -196,7 +196,7 @@ public:
                                         ERenderMaterialClass material, bool shadow,
                                         quintptr owner);
     void submitPrepared(const SRenderItem& item, bool colorVisible, bool shadow);
-    void submitSelection(CPart* part, const QMatrix4x4& modelMatrix,
+    void submitSelection(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
                          const QVector4D& pickingColor);
     void flush();
     void flushShadow(QOpenGLShaderProgram* shadowProgram,
