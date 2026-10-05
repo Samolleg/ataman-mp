@@ -90,7 +90,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_itemMaterial->setToolTip(tr("Object material"));
     m_itemModel = new QComboBox(this);
     m_itemModel->setObjectName("databaseItemModel");
-    m_itemModel->setToolTip(QString::fromUtf8("Вариант модели оружия из каталога"));
+    m_itemModel->setToolTip(QString::fromUtf8("Вариант модели предмета из каталога"));
     connect(m_itemModel, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int) { selectDatabaseEntry(); });
     m_databaseSearch = new QLineEdit(this);
@@ -904,8 +904,7 @@ void CCreateObjectForm::selectDatabaseEntry()
             m_itemMaterial->clear();
             int firstAvailable = -1;
             for(const auto& material : m_itemCatalog.compatibleMaterials(*item)) {
-                const QString texture = ei::ItemSpellConstructorCatalog::itemTextureName(*item, &material)
-                    + (m_itemCatalog.isJmvProfile() ? ".x2" : "");
+                const QString texture = ei::MapWeaponCatalog::textureName(*item, &material, m_itemCatalog.isJmvProfile());
                 const bool available = !m_weaponCatalog.present()
                     || CTextureList::getInstance()->textureList().contains(texture);
                 m_itemMaterial->addItem(QString::fromUtf8("Материал: ") + material.displayName
@@ -934,7 +933,7 @@ void CCreateObjectForm::selectDatabaseEntry()
                 m_pNode = m_weaponCatalog.create(*item, material, m_itemModel->currentData().toString(),
                     m_itemCatalog.isJmvProfile(), &itemDiagnostic);
                 if(m_itemMaterial->currentIndex() < 0)
-                    itemDiagnostic = QString::fromUtf8("Для материалов этого оружия нет текстур в активном профиле. Добавьте соответствующие текстуры в ресурсы профиля.");
+                    itemDiagnostic = QString::fromUtf8("Для материалов этого предмета нет текстур в активном профиле. Добавьте соответствующие текстуры в ресурсы профиля.");
             } else {
                 m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
                     material, ei::ProfileDatabaseContext::instance().current(), true, &itemDiagnostic);

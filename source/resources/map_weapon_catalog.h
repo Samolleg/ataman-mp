@@ -13,6 +13,8 @@ class MapWeaponCatalog
 {
 public:
     static QString pathForDatabase(const QString& databasePath);
+    static QString textureName(const SConstructorItem& item, const SConstructorMaterial* material,
+                               bool highResolution);
     bool load(const QString& path, const ItemSpellConstructorCatalog& database);
     bool present() const { return m_present; }
     QString diagnostic() const { return m_diagnostic; }

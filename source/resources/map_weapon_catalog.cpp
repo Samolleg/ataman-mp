@@ -25,7 +25,7 @@ bool MapWeaponCatalog::load(const QString& path, const ItemSpellConstructorCatal
     const auto fail = [&](const QString& message) { m_diagnostic = message; m_models.clear(); return false; };
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly) || file.size() > 8 * 1024 * 1024)
-        return fail(QString::fromUtf8("Не удалось прочитать каталог оружия: ") + path);
+        return fail(QString::fromUtf8("Не удалось прочитать каталог предметов: ") + path);
     QJsonParseError parse;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse);
     const QJsonObject root = document.object();
@@ -37,15 +37,24 @@ bool MapWeaponCatalog::load(const QString& path, const ItemSpellConstructorCatal
        || db.value("weapon_class_field").toInt(-1) != 2
        || db.value("model_index_field").toInt(-1) != 5)
         return fail(QString::fromUtf8("Некорректный формат mapweapons-catalog.json (ожидается версия 2)."));
+    // Armor is an optional extension of schema 2. Retain weapon-only catalogs,
+    // but never interpret armor bindings without their declared DB contract.
+    const QJsonObject armorDb = root.value("armor_database").toObject();
+    const bool hasArmor = root.contains("armor_database");
+    if(hasArmor && (armorDb.value("table").toString() != "items.armors"
+       || armorDb.value("identity_field").toInt(-1) != 0
+       || armorDb.value("armor_type_field").toInt(-1) != 2
+       || armorDb.value("model_index_field").toInt(-1) != 5))
+        return fail(QString::fromUtf8("Некорректное описание items.armors в каталоге предметов."));
     const QString archive = root.value("model_archive").toString();
     const QRegularExpression leaf("^[A-Za-z0-9_.-]+$");
     if(!leaf.match(archive).hasMatch() || !archive.endsWith(".res", Qt::CaseInsensitive))
-        return fail(QString::fromUtf8("Некорректное имя архива моделей оружия."));
+        return fail(QString::fromUtf8("Некорректное имя архива моделей предметов."));
     m_archive = QFileInfo(path).dir().absoluteFilePath(archive);
     CResArchiveIndex index;
     QString error;
     if(!index.open(m_archive, &error))
-        return fail(QString::fromUtf8("Архив моделей оружия недоступен: ") + error);
+        return fail(QString::fromUtf8("Архив моделей предметов недоступен: ") + error);
     int rejected = 0;
     for(const QJsonValue& value : root.value("models").toArray())
     {
@@ -54,20 +63,29 @@ bool MapWeaponCatalog::load(const QString& path, const ItemSpellConstructorCatal
         if(!leaf.match(model.model).hasMatch() || model.mod != model.model + ".mod"
            || model.bon != model.model + ".bon" || index.memberIndex(model.mod) < 0
            || index.memberIndex(model.bon) < 0) { ++rejected; continue; }
-        for(const QJsonValue& bindingValue : row.value("db_weapons").toArray())
-        {
-            const QJsonObject binding = bindingValue.toObject();
-            const QString name = binding.value("name").toString();
-            const auto* item = database.findItem(name);
-            // Record positions and archive hashes can change after unrelated DB edits.
-            // Bind by stable identity and verify both geometry selectors against live DB.
-            if(!item || item->category != "Weapon" || binding.value("weapon_class").toInt(-1) != item->typeId
-               || binding.value("model_index").toInt(-1) != item->textureType1) { ++rejected; continue; }
-            auto& models = m_models[name.toCaseFolded()];
-            bool duplicate = false;
-            for(const auto& existing : models) if(existing.model == model.model) duplicate = true;
-            if(!duplicate) models.append(model);
-        }
+        const auto bind = [&](const QJsonArray& bindings, bool armor) {
+            for(const QJsonValue& bindingValue : bindings)
+            {
+                const QJsonObject binding = bindingValue.toObject();
+                const QString name = binding.value("name").toString();
+                const auto* item = database.findItem(name);
+                // Record positions and archive hashes can change after unrelated DB edits.
+                // Bind by stable identity and verify both geometry selectors against live DB.
+                if(!item || item->category != (armor ? "Armor" : "Weapon")
+                   || binding.value(armor ? "armor_type" : "weapon_class").toInt(-1) != item->typeId
+                   || binding.value("model_index").toInt(-1) != item->textureType1
+                   || (armor && (!hasArmor
+                       || binding.value("texture_variant").toInt(-1) != item->textureType2
+                       || binding.value("material_type").toString().compare(item->materialType, Qt::CaseInsensitive) != 0)))
+                    { ++rejected; continue; }
+                auto& models = m_models[name.toCaseFolded()];
+                bool duplicate = false;
+                for(const auto& existing : models) if(existing.model == model.model) duplicate = true;
+                if(!duplicate) models.append(model);
+            }
+        };
+        bind(row.value("db_weapons").toArray(), false);
+        bind(row.value("db_armors").toArray(), true);
     }
     for(auto it = m_models.begin(); it != m_models.end(); ++it)
         std::sort(it->begin(), it->end(), [](const SMapWeaponModel& a, const SMapWeaponModel& b) {
@@ -75,7 +93,7 @@ bool MapWeaponCatalog::load(const QString& path, const ItemSpellConstructorCatal
             if(a.model.endsWith('r') != b.model.endsWith('r')) return a.model.endsWith('r');
             return a.model < b.model;
         });
-    if(m_models.isEmpty()) return fail(QString::fromUtf8("В каталоге нет моделей, связанных с оружием активной БД."));
+    if(m_models.isEmpty()) return fail(QString::fromUtf8("В каталоге нет моделей, связанных с предметами активной БД."));
     if(rejected) m_diagnostic = QString::fromUtf8("Пропущено неподтверждённых связей каталога: %1.").arg(rejected);
     return true;
 }
@@ -85,6 +103,17 @@ QVector<SMapWeaponModel> MapWeaponCatalog::models(const QString& weapon) const
     return m_models.value(weapon.toCaseFolded());
 }
 
+QString MapWeaponCatalog::textureName(const SConstructorItem& item, const SConstructorMaterial* material,
+                                     bool highResolution)
+{
+    const QString base = ItemSpellConstructorCatalog::itemTextureName(item, material);
+    if(base.isEmpty() || !highResolution) return base;
+    // Same authored atlas naming as JMV equipment: weapons/helmets use x2,
+    // while the six remaining armor types use x4. Keep full-atlas UVs.
+    return base + (item.category == "Armor" && item.type.compare("helm", Qt::CaseInsensitive) != 0
+        ? ".x4" : ".x2");
+}
+
 CWorldObj* MapWeaponCatalog::create(const SConstructorItem& item, const SConstructorMaterial* material,
                                    const QString& modelName, bool highResolution, QString* diagnostic) const
 {
@@ -92,9 +121,9 @@ CWorldObj* MapWeaponCatalog::create(const SConstructorItem& item, const SConstru
     const auto fail = [&](const QString& message) -> CWorldObj* { if(diagnostic) *diagnostic = message; return nullptr; };
     SMapWeaponModel selected;
     for(const auto& model : models(item.name)) if(model.model == modelName) selected = model;
-    if(selected.model.isEmpty()) return fail(QString::fromUtf8("Модель не связана с выбранным оружием в каталоге."));
+    if(selected.model.isEmpty()) return fail(QString::fromUtf8("Модель не связана с выбранным предметом в каталоге."));
     if(!material || material->type.compare(item.materialType, Qt::CaseInsensitive) != 0)
-        return fail(QString::fromUtf8("Выберите совместимый материал оружия."));
+        return fail(QString::fromUtf8("Выберите совместимый материал предмета."));
     for(const QString& resource : {selected.mod, selected.bon})
     {
         QString source;
@@ -103,11 +132,11 @@ CWorldObj* MapWeaponCatalog::create(const SConstructorItem& item, const SConstru
             return fail(QString::fromUtf8("Ресурс %1 из %2 недоступен или перекрыт другим архивом профиля.").arg(resource, m_archive));
     }
     if(!CObjectList::getInstance()->getFigureResource(selected.mod))
-        return fail(QString::fromUtf8("Не удалось загрузить модель оружия: ") + selected.mod);
-    const QString base = ItemSpellConstructorCatalog::itemTextureName(item, material);
+        return fail(QString::fromUtf8("Не удалось загрузить модель предмета: ") + selected.mod);
+    const QString exactTexture = textureName(item, material, highResolution);
     QStringList candidates;
-    if(!base.isEmpty()) {
-        candidates.append(highResolution ? base + ".x2" : base);
+    if(!exactTexture.isEmpty()) {
+        candidates.append(exactTexture);
     }
     QString texture;
     const auto available = CTextureList::getInstance()->textureList();

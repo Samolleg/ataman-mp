@@ -558,13 +558,16 @@ int runDatabasePreviewCheck()
         auto* place = form->findChild<QPushButton*>("buttonCreate");
         if(!materials || !models || !place) return fail("weapon picker controls");
         category->setCurrentIndex(1); search->clear();
-        int linked = 0;
+        int linked = 0, linkedArmor = 0;
+        QSet<int> armorTypes;
         for(const auto& item : catalog.items) if(!weapons.models(item.name).isEmpty()) {
-            if(item.category != "Weapon") return fail("non-weapon in extracted catalog");
+            if(item.category != "Weapon" && item.category != "Armor") return fail("non-equipment in extracted catalog");
+            if(item.category == "Armor") { ++linkedArmor; armorTypes.insert(item.typeId); }
             ++linked;
         }
-        if(linked == 0 || objects->count() != linked) return fail("only catalog-backed weapons listed");
-        output << "PASS: catalog-backed weapon identities=" << linked << "\n";
+        if(linked == 0 || objects->count() != linked) return fail("only catalog-backed equipment listed");
+        if(linkedArmor == 0 || armorTypes.size() != 7) return fail("all seven armor types linked");
+        output << "PASS: catalog-backed equipment identities=" << linked << ", armor=" << linkedArmor << "\n";
         int modelCount = 0, textureChoices = 0, absentTextureChoices = 0;
         QSet<QString> checkedModels;
         for(const auto& item : catalog.items) {
@@ -578,15 +581,26 @@ int runDatabasePreviewCheck()
                 ++modelCount;
             }
             for(const auto& material : catalog.compatibleMaterials(item)) {
-                const QString texture = catalog.itemTextureName(item, &material) + (jmv ? ".x2" : "");
-                if(CTextureList::getInstance()->textureList().contains(texture)) { ++textureChoices; ++availableForItem; }
+                const QString texture = catalog.itemTextureName(item, &material)
+                    + (jmv ? (item.category == "Armor" && item.typeId != 0 ? ".x4" : ".x2") : "");
+                if(CTextureList::getInstance()->textureList().contains(texture)) {
+                    ++textureChoices; ++availableForItem;
+                    // Every armor identity must use its DB-derived texture,
+                    // including lower armor sharing one extracted body mesh.
+                    if(item.category == "Armor" && availableForItem == 1) {
+                        QString error;
+                        QScopedPointer<CWorldObj> armor(weapons.create(item, &material, variants.first().model, jmv, &error));
+                        if(!armor || armor->textureName() != texture) return fail("armor exact material binding: " + item.name + ": " + error);
+                    }
+                }
                 else ++absentTextureChoices;
             }
             if(availableForItem == 0) output << "RESOURCE GAP: no material texture for " << item.name << "\n";
         }
         output << "PASS: linked model decode=" << modelCount << ", exact material textures=" << textureChoices
                << ", absent textures=" << absentTextureChoices << "\n";
-        const QStringList names{"cheat dagger", "stone sword", "2h bone club", "small leather shield", "bow"};
+        const QStringList names{"cheat dagger", "stone sword", "2h bone club", "small leather shield", "bow",
+            "hmh", "hmp", "hmp1", "mml", "vlcsh", "vlcpt", "vlcpt1", "vlcbt", "vlcgl"};
         int createdCount = 0, missingTextures = 0;
         for(const QString& name : names) {
             if(weapons.models(name).isEmpty()) continue;
@@ -596,7 +610,17 @@ int runDatabasePreviewCheck()
             objects->setCurrentItem(matches.first());
             if(matches.first()->text() == name) return fail("Russian weapon name: " + name);
             if(models->count() != weapons.models(name).size()) return fail("all model variants exposed");
+            if(catalog.findItem(name)->category == "Armor") {
+                const QString localized = matches.first()->text().section(" - ", 1);
+                search->setText(localized);
+                const auto localizedMatches = findCode(name);
+                if(localizedMatches.size() != 1) return fail("Russian armor search: " + name);
+                objects->setCurrentItem(localizedMatches.first());
+                search->setText(name);
+                objects->setCurrentItem(findCode(name).first());
+            }
             if(name == "cheat dagger") form->grab().save(outputDirectory + "/weapon-picker.png");
+            if(name == "hmp" || name == "vlcbt") form->grab().save(outputDirectory + "/armor-picker-" + name + ".png");
             QSet<QString> textures;
             int successes = 0;
             for(int materialIndex = 0; materialIndex < materials->count(); ++materialIndex) {
@@ -611,7 +635,9 @@ int runDatabasePreviewCheck()
                 CNode* node = destination->nodes().first();
                 const QString texture = node->textureName();
                 const QString base = ei::ItemSpellConstructorCatalog::itemTextureName(*catalog.findItem(name), catalog.findMaterial(chosenMaterial));
-                if(node->modelName() != chosenModel || (texture != base && texture != base + ".x2")
+                const QString expectedTexture = base + (jmv ? (catalog.findItem(name)->category == "Armor"
+                    && catalog.findItem(name)->typeId != 0 ? ".x4" : ".x2") : "");
+                if(node->modelName() != chosenModel || texture != expectedTexture
                    || !node->toJson().value("Object parts").toArray().isEmpty())
                     return fail("exact extracted model/material/texture identity");
                 textures.insert(texture);
@@ -628,6 +654,11 @@ int runDatabasePreviewCheck()
                 CNode* restored = reopened.nodes().first();
                 if(restored->mapId() == 0 || restored->modelName() != chosenModel || restored->textureName() != texture)
                     return fail("weapon persisted ID/model/texture");
+                const auto restoredData = restored->toJson();
+                if(restoredData.value("Secondary texture").toString() != texture
+                   || restoredData.value("Base object").toObject().value("Map name").toString()
+                      != catalog.formatItemCode(name, chosenMaterial))
+                    return fail("equipment persisted item/material code and secondary texture");
                 preview->makeCurrent(); restored->loadFigure(); restored->loadTexture();
                 restored->setDrawPosition(QVector3D()); preview->attachNode(restored);
                 if(successes == 0 && !capture("weapon-reopened-" + chosenModel)) return fail("weapon reopened render");
@@ -648,7 +679,7 @@ int runDatabasePreviewCheck()
             }
             output << "PASS: " << name << " localized/materials/variants/preview/Escape/place/ID/save/reopen/Undo/Redo\n";
         }
-        if(createdCount < 6) return fail("insufficient real weapon cases");
+        if(createdCount < 20) return fail("insufficient weapon and armor placement cases");
         QString error;
         QScopedPointer<CWorldObj> invalid(weapons.create(*catalog.findItem("cheat dagger"), nullptr, "uhwdg03r", true, &error));
         if(invalid || error.isEmpty()) return fail("invalid material refusal");
@@ -682,6 +713,28 @@ int runDatabasePreviewCheck()
         if(invalid || error.isEmpty()) return fail("unavailable model archive in profile refusal");
         binding.insert("model_index", dagger->textureType1 + 1); row.insert("db_weapons", QJsonArray{binding}); root.insert("models", QJsonArray{row});
         if(!writeCatalog() || weapons.load(malformed, catalog) || !weapons.models(dagger->name).isEmpty()) return fail("stale DB geometry binding refused");
+        const auto* armor = catalog.findItem("vlcpt");
+        if(!armor) return fail("armor fixture identity");
+        const QJsonObject armorDb{{"table", "items.armors"}, {"identity_field", 0}, {"armor_type_field", 2}, {"model_index_field", 5}};
+        const QJsonObject armorBinding{{"name", armor->name}, {"armor_type", armor->typeId},
+            {"model_index", armor->textureType1}, {"texture_variant", armor->textureType2}, {"material_type", armor->materialType}};
+        row.remove("db_weapons"); row.insert("db_armors", QJsonArray{armorBinding});
+        root.insert("armor_database", armorDb); root.insert("models", QJsonArray{row});
+        if(!writeCatalog() || !weapons.load(malformed, catalog) || weapons.models(armor->name).size() != 1)
+            return fail("valid armor semantic binding");
+        for(const QString& field : {QString("armor_type"), QString("model_index"), QString("texture_variant"), QString("material_type")}) {
+            auto stale = armorBinding;
+            stale.insert(field, field == "material_type" ? QJsonValue("wrong-material-type") : QJsonValue(stale.value(field).toInt() + 1));
+            row.insert("db_armors", QJsonArray{stale}); root.insert("models", QJsonArray{row});
+            if(!writeCatalog() || weapons.load(malformed, catalog) || !weapons.models(armor->name).isEmpty())
+                return fail("stale armor field refused: " + field);
+        }
+        row.insert("db_armors", QJsonArray{armorBinding}); root.insert("models", QJsonArray{row});
+        root.remove("armor_database");
+        if(!writeCatalog() || weapons.load(malformed, catalog)) return fail("undeclared armor contract refused");
+        auto invalidArmorDb = armorDb; invalidArmorDb.insert("armor_type_field", 5); root.insert("armor_database", invalidArmorDb);
+        if(!writeCatalog() || weapons.load(malformed, catalog)) return fail("invalid armor contract refused");
+        root.insert("armor_database", armorDb);
         root.insert("model_archive", "../test.res");
         if(!writeCatalog() || weapons.load(malformed, catalog)) return fail("catalog path escape refused");
         if(weapons.load(temporary.filePath("absent.json"), catalog) || weapons.present()) return fail("absent catalog legacy mode");
