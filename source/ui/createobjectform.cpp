@@ -88,6 +88,11 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     m_itemMaterial = new QComboBox(this);
     m_itemMaterial->setObjectName("databaseItemMaterial");
     m_itemMaterial->setToolTip(tr("Object material"));
+    m_itemModel = new QComboBox(this);
+    m_itemModel->setObjectName("databaseItemModel");
+    m_itemModel->setToolTip(QString::fromUtf8("Вариант модели оружия из каталога"));
+    connect(m_itemModel, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { selectDatabaseEntry(); });
     m_databaseSearch = new QLineEdit(this);
     m_databaseSearch->setObjectName("databaseSearch");
     m_databaseSearch->setPlaceholderText(tr("Search by name or model"));
@@ -103,6 +108,7 @@ CCreateObjectForm::CCreateObjectForm(QWidget *parent) :
     ui->verticalLayout_2->insertWidget(3, m_databaseDetails);
     ui->verticalLayout_2->insertWidget(4, m_itemMaterial);
     ui->verticalLayout_2->insertWidget(5, m_advanced);
+    ui->verticalLayout_2->insertWidget(5, m_itemModel);
     m_technicalTextureLabel = new QLabel(tr("Primary texture for this model"), this);
     m_technicalTexture = new QComboBox(this);
     m_technicalTexture->setObjectName("technicalObjectTexture");
@@ -622,6 +628,10 @@ void CCreateObjectForm::refreshDatabase()
         if(auto* option=dynamic_cast<COptStringList*>(m_pView->settings()->opt(eOptSetResource,"mapRoots")))mapRoots=option->value().toList();
     }
     QString token=QString::number(ei::ProfileDatabaseContext::instance().generation())+resourceRoots.join('|')+mapRoots.join('|');
+    const auto activeDatabase = ei::ProfileDatabaseContext::instance().current();
+    const QString weaponsPath = ei::MapWeaponCatalog::pathForDatabase(activeDatabase ? activeDatabase->sourceArchivePath : QString());
+    const QFileInfo weaponsFile(weaponsPath);
+    token += QString("|%1:%2:%3").arg(weaponsPath).arg(weaponsFile.size()).arg(weaponsFile.lastModified().toMSecsSinceEpoch());
     for(const auto& root:resourceRoots) {
         const QFileInfo file(QDir(root).filePath("texts.res"));
         token+=QString("|%1:%2").arg(file.size()).arg(file.lastModified().toMSecsSinceEpoch());
@@ -643,6 +653,21 @@ void CCreateObjectForm::refreshDatabase()
     const auto texts=ei::loadGameTextCatalog(resourceRoots);
     ei::applyDatabaseMapTexts(&m_databaseEntries,texts.entries);
     m_itemCatalog.applyGameTexts(texts.entries);
+    m_weaponCatalog.load(weaponsPath, m_itemCatalog);
+    if(m_weaponCatalog.present()) {
+        QVector<ei::SDatabaseMapEntry> filtered;
+        for(auto entry : m_databaseEntries) {
+            if(entry.category == ei::EDatabaseMapCategory::Item) {
+                const auto models = m_weaponCatalog.models(entry.name);
+                if(models.isEmpty()) continue;
+                QStringList names;
+                for(const auto& model : models) names.append(model.model);
+                entry.model = names.join(" / ");
+            }
+            filtered.append(entry);
+        }
+        m_databaseEntries = filtered;
+    }
     // Read the existing database-side catalog without importing or saving it.
     m_modelCatalogProfile=ei::TechnicalModelCatalog::profileKey(mapRoots);
     m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(snapshot?snapshot->sourceArchivePath:QString()),&m_modelCatalogError);
@@ -660,6 +685,7 @@ void CCreateObjectForm::filterDatabase()
     m_databaseDetails->setVisible(m_databaseMode);
     m_advanced->setVisible(m_databaseMode);
     m_itemMaterial->setVisible(m_databaseMode && m_databaseCategory->currentIndex() == 1);
+    m_itemModel->setVisible(m_databaseMode && m_databaseCategory->currentIndex() == 1 && m_weaponCatalog.present());
     const bool technicalMode = !m_databaseMode;
     m_technicalTextureLabel->setVisible(technicalMode);
     m_technicalTexture->setVisible(technicalMode);
@@ -858,6 +884,11 @@ void CCreateObjectForm::selectDatabaseEntry()
         m_databaseDetails->setText(m_databaseEntries.isEmpty()
             ? tr("No active database. Configure the game or mod profile first.")
             : tr("No matching objects."));
+        if(m_databaseCategory->currentIndex() == 1 && m_weaponCatalog.present()
+           && !m_weaponCatalog.diagnostic().isEmpty())
+            m_databaseDetails->setText(m_weaponCatalog.diagnostic());
+        const QSignalBlocker materialBlock(m_itemMaterial), modelBlock(m_itemModel);
+        m_itemMaterial->clear(); m_itemModel->clear();
         updateTable(); return;
     }
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
@@ -871,14 +902,43 @@ void CCreateObjectForm::selectDatabaseEntry()
             const QSignalBlocker block(m_itemMaterial);
             const QString previous = m_itemMaterial->currentData().toString();
             m_itemMaterial->clear();
-            for(const auto& material : m_itemCatalog.compatibleMaterials(*item))
-                m_itemMaterial->addItem(material.displayName, material.name);
+            int firstAvailable = -1;
+            for(const auto& material : m_itemCatalog.compatibleMaterials(*item)) {
+                const QString texture = ei::ItemSpellConstructorCatalog::itemTextureName(*item, &material)
+                    + (m_itemCatalog.isJmvProfile() ? ".x2" : "");
+                const bool available = !m_weaponCatalog.present()
+                    || CTextureList::getInstance()->textureList().contains(texture);
+                m_itemMaterial->addItem(QString::fromUtf8("Материал: ") + material.displayName
+                    + (available ? QString() : QString::fromUtf8(" (нет текстуры)")), material.name);
+                const int row = m_itemMaterial->count() - 1;
+                m_itemMaterial->setItemData(row, texture, Qt::ToolTipRole);
+                if(available && firstAvailable < 0) firstAvailable = row;
+                if(!available) if(auto* choices = qobject_cast<QStandardItemModel*>(m_itemMaterial->model()))
+                    choices->item(row)->setEnabled(false);
+            }
             const int previousIndex = m_itemMaterial->findData(previous);
-            if(previousIndex >= 0) m_itemMaterial->setCurrentIndex(previousIndex);
+            const bool previousAvailable = previousIndex >= 0
+                && (m_itemMaterial->model()->flags(m_itemMaterial->model()->index(previousIndex, 0)) & Qt::ItemIsEnabled);
+            m_itemMaterial->setCurrentIndex(previousAvailable ? previousIndex : firstAvailable);
             m_itemMaterial->setEnabled(m_itemMaterial->count() > 0);
-            m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
-                m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString()),
-                ei::ProfileDatabaseContext::instance().current(), true, &itemDiagnostic);
+            const auto* material = m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString());
+            if(m_weaponCatalog.present()) {
+                const QSignalBlocker modelBlock(m_itemModel);
+                const QString previousModel = m_itemModel->currentData().toString();
+                m_itemModel->clear();
+                for(const auto& model : m_weaponCatalog.models(item->name))
+                    m_itemModel->addItem(QString::fromUtf8("Модель: ") + model.model, model.model);
+                const int modelIndex = m_itemModel->findData(previousModel);
+                if(modelIndex >= 0) m_itemModel->setCurrentIndex(modelIndex);
+                m_itemModel->setEnabled(m_itemModel->count() > 1);
+                m_pNode = m_weaponCatalog.create(*item, material, m_itemModel->currentData().toString(),
+                    m_itemCatalog.isJmvProfile(), &itemDiagnostic);
+                if(m_itemMaterial->currentIndex() < 0)
+                    itemDiagnostic = QString::fromUtf8("Для материалов этого оружия нет текстур в активном профиле. Добавьте соответствующие текстуры в ресурсы профиля.");
+            } else {
+                m_pNode = ei::ItemSpellConstructorDialog::buildItemPreview(m_itemCatalog, *item,
+                    material, ei::ProfileDatabaseContext::instance().current(), true, &itemDiagnostic);
+            }
             m_pPreview->attachNode(m_pNode);
         }
         else
@@ -887,6 +947,11 @@ void CCreateObjectForm::selectDatabaseEntry()
             m_itemMaterial->clear();
         }
         m_databaseDetails->setText(tr("Place as an ordinary object. You can convert it to a lever and assign an interaction script afterwards."));
+        if(m_pNode && m_weaponCatalog.present())
+            m_databaseDetails->setText(m_itemCatalog.itemDisplayName(*item,
+                m_itemCatalog.findMaterial(m_itemMaterial->currentData().toString()))
+                + QString::fromUtf8("\nТекстура: ") + m_pNode->textureName()
+                + QString::fromUtf8("\nРазместите объект на карте. Esc — отмена."));
         if(!m_pNode)
             m_databaseDetails->setText(itemDiagnostic.isEmpty()
                 ? tr("No model or material texture is available for placing this item.") : itemDiagnostic);

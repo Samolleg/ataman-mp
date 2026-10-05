@@ -8,6 +8,7 @@
 #include "node.h"
 #include "database_map_catalog.h"
 #include "item_spell_constructor.h"
+#include "map_weapon_catalog.h"
 #include "technical_texture_catalog.h"
 #include "technical_model_catalog.h"
 #include <QTimer>
@@ -81,6 +82,8 @@ private:
     QUndoStack* m_pUndoStack;
     QComboBox* m_databaseCategory{nullptr};
     QComboBox* m_itemMaterial{nullptr};
+    QComboBox* m_itemModel{nullptr};
+    ei::MapWeaponCatalog m_weaponCatalog;
     ei::ItemSpellConstructorCatalog m_itemCatalog;
     QLineEdit* m_databaseSearch{nullptr};
     QListWidget* m_databaseList{nullptr};

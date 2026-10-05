@@ -17,6 +17,7 @@
 #include <QFile>
 #include <QCryptographicHash>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTextStream>
 #include <QScopedPointer>
 #include <QApplication>
@@ -542,6 +543,149 @@ int runDatabasePreviewCheck()
         output << "Preview " << name << ": " << colors.size() << " colors\n"; output.flush();
         return colors.size() > 32;
     };
+    if(qEnvironmentVariableIsSet("EI_TEST_MAP_WEAPONS_ONLY"))
+    {
+        auto document = ei::DatabaseDocument::fromSnapshot(snapshot);
+        auto catalog = ei::ItemSpellConstructorCatalog::fromDocument(*document);
+        ei::MapWeaponCatalog weapons;
+        if(!weapons.load(ei::MapWeaponCatalog::pathForDatabase(archive), catalog))
+            return fail(weapons.diagnostic());
+        auto* materials = form->findChild<QComboBox*>("databaseItemMaterial");
+        auto* models = form->findChild<QComboBox*>("databaseItemModel");
+        auto* place = form->findChild<QPushButton*>("buttonCreate");
+        if(!materials || !models || !place) return fail("weapon picker controls");
+        category->setCurrentIndex(1); search->clear();
+        int linked = 0;
+        for(const auto& item : catalog.items) if(!weapons.models(item.name).isEmpty()) {
+            if(item.category != "Weapon") return fail("non-weapon in extracted catalog");
+            ++linked;
+        }
+        if(linked == 0 || objects->count() != linked) return fail("only catalog-backed weapons listed");
+        output << "PASS: catalog-backed weapon identities=" << linked << "\n";
+        int modelCount = 0, textureChoices = 0, absentTextureChoices = 0;
+        QSet<QString> checkedModels;
+        for(const auto& item : catalog.items) {
+            const auto variants = weapons.models(item.name);
+            if(variants.isEmpty()) continue;
+            int availableForItem = 0;
+            for(const auto& model : variants) {
+                if(checkedModels.contains(model.model)) continue;
+                checkedModels.insert(model.model);
+                if(!CObjectList::getInstance()->getFigureResource(model.mod)) return fail("catalog model decode: " + model.mod);
+                ++modelCount;
+            }
+            for(const auto& material : catalog.compatibleMaterials(item)) {
+                const QString texture = catalog.itemTextureName(item, &material) + (jmv ? ".x2" : "");
+                if(CTextureList::getInstance()->textureList().contains(texture)) { ++textureChoices; ++availableForItem; }
+                else ++absentTextureChoices;
+            }
+            if(availableForItem == 0) output << "RESOURCE GAP: no material texture for " << item.name << "\n";
+        }
+        output << "PASS: linked model decode=" << modelCount << ", exact material textures=" << textureChoices
+               << ", absent textures=" << absentTextureChoices << "\n";
+        const QStringList names{"cheat dagger", "stone sword", "2h bone club", "small leather shield", "bow"};
+        int createdCount = 0, missingTextures = 0;
+        for(const QString& name : names) {
+            if(weapons.models(name).isEmpty()) continue;
+            form->show(); category->setCurrentIndex(1); search->setText(name);
+            const auto matches = findCode(name);
+            if(matches.size() != 1) return fail("weapon identity selection: " + name);
+            objects->setCurrentItem(matches.first());
+            if(matches.first()->text() == name) return fail("Russian weapon name: " + name);
+            if(models->count() != weapons.models(name).size()) return fail("all model variants exposed");
+            if(name == "cheat dagger") form->grab().save(outputDirectory + "/weapon-picker.png");
+            QSet<QString> textures;
+            int successes = 0;
+            for(int materialIndex = 0; materialIndex < materials->count(); ++materialIndex) {
+                materials->setCurrentIndex(materialIndex);
+                if(!place->isEnabled()) { ++missingTextures; continue; }
+                const QString chosenModel = models->currentData().toString();
+                const QString chosenMaterial = materials->currentData().toString();
+                if(successes == 0 && !capture("weapon-" + chosenModel)) return fail("weapon colored preview: " + name);
+                QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+                if(!view->isDatabasePlacementPending() || destination->nodes().size() != 1)
+                    return fail("catalog weapon pending placement: " + name);
+                CNode* node = destination->nodes().first();
+                const QString texture = node->textureName();
+                const QString base = ei::ItemSpellConstructorCatalog::itemTextureName(*catalog.findItem(name), catalog.findMaterial(chosenMaterial));
+                if(node->modelName() != chosenModel || (texture != base && texture != base + ".x2")
+                   || !node->toJson().value("Object parts").toArray().isEmpty())
+                    return fail("exact extracted model/material/texture identity");
+                textures.insert(texture);
+                if(!view->cancelPendingOperation() || !destination->nodes().isEmpty()) return fail("weapon Escape rollback");
+                form->show(); QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+                if(!view->isDatabasePlacementPending()) return fail("weapon retry");
+                QMouseEvent click(QEvent::MouseButtonRelease,QPointF(320,240),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                view->m_pOp->mouseReleaseEvent(&click);
+                if(destination->nodes().size() != 1 || history->count() != 1) return fail("weapon single undo command");
+                CValidationReport report; QByteArray bytes;
+                if(!destination->buildValidatedCandidate(&bytes, &report)) return fail(report.toText());
+                CMob reopened;
+                if(!reopened.deserialize(bytes) || reopened.nodes().size() != 1) return fail("weapon save/reopen");
+                CNode* restored = reopened.nodes().first();
+                if(restored->mapId() == 0 || restored->modelName() != chosenModel || restored->textureName() != texture)
+                    return fail("weapon persisted ID/model/texture");
+                preview->makeCurrent(); restored->loadFigure(); restored->loadTexture();
+                restored->setDrawPosition(QVector3D()); preview->attachNode(restored);
+                if(successes == 0 && !capture("weapon-reopened-" + chosenModel)) return fail("weapon reopened render");
+                preview->attachNode(nullptr, false);
+                history->undo(); if(!destination->nodes().isEmpty()) return fail("weapon undo");
+                history->redo(); if(destination->nodes().size() != 1) return fail("weapon redo");
+                history->undo(); history->clear();
+                ++createdCount; ++successes;
+                form->show();
+                if(successes == 2) break;
+            }
+            if(successes == 0) return fail("no usable material: " + name);
+            if(textures.size() != successes) return fail("material changes exact texture");
+            if(models->count() > 1) {
+                models->setCurrentIndex(1);
+                if(!place->isEnabled() || !capture("weapon-variant-" + models->currentData().toString()))
+                    return fail("second extracted variant preview");
+            }
+            output << "PASS: " << name << " localized/materials/variants/preview/Escape/place/ID/save/reopen/Undo/Redo\n";
+        }
+        if(createdCount < 6) return fail("insufficient real weapon cases");
+        QString error;
+        QScopedPointer<CWorldObj> invalid(weapons.create(*catalog.findItem("cheat dagger"), nullptr, "uhwdg03r", true, &error));
+        if(invalid || error.isEmpty()) return fail("invalid material refusal");
+        invalid.reset(weapons.create(*catalog.findItem("cheat dagger"), catalog.findMaterial("bronze"), "unhuma", true, &error));
+        if(invalid || error.isEmpty()) return fail("unbound model refusal");
+        auto missingMaterial = *catalog.findMaterial("bronze"); missingMaterial.code = "missing-test-material";
+        invalid.reset(weapons.create(*catalog.findItem("cheat dagger"), &missingMaterial, "uhwdg03r", true, &error));
+        if(invalid || !error.contains("missing-test-material")) return fail("missing exact texture refusal");
+        const QString malformed = temporary.filePath("invalid-weapons.json");
+        QFile fixture(malformed); if(!fixture.open(QIODevice::WriteOnly)) return fail("fixture");
+        fixture.write("{\"schema_version\":99}"); fixture.close();
+        if(weapons.load(malformed, catalog) || !weapons.present() || weapons.diagnostic().isEmpty()
+           || !weapons.models("cheat dagger").isEmpty()) return fail("invalid catalog refuses stale mappings");
+        CResFile synthetic;
+        synthetic.addFiledata("test.mod", QByteArray("owned synthetic index fixture"));
+        synthetic.addFiledata("test.bon", QByteArray("owned synthetic index fixture"));
+        synthetic.saveToFile(temporary.filePath("test.res"));
+        const auto* dagger = catalog.findItem("cheat dagger");
+        QJsonObject binding{{"name", dagger->name}, {"weapon_class", dagger->typeId}, {"model_index", dagger->textureType1}};
+        QJsonObject row{{"model", "test"}, {"mod", "test.mod"}, {"bon", "test.bon"}, {"db_weapons", QJsonArray{binding}}};
+        QJsonObject root{{"schema_version", 2}, {"path_base", "catalog_directory"}, {"model_archive", "test.res"},
+            {"database", QJsonObject{{"table", "items.weapons"}, {"identity_field", 0}, {"weapon_class_field", 2}, {"model_index_field", 5}}},
+            {"models", QJsonArray{row}}};
+        const auto writeCatalog = [&]() {
+            if(!fixture.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+            fixture.write(QJsonDocument(root).toJson()); fixture.close(); return true;
+        };
+        if(!writeCatalog() || !weapons.load(malformed, catalog) || weapons.models(dagger->name).size() != 1)
+            return fail("synthetic valid semantic binding");
+        invalid.reset(weapons.create(*dagger, catalog.findMaterial("bronze"), "test", true, &error));
+        if(invalid || error.isEmpty()) return fail("unavailable model archive in profile refusal");
+        binding.insert("model_index", dagger->textureType1 + 1); row.insert("db_weapons", QJsonArray{binding}); root.insert("models", QJsonArray{row});
+        if(!writeCatalog() || weapons.load(malformed, catalog) || !weapons.models(dagger->name).isEmpty()) return fail("stale DB geometry binding refused");
+        root.insert("model_archive", "../test.res");
+        if(!writeCatalog() || weapons.load(malformed, catalog)) return fail("catalog path escape refused");
+        if(weapons.load(temporary.filePath("absent.json"), catalog) || weapons.present()) return fail("absent catalog legacy mode");
+        output << "PASS: invalid material/model/catalog; placements=" << createdCount
+               << ", unavailable material textures=" << missingTextures << "\n";
+        return 0;
+    }
     if(qEnvironmentVariableIsSet("EI_TEST_NPC_CREATION_ONLY"))
     {
         QStandardPaths::setTestModeEnabled(true);
@@ -625,7 +769,8 @@ int runDatabasePreviewCheck()
     if(!jmv)
         for(const auto& item : snapshot->items)
             if(item.category == "weapons") { weaponName = item.name; break; }
-    if(qEnvironmentVariableIsSet("EI_TEST_SYNTHETIC_MAP_TEXTURES"))
+    const bool extractedWeapons = QFileInfo::exists(ei::MapWeaponCatalog::pathForDatabase(archive));
+    if(!extractedWeapons && qEnvironmentVariableIsSet("EI_TEST_SYNTHETIC_MAP_TEXTURES"))
     {
         const auto catalog = ei::ItemSpellConstructorCatalog::fromDocument(
             *ei::DatabaseDocument::fromSnapshot(snapshot));
@@ -724,11 +869,16 @@ int runDatabasePreviewCheck()
     if(itemTexture.endsWith(".mmp", Qt::CaseInsensitive)
        || !CTextureList::getInstance()->textureList().contains(itemTexture))
         return fail("saved item texture must name an exact game resource without extension");
+    if(extractedWeapons) {
+        if(jmv && (itemModel != "uhwdg03r" || itemTexture != "unhumadg_03.br.1.x2"))
+            return fail("extracted catalog model and original material texture");
+    } else {
     if(!itemTexture.endsWith("map", Qt::CaseInsensitive)
        || (jmv && itemTexture != "unhumadg_03.br.1.x2map"))
         return fail("placed item must use the separate map texture resource");
     if(ei::textureUvScale(itemTexture) != 1.0f)
         return fail("map texture must use authored UVs, without equipment x2 correction");
+    }
     const QVector3D itemStart = itemNode->position();
     if(!view->updateDatabasePlacementPointer(QPoint(420,280)) || itemNode->position()==itemStart)
         return fail("item follows pointer");
