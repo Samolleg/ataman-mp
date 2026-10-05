@@ -238,7 +238,13 @@ void ei::CFigure::readAssemblyOffset(QDataStream& stream)
 // in. offset - accumulate for children
 void ei::CFigure::applyAssemblyOffset(QVector<QVector3D>* offset)
 {
-    if(offset)
+    if(!offset)
+    {
+        // Retail RecalcSkeleton places the root from its animation track;
+        // BON contributes only to children. All geometry/bounds share this.
+        m_offset.fill(QVector3D(), 8);
+    }
+    else
     {
         Q_ASSERT((offset->size() == 8) && (m_offset.size() == 8));
         for(int i(0); i<offset->size(); ++i)

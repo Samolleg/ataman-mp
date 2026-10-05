@@ -27,7 +27,8 @@ const int kContainerSchema = 2;
 // which doubled disk traffic and decompression work without preserving any
 // additional source precision.
 const quint32 kImageSchema = 2;
-const quint32 kAssemblySchema = 1;
+// Root BON no longer contributes to decoded assembly placement.
+const quint32 kAssemblySchema = 2;
 const int kMaximumPayloadBytes = 512 * 1024 * 1024;
 const int kMaximumParts = 4096;
 const int kMaximumVertices = 16 * 1024 * 1024;

@@ -1,4 +1,5 @@
 #include "database_creation_check.h"
+#include "root_bon_check.h"
 #include "database_map_catalog.h"
 #include "endurance_document.h"
 #include "mob.h"
@@ -53,6 +54,8 @@
 
 int runDatabaseCreationCheck()
 {
+    const int rootBonResult=runRootBonCheck();
+    if(rootBonResult || qEnvironmentVariableIsSet("EI_ROOT_BON_ONLY"))return rootBonResult;
     QTextStream output(stdout);
     CValidationReport report;
     auto fail = [&](const QString& stage) {
