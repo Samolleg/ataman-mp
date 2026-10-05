@@ -4,7 +4,7 @@
 
 - Поручение2026-10-05 «Исправляй» продолжает EI-MAP-WEAPONS-PLACEMENT-VERIFY-112 и родитель112. База main f042d122bbd7ca50fdce6a8317f2f1018bf6d431,112→113. Разрешены реализация, scoped-коммит и стандартная сборка/постоянная установка. Исходная проблема: uhwdg03r в маппере смещён относительно игры; отчёт владельца подтверждает игнорирование BON корня retail skeleton с сохранением child BON.
 - Критерии: одинаковые преобразования корня в geometry/rest pose/bounds, сохранение дочерних смещений и морфинга Z1/5/10, проверка реального кинжала, регресс составных/анимированных моделей и сохранения MOB; старый кэш не возвращает дефект. Игровые карты/архивы/REG и чужие правки этим исправлением не меняются.
-- Статус: реализация113 проверена:28 focused assertions,40 animation tests, native creation/weapon placement/history PASS; UI сохраняет прежние10 clipboard FAIL. Отчёт docs/validation/ATAMAN_ROOT_BON_113_20261005.md. Следующий шаг: упаковка/постоянная установка и ручное сравнение владельцем. Родитель112 и runtime-приёмка остаются открытыми.
+- Статус: реализация113 проверена:28 focused assertions,40 animation tests, native creation/weapon placement/history PASS; UI сохраняет прежние10 clipboard FAIL. Отчёт docs/validation/ATAMAN_ROOT_BON_113_20261005.md. Проверенный коммит main55dce81973408fa4cb44fda2e9ef0072860e3f69; fresh staging/finalizer/validator PASS, постоянная установка112→113 обновлена:127 managed и17089 unlisted user files verified,6 replacements с откатом112. EXE E9F1BEFF8A1A53F3E1A105F3DCBCB95F2EF33F5099BDF514C4B5CD3339A4F101. Следующий шаг: ручное сравнение трёх кинжалов с игрой, выделение и составные модели. Родитель112 и runtime-приёмка остаются открытыми.
 
 
 ## EI-MAP-WEAPONS-112 — добавление оружия из mapweapons.res

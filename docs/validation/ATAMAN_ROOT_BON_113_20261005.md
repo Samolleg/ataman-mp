@@ -25,4 +25,10 @@ Evidence: build-tests-113-root-bon/root-bon-check-native/check.out, database-cre
 
 Runtime acceptance remains open: owner should reopen zone1 in113, compare the three existing daggers with the game and inspect selection plus a multicomponent model. Animation tests establish regressions against the editor contract, not complete character/game parity. Existing user edits to live zone1 were observed during work and were not overwritten. The failed diagnostic artifacts remain installed from the earlier authorized experiment; this program correction does not restore a stale map or remove user registry entries automatically.
 
-Package/permanent-install evidence will be recorded after verification.
+## Verified handoff
+
+Implementation commit main55dce81973408fa4cb44fda2e9ef0072860e3f69. Build completed before committing identical scoped sources; stage log initially recorded the unchanged parent HEAD, which does not identify the compiled change. The implementation commit above identifies the tested source. No application source changed between testing, commit and staging.
+
+Fresh build-staging-113-root-bon finalized and independently validated, --version113 verified before finalization; raw/staged/installed EXE SHA256 E9F1BEFF8A1A53F3E1A105F3DCBCB95F2EF33F5099BDF514C4B5CD3339A4F101. No GUI run of the finalized package. Permanent artifacts/EI-Mapper-Ataman-2-first-test updated112→113:127 managed files plus manifest verified;6 replacements backed up. All17089 unlisted user files have identical before/after hashes. Settings/maps/logs were preserved and no finalizer ran on the permanent folder. Verified rollback112: artifacts/rollback-EI-Mapper-Ataman-v112-to-113-20261005; older owned111 rollback verified and removed only after successful installation.
+
+Evidence: build-tests-113-root-bon/stage.log, finalize.log, validate-package.log, stage-version.out, install.log, user-files-before.json/user-files-after.json. No distribution ZIP requested for this ordinary tester update. Owner visual acceptance and parent112 remain open.
