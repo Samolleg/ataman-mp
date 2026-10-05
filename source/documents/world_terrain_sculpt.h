@@ -14,6 +14,7 @@ struct SWorldTerrainTarget
     bool editable{false};
 };
 class CTerrainWorkingAtlas;
+struct STerrainMobHeightState;
 struct SWorldTerrainPaintState
 {
     CTerrainEditModel terrain;
@@ -33,6 +34,8 @@ struct SWorldTerrainStroke
     QMap<QString, SOverlaySurfaceCommand> overlays;
     QMap<QString, STerrainTileCommand> tiles;
     QMap<QString, SWorldTerrainPaintChange> paint;
+    // Optional editor companion; canonical MPR algorithms never inspect it.
+    QSharedPointer<STerrainMobHeightState> mobHeightState;
     bool isEmpty() const { return maps.isEmpty() && overlays.isEmpty() && tiles.isEmpty() && paint.isEmpty(); }
     void append(const SWorldTerrainStroke& stamp);
 };

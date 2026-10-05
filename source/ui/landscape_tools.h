@@ -99,6 +99,7 @@ public:
     float radius() const;
     float strength() const;
     float rawDelta() const;
+    bool moveMobObjectsWithTerrain() const;
     quint16 flattenHeight() const;
     void setFlattenHeight(quint16 height);
     ETerrainBrushFalloff falloff() const;
@@ -208,6 +209,7 @@ private:
     QLabel* m_flattenLabel;
     QLabel* m_falloffLabel;
     QCheckBox* m_flipVertical;
+    QCheckBox* m_moveMobObjects;
     QTabWidget* m_materialTabs;
     QTabWidget* m_paintModeTabs;
     QTabWidget* m_classicMaterialTabs;

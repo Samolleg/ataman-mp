@@ -43,6 +43,21 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDirectory.path());
     }
+    void mobHeightOptionPersistsAndOnlyAppliesToGroundSculpt()
+    {
+        QSettings().remove("ui/landscape/moveMobObjects");
+        CLandscapeTools tools;
+        auto* box=tools.findChild<QCheckBox*>("landscapeMoveMobObjects");
+        QVERIFY(box);QVERIFY(tools.moveMobObjectsWithTerrain());
+        tools.activateMode(ELandscapeEditMode::Sculpt);
+        QVERIFY(!box->isHidden());box->setChecked(false);
+        QVERIFY(!tools.moveMobObjectsWithTerrain());
+        CLandscapeTools restored;QVERIFY(!restored.moveMobObjectsWithTerrain());
+        tools.activateMode(ELandscapeEditMode::OverlaySculpt);QVERIFY(box->isHidden());
+        tools.activateMode(ELandscapeEditMode::TilePaint);QVERIFY(box->isHidden());
+        tools.activateMode(ELandscapeEditMode::Sculpt);QVERIFY(!box->isHidden());
+        QSettings().remove("ui/landscape/moveMobObjects");
+    }
     void boundaryFillHasNoFixedHeight()
     {
         CLandscapeTools tools;

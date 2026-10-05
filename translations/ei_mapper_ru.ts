@@ -632,6 +632,14 @@ Restore the runtime paths for the selected installation, then retry Test Current
     <context>
         <name>CLandscapeTools</name>
         <message>
+            <source>Move objects with terrain</source>
+            <translation>Перемещать объекты с рельефом</translation>
+        </message>
+        <message>
+            <source>When disabled, world objects, levers, traps and torches keep their world height by changing their MOB Z offset. Save both MPR and MOB. Units remain grounded; lights, sounds and particles already use absolute height.</source>
+            <translation>Без галочки объекты мира, рычаги, ловушки и факелы сохраняют мировую высоту: изменяется смещение Z в MOB. Сохраняйте MPR и MOB. Существа остаются привязаны к земле; свет, звук и частицы уже имеют абсолютную высоту.</translation>
+        </message>
+        <message>
             <source>Fill from boundary</source>
             <translation>По границе</translation>
         </message>
@@ -6483,6 +6491,10 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
     </context>
     <context>
         <name>CView</name>
+        <message>
+            <source>Cannot replay terrain and object heights after the affected MOB was unloaded.</source>
+            <translation>Нельзя восстановить рельеф и высоты объектов: затронутые MPR и MOB должны оставаться загруженными.</translation>
+        </message>
         <message>
             <location filename="../source/render/view.cpp" line="1897" />
             <location filename="../source/render/view.cpp" line="2014" />

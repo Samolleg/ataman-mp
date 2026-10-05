@@ -178,6 +178,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_flattenLabel(new QLabel(tr("Flatten target"), this))
     , m_falloffLabel(new QLabel(tr("Falloff"), this))
     , m_flipVertical(new QCheckBox(tr("Flip image vertically"), this))
+    , m_moveMobObjects(new QCheckBox(tr("Move objects with terrain"), this))
     , m_materialTabs(new QTabWidget(this))
     , m_paintModeTabs(new QTabWidget(this))
     , m_classicMaterialTabs(new QTabWidget(this))
@@ -289,9 +290,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         tr("Preserves the outer row of vertices inside the circle and fills the interior from their heights. Strength controls blending. No fixed target height."),
         Qt::ToolTipRole);
     m_radius->setRange(0.5, 64.0);
+    m_radius->setObjectName(QStringLiteral("landscapeSculptRadius"));
     m_radius->setValue(4.0);
     m_radius->setSingleStep(0.5);
     m_strength->setRange(0.01, 1.0);
+    m_strength->setObjectName(QStringLiteral("landscapeSculptStrength"));
     m_strength->setValue(0.35);
     m_strength->setSingleStep(0.05);
     m_strength->setDecimals(2);
@@ -313,6 +316,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_falloff->setObjectName(QStringLiteral("landscapeSculptFalloff"));
 
     QSettings settings;
+    m_moveMobObjects->setObjectName(QStringLiteral("landscapeMoveMobObjects"));
+    m_moveMobObjects->setChecked(settings.value(
+        QStringLiteral("ui/landscape/moveMobObjects"), true).toBool());
+    m_moveMobObjects->setToolTip(tr("When disabled, world objects, levers, traps and torches keep their world height by changing their MOB Z offset. Save both MPR and MOB. Units remain grounded; lights, sounds and particles already use absolute height."));
     m_randomizeUniformRotation->setChecked(settings.value(
         "ui/landscape/randomizeUniformRotation", true).toBool());
     m_randomizeUniformRotation->setToolTip(tr(
@@ -353,6 +360,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     form->addRow(m_deltaLabel, m_delta);
     form->addRow(m_flattenLabel, m_flatten);
     form->addRow(m_falloffLabel, m_falloff);
+    form->addRow(m_moveMobObjects);
     QWidget* worldControls = new QWidget(this);
     QVBoxLayout* worldLayout = new QVBoxLayout(worldControls);
     worldLayout->setContentsMargins(0,0,0,0);
@@ -995,6 +1003,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             });
     connect(m_flatten, QOverload<int>::of(&QSpinBox::valueChanged), this,
             [](int value) { QSettings().setValue("ui/landscape/flattenHeight", value); });
+    connect(m_moveMobObjects, &QCheckBox::toggled, this, [](bool checked) {
+        QSettings().setValue(QStringLiteral("ui/landscape/moveMobObjects"), checked);
+    });
     m_modernAutoResolveBlends->setVisible(m_paintModeTabs->currentIndex()==0);
     m_classicAutoSafe->setVisible(m_paintModeTabs->currentIndex()==1);
     updateModeVisibility();
@@ -1117,6 +1128,7 @@ void CLandscapeTools::updateModeVisibility()
     m_flattenLabel->setVisible(flatten);
     m_falloff->setVisible(sculpt);
     m_falloffLabel->setVisible(sculpt);
+    m_moveMobObjects->setVisible(sculpt && !overlaySculptEnabled());
     m_deltaLabel->setText(noise ? tr("Noise range") : tr("Raise/lower step"));
     m_delta->setVisible(raiseLower || noise);
     m_deltaLabel->setVisible(raiseLower || noise);
@@ -1162,6 +1174,7 @@ ETerrainBrushFalloff CLandscapeTools::falloff() const
     return static_cast<ETerrainBrushFalloff>(m_falloff->currentData().toInt());
 }
 bool CLandscapeTools::flipHeightmapVertically() const { return m_flipVertical->isChecked(); }
+bool CLandscapeTools::moveMobObjectsWithTerrain() const { return m_moveMobObjects->isChecked(); }
 float CLandscapeTools::paintRadius() const
 {
     // UI size 1 is one terrain vertex. The terrain model uses a zero-based

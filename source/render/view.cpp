@@ -967,12 +967,23 @@ class CTerrainHeightPreviewCommand : public QUndoCommand,
 {
 public:
     CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command,
-                                 bool alreadyApplied = false)
+                                 bool alreadyApplied = false,
+                                 QSharedPointer<STerrainMobHeightState> mobHeights = {})
         : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
+        , m_mobHeights(mobHeights)
+        , m_firstApplication(!alreadyApplied)
     {
         setText(command.description);
+        if(!alreadyApplied && !m_mobHeights)
+        {
+            m_mobHeights = m_view->makeTerrainMobHeightState();
+            m_view->captureTerrainMobHeights(command, m_mobHeights.data());
+        }
     }
-    void undo() override { m_view->applyTerrainHeightPreview(m_command, false); }
+    void undo() override {
+        if(m_view->applyTerrainHeightPreview(m_command, false))
+            m_view->applyTerrainMobHeights(m_mobHeights.data(), false);
+    }
     void redo() override
     {
         if(m_skipInitialRedo)
@@ -980,7 +991,9 @@ public:
             m_skipInitialRedo = false;
             return;
         }
-        m_view->applyTerrainHeightPreview(m_command, true);
+        if(m_view->applyTerrainHeightPreview(m_command, true))
+            m_view->applyTerrainMobHeights(m_mobHeights.data(), true, m_firstApplication);
+        m_firstApplication = false;
     }
     bool invalidatesAiGraphPreview() const override
     {
@@ -990,6 +1003,8 @@ private:
     CView* m_view;
     STerrainHeightCommand m_command;
     bool m_skipInitialRedo{false};
+    QSharedPointer<STerrainMobHeightState> m_mobHeights;
+    bool m_firstApplication{true};
 };
 
 class CTerrainVerticalScalePreviewCommand : public QUndoCommand,
@@ -22511,6 +22526,8 @@ void CView::mousePressEvent(QMouseEvent* event)
         m_sculptStrokeNoiseSeed = QRandomGenerator::global()->generate();
         m_sculptStrokeCommand = STerrainHeightCommand();
         m_sculptStrokeCommand.description = tr("Sculpt terrain");
+        m_sculptStrokeMobHeightState = overlaySculpt
+            ? QSharedPointer<STerrainMobHeightState>() : makeTerrainMobHeightState();
         m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
         m_overlaySurfaceStrokeCommand.description = tr("Sculpt overlay height");
         m_overlaySurfaceStrokeBaseline = m_terrainEdit.overlaySurfaceSnapshot();
@@ -22751,6 +22768,108 @@ void CView::sculptTerrainTowardLatestPoint()
     m_lastSculptStampPoint = m_lastSculptPoint;
 }
 
+QSharedPointer<STerrainMobHeightState> CView::makeTerrainMobHeightState() const
+{
+    if(!m_landscapeTools || m_landscapeTools->moveMobObjectsWithTerrain())
+        return {};
+    auto state = QSharedPointer<STerrainMobHeightState>::create();
+    state->terrainPath = CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    return state;
+}
+
+void CView::captureTerrainMobHeights(const STerrainHeightCommand& command,
+                                    STerrainMobHeightState* state)
+{
+    if(!state || !m_terrainEditAvailable)
+        return;
+    const auto bounds = terrainHeightInfluenceBounds(command,
+        m_terrainEdit.vertexCountX(), m_terrainEdit.vertexCountY());
+    for(CMob* mob : m_aMob)
+        for(CNode* node : mob->nodes())
+        {
+            if(!node || node->isMarkDeleted() || state->captured.contains(node)
+               || !ei::usesTerrainRelativeMapObjectHeight(node->nodeType())
+               || !bounds.contains(node->position().x(), node->position().y()))
+                continue;
+            bool sampled = false;
+            const float height = m_terrainEdit.terrainSurfaceHeight(
+                node->position().x(), node->position().y(), &sampled);
+            if(!sampled || !std::isfinite(height))
+                continue;
+            STerrainMobHeightEntry entry;
+            entry.node = node;
+            entry.mob = mob;
+            entry.beforeOffset = entry.afterOffset = node->position().z();
+            entry.beforeTerrainHeight = height;
+            state->entries.append(entry);
+            state->captured.insert(node);
+        }
+}
+
+bool CView::terrainMobHeightStateAvailable(const STerrainMobHeightState* state) const
+{
+    if(!state)
+        return true;
+    const QString currentTerrain = CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    QHash<CMob*,QSet<CNode*>> owners;
+    for(CMob* mob : m_aMob)
+        owners.insert(mob, QSet<CNode*>::fromList(mob->nodes()));
+    for(const auto& entry : state->entries)
+        if(entry.beforeOffset != entry.afterOffset
+           && (state->terrainPath != currentTerrain || !entry.node
+               || !owners.value(entry.mob).contains(entry.node.data())))
+            return false;
+    return true;
+}
+
+void CView::applyTerrainMobHeights(STerrainMobHeightState* state, bool forward,
+                                  bool captureAfter)
+{
+    if(!state)
+        return;
+    CTerrainPreviewContext contextGuard(this);
+    QSet<CMob*> changed;
+    QHash<CMob*,QSet<CNode*>> owners;
+    for(CMob* mob : m_aMob)
+        owners.insert(mob, QSet<CNode*>::fromList(mob->nodes()));
+    for(auto& entry : state->entries)
+    {
+        CNode* node = entry.node.data();
+        if(!node || !owners.value(entry.mob).contains(node))
+            continue;
+        if(captureAfter)
+        {
+            bool sampled = false;
+            const float height = m_terrainEdit.terrainSurfaceHeight(
+                node->position().x(), node->position().y(), &sampled);
+            if(!sampled || !std::isfinite(height))
+                continue;
+            entry.afterOffset = entry.beforeOffset + (entry.beforeTerrainHeight - height);
+        }
+        QVector3D pos = node->position();
+        const float offset = forward ? entry.afterOffset : entry.beforeOffset;
+        if(pos.z() == offset)
+            continue;
+        pos.setZ(offset);
+        node->updatePos(pos);
+        changed.insert(entry.mob);
+    }
+    if(!changed.isEmpty())
+    {
+        for(CMob* mob : changed)
+            mob->refreshDirtyFromProjection();
+        if(m_activeMob)
+            emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag,
+                                      m_activeMob->isDirty() ? "*" : "");
+        emit mobStateChanged();
+        m_staticShadowFingerprint.clear();
+        m_farStaticShadowFingerprint.clear();
+        m_aiGraphOverlayDirty = true;
+        viewParameters();
+        update();
+    }
+}
+
 bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward)
 {
     if(!m_terrainEditAvailable)
@@ -22781,6 +22900,8 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
         beforePayloads.insert(sector,
             m_terrainEdit.sectorPayload(sector.first, sector.second));
     CValidationReport report;
+    if(m_sculptStrokeActive)
+        captureTerrainMobHeights(command, m_sculptStrokeMobHeightState.data());
     if(!m_terrainEdit.apply(command, forward, &report, false))
     {
         ei::log(eLogWarning, "Terrain preview command refused:\n" + report.toText());
@@ -25611,9 +25732,11 @@ void CView::finishSculptStroke()
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
     m_sculptPointerValid = false;
+    applyTerrainMobHeights(m_sculptStrokeMobHeightState.data(), true, true);
     if(!m_worldTerrainStroke.isEmpty())
     {
         m_worldTerrainStroke.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;
+        m_worldTerrainStroke.mobHeightState = m_sculptStrokeMobHeightState;
         m_worldTerrainSession.record(m_worldTerrainStroke);
         updateWorldTerrainStatus();
         const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
@@ -25635,6 +25758,7 @@ void CView::finishSculptStroke()
             .arg(changedMaps.size()).arg(m_worldTerrainStroke.protectedBoundaryVertices));
         m_worldTerrainStroke=SWorldTerrainStroke();
         m_sculptStrokeCommand=STerrainHeightCommand();
+        m_sculptStrokeMobHeightState.clear();
         m_sculptGestureCaptured=false;
         syncMprDirtyState();
         return;
@@ -25691,7 +25815,7 @@ void CView::finishSculptStroke()
             this, m_overlaySurfaceStrokeCommand, true));
     else if(m_pUndoStack && !m_sculptStrokeCommand.isEmpty())
         m_pUndoStack->push(new CTerrainHeightPreviewCommand(
-            this, m_sculptStrokeCommand, true));
+            this, m_sculptStrokeCommand, true, m_sculptStrokeMobHeightState));
     undoNsecs = undoTimer.nsecsElapsed();
     if(m_sculptStrokeChanged)
     {
@@ -25745,6 +25869,7 @@ void CView::finishSculptStroke()
         .arg(double(stateNsecs) / 1000000.0, 0, 'f', 2)
         .arg(reprojectedObjects));
     m_sculptGestureCaptured = false;
+    m_sculptStrokeMobHeightState.clear();
 }
 
 void CView::setDurty(CMob* pMob)

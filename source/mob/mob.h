@@ -44,6 +44,7 @@ struct SMobParameterState
 ///
 class CMob
 {
+    friend int runTerrainMobHeightCheck();
 public:
     struct SCanvasCropResult
     {

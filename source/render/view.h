@@ -61,6 +61,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include <atomic>
 #include "world_terrain_session.h"
 #include "world_material_boundary.h"
+#include "terrain_mob_height_state.h"
 
 class QLineEdit;
 class QFrame;
@@ -179,6 +180,7 @@ class CView : public QGLWidget
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
+    friend int runTerrainMobHeightCheck();
 
 public:
     struct SNidRepair
@@ -475,6 +477,12 @@ public:
     void beginTerrainPreviewBatch();
     void endTerrainPreviewBatch();
     bool applyTerrainHeightPreview(const STerrainHeightCommand& command, bool forward);
+    QSharedPointer<STerrainMobHeightState> makeTerrainMobHeightState() const;
+    void captureTerrainMobHeights(const STerrainHeightCommand& command,
+                                 STerrainMobHeightState* state);
+    void applyTerrainMobHeights(STerrainMobHeightState* state, bool forward,
+                               bool captureAfter = false);
+    bool terrainMobHeightStateAvailable(const STerrainMobHeightState* state) const;
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
@@ -1243,6 +1251,7 @@ private:
     bool m_sculptGestureCaptured{false};
     bool m_sculptPointerValid{false};
     STerrainHeightCommand m_sculptStrokeCommand;
+    QSharedPointer<STerrainMobHeightState> m_sculptStrokeMobHeightState;
     QVector3D m_lastSculptPoint;
     QVector3D m_lastSculptStampPoint;
     bool m_sculptStrokeChanged{false};

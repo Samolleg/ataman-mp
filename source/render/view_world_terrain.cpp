@@ -285,6 +285,11 @@ bool CView::worldTerrainHistory(bool forward,bool force)
     if(!force && m_pUndoStack && next->localUndoIndex>=0
        && next->localUndoIndex!=m_pUndoStack->index())return false;
     const auto stroke=*next;
+    if(!terrainMobHeightStateAvailable(stroke.mobHeightState.data()))
+    {
+        emit updateMsg(tr("Cannot replay terrain and object heights after the affected MOB was unloaded."));
+        return true;
+    }
     QString error;
     if(!prepareHistoryNavigation()) return true;
     if(!(forward?m_worldTerrainSession.redo(&error):m_worldTerrainSession.undo(&error)))
@@ -297,6 +302,7 @@ bool CView::worldTerrainHistory(bool forward,bool force)
         if(stroke.tiles.contains(active))applyTerrainTilePreview(stroke.tiles[active],forward);
     }
     for(const auto& id:stroke.paint.keys())previewWorldPaintState(id);
+    applyTerrainMobHeights(stroke.mobHeightState.data(),forward);
     refreshWorldTerrainNeighbors();
     emit updateMsg(forward?tr("Redid one complete world terrain stroke."):tr("Undid one complete world terrain stroke."));
     updateWorldTerrainStatus();
