@@ -31,6 +31,15 @@ struct SWorldMaterialRepairPlan
     int changedVertices{0};
 };
 
+inline bool worldMaterialRepairCellAvailable(const SWorldMaterialRepairMap& map,int x,int y)
+{
+    if(x<0 || y<0 || x>=map.field.tileWidth() || y>=map.field.tileHeight())return false;
+    if(!map.geometry)return true; // abstract fields have no physical presence mask
+    bool available=false;const auto packed=map.geometry->packedTile(x,y,map.layer,&available);
+    // An absent overlay returns packed0, which is also a valid active atlas slot.
+    return available && !(map.layer==ETerrainTileLayer::Overlay && packed==0xffff);
+}
+
 // Select complete shared tile edges only; excluded maps, corner contacts and
 // old half-tile placements do not acquire invented raster correspondence.
 inline QMap<QString,QMap<int,int>> worldMaterialSeamSides(
@@ -56,12 +65,10 @@ inline QMap<QString,QMap<int,int>> worldMaterialSeamSides(
                 const double start=(vertical?a.origin.y():a.origin.x())+k*2;
                 if(start<low-1e-5 || start+2>high+1e-5)continue;
                 const int x=vertical?(side==1?w-1:0):k,y=vertical?k:(side==2?h-1:0);
-                if(a.layer==ETerrainTileLayer::Overlay && a.geometry && b.geometry) {
-                    const int bx=vertical?(side==1?0:b.field.tileWidth()-1):qRound((start-b.origin.x())/2);
-                    const int by=vertical?qRound((start-b.origin.y())/2):(side==2?0:b.field.tileHeight()-1);
-                    if(a.geometry->packedTile(x,y,a.layer)==0xffff
-                       || b.geometry->packedTile(bx,by,b.layer)==0xffff)continue;
-                }
+                const int bx=vertical?(side==1?0:b.field.tileWidth()-1):qRound((start-b.origin.x())/2);
+                const int by=vertical?qRound((start-b.origin.y())/2):(side==2?0:b.field.tileHeight()-1);
+                if(!worldMaterialRepairCellAvailable(a,x,y)
+                   || !worldMaterialRepairCellAvailable(b,bx,by))continue;
                 result[a.id][y*w+x]|=1<<side;
             }
         }
@@ -98,6 +105,7 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
         for(bool vertical:{false,true})for(int side:{0,1})for(int k=0;k<(vertical?h:w);++k) {
             const int x=vertical?(side?w:0):k,y=vertical?k:(side?h:0);
             Edge e;e.map=i;e.x=vertical?(side?w-1:0):k;e.y=vertical?k:(side?h-1:0);
+            if(!worldMaterialRepairCellAvailable(m,e.x,e.y))continue;
             for(int j=0;j<3;++j)e.p[j]=point(m,x*2+(vertical?0:j),y*2+(vertical?j:0));
             e.first=m.field.material(x,y);e.last=m.field.material(x+(vertical?0:1),y+(vertical?1:0));
             bool found=false;STerrainTransitionSignature sig;
@@ -118,6 +126,7 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
             if(x && y && x<w && y<h)continue;
             const auto p=point(m,2*x,2*y);QSet<qint32> pure,values;bool contact=false;
             bool aligned=true;
+            bool ownSurface=m.layer!=ETerrainTileLayer::Overlay || !m.geometry;
             for(const auto& e:edges) {
                 if(e.map!=i && !adjacent(m,maps[e.map]))continue;
                 bool on=false;double position=0;
@@ -131,6 +140,7 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
                     }
                 }
                 if(!on)continue;
+                if(e.map==i)ownSurface=true;
                 if(e.map!=i) {
                     contact=true;
                     const auto phase=m.origin-maps[e.map].origin;
@@ -142,8 +152,10 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
                 else if(position>1-1e-6 && e.last>0)values.insert(e.last);
                 else if(e.first==e.last && e.first>0)values.insert(e.first);
             }
-            if(!contact)continue;
-            for(int cy:{y-1,y})for(int cx:{x-1,x})if(cx>=0 && cy>=0 && cx<w && cy<h)
+            // Neighbor evidence must not fill the unknown corners of an absent
+            // surface, even if the neighboring water has a complete signature.
+            if(!contact || !ownSurface)continue;
+            for(int cy:{y-1,y})for(int cx:{x-1,x})if(worldMaterialRepairCellAvailable(m,cx,cy))
                 plan.seamCells[m.id].insert(cy*w+cx);
             const auto& evidence=pure.isEmpty()?values:pure;
             if(evidence.isEmpty() || (evidence.size()!=1 && (!stitchAlignedEdges || !aligned))) {
@@ -155,7 +167,7 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
             const auto material=*std::min_element(evidence.cbegin(),evidence.cend());
             if(material==m.field.material(x,y))continue;
             plan.fields[m.id].setMaterial(x,y,material);++plan.changedVertices;
-            for(int cy:{y-1,y})for(int cx:{x-1,x})if(cx>=0 && cy>=0 && cx<w && cy<h)
+            for(int cy:{y-1,y})for(int cx:{x-1,x})if(worldMaterialRepairCellAvailable(m,cx,cy))
                 plan.changedCells[m.id].insert(cy*w+cx);
         }
     }

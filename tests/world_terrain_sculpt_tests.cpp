@@ -58,6 +58,67 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void overlaySeamsRespectSparsePresenceAndSlotZero()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;
+        auto& left=s.documents["a"]->terrain;auto& right=s.documents["b"]->terrain;
+        SWorldMaterialRepairMap a,b;a.id="a";b.id="b";b.origin={32,0};
+        a.layer=b.layer=ETerrainTileLayer::Overlay;a.geometry=&left;b.geometry=&right;
+        QVERIFY(a.field.resize(16,16,1));QVERIFY(b.field.resize(16,16,2));
+        // Recovered corner values are not proof that either physical surface exists.
+        QVERIFY(worldMaterialSeamSides({a,b}).isEmpty());
+        QCOMPARE(planWorldMaterialRepair({a,b},true).changedVertices,0);
+        const auto activate=[&](CTerrainEditModel& model,int x,int y) {
+            STerrainTileBrush brush;brush.centerX=x;brush.centerY=y;brush.radius=0;
+            const auto command=model.makeOverlayActivation(brush,0,0,0,0,&report);
+            return !command.isEmpty() && model.apply(command,true,&report);
+        };
+        QVERIFY(activate(left,15,5));
+        QVERIFY(worldMaterialSeamSides({a,b}).isEmpty()); // type3 opposite type1
+        QCOMPARE(planWorldMaterialRepair({a,b},true).changedVertices,0);
+        QVERIFY(activate(right,0,7));
+        QVERIFY(worldMaterialSeamSides({a,b}).isEmpty()); // disjoint active spans
+        QCOMPARE(planWorldMaterialRepair({a,b},true).changedVertices,0);
+        QVERIFY(activate(right,0,5));
+        bool available=false;
+        QCOMPARE(left.packedTile(15,5,ETerrainTileLayer::Overlay,&available),quint16(0));
+        QVERIFY(available);
+        QCOMPARE(left.packedTile(15,4,ETerrainTileLayer::Overlay,&available),quint16(0));
+        QVERIFY(!available); // inactive type3 cell returns the same number
+        const auto sides=worldMaterialSeamSides({a,b});
+        QCOMPARE(sides["a"].size(),1);QCOMPARE(sides["b"].size(),1);
+        QCOMPARE(sides["a"].value(5*16+15),2);QCOMPARE(sides["b"].value(5*16),8);
+        const auto plan=planWorldMaterialRepair({a,b},true);
+        QCOMPARE(plan.changedVertices,2);
+        QCOMPARE(plan.fields["b"].material(0,5),1);QCOMPARE(plan.fields["b"].material(0,6),1);
+        QCOMPARE(plan.fields["b"].material(0,4),2);QCOMPARE(plan.fields["b"].material(0,7),2);
+        QCOMPARE(plan.changedCells.value("b"),QSet<int>{5*16});
+        QCOMPARE(planWorldMaterialRepair({b,a},true).changedCells,plan.changedCells);
+        const auto before=left.sectorPayload(0,0);
+        STerrainTileCommand invalid;STerrainTileDelta delta;delta.layer=ETerrainTileLayer::Overlay;
+        delta.globalX=15;delta.globalY=4;delta.before=0;delta.after=1;invalid.deltas.append(delta);
+        CValidationReport refused;QVERIFY(!left.apply(invalid,true,&refused));QVERIFY(refused.hasErrors());
+        QCOMPARE(left.sectorPayload(0,0),before);QVERIFY(!report.hasErrors());
+    }
+    void overlayOneSidedWaterPreservesUnknownVertices()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;
+        auto& right=s.documents["b"]->terrain;
+        STerrainTileBrush brush;brush.centerX=0;brush.centerY=5;brush.radius=0;
+        const auto activation=right.makeOverlayActivation(brush,0,0,0,0,&report);
+        QVERIFY(right.apply(activation,true,&report));
+        SWorldMaterialRepairMap a,b;a.id="a";b.id="b";b.origin={32,0};
+        a.layer=b.layer=ETerrainTileLayer::Overlay;
+        a.geometry=&s.documents["a"]->terrain;b.geometry=&right;
+        QVERIFY(a.field.resize(16,16,std::numeric_limits<qint32>::min()));
+        QVERIFY(b.field.resize(16,16,std::numeric_limits<qint32>::min()));
+        for(int y:{5,6})for(int x:{0,1})QVERIFY(b.field.setMaterial(x,y,2));
+        const auto plan=planWorldMaterialRepair({a,b},true);
+        QCOMPARE(plan.changedVertices,0);QVERIFY(plan.seamCells.isEmpty());
+        QCOMPARE(plan.fields["a"].stableSha256(),a.field.stableSha256());
+        QCOMPARE(plan.fields["b"].stableSha256(),b.field.stableSha256());
+        QVERIFY(worldMaterialSeamSides({a,b}).isEmpty());QVERIFY(!report.hasErrors());
+    }
     void snappedMaterialRepairIsJointAndOrderIndependent()
     {
         for(const QPointF direction:{QPointF(32,0),QPointF(-32,0),QPointF(0,32),QPointF(0,-32)}) {

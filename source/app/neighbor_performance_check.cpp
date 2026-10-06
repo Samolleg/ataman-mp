@@ -177,31 +177,89 @@ int runNeighborPerformanceCheck()
             if(seamPair)view.m_neighborPlacements[0].origin=view.m_neighborPlacements[0].worldOrigin-view.m_activeMapWorldOrigin;
             SNeighborMapPlacement third=adjacent;third.mprPath=root+"/Maps/zone13.mpr";
             third.worldOrigin={512,-59.5};third.size={448,384};
-            if(!seamPair){view.m_neighborPlacements.append(third);
+            const bool layoutCohort=qEnvironmentVariableIsSet("EI_WORLD_LAYOUT_MATERIAL_CHECK");
+            if(!seamPair && !layoutCohort){view.m_neighborPlacements.append(third);
                 view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(third.mprPath));}
+            if(layoutCohort) {
+                CWorldMapLayoutDocument world(root+"/world-map-layouts.json");
+                const auto records=world.loadEditorWorld(qEnvironmentVariable("EI_WORLD_LAYOUT_PROFILE","deja-vu"),{root});
+                QString allod;
+                for(const auto& record:records.zones)if(record.mprIdentity==zone) {
+                    allod=record.allodId;view.m_activeMapWorldOrigin=record.origin;
+                }
+                check(!allod.isEmpty() && !records.storageBlocked,"read actual layout cohort without persisting it");
+                if(allod.isEmpty() || records.storageBlocked)return 1;
+                view.m_neighborPlacements.clear();view.m_worldTerrainEnabledPaths.clear();
+                for(const auto& record:records.zones)if(record.allodId==allod && record.mprIdentity!=zone) {
+                    SNeighborMapPlacement member;member.mprPath=world.absoluteResourcePath(record.mprPath);
+                    member.worldOrigin=record.origin;member.origin=record.origin-view.m_activeMapWorldOrigin;
+                    member.size={record.sectorWidth*32.0,record.sectorHeight*32.0};
+                    view.m_neighborPlacements.append(member);
+                    view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(member.mprPath));
+                }
+                check(view.m_neighborPlacements.size()==7,"original eight-map cohort is selected");
+            }
             const auto thirdHash=digest(third.mprPath),neighborHash=digest(adjacent.mprPath);
+            const auto modelState=[](const SWorldTerrainDocument& doc) {
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                for(const auto& sec:doc.baseline.sectors())hash.addData(doc.terrain.sectorPayload(sec.sectorX,sec.sectorY));
+                QByteArray fields;QDataStream stream(&fields,QIODevice::WriteOnly);
+                for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                    QVector<qint32> current,baseline;doc.terrain.copyVirtualMaterialFieldState(layer,&current,&baseline);
+                    stream<<current<<baseline;
+                }
+                hash.addData(fields);return hash.result();
+            };
+            QMap<QString,QByteArray> beforeModels,beforeAtlases,inputHashes;
+            QMap<QString,CTerrainVirtualMaterialField> beforeOverlayFields;
+            QSet<QString> cohort=view.m_worldTerrainEnabledPaths;cohort.insert(activeId);
+            QString setupError;CValidationReport setupReport;
+            if(!view.m_worldTerrainSession.load(activeId,&setupError))return 1;
+            view.syncWorldTerrainActive();
+            for(const auto& id:cohort) {
+                inputHashes[id]=digest(id);
+                const bool ready=view.m_worldTerrainSession.load(id,&setupError) && view.ensureWorldTerrainAtlas(id,&setupReport);
+                check(ready && !setupReport.hasErrors(),"cohort atlas and pre-repair snapshot load");
+                if(!ready || setupReport.hasErrors()){out<<setupError<<setupReport.toText()<<"\n";return 1;}
+                const auto doc=view.m_worldTerrainSession.documents[id];
+                beforeModels[id]=modelState(*doc);beforeAtlases[id]=doc->atlas->stateFingerprint();
+                auto recovered=doc->terrain;
+                check(recovered.initializeVirtualMaterialField(ETerrainTileLayer::Overlay,doc->atlas->catalog(),&setupReport,
+                    ETerrainMaterialFieldRecovery::RecoverDeterministically),"recover original sparse overlay field in a copy");
+                recovered.copyVirtualMaterialField(ETerrainTileLayer::Overlay,&beforeOverlayFields[id],false);
+            }
+            inputHashes[root+"/world-map-layouts.json"]=digest(root+"/world-map-layouts.json");
             QString summary;CValidationReport repair;STerrainResolveAuditSession audit;
             check(view.resolveWorldMaterialBlends(&summary,&repair,&audit) && !repair.hasErrors(),"world physical blend repair completes");
             out<<summary<<"\n"<<repair.toText()<<"\n";out.flush();
             if(repair.hasErrors())return 1;
             QMap<QString,QVector<QByteArray>> after;
-            QMap<QString,QByteArray> materialHashes;
+            QMap<QString,QByteArray> materialHashes,afterModels,afterAtlases;
             for(auto it=view.m_worldTerrainSession.documents.cbegin();it!=view.m_worldTerrainSession.documents.cend();++it)
                 for(const auto& sec:it.value()->baseline.sectors())after[it.key()].append(it.value()->terrain.sectorPayload(sec.sectorX,sec.sectorY));
             for(auto it=view.m_worldTerrainSession.documents.cbegin();it!=view.m_worldTerrainSession.documents.cend();++it) {
                 CTerrainEditModel original;CValidationReport validation;original.load(it.value()->baseline,&validation);
-                bool exact=true,types=true,interior=true,authored=true;int changed=0;
+                bool exact=true,types=true,interior=true,authored=true,presence=true,emptyVertices=true;int changed=0;
                 for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
                     CTerrainVirtualMaterialField field;it.value()->terrain.copyVirtualMaterialField(layer,&field,false);
                     materialHashes[it.key()]+=field.stableSha256();
                     for(int y=0;y<original.tileCountY();++y)for(int x=0;x<original.tileCountX();++x) {
-                        const auto before=original.packedTile(x,y,layer),now=it.value()->terrain.packedTile(x,y,layer);
+                        bool beforeAvailable=false,nowAvailable=false;
+                        const auto before=original.packedTile(x,y,layer,&beforeAvailable),now=it.value()->terrain.packedTile(x,y,layer,&nowAvailable);
+                        presence &= beforeAvailable==nowAvailable && (beforeAvailable || before==now);
                         if(before==now)continue;++changed;
                         bool physical=false,semantic=false;
                         exact &= it.value()->atlas->catalog().gridSignatureForPacked(now,&physical)==field.cellSignature(x,y,&semantic)
                             && physical && semantic;
                         types &= original.tileType(before)==it.value()->terrain.tileType(now);
                         if(it.key()!=activeId)interior &= x==0 || y==0 || x==original.tileCountX()-1 || y==original.tileCountY()-1;
+                    }
+                    if(layer==ETerrainTileLayer::Overlay)for(int y=0;y<=original.tileCountY();++y)for(int x=0;x<=original.tileCountX();++x) {
+                        bool incidentSurface=false;
+                        for(int cy:{y-1,y})for(int cx:{x-1,x}) {
+                            bool available=false;original.packedTile(cx,cy,layer,&available);incidentSurface |= available;
+                        }
+                        if(!incidentSurface)emptyVertices &= field.material(x,y)==beforeOverlayFields.value(it.key()).material(x,y);
                     }
                 }
                 const auto images=it.value()->atlas->activeTileImages(),old=it.value()->atlas->authoredTileImages();
@@ -211,6 +269,9 @@ int runNeighborPerformanceCheck()
                 check(types,"repaired physical tiles retain runtime terrain types");
                 check(interior,"neighbor interiors remain unchanged");
                 check(authored,"original authored pixels remain unchanged");
+                check(presence,"overlay presence mask and inactive cells remain unchanged");
+                check(emptyVertices,"vertices without an overlay surface retain their exact material values");
+                afterModels[it.key()]=modelState(*it.value());afterAtlases[it.key()]=it.value()->atlas->stateFingerprint();
             }
             if(seamPair) {
                 const auto a=view.m_worldTerrainSession.documents[CWorldTerrainSession::key(root+"/Maps/zone4.mpr")];
@@ -241,11 +302,18 @@ int runNeighborPerformanceCheck()
             QString error;
             if(view.m_worldTerrainSession.canUndo()) {
                 check(view.worldTerrainHistory(false,true),"three-map repair undo");
+                for(auto it=beforeModels.cbegin();it!=beforeModels.cend();++it) {
+                    const auto doc=view.m_worldTerrainSession.documents[it.key()];
+                    check(modelState(*doc)==it.value() && doc->atlas->stateFingerprint()==beforeAtlases[it.key()],
+                        "undo exactly restores physical payloads, both semantic field states and atlas");
+                }
                 check(view.worldTerrainHistory(true,true),"three-map repair redo");
                 for(auto it=after.cbegin();it!=after.cend();++it) {
                     QVector<QByteArray> restored;const auto doc=view.m_worldTerrainSession.documents[it.key()];
                     for(const auto& sec:doc->baseline.sectors())restored.append(doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
                     check(restored==it.value(),"redo restores every physical sector");
+                    check(modelState(*doc)==afterModels[it.key()] && doc->atlas->stateFingerprint()==afterAtlases[it.key()],
+                        "redo exactly restores semantic fields and atlas");
                 }
             }
             CValidationReport repeat;check(view.resolveWorldMaterialBlends(&summary,&repeat) && !repeat.hasErrors(),"repeat repair completes");
@@ -259,6 +327,7 @@ int runNeighborPerformanceCheck()
                     CTerrainVirtualMaterialField field;doc->terrain.copyVirtualMaterialField(layer,&field,false);materials+=field.stableSha256();
                 }
                 check(materials==materialHashes[it.key()],"repeat repair preserves semantic fields");
+                check(doc->atlas->stateFingerprint()==afterAtlases[it.key()],"repeat repair preserves every working atlas");
                 CValidationReport serialized;
                 const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(doc->baseline,
                     doc->atlas->activeTileImages(),doc->atlas->activeTileTypes(),view.m_worldTerrainAtlasSources[it.key()].pages,
@@ -302,6 +371,8 @@ int runNeighborPerformanceCheck()
             }
             check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash
                 && digest(adjacent.mprPath)==neighborHash && digest(third.mprPath)==thirdHash,"all real game files unchanged");
+            bool inputUnchanged=true;for(auto it=inputHashes.cbegin();it!=inputHashes.cend();++it)inputUnchanged &= digest(it.key())==it.value();
+            check(inputUnchanged,"all cohort MPR files and layout remain byte-identical on disk");
             return failures?1:0;
         }
         const auto before=view.m_terrainEdit;

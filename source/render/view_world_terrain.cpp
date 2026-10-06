@@ -733,6 +733,12 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
     QMap<QString,SWorkingTerrainResolveStage> stages;
     SWorldTerrainStroke stamp;
     const auto layers={ETerrainTileLayer::Land,ETerrainTileLayer::Overlay};
+    const auto failedMapStage=[this,report](const QString& id,ETerrainTileLayer layer) {
+        report->add("terrain.world.resolve_map",EValidationSeverity::Error,
+            tr("Не удалось подготовить переходы; общая операция отменена."),
+            QFileInfo(id).fileName()+QStringLiteral(" / ")
+                +(layer==ETerrainTileLayer::Land?tr("земля"):tr("покрытие")));
+    };
     for(auto it=origins.cbegin();it!=origins.cend();++it) {
         if(!m_worldTerrainSession.load(it.key(),&error)) {
             report->add("terrain.world.load",EValidationSeverity::Error,error);return true;
@@ -814,7 +820,9 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             if(!stage.terrainEdit.installWorkingAtlasSlotTypes(stage.atlas->activeTileTypes()))return true;
             const auto command=stage.terrainEdit.makeVirtualMapResolution(layer,stage.atlas->catalog(),m_terrainSemanticSeed,
                 report,false,&field,true,true,nullptr,nullptr,&excluded);
-            if(report->hasErrors() || !stage.terrainEdit.apply(command,true,report))return true;
+            if(report->hasErrors() || !stage.terrainEdit.apply(command,true,report)) {
+                failedMapStage(it.key(),layer);return true;
+            }
             cells+=command.deltas.size();
         }
     }
@@ -834,7 +842,8 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             const auto edges=seamSides[li].value(it.key());
             for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
                 const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
-                if(layer==ETerrainTileLayer::Overlay && it->terrainEdit.packedTile(x,y,layer)==0xffff)continue;
+                bool available=false;const auto packed=it->terrainEdit.packedTile(x,y,layer,&available);
+                if(!available || (layer==ETerrainTileLayer::Overlay && packed==0xffff))continue;
                 bool found=false;const auto sig=field.cellSignature(x,y,&found);
                 if(found)required<<sig.northWest<<sig.northEast<<sig.southEast<<sig.southWest;
             }
@@ -856,23 +865,23 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             const auto edges=seamSides[li].value(it.key());
             for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
                 const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
-                const quint16 before=stage.terrainEdit.packedTile(x,y,layer);
-                if(layer==ETerrainTileLayer::Overlay && before==0xffff)continue;
+                bool available=false;const quint16 before=stage.terrainEdit.packedTile(x,y,layer,&available);
+                if(!available || (layer==ETerrainTileLayer::Overlay && before==0xffff))continue;
                 bool found=false;const auto sig=field.cellSignature(x,y,&found);
                 if(!found)continue;
                 const QImage pixels=shared.worldBoundaryTile(sig,stage.terrainEdit,origins[it.key()],
                     x,y,edge.value(),&canonicalCache,report);
-                if(pixels.isNull())return true;
+                if(pixels.isNull()){failedMapStage(it.key(),layer);return true;}
                 const int runtime=stage.atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
                 const int slot=stage.atlas->importWorldBoundaryTile(pixels,runtime,sig,report);
-                if(slot<0)return true;
+                if(slot<0){failedMapStage(it.key(),layer);return true;}
                 SMprPackedTile tile;tile.atlasIndex=quint8(slot/64);tile.tileIndex=quint8(slot%64);
                 if(tile.encode()==before)continue;
                 STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
                 delta.before=before;delta.after=tile.encode();command.deltas.append(delta);
             }
             stage.terrainEdit.installWorkingAtlasSlotTypes(stage.atlas->activeTileTypes());
-            if(!stage.terrainEdit.apply(command,true,report))return true;
+            if(!stage.terrainEdit.apply(command,true,report)){failedMapStage(it.key(),layer);return true;}
         }
     }
     cells=0;QMap<QString,QVector<STerrainTileDelta>> worldDeltas;
