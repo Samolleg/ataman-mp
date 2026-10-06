@@ -127,6 +127,7 @@ struct SWorkingTerrainResolveStage
     QMap<qint32, QImage> materialSources;
     QMap<qint32, STerrainGlobalMaterialSource> materialSourceIdentities;
     bool undoCheckpointRequired{false};
+    bool allowSlotRecycling{true};
 };
 
 struct SWorldTerrainAtlasSource {
@@ -631,7 +632,10 @@ private:
     bool previewWorldPaintState(const QString& id);
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
-    bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report);
+    bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,
+                                   STerrainResolveAuditSession* audit = nullptr);
+    bool loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
+        const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();

@@ -694,22 +694,29 @@ bool CView::ensureWorldTerrainAtlas(const QString& id,CValidationReport* report)
     m_worldTerrainAtlasSources[id]=source;return true;
 }
 
-bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* report)
+bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* report,STerrainResolveAuditSession* audit)
 {
     if(!m_worldTerrainEnabled || !m_hasActiveMapWorldOrigin || !m_neighborLayoutStorageWritable)return false;
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     QMap<QString,QPointF> origins;origins[active]=m_activeMapWorldOrigin;
     const QRectF ar(m_activeMapWorldOrigin,QSizeF(m_terrainEdit.tileCountX()*2,m_terrainEdit.tileCountY()*2));
-    for(const auto& p:m_neighborPlacements) {
+    bool expanded=true;
+    while(expanded) {expanded=false;for(const auto& p:m_neighborPlacements) {
         const QString id=CWorldTerrainSession::key(p.mprPath);
         if(!m_worldTerrainEnabledPaths.contains(id) || origins.contains(id))continue;
         const QRectF br(p.worldOrigin,p.size);
-        const bool touching=((qAbs(ar.right()-br.left())<1e-5 || qAbs(ar.left()-br.right())<1e-5)
-            && qMin(ar.bottom(),br.bottom())-qMax(ar.top(),br.top())>1e-5)
-            || ((qAbs(ar.bottom()-br.top())<1e-5 || qAbs(ar.top()-br.bottom())<1e-5)
-            && qMin(ar.right(),br.right())-qMax(ar.left(),br.left())>1e-5);
-        if(touching)origins[id]=p.worldOrigin;
-    }
+        for(auto included=origins.cbegin();included!=origins.cend();++included) {
+            QSizeF size=ar.size();
+            if(included.key()!=active)for(const auto& known:m_neighborPlacements)
+                if(CWorldTerrainSession::key(known.mprPath)==included.key()){size=known.size;break;}
+            const QRectF edge(included.value(),size);
+            const bool touching=((qAbs(edge.right()-br.left())<1e-5 || qAbs(edge.left()-br.right())<1e-5)
+                && qMin(edge.bottom(),br.bottom())-qMax(edge.top(),br.top())>1e-5)
+                || ((qAbs(edge.bottom()-br.top())<1e-5 || qAbs(edge.top()-br.bottom())<1e-5)
+                && qMin(edge.right(),br.right())-qMax(edge.left(),br.left())>1e-5);
+            if(touching){origins[id]=p.worldOrigin;expanded=true;break;}
+        }
+    }}
     if(origins.size()<2)return false;
     bool completed=false;
     struct FailureReport {
@@ -733,6 +740,7 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
         if(!ensureWorldTerrainAtlas(it.key(),report))return true;
         const auto doc=m_worldTerrainSession.documents[it.key()];
         auto& stage=stages[it.key()];stage.terrainEdit=doc->terrain;stage.atlas=doc->atlas->createStagingCopy();
+        stage.allowSlotRecycling=false;
         // Cohort snapshots and original compressed pages remain immutable.
         // Repair may append artwork, never recycle a pre-existing slot/page.
         for(int slot=0;slot<stage.atlas->activeTileImages().size();++slot)stage.protectedSlots.insert(slot);
@@ -745,7 +753,8 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             if(!stage.terrainEdit.initializeVirtualMaterialField(layer,stage.atlas->catalog(),report,
                     ETerrainMaterialFieldRecovery::RecoverDeterministically))return true;
     }
-    QMap<QString,QSet<int>> preserve[2];QSet<QString> semanticChanges;int conflicts=0,boundaryVertices=0;
+    QMap<QString,QSet<int>> preserve[2];QMap<QString,QMap<int,int>> seamSides[2];
+    QSet<QString> semanticChanges;int conflicts=0,boundaryVertices=0;
     for(auto layer:layers) {
         const int li=layer==ETerrainTileLayer::Land?0:1;
         QVector<SWorldMaterialRepairMap> maps;
@@ -757,7 +766,8 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             }
             maps.append(m);
         }
-        const auto plan=planWorldMaterialRepair(maps);boundaryVertices+=plan.changedVertices;
+        const auto plan=planWorldMaterialRepair(maps,true);boundaryVertices+=plan.changedVertices;
+        seamSides[li]=worldMaterialSeamSides(maps);
         for(auto changes=plan.changedCells.cbegin();changes!=plan.changedCells.cend();++changes)
             if(!changes->isEmpty())semanticChanges.insert(changes.key());
         for(auto it=stages.begin();it!=stages.end();++it) {
@@ -786,7 +796,6 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
                 bool available=false;const auto packed=stage.terrainEdit.packedTile(x,y,layer,&available);
                 if(available && packed!=0xffff)++usage[SMprPackedTile::decode(packed).atlasSlot()];
             }
-        bool changed=semanticChanges.contains(it.key());
         for(auto layer:layers) {
             const int li=layer==ETerrainTileLayer::Land?0:1;
             CTerrainVirtualMaterialField field;
@@ -806,10 +815,77 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             const auto command=stage.terrainEdit.makeVirtualMapResolution(layer,stage.atlas->catalog(),m_terrainSemanticSeed,
                 report,false,&field,true,true,nullptr,nullptr,&excluded);
             if(report->hasErrors() || !stage.terrainEdit.apply(command,true,report))return true;
-            cells+=command.deltas.size();changed=changed || !command.deltas.isEmpty();
+            cells+=command.deltas.size();
         }
-        // Establishing an interpretation alone is not a user edit.
-        if(!changed)continue;
+    }
+    // The same canonical source set is used by every member of the cohort.
+    // Local atlases may contain different authored masks for identical tuples.
+    for(auto layer:layers) {
+        const int li=layer==ETerrainTileLayer::Land?0:1;
+        QSet<qint32> required;QSize size;
+        for(auto it=stages.cbegin();it!=stages.cend();++it) {
+            const auto candidate=it->atlas->activeTileImages().first().size();
+            if(!size.isEmpty() && size!=candidate) {
+                report->add("terrain.world.tile_size",EValidationSeverity::Error,
+                    tr("Размеры текстур соседних карт различаются. Исправление не применено."));return true;
+            }
+            size=candidate;CTerrainVirtualMaterialField field;
+            it->terrainEdit.copyVirtualMaterialField(layer,&field,false);
+            const auto edges=seamSides[li].value(it.key());
+            for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
+                const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
+                if(layer==ETerrainTileLayer::Overlay && it->terrainEdit.packedTile(x,y,layer)==0xffff)continue;
+                bool found=false;const auto sig=field.cellSignature(x,y,&found);
+                if(found)required<<sig.northWest<<sig.northEast<<sig.southEast<<sig.southWest;
+            }
+        }
+        if(required.isEmpty())continue;
+        QMap<qint32,QImage> sources;
+        if(!loadWorldTerrainMaterialSources(required,size,&sources,report))return true;
+        QImage placeholder(size,QImage::Format_RGBA8888);placeholder.fill(Qt::transparent);
+        QMap<qint32,ETerrainBlendStyle> styles;
+        for(const auto& family:m_terrainGlobalFamilies)
+            styles[family.id]=CTerrainVirtualAtlas::blendStyleForMaterialName(family.name);
+        CTerrainVirtualAtlas shared(CTerrainTransitionCatalog(),{placeholder},0,sources,
+            styles,layer==ETerrainTileLayer::Land);
+        QMap<QByteArray,QImage> canonicalCache;
+        for(auto it=stages.begin();it!=stages.end();++it) {
+            auto& stage=it.value();CTerrainVirtualMaterialField field;
+            stage.terrainEdit.copyVirtualMaterialField(layer,&field,false);
+            STerrainTileCommand command;command.description=tr("Согласовать рисунок стыка карт");
+            const auto edges=seamSides[li].value(it.key());
+            for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
+                const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
+                const quint16 before=stage.terrainEdit.packedTile(x,y,layer);
+                if(layer==ETerrainTileLayer::Overlay && before==0xffff)continue;
+                bool found=false;const auto sig=field.cellSignature(x,y,&found);
+                if(!found)continue;
+                const QImage pixels=shared.worldBoundaryTile(sig,stage.terrainEdit,origins[it.key()],
+                    x,y,edge.value(),&canonicalCache,report);
+                if(pixels.isNull())return true;
+                const int runtime=stage.atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
+                const int slot=stage.atlas->importWorldBoundaryTile(pixels,runtime,sig,report);
+                if(slot<0)return true;
+                SMprPackedTile tile;tile.atlasIndex=quint8(slot/64);tile.tileIndex=quint8(slot%64);
+                if(tile.encode()==before)continue;
+                STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
+                delta.before=before;delta.after=tile.encode();command.deltas.append(delta);
+            }
+            stage.terrainEdit.installWorkingAtlasSlotTypes(stage.atlas->activeTileTypes());
+            if(!stage.terrainEdit.apply(command,true,report))return true;
+        }
+    }
+    cells=0;QMap<QString,QVector<STerrainTileDelta>> worldDeltas;
+    for(auto it=stages.begin();it!=stages.end();++it) {
+        auto& stage=it.value();const auto doc=m_worldTerrainSession.documents[it.key()];
+        for(int y=0;y<stage.terrainEdit.tileCountY();++y)for(int x=0;x<stage.terrainEdit.tileCountX();++x)
+            for(auto layer:layers) {
+                const auto before=doc->terrain.packedTile(x,y,layer),after=stage.terrainEdit.packedTile(x,y,layer);
+                if(before==after)continue;
+                STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
+                delta.before=before;delta.after=after;worldDeltas[it.key()].append(delta);++cells;
+            }
+        if(worldDeltas.value(it.key()).isEmpty() && !semanticChanges.contains(it.key()))continue;
         SWorldTerrainPaintChange change;change.before.terrain=doc->terrain;change.before.atlas=doc->atlas->createStagingCopy();
         change.before.materials=doc->materials;change.after.terrain=stage.terrainEdit;
         change.after.atlas=stage.atlas;change.after.materials=doc->materials;stamp.paint[it.key()]=change;
@@ -824,6 +900,14 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
         }
         stamp.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;m_worldTerrainSession.record(stamp);
         refreshWorldTerrainNeighbors();updateWorldTerrainStatus();
+    }
+    if(audit) {
+        audit->worldPackedDeltas=worldDeltas;
+        audit->stagedCellCount=cells;
+        audit->skippedCellCount=conflicts;
+        if(conflicts){STerrainResolveSkippedReason reason;reason.reason="world-boundary-material-conflict";
+            reason.count=conflicts;audit->skippedReasons.append(reason);}
+        if(!stamp.isEmpty()){audit->undoCommandId="world-terrain-cohort";audit->undoCommandDescription="World material boundary repair";}
     }
     *summary=tr("Исправлено тайлов: %1; карт: %2. Согласовано граничных вершин: %3.\nОтменить исправление можно кнопкой общей кисти.")
         .arg(cells).arg(stamp.paint.size()).arg(boundaryVertices);

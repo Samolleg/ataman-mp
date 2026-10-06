@@ -140,6 +140,25 @@ QByteArray terrainResolvePackedDeltaSha256(const QVector<STerrainTileDelta>& del
     return hash.result().toHex();
 }
 
+int terrainResolveChangedCellCount(const STerrainResolveAuditSession& session)
+{
+    int count=session.packedDeltas.size();
+    for(const auto& deltas:session.worldPackedDeltas)count+=deltas.size();
+    return count;
+}
+
+QByteArray terrainResolveSessionDeltaSha256(const STerrainResolveAuditSession& session)
+{
+    if(session.worldPackedDeltas.isEmpty())return terrainResolvePackedDeltaSha256(session.packedDeltas);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData("world-terrain-resolve-deltas-v1");
+    for(auto it=session.worldPackedDeltas.cbegin();it!=session.worldPackedDeltas.cend();++it) {
+        const QByteArray id=it.key().toUtf8();addInt(&hash,id.size());hash.addData(id);
+        hash.addData(terrainResolvePackedDeltaSha256(it.value()));
+    }
+    return hash.result().toHex();
+}
+
 QJsonObject terrainResolveAuditSessionJson(const STerrainResolveAuditSession& session,
                                            int packedDeltaLimit,
                                            int skippedSampleLimit)
@@ -174,12 +193,21 @@ QJsonObject terrainResolveAuditSessionJson(const STerrainResolveAuditSession& se
 
     result.insert(QStringLiteral("stagedTupleCount"), session.stagedTupleCount);
     result.insert(QStringLiteral("stagedCellCount"), session.stagedCellCount);
-    result.insert(QStringLiteral("changedCellCount"), session.packedDeltas.size());
+    result.insert(QStringLiteral("changedCellCount"), terrainResolveChangedCellCount(session));
     result.insert(QStringLiteral("generatedTupleCount"), session.generatedTupleCount);
     result.insert(QStringLiteral("skippedCellCount"), session.skippedCellCount);
     result.insert(QStringLiteral("packedDeltaSha256"),
-                  QString::fromLatin1(terrainResolvePackedDeltaSha256(
-                      session.packedDeltas)));
+                  QString::fromLatin1(terrainResolveSessionDeltaSha256(session)));
+    QJsonArray worldMaps;
+    for(auto it=session.worldPackedDeltas.cbegin();it!=session.worldPackedDeltas.cend();++it) {
+        QJsonObject map;map.insert("map",it.key());map.insert("changedCellCount",it->size());
+        map.insert("packedDeltaSha256",QString::fromLatin1(terrainResolvePackedDeltaSha256(it.value())));
+        QJsonArray sample;const auto ordered=canonicalDeltas(it.value());
+        for(int i=0;i<qMin(boundedDeltaLimit,ordered.size());++i)sample.append(deltaJson(ordered[i]));
+        map.insert("packedDeltaExamples",sample);map.insert("packedDeltaExamplesTruncated",ordered.size()>boundedDeltaLimit);
+        worldMaps.append(map);
+    }
+    result.insert("worldMaps",worldMaps);
     const QVector<STerrainTileDelta> ordered = canonicalDeltas(session.packedDeltas);
     QJsonArray examples;
     for(int index = 0; index < ordered.size() && index < boundedDeltaLimit; ++index)

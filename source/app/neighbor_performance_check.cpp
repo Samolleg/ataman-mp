@@ -22,6 +22,8 @@
 #include "endurance_document.h"
 #include "camera.h"
 #include "world_map_layout_document.h"
+#include "res_archive_document.h"
+#include "mmp_codec.h"
 #include "neighbor_map_layout.h"
 #include <QApplication>
 #include <QTemporaryDir>
@@ -169,13 +171,17 @@ int runNeighborPerformanceCheck()
         check(selected,"select a global painting family");
         const auto activeId=CWorldTerrainSession::key(placement.mprPath),neighborId=CWorldTerrainSession::key(adjacent.mprPath);
         if(qEnvironmentVariableIsSet("EI_WORLD_MATERIAL_CHECK")) {
-            view.m_neighborPlacements[0].worldOrigin={512,324.5};
+            const bool seamPair=qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK");
+            view.m_activeMapWorldOrigin=seamPair?(zone=="zone4"?QPointF(960,190):QPointF(704,64)):QPointF(0,0);
+            view.m_neighborPlacements[0].worldOrigin=seamPair?(zone=="zone4"?QPointF(704,64):QPointF(960,190)):QPointF(512,324.5);
+            if(seamPair)view.m_neighborPlacements[0].origin=view.m_neighborPlacements[0].worldOrigin-view.m_activeMapWorldOrigin;
             SNeighborMapPlacement third=adjacent;third.mprPath=root+"/Maps/zone13.mpr";
-            third.worldOrigin={512,-59.5};third.size={448,384};view.m_neighborPlacements.append(third);
-            view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(third.mprPath));
+            third.worldOrigin={512,-59.5};third.size={448,384};
+            if(!seamPair){view.m_neighborPlacements.append(third);
+                view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(third.mprPath));}
             const auto thirdHash=digest(third.mprPath),neighborHash=digest(adjacent.mprPath);
-            QString summary;CValidationReport repair;
-            check(view.resolveWorldMaterialBlends(&summary,&repair) && !repair.hasErrors(),"three-map physical blend repair completes");
+            QString summary;CValidationReport repair;STerrainResolveAuditSession audit;
+            check(view.resolveWorldMaterialBlends(&summary,&repair,&audit) && !repair.hasErrors(),"world physical blend repair completes");
             out<<summary<<"\n"<<repair.toText()<<"\n";out.flush();
             if(repair.hasErrors())return 1;
             QMap<QString,QVector<QByteArray>> after;
@@ -206,6 +212,32 @@ int runNeighborPerformanceCheck()
                 check(interior,"neighbor interiors remain unchanged");
                 check(authored,"original authored pixels remain unchanged");
             }
+            if(seamPair) {
+                const auto a=view.m_worldTerrainSession.documents[CWorldTerrainSession::key(root+"/Maps/zone4.mpr")];
+                const auto b=view.m_worldTerrainSession.documents[CWorldTerrainSession::key(root+"/Maps/zone6.mpr")];
+                CTerrainVirtualMaterialField af,bf;a->terrain.copyVirtualMaterialField(ETerrainTileLayer::Land,&af);
+                b->terrain.copyVirtualMaterialField(ETerrainTileLayer::Land,&bf);
+                int mismatch=0,pixelMismatch=0,pairs=0,physicalMismatch=0;
+                QCryptographicHash seamHash(QCryptographicHash::Sha256);
+                for(int y=0;y<=129;++y)if(af.material(0,y)!=bf.material(128,y+63))++mismatch;
+                for(int y=0;y<129;++y) {
+                    const auto ap=a->terrain.packedTile(0,y,ETerrainTileLayer::Land),bp=b->terrain.packedTile(127,y+63,ETerrainTileLayer::Land);
+                    const auto as=a->atlas->catalog().gridSignatureForPacked(ap),bs=b->atlas->catalog().gridSignatureForPacked(bp);
+                    physicalMismatch+=as.northWest!=bs.northEast || as.southWest!=bs.southEast;
+                    const QImage ai=a->atlas->activeTileImages()[SMprPackedTile::decode(ap).atlasSlot()];
+                    const QImage bi=b->atlas->activeTileImages()[SMprPackedTile::decode(bp).atlasSlot()];
+                    for(const auto& image:{ai,bi})seamHash.addData(reinterpret_cast<const char*>(image.constBits()),int(image.sizeInBytes()));
+                    if(y+63>=179 && y+63<=182)continue; // SEC along-edge deformation has different sampling positions
+                    for(int row=0;row<ai.height();++row)pixelMismatch+=ai.pixel(0,row)!=bi.pixel(bi.width()-1,row);
+                    ++pairs;
+                }
+                out<<"zone4/zone6 shared vertices mismatched: "<<mismatch<<" physical edges: "<<physicalMismatch
+                    <<" pixels: "<<pixelMismatch<<" compared pairs: "<<pairs<<" audit cells: "<<terrainResolveChangedCellCount(audit)<<"\n";
+                out<<"zone4/zone6 artwork sha256: "<<seamHash.result().toHex()<<"\n";
+                check(mismatch==0 && physicalMismatch==0,"zone4/zone6 material corners agree on both sides");
+                check(pixelMismatch==0 && pairs==125,"undeformed zone4/zone6 physical edge pixels agree");
+                check(audit.worldPackedDeltas.size()==2 && terrainResolveChangedCellCount(audit)>0,"world audit records changes to both maps");
+            }
             QString error;
             if(view.m_worldTerrainSession.canUndo()) {
                 check(view.worldTerrainHistory(false,true),"three-map repair undo");
@@ -218,6 +250,7 @@ int runNeighborPerformanceCheck()
             }
             CValidationReport repeat;check(view.resolveWorldMaterialBlends(&summary,&repeat) && !repeat.hasErrors(),"repeat repair completes");
             out<<summary<<"\n"<<repeat.toText()<<"\n";
+            QMap<QString,QVector<QImage>> savedEdges;
             for(auto it=after.cbegin();it!=after.cend();++it) {
                 QVector<QByteArray> repeated;const auto doc=view.m_worldTerrainSession.documents[it.key()];
                 for(const auto& sec:doc->baseline.sectors())repeated.append(doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
@@ -238,7 +271,34 @@ int runNeighborPerformanceCheck()
                 if(valid) {
                     QVector<QByteArray> payloads;for(const auto& sec:doc->baseline.sectors())payloads.append(model.sectorPayload(sec.sectorX,sec.sectorY));
                     check(payloads==it.value(),"reopened physical sectors match repaired sectors");
+                    if(seamPair) {
+                        CResArchiveDocument archive;QMap<int,QImage> decoded;QVector<QImage> edge;
+                        bool pixels=archive.loadBytes(package.resourceArchiveBytes,"memory.res");
+                        for(int y=0;y<129 && pixels;++y) {
+                            const bool zone4=it.key()==CWorldTerrainSession::key(root+"/Maps/zone4.mpr");
+                            const auto packed=SMprPackedTile::decode(model.packedTile(zone4?0:127,zone4?y:y+63,ETerrainTileLayer::Land));
+                            const int slot=packed.atlasSlot();
+                            if(!decoded.contains(slot)) {
+                                QImage tile;pixels=ei::decodeMmpDxt1AtlasTile(archive.memberPayload(package.resourceMembers.value(packed.atlasIndex)),packed.tileIndex,&tile);
+                                if(pixels)decoded[slot]=tile;
+                            }
+                            edge.append(decoded.value(slot));
+                        }
+                        check(pixels && edge.size()==129,"saved game-format MMP border tiles decode");
+                        savedEdges[it.key()]=edge;
+                    }
                 } else out<<serialized.toText()<<"\n";
+            }
+            if(seamPair && savedEdges.size()==2) {
+                const auto a=savedEdges[CWorldTerrainSession::key(root+"/Maps/zone4.mpr")];
+                const auto b=savedEdges[CWorldTerrainSession::key(root+"/Maps/zone6.mpr")];
+                int mismatch=0;
+                if(a.size()==129 && b.size()==129)for(int y=0;y<129;++y) {
+                    if(y+63>=179 && y+63<=182)continue;
+                    for(int row=0;row<a[y].height();++row)mismatch+=a[y].pixel(0,row)!=b[y].pixel(b[y].width()-1,row);
+                } else ++mismatch;
+                out<<"saved MMP shared-edge pixel mismatches: "<<mismatch<<"\n";
+                check(mismatch==0,"saved DXT1 border pixels still agree between zone4 and zone6");
             }
             check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash
                 && digest(adjacent.mprPath)==neighborHash && digest(third.mprPath)==thirdHash,"all real game files unchanged");

@@ -58,6 +58,141 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void snappedMaterialRepairIsJointAndOrderIndependent()
+    {
+        for(const QPointF direction:{QPointF(32,0),QPointF(-32,0),QPointF(0,32),QPointF(0,-32)}) {
+            SWorldMaterialRepairMap a,b;a.id="a";b.id="b";b.origin=direction;
+            QVERIFY(a.field.resize(16,16,2));QVERIFY(b.field.resize(16,16,1));
+            QCOMPARE(planWorldMaterialRepair({a,b}).changedVertices,0); // old no-op
+            const auto repaired=planWorldMaterialRepair({a,b},true);
+            QVERIFY(repaired.changedVertices>0);
+            QCOMPARE(planWorldMaterialRepair({b,a},true).changedCells,repaired.changedCells);
+            QVERIFY(repaired.conflicts.isEmpty());
+            a.field=repaired.fields["a"];b.field=repaired.fields["b"];
+            QCOMPARE(planWorldMaterialRepair({a,b},true).changedVertices,0);
+            QCOMPARE(a.field.material(8,8),2);QCOMPARE(b.field.material(8,8),1);
+            const auto sides=worldMaterialSeamSides({a,b});
+            QCOMPARE(sides["a"].size(),16);QCOMPARE(sides["b"].size(),16);
+            b.editable=false;a.field.resize(16,16,2);
+            QCOMPARE(planWorldMaterialRepair({a,b},true).changedVertices,0);
+            QVERIFY(worldMaterialSeamSides({a,b}).isEmpty());
+        }
+        SWorldMaterialRepairMap a,b,c;a.id="a";b.id="b";c.id="c";
+        a.field.resize(16,16,3);b.field.resize(16,16,2);c.field.resize(16,16,1);
+        b.origin={32,16};c.origin={32,-16};
+        const auto plan=planWorldMaterialRepair({a,b,c},true);
+        QCOMPARE(planWorldMaterialRepair({c,a,b},true).changedCells,plan.changedCells);
+        QCOMPARE(plan.fields["a"].material(16,8),1);
+        QCOMPARE(plan.fields["b"].material(0,0),1);
+        QCOMPARE(plan.fields["c"].material(0,16),1);
+        c.origin={32,-32};b.origin={33,0};
+        QVERIFY(worldMaterialSeamSides({a,b,c}).isEmpty()); // gap and corner
+    }
+    void worldBoundaryImportPreservesAuthoredPagePadding()
+    {
+        QImage old(64,64,QImage::Format_RGBA8888);old.fill(Qt::green);
+        QImage pixels=old;pixels.fill(Qt::red);
+        const QVector<QImage> authored(64,old);
+        const QVector<qint32> partialTypes(4,0);
+        STerrainTransitionSignature sig;sig.northWest=sig.northEast=sig.southWest=sig.southEast=1;
+        CValidationReport report;
+        CTerrainWorkingAtlas atlas(CTerrainTransitionCatalog(),authored,0,128,{}, {},partialTypes);
+        QCOMPARE(atlas.importWorldBoundaryTile(pixels,0,sig,&report),64);
+        QCOMPARE(atlas.importWorldBoundaryTile(pixels,0,sig,&report),64);
+        for(int slot=0;slot<64;++slot)QCOMPARE(atlas.activeTileImages()[slot],authored[slot]);
+        CTerrainWorkingAtlas full(CTerrainTransitionCatalog(),authored,0,64,{}, {},partialTypes);
+        const auto before=full.createStagingCopy();
+        QCOMPARE(full.importWorldBoundaryTile(pixels,0,sig,&report),-1);
+        QVERIFY(report.hasErrors());
+        QCOMPARE(full.activeTileImages(),before->activeTileImages());
+        QCOMPARE(full.activeTileTypes(),before->activeTileTypes());
+    }
+    void sharedPhysicalEdgesUseWorldPhaseAndSurviveCompaction()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");
+        QImage anchor(64,64,QImage::Format_RGBA8888);anchor.fill(Qt::red);
+        QMap<qint32,QImage> sources;
+        for(int material=1;material<=3;++material) {
+            QImage image=anchor;
+            for(int y=0;y<64;++y)for(int x=0;x<64;++x)
+                image.setPixelColor(x,y,QColor(material*60,x*2,y*3));
+            sources[material]=image;
+        }
+        CTerrainVirtualAtlas shared(CTerrainTransitionCatalog(),{anchor},0,sources);
+        STerrainTransitionSignature a,b;a.northWest=3;a.northEast=1;a.southEast=2;a.southWest=3;
+        b.northWest=1;b.northEast=3;b.southEast=3;b.southWest=2;
+        QMap<QByteArray,QImage> cache;CValidationReport report;
+        const auto left=shared.worldBoundaryTile(a,s.documents["a"]->terrain,{0,0},15,4,2,&cache,&report);
+        const auto right=shared.worldBoundaryTile(b,s.documents["b"]->terrain,{32,0},0,4,8,&cache,&report);
+        QVERIFY(!left.isNull() && !right.isNull());
+        for(int y=0;y<64;++y)QCOMPARE(left.pixel(63,y),right.pixel(0,y));
+        const auto page=CTerrainVirtualAtlas::composePage({left,right},0,64);
+        const auto mmp=ei::encodeMmpDxt1(page,true,nullptr);QVERIFY(!mmp.isEmpty());
+        QImage encodedLeft,encodedRight;
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(mmp,0,&encodedLeft));
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(mmp,1,&encodedRight));
+        for(int y=0;y<64;++y)QCOMPARE(encodedLeft.pixel(63,y),encodedRight.pixel(0,y));
+        QCOMPARE(shared.worldBoundaryTile(a,s.documents["a"]->terrain,{0,0},15,4,2,&cache,&report),left);
+        CTerrainWorkingAtlas atlas(CTerrainTransitionCatalog(),{anchor},0,64,sources);
+        const int slot=atlas.importWorldBoundaryTile(left,3,a,&report);
+        QVERIFY(slot>=0);QCOMPARE(atlas.importWorldBoundaryTile(left,3,a,&report),slot);
+        QCOMPARE(atlas.tileOriginForSlot(slot),ETerrainWorkingTileOrigin::CanonicalGenerated);
+        SMprPackedTile packed;packed.atlasIndex=slot/64;packed.tileIndex=slot%64;
+        bool decoded=false;QCOMPARE(atlas.catalog().gridSignatureForPacked(packed.encode(),&decoded),a);QVERIFY(decoded);
+        CTerrainVirtualMaterialField field;field.resize(1,1);
+        field.setMaterial(0,0,a.northWest);field.setMaterial(1,0,a.northEast);
+        field.setMaterial(1,1,a.southEast);field.setMaterial(0,1,a.southWest);
+        CTerrainVirtualAtlas compact(atlas.catalog(),atlas.activeTileImages(),0,sources,{},true,atlas.activeTileTypes());
+        auto final=compact.finalize(field,"test",64,atlas.activeTileTypes(),&report,{},
+            {3},{packed.encode()},{},&atlas.catalog(),{false});
+        QVERIFY2(final.success,qPrintable(report.toText()));
+        const int retained=final.authoredSlotRemap.value(slot,-1);QVERIFY(retained>=0);
+        QCOMPARE(final.tiles[retained].pixels,left);
+        STerrainWorkingFinalizationOrigins origins;
+        QVERIFY(atlas.restoreFinalizedProvenance(&final,&origins,"test",field.stableSha256(),{},&report));
+        QVERIFY(origins.canonicalGeneratedOutputs.contains(retained));
+        QVector<QImage> decodedTiles;QVERIFY(CTerrainVirtualAtlas::decodePhysicalTileImages(final,&decodedTiles,&report));
+        QVERIFY(!decodedTiles[retained].isNull());QVERIFY(!report.hasErrors());
+    }
+    void boundaryArtworkCapacityFailurePreservesAtlas()
+    {
+        QImage anchor(16,16,QImage::Format_RGBA8888);anchor.fill(Qt::red);
+        CTerrainWorkingAtlas atlas(CTerrainTransitionCatalog(),{anchor},0,1);
+        const auto before=atlas.stateFingerprint();anchor.fill(Qt::blue);
+        STerrainTransitionSignature sig;sig.northWest=sig.northEast=sig.southEast=sig.southWest=1;
+        CValidationReport report;
+        QCOMPARE(atlas.importWorldBoundaryTile(anchor,2,sig,&report),-1);
+        QVERIFY(report.hasErrors());QCOMPARE(atlas.stateFingerprint(),before);
+    }
+    void boundaryArtworkFollowsAlongEdgeSecOffsets()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;
+        auto& doc=*s.documents["a"];
+        const auto original=doc.terrain.sectorPayload(0,0);auto deformed=original;
+        deformed[5+(9*33+32)*8+1]=char(-63);
+        CMprEditTransaction tx;tx.replaceMemberPayload(doc.baseline.sectors()[0].memberName,
+            QCryptographicHash::hash(original,QCryptographicHash::Sha256).toHex(),deformed);
+        QByteArray bytes;QVERIFY(doc.baseline.applyTransaction(tx,&bytes,&report));
+        CMprDocument edited;QVERIFY(edited.loadBytes(bytes,"deformed.mpr",&report));
+        QVERIFY(doc.terrain.load(edited,&report));
+        QImage red(64,64,QImage::Format_RGBA8888),green=red,blue=red;
+        red.fill(QColor(250,0,0));green.fill(QColor(0,250,0));blue.fill(QColor(0,0,250));
+        CTerrainVirtualAtlas shared(CTerrainTransitionCatalog(),{red},0,{{1,red},{2,green},{3,blue}});
+        STerrainTransitionSignature a,b;a.northWest=a.southWest=3;a.northEast=1;a.southEast=2;
+        b.northEast=b.southEast=3;b.northWest=1;b.southWest=2;
+        QMap<QByteArray,QImage> cache;
+        const auto left=shared.worldBoundaryTile(a,doc.terrain,{0,0},15,4,2,&cache,&report).mirrored(false,true);
+        const auto right=shared.worldBoundaryTile(b,s.documents["b"]->terrain,{32,0},0,4,8,&cache,&report).mirrored(false,true);
+        for(int row=0;row<64;++row) {
+            const double t=double(row)/63;const int half=t<=0.5?0:1;
+            const auto p=doc.terrain.terrainVertexPosition(32,8+half),q=doc.terrain.terrainVertexPosition(32,9+half);
+            const double sample=(p.y()+(q.y()-p.y())*(2*t-half)-8)*63/2;
+            const int lo=qBound(0,int(std::floor(sample)),63),hi=qMin(63,lo+1);
+            const double value=right.pixelColor(0,lo).green()*(1-(sample-lo))+right.pixelColor(0,hi).green()*(sample-lo);
+            QVERIFY(qAbs(left.pixelColor(63,row).green()-value)<=2.0);
+        }
+        QCOMPARE(doc.terrain.sectorPayload(0,0),deformed);QVERIFY(!report.hasErrors());
+    }
     void materialRepairUsesPhysicalUniformEvidence()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");

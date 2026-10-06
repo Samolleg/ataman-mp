@@ -82,6 +82,18 @@ class TerrainResolveAuditTests : public QObject
     Q_OBJECT
 
 private slots:
+    void worldAuditCountsEveryMapAndIncludesItsIdentity()
+    {
+        auto value=session(1);value.packedDeltas.clear();
+        value.worldPackedDeltas["zone4"]={delta(0,2,ETerrainTileLayer::Land,1,2)};
+        value.worldPackedDeltas["zone6"]={delta(127,65,ETerrainTileLayer::Land,2,3)};
+        auto json=terrainResolveAuditSessionJson(value,1,1);
+        QCOMPARE(json["changedCellCount"].toInt(),2);
+        QCOMPARE(json["worldMaps"].toArray().size(),2);
+        const auto before=terrainResolveSessionDeltaSha256(value);
+        value.worldPackedDeltas["zone7"]=value.worldPackedDeltas.take("zone6");
+        QVERIFY(before!=terrainResolveSessionDeltaSha256(value));
+    }
     void sessionJsonIsBoundedAndContainsRequiredResolverEvidence();
     void journalRetentionKeepsNewestTerminalSessions();
 };
@@ -182,5 +194,5 @@ void TerrainResolveAuditTests::journalRetentionKeepsNewestTerminalSessions()
              QStringLiteral("3"));
 }
 
-QTEST_MAIN(TerrainResolveAuditTests)
+QTEST_GUILESS_MAIN(TerrainResolveAuditTests)
 #include "terrain_resolve_audit_tests.moc"

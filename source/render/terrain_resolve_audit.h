@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QPoint>
+#include <QMap>
 #include <QString>
 #include <QVector>
 
@@ -66,6 +67,7 @@ struct STerrainResolveAuditSession
     int generatedTupleCount{0};
     int skippedCellCount{0};
     QVector<STerrainTileDelta> packedDeltas;
+    QMap<QString,QVector<STerrainTileDelta>> worldPackedDeltas;
     QVector<STerrainResolveRuntimeDecision> runtimeDecisions;
     QVector<STerrainResolveSkippedReason> skippedReasons;
     QString undoCommandId;
@@ -80,6 +82,8 @@ struct STerrainResolveAuditSession
 
 QString terrainResolveAuditTriggerName(ETerrainResolveAuditTrigger trigger);
 QByteArray terrainResolvePackedDeltaSha256(const QVector<STerrainTileDelta>& deltas);
+int terrainResolveChangedCellCount(const STerrainResolveAuditSession& session);
+QByteArray terrainResolveSessionDeltaSha256(const STerrainResolveAuditSession& session);
 QJsonObject terrainResolveAuditSessionJson(const STerrainResolveAuditSession& session,
                                            int packedDeltaLimit = 256,
                                            int skippedSampleLimit = 32);

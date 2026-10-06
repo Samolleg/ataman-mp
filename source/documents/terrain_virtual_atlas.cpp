@@ -2884,6 +2884,62 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
                         provenance, report, true);
 }
 
+QImage CTerrainVirtualAtlas::worldBoundaryTile(
+    const STerrainTransitionSignature& signature,
+    const CTerrainEditModel& geometry, const QPointF& origin,
+    int cellX, int cellY, int sides, QMap<QByteArray,QImage>* cache,
+    CValidationReport* report) const
+{
+    const QByteArray key=signatureKey(signature);
+    QImage canonical=cache?cache->value(key):QImage();
+    if(canonical.isNull()) {
+        canonical=reviewGeneratedBlend(signature,0,nullptr,report);
+        if(canonical.isNull())return {};
+        if(cache)cache->insert(key,canonical);
+    }
+    QImage grid=canonical.mirrored(false,true);
+    const int size=grid.width(),band=qMin(12,size/4),guard=qMin(4,band);
+    const QVector<qint32> ids=corners(signature);
+    const auto sourcePixel=[&](qint32 material,const QPointF& world) {
+        const QImage& source=m_materialSources[material];
+        const auto phase=[size](double coordinate) {
+            const double wrapped=coordinate/2-std::floor(coordinate/2);
+            return qBound(0,int(std::floor(wrapped*size+1e-7)),size-1);
+        };
+        return source.pixelColor(phase(world.x()),size-1-phase(world.y()));
+    };
+    for(int y=0;y<size;++y)for(int x=0;x<size;++x) {
+        int side=-1,distance=band;
+        const int distances[4]={y,size-1-x,size-1-y,x};
+        for(int candidate=0;candidate<4;++candidate)
+            if((sides&(1<<candidate)) && distances[candidate]<distance) {
+                side=candidate;distance=distances[candidate];
+            }
+        if(side<0)continue;
+        const bool vertical=side==1 || side==3;
+        const double t=double(vertical?y:x)/qMax(1,size-1);
+        const int vx=2*cellX+(side==1?2:0),vy=2*cellY+(side==2?2:0);
+        const int half=t<=0.5?0:1;
+        const QPointF first=geometry.terrainVertexPosition(vx+(vertical?0:half),vy+(vertical?half:0));
+        const QPointF last=geometry.terrainVertexPosition(vx+(vertical?0:half+1),vy+(vertical?half+1:0));
+        const QPointF world=origin+first+(last-first)*(t*2-half);
+        const double along=vertical?(world.y()-origin.y()-2*cellY)/2
+            :(world.x()-origin.x()-2*cellX)/2;
+        const qint32 a=ids.at(side==0 || side==3?0:side==1?1:3);
+        const qint32 b=ids.at(side==0?1:side==3?3:2);
+        const double weight=a==b?0.0:qRound(smoothUnit((along-0.38)/0.24)*255)/255.0;
+        const QColor ca=sourcePixel(a,world),cb=sourcePixel(b,world),old=grid.pixelColor(x,y);
+        const double fade=distance<guard?1.0:smoothUnit(double(band-distance)/(band-guard));
+        const auto mix=[&](int av,int bv,int previous) {
+            return qBound(0,qRound((av*(1-weight)+bv*weight)*fade+previous*(1-fade)),255);
+        };
+        grid.setPixelColor(x,y,QColor(mix(ca.red(),cb.red(),old.red()),
+            mix(ca.green(),cb.green(),old.green()),mix(ca.blue(),cb.blue(),old.blue()),
+            mix(ca.alpha(),cb.alpha(),old.alpha())));
+    }
+    return grid.mirrored(false,true);
+}
+
 QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
     const STerrainTransitionSignature& gridSignature,
     qint32 ownerMaterial, int variation, QString* provenance) const
@@ -4851,7 +4907,7 @@ qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
 ETerrainWorkingTileOrigin CTerrainWorkingAtlas::tileOriginForSlot(
     int slot) const
 {
-    if(m_foreignPhysicalTiles.contains(slot))return ETerrainWorkingTileOrigin::ImportedAuthored;
+    if(m_foreignPhysicalTiles.contains(slot))return m_foreignPhysicalTiles.value(slot).origin;
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
         return ETerrainWorkingTileOrigin::Unknown;
@@ -5327,9 +5383,23 @@ quint16 CTerrainWorkingAtlas::resolve(
     return packed.encode();
 }
 
+int CTerrainWorkingAtlas::importWorldBoundaryTile(const QImage& pixels,qint32 runtimeType,
+    const STerrainTransitionSignature& signature,CValidationReport* report)
+{
+    const QString marker=QStringLiteral("canonical-world-boundary-v1");
+    const int slot=importPhysicalTile(pixels,runtimeType,&signature,marker,-1,report,true);
+    if(slot>=0 && m_foreignPhysicalTiles.contains(slot)
+       && m_foreignPhysicalTiles[slot].sourceNamespace==marker) {
+        auto& identity=m_foreignPhysicalTiles[slot];identity.origin=ETerrainWorkingTileOrigin::CanonicalGenerated;
+        identity.sourceNamespace.clear();identity.sourceSlotAliases.clear();
+        identity.canonicalGeneratedBlend=true;identity.blendProvenance=marker;
+    }
+    return slot;
+}
+
 int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtimeType,
         const STerrainTransitionSignature* signature,const QString& sourceNamespace,
-        int sourceSlot,CValidationReport* report)
+        int sourceSlot,CValidationReport* report,bool preserveAuthoredPages)
 {
     if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
        || pixels.size()!=m_authoredImages.first().size()) {
@@ -5343,7 +5413,7 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
             bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);
             if(!signature || (known && existing==*signature))return slot;
         }
-    const int slot=activeTileCount();
+    const int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
     if(slot>=m_capacityLimit) {
         if(report)report->add("terrain.world.capacity",EValidationSeverity::Error,"The neighboring atlas is full.");return -1;
     }

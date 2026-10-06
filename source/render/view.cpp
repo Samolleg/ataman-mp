@@ -14170,6 +14170,33 @@ bool CView::ensureGlobalTerrainMaterialSources(
     return true;
 }
 
+bool CView::loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
+    const QSize& size, QMap<qint32,QImage>* result, CValidationReport* report)
+{
+    for(qint32 material:materials) {
+        STerrainGlobalMaterialFamily family;
+        for(const auto& candidate:m_terrainGlobalFamilies)
+            if(candidate.id==material){family=candidate;break;}
+        family.sources+=family.thumbnailSources;family.thumbnailSources.clear();
+        std::sort(family.sources.begin(),family.sources.end(),[](const STerrainGlobalMaterialSource& a,
+                                                               const STerrainGlobalMaterialSource& b) {
+            if(a.mprNamespace!=b.mprNamespace)return a.mprNamespace<b.mprNamespace;
+            if(a.atlasPixelSha256!=b.atlasPixelSha256)return a.atlasPixelSha256<b.atlasPixelSha256;
+            return a.uniformSlot<b.uniformSlot;
+        });
+        const QImage pixels=loadBoundGlobalUniformSource(family,QString(),size,
+            &m_terrainGlobalBoundAtlasCache,&m_terrainGlobalTransitionMissingPages,
+            &m_terrainGlobalUniformTileCache);
+        if(pixels.isNull()) {
+            report->add("terrain.world.material_source",EValidationSeverity::Error,
+                tr("Нет общего источника текстуры материала %1 для стыка карт.").arg(material));
+            return false;
+        }
+        result->insert(material,pixels);
+    }
+    return true;
+}
+
 bool CView::realizeWorkingTerrainSignature(
     const STerrainTransitionSignature& signature, int cellX, int cellY,
     QMap<int, quint64>* usage, CValidationReport* report, bool* generated,
@@ -14340,7 +14367,8 @@ bool CView::realizeWorkingTerrainSignature(
             preferredRuntimeType, requirePreferredRuntimeType);
     }
     if(!selectedTypedWorkingVariant && attempt.hasErrors()
-       && hasCapacityFinding(attempt) && usage)
+       && hasCapacityFinding(attempt) && usage
+       && (!staging || staging->allowSlotRecycling))
     {
         bool reclaimable = false;
         for(int slot = 0; slot < atlas->capacityLimit(); ++slot)
@@ -20548,8 +20576,6 @@ void CView::resolveMissingTerrainBlends()
         audit.undoStackIndexAfter = m_pUndoStack ? m_pUndoStack->index() : -1;
         audit.undoStackCountAfter = m_pUndoStack ? m_pUndoStack->count() : -1;
         audit.validationFindings.clear();
-        audit.skippedCellCount = 0;
-        audit.skippedReasons.clear();
         QRegExp leadingCount(QStringLiteral("^(\\d+)"));
         for(const SValidationFinding& finding : report.findings())
         {
@@ -20582,10 +20608,10 @@ void CView::resolveMissingTerrainBlends()
                 .arg(audit.actionId)
                 .arg(terrainResolveAuditTriggerName(audit.trigger))
                 .arg(audit.outcome).arg(audit.stagedTupleCount)
-                .arg(audit.stagedCellCount).arg(audit.packedDeltas.size())
+                .arg(audit.stagedCellCount).arg(terrainResolveChangedCellCount(audit))
                 .arg(audit.generatedTupleCount).arg(audit.skippedCellCount)
                 .arg(QString::fromLatin1(
-                    terrainResolvePackedDeltaSha256(audit.packedDeltas)))
+                    terrainResolveSessionDeltaSha256(audit)))
                 .arg(journalPath));
         if(!journalWritten)
             ei::log(eLogWarning, QString(
@@ -20625,7 +20651,7 @@ void CView::resolveMissingTerrainBlends()
             m_worldTerrainEnabled
             ? tr("Исправить переходы земли и покрытий на текущей карте и общих краях соседей, выбранных для общей кисти?\n\n"
                  "Полностью закрашенные тайлы учитываются при согласовании материалов стыка. "
-                 "Неоднозначные материалы сохраняются и перечисляются в отчёте. "
+                 "Материалы граничных вершин и рисунок переходов согласуются с обеих сторон. "
                  "Все изменения отменяются одним шагом общей кисти; новые текстуры остаются в рабочем атласе.")
             : tr("Scan Ground and Overlay and replace every unambiguous missing "
                "or inconsistent physical blend with the exact Modern result?\n\n"
@@ -20651,7 +20677,7 @@ void CView::resolveMissingTerrainBlends()
     finishSculptStroke();
     endTileBrushGroup();
     QString worldSummary;
-    if(resolveWorldMaterialBlends(&worldSummary,&report)) {
+    if(resolveWorldMaterialBlends(&worldSummary,&report,&audit)) {
         showResolveResult(report.hasErrors()?QMessageBox::Critical:QMessageBox::Information,worldSummary);
         finishAudit(report.hasErrors()?QStringLiteral("world-refused"):QStringLiteral("world-completed"));
         return;
