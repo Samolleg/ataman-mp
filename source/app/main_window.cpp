@@ -1591,14 +1591,19 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_pView, &CView::neighborMapOriginChangeRequested, this,
             [this](const QString& zoneId, const QPointF& worldOrigin)
     {
-        QString error;
-        if(!m_worldMapLayoutDocument.setZoneOrigin(activeResourceProfile().profileId,
-                m_editorActiveMap.allodId, zoneId, worldOrigin, &error))
-            QMessageBox::warning(this, tr("Arrange maps"), error);
+        for(const auto& map:m_editorWorldMaps)
+            if(map.allodId==m_editorActiveMap.allodId && map.zoneId==zoneId)
+            {
+                SWorldMapLayoutChange change; change.before=map; change.after=map;
+                change.after.origin=worldOrigin; change.after.provenance=EWorldMapOriginProvenance::Manual;
+                commitWorldLayoutChanges({change},QString::fromUtf8("Перемещение карты"));
+                return;
+            }
         refreshEditorWorld();
     });
     connect(m_pView, &CView::addWorldMapRequested, this, &MainWindow::addMapToWorld);
     connect(m_pView, &CView::manageWorldMapsRequested, this, &MainWindow::manageWorldMaps);
+    connect(m_pView,&CView::worldMapAlignmentRequested,this,&MainWindow::alignWorldMapTiles);
     connect(m_pView, &CView::worldMapPlacementConfirmed, this, &MainWindow::commitWorldMapPlacement);
     connect(m_pView, &CView::worldMapPlacementCancelled, this, [this]() { m_pendingWorldMaps.clear(); });
     const QMetaObject::Connection databasePrototypeNavigation = connect(

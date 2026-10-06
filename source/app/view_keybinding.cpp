@@ -123,6 +123,9 @@ bool CView::eventFilter(QObject* watched, QEvent* event)
 
 void CView::keyPressEvent(QKeyEvent* event)
 {
+    if(event->key()==Qt::Key_Escape && m_neighborLayoutDragActive) {
+        cancelNeighborLayoutDrag(true);event->accept();return;
+    }
     if(event->key() == Qt::Key_Escape && isLogicPlacementPending()) {
         cancelPendingOperation();
         event->accept();

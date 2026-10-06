@@ -27,6 +27,8 @@ struct SNeighborMapLayoutResult
     QVector<SNeighborMapPlacement> placements;
     QStringList messages;
     QPointF activeWorldOrigin;
+    QPointF tileGridAnchor;
+    bool hasTileGridAnchor{false};
     QString componentAnchorZoneId;
     bool hasActiveWorldOrigin{false};
 };

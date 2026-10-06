@@ -6,13 +6,23 @@
 
 void CView::beginWorldMapPlacement(const QSizeF& size)
 {
+    beginWorldMapPlacement(size,m_worldTileGridAnchor,m_hasWorldTileGridAnchor);
+}
+
+void CView::beginWorldMapPlacement(const QSizeF& size, const QPointF& anchor, bool hasAnchor)
+{
     cancelPendingOperation();
     if(m_neighborLayoutEditToggle) m_neighborLayoutEditToggle->setChecked(false);
     m_worldPlacementSize = size;
     m_worldPlacementActive = true;
     m_worldPlacementValid = false;
+    m_worldPlacementTileAnchor=anchor;
+    m_hasWorldPlacementTileAnchor=hasAnchor;
+    m_worldMapSnapPreview=SWorldMapSnapResult();
     QVector3D point;
-    m_worldPlacementZ = terrainPositionAt(rect().center(), &point, false) ? point.z() : 0.f;
+    const bool foundPlane=terrainPositionAt(rect().center(), &point, false)
+        || neighborMapAtViewport(rect().center(),nullptr,&point,true);
+    m_worldPlacementZ = foundPlane ? point.z() : 0.f;
     setFocus(); setCursor(Qt::CrossCursor);
     updateWorldMapPlacement(rect().center());
 }
@@ -21,6 +31,7 @@ void CView::cancelWorldMapPlacement()
 {
     if(!m_worldPlacementActive) return;
     m_worldPlacementActive = false; m_worldPlacementValid = false;
+    m_worldMapSnapPreview=SWorldMapSnapResult();
     unsetCursor();
     if(m_neighborLayoutStatus) m_neighborLayoutStatus->hide();
     emit worldMapPlacementCancelled(); update();
@@ -37,28 +48,17 @@ bool CView::updateWorldMapPlacement(const QPoint& position)
     QPointF local;
     m_worldPlacementValid = viewportPointOnHorizontalPlane(position, m_worldPlacementZ, &local);
     if(!m_worldPlacementValid) { update(); return false; }
-    QPointF origin = local + m_activeMapWorldOrigin;
-    QVector<QRectF> bounds;
-    if(m_pLand && m_pLand->isMprLoad())
-        bounds.append(QRectF(m_activeMapWorldOrigin, QSizeF(
-            m_mprDocument.mapInfo().sectorCountX*32, m_mprDocument.mapInfo().sectorCountY*32)));
-    for(const auto& map : m_neighborPlacements) bounds.append(QRectF(map.worldOrigin, map.size));
-    // Snap each axis to the nearest edge within two world units.
-    double bestX=2.0, bestY=2.0, dx=0, dy=0;
-    for(const auto& rect : bounds)
+    m_worldMapSnapPreview=snapWorldMap(local+m_activeMapWorldOrigin,m_worldPlacementSize,
+        QString(),position,m_worldPlacementZ,m_worldPlacementTileAnchor,m_hasWorldPlacementTileAnchor);
+    m_worldPlacementValid=m_worldMapSnapPreview.valid;
+    if(!m_worldPlacementValid)
     {
-        for(double edge : {rect.left(),rect.right()})
-            for(double side : {origin.x(),origin.x()+m_worldPlacementSize.width()})
-                if(std::abs(edge-side)<bestX) {bestX=std::abs(edge-side);dx=edge-side;}
-        for(double edge : {rect.top(),rect.bottom()})
-            for(double side : {origin.y(),origin.y()+m_worldPlacementSize.height()})
-                if(std::abs(edge-side)<bestY) {bestY=std::abs(edge-side);dy=edge-side;}
+        if(m_neighborLayoutStatus) m_neighborLayoutStatus->setText(QString::fromUtf8(
+            "Не найдена опорная карта для сетки тайлов. Проверьте раскладку мира."));
+        update(); return false;
     }
-    origin += QPointF(dx,dy);
-    m_worldPlacementOrigin = QPointF(std::round(origin.x()*4)/4,std::round(origin.y()*4)/4);
-    m_worldPlacementOverlaps = false;
-    for(const auto& rect : bounds)
-        m_worldPlacementOverlaps |= rect.intersects(QRectF(m_worldPlacementOrigin,m_worldPlacementSize));
+    m_worldPlacementOrigin=m_worldMapSnapPreview.origin;
+    m_worldPlacementOverlaps=m_worldMapSnapPreview.overlaps;
     if(m_neighborLayoutStatus)
     {
         m_neighborLayoutStatus->setText(tr("Place map: X %1, Y %2 — %3 × %4. Left click: place; Esc: cancel.%5")
@@ -66,6 +66,49 @@ bool CView::updateWorldMapPlacement(const QPoint& position)
             .arg(m_worldPlacementSize.width()).arg(m_worldPlacementSize.height())
             .arg(m_worldPlacementOverlaps ? tr(" Overlaps another map.") : QString()));
         m_neighborLayoutStatus->show();
+        if(m_worldMapSnapPreview.incompatibleEdge)
+            m_neighborLayoutStatus->setText(m_neighborLayoutStatus->text()+QString::fromUtf8(
+                "\nУ соседней карты другая сетка. Используйте «Выровнять по тайлам»."));
     }
     update(); return true;
+}
+
+SWorldMapSnapResult CView::snapWorldMap(const QPointF& origin, const QSizeF& size,
+    const QString& excludedZone, const QPoint& pointer, float planeZ,
+    const QPointF& anchor, bool hasAnchor)
+{
+    QVector<SWorldMapSnapBounds> bounds;
+    if(m_pLand && m_pLand->isMprLoad() && (excludedZone.isEmpty() || m_neighborActiveZoneId!=excludedZone))
+        bounds.append({m_neighborActiveZoneId,QRectF(m_activeMapWorldOrigin,
+            QSizeF(m_pLand->widthInWorldUnits(),m_pLand->heightInWorldUnits()))});
+    for(const auto& map:m_neighborPlacements)
+        if(map.zoneId!=excludedZone) bounds.append({map.zoneId,QRectF(map.worldOrigin,map.size)});
+    double radius=2.0;
+    QPointF p,x,y;
+    if(viewportPointOnHorizontalPlane(pointer,planeZ,&p)
+       && viewportPointOnHorizontalPlane(pointer+QPoint(12,0),planeZ,&x)
+       && viewportPointOnHorizontalPlane(pointer+QPoint(0,12),planeZ,&y))
+        radius=qMax(QLineF(p,x).length(),QLineF(p,y).length());
+    return CWorldMapSnap::place(origin,size,anchor,hasAnchor,m_worldTileSnapEnabled,
+                               bounds,radius,m_worldMapSnapPreview.latch);
+}
+
+void CView::previewWorldMapOrigins(const QMap<QString,QPointF>& origins)
+{
+    if(origins.contains(m_neighborActiveZoneId)) m_activeMapWorldOrigin=origins.value(m_neighborActiveZoneId);
+    for(auto& map:m_neighborPlacements)
+    {
+        if(origins.contains(map.zoneId)) map.worldOrigin=origins.value(map.zoneId);
+        map.origin=map.worldOrigin-m_activeMapWorldOrigin;
+    }
+    for(auto& loaded:m_neighborLandscapes)
+    {
+        if(origins.contains(loaded.placement.zoneId)) loaded.placement.worldOrigin=origins.value(loaded.placement.zoneId);
+        loaded.placement.origin=loaded.placement.worldOrigin-m_activeMapWorldOrigin;
+        loaded.drawCacheDirty=true;
+        if(loaded.landscape) loaded.landscape->setWorldOffset(QVector3D(
+            float(loaded.placement.origin.x()),float(loaded.placement.origin.y()),0));
+    }
+    m_worldMapSnapPreview=SWorldMapSnapResult();
+    update();
 }

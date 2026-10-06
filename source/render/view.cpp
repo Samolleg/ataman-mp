@@ -7,6 +7,7 @@
 #include <QMap>         //for parameters
 #include <QAbstractScrollArea>
 #include <QUndoStack>
+#include "world_map_layout_command.h"
 #include <QTreeWidget>
 #include <QPair>
 #include <QRandomGenerator>
@@ -2453,11 +2454,14 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
                 || dynamic_cast<const COverlaySurfacePreviewCommand*>(command)
                 || dynamic_cast<const CMprParametersPreviewCommand*>(command);
         }
-        if(!selectionOnly && !mprOnlyChange)
+        bool layoutOnlyChange=first>=0 && first<last && last<=m_pUndoStack->count();
+        for(int i=first;layoutOnlyChange && i<last;++i)
+            layoutOnlyChange=dynamic_cast<const CWorldMapLayoutCommand*>(m_pUndoStack->command(i))!=nullptr;
+        if(!selectionOnly && !mprOnlyChange && !layoutOnlyChange)
         {
             refreshMobDirtyStates();
         }
-        if(!selectionOnly)
+        if(!selectionOnly && !layoutOnlyChange)
             m_spatialIndexDirty = true;
         bool navigationChange = false;
         for(int commandIndex = first; !navigationChange && commandIndex < last;
@@ -2642,6 +2646,24 @@ void CView::initEnvironmentPreviewWidget()
         "visualsArrangeNeighborMaps", tr("Arrange maps"), tr(
         "Turn this on, then left-drag a neighboring map. Its world X/Y origin is shown while dragging and saved for the active profile. The reference map stays fixed while dragging; its coordinates can be edited in World maps. Double-click navigation is paused while arranging."),
         false);
+    m_worldTileSnapEnabled=visualSettings.value("ui/viewportVisuals/worldTileSnap",true).toBool();
+    m_worldTileSnapToggle=new QCheckBox(QString::fromUtf8("Привязка к тайлам"),m_environmentPreviewBody);
+    m_worldTileSnapToggle->setObjectName(QStringLiteral("worldTileSnap"));
+    m_worldTileSnapToggle->setChecked(m_worldTileSnapEnabled);
+    m_worldTileSnapToggle->setToolTip(QString::fromUtf8("Общая сетка тайлов и магнит краёв при добавлении и перемещении карт."));
+    body->addWidget(m_worldTileSnapToggle);
+    connect(m_worldTileSnapToggle,&QCheckBox::toggled,this,[this](bool enabled) {
+        cancelNeighborLayoutDrag(true);
+        m_worldTileSnapEnabled=enabled;
+        persistViewportVisualState();
+        if(m_worldPlacementActive) updateWorldMapPlacement(m_lastViewportMousePos);
+    });
+    auto* alignMaps=new QToolButton(m_environmentPreviewBody);
+    alignMaps->setObjectName(QStringLiteral("alignWorldMapTiles"));
+    alignMaps->setText(QString::fromUtf8("Выровнять по тайлам…"));
+    alignMaps->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
+    body->addWidget(alignMaps);
+    connect(alignMaps,&QToolButton::clicked,this,&CView::worldMapAlignmentRequested);
     auto* addWorld = new QToolButton(m_environmentPreviewBody);
     addWorld->setObjectName(QStringLiteral("addWorldMap"));
     addWorld->setText(tr("Add map to world..."));
@@ -2792,6 +2814,8 @@ void CView::initEnvironmentPreviewWidget()
         m_neighborLayoutEditEnabled = enabled;
         if(enabled)
         {
+            cancelPendingOperation();
+            closeLandscapeTools();
             setCursor(Qt::OpenHandCursor);
             updateNeighborLayoutStatus();
             emit updateMsg(tr(
@@ -2920,6 +2944,7 @@ void CView::initEnvironmentPreviewWidget()
 void CView::persistViewportVisualState()
 {
     QSettings settings;
+    settings.setValue("ui/viewportVisuals/worldTileSnap",m_worldTileSnapEnabled);
     settings.setValue(QStringLiteral("ui/viewportVisuals/entrances"),
                       m_entranceOverlaysVisible);
     settings.setValue(QStringLiteral("ui/viewportVisuals/neighborLandscapes"),
@@ -3060,7 +3085,8 @@ void CView::setNeighborMapContext(
     QByteArray contextKey;
     QDataStream stream(&contextKey,QIODevice::WriteOnly);
     stream << profileId << activeAllodId << activeZoneId << layoutWarning
-           << layout.activeWorldOrigin << layout.componentAnchorZoneId << layout.hasActiveWorldOrigin
+            << layout.activeWorldOrigin << layout.componentAnchorZoneId << layout.hasActiveWorldOrigin
+            << layout.tileGridAnchor << layout.hasTileGridAnchor
            << isValid() << m_neighborLandscapesVisible;
     const auto resourceRevision=[&stream](const QString& path) {
         const QFileInfo info(path);
@@ -3074,6 +3100,9 @@ void CView::setNeighborMapContext(
     if(contextKey == m_neighborContextKey) return;
     clearNeighborLandscapes();
     m_activeMapWorldOrigin = QPointF();
+    m_neighborActiveZoneId=activeZoneId;
+    m_worldTileGridAnchor=layout.tileGridAnchor;
+    m_hasWorldTileGridAnchor=layout.hasTileGridAnchor;
     m_neighborMapAnchorZoneId.clear();
     m_hasActiveMapWorldOrigin = false;
     m_neighborLayoutStorageWritable = layoutWarning.isEmpty();
@@ -3482,12 +3511,17 @@ bool CView::updateNeighborLayoutDrag(const QPoint& viewportPosition)
         return false;
     const QPointF delta = pointerWorld - m_neighborLayoutDragStartPointerWorld;
     QPointF worldOrigin = m_neighborLayoutDragStartOrigin + delta;
-    // Quarter-unit snapping keeps persisted coordinates readable while still
-    // matching the half/quarter-unit offsets authored by shipped map tables.
-    worldOrigin.setX(qRound(worldOrigin.x() * 4.0) / 4.0);
-    worldOrigin.setY(qRound(worldOrigin.y() * 4.0) / 4.0);
+    QSizeF size;
+    for(const auto& placement:m_neighborPlacements)
+        if(placement.zoneId==m_neighborLayoutDragZoneId) { size=placement.size; break; }
+    m_worldMapSnapPreview=snapWorldMap(worldOrigin,size,m_neighborLayoutDragZoneId,
+        viewportPosition,m_neighborLayoutDragPlaneZ,m_worldTileGridAnchor,m_hasWorldTileGridAnchor);
+    m_neighborLayoutDragValid=m_worldMapSnapPreview.valid;
+    if(!m_neighborLayoutDragValid)
+    { emit updateMsg(QString::fromUtf8("Не найдена опорная карта для сетки тайлов.")); return false; }
+    worldOrigin=m_worldMapSnapPreview.origin;
     if(worldOrigin == m_neighborLayoutDragWorldOrigin)
-        return true;
+    { updateNeighborLayoutStatus(m_neighborLayoutDragZoneId,worldOrigin); update(); return true; }
     m_neighborLayoutDragWorldOrigin = worldOrigin;
     m_neighborLayoutDragChanged =
         QLineF(m_neighborLayoutDragStartOrigin, worldOrigin).length() > 0.001;
@@ -3549,6 +3583,8 @@ void CView::cancelNeighborLayoutDrag(bool restoreOrigin)
     m_neighborLayoutDragZoneId.clear();
     m_neighborPointerGestureCaptured = false;
     m_neighborPointerGestureButton = Qt::NoButton;
+    m_worldMapSnapPreview=SWorldMapSnapResult();
+    m_neighborLayoutDragValid=false;
     if(m_neighborLayoutEditEnabled)
         setCursor(Qt::OpenHandCursor);
     else
@@ -3587,6 +3623,9 @@ void CView::updateNeighborLayoutStatus(const QString& zoneId,
             .arg(worldOrigin.y(), 0, 'f', 2);
     }
     m_neighborLayoutStatus->setText(text);
+    if(m_worldMapSnapPreview.incompatibleEdge)
+        m_neighborLayoutStatus->setText(text+QString::fromUtf8(
+            "\nУ соседней карты другая сетка. Используйте «Выровнять по тайлам»."));
     m_neighborLayoutStatus->show();
     if(m_environmentPreviewWidget)
     {
@@ -6131,6 +6170,7 @@ void CView::drawTestOverlaysOpenGl()
     if((m_testEntranceRectangles.isEmpty() && !m_testSpawnMarkerValid
         && !m_terrainPaintOutlineValid && !m_sculptOutlineValid
         && !paintIssueOverlay && !m_worldPlacementActive
+        && !(m_neighborLayoutDragActive && !m_worldMapSnapPreview.seams.isEmpty())
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
         && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty()
@@ -6213,6 +6253,36 @@ void CView::drawTestOverlaysOpenGl()
         m_program.setUniformValue("customColor", QVector4D(0.1f,0.9f,1.f,1.f));
         m_program.setAttributeArray(position, corners.constData());
         ei::gl::DrawArrays(GL_LINE_LOOP, 0, corners.size());
+        ei::gl::Enable(GL_DEPTH_TEST);
+    }
+
+    if((m_neighborLayoutDragActive || m_worldPlacementActive) && !m_worldMapSnapPreview.seams.isEmpty())
+    {
+        QVector<QVector3D> lines;
+        const float z=(m_worldPlacementActive?m_worldPlacementZ:m_neighborLayoutDragPlaneZ)+0.2f;
+        for(const auto& seam:m_worldMapSnapPreview.seams)
+        {
+            if(seam.length()<0.001)
+            {
+                const auto p=seam.p1()-m_activeMapWorldOrigin;
+                lines << QVector3D(float(p.x()-0.6),float(p.y()),z)
+                      << QVector3D(float(p.x()+0.6),float(p.y()),z)
+                      << QVector3D(float(p.x()),float(p.y()-0.6),z)
+                      << QVector3D(float(p.x()),float(p.y()+0.6),z);
+                continue;
+            }
+            for(const QPointF& point:{seam.p1(),seam.p2()})
+            {
+                const auto local=point-m_activeMapWorldOrigin;
+                lines.append(QVector3D(float(local.x()),float(local.y()),z));
+            }
+        }
+        ei::gl::Disable(GL_DEPTH_TEST);
+        ei::gl::LineWidth(3.0f);
+        m_program.setUniformValue("customColor",QVector4D(0.2f,1.0f,0.35f,1.0f));
+        m_program.setAttributeArray(position,lines.constData());
+        ei::gl::DrawArrays(GL_LINES,0,lines.size());
+        ei::gl::LineWidth(1.0f);
         ei::gl::Enable(GL_DEPTH_TEST);
     }
 
@@ -22419,6 +22489,8 @@ void CView::mousePressEvent(QMouseEvent* event)
                 {
                     m_neighborLayoutDragActive = true;
                     m_neighborLayoutDragChanged = false;
+                    m_neighborLayoutDragValid=true;
+                    m_worldMapSnapPreview=SWorldMapSnapResult();
                     m_neighborLayoutDragZoneId = target.zoneId;
                     m_neighborLayoutDragStartOrigin = target.worldOrigin;
                     m_neighborLayoutDragWorldOrigin = target.worldOrigin;
@@ -23343,7 +23415,7 @@ void CView::mouseReleaseEvent(QMouseEvent *event)
         updateNeighborLayoutDrag(event->pos());
         const QString zoneId = m_neighborLayoutDragZoneId;
         const QPointF worldOrigin = m_neighborLayoutDragWorldOrigin;
-        const bool changed = m_neighborLayoutDragChanged;
+        const bool changed = m_neighborLayoutDragChanged && m_neighborLayoutDragValid;
         cancelNeighborLayoutDrag(false);
         if(changed)
             emit neighborMapOriginChangeRequested(zoneId, worldOrigin);
@@ -24079,6 +24151,7 @@ void CView::changeOperation(EButtonOp type, bool preserveLandscapeEditing)
 
 bool CView::cancelPendingOperation()
 {
+    if(m_neighborLayoutDragActive) { cancelNeighborLayoutDrag(true); return true; }
     if(m_worldPlacementActive) { cancelWorldMapPlacement(); return true; }
     if(!m_pOp)
         return false;

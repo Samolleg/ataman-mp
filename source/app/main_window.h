@@ -95,6 +95,7 @@ class MainWindow : public QMainWindow
 public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
     friend int runAssemblyCatalogCheck();
+    friend int runWorldMapSnapCheck();
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
@@ -435,10 +436,14 @@ private:
     QString m_preferredEditorActiveMap;
     QMap<QString, QSize> m_worldMapSizeCache;
     QFutureWatcher<QMap<QString,QSize>>* m_worldMetadataWatcher{nullptr};
+    bool m_worldAlignmentPreviewActive{false};
     void refreshEditorWorld();
     void addMapToWorld();
     void manageWorldMaps();
     void commitWorldMapPlacement(const QPointF& origin);
+    void alignWorldMapTiles();
+    bool commitWorldLayoutChanges(const QVector<SWorldMapLayoutChange>& changes,
+                                  const QString& label);
     bool validateWorldMap(SWorldMapZoneOrigin* map, QString* error);
     QString m_lastWorldMapLayoutWarning;
     QVector<SMapTravelZone> m_validEntrances;

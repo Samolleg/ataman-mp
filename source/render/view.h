@@ -56,6 +56,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "frame_presentation_telemetry.h"
 #include "map_catalog.h"
 #include "neighbor_map_layout.h"
+#include "world_map_snap.h"
 #include "neighbor_scene_data.h"
 #include "neighbor_render_cache.h"
 #include <atomic>
@@ -182,6 +183,7 @@ class CView : public QGLWidget
     friend int runNeighborPerformanceCheck();
     friend int runTerrainMobHeightCheck();
     friend int runPointerModesCheck();
+    friend int runWorldMapSnapCheck();
 
 public:
     struct SNidRepair
@@ -347,8 +349,10 @@ public:
     void setWorldTravelAreas(const QVector<STravelArea>& areas);
     bool projectTravelOverlay(int index, QVector3D& point) const;
     void beginWorldMapPlacement(const QSizeF& size);
+    void beginWorldMapPlacement(const QSizeF& size, const QPointF& anchor, bool hasAnchor);
     void cancelWorldMapPlacement();
     void showWorldMap(const QString& mapId);
+    void previewWorldMapOrigins(const QMap<QString,QPointF>& origins);
     void refreshUiScale();
     void moveCameraToPoint(const QVector3D& position);
     void anchorCameraRotationToViewportCenter();
@@ -639,6 +643,9 @@ private:
                                         float planeZ,
                                         QPointF* worldPoint) const;
     bool updateNeighborLayoutDrag(const QPoint& viewportPosition);
+    SWorldMapSnapResult snapWorldMap(const QPointF& origin, const QSizeF& size,
+        const QString& excludedZone, const QPoint& pointer, float planeZ,
+        const QPointF& anchor, bool hasAnchor);
     void cancelNeighborLayoutDrag(bool restoreOrigin);
     void updateNeighborLayoutStatus(const QString& zoneId = QString(),
                                     const QPointF& worldOrigin = QPointF());
@@ -841,6 +848,7 @@ signals:
     void neighborMapOriginChangeRequested(const QString& zoneId,
                                           const QPointF& worldOrigin);
     void neighborMapLayoutResetRequested();
+    void worldMapAlignmentRequested();
     void addWorldMapRequested();
     void manageWorldMapsRequested();
     void worldMapPlacementConfirmed(const QPointF& origin);
@@ -1073,6 +1081,14 @@ private:
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QByteArray m_neighborContextKey;
     QPointF m_activeMapWorldOrigin;
+    QString m_neighborActiveZoneId;
+    QPointF m_worldTileGridAnchor;
+    bool m_hasWorldTileGridAnchor{false};
+    bool m_worldTileSnapEnabled{true};
+    QPointF m_worldPlacementTileAnchor;
+    bool m_hasWorldPlacementTileAnchor{false};
+    SWorldMapSnapResult m_worldMapSnapPreview;
+    bool m_neighborLayoutDragValid{false};
     QString m_neighborMapAnchorZoneId;
     bool m_hasActiveMapWorldOrigin{false};
     bool m_neighborLayoutStorageWritable{false};
@@ -1295,6 +1311,7 @@ private:
     QToolButton* m_entranceVisualToggle{nullptr};
     QToolButton* m_neighborLandscapesVisualToggle{nullptr};
     QToolButton* m_neighborLayoutEditToggle{nullptr};
+    QCheckBox* m_worldTileSnapToggle{nullptr};
     QToolButton* m_neighborLayoutResetButton{nullptr};
     QLabel* m_neighborLayoutStatus{nullptr};
     QToolButton* m_objectHelpersVisualToggle{nullptr};

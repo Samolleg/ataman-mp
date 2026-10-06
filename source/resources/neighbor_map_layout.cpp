@@ -89,6 +89,12 @@ SNeighborMapLayoutResult CNeighborMapLayout::build(
     result.activeWorldOrigin = activeWorld->origin;
     result.componentAnchorZoneId = activeWorld->componentAnchorZoneId;
     result.hasActiveWorldOrigin = true;
+    if(const auto* anchor = CWorldMapLayout::zone(worldOrigins,profileId,
+            activeAllodId,activeWorld->componentAnchorZoneId))
+    {
+        result.tileGridAnchor=anchor->origin;
+        result.hasTileGridAnchor=true;
+    }
     if(maximumNeighbors == 0)
         return result;
 

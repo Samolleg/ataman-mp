@@ -25,6 +25,11 @@
 #include <QStatusBar>
 #include <QUuid>
 #include "world_coordinate_edit.h"
+#include "world_map_snap.h"
+#include "world_map_layout_command.h"
+#include "log.h"
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QtConcurrent/QtConcurrentRun>
 
 namespace {
@@ -68,6 +73,8 @@ bool MainWindow::validateWorldMap(SWorldMapZoneOrigin* map, QString* error)
 
 void MainWindow::refreshEditorWorld()
 {
+    // Defer metadata-driven scene replacement while checked rows are previewed.
+    if(m_worldAlignmentPreviewActive) return;
     const auto profile = activeResourceProfile();
     const QString root = !profile.valid ? QString() :
         (profile.modRoot.isEmpty() ? profile.gameRoot : profile.modRoot);
@@ -248,7 +255,11 @@ void MainWindow::addMapToWorld()
     map.componentAnchorZoneId=anchor.isEmpty()?map.zoneId:anchor;
     m_pendingWorldMaps.append(map);
     if(!CLandscape::getInstance()->isMprLoad()) {commitWorldMapPlacement(QPointF());return;}
-    m_pView->beginWorldMapPlacement(QSizeF(map.sectorWidth*32,map.sectorHeight*32));
+    QPointF gridAnchor; bool hasGridAnchor=false;
+    for(const auto& candidate:m_editorWorldMaps+m_pendingWorldMaps)
+        if(candidate.allodId==map.allodId && candidate.zoneId==map.componentAnchorZoneId)
+        { gridAnchor=candidate.origin; hasGridAnchor=true; break; }
+    m_pView->beginWorldMapPlacement(QSizeF(map.sectorWidth*32,map.sectorHeight*32),gridAnchor,hasGridAnchor);
 }
 
 void MainWindow::commitWorldMapPlacement(const QPointF& origin)
@@ -261,8 +272,9 @@ void MainWindow::commitWorldMapPlacement(const QPointF& origin)
     {QMessageBox::warning(this,tr("Add map to world"),tr("The resource profile changed; placement was cancelled."));return;}
     for(auto& map:maps) if(!validateWorldMap(&map,&error))
     {QMessageBox::warning(this,tr("Add map to world"),error);return;}
-    if(!m_worldMapLayoutDocument.addEditorMaps(maps,&error))
-    {QMessageBox::warning(this,tr("Add map to world"),error);return;}
+    QVector<SWorldMapLayoutChange> changes;
+    for(const auto& map:maps) { SWorldMapLayoutChange change;change.hadBefore=false;change.after=map;changes.append(change); }
+    if(!commitWorldLayoutChanges(changes,QString::fromUtf8("Добавление карты в мир"))) return;
     m_pView->showWorldMap(maps.last().zoneId);refreshEditorWorld();
     if(!CLandscape::getInstance()->isMprLoad())
         openNeighborMapPair(m_worldMapLayoutDocument.absoluteResourcePath(maps.last().mprPath),
@@ -289,8 +301,10 @@ void MainWindow::manageWorldMaps()
     auto* show=new QPushButton(tr("Show among neighbors"),&dialog);
     auto* remove=new QPushButton(tr("Remove from world"),&dialog);
     auto* locate=new QPushButton(tr("Map files and position..."),&dialog);
+    auto* align=new QPushButton(QString::fromUtf8("Выровнять по тайлам…"),&dialog);
+    connect(align,&QPushButton::clicked,&dialog,[&](){dialog.accept();alignWorldMapTiles();});
     auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog);
-    layout->addWidget(open);layout->addWidget(show);layout->addWidget(locate);layout->addWidget(remove);layout->addWidget(close);
+    layout->addWidget(open);layout->addWidget(show);layout->addWidget(locate);layout->addWidget(align);layout->addWidget(remove);layout->addWidget(close);
     auto* importWorld=new QPushButton(QString::fromUtf8("Перенести координаты из другого профиля…"),&dialog);
     layout->insertWidget(0,importWorld);
     const QString target=activeResourceProfile().profileId;
@@ -374,4 +388,84 @@ void MainWindow::manageWorldMaps()
         dialog.accept();refreshEditorWorld();
     });
     dialog.resize(660,460);dialog.exec();
+}
+
+bool MainWindow::commitWorldLayoutChanges(const QVector<SWorldMapLayoutChange>& changes, const QString& label)
+{
+    if(changes.isEmpty()) return true;
+    const QString path=m_worldMapLayoutDocument.path();
+    const QString profile=activeResourceProfile().profileId;
+    auto success=QSharedPointer<bool>::create(false);
+    m_undoStack->push(new CWorldMapLayoutCommand(label,
+        [this,path,profile,changes,success](bool forward,QString* error) {
+            if(m_worldMapLayoutDocument.path()!=path || activeResourceProfile().profileId!=profile)
+            { *error=QString::fromUtf8("Профиль мира изменился; прежняя раскладка не изменена."); return false; }
+            *success=m_worldMapLayoutDocument.applyChanges(changes,forward,error);
+            if(*success) refreshEditorWorld();
+            return *success;
+        },[this](const QString& error) {
+            refreshEditorWorld();
+            ei::log(eLogWarning,error);
+            statusBar()->showMessage(QString::fromUtf8("Раскладка не изменена: ")+error,15000);
+        }));
+    return *success;
+}
+
+void MainWindow::alignWorldMapTiles()
+{
+    m_pView->cancelPendingOperation(); m_pView->cancelWorldMapPlacement();
+    refreshEditorWorld();
+    if(m_editorActiveMap.zoneId.isEmpty() || !m_lastWorldMapLayoutWarning.isEmpty())
+    { statusBar()->showMessage(QString::fromUtf8("Откройте карту мира с доступной раскладкой."),8000); return; }
+    QVector<SWorldMapZoneOrigin> maps;
+    for(const auto& map:m_editorWorldMaps) if(map.allodId==m_editorActiveMap.allodId) maps.append(map);
+    QDialog dialog(this);dialog.setWindowTitle(QString::fromUtf8("Выровнять по тайлам"));
+    ei::rememberWindowGeometry(&dialog,QStringLiteral("alignWorldMapTiles"));
+    auto* layout=new QVBoxLayout(&dialog);
+    auto* hint=new QLabel(QString::fromUtf8("Выберите карты для выравнивания. Опорные карты остаются на месте. Изменения видны в сцене; «Отмена» возвращает исходное положение."),&dialog);
+    hint->setWordWrap(true);layout->addWidget(hint);
+    auto* table=new QTableWidget(maps.size(),3,&dialog);table->setObjectName("worldTileAlignmentTable");
+    table->setHorizontalHeaderLabels({QString::fromUtf8("Карта"),QString::fromUtf8("Сейчас X / Y"),QString::fromUtf8("После X / Y")});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);layout->addWidget(table);
+    const auto coords=[](QPointF p) { return QString("%1 / %2").arg(p.x(),0,'g',12).arg(p.y(),0,'g',12); };
+    QVector<SWorldMapLayoutChange> available;
+    for(int i=0;i<maps.size();++i)
+    {
+        const auto& map=maps[i];SWorldMapLayoutChange change;change.before=map;change.after=map;
+        const auto* anchor=CWorldMapLayout::zone(maps,map.profileId,map.allodId,map.componentAnchorZoneId);
+        const bool movable=anchor && map.zoneId!=map.componentAnchorZoneId;
+        if(movable) { change.after.origin=CWorldMapSnap::align(map.origin,anchor->origin);change.after.provenance=EWorldMapOriginProvenance::Manual; }
+        auto* name=new QTableWidgetItem(map.displayName.isEmpty()?map.mprIdentity:map.displayName);
+        const bool changed=movable && change.after.origin!=map.origin;
+        name->setFlags(Qt::ItemIsSelectable|Qt::ItemIsEnabled|(changed?Qt::ItemIsUserCheckable:Qt::NoItemFlags));
+        if(changed) name->setCheckState(Qt::Checked);
+        else name->setToolTip(anchor?QString::fromUtf8("Положение уже соответствует сетке или карта является опорной."):QString::fromUtf8("Опорная карта не найдена."));
+        table->setItem(i,0,name);table->setItem(i,1,new QTableWidgetItem(coords(map.origin)));
+        table->setItem(i,2,new QTableWidgetItem(coords(change.after.origin)));available.append(change);
+    }
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Apply|QDialogButtonBox::Cancel,&dialog);layout->addWidget(buttons);
+    buttons->button(QDialogButtonBox::Apply)->setText(QString::fromUtf8("Применить"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QString::fromUtf8("Отмена"));
+    QVector<SWorldMapLayoutChange> selected;
+    QMap<QString,QPointF> original;
+    for(const auto& map:maps) original.insert(map.zoneId,map.origin);
+    const auto preview=[&]() {
+        auto positions=original;selected.clear();
+        for(int i=0;i<available.size();++i)
+            if(table->item(i,0)->checkState()==Qt::Checked)
+            { selected.append(available[i]);positions[available[i].after.zoneId]=available[i].after.origin; }
+        buttons->button(QDialogButtonBox::Apply)->setEnabled(!selected.isEmpty());
+        m_pView->previewWorldMapOrigins(positions);
+    };
+    connect(table,&QTableWidget::itemChanged,&dialog,[&](QTableWidgetItem*){preview();});
+    connect(buttons->button(QDialogButtonBox::Apply),&QPushButton::clicked,&dialog,&QDialog::accept);
+    connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    m_worldAlignmentPreviewActive=true;
+    preview();dialog.resize(680,420);
+    const bool accepted=dialog.exec()==QDialog::Accepted;
+    m_pView->previewWorldMapOrigins(original);
+    m_worldAlignmentPreviewActive=false;
+    if(accepted) commitWorldLayoutChanges(selected,QString::fromUtf8("Выравнивание карт по тайлам"));
+    else refreshEditorWorld();
 }

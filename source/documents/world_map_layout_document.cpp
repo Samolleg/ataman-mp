@@ -1069,3 +1069,76 @@ bool CWorldMapLayoutDocument::importProfile(const QString& sourceProfile,
     if(error) error->clear();
     return true;
 }
+
+bool CWorldMapLayoutDocument::applyChanges(const QVector<SWorldMapLayoutChange>& changes,
+                                         bool forward, QString* error)
+{
+    if(error) error->clear();
+    if(!ensureLoaded()) { if(error) *error=m_loadWarning; return false; }
+    const auto same = [](const SWorldMapZoneOrigin& a, const SWorldMapZoneOrigin& b) {
+        return a.profileId==b.profileId && a.allodId==b.allodId && a.zoneId==b.zoneId
+            && a.origin==b.origin && a.provenance==b.provenance
+            && a.componentAnchorZoneId==b.componentAnchorZoneId
+            && a.mprIdentity==b.mprIdentity && a.mprPath==b.mprPath && a.mobPath==b.mobPath
+            && a.displayName==b.displayName && a.sectorWidth==b.sectorWidth && a.sectorHeight==b.sectorHeight;
+    };
+    QVector<SWorldMapZoneOrigin> candidate=m_zones;
+    QSet<QString> changed;
+    for(const auto& change : changes)
+    {
+        const auto& expected=forward?change.before:change.after;
+        const auto& desired=forward?change.after:change.before;
+        const bool hadExpected=forward?change.hadBefore:change.hasAfter;
+        const bool hasDesired=forward?change.hasAfter:change.hadBefore;
+        const auto& identity=hadExpected?expected:desired;
+        const QString id=zoneKey(identity.profileId,identity.allodId,identity.zoneId);
+        if((!hadExpected && !hasDesired) || changed.contains(id)
+           || (hasDesired && (!validZone(desired,error)
+               || id!=zoneKey(desired.profileId,desired.allodId,desired.zoneId))))
+        { if(error && error->isEmpty()) *error=QStringLiteral("Invalid or duplicate world-layout change."); return false; }
+        changed.insert(id);
+        int index=-1;
+        for(int i=0;i<candidate.size();++i)
+            if(zoneKey(candidate[i].profileId,candidate[i].allodId,candidate[i].zoneId)==id) {index=i;break;}
+        // Resource dimensions are verified asynchronously from MPR headers.
+        // An origin-only command must retain that metadata, including on Undo.
+        const bool unchangedSize=change.before.sectorWidth==change.after.sectorWidth
+            && change.before.sectorHeight==change.after.sectorHeight;
+        auto comparable=expected;
+        auto next=desired;
+        if(index>=0 && unchangedSize)
+        {
+            comparable.sectorWidth=next.sectorWidth=candidate[index].sectorWidth;
+            comparable.sectorHeight=next.sectorHeight=candidate[index].sectorHeight;
+        }
+        if((index>=0)!=hadExpected || (hadExpected && !same(candidate[index],comparable)))
+        { if(error) *error=QString::fromUtf8("Раскладка карты изменилась. Перезагрузите мир перед повторным действием или отменой."); return false; }
+        if(index<0 && hasDesired)
+        {
+            const QString full=absoluteResourcePath(next.mprPath);
+            if(next.mprPath.isEmpty() || next.sectorWidth<=0 || next.sectorHeight<=0
+               || !QFileInfo(full).isFile()
+               || (!next.mobPath.isEmpty() && !QFileInfo(absoluteResourcePath(next.mobPath)).isFile()))
+            { if(error) *error=QStringLiteral("A selected map file is missing or its dimensions are invalid."); return false; }
+            const QString physical=key(QFileInfo(full).canonicalFilePath());
+            for(const auto& existing:candidate)
+                if(key(existing.profileId)==key(next.profileId)
+                   && (key(existing.zoneId)==key(next.zoneId)
+                       || (!existing.mprPath.isEmpty()
+                           && key(QFileInfo(absoluteResourcePath(existing.mprPath)).canonicalFilePath())==physical)))
+                { if(error) *error=QStringLiteral("This map is already in the profile world layout."); return false; }
+            next.mprPath=portableResourcePath(full);
+            next.mobPath=portableResourcePath(absoluteResourcePath(next.mobPath));
+        }
+        if(index>=0 && hasDesired) candidate[index]=next;
+        else if(index>=0) candidate.remove(index);
+        else if(hasDesired) candidate.append(next);
+    }
+    if(changes.isEmpty()) return true;
+    QVector<SWorldMapZoneOrigin> checked;
+    const QByteArray bytes=serialize(candidate,error);
+    if(bytes.isEmpty() || !parse(bytes,&checked,error)) return false;
+    if(!save(candidate,error)) return false;
+    m_zones=candidate; m_hasPersistentFile=true;
+    return true;
+}

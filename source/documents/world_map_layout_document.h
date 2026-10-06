@@ -16,6 +16,14 @@ struct SWorldMapLayoutUpdateResult
     bool storageBlocked{false};
 };
 
+struct SWorldMapLayoutChange
+{
+    SWorldMapZoneOrigin before;
+    SWorldMapZoneOrigin after;
+    bool hadBefore{true};
+    bool hasAfter{true};
+};
+
 class CWorldMapLayoutDocument
 {
 public:
@@ -52,6 +60,9 @@ public:
     bool setZoneOrigin(const QString& profileId, const QString& allodId,
                        const QString& zoneId, const QPointF& origin,
                        QString* error = nullptr);
+    // Compare expected entries, then persist every change as one atomic write.
+    bool applyChanges(const QVector<SWorldMapLayoutChange>& changes, bool forward,
+                      QString* error = nullptr);
     bool resetZoneToInferred(
         const QString& profileId, const QString& allodId,
         const QString& zoneId,
