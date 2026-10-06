@@ -23,7 +23,7 @@ Fresh staging: `C:/GOG Games/maped/ei-mapper-ataman/build-staging-117-pointer-mo
 
 Чужой `translations/ei_mapper_ru.qm` восстановлен byte-identical SHA256 EDA31955A912758ACB5A7BDE043BBF2EB5F8A2606FA32DC52AFA4156CA74ED9F. Чужие ROADMAP/terrain atlas report и неотслеживаемые артефакты сохранены; в коммит входит только собственная часть ROADMAP.
 
-Установка: ожидает закрытия EXE116 в постоянной папке `artifacts/EI-Mapper-Ataman-2-first-test`; проверенный пакет готов. Следующий шаг — закрытие, проверенный backup/managed-only update/все hashes и сохранность unlisted user files. Ручной runtime тест исходной карты ещё не проведён; родительские115/116 не закрыты.
+После подтверждения владельца «закрыл»2026-10-06 процессы маппера/runtime отсутствовали. Постоянная папка `artifacts/EI-Mapper-Ataman-2-first-test` обновлена116→117:127 managed payloads+manifest проверены,6 изменённых программных файлов сохранены в backup и заменены;18622 unlisted пользовательских файла byte-identical. Установленные raw/staged/installed EXE совпадают с хешем выше; VERSION117 проверен. Bridge SHA256 `D527F241146D24DDB5D9D5E3F151924CBE7088E3EF64C889F67A39405EFAF275`, RuntimeHost `283680CC6FEE95CCA7E4ABB1754BC88B92E89779BA6FF76F4E3758F1077704F3`. Откат116 сохранён в `artifacts/rollback-EI-Mapper-Ataman-v116-to-117-20261006`; предыдущий проверенный откат115 удалён только после успешной передачи по договору. Логи `build-tests-117-pointer-modes/install.log`, `retire-rollback.log`, сравнения `user-files-before.json`/`user-files-after.json`. Редактор интерактивно не запускался. Следующий шаг — ручная проверка исходной карты; родительские115/116 не закрыты.
 
 ## Ручная проверка
 
