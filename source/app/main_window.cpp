@@ -50,6 +50,7 @@
 #include <QScrollBar>
 #include <QDialogButtonBox>
 #include <QClipboard>
+#include "verified_clipboard.h"
 #include <QLineEdit>
 #include <QFontMetrics>
 #include <QSplitter>
@@ -1162,9 +1163,9 @@ MainWindow::MainWindow(QWidget* parent) :
         selectObject->setEnabled(item->data(0, kValidationNidRole).isValid());
         QAction* selected = menu.exec(m_validationTree->viewport()->mapToGlobal(point));
         if(selected == copyPath)
-            QApplication::clipboard()->setText(item->data(0, kValidationPathRole).toString());
+            ei::copyTextToClipboard(item->data(0, kValidationPathRole).toString(), this);
         else if(selected == copyFinding)
-            QApplication::clipboard()->setText(item->data(0, kValidationCopyRole).toString());
+            ei::copyTextToClipboard(item->data(0, kValidationCopyRole).toString(), this);
         else if(selected == selectObject)
             selectValidationObject(item);
     });

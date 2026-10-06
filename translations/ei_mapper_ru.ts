@@ -4812,6 +4812,10 @@ Select a valid installation or another preset.</source>
     <context>
         <name>CTableManager</name>
         <message>
+            <source>The copied property data is no longer available. Copy it again.</source>
+            <translation>Данные скопированных свойств больше недоступны. Скопируйте их заново.</translation>
+        </message>
+        <message>
             <location filename="../source/layout_components/tablemanager.cpp" line="535" />
             <source>Parameter</source>
             <translation>Параметр</translation>
@@ -17142,6 +17146,13 @@ Conditions: %5</source>
     <message>
         <source>Cannot save model catalog: %1</source>
         <translation>Не удалось сохранить каталог моделей: %1</translation>
+    </message>
+</context>
+<context>
+    <name>VerifiedClipboard</name>
+    <message>
+        <source>Could not copy: the Windows clipboard is busy. Try copying again.</source>
+        <translation>Не удалось скопировать: буфер обмена Windows занят. Повторите копирование.</translation>
     </message>
 </context>
 </TS>

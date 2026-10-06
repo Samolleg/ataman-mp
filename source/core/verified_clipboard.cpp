@@ -1,0 +1,415 @@
+#include "verified_clipboard.h"
+
+#include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QDebug>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QImage>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QMenu>
+#include <QMimeData>
+#include <QPointer>
+#include <QScopedValueRollback>
+#include <QThread>
+#include <QTimer>
+#include <QToolTip>
+#include <QVector>
+#include <climits>
+#include <cstring>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#include <ole2.h>
+#endif
+
+namespace ei {
+struct NativeClipboardState
+{
+#ifdef Q_OS_WIN
+    QMap<UINT, QByteArray> formats;
+    QVector<UINT> order; // Native format priority matters, e.g. DIBV5 before DIB.
+
+    bool capture(QString& error)
+    {
+        IDataObject* object = nullptr;
+        if(OleGetClipboard(&object) != S_OK || !object) return false;
+        IEnumFORMATETC* enumerator = nullptr;
+        const HRESULT enumerated = object->EnumFormatEtc(DATADIR_GET, &enumerator);
+        if(enumerated != S_OK || !enumerator) { object->Release(); return false; }
+        QMap<UINT, QByteArray> values;
+        QVector<UINT> priority;
+        FORMATETC format;
+        bool ok = true;
+        HRESULT next;
+        while((next = enumerator->Next(1, &format, nullptr)) == S_OK) {
+            // Abort before any test writes when an indexed/device/non-memory
+            // format cannot be preserved. Never silently drop user data.
+            if(format.ptd || format.lindex != -1 || format.dwAspect != DVASPECT_CONTENT
+                || !(format.tymed & TYMED_HGLOBAL)) {
+                if(format.ptd) CoTaskMemFree(format.ptd);
+                error = QStringLiteral("Native clipboard format %1 is not preservable; check aborted before writes.")
+                    .arg(format.cfFormat);
+                ok = false;
+                break;
+            }
+            format.tymed = TYMED_HGLOBAL;
+            STGMEDIUM medium = {};
+            if(object->GetData(&format, &medium) != S_OK) { ok = false; break; }
+            const SIZE_T size = medium.tymed == TYMED_HGLOBAL ? GlobalSize(medium.hGlobal) : 0;
+            const void* bytes = size && size <= INT_MAX ? GlobalLock(medium.hGlobal) : nullptr;
+            if(!bytes) ok = false;
+            else {
+                if(!values.contains(format.cfFormat)) priority.append(format.cfFormat);
+                values.insert(format.cfFormat, QByteArray(static_cast<const char*>(bytes), int(size)));
+                GlobalUnlock(medium.hGlobal);
+            }
+            ReleaseStgMedium(&medium);
+            if(!ok) break;
+        }
+        if(next != S_FALSE && next != S_OK) ok = false;
+        enumerator->Release();
+        object->Release();
+        if(ok) { formats = values; order = priority; }
+        return ok;
+    }
+
+    // Caller holds OpenClipboard: compare actual native IDs and bytes, including
+    // binary browser formats that Qt cannot read under their literal aliases.
+    bool matches() const
+    {
+        if(formats.isEmpty()) return CountClipboardFormats() == 0;
+        int priority = 0;
+        UINT format = 0;
+        while((format = EnumClipboardFormats(format)) != 0) {
+            if(priority < order.size() && format == order[priority]) ++priority;
+            else if(formats.contains(format)) return false;
+        }
+        if(priority != order.size()) return false;
+        for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
+            HANDLE handle = GetClipboardData(it.key());
+            if(!handle || GlobalSize(handle) != SIZE_T(it.value().size())) return false;
+            const void* bytes = GlobalLock(handle);
+            if(!bytes) return false;
+            const bool same = memcmp(bytes, it.value().constData(), size_t(it.value().size())) == 0;
+            GlobalUnlock(handle);
+            if(!same) return false;
+        }
+        return true;
+    }
+
+    // Allocate everything before emptying the clipboard. On success Windows
+    // owns each materialized block, so process exit does not lose delayed data.
+    bool write() const
+    {
+        QMap<UINT, HGLOBAL> blocks;
+        bool ok = true;
+        for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
+            HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, SIZE_T(it.value().size()));
+            void* bytes = block ? GlobalLock(block) : nullptr;
+            if(!bytes) { if(block) GlobalFree(block); ok = false; break; }
+            memcpy(bytes, it.value().constData(), size_t(it.value().size()));
+            GlobalUnlock(block);
+            blocks.insert(it.key(), block);
+        }
+        if(ok) ok = EmptyClipboard();
+        if(ok) for(UINT format : order) {
+            if(!SetClipboardData(format, blocks[format])) { ok = false; break; }
+            blocks[format] = nullptr; // Ownership transferred to Windows.
+        }
+        for(HGLOBAL block : blocks) if(block) GlobalFree(block);
+        return ok && matches();
+    }
+#endif
+};
+namespace {
+bool writing = false; // GUI thread only; a nested request must not replace this write.
+
+bool openNativeClipboard()
+{
+#ifdef Q_OS_WIN
+    // A distinct hidden HWND makes this probe independent of a NULL-HWND
+    // opener. Never share another application's clipboard window identity.
+    struct ProbeWindow {
+        HWND handle = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+                                      HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        ~ProbeWindow() { if(handle) DestroyWindow(handle); }
+    };
+    static ProbeWindow window;
+    return window.handle && OpenClipboard(window.handle);
+#endif
+    return true;
+}
+
+bool nativeAvailable()
+{
+    if(!openNativeClipboard()) return false;
+#ifdef Q_OS_WIN
+    CloseClipboard();
+#endif
+    return true;
+}
+
+void serviceClipboardEvents(int waitMs)
+{
+    // Do not dispatch another user's Copy/Cut/Paste or a socket callback in
+    // the middle of a transaction. Timers/native OLE messages remain live.
+    const auto flags = QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers;
+    if(waitMs <= 0) {
+        QCoreApplication::processEvents(flags);
+        return;
+    }
+    QEventLoop loop;
+    QTimer::singleShot(waitMs, &loop, &QEventLoop::quit);
+    loop.exec(flags);
+}
+
+void reportFailure(QWidget* feedback, const QString& error)
+{
+    qWarning().noquote() << error; // Never log clipboard contents.
+    QApplication::beep();
+    if(feedback)
+        QToolTip::showText(feedback->mapToGlobal(feedback->rect().center()), error, feedback);
+}
+
+QString actionLabel(QString text)
+{
+    return text.section('\t', 0, 0).remove('&');
+}
+
+}
+
+ClipboardSnapshot ClipboardSnapshot::fromMimeData(const QMimeData& mime)
+{
+    ClipboardSnapshot result;
+    for(const QString& format : mime.formats())
+        result.formats.insert(format, mime.data(format));
+    if(mime.hasImage()) result.image = mime.imageData();
+    if(mime.hasUrls()) result.urls = mime.urls();
+    return result;
+}
+
+QMimeData* ClipboardSnapshot::createMimeData() const
+{
+    QMimeData* mime = new QMimeData;
+    for(auto it = formats.cbegin(); it != formats.cend(); ++it)
+        mime->setData(it.key(), it.value());
+    if(image.isValid()) mime->setImageData(image);
+    if(formats.contains(QStringLiteral("text/uri-list"))) mime->setUrls(urls);
+    return mime;
+}
+
+bool ClipboardSnapshot::matches(const QMimeData* mime, QString* mismatch) const
+{
+    if(!mime) {
+        if(mismatch) *mismatch = QStringLiteral("native MIME unavailable");
+        return formats.isEmpty() && !image.isValid();
+    }
+    if(formats.isEmpty() && !image.isValid()) return mime->formats().isEmpty();
+    for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
+        if(it.key() == QStringLiteral("text/uri-list")) {
+            // Qt serializes native URL lists with platform line endings.
+            // Preserve the exact URL values using its typed accessor.
+            if(!mime->hasUrls() || mime->urls() != urls) {
+                if(mismatch) *mismatch = QStringLiteral("URL values unavailable or changed");
+                return false;
+            }
+        } else {
+            if(mime->hasFormat(it.key()) && mime->data(it.key()) == it.value()) continue;
+            if(mismatch) *mismatch = QStringLiteral("MIME format unavailable or changed: %1").arg(it.key());
+            return false;
+        }
+    }
+    if(image.isValid() && (!mime->hasImage()
+        || qvariant_cast<QImage>(mime->imageData()) != qvariant_cast<QImage>(image))) {
+        if(mismatch) *mismatch = QStringLiteral("Image pixels unavailable or changed");
+        return false;
+    }
+    return true;
+}
+
+ClipboardWriteResult writeClipboard(const ClipboardSnapshot& data, int timeoutMs)
+{
+    ClipboardWriteResult result;
+    if(!qApp || QThread::currentThread() != qApp->thread() || writing) {
+        result.error = QStringLiteral("Clipboard write is already in progress or is outside the GUI thread.");
+        return result;
+    }
+    QScopedValueRollback<bool> active(writing, true);
+    QElapsedTimer timer;
+    timer.start();
+    QClipboard* clipboard = QApplication::clipboard();
+    serviceClipboardEvents(0);
+    do {
+        // Avoid Qt's blocking native retries while another owner has the
+        // clipboard open. A race after this preflight is handled by readback.
+        if(nativeAvailable()) {
+            ++result.attempts;
+            clipboard->setMimeData(data.createMimeData());
+            // The transferred pointer may already have been deleted. Read
+            // only the current clipboard and compare with our value snapshot.
+            if(clipboard->ownsClipboard() && data.matches(clipboard->mimeData())) {
+                result.ok = true;
+                break;
+            }
+        }
+        const int remaining = qMax(0, timeoutMs - int(timer.elapsed()));
+        if(!remaining) break;
+        serviceClipboardEvents(qMin(25, remaining));
+    } while(timer.elapsed() < timeoutMs);
+    result.elapsedMs = int(timer.elapsed());
+    if(!result.ok)
+        result.error = QCoreApplication::translate("VerifiedClipboard",
+            "Could not copy: the Windows clipboard is busy. Try copying again.");
+    return result;
+}
+
+bool copyMimeDataToClipboard(const QMimeData& data, QWidget* feedback)
+{
+    const ClipboardSnapshot snapshot = ClipboardSnapshot::fromMimeData(data);
+    const QPointer<QWidget> target(feedback);
+    const ClipboardWriteResult result = writeClipboard(snapshot);
+    if(!result.ok) reportFailure(target, result.error);
+    return result.ok;
+}
+
+bool copyTextToClipboard(const QString& text, QWidget* feedback)
+{
+    QMimeData mime;
+    mime.setText(text);
+    return copyMimeDataToClipboard(mime, feedback);
+}
+
+bool copyLineEditSelection(QLineEdit* editor, bool cut)
+{
+    if(!editor || !editor->hasSelectedText() || editor->echoMode() != QLineEdit::Normal
+        || (cut && editor->isReadOnly())) return false;
+    const QString text = editor->text();
+    const QString selected = editor->selectedText();
+    const int start = editor->selectionStart();
+    const QPointer<QLineEdit> target(editor);
+    if(!copyTextToClipboard(selected, editor)) return false;
+    // Events needed by OLE may have rebuilt or edited the field. Never cut a
+    // different selection, nor delete text when the clipboard write failed.
+    if(cut && target && !target->isReadOnly() && target->text() == text
+        && target->selectionStart() == start && target->selectedText() == selected)
+        target->insert(QString());
+    return true;
+}
+
+QMenu* verifiedLineEditContextMenu(QLineEdit* editor)
+{
+    QMenu* menu = editor->createStandardContextMenu();
+    const QString copy = actionLabel(QCoreApplication::translate("QLineEdit", "&Copy"));
+    const QString cut = actionLabel(QCoreApplication::translate("QLineEdit", "Cu&t"));
+    const QString paste = actionLabel(QCoreApplication::translate("QLineEdit", "&Paste"));
+    for(QAction* action : menu->actions()) {
+        const QString label = actionLabel(action->text());
+        if(label != copy && label != cut && label != paste) continue;
+        QObject::disconnect(action, nullptr, nullptr, nullptr);
+        if(label == paste) {
+            // Use the editor's usual compatibility/preview handler also from
+            // the menu, rather than bypassing it with QLineEdit::paste().
+            action->setObjectName(QStringLiteral("verifiedClipboardPaste"));
+            QObject::connect(action, &QAction::triggered, editor, [editor] {
+                QKeyEvent event(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+                QCoreApplication::sendEvent(editor, &event);
+            });
+        } else {
+            const bool cutting = label == cut;
+            action->setObjectName(cutting ? QStringLiteral("verifiedClipboardCut")
+                                          : QStringLiteral("verifiedClipboardCopy"));
+            QObject::connect(action, &QAction::triggered, editor, [editor, cutting] {
+                copyLineEditSelection(editor, cutting);
+            });
+        }
+    }
+    return menu;
+}
+
+ClipboardRestoreGuard::ClipboardRestoreGuard()
+{
+#ifdef Q_OS_WIN
+    m_native.reset(new NativeClipboardState);
+#endif
+    QElapsedTimer timer;
+    timer.start();
+    do {
+        serviceClipboardEvents(0);
+        if(nativeAvailable()) {
+#ifdef Q_OS_WIN
+            // Capture the native, persisted representation. Qt's local HTML
+            // and URL values are encoded by OLE (fragment markers/line ends).
+            // Capturing a local value then comparing with its encoded form
+            // after exit would incorrectly report a restoration failure.
+            if(QApplication::clipboard()->ownsClipboard()) {
+                if(OleFlushClipboard() != S_OK) {
+                    serviceClipboardEvents(25);
+                    continue;
+                }
+                serviceClipboardEvents(0);
+            }
+            const DWORD sequence = GetClipboardSequenceNumber();
+            const bool empty = CountClipboardFormats() == 0;
+            if(empty) { m_native->formats.clear(); m_native->order.clear(); }
+            const bool saved = empty || m_native->capture(m_error);
+            if(!m_error.isEmpty()) return;
+            if(saved && openNativeClipboard()) {
+                m_captured = sequence == GetClipboardSequenceNumber() && m_native->matches();
+                CloseClipboard();
+                if(m_captured) return;
+            }
+#else
+            const QMimeData* mime = QApplication::clipboard()->mimeData();
+            if(mime) {
+                m_saved = ClipboardSnapshot::fromMimeData(*mime);
+                m_captured = m_saved.matches(QApplication::clipboard()->mimeData());
+                if(m_captured) return;
+            }
+#endif
+        }
+        serviceClipboardEvents(25);
+    } while(timer.elapsed() < 1000);
+    m_error = QStringLiteral("Native clipboard capture failed; no synthetic write performed.");
+}
+
+bool ClipboardRestoreGuard::restore()
+{
+    if(!m_captured) { m_error = QStringLiteral("Native clipboard capture failed."); return false; }
+    if(m_restored) return true;
+#ifdef Q_OS_WIN
+    QElapsedTimer timer;
+    timer.start();
+    bool restored = false;
+    do {
+        serviceClipboardEvents(0);
+        if(openNativeClipboard()) {
+            restored = m_native->write();
+            CloseClipboard();
+            if(restored) break;
+        }
+        serviceClipboardEvents(25);
+    } while(timer.elapsed() < 2000);
+    if(!restored) {
+        m_error = QStringLiteral("Clipboard native restore/write/readback failed.");
+        return false;
+    }
+    serviceClipboardEvents(0); // Release Qt's old owner after native replacement.
+#else
+    if(!writeClipboard(m_saved, 2000).ok) {
+        m_error = QStringLiteral("Clipboard restore write/readback failed.");
+        return false;
+    }
+#endif
+    m_restored = true;
+    m_error.clear();
+    return true;
+}
+
+ClipboardRestoreGuard::~ClipboardRestoreGuard()
+{
+    if(m_captured && !m_restored && !restore())
+        qWarning("Clipboard restoration failed; native check is not a PASS.");
+}
+}

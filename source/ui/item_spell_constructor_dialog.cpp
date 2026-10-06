@@ -14,6 +14,7 @@
 #include "resourcemanager.h"
 #include <QApplication>
 #include <QClipboard>
+#include "verified_clipboard.h"
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -648,6 +649,6 @@ void ItemSpellConstructorDialog::importCode()
     const QString value=m_codeEdit->text().trimmed();if(value.contains('{')&&!value.contains('[')){const auto parsed=ItemSpellConstructorCatalog::parseSpellCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*spell=m_catalog.findSpell(parsed.prototypeCode);if(!spell){showImportDiagnostic({tr("Unknown spell prototype '%1'.").arg(parsed.prototypeCode)});return;}m_tabs->setCurrentIndex(1);for(int i=0;i<m_spellList->count();++i)if(m_spellList->item(i)->data(Qt::UserRole).toString().compare(spell->code,Qt::CaseInsensitive)==0)m_spellList->setCurrentRow(i);m_selectedRunes->clear();for(const QString&code:parsed.runeCodes){if(const auto*rune=m_catalog.findRune(code))catalogItem(rune->displayName,tr("%1 • %2").arg(rune->code,runeTypeName(rune->type)),rune->code,m_selectedRunes,runePixmap(m_catalog,*rune));else catalogItem(tr("Unknown rune"),code,code,m_selectedRunes);}updateOutput();return;}
     const auto parsed=ItemSpellConstructorCatalog::parseItemCode(value);if(!parsed.valid){showImportDiagnostic(parsed.diagnostics);return;}const auto*item=m_catalog.findItem(parsed.prototypeName);if(!item){showImportDiagnostic({tr("Unknown item prototype '%1'.").arg(parsed.prototypeName)});return;}m_tabs->setCurrentIndex(0);m_itemFilter->clear();m_itemCategory->setCurrentIndex(0);m_itemType->setCurrentIndex(0);m_armorLayer->setCurrentIndex(0);refreshItemFilterChoices();refreshItemFilter();for(int i=0;i<m_itemList->count();++i)if(m_itemList->item(i)->data(Qt::UserRole).toString().compare(item->name,Qt::CaseInsensitive)==0){m_itemList->setCurrentRow(i);break;}rebuildMaterialChoices(parsed.materialName);if(!parsed.materialName.isEmpty()&&m_material->currentData().toString().compare(parsed.materialName,Qt::CaseInsensitive)!=0)showImportDiagnostic({tr("Material '%1' is not compatible with %2 (%3 required).").arg(parsed.materialName,item->name,item->materialType)});m_itemSpell->setText(parsed.spell.valid?ItemSpellConstructorCatalog::formatSpellCode(parsed.spell.prototypeCode,parsed.spell.runeCodes):parsed.bracketPayload);updateOutput();
 }
-void ItemSpellConstructorDialog::copyCode(){QApplication::clipboard()->setText(code());}
+void ItemSpellConstructorDialog::copyCode(){ei::copyTextToClipboard(code(),this);}
 void ItemSpellConstructorDialog::showImportDiagnostic(const QStringList&messages){QMessageBox::warning(this,tr("Code could not be imported"),messages.join('\n'));}
 }

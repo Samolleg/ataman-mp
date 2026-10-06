@@ -49,6 +49,7 @@
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QClipboard>
+#include "verified_clipboard.h"
 #include <QMimeData>
 #include <QMenu>
 #include <QPushButton>
@@ -777,17 +778,22 @@ int runHeadlessCommand(QApplication& app)
         } hiddenWidgetFilter;
         app.installEventFilter(&hiddenWidgetFilter);
         // Native-platform checks must restore the user's clipboard afterwards.
-        struct ClipboardRestore
-        {
-            QMimeData* saved = new QMimeData;
-            ClipboardRestore()
-            {
-                if(const QMimeData* current = QApplication::clipboard()->mimeData())
-                    for(const QString& format : current->formats())
-                        saved->setData(format, current->data(format));
-            }
-            ~ClipboardRestore() { QApplication::clipboard()->setMimeData(saved); }
-        } clipboardRestore;
+        ei::ClipboardRestoreGuard clipboardRestore;
+        if(!clipboardRestore.captured()) {
+            QTextStream(stderr) << "FAIL: cannot preserve native clipboard; UI check aborted before synthetic writes: "
+                                << clipboardRestore.error() << "\n";
+            return 2;
+        }
+        bool clipboardWritesVerified = true;
+        const auto setCheckMimeData = [&clipboardWritesVerified](QMimeData* data) {
+            QScopedPointer<QMimeData> owned(data);
+            const bool ok = ei::copyMimeDataToClipboard(*data);
+            clipboardWritesVerified = clipboardWritesVerified && ok;
+        };
+        const auto setCheckText = [&clipboardWritesVerified](const QString& text) {
+            const bool ok = ei::copyTextToClipboard(text);
+            clipboardWritesVerified = clipboardWritesVerified && ok;
+        };
         QTemporaryDir uiSettingsDirectory;
         if(!uiSettingsDirectory.isValid())
             return 2;
@@ -945,13 +951,13 @@ int runHeadlessCommand(QApplication& app)
         incompatibleMime->setText("model_value");
         incompatibleMime->setData("application/x-ei-mapper-property-type",
                                   QByteArray::number(int(eObjParam_TEMPLATE)));
-        QGuiApplication::clipboard()->setMimeData(incompatibleMime);
+        setCheckMimeData(incompatibleMime);
         QKeyEvent pasteIncompatible(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(textureCombo.lineEdit(), &pasteIncompatible);
         const bool incompatiblePasteBlocked = textureCombo.currentText() == "original_texture"
                 && textureCombo.value()->toString() == "original_texture";
 
-        QGuiApplication::clipboard()->setText("custom_texture");
+        setCheckText("custom_texture");
         textureCombo.lineEdit()->selectAll();
         QKeyEvent pastePlainText(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
         QApplication::sendEvent(textureCombo.lineEdit(), &pastePlainText);
@@ -1297,6 +1303,17 @@ int runHeadlessCommand(QApplication& app)
                 && qFuzzyCompare(colorValue->value().y(), 0.2f)
                 && qFuzzyCompare(colorValue->value().z(), 0.3f);
 
+        // An old/external typed entry must not reuse the last in-memory value.
+        auto* stalePropertyMime = new QMimeData;
+        stalePropertyMime->setText("stale structured value");
+        stalePropertyMime->setData("application/x-ei-mapper-property-type",
+                                   QByteArray::number(int(eObjParam_LIGHT_COLOR)));
+        setCheckMimeData(stalePropertyMime);
+        pastedColor.clear();
+        QKeyEvent pasteStaleColor(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier);
+        QApplication::sendEvent(&colorDestinationTable, &pasteStaleColor);
+        const bool stalePropertyClipboardBlocked = pastedColor.isNull();
+
         // A single component of a compound vector is ordinary numeric data:
         // it can be copied into another numeric field, with range validation
         // and nearest-integer rounding when the destination is integral.
@@ -1363,7 +1380,7 @@ int runHeadlessCommand(QApplication& app)
         });
         QMimeData* componentText = new QMimeData;
         componentText->setText("8.75");
-        QGuiApplication::clipboard()->setMimeData(componentText);
+        setCheckMimeData(componentText);
         if(xComponentPlate)
         {
             xComponentPlate->click();
@@ -1378,7 +1395,7 @@ int runHeadlessCommand(QApplication& app)
         componentPlateChange.clear();
         componentText = new QMimeData;
         componentText->setText("6.25");
-        QGuiApplication::clipboard()->setMimeData(componentText);
+        setCheckMimeData(componentText);
         bool componentContextShowsOnlyComponent = false;
         bool componentContextGestureKeepsTableClear = false;
         if(yComponentPlate)
@@ -3035,7 +3052,7 @@ int runHeadlessCommand(QApplication& app)
             messageLogSeverityColorsWork = messageLogSeverityColorsWork
                 && severitySamples == 4 && severityColors.size() == 3;
         }
-        QApplication::clipboard()->clear();
+        setCheckMimeData(new QMimeData);
         QMetaObject::invokeMethod(&messageLog, "copySelectedMessages",
                                   Qt::DirectConnection);
         const QString copiedMessages = QApplication::clipboard()->text();
@@ -3508,7 +3525,14 @@ int runHeadlessCommand(QApplication& app)
         const bool groupRotationWorks = runGroupRotationCheck() == 0;
         const bool darkThemeWorks = runDarkThemeCheck() == 0;
         const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
-        const bool passed = profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        const bool clipboardRestored = clipboardRestore.restore();
+        QTextStream(clipboardWritesVerified && clipboardRestored ? stdout : stderr)
+            << (clipboardWritesVerified && clipboardRestored ? "PASS" : "FAIL")
+            << ": native clipboard write preconditions and verified restoration"
+            << " clipboardWritesVerified=" << clipboardWritesVerified
+            << " clipboardRestored=" << clipboardRestored << "\n";
+        if(!clipboardRestored) QTextStream(stderr) << clipboardRestore.error() << "\n";
+        const bool passed = clipboardWritesVerified && clipboardRestored && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -3554,6 +3578,7 @@ int runHeadlessCommand(QApplication& app)
                 && incompatiblePasteBlocked && compatiblePastePreview && compatiblePasteCommit
                 && multiPropertyPaste && mismatchedPropertyPasteBlocked
                 && fieldPastePreview && fieldPasteCommit && fieldCopyAvailable && nonTextPropertyPaste
+                && stalePropertyClipboardBlocked
                 && numericComponentPaste && individualComponentSelection
                 && selectedComponentCopy && componentPlatePaste && componentContextPaste
                 && componentContextPreservesSelection && componentContextShowsOnlyComponent
@@ -3753,7 +3778,8 @@ int runHeadlessCommand(QApplication& app)
                << " fieldPastePreview=" << fieldPastePreview
                << " fieldPasteCommit=" << fieldPasteCommit
                << " fieldCopyAvailable=" << fieldCopyAvailable
-               << " nonTextPropertyPaste=" << nonTextPropertyPaste << "\n"
+               << " nonTextPropertyPaste=" << nonTextPropertyPaste
+               << " stalePropertyClipboardBlocked=" << stalePropertyClipboardBlocked << "\n"
                << " numericComponentPaste=" << numericComponentPaste << "\n"
                << " individualComponentSelection=" << individualComponentSelection
                << " selectedComponentCopy=" << selectedComponentCopy

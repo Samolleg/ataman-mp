@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include "verified_clipboard.h"
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -219,5 +220,5 @@ void CMessageLogPanel::copySelectedMessages()
         if(QTableWidgetItem* message = m_table->item(row, 2))
             lines << message->data(Qt::UserRole).toString();
     }
-    if(!lines.isEmpty()) QApplication::clipboard()->setText(lines.join('\n'));
+    if(!lines.isEmpty()) ei::copyTextToClipboard(lines.join('\n'), this);
 }

@@ -39,6 +39,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "verified_clipboard.h"
 #include "selection_region.h"
 #include "neighbor_visual_preparation.h"
 #include "map_object_placement_policy.h"
@@ -26543,8 +26544,7 @@ void CView::copySelectedIDsToClipboard()
     {
         text += QString::number(id) + "\n";
     }
-    QClipboard* pClipboard = QGuiApplication::clipboard();
-    pClipboard->setText(text);
+    ei::copyTextToClipboard(text, this);
 }
 
 void CView::execMobSwitch()

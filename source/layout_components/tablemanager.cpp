@@ -7,6 +7,8 @@
 #include <QLabel>
 #include <QGuiApplication>
 #include <QClipboard>
+#include "verified_clipboard.h"
+#include <QUuid>
 #include <QSignalBlocker>
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -73,7 +75,15 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override { event->accept(); }
 };
 const char* kPropertyMimeType = "application/x-ei-mapper-property-type";
+const char* kPropertyTokenMimeType = "application/x-ei-mapper-property-token";
 QList<QSharedPointer<IPropertyBase>> g_propertyClipboard;
+QByteArray g_propertyClipboardToken;
+
+bool hasPropertyClipboard(const QMimeData* mime)
+{
+    return mime && !g_propertyClipboardToken.isEmpty()
+        && mime->data(kPropertyTokenMimeType) == g_propertyClipboardToken;
+}
 
 QString staticChoiceToolTip(EObjParam type, uint value)
 {
@@ -211,12 +221,16 @@ void copyProperty(const QSharedPointer<IPropertyBase>& property, const QString& 
 {
     if(property.isNull())
         return;
-    g_propertyClipboard.clear();
-    g_propertyClipboard.append(clonePropertyValue(property));
-    QMimeData* mime = new QMimeData;
-    mime->setText(displayText);
-    mime->setData(kPropertyMimeType, QByteArray::number(int(property->type())));
-    QGuiApplication::clipboard()->setMimeData(mime);
+    const auto value = clonePropertyValue(property);
+    const QByteArray token = QUuid::createUuid().toByteArray();
+    QMimeData mime;
+    mime.setText(displayText);
+    mime.setData(kPropertyMimeType, QByteArray::number(int(property->type())));
+    mime.setData(kPropertyTokenMimeType, token);
+    if(ei::copyMimeDataToClipboard(mime, QApplication::focusWidget())) {
+        g_propertyClipboard = {value};
+        g_propertyClipboardToken = token;
+    }
 }
 
 class CVectorComponentPlate final : public QToolButton
@@ -423,8 +437,10 @@ private:
         if(!mime)
             return false;
         QSharedPointer<IPropertyBase> converted;
-        if(mime->hasFormat(kPropertyMimeType) && g_propertyClipboard.size() == 1)
+        if(mime->hasFormat(kPropertyMimeType))
         {
+            if(!hasPropertyClipboard(mime) || g_propertyClipboard.size() != 1)
+                return false;
             const QSharedPointer<IPropertyBase> source = g_propertyClipboard.first();
             if(!source.isNull() && source->type() == m_property->type())
                 converted = clonePropertyValue(source);
@@ -824,7 +840,7 @@ void CTableManager::copyRows(const QList<int>& rows)
 {
     if(rows.isEmpty())
         return;
-    g_propertyClipboard.clear();
+    QList<QSharedPointer<IPropertyBase>> copiedProperties;
     QStringList types;
     QStringList plainText;
     for(int row : rows)
@@ -832,7 +848,7 @@ void CTableManager::copyRows(const QList<int>& rows)
         const QSharedPointer<IPropertyBase> value = m_rowValues.value(row);
         if(value.isNull())
             return;
-        g_propertyClipboard.append(clonePropertyValue(value));
+        copiedProperties.append(clonePropertyValue(value));
         types.append(QString::number(int(value->type())));
         const QString display = propertyDisplayText(row);
         if(rows.size() == 1)
@@ -843,10 +859,15 @@ void CTableManager::copyRows(const QList<int>& rows)
             plainText.append(QString("%1: %2").arg(label, display));
         }
     }
-    QMimeData* mime = new QMimeData;
-    mime->setText(plainText.join('\n'));
-    mime->setData(kPropertyMimeType, types.join(',').toLatin1());
-    QGuiApplication::clipboard()->setMimeData(mime);
+    const QByteArray token = QUuid::createUuid().toByteArray();
+    QMimeData mime;
+    mime.setText(plainText.join('\n'));
+    mime.setData(kPropertyMimeType, types.join(',').toLatin1());
+    mime.setData(kPropertyTokenMimeType, token);
+    if(ei::copyMimeDataToClipboard(mime, m_pTable)) {
+        g_propertyClipboard = copiedProperties;
+        g_propertyClipboardToken = token;
+    }
 }
 
 bool CTableManager::buildPasteValues(const QList<int>& rows,
@@ -881,6 +902,11 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if(mime && mime->hasFormat(kPropertyMimeType))
     {
+        if(!hasPropertyClipboard(mime))
+        {
+            if(error) *error = tr("The copied property data is no longer available. Copy it again.");
+            return false;
+        }
         const QList<QByteArray> encodedTypes = mime->data(kPropertyMimeType).split(',');
         if(encodedTypes.size() != rows.size() || g_propertyClipboard.size() != rows.size())
         {
@@ -2062,7 +2088,7 @@ void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPositio
     // Keep the editor and action alive until the user's choice is known.  A
     // modeless popup can transfer focus back through the property panel and
     // rebuild this cell before QAction::triggered reaches the routing chain.
-    QScopedPointer<QMenu> menu(lineEdit()->createStandardContextMenu());
+    QPointer<QMenu> menu = ei::verifiedLineEditContextMenu(lineEdit());
     menu->addSeparator();
     QAction* open = menu->addAction(tr("Open prototype in Database Editor"));
     open->setObjectName(QStringLiteral("openDatabasePrototypeAction"));
@@ -2073,6 +2099,7 @@ void CComboDynItem::showDatabasePrototypeContextMenu(const QPoint& globalPositio
     // properties panel even though the user selected the action.
     connect(open, &QAction::triggered, this, &CComboDynItem::requestDatabasePrototypeOpen);
     menu->exec(globalPosition);
+    delete menu.data();
 }
 
 void CColorButtonItem::keyPressEvent(QKeyEvent* event)
@@ -2085,7 +2112,9 @@ void CColorButtonItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+        if(!clipboardMatches(m_pValue->type())
+           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
@@ -2293,6 +2322,12 @@ void CComboStItem::keyPressEvent(QKeyEvent* event)
 
 void CValueItem::keyPressEvent(QKeyEvent* event)
 {
+    if(event->matches(QKeySequence::Copy) || event->matches(QKeySequence::Cut))
+    {
+        ei::copyLineEditSelection(this, event->matches(QKeySequence::Cut));
+        event->accept();
+        return;
+    }
     // Inside the editable text, Ctrl+C/Ctrl+V are ordinary text operations:
     // copy the exact highlighted characters and replace only the current
     // selection. Validation and property application still happen on commit.
@@ -2306,7 +2341,8 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
            && !clipboardMatches(m_pValue->type()))
         {
             QString conversionError;
-            const QSharedPointer<IPropertyBase> converted = g_propertyClipboard.size() == 1
+            const QSharedPointer<IPropertyBase> converted = hasPropertyClipboard(mime)
+                && g_propertyClipboard.size() == 1
                 ? convertedNumericValue(g_propertyClipboard.first().get(),
                                         m_pValue.get(), &conversionError)
                 : QSharedPointer<IPropertyBase>();
@@ -2326,9 +2362,9 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
 
 void CValueItem::contextMenuEvent(QContextMenuEvent* event)
 {
-    QMenu* menu = createStandardContextMenu();
+    QPointer<QMenu> menu = ei::verifiedLineEditContextMenu(this);
     menu->exec(event->globalPos());
-    delete menu;
+    delete menu.data();
 }
 
 void CComboDynItem::_onEditingFinished()
@@ -2402,11 +2438,16 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
        && !m_popupActive && static_cast<QMouseEvent*>(event)->buttons().testFlag(Qt::LeftButton)) {
         event->accept(); return true;
     }
-    if(watched == lineEdit() && event->type() == QEvent::ContextMenu
-       && m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+    if(watched == lineEdit() && event->type() == QEvent::ContextMenu)
     {
         const QContextMenuEvent* context = static_cast<QContextMenuEvent*>(event);
-        showDatabasePrototypeContextMenu(context->globalPos());
+        if(m_pValue->type() == eObjParam_UNIT_PROTOTYPE)
+            showDatabasePrototypeContextMenu(context->globalPos());
+        else {
+            QPointer<QMenu> menu = ei::verifiedLineEditContextMenu(lineEdit());
+            menu->exec(context->globalPos());
+            delete menu.data();
+        }
         return true;
     }
     if(watched == lineEdit() && event->type() == QEvent::FocusOut)
@@ -2418,8 +2459,11 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
     if(watched == lineEdit() && event->type() == QEvent::KeyPress)
     {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
-        if(keyEvent->matches(QKeySequence::Copy))
-            return false;
+        if(keyEvent->matches(QKeySequence::Copy) || keyEvent->matches(QKeySequence::Cut))
+        {
+            ei::copyLineEditSelection(lineEdit(), keyEvent->matches(QKeySequence::Cut));
+            return true;
+        }
         if(keyEvent->matches(QKeySequence::Paste))
         {
             // Typed property bundles still cannot cross incompatible fields,
@@ -2730,7 +2774,9 @@ void CUnitStatItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+        if(!clipboardMatches(m_pValue->type())
+           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
@@ -2780,7 +2826,9 @@ void CBodyPartItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        if(!clipboardMatches(m_pValue->type()) || g_propertyClipboard.size() != 1
+        if(!clipboardMatches(m_pValue->type())
+           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
             rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());

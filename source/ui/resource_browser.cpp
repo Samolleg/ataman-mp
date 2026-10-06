@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QClipboard>
+#include "verified_clipboard.h"
 #include <QComboBox>
 #include <QCryptographicHash>
 #include <QDesktopServices>
@@ -1114,7 +1115,7 @@ void CResourceBrowser::exportSelected()
 
 void CResourceBrowser::copySelectedName()
 {
-    if(const auto* entry = selectedEntry()) QApplication::clipboard()->setText(entry->logicalName);
+    if(const auto* entry = selectedEntry()) ei::copyTextToClipboard(entry->logicalName, this);
 }
 
 void CResourceBrowser::openSelectedLocation()
