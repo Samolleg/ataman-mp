@@ -91,9 +91,31 @@ Staging `build-staging-122-height-res-handoff`, manifest SHA256
 
 ## Передача и границы
 
-Следующий шаг — scoped-коммит main и guarded обновление единственной постоянной
-установки `artifacts/EI-Mapper-Ataman-2-first-test` с сохранением пользовательских
-файлов. Результат установки будет дописан после readback.
+Реализация закоммичена в main:
+`915fa959aba278ef291f2dd5b062085390c90d81`.
+Постоянная `artifacts/EI-Mapper-Ataman-2-first-test` обновлена121→122:
+редактор/runtime не работали,127 managed files и manifest verified,
+6 программных файлов заменены с проверенными backup,21115 неуправляемых
+пользовательских файлов имеют одинаковые пути и SHA256 до/после. Финализатор
+на постоянной установке не запускался. Raw/staged/installed editor и оба
+runtime компонента одинаковы. Runtime bridge SHA256
+`d7473da8963b3b5ba8bb40c468cfb400ffea01d224e18c009e89aaf539a0af19`;
+host `179c9b8a8aef094ae4ec29772ce9f657f95a4b4f16fbca90011fdc78ed972615`.
+Доказательства: `install-plan.json`, `install-result.json`, `install.log`,
+`user-files-before.json`, `user-files-after.json`,
+`installed-binary-comparison.json`, `verify-and-retire.log` в owned test folder.
+Проверенный rollback121 —
+`artifacts/rollback-EI-Mapper-Ataman-v121-to-122-20261007`; старый owned
+rollback120 удалён только после проверки его точного пути, состава и payload hashes.
+
+До этой задачи checkout уже содержал чужие незакоммиченные ROADMAP/doc52/QM
+и untracked отчёты/artifacts. Они сохранены и исключены из scoped-коммита.
+Сборка использует рабочий translation QM (прежний SHA256
+`ab06b0cc2247832c97fc5dcd654e32854c2712add23ec17378e451f743c7f1e3`),
+поэтому provenance — проверенный рабочий snapshot этого main с прежним QM,
+а не обещание воспроизведения бинарника из чистого HEAD. Код исправления
+после тестов не менялся; все функциональные native checks ссылаются на точный
+выданный EXE hash. Игровые/приватные данные в коммит или staging не добавлены.
 
 Визуальный редактор/игра не запускались вместо владельца. Приёмка на исходной
 карте и native игре остаётся отдельной: изменить только рельеф, сохранить,
