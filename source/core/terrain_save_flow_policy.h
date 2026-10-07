@@ -43,13 +43,12 @@ inline ETerrainMprSaveRoute terrainMprSaveRoute(
     bool persistedWorkingDraft = false,
     bool saveAs = false)
 {
-    Q_UNUSED(saveAs);
     // A semantic paint field is not new artwork. Authored physical tiles can
     // be saved by the ordinary MPR transaction (and its semantic-state store).
     Q_UNUSED(landMaterialFieldActive);
     Q_UNUSED(overlayMaterialFieldActive);
     return identityPublicationRequested || landUsesWorkingExtension
-            || overlayUsesWorkingExtension || persistedWorkingDraft
+            || overlayUsesWorkingExtension || (persistedWorkingDraft && saveAs)
         ? ETerrainMprSaveRoute::PublishModernAtlas
         : ETerrainMprSaveRoute::PlainMpr;
 }

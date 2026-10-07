@@ -10198,7 +10198,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     }
     updateProgress(tr("Validating staged MPR candidate..."), 1);
 
-    const SStagedMprTransactionValidation preview =
+    SStagedMprTransactionValidation preview =
         validateStagedMprTransaction(m_mprDocument, transaction, destination);
     if(!preview.success)
     {
@@ -10356,7 +10356,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                draft.mprBytes, destination, draftProfile.mprNamespace,
                draftProfile.atlasPixelSha256,
                embeddedProfileMember.payload,
-               &semanticFieldMember, &draftReport))
+               &semanticFieldMember, &draftReport, nullptr, &draft.mprBytes))
         {
             QMessageBox::critical(this, tr("Modern draft save refused"),
                 tr("The exact shared-corner material field could not be "
@@ -10531,32 +10531,6 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return true;
     }
 
-    QByteArray semanticResOriginalBytes;
-    QString semanticResPath;
-    QString semanticResCandidateSha256;
-    bool semanticResChanged = false;
-    bool semanticPublicationStarted = false;
-    const auto restoreSemanticRes = [&]() {
-        if(!semanticResChanged || semanticResPath.isEmpty())
-            return true;
-        QFile currentFile(semanticResPath);
-        if(!currentFile.open(QIODevice::ReadOnly))
-            return false;
-        const QByteArray currentBytes = currentFile.readAll();
-        currentFile.close();
-        const QString currentHash = QString::fromLatin1(
-            QCryptographicHash::hash(currentBytes,
-                QCryptographicHash::Sha256).toHex());
-        if(currentHash.compare(semanticResCandidateSha256,
-                               Qt::CaseInsensitive) != 0)
-            return false;
-        QSaveFile restore(semanticResPath);
-        return restore.open(QIODevice::WriteOnly)
-            && restore.write(semanticResOriginalBytes)
-                == semanticResOriginalBytes.size()
-            && restore.commit();
-    };
-
     SResArchiveNewMember semanticFieldMember;
     CValidationReport semanticFieldReport;
     if(!buildTerrainSemanticFieldMember(
@@ -10564,7 +10538,8 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
            m_mprDocument.mapInfo().innerNamespace,
            m_terrainAtlasProfile.atlasPixelSha256,
            m_terrainAtlasProfile.toBytes(),
-           &semanticFieldMember, &semanticFieldReport))
+           &semanticFieldMember, &semanticFieldReport, nullptr,
+           &preview.candidateBytes))
     {
         QMessageBox::critical(this, tr("MPR save refused"),
             tr("The exact shared-corner material state could not be prepared. "
@@ -10572,78 +10547,15 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 .arg(semanticFieldReport.toText().trimmed()));
         return false;
     }
+    preview.sha256 = QString::fromLatin1(QCryptographicHash::hash(
+        preview.candidateBytes, QCryptographicHash::Sha256).toHex());
+    CMprDocument semanticCandidate;
+    if(!semanticCandidate.loadBytes(preview.candidateBytes, destinationPath,
+                                    &semanticFieldReport)) return false;
+    preview.semanticDiff = CMprSemanticDiff::compare(m_mprDocument,
+                                                    semanticCandidate).toText();
     if(!semanticFieldMember.name.isEmpty())
-    {
-        semanticResPath = QFileInfo(
-            m_activeTerrainArchivePath).absoluteFilePath();
-        if(semanticResPath.isEmpty() || !QFileInfo::exists(semanticResPath))
-        {
-            ei::log(eLogWarning, QStringLiteral(
-                "No active RES is available for the map-bound terrain semantic field; the physical MPR save remains valid but a later session must reconstruct shared-corner semantics."));
-            semanticResPath.clear();
-        }
-        else
-        {
-            QFile sourceRes(semanticResPath);
-            if(!sourceRes.open(QIODevice::ReadOnly))
-            {
-                QMessageBox::critical(this, tr("MPR save refused"),
-                    tr("The active terrain RES could not be read before "
-                       "storing the map's shared-corner material state. "
-                       "No destination was changed.\n\n%1")
-                        .arg(sourceRes.errorString()));
-                return false;
-            }
-            semanticResOriginalBytes = sourceRes.readAll();
-            CResArchiveDocument semanticArchive;
-            QStringList semanticArchiveErrors;
-            if(!semanticArchive.loadBytes(
-                   semanticResOriginalBytes, semanticResPath,
-                   &semanticArchiveErrors))
-            {
-                QMessageBox::critical(this, tr("MPR save refused"),
-                    tr("The active terrain RES could not be validated before "
-                       "storing the map's shared-corner material state. "
-                       "No destination was changed.\n\n%1")
-                        .arg(semanticArchiveErrors.join(
-                            QStringLiteral("\n"))));
-                return false;
-            }
-            SResPublishedMembersSaveRequest semanticRequest;
-            semanticRequest.source = QFileInfo(semanticResPath);
-            semanticRequest.destination = QFileInfo(semanticResPath);
-            semanticRequest.published = {semanticFieldMember};
-            semanticRequest.allowReplaceExisting = true;
-            semanticRequest.createBackup = true;
-            bool semanticPublicationReady = true;
-            emit terrainPublicationPreflightRequested(semanticResPath, &semanticPublicationReady);
-            if(!semanticPublicationReady)
-                return false;
-            semanticPublicationStarted = true;
-            SResPublishedMembersSaveResult semanticResult;
-            if(m_mapCohortActive) {
-                QByteArray candidate;QStringList errors;
-                semanticResult.success=semanticArchive.buildWithPublishedMembers(
-                    {semanticFieldMember},true,&candidate,&errors)
-                    && stageMapCompanion(semanticResPath,candidate,&semanticResult.error,&semanticResOriginalBytes);
-                if(!errors.isEmpty())semanticResult.error=errors.join('\n');
-                semanticResult.noOp=true;
-                semanticResult.phase=QStringLiteral("deferred-map-cohort");
-            } else semanticResult=commitStagedResPublishedMembers(semanticArchive,semanticRequest);
-            if(!semanticResult.success)
-            {
-                emit terrainPublicationFinished(semanticResPath, false);
-                QMessageBox::critical(this, tr("MPR save refused"),
-                    tr("The map's shared-corner material state could not be "
-                       "stored in the active terrain RES. The MPR was not "
-                       "changed.\n\nPhase: %1\n%2")
-                        .arg(semanticResult.phase, semanticResult.error));
-                return false;
-            }
-            semanticResChanged = !semanticResult.noOp;
-            semanticResCandidateSha256 = semanticResult.candidateSha256;
-        }
-    }
+        preview.changedMembers.append(STerrainSemanticFieldDocument::embeddedMemberName());
     updateProgress(tr("Creating backup and committing atomically..."), 2);
 
     SMprSaveCommitRequest request;
@@ -10654,34 +10566,35 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         result.success=commitMapCohortMpr(destination,preview.candidateBytes,&result.error);
         result.candidateSha256=preview.sha256;result.changedMembers=preview.changedMembers;
         result.semanticDiff=preview.semanticDiff;result.phase=QStringLiteral("map-cohort");
-    } else result=commitStagedMprTransaction(m_mprDocument,transaction,request);
+    } else {
+        SMprBytesSaveCommitRequest bytesRequest;
+        bytesRequest.source = request.source;
+        bytesRequest.destination = request.destination;
+        bytesRequest.expectedSourceBytes = m_mprDocument.originalBytes();
+        bytesRequest.candidateBytes = preview.candidateBytes;
+        const auto committed = commitValidatedMprBytes(bytesRequest);
+        result.success=committed.success; result.phase=committed.phase;
+        result.error=committed.error; result.candidateSha256=committed.candidateSha256;
+        result.backupPath=committed.backupPath; result.changedMembers=preview.changedMembers;
+        result.semanticDiff=preview.semanticDiff;
+    }
     if(!result.success)
     {
-        const bool semanticRestored = restoreSemanticRes();
-        if(semanticPublicationStarted)
-            emit terrainPublicationFinished(semanticResPath, !semanticRestored);
         ei::log(eLogFatal, QString("Changed MPR save failed phase:%1 path:%2 error:%3 backup:%4")
             .arg(result.phase, destinationPath, result.error,
                  result.backupPath.isEmpty() ? QStringLiteral("not-created")
                                              : result.backupPath));
         QMessageBox::critical(this, tr("Changed MPR save failed"),
-            tr("The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3\nSemantic RES rollback: %4")
+            tr("The changed MPR save did not complete.\n\nPhase: %1\n%2\n\nBackup: %3")
                 .arg(result.phase, result.error,
                      result.backupPath.isEmpty() ? tr("not created")
-                                                 : result.backupPath,
-                     semanticRestored ? tr("complete") : tr("failed")));
+                                                 : result.backupPath));
         return false;
     }
 
     updateProgress(tr("Reopening and adopting validated terrain..."), 3);
     if(adoptAsOpenBaseline && !adoptCommittedLandscapeBaseline(destination, result))
-    {
-        if(semanticPublicationStarted)
-            emit terrainPublicationFinished(semanticResPath, true);
         return false;
-    }
-    if(semanticPublicationStarted)
-        emit terrainPublicationFinished(semanticResPath, true);
 
     ei::log(eLogInfo, QString("Changed MPR semantic diff destination:%1\n%2")
         .arg(destinationPath,
@@ -13949,7 +13862,7 @@ bool CView::buildTerrainSemanticFieldMember(
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
     const QByteArray& profileBytes,
     SResArchiveNewMember* member, CValidationReport* report,
-    const CTerrainEditModel* terrainEdit) const
+    const CTerrainEditModel* terrainEdit, QByteArray* embeddedMprBytes) const
 {
     if(!member) return false;
     *member = SResArchiveNewMember();
@@ -13968,8 +13881,10 @@ bool CView::buildTerrainSemanticFieldMember(
 
     STerrainSemanticFieldDocument document;
     document.mprNamespace = mprNamespace;
-    document.mprSha256 = QCryptographicHash::hash(
-        candidateMprBytes, QCryptographicHash::Sha256);
+    CMprDocument candidate;
+    if(!candidate.loadBytes(candidateMprBytes, destinationMpr.absoluteFilePath(), report))
+        return false;
+    document.terrainTilesSha256 = STerrainSemanticFieldDocument::tileBindingSha256(candidate);
     document.atlasPixelSha256 = rawAtlasHash;
     document.profileSha256 = QCryptographicHash::hash(
         profileBytes, QCryptographicHash::Sha256);
@@ -13995,6 +13910,12 @@ bool CView::buildTerrainSemanticFieldMember(
         member->name.clear();
         return false;
     }
+    if(embeddedMprBytes) {
+        QByteArray embedded;
+        if(!STerrainSemanticFieldDocument::embedInMpr(candidateMprBytes,
+                member->payload, &embedded, report)) return false;
+        *embeddedMprBytes = embedded;
+    }
     return true;
 }
 
@@ -14016,47 +13937,61 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
     const QFileInfo& mprFile, const QString& terrainArchivePath,
     bool requireMember) const
 {
-    if(!terrain || terrainArchivePath.trimmed().isEmpty()
-       || !QFileInfo::exists(terrainArchivePath))
-        return !requireMember;
+    if(!terrain) return !requireMember;
     const QString memberName = STerrainSemanticFieldDocument::memberName(
         mprDocument.mapInfo().innerNamespace, mprFile);
-    const QString profileMemberName =
-        CTerrainAtlasProfileStore::embeddedMemberName(
-            mprDocument.mapInfo().innerNamespace);
+    const QString profileMemberName = CTerrainAtlasProfileStore::embeddedMemberName(
+        mprDocument.mapInfo().innerNamespace);
+    QByteArray payload = mprDocument.memberPayload(
+        STerrainSemanticFieldDocument::embeddedMemberName());
+    const bool embedded = !payload.isEmpty();
     QMap<QString, QByteArray> members;
     qint64 archiveBytesRead = 0;
     QString archiveError;
-    if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
-           terrainArchivePath, {memberName, profileMemberName}, &members,
-           &archiveBytesRead, &archiveError))
-    {
-        ei::log(eLogWarning, QStringLiteral(
-            "Could not inspect terrain semantic-field RES %1: %2")
-            .arg(terrainArchivePath, archiveError));
-        return !requireMember;
+    if(!terrainArchivePath.isEmpty() && QFileInfo::exists(terrainArchivePath)) {
+        const QStringList requested = embedded ? QStringList{profileMemberName}
+                                              : QStringList{memberName, profileMemberName};
+        if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
+               terrainArchivePath, requested, &members, &archiveBytesRead, &archiveError)
+           && !embedded) {
+            ei::log(eLogWarning, QStringLiteral("Could not inspect terrain semantic-field RES %1: %2")
+                .arg(terrainArchivePath, archiveError));
+            return !requireMember;
+        }
     }
-    const QByteArray payload = members.value(memberName);
-    if(payload.isEmpty())
-        return !requireMember;
+    if(!embedded) payload = members.value(memberName);
+    if(payload.isEmpty()) return !requireMember;
     STerrainSemanticFieldDocument document;
     CValidationReport report;
-    const QByteArray rawMprHash = QCryptographicHash::hash(
-        mprDocument.originalBytes(), QCryptographicHash::Sha256);
+    const QString bindingSource = embedded
+        ? mprFile.absoluteFilePath() + QLatin1Char(':')
+            + STerrainSemanticFieldDocument::embeddedMemberName()
+        : terrainArchivePath + QLatin1Char(':') + memberName;
+    const bool decoded = STerrainSemanticFieldDocument::fromBytes(
+        payload, &document, &report, bindingSource);
+    const QByteArray rawMprHash = document.schemaVersion == 1
+        ? QCryptographicHash::hash(mprDocument.originalBytes(), QCryptographicHash::Sha256)
+        : QByteArray();
     QByteArray rawAtlasHash = QByteArray::fromHex(
         terrainProfile.atlasPixelSha256);
     QByteArray profileBytes = members.value(profileMemberName);
+    bool profileDecoded = true;
+    if(document.schemaVersion == 2 && !profileBytes.isEmpty()) {
+        STerrainAtlasProfile storedProfile;
+        profileDecoded = STerrainAtlasProfile::fromBytes(profileBytes, &storedProfile,
+            &report, terrainArchivePath + QLatin1Char(':') + profileMemberName);
+        if(profileDecoded) profileBytes = storedProfile.toBytes();
+    }
     if(profileBytes.isEmpty())
         profileBytes = terrainProfile.toBytes();
     const QByteArray rawProfileHash = QCryptographicHash::hash(
         profileBytes, QCryptographicHash::Sha256);
-    if(!STerrainSemanticFieldDocument::fromBytes(
-           payload, &document, &report,
-           terrainArchivePath + QLatin1Char(':') + memberName)
+    if(!decoded || !profileDecoded
        || !document.validateBinding(
            mprDocument.mapInfo().innerNamespace, rawMprHash, rawAtlasHash,
            rawProfileHash,
-           terrain->tileCountX()+1, terrain->tileCountY()+1, &report)
+           terrain->tileCountX()+1, terrain->tileCountY()+1, &report,
+           STerrainSemanticFieldDocument::tileBindingSha256(mprDocument))
        || !terrain->restoreVirtualMaterialFieldState(
            ETerrainTileLayer::Land, document.land, document.land, &report)
        || !terrain->restoreVirtualMaterialFieldState(
@@ -14065,15 +14000,12 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
     {
         ei::log(eLogWarning, QStringLiteral(
             "Ignored invalid terrain semantic-field member %1: %2")
-            .arg(memberName, report.toText().trimmed()));
+            .arg(bindingSource, report.toText().trimmed()));
         return false;
     }
     ei::log(eLogInfo, QStringLiteral(
-        "Restored exact shared-corner terrain semantics by indexed RES read "
-        "from %1:%2 bytes:%3 archiveBytes:%4")
-        .arg(terrainArchivePath, memberName)
-        .arg(archiveBytesRead)
-        .arg(QFileInfo(terrainArchivePath).size()));
+        "Restored exact shared-corner terrain semantics from %1 payloadBytes:%2 archiveReadBytes:%3")
+        .arg(bindingSource).arg(payload.size()).arg(archiveBytesRead));
     return true;
 }
 
@@ -15172,7 +15104,7 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     finalized.isolatedNamespace = selectedIdentity;
 
-    const STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
+    STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,publicationTerrain,m_mprMaterials,finalized,layer,&report);
     if(!package.success)
     {
@@ -15361,7 +15293,7 @@ void CView::finalizeVirtualTerrainAtlas()
            package.mprBytes, mprDestination, portableProfile.mprNamespace,
            portableProfile.atlasPixelSha256, embeddedProfileMember.payload,
            &semanticFieldMember,
-           &portableProfileReport, &publicationTerrain))
+           &portableProfileReport, &publicationTerrain, &package.mprBytes))
     {
         QMessageBox::critical(this, tr("Atlas package not written"),
             tr("The exact shared-corner material field could not be bound to "

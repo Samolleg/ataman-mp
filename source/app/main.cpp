@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "database_creation_check.h"
 #include "terrain_mob_height_check.h"
+#include "terrain_height_res_save_check.h"
 #include "pointer_modes_check.h"
 #include "world_map_snap_check.h"
 #include "model_gallery_check.h"
@@ -548,6 +549,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption scenarioCheckOption("scenario-layer-check", "Run synthetic read-only scenario integration checks.");
     QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
     QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
+    QCommandLineOption terrainHeightResSaveCheckOption("terrain-height-res-save-check", "Validate height-only MPR saves and unchanged terrain resources with synthetic data.");
     QCommandLineOption terrainMobHeightCheckOption("terrain-mob-height-check", "Validate terrain and MOB height history with synthetic data.");
     QCommandLineOption resourceNavigationCheckOption("resource-navigation-check",
         "Run the sorted Resource Browser reference-navigation regression check.");
@@ -597,6 +599,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption worldMapSnapCheckOption("world-map-snap-check", "Validate native neighbor dragging and common tile-grid placement with synthetic maps.");
     parser.addOption(worldMapSnapCheckOption);
     parser.addOption(terrainMobHeightCheckOption);
+    parser.addOption(terrainHeightResSaveCheckOption);
     parser.addOption(databasePreviewCheckOption);
     parser.addOption(resourceNavigationCheckOption);
     parser.addOption(testRunReportOption);
@@ -660,16 +663,17 @@ int runHeadlessCommand(QApplication& app)
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool pointerModesCheck = parser.isSet(pointerModesCheckOption);
     const bool worldMapSnapCheck = parser.isSet(worldMapSnapCheckOption);
+    const bool terrainHeightResSaveCheck = parser.isSet(terrainHeightResSaveCheckOption);
     const bool terrainMobHeightCheck = parser.isSet(terrainMobHeightCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
     const bool testRunReport = parser.isSet(testRunReportOption);
     if(!objectRandomCheck && !assemblyCatalogCheck && !validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
-       && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck && !terrainMobHeightCheck && !pointerModesCheck
+       && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck && !terrainMobHeightCheck && !terrainHeightResSaveCheck && !pointerModesCheck
        && !testRunReport && !worldMapSnapCheck)
         return -1;
     if((objectRandomCheck ? 1 : 0) + (assemblyCatalogCheck ? 1 : 0) + (validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (modelConnectionCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
-            + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0) + (terrainMobHeightCheck ? 1 : 0) + (pointerModesCheck ? 1 : 0)
+            + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0) + (terrainMobHeightCheck ? 1 : 0) + (terrainHeightResSaveCheck ? 1 : 0) + (pointerModesCheck ? 1 : 0)
             + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) + (worldMapSnapCheck ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
@@ -689,6 +693,7 @@ int runHeadlessCommand(QApplication& app)
     if(pointerModesCheck) return runPointerModesCheck();
     if(worldMapSnapCheck) return runWorldMapSnapCheck();
     if(terrainMobHeightCheck) return runTerrainMobHeightCheck();
+    if(terrainHeightResSaveCheck) return runTerrainHeightResSaveCheck();
     if(profileCatalogCheck) return runProfileModelCatalogCheck();
     if(hierarchyCheck) return runObjectHierarchyCheck();
     if(groupRotationCheck) return runGroupRotationCheck();

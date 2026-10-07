@@ -183,6 +183,7 @@ class CView : public QGLWidget
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
     friend int runTerrainMobHeightCheck();
+    friend int runTerrainHeightResSaveCheck();
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
 
@@ -585,7 +586,8 @@ private:
         const QByteArray& profileBytes,
         SResArchiveNewMember* member,
         CValidationReport* report = nullptr,
-        const CTerrainEditModel* terrainEdit = nullptr) const;
+        const CTerrainEditModel* terrainEdit = nullptr,
+        QByteArray* embeddedMprBytes = nullptr) const;
     bool restoreTerrainSemanticFieldFromArchive(
         const QFileInfo& mprFile, const QString& terrainArchivePath,
         bool requireMember = false);

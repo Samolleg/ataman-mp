@@ -607,6 +607,8 @@ private slots:
     void manualTileStrokeStoresOnlyTouchedSemanticVertices();
     void terrainSemanticFieldRoundTripsWithoutPlacementHistory();
     void terrainSemanticFieldRejectsWrongMprOrAtlasBinding();
+    void terrainSemanticFieldV2IgnoresGeometryAndRejectsTileChanges();
+    void terrainSemanticFieldEmbedsLosslesslyAndCommitsWithRollback();
     void mapReferencedUnassignedAtlasSlotsExcludeUnusedAtlasCapacity();
     void restoredTerrainFamiliesAreMarkedUsedBeforeFirstPaint();
     void terrainSaveRouteDoesNotHashArtworkPerMapCell();
@@ -1350,7 +1352,7 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, true),
              ETerrainMprSaveRoute::PublishModernAtlas);
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, false, true),
-             ETerrainMprSaveRoute::PublishModernAtlas);
+             ETerrainMprSaveRoute::PlainMpr);
     QCOMPARE(terrainMprSaveRoute(false, false, false, false, false, true,
                                  true),
              ETerrainMprSaveRoute::PublishModernAtlas);
@@ -14184,6 +14186,7 @@ void EnduranceDocumentTests::malformedMprTableIsRejected()
 void EnduranceDocumentTests::terrainSemanticFieldRoundTripsWithoutPlacementHistory()
 {
     STerrainSemanticFieldDocument source;
+    source.schemaVersion = 1; // Existing RES members remain readable.
     source.mprNamespace = QStringLiteral("zone2");
     source.mprSha256 = QCryptographicHash::hash(
         QByteArrayLiteral("mpr-candidate"), QCryptographicHash::Sha256);
@@ -14233,6 +14236,105 @@ void EnduranceDocumentTests::terrainSemanticFieldRoundTripsWithoutPlacementHisto
     QVERIFY(first.endsWith(QStringLiteral(".json")));
 }
 
+void EnduranceDocumentTests::terrainSemanticFieldV2IgnoresGeometryAndRejectsTileChanges()
+{
+    CMprDocument original;CTerrainEditModel terrain;CValidationReport report;
+    QVERIFY(original.loadBytes(syntheticMpr(),"binding.mpr",&report));
+    QVERIFY(terrain.load(original,&report));
+    STerrainSemanticFieldDocument field;
+    field.mprNamespace=original.mapInfo().innerNamespace;
+    field.terrainTilesSha256=field.tileBindingSha256(original);
+    field.atlasPixelSha256=QByteArray(32,'a');field.profileSha256=QByteArray(32,'p');
+    field.vertexWidth=17;field.vertexHeight=17;field.land=QVector<qint32>(289,1);
+    const auto valid=[&field](const CMprDocument& mpr) {
+        return field.validateBinding(mpr.mapInfo().innerNamespace,{},field.atlasPixelSha256,
+            field.profileSha256,17,17,nullptr,field.tileBindingSha256(mpr));
+    };
+    QVERIFY(valid(original));
+    STerrainBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=2;
+    const auto height=terrain.makeRaiseLower(brush,300);QVERIFY(!height.isEmpty());
+    QVERIFY(terrain.apply(height,true,&report));
+    CMprEditTransaction edits;QByteArray changed;
+    QVERIFY(terrain.appendSectorEdits(&edits,&report));
+    QVERIFY(original.appendMaxZEdit(200,&edits,&report));
+    QVERIFY(original.applyTransaction(edits,&changed,&report));
+    CMprDocument geometry;QVERIFY(geometry.loadBytes(changed,"geometry.mpr",&report));
+    QVERIFY(changed!=original.originalBytes());QVERIFY(valid(geometry));
+    QVERIFY(terrain.apply(height,false,&report));
+    CMprEditTransaction undone;QByteArray undoBytes;
+    QVERIFY(terrain.appendSectorEdits(&undone,&report));
+    QVERIFY(original.applyTransaction(undone,&undoBytes,&report));
+    QCOMPARE(undoBytes,original.originalBytes());
+    QVERIFY(terrain.apply(height,true,&report));
+    STerrainTileBrush cell;cell.centerX=8;cell.centerY=8;cell.radius=0;
+    const auto painted=terrain.makeTilePaint(cell,ETerrainTileLayer::Land,0,1,2);
+    QVERIFY(!painted.isEmpty());QVERIFY(terrain.apply(painted,true,&report));
+    CMprEditTransaction mixed;QByteArray mixedBytes;
+    QVERIFY(terrain.appendSectorEdits(&mixed,&report));
+    QVERIFY(original.applyTransaction(mixed,&mixedBytes,&report));
+    CMprDocument mixedDoc;QVERIFY(mixedDoc.loadBytes(mixedBytes,"mixed.mpr",&report));
+    QVERIFY(!valid(mixedDoc));
+    QVERIFY(!field.validateBinding(field.mprNamespace,{},QByteArray(32,'b'),field.profileSha256,
+        17,17,nullptr,field.terrainTilesSha256));
+    QVERIFY(!field.validateBinding(field.mprNamespace,{},field.atlasPixelSha256,QByteArray(32,'q'),
+        17,17,nullptr,field.terrainTilesSha256));
+    QVERIFY(!field.validateBinding("another-map",{},field.atlasPixelSha256,field.profileSha256,
+        17,17,nullptr,field.terrainTilesSha256));
+    STerrainSemanticFieldDocument parsed;
+    QVERIFY(STerrainSemanticFieldDocument::fromBytes(field.toBytes(),&parsed,&report));
+    QCOMPARE(parsed.schemaVersion,2);QCOMPARE(parsed.land,field.land);
+    QCOMPARE(parsed.terrainTilesSha256,field.terrainTilesSha256);
+    QVERIFY(!field.toBytes().contains("mprSha256"));
+    // Sparse overlay presence and its material ownership also belong to binding.
+    QByteArray overlay=syntheticOverlaySector();
+    qToLittleEndian<qint16>(0,reinterpret_cast<uchar*>(overlay.data()+5+33*33*16+512*2+2));
+    CMprDocument otherOverlay;QVERIFY(otherOverlay.loadBytes(syntheticMpr(overlay),"overlay.mpr",&report));
+    QVERIFY(!valid(otherOverlay));
+}
+
+void EnduranceDocumentTests::terrainSemanticFieldEmbedsLosslesslyAndCommitsWithRollback()
+{
+    CMprDocument mpr;CValidationReport report;const QByteArray original=syntheticMpr();
+    QVERIFY(mpr.loadBytes(original,"embedded.mpr",&report));
+    STerrainSemanticFieldDocument field;
+    field.mprNamespace=mpr.mapInfo().innerNamespace;field.terrainTilesSha256=field.tileBindingSha256(mpr);
+    field.atlasPixelSha256=QByteArray(32,'a');field.profileSha256=QByteArray(32,'p');
+    field.vertexWidth=17;field.vertexHeight=17;field.land=QVector<qint32>(289,1);
+    QByteArray embedded;
+    QVERIFY2(field.embedInMpr(original,field.toBytes(),&embedded,&report),qPrintable(report.toText()));
+    QCOMPARE(embedded.mid(16,original.size()-16),original.mid(16));
+    QVERIFY(embedded.endsWith("preserved-trailer"));
+    CMprDocument reopened;QVERIFY(reopened.loadBytes(embedded,"embedded.mpr",&report));
+    QCOMPARE(reopened.members().size(),mpr.members().size()+1);
+    QCOMPARE(runtimeMprLookup(embedded,field.embeddedMemberName()),field.toBytes());
+    for(const auto& member:mpr.members()) {
+        QCOMPARE(reopened.memberPayload(member.name),member.payload);
+        QCOMPARE(runtimeMprLookup(embedded,member.name),member.payload);
+    }
+    QByteArray again;QVERIFY(field.embedInMpr(embedded,field.toBytes(),&again,&report));
+    QCOMPARE(again,embedded);
+    field.land[0]=2;QVERIFY(field.embedInMpr(embedded,field.toBytes(),&again,&report));
+    QCOMPARE(again.mid(16,embedded.size()-16),embedded.mid(16));
+    CMprDocument edited;QVERIFY(edited.loadBytes(again,"embedded.mpr",&report));
+    QCOMPARE(edited.members().size(),reopened.members().size());
+    QCOMPARE(runtimeMprLookup(again,field.embeddedMemberName()),field.toBytes());
+    QTemporaryDir temp;QVERIFY(temp.isValid());const QString path=temp.filePath("embedded.mpr");
+    QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write(original),qint64(original.size()));file.close();
+    SMprBytesSaveCommitRequest request;request.source=QFileInfo(path);request.destination=request.source;
+    request.expectedSourceBytes=original;request.candidateBytes=again;
+    request.backupRootOverride=temp.filePath("backups");request.simulateAtomicCommitFailure=true;
+    QVERIFY(!commitValidatedMprBytes(request).success);
+    QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),original);file.close();
+    request.simulateAtomicCommitFailure=false;QVERIFY(commitValidatedMprBytes(request).success);
+    QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),again);file.close();
+    // A colliding opaque member is preservation-only, even under our reserved name.
+    CResArchiveDocument res;QStringList errors;QVERIFY(res.loadBytes(original,"collision.mpr",&errors));
+    SResArchiveNewMember collision;collision.name=field.embeddedMemberName();collision.payload="opaque-owner-data";
+    QByteArray colliding;QVERIFY(res.buildWithAppendedMembers({collision},&colliding,&errors));
+    CValidationReport rejected;QVERIFY(!field.embedInMpr(colliding,field.toBytes(),&again,&rejected));
+    QVERIFY(again.isEmpty());QVERIFY(rejected.hasErrors());
+}
+
 void EnduranceDocumentTests::terrainSaveRouteDoesNotHashArtworkPerMapCell()
 {
     const QByteArray source = viewSource();
@@ -14253,6 +14355,7 @@ void EnduranceDocumentTests::terrainSaveRouteDoesNotHashArtworkPerMapCell()
 void EnduranceDocumentTests::terrainSemanticFieldRejectsWrongMprOrAtlasBinding()
 {
     STerrainSemanticFieldDocument source;
+    source.schemaVersion = 1;
     source.mprNamespace = QStringLiteral("zone2");
     source.mprSha256 = QCryptographicHash::hash(
         QByteArrayLiteral("mpr-a"), QCryptographicHash::Sha256);

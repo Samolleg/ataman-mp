@@ -12,6 +12,7 @@
 
 class CMprDocument;
 class CTerrainVirtualMaterialField;
+class CTerrainWorkingAtlas;
 class CMprEditTransaction;
 class CValidationReport;
 
@@ -569,6 +570,7 @@ public:
     STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;
     bool isDirty() const;
+    bool usesUnsavedAtlasArtwork(const CTerrainWorkingAtlas& atlas) const;
     void extendMaterialTable(int count) { if(count>=m_materialCount && count<=32767)m_materialCount=count; }
     int tileCountX() const { return m_sectorCountX * 16; }
     int tileCountY() const { return m_sectorCountY * 16; }

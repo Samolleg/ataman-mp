@@ -1545,6 +1545,19 @@ bool CTerrainEditModel::isDirty() const
     return false;
 }
 
+bool CTerrainEditModel::usesUnsavedAtlasArtwork(const CTerrainWorkingAtlas& atlas) const
+{
+    for(const auto layer : {ETerrainTileLayer::Land, ETerrainTileLayer::Overlay})
+        for(int y=0; y<tileCountY(); ++y)
+            for(int x=0; x<tileCountX(); ++x) {
+                bool available=false;
+                const auto packed=packedTile(x,y,layer,&available);
+                if(available && atlas.tileOriginForSlot(SMprPackedTile::decode(packed).atlasSlot())
+                    != ETerrainWorkingTileOrigin::AuthoredMap) return true;
+            }
+    return false;
+}
+
 bool CTerrainEditModel::tileLocation(int globalX, int globalY, int* sectorIndex,
                                      int* localTile, CValidationReport* report) const
 {

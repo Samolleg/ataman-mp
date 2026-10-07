@@ -333,7 +333,8 @@ bool CView::saveWorldTerrainMaps()
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];
         CMprDocument staged=doc->baseline;
         if(id==active && m_workingTerrainAtlas && !ensureWorldTerrainAtlas(id,&report))return refuse(report.toText());
-        if(doc->atlas) {
+        const bool publishAtlas = doc->atlas && doc->terrain.usesUnsavedAtlasArtwork(*doc->atlas);
+        if(publishAtlas) {
             const auto source=m_worldTerrainAtlasSources.value(id);
             if(source.archive.isEmpty())return refuse(tr("Не определён архив текстур карты %1.").arg(path));
             const QString archiveId=CWorldTerrainSession::key(source.archive);
@@ -386,23 +387,31 @@ bool CView::saveWorldTerrainMaps()
         CMprEditTransaction transaction(QStringLiteral("World terrain and materials"));
         QByteArray candidate;
         if(!doc->terrain.appendSectorEdits(&transaction,&report)
-           || (doc->atlas ? !staged.appendMaxZEdit(doc->terrain.maxZ(),&transaction,&report)
+           || (publishAtlas ? !staged.appendMaxZEdit(doc->terrain.maxZ(),&transaction,&report)
                : !staged.appendMapParametersEdit(doc->terrain.maxZ(),id==active?m_mprMaterials:doc->materials,
                  id==active?m_mprAnimatedTiles:staged.mapInfo().animatedTiles,&transaction,&report))
            || !staged.applyTransaction(transaction,&candidate,&report))return refuse(report.toText());
         CTerrainEditModel check;
         if(!reopened[id].loadBytes(candidate,path,&report) || !check.load(reopened[id],&report) || report.hasErrors())return refuse(report.toText());
         if(doc->atlas) {
-            const QString archiveId=CWorldTerrainSession::key(m_worldTerrainAtlasSources[id].archive);
-            const auto profile=profiles[id];
+            const auto source=m_worldTerrainAtlasSources[id];
+            const auto profile=publishAtlas ? profiles[id] : source.profile;
             SResArchiveNewMember semantic;
-            if(!buildTerrainSemanticFieldMember(candidate,QFileInfo(path),profile.mprNamespace,profile.atlasPixelSha256,profile.toBytes(),&semantic,&report,&doc->terrain))return refuse(report.toText());
-            const QString name=CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace);
-            if(published[archiveId].contains(name) && published[archiveId][name]!=profile.toBytes())return refuse(tr("Несовместимые профили общего атласа."));
-            published[archiveId][name]=profile.toBytes();
-            if(!semantic.name.isEmpty()) {
-                if(published[archiveId].contains(semantic.name) && published[archiveId][semantic.name]!=semantic.payload)return refuse(tr("Несовместимые поля материалов одного пространства имён."));
-                published[archiveId][semantic.name]=semantic.payload;
+            if(!buildTerrainSemanticFieldMember(candidate,QFileInfo(path),
+                    profile.mprNamespace,profile.atlasPixelSha256,profile.toBytes(),
+                    &semantic,&report,&doc->terrain,&candidate)) return refuse(report.toText());
+            if(!reopened[id].loadBytes(candidate,path,&report))return refuse(report.toText());
+            if(publishAtlas) {
+                const QString archiveId=CWorldTerrainSession::key(source.archive);
+                const QString name=CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace);
+                if(published[archiveId].contains(name) && published[archiveId][name]!=profile.toBytes())
+                    return refuse(tr("Несовместимые профили общего атласа."));
+                published[archiveId][name]=profile.toBytes();
+                if(!semantic.name.isEmpty()) {
+                    if(published[archiveId].contains(semantic.name) && published[archiveId][semantic.name]!=semantic.payload)
+                        return refuse(tr("Несовместимые поля материалов одного пространства имён."));
+                    published[archiveId][semantic.name]=semantic.payload;
+                }
             }
         }
         SMapSaveFile file;file.path=path;file.before=doc->baseline.originalBytes();file.after=candidate;files.append(file);
@@ -448,7 +457,7 @@ bool CView::saveWorldTerrainMaps()
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];
         if(id==active) {
             const QString hash=QString::fromLatin1(QCryptographicHash::hash(reopened[id].originalBytes(),QCryptographicHash::Sha256).toHex());
-            if(doc->atlas) {
+            if(profiles.contains(id)) {
                 if(!adoptCompleteTerrainBaseline(QFileInfo(path),hash,physical[id],m_worldTerrainAtlasSources[id].archive,profiles[id],false))
                     return refuse(tr("Файлы сохранены, но предпросмотр требует повторного открытия карты."));
             } else {
