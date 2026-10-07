@@ -150,7 +150,6 @@ private slots:
     void regenerationIndexesCollisionCoverageOnce();
     void regenerationHandlesPopulatedMapScale();
     void parsesProfileTerrainTraversalRegistry();
-    void sourceSwitchOwnsRegenerationLifecycle();
     void invalidationClassifiesOnlyGraphBuilderInputs();
     void invalidationTraversesUndoMacros();
     void staticObjectNidInvalidationIsScoped();
@@ -1137,27 +1136,6 @@ void AiGraphDocumentTests::parsesProfileTerrainTraversalRegistry()
     QCOMPARE(traversal.at(4).speed, 700);
     QCOMPARE(traversal.at(4).cost, 50);
     QCOMPARE(traversal.at(3).speed, -1);
-}
-
-void AiGraphDocumentTests::sourceSwitchOwnsRegenerationLifecycle()
-{
-    const SAiGraphPreviewSourceTransition loaded =
-        aiGraphPreviewSourceTransition(true, true);
-    QVERIFY(!loaded.enableAutomaticRegeneration);
-    QVERIFY(loaded.cancelPendingRegeneration);
-    QVERIFY(!loaded.queueRegeneration);
-
-    const SAiGraphPreviewSourceTransition freshGenerated =
-        aiGraphPreviewSourceTransition(false, true);
-    QVERIFY(freshGenerated.enableAutomaticRegeneration);
-    QVERIFY(!freshGenerated.cancelPendingRegeneration);
-    QVERIFY(!freshGenerated.queueRegeneration);
-
-    const SAiGraphPreviewSourceTransition staleGenerated =
-        aiGraphPreviewSourceTransition(false, false);
-    QVERIFY(staleGenerated.enableAutomaticRegeneration);
-    QVERIFY(!staleGenerated.cancelPendingRegeneration);
-    QVERIFY(staleGenerated.queueRegeneration);
 }
 
 void AiGraphDocumentTests::invalidationClassifiesOnlyGraphBuilderInputs()

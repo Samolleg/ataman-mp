@@ -12,15 +12,6 @@ public:
     virtual bool invalidatesAiGraphPreview() const = 0;
 };
 
-struct SAiGraphPreviewSourceTransition
-{
-    bool enableAutomaticRegeneration{false};
-    bool cancelPendingRegeneration{false};
-    bool queueRegeneration{false};
-};
-
-SAiGraphPreviewSourceTransition aiGraphPreviewSourceTransition(
-    bool selectLoadedSource, bool regeneratedGraphFresh);
 bool aiGraphObjectPropertyInvalidatesPreview(ENodeType nodeType,
                                              EObjParam property);
 bool aiGraphUndoCommandInvalidatesPreview(const QUndoCommand* command);

@@ -1122,7 +1122,7 @@ void EnduranceDocumentTests::aiGraphLoadedSourceStopsRegeneratedLifecycle()
     const int loadedBranch = widget.indexOf("m_aiGraphPreviewUsesLoadedSource = true;");
     QVERIFY2(loadedBranch >= 0,
              "Loaded AI graph source-selection branch was not found");
-    QVERIFY2(widget.indexOf("stopAiGraphPreviewAutoRegeneration();", loadedBranch) > loadedBranch,
+    QVERIFY2(widget.indexOf("cancelPendingAiGraphPreviewRegeneration();", loadedBranch) > loadedBranch,
              "Switching back to the loaded graph leaves regenerated-mode work active");
 }
 

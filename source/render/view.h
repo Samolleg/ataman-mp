@@ -186,6 +186,7 @@ class CView : public QGLWidget
     friend int runTerrainHeightResSaveCheck();
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
+    friend int runAiGraphRegenerationCheck();
 
 public:
     struct SNidRepair
@@ -755,9 +756,9 @@ private:
     void syncAiGraphPreviewWidget();
     void rebuildAiGraphOverlayGeometry();
     void startAiGraphPreviewRegeneration();
-    void beginAiGraphPreviewRegeneration(bool selectRegenerated);
-    void scheduleAiGraphPreviewRegeneration();
-    void stopAiGraphPreviewAutoRegeneration();
+    void beginAiGraphPreviewRegeneration();
+    void invalidateAiGraphPreview();
+    void cancelPendingAiGraphPreviewRegeneration();
     bool captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                          QString* error);
     void syncEnvironmentPreviewWidget(float mapTimeHours);
@@ -1371,7 +1372,7 @@ private:
     bool m_unitVisualPreparationSuspended{false};
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};
-    bool m_aiGraphAutoRegenerationEnabled{false};
+    // Only another explicit button click can queue a follow-up calculation.
     bool m_aiGraphRegenerationPending{false};
     bool m_aiGraphRegeneratedFresh{false};
     bool m_aiGraphPreviewUsesLoadedSource{true};

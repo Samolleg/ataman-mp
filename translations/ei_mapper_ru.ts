@@ -6591,8 +6591,12 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2993" />
-            <source>Build a non-saving diagnostic graph from current terrain and static-object collision proxies.</source>
-            <translation>Построить временный граф по текущему рельефу и границам неподвижных объектов, не сохраняя его.</translation>
+            <source>Calculate the graph once from current terrain and static objects. Map edits only mark it out of date; click again to recalculate.</source>
+            <translation>Рассчитать граф один раз по текущему рельефу и неподвижным объектам. Изменения карты помечают граф устаревшим; для пересчёта нажмите кнопку снова.</translation>
+        </message>
+        <message>
+            <source>Graph is out of date. Click Regenerate preview.</source>
+            <translation>Граф устарел. Нажмите «Обновить граф».</translation>
         </message>
         <message>
             <location filename="../source/render/view.cpp" line="2996" />

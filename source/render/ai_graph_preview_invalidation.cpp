@@ -4,16 +4,6 @@
 
 #include <QUndoCommand>
 
-SAiGraphPreviewSourceTransition aiGraphPreviewSourceTransition(
-    bool selectLoadedSource, bool regeneratedGraphFresh)
-{
-    SAiGraphPreviewSourceTransition result;
-    result.enableAutomaticRegeneration = !selectLoadedSource;
-    result.cancelPendingRegeneration = selectLoadedSource;
-    result.queueRegeneration = !selectLoadedSource && !regeneratedGraphFresh;
-    return result;
-}
-
 bool aiGraphObjectPropertyInvalidatesPreview(ENodeType nodeType,
                                              EObjParam property)
 {

@@ -1708,18 +1708,14 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
             this, &CView::updateOverlaySculptPointer);
     m_aiGraphRegenerationTimer = new QTimer(this);
     m_aiGraphRegenerationTimer->setSingleShot(true);
-    m_aiGraphRegenerationTimer->setInterval(500);
+    m_aiGraphRegenerationTimer->setInterval(0);
     connect(m_aiGraphRegenerationTimer, &QTimer::timeout, this, [this]()
     {
-        if(!m_aiGraphAutoRegenerationEnabled)
+        if(!m_aiGraphRegenerationPending)
             return;
         if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
-        {
-            m_aiGraphRegenerationPending = true;
             return;
-        }
-        m_aiGraphRegenerationPending = false;
-        beginAiGraphPreviewRegeneration(false);
+        beginAiGraphPreviewRegeneration();
     });
     // Character preparation must continue while the viewport is idle. The old
     // draw-driven scheduler stopped permanently when Qt had no other reason to
@@ -2472,7 +2468,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
             navigationChange = aiGraphUndoCommandInvalidatesPreview(command);
         }
         if(navigationChange)
-            scheduleAiGraphPreviewRegeneration();
+            invalidateAiGraphPreview();
         m_lastUndoStackIndex = index;
     });
 
@@ -3724,7 +3720,7 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphRegenerateButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphRegenerateButton->setText(tr("Regenerate preview"));
     m_aiGraphRegenerateButton->setToolTip(tr(
-        "Build a non-saving diagnostic graph from current terrain and static-object collision proxies."));
+        "Calculate the graph once from current terrain and static objects. Map edits only mark it out of date; click again to recalculate."));
     m_aiGraphCompareButton = new QToolButton(m_aiGraphPreviewBody);
     m_aiGraphCompareButton->setText(tr("Diff loaded / regenerated"));
     m_aiGraphCompareButton->setToolTip(tr(
@@ -3865,21 +3861,13 @@ void CView::initAiGraphPreviewWidget()
             m_aiGraphPreviewUsesLoadedSource = true;
             m_aiGraphDocument = m_aiGraphLoadedDocument;
             m_aiGraphSource = m_aiGraphLoadedSource;
-            stopAiGraphPreviewAutoRegeneration();
+            cancelPendingAiGraphPreviewRegeneration();
         }
         m_aiGraphOverlayDirty = true;
         if(m_aiGraphPreviewToggle && !m_aiGraphPreviewToggle->isChecked())
             m_aiGraphPreviewToggle->setChecked(true);
         syncAiGraphPreviewWidget();
         update();
-        const SAiGraphPreviewSourceTransition transition =
-            aiGraphPreviewSourceTransition(
-                m_aiGraphPreviewUsesLoadedSource,
-                m_aiGraphRegeneratedFresh);
-        m_aiGraphAutoRegenerationEnabled =
-            transition.enableAutomaticRegeneration;
-        if(transition.queueRegeneration)
-            scheduleAiGraphPreviewRegeneration();
     });
     QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
@@ -3917,6 +3905,12 @@ void CView::syncAiGraphPreviewWidget()
         ? tr("%1\n%2 x %3")
               .arg(m_aiGraphSource).arg(m_aiGraphDocument.width()).arg(m_aiGraphDocument.height())
         : tr("No graph source loaded"));
+    if(!m_aiGraphPreviewUsesLoadedSource && !m_aiGraphRegeneratedFresh
+       && m_aiGraphRegeneratedDocument.isValid()
+       && !(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
+       && !m_aiGraphRegenerationPending)
+        m_aiGraphSourceLabel->setText(m_aiGraphSourceLabel->text() + "\n"
+            + tr("Graph is out of date. Click Regenerate preview."));
     m_aiGraphPreviewToggle->setToolTip(available
         ? tr("Show or hide the current AI graph layer in the viewport (N).")
         : tr("Load a MOB with an embedded graph or a matching external .grp file."));
@@ -3962,11 +3956,7 @@ void CView::syncAiGraphPreviewWidget()
 
 void CView::refreshAiGraphPreviewSource()
 {
-    ++m_aiGraphBuildRequest;
-    m_aiGraphAutoRegenerationEnabled = false;
-    m_aiGraphRegenerationPending = false;
-    if(m_aiGraphRegenerationTimer)
-        m_aiGraphRegenerationTimer->stop();
+    cancelPendingAiGraphPreviewRegeneration();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
     m_aiGraphLoadedBytes.clear();
@@ -4313,7 +4303,7 @@ void CView::startAiGraphPreviewRegeneration()
     }
     ++m_aiGraphBuildRequest;
     m_aiGraphRegeneratedFresh = false;
-    beginAiGraphPreviewRegeneration(true);
+    beginAiGraphPreviewRegeneration();
 }
 
 void CView::refreshAiGraphOwnership()
@@ -4321,7 +4311,7 @@ void CView::refreshAiGraphOwnership()
     refreshAiGraphPreviewSource();
 }
 
-void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
+void CView::beginAiGraphPreviewRegeneration()
 {
     if(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
     {
@@ -4337,11 +4327,11 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
     if(!captureAiGraphPreviewBuildInput(&input, &error))
     {
         emit updateMsg(error);
+        syncAiGraphPreviewWidget();
+        update();
         return;
     }
-    if(selectRegenerated)
-        m_aiGraphPreviewUsesLoadedSource = false;
-    m_aiGraphAutoRegenerationEnabled = true;
+    m_aiGraphPreviewUsesLoadedSource = false;
 
     if(!m_aiGraphBuildWatcher)
     {
@@ -4353,7 +4343,9 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
             const SAiGraphPreviewBuildResult result = m_aiGraphBuildWatcher->result();
             if(request != m_aiGraphBuildRequest || m_aiGraphRegenerationPending)
             {
+                ei::log(eLogInfo, "AI graph preview result discarded: input or explicit request changed");
                 syncAiGraphPreviewWidget();
+                update();
                 if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
                     m_aiGraphRegenerationTimer->start();
                 return;
@@ -4362,8 +4354,6 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
             {
                 emit updateMsg(tr("AI graph preview regeneration failed: %1").arg(result.error));
                 syncAiGraphPreviewWidget();
-                if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
-                    m_aiGraphRegenerationTimer->start();
                 return;
             }
             m_aiGraphRegeneratedDocument = result.document;
@@ -4391,8 +4381,6 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
                 ei::log(eLogWarning, "AI graph preview: " + warning);
             syncAiGraphPreviewWidget();
             update();
-            if(m_aiGraphRegenerationPending && m_aiGraphRegenerationTimer)
-                m_aiGraphRegenerationTimer->start();
         });
     }
     const quint64 request = m_aiGraphBuildRequest;
@@ -4408,31 +4396,22 @@ void CView::beginAiGraphPreviewRegeneration(bool selectRegenerated)
     }));
 }
 
-void CView::scheduleAiGraphPreviewRegeneration()
+void CView::invalidateAiGraphPreview()
 {
     m_aiGraphLoadedSurfaceHeights.clear();
     m_aiGraphLoadedSurfacesResolved = false;
     m_aiGraphOverlayDirty = true;
     m_aiGraphRegeneratedFresh = false;
-    if(!m_aiGraphAutoRegenerationEnabled || m_aiGraphPreviewUsesLoadedSource
-       || !m_terrainEditAvailable || !m_aiGraphRegenerationTimer)
-        return;
+    // Reject a snapshot built before this edit, but never schedule work for an
+    // edit. A pending explicit click remains authorized to use the latest input.
     ++m_aiGraphBuildRequest;
-    m_aiGraphPreviewUsesLoadedSource = false;
-    if(m_aiGraphRegeneratedDocument.isValid())
-    {
-        m_aiGraphDocument = m_aiGraphRegeneratedDocument;
-        m_aiGraphSource = m_aiGraphRegeneratedSource;
-        m_aiGraphOverlayDirty = true;
-    }
-    m_aiGraphRegenerationPending = true;
-    m_aiGraphRegenerationTimer->start();
+    syncAiGraphPreviewWidget();
+    update();
 }
 
-void CView::stopAiGraphPreviewAutoRegeneration()
+void CView::cancelPendingAiGraphPreviewRegeneration()
 {
     ++m_aiGraphBuildRequest;
-    m_aiGraphAutoRegenerationEnabled = false;
     m_aiGraphRegenerationPending = false;
     if(m_aiGraphRegenerationTimer)
         m_aiGraphRegenerationTimer->stop();
@@ -5987,11 +5966,7 @@ bool CView::prepareForApplicationShutdown()
         m_mprModifyTimer->stop();
     m_sculptRepeatTimer->stop();
     m_overlayPointerTimer->stop();
-    ++m_aiGraphBuildRequest;
-    m_aiGraphAutoRegenerationEnabled = false;
-    m_aiGraphRegenerationPending = false;
-    if(m_aiGraphRegenerationTimer)
-        m_aiGraphRegenerationTimer->stop();
+    cancelPendingAiGraphPreviewRegeneration();
     if(m_aiGraphBuildWatcher)
     {
         QObject::disconnect(m_aiGraphBuildWatcher, nullptr, this, nullptr);
