@@ -1,6 +1,7 @@
 #include "ui_theme.h"
 #include <QApplication>
 #include <QPalette>
+#include <QTableWidgetItem>
 namespace ei {
 QColor uiTextColor(UiTextTone tone)
 {
@@ -18,6 +19,18 @@ QColor uiTextColor(UiTextTone tone)
 QString uiTextStyle(UiTextTone tone)
 {
     return QStringLiteral("color: %1;").arg(uiTextColor(tone).name());
+}
+
+void applyRelationCellColors(QTableWidgetItem* cell, int value)
+{
+    // Shared by the relation editor and inspector. Neutral olive cells need black text.
+    cell->setForeground(value == 1 ? Qt::black : Qt::white);
+    switch (value) {
+    case 0: cell->setBackground(Qt::darkGreen); break;
+    case 1: cell->setBackground(Qt::darkYellow); break;
+    case 2: cell->setBackground(Qt::darkRed); break;
+    default: cell->setData(Qt::BackgroundRole, QVariant()); break;
+    }
 }
 
 void installDarkUiPalette()

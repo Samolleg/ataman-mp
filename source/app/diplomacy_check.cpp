@@ -130,7 +130,10 @@ int runDiplomacyCheck()
     auto* unit=new CUnit; unit->setMapId(71);
     QSharedPointer<IPropertyBase> player(new propChar(eObjParam_PLAYER,char(11))); unit->applyParam(player);
     mob->nodes().append(unit); mob->setScript("WorldScript(SetPlayer(GetObject(71),12))");
-    mob->setDiplomacyField(QVector<QVector<uint>>(32,QVector<uint>(32,0)));
+    QVector<QVector<uint>> fixtureRelations(32,QVector<uint>(32));
+    for(int r=0;r<32;++r) for(int c=0;c<32;++c)
+        fixtureRelations[r][c]=r==c?0:uint((r+c)%2+1);
+    mob->setDiplomacyField(fixtureRelations);
     mob->captureCleanProjection(); mob->setDirty(false); view->m_aMob.append(mob); view->m_activeMob=mob;
     auto* button=window.findChild<QToolButton*>("diplomacyToolbarButton");
     auto* group=window.findChild<QGroupBox*>("scenarioToolGroup");
@@ -151,7 +154,9 @@ int runDiplomacyCheck()
     dialog->findChild<QLineEdit*>("diplomacyNpcFilter")->clear();
     dialog->findChild<QTabWidget*>()->setCurrentIndex(2);
     auto* relations=dialog->findChild<QTableWidget*>("diplomacyRelations");
-    check(relations->rowCount()==32 && relations->item(1,2)->text()=="0" && relations->editTriggers()==QAbstractItemView::NoEditTriggers,"read-only actual relation matrix");
+    check(relations->rowCount()==32 && relations->item(1,2)->text()==QString::number(fixtureRelations[1][2]) && relations->editTriggers()==QAbstractItemView::NoEditTriggers,"read-only actual relation matrix");
+    if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE"))
+        check(dialog->grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".relations.png"),"hidden relation matrix capture");
     check(mob->parameterState()==before && !mob->isDirty() && window.m_undoStack->count()==0,"inspection preserves MOB, script, dirty flag and history");
     view->openScenarioSource(mob,view->scenarioScriptText(mob),-1);
     auto* scriptWindow=view->findChild<CMobScriptWindow*>();
@@ -204,6 +209,8 @@ int runDiplomacyCheck()
             check(waitFor(preview) && preview.result().sources.size()==inspected.sources.size()
                 && preview.result().diagnostics==inspected.diagnostics
                 && preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus.png"),"hidden real corpus overview capture");
+            preview.findChild<QTabWidget*>()->setCurrentIndex(2);
+            check(preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus-relations.png"),"hidden real corpus relation matrix capture");
         }
     }
     qApp->removeEventFilter(&hidden); out<<"RESULT: "<<passed<<" PASS, "<<failed<<" FAIL\n";

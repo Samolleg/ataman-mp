@@ -1,4 +1,5 @@
 #include "window_geometry.h"
+#include "ui_theme.h"
 #include <QTableWidget>
 #include <QMessageBox>
 #include <QTextBlock>
@@ -234,28 +235,6 @@ void CMobParameters::generateTitle()
     setWindowTitle(title);
 }
 
-void colorizeCell(QTableWidgetItem* pCell, int value)
-{
-    // Neutral cells have an olive background: black is readable there,
-    // whereas ally/war cells need white. Reapply after each relation change.
-    pCell->setForeground(value == 1 ? Qt::black : Qt::white);
-    switch (value)
-    {
-    case 0: // if diplomacy table - friend. if scripts - neutral
-        pCell->setBackground(Qt::darkGreen);
-        break;
-    case 1: // if diplomacy table - neutral. if scripts - friend
-        pCell->setBackground(Qt::darkYellow);
-        break;
-    case 2:
-        pCell->setBackground(Qt::darkRed);
-        break;
-    default:
-        pCell->setData(Qt::BackgroundRole, QVariant());
-        break;
-    }
-}
-
 QString diplomacyValueText(uint value)
 {
     return QString::number(value);
@@ -340,7 +319,7 @@ void CMobParameters::updateWindow()
                 auto pCell = m_aCell[i*32 + j];
                 val = dipTable[i][j];
                 setDiplomacyCellPresentation(pCell.get(), uint(val));
-                colorizeCell(pCell.get(), val);
+                ei::applyRelationCellColors(pCell.get(), val);
                 pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
         }
@@ -907,7 +886,7 @@ void CMobParameters::updateDiplomacyTable()
             {
                 auto pCell = m_aCell[i*32 + j];
                 setDiplomacyCellPresentation(pCell.get(), dipTable[i][j]);
-                colorizeCell(pCell.get(), int(dipTable[i][j]));
+                ei::applyRelationCellColors(pCell.get(), int(dipTable[i][j]));
                 //pCell->setFlags(pCell->flags() & ~Qt::ItemIsEditable);
             }
         }
@@ -925,7 +904,7 @@ void CMobParameters::updateDiplomacyTable(int row, int column)
         auto pCell = m_aCell[row*32 + column];
         int value = dipTable[row][column];
         setDiplomacyCellPresentation(pCell.get(), uint(value));
-        colorizeCell(pCell.get(), value);
+        ei::applyRelationCellColors(pCell.get(), value);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "diplomacy_dialog.h"
 #include "window_geometry.h"
+#include "ui_theme.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTreeWidget>
 #include <QTableWidget>
@@ -233,6 +234,7 @@ void CDiplomacyDialog::populateRelations() {
     m_relations->horizontalHeader()->setDefaultSectionSize(95);
     for(int r=0;r<32;++r) for(int c=0;c<32;++c) {
         auto* item=new QTableWidgetItem(QString::number(src->relations[r][c]));
+        ei::applyRelationCellColors(item, int(src->relations[r][c]));
         item->setTextAlignment(Qt::AlignCenter);
         item->setToolTip(names[r]+" → "+names[c]); m_relations->setItem(r,c,item);
     }
