@@ -35,17 +35,23 @@ Use the documented release wrapper from the active worktree:
 The raw shadow-build directory is compiler output. It is never the folder
 given to a tester.
 
-Run proportionate automated validation before handoff. This normally includes
-the release build and `--ui-widget-check`, plus focused document, renderer,
-runtime, or packaging checks for the changed area. Headless commands may run
-automatically. Do not open the packaged GUI for the user or begin their manual
-test on their behalf.
+Choose automated validation for the changed behavior and concrete risks before
+handoff. The release build and applicable --ui-widget-check, document, renderer,
+runtime or packaging checks form the starting set; unrelated suites are not
+automatic gates. Headless checks may run under the task's authorization. Do not
+open the packaged GUI or perform the user's manual acceptance on their behalf.
 
-Report every failure, timeout and skipped check. A historical exact-commit
-rebuild may be delivered as an explicitly unvalidated test artifact with these
-limits, not as a verified release. For a new fix/feature, failure of its original
-reproduction or relevant regression blocks declaring the task complete. Do not
-change an explicitly requested historical commit to make checks pass.
+Reuse successful checks when the relevant tested inputs and artifacts are unchanged.
+Repeat for relevant changes, new failure evidence, stale evidence or investigation
+of observed instability. Do not repeat the same validator on unchanged bytes merely
+because another workflow step mentions it.
+
+Report failures, timeouts and skipped required checks, grouped with links to details.
+Unavailable acceptance remains open; continue independent authorized work. A
+historical exact-commit rebuild may be delivered as an explicitly unvalidated test
+artifact, not a verified release. A new fix/feature is not complete when its original
+scenario or relevant regression fails. Do not alter an explicitly requested
+historical commit to make checks pass.
 
 ## 2. Stage a temporary runnable package
 
@@ -154,13 +160,18 @@ identity, manifest syntax, safe/unique paths, every SHA-256, missing files and
 complete coverage. finalize_package.ps1 invokes this validator after generating
 the manifest. The validator also rejects linked manifest paths.
 
-The finalizer and validator must pass. Independently compare the fresh tested
-executable and staged executable hashes and verify the staged --version result
-before finalization. Record source SHA, absolute package path and verification
-results in the handoff evidence. Do not modify or run the finalized package.
-Package completeness remains distinct from functional test success: a valid
-manifest cannot prove that the editor's behavior is correct. Historical reports
-before version 21 retain their earlier independent-check requirements as evidence.
+The finalizer must pass, including its internal validate_distribution.ps1 call.
+That successful result satisfies package validation; a separate invocation on the
+same unchanged package is not required. Re-run the validator after package changes, missing
+or stale validation evidence, or a new integrity concern.
+
+Separately compare the fresh tested and staged executable hashes and check staged
+--version before finalization: these establish executable identity and runnable
+staging, not the same manifest question. Record source SHA, package path and the
+relevant results. Do not modify or run the finalized package. Installed-file and
+ZIP verification below remain required for those distinct outputs; package integrity
+never substitutes for functional acceptance. Older reports retain their historical
+independent-check requirements as evidence.
 
 For each Ataman version use a fresh shadow-build directory: changing VERSION
 changes a compiler definition, which incremental Make builds may fail to notice.

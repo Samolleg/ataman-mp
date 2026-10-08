@@ -101,9 +101,16 @@ validation.
 
 ## Development evidence
 
-- Reproduce the original issue before changing code and trace the pipeline to
-  the first incorrect value or decision.
-- A fix is complete only when that reproduction passes without proportional
-  regressions.
+- For a defect, record its symptoms, conditions and expected result, then trace
+  the relevant pipeline to the first incorrect value or decision. When reproduction
+  is intermittent or unavailable, use logs, dumps, source evidence and observations;
+  give further attempts a concrete hypothesis. Do not present a hypothesis as proven.
+- For a new feature, define the expected scenario. Verify the original defect or
+  expected behavior and proportionate regression. Reuse successful evidence for
+  unchanged relevant inputs; repeat only for a changed risk, new failure, stale
+  evidence or investigation of observed instability, as specified in AGENTS.md.
+- Complete the agreed result with sufficient evidence. State unavailable required
+  checks explicitly and continue independent authorized work; packaging or repeated
+  indirect checks do not substitute for functional acceptance.
 - Keep research notes, rejected experiments, corpus measurements, and detailed
-  alpha changelists in `docs/`, validation reports, or Git history.
+  changelists in docs, validation reports, or Git history. Scale evidence to the task.
