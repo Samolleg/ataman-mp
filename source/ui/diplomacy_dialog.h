@@ -11,6 +11,10 @@ class QLineEdit;
 class QPushButton;
 class QTimer;
 class QTabWidget;
+class QTreeWidgetItem;
+class QCheckBox;
+class QPlainTextEdit;
+class QSplitter;
 
 class CDiplomacyDialog final : public QDialog
 {
@@ -32,6 +36,11 @@ private:
     void populateGroups();
     void populateDetails();
     void populateRelations();
+    void populateRelationSources();
+    void filterGroups();
+    void showDetails();
+    void showRelationDetails();
+    void sizeRelationCells();
     bool includesSource(const QString& key) const;
     const diplomacy::Source* relationSource() const;
     Snapshot m_snapshot;
@@ -43,9 +52,16 @@ private:
     bool m_workerPending = false;
     QTreeWidget *m_groups, *m_npcs, *m_scripts;
     QTableWidget* m_relations;
-    QComboBox* m_sources;
+    QComboBox *m_sources, *m_relationSources;
     QLineEdit* m_filter;
-    QLabel *m_summary, *m_relationNotice;
+    QLabel *m_summary, *m_relationNotice, *m_relationSelection, *m_detailsTitle, *m_emptyNotice, *m_help;
     QPushButton* m_edit;
     QTabWidget* m_tabs;
+    QCheckBox* m_hideEmpty;
+    QPlainTextEdit* m_details;
+    QWidget* m_detailPanel;
+    QSplitter *m_split, *m_detailsSplit;
+    int m_selectedGroup = -2;
+    QString m_selectedRelationSource;
+    QString m_selectedNpcKey, m_selectedScriptKey;
 };

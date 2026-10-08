@@ -27,6 +27,11 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QSettings>
+#include <QCheckBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QHeaderView>
+#include <QLabel>
 
 namespace {
 class HiddenDiplomacyWidgets : public QObject {
@@ -196,6 +201,104 @@ int runDiplomacyCheck()
     check(waitFor(*dialog) && dialog->result().sources.isEmpty(),"unloaded MOB leaves no stale membership");
     button->click(); check(window.findChildren<CDiplomacyDialog*>().size()==1,"repeated clicks reuse inspector");
     dialog->hide(); window.m_undoStack->clear(); delete mob;
+
+    // Exercise browsing with long names, long conditions and distinct MOB tables.
+    diplomacy::Request browsing; browsing.sources={base}; browsing.preferredSource=base.key;
+    browsing.sources[0].relations=fixtureRelations;
+    browsing.sources[0].groupNames=QStringList();
+    for(int g=0;g<32;++g) browsing.sources[0].groupNames.append("Player-"+QString::number(g));
+    const QString longName="Guard with a complete long display name that must remain available";
+    const QString longPrototype="SkeletonWarriorLongPrototypeVariant";
+    browsing.sources[0].npcs[0].name=longName; browsing.sources[0].npcs[0].prototype=longPrototype;
+    browsing.sources[0].script+="\nif(And(IsAlive(GetObject(7)),IsEqual(GSGetVar(0,\"long-condition-marker-for-full-details\"),1))) then(SetPlayer(GetObject(7),5))";
+    for(uint id:{100u,10u,2u}) {
+        auto extraNpc=npc; extraNpc.id=id; extraNpc.key="id"+QString::number(id);
+        extraNpc.name="ID fixture "+QString::number(id); extraNpc.group=2;
+        browsing.sources[0].npcs.append(extraNpc);
+    }
+    diplomacy::Source readOnly; readOnly.key=files.filePath("read-only.mob"); readOnly.groupNames=browsing.sources[0].groupNames;
+    readOnly.relations=QVector<QVector<uint>>(32,QVector<uint>(32,1)); readOnly.relations[3][4]=7;
+    auto readOnlyNpc=npc; readOnlyNpc.id=900; readOnlyNpc.key="npc900"; readOnlyNpc.group=17;
+    readOnly.npcs={readOnlyNpc}; browsing.sources.append(readOnly);
+    CDiplomacyDialog browser([&browsing]{return browsing;},&window);
+    browser.setAttribute(Qt::WA_DontShowOnScreen); browser.show();
+    check(waitFor(browser),"browsing fixture completes asynchronous inspection");
+    auto* browseGroups=browser.findChild<QTreeWidget*>("diplomacyGroups");
+    auto* browseNpcs=browser.findChild<QTreeWidget*>("diplomacyNpcs");
+    auto* browseScripts=browser.findChild<QTreeWidget*>("diplomacyScripts");
+    auto* browseTabs=browser.findChild<QTabWidget*>();
+    auto* hideEmpty=browser.findChild<QCheckBox*>("diplomacyHideEmptyGroups");
+    auto* detail=browser.findChild<QPlainTextEdit*>("diplomacyDetails");
+    auto* search=browser.findChild<QLineEdit*>("diplomacyNpcFilter");
+    auto* relationSources=browser.findChild<QComboBox*>("diplomacyRelationSource");
+    auto* browseMatrix=browser.findChild<QTableWidget*>("diplomacyRelations");
+    auto* editButton=browser.findChild<QPushButton*>("diplomacyEditRelations");
+    check(!browseTabs->tabIcon(0).isNull() && !browseTabs->tabIcon(1).isNull() && !browseTabs->tabIcon(2).isNull(),"NPC, script and relation sections have icons");
+    const QString total=browseGroups->topLevelItem(0)->text(1);
+    hideEmpty->setChecked(true);
+    check(browseGroups->topLevelItem(2)->isHidden() && !browseGroups->topLevelItem(3)->isHidden()
+        && browseGroups->topLevelItem(0)->text(1)==total,"empty group filter retains counts and occupied groups");
+    hideEmpty->setChecked(false);
+    check(!browseGroups->topLevelItem(2)->isHidden(),"empty groups remain available on demand");
+    browseGroups->setCurrentItem(browseGroups->topLevelItem(2)); hideEmpty->setChecked(true);
+    check(browseGroups->currentItem()==browseGroups->topLevelItem(0),"hiding selected empty group returns to all groups");
+    browseNpcs->sortItems(1,Qt::AscendingOrder);
+    QStringList sortedIds; for(int i=0;i<browseNpcs->topLevelItemCount();++i) {
+        const auto value=browseNpcs->topLevelItem(i)->data(1,Qt::UserRole);
+        if(value.isValid()) sortedIds.append(browseNpcs->topLevelItem(i)->text(1));
+    }
+    check(sortedIds==QStringList{"2","7","8","10","100","900"},"ID sorting is numeric instead of lexical");
+    browser.resize(1000,650); QApplication::processEvents();
+    check(browseNpcs->columnWidth(0)>=240 && browseScripts->columnWidth(0)>=300,"narrow window preserves readable primary columns with horizontal scrolling");
+    auto npcRow=[&](const QString& id)->QTreeWidgetItem* {
+        for(int i=0;i<browseNpcs->topLevelItemCount();++i) if(browseNpcs->topLevelItem(i)->text(1)==id) return browseNpcs->topLevelItem(i);
+        return nullptr;
+    };
+    browseNpcs->setCurrentItem(npcRow("7"));
+    check(npcRow("7") && npcRow("7")->text(0)==longName && npcRow("7")->text(4)==longPrototype
+        && detail->toPlainText().contains(longName) && detail->toPlainText().contains(longPrototype)
+        && detail->toPlainText().contains(base.key) && detail->isReadOnly(),"separate NPC/prototype columns and full copyable details");
+    search->setText("no-browsing-match");
+    check(browseNpcs->topLevelItemCount()==0 && !detail->toPlainText().contains(longName)
+        && browseGroups->topLevelItem(0)->text(1)==total,"empty search clears stale details without changing totals");
+    search->clear(); browseGroups->setCurrentItem(browseGroups->topLevelItem(3)); browseNpcs->setCurrentItem(npcRow("7"));
+    browser.invalidate();
+    check(!detail->toPlainText().contains(longName),"refresh clears old details while worker runs");
+    check(waitFor(browser) && browseGroups->currentItem()->data(0,Qt::UserRole).toInt()==2
+        && browseNpcs->currentItem()->text(1)=="7","refresh preserves selected group and NPC identity");
+    browseGroups->setCurrentItem(browseGroups->topLevelItem(0)); browseTabs->setCurrentIndex(1);
+    QTreeWidgetItem* conditionRow=nullptr;
+    for(int i=0;i<browseScripts->topLevelItemCount();++i)
+        if(browseScripts->topLevelItem(i)->toolTip(4).contains("long-condition-marker")) conditionRow=browseScripts->topLevelItem(i);
+    if(conditionRow) browseScripts->setCurrentItem(conditionRow);
+    check(conditionRow && !conditionRow->text(0).contains('\n') && !conditionRow->text(4).contains('\n')
+        && detail->toPlainText().contains("long-condition-marker") && detail->toPlainText().contains("SetPlayer"),"long script conditions use full details instead of multiline list rows");
+    search->setText("long-condition-marker");
+    check(browseScripts->topLevelItemCount()==1 && detail->toPlainText().contains("long-condition-marker"),"script search includes complete conditions");
+    search->clear(); browseTabs->setCurrentIndex(2);
+    check(browseMatrix->rowCount()==32 && browseMatrix->columnCount()==32
+        && browseMatrix->horizontalHeaderItem(31)->text()=="31"
+        && browseMatrix->horizontalHeaderItem(31)->toolTip().contains("Player-31"),"compact matrix retains all groups and full header tooltips");
+    int editRequests=0; QString editedSource;
+    QObject::connect(&browser,&CDiplomacyDialog::editRelationsRequested,[&](const QString& source){++editRequests;editedSource=source;});
+    relationSources->setCurrentIndex(relationSources->findData(readOnly.key));
+    browseMatrix->setCurrentCell(3,4);
+    check(browseMatrix->item(3,4)->text()=="7" && !browseMatrix->item(3,4)->data(Qt::BackgroundRole).isValid()
+        && !editButton->isEnabled() && browseGroups->topLevelItem(0)->text(1)==total,"independent source chooser displays read-only MOB values and preserves overview counts");
+    check(browser.findChild<QLabel*>("diplomacyRelationSelection")->text().contains("3 · Player-3")
+        && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().contains("4 · Player-4")
+        && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().endsWith("(7)"),"selected relation describes exact source and target including unknown values");
+    editButton->click(); relationSources->setCurrentIndex(relationSources->findData(base.key)); editButton->click();
+    check(editRequests==1 && editedSource==base.key,"editing routes only to the selected loaded MOB");
+    check(browseMatrix->item(0,0)->background().color()==QColor(Qt::darkGreen)
+        && browseMatrix->item(1,2)->background().color()==QColor(Qt::darkRed)
+        && browseMatrix->item(1,3)->background().color()==QColor(Qt::darkYellow),"legacy 0/1/2 relation colors preserved");
+    browsing.sources={readOnly}; browser.invalidate();
+    check(waitFor(browser) && relationSources->count()==1 && browseMatrix->item(3,4)->text()=="7" && !editButton->isEnabled(),"removing selected source cannot show or edit stale relations");
+    browsing.sources[0].relations.clear(); browser.invalidate();
+    check(waitFor(browser) && browseMatrix->rowCount()==0
+        && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().isEmpty(),"incomplete source clears matrix and selected pair");
+    browser.hide();
     if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_AUDIT_MOB")) {
         diplomacy::Request corpus; corpus.extraSources=QStringList{qEnvironmentVariable("EI_DIPLOMACY_AUDIT_MOB")};
         corpus.roots=QStringList{QFileInfo(corpus.extraSources[0]).absolutePath()};
@@ -206,11 +309,20 @@ int runDiplomacyCheck()
         check(!inspected.sources.isEmpty() && units>0,"read-only installed MOB NPC and script corpus");
         if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE")) {
             CDiplomacyDialog preview([corpus]{return corpus;},&window); preview.setAttribute(Qt::WA_DontShowOnScreen); preview.show();
+            preview.resize(1560,940); QApplication::processEvents();
             check(waitFor(preview) && preview.result().sources.size()==inspected.sources.size()
                 && preview.result().diagnostics==inspected.diagnostics
                 && preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus.png"),"hidden real corpus overview capture");
+            preview.findChild<QTabWidget*>()->setCurrentIndex(1);
+            QApplication::processEvents();
+            check(preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus-scripts.png"),"hidden real corpus compact scripts capture");
             preview.findChild<QTabWidget*>()->setCurrentIndex(2);
+            QApplication::processEvents();
             check(preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus-relations.png"),"hidden real corpus relation matrix capture");
+            preview.resize(1000,650); QApplication::processEvents();
+            check(preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus-narrow-relations.png"),"hidden narrow relation matrix capture");
+            preview.findChild<QTabWidget*>()->setCurrentIndex(0); QApplication::processEvents();
+            check(preview.grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".corpus-narrow-npcs.png"),"hidden narrow NPC details capture");
         }
     }
     qApp->removeEventFilter(&hidden); out<<"RESULT: "<<passed<<" PASS, "<<failed<<" FAIL\n";

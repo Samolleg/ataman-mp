@@ -17225,5 +17225,97 @@ group</source><translation>Начальная
     <message><source>Script
 groups</source><translation>Группы из
 скриптов</translation></message>
+    <message><source>Sources:</source><translation>Источники:</translation></message>
+    <message><source>How to read the data</source><translation>Как читать данные</translation></message>
+    <message><source>Diplomacy groups</source><translation>Группы дипломатии</translation></message>
+    <message><source>Hide empty groups</source><translation>Скрыть пустые группы</translation></message>
+    <message><source>Show groups with placed NPCs or SetPlayer calls. The relation matrix always contains all 32 groups.</source><translation>Показать группы с размещёнными НПС или вызовами SetPlayer. Матрица отношений всегда содержит все 32 группы.</translation></message>
+    <message><source>Initial number of NPCs stored in the selected MOBs.</source><translation>Начальное количество НПС, записанных в выбранных MOB.</translation></message>
+    <message><source>Number of SetPlayer calls; these are possible assignments, not additional NPCs.</source><translation>Количество вызовов SetPlayer: возможные назначения групп, а не дополнительные НПС.</translation></message>
+    <message><source>NPC</source><translation>НПС</translation></message>
+    <message><source>MOB group</source><translation>Группа MOB</translation></message>
+    <message><source>Possible groups</source><translation>Возможные группы</translation></message>
+    <message><source>Prototype</source><translation>Прототип</translation></message>
+    <message><source>MOB</source><translation>MOB</translation></message>
+    <message><source>Possible diplomacy groups assigned by SetPlayer. GroupAdd / GroupSub script groups are separate.</source><translation>Возможные группы дипломатии, назначаемые через SetPlayer. Скриптовые группы GroupAdd / GroupSub учитываются отдельно.</translation></message>
+    <message><source>Line</source><translation>Строка</translation></message>
+    <message><source>Execution</source><translation>Выполнение</translation></message>
+    <message><source>Relation table:</source><translation>Таблица MOB:</translation></message>
+    <message><source>0 · Ally</source><translation>0 · Союзник</translation></message>
+    <message><source>1 · Neutral</source><translation>1 · Нейтральный</translation></message>
+    <message><source>2 · War</source><translation>2 · Враг</translation></message>
+    <message><source>%1 NPCs · %2 MOBs · %3 script spawn sites</source><translation>%1 НПС · %2 MOB · %3 мест создания в скриптах</translation></message>
+    <message><source>Incomplete inspection: %1 warnings</source><translation>Неполный обзор: предупреждений — %1</translation></message>
+    <message><source>NPC: %1
+ID: %2
+Prototype: %3
+Initial MOB group: %4
+Possible SetPlayer groups: %5
+Source: %6</source><translation>НПС: %1
+ID: %2
+Прототип: %3
+Начальная группа MOB: %4
+Возможные группы SetPlayer: %5
+Источник: %6</translation></message>
+    <message><source>Unknown</source><translation>Неизвестно</translation></message>
+    <message><source>Unnamed NPC</source><translation>НПС без имени</translation></message>
+    <message><source>Script spawn site at line %1; this does not determine the runtime number of NPCs.</source><translation>Место создания в скрипте, строка %1; оно не определяет количество НПС в игре.</translation></message>
+    <message><source>Command: %1
+Group: %2
+Source: %3
+Line: %4
+
+Call:
+%5
+
+Conditions and status:
+%6</source><translation>Команда: %1
+Группа: %2
+Источник: %3
+Строка: %4
+
+Вызов:
+%5
+
+Условия и статус:
+%6</translation></message>
+    <message><source>Conditional</source><translation>По условию</translation></message>
+    <message><source>Unresolved</source><translation>Не определено</translation></message>
+    <message><source>NPCs (%1)</source><translation>НПС (%1)</translation></message>
+    <message><source>Scripts (%1)</source><translation>Скрипты (%1)</translation></message>
+    <message><source>NPC details</source><translation>Сведения о НПС</translation></message>
+    <message><source>Script details</source><translation>Сведения о скрипте</translation></message>
+    <message><source>%1 rows · Click a column heading to sort</source><translation>Строк: %1 · Нажмите заголовок столбца для сортировки</translation></message>
+    <message><source>No matches. Change the group, source or search.</source><translation>Нет совпадений. Измените группу, источник или запрос.</translation></message>
+    <message><source>Select a row to see full details.</source><translation>Выберите строку, чтобы увидеть полные сведения.</translation></message>
+    <message><source> [read-only]</source><translation> [только просмотр]</translation></message>
+    <message><source>The row group acts on the column group. Column numbers match the groups on the left.</source><translation>Строка действует на столбец. Номера столбцов соответствуют группам слева.</translation></message>
+    <message><source>Stored value: %1</source><translation>Значение в MOB: %1</translation></message>
+    <message><source>Ally</source><translation>Союзник</translation></message>
+    <message><source>Neutral</source><translation>Нейтральный</translation></message>
+    <message><source>War</source><translation>Враг</translation></message>
+    <message><source>%1 → %2: %3 (%4)</source><translation>%1 → %2: %3 (%4)</translation></message>
+    <message><source>Unknown relation</source><translation>Неизвестное отношение</translation></message>
+    <message><source>Assignments</source><translation>Назнач.</translation></message>
+    <message><source>Initial diplomacy group recorded in the MOB.</source><translation>Начальная группа дипломатии, записанная в MOB.</translation></message>
+    <message><source>Call:
+%5
+
+Conditions and status:
+%6
+
+Command: %1
+Group: %2
+Source: %3
+Line: %4</source><translation>Вызов:
+%5
+
+Условия и статус:
+%6
+
+Команда: %1
+Группа: %2
+Источник: %3
+Строка: %4</translation></message>
 </context>
 </TS>
