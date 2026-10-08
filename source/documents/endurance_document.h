@@ -114,6 +114,8 @@ struct SMobObjectSnapshot
     bool hasParentId = false;
     quint32 parentId = 0;
     bool useInScript = false;
+    bool hasPlayer = false;
+    quint8 player = 0;
     QString name;
     QString prototype;
     QString model;

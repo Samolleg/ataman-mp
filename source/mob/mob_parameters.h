@@ -54,6 +54,7 @@ public:
     void execWsChanges(EWsType paramType, QString& value);
     void setNewRange(SRange& arrRanges, int index);
     const CMob* mob() {return m_pCurMob;}
+    void showDiplomacyTable() { on_diplomacyButton_clicked(); }
 
 protected:
     void closeEvent(QCloseEvent* event) override;

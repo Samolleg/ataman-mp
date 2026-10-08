@@ -42,6 +42,13 @@ struct Target {
     bool hasId = false;
 };
 struct Reference {
+    struct Argument {
+        QString expression;
+        bool hasString = false;
+        QString text;
+        bool hasNumber = false;
+        double number = 0;
+    };
     QString sourceKey;
     QString function;
     QString command;
@@ -54,6 +61,7 @@ struct Reference {
     int line = 1;
     int column = 1;
     QVector<Target> targets;
+    QVector<Argument> arguments;
     QString spawnName;
     QString prototype;
     bool prototypeVerified = false;

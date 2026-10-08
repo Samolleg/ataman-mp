@@ -88,6 +88,7 @@
 #include "ui/dock_hidden_tab.h"
 #include "ui/camera_telephoto_controls.h"
 #include "ui/viewport_tools_layout.h"
+#include "ui/diplomacy_dialog.h"
 #include <QWidgetAction>
 #include "camera_telephoto.h"
 #include "endurance_ui_scale.h"
@@ -474,6 +475,11 @@ QIcon viewportToolIcon(int kind)
     case 12: p.setBrush(QColor("#edc36c"));p.drawRoundedRect(3,3,18,18,3,3);
         p.setPen(Qt::NoPen);p.setBrush(QColor("#38434d"));
         for(const QPointF point:{QPointF(7,7),QPointF(17,7),QPointF(12,12),QPointF(7,17),QPointF(17,17)})p.drawEllipse(point,1.6,1.6);break;
+    case 13: p.drawEllipse(2,2,6,6);p.drawEllipse(16,2,6,6);
+        p.drawRoundedRect(1,10,8,9,2,2);p.drawRoundedRect(15,10,8,9,2,2);
+        p.setPen(QPen(QColor("#edc36c"),2));p.drawLine(8,15,16,15);
+        p.drawPolyline(QPolygonF()<<QPointF(10,12)<<QPointF(8,15)<<QPointF(10,18));
+        p.drawPolyline(QPolygonF()<<QPointF(14,12)<<QPointF(16,15)<<QPointF(14,18));break;
     default: p.drawArc(QRectF(3,4,18,18),0,180*16);p.drawLine(12,13,18,7);p.drawEllipse(10,11,4,4);break;
     }
     return QIcon(pm);
@@ -3680,6 +3686,9 @@ void MainWindow::setupCompactViewportTools()
     connect(m_landscapeToolsDock,&QDockWidget::visibilityChanged,this,&MainWindow::updateLandscapeToolButtons);
     connect(m_pView,&CView::loadedMapStateChanged,this,&MainWindow::updateLandscapeToolButtons);
     auto* travel=button("travelToolbarButton",QString::fromUtf8("Появления и переходы"),2,7);
+    auto* diplomacy=button("diplomacyToolbarButton",tr("Diplomacy"),13,7);
+    diplomacy->setToolTip(tr("NPC diplomacy groups in connected MOBs and scripts"));
+    connect(diplomacy,&QToolButton::clicked,this,&MainWindow::openDiplomacy);
     // The dock may be present but covered by another tab. Qt's toggle action
     // then considers it open and a toolbar click hides it instead of showing it.
     // This button is an entry point: always expose and focus the editor.
@@ -3863,11 +3872,65 @@ void MainWindow::setupCompactViewportTools()
     group("objectToolGroup","Объекты",{m_ui->selectButton,m_ui->moveButton,m_ui->rotateButton,m_ui->scaleButton});
     group("creationToolGroup","Создание",{create,gallery,assemblies,random});
     group("landscapeToolGroup","Ландшафт",{m_ui->tileBrushButton,m_groundPaintButton});
-    group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,travel,scenario,script});
+    group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,diplomacy,travel,scenario,script});
     group("helperToolGroup","Помощники",{magnet,camera});
     rows->addWidget(bar->findChild<QWidget*>("modelConnectionControls"));
     bar->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
     updateLandscapeToolButtons();
+}
+
+void MainWindow::openDiplomacy()
+{
+    if(!m_diplomacyDialog) {
+        m_diplomacyDialog=new CDiplomacyDialog([this] {
+            diplomacy::Request request;
+            request.roots=activeMapRoots().toList();
+            if(!m_pView) return request;
+            if(m_pView->currentMob()) request.preferredSource=m_pView->currentMob()->filePath().absoluteFilePath();
+            for(CMob* mob:m_pView->mobs()) if(mob) {
+                diplomacy::Source source; source.key=mob->filePath().absoluteFilePath(); source.loaded=true;
+                source.script=m_pView->scenarioScriptText(mob,&source.draft);
+                source.groupNames=QStringList(mob->diplomacyNames()); source.relations=mob->diplomacyField();
+                for(CNode* node:mob->nodes()) {
+                    if(!node || node->isMarkDeleted()) continue;
+                    if(dynamic_cast<CWorldObj*>(node)) {
+                        scenario::Object object; object.key=QString("node:%1").arg(node->innerId());
+                        object.id=node->mapId(); object.name=node->mapName(); source.objects.append(object);
+                    }
+                    auto* unit=dynamic_cast<CUnit*>(node);
+                    if(!unit || unit->isMarkDeleted()) continue;
+                    diplomacy::Npc npc; npc.key=QString("node:%1").arg(unit->innerId());
+                    npc.id=unit->mapId(); npc.name=unit->mapName(); npc.prototype=unit->databaseName();
+                    npc.group=int(static_cast<unsigned char>(unit->dipGroup())); source.npcs.append(npc);
+                }
+                request.sources.append(source);
+                request.roots.prepend(mob->filePath().absolutePath());
+            }
+            request.roots.removeDuplicates();
+            if(m_currentCollectionPath.isEmpty() && !m_mapTestEntry.mobPath.isEmpty())
+                request.extraSources.append(m_mapTestEntry.mobPath);
+            const QString profileId=activeResourceProfile().profileId;
+            if(profileId.contains("jamais",Qt::CaseInsensitive) || profileId.compare("jmv",Qt::CaseInsensitive)==0)
+                for(const auto& root:request.roots) {
+                    const QString autorun=QDir(root).filePath("AutoRunSpellAddon123.mob");
+                    if(QFileInfo::exists(autorun)) { request.extraSources.append(autorun); break; }
+                }
+            return request;
+        },this);
+        connect(m_diplomacyDialog,&CDiplomacyDialog::editRelationsRequested,this,[this](const QString& path) {
+            if(m_pView) for(CMob* mob:m_pView->mobs()) if(mob && mob->filePath().absoluteFilePath()==path) {
+                m_pView->openMobDiplomacyTable(mob); break;
+            }
+        });
+        const auto invalidate=[this] { if(m_diplomacyDialog) m_diplomacyDialog->invalidate(); };
+        connect(m_pView,&CView::mobStateChanged,m_diplomacyDialog,invalidate);
+        connect(m_pView,&CView::loadedMapStateChanged,m_diplomacyDialog,invalidate);
+        connect(m_pView,&CView::mobScriptChanged,m_diplomacyDialog,invalidate);
+        connect(m_pView,&CView::scenarioBufferChanged,m_diplomacyDialog,invalidate);
+        connect(m_pView,QOverload<CMob*>::of(&CView::unloadMob),m_diplomacyDialog,invalidate);
+        connect(m_undoStack,&QUndoStack::indexChanged,m_diplomacyDialog,invalidate);
+    }
+    m_diplomacyDialog->show(); m_diplomacyDialog->raise(); m_diplomacyDialog->activateWindow();
 }
 
 void MainWindow::createViewportToolbars()

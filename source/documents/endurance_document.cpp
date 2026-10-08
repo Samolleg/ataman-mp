@@ -254,6 +254,15 @@ SMobObjectSnapshot snapshotObject(const SMobSection& section)
             object.objectType = readU32(data, 0);
         }
     }
+    if(const SMobSection* player = findSection(section, 0xB011))
+    {
+        const QByteArray data = payload(*player);
+        if(data.size() == 1)
+        {
+            object.hasPlayer = true;
+            object.player = quint8(data.at(0));
+        }
+    }
     if(const SMobSection* parent = findSection(section, 0xB012))
     {
         const QByteArray data = payload(*parent);
@@ -1331,6 +1340,8 @@ QJsonObject SMobObjectSnapshot::toJson() const
     if(hasParentId)
         result.insert("parentId", double(parentId));
     result.insert("useInScript", useInScript);
+    if(hasPlayer)
+        result.insert("player", int(player));
     if(!name.isEmpty())
         result.insert("name", name);
     if(!prototype.isEmpty())

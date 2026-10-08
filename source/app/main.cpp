@@ -15,6 +15,7 @@
 #include "dark_theme_check.h"
 #include "ui_theme.h"
 #include "scenario_layer_check.h"
+#include "diplomacy_check.h"
 #include <QApplication>
 #include <QGroupBox>
 #include "window_layout_check.h"
@@ -548,6 +549,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption textureLifetimeCheckOption("texture-lifetime-check",
         "Verify composed character textures survive resource refresh with a live scene object.");
     QCommandLineOption scenarioCheckOption("scenario-layer-check", "Run synthetic read-only scenario integration checks.");
+    QCommandLineOption diplomacyCheckOption("diplomacy-check", "Inspect synthetic NPC groups, connected MOBs, scripts and diplomacy UI.");
     QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
     QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
     QCommandLineOption terrainHeightResSaveCheckOption("terrain-height-res-save-check", "Validate height-only MPR saves and unchanged terrain resources with synthetic data.");
@@ -595,6 +597,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(darkThemeCheckOption);
     parser.addOption(textureLifetimeCheckOption);
     parser.addOption(scenarioCheckOption);
+    parser.addOption(diplomacyCheckOption);
     parser.addOption(databaseCreationCheckOption);
     QCommandLineOption pointerModesCheckOption("pointer-modes-check", "Validate exclusive mouse gestures and editable object transforms with synthetic data.");
     parser.addOption(pointerModesCheckOption);
@@ -662,6 +665,7 @@ int runHeadlessCommand(QApplication& app)
     const bool groupRotationCheck = parser.isSet(groupRotationCheckOption);
     const bool textureLifetimeCheck = parser.isSet(textureLifetimeCheckOption);
     const bool scenarioCheck = parser.isSet(scenarioCheckOption);
+    const bool diplomacyCheck = parser.isSet(diplomacyCheckOption);
     const bool databasePreviewCheck = parser.isSet(databasePreviewCheckOption);
     const bool databaseCreationCheck = parser.isSet(databaseCreationCheckOption);
     const bool pointerModesCheck = parser.isSet(pointerModesCheckOption);
@@ -673,12 +677,12 @@ int runHeadlessCommand(QApplication& app)
     const bool testRunReport = parser.isSet(testRunReportOption);
     if(!objectRandomCheck && !assemblyCatalogCheck && !validate && !roundtrip && !profileLoad && !mobDiff && !uiWidgetCheck && !windowLayoutCheck && !profileCatalogCheck && !modelGalleryCheck && !hierarchyCheck && !groupRotationCheck && !modelConnectionCheck && !darkThemeCheck && !textureLifetimeCheck && !scenarioCheck
        && !resourceNavigationCheck && !databaseCreationCheck && !databasePreviewCheck && !terrainMobHeightCheck && !terrainHeightResSaveCheck && !pointerModesCheck
-       && !testRunReport && !worldMapSnapCheck && !aiGraphRegenerationCheck)
+       && !testRunReport && !worldMapSnapCheck && !aiGraphRegenerationCheck && !diplomacyCheck)
         return -1;
     if((objectRandomCheck ? 1 : 0) + (assemblyCatalogCheck ? 1 : 0) + (validate ? 1 : 0) + (roundtrip ? 1 : 0) + (profileLoad ? 1 : 0)
             + (mobDiff ? 1 : 0) + (uiWidgetCheck ? 1 : 0) + (modelGalleryCheck ? 1 : 0) + (profileCatalogCheck ? 1 : 0) + (hierarchyCheck ? 1 : 0) + (groupRotationCheck ? 1 : 0) + (modelConnectionCheck ? 1 : 0) + (darkThemeCheck ? 1 : 0) + (textureLifetimeCheck ? 1 : 0)
             + (resourceNavigationCheck ? 1 : 0) + (databaseCreationCheck ? 1 : 0) + (databasePreviewCheck ? 1 : 0) + (terrainMobHeightCheck ? 1 : 0) + (terrainHeightResSaveCheck ? 1 : 0) + (pointerModesCheck ? 1 : 0)
-            + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) + (worldMapSnapCheck ? 1 : 0) + (aiGraphRegenerationCheck ? 1 : 0) > 1)
+            + (testRunReport ? 1 : 0) + (scenarioCheck ? 1 : 0) + (windowLayoutCheck ? 1 : 0) + (worldMapSnapCheck ? 1 : 0) + (aiGraphRegenerationCheck ? 1 : 0) + (diplomacyCheck ? 1 : 0) > 1)
     {
         QTextStream(stderr) << "Choose one headless command.\n";
         return 2;
@@ -714,6 +718,7 @@ int runHeadlessCommand(QApplication& app)
         return passed ? 0 : 1;
     }
     if(scenarioCheck) return runScenarioLayerCheck();
+    if(diplomacyCheck) return runDiplomacyCheck();
 
     if(textureLifetimeCheck)
     {

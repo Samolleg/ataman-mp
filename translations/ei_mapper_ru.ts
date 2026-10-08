@@ -14916,6 +14916,9 @@ It could not be opened automatically.</source>
             <source>Open another map of this world first.</source>
             <translation>Сначала откройте другую карту этого мира.</translation>
         </message>
+
+    <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
+    <message><source>NPC diplomacy groups in connected MOBs and scripts</source><translation>Группы дипломатии НПС в подключённых MOB и скриптах</translation></message>
 </context>
     <context>
         <name>MobDiffTerms</name>
@@ -15518,7 +15521,16 @@ It could not be opened automatically.</source>
             <source>target does not exist</source>
             <translation>целевой файл не существует</translation>
         </message>
-    </context>
+
+    <message><source>Unknown</source><translation>Неизвестно</translation></message>
+    <message><source>Cannot read MOB: %1</source><translation>Не удалось прочитать MOB: %1</translation></message>
+    <message><source>Map / profile MOB</source><translation>MOB карты / профиля</translation></message>
+    <message><source>MOB dependency limit reached; result incomplete</source><translation>Достигнут предел подключений MOB; обзор неполный</translation></message>
+    <message><source>Unresolved AddMob: %1:%2</source><translation>Неопределённый AddMob: %1:%2</translation></message>
+    <message><source>Missing or ambiguous MOB %1 (%2:%3)</source><translation>MOB %1 отсутствует или неоднозначен (%2:%3)</translation></message>
+
+    <message><source>Ambiguous loaded MOB: %1</source><translation>Неоднозначный открытый MOB: %1</translation></message>
+</context>
     <context>
         <name>QPlatformTheme</name>
         <message>
@@ -17158,5 +17170,60 @@ Conditions: %5</source>
         <source>Could not copy: the Windows clipboard is busy. Try copying again.</source>
         <translation>Не удалось скопировать: буфер обмена Windows занят. Повторите копирование.</translation>
     </message>
+</context>
+<context>
+    <name>CDiplomacyDialog</name>
+    <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
+    <message><source>MOB:</source><translation>MOB:</translation></message>
+    <message><source>Refresh</source><translation>Обновить</translation></message>
+    <message><source>MOB counts show initial membership. Script spawns and SetPlayer calls are possible changes; loops and conditions can change runtime counts. Script groups (GroupAdd / GroupSub) are separate from diplomacy groups.</source><translation>Число НПС в MOB отражает начальные группы. Создания и SetPlayer в скриптах показывают возможные изменения; условия и циклы влияют на число НПС в игре. Скриптовые группы GroupAdd / GroupSub учитываются отдельно от групп дипломатии.</translation></message>
+    <message><source>Search NPC, ID, prototype or script</source><translation>Поиск по НПС, ID, прототипу или скрипту</translation></message>
+    <message><source>Group</source><translation>Группа</translation></message>
+    <message><source>NPCs in MOB</source><translation>НПС в MOB</translation></message>
+    <message><source>SetPlayer calls</source><translation>Вызовы SetPlayer</translation></message>
+    <message><source>NPC / prototype</source><translation>НПС / прототип</translation></message>
+    <message><source>ID</source><translation>ID</translation></message>
+    <message><source>Initial group</source><translation>Начальная группа</translation></message>
+    <message><source>Possible script groups</source><translation>Возможные группы в скриптах</translation></message>
+    <message><source>Source</source><translation>Источник</translation></message>
+    <message><source>NPCs</source><translation>НПС</translation></message>
+    <message><source>Command / participant</source><translation>Команда / участник</translation></message>
+    <message><source>Source / line</source><translation>Источник / строка</translation></message>
+    <message><source>Conditions / status</source><translation>Условия / статус</translation></message>
+    <message><source>Scripts</source><translation>Скрипты</translation></message>
+    <message><source>Relations</source><translation>Отношения</translation></message>
+    <message><source>Edit relations…</source><translation>Редактировать отношения…</translation></message>
+    <message><source>Close</source><translation>Закрыть</translation></message>
+    <message><source>Updating diplomacy…</source><translation>Обновление дипломатии…</translation></message>
+    <message><source>All connected MOBs</source><translation>Все подключённые MOB</translation></message>
+    <message><source> [loaded]</source><translation> [открыт]</translation></message>
+    <message><source> [AddMob / profile]</source><translation> [AddMob / профиль]</translation></message>
+    <message><source> [unapplied script]</source><translation> [скрипт не применён]</translation></message>
+    <message><source>All groups</source><translation>Все группы</translation></message>
+    <message><source>Unknown group</source><translation>Неизвестная группа</translation></message>
+    <message><source>Invalid group %1</source><translation>Некорректная группа %1</translation></message>
+    <message><source>%1 NPCs in %2 MOBs · %3 script spawn sites</source><translation>%1 НПС в %2 MOB · %3 мест создания в скриптах</translation></message>
+    <message><source>Incomplete inspection: %1</source><translation>Неполный обзор: %1</translation></message>
+    <message><source>:%1 [spawn site]</source><translation>:%1 [создание скриптом]</translation></message>
+    <message><source>NPC identity unresolved</source><translation>НПС не определён</translation></message>
+    <message><source>Possible execution</source><translation>Возможное выполнение</translation></message>
+    <message><source>Open a MOB to inspect diplomacy.</source><translation>Откройте MOB для просмотра дипломатии.</translation></message>
+    <message><source>%1 · Rows act on columns. 0: ally, 1: neutral, 2: war.</source><translation>%1 · Строка действует на столбец. 0: союзник, 1: нейтральный, 2: враг.</translation></message>
+    <message><source>%1 has no complete diplomacy table.</source><translation>В %1 нет полной таблицы дипломатии.</translation></message>
+
+    <message><source>Group is computed, invalid or unknown</source><translation>Группа вычисляется, некорректна или неизвестна</translation></message>
+
+    <message><source>NPCs in
+MOB</source><translation>НПС в
+MOB</translation></message>
+    <message><source>SetPlayer
+calls</source><translation>Вызовы
+SetPlayer</translation></message>
+    <message><source>Initial
+group</source><translation>Начальная
+группа</translation></message>
+    <message><source>Script
+groups</source><translation>Группы из
+скриптов</translation></message>
 </context>
 </TS>

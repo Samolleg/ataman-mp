@@ -16492,6 +16492,20 @@ void CView::openActiveMobEditParams()
     pParam->show();
 }
 
+void CView::openMobDiplomacyTable(CMob* mob)
+{
+    if(!mob || !m_aMob.contains(mob)) return;
+    CMobParameters* parameters=nullptr;
+    for(auto* window:m_arrParamWindow) if(window->mob()==mob) { parameters=window; break; }
+    if(!parameters) {
+        parameters=new CMobParameters(this,mob,this);
+        connect(this,SIGNAL(unloadMob(CMob*)),parameters,SLOT(onMobUnload(CMob*)));
+        connect(parameters,&CMobParameters::editFinishedSignal,this,&CView::onMobParamEditFinished);
+        m_arrParamWindow.append(parameters);
+    }
+    parameters->show(); parameters->raise(); parameters->showDiplomacyTable();
+}
+
 void CView::openActiveMobScript()
 {
     if(!m_activeMob)

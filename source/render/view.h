@@ -172,6 +172,7 @@ class CView : public QGLWidget
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
+    friend int runDiplomacyCheck();
     friend int runObjectHierarchyCheck();
     friend int runGroupRotationCheck();
     friend int runProfileModelCatalogCheck();
@@ -239,6 +240,7 @@ public:
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
     void unloadActiveMob();
     void openActiveMobEditParams();
+    void openMobDiplomacyTable(CMob* mob);
     void openActiveMobScript();
     QString scenarioScriptText(CMob* mob, bool* draft = nullptr) const;
     bool openScenarioSource(CMob* mob, const QString& analyzedText, int offset);

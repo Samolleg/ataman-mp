@@ -163,7 +163,8 @@ bool numberValue(const Parsed& p,QPair<int,int> arg,double* value) {
 QString canonicalCommand(const QString& name) {
     static const QStringList commands={"GetObject","GetObjectByID","GetObjectByName","AddUnitToServer",
         "SetCP","SetCPFast","MoveToPoint","MoveToObject","SwitchLeverState","SwitchLeverStateEx",
-        "EnableLever","ActivateTrap","AddObject","RemoveObject","AddMob","HideObject","RemoveObjectFromServer"};
+        "EnableLever","ActivateTrap","AddObject","RemoveObject","AddMob","HideObject","RemoveObjectFromServer",
+        "SetPlayer","SetDiplomacy","GetDiplomacy","GroupAdd","GroupSub","GroupCross","GroupHas","GroupSize","GroupSee"};
     for(const auto& command:commands) if(command.compare(name,Qt::CaseInsensitive)==0) return command;
     return name;
 }
@@ -220,6 +221,13 @@ Result analyze(const Request& request) {
             ref.complete=closed && syntaxDiagnostics.isEmpty();
             ref.length=(closed?p.tokens[call.close].end:source.text.size())-ref.offset;
             ref.context=source.text.mid(ref.offset,qMin(ref.length,240)).simplified();
+            for(const auto& arg:call.args) {
+                Reference::Argument value;
+                value.expression=expression(p,source.text,arg);
+                value.hasString=stringValue(p,arg,&value.text);
+                value.hasNumber=numberValue(p,arg,&value.number);
+                ref.arguments.append(value);
+            }
             for(const auto& region:p.functions) if(call.token>region.begin && call.token<region.end) ref.function=region.text;
             for(const auto& region:p.conditions) if(call.token>region.begin && call.token<region.end) ref.conditions.append(region.text);
             Pending item; item.source=s; item.reference=result.references.size();
@@ -238,6 +246,12 @@ Result analyze(const Request& request) {
             else if(command=="RemoveObjectFromServer") { ref.kind=Kind::Control; arity=1; objectArgs={0}; }
             else if(command=="AddObject" || command=="RemoveObject") { ref.kind=Kind::Group; arity=2; objectArgs={1}; }
             else if(command=="AddMob") { ref.kind=Kind::Dependency; arity=1; }
+            else if(command=="SetPlayer") { ref.kind=Kind::Control; arity=2; objectArgs={0}; }
+            else if(command=="SetDiplomacy" || command=="GetDiplomacy" || command.startsWith("Group")) {
+                ref.kind=Kind::Group;
+                if(command=="SetDiplomacy") arity=3;
+                else if(command=="GetDiplomacy") arity=2;
+            }
             else {
                 // Unknown script calls with arguments remain reviewable. Pure
                 // arithmetic/condition helpers are already shown in context.

@@ -69,6 +69,7 @@ class CCameraTelephotoControls;
 class CMinimapExportDialog;
 class CMessageLogPanel;
 class CScenarioPanel;
+class CDiplomacyDialog;
 class CTravelPanel;
 class CTravelDocument;
 struct SMapTableZone;
@@ -96,6 +97,7 @@ public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
     friend int runAssemblyCatalogCheck();
     friend int runWorldMapSnapCheck();
+    friend int runDiplomacyCheck();
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     bool openDocument(const QFileInfo& fileName);
@@ -198,6 +200,7 @@ private:
     void launchCurrentMapTest();
     void createViewportToolbars();
     void setupCompactViewportTools();
+    void openDiplomacy();
     void updateLandscapeToolButtons();
     void refreshMapTestContext(bool preserveWorkspaceState = false,
                                bool reloadCatalog = false);
@@ -404,6 +407,7 @@ private:
     CMobFamilyValidationReport m_nidAllocationValidation;
     QByteArray m_nidAllocationContextDigest;
     CScenarioPanel* m_scenarioPanel{nullptr};
+    QPointer<CDiplomacyDialog> m_diplomacyDialog;
     QByteArray m_acknowledgedFindingDigest;
     QSet<QString> m_previousFamilyRiskKeys;
     QSet<quint32> m_sessionAllocatedNids;
