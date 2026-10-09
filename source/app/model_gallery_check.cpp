@@ -18,10 +18,12 @@
 #include <QFile>
 #include <atomic>
 #include <QThread>
+#include <QDebug>
 
 bool runModelGalleryWidgetCheck(QString* diagnostic)
 {
-    const auto fail=[diagnostic](const QString& message){if(diagnostic)*diagnostic=message;return false;};
+    QString thumbnailFailure;
+    const auto fail=[diagnostic,&thumbnailFailure](const QString& message){if(diagnostic)*diagnostic=message+thumbnailFailure;return false;};
     QTemporaryDir temp; if(!temp.isValid()) return fail("temporary directory");
     ei::TechnicalModelCatalog catalog; QString error;
     if(!catalog.load(temp.filePath("model-catalog.json"),&error)) return fail(error);
@@ -168,18 +170,30 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     const auto ready=[&](CModelGallery& dialog,int limit) {
         auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");
         QEventLoop loop; QTimer deadline,probe; bool complete=false;
+        QElapsedTimer elapsed;elapsed.start();qint64 last=0,gap=0,first=-1;int visible=0,done=0;
         const auto inspect=[&] {
+            const qint64 now=elapsed.elapsed();gap=qMax(gap,now-last);last=now;
             complete=true;
-            for(int i=0;i<tiles->count();++i) if(tiles->visualItemRect(tiles->item(i)).intersects(tiles->viewport()->rect()) && tiles->item(i)->icon().isNull()) complete=false;
+            visible=done=0;
+            for(int i=0;i<tiles->count();++i) if(tiles->visualItemRect(tiles->item(i)).intersects(tiles->viewport()->rect())) {
+                ++visible;auto* item=tiles->item(i);const QString model=item->data(Qt::UserRole).toString();
+                if(item->icon().isNull() || item->data(Qt::UserRole+2).toString()!=dialog.cacheKey(model,dialog.textureForModel(model)))complete=false;else ++done;
+            }
+            complete=complete && visible>0;
+            if(done&&first<0)first=now;
             if(complete) loop.quit();
         };
-        // Exercise the normal queued event loop, including completion ordering;
-        // a busy processEvents loop can repeatedly repaint other UI fixtures.
-        deadline.setSingleShot(true);probe.setTimerType(Qt::PreciseTimer);probe.setInterval(5);
+        // Exercise the normal event loop. Keep the 300ms completion bound and
+        // independently reject a >=100ms GUI gap, even if workers finish early.
+        deadline.setSingleShot(true);deadline.setTimerType(Qt::PreciseTimer);probe.setTimerType(Qt::PreciseTimer);probe.setInterval(5);
         QObject::connect(&deadline,&QTimer::timeout,&loop,&QEventLoop::quit);
         QObject::connect(&probe,&QTimer::timeout,&loop,inspect);
         deadline.start(limit);probe.start();loop.exec();
-        return complete;
+        gap=qMax(gap,elapsed.elapsed()-last);
+        const bool passed=complete && elapsed.elapsed()<limit && gap<100;
+        thumbnailFailure=passed?QString():QString("; thumbnails elapsed=%1ms first=%2ms GUI-gap=%3ms visible=%4 ready=%5 (completion<%6ms, GUI-gap<100ms)").arg(elapsed.elapsed()).arg(first).arg(gap).arg(visible).arg(done).arg(limit);
+        if(qEnvironmentVariableIsSet("EI_GALLERY_TIMING_TRACE"))qInfo("GALLERY ready elapsed_ms=%lld first_ms=%lld gap_ms=%lld visible=%d done=%d complete=%d passed=%d",(long long)elapsed.elapsed(),(long long)first,(long long)gap,visible,done,complete,passed);
+        return passed;
     };
     // Bounded overlap, stale texture/tab delivery, scrolling, and all-N close.
     struct ParallelState { std::atomic<int> active{0},maximum{0},calls{0}; };
@@ -234,9 +248,12 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         auto* tiles=cold.findChild<QListWidget*>("modelGalleryTiles");
         if(sharedCalls->load()==0 || sharedCalls->load()>=manyModels.size()) return fail("full-profile visible-only jobs");
         const int before=sharedCalls->load();
+        const int originalScroll=tiles->verticalScrollBar()->value();
         tiles->verticalScrollBar()->setValue(0);
         if(!ready(cold,300) || sharedCalls->load()<=before) return fail("new viewport thumbnails");
-        tiles->scrollToItem(tiles->currentItem());
+        // Return to the same viewport. EnsureVisible may align the selected row
+        // differently after the first layout and reveal uncached extra tiles.
+        tiles->verticalScrollBar()->setValue(originalScroll);
         const int back=sharedCalls->load();
         if(!ready(cold,300) || sharedCalls->load()!=back) return fail("return to cached viewport");
         // Scroll may leave bounded jobs from the previous viewport completing.
@@ -251,8 +268,7 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         if(!ready(warm,300) || sharedCalls->load()!=before) return fail(QString("preview cache survives gallery reopening before=%1 after=%2 jobs=%3").arg(before).arg(sharedCalls->load()).arg(warm.m_thumbnailJobs.size()));
         warm.setCurrentTexture("stone");
         if(!ready(warm,300)) return fail("changed texture preview");
-        // ready() may observe the old icon until the queued job finishes. Wait
-        // for the actual new cache key before examining the displayed result.
+        // ready() requires the current key, including the changed texture.
         auto* tiles=warm.findChild<QListWidget*>("modelGalleryTiles");clock.restart();
         while(tiles->currentItem()->data(Qt::UserRole+2).toString()!=warm.cacheKey("house","stone") && clock.elapsed()<300) QApplication::processEvents(QEventLoop::AllEvents,10);
         if(tiles->currentItem()->data(Qt::UserRole+2).toString()!=warm.cacheKey("house","stone")
@@ -282,8 +298,8 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     batch.accept();if(batch.result()!=QDialog::Accepted)return fail("accept multiple models with bound textures");
     auto started=QSharedPointer<std::atomic_bool>::create(false);
     auto* slow=new CModelGallery({"house"},&catalog,"test",{"wood"},&scan,[started](const QString&,const QString&){
-        started->store(true);QThread::msleep(600);return QImage(8,8,QImage::Format_RGB32);
-    },nullptr);
+        started->store(true);QThread::msleep(600);QImage image(192,132,QImage::Format_ARGB32);image.fill(Qt::red);return image;
+    },nullptr,{}, {},temp.path()+"/close-disk-worker");
     slow->setAttribute(Qt::WA_DontShowOnScreen);slow->show();
     clock.restart();while(!started->load() && clock.elapsed()<500)QApplication::processEvents();
     if(!started->load()){delete slow;return fail("slow worker started");}

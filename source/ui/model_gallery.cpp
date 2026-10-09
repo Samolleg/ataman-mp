@@ -38,13 +38,22 @@
 #include <QPointer>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QDebug>
+#include <QScopeGuard>
+#include <QCoreApplication>
 
 namespace {
 QThreadPool& thumbnailPool()
 {
     // Separate from unrelated QtConcurrent tasks (the old full-UI 300ms risk).
     static QThreadPool pool;
-    static const bool configured = []{pool.setMaxThreadCount(qBound(2,QThread::idealThreadCount(),4));return true;}();
+    static const bool configured = []{
+        pool.setMaxThreadCount(qBound(2,QThread::idealThreadCount(),4));
+        // Dialog close stays nonblocking. At application shutdown, finish jobs
+        // before later-created static disk-cache helpers begin destruction.
+        qAddPostRoutine([]{pool.waitForDone();});
+        return true;
+    }();
     Q_UNUSED(configured);
     return pool;
 }
@@ -206,6 +215,9 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     auto* textureRow=new QHBoxLayout; textureRow->addWidget(new QLabel(tr("Primary texture:"),this));
     m_texture=new QComboBox(this); m_texture->setObjectName("modelGalleryTexture"); m_texture->setEditable(true);
     m_texture->setInsertPolicy(QComboBox::NoInsert); m_texture->setMinimumContentsLength(20);
+    // Layout must not measure thousands of texture labels on the GUI thread.
+    // The expanding editable field and completer retain the complete catalog.
+    m_texture->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_texture->completer()->setFilterMode(Qt::MatchContains); m_texture->completer()->setCaseSensitivity(Qt::CaseInsensitive);
     textureRow->addWidget(m_texture,1);
     m_saveTexture=new QPushButton(tr("Bind texture"),this); m_saveTexture->setObjectName("modelGalleryBindTexture"); textureRow->addWidget(m_saveTexture); layout->addLayout(textureRow);
@@ -406,6 +418,10 @@ void CModelGallery::savePlacement()
 void CModelGallery::loadVisibleThumbnail()
 {
     if(!isVisible() || !m_provider) return;
+    const bool trace=qEnvironmentVariableIsSet("EI_GALLERY_TIMING_TRACE");
+    QElapsedTimer traceClock;traceClock.start();
+    qint64 textureNs=0;int visited=0;
+    const auto traceSlice=qScopeGuard([&]{if(trace)qInfo("GALLERY dispatch elapsed_ms=%.3f texture_ms=%.3f visited=%d jobs=%d",traceClock.nsecsElapsed()/1e6,textureNs/1e6,visited,m_thumbnailJobs.size());});
     const int limit=thumbnailPool().maxThreadCount();
     QElapsedTimer guiSlice;guiSlice.start();
     for(int i=0;i<m_list->count();++i)
@@ -415,7 +431,9 @@ void CModelGallery::loadVisibleThumbnail()
         if(guiSlice.elapsed()>=8) {m_thumbnailTimer.start();return;}
         auto* item=m_list->item(i);
         if(!m_list->visualItemRect(item).intersects(m_list->viewport()->rect())) continue;
+        ++visited;QElapsedTimer textureClock;textureClock.start();
         const QString model=item->data(Qt::UserRole).toString(),texture=textureForModel(model),key=cacheKey(model,texture);
+        textureNs+=textureClock.nsecsElapsed();
         if(item->data(Qt::UserRole+2).toString()==key) continue;
         const QImage* cached=m_thumbnails.object(key);
         if(!cached && !m_thumbnailNamespace.isEmpty()) cached=sharedThumbnails().object(key);
@@ -435,17 +453,25 @@ void CModelGallery::loadVisibleThumbnail()
         const QString directory=m_thumbnailNamespace.isEmpty()?QString():ei::galleryThumbnailDirectory();
         // No dialog/item/catalog references enter workers. Destroying a watcher
         // disconnects delivery without blocking; captured provider state outlives it.
-        watcher->setFuture(QtConcurrent::run(&thumbnailPool(),[provider,model,texture,key,directory]{
+        QElapsedTimer submitted;submitted.start();
+        watcher->setFuture(QtConcurrent::run(&thumbnailPool(),[provider,model,texture,key,directory,trace,submitted]{
+            const double queueMs=submitted.nsecsElapsed()/1e6;
+            QElapsedTimer stage;stage.start();
             QImage image;
-            if(!directory.isEmpty() && ei::readGalleryThumbnail(directory,key,&image)) return image;
+            const bool hit=!directory.isEmpty() && ei::readGalleryThumbnail(directory,key,&image);
+            const double readMs=stage.nsecsElapsed()/1e6;stage.restart();
+            if(hit) {if(trace)qInfo("GALLERY worker queue_ms=%.3f read_ms=%.3f provider_ms=0 write_ms=0 hit=1",queueMs,readMs);return image;}
             image=provider(model,texture);
+            const double providerMs=stage.nsecsElapsed()/1e6;stage.restart();
             if(!directory.isEmpty() && !image.isNull()) ei::writeGalleryThumbnail(directory,key,image);
+            if(trace)qInfo("GALLERY worker queue_ms=%.3f read_ms=%.3f provider_ms=%.3f write_ms=%.3f hit=0",queueMs,readMs,providerMs,stage.nsecsElapsed()/1e6);
             return image;
         }));
     }
 }
 void CModelGallery::finishThumbnail(QFutureWatcher<QImage>* watcher,const QString& model,const QString& key)
 {
+    QElapsedTimer delivered;delivered.start();
     const QImage image=watcher->result(); m_thumbnails.insert(key,new QImage(image),imageCost(image));
     m_thumbnailJobs.remove(key);watcher->deleteLater();
     if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
@@ -459,6 +485,7 @@ void CModelGallery::finishThumbnail(QFutureWatcher<QImage>* watcher,const QStrin
         }
     }
     m_thumbnailTimer.start();
+    if(qEnvironmentVariableIsSet("EI_GALLERY_TIMING_TRACE"))qInfo("GALLERY delivery elapsed_ms=%.3f",delivered.nsecsElapsed()/1e6);
 }
 
 QString CModelGallery::resourceThumbnailNamespace(const QStringList& sourcePaths)
