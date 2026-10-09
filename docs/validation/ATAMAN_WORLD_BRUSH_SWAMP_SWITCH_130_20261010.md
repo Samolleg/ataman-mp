@@ -244,3 +244,134 @@ lifetimes. Это предотвращает повторное создание
   world terrain 41 PASS/0 FAIL/5 optional SKIP.
   Подробности: docs/validation/ATAMAN_WORLD_BRUSH_SWAMP_SWITCH_130_20261010.md.
 ```
+
+## Передача 129
+
+EI-FINALIZE-129, 2026-10-10, отдельное поручение владельца через Claude.
+Начальная база main и источник сборки:
+`b8ca24bb983bfd01b3d99bb9878b122e017cc263`, VERSION=129.
+AGENTS.md проверен: SHA256
+`F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`,
+правила не менялись. Git использован только для чтения/архива;
+ветки, worktree, коммиты, подагенты, сеть и установка зависимостей не выполнялись.
+Общие ROADMAP/CHANGELOG/VERSION/Readme/translations в рабочем checkout не изменены.
+Во время передачи сопровождающий изменил HEAD на
+`e13033fb4cf84e82e9a9b0d43920956a0d858ef6`; это не источник сборки129.
+
+### Изоляция и сборка
+
+Снимок создан `git -c core.autocrlf=false -c core.eol=lf archive` указанного
+коммита, распакован Python tarfile в `build-release-129-final/src`.
+Все **1782 Git blob**, полный список файлов и VERSION129 проверены до сборки;
+после сборки **0 изменённых blob / 0 дополнительных файлов**.
+Доказательства: [snapshot.json](../../build-tests-129-final/snapshot.json),
+[snapshot-after-build.json](../../build-tests-129-final/snapshot-after-build.json).
+Начальная распаковка системным tar искажала кириллические имена, а первоначальный
+archive использовал CRLF; эта копия сохранена как
+`build-release-129-final/src-tar-encoding-unused` и не использовалась для сборки.
+Начальная проверка ожидаемого нового QM после сборки оказалась слишком строгой:
+QM уже tracked и остался byte-identical; фактический результат — неизменное дерево.
+
+Свежая shadow Release: `build-release-129-final/release`, стандартный wrapper
+из снимка, Qt5.12.12/MinGW7.3 x64, оба x86 runtime-компонента пересобраны;
+exit0, 146.78с. [Лог](../../build-tests-129-final/release-build.out).
+EXE `--version`: `EI Mapper Endurance Edition 129`, exit0.
+SHA256 свежего, протестированного, staged и установленного EXE совпадает:
+`B70F56E4F8D0B2E187E5469923644613CDA81B0CC41BCE4E07D0B767D9245CA5`.
+
+### Регрессы
+
+Все проверки с UI/native GL выполнялись последовательно под атомарным
+`build-locks/ui-tests.lock`, owner.txt=EI-FINALIZE-129; блокировка снималась finally.
+TEMP/TMP и рабочие данные проверок находятся в собственном build-tests-129-final.
+Редактор и игра интерактивно не запускались; живые карты/игра/мод не менялись.
+
+| Проверка | Результат | Доказательство |
+|---|---|---|
+| Полный --ui-widget-check под --guard-image-child | **UNAVAILABLE**, guard exit2 до запуска UI и до записи буфера: несохраняемый native формат49470; 0 выполненных проверок, не PASS | [stderr](../../build-tests-129-final/ui/check.err), [result](../../build-tests-129-final/ui/result.json) |
+| --scenario-layer-check | **50 PASS, 0 FAIL, 0 SKIP**, exit0 | [result](../../build-tests-129-final/scenario/result.json) |
+| --dark-theme-check | **70 PASS, 0 FAIL, 0 SKIP**, exit0 | [result](../../build-tests-129-final/dark-theme/result.json) |
+| world_brush_130_integration, собран из снимка129 | **8/8 содержательных случаев PASS**, QtTest24 PASS включая16 init/cleanup, 0 FAIL/0 SKIP, exit0 | [stdout](../../build-tests-129-final/brush/check.out) |
+| world_terrain_sculpt_tests, собран из снимка129 | **41 PASS, 0 FAIL, 5 optional SKIP**, exit0 | [results](../../build-tests-129-final/sculpt/results.txt) |
+
+Пять SKIP относятся к optional installedZone2OffsetOnlyReadOnly,
+installedZone11Zone12ReadOnly, installedZone6Zone4QuarterShiftReadOnly,
+installedZone11Zone12Zone13ReadOnly, installedTripleReadOnly; они не выполнены.
+Буфер пользователя сохранён. Предложено скопировать обычный текст для повторного
+UI-check; к моменту передачи подтверждения изменения буфера не получено.
+Защита не ослаблялась. Недоступность UI явно внесена в changelist пакета.
+Причина SWITCH-ATLAS и границы SWAMP остаются описанными выше:
+исправлено владение поздним рабочим атласом; исходный невидимый мазок zone3obr
+не объяснён окончательно, алгоритм высот существующего покрытия не менялся.
+
+### Staging и постоянная установка
+
+Новый staging: `build-staging-129-final-handoff`, создан заново.
+Qt/runtime deployment-файлы и синтетические fixtures взяты из чистого staging128
+с проверкой всех127 старых manifest hashes; EXE, оба пересобранных runtime,
+VERSION/Readme заменены из сборки/снимка129, CHANGELOG содержит только129,
+результаты и короткие ручные шаги. Проверены staged --version и идентичность EXE.
+Финализатор из снимка выполнен **только на staging**, exit0, его внутренний
+distribution validator **PASS**,127 payloads; после finalizer пакет не запускался
+и не менялся. [Finalizer](../../build-tests-129-final/finalizer.out),
+[staging-result](../../build-tests-129-final/staging-result.json).
+
+Постоянная установка обновлена **128→129**:
+`artifacts/EI-Mapper-Ataman-2-first-test`.
+Host-level process guard перед подготовкой и непосредственно перед заменой
+подтвердил отсутствие процессов редактора/runtime.
+Все127 старых managed hashes совпали с manifest128, конфликтов не было.
+Заменены ровно6 managed файлов:
+
+- `CHANGELOG.md`
+- `EIMapperEndurance.exe`
+- `Readme.md`
+- `VERSION`
+- `runtime/EIMapperEnduranceJmvBridge.plg`
+- `runtime/EIMapperEnduranceRuntimeHost.exe`
+
+`SHA256SUMS.txt` заменён последним; файлы копировались через проверенный временный
+файл с atomic os.replace. **127/127 установленных managed hashes + manifest PASS**.
+**22433/22433 unlisted пользовательских файлов сохранены побайтово**,
+включая настройки, карты, логи и кэши; списки до/после совпадают.
+Finalizer и проверки, создающие пользовательские данные, на установке не запускались.
+SHA256 manifest129:
+`6D08B53C84547CF6DDF95B72F170CD0DCA8F68B7CBD310223E183E4EAAFE5631`.
+[Install result](../../build-tests-129-final/install-result.json),
+[план](../../build-tests-129-final/install-plan.json),
+[hashes до](../../build-tests-129-final/user-files-before.json),
+[hashes после](../../build-tests-129-final/user-files-after.json).
+
+Rollback128: `artifacts/rollback-EI-Mapper-Ataman-v128-to-129-20261010`,
+ровно заменяемые6 файлов и прежний manifest, **7/7 backup hashes PASS** до замены;
+[rollback hashes](../../build-tests-129-final/rollback-hashes.json).
+Восстановление не потребовалось. Старый rollback127
+`artifacts/rollback-EI-Mapper-Ataman-v127-to-128-20261009` сохранён:
+он вне явно разрешённого владения `artifacts/rollback-*129*`.
+Удаление только этой подтверждённой старой генерации по правилу одной завершённой
+генерации остаётся шагом сопровождающего; самостоятельно границы не расширялись.
+ZIP не запрошен и не создавался.
+
+### Передача сопровождающему
+
+Сборка и обновление выполнены; полная автоматическая UI-приёмка остаётся
+недоступной по указанному guard. Ручная смена карты с новым атласом,
+визуальная/игровая приёмка и исходный SWAMP остаются открытыми.
+
+**Точный список файлов для коммита этой задачи — один изменённый файл:**
+`docs/validation/ATAMAN_WORLD_BRUSH_SWAMP_SWITCH_130_20261010.md`
+(только добавленный раздел «Передача129»).
+Новых source-файлов для коммита нет; build/staging/install/rollback и приватные
+инвентаризации — инженерные артефакты, в Git не включать.
+
+Текст для ROADMAP (общий файл не изменён):
+
+```markdown
+- EI-FINALIZE-129, 2026-10-10: Release129 собрана из точного снимка main b8ca24bb983bfd01b3d99bb9878b122e017cc263,1782 blobs до/после совпадают. Scenario50/0, dark-theme70/0, native8/8 (QtTest24/0), world terrain41/0/5 optional SKIP. Полный UI-check UNAVAILABLE: guard остановлен native clipboard49470 до записи. Staging/finalizer127 managed PASS; постоянная установка128→129,127 managed+manifest PASS,22433 user files byte-identical, rollback128 проверен. Evidence: docs/validation/ATAMAN_WORLD_BRUSH_SWAMP_SWITCH_130_20261010.md, раздел Передача129. Следующий шаг: повторить полный UI-check после сохраняемого буфера, вручную принять смену карты/атлас; сопровождающему удалить старый rollback127 вне владения исполнителя. Исходный SWAMP и прежние родительские цели не закрыты.
+```
+
+Дополнение записи CHANGELOG129 для сопровождающего (общий файл не изменён):
+
+```markdown
+- EI-FINALIZE-129: выполнены свежая Release из коммита b8ca24bb983bfd01b3d99bb9878b122e017cc263 и передача128→129 с сохранением22433 пользовательских файлов и проверенным rollback128. Scenario50 PASS/0 FAIL, dark-theme70/0,8 native cases PASS, world terrain41/0/5 optional SKIP; clean staging127 hashes PASS. Полный UI-check недоступен из-за несохраняемого native clipboard49470, guard остановил запуск до записи; ручная приёмка остаётся открытой. Evidence: docs/validation/ATAMAN_WORLD_BRUSH_SWAMP_SWITCH_130_20261010.md, Передача129.
+```
