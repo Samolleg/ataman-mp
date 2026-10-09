@@ -1,9 +1,15 @@
-# Material atlas
+# Material atlas — Ataman 128
 
-Endurance reads the existing atlas images exactly as the game does. It does not
-edit or generate atlas imagery. It builds a material catalog describing which
-existing slots represent Ground, Underwater, or Overlay materials and which
-material appears at each tile corner.
+Synchronized 2026-10-10, EI-PAINT-DOCS-SYNC-20261010. Current behavior and
+source anchors are recorded in
+[the synchronization report](validation/ATAMAN_PAINT_DOCS_SYNC_20261010.md).
+The questionnaire sections retain the historical research/presentation contract;
+they are not a claim that a questionnaire was regenerated or tested today.
+
+Ataman reads existing atlas images and builds a material catalog for Ground,
+Underwater and Overlay usage and exact tile-corner identities. Modern painting
+can also import authored stock tiles and generate missing blends; the former
+statement that the editor never generates imagery is obsolete.
 
 Zone 1 is the authored behavioral baseline. Every reviewed installed namespace
 has an exact-bound built-in default with the same names, assignments, layers,
@@ -22,48 +28,48 @@ corner editing and slot reconstruction still depend on it.
 
 ## Painting
 
-Landscape Tools has separate **Ground** and **Overlay** modes. Ground and
-Underwater materials remain visible in their own palette sections. Overlay
-materials appear only in Overlay mode, so a ground texture cannot be painted as
-an overlay or vice versa.
+Landscape Tools provides **Modern (Z)**, **Classic / Classic Auto (X)** and
+**Manual (C)** painting, with selectable **Ground** and **Overlay** layers.
+Underwater materials appear in the Ground palette. Allowed-layer flags can
+permit one family in both layers; incompatible corner combinations are refused.
 
-Each material is a pressed thumbnail button. A family with a uniform four-corner
-tile uses the lowest valid uniform slot as its default thumbnail (or the user's
-chosen uniform slot). A family with no uniform tile but a valid 1-on-3
-relationship uses a four-tile vertex-centred preview of its size-1 stamp. This
-includes a transition-only centre family
-(for example, **Irregular on Dark**) and the inverse case where the center has
-ordinary uniform tiles but its support does not (for example, **Stone on
-Ground**). These cards rotate the one authored tile around a vertex to form the
-complete four-tile junction. A family with neither kind of authored support is
-labeled **transition support**, kept for exact corner review, and not offered as
-a brush. Contextual cards do not duplicate or merge profile assignments.
-Hovering shows the exact card name and assigned-slot count.
+Modern reuses exact authored tiles and creates missing exact blends from uniform
+sources. Automatic transitions are enabled by default; disabling them leaves
+resolution to the explicit Resolve Missing Blends action. Publication refuses
+unresolved changed tuples. Modern drag preview is an unblended fill over the
+accumulated vertex footprint; release resolves it as one undo transaction.
 
-All semantic material brushes operate on terrain vertices. During a drag the
-editor shows the selected material immediately as a temporary hard-edged,
-unblended fill. It does not repeatedly resolve transition tiles against the
-partially completed stroke. On release, that temporary fill is removed and the
-complete accumulated vertex footprint is resolved once from the original
-terrain state. MPR storage, final preview, save, and undo remain tile-based.
+Classic never expands the atlas. **Safe** is enabled by default: unsupported
+vertices/boundaries remain unchanged. With Safe disabled (less restrictive
+behavior sometimes called **Smart**), unresolved boundaries may use a local
+uniform hard edge. The current enum/UI does not expose Smart as a fourth mode.
+Manual writes the selected physical tile and rotation directly.
 
-Some authored detail materials have no uniform four-corner tile. Each contextual
-palette card therefore retains the exact support material shown in its preview.
-A click first requests the authored four-tile `detail on support` vertex motif,
-with the correct rotation in every incident tile. When a complete stroke asks
-for a 2-corner or 3-corner combination absent from the atlas, the resolver keeps
-a deterministic representable subset and leaves unsupported
-vertices unchanged. It never selects four independent "closest" tiles: every
-retained vertex has one identity shared by all incident tiles. The editor
-reports exactly how many requested vertices the atlas could not retain. No
-paint action expands beyond tiles incident to requested vertices.
+Each material is a pressed thumbnail button. Uniform families use a valid
+uniform thumbnail; supported 1-on-3 contextual cards use a vertex-centred motif.
+Components without paint support remain **transition support** for exact corner
+review. Hovering exposes the card name and assigned-slot count. Coverage counts
+assigned physical slots once even when transitions belong to several families.
 
-The coverage label beside **Material atlas...** reports, for example,
-`509 / 512 assigned (3 unassigned)`. Deterministic, structurally valid
-assignments are usable immediately—even before explicit approval. Unassigned
-tiles are excluded from automatic painting. When a requested 3-way or 4-way
-transition does not exist, painting uses a hard edge and records a diagnostic;
-it never invents atlas content.
+The historical description of representable subsets/hard edges applies to
+authored-atlas Classic behavior, not to Modern generation in general. Modern
+resolves exact signatures and reports unavailable sources/masks rather than
+silently substituting another requested identity. Generation has reviewed-mask
+and explicit canonical mathematical paths; it is not limited to the original
+MVP stock-mask transfer algorithm.
+
+Ground + Overlay can be finalized together. Dense packing retains live references
+and animation phases. The current editor limit is **16,384 slots** (256 pages),
+with a warning above **4,096**. Corrected historical runtime evidence passed
+through 4,096, failed at 8,192 and did not attempt 16,384 in the ordered rerun:
+[capacity report](validation/EXPANDED_TERRAIN_ATLAS_RUNTIME.md).
+Export capacity and runtime proof are different boundaries.
+
+R151 removed rotated-equivalent authored-slot merging: packing retains authored
+image orientation and requires identical images/semantics/classes/route owner for
+a merge. Generated signatures still use quarter-turn canonicalization, and
+typed pixel caching still exists. It is inaccurate to describe all current
+deduplication as disabled.
 
 ## Visual editing
 
@@ -98,8 +104,8 @@ counts only once in total coverage.
 - Select a uniform member tile and choose **Use selected tile as thumbnail** to
   override the deterministic default.
 
-Review previews and schema-6 profiles use one literal visual contract: NW is
-the material visible at the upper-left of the displayed tile, and likewise for
+Review previews and current schema-10 profiles use one literal visual contract:
+NW is the material visible at the upper-left of the displayed tile, and likewise for
 NE, SE, and SW. The paint compiler reflects that signature once into terrain
 grid space and applies the renderer's one fixed packed-rotation convention.
 Atlas content cannot redefine the meaning of the MPR rotation bits.
@@ -107,11 +113,11 @@ Selecting a tile never recolours its texture. The thumbnail member is marked wit
 outlined **T** in the expanded material list; selecting only a material shows
 that thumbnail without selecting or editing a tile.
 
-Ground/Underwater and Overlay families cannot coexist in one tile. The editor
-rejects such a drop immediately, explains the conflict, and leaves the previous
-assignment unchanged. An unusual inferred tile that initially crosses layers
-stays unassigned; drag it to the correct material first, then refine corners
-within that layer.
+All four corners must share an allowed Ground or Overlay section. A family
+can permit both; Ground-only and Overlay-only families cannot be combined in
+one tile. Incompatible assignments are refused without changing the previous
+assignment. Unassigned inferred tiles can first be given a compatible base
+assignment and then refined corner by corner.
 
 There are no family and slot “Needs review” checkboxes. Slot ambiguity is
 resolved by assigning or excluding the tile. If the parser could not prove a
@@ -206,9 +212,10 @@ generated/default cache files from older builds are ignored. AppData profiles
 from older builds are not migrated or loaded. Distribution packages contain no
 local override profiles.
 
-Profile schema 7 records tile-preview corner space explicitly as well as
-whether an authored internal family is paint selectable. Pixel-inferred legacy
-profiles already contain visual corners and keep them unchanged. Known authored
+Current profile schema **10** records tile-preview corner space, paint
+selectability, allowed layers, runtime tile types, texture count, and per-slot
+route owner. Schema 7 is a historical format, not the current writer version.
+Pixel-inferred legacy profiles already contain visual corners and keep them unchanged. Known authored
 profiles are reflected once from their former paint-grid representation while
 preserving names, thumbnails, and user edits. A profile
 is accepted only when all three bindings match the loaded atlas:
@@ -220,3 +227,20 @@ is accepted only when all three bindings match the loaded atlas:
 “Profile does not match this atlas” therefore means the chosen profile belongs
 to another namespace or atlas revision, not that its outer filename differs.
 No profile silently transfers semantic meaning across those boundaries.
+
+## MPR save and published atlas identity
+
+Save MPR can update the loaded file in place; Save MPR As selects another target.
+Neither a new MPR name nor separate Ground/Overlay sessions are mandatory.
+The save policy publishes new artwork/working-extension references or explicit
+identity changes to the configured **HDPack_Terrain.res** (publication target
+since Ataman 52). Ordinary semantic/height-only saves do not republish the RES.
+Existing archive members are preserved; replacement uses staged validation,
+backup and guarded rollback. Reusing an atlas identity can affect other maps.
+
+Since Ataman 122 the exact semantic field is embedded in MPR as
+**ei_mapper_terrain_semantics.json**, with Ground and Overlay state and
+namespace/tile/atlas/profile bindings. MPR semantics take precedence over the
+legacy RES member; old RES state is read when MPR semantics are absent.
+These semantic fields differ from review-profile copies in terrain-atlas-profiles.
+See [current MVP save contract](MODERN_TERRAIN_EDITOR_MVP.md).
