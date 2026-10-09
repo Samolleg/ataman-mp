@@ -488,8 +488,17 @@ bool CView::resolveWorldTerrainClose(bool retain)
         {
             QByteArray candidate;CValidationReport report;
             const auto retained=m_worldTerrainSession.documents.value(CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath()));
+            // A height-only world session has no atlas yet. A later local
+            // paint/repair can introduce working artwork; sync alone only
+            // updates an already-owned atlas. Capture its source pages before
+            // retaining the map, so reopening/saving keeps the complete pair.
+            const bool needsAtlas=retained && m_workingTerrainAtlas
+                && m_terrainEdit.usesUnsavedAtlasArtwork(*m_workingTerrainAtlas);
+            const bool atlasReady=!needsAtlas || ensureWorldTerrainAtlas(
+                CWorldTerrainSession::key(retained->path),&report);
             const bool ownsAtlas=retained && retained->atlas && m_worldTerrainAtlasSources.contains(CWorldTerrainSession::key(retained->path));
-            if((mprParametersDirty() && (!ownsAtlas || m_mprAnimatedTiles!=m_mprDocument.mapInfo().animatedTiles))
+            if(!atlasReady
+               || (mprParametersDirty() && (!ownsAtlas || m_mprAnimatedTiles!=m_mprDocument.mapInfo().animatedTiles))
                || (!ownsAtlas && !buildValidatedLandscapeCandidate(&candidate,&report)))
             {
                 QMessageBox::information(this,tr("Save before switching maps"),
