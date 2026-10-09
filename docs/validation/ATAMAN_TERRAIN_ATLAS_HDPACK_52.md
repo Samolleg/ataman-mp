@@ -19,15 +19,20 @@ Branch: `codex/terrain-atlas-hdpack-v52`
 ## Checks
 
 - `git diff --check`: PASS before commit.
-- Release build: PASS using the retained Qt 5.12.12 MinGW 7.3 kit from the
-  Endurance checkout, with a fresh Ataman shadow directory
-  `build-release-52-terrain-atlas-hdpack`.
-- Build output shows `ENDURANCE_VERSION="52"`; the executable was produced.
-- `--version` runtime probe did not return in the available wait window, so the
-  version output check is NOT PASS. Only processes launched from this task's
-  shadow executable were stopped; the existing installed mapper was not touched.
-- Automated tests and game/editor scenario were not run. No live HDPack, MPR,
-  game installation, or permanent installation was modified.
+- Rebuilt from source commit `74adbecabcfae5911057c0497d71e69c71468557`
+  using the retained Qt 5.12.12 MinGW 7.3 kit and fresh shadow directory
+  `build-release-52-terrain-atlas-hdpack-rebuild`: PASS.
+- Staged `--version`: PASS, output `EI Mapper Endurance Edition 52`.
+- Fresh package `build-staging-52-terrain-atlas-hdpack`: finalizer PASS;
+  all 101 files are covered by valid SHA-256 entries. Staged executable hash
+  matches the fresh build: `2e43c2e1aa99915555069d802882b29cf67ca3d04263a46a8d18727d34e477ab`.
+- Permanent installation `artifacts/EI-Mapper-Ataman-2-first-test`: updated to
+  52; all 101 installed managed files match the package manifest. The previous
+  51 managed files were verified against their manifest and backed up under
+  `artifacts/rollback-EI-Mapper-Ataman-v51-to-52-20260923` before replacement.
+  User files outside the package manifest were not copied over or removed.
+- Automated behavior tests and the game/editor scenario were not run for this
+  rebuild. No live HDPack, MPR, or game installation was modified.
 
 ## Acceptance still needed
 
