@@ -1,3 +1,7 @@
+#include "gallery_thumbnail_cache.h"
+#include <QThreadPool>
+#include <QThread>
+#include <QElapsedTimer>
 #include "window_geometry.h"
 #include "model_catalog_icons.h"
 #include "model_gallery_thumbnail.h"
@@ -36,6 +40,15 @@
 #include <QKeyEvent>
 
 namespace {
+QThreadPool& thumbnailPool()
+{
+    // Separate from unrelated QtConcurrent tasks (the old full-UI 300ms risk).
+    static QThreadPool pool;
+    static const bool configured = []{pool.setMaxThreadCount(qBound(2,QThread::idealThreadCount(),4));return true;}();
+    Q_UNUSED(configured);
+    return pool;
+}
+
 // Pointer motion can turn IconMode's Shift click into a geometric rectangle.
 // Explorer-style ranges
 // must instead use the ordered model rows, including rows outside the viewport.
@@ -230,9 +243,8 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     connect(m_texture->lineEdit(),&QLineEdit::editingFinished,this,[this]{m_chosenTextures.insert(selectedModel(),selectedTexture());});
     connect(m_list->verticalScrollBar(),&QScrollBar::valueChanged,this,[this]{m_thumbnailTimer.start();});
     connect(&m_thumbnailTimer,&QTimer::timeout,this,&CModelGallery::loadVisibleThumbnail);
-    // A queued GUI callback starts one CPU worker, without an artificial pause.
+    // A queued GUI callback fills a bounded worker pool, without an artificial pause.
     m_thumbnailTimer.setInterval(0); m_thumbnailTimer.setSingleShot(true);
-    connect(&m_thumbnailWatcher,&QFutureWatcher<QImage>::finished,this,&CModelGallery::finishThumbnail);
     filter(initialModel,initialTexture);
 }
 CModelGallery::~CModelGallery() { m_thumbnailTimer.stop(); }
@@ -256,7 +268,7 @@ QVector<QPair<QString,QString>> CModelGallery::selectedEntries() const
     }
     return result;
 }
-QString CModelGallery::cacheKey(const QString& model,const QString& texture) const { return model.toLower()+'|'+texture.toLower(); }
+QString CModelGallery::cacheKey(const QString& model,const QString& texture) const { return ei::galleryThumbnailKey(m_thumbnailNamespace,m_profile,model,texture); }
 QVector<ei::STechnicalTextureChoice> CModelGallery::textureChoices(const QString& model) const
 {
     if(m_catalogRevision!=m_catalog->revision() || m_scanRevision!=m_scan->revision()) {
@@ -393,46 +405,57 @@ void CModelGallery::savePlacement()
 }
 void CModelGallery::loadVisibleThumbnail()
 {
-    // isRunning() becomes false before the queued finished notification. Keep
-    // ownership until that notification consumes the result and loading key.
-    if(!isVisible() || m_thumbnailJobActive || !m_provider) return;
+    if(!isVisible() || !m_provider) return;
+    const int limit=thumbnailPool().maxThreadCount();
+    QElapsedTimer guiSlice;guiSlice.start();
     for(int i=0;i<m_list->count();++i)
     {
+        // Resolving a first texture choice can be costly on a real profile.
+        // Yield between items rather than multiplying that GUI work by N jobs.
+        if(guiSlice.elapsed()>=8) {m_thumbnailTimer.start();return;}
         auto* item=m_list->item(i);
         if(!m_list->visualItemRect(item).intersects(m_list->viewport()->rect())) continue;
         const QString model=item->data(Qt::UserRole).toString(),texture=textureForModel(model),key=cacheKey(model,texture);
         if(item->data(Qt::UserRole+2).toString()==key) continue;
         const QImage* cached=m_thumbnails.object(key);
-        if(!cached && !m_thumbnailNamespace.isEmpty()) cached=sharedThumbnails().object(m_thumbnailNamespace+'|'+key);
+        if(!cached && !m_thumbnailNamespace.isEmpty()) cached=sharedThumbnails().object(key);
         if(cached) {
-            if(item->data(Qt::UserRole+2).toString()!=key) {
-                if(!cached->isNull()) item->setIcon(QPixmap::fromImage(*cached));
-                else {item->setIcon(QIcon());item->setToolTip(model+"\n"+tr("Preview unavailable"));}
-                item->setData(Qt::UserRole+2,key);
-            }
+            if(!cached->isNull()) {item->setIcon(QPixmap::fromImage(*cached));item->setToolTip(model+"\n"+item->data(Qt::UserRole+1).toString());}
+            else {item->setIcon(QIcon());item->setToolTip(model+"\n"+tr("Preview unavailable"));}
+            item->setData(Qt::UserRole+2,key);
             continue;
         }
-        // A new texture must show loading rather than the previous texture.
         item->setIcon(QIcon()); item->setData(Qt::UserRole+2,QVariant());
-        m_loadingKey=key; m_loadingModel=model;
+        // Retain ownership until finished is consumed, even if the future is done.
+        if(m_thumbnailJobs.contains(key) || m_thumbnailJobs.size()>=limit) continue;
+        auto* watcher=new QFutureWatcher<QImage>(this);
+        m_thumbnailJobs.insert(key,watcher);
+        connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,model,key]{finishThumbnail(watcher,model,key);});
         const auto provider=m_provider;
-        m_thumbnailJobActive=true;
-        m_thumbnailWatcher.setFuture(QtConcurrent::run([provider,model,texture]{return provider(model,texture);}));
-        return;
+        const QString directory=m_thumbnailNamespace.isEmpty()?QString():ei::galleryThumbnailDirectory();
+        // No dialog/item/catalog references enter workers. Destroying a watcher
+        // disconnects delivery without blocking; captured provider state outlives it.
+        watcher->setFuture(QtConcurrent::run(&thumbnailPool(),[provider,model,texture,key,directory]{
+            QImage image;
+            if(!directory.isEmpty() && ei::readGalleryThumbnail(directory,key,&image)) return image;
+            image=provider(model,texture);
+            if(!directory.isEmpty() && !image.isNull()) ei::writeGalleryThumbnail(directory,key,image);
+            return image;
+        }));
     }
 }
-void CModelGallery::finishThumbnail()
+void CModelGallery::finishThumbnail(QFutureWatcher<QImage>* watcher,const QString& model,const QString& key)
 {
-    const QImage image=m_thumbnailWatcher.result(); m_thumbnails.insert(m_loadingKey,new QImage(image),imageCost(image));
-    m_thumbnailJobActive=false;
-    if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(m_thumbnailNamespace+'|'+m_loadingKey,new QImage(image),imageCost(image));
+    const QImage image=watcher->result(); m_thumbnails.insert(key,new QImage(image),imageCost(image));
+    m_thumbnailJobs.remove(key);watcher->deleteLater();
+    if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
     for(int i=0;i<m_list->count();++i)
     {
-        auto* item=m_list->item(i); const QString model=item->data(Qt::UserRole).toString();
-        if(model==m_loadingModel && cacheKey(model,textureForModel(model))==m_loadingKey) {
-            if(!image.isNull()) item->setIcon(QPixmap::fromImage(image));
-            else item->setToolTip(model+"\n"+tr("Preview unavailable"));
-            item->setData(Qt::UserRole+2,m_loadingKey);
+        auto* item=m_list->item(i);
+        if(item->data(Qt::UserRole).toString()==model && cacheKey(model,textureForModel(model))==key) {
+            item->setIcon(image.isNull()?QIcon():QIcon(QPixmap::fromImage(image)));
+            item->setToolTip(model+"\n"+(image.isNull()?tr("Preview unavailable"):item->data(Qt::UserRole+1).toString()));
+            item->setData(Qt::UserRole+2,key);
         }
     }
     m_thumbnailTimer.start();
@@ -473,8 +496,9 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
         }
     }
     return [sources](const QString& model, const QString& texture) -> QImage {
-        // Immutable results can be shared across windows. Index and cache access
-        // is serialized in workers; the GUI never waits on this mutex.
+        // Publish the archive index once. Afterwards it is immutable; readMember
+        // uses a fresh local QFile/QDataStream, so reads and CPU decoders can overlap.
+        // Only initialization and QCache access need this mutex; the GUI never waits.
         QMutexLocker lock(&sources->mutex);
         if(!sources->indexed) { sources->catalog.build(sources->paths); sources->indexed = true; }
         const auto read = [sources](const QString& name) -> QByteArray {
@@ -485,25 +509,35 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
         };
         const QString stem = ei::TechnicalModelCatalog::modelKey(model);
         ei::SResourceModelScene scene;
-        if(const auto* cached=sources->scenes.object(stem)) scene=*cached;
-        else {
+        const auto* cachedScene=sources->scenes.object(stem);
+        const bool foundScene=cachedScene!=nullptr;
+        if(foundScene) scene=*cachedScene;
+        lock.unlock();
+        if(!foundScene) {
             const QByteArray payload=read(stem+".mod");
             scene=payload.isEmpty() ? ei::buildFig8Scene(read(stem+".fig")) : ei::buildModScene(payload,read(stem+".bon"));
             // Conservative allowance for part names and skeleton allocations,
             // plus the actual triangle capacity. Cache oversized scenes nowhere.
             qint64 bytes=sizeof(scene)+qint64(scene.parts.size())*2048;
             for(const auto& part:scene.parts) bytes+=qint64(part.triangles.capacity())*sizeof(ei::SResourceModelTriangle);
+            QMutexLocker cacheLock(&sources->mutex);
             sources->scenes.insert(stem,new ei::SResourceModelScene(scene),int(qMin<qint64>(2147483647,(bytes+1023)/1024)));
         }
         QImage image;
         if(!texture.isEmpty()) for(const QString& candidate : ei::textureResourceCandidates(texture, stem))
         {
-            if(const auto* cached=sources->textures.object(candidate.toCaseFolded())) {image=*cached;break;}
+            {
+                QMutexLocker cacheLock(&sources->mutex);
+                if(const auto* cached=sources->textures.object(candidate.toCaseFolded())) {image=*cached;break;}
+            }
             const QByteArray bytes = read(candidate);
             if(bytes.isEmpty()) continue;
             image = CTextureList::prepareStaticTexture(bytes).image;
+            QMutexLocker cacheLock(&sources->mutex);
             sources->textures.insert(candidate.toCaseFolded(),new QImage(image),imageCost(image)); break;
         }
+        // Scene/texture data is held by local implicit-sharing copies.
+        // CPU rasterization neither mutates those caches nor touches OpenGL.
         float minU=0,maxU=0,minV=0,maxV=0;
         for(const auto& part:scene.parts) for(const auto& triangle:part.triangles) for(const auto& vertex:triangle.vertices)
         { minU=qMin(minU,vertex.uv.x());maxU=qMax(maxU,vertex.uv.x());minV=qMin(minV,vertex.uv.y());maxV=qMax(maxV,vertex.uv.y()); }

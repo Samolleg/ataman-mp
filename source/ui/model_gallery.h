@@ -20,6 +20,7 @@ class CModelGallery final : public QDialog
 {
     Q_OBJECT
 public:
+    // Called on 2–4 workers: implementations must be reentrant or guard shared state.
     using ThumbnailProvider = std::function<QImage(const QString&, const QString&)>;
     CModelGallery(const QStringList& models, ei::TechnicalModelCatalog* catalog,
         const QString& profile, const QStringList& textures, const ei::TechnicalTextureCatalog* scan,
@@ -50,7 +51,7 @@ private:
     void saveTexture();
     void savePlacement();
     void loadVisibleThumbnail();
-    void finishThumbnail();
+    void finishThumbnail(QFutureWatcher<QImage>* watcher, const QString& model, const QString& key);
     QString textureForModel(const QString& model) const;
     QString cacheKey(const QString& model, const QString& texture) const;
     QVector<ei::STechnicalTextureChoice> textureChoices(const QString& model) const;
@@ -77,9 +78,8 @@ private:
     bool m_multiSelection{false};
     QHash<QString,QString> m_chosenTextures;
     QTimer m_thumbnailTimer;
-    QFutureWatcher<QImage> m_thumbnailWatcher;
-    bool m_thumbnailJobActive = false;
+    QHash<QString,QFutureWatcher<QImage>*> m_thumbnailJobs;
     QCache<QString,QImage> m_thumbnails{16*1024};
-    QString m_loadingKey, m_loadingModel;
+
 };
 #endif

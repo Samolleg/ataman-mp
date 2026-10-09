@@ -1,5 +1,6 @@
 #include "model_gallery_check.h"
 #include "model_gallery.h"
+#include "gallery_thumbnail_cache.h"
 #include <QTemporaryDir>
 #include <QListWidget>
 #include <QLineEdit>
@@ -29,9 +30,9 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     catalog.registerModels(models); catalog.setRussianName("house",QString::fromUtf8("Домик"));
     catalog.bindTexture("test","house","stone"); if(!catalog.save(&error)) return fail(error);
     ei::TechnicalTextureCatalog scan;
-    std::atomic<int> previews{0};
+    auto previews=QSharedPointer<std::atomic<int>>::create(0);
     CModelGallery gallery(models,&catalog,"test",{"stone","wood"},&scan,
-        [&previews](const QString&,const QString&){++previews;QImage image(192,132,QImage::Format_ARGB32);image.fill(Qt::red);return image;});
+        [previews](const QString&,const QString&){++*previews;QImage image(192,132,QImage::Format_ARGB32);image.fill(Qt::red);return image;});
     gallery.setAttribute(Qt::WA_DontShowOnScreen); gallery.show();
     auto* list=gallery.findChild<QListWidget*>("modelGalleryTiles");
     auto* search=gallery.findChild<QLineEdit*>("modelGallerySearch");
@@ -59,8 +60,8 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     categories->setCurrentIndex(0);
     for(int i=0;i<list->count();++i) if(list->item(i)->data(Qt::UserRole).toString()=="bridge" && !list->item(i)->data(Qt::UserRole+1).toString().isEmpty()) return fail("empty Russian subtitle placeholder");
     QElapsedTimer clock; clock.start();
-    while(clock.elapsed()<800 && previews.load()<2) {QApplication::processEvents(QEventLoop::AllEvents,20);}
-    if(previews.load()==0 || previews.load()>=models.size()) return fail("visible-only thumbnails");
+    while(clock.elapsed()<800 && previews->load()<2) {QApplication::processEvents(QEventLoop::AllEvents,20);}
+    if(previews->load()==0 || previews->load()>=models.size()) return fail("visible-only thumbnails");
     search->setText(QString::fromUtf8("ДОМИК house"));
     if(list->count()!=1 || gallery.selectedModel()!="house") return fail("Russian/technical search");
     name->setText(QString::fromUtf8("Каменный дом")); save->click();
@@ -150,8 +151,8 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         || largeTexture->completer()->completionModel()->index(0,0).data().toString()!="texture7162") return fail("full-list completion content");
     // The two production entry points provide the initial model/texture before
     // the first population. Shared preview keys must include the resources.
-    std::atomic<int> sharedCalls{0};
-    const auto fastProvider=[&sharedCalls](const QString&,const QString& tex){++sharedCalls;QImage image(192,132,QImage::Format_ARGB32);image.fill(tex=="wood"?Qt::red:Qt::blue);return image;};
+    auto sharedCalls=QSharedPointer<std::atomic<int>>::create(0);
+    const auto fastProvider=[sharedCalls](const QString&,const QString& tex){++*sharedCalls;QImage image(192,132,QImage::Format_ARGB32);image.fill(tex=="wood"?Qt::red:Qt::blue);return image;};
     // A worker may finish before its queued GUI notification. A resize/scroll
     // timer in that interval must not replace its future or submit it twice.
     {
@@ -160,9 +161,9 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
             [&jobs](const QString&,const QString&){++jobs;QImage image(192,132,QImage::Format_ARGB32);image.fill(Qt::red);return image;});
         notification.setAttribute(Qt::WA_DontShowOnScreen);notification.show();
         notification.m_thumbnailTimer.stop();notification.loadVisibleThumbnail();
-        notification.m_thumbnailWatcher.waitForFinished();
-        notification.loadVisibleThumbnail();notification.m_thumbnailWatcher.waitForFinished();
-        if(jobs.load()!=1) return fail("finished worker must await GUI result notification without resubmission");
+        for(auto* watcher:notification.m_thumbnailJobs)watcher->waitForFinished();
+        notification.loadVisibleThumbnail();
+        if(jobs.load()!=2) return fail("finished worker must await GUI result notification without resubmission");
     }
     const auto ready=[&](CModelGallery& dialog,int limit) {
         auto* tiles=dialog.findChild<QListWidget*>("modelGalleryTiles");
@@ -177,10 +178,44 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         deadline.setSingleShot(true);probe.setTimerType(Qt::PreciseTimer);probe.setInterval(5);
         QObject::connect(&deadline,&QTimer::timeout,&loop,&QEventLoop::quit);
         QObject::connect(&probe,&QTimer::timeout,&loop,inspect);
-        const auto finished=QObject::connect(&dialog.m_thumbnailWatcher,&QFutureWatcher<QImage>::finished,&loop,inspect);
-        deadline.start(limit);probe.start();loop.exec();QObject::disconnect(finished);
+        deadline.start(limit);probe.start();loop.exec();
         return complete;
     };
+    // Bounded overlap, stale texture/tab delivery, scrolling, and all-N close.
+    struct ParallelState { std::atomic<int> active{0},maximum{0},calls{0}; };
+    auto parallel=QSharedPointer<ParallelState>::create();
+    const auto slowProvider=[parallel](const QString&,const QString& tex){
+        ++parallel->calls;const int active=++parallel->active;
+        int maximum=parallel->maximum.load();while(maximum<active&&!parallel->maximum.compare_exchange_weak(maximum,active)){}
+        QThread::msleep(tex=="wood"?100:20);
+        QImage image(192,132,QImage::Format_ARGB32);image.fill(tex=="wood"?Qt::red:Qt::blue);
+        --parallel->active;return image;
+    };
+    {
+        CModelGallery concurrent({"house","bridge","a","b","c","d","e","f","g","h"},&catalog,"test",{"wood","stone"},&scan,slowProvider,nullptr,"house","wood");
+        concurrent.setAttribute(Qt::WA_DontShowOnScreen);concurrent.show();
+        concurrent.m_thumbnailTimer.stop();concurrent.loadVisibleThumbnail();
+        clock.restart();while(parallel->active.load()<2 && clock.elapsed()<300)QApplication::processEvents();
+        if(parallel->active.load()<2 || concurrent.m_thumbnailJobs.size()>4)return fail("bounded parallel provider overlap");
+        concurrent.setCurrentTexture("stone");
+        auto* tiles=concurrent.findChild<QListWidget*>("modelGalleryTiles");
+        clock.restart();while(tiles->currentItem()->data(Qt::UserRole+2).toString()!=concurrent.cacheKey("house","stone")&&clock.elapsed()<500)QApplication::processEvents(QEventLoop::AllEvents,10);
+        if(tiles->currentItem()->data(Qt::UserRole+2).toString()!=concurrent.cacheKey("house","stone") || tiles->currentItem()->icon().pixmap(192,132).toImage().pixelColor(0,0)!=QColor(Qt::blue))return fail("stale concurrent texture cannot overwrite newer icon");
+        tiles->verticalScrollBar()->setValue(tiles->verticalScrollBar()->maximum());
+        concurrent.m_search->setText("bridge");
+        if(!ready(concurrent,500) || concurrent.selectedModel()!="bridge")return fail("stale filtered/scrolled jobs");
+    }
+    clock.restart();while(parallel->active.load()!=0&&clock.elapsed()<500)QApplication::processEvents();
+    if(parallel->active.load()!=0||parallel->maximum.load()<2||parallel->maximum.load()>4)return fail("worker cleanup and concurrency bounds");
+    {
+        auto* closing=new CModelGallery({"house","bridge","a","b"},&catalog,"test",{"wood","stone"},&scan,slowProvider);
+        closing->setAttribute(Qt::WA_DontShowOnScreen);closing->show();closing->m_thumbnailTimer.stop();closing->loadVisibleThumbnail();
+        clock.restart();while(parallel->active.load()<2&&clock.elapsed()<300)QApplication::processEvents();
+        if(parallel->active.load()<2){delete closing;return fail("N workers started before close");}
+        clock.restart();delete closing;if(clock.elapsed()>150)return fail("all-N close blocks UI");
+        clock.restart();while(parallel->active.load()!=0&&clock.elapsed()<500)QApplication::processEvents();
+        if(parallel->active.load()!=0)return fail("all-N close leaks workers");
+    }
     const QString space=temp.path()+"/resources-1";
     const QString resourcePath=temp.filePath("preview-resource.res");
     QFile resource(resourcePath);
@@ -195,35 +230,40 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         CModelGallery cold(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space);
         if(cold.selectedModel()!="house" || cold.selectedTexture()!="wood") return fail("initial model and explicit texture");
         cold.setAttribute(Qt::WA_DontShowOnScreen);cold.show();clock.restart();
-        if(!ready(cold,300)) return fail(QString("visible thumbnail queue responsiveness (limit300ms): calls=%1 viewport=%2x%3 elapsed=%4ms").arg(sharedCalls.load()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->width()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->height()).arg(clock.elapsed()));
+        if(!ready(cold,300)) return fail(QString("visible thumbnail queue responsiveness (limit300ms): calls=%1 viewport=%2x%3 elapsed=%4ms").arg(sharedCalls->load()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->width()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->height()).arg(clock.elapsed()));
         auto* tiles=cold.findChild<QListWidget*>("modelGalleryTiles");
-        if(sharedCalls.load()==0 || sharedCalls.load()>=manyModels.size()) return fail("full-profile visible-only jobs");
-        const int before=sharedCalls.load();
+        if(sharedCalls->load()==0 || sharedCalls->load()>=manyModels.size()) return fail("full-profile visible-only jobs");
+        const int before=sharedCalls->load();
         tiles->verticalScrollBar()->setValue(0);
-        if(!ready(cold,300) || sharedCalls.load()<=before) return fail("new viewport thumbnails");
+        if(!ready(cold,300) || sharedCalls->load()<=before) return fail("new viewport thumbnails");
         tiles->scrollToItem(tiles->currentItem());
-        const int back=sharedCalls.load();
-        if(!ready(cold,300) || sharedCalls.load()!=back) return fail("return to cached viewport");
+        const int back=sharedCalls->load();
+        if(!ready(cold,300) || sharedCalls->load()!=back) return fail("return to cached viewport");
+        // Scroll may leave bounded jobs from the previous viewport completing.
+        // Consume them before measuring a separate window's provider count.
+        clock.restart();while(!cold.m_thumbnailJobs.isEmpty()&&clock.elapsed()<300)QApplication::processEvents(QEventLoop::AllEvents,10);
+        if(!cold.m_thumbnailJobs.isEmpty())return fail("scroll job completion deadline300ms");
     }
     {
-        const int before=sharedCalls.load();
+        const int before=sharedCalls->load();
         CModelGallery warm(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space);
         warm.setAttribute(Qt::WA_DontShowOnScreen);warm.show();
-        if(!ready(warm,300) || sharedCalls.load()!=before) return fail("preview cache survives gallery reopening");
+        if(!ready(warm,300) || sharedCalls->load()!=before) return fail(QString("preview cache survives gallery reopening before=%1 after=%2 jobs=%3").arg(before).arg(sharedCalls->load()).arg(warm.m_thumbnailJobs.size()));
         warm.setCurrentTexture("stone");
         if(!ready(warm,300)) return fail("changed texture preview");
         // ready() may observe the old icon until the queued job finishes. Wait
         // for the actual new cache key before examining the displayed result.
         auto* tiles=warm.findChild<QListWidget*>("modelGalleryTiles");clock.restart();
-        while(tiles->currentItem()->data(Qt::UserRole+2).toString()!="house|stone" && clock.elapsed()<300) QApplication::processEvents(QEventLoop::AllEvents,10);
-        if(tiles->currentItem()->data(Qt::UserRole+2).toString()!="house|stone"
+        while(tiles->currentItem()->data(Qt::UserRole+2).toString()!=warm.cacheKey("house","stone") && clock.elapsed()<300) QApplication::processEvents(QEventLoop::AllEvents,10);
+        if(tiles->currentItem()->data(Qt::UserRole+2).toString()!=warm.cacheKey("house","stone")
             || tiles->currentItem()->icon().pixmap(192,132).toImage().pixelColor(0,0)!=QColor(Qt::blue)) return fail("texture change invalidates tile identity");
     }
     {
-        const int before=sharedCalls.load();
+        const int before=sharedCalls->load();
         CModelGallery changed(manyModels,&catalog,"test",manyTextures,&scan,fastProvider,nullptr,"house","wood",space+"-changed");
         changed.setAttribute(Qt::WA_DontShowOnScreen);changed.show();
-        if(!ready(changed,300) || sharedCalls.load()<=before) return fail("resource generation invalidates shared previews");
+        clock.restart();
+        if(!ready(changed,300) || sharedCalls->load()<=before) return fail(QString("resource generation invalidates shared previews before=%1 after=%2 jobs=%3 elapsed=%4ms").arg(before).arg(sharedCalls->load()).arg(changed.m_thumbnailJobs.size()).arg(clock.elapsed()));
     }
     catalog.bindTexture("test","asset0","texture99");
     large.setCurrentModel("asset0");
@@ -249,6 +289,6 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     if(!started->load()){delete slow;return fail("slow worker started");}
     clock.restart();delete slow;const auto closeMs=clock.elapsed();
     if(closeMs>150)return fail("closing gallery waits for thumbnail worker");
-    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms;143 Shift=%4ms entries=%5ms; Shift pointer-motion/keyboard/Ctrl/reverse PASS; close during600ms worker=%3ms; thumbnail cache PASS").arg(openMs).arg(selectMs).arg(closeMs).arg(rangeMs).arg(entriesMs);
+    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms;143 Shift=%4ms entries=%5ms; Shift pointer-motion/keyboard/Ctrl/reverse PASS; close during600ms worker=%3ms; thumbnail cache / bounded parallel / stale results / all-N close PASS").arg(openMs).arg(selectMs).arg(closeMs).arg(rangeMs).arg(entriesMs);
     return true;
 }
