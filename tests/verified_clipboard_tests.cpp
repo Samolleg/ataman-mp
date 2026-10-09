@@ -8,12 +8,94 @@
 #include <QMimeData>
 #include <QProcess>
 #include <QPointer>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolTip>
 #include <QUrl>
+#include <climits>
+#include <cstring>
 #include "verified_clipboard.h"
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
+#endif
+
+#ifdef Q_OS_WIN
+// Native fixtures and readback deliberately avoid Qt's image MIME conversion.
+static QByteArray rasterDib(bool indexed)
+{
+    BITMAPINFOHEADER header = {};
+    header.biSize = sizeof(header);
+    header.biWidth = 2;
+    header.biHeight = 2;
+    header.biPlanes = 1;
+    header.biBitCount = indexed ? 8 : 24;
+    header.biSizeImage = indexed ? 8 : 16;
+    header.biClrUsed = indexed ? 2 : 0;
+    QByteArray bytes(int(sizeof(header) + header.biClrUsed * sizeof(RGBQUAD) + header.biSizeImage), '\0');
+    memcpy(bytes.data(), &header, sizeof(header));
+    if(indexed) {
+        const RGBQUAD colors[2] = {{10, 20, 30, 0}, {70, 80, 90, 0}};
+        memcpy(bytes.data() + sizeof(header), colors, sizeof(colors));
+        bytes[int(sizeof(header) + sizeof(colors))] = 1;
+    } else {
+        for(int i = 0; i < 16; ++i) bytes[int(sizeof(header)) + i] = char(i * 11);
+    }
+    return bytes;
+}
+
+static bool installRaster(bool indexed, bool bitmapFirst = false)
+{
+    const QByteArray dib = rasterDib(indexed);
+    HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, SIZE_T(dib.size()));
+    void* bytes = block ? GlobalLock(block) : nullptr;
+    if(!bytes) { if(block) GlobalFree(block); return false; }
+    memcpy(bytes, dib.constData(), size_t(dib.size()));
+    GlobalUnlock(block);
+    HDC dc = GetDC(nullptr);
+    HBITMAP bitmap = bitmapFirst ? CreateDIBitmap(dc,
+        reinterpret_cast<const BITMAPINFOHEADER*>(dib.constData()), CBM_INIT,
+        dib.constData() + sizeof(BITMAPINFOHEADER),
+        reinterpret_cast<const BITMAPINFO*>(dib.constData()), DIB_RGB_COLORS) : nullptr;
+    ReleaseDC(nullptr, dc);
+    HPALETTE palette = nullptr;
+    if(indexed) {
+        struct { WORD version; WORD count; PALETTEENTRY entries[2]; } logical =
+            {0x300, 2, {{30, 20, 10, 0}, {90, 80, 70, 0}}};
+        palette = CreatePalette(reinterpret_cast<const LOGPALETTE*>(&logical));
+    }
+    HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    bool ok = window && (!bitmapFirst || bitmap) && (!indexed || palette) && OpenClipboard(window);
+    if(ok) {
+        ok = EmptyClipboard();
+        if(ok && bitmapFirst) {
+            ok = SetClipboardData(CF_BITMAP, bitmap);
+            if(ok) bitmap = nullptr;
+        }
+        if(ok) { ok = SetClipboardData(CF_DIB, block); if(ok) block = nullptr; }
+        if(ok && palette) { ok = SetClipboardData(CF_PALETTE, palette); if(ok) palette = nullptr; }
+        CloseClipboard();
+    }
+    if(window) DestroyWindow(window);
+    if(bitmap) DeleteObject(bitmap);
+    if(palette) DeleteObject(palette);
+    if(block) GlobalFree(block);
+    return ok;
+}
+
+static QByteArray readNativeBytes(UINT format)
+{
+    QByteArray result;
+    if(OpenClipboard(nullptr)) {
+        HANDLE block = GetClipboardData(format);
+        const SIZE_T size = block ? GlobalSize(block) : 0;
+        const void* bytes = size && size <= INT_MAX ? GlobalLock(block) : nullptr;
+        if(bytes) { result = QByteArray(static_cast<const char*>(bytes), int(size)); GlobalUnlock(block); }
+        CloseClipboard();
+    }
+    return result;
+}
 #endif
 
 class HiddenWidgets : public QObject
@@ -43,15 +125,18 @@ class VerifiedClipboardTests : public QObject
 #endif
     bool holdClipboard(QProcess& holder, int ms)
     {
-        holder.start(QCoreApplication::applicationFilePath(), {"--hold", QString::number(ms)});
+        QTemporaryDir ready;
+        if(!ready.isValid()) return false;
+        const QString marker = ready.filePath("locked");
+        holder.setProcessChannelMode(QProcess::ForwardedChannels);
+        holder.setInputChannelMode(QProcess::ForwardedInputChannel);
+        holder.start(QCoreApplication::applicationFilePath(), {"--hold", QString::number(ms), marker});
         if(!holder.waitForStarted(3000)) return false;
         QElapsedTimer timeout;
         timeout.start();
-        QByteArray output;
         do {
             QTest::qWait(10); // The clipboard's current OLE owner must dispatch native messages.
-            output += holder.readAllStandardOutput();
-            if(output.contains("locked")) return true;
+            if(QFile::exists(marker)) return true;
         } while(timeout.elapsed() < 3000 && holder.state() != QProcess::NotRunning);
         return false;
     }
@@ -61,6 +146,100 @@ class VerifiedClipboardTests : public QObject
             && holder.exitStatus() == QProcess::NormalExit && holder.exitCode() == 0;
     }
 private slots:
+    void nativeBitmapBeforeDibRestores()
+    {
+#ifdef Q_OS_WIN
+        QVERIFY(installRaster(false, true));
+        const QByteArray original = readNativeBytes(CF_DIB);
+        QCOMPARE(original, rasterDib(false));
+        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY2(guard.captured(), qPrintable(guard.error()));
+        QVERIFY(ei::copyTextToClipboard("Temporary replacement"));
+        QVERIFY2(guard.restore(), qPrintable(guard.error()));
+        QCOMPARE(readNativeBytes(CF_DIB), original);
+        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+        QVERIFY(OpenClipboard(nullptr));
+        const bool bitmapAvailable = GetClipboardData(CF_BITMAP) != nullptr;
+        CloseClipboard();
+        QVERIFY(bitmapAvailable);
+#endif
+    }
+    void indexedDibRestoresBitmapAndPalette()
+    {
+#ifdef Q_OS_WIN
+        QVERIFY(installRaster(true));
+        QVERIFY(OpenClipboard(nullptr));
+        const bool available = GetClipboardData(CF_BITMAP) && GetClipboardData(CF_PALETTE);
+        CloseClipboard();
+        QVERIFY(available);
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY2(guard.captured(), qPrintable(guard.error()));
+        QVERIFY(ei::copyTextToClipboard("Temporary replacement"));
+        QVERIFY2(guard.restore(), qPrintable(guard.error()));
+        QCOMPARE(readNativeBytes(CF_DIB), rasterDib(true));
+        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+        QVERIFY(IsClipboardFormatAvailable(CF_PALETTE));
+        QVERIFY(OpenClipboard(nullptr));
+        HPALETTE palette = HPALETTE(GetClipboardData(CF_PALETTE));
+        PALETTEENTRY entries[2] = {};
+        const UINT count = palette ? GetPaletteEntries(palette, 0, 2, entries) : 0;
+        CloseClipboard();
+        QCOMPARE(count, UINT(2));
+        QCOMPARE(entries[0].peRed, BYTE(30));
+        QCOMPARE(entries[1].peBlue, BYTE(70));
+#endif
+    }
+    void paletteWithoutDibRefusesBeforeWrites()
+    {
+#ifdef Q_OS_WIN
+        struct { WORD version; WORD count; PALETTEENTRY entries[2]; } logical =
+            {0x300, 2, {{30, 20, 10, 0}, {90, 80, 70, 0}}};
+        HPALETTE palette = CreatePalette(reinterpret_cast<const LOGPALETTE*>(&logical));
+        QVERIFY(palette);
+        HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+            HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        const bool opened = openForCheck(window);
+        const bool installed = opened && EmptyClipboard() && SetClipboardData(CF_PALETTE, palette);
+        if(opened) CloseClipboard();
+        if(window) DestroyWindow(window);
+        if(!installed) DeleteObject(palette);
+        QVERIFY(installed);
+        const DWORD sequence = GetClipboardSequenceNumber();
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY(!guard.captured());
+        QVERIFY(!guard.error().isEmpty());
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
+        QVERIFY(IsClipboardFormatAvailable(CF_PALETTE));
+#endif
+    }
+    void metafileWithDibRefusesBeforeWrites()
+    {
+#ifdef Q_OS_WIN
+        QVERIFY(installRaster(false));
+        HDC dc = CreateEnhMetaFileW(nullptr, nullptr, nullptr, L"Synthetic\0Metafile\0\0");
+        QVERIFY(dc);
+        MoveToEx(dc, 0, 0, nullptr); LineTo(dc, 2, 2);
+        HENHMETAFILE metafile = CloseEnhMetaFile(dc);
+        QVERIFY(metafile);
+        HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+            HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        const bool opened = openForCheck(window);
+        const bool installed = opened && SetClipboardData(CF_ENHMETAFILE, metafile);
+        if(opened) CloseClipboard();
+        if(window) DestroyWindow(window);
+        if(!installed) DeleteEnhMetaFile(metafile);
+        QVERIFY(installed);
+        const QByteArray dib = readNativeBytes(CF_DIB);
+        const DWORD sequence = GetClipboardSequenceNumber();
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY(!guard.captured());
+        QVERIFY(!guard.error().isEmpty());
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
+        QCOMPARE(readNativeBytes(CF_DIB), dib);
+        QVERIFY(IsClipboardFormatAvailable(CF_ENHMETAFILE));
+#endif
+    }
     void rapidNativeCopies()
     {
         QWidget anchor;
@@ -270,7 +449,7 @@ private slots:
 int main(int argc, char** argv)
 {
 #ifdef Q_OS_WIN
-    if(argc == 3 && QByteArray(argv[1]) == "--hold") {
+    if(argc == 4 && QByteArray(argv[1]) == "--hold") {
         HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
                                       HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
         if(!window) return 3;
@@ -280,8 +459,9 @@ int main(int argc, char** argv)
             if(timeout.elapsed() >= 2000) return 2;
             QThread::msleep(10);
         }
-        printf("locked\n");
-        fflush(stdout);
+        QFile marker(QString::fromLocal8Bit(argv[3]));
+        if(!marker.open(QIODevice::WriteOnly)) { CloseClipboard(); DestroyWindow(window); return 4; }
+        marker.write("locked"); marker.close();
         QThread::msleep(QByteArray(argv[2]).toUInt());
         CloseClipboard();
         DestroyWindow(window);
@@ -293,11 +473,26 @@ int main(int argc, char** argv)
     app.installEventFilter(&hidden);
     ei::ClipboardRestoreGuard clipboard;
     if(!clipboard.captured()) { fprintf(stderr, "%s\n", qPrintable(clipboard.error())); return 2; }
-    if(argc == 3 && QByteArray(argv[1]) == "--guard-child") {
+    if(argc == 3 && QByteArray(argv[1]) == "--guard-image-child") {
+#ifdef Q_OS_WIN
+        // The owner's contents are captured before installing any fixture.
+        if(!installRaster(false, true)) return 2;
+#endif
+    }
+    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child")) {
         // Historical UI checks lack verified restoration. Keep their original
         // executable unchanged, while an independent parent preserves native
         // clipboard data for a safe baseline comparison.
         QProcess child;
+        QTemporaryDir childOutput;
+        if(!childOutput.isValid()) return 2;
+        child.setStandardOutputFile(childOutput.filePath("out"));
+        child.setStandardErrorFile(childOutput.filePath("err"));
+        child.setInputChannelMode(QProcess::ForwardedInputChannel);
+#ifdef Q_OS_WIN
+        const QByteArray imageBefore = readNativeBytes(CF_DIB);
+        const QByteArray imageV5Before = readNativeBytes(CF_DIBV5);
+#endif
         child.start(QString::fromLocal8Bit(argv[2]), {"--ui-widget-check"});
         if(!child.waitForStarted(3000)) return 2;
         QElapsedTimer timeout;
@@ -306,13 +501,23 @@ int main(int argc, char** argv)
             QTest::qWait(25);
         const bool finished = child.state() == QProcess::NotRunning;
         if(!finished) { child.kill(); child.waitForFinished(3000); }
-        const auto output = child.readAllStandardOutput();
-        const auto errors = child.readAllStandardError();
+        QFile outputFile(childOutput.filePath("out")), errorFile(childOutput.filePath("err"));
+        outputFile.open(QIODevice::ReadOnly); errorFile.open(QIODevice::ReadOnly);
+        const auto output = outputFile.readAll();
+        const auto errors = errorFile.readAll();
         fwrite(output.constData(), 1, size_t(output.size()), stdout);
         fwrite(errors.constData(), 1, size_t(errors.size()), stderr);
+#ifdef Q_OS_WIN
+        const bool imageRestored = QByteArray(argv[1]) != "--guard-image-child"
+            || (readNativeBytes(CF_DIB) == imageBefore && readNativeBytes(CF_DIBV5) == imageV5Before
+                && IsClipboardFormatAvailable(CF_BITMAP));
+        printf("%s: child preserved image HGLOBAL bytes and CF_BITMAP availability\n", imageRestored ? "PASS" : "FAIL");
+#else
+        const bool imageRestored = true;
+#endif
         const bool restored = clipboard.restore();
         printf("%s: baseline parent restored original native clipboard\n", restored ? "PASS" : "FAIL");
-        if(!finished || !restored || child.exitStatus() != QProcess::NormalExit) return 2;
+        if(!finished || !restored || !imageRestored || child.exitStatus() != QProcess::NormalExit) return 2;
         return child.exitCode();
     }
     VerifiedClipboardTests tests;

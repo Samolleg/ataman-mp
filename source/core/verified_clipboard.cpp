@@ -9,6 +9,7 @@
 #include <QImage>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QLibrary>
 #include <QMenu>
 #include <QMimeData>
 #include <QPointer>
@@ -25,11 +26,62 @@
 #endif
 
 namespace ei {
+#ifdef Q_OS_WIN
+namespace {
+// Keep the guard self-contained: the application does not link gdi32 directly.
+// Failure to resolve an OS API is a safe capture/allocation failure.
+struct PaletteApi
+{
+    QLibrary library{QStringLiteral("gdi32")};
+    decltype(&GetPaletteEntries) entries = reinterpret_cast<decltype(&GetPaletteEntries)>(library.resolve("GetPaletteEntries"));
+    decltype(&CreatePalette) create = reinterpret_cast<decltype(&CreatePalette)>(library.resolve("CreatePalette"));
+    decltype(&DeleteObject) destroy = reinterpret_cast<decltype(&DeleteObject)>(library.resolve("DeleteObject"));
+    bool available() const { return entries && create && destroy; }
+};
+const PaletteApi& paletteApi()
+{
+    static const PaletteApi api;
+    return api;
+}
+}
+#endif
 struct NativeClipboardState
 {
 #ifdef Q_OS_WIN
     QMap<UINT, QByteArray> formats;
     QVector<UINT> order; // Native format priority matters, e.g. DIBV5 before DIB.
+    QVector<UINT> synthesized; // Availability, never opaque GDI handle bytes.
+    QByteArray paletteEntries; // Some desktops do not synthesize CF_PALETTE.
+
+    static bool canSynthesize(UINT format, const QMap<UINT, QByteArray>& values)
+    {
+        // A complete raster source permits BITMAP synthesis, never metafile
+        // synthesis. Accept PALETTE only with a color table, and preserve its
+        // actual entries as well: synthesis is unavailable on some desktops.
+        for(UINT source : {UINT(CF_DIBV5), UINT(CF_DIB)}) {
+            const auto it = values.constFind(source);
+            if(it == values.cend() || it->size() < int(sizeof(BITMAPINFOHEADER))) continue;
+            BITMAPINFOHEADER header;
+            memcpy(&header, it->constData(), sizeof(header));
+            if((header.biSize != sizeof(BITMAPINFOHEADER) && header.biSize != sizeof(BITMAPV4HEADER)
+                && header.biSize != sizeof(BITMAPV5HEADER)) || header.biPlanes != 1
+                || header.biWidth <= 0 || header.biHeight == 0 || header.biHeight == LONG_MIN
+                || (header.biCompression != BI_RGB && header.biCompression != BI_BITFIELDS)
+                || (header.biBitCount != 1 && header.biBitCount != 4 && header.biBitCount != 8
+                    && header.biBitCount != 16 && header.biBitCount != 24 && header.biBitCount != 32)) continue;
+            const quint64 colors = header.biClrUsed ? header.biClrUsed
+                : (header.biBitCount <= 8 ? quint64(1) << header.biBitCount : 0);
+            if(header.biBitCount <= 8 && colors > (quint64(1) << header.biBitCount)) continue;
+            const quint64 masks = header.biSize == sizeof(BITMAPINFOHEADER)
+                && header.biCompression == BI_BITFIELDS ? 3 * sizeof(DWORD) : 0;
+            const quint64 stride = ((quint64(header.biWidth) * header.biBitCount + 31) / 32) * 4;
+            const quint64 height = header.biHeight < 0 ? -qint64(header.biHeight) : header.biHeight;
+            if(quint64(header.biSize) + masks + colors * sizeof(RGBQUAD) + stride * height
+                > quint64(it->size())) continue;
+            if(format == CF_BITMAP || (format == CF_PALETTE && colors)) return true;
+        }
+        return false;
+    }
 
     bool capture(QString& error)
     {
@@ -40,19 +92,43 @@ struct NativeClipboardState
         if(enumerated != S_OK || !enumerator) { object->Release(); return false; }
         QMap<UINT, QByteArray> values;
         QVector<UINT> priority;
+        QVector<UINT> deferred;
+        QByteArray palette;
         FORMATETC format;
         bool ok = true;
         HRESULT next;
         while((next = enumerator->Next(1, &format, nullptr)) == S_OK) {
-            // Abort before any test writes when an indexed/device/non-memory
-            // format cannot be preserved. Never silently drop user data.
+            // Decide GDI dependencies after capturing every HGLOBAL source:
+            // OLE may enumerate BITMAP before DIB. Preserve source priority.
+            const bool rasterGdi = (format.cfFormat == CF_BITMAP || format.cfFormat == CF_PALETTE)
+                && (format.tymed & TYMED_GDI);
             if(format.ptd || format.lindex != -1 || format.dwAspect != DVASPECT_CONTENT
-                || !(format.tymed & TYMED_HGLOBAL)) {
+                || (!(format.tymed & TYMED_HGLOBAL) && !rasterGdi)) {
                 if(format.ptd) CoTaskMemFree(format.ptd);
                 error = QStringLiteral("Native clipboard format %1 is not preservable; check aborted before writes.")
                     .arg(format.cfFormat);
                 ok = false;
                 break;
+            }
+            if(!(format.tymed & TYMED_HGLOBAL)) {
+                if(format.cfFormat == CF_PALETTE) {
+                    if(!paletteApi().available()) { ok = false; break; }
+                    format.tymed = TYMED_GDI;
+                    STGMEDIUM medium = {};
+                    if(object->GetData(&format, &medium) != S_OK) { ok = false; break; }
+                    HPALETTE handle = medium.tymed == TYMED_GDI ? HPALETTE(medium.hBitmap) : nullptr;
+                    const UINT count = handle ? paletteApi().entries(handle, 0, 0, nullptr) : 0;
+                    if(!count || count > 65535) ok = false;
+                    else {
+                        palette.resize(int(count * sizeof(PALETTEENTRY)));
+                        ok = paletteApi().entries(handle, 0, count,
+                            reinterpret_cast<PALETTEENTRY*>(palette.data())) == count;
+                    }
+                    ReleaseStgMedium(&medium);
+                    if(!ok) break;
+                }
+                if(!deferred.contains(format.cfFormat)) deferred.append(format.cfFormat);
+                continue;
             }
             format.tymed = TYMED_HGLOBAL;
             STGMEDIUM medium = {};
@@ -71,7 +147,24 @@ struct NativeClipboardState
         if(next != S_FALSE && next != S_OK) ok = false;
         enumerator->Release();
         object->Release();
-        if(ok) { formats = values; order = priority; }
+        if(ok) for(UINT format : deferred) {
+            if(!canSynthesize(format, values)) {
+                error = QStringLiteral("Native clipboard format %1 has no preservable synthesis source; check aborted before writes.")
+                    .arg(format);
+                ok = false;
+                break;
+            }
+        }
+        if(ok) {
+            // OLE does not always enumerate Windows' implicit BITMAP format.
+            for(UINT format : {UINT(CF_BITMAP)})
+                if(!deferred.contains(format) && IsClipboardFormatAvailable(format)
+                    && canSynthesize(format, values)) deferred.append(format);
+            formats = values;
+            order = priority;
+            synthesized = deferred;
+            paletteEntries = palette;
+        }
         return ok;
     }
 
@@ -96,6 +189,16 @@ struct NativeClipboardState
             GlobalUnlock(handle);
             if(!same) return false;
         }
+        for(UINT format : synthesized)
+            if(!IsClipboardFormatAvailable(format) || !GetClipboardData(format)) return false;
+        if(!paletteEntries.isEmpty()) {
+            HPALETTE palette = HPALETTE(GetClipboardData(CF_PALETTE));
+            const UINT count = UINT(paletteEntries.size() / sizeof(PALETTEENTRY));
+            QByteArray actual(paletteEntries.size(), '\0');
+            if(!paletteApi().available() || !palette || paletteApi().entries(palette, 0, 0, nullptr) != count
+                || paletteApi().entries(palette, 0, count, reinterpret_cast<PALETTEENTRY*>(actual.data())) != count
+                || actual != paletteEntries) return false;
+        }
         return true;
     }
 
@@ -105,6 +208,18 @@ struct NativeClipboardState
     {
         QMap<UINT, HGLOBAL> blocks;
         bool ok = true;
+        HPALETTE palette = nullptr;
+        if(!paletteEntries.isEmpty()) {
+            if(!paletteApi().available()) return false;
+            const WORD count = WORD(paletteEntries.size() / sizeof(PALETTEENTRY));
+            QByteArray logical(int(sizeof(WORD) * 2) + paletteEntries.size(), '\0');
+            LOGPALETTE* data = reinterpret_cast<LOGPALETTE*>(logical.data());
+            data->palVersion = 0x300;
+            data->palNumEntries = count;
+            memcpy(data->palPalEntry, paletteEntries.constData(), size_t(paletteEntries.size()));
+            palette = paletteApi().create(data);
+            if(!palette) return false;
+        }
         for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
             HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, SIZE_T(it.value().size()));
             void* bytes = block ? GlobalLock(block) : nullptr;
@@ -118,8 +233,13 @@ struct NativeClipboardState
             if(!SetClipboardData(format, blocks[format])) { ok = false; break; }
             blocks[format] = nullptr; // Ownership transferred to Windows.
         }
+        if(ok && palette) {
+            ok = SetClipboardData(CF_PALETTE, palette);
+            if(ok) palette = nullptr;
+        }
+        if(palette) paletteApi().destroy(palette);
         for(HGLOBAL block : blocks) if(block) GlobalFree(block);
-        return ok && matches();
+        return ok; // Windows finishes synthesis when CloseClipboard is called.
     }
 #endif
 };
@@ -385,8 +505,14 @@ bool ClipboardRestoreGuard::restore()
     do {
         serviceClipboardEvents(0);
         if(openNativeClipboard()) {
-            restored = m_native->write();
+            const bool written = m_native->write();
             CloseClipboard();
+            // Synthesized GDI formats may not exist until the writer closes.
+            // Reopen for readback; successful SetClipboardData is not a PASS.
+            if(written && openNativeClipboard()) {
+                restored = m_native->matches();
+                CloseClipboard();
+            }
             if(restored) break;
         }
         serviceClipboardEvents(25);
