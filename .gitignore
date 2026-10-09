@@ -69,3 +69,8 @@ CMakeLists.txt.user*
 !/source/runtime/jmv_bridge/build-x86.cmd
 /source/runtime/base_runtime_host/bin/
 !/source/runtime/base_runtime_host/build-x86.cmd
+
+# Local diagnostics and caches (may contain game-derived data)
+/artifacts/*.zip.sha256
+/artifacts/zone9-*-diagnostic-*/
+__pycache__/
