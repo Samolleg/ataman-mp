@@ -1,12 +1,17 @@
 # EI Mapper Ataman — roadmap
 
+## EI-SEMANTIC-REFRESH-COPY-20261010 — восстановление устаревшей семантики на копиях
+
+- Поручение владельца через Claude 2026-10-10: «да, сделай семантику явно на копии с проверкой». База входа main b6b3be3cd3b3710613ae848182015f14f1240931, программа136. Полный результат: корпус Dejavu/Base, причины отказа, штатные recovery/save/reopen на копиях, проверка углов каждой клетки и сохранности данных, стабильный resave, план применения без live replacement.
+- Границы: программа/установка/живые данные/буфер не меняются; сохраняется параллельная137. Свои build-tests-semantic-refresh и build-release-semantic-refresh; скрытые окна под ui-tests.lock. Scoped-коммит только отчёта docs/validation/ATAMAN_SEMANTIC_REFRESH_COPY_20261010.md, без сети/подагентов.
+- Статус: COPY VALIDATION PASS. Корпус79/79: сохранённые документы17, valid15/stale2 (Zone2/Zone3obr, прежний полный MPR SHA v1). Копии восстановлены существующим production-ядром136: 6/6 recovery/save/reopen/resave, 41194/41194 активных клеток/0 неоднозначностей; 142/142 прежних MPR payloads и RES неизменны, resave byte-stable. 83/83 live inputs и установленный EXE прежние. Plain changed-save136 с0 SEC patches отказывает; semantic-only коммит выполнен штатными buildTerrainSemanticFieldMember/commitValidatedMprBytes/adopt, UI-команда не исправлялась. Отчёт и план без live apply: [ATAMAN_SEMANTIC_REFRESH_COPY_20261010.md](docs/validation/ATAMAN_SEMANTIC_REFRESH_COPY_20261010.md). Следующий шаг: отдельное live-поручение и свежие baseline/atlas/profile guards; смена HDPack потребует перепроверки embedded v2. В scoped-коммит входит только отчёт; эта запись карты остаётся вместе с текущими незакоммиченными изменениями137.
+
 ## EI-TERRAIN-MIXED-RES-ATLAS-137 — mixed native atlas и clipboard sentinel
 
 - Поручение владельца через Claude 2026-10-10, база main b6b3be3cd3b3710613ae848182015f14f1240931, VERSION136→137. Результат: native identity при смешанных страницах, максимальный размер рендера/новых тайлов, сохранение authored payloads; изоляция буфера по nativeAttempts, внешняя метаинформация — INFO.
 - Границы: программа/tests/docs; собственные build-release-137-*/build-tests-137-* и copied maps; UI под ui-tests.lock; без открытия/удержания системного буфера, сети, подагентов, интерактивной игры/редактора, live writes, установки137 и push.
 - Статус: IMPLEMENTED, AUTOMATED GATES PASS, REVIEW/MANUAL ACCEPTANCE OPEN. Synthetic4/0, terrain146/0, random80/0, mixed-edge63/0, UI169/0/scenario50/0/dark70/0/gallery PASS, clipboard12/0, reader23/0 после первого сбоя.16 ожидаемых открытий; прежние semantic FAIL Zone2/Zone3obr сохранены. Uniform opening time≤+1.00%, memory≤+5.69%; thumbnails≤10% или≤+15ms.
 - Evidence: [ATAMAN_TERRAIN_MIXED_RES_ATLAS_137_20261010.md](docs/validation/ATAMAN_TERRAIN_MIXED_RES_ATLAS_137_20261010.md). Mixed MMP найдены в JamaisVu135 zone10/bz7g; игровая поддержка не доказана. Следующий шаг: ревью/договорная установка сопровождающим; отдельная game acceptance и задача guarded HDPack apply. Safe fallback — uniform256 новый namespace; к live не применён.
-
 
 ## EI-HDPACK-RESTORE-APPLY-20261010 — восстановление HDPack с переносом привязок
 
