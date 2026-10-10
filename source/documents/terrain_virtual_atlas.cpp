@@ -4450,6 +4450,8 @@ QString CTerrainWorkingAtlas::error() const
 
 int CTerrainWorkingAtlas::generatedTileCount() const
 {
+    if(!m_mixedEdgeRecipes.isEmpty())
+        return qMax(0,activeTileCount()-m_authoredSlotCount);
     return m_resolver ? m_resolver->generatedTiles().size() : 0;
 }
 
@@ -4499,6 +4501,7 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_workingToVirtual = staged.m_workingToVirtual;
     m_animationCopySources = staged.m_animationCopySources;
     m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
+    m_mixedEdgeRecipes = staged.m_mixedEdgeRecipes;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
@@ -4757,6 +4760,9 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
         addInt(copy.key());
         addInt(copy.value());
     }
+    if(!m_mixedEdgeRecipes.isEmpty())
+        for(auto recipe=m_mixedEdgeRecipes.cbegin();recipe!=m_mixedEdgeRecipes.cend();++recipe)
+        { addBytes(recipe.key().toUtf8()); addInt(recipe.value()); }
     addInt(m_changedSlots.size());
     for(int slot : m_changedSlots)
         addInt(slot);
@@ -5163,6 +5169,14 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
             origins->retainedMapOutputs.insert(outputSlot);
     }
 
+    // Preserve every recipe alias when typed pixel dedup merges recipes.
+    for(auto recipe=m_mixedEdgeRecipes.cbegin();recipe!=m_mixedEdgeRecipes.cend();++recipe)
+    {
+        const int output=finalization->authoredSlotRemap.value(recipe.value(),-1);
+        if(output>=0 && output<finalization->tiles.size())
+            finalization->tiles[output].mixedEdgeRecipes.append(recipe.key());
+    }
+
     // The clean finalizer initially sees every live working slot as authored.
     // Its first hash therefore describes that flattened cache identity. Once
     // the real source/generated provenance is restored, rebuild the identity
@@ -5381,6 +5395,34 @@ quint16 CTerrainWorkingAtlas::resolve(
     if(generated)
         *generated = isGenerated;
     return packed.encode();
+}
+
+void CTerrainWorkingAtlas::restoreMixedEdgeRecipe(int slot, const QString& recipeKey)
+{
+    if(slot < 0 || slot >= activeTileCount()
+       || recipeKey.size()!=78 || !recipeKey.startsWith(QStringLiteral("mixed-edge-b2:")))
+        return;
+    m_mixedEdgeRecipes.insert(recipeKey, slot);
+    STerrainWorkingTileIdentity identity;
+    if(tileIdentityForSlot(slot, &identity))
+    {
+        identity.origin = ETerrainWorkingTileOrigin::CanonicalGenerated;
+        identity.canonicalGeneratedBlend = true;
+        identity.blendProvenance = recipeKey;
+        m_foreignPhysicalTiles.insert(slot, identity);
+    }
+}
+
+int CTerrainWorkingAtlas::importMixedEdgeTile(const QImage& pixels, qint32 runtimeType,
+    const STerrainTransitionSignature& signature, const QString& recipeKey,
+    CValidationReport* report)
+{
+    const int reused = mixedEdgeSlot(recipeKey);
+    if(reused >= 0) return reused;
+    const int slot = importPhysicalTile(pixels, runtimeType, &signature,
+        recipeKey, -1, report, true);
+    if(slot >= 0) restoreMixedEdgeRecipe(slot, recipeKey);
+    return slot;
 }
 
 int CTerrainWorkingAtlas::importWorldBoundaryTile(const QImage& pixels,qint32 runtimeType,

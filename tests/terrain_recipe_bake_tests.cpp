@@ -350,11 +350,38 @@ bool zone(const QString& path)
 }
 }
 
+void incrementalMaps()
+{
+    auto full=input(2,1,4);full.vertexMaterials={1,2,3,4,3,2};full.preferredMaterials={1,2};
+    STerrainRecipeBakeOptions options;options.tileSize=33;options.stableCoordinateVariants=true;
+    options.origin=QPoint(-19,27);
+    const auto combined=CTerrainRecipeBaker::bake(full,options);
+    check(combined.success,"incremental paired-map reference bake");
+    QVector<QImage> splitPixels;
+    for(int cell=0;cell<2;++cell)
+    {
+        auto single=full;single.tileWidth=single.tileHeight=1;
+        single.vertexMaterials={full.vertexMaterials[cell],full.vertexMaterials[cell+1],full.vertexMaterials[cell+3],full.vertexMaterials[cell+4]};
+        single.preferredMaterials={full.preferredMaterials[cell]};
+        auto local=options;local.origin+=QPoint(cell,0);
+        const auto part=CTerrainRecipeBaker::bake(single,local);
+        check(part.success,"separate neighboring map bake");
+        if(!part.success || !combined.success)continue;
+        check(part.recipes.first().variant==combined.recipes[cell].variant,"stable variant independent of neighboring group membership");
+        const QImage pixels=part.tiles[part.tileByCell.first()].pixels;
+        check(pixels==combined.tiles[combined.tileByCell[cell]].pixels,"incremental map recipe bytes equal combined bake");
+        splitPixels.append(pixels);
+    }
+    bool joined=splitPixels.size()==2;
+    if(joined)for(int y=0;y<33;++y){joined&=splitPixels[0].pixel(32,y)==splitPixels[1].pixel(0,y);seamChannels+=4;}
+    ++seamEdges;check(joined,"synthetic independent map pair shared edge exact");
+}
+
 int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
     if(app.arguments().size()==3 && app.arguments()[1]=="--zone") check(zone(app.arguments()[2]),"Zone6 fixture loaded");
-    else { synthetic(); junctions(); }
+    else { synthetic(); junctions(); incrementalMaps(); }
     QTextStream(stdout) << "RESULT PASS=" << passed << " FAIL=" << failed << " SKIP=0 edges=" << seamEdges
         << " RGBA_channel_comparisons=" << seamChannels << '\n';
     return failed ? 1:0;

@@ -1282,6 +1282,18 @@ Restore the runtime paths for the selected installation, then retry Test Current
             <source>Undo world stroke</source>
             <translation>Отменить общий мазок</translation>
         </message>
+    <message>
+        <source>Smooth boundaries (mixed-edge)</source>
+        <translation>Плавные границы (mixed-edge)</translation>
+    </message>
+    <message>
+        <source>Ground only, on one map. Disable the shared brush for neighboring maps. Requires opaque uniform sources and stock edges in this map&#x27;s atlas. Animated materials and water use the previous Modern path with this option off. Transitions resolve on release; the default atlas budget is 4096 slots.</source>
+        <translation>Только земля одной карты. Отключите общую кисть соседних карт. Нужны непрозрачные однородные исходники и stock-кромки текущего атласа. Для анимации и воды отключите опцию и используйте прежний Modern. Переходы строятся после отпускания мазка; предел по умолчанию — 4096 слотов.</translation>
+    </message>
+    <message>
+        <source>%1 / %2 slots, %3 available</source>
+        <translation>%1 / %2 слотов, свободно %3</translation>
+    </message>
 </context>
     <context>
         <name>CMapTableEditorDialog</name>
@@ -10796,6 +10808,34 @@ Save all, discard the entire session, or cancel?</source>
             <source>Reference map: %1. Edit its coordinates in World maps.</source>
             <translation>Опорная карта: %1. Её координаты доступны в окне «Карты мира».</translation>
         </message>
+    <message>
+        <source>Mixed-edge is limited to one map. Disable the shared brush for neighboring maps before painting or resolving transitions.</source>
+        <translation>Mixed-edge ограничен одной картой. Отключите общую кисть соседних карт перед покраской или исправлением переходов.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge supports Ground on one map only. Disable the option for Overlay/water/animation, or disable the shared brush for neighboring maps.</source>
+        <translation>Mixed-edge поддерживает только землю одной карты. Для покрытий, воды и анимации отключите опцию; для работы на одной карте отключите общую кисть соседей.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge transitions resolved for the changed Ground region.</source>
+        <translation>Переходы mixed-edge исправлены в изменённой области земли.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge preview upload failed. The previous model and working atlas were restored.</source>
+        <translation>Не удалось загрузить предпросмотр mixed-edge. Восстановлены прежняя модель и рабочий атлас.</translation>
+    </message>
+    <message>
+        <source>Terrain atlas budget</source>
+        <translation>Бюджет атласа земли</translation>
+    </message>
+    <message>
+        <source>This map uses %1 atlas slots, above the recommended limit of 4096. Runtime memory stability is unconfirmed. No material will be substituted. Mixed-edge painting remains limited to 4096; the extended 8192 limit is not enabled. Save this existing atlas anyway?</source>
+        <translation>Карта использует %1 слотов атласа — больше рекомендованного предела 4096. Стабильность памяти в игре не подтверждена. Материалы не будут подменены. Покраска mixed-edge ограничена 4096; расширенный предел 8192 не разрешён. Всё равно сохранить этот существующий атлас?</translation>
+    </message>
+    <message>
+        <source>Mixed-edge cannot replace animated Ground cells. Disable the option to use the previous Modern path.</source>
+        <translation>Mixed-edge не может заменять анимированную землю. Отключите опцию и используйте прежний Modern.</translation>
+    </message>
 </context>
     <context>
         <name>CViewportMinimapWidget</name>
@@ -17317,5 +17357,32 @@ Line: %4</source><translation>Вызов:
 Группа: %2
 Источник: %3
 Строка: %4</translation></message>
+</context>
+<context>
+    <name>CTerrainMixedEdge</name>
+    <message>
+        <source>Mixed-edge requires a complete Ground material field and a valid working atlas.</source>
+        <translation>Для mixed-edge нужны полное поле материалов земли и исправный рабочий атлас.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge footprint is outside this map.</source>
+        <translation>Область mixed-edge выходит за границы этой карты.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge does not support animated Ground cells (%1,%2). Use the previous Modern path.</source>
+        <translation>Mixed-edge не поддерживает анимированную землю (%1,%2). Отключите опцию и используйте прежний Modern.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge has no opaque non-animated uniform source or reviewed runtime class for material %1 in this map's atlas/profile.</source>
+        <translation>В атласе/профиле этой карты нет непрозрачного неанимированного однородного образца или подтверждённого класса для материала %1.</translation>
+    </message>
+    <message>
+        <source>Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile. %3</source>
+        <translation>В атласе/профиле этой карты нет пригодной stock-кромки для материалов %1 / %2. %3</translation>
+    </message>
+    <message>
+        <source>Mixed-edge atlas budget exceeded: %1 / %2 slots. No material was substituted; extended 8192 is not enabled.</source>
+        <translation>Превышен бюджет mixed-edge: %1 / %2 слотов. Материалы не подменены; расширенный предел 8192 не разрешён.</translation>
+    </message>
 </context>
 </TS>

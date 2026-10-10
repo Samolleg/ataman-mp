@@ -62,6 +62,9 @@ struct STerrainRecipeBakeOptions
 {
     int tileSize{128};
     int variants{4};
+    // Incremental editing must not renumber labels when the group grows.
+    // Offline balanced assignment remains the default for existing callers.
+    bool stableCoordinateVariants{false};
     QPoint origin;
     quint64 reservedSlots{0}; // pinned other-layer/animation slots, supplied by caller
     quint64 slotLimit{4096};

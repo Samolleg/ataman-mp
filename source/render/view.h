@@ -185,6 +185,7 @@ class CView : public QGLWidget
     friend int runNeighborPerformanceCheck();
     friend int runTerrainMobHeightCheck();
     friend int runTerrainHeightResSaveCheck();
+    friend int runTerrainMixedEdgeCheck(const QString& fixturePath);
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
     friend int runAiGraphRegenerationCheck();
@@ -700,6 +701,9 @@ private:
                                         qint32 terrainType,
                                         CValidationReport* report,
                                         bool* atlasPublicationPending);
+    bool resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationReport* report);
+    bool mixedEdgeTerrainEnabled() const;
+    bool confirmTerrainAtlasBudgetForSave(int usedSlots);
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
@@ -1256,6 +1260,8 @@ private:
     int m_tileStrokeTargetMode{-1};
     bool m_tileStrokeSafeMode{false};
     bool m_tileStrokeAutoResolveBlends{true};
+    bool m_tileStrokeMixedEdge{false};
+    QSharedPointer<CTerrainWorkingAtlas> m_mixedEdgeStrokeAtlasBefore;
     qint32 m_tileStrokeMaterialId{-1};
     ETerrainTileLayer m_tileStrokeLayer{ETerrainTileLayer::Land};
     int m_tileStrokeSafeSkippedVertices{0};

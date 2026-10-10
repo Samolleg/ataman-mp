@@ -2,6 +2,7 @@
 #include "database_creation_check.h"
 #include "terrain_mob_height_check.h"
 #include "terrain_height_res_save_check.h"
+#include "terrain_mixed_edge_check.h"
 #include "ai_graph_regeneration_check.h"
 #include "pointer_modes_check.h"
 #include "world_map_snap_check.h"
@@ -553,6 +554,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
     QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
     QCommandLineOption terrainHeightResSaveCheckOption("terrain-height-res-save-check", "Validate height-only MPR saves and unchanged terrain resources with synthetic data.");
+    QCommandLineOption terrainMixedEdgeCheckOption("terrain-mixed-edge-check", "Validate mixed-edge integration on an isolated map/atlas fixture.", "fixture-json");
+    parser.addOption(terrainMixedEdgeCheckOption);
     QCommandLineOption aiGraphRegenerationCheckOption("ai-graph-regeneration-check", "Validate explicit graph calculation, invalidation, queued clicks and current save candidates with synthetic data.");
     QCommandLineOption terrainMobHeightCheckOption("terrain-mob-height-check", "Validate terrain and MOB height history with synthetic data.");
     QCommandLineOption resourceNavigationCheckOption("resource-navigation-check",
@@ -671,6 +674,8 @@ int runHeadlessCommand(QApplication& app)
     const bool pointerModesCheck = parser.isSet(pointerModesCheckOption);
     const bool worldMapSnapCheck = parser.isSet(worldMapSnapCheckOption);
     const bool terrainHeightResSaveCheck = parser.isSet(terrainHeightResSaveCheckOption);
+    if(parser.isSet(terrainMixedEdgeCheckOption))
+        return runTerrainMixedEdgeCheck(parser.value(terrainMixedEdgeCheckOption));
     const bool aiGraphRegenerationCheck = parser.isSet(aiGraphRegenerationCheckOption);
     const bool terrainMobHeightCheck = parser.isSet(terrainMobHeightCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
@@ -2442,8 +2447,12 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QProgressBar*>("terrainAtlasCapacity");
         QLabel* atlasCapacityWarning = landscapeTools.findChild<QLabel*>(
             "terrainAtlasCapacityWarning");
-        const bool expandedAtlasCapacityIsYellow = atlasCapacity
+        const bool atlasCapacityIsGreen = atlasCapacity
             && atlasCapacity->value() == 519
+            && atlasCapacity->styleSheet().contains(QStringLiteral("#35a853"));
+        landscapeTools.setGeneratedAtlasTileCount(1543);
+        const bool expandedAtlasCapacityIsYellow = atlasCapacityIsGreen && atlasCapacity
+            && atlasCapacity->value() == 2055
             && atlasCapacity->styleSheet().contains(QStringLiteral("#ebbe23"))
             && atlasCapacityWarning && atlasCapacityWarning->text().isEmpty();
         landscapeTools.setPaintMaterials(

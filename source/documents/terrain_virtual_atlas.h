@@ -76,6 +76,7 @@ struct STerrainFinalizedTile
     // Empty for original map slots. Imported exact tiles and generated tiles
     // record their physical artwork provenance.
     QString blendProvenance;
+    QStringList mixedEdgeRecipes;
     bool stockDerivedBlend{false};
     bool canonicalGeneratedBlend{false};
     // Exact material whose reviewed route generated this transition. Zero is
@@ -490,11 +491,20 @@ public:
     bool addExternalMaterialSource(qint32 material, const QImage& pixels)
     { return m_resolver && m_resolver->addExternalMaterialSource(material, pixels); }
     QSet<int> takeChangedSlots();
+    void invalidatePreviewTiles()
+    { for(int slot=0; slot<activeTileCount(); ++slot) m_changedSlots.insert(slot); }
     int importPhysicalTile(const QImage& pixels, qint32 runtimeType,
         const STerrainTransitionSignature* signature, const QString& sourceNamespace,
         int sourceSlot, CValidationReport* report, bool preserveAuthoredPages = false);
     int importWorldBoundaryTile(const QImage& pixels, qint32 runtimeType,
         const STerrainTransitionSignature& signature, CValidationReport* report = nullptr);
+    int mixedEdgeSlot(const QString& recipeKey) const
+    { return m_mixedEdgeRecipes.value(recipeKey, -1); }
+    const QMap<QString, int>& mixedEdgeRecipes() const { return m_mixedEdgeRecipes; }
+    void restoreMixedEdgeRecipe(int slot, const QString& recipeKey);
+    int importMixedEdgeTile(const QImage& pixels, qint32 runtimeType,
+        const STerrainTransitionSignature& signature, const QString& recipeKey,
+        CValidationReport* report);
 
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
@@ -551,6 +561,7 @@ private:
     // identity without pretending to be a new authored/generated provenance.
     QMap<int, int> m_animationCopySources;
     QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
+    QMap<QString, int> m_mixedEdgeRecipes;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
 };

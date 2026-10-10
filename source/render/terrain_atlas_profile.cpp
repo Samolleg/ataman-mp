@@ -303,6 +303,8 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
+        if(!slot.mixedEdgeRecipes.isEmpty())
+            object.insert(QStringLiteral("mixedEdgeRecipes"), QJsonArray::fromStringList(slot.mixedEdgeRecipes));
         if(slot.routeOwnerMaterial > 0)
             object.insert(QStringLiteral("routeOwnerMaterial"),
                           slot.routeOwnerMaterial);
@@ -433,6 +435,18 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
             : !slot.ambiguous;
         slot.routeOwnerMaterial = schemaVersion >= 10
             ? item.value(QStringLiteral("routeOwnerMaterial")).toInt(0) : 0;
+        for(const auto& value:item.value(QStringLiteral("mixedEdgeRecipes")).toArray())
+        {
+            const QString key=value.toString();
+            if(!QRegularExpression(QStringLiteral("^mixed-edge-b2:[0-9a-f]{64}$")).match(key).hasMatch()
+               || slot.mixedEdgeRecipes.contains(key))
+            {
+                if(report) report->add("terrain.atlas_profile_recipe", EValidationSeverity::Error,
+                    "The mixed-edge recipe identity is malformed or duplicated.");
+                return false;
+            }
+            slot.mixedEdgeRecipes.append(key);
+        }
         if(schemaVersion >= 8
            && item.value(QStringLiteral("sourceSlots")).isArray())
         {
@@ -1033,6 +1047,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
                 definition.sourcePixelSha256 = tile.pixelSha256;
             }
             definition.routeOwnerMaterial = tile.routeOwnerMaterial;
+            definition.mixedEdgeRecipes=tile.mixedEdgeRecipes;
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,

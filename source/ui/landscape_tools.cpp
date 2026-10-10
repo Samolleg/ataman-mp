@@ -517,6 +517,20 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         "without creating or selecting blend tiles."));
 
     modernModeLayout->addWidget(m_materialTabs);
+    m_modernMixedEdge = new QCheckBox(tr("Smooth boundaries (mixed-edge)"), this);
+    m_modernMixedEdge->setObjectName(QStringLiteral("modernMixedEdge"));
+    m_modernMixedEdge->setChecked(settings.value(
+        QStringLiteral("ui/landscape/modernMixedEdge"), false).toBool());
+    m_modernMixedEdge->setToolTip(tr(
+        "Ground only, on one map. Disable the shared brush for neighboring maps. "
+        "Requires opaque uniform sources and stock edges in this map's atlas. "
+        "Animated materials and water use the previous Modern path with this option off. "
+        "Transitions resolve on release; the default atlas budget is 4096 slots."));
+    connect(m_modernMixedEdge, &QCheckBox::toggled, this, [this](bool checked) {
+        QSettings().setValue(QStringLiteral("ui/landscape/modernMixedEdge"), checked);
+        refreshAtlasCapacity(m_atlasActiveSlots);
+        emit editingStateChanged();
+    });
     QVBoxLayout* classicModeLayout = new QVBoxLayout(m_classicModePage);
     classicModeLayout->setContentsMargins(0, 0, 0, 0);
     m_classicAutoSafe->setObjectName(QStringLiteral("classicAutoSafeMode"));
@@ -740,6 +754,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     });
     connect(m_paintModeTabs,&QTabWidget::currentChanged,this,[this](int index){
         m_modernAutoResolveBlends->setVisible(index==0);
+        m_modernMixedEdge->setVisible(index==0);
+        refreshAtlasCapacity(m_atlasActiveSlots);
         m_classicAutoSafe->setVisible(index==1);
     });
     advanced->addWidget(paintAlgorithm);
@@ -757,6 +773,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     reviewAtlas->setText(tr("Редактор атласа…"));
     m_overlayMprMaterials->setText(tr("Материалы поверхности…"));
     advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
+    advanced->addWidget(m_modernMixedEdge);
     advanced->addWidget(m_randomizeUniformRotation); advanced->addWidget(m_overlayMprMaterials);
     advanced->addWidget(resolveMissing);advanced->addWidget(saveDraft);
     auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
@@ -1182,13 +1199,16 @@ float CLandscapeTools::paintRadius() const
     return float(m_paintRadius->value() - 1.0);
 }
 
-void CLandscapeTools::setGeneratedAtlasTileCount(int count)
+void CLandscapeTools::setGeneratedAtlasTileCount(int count, int activeSlots)
 {
-    const int added = qMax(0, count);
-    const int active = m_authoredAtlasSlots + added;
+    m_workingAtlasActiveSlots=activeSlots;
+    const bool exactBudget=modernMixedEdge() && activeSlots>=0;
+    const int original=exactBudget?qMin(m_authoredAtlasSlots,activeSlots):m_authoredAtlasSlots;
+    const int added=exactBudget?qMax(0,activeSlots-original):qMax(0,count);
+    const int active=exactBudget?activeSlots:original+added;
     m_generatedAtlasTiles->setText(tr(
         "%1 original + %2 added exact = %3 active slots")
-        .arg(m_authoredAtlasSlots).arg(added).arg(active));
+        .arg(original).arg(added).arg(active));
     m_generatedAtlasTiles->setToolTip(tr(
         "Original slots remain byte-identical. Added exact tiles include reused stock JMV blends and newly generated combinations cached for this map session."));
     refreshAtlasCapacity(active);
@@ -1196,23 +1216,22 @@ void CLandscapeTools::setGeneratedAtlasTileCount(int count)
 
 void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
 {
-    const int boundedSlots = qBound(0, activeSlots, 16384);
+    m_atlasActiveSlots=activeSlots;
+    if(modernMixedEdge() && m_workingAtlasActiveSlots>=0) activeSlots=m_workingAtlasActiveSlots;
+    const int limit=modernMixedEdge()?4096:16384;
+    m_atlasCapacity->setMaximum(limit);
+    const int boundedSlots = qBound(0, activeSlots, limit);
     QColor color;
     QString tier;
-    if(activeSlots <= 512)
+    if(activeSlots <= 2048)
     {
         color = QColor(53, 168, 83);
         tier = tr("shipped-size range");
     }
-    else if(activeSlots <= 2048)
+    else if(activeSlots <= 4096)
     {
         color = QColor(235, 190, 35);
         tier = tr("expanded range");
-    }
-    else if(activeSlots <= 4096)
-    {
-        color = QColor(232, 126, 32);
-        tier = tr("high-memory range");
     }
     else
     {
@@ -1220,8 +1239,10 @@ void CLandscapeTools::refreshAtlasCapacity(int activeSlots)
         tier = tr("unvalidated / potentially unstable range");
     }
     m_atlasCapacity->setValue(boundedSlots);
-    m_atlasCapacity->setFormat(tr("%1 / 16384 slots - %2")
-        .arg(activeSlots).arg(tier));
+    if(modernMixedEdge())
+        m_atlasCapacity->setFormat(tr("%1 / %2 slots, %3 available")
+            .arg(activeSlots).arg(limit).arg(qMax(0,limit-activeSlots)));
+    else m_atlasCapacity->setFormat(tr("%1 / 16384 slots - %2").arg(activeSlots).arg(tier));
     m_atlasCapacity->setStyleSheet(QStringLiteral(
         "QProgressBar { text-align: center; } "
         "QProgressBar::chunk { background-color: %1; }")
@@ -1238,6 +1259,11 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 {
     return m_squarePaintShape->isChecked()
         ? ETerrainTileBrushShape::Square : ETerrainTileBrushShape::Circle;
+}
+bool CLandscapeTools::modernMixedEdge() const
+{
+    return paintPaletteMode() == ETerrainPaintPaletteMode::Modern
+        && m_modernMixedEdge && m_modernMixedEdge->isChecked();
 }
 bool CLandscapeTools::manualTileSelectionEnabled() const
 {

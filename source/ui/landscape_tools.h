@@ -113,6 +113,7 @@ public:
     ETerrainPaintTargetMode paintTargetMode() const;
     bool classicAutoSafeMode() const;
     bool modernAutoResolveBlends() const;
+    bool modernMixedEdge() const;
     bool tilePaintPreviewEnabled() const;
     bool randomizeUniformRotation() const;
     bool landFamiliesAllowedInOverlay() const;
@@ -157,7 +158,7 @@ public:
                               // identity for the corresponding slot. Empty
                               // entries are unaddressable physical padding.
                               const QVector<QByteArray>& physicalIdentities = {});
-    void setGeneratedAtlasTileCount(int count);
+    void setGeneratedAtlasTileCount(int count, int activeSlots = -1);
     void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
                                 const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
@@ -245,6 +246,7 @@ private:
     QToolButton* m_vertexPaintTarget;
     QCheckBox* m_classicAutoSafe;
     QCheckBox* m_modernAutoResolveBlends;
+    QCheckBox* m_modernMixedEdge{nullptr};
     QCheckBox* m_randomizeUniformRotation;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
@@ -260,6 +262,8 @@ private:
     QLabel* m_atlasCoverage;
     QLabel* m_generatedAtlasTiles;
     QProgressBar* m_atlasCapacity;
+    int m_atlasActiveSlots{0};
+    int m_workingAtlasActiveSlots{-1};
     QLabel* m_atlasCapacityWarning;
     QWidget* m_sculptControls;
     QLabel* m_worldTerrainStatus{nullptr};

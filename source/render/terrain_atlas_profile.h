@@ -124,6 +124,7 @@ struct STerrainAtlasProfileSlot
     // Exact canonical-generation route owner. Zero means authored or legacy
     // route-neutral provenance; it is never inferred from slot order.
     qint32 routeOwnerMaterial{0};
+    QStringList mixedEdgeRecipes;
 };
 
 // A profile is always scoped to both an MPR namespace and the exact decoded

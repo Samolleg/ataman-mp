@@ -2,6 +2,7 @@
 #include "ui_theme.h"
 #include <QtWidgets>
 #include "terrain_preview_context.h"
+#include "terrain_mixed_edge.h"
 #include <QDebug>
 #include <QtMath>       //for fabs
 #include <QMap>         //for parameters
@@ -9922,6 +9923,10 @@ bool CView::saveLandscapeDocument(const QFileInfo& destination)
         return saveChangedLandscapeDocument(destination, samePath);
     }
 
+    const int usedSlots=m_workingTerrainAtlas?m_workingTerrainAtlas->activeTileCount()
+        :m_mprDocument.mapInfo().tileTypes.size();
+    if(!confirmTerrainAtlasBudgetForSave(usedSlots)) return false;
+
     QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
     progress.setWindowModality(Qt::ApplicationModal);
@@ -10126,6 +10131,10 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         terrainChangedSaveNeedsWorkingAtlasPackage(
             allowModernDraft, workingAtlasAvailable,
             landWorkingExtension, overlayWorkingExtension);
+    const int usedSlots=workingAtlasAvailable?m_workingTerrainAtlas->activeTileCount()
+        :m_mprDocument.mapInfo().tileTypes.size();
+    if(!confirmTerrainAtlasBudgetForSave(usedSlots)) return false;
+
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
                              0, workingExtension ? 8 : 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
@@ -10277,6 +10286,10 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                 stagedDocument.mapInfo().innerNamespace, physicalDraftTiles,
                 m_workingTerrainAtlas->catalog(), m_terrainAtlasProfile,
                 m_terrainGlobalFamilies, &draftReport);
+        for(auto& definition:draftProfile.slotDefinitions)
+            for(auto recipe=m_workingTerrainAtlas->mixedEdgeRecipes().cbegin();
+                recipe!=m_workingTerrainAtlas->mixedEdgeRecipes().cend();++recipe)
+                if(recipe.value()==definition.slot) definition.mixedEdgeRecipes.append(recipe.key());
         QStringList resourceRoots;
         if(m_pSettings)
             if(COptStringList* configured = dynamic_cast<COptStringList*>(
@@ -12133,10 +12146,13 @@ void CView::rebuildTerrainAutoCatalog()
             materialRuntimeTypes(m_terrainAtlasProfile,
                                  m_terrainGlobalFamilies)));
         workingAtlasMs = catalogDetailTimer.restart();
+        for(const auto& definition:m_terrainAtlasProfile.slotDefinitions)
+            for(const auto& key:definition.mixedEdgeRecipes)
+                m_workingTerrainAtlas->restoreMixedEdgeRecipe(definition.slot,key);
         m_terrainEdit.enableWorkingAtlasSlots(
             m_workingTerrainAtlas->capacityLimit());
         if(m_landscapeTools)
-            m_landscapeTools->setGeneratedAtlasTileCount(0);
+            m_landscapeTools->setGeneratedAtlasTileCount(0,m_workingTerrainAtlas->activeTileCount());
         const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
         for(int slot = 0; slot < currentUsage.size(); ++slot)
             if(currentUsage.at(slot).landCount > 0
@@ -12741,6 +12757,76 @@ bool CView::adoptPrewarmedTerrainFamily(qint32 terrainType,
     ei::log(eLogInfo, QString(
         "Terrain family prewarm adopted for atomic first sample material:%1")
         .arg(terrainType));
+    return true;
+}
+
+bool CView::confirmTerrainAtlasBudgetForSave(int usedSlots)
+{
+    if(usedSlots<=4096) return true;
+    return QMessageBox::warning(this,tr("Terrain atlas budget"),
+        tr("This map uses %1 atlas slots, above the recommended limit of 4096. "
+           "Runtime memory stability is unconfirmed. No material will be substituted. "
+           "Mixed-edge painting remains limited to 4096; the extended 8192 limit is not enabled. "
+           "Save this existing atlas anyway?").arg(usedSlots),
+        QMessageBox::Yes|QMessageBox::Cancel,QMessageBox::Cancel)==QMessageBox::Yes;
+}
+
+bool CView::mixedEdgeTerrainEnabled() const
+{
+    return m_landscapeTools && m_landscapeTools->modernMixedEdge();
+}
+
+bool CView::resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationReport* report)
+{
+    if(!stroke || !m_workingTerrainAtlas) return false;
+    if(m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty())
+    {
+        report->add("terrain.mixed_edge.single_map", EValidationSeverity::Error,
+            tr("Mixed-edge is limited to one map. Disable the shared brush for neighboring maps before painting or resolving transitions."));
+        return false;
+    }
+    QSet<int> animatedSlots;
+    for(const auto& animation:m_mprAnimatedTiles)
+        for(int frame=0;frame<animation.frameCount;++frame) animatedSlots.insert(animation.tileIndex+frame);
+    for(const auto& delta:stroke->deltas)
+        if(delta.layer==ETerrainTileLayer::Land
+           && animatedSlots.contains(SMprPackedTile::decode(delta.before).atlasSlot()))
+        {
+            report->add("terrain.mixed_edge.animated",EValidationSeverity::Error,
+                tr("Mixed-edge cannot replace animated Ground cells. Disable the option to use the previous Modern path."));
+            return false;
+        }
+    auto types=materialRuntimeTypes(m_terrainAtlasProfile,m_terrainGlobalFamilies);
+    for(const auto& family:m_terrainAtlasProfile.families)
+        if(family.underwater) types.remove(family.id);
+    for(const auto& choice:m_modernUnderwaterPaintChoices) types.remove(choice.id);
+    auto staged=m_workingTerrainAtlas->createStagingCopy();
+    QSet<int> cells;
+    const int w=m_terrainEdit.tileCountX(),h=m_terrainEdit.tileCountY();
+    QVector<QPoint> vertices=stroke->semanticAudit.paintedVertices;
+    for(const auto& delta:stroke->virtualVertices) vertices.append(QPoint(delta.globalX,delta.globalY));
+    for(const auto& vertex:vertices)
+        for(int y:{vertex.y()-1,vertex.y()}) for(int x:{vertex.x()-1,vertex.x()})
+            if(x>=0 && y>=0 && x<w && y<h) cells.insert(y*w+x);
+    for(const auto& cell:stroke->semanticAudit.paintedCoreCells)
+        cells.insert(cell.y()*w+cell.x());
+    const QPoint origin(qRound(m_activeMapWorldOrigin.x()/2),qRound(m_activeMapWorldOrigin.y()/2));
+    STerrainTileCommand resolution=CTerrainMixedEdge::resolve(m_terrainEdit,staged.data(),cells,
+        types,m_mprAnimatedTiles,origin,stroke->semanticAudit.requestedMaterialId,
+        m_tileStrokeDistributionSeed,m_landscapeTools && m_landscapeTools->randomizeUniformRotation(),report);
+    if(report->hasErrors()) return false;
+    resolution.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore
+        ?m_mixedEdgeStrokeAtlasBefore:m_workingTerrainAtlas->createStagingCopy();
+    resolution.workingAtlasAfter=staged;
+    // Preview apply performs the atlas/type/SEC commit and upload without
+    // yielding a frame between mismatched cell references and pixels.
+    if(!applyTerrainTilePreview(resolution,true))
+    {
+        report->add("terrain.mixed_edge.preview",EValidationSeverity::Error,
+            tr("Mixed-edge preview upload failed. The previous model and working atlas were restored."));
+        return false;
+    }
+    appendTerrainTileCommand(stroke,resolution);
     return true;
 }
 
@@ -14410,7 +14496,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
         }
         if(publishingLiveAtlas && m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(
-                atlas->generatedTileCount());
+                atlas->generatedTileCount(),atlas->activeTileCount());
         return true;
     }
     const QVector<QImage> activeImages = atlas->activeTileImages();
@@ -14523,7 +14609,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
     {
         if(m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(
-                atlas->generatedTileCount());
+                atlas->generatedTileCount(),atlas->activeTileCount());
         refreshWorkingTerrainPalettes();
         if(presentCompletedFrame)
             presentCompletedTerrainPublication();
@@ -14729,6 +14815,18 @@ void CView::finalizeVirtualTerrainAtlas()
                               && packed==0xffffu))
                 pinned.append(packed);
         }
+    if(m_workingTerrainAtlas && !m_workingTerrainAtlas->mixedEdgeRecipes().isEmpty())
+    {
+        // Keep the exact profile stock sources for deterministic repaint
+        // after publication; compaction still uses the existing pin/remap path.
+        for(int slot=0;slot<m_workingTerrainAtlas->authoredSlotCount();++slot)
+        {
+            SMprPackedTile source; source.atlasIndex=quint8(slot/64); source.tileIndex=quint8(slot%64);
+            bool known=false;
+            m_workingTerrainAtlas->catalog().gridSignatureForPacked(source.encode(),&known);
+            if(known) pinned.append(source.encode());
+        }
+    }
     const QVector<QImage> authoredImages=m_workingTerrainAtlas
         ?m_workingTerrainAtlas->activeTileImages()
         :(m_authoredTerrainTileImages.isEmpty()
@@ -14788,7 +14886,8 @@ void CView::finalizeVirtualTerrainAtlas()
             placedRouteOwners.append(
                 routeFound ? route.routeOwnerMaterial : 0);
             preservePlacedCells.append(
-                !publicationTerrain.virtualMaterialCellChanged(layer,x,y));
+                (m_workingTerrainAtlas && !m_workingTerrainAtlas->mixedEdgeRecipes().isEmpty())
+                || !publicationTerrain.virtualMaterialCellChanged(layer,x,y));
         }
     const CTerrainTransitionCatalog* finalizedDecodeCatalog =
         m_workingTerrainAtlas
@@ -15147,7 +15246,8 @@ void CView::finalizeVirtualTerrainAtlas()
             "QLabel { color: #efb24a; font-weight: bold; padding: 5px; }"));
         previewLayout->insertWidget(2, visibilityWarning);
     }
-    if(!automaticDestination && preview.exec()!=QDialog::Accepted)
+    if((!automaticDestination || finalized.requiredSlots>4096)
+       && preview.exec()!=QDialog::Accepted)
         return;
 
     QFile sourceTextures(texturesPath);
@@ -19121,7 +19221,14 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
         return;
 
-    if(paintWorldTerrainAt(posOnLand,bLand))return;
+    if(m_tileStrokeMixedEdge && (!bLand
+       || (m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty())))
+    {
+        ++m_tileStrokeRefused;
+        emit updateMsg(tr("Mixed-edge supports Ground on one map only. Disable the option for Overlay/water/animation, or disable the shared brush for neighboring maps."));
+        return;
+    }
+    if(!m_tileStrokeMixedEdge && paintWorldTerrainAt(posOnLand,bLand))return;
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
@@ -19666,7 +19773,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
             }
         }
 
-        if(!classicAuto && m_tileStrokeAutoResolveBlends
+        if(!classicAuto && !m_tileStrokeMixedEdge && m_tileStrokeAutoResolveBlends
            && !command.isEmpty()
            && !prepareExactModernTerrainStamp(
                &command, terrainType, &report,
@@ -20036,7 +20143,25 @@ void CView::endTileBrushGroup()
             if(!m_classicAutoStrokeValidation.isEmpty())
                 emit updateMsg(m_classicAutoStrokeValidation);
         }
-        if(m_tileStrokeAutoResolveBlends
+        if(m_tileStrokeMixedEdge && !m_tileStrokeCommand.isEmpty())
+        {
+            CValidationReport mixedReport;
+            if(!resolveMixedEdgeTerrain(&m_tileStrokeCommand,&mixedReport))
+            {
+                applyTerrainTilePreview(m_tileStrokeCommand,false);
+                if(m_mixedEdgeStrokeAtlasBefore)
+                {
+                    STerrainTileCommand restore;
+                    restore.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
+                    restore.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
+                    applyTerrainTilePreview(restore,false);
+                }
+                m_tileStrokeCommand=STerrainTileCommand();
+                ++m_tileStrokeRefused;
+                emit updateMsg(tr("Terrain stroke refused without substituting material identities:\n%1").arg(mixedReport.toText()));
+            }
+        }
+        else if(m_tileStrokeAutoResolveBlends
            && !m_tileStrokeClassicAuto
            && m_tileStrokePaletteMode
                   != int(ETerrainPaintPaletteMode::Manual)
@@ -20347,6 +20472,14 @@ void CView::cancelTileBrushGroup()
         else if(!m_tileStrokeCommand.isEmpty())
             applyTerrainTilePreview(m_tileStrokeCommand, false);
 
+        if(m_tileStrokeMixedEdge && m_mixedEdgeStrokeAtlasBefore)
+        {
+            STerrainTileCommand restore;
+            restore.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
+            restore.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
+            applyTerrainTilePreview(restore,false);
+        }
+
         for(int index = m_terrainPaintActions.size() - 1; index >= 0; --index)
             if(m_terrainPaintActions.at(index).strokeId == m_tileBrushCommandId)
                 m_terrainPaintActions.removeAt(index);
@@ -20435,6 +20568,27 @@ void CView::requestResolveMissingTerrainBlends(
 
 void CView::resolveMissingTerrainBlends()
 {
+    if(mixedEdgeTerrainEnabled())
+    {
+        endTileBrushGroup();
+        CValidationReport mixedReport;
+        if(!m_terrainEditAvailable || !m_workingTerrainAtlas || !m_pUndoStack) return;
+        STerrainTileCommand footprint; footprint.semanticAudit.layer=ETerrainTileLayer::Land;
+        footprint.semanticAudit.requestedMaterialId=0;
+        for(int y=0;y<m_terrainEdit.tileCountY();++y)
+            for(int x=0;x<m_terrainEdit.tileCountX();++x)
+                if(m_terrainEdit.virtualMaterialCellChanged(ETerrainTileLayer::Land,x,y))
+                    footprint.semanticAudit.paintedCoreCells.append(QPoint(x,y));
+        m_mixedEdgeStrokeAtlasBefore=m_workingTerrainAtlas->createStagingCopy();
+        if(resolveMixedEdgeTerrain(&footprint,&mixedReport))
+        {
+            if(!footprint.isEmpty()) m_pUndoStack->push(new CTerrainTilePreviewCommand(this,footprint,true));
+            emit updateMsg(tr("Mixed-edge transitions resolved for the changed Ground region."));
+        }
+        else emit updateMsg(mixedReport.toText());
+        m_mixedEdgeStrokeAtlasBefore.clear();
+        return;
+    }
     const ETerrainResolveAuditTrigger trigger =
         m_pendingTerrainResolveAuditTrigger;
     m_pendingTerrainResolveAuditTrigger =
@@ -20963,7 +21117,7 @@ void CView::resolveMissingTerrainBlends()
     audit.undoCommandDescription = combined.description;
     if(m_landscapeTools)
         m_landscapeTools->setGeneratedAtlasTileCount(
-            m_workingTerrainAtlas->generatedTileCount());
+            m_workingTerrainAtlas->generatedTileCount(),m_workingTerrainAtlas->activeTileCount());
     refreshTerrainFamilyUsage();
     refreshClassicAutoPalette();
     refreshManualAtlasPalette();
@@ -21004,6 +21158,10 @@ void CView::beginTileBrushGroup()
         || m_landscapeTools->paintPaletteMode()
              != ETerrainPaintPaletteMode::Modern
         || m_landscapeTools->modernAutoResolveBlends();
+    m_tileStrokeMixedEdge=mixedEdgeTerrainEnabled();
+    if(m_tileStrokeMixedEdge) m_tileStrokeAutoResolveBlends=true;
+    m_mixedEdgeStrokeAtlasBefore=m_tileStrokeMixedEdge && m_workingTerrainAtlas
+        ?m_workingTerrainAtlas->createStagingCopy():QSharedPointer<CTerrainWorkingAtlas>();
     // Draw one nonce only when a new committed stroke begins. Every preview
     // recomputation within that stroke keeps this immutable seed; undo/redo
     // later replays captured packed values and never consults randomness.
@@ -21070,6 +21228,34 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
     if(!m_terrainEditAvailable)
         return false;
     CValidationReport report;
+    const auto atlasState=forward?command.workingAtlasAfter:command.workingAtlasBefore;
+    if(atlasState)
+    {
+        if(!m_workingTerrainAtlas
+           || !m_workingTerrainAtlas->canCommitStaging(*atlasState)) return false;
+        CTerrainEditModel candidate=m_terrainEdit;
+        if(forward && !candidate.installWorkingAtlasSlotTypes(atlasState->activeTileTypes())) return false;
+        if(!candidate.apply(command,forward,&report)) return false;
+        if(!forward && !candidate.installWorkingAtlasSlotTypes(atlasState->activeTileTypes())) return false;
+        const auto previousAtlas=m_workingTerrainAtlas->createStagingCopy();
+        const auto previousEdit=m_terrainEdit;
+        m_workingTerrainAtlas->commitStaging(*atlasState);
+        m_terrainEdit=candidate;
+        m_workingTerrainAtlas->invalidatePreviewTiles();
+        if(!syncWorkingTerrainAtlas(&report,nullptr,false))
+        {
+            m_workingTerrainAtlas->commitStaging(*previousAtlas);
+            m_terrainEdit=previousEdit;
+            m_workingTerrainAtlas->invalidatePreviewTiles();
+            CValidationReport restoreReport;
+            syncWorkingTerrainAtlas(&restoreReport,nullptr,false);
+            ei::log(eLogWarning,"Mixed-edge atlas upload refused:\n"+report.toText());
+            return false;
+        }
+        refreshTerrainTilePreview(command,forward);
+        refreshWorkingTerrainPalettes();
+        return true;
+    }
     if(!m_terrainEdit.apply(command, forward, &report))
     {
         ei::log(eLogWarning, "Semantic terrain preview command refused:\n" + report.toText());

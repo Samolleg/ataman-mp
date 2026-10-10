@@ -495,6 +495,10 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
 {
     if(!stroke)
         return;
+    if(stamp.workingAtlasBefore && !stroke->workingAtlasBefore)
+        stroke->workingAtlasBefore = stamp.workingAtlasBefore;
+    if(stamp.workingAtlasAfter)
+        stroke->workingAtlasAfter = stamp.workingAtlasAfter;
     // The release resolver needs the brush identity for equal-coverage
     // runtime terrain-type ties. Preserve it while composing incremental
     // preview stamps into the one undoable stroke; previously only tile and

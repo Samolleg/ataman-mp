@@ -1,5 +1,15 @@
 # EI Mapper Ataman — roadmap
 
+## EI-TERRAIN-BAKE-B2-MODERN-135 — mixed-edge в Modern
+
+- Поручение владельца через Claude 2026-10-10 «запускай этап B»; база main b87df6f91ae486a8fe49943180d8cd72ea3887af, VERSION134→135. Параллельных задач нет. Реализация, изолированные проверки и scoped-коммит без push; установку обновляет сопровождающий после ревью.
+- Результат: сохраняемая опция «Плавные границы (mixed-edge)», по умолчанию выключена; земля Modern разрешается ядром после мазка/Shift+R, typed dedup, атомарные поле/SEC/атлас и Undo/Redo, существующая публикация и повторное открытие. Бюджет2048/4096,8192 только явно расширенный предел; отсутствующие источники не подменяются.
+- Границы: данные только build-tests-135-bake/, живые установки/карты/Endurance не менять; сеть/зависимости/подагенты/интерактивный редактор запрещены. UI под build-locks/ui-tests.lock. Для общей кисти допускается честное ограничение одной картой.
+- Критерии: synthetic+копия Zone6, save/reopen, Undo/Redo, reuse,3/4-узлы, бюджет, выключенная опция=прежние байты; соседняя пара или явный отказ; полный UI/scenario/dark/gallery, terrain/world/save122/reader-drain/core; PNG до/после. Evidence: docs/validation/ATAMAN_TERRAIN_BAKE_B2_MODERN_135_20261010.md.
+- Результат135: option+budget в панели, kernel staging/typed dedup, настоящая CView release/Undo/Redo/GL, existing publication/reopen с recipe aliases. Synthetic60/0/0, Zone649/0/0 (24576 SEC,1216→1230 working,1162 published; повтор0 новых слотов), core17413/0/0, OFF/Classic/Manual по79954616 bytes совпали с134. Полный UI169/0, scenario50/0, dark70/0, gallery PASS, save12229/0, reader-drain23/0/0; terrain atlas144/0/0, audit5/0/0.
+- Ограничения/открытые вопросы: только Ground одной карты, shared brush явно отказывает; stock/local sources обязательны,8192 не включён. World-terrain45/1/0: тот же BoundaryFill Zone11/Zone12 FAIL(gap0.000585550) воспроизведён на назначенном HEAD134; причина не исследована, порог не ослаблен. Document corpus192/0/18 — внешние SKIP не PASS. Подробности и PNG в evidence выше.
+- Статус: реализация135 и доступные проверки выполнены, подготовлена к ревью; полная приёмка открыта из-за унаследованного world FAIL и отсутствия ручной/игровой проверки. Scoped-коммит main без push/обновления установки. Следующий шаг — ревью Claude, решение по старому world FAIL, окончательная сборка/установка сопровождающим; соседние карты требуют отдельной интеграции.
+
 ## EI-TERRAIN-BAKE-B1-JUNCTIONS — узлы mixed-edge из 3–4 материалов
 
 - Поручение владельца через Claude 2026-10-10 «запускай этап B»; B1 на main 9114a68111b68946cc0ebb2f83a80231057bfd9c, VERSION 134 без изменения. Только автономное ядро, его тесты, prototype tooling, приватный build-tests-B1-junctions и отчёт; scoped-коммит без push, без Modern wiring, установки и живых записей.

@@ -515,6 +515,20 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
     {
         auto& members=it.value();
         const auto s=corners(result.recipes[members.front()].signature);
+        if(options.stableCoordinateVariants)
+        {
+            qint64 salt=0; for(qint32 mat : s) salt+=mat;
+            QSet<int> labels;
+            for(int cell : members)
+            {
+                const int label=int(seed(qint64(options.origin.x())+cell%input.tileWidth,
+                    qint64(options.origin.y())+cell/input.tileWidth,salt)%quint64(options.variants));
+                result.recipes[cell].variant=label;
+                labels.insert(label);
+            }
+            recipeCount+=quint64(labels.size());
+            continue;
+        }
         const int n=qMin(members.size(),s[0]==s[1] && s[0]==s[2] && s[0]==s[3] ? qMin(4,options.variants) : options.variants);
         recipeCount+=quint64(n);
         qint64 salt=0; for(qint32 mat : s) salt+=mat;

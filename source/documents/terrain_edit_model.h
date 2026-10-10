@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QString>
 #include <QVector>
+#include <QSharedPointer>
 
 class CMprDocument;
 class CTerrainVirtualMaterialField;
@@ -220,6 +221,10 @@ struct STerrainTileCommand
         QVector<qint32> afterBaseline;
     };
     QVector<SVirtualFieldDelta> virtualFields;
+    // Mixed-edge owns atlas pixels, mappings and classes with the same undo
+    // entry as its semantic field and SEC references. Other modes leave empty.
+    QSharedPointer<CTerrainWorkingAtlas> workingAtlasBefore;
+    QSharedPointer<CTerrainWorkingAtlas> workingAtlasAfter;
     bool isEmpty() const
     {
         return deltas.isEmpty() && virtualVertices.isEmpty()
