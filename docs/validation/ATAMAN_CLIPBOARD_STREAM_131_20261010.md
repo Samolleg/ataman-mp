@@ -78,8 +78,8 @@ processing/history/cloud. Это осознанное дополнение те�
 exclusion; обычный Copy вне guard не меняется. Явно пустая запись исключение
 не добавляет, поскольку содержимого для истории нет. Guard не удаляет прежние
 элементы Win+V и не изменяет настройки истории. Фактический список Win+V и
-состояние cloud service интерактивно не проверены; отсутствие дубликата на
-конкретной конфигурации Windows остаётся ручной приёмкой. Нельзя обещать
+состояние cloud service интерактивно не проверены. Read-only history API
+подтвердил отсутствие новых элементов на этой конфигурации (ниже). Нельзя обещать
 контроль сторонних clipboard consumers или других native writers.
 
 ## Проверки и промежуточные результаты
@@ -146,4 +146,51 @@ ID/байты уже заданного marker1 и автоматически д
 включаются в Git или пакет. Посторонние untracked файлы в
 tools/terrain_bake_prototype появились после начальной проверки clean tree;
 они не читались, не изменялись и не включаются в scoped-коммит.
-Staging/install и SHA коммитов фиксируются отдельной записью передачи.
+## Передача131
+
+Реализация+документы закоммичены в main:
+`37740d26ea6b60f18add6b0ddc8e597dad65294d`.
+Author/committer Codex <codex@localhost> заданы только окружением команды;
+финальный trailer Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>.
+Глобальный git config не изменялся, push не выполнялся. Последующая запись
+передачи меняет только этот отчёт и собственный пункт ROADMAP; её SHA хранится
+в финальном ответе и `build-tests-131-stream/handoff-commit.json`.
+
+Fresh staging `build-staging-131-stream-handoff` создана заново из проверенных
+127 managed payloads чистого staging130 с заменой editor/runtime/version/readme
+и единственного актуального changelist131. Raw/staged EXE и оба runtime hashes
+совпали; staged --version131 подтверждён до finalizer. Finalizer и внутренний
+distribution validator PASS, удалений0, coverage127/127.
+После finalizer пакет не запускался и не изменялся. Manifest SHA256:
+`DC081F3154732FAC2336F3EB89404DC2CBD67954A67394D57FB682350107B3A9`.
+
+Постоянная `artifacts/EI-Mapper-Ataman-2-first-test` обновлена130→131.
+До записи проверены отсутствие editor/runtime процессов, все старые managed
+hashes и manifest130, все staging hashes. Verified rollback130 содержит точные
+прежние6 файлов и manifest:
+`artifacts/rollback-EI-Mapper-Ataman-v130-to-131-20261010`.
+Файлы заменены через собственные временные файлы и atomic os.replace,
+manifest последним. Итог:127/127 установленных managed hashes и manifest PASS,
+**22453/22453 unlisted user files byte-identical**. Настройки, карты, saves,
+логи и кэши сохранены, finalizer на постоянной установке не запускался.
+Все прежние rollback127/128/129 сохранены. EXE установки совпадает с tested
+конечным EXE SHA25639707F231B5FCAFD8A292EF4CA58BB9F499E4B4A4F66B03939A15724F643DBD3.
+ZIP не запрошен, публикация/сеть запрещены и не выполнялись.
+
+Отдельная проверка реальной Windows history: IsHistoryEnabled=true;
+GetHistoryItemsAsync=Success. До и через1500мс после полного stream-guard UI
+число25→25 и весь набор history item IDs одинаков. Новых элементов/дубликатов
+после synthetic PNG, временных UI Copy и возврата владельца не обнаружено.
+Read-only API запрашивал только ID, содержимое history не читалось и ID не
+сохранялись/не печатались. Дополнительный полный UI нужен для ответа именно
+на незакрытый вопрос history:169 UI PASS+3 внешних PASS, exit0, тот же конечный
+EXE; тесты не повторялись вместо этой проверки. Это наблюдение на текущей
+Windows, не гарантия для стороннего clipboard manager или иных cloud services.
+
+Receipts: `staging-result.json`, `finalizer.out`, `stage-version.out`,
+`process-guard.json`, `install-plan.json`, `rollback-hashes.json`,
+`install-result.json`, `user-files-{before,after}.json`, `history-result.json`,
+`history-probe/` в build-tests-131-stream. UI lock снят, QM byte-identical HEAD.
+Все заданные автоматические критерии и передача выполнены. Осталось
+подтвердить medium исходного скриншота и реальную вставку в Paint/браузер/Office
+при ручной приёмке владельцем; эти приложения не открывались автоматически.

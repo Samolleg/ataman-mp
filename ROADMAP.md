@@ -23,8 +23,16 @@
   dark70/0, gallery PASS. Release131/оба runtime/version/QM HEAD PASS.
   EXE SHA25639707F231B5FCAFD8A292EF4CA58BB9F499E4B4A4F66B03939A15724F643DBD3.
   Буфер владельца восстановлен; medium исходного screenshot остаётся гипотезой.
-- Статус: реализация/регресс готовы. Следующий шаг — scoped-коммит,
-  staging/установка130→131 и запись передачи вторым коммитом. Evidence:
+- Статус: реализация/регресс/передача131 завершены. Код+документы main
+  `37740d26ea6b60f18add6b0ddc8e597dad65294d`; fresh staging finalizer/manifest
+  127/127 PASS. Постоянная установка130→131:6 managed замен+manifest,
+  22453 user files byte-identical, verified rollback130; старые rollback сохранены.
+  Windows history enabled: read-only API25→25, все item IDs неизменны после
+  отдельного полного UI под stream guard (169+3 PASS), новые элементы не появились.
+  Буфер владельца восстановлен, ui-tests.lock удалён, QM совпадает с HEAD.
+  Передача фиксируется следующим документальным коммитом. Следующий шаг —
+  ручная вставка исходного скриншота владельца в Paint/браузер/Office;
+  medium именно исходного скриншота остаётся гипотезой. Evidence:
   docs/validation/ATAMAN_CLIPBOARD_STREAM_131_20261010.md.
 
 ## EI-GALLERY-THUMB-DEADLINE-130 — дедлайн видимых миниатюр
