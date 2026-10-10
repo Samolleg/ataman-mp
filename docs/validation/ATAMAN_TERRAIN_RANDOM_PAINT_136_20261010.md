@@ -352,3 +352,154 @@ World45/1/0 — прежний FAIL135, подтверждён контроль�
   docs/validation/ATAMAN_TERRAIN_RANDOM_PAINT_136_20261010.md.
 - Художественная/ручная/игровая приёмка открыта; факт установки дополнять только
   после конечной передачи по договору.
+
+
+## Передача 136
+
+EI-FINALIZE-136, 2026-10-10. Поручение владельца через сопровождающего Claude:
+свежая сборка указанного коммита, регресс, пять повторов скорости против
+установленной135, staging/manifest и установка135→136; scoped-коммит только этого
+отчёта и статуса EI-TERRAIN-RANDOM-PAINT-136 в ROADMAP, без push.
+Эта запись фиксирует выполненную передачу; прежние предложения и ограничения
+разделения работы выше относятся к стадии реализации.
+
+### Исходники и сборка
+
+- Ветка `main`; программный SHA `d832153bf0711f4ca00fea8979e081835b41c63f`, VERSION136.
+- AGENTS SHA256 `F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`:
+  актуальные правила проверены, TEST_BUILD_HANDOFF и PROJECT_CONTRACT прочитаны.
+- Новый `build-release-136-final/src` из `git archive` полного SHA, сборка штатным
+  `scripts/build_release.ps1`, Release Qt5.12.12 MinGW7.3 x64, свежие runtime x86.
+  1827/1827 Git blobs совпали до и после сборки. Git archive применил рабочие CRLF;
+  1616 файлов снимка нормализованы обратно до точных Git blobs, без правок checkout.
+  [Provenance](../../build-tests-136-final/provenance.json).
+- Сборка exit0, 108.546с; свежий и staged `--version`: `EI Mapper Endurance Edition 136`.
+- Сборка135 для сравнения — `3ce012182db78e38290ab109af48c0e99a932ef5`;
+  её1820 Git blobs повторно сверены, Release EXE точно совпал с установленной135:
+  `12C10B81846545510BF8465C725BDF978F8CDC66F0EB383968897900D08AFB43`.
+- Сеть, установка зависимостей, подагенты, интерактивный редактор не использовались.
+  Отсутствующие навыки приватного движка не потребовались: приватный код не исследовали.
+  Игру, мод, живые карты и Endurance не изменяли; toolchain Endurance только читался.
+  Файлы параллельной EI-HDPACK-RESTORE-APPLY сохранены.
+
+### Регресс и буфер обмена
+
+Все UI/gallery/scenario, terrain/world и замеры выполнены последовательно под
+атомарным `mkdir build-locks/ui-tests.lock` с `owner.txt` и освобождением собственного
+lock. Все рабочие данные, настройки и кэши тестов находятся в `build-tests-136-final`.
+Для исходного случая использована новая приватная копия прежних разрешённых данных.
+
+| Проверка | Результат PASS/FAIL/SKIP |
+|---|---|
+| Полный `--ui-widget-check` | 169/0, exit0; отдельный sentinel изоляции PASS |
+| `--scenario-layer-check` | 50/0, exit0 |
+| `--dark-theme-check` | 70/0, exit0; sentinel PASS |
+| `--model-gallery-check` | exit0, функциональный PASS и sentinel PASS |
+| verified_clipboard_tests | 11/0/0 |
+| reader-drain | 23/0/0, exit0 |
+| `--terrain-random-paint-check` | 80/0/0, exit0 |
+| `--terrain-mixed-edge-check` | 63/0/0, exit0 |
+| Terrain atlas | 144/0/0, exit0 |
+| Terrain audit | 5/0/0, exit0 |
+| World terrain | 45/1/0 — известный FAIL, exit1 |
+| Terrain recipe core | 17425/0/0; 18241 рёбер, 2240132 RGBA сравнений |
+| OFF regression против135 | 6/6 точных бинарных снимков, по79954616 bytes каждый |
+
+[Полный harness](../../build-tests-136-final/regression.out) использует неизменённый
+`tests/clipboard_isolation_regression.ps1` (tracked bytes сверены со снимком).
+Буфер владельца: п»їPASS: harness clipboard metadata sequence=34300->34300 formats=1,7,13,16->1,7,13,16 unchanged=1.
+Системное содержимое не читалось, не очищалось и не записывалось; тестовый backend
+in-memory, nativeAttempts0. Первые попытки не объявлены PASS:
+
+- Clipboard binary был собран без локального Qt deployment: exit -1073740286,
+  до результатов. После `windeployqt` исправлена только подготовка тестового каталога.
+  [Первичный FAIL](../../build-tests-136-final/preflight-regression.err).
+- В двух полных harness и первом random-check обнаружились внешние изменения
+  sequence/formats при nativeAttempts0. Reader cases были23/0, random80/0,
+  но sentinel завершал процессы exit2: это FAIL, не PASS.
+  [Первый drift](../../build-tests-136-final/clipboard-drift-regression.err),
+  [второй](../../build-tests-136-final/clipboard-drift2-regression.err),
+  [random](../../build-tests-136-final/clipboard-drift-random.err).
+- Для стабильного прогона внешний runner удерживал `OpenClipboard(NULL)` только
+  как блокировку: без GetClipboardData/EmptyClipboard/SetClipboardData, с обязательным
+  CloseClipboard. Это предотвращает внешнюю запись на время теста и не ослабляет
+  внутренние hooks/sentinel. Полный harness повторён по конкретной нестабильности;
+  теперь exit0, metadata неизменны. Такая же блокировка применена к замерам.
+  [Receipt](../../build-tests-136-final/regression-native-read-lock.json).
+
+В длительном terrain runner дополнительная общая clipboard-блокировка оказалась
+утрачена к завершению non-UI core/world/OFF: sequence34309→34318 и CloseClipboard
+вернул false. Причина не установлена; вспомогательная проверка runner — FAIL,
+не PASS. Random и mixed завершились exit0 с собственными неизменными clipboard
+sentinel; non-UI test binaries, world comparison и OFF snapshots завершились
+с указанными выше результатами, HDPack hash в захваченном ui-lock прежний.
+Они повторно не запускались. После ошибки teardown собственный lock остался;
+PID27312 уже отсутствовал, owner.txt проверен, удалён только этот собственный lock.
+Сводка сделана отдельным postprocessing по завершённым результатам:
+[terrain receipt](../../build-tests-136-final/terrain-complete.json).
+
+Реальная копия: изменено6745/24576 однородных клеток; переходов0/17316.
+Seed/save/reopen/Undo/Redo точны, высоты/overlay/анимация и байты вне Ground refs прежние.
+[Random](../../build-tests-136-final/random.out),
+[OFF snapshots](../../build-tests-136-final/off-comparison.json).
+
+World45/1/0: прежний WorldTerrainTests::installedZone11Zone12ReadOnly /
+BoundaryFill(mode4), gap-after0.000585550. Строка FAIL идентична проверке135;
+код и порог не менялись. [Сверка](../../build-tests-136-final/world-comparison.json).
+SKIP/таймаутов в завершённых требуемых проверках нет; ранее описанные сбои сохранены.
+
+### Скорость миниатюр: база установленная135
+
+Одинаковый harness `build-tests-133-perf/real-benchmark.cpp`, отдельно связанный с
+точными Release objects135/136 (кроме main.o); EXE135 из той сборки совпал с
+установленным по SHA256. Профиль DejaVu/Base129: unmo36/stbu71, по8 видимых плиток.
+Пять повторов, порядок135/136 чередуется. На каждый повтор и версию — новая
+app-папка: cold новый процесс + miss memory/disk cache; затем второй процесс
+warm disk; каждый процесс имеет повтор памяти. OS file cache не очищали.
+Кэши владельца и постоянной установки не использовались и не удалялись.
+Все135/136 прогоны были в одном захвате ui-tests.lock; HDPack SHA256 до/после
+одинаков, замениться между ними не мог. [Lock](../../build-tests-136-final/benchmark-lock.json).
+80 измерений: complete1, ready8, unavailable0; provider calls8 для cold,0 иначе.
+
+| Fill, мс (min / median / max), n=5 | 135 | 136 | Δ медианы, мс / % |
+|---|---|---|---|
+| characters-unmo, cold | 93.424 / 99.703 / 126.602 | 97.598 / 101.953 / 113.438 | +2.250 / +2.26% |
+| characters-unmo, disk-warm | 31.302 / 31.913 / 32.314 | 30.904 / 32.398 / 39.916 | +0.485 / +1.52% |
+| characters-unmo, repeat | 5.244 / 5.520 / 6.789 | 5.222 / 5.536 / 6.506 | +0.016 / +0.29% |
+| characters-unmo, repeat-after-disk | 4.916 / 5.401 / 6.170 | 5.208 / 5.990 / 6.082 | +0.589 / +10.91% |
+| equivalent-buildings-stbu, cold | 29.647 / 32.701 / 34.349 | 30.068 / 34.238 / 38.253 | +1.537 / +4.70% |
+| equivalent-buildings-stbu, disk-warm | 10.003 / 10.249 / 13.492 | 9.981 / 10.969 / 12.564 | +0.720 / +7.03% |
+| equivalent-buildings-stbu, repeat | 5.354 / 6.574 / 8.332 | 6.190 / 6.976 / 8.424 | +0.402 / +6.11% |
+| equivalent-buildings-stbu, repeat-after-disk | 5.973 / 6.074 / 6.974 | 6.131 / 6.803 / 7.445 | +0.729 / +12.00% |
+
+Порог холодного заполнения: ≤+10% **или** ≤+15мс против135. Оба cold случая PASS;
+установка разрешена исходным поручением, повторов ради обхода порога не делали.
+[Все samples](../../build-tests-136-final/benchmark-raw.json),
+[сводка](../../build-tests-136-final/benchmark-summary.json).
+
+### Состав пакета и установка135→136
+
+Новый собственный `build-staging-136-final`; staged EXE=проверенный свежий EXE,
+staged --version136 проверен до finalizer. Finalizer применён только к staging,
+внутренний validate_distribution exit0:127/127 payload hashes,0 missing/0 extras.
+После finalizer staging не запускался и не изменялся. ZIP не запрашивался.
+Состав сравнён со staging135:0 новых/0 удалённых paths; изменены только6 payload:
+CHANGELOG.md (только136 + ручные шаги/границы), EIMapperEndurance.exe (новая программа),
+Readme.md/VERSION (136), два заново собранных runtime x86. Manifest обновлён.
+TRAVEL_EDITOR.md прежний, SHA256
+`945D3E7B5905944D8735D07E518063DBC04BCDA15887CFD5B119F463EF1ACC83`.
+Все md/txt/json/VERSION в staging — CRLF без UTF-8 BOM; политика проверена,
+package scripts не изменены. [Receipt](../../build-tests-136-final/package-receipt.json).
+
+Установка: `artifacts/EI-Mapper-Ataman-2-first-test`, VERSION136. Два host-level
+process guards подтвердили отсутствие её процессов; старые127 managed hashes
+и свежий staging сверены. Backup6 заменяемых payload + прежний manifest проверен
+до записи; замена через временные файлы и os.replace, manifest последним.
+Все127 новых managed hashes проверены в установленной папке; staging и backup прежние.
+Сохранено без изменения 23878 пользовательских файлов, включая настройки и кэши.
+Rollback135: `C:\GOG Games\maped\ei-mapper-ataman\artifacts\rollback-135-to-136-final`; все 7 прежних rollback сохранены, ничего не удаляли.
+EXE SHA256: `53E595BAC618A7A782A43CDC483398DBAB0A49EF68EE5C36D791C3D024871602`.
+Manifest SHA256: `074F49A2342AA2CB4E3576007BD2C96BB109030F301EA232A55FE5759355F9EE`.
+[Установка и runtime hashes](../../build-tests-136-final/install-receipt.json).
+
+Передача136 завершена. Художественная, ручная работа мышью и игровая приёмка остаются открытыми; интерактивный редактор не запускали. Известный world FAIL не исправлен.
