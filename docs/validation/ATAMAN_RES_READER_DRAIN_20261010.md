@@ -686,3 +686,185 @@ GIT_AUTHOR_EMAIL/GIT_COMMITTER_EMAIL=codex@localhost и trailer
 Push/remote/network и изменения глобального Git config запрещены и не выполнялись.
 Ручная визуальная/игровая приёмка не проводилась; следующий шаг — поручение на
 устранение speed-регресса и native image/icns FAIL, затем полная передача пакета.
+
+
+## Исправление скорости миниатюр
+
+EI-PUBLICATION-RES-READER-DRAIN-133-PERF, 2026-10-10. Результат готов к
+scoped-коммиту сопровождающим: холодные unmo/stbu проходят заданный критерий,
+reader-drain, handler, gallery, полный UI/scenario/dark-theme проходят.
+Установка/пакет 133 в этом поручении не передавались.
+
+### База, границы и происхождение сборки
+
+Работа в main на `f182b72def81bc0dd7bfddd792901adac0790cf9`, VERSION133.
+AGENTS.md прочитан и проверен; SHA256
+`F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`
+не изменился. Последнее поручение запрещает Git-записи, изменение версионных
+документов/ROADMAP и установки; эти ограничения соблюдены.
+
+Git archive HEAD проверен по всем 1809 blobs; приложение построено из него
+с наложением только пяти собственных source/test файлов, перечисленных ниже.
+Файлы незавершённой задачи134 из working checkout в сборку не включались.
+Исходники, Qt/MinGW kit и разрешённый приватный fixture читались локально;
+сети, установки зависимостей, новых чатов и подагентов не было. Приватные
+engine-reference skills недоступны; приватный engine-код не исследовался.
+
+Release-wrapper запускался на собственной snapshot-папке, включая его
+translations/runtime outputs; рабочие translations не менялись. Первая
+сборка заново скомпилировала приложение; дальнейшие сборки использовали
+актуальные зависимости Makefile. Проверены все snapshot blobs после сборки,
+собственные overlays совпали побайтно с рабочими файлами, отклонений0.
+В финальном `model_gallery.cpp` измерительных вставок нет.
+
+- Приложение: `build-release-133-perf/release/release/EIMapperEndurance.exe`.
+- EXE SHA256: `092F0536CB6E833A1B08933A96FE2E33CBBFACFB84F65CD90CC274BB03A811CF`.
+- [Происхождение overlays](../../build-tests-133-perf/provenance.json),
+  [итоговый receipt](../../build-tests-133-perf/receipt.json),
+  [сборка](../../build-tests-133-perf/release-final/result.json).
+
+### Измеренная причина
+
+Профилирование сделано временными вставками только в owned snapshot provider.
+На каждый вызов отдельно накапливались lease, generation (включая `current()`),
+catalog copy, index build, read (включая поиск члена/проверку источника), decode
+FIG/MOD/MMP и raster (включая UV bounds). Выход каждого worker сохранялся
+отдельной строкой; времена — elapsed, не CPU, могут включать вытеснение потока.
+По8 cold-вызовов для каждого региона. Индекс строится один раз для unmo;
+stbu переиспользует его. Эти профильные прогоны служат локализации, критерий
+скорости проверен отдельными пятью повторами без profiling.
+
+| Стадия, мс на вызов; median, кроме index | unmo до | unmo после | stbu до | stbu после |
+|---|---:|---:|---:|---:|
+| lease | 36.241750 | 0.028100 | 35.905950 | 0.028800 |
+| generation/current | 52.100300 | 0.003350 | 53.216850 | 0.002350 |
+| catalog copy | 0.000450 | 0.000200 | 0.000450 | 0.000200 |
+| index build, один вызов | 52.283900 | 72.990300 | 0.000000 | 0.000000 |
+| index lookup/read | 3.846450 | 3.403950 | 3.793350 | 3.362350 |
+| decode | 9.739300 | 17.114050 | 2.464450 | 4.480550 |
+| raster | 0.890050 | 1.147500 | 0.607800 | 0.836550 |
+
+Основная причина подтверждена: многократный `pathKey()` с
+`QFileInfo::canonicalFilePath()` для всех RES при admission и каждой проверке
+generation. Только эти две стадии дают около88–89мс на один запрос.
+Часть generation/current выполняется под provider/cache mutex: обращения
+к ФС там сериализуют worker. Сумма generation на8 запросов —411,149мс
+для unmo и425,012мс для stbu. Baseline profiling fill:
+unmo427,514мс, stbu371,261мс, воспроизводит регресс финализации.
+После замены разрешения путей готовыми handles те же admission/generation
+занимают тысячные/сотые доли мс. Deep-copy каталога как причина опровергнута:
+медиана копии0,000450мс; сохраняется существующая implicit-sharing копия.
+Рост decode/index/raster в отдельном after-profile не означает изменение
+этих алгоритмов: elapsed включает планирование; функциональный код декодеров
+и растеризатора не менялся. Проверяемый итог — независимая серия ниже.
+
+[Профиль до](../../build-tests-133-perf/profile-before/summary.json),
+[профиль после](../../build-tests-133-perf/profile-after/summary.json),
+исходные worker строки в `profile-{before,after}/err.txt`.
+
+### Исправление и сохранение защиты
+
+1. `res_read_lease.h`: `ReadPath` содержит канонический ключ и shared handle
+   того же registry State, которым пользуется path-based PublicationLease.
+   `readPaths()` один раз разрешает/упорядочивает/дедуплицирует пути. Overload
+   ReadLeases для готовых handles не обращается к ФС. Приоритет writer,
+   nested admitted readers, GUI refusal, worker timeout и reader accounting
+   сохранены. Снимок поколений и `generationsMatch()` выполняются под общим
+   registry mutex, без повторной канонизации.
+2. `resourceThumbnails`: handles готовятся при создании PreviewSources,
+   один снимок generation берётся после admission на вызов. Scene/texture
+   caches сбрасываются при смене generation; проверки перед вставками и
+   перед возвратом результата сохранены. Lease освобождается перед raster.
+   `generationsMatch` дополнительно отвергает активного publisher даже до
+   увеличения generation в его destructor: результат raster во время ещё
+   незавершённой публикации тоже получает ReadFailure.
+3. `res_archive_index`: успешный open сохраняет тот же canonical State;
+   readRange/sourceIsCurrent используют его для nested leases/generation.
+   Физическая проверка size/mtime/header SHA256 остаётся, внешние изменения
+   продолжают отвергаться. Невалидный/unopened index не разыменовывает handle.
+4. Два новых теста проверяют drain/wait/новые bytes для handles и обычного
+   publisher, alias-дедупликацию, стабильность handle при создании destination,
+   active publisher до смены generation и внешнее изменение индекса.
+   Ошибки provider остаются исключениями; production handler не менялся.
+
+### Скорость: пять повторов без profiling
+
+Повторены скрипт/скрытый native harness финализации133 из
+`build-tests-133-final/benchmark.py` и `real-benchmark.cpp`; локальные copies
+в `build-tests-133-perf`. Harness связан с точными objects132 и исправленными
+objects133, исключён только main.o. Профиль/списки/8 видимых плиток/viewport/
+условие ready остались прежними: DejaVu/Base, unmo36/stbu71, private fixture129.
+Версии чередовались между повторами. Для каждого cold — новая app-папка,
+miss производных memory/disk thumbnail caches; warm disk — второй процесс
+той же папки; repeat — следующий показ в памяти того же процесса.
+OS file cache и чужие кэши не очищались. Живые RES/игра/мод/карты не менялись.
+
+Все20 процессов exit0; все80 measurements visible8/ready8/unavailable0/
+complete1. В cold8 provider calls; disk/repeat0 calls. Fill начинается после
+show; total/open/show/GUI gaps и все samples сохранены в raw/summary.
+
+| Fill, мс; n=5 | 132 min / median / max | исправленная133 min / median / max | Δ median мс / % |
+|---|---:|---:|---:|
+| unmo cold | 73.483 / 74.203 / 75.560 | 86.239 / 86.543 / 94.719 | +12.340 / +16.63% |
+| unmo disk-warm | 26.604 / 28.468 / 28.955 | 27.238 / 28.871 / 30.076 | +0.403 / +1.42% |
+| unmo repeat | 4.825 / 5.205 / 6.440 | 4.748 / 5.096 / 5.404 | -0.109 / -2.09% |
+| unmo repeat-after-disk | 4.903 / 4.950 / 5.597 | 4.991 / 5.131 / 6.313 | +0.181 / +3.66% |
+| stbu cold | 28.547 / 29.496 / 30.017 | 28.431 / 30.324 / 31.498 | +0.828 / +2.81% |
+| stbu disk-warm | 9.134 / 9.446 / 10.062 | 9.281 / 9.702 / 10.013 | +0.256 / +2.71% |
+| stbu repeat | 5.531 / 5.722 / 5.921 | 5.451 / 5.929 / 7.157 | +0.207 / +3.62% |
+| stbu repeat-after-disk | 5.442 / 5.601 / 5.871 | 5.606 / 5.690 / 6.167 | +0.089 / +1.59% |
+
+Критерий «не хуже132 более чем на10% **или** ≤+15мс» выполнен:
+unmo+12,340мс (+16,63%) проходит абсолютную ветвь ≤15мс;
+stbu+0,828мс (+2,81%) проходит обе ветви. От исторических медиан133
+413,350/362,806мс cold уменьшился до86,543/30,324мс.
+Тёплый диск отличается менее чем на0,5мс, повторы в памяти — менее0,21мс.
+
+[Сырые80 samples](../../build-tests-133-perf/benchmark-raw.json),
+[summary/min/median/max](../../build-tests-133-perf/benchmark-summary.json).
+
+### Проверки результата
+
+Все gallery/UI/benchmark/widget-reader runs — под атомарным mkdir
+`build-locks/ui-tests.lock`, с owner.txt и освобождением собственных locks в
+finally. Чужой lock задачи134 не изменялся. Редактор интерактивно не открывался.
+Reader tests используют собственные синтетические RES/backups/test tree.
+
+| Проверка | Результат | Evidence в build-tests-133-perf |
+|---|---|---|
+| Reader-drain, exact final production objects | 23 PASS /0 FAIL /0 SKIP; прежние21 +2 новых | drain/results.txt |
+| Отдельный production handler | 3 PASS /0 FAIL /0 SKIP | thumbnail/results.txt |
+| --model-gallery-check | PASS, exit0;497 models/7165 textures;open6мс/select3мс,close0мс | gallery/0.out |
+| Полный --ui-widget-check | 169 PASS +2 parent PASS;0 FAIL/0 SKIP,exit0;8,66с | ui/{0.out,0.err,result.json} |
+| --scenario-layer-check | 50 PASS /0 FAIL /0 SKIP,exit0 | scenario/ |
+| --dark-theme-check | 70 PASS /0 FAIL /0 SKIP,exit0 | dark-theme/ |
+
+Production drain: собственный reader187мс,1 commit/1 checkpoint;
+4/4 thumbnails +1/1 hydration, drain179мс; поздние5/5 consumers ждали,
+после publication прочитали новые bytes. Admission timeout10011мс — явное
+исключение; повтор того же provider успешен. Handler подтверждает отсутствие
+failure local/shared/disk cache и успешный повтор.
+
+Сохранена первая **неуспешная** попытка `ui-live/`: image-specific parent
+из133 завершился exit2 до child, потому что текущий clipboard содержал
+HTML/text/Chromium formats, а helper требует PNG/DIB/DIBV5. Это не PASS
+и не запуск UI. Затем общий `--guard-child` того же неизменённого parent133
+запустил полный исходный UI check исправленного EXE, сохранил/восстановил
+original clipboard; parent и child restoration PASS. Helper134 и изменённые
+clipboard/main/UI файлы задачи134 не использовались. Хеш/источник parent:
+[parent-provenance.json](../../build-tests-133-perf/parent-provenance.json).
+
+### Файлы для scoped-коммита сопровождающим
+
+- `source/ui/model_gallery.cpp` — только resourceThumbnails/PreviewSources.
+- `source/resources/res_read_lease.h`.
+- `source/resources/res_archive_index.cpp`.
+- `source/resources/res_archive_index.h`.
+- `tests/res_reader_drain_tests.cpp`.
+- `docs/validation/ATAMAN_RES_READER_DRAIN_20261010.md` — только этот раздел.
+
+Build scripts/logs/binaries/private fixtures из build-*-133-perf в Git не
+включать. VERSION/Readme/CHANGELOG/ROADMAP не изменялись. Коммита/push нет;
+постоянная установка остаётся вне работ. Требуется последующая интеграция
+сопровождающим и отдельная передача133; ручная визуальная/игровая приёмка
+этим автоматическим исправлением скорости не заявляется.

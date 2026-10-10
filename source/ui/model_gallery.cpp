@@ -513,8 +513,9 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
     struct PreviewSources {
         CResourceCatalog catalog;
         bool indexed=false;
-        QMap<QString,quint64> generations;
+        QVector<quint64> generations;
         QVector<QString> paths;
+        QVector<resIo::ReadPath> readPaths;
         QMutex mutex;
         QCache<QString,ei::SResourceModelScene> scenes{16*1024};
         QCache<QString,QImage> textures{32*1024};
@@ -528,19 +529,19 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
         if(const auto* cached=registry.object(identity)) sources=*cached;
         else {
             sources.reset(new PreviewSources); sources->paths=sourcePaths.toVector();
+            sources->readPaths=resIo::readPaths(sources->paths);
             registry.insert(identity,new QSharedPointer<PreviewSources>(sources));
         }
     }
     return [sources](const QString& model, const QString& texture) -> QImage {
         QString admissionError;
-        resIo::ReadLeases leases(sources->paths, &admissionError);
+        resIo::ReadLeases leases(sources->readPaths, &admissionError);
         if(!leases.acquired()) throw resIo::ReadFailure(admissionError);
         // Publish the archive index once. Afterwards it is immutable; readMember
         // uses a fresh local QFile/QDataStream, so reads and CPU decoders can overlap.
         // Only initialization and QCache access need this mutex; the GUI never waits.
         QMutexLocker lock(&sources->mutex);
-        QMap<QString,quint64> generations;
-        for(const auto& path : sources->paths) generations.insert(path,resIo::generation(path));
+        const auto generations=resIo::generations(sources->readPaths);
         if(generations != sources->generations) {
             sources->indexed=false; sources->scenes.clear(); sources->textures.clear();
             sources->generations=generations;
@@ -554,10 +555,8 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
         // Copy the catalog too: a subsequent request can rebuild it after commit
         // while this request decodes old bytes outside the cache mutex.
         const CResourceCatalog catalog=sources->catalog;
-        const auto current=[generations]() {
-            for(auto it=generations.cbegin(); it!=generations.cend(); ++it)
-                if(resIo::generation(it.key()) != it.value()) return false;
-            return true;
+        const auto current=[sources,generations]() {
+            return resIo::generationsMatch(sources->readPaths,generations);
         };
         const auto read = [catalog](const QString& name) -> QByteArray {
             const auto entries = catalog.providers(name);

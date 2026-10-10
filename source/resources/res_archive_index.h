@@ -6,6 +6,9 @@
 #include <QHash>
 #include <QString>
 #include <QVector>
+#include <memory>
+
+namespace resIo { struct State; }
 
 struct SResIndexedMember
 {
@@ -51,6 +54,8 @@ private:
                          QString* error) const;
 
     QString m_path;
+    QString m_readKey;
+    std::shared_ptr<resIo::State> m_readState;
     quint64 m_generation{0};
     qint64 m_size{-1};
     QDateTime m_modified;

@@ -61,19 +61,65 @@ inline std::shared_ptr<State> state(const QString& key)
     if(!value) value = std::make_shared<State>();
     return value;
 }
-inline quint64 generation(const QString& path)
+// Resolve filesystem identity at snapshot creation, not at every thumbnail/cache
+// check. Handles refer to the same registry State used by path-based publishers.
+struct ReadPath {
+    QString key;
+    std::shared_ptr<State> handle;
+};
+inline ReadPath readPath(const QString& path)
 {
     const QString key = pathKey(path);
     auto& r = registry(); QMutexLocker lock(&r.mutex);
-    return state(key)->generation;
+    return {key, state(key)};
+}
+inline QVector<ReadPath> readPaths(const QVector<QString>& paths)
+{
+    QMap<QString, ReadPath> ordered;
+    for(const auto& path : paths) {
+        const auto resolved = readPath(path);
+        ordered.insert(resolved.key, resolved);
+    }
+    return ordered.values().toVector();
+}
+inline quint64 generation(const std::shared_ptr<State>& handle)
+{
+    auto& r = registry(); QMutexLocker lock(&r.mutex);
+    return handle->generation;
+}
+inline quint64 generation(const QString& path)
+{
+    return generation(readPath(path).handle);
+}
+inline QVector<quint64> generations(const QVector<ReadPath>& paths)
+{
+    QVector<quint64> result; result.reserve(paths.size());
+    auto& r = registry(); QMutexLocker lock(&r.mutex);
+    for(const auto& path : paths) result.append(path.handle->generation);
+    return result;
+}
+inline bool generationsMatch(const QVector<ReadPath>& paths, const QVector<quint64>& snapshot)
+{
+    if(paths.size() != snapshot.size()) return false;
+    auto& r = registry(); QMutexLocker lock(&r.mutex);
+    for(int i = 0; i < paths.size(); ++i)
+        // After file reads are released, rasterization may overlap a publisher
+        // whose generation has not advanced yet. Reject that in-progress result.
+        if(paths[i].handle->generation != snapshot[i] || paths[i].handle->writer) return false;
+    return true;
 }
 class ReadLease {
 public:
     explicit ReadLease(const QString& path, QString* error = nullptr, int timeoutMs = 10000)
+        : ReadLease(readPath(path), error, timeoutMs) {}
+    explicit ReadLease(const ReadPath& path, QString* error = nullptr, int timeoutMs = 10000)
     {
-        const QString key = pathKey(path);
         auto& r = registry(); QMutexLocker lock(&r.mutex);
-        m_state = state(key);
+        m_state = path.handle;
+        if(!m_state) {
+            if(error) *error = QStringLiteral("reader-admission: invalid source handle");
+            return;
+        }
         m_thread = QThread::currentThreadId();
         // Writer-owned validation and admitted nested reads never wait. A fresh
         // worker sleeps with the registry mutex released, giving writers priority.
@@ -87,9 +133,9 @@ public:
             const qint64 remaining = timeoutMs - timer.elapsed();
             if(gui || remaining <= 0) {
                 if(error) *error = gui
-                    ? QStringLiteral("reader-admission: GUI read cannot wait for publication: %1").arg(path)
+                    ? QStringLiteral("reader-admission: GUI read cannot wait for publication: %1").arg(path.key)
                     : QStringLiteral("reader-admission timeout after %1 ms: %2; publication still in progress")
-                        .arg(timer.elapsed()).arg(path);
+                        .arg(timer.elapsed()).arg(path.key);
                 m_state.reset(); return;
             }
             m_state->changed.wait(&r.mutex, static_cast<unsigned long>(remaining));
@@ -116,10 +162,19 @@ private:
 class ReadLeases {
 public:
     explicit ReadLeases(const QVector<QString>& paths, QString* error = nullptr, int timeoutMs = 10000) {
-        QMap<QString, QString> ordered;
-        for(const auto& path : paths) ordered.insert(pathKey(path), path);
+        acquire(readPaths(paths), error, timeoutMs);
+    }
+    // readPaths returns a unique canonical-key order. Reuse that immutable order
+    // for the lifetime of a provider snapshot, preserving multi-path admission.
+    explicit ReadLeases(const QVector<ReadPath>& paths, QString* error = nullptr, int timeoutMs = 10000) {
+        acquire(paths, error, timeoutMs);
+    }
+    bool acquired() const { return m_acquired; }
+    void release() { m_leases.clear(); m_acquired = false; }
+private:
+    void acquire(const QVector<ReadPath>& paths, QString* error, int timeoutMs) {
         QElapsedTimer timer; timer.start();
-        for(const auto& path : ordered) {
+        for(const auto& path : paths) {
             std::unique_ptr<ReadLease> lease(new ReadLease(path, error,
                 int(qMax<qint64>(0, timeoutMs - timer.elapsed()))));
             if(!lease->acquired()) { m_leases.clear(); return; }
@@ -127,9 +182,6 @@ public:
         }
         m_acquired = true;
     }
-    bool acquired() const { return m_acquired; }
-    void release() { m_leases.clear(); m_acquired = false; }
-private:
     bool m_acquired{false};
     std::vector<std::unique_ptr<ReadLease>> m_leases;
 };

@@ -90,6 +90,60 @@ QString tempPattern() { return QDir::current().filePath("fixture-XXXXXX"); }
 class ResReaderDrainTests : public QObject {
     Q_OBJECT
 private slots:
+    void resolvedHandlesDrainAndWaitForPathPublisher() {
+        QTemporaryDir dir(tempPattern()); const QString path=dir.filePath("handle.res");
+        QVERIFY(write(path,"before"));
+        const auto paths=resIo::readPaths({path,dir.filePath("./handle.res")});
+        QCOMPARE(paths.size(),1);
+        const auto snapshot=resIo::generations(paths);
+        resIo::ReadLeases held(paths); QVERIFY(held.acquired());
+        auto writer=std::async(std::launch::async,[&] {
+            QString error;resIo::PublicationLease publication(path,&error);
+            return publication.acquired() && write(path,"after");
+        });
+        QElapsedTimer timer;timer.start();bool queued=false;
+        while(timer.elapsed()<1000) {
+            auto& r=resIo::registry();QMutexLocker lock(&r.mutex);
+            queued=paths.first().handle->waitingWriters>0;
+            if(queued) break;
+            lock.unlock();QThread::msleep(1);
+        }
+        QSemaphore started;
+        auto reader=std::async(std::launch::async,[&] {
+            started.release();resIo::ReadLeases lease(paths);
+            return lease.acquired()?read(path):QByteArray();
+        });
+        started.acquire();
+        const bool blocked=reader.wait_for(std::chrono::milliseconds(60))==std::future_status::timeout;
+        const bool currentWhileHeld=resIo::generationsMatch(paths,snapshot);
+        held.release();const bool published=writer.get();const auto bytes=reader.get();
+        QVERIFY(queued);QVERIFY(blocked);QVERIFY(currentWhileHeld);QVERIFY(published);
+        QCOMPARE(bytes,QByteArray("after"));QVERIFY(!resIo::generationsMatch(paths,snapshot));
+        QVERIFY(resIo::generationsMatch(paths,resIo::generations(paths)));
+    }
+    void resolvedHandleSurvivesDestinationCreationAndIndexExternalChange() {
+        QTemporaryDir dir(tempPattern());const QString path=dir.filePath("new.res");
+        const auto paths=resIo::readPaths({path});const auto before=resIo::generations(paths);
+        const QByteArray archive=archiveBytes({{"opaque.bin","before"}});
+        {
+            resIo::PublicationLease publication(path);QVERIFY(publication.acquired());
+            // An active publisher is stale even before its destructor advances
+            // the generation (e.g. publication overlaps thumbnail rasterization).
+            QVERIFY(!resIo::generationsMatch(paths,before));
+            QVERIFY(write(path,archive));
+        }
+        QCOMPARE(paths.first().handle,resIo::readPath(path).handle);
+        QVERIFY(!resIo::generationsMatch(paths,before));
+        CResArchiveIndex index;QString error;QVERIFY(index.open(path,&error));
+        QCOMPARE(index.readMember("opaque.bin",&error),QByteArray("before"));
+        // No in-process publisher: the existing physical source fingerprint
+        // must still reject external changes even with a cached admission handle.
+        const auto generation=resIo::generation(path);
+        QVERIFY(write(path,archive+"external"));
+        QCOMPARE(resIo::generation(path),generation);
+        QVERIFY(!index.sourceIsCurrent(&error));QVERIFY(error.contains("changed since"));
+        QVERIFY(index.readMember("opaque.bin",&error).isEmpty());
+    }
     void ownReaderDrainsAndCheckpointRunsAfterRelease() {
         QTemporaryDir dir(tempPattern()); QVERIFY(dir.isValid());
         const QString path=dir.filePath("held.res"); QVERIFY(write(path,"before"));
