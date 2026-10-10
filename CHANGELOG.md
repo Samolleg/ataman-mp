@@ -5,6 +5,7 @@
 - Production-linked synthetic4/0/0;28 actual mapper openings, private UI publication/reopen with byte-identical UI/CLI MPR; PNG5 карт, полный ui-widget/scenario/dark/gallery/nativeAttempts=0, terrain/mixed-resolution/random/mixed-edge/reader-drain; gallery benchmark137 проходит. World48/0/0 после принятого коммита02e01e55; backup isolation408aa5eb также включён в fresh combined build. Размеры/память и условный compressed budget в отчёте.
 - Принятые сопутствующие изменения138: общий rim knot World BoundaryFill смешивается от единой высоты, устраняя повторное округление; test backups изолированы, устаревшее ожидание save policy122 исправлено. [World](docs/validation/ATAMAN_WORLD_SCULPT_TEST_FAIL_20261011.md), [test tails](docs/validation/ATAMAN_TEST_TAILS_20261011.md).
 - Установлена137; живые84 входа и14 copied originals неизменны, без live apply/push. Новый scoped-коммит продолжает WIP без переписывания истории. [Отчёт, PNG, причины SD и план](docs/validation/ATAMAN_TERRAIN_HD_REPUBLISH_138_20261010.md).
+- EI-TEST-TAILS-20261011: тестовые сохранения больше не пишут в пользовательскую папку backup; исправлено устаревшее ожидание теста сохранения черновика (политика 122).
 
 ## Ataman 137 — EI-TERRAIN-MIXED-RES-ATLAS-137 — 2026-10-10
 
