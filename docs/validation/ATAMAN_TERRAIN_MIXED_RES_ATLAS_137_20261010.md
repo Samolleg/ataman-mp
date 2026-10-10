@@ -291,14 +291,32 @@ full SHA коммита находится в итоговом сообщени�
 
 ## Передача 137
 
-EI-FINALIZE-137, 2026-10-10, база
-`b586e970b0d02655f31e346f22ba9785c2c1d8d4`: **STOP до компиляции**.
-Создан git archive/snapshot; агент ошибочно передал несуществующие Ataman
-QtBin/MinGwBin вместо существующего Endurance toolchain. Wrapper завершился
-ошибкой Resolve-Path; свежего EXE137, регресса, замера, staging, finalizer,
-manifest и установки нет. По явному правилу владельца повтор не запускался.
-Замены0, откат не требуется; installed136 и три live файла сохранили
-ожидаемые SHA. Владелец через Claude подтвердил игру на zone10/bz7g
-JamaisVu135 со смешанными страницами и разрешил все три последовательных шага;
-это разрешение сохраняется, работа не закрыта. Доказательства и правильная
-команда продолжения: [отчёт применения](ATAMAN_APPLY_137_HDPACK_SEMANTIC_20261010.md).
+EI-FINALIZE-137 завершён 2026-10-10. Свежая Release из git archive
+`b586e970b0d02655f31e346f22ba9785c2c1d8d4`, VERSION 137; `--version=137`.
+EXE SHA256 `cf69724878349614e4540cbabe15e7fe52df9adb26214affca1d13a01ab50343`.
+Полный свежий UI/scenario/dark/gallery/terrain/mixed-resolution/random/mixed-edge/
+reader-drain успешен под ui-tests.lock, nativeAttempts=0; world 45/1 — тот же
+известный FAIL, не PASS. Миниатюры против установленной 136: 80 измерений,
+8/8 допусков, максимальное замедление +5.69% / +0.646 ms (разные строки).
+
+Новый `build-staging-137-final/`: состав 127/127 против staging 136, добавлений/
+удалений 0, изменённых файлов 6; finalizer/внутренний validator PASS.
+Manifest SHA256 `22afaf063b83061d1dd8f2fbba18eca4baa664bae95c94920e74f19eefec6c4e`.
+Постоянная `artifacts/EI-Mapper-Ataman-2-first-test` обновлена 136→137,
+127 managed SHA верны; 23 051 пользовательский файл/кэши сохранены.
+Backup7/7: `artifacts/rollback-136-to-137-final/`; старые rollback сохранены.
+Finalizer на установке не запускался.
+
+После успешной передачи по явному разрешению владельца применён HDPack v2:
+41/41 живых Dejavu карт открыты именно установленной 137, exact profiles/
+палитры не ухудшились, stock bz10k/Zone12/Zone8 render 256 px. Затем заново
+восстановлены fresh copies Zone2/Zone3obr под live v2: 41 194 активные ячейки,
+0 неоднозначностей, 142/142 прежних MPR members сохранены, resave byte-stable;
+guarded live apply обеих карт и installed reopen 2/2 PASS. Остальные 80 входов
+корпуса, включая Base/MOB/textures, неизменны. Published namespaces остаются128.
+
+Первоначальная остановка по неверному пути toolchain была ошибкой подготовки;
+после уточнения сопровождающего она исправлена. Неуспешные попытки не учтены
+как PASS. Новая интерактивная gameplay acceptance не проводилась.
+Полные хеши до/после, замеры, receipts, backup paths и команды отката:
+[отчёт применения](ATAMAN_APPLY_137_HDPACK_SEMANTIC_20261010.md).
