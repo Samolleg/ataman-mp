@@ -51,6 +51,7 @@ private:
                          QString* error) const;
 
     QString m_path;
+    quint64 m_generation{0};
     qint64 m_size{-1};
     QDateTime m_modified;
     QByteArray m_headerSha256;

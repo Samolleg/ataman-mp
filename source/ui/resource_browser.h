@@ -22,12 +22,14 @@ class QTemporaryDir;
 struct SResourceBrowserLoadResult
 {
     CResourceCatalog catalog;
+    QMap<QString, quint64> archiveGenerations;
     QStringList errors;
 };
 
 struct SResourceBrowserPreview
 {
     quint64 generation{0};
+    QMap<QString, quint64> archiveGenerations;
     bool valid{false};
     QString title;
     QString details;

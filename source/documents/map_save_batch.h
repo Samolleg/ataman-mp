@@ -16,6 +16,10 @@ struct SMapSaveBatchResult
 {
     bool success{false};
     bool rollbackComplete{true};
+    QString phase;
+    QString failedPath;
+    QStringList committedPaths;
+    int commitAttempts{0};
     QString error;
     QStringList backups;
 };

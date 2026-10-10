@@ -11,6 +11,7 @@
 #include "mmp_codec.h"
 #include "endurance_document.h"
 #include "res_file.h"
+#include "res_read_lease.h"
 #include "terrain_atlas_profile.h"
 
 namespace {
@@ -35,6 +36,8 @@ bool archiveIndex(const QString& path,
     if(!members)
         return false;
     members->clear();
+    resIo::ReadLease lease(path, error);
+    if(!lease.acquired()) return false;
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly))
     {
@@ -133,6 +136,8 @@ bool CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
         return false;
     }
 
+    resIo::ReadLease lease(archivePath, error);
+    if(!lease.acquired()) return false;
     QMap<QString, SArchiveMemberLocation> members;
     QSet<QString> duplicateNames;
     qint64 indexedBytes = 0;
@@ -304,6 +309,9 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
         if(seen.contains(key))
             continue;
         seen.insert(key);
+        resIo::ReadLease lease(archive.absoluteFilePath(), &result.error);
+        if(!lease.acquired()) return result;
+        const quint64 generation = resIo::generation(archive.absoluteFilePath());
         QMap<QString, SArchiveMemberLocation> members;
         if(!archiveIndex(archive.absoluteFilePath(), &members))
             continue;
@@ -315,6 +323,8 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
             continue;
         const QByteArray profileBytes = memberPayload(&file,
                                                        profileMember.value());
+        file.close();
+        lease.release();
         STerrainAtlasProfile profile;
         if(profileBytes.isEmpty()
            || !STerrainAtlasProfile::fromBytes(
@@ -335,11 +345,16 @@ CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
             &decodedTiles);
         if(!exact.success())
         {
+            if(exact.error.contains(QStringLiteral("reader-admission"))) {
+                result.error=exact.error;
+                return result;
+            }
             rejected.append(QStringLiteral("%1: %2")
                 .arg(QDir::toNativeSeparators(archive.absoluteFilePath()),
                      exact.error));
             continue;
         }
+        if(generation != resIo::generation(archive.absoluteFilePath())) continue;
         result.archivePath = exact.archivePath;
         result.profileMemberName = memberName;
         result.profile = profile;
@@ -391,9 +406,12 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         if(seen.contains(key))
             continue;
         seen.insert(key);
-        const qint64 archiveSize = archive.size();
+        resIo::ReadLease lease(archive.absoluteFilePath(), &result.error);
+        if(!lease.acquired()) return result;
+        const quint64 generation = resIo::generation(archive.absoluteFilePath());
+        const qint64 archiveSize = QFileInfo(archive.absoluteFilePath()).size();
         const qint64 archiveLastModifiedMs =
-            archive.lastModified().toMSecsSinceEpoch();
+            QFileInfo(archive.absoluteFilePath()).lastModified().toMSecsSinceEpoch();
         QMap<QString, SArchiveMemberLocation> members;
         if(!archiveIndex(archive.absoluteFilePath(), &members))
             continue;
@@ -421,6 +439,8 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             }
             pages.append(payload);
         }
+        file.close();
+        lease.release();
         if(!complete)
             continue;
         result.completeArchives.append(archive.absoluteFilePath());
@@ -444,7 +464,8 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             CTerrainAtlasProfileInference::pixelSha256(tiles);
         QFileInfo archiveAfterRead(archive.absoluteFilePath());
         archiveAfterRead.refresh();
-        if(!archiveAfterRead.isFile()
+        if(generation != resIo::generation(archive.absoluteFilePath())
+           || !archiveAfterRead.isFile()
            || archiveAfterRead.size() != archiveSize
            || archiveAfterRead.lastModified().toMSecsSinceEpoch()
                 != archiveLastModifiedMs)

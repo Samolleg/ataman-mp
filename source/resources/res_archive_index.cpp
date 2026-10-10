@@ -1,4 +1,5 @@
 #include "res_archive_index.h"
+#include "res_read_lease.h"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -75,6 +76,8 @@ bool CResArchiveIndex::open(const QString& path, QString* error)
     m_path.clear();
     m_members.clear();
     m_byName.clear();
+    resIo::ReadLease lease(path, error);
+    if(!lease.acquired()) return false;
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly))
     {
@@ -140,6 +143,7 @@ bool CResArchiveIndex::open(const QString& path, QString* error)
     }
     file.seek(0);
     m_headerSha256 = sha(file.read(qMin(kHeaderFingerprintBytes, size)));
+    m_generation = resIo::generation(path);
     m_path = info.absoluteFilePath();
     m_size = size;
     m_modified = info.lastModified();
@@ -160,6 +164,12 @@ bool CResArchiveIndex::sourceIsCurrent(QString* error) const
         setError(error, "No RES archive is open.");
         return false;
     }
+    resIo::ReadLease lease(m_path, error);
+    if(!lease.acquired()) return false;
+    if(m_generation != resIo::generation(m_path)) {
+        setError(error, "The RES archive publication generation changed; reindex required.");
+        return false;
+    }
     QFile file(m_path);
     const QFileInfo info(m_path);
     if(info.size() != m_size || info.lastModified() != m_modified
@@ -175,7 +185,8 @@ bool CResArchiveIndex::sourceIsCurrent(QString* error) const
 QByteArray CResArchiveIndex::readRange(quint32 offset, quint32 size, qint64 maximumBytes,
                                        QString* error) const
 {
-    if(!sourceIsCurrent(error)) return QByteArray();
+    resIo::ReadLease lease(m_path, error);
+    if(!lease.acquired() || !sourceIsCurrent(error)) return QByteArray();
     QFile file(m_path);
     if(!file.open(QIODevice::ReadOnly) || !file.seek(offset))
     {
@@ -359,7 +370,8 @@ bool CResArchiveTransaction::remove(const QString& name, QString* error)
 
 bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QString* error) const
 {
-    if(!m_source.sourceIsCurrent(error)) return false;
+    resIo::ReadLease lease(m_source.path(),error);
+    if(!lease.acquired() || !m_source.sourceIsCurrent(error)) return false;
     QFile source(m_source.path());
     if(!source.open(QIODevice::ReadOnly))
     {
@@ -374,6 +386,7 @@ bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QStr
     }
     // QSaveFile cannot atomically replace an open source on Windows.
     source.close();
+    lease.release();
 
     struct OutputMember { QByteArray name; quint32 size; quint32 offset; quint32 time; };
     QVector<OutputMember> outputMembers;

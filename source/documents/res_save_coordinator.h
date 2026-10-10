@@ -27,6 +27,8 @@ struct SResMemberSaveRequest
 struct SResMemberSaveResult
 {
     bool success{false};
+    bool committed{false};
+    int commitAttempts{0};
     bool noOp{false};
     QString phase;
     QString error;
@@ -51,6 +53,8 @@ struct SResPublishedMembersSaveRequest
 struct SResPublishedMembersSaveResult
 {
     bool success{false};
+    bool committed{false};
+    int commitAttempts{0};
     bool noOp{false};
     QString phase;
     QString error;
@@ -73,6 +77,8 @@ struct SResArchiveBytesSaveRequest
 struct SResArchiveBytesSaveResult
 {
     bool success{false};
+    bool committed{false};
+    int commitAttempts{0};
     QString phase;
     QString error;
     QString candidateSha256;

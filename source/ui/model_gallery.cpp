@@ -9,6 +9,7 @@
 #include "resource_name.h"
 #include "resourcemanager.h"
 #include "model_gallery.h"
+#include "res_read_lease.h"
 #include "view.h"
 #include "createobjectform.h"
 #include <QStandardItemModel>
@@ -472,19 +473,26 @@ void CModelGallery::loadVisibleThumbnail()
 void CModelGallery::finishThumbnail(QFutureWatcher<QImage>* watcher,const QString& model,const QString& key)
 {
     QElapsedTimer delivered;delivered.start();
-    const QImage image=watcher->result(); m_thumbnails.insert(key,new QImage(image),imageCost(image));
+    QImage image;QString error;
+    try { image=watcher->result(); }
+    catch(const resIo::ReadFailure& failure) { error=failure.error; }
+    catch(const QException&) { error=QStringLiteral("Thumbnail worker failed; retry required."); }
     m_thumbnailJobs.remove(key);watcher->deleteLater();
-    if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
+    if(error.isEmpty() && !image.isNull()) {
+        m_thumbnails.insert(key,new QImage(image),imageCost(image));
+        if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
+    }
     for(int i=0;i<m_list->count();++i)
     {
         auto* item=m_list->item(i);
         if(item->data(Qt::UserRole).toString()==model && cacheKey(model,textureForModel(model))==key) {
             item->setIcon(image.isNull()?QIcon():QIcon(QPixmap::fromImage(image)));
-            item->setToolTip(model+"\n"+(image.isNull()?tr("Preview unavailable"):item->data(Qt::UserRole+1).toString()));
-            item->setData(Qt::UserRole+2,key);
+            item->setToolTip(model+"\n"+(!error.isEmpty()?error:image.isNull()?tr("Preview unavailable"):item->data(Qt::UserRole+1).toString()));
+            item->setData(Qt::UserRole+2,error.isEmpty()?QVariant(key):QVariant());
         }
     }
-    m_thumbnailTimer.start();
+    if(error.isEmpty()) m_thumbnailTimer.start();
+    else showCatalogError(error); // Retry on the next visibility/selection request.
     if(qEnvironmentVariableIsSet("EI_GALLERY_TIMING_TRACE"))qInfo("GALLERY delivery elapsed_ms=%.3f",delivered.nsecsElapsed()/1e6);
 }
 
@@ -505,6 +513,7 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
     struct PreviewSources {
         CResourceCatalog catalog;
         bool indexed=false;
+        QMap<QString,quint64> generations;
         QVector<QString> paths;
         QMutex mutex;
         QCache<QString,ei::SResourceModelScene> scenes{16*1024};
@@ -523,16 +532,41 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
         }
     }
     return [sources](const QString& model, const QString& texture) -> QImage {
+        QString admissionError;
+        resIo::ReadLeases leases(sources->paths, &admissionError);
+        if(!leases.acquired()) throw resIo::ReadFailure(admissionError);
         // Publish the archive index once. Afterwards it is immutable; readMember
         // uses a fresh local QFile/QDataStream, so reads and CPU decoders can overlap.
         // Only initialization and QCache access need this mutex; the GUI never waits.
         QMutexLocker lock(&sources->mutex);
-        if(!sources->indexed) { sources->catalog.build(sources->paths); sources->indexed = true; }
-        const auto read = [sources](const QString& name) -> QByteArray {
-            const auto entries = sources->catalog.providers(name);
+        QMap<QString,quint64> generations;
+        for(const auto& path : sources->paths) generations.insert(path,resIo::generation(path));
+        if(generations != sources->generations) {
+            sources->indexed=false; sources->scenes.clear(); sources->textures.clear();
+            sources->generations=generations;
+        }
+        if(!sources->indexed) {
+            QStringList errors;
+            sources->indexed=sources->catalog.build(sources->paths, &errors);
+            for(const auto& error : errors)
+                if(error.contains(QStringLiteral("reader-admission"))) throw resIo::ReadFailure(error);
+        }
+        // Copy the catalog too: a subsequent request can rebuild it after commit
+        // while this request decodes old bytes outside the cache mutex.
+        const CResourceCatalog catalog=sources->catalog;
+        const auto current=[generations]() {
+            for(auto it=generations.cbegin(); it!=generations.cend(); ++it)
+                if(resIo::generation(it.key()) != it.value()) return false;
+            return true;
+        };
+        const auto read = [catalog](const QString& name) -> QByteArray {
+            const auto entries = catalog.providers(name);
               if(entries.isEmpty() || entries.first().size > 64 * 1024 * 1024) return {};
-            const auto* archive = sources->catalog.archive(entries.first().archivePriority);
-            return archive ? archive->readMember(entries.first().memberIndex) : QByteArray();
+            const auto* archive = catalog.archive(entries.first().archivePriority);
+            QString error;
+            const QByteArray bytes=archive ? archive->readMember(entries.first().memberIndex, &error) : QByteArray();
+            if(!error.isEmpty()) throw resIo::ReadFailure(error);
+            return bytes;
         };
         const QString stem = ei::TechnicalModelCatalog::modelKey(model);
         ei::SResourceModelScene scene;
@@ -548,7 +582,8 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
             qint64 bytes=sizeof(scene)+qint64(scene.parts.size())*2048;
             for(const auto& part:scene.parts) bytes+=qint64(part.triangles.capacity())*sizeof(ei::SResourceModelTriangle);
             QMutexLocker cacheLock(&sources->mutex);
-            sources->scenes.insert(stem,new ei::SResourceModelScene(scene),int(qMin<qint64>(2147483647,(bytes+1023)/1024)));
+            if(!current()) throw resIo::ReadFailure(QStringLiteral("RES changed during thumbnail decoding; retry required."));
+            if(scene.valid) sources->scenes.insert(stem,new ei::SResourceModelScene(scene),int(qMin<qint64>(2147483647,(bytes+1023)/1024)));
         }
         QImage image;
         if(!texture.isEmpty()) for(const QString& candidate : ei::textureResourceCandidates(texture, stem))
@@ -561,15 +596,20 @@ CModelGallery::ThumbnailProvider CModelGallery::resourceThumbnails(const QString
             if(bytes.isEmpty()) continue;
             image = CTextureList::prepareStaticTexture(bytes).image;
             QMutexLocker cacheLock(&sources->mutex);
-            sources->textures.insert(candidate.toCaseFolded(),new QImage(image),imageCost(image)); break;
+            if(!current()) throw resIo::ReadFailure(QStringLiteral("RES changed during thumbnail decoding; retry required."));
+            if(!image.isNull()) sources->textures.insert(candidate.toCaseFolded(),new QImage(image),imageCost(image));
+            break;
         }
+        leases.release(); // Rasterization holds no file handle or reader lease.
         // Scene/texture data is held by local implicit-sharing copies.
         // CPU rasterization neither mutates those caches nor touches OpenGL.
         float minU=0,maxU=0,minV=0,maxV=0;
         for(const auto& part:scene.parts) for(const auto& triangle:part.triangles) for(const auto& vertex:triangle.vertices)
         { minU=qMin(minU,vertex.uv.x());maxU=qMax(maxU,vertex.uv.x());minV=qMin(minV,vertex.uv.y());maxV=qMax(maxV,vertex.uv.y()); }
-        return ei::renderModelGalleryThumbnail(scene,image,stem,
+        const QImage thumbnail=ei::renderModelGalleryThumbnail(scene,image,stem,
             ei::textureUvScaleForBounds(texture,minU,maxU,minV,maxV));
+        if(!current()) throw resIo::ReadFailure(QStringLiteral("RES changed during thumbnail rendering; retry required."));
+        return thumbnail;
     };
 }
 

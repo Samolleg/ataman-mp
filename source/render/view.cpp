@@ -15163,6 +15163,9 @@ void CView::finalizeVirtualTerrainAtlas()
                                  QStringLiteral("finalized-pages.res"),
                                  &publishErrors))
     {
+        if(sourceTextures.error() != QFileDevice::NoError)
+            publishErrors.prepend(QStringLiteral("source-open/read: %1; Qt file error %2: %3")
+                .arg(texturesPath).arg(int(sourceTextures.error())).arg(sourceTextures.errorString()));
         QMessageBox::critical(this, tr("HDPack_Terrain.res publication refused"),
             tr("The selected resource archive could not be read safely.\n\n%1")
                 .arg(publishErrors.join(QStringLiteral("\n"))));
@@ -15450,8 +15453,11 @@ void CView::finalizeVirtualTerrainAtlas()
         publishProgress.close();
         emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("HDPack_Terrain.res publication failed"),
-            tr("The selected archive was not replaced.\n\nPhase: %1\n%2")
-                .arg(resResult.phase, resResult.error));
+            (resResult.committed
+                ? tr("The archive was committed, but verification failed. Reopen it before saving again.\nBackup: %3\n\nPhase: %1\n%2")
+                    .arg(resResult.phase, resResult.error, resResult.backupPath)
+                : tr("Publication did not complete.\n\nPhase: %1\n%2")
+                    .arg(resResult.phase, resResult.error)));
         return;
     }
     const auto restorePublishedRes = [&]() {

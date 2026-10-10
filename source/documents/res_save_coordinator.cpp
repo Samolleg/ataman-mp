@@ -1,4 +1,5 @@
 #include "res_save_coordinator.h"
+#include "../resources/res_read_lease.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -17,19 +18,21 @@ bool readFile(const QFileInfo& info, QByteArray* bytes, QString* error)
     const QFileInfo fresh(info.absoluteFilePath());
     if(!fresh.exists() || !fresh.isFile())
     {
-        if(error) *error = QString("File does not exist: %1").arg(fresh.absoluteFilePath());
+        if(error) *error = QString("missing: %1").arg(fresh.absoluteFilePath());
         return false;
     }
+    resIo::ReadLease lease(fresh.absoluteFilePath(), error);
+    if(!lease.acquired()) return false;
     QFile file(fresh.absoluteFilePath());
     if(!file.open(QIODevice::ReadOnly))
     {
-        if(error) *error = file.errorString();
+        if(error) *error = QString("open: %1; Qt file error %2: %3").arg(fresh.absoluteFilePath()).arg(int(file.error())).arg(file.errorString());
         return false;
     }
     const QByteArray data = file.readAll();
-    if(file.error() != QFileDevice::NoError)
+    if(file.error() != QFileDevice::NoError || data.size() != file.size())
     {
-        if(error) *error = file.errorString();
+        if(error) *error = QString("read: %1; Qt file error %2: %3").arg(fresh.absoluteFilePath()).arg(int(file.error())).arg(file.errorString());
         return false;
     }
     if(bytes) *bytes = data;
@@ -39,21 +42,7 @@ bool readFile(const QFileInfo& info, QByteArray* bytes, QString* error)
 bool destinationMatches(const QFileInfo& destination, bool existed,
                         const QByteArray& expected, QString* error)
 {
-    const QFileInfo fresh(destination.absoluteFilePath());
-    if(!existed)
-    {
-        if(!fresh.exists())
-            return true;
-        if(error) *error = "The destination appeared while the RES save was staged.";
-        return false;
-    }
-    QByteArray current;
-    if(!readFile(fresh, &current, error))
-        return false;
-    if(current == expected)
-        return true;
-    if(error) *error = "The destination changed while the RES save was staged.";
-    return false;
+    return resIo::matches(destination.absoluteFilePath(), expected, existed, error);
 }
 }
 
@@ -73,7 +62,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
         return result;
     if(sourceBytes != baseline.originalBytes())
     {
-        result.error = "The source RES changed on disk. Reopen it before saving.";
+        result.error = "mismatch: The source RES changed on disk. Reopen it before saving.";
         return result;
     }
 
@@ -126,7 +115,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
        reopenedBytes != candidateBytes)
     {
         if(result.error.isEmpty())
-            result.error = "The staged RES bytes changed on fresh reopen.";
+            result.error = "mismatch: The staged RES bytes changed on fresh reopen.";
         return result;
     }
     CResArchiveDocument reopened;
@@ -140,11 +129,14 @@ SResMemberSaveResult commitStagedResMemberReplacement(
         return result;
     }
 
+    result.phase = "reader-drain";
+    resIo::PublicationLease publication(destination.absoluteFilePath(), &result.error);
+    if(!publication.acquired()) return result;
     result.phase = "pre-backup-race-check";
     QByteArray currentSource;
     if(!readFile(request.source, &currentSource, &result.error) || currentSource != sourceBytes)
     {
-        if(result.error.isEmpty()) result.error = "The source RES changed during staging.";
+        if(result.error.isEmpty()) result.error = "mismatch: The source RES changed during staging.";
         return result;
     }
     if(!destinationMatches(destination, destinationExisted, destinationBytes, &result.error))
@@ -173,7 +165,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
     result.phase = "pre-commit-race-check";
     if(!readFile(request.source, &currentSource, &result.error) || currentSource != sourceBytes)
     {
-        if(result.error.isEmpty()) result.error = "The source RES changed before commit.";
+        if(result.error.isEmpty()) result.error = "mismatch: The source RES changed before commit.";
         return result;
     }
     if(!destinationMatches(destination, destinationExisted, destinationBytes, &result.error))
@@ -190,22 +182,31 @@ SResMemberSaveResult commitStagedResMemberReplacement(
 
     result.phase = "atomic-replacement";
     QSaveFile output(destination.absoluteFilePath());
+    output.setDirectWriteFallback(false);
     if(!output.open(QIODevice::WriteOnly))
     {
-        result.error = output.errorString();
+        result.error = QString("open/write: Qt file error %1: %2").arg(int(output.error())).arg(output.errorString());
         return result;
     }
     if(output.write(candidateBytes) != candidateBytes.size())
     {
-        result.error = output.errorString();
+        result.error = QString("open/write: Qt file error %1: %2").arg(int(output.error())).arg(output.errorString());
         output.cancelWriting();
         return result;
     }
-    if(!output.commit())
-    {
-        result.error = output.errorString();
-        return result;
-    }
+    if(!resIo::commitWithRetry(output, destination.absoluteFilePath(), candidateBytes,
+        [&](QString* error) {
+            QByteArray current;
+            if(!readFile(request.source, &current, error)) return false;
+            if(current != sourceBytes) {
+                if(error) *error = "mismatch: source RES changed before commit/retry";
+                return false;
+            }
+            return destinationMatches(destination,destinationExisted,destinationBytes,error);
+        }, &result.error, &result.commitAttempts)) return result;
+    result.committed = true;
+    result.phase = "post-commit-validation";
+    if(!resIo::matches(destination.absoluteFilePath(),candidateBytes,true,&result.error)) return result;
     result.success = true;
     result.phase = "complete";
     return result;
@@ -232,7 +233,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     if(sourceBytes != baseline.originalBytes())
     {
         result.error = QStringLiteral(
-            "The source RES changed on disk. Reopen it before publishing.");
+            "mismatch: The source RES changed on disk. Reopen it before publishing.");
         return result;
     }
 
@@ -292,7 +293,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     {
         if(result.error.isEmpty())
             result.error = QStringLiteral(
-                "The staged RES bytes changed on fresh reopen.");
+                "mismatch: The staged RES bytes changed on fresh reopen.");
         return result;
     }
     CResArchiveDocument reopened;
@@ -313,6 +314,9 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
             return result;
         }
 
+    result.phase = QStringLiteral("reader-drain");
+    resIo::PublicationLease publication(destination.absoluteFilePath(), &result.error);
+    if(!publication.acquired()) return result;
     result.phase = QStringLiteral("pre-backup-race-check");
     QByteArray currentSource;
     if(!readFile(request.source, &currentSource, &result.error)
@@ -320,7 +324,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     {
         if(result.error.isEmpty())
             result.error = QStringLiteral(
-                "The source RES changed during publication staging.");
+                "mismatch: The source RES changed during publication staging.");
         return result;
     }
     if(!destinationMatches(destination, destinationExisted,
@@ -355,7 +359,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     {
         if(result.error.isEmpty())
             result.error = QStringLiteral(
-                "The source RES changed before publication commit.");
+                "mismatch: The source RES changed before publication commit.");
         return result;
     }
     if(!destinationMatches(destination, destinationExisted,
@@ -373,22 +377,29 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
 
     result.phase = QStringLiteral("atomic-replacement");
     QSaveFile output(destination.absoluteFilePath());
+    output.setDirectWriteFallback(false);
     if(!output.open(QIODevice::WriteOnly))
     {
-        result.error = output.errorString();
+        result.error = QString("open/write: Qt file error %1: %2").arg(int(output.error())).arg(output.errorString());
         return result;
     }
     if(output.write(candidateBytes) != candidateBytes.size())
     {
-        result.error = output.errorString();
+        result.error = QString("open/write: Qt file error %1: %2").arg(int(output.error())).arg(output.errorString());
         output.cancelWriting();
         return result;
     }
-    if(!output.commit())
-    {
-        result.error = output.errorString();
-        return result;
-    }
+    if(!resIo::commitWithRetry(output, destination.absoluteFilePath(), candidateBytes,
+        [&](QString* error) {
+            QByteArray current;
+            if(!readFile(request.source, &current, error)) return false;
+            if(current != sourceBytes) {
+                if(error) *error = "mismatch: source RES changed before commit/retry";
+                return false;
+            }
+            return destinationMatches(destination,destinationExisted,destinationBytes,error);
+        }, &result.error, &result.commitAttempts)) return result;
+    result.committed = true;
 
     result.phase = QStringLiteral("post-commit-validation");
     QByteArray committedBytes;
@@ -397,7 +408,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     {
         if(result.error.isEmpty())
             result.error = QStringLiteral(
-                "The committed RES bytes differ from the validated candidate.");
+                "mismatch: The committed RES bytes differ from the validated candidate.");
         return result;
     }
     CResArchiveDocument committed;
@@ -455,7 +466,11 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
             + destination.absolutePath();
         return result;
     }
-    const bool existed = destination.exists();
+    result.phase = QStringLiteral("reader-drain");
+    resIo::PublicationLease publication(destination.absoluteFilePath(), &result.error);
+    if(!publication.acquired()) return result;
+    result.phase = QStringLiteral("destination-check");
+    const bool existed = QFileInfo(destination.absoluteFilePath()).exists();
     QByteArray original;
     if(existed && !readFile(destination, &original, &result.error))
         return result;
@@ -492,13 +507,17 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
 #endif
     result.phase = QStringLiteral("atomic-replacement");
     QSaveFile output(destination.absoluteFilePath());
+    output.setDirectWriteFallback(false);
     if(!output.open(QIODevice::WriteOnly)
        || output.write(request.candidateBytes) != request.candidateBytes.size()
-       || !output.commit())
+       || !resIo::commitWithRetry(output,destination.absoluteFilePath(),request.candidateBytes,
+            [&](QString* error){return destinationMatches(destination,existed,original,error);},
+            &result.error,&result.commitAttempts))
     {
-        result.error = output.errorString();
+        if(result.error.isEmpty()) result.error = output.errorString();
         return result;
     }
+    result.committed = true;
     QByteArray reopenedBytes;
     CResArchiveDocument reopened;
     errors.clear();
