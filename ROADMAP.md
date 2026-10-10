@@ -1,5 +1,12 @@
 # EI Mapper Ataman — roadmap
 
+## EI-HDPACK-RESTORE-APPLY-20261010 — восстановление HDPack с переносом привязок
+
+- Поручение владельца через Claude 2026-10-10: «Оба шага»; здесь только data-only v2 от проверенного v1, перенос 12 embedded profiles/10 semantic documents и guarded replacement единственного Dejavu/res/HDPack_Terrain.res с backup. Функция пересборки опубликованных карт в HD — позднее, вне этой задачи.
+- База входа main d832153bf0711f4ca00fea8979e081835b41c63f; зависимость: подготовка 1eb7d803, docs/validation/ATAMAN_HDPACK_RESTORE_PREP_20261010.md. Код, VERSION и постоянную установку не менять; сохранять параллельную EI-FINALIZE-136, UI/замена под build-locks/ui-tests.lock, без сети/push/подагентов.
+- Критерии: доказанные old→new atlas SHA и неизменные physical slots/mip≥1; прочие payloads как v1; 79 MPR/SEC/повороты/вода; exact bindings 68/68; active bz10k/zone12/zone2/zone8 palette+точная семантика; скрытые открытия до/после; baseline SHA, backup/hash, atomic replace/readback, проверенный невыполненный откат.
+- Статус: BLOCKED BEFORE LIVE REPLACEMENT. V2 `b3b123dde10513cf6dcc40d60ff4a9e21177017a51989b991c2445eb3f0868cf`: 12 profiles/10 fields перенесены, 1200 прочих payloads как v1, exact native68/68, maps79/79/SEC/вода валидны. Полный editor pipeline отвергает mixed-size atlas (active4 palette/semantic FAIL); у Zone2 предсуществующий неверный MPR SHA semantic v1, у published Zone3obr также прежний semantic FAIL. Живой RES/backup `2d20abdd3a753cd00671c84798a2bda030b7f192b71de58e0e09860f5bfe488c`; live не заменён. Проверенная rollback-команда пока NOOP. Evidence [ATAMAN_HDPACK_RESTORE_APPLY_20261010.md](docs/validation/ATAMAN_HDPACK_RESTORE_APPLY_20261010.md). Следующий шаг: отдельное поручение на необходимый editor binding/picker code fix и доказуемую map binding семантику; затем затронутые проверки и guarded apply. Опубликованные Zone6/9/3obr/19 остаются128 до будущего HD шага; эту цель не закрывать.
+
 ## EI-TERRAIN-RANDOM-PAINT-136 — покраска со случайностью и «Перемешать тайлы»
 
 - Поручение владельца 2026-10-10: «Научить маппер покраске со случайностью — это лучший вариант, и нужна кнопка пересчёта». Жалоба: одна и та же текстура повторяется.
