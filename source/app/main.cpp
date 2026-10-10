@@ -3,6 +3,7 @@
 #include "terrain_mob_height_check.h"
 #include "terrain_height_res_save_check.h"
 #include "terrain_mixed_edge_check.h"
+#include "terrain_hd_republish.h"
 #include "terrain_random_paint_check.h"
 #include "ai_graph_regeneration_check.h"
 #include "pointer_modes_check.h"
@@ -557,6 +558,8 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption terrainHeightResSaveCheckOption("terrain-height-res-save-check", "Validate height-only MPR saves and unchanged terrain resources with synthetic data.");
     QCommandLineOption terrainMixedEdgeCheckOption("terrain-mixed-edge-check", "Validate mixed-edge integration on an isolated map/atlas fixture.", "fixture-json");
     parser.addOption(terrainMixedEdgeCheckOption);
+    QCommandLineOption terrainHdRepublishOption("terrain-hd-republish-check", "Check/build HD atlas candidates in a new isolated output directory; never modify source maps.", "fixture-json");
+    parser.addOption(terrainHdRepublishOption);
     QCommandLineOption terrainRandomPaintCheckOption("terrain-random-paint-check", "Validate deterministic cosmetic tile variation on isolated fixtures.", "fixture-json");
     parser.addOption(terrainRandomPaintCheckOption);
     QCommandLineOption aiGraphRegenerationCheckOption("ai-graph-regeneration-check", "Validate explicit graph calculation, invalidation, queued clicks and current save candidates with synthetic data.");
@@ -679,6 +682,8 @@ int runHeadlessCommand(QApplication& app)
     const bool terrainHeightResSaveCheck = parser.isSet(terrainHeightResSaveCheckOption);
     if(parser.isSet(terrainMixedEdgeCheckOption))
         return runTerrainMixedEdgeCheck(parser.value(terrainMixedEdgeCheckOption));
+    if(parser.isSet(terrainHdRepublishOption))
+        return runTerrainHdRepublish(parser.value(terrainHdRepublishOption));
     if(parser.isSet(terrainRandomPaintCheckOption))
         return runTerrainRandomPaintCheck(parser.value(terrainRandomPaintCheckOption));
     const bool aiGraphRegenerationCheck = parser.isSet(aiGraphRegenerationCheckOption);

@@ -1,3 +1,9 @@
+## Ataman 138 (WIP, не передан) — EI-TERRAIN-HD-REPUBLISH-138 — 2026-10-10
+
+- Подготовлены кнопка HD-пересборки опубликованного атласа текущей карты, пакетная check/build команда, exact cross-namespace stock matching и восстановление части Modern-рецептов; сохранение BC1-блоков и прежних128 страниц. Реализация неполная, mixed-edge regeneration отсутствует; whole-page fallback требует решения политики.
+- Fresh Release138; synthetic4 PASS/0 FAIL/0 SKIP. Первая публикация копии FAIL/exit2 (binary hash вместо hex namespace). STOP по поручению; полный регресс, openings/PNG/память и передача не выполнены. Последние guards исходников не пересобраны.
+- Установлена137; живые данные/84 защищённых входа и14 copied MPR неизменны. Scoped WIP-коммит не закрывает задачу. [Отчёт и следующий шаг](docs/validation/ATAMAN_TERRAIN_HD_REPUBLISH_138_20261010.md).
+
 ## Ataman 137 — EI-TERRAIN-MIXED-RES-ATLAS-137 — 2026-10-10
 
 - Смешанные native страницы256/128 принимаются по точной исходной идентичности. GL отображает максимальное разрешение; меньшие тайлы масштабируются только в raster для показа.

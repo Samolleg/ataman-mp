@@ -771,6 +771,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     saveDraft->setText(tr("Сохранить черновик…"));
     exportDiagnostic->setText(tr("Экспорт диагностики…"));
     reviewAtlas->setText(tr("Редактор атласа…"));
+    auto hdRepublish = new QPushButton(tr("Пересобрать атлас карты в HD…"), this);
+    hdRepublish->setObjectName(QStringLiteral("terrainHdRepublish"));
+    hdRepublish->setToolTip(tr("Пересобрать опубликованный атлас текущей карты из точных HD-источников, сохранив слоты, повороты и воду."));
+    advanced->addWidget(hdRepublish);
+    connect(hdRepublish, &QPushButton::clicked, this, &CLandscapeTools::atlasHdRepublishRequested);
     m_overlayMprMaterials->setText(tr("Материалы поверхности…"));
     advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
     advanced->addWidget(m_modernMixedEdge);

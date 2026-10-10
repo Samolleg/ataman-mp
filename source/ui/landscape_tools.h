@@ -183,6 +183,7 @@ signals:
     void importHeightmapRequested();
     void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
+    void atlasHdRepublishRequested();
     void exportPaintDiagnosticRequested();
     void openMprSettingsRequested();
     void openMprMaterialsRequested();

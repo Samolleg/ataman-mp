@@ -1787,6 +1787,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         });
         connect(m_landscapeTools, &CLandscapeTools::atlasProfileReviewRequested,
                 this, &CView::reviewTerrainAtlasProfile);
+        connect(m_landscapeTools, &CLandscapeTools::atlasHdRepublishRequested,
+                this, &CView::republishTerrainAtlasHd);
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::openMprSettingsRequested,

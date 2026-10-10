@@ -747,6 +747,7 @@ private:
     void reviewTerrainAtlasProfile();
     void reviewTerrainAtlasProfileAtSlot(int initialSlot);
     void finalizeVirtualTerrainAtlas();
+    void republishTerrainAtlasHd();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
