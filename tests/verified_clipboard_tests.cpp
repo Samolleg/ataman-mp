@@ -803,7 +803,10 @@ private slots:
     }
 };
 
-int main(int argc, char** argv)
+// Historical native guard fixtures are OPTIONAL and can touch the OS clipboard.
+// Only --native-clipboard-tests or their explicitly named helper modes enter
+// this suite. The default regression below never captures/restores OS data.
+int nativeClipboardMain(int argc, char** argv)
 {
 #ifdef Q_OS_WIN
     if(argc == 4 && QByteArray(argv[1]) == "--hold") {
@@ -940,5 +943,156 @@ int main(int argc, char** argv)
     printf("%s: original clipboard restored and native data flushed\n", restored ? "PASS" : "FAIL");
     if(!restored) fprintf(stderr, "%s\n", qPrintable(clipboard.error()));
     return restored ? result : 1;
+}
+class IsolatedClipboardTests : public QObject
+{
+    Q_OBJECT
+private slots:
+    void init() { QApplication::clipboard()->clear(); }
+    void backendAndModes()
+    {
+        QVERIFY(ei::testClipboardEnabled());
+        QVERIFY(!QApplication::clipboard()->supportsSelection());
+        QVERIFY(!QApplication::clipboard()->supportsFindBuffer());
+        QVERIFY(!QApplication::clipboard()->ownsClipboard());
+    }
+    void valueReadback()
+    {
+        QMimeData original;
+        original.setText(QString::fromUtf8("Текст буфера"));
+        original.setHtml("<b>clipboard</b>");
+        original.setData("application/x-ataman", QByteArray::fromHex("0001ff007f"));
+        original.setUrls({QUrl("https://example.invalid/a%20b"), QUrl::fromLocalFile("C:/test/a")});
+        QImage image(3,2,QImage::Format_ARGB32); image.fill(QColor(30,60,90,123));
+        original.setImageData(image);
+        const auto snapshot = ei::ClipboardSnapshot::fromMimeData(original);
+        const auto result = ei::writeClipboard(snapshot);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.attempts, 1);
+        QVERIFY(snapshot.matches(ei::clipboardMimeData()));
+        QCOMPARE(ei::clipboardMimeData()->formats().size(), original.formats().size());
+        QVERIFY(QApplication::clipboard()->ownsClipboard());
+    }
+    void replacementAndEmpty()
+    {
+        QMimeData data; data.setData("application/x-ataman", "payload");
+        QVERIFY(ei::copyMimeDataToClipboard(data));
+        QVERIFY(ei::copyTextToClipboard("replacement"));
+        QVERIFY(!ei::clipboardMimeData()->hasFormat("application/x-ataman"));
+        QCOMPARE(ei::clipboardText(), QString("replacement"));
+        QVERIFY(ei::writeClipboard(ei::ClipboardSnapshot()).ok);
+        QVERIFY(ei::clipboardMimeData()->formats().isEmpty());
+    }
+    void builtInLineEditCopyCutPasteUndo()
+    {
+        QLineEdit editor("abcdef"); editor.setAttribute(Qt::WA_DontShowOnScreen);
+        editor.setSelection(2,2);
+        editor.copy(); QCOMPARE(ei::clipboardText(), QString("cd"));
+        editor.cut(); QCOMPARE(editor.text(), QString("abef"));
+        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
+        editor.deselect(); editor.setCursorPosition(6); editor.paste();
+        QCOMPARE(editor.text(), QString("abcdefcd"));
+        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
+    }
+    void builtInMenuAndShortcuts()
+    {
+        QLineEdit editor("menu text"); editor.setAttribute(Qt::WA_DontShowOnScreen);
+        editor.selectAll();
+        QScopedPointer<QMenu> menu(editor.createStandardContextMenu());
+        bool copied = false;
+        for(QAction* action : menu->actions()) if(action->text().remove('&').startsWith("Copy")) {
+            action->trigger(); copied = true; break;
+        }
+        QVERIFY(copied); QCOMPARE(ei::clipboardText(), QString("menu text"));
+        QTest::keyClick(&editor, Qt::Key_X, Qt::ControlModifier);
+        QVERIFY(editor.text().isEmpty());
+        QTest::keyClick(&editor, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor.text(), QString("menu text"));
+        editor.deselect(); editor.setCursorPosition(9);
+        QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(editor.text(), QString("menu textmenu text"));
+    }
+    void verifiedMenuAndCut()
+    {
+        QLineEdit editor("abcdef"); editor.setSelection(2,2);
+        QScopedPointer<QMenu> menu(ei::verifiedLineEditContextMenu(&editor));
+        QAction* cut = menu->findChild<QAction*>("verifiedClipboardCut");
+        QVERIFY(cut); cut->trigger();
+        QCOMPARE(editor.text(), QString("abef")); QCOMPARE(ei::clipboardText(), QString("cd"));
+        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
+    }
+    void signalsAndNestedWrite()
+    {
+        QSignalSpy spy(QApplication::clipboard(), &QClipboard::dataChanged);
+        bool attempted = false; bool nestedOk = true;
+        const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&] {
+            if(!attempted) { attempted=true; nestedOk=ei::copyTextToClipboard("nested"); }
+        });
+        QVERIFY(ei::copyTextToClipboard("outer"));
+        disconnect(connection);
+        QVERIFY(attempted); QVERIFY(!nestedOk);
+        QCOMPARE(ei::clipboardText(), QString("outer")); QCOMPARE(spy.count(),1);
+    }
+    void ordinaryModeSelectionAndAllCheckFlags()
+    {
+        char exe[]="mapper", ordinary[]="--version", check[]="--ui-widget-check", equals[]="--roundtrip-check=file";
+        char* normal[]={exe,ordinary}; char* testing[]={exe,check}; char* valued[]={exe,equals};
+        QVERIFY(!ei::testClipboardRequested(2,normal));
+        QVERIFY(ei::testClipboardRequested(2,testing));
+        QVERIFY(ei::testClipboardRequested(2,valued));
+        QProcess child;
+        child.start(QCoreApplication::applicationFilePath(), {"--backend-default-check"});
+        QVERIFY(child.waitForFinished(10000)); QCOMPARE(child.exitCode(),0);
+        QVERIFY(child.readAllStandardOutput().contains("backend=system"));
+    }
+    void sentinelRejectsNativeAndSystemQpa()
+    {
+        for(const QString& probe : {QString("--probe-native-open"),QString("--probe-native-ole"),QString("--probe-system-qpa")}) {
+            QProcess child; child.start(QCoreApplication::applicationFilePath(), {probe});
+            QVERIFY(child.waitForFinished(10000));
+            qInfo().noquote() << probe << "exit=" << child.exitCode()
+                << child.readAllStandardOutput();
+            QCOMPARE(child.exitStatus(),QProcess::NormalExit); QCOMPARE(child.exitCode(),2);
+            const QByteArray output=child.readAllStandardError();
+            QVERIFY2(output.contains("FAIL: clipboard isolation"),output.constData());
+            QVERIFY(!output.contains("nativeAttempts=0"));
+            QVERIFY(output.contains("unchanged=1"));
+        }
+    }
+};
+
+int main(int argc, char** argv)
+{
+    const QByteArray option = argc > 1 ? QByteArray(argv[1]) : QByteArray();
+    if(option == "--native-clipboard-tests") {
+        for(int i=1;i<argc-1;++i) argv[i]=argv[i+1];
+        --argc;
+        return nativeClipboardMain(argc,argv);
+    }
+    // Helpers are explicit native-only invocations; never run by qExec default.
+    if(option == "--hold" || option == "--inventory" || option.startsWith("--guard-"))
+        return nativeClipboardMain(argc,argv);
+    const bool ordinary = option == "--backend-default-check";
+    ei::TestClipboardSession clipboard(!ordinary);
+    if(!clipboard.prepared()) return 2;
+    QApplication app(argc,argv);
+    if(!clipboard.install()) return 2;
+    if(ordinary) {
+        const bool system = !ei::testClipboardEnabled();
+        printf("%s: backend=system without test activation\n",system?"PASS":"FAIL");
+        return system?0:2;
+    }
+#ifdef Q_OS_WIN
+    if(option == "--probe-native-open") { OpenClipboard(nullptr); return 0; }
+    if(option == "--probe-native-ole") { IDataObject* object=nullptr; OleGetClipboard(&object); return 0; }
+    if(option == "--probe-system-qpa") {
+        // Test the REAL Windows clipboard class without the QPA adapter.
+        // The import hook must reject its read before any payload is obtained.
+        ei::probeSystemClipboardForTest();
+        return 0;
+    }
+#endif
+    HiddenWidgets hidden; app.installEventFilter(&hidden);
+    IsolatedClipboardTests tests; return QTest::qExec(&tests,argc,argv);
 }
 #include "verified_clipboard_tests.moc"

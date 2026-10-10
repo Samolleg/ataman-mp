@@ -20,12 +20,279 @@
 #include <QVector>
 #include <climits>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <atomic>
+#include <algorithm>
+#include <QDir>
+#include <QFileInfo>
+#include <private/qguiapplication_p.h>
+#include <qpa/qplatformclipboard.h>
+#include <qpa/qplatformintegration.h>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <ole2.h>
+#include <tlhelp32.h>
 #endif
 
 namespace ei {
+namespace {
+bool isolated = false;
+std::atomic<unsigned> nativeAttempts{0};
+unsigned hookedImports = 0;
+bool isolationReady = false;
+QPlatformIntegration* systemForProbe = nullptr;
+bool nativeHooksReady = true;
+quint32 initialSequence = 0;
+QVector<quint32> initialFormats;
+
+// QClipboard, QLineEdit, QTextEdit, standard context menus and keyboard
+// shortcuts all obtain their data through QPlatformIntegration::clipboard().
+// Own the transferred MIME object just as QClipboard's platform backend does.
+class MemoryClipboard final : public QPlatformClipboard
+{
+    std::unique_ptr<QMimeData> value{new QMimeData};
+    bool owned = false;
+public:
+    QMimeData* mimeData(QClipboard::Mode mode) override
+    { return mode == QClipboard::Clipboard ? value.get() : nullptr; }
+    void setMimeData(QMimeData* data, QClipboard::Mode mode) override
+    {
+        if(mode != QClipboard::Clipboard) { delete data; return; }
+        if(data == value.get()) return;
+        value.reset(data ? data : new QMimeData);
+        owned = data != nullptr;
+        emitChanged(mode);
+    }
+    bool supportsMode(QClipboard::Mode mode) const override
+    { return mode == QClipboard::Clipboard; } // Same as Windows.
+    bool ownsMode(QClipboard::Mode mode) const override
+    { return supportsMode(mode) && owned; }
+};
+
+// Keep the actual Windows renderer/input/theme services. Offscreen/minimal
+// would change the OpenGL and native widget behavior being tested. Forward
+// every virtual of the retained Qt 5.12 QPA contract except clipboard().
+class ClipboardIntegration final : public QPlatformIntegration
+{
+    std::unique_ptr<QPlatformIntegration> system;
+    mutable MemoryClipboard memory;
+public:
+    explicit ClipboardIntegration(QPlatformIntegration* original) : system(original) {}
+    bool hasCapability(Capability c) const override { return system->hasCapability(c); }
+    QPlatformPixmap* createPlatformPixmap(QPlatformPixmap::PixelType t) const override { return system->createPlatformPixmap(t); }
+    QPlatformWindow* createPlatformWindow(QWindow* w) const override { return system->createPlatformWindow(w); }
+    QPlatformWindow* createForeignWindow(QWindow* w, WId id) const override { return system->createForeignWindow(w,id); }
+    QPlatformBackingStore* createPlatformBackingStore(QWindow* w) const override { return system->createPlatformBackingStore(w); }
+    QPlatformOpenGLContext* createPlatformOpenGLContext(QOpenGLContext* c) const override { return system->createPlatformOpenGLContext(c); }
+    QPlatformSharedGraphicsCache* createPlatformSharedGraphicsCache(const char* id) const override { return system->createPlatformSharedGraphicsCache(id); }
+    QPaintEngine* createImagePaintEngine(QPaintDevice* d) const override { return system->createImagePaintEngine(d); }
+    QAbstractEventDispatcher* createEventDispatcher() const override { return system->createEventDispatcher(); }
+    void initialize() override { system->initialize(); }
+    void destroy() override { system->destroy(); }
+    QPlatformFontDatabase* fontDatabase() const override { return system->fontDatabase(); }
+    QPlatformClipboard* clipboard() const override { return &memory; }
+    QPlatformDrag* drag() const override { return system->drag(); }
+    QPlatformInputContext* inputContext() const override { return system->inputContext(); }
+    QPlatformAccessibility* accessibility() const override { return system->accessibility(); }
+    QPlatformNativeInterface* nativeInterface() const override { return system->nativeInterface(); }
+    QPlatformServices* services() const override { return system->services(); }
+    QVariant styleHint(StyleHint h) const override { return system->styleHint(h); }
+    Qt::WindowState defaultWindowState(Qt::WindowFlags f) const override { return system->defaultWindowState(f); }
+    Qt::KeyboardModifiers queryKeyboardModifiers() const override { return system->queryKeyboardModifiers(); }
+    QList<int> possibleKeys(const QKeyEvent* e) const override { return system->possibleKeys(e); }
+    QStringList themeNames() const override { return system->themeNames(); }
+    QPlatformTheme* createPlatformTheme(const QString& n) const override { return system->createPlatformTheme(n); }
+    QPlatformOffscreenSurface* createPlatformOffscreenSurface(QOffscreenSurface* s) const override { return system->createPlatformOffscreenSurface(s); }
+    QPlatformSessionManager* createPlatformSessionManager(const QString& id, const QString& key) const override { return system->createPlatformSessionManager(id,key); }
+    void sync() override { system->sync(); }
+    QOpenGLContext::OpenGLModuleType openGLModuleType() override { return system->openGLModuleType(); }
+    void setApplicationIcon(const QIcon& i) const override { system->setApplicationIcon(i); }
+    void beep() const override { system->beep(); }
+#if QT_CONFIG(vulkan)
+    QPlatformVulkanInstance* createPlatformVulkanInstance(QVulkanInstance* i) const override { return system->createPlatformVulkanInstance(i); }
+#endif
+};
+
+#ifdef Q_OS_WIN
+// Deny native reads/writes rather than just noticing damage afterwards.
+// Patch IMPORT SLOTS, not instructions or DLL files, in this test process only.
+// Pin monitored modules until process exit so teardown is monitored too.
+void violation() { ++nativeAttempts; SetLastError(ERROR_ACCESS_DENIED); }
+BOOL WINAPI denyOpen(HWND) { violation(); return FALSE; }
+BOOL WINAPI denyBool() { violation(); return FALSE; }
+HANDLE WINAPI denyGet(UINT) { violation(); return nullptr; }
+HANDLE WINAPI denySet(UINT, HANDLE) { violation(); return nullptr; }
+UINT WINAPI denyEnum(UINT) { violation(); return 0; }
+int WINAPI denyCount() { violation(); return 0; }
+BOOL WINAPI denyAvailable(UINT) { violation(); return FALSE; }
+int WINAPI denyPriority(UINT*, int) { violation(); return -1; }
+HWND WINAPI denyWindow() { violation(); return nullptr; }
+HRESULT WINAPI denyOleGet(IDataObject** p) { violation(); if(p) *p=nullptr; return E_ACCESSDENIED; }
+HRESULT WINAPI denyOleSet(IDataObject*) { violation(); return E_ACCESSDENIED; }
+HRESULT WINAPI denyOleFlush() { violation(); return E_ACCESSDENIED; }
+HRESULT WINAPI denyOleCurrent(IDataObject*) { violation(); return E_ACCESSDENIED; }
+struct DeniedImport { const char* name; void* replacement; };
+const DeniedImport deniedImports[] = {
+    {"OpenClipboard", reinterpret_cast<void*>(&denyOpen)},
+    {"CloseClipboard", reinterpret_cast<void*>(&denyBool)},
+    {"EmptyClipboard", reinterpret_cast<void*>(&denyBool)},
+    {"GetClipboardData", reinterpret_cast<void*>(&denyGet)},
+    {"SetClipboardData", reinterpret_cast<void*>(&denySet)},
+    {"EnumClipboardFormats", reinterpret_cast<void*>(&denyEnum)},
+    {"CountClipboardFormats", reinterpret_cast<void*>(&denyCount)},
+    {"IsClipboardFormatAvailable", reinterpret_cast<void*>(&denyAvailable)},
+    {"GetPriorityClipboardFormat", reinterpret_cast<void*>(&denyPriority)},
+    {"GetClipboardOwner", reinterpret_cast<void*>(&denyWindow)},
+    {"GetOpenClipboardWindow", reinterpret_cast<void*>(&denyWindow)},
+    {"OleGetClipboard", reinterpret_cast<void*>(&denyOleGet)},
+    {"OleSetClipboard", reinterpret_cast<void*>(&denyOleSet)},
+    {"OleFlushClipboard", reinterpret_cast<void*>(&denyOleFlush)},
+    {"OleIsCurrentClipboard", reinterpret_cast<void*>(&denyOleCurrent)}
+};
+bool hookModule(HMODULE module)
+{
+    auto* base = reinterpret_cast<unsigned char*>(module);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    const DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    if(!rva) return true;
+    auto* imports = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + rva);
+    for(; imports->Name; ++imports) {
+        if(!imports->OriginalFirstThunk) return false;
+        auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + imports->OriginalFirstThunk);
+        auto* importSlots = reinterpret_cast<IMAGE_THUNK_DATA*>(base + imports->FirstThunk);
+        for(; names->u1.AddressOfData; ++names, ++importSlots) {
+            if(IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            const char* name = reinterpret_cast<const char*>(reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData)->Name);
+            for(const auto& entry : deniedImports) if(std::strcmp(name, entry.name) == 0) {
+                if(importSlots->u1.Function == reinterpret_cast<ULONG_PTR>(entry.replacement)) break;
+                DWORD old = 0, ignored = 0;
+                if(!VirtualProtect(&importSlots->u1.Function, sizeof(ULONG_PTR), PAGE_READWRITE, &old)) return false;
+                importSlots->u1.Function = reinterpret_cast<ULONG_PTR>(entry.replacement);
+                if(!VirtualProtect(&importSlots->u1.Function, sizeof(ULONG_PTR), old, &ignored)) return false;
+                ++hookedImports;
+                HMODULE pinned = nullptr;
+                if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                    reinterpret_cast<LPCWSTR>(module), &pinned)) return false;
+                break;
+            }
+        }
+    }
+    return true;
+}
+bool installNativeHooks()
+{
+    // Preload the selected production plugin before QApplication can ask for
+    // its clipboard. Keep the loader reference for this isolated process.
+    // QLibraryInfo before QCoreApplication may use a relative deployment
+    // prefix. Resolve the loaded Qt DLL instead (deployed and retained kit).
+    wchar_t corePath[MAX_PATH];
+    if(!GetModuleFileNameW(GetModuleHandleW(L"Qt5Core.dll"), corePath, MAX_PATH)) return false;
+    const QDir coreDir = QFileInfo(QString::fromWCharArray(corePath)).dir();
+    QString plugin = coreDir.filePath("platforms/qwindows.dll");
+    if(!QFileInfo::exists(plugin)) plugin = coreDir.filePath("../plugins/platforms/qwindows.dll");
+    if(!LoadLibraryW(reinterpret_cast<LPCWSTR>(plugin.utf16()))) {
+        std::fprintf(stderr, "FAIL: could not preload test QPA plugin (error=%lu)\n", GetLastError());
+        return false;
+    }
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if(snapshot == INVALID_HANDLE_VALUE) return false;
+    wchar_t windowsPath[MAX_PATH];
+    if(!GetWindowsDirectoryW(windowsPath, MAX_PATH)) { CloseHandle(snapshot); return false; }
+    const QString windows = QDir::fromNativeSeparators(QString::fromWCharArray(windowsPath)) + '/';
+    MODULEENTRY32W entry = {}; entry.dwSize = sizeof(entry);
+    bool ok = Module32FirstW(snapshot, &entry);
+    if(ok) do {
+        const QString path = QDir::fromNativeSeparators(QString::fromWCharArray(entry.szExePath));
+        // OS internals aren't application imports. Hook all application/Qt/
+        // third-party modules loaded before widgets are created.
+        if(!path.startsWith(windows, Qt::CaseInsensitive)) ok = hookModule(entry.hModule) && ok;
+    } while(Module32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    return ok && hookedImports > 0;
+}
+bool formatInventory(QVector<quint32>& formats)
+{
+    // Metadata only: no OpenClipboard, payload read or delayed OLE rendering.
+    UINT count = 0;
+    if(!GetUpdatedClipboardFormats(nullptr, 0, &count) && GetLastError() != ERROR_INSUFFICIENT_BUFFER) return false;
+    QVector<UINT> ids(int(count), 0);
+    if(count && !GetUpdatedClipboardFormats(ids.data(), count, &count)) return false;
+    formats.clear(); for(UINT id : ids) formats.append(id);
+    std::sort(formats.begin(), formats.end());
+    return true;
+}
+#endif
+}
+
+bool testClipboardEnabled() { return isolated; }
+bool testClipboardRequested(int argc, char** argv)
+{
+    for(int i=1; i<argc; ++i) {
+        const QByteArray option(argv[i]);
+        if(option.startsWith("--") && option.left(option.indexOf('=') < 0 ? option.size() : option.indexOf('=')).endsWith("-check")) return true;
+    }
+    return false;
+}
+TestClipboardSession::TestClipboardSession(bool enabled) : m_enabled(enabled)
+{
+    if(!enabled) return;
+    isolated = true;
+#ifdef Q_OS_WIN
+    initialSequence = GetClipboardSequenceNumber();
+    nativeHooksReady = formatInventory(initialFormats);
+    nativeHooksReady = installNativeHooks() && nativeHooksReady;
+    nativeHooksReady = GetClipboardSequenceNumber() == initialSequence && nativeHooksReady;
+#endif
+}
+bool TestClipboardSession::install()
+{
+    if(!m_enabled) return !isolated; // No clipboard creation in ordinary mode.
+    if(!nativeHooksReady || !qApp || !QGuiApplicationPrivate::platformIntegration()
+        || QGuiApplication::platformName() != QStringLiteral("windows")) return false;
+    if(!isolationReady) {
+        systemForProbe = QGuiApplicationPrivate::platformIntegration();
+        QGuiApplicationPrivate::platform_integration = new ClipboardIntegration(QGuiApplicationPrivate::platformIntegration());
+        isolationReady = true;
+    }
+    return true;
+}
+bool TestClipboardSession::prepared() const { return !m_enabled || nativeHooksReady; }
+bool TestClipboardSession::verify() const
+{
+    if(!m_enabled) return true;
+    bool unchanged = true;
+    quint32 sequence = initialSequence;
+    QVector<quint32> formats;
+#ifdef Q_OS_WIN
+    sequence = GetClipboardSequenceNumber();
+    unchanged = formatInventory(formats) && sequence == initialSequence && formats == initialFormats
+        && sequence == GetClipboardSequenceNumber();
+#endif
+    const bool ok = isolationReady && nativeHooksReady && nativeAttempts.load() == 0 && unchanged;
+    std::fprintf(ok ? stdout : stderr,
+        "%s: clipboard isolation backend=in-memory nativeAttempts=%u hookedImports=%u sequence=%u->%u formats=%d->%d unchanged=%d\n",
+        ok ? "PASS" : "FAIL", nativeAttempts.load(), hookedImports, initialSequence, sequence,
+        initialFormats.size(), formats.size(), int(unchanged));
+    return ok;
+}
+TestClipboardSession::~TestClipboardSession()
+{
+    // Declared before QApplication: includes Qt/window/plugin teardown. A
+    // failed sentinel overrides an otherwise successful test's exit status.
+    if(m_enabled && !verify()) { std::fflush(nullptr); std::_Exit(2); }
+}
+const QMimeData* clipboardMimeData() { return QApplication::clipboard()->mimeData(); }
+QString clipboardText() { return QApplication::clipboard()->text(); }
+void probeSystemClipboardForTest()
+{
+    if(isolated && isolationReady && systemForProbe) {
+        const QMimeData* mime = systemForProbe->clipboard()->mimeData(QClipboard::Clipboard);
+        if(mime) mime->formats(); // Windows MIME object retrieves OLE lazily.
+    }
+}
+
 #ifdef Q_OS_WIN
 namespace {
 // Keep the guard self-contained: the application does not link gdi32 directly.
@@ -368,6 +635,7 @@ bool writing = false; // GUI thread only; a nested request must not replace this
 
 bool openNativeClipboard()
 {
+    if(isolated) { ++nativeAttempts; return false; }
 #ifdef Q_OS_WIN
     // A distinct hidden HWND makes this probe independent of a NULL-HWND
     // opener. Never share another application's clipboard window identity.
@@ -480,6 +748,15 @@ ClipboardWriteResult writeClipboard(const ClipboardSnapshot& data, int timeoutMs
     QElapsedTimer timer;
     timer.start();
     QClipboard* clipboard = QApplication::clipboard();
+    if(isolated) {
+        if(!isolationReady) { result.error = QStringLiteral("Test clipboard backend not installed."); return result; }
+        ++result.attempts;
+        clipboard->setMimeData(data.createMimeData());
+        result.ok = clipboard->ownsClipboard() && data.matches(clipboard->mimeData());
+        result.elapsedMs = int(timer.elapsed());
+        if(!result.ok) result.error = QStringLiteral("In-memory clipboard readback failed.");
+        return result;
+    }
     serviceClipboardEvents(0);
     do {
         // Avoid Qt's blocking native retries while another owner has the
@@ -581,6 +858,11 @@ QMenu* verifiedLineEditContextMenu(QLineEdit* editor)
 
 ClipboardRestoreGuard::ClipboardRestoreGuard()
 {
+    if(isolated) {
+        ++nativeAttempts;
+        m_error = QStringLiteral("Native ClipboardRestoreGuard is forbidden in isolated tests.");
+        return;
+    }
 #ifdef Q_OS_WIN
     m_native.reset(new NativeClipboardState);
 #endif

@@ -433,7 +433,7 @@ private:
         if(m_property.isNull() || property("enduranceReadOnly").toBool()
            || (parentWidget() && parentWidget()->property("enduranceReadOnly").toBool()))
             return false;
-        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        const QMimeData* mime = ei::clipboardMimeData();
         if(!mime)
             return false;
         QSharedPointer<IPropertyBase> converted;
@@ -490,7 +490,7 @@ private:
 
 bool clipboardMatches(EObjParam destination)
 {
-    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    const QMimeData* mime = ei::clipboardMimeData();
     if(!mime || !mime->hasFormat(kPropertyMimeType))
         return true;
     bool ok = false;
@@ -899,7 +899,7 @@ bool CTableManager::buildPasteValues(const QList<int>& rows,
             return false;
         }
     }
-    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    const QMimeData* mime = ei::clipboardMimeData();
     if(mime && mime->hasFormat(kPropertyMimeType))
     {
         if(!hasPropertyClipboard(mime))
@@ -2113,11 +2113,11 @@ void CColorButtonItem::keyPressEvent(QKeyEvent* event)
     if(event->matches(QKeySequence::Paste))
     {
         if(!clipboardMatches(m_pValue->type())
-           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || !hasPropertyClipboard(ei::clipboardMimeData())
            || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
-            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            rejectIncompatiblePaste(this, m_pValue->type(), ei::clipboardText());
             event->accept();
             return;
         }
@@ -2304,7 +2304,7 @@ void CComboStItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        const QString value = QGuiApplication::clipboard()->text();
+        const QString value = ei::clipboardText();
         if(rejectIncompatiblePaste(this, m_pValue->type(), value)
            || !m_valueList.values().contains(value))
         {
@@ -2336,7 +2336,7 @@ void CValueItem::keyPressEvent(QKeyEvent* event)
     // the current selection without committing the edit early.
     if(event->matches(QKeySequence::Paste))
     {
-        const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+        const QMimeData* mime = ei::clipboardMimeData();
         if(mime && mime->hasFormat(kPropertyMimeType)
            && !clipboardMatches(m_pValue->type()))
         {
@@ -2397,7 +2397,7 @@ void CComboDynItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        const QString text = QGuiApplication::clipboard()->text().trimmed();
+        const QString text = ei::clipboardText().trimmed();
         if(!rejectIncompatiblePaste(this, m_pValue->type(), text))
         {
             setEditText(text);
@@ -2470,7 +2470,7 @@ bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
             // but ordinary text (including a partial selection copied from
             // another editor) is inserted natively and remains uncommitted
             // until Enter or an explicit dropdown choice.
-            const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+            const QMimeData* mime = ei::clipboardMimeData();
             if(mime && mime->hasFormat(kPropertyMimeType)
                && !clipboardMatches(m_pValue->type()))
             {
@@ -2610,8 +2610,7 @@ void C3DItem::keyPressEvent(QKeyEvent *event)
             event->accept();
             return;
         }
-        QClipboard *pClipboard = QGuiApplication::clipboard();
-        QString val = pClipboard->text();
+        QString val = ei::clipboardText();
         if(rejectIncompatiblePaste(this, EObjParam(m_xValue->type() + 3), val))
         {
             event->accept();
@@ -2690,7 +2689,7 @@ void CMultiLineButtonItem::keyPressEvent(QKeyEvent* event)
     }
     if(event->matches(QKeySequence::Paste))
     {
-        const QString text = QGuiApplication::clipboard()->text();
+        const QString text = ei::clipboardText();
         if(rejectIncompatiblePaste(this, m_pValue->type(), text))
         {
             event->accept();
@@ -2775,11 +2774,11 @@ void CUnitStatItem::keyPressEvent(QKeyEvent* event)
     if(event->matches(QKeySequence::Paste))
     {
         if(!clipboardMatches(m_pValue->type())
-           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || !hasPropertyClipboard(ei::clipboardMimeData())
            || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
-            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            rejectIncompatiblePaste(this, m_pValue->type(), ei::clipboardText());
             event->accept();
             return;
         }
@@ -2827,11 +2826,11 @@ void CBodyPartItem::keyPressEvent(QKeyEvent* event)
     if(event->matches(QKeySequence::Paste))
     {
         if(!clipboardMatches(m_pValue->type())
-           || !hasPropertyClipboard(QGuiApplication::clipboard()->mimeData())
+           || !hasPropertyClipboard(ei::clipboardMimeData())
            || g_propertyClipboard.size() != 1
            || g_propertyClipboard.first()->type() != m_pValue->type())
         {
-            rejectIncompatiblePaste(this, m_pValue->type(), QGuiApplication::clipboard()->text());
+            rejectIncompatiblePaste(this, m_pValue->type(), ei::clipboardText());
             event->accept();
             return;
         }

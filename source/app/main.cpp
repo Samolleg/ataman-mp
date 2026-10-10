@@ -792,13 +792,6 @@ int runHeadlessCommand(QApplication& app)
             }
         } hiddenWidgetFilter;
         app.installEventFilter(&hiddenWidgetFilter);
-        // Native-platform checks must restore the user's clipboard afterwards.
-        ei::ClipboardRestoreGuard clipboardRestore;
-        if(!clipboardRestore.captured()) {
-            QTextStream(stderr) << "FAIL: cannot preserve native clipboard; UI check aborted before synthetic writes: "
-                                << clipboardRestore.error() << "\n";
-            return 2;
-        }
         bool clipboardWritesVerified = true;
         const auto setCheckMimeData = [&clipboardWritesVerified](QMimeData* data) {
             QScopedPointer<QMimeData> owned(data);
@@ -1288,7 +1281,7 @@ int runHeadlessCommand(QApplication& app)
 
         QKeyEvent copyModelField(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
         QApplication::sendEvent(sourcePropertyTable.cellWidget(sourceModelRow, 1), &copyModelField);
-        const bool fieldCopyAvailable = QGuiApplication::clipboard()->text() == "copied_model";
+        const bool fieldCopyAvailable = ei::clipboardText() == "copied_model";
 
         QList<QSharedPointer<IPropertyBase>> colorSource;
         colorSource << QSharedPointer<IPropertyBase>(new prop3D(eObjParam_LIGHT_COLOR, 0.1f, 0.2f, 0.3f));
@@ -1363,7 +1356,7 @@ int runHeadlessCommand(QApplication& app)
             QApplication::sendEvent(zComponentPlate, &copyZComponent);
         }
         const bool selectedComponentCopy = zComponentPlate && zComponentPlate->isChecked()
-                && QGuiApplication::clipboard()->text() == "3.6";
+                && ei::clipboardText() == "3.6";
         QList<QSharedPointer<IPropertyBase>> integerDestination;
         integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
         QTableWidget integerDestinationTable;
@@ -1511,8 +1504,8 @@ int runHeadlessCommand(QApplication& app)
         partialEditor.setSelection(2, 2);
         QKeyEvent copyPartialText(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
         QApplication::sendEvent(&partialEditor, &copyPartialText);
-        const bool partialCopyExact = QGuiApplication::clipboard()->text() == "cd"
-                && !QGuiApplication::clipboard()->mimeData()->hasFormat(
+        const bool partialCopyExact = ei::clipboardText() == "cd"
+                && !ei::clipboardMimeData()->hasFormat(
                     "application/x-ei-mapper-property-type");
         QSharedPointer<IPropertyBase> partialDestinationValue(
                     new propStr(eObjParam_COMMENTS, "123456"));
@@ -3070,7 +3063,7 @@ int runHeadlessCommand(QApplication& app)
         setCheckMimeData(new QMimeData);
         QMetaObject::invokeMethod(&messageLog, "copySelectedMessages",
                                   Qt::DirectConnection);
-        const QString copiedMessages = QApplication::clipboard()->text();
+        const QString copiedMessages = ei::clipboardText();
         const bool messageLogMultiCopyWorks = copiedMessages.contains("{INFO}")
                 && copiedMessages.contains("{WARNING}")
                 && copiedMessages.contains("ui-check searchable information")
@@ -3540,14 +3533,11 @@ int runHeadlessCommand(QApplication& app)
         const bool groupRotationWorks = runGroupRotationCheck() == 0;
         const bool darkThemeWorks = runDarkThemeCheck() == 0;
         const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
-        const bool clipboardRestored = clipboardRestore.restore();
-        QTextStream(clipboardWritesVerified && clipboardRestored ? stdout : stderr)
-            << (clipboardWritesVerified && clipboardRestored ? "PASS" : "FAIL")
-            << ": native clipboard write preconditions and verified restoration"
-            << " clipboardWritesVerified=" << clipboardWritesVerified
-            << " clipboardRestored=" << clipboardRestored << "\n";
-        if(!clipboardRestored) QTextStream(stderr) << clipboardRestore.error() << "\n";
-        const bool passed = clipboardWritesVerified && clipboardRestored && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        QTextStream(clipboardWritesVerified ? stdout : stderr)
+            << (clipboardWritesVerified ? "PASS" : "FAIL")
+            << ": in-memory clipboard writes and verified readback"
+            << " clipboardWritesVerified=" << clipboardWritesVerified << "\n";
+        const bool passed = clipboardWritesVerified && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -4141,6 +4131,8 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    ei::TestClipboardSession clipboardSession(ei::testClipboardRequested(argc, argv));
+    if(!clipboardSession.prepared()) return 2;
 #ifdef Q_OS_WIN
     // Automated smoke runs must never leave a modal Windows crash dialog on
     // the operator's desktop. The normal unhandled-exception logger still
@@ -4163,6 +4155,10 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    if(!clipboardSession.install()) {
+        std::fprintf(stderr, "FAIL: could not install isolated test clipboard\n");
+        return 2;
+    }
     g_previousQtMessageHandler = qInstallMessageHandler(
         enduranceQtMessageHandler);
     app.setWindowIcon(QIcon(":/endurance_gate.png"));

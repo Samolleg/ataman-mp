@@ -16,6 +16,29 @@ namespace ei {
 
 struct NativeClipboardState;
 
+// Explicit, process-lifetime test isolation. Construct BEFORE QApplication,
+// install AFTER QApplication but BEFORE any windows/clipboard use. The QPA
+// adapter covers Qt's built-in editors too; ordinary launches never install it.
+class TestClipboardSession
+{
+public:
+    explicit TestClipboardSession(bool enabled);
+    ~TestClipboardSession();
+    bool prepared() const;
+    bool install();
+    bool verify() const;
+    TestClipboardSession(const TestClipboardSession&) = delete;
+    TestClipboardSession& operator=(const TestClipboardSession&) = delete;
+private:
+    bool m_enabled;
+};
+bool testClipboardEnabled();
+bool testClipboardRequested(int argc, char** argv);
+const QMimeData* clipboardMimeData();
+QString clipboardText();
+// Negative-test probe: bypasses the adapter; native hooks MUST deny the access.
+void probeSystemClipboardForTest();
+
 // Value copies only: QClipboard may delete a transferred QMimeData inside
 // setMimeData() when the platform write fails.
 struct ClipboardSnapshot
