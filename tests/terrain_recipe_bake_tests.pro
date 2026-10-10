@@ -1,0 +1,10 @@
+QT += core gui
+QT -= widgets
+CONFIG += c++11 console
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = terrain_recipe_bake_tests
+isEmpty(RECIPE_SOURCE_DIR): RECIPE_SOURCE_DIR = $$PWD/../source/documents
+INCLUDEPATH += $$RECIPE_SOURCE_DIR $$PWD/../source/documents
+SOURCES += $$PWD/terrain_recipe_bake_tests.cpp $$RECIPE_SOURCE_DIR/terrain_recipe_bake.cpp
+HEADERS += $$RECIPE_SOURCE_DIR/terrain_recipe_bake.h

@@ -1,5 +1,14 @@
 # EI Mapper Ataman — roadmap
 
+## EI-TERRAIN-BAKE-CORE-A — ядро рецептов mixed-edge
+
+- Поручение владельца через Claude 2026-10-10; база main df91a69413b0c924e06bbfe2126b9e4d31c307c2, VERSION 131. Этап A: автономный C++ модуль и тесты без Modern/UI wiring, изменения установок и живых данных.
+- Результат: N4 recipes по полю вершин, фиксированный edge state, mixed-edge raster, class-aware dedup, majority/tie 0..15, stock fit/strip/bank API, явные unsupported junctions и пороги 2048/4096/8192 без замены материалов.
+- Проверки: 466 PASS/0 FAIL/0 SKIP; 4096 бесшовных рёбер. Zone6 diagnostic: 439 тайлов, 1984 бесшовных ребра, 250 unsupported cells. Объект компилируется с флагами ei_maper.pro.
+- Статус: этап A готов к интеграции сопровождающим. Далее этап B: profile adapter, Modern wiring и сохранение labels. Production bake, сложные узлы, DXT/mips/overlay/animation/save и художественная/игровая приёмка остаются открыты.
+- Evidence: docs/validation/ATAMAN_TERRAIN_BAKE_CORE_A_20261010.md.
+- Решение сопровождающего: модуль не подключён к программе и не меняет поведение, поэтому VERSION не повышается; номер получит этап B вместе с пользовательской функцией. Блокер этапа B: 250 клеток Zone6 (249 тройных + 1 четверной узел, ~29% переходов участка) сейчас unsupported — до включения в Modern нужна поддержка сложных узлов.
+
 ## EI-TERRAIN-MEMORY-SYNTHETIC — синтетический бюджет атласа (без запуска игры)
 
 - Поручение владельца 2026-10-10: ручной игровой memory gate отменён, «проверь синтетически»; уточнение владельца — у игры новый рендер. Только синтетика; программа, установки и живые данные не изменены.
