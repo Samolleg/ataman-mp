@@ -775,6 +775,41 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
     advanced->addWidget(m_modernMixedEdge);
     advanced->addWidget(m_randomizeUniformRotation); advanced->addWidget(m_overlayMprMaterials);
+    m_randomPaintVariants = new QCheckBox(tr("Random variants when painting"), this);
+    m_randomPaintVariants->setObjectName(QStringLiteral("randomPaintVariants"));
+    m_randomPaintVariants->setChecked(settings.value(
+        QStringLiteral("ui/landscape/randomPaintVariants"), true).toBool());
+    m_randomPaintVariants->setToolTip(tr("Stable variation of uniform cells using the map seed. Transitions keep version 135 selection and rotation. Disable to retain all version 135 painting."));
+    m_randomizeUniformRotation->setVisible(!m_randomPaintVariants->isChecked());
+    connect(m_randomPaintVariants, &QCheckBox::toggled, this, [this](bool enabled) {
+        QSettings().setValue(QStringLiteral("ui/landscape/randomPaintVariants"), enabled);
+        m_randomizeUniformRotation->setVisible(!enabled);
+    });
+    advanced->addWidget(m_randomPaintVariants);
+    m_randomPaintScope = new QComboBox(this);
+    m_randomPaintScope->setObjectName(QStringLiteral("randomPaintScope"));
+    m_randomPaintScope->addItem(tr("Entire current map"), false);
+    m_randomPaintScope->addItem(tr("Selection frame"), true);
+    advanced->addWidget(m_randomPaintScope);
+    auto randomRow = new QHBoxLayout;
+    m_randomPaintSeed = new QLineEdit(QStringLiteral("0"), this);
+    m_randomPaintSeed->setObjectName(QStringLiteral("randomPaintSeed"));
+    m_randomPaintSeed->setToolTip(tr("Map seed (0–4294967295). New seed changes the pending value; Shuffle applies it in one undo transaction."));
+    auto newSeed = new QPushButton(tr("New seed"), this);
+    newSeed->setObjectName(QStringLiteral("newRandomPaintSeed"));
+    connect(newSeed, &QPushButton::clicked, this, [this]() {
+        setRandomPaintSeed(randomPaintSeed() + 0x9e3779b9u);
+    });
+    randomRow->addWidget(m_randomPaintSeed); randomRow->addWidget(newSeed);
+    advanced->addLayout(randomRow);
+    auto shuffle = new QPushButton(tr("Shuffle tiles"), this);
+    shuffle->setObjectName(QStringLiteral("shuffleTerrainTiles"));
+    connect(shuffle, &QPushButton::clicked, this, [this]() {
+        bool valid = false;
+        m_randomPaintSeed->text().toUInt(&valid);
+        if(valid) emit shuffleTerrainTilesRequested(m_randomPaintScope->currentData().toBool(), randomPaintSeed());
+    });
+    advanced->addWidget(shuffle);
     advanced->addWidget(resolveMissing);advanced->addWidget(saveDraft);
     auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
     diagnostics->addWidget(m_tilesetStatus);diagnostics->addLayout(atlasRow);
@@ -1314,8 +1349,14 @@ bool CLandscapeTools::tilePaintPreviewEnabled() const
 }
 bool CLandscapeTools::randomizeUniformRotation() const
 {
-    return m_randomizeUniformRotation->isChecked();
+    // The material-aware adapter owns rotations in the new mode. Preserve
+    // the old switch for OFF and for the separate mixed-edge pipeline.
+    return m_randomizeUniformRotation->isChecked()
+        && (!randomPaintVariants() || modernMixedEdge());
 }
+bool CLandscapeTools::randomPaintVariants() const { return m_randomPaintVariants->isChecked(); }
+quint32 CLandscapeTools::randomPaintSeed() const { return m_randomPaintSeed->text().toUInt(); }
+void CLandscapeTools::setRandomPaintSeed(quint32 seed) { m_randomPaintSeed->setText(QString::number(seed)); }
 bool CLandscapeTools::landFamiliesAllowedInOverlay() const
 {
     return false;

@@ -486,6 +486,11 @@ public:
     void acknowledgeChangedSlots(const QSet<int>& changed);
     void setDistributionSeed(quint32 seed)
     { if(m_resolver) m_resolver->setDistributionSeed(seed); }
+    void setUniformPaintSeed(bool enabled, quint32 seed)
+    {
+        m_authoredCatalog.setUniformPaintSeed(enabled, seed);
+        m_workingCatalog.setUniformPaintSeed(enabled, seed);
+    }
     bool hasMaterialSource(qint32 material) const
     { return m_resolver && m_resolver->hasMaterialSource(material); }
     bool addExternalMaterialSource(qint32 material, const QImage& pixels)

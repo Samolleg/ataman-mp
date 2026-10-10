@@ -495,6 +495,14 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
 {
     if(!stroke)
         return;
+    if(stamp.changesRandomSeed) {
+        if(!stroke->changesRandomSeed) {
+            stroke->beforeRandomSeed = stamp.beforeRandomSeed;
+            stroke->beforeRandomSeedSet = stamp.beforeRandomSeedSet;
+        }
+        stroke->changesRandomSeed = true;
+        stroke->afterRandomSeed = stamp.afterRandomSeed;
+    }
     if(stamp.workingAtlasBefore && !stroke->workingAtlasBefore)
         stroke->workingAtlasBefore = stamp.workingAtlasBefore;
     if(stamp.workingAtlasAfter)
@@ -978,13 +986,26 @@ quint16 CTerrainTransitionCatalog::selectCandidates(
             hash *= 16777619u;
         }
     };
-    mix(distributionSeed);
+    // Keep legacy stroke selection for transitions, but make even the initial
+    // uniform builder selection stable before the material-aware adapter.
+    const bool uniform = signature.northWest == signature.northEast
+        && signature.northWest == signature.southEast
+        && signature.northWest == signature.southWest;
+    mix(paintOnly && m_uniformPaintSeedEnabled && uniform
+        ? m_uniformPaintSeed : distributionSeed);
     mix(quint32(globalX));
     mix(quint32(globalY));
     mix(quint32(signature.northWest));
     mix(quint32(signature.northEast));
     mix(quint32(signature.southEast));
     mix(quint32(signature.southWest));
+    if(m_randomDistribution) {
+        // FNV low bits alone produce short coordinate periods for pools of
+        // two/four variants. Avalanche only the new cosmetic-selection path;
+        // legacy painting keeps its exact distribution bytes.
+        hash ^= hash >> 16; hash *= 0x7feb352du;
+        hash ^= hash >> 15; hash *= 0x846ca68bu; hash ^= hash >> 16;
+    }
     quint64 selection = quint64(hash) % totalWeight;
     QVector<int> selectedRotations;
     for(auto group = byPhysicalSlot.constBegin();
@@ -1311,6 +1332,8 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
                                     int materialCount)
 {
     m_sectorCountX = 0;
+    m_randomPaintSeed = m_originalRandomPaintSeed = 0;
+    m_randomPaintSeedSet = m_originalRandomPaintSeedSet = false;
     m_sectorCountY = 0;
     m_vertexCountX = 0;
     m_vertexCountY = 0;
@@ -1540,6 +1563,8 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
 
 bool CTerrainEditModel::isDirty() const
 {
+    if(m_randomPaintSeed != m_originalRandomPaintSeed
+       || m_randomPaintSeedSet != m_originalRandomPaintSeedSet) return true;
     if(m_maxZ != m_originalMaxZ || m_virtualLandMaterials!=m_originalVirtualLandMaterials
        || m_virtualOverlayMaterials!=m_originalVirtualOverlayMaterials)
         return true;
@@ -3692,6 +3717,85 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
             delta.after = after;
             command.deltas.append(delta);
         }
+    }
+    return command;
+}
+
+STerrainTileCommand CTerrainEditModel::makeRandomTilePaint(
+    const CTerrainTransitionCatalog& catalog, quint32 seed,
+    const QRect& region, const QSet<int>& excludedSlots,
+    const QVector<QPoint>& cells, bool preserveDirectionalRotation) const
+{
+    STerrainTileCommand command;
+    command.description = QStringLiteral("Shuffle terrain tiles");
+    const QRect bounds = region.intersected(QRect(0, 0, tileCountX(), tileCountY()));
+    // Cache the filtered pool per predecessor: large maps generally use a
+    // small set of packed references. Weights remain per physical slot.
+    QMap<quint16, CTerrainTransitionCatalog> pools;
+    QSet<quint16> rejected;
+    QSet<int> visited;
+    const auto visit = [&](int x, int y) {
+        if(!bounds.contains(x, y) || visited.contains(y * tileCountX() + x)) return;
+        visited.insert(y * tileCountX() + x);
+        bool available = false;
+        const quint16 before = packedTile(x, y, ETerrainTileLayer::Land, &available);
+        const auto packed = SMprPackedTile::decode(before);
+        if(!available || excludedSlots.contains(packed.atlasSlot()) || rejected.contains(before)) return;
+        bool decoded = false;
+        const auto original = catalog.variantForPacked(before, &decoded);
+        bool typed = false;
+        const qint32 type = tileType(before, &typed);
+        if(!decoded || !typed || type < 0 || type >= 16 || !original.paintSelectable || original.mixedEdge) {
+            rejected.insert(before); return;
+        }
+        const auto signature = catalog.gridSignatureForPacked(before);
+        // Equal material corners do not imply compatible edge artwork.
+        // Never reroll a transition, including symmetric rotations.
+        if(signature.northWest != signature.northEast
+           || signature.northWest != signature.southEast
+           || signature.northWest != signature.southWest) {
+            rejected.insert(before); return;
+        }
+        if(!pools.contains(before)) {
+            CTerrainTransitionCatalog pool;
+            pool.setRandomDistribution(true);
+            QSet<int> directionalSlots;
+            for(const auto& candidate : catalog.paintVariants(signature)) {
+                const auto physical = SMprPackedTile::decode(candidate.packedTile);
+                bool candidateTyped = false;
+                const qint32 candidateType = tileType(candidate.packedTile, &candidateTyped);
+                if(!candidateTyped || candidateType != type || candidate.mixedEdge
+                   || excludedSlots.contains(physical.atlasSlot())
+                   || candidate.routeOwnerMaterial != original.routeOwnerMaterial
+                   || candidate.canonicalGeneratedRoute != original.canonicalGeneratedRoute) continue;
+                // Directional materials keep the user's physical orientation.
+                if((!original.randomRotationAllowed || !candidate.randomRotationAllowed)
+                   && (preserveDirectionalRotation ? physical.rotation != packed.rotation
+                       : directionalSlots.contains(physical.atlasSlot()))) continue;
+                if(!original.randomRotationAllowed || !candidate.randomRotationAllowed)
+                    directionalSlots.insert(physical.atlasSlot());
+                auto gridCandidate = candidate;
+                gridCandidate.signature = signature;
+                pool.addVariant(gridCandidate);
+            }
+            pools.insert(before, pool);
+        }
+        bool found = false;
+        // Candidates were normalized to the requested grid-space signature;
+        // the small pool has no mirror adapter.
+        const quint16 after = pools.value(before).select(signature, x, y, seed, &found);
+        if(found && before != after) {
+            STerrainTileDelta delta;
+            delta.globalX = x; delta.globalY = y;
+            delta.before = before; delta.after = after;
+            command.deltas.append(delta);
+        }
+    };
+    if(!cells.isEmpty()) {
+        for(const auto& cell : cells) visit(cell.x(), cell.y());
+    } else {
+        for(int y = bounds.top(); y <= bounds.bottom(); ++y)
+            for(int x = bounds.left(); x <= bounds.right(); ++x) visit(x, y);
     }
     return command;
 }
@@ -7365,6 +7469,10 @@ bool CTerrainEditModel::virtualMaterialCellChanged(
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
 {
+    if(command.changesRandomSeed && m_randomPaintSeed
+       != (forward ? command.beforeRandomSeed : command.afterRandomSeed)) return false;
+    if(command.changesRandomSeed && m_randomPaintSeedSet
+       != (forward ? command.beforeRandomSeedSet : true)) return false;
     QSet<int> commandFields;
     const int expectedFieldSize = (tileCountX() + 1) * (tileCountY() + 1);
     for(const STerrainTileCommand::SVirtualFieldDelta& delta
@@ -7570,6 +7678,10 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
             pending.remove(key);
         else
             pending.insert(key, value);
+    }
+    if(command.changesRandomSeed) {
+        m_randomPaintSeed = forward ? command.afterRandomSeed : command.beforeRandomSeed;
+        m_randomPaintSeedSet = forward ? true : command.beforeRandomSeedSet;
     }
     return true;
 }

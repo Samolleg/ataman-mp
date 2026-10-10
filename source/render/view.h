@@ -186,6 +186,7 @@ class CView : public QGLWidget
     friend int runTerrainMobHeightCheck();
     friend int runTerrainHeightResSaveCheck();
     friend int runTerrainMixedEdgeCheck(const QString& fixturePath);
+    friend int runTerrainRandomPaintCheck(const QString& fixturePath);
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
     friend int runAiGraphRegenerationCheck();
@@ -497,6 +498,12 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
+    void shuffleTerrainTiles(bool selectionOnly, quint32 seed);
+    QSet<int> randomPaintExcludedSlots() const;
+    quint32 terrainRandomPaintSeed() const;
+    void randomizeTerrainPaintCommand(STerrainTileCommand* command,
+        const CTerrainTransitionCatalog& catalog);
+    QRect m_randomPaintSelection;
     bool terrainTileCommandInvalidatesAiGraph(
         const STerrainTileCommand& command) const;
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);

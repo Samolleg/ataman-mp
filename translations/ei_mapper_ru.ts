@@ -17389,4 +17389,26 @@ Line: %4</source><translation>Вызов:
         <translation>Контраста материалов недостаточно для надёжного извлечения кромки из stock-перехода.</translation>
     </message>
 </context>
+<context>
+<name>CLandscapeTools</name>
+<message><source>Entire current map</source><translation>Вся текущая карта</translation></message>
+<message><source>Map seed (0–4294967295). New seed changes the pending value; Shuffle applies it in one undo transaction.</source><translation>Зерно карты (0–4294967295). «Новое зерно» меняет поле; «Перемешать тайлы» применяет его с одной записью Undo.</translation></message>
+<message><source>New seed</source><translation>Новое зерно</translation></message>
+<message><source>Random variants when painting</source><translation>Случайные варианты при покраске</translation></message>
+<message><source>Selection frame</source><translation>Рамка выделения</translation></message>
+<message><source>Shuffle tiles</source><translation>Перемешать тайлы</translation></message>
+<message><source>Stable variation of uniform cells using the map seed. Transitions keep version 135 selection and rotation. Disable to retain all version 135 painting.</source><translation>Стабильное разнообразие только однородных клеток по зерну карты. Выбор и поворот переходов — как в версии 135. Выключите для всей покраски как в 135.</translation></message>
+</context>
+<context>
+<name>CTerrainAtlasReviewDialog</name>
+<message><source>Allow quarter-turn variation for this material. Disable for boards, furrows, roads and edges. Water, overlays and animated tiles remain protected.</source><translation>Разрешить повороты этого материала на 0/90/180/270°. Выключите для досок, борозд, дорог и краёв. Вода, overlay и анимации защищены.</translation></message>
+<message><source>Random rotation</source><translation>Случайный поворот</translation></message>
+</context>
+<context>
+<name>CView</name>
+<message><source>Changed %1 cells</source><translation>Изменено %1 клеток</translation></message>
+<message><source>Draw a selection frame on the map first.</source><translation>Сначала задайте рамку выделения на карте.</translation></message>
+<message><source>Shuffle tiles</source><translation>Перемешать тайлы</translation></message>
+<message><source>The selection frame must lie entirely on terrain.</source><translation>Вся рамка выделения должна находиться на ландшафте.</translation></message>
+</context>
 </TS>

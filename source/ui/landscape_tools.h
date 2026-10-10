@@ -116,6 +116,9 @@ public:
     bool modernMixedEdge() const;
     bool tilePaintPreviewEnabled() const;
     bool randomizeUniformRotation() const;
+    bool randomPaintVariants() const;
+    quint32 randomPaintSeed() const;
+    void setRandomPaintSeed(quint32 seed);
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
     void setOverlayMaterialSlotLabelsVisible(bool visible);
@@ -172,6 +175,7 @@ public:
                               bool notify = false);
 
 signals:
+    void shuffleTerrainTilesRequested(bool selectionOnly, quint32 seed);
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();
@@ -248,6 +252,9 @@ private:
     QCheckBox* m_modernAutoResolveBlends;
     QCheckBox* m_modernMixedEdge{nullptr};
     QCheckBox* m_randomizeUniformRotation;
+    QCheckBox* m_randomPaintVariants;
+    QLineEdit* m_randomPaintSeed;
+    QComboBox* m_randomPaintScope;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
     QCheckBox* m_showOverlayMaterialSlots;

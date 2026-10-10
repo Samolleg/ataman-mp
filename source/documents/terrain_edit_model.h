@@ -6,6 +6,7 @@
 #include <QMap>
 #include <QPair>
 #include <QPoint>
+#include <QRect>
 #include <QSet>
 #include <QString>
 #include <QVector>
@@ -172,6 +173,10 @@ struct STerrainSemanticPaintAudit
 struct STerrainTileCommand
 {
     QString description;
+    bool changesRandomSeed{false};
+    quint32 beforeRandomSeed{0};
+    quint32 afterRandomSeed{0};
+    bool beforeRandomSeedSet{false};
     QVector<STerrainTileDelta> deltas;
     STerrainSemanticPaintAudit semanticAudit;
     struct SVirtualVertexDelta
@@ -227,7 +232,7 @@ struct STerrainTileCommand
     QSharedPointer<CTerrainWorkingAtlas> workingAtlasAfter;
     bool isEmpty() const
     {
-        return deltas.isEmpty() && virtualVertices.isEmpty()
+        return !changesRandomSeed && deltas.isEmpty() && virtualVertices.isEmpty()
             && pendingVirtualVertices.isEmpty() && virtualFields.isEmpty();
     }
 };
@@ -255,6 +260,8 @@ struct STerrainTransitionVariant
     // authored route-neutral exact artwork. It is derived from generated
     // provenance and is not placement history.
     bool canonicalGeneratedRoute{false};
+    bool randomRotationAllowed{true};
+    bool mixedEdge{false};
 };
 
 class CTerrainTransitionCatalog
@@ -310,6 +317,9 @@ public:
     QVector<STerrainTransitionSignature> gridSignatures() const;
     void removeAtlasSlot(int atlasSlot);
     bool paintGridMirrored() const { return m_mirrorPaintGridY; }
+    void setRandomDistribution(bool enabled) { m_randomDistribution = enabled; }
+    void setUniformPaintSeed(bool enabled, quint32 seed)
+    { m_uniformPaintSeedEnabled = enabled; m_uniformPaintSeed = seed; }
     int size() const { return m_variants.size(); }
 
 private:
@@ -325,6 +335,9 @@ private:
     QHash<QByteArray, QVector<int>> m_signatureLookup;
     QSet<qint32> m_materialIds;
     bool m_mirrorPaintGridY{false};
+    bool m_randomDistribution{false};
+    bool m_uniformPaintSeedEnabled{false};
+    quint32 m_uniformPaintSeed{0};
 };
 
 struct STerrainHeightDelta
@@ -546,6 +559,19 @@ struct STerrainHeightmapImportSettings
 class CTerrainEditModel
 {
 public:
+    // Uniform cells only; transition artwork and orientation remain exact.
+    // Cosmetic physical substitution only. No semantic-field recovery, atlas
+    // growth or geometry mutation is performed by this operation.
+    STerrainTileCommand makeRandomTilePaint(
+        const CTerrainTransitionCatalog& catalog, quint32 seed,
+        const QRect& region, const QSet<int>& excludedSlots = {},
+        const QVector<QPoint>& cells = {}, bool preserveDirectionalRotation = true) const;
+    quint32 randomPaintSeed() const { return m_randomPaintSeed; }
+    bool hasRandomPaintSeed() const { return m_randomPaintSeedSet; }
+    void setRandomPaintSeed(quint32 seed) {
+        m_randomPaintSeed = m_originalRandomPaintSeed = seed;
+        m_randomPaintSeedSet = m_originalRandomPaintSeedSet = true;
+    }
     bool load(const CMprDocument& document, CValidationReport* report = nullptr);
     bool loadSources(int sectorCountX, int sectorCountY, float maxZ,
                      const QVector<STerrainSectorSource>& sources,
@@ -884,6 +910,10 @@ private:
     int m_textureCount{0};
     int m_materialCount{0};
     QVector<qint32> m_tileTypes;
+    quint32 m_randomPaintSeed{0};
+    quint32 m_originalRandomPaintSeed{0};
+    bool m_randomPaintSeedSet{false};
+    bool m_originalRandomPaintSeedSet{false};
     QVector<quint16> m_heights;
     QVector<quint16> m_originalHeights;
     QVector<qint8> m_xOffsets;

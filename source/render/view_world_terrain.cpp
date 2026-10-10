@@ -1041,6 +1041,9 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             if(!surface.isEmpty()) {if(!stage.terrainEdit.apply(surface,true,&report))break;changed=true;}
         }
         STerrainTileCommand command;
+        stage.atlas->setUniformPaintSeed(!manual && layer==ETerrainTileLayer::Land
+            && m_landscapeTools->randomPaintVariants(),stage.terrainEdit.hasRandomPaintSeed()
+                ? stage.terrainEdit.randomPaintSeed() : m_terrainSemanticSeed);
         const auto& catalog=stage.atlas->catalog();
         if(manual)command=stage.terrainEdit.makeTilePaint(brush,layer,quint8(slot/64),quint8(slot%64),quint8(rotation),catalog,&report);
         else if(classic) {
@@ -1053,6 +1056,23 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         else if(tileTarget || activating)command=stage.terrainEdit.makeVirtualTileMaterialPaint(brush,layer,material,catalog,m_tileStrokeDistributionSeed,&report,m_landscapeTools->randomizeUniformRotation());
         else command=stage.terrainEdit.makeVirtualMaterialPaint(qBound(0,qRound(brush.centerX),stage.terrainEdit.tileCountX()-1),
             qBound(0,qRound(brush.centerY),stage.terrainEdit.tileCountY()-1),vertices,layer,material,catalog,m_tileStrokeDistributionSeed,&report,m_landscapeTools->randomizeUniformRotation());
+        if(!manual && m_landscapeTools->randomPaintVariants()) {
+            QSet<int> animated;
+            for(const auto& animation : doc->baseline.mapInfo().animatedTiles)
+                for(int frame = 0; frame < animation.frameCount; ++frame)
+                    animated.insert(int(animation.tileIndex) + frame);
+            for(auto& delta : command.deltas) {
+                if(layer == ETerrainTileLayer::Overlay
+                   || animated.contains(SMprPackedTile::decode(delta.after).atlasSlot())) {
+                    bool known=false;
+                    const auto signature=catalog.gridSignatureForPacked(delta.after,&known);
+                    if(known && signature.northWest==signature.northEast
+                       && signature.northWest==signature.southEast
+                       && signature.northWest==signature.southWest)
+                        delta.after=catalog.lowestPaintRotationForSlot(signature,delta.after);
+                }
+            }
+        }
         if(report.hasErrors() || (!command.isEmpty() && !stage.terrainEdit.apply(command,true,&report)))break;
         changed=changed || !command.isEmpty();
         if(!manual && !classic && m_tileStrokeAutoResolveBlends && !command.isEmpty()) {
@@ -1072,6 +1092,22 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             if(!resolution.isEmpty() && !stage.terrainEdit.apply(resolution,true,&report))break;
         }
         if(report.hasErrors())break;
+        if(!manual && layer == ETerrainTileLayer::Land && m_landscapeTools->randomPaintVariants()) {
+            QVector<QPoint> randomCells = command.semanticAudit.affectedCells;
+            for(const auto& delta : command.deltas) randomCells.append(QPoint(delta.globalX, delta.globalY));
+            QSet<int> excluded;
+            for(const auto& animation : doc->baseline.mapInfo().animatedTiles)
+                for(int frame = 0; frame < animation.frameCount; ++frame)
+                    excluded.insert(int(animation.tileIndex) + frame);
+            for(int slot : stage.atlas->mixedEdgeRecipes()) excluded.insert(slot);
+            if(!randomCells.isEmpty()) {
+                const auto random = stage.terrainEdit.makeRandomTilePaint(stage.atlas->catalog(),
+                    stage.terrainEdit.hasRandomPaintSeed() ? stage.terrainEdit.randomPaintSeed() : m_terrainSemanticSeed,
+                    QRect(0, 0, stage.terrainEdit.tileCountX(), stage.terrainEdit.tileCountY()), excluded, randomCells, false);
+                if(!stage.terrainEdit.apply(random, true, &report)) break;
+                changed |= !random.isEmpty();
+            }
+        }
         ++planned;
         if(!changed)continue;
         change.after.terrain=stage.terrainEdit;change.after.atlas=stage.atlas;

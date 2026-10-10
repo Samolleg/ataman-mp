@@ -5286,6 +5286,15 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             variant.routeOwnerMaterial = sourceTile.authored
                 ? 0 : sourceTile.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = !sourceTile.authored;
+            variant.randomRotationAllowed = true;
+            for(qint32 material : {grid.northWest, grid.northEast, grid.southEast, grid.southWest}) {
+                STerrainTransitionSignature uniform;
+                uniform.northWest = uniform.northEast = uniform.southEast = uniform.southWest = material;
+                const auto anchors = m_authoredCatalog.paintVariants(uniform);
+                bool allowed = !anchors.isEmpty();
+                for(const auto& anchor : anchors) allowed &= anchor.randomRotationAllowed;
+                variant.randomRotationAllowed &= allowed;
+            }
             // Global-authored and canonical-generated tiles fill an exact
             // signature/runtime gap. They are not an extra variation pool
             // when this map already authored a selectable candidate for that

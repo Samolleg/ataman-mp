@@ -2,6 +2,7 @@
 
 #include <QAbstractItemView>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCursor>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -25,6 +26,7 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QSet>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -319,6 +321,18 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     m_familyClass->addItem(tr("Ground + Overlay"), 3);
     m_familyClass->addItem(tr("Ground (surface + underwater)"), 4);
     materialSide->addWidget(m_familyClass);
+    m_randomRotation = new QCheckBox(tr("Random rotation"), this);
+    m_randomRotation->setObjectName(QStringLiteral("materialRandomRotation"));
+    m_randomRotation->setToolTip(tr("Allow quarter-turn variation for this material. Disable for boards, furrows, roads and edges. Water, overlays and animated tiles remain protected."));
+    materialSide->addWidget(m_randomRotation);
+    connect(m_randomRotation, &QCheckBox::toggled, this, [this](bool enabled) {
+        if(m_rebuilding) return;
+        auto selected = family(selectedFamilyId());
+        if(!selected || selected->randomRotationAllowed == enabled) return;
+        selected->randomRotationAllowed = enabled;
+        selected->randomRotationExplicit = true;
+        markEdited();
+    });
     m_familyReason->setWordWrap(true);
     materialSide->addWidget(m_familyReason);
     materialSide->addWidget(m_confirmFamily);
@@ -708,6 +722,10 @@ void CTerrainAtlasReviewDialog::updateInspector()
     const qint32 familyId = selectedFamilyId();
     const STerrainAtlasProfileFamily* selectedFamily = family(familyId);
     m_rebuilding = true;
+    m_randomRotation->setEnabled(selectedFamily && selectedFamily->landAllowed
+        && !QRegularExpression(QStringLiteral("water|lava|вода|лав"),
+            QRegularExpression::CaseInsensitiveOption).match(selectedFamily->name).hasMatch());
+    m_randomRotation->setChecked(selectedFamily && selectedFamily->randomRotationAllowed);
     if(selectedFamily)
     {
         const int classification = selectedFamily->landAllowed && selectedFamily->overlayAllowed

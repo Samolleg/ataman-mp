@@ -99,6 +99,8 @@ struct STerrainAtlasProfileFamily
     ETerrainAtlasUnderwaterRole underwaterRole{ETerrainAtlasUnderwaterRole::Surface};
     bool ambiguous{false};
     bool paintSelectable{true};
+    bool randomRotationAllowed{false};
+    bool randomRotationExplicit{false};
     qint32 tileType{-1};
     int thumbnailSlot{-1};
     QVector<int> memberSlots;
@@ -125,6 +127,7 @@ struct STerrainAtlasProfileSlot
     // route-neutral provenance; it is never inferred from slot order.
     qint32 routeOwnerMaterial{0};
     QStringList mixedEdgeRecipes;
+    int distributionWeight{1};
 };
 
 // A profile is always scoped to both an MPR namespace and the exact decoded

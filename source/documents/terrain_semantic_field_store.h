@@ -22,6 +22,8 @@ struct STerrainSemanticFieldDocument
     QByteArray profileSha256;
     int vertexWidth{0};
     int vertexHeight{0};
+    quint32 randomPaintSeed{0};
+    bool hasRandomPaintSeed{false};
     QVector<qint32> land;
     QVector<qint32> overlay;
 

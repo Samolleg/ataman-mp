@@ -7,6 +7,7 @@
 #include <QtEndian>
 #include <algorithm>
 #include <limits>
+#include <cmath>
 
 #include "endurance_document.h"
 #include "mpr_document.h"
@@ -109,6 +110,7 @@ QByteArray STerrainSemanticFieldDocument::toBytes(CValidationReport* report) con
     root.insert(QStringLiteral("vertexHeight"), vertexHeight);
     root.insert(QStringLiteral("land"), encodedField(land));
     root.insert(QStringLiteral("overlay"), encodedField(overlay));
+    if(hasRandomPaintSeed) root.insert(QStringLiteral("randomPaintSeed"), double(randomPaintSeed));
     return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
 
@@ -137,6 +139,11 @@ bool STerrainSemanticFieldDocument::fromBytes(
                                         QStringLiteral("atlasPixelSha256"));
     parsed.profileSha256 = parseHash(root, QStringLiteral("profileSha256"));
     parsed.vertexWidth = root.value(QStringLiteral("vertexWidth")).toInt();
+    const double seed = root.value(QStringLiteral("randomPaintSeed")).toDouble(0);
+    if((root.contains(QStringLiteral("randomPaintSeed")) && !root.value(QStringLiteral("randomPaintSeed")).isDouble())
+       || !std::isfinite(seed) || seed < 0 || seed > 4294967295.0 || seed != std::floor(seed)) return false;
+    parsed.randomPaintSeed = quint32(seed);
+    parsed.hasRandomPaintSeed = root.contains(QStringLiteral("randomPaintSeed"));
     parsed.vertexHeight = root.value(QStringLiteral("vertexHeight")).toInt();
     const int count = parsed.vertexWidth * parsed.vertexHeight;
     if(root.value(QStringLiteral("schema")).toString()

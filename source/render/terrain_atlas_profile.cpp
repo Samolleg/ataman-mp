@@ -287,6 +287,8 @@ QJsonObject STerrainAtlasProfile::toJson() const
                       underwaterRoleName(family.underwaterRole));
         object.insert(QStringLiteral("ambiguous"), family.ambiguous);
         object.insert(QStringLiteral("paintSelectable"), family.paintSelectable);
+        if(family.randomRotationExplicit)
+            object.insert(QStringLiteral("randomRotationAllowed"), family.randomRotationAllowed);
         object.insert(QStringLiteral("tileType"), family.tileType);
         object.insert(QStringLiteral("thumbnailSlot"), family.thumbnailSlot);
         QJsonArray slotsArray;
@@ -303,6 +305,8 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
+        if(slot.distributionWeight != 1)
+            object.insert(QStringLiteral("distributionWeight"), slot.distributionWeight);
         if(!slot.mixedEdgeRecipes.isEmpty())
             object.insert(QStringLiteral("mixedEdgeRecipes"), QJsonArray::fromStringList(slot.mixedEdgeRecipes));
         if(slot.routeOwnerMaterial > 0)
@@ -417,6 +421,20 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         family.paintSelectable = schemaVersion >= 3
             ? item.value(QStringLiteral("paintSelectable")).toBool(true) : true;
         family.tileType = item.value(QStringLiteral("tileType")).toInt(-1);
+        // Conservative semantic default for old/built-in profiles. Direction
+        // detection from pixels is advisory research, never user authority.
+        const QString materialName = family.name.toLower();
+        const bool natural = QRegularExpression(QStringLiteral(
+            "grass|ground|earth|sand|stone|rock|snow|moss|gravel|dirt|mud|"
+            "трава|земля|песок|камень|скала|снег|мох|гравий|грязь"))
+                .match(materialName).hasMatch();
+        const bool directional = QRegularExpression(QStringLiteral(
+            "board|plank|wood|furrow|road|path|edge|border|water|lava|"
+            "доск|дерев|борозд|дорог|троп|край|кромк|вода|лав"))
+                .match(materialName).hasMatch();
+        family.randomRotationAllowed = item.value(QStringLiteral("randomRotationAllowed"))
+            .toBool(natural && !directional && family.landAllowed);
+        family.randomRotationExplicit = item.contains(QStringLiteral("randomRotationAllowed"));
         family.thumbnailSlot = schemaVersion >= 2
             ? item.value(QStringLiteral("thumbnailSlot")).toInt(-1) : -1;
         for(const QJsonValue& slot : item.value(QStringLiteral("slots")).toArray())
@@ -429,6 +447,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         const QJsonObject item = value.toObject();
         STerrainAtlasProfileSlot slot;
         slot.slot = item.value(QStringLiteral("slot")).toInt(-1);
+        slot.distributionWeight = item.value(QStringLiteral("distributionWeight")).toInt(1);
+        if(slot.distributionWeight <= 0) return false;
         slot.ambiguous = item.value(QStringLiteral("ambiguous")).toBool();
         slot.assigned = schemaVersion >= 2
             ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
@@ -1502,6 +1522,7 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
                               slot.signature.southEast, slot.signature.southWest};
         bool allowLand = true;
         bool allowOverlay = true;
+        bool randomRotationAllowed = true;
         for(qint32 id : ids)
             if(!byId.contains(id))
             {
@@ -1514,6 +1535,10 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             {
                 allowLand &= byId.value(id).landAllowed;
                 allowOverlay &= byId.value(id).overlayAllowed;
+                randomRotationAllowed &= byId.value(id).randomRotationAllowed
+                    && byId.value(id).landAllowed;
+                randomRotationAllowed &= !QRegularExpression(QStringLiteral("water|lava|вода|лав"),
+                    QRegularExpression::CaseInsensitiveOption).match(byId.value(id).name).hasMatch();
             }
         if(!allowLand && !allowOverlay)
         {
@@ -1541,6 +1566,9 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.packedTile = packed.encode();
             variant.routeOwnerMaterial = slot.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = slot.routeOwnerMaterial > 0;
+            variant.randomRotationAllowed = randomRotationAllowed;
+            variant.mixedEdge = !slot.mixedEdgeRecipes.isEmpty();
+            variant.distributionWeight = slot.distributionWeight;
             if((allowLand && !result.landCatalog.addVariant(variant, report))
                || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))

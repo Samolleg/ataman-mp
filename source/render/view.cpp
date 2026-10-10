@@ -1767,6 +1767,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
+        connect(m_landscapeTools, &CLandscapeTools::shuffleTerrainTilesRequested,
+                this, &CView::shuffleTerrainTiles);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, [this]()
         {
@@ -9728,6 +9730,7 @@ void CView::unloadLand(bool promptForSave)
     m_overlayMaterialSlotLabelsDirty = true;
     rebuildTerrainAutoCatalog();
     m_terrainSemanticSeed = 0;
+    m_randomPaintSelection = QRect();
     m_mprDocument = CMprDocument();
     if(isValid())
         makeCurrent();
@@ -11803,6 +11806,8 @@ void CView::rebuildTerrainAutoCatalog()
     }
     m_terrainSemanticSeed = seed;
     const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
+    if(m_landscapeTools) m_landscapeTools->setRandomPaintSeed(
+        m_terrainEdit.hasRandomPaintSeed() ? m_terrainEdit.randomPaintSeed() : seed);
     bool reviewedProfileActive = false;
     bool provisionalProfileActive = false;
     bool staleProfile = false;
@@ -13942,6 +13947,8 @@ bool CView::buildTerrainSemanticFieldMember(
 
     STerrainSemanticFieldDocument document;
     document.mprNamespace = mprNamespace;
+    document.randomPaintSeed = semanticTerrain.randomPaintSeed();
+    document.hasRandomPaintSeed = semanticTerrain.hasRandomPaintSeed();
     CMprDocument candidate;
     if(!candidate.loadBytes(candidateMprBytes, destinationMpr.absoluteFilePath(), report))
         return false;
@@ -13961,7 +13968,7 @@ bool CView::buildTerrainSemanticFieldMember(
         ETerrainTileLayer::Overlay, &document.overlay, &ignored);
     if(document.overlay.size() != count)
         document.overlay.clear();
-    if(document.land.isEmpty() && document.overlay.isEmpty())
+    if(document.land.isEmpty() && document.overlay.isEmpty() && !document.hasRandomPaintSeed)
         return true;
     member->name = STerrainSemanticFieldDocument::memberName(
         document.mprNamespace, destinationMpr);
@@ -14064,6 +14071,10 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
             .arg(bindingSource, report.toText().trimmed()));
         return false;
     }
+    if(document.hasRandomPaintSeed) terrain->setRandomPaintSeed(document.randomPaintSeed);
+    if(terrain == &m_terrainEdit && m_landscapeTools)
+        m_landscapeTools->setRandomPaintSeed(terrain->hasRandomPaintSeed()
+            ? terrain->randomPaintSeed() : m_terrainSemanticSeed);
     ei::log(eLogInfo, QStringLiteral(
         "Restored exact shared-corner terrain semantics from %1 payloadBytes:%2 archiveReadBytes:%3")
         .arg(bindingSource).arg(payload.size()).arg(archiveBytesRead));
@@ -15742,6 +15753,7 @@ void CView::checkNewLandVersion()
 
 void CView::drawSelectFrame(QRect &rect)
 {
+    m_randomPaintSelection = rect.normalized();
     //convert frame to [(-1, 1), (-1, 1)]
     float leftX = rect.bottomLeft().x()/(float)m_width*2-1.0f;
     float leftY = rect.bottomLeft().y()/(float)m_height*2-1.0f;
@@ -19454,6 +19466,8 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                    &semanticOverlayCommand, pure.northWest, &report,
                    &workingAtlasPublicationPending))
                 semanticOverlayCommand = STerrainTileCommand();
+            if(!report.hasErrors())
+                randomizeTerrainPaintCommand(&semanticOverlayCommand, m_workingTerrainAtlas->catalog());
             if(report.hasErrors()
                || (!semanticOverlayCommand.isEmpty()
                    && !applyTerrainTilePreview(semanticOverlayCommand, true)))
@@ -19489,6 +19503,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     }
     const ETerrainTileLayer layer = bLand
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
+    const bool stableUniform = m_landscapeTools->randomPaintVariants() && !m_tileStrokeMixedEdge
+        && layer == ETerrainTileLayer::Land;
+    if(m_workingTerrainAtlas)
+        m_workingTerrainAtlas->setUniformPaintSeed(stableUniform, terrainRandomPaintSeed());
+    m_terrainAtlasAnalysis.landCatalog.setUniformPaintSeed(stableUniform, terrainRandomPaintSeed());
     const CTerrainTransitionCatalog& semanticCatalog = m_workingTerrainAtlas
         ? m_workingTerrainAtlas->catalog()
         : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
@@ -19659,6 +19678,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                         ? ETerrainSemanticPaintPolicy::ExactExistingOnly
                         : ETerrainSemanticPaintPolicy::AllowLocalHardEdges);
             m_classicAutoStrokeValidation = previewReport.toText();
+            if(!previewReport.hasErrors()) randomizeTerrainPaintCommand(&preview, semanticCatalog);
             m_classicAutoStrokePreviewRefused = previewReport.hasErrors();
             m_tileStrokeSafeSkippedVertices = 0;
             if(m_tileStrokeSafeMode)
@@ -19782,6 +19802,10 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
 
     }
     STerrainPaintAuditAction audit;
+    if(!report.hasErrors() && !m_tileStrokeMixedEdge && !manual
+       && (layer == ETerrainTileLayer::Land || layer == ETerrainTileLayer::Overlay))
+        randomizeTerrainPaintCommand(&command, m_workingTerrainAtlas
+            ? m_workingTerrainAtlas->catalog() : semanticCatalog);
     audit.actionId = m_terrainPaintActionId++;
     audit.strokeId = m_tileBrushCommandId;
     audit.validation = report.toText();
@@ -20302,6 +20326,7 @@ void CView::endTileBrushGroup()
                     m_landscapeTools
                         &&m_landscapeTools->randomizeUniformRotation(),
                     m_tileStrokeCommand.semanticAudit.requestedMaterialId);
+                if(!releaseReport.hasErrors()) randomizeTerrainPaintCommand(&resolution, catalog);
                 bool resolutionApplied = false;
                 if(!releaseReport.hasErrors() && !resolution.isEmpty())
                 {
@@ -20352,6 +20377,24 @@ void CView::endTileBrushGroup()
             if(!releaseReport.findings().isEmpty())
                 ei::log(releaseReport.hasErrors()?eLogWarning:eLogInfo,
                     "Virtual terrain release resolution:\n"+releaseReport.toText());
+        }
+        if(m_landscapeTools && m_landscapeTools->randomPaintVariants()
+           && !m_tileStrokeMixedEdge && m_tileStrokeLayer == ETerrainTileLayer::Land
+           && m_tileStrokePaletteMode != int(ETerrainPaintPaletteMode::Manual)
+           && m_tileStrokeRefused == 0) {
+            QVector<QPoint> cells = m_tileStrokeCommand.semanticAudit.affectedCells;
+            for(const auto& delta : m_tileStrokeCommand.deltas)
+                cells.append(QPoint(delta.globalX, delta.globalY));
+            if(!cells.isEmpty()) {
+                const auto& catalog = m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+                    : m_terrainAtlasAnalysis.landCatalog;
+                const auto random = m_terrainEdit.makeRandomTilePaint(catalog,
+                    terrainRandomPaintSeed(),
+                    QRect(0, 0, m_terrainEdit.tileCountX(), m_terrainEdit.tileCountY()),
+                    randomPaintExcludedSlots(), cells, false);
+                if(!random.isEmpty() && applyTerrainTilePreview(random, true))
+                    appendTerrainTileCommand(&m_tileStrokeCommand, random);
+            }
         }
         m_tilePaintStrokeActive = false;
         m_tileStrokeFinishing = false;
@@ -21169,9 +21212,13 @@ void CView::beginTileBrushGroup()
     m_tileStrokeDistributionSeed = m_terrainSemanticSeed
         ^ strokeNonce
         ^ (quint32(m_tileBrushCommandId + 1) * 0x9e3779b9u);
-    if(m_workingTerrainAtlas)
+    if(m_workingTerrainAtlas) {
         m_workingTerrainAtlas->setDistributionSeed(
             m_tileStrokeDistributionSeed);
+        m_workingTerrainAtlas->setUniformPaintSeed(
+            m_landscapeTools && m_landscapeTools->randomPaintVariants() && !m_tileStrokeMixedEdge,
+            terrainRandomPaintSeed());
+    }
     m_tileStrokeCommand = STerrainTileCommand();
     m_tileStrokeCommand.description = tr("Paint terrain tiles");
     m_overlaySurfaceStrokeCommand = SOverlaySurfaceCommand();
@@ -21262,7 +21309,103 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         return false;
     }
     refreshTerrainTilePreview(command, forward);
+    if(command.changesRandomSeed && m_landscapeTools)
+        m_landscapeTools->setRandomPaintSeed(m_terrainEdit.hasRandomPaintSeed()
+            ? m_terrainEdit.randomPaintSeed() : m_terrainSemanticSeed);
     return true;
+}
+
+QSet<int> CView::randomPaintExcludedSlots() const
+{
+    QSet<int> result;
+    for(const auto& animation : m_mprAnimatedTiles)
+        for(int frame = 0; frame < animation.frameCount; ++frame)
+            result.insert(int(animation.tileIndex) + frame);
+    for(const auto& definition : m_terrainAtlasProfile.slotDefinitions)
+        if(!definition.mixedEdgeRecipes.isEmpty()) result.insert(definition.slot);
+    if(m_workingTerrainAtlas)
+        for(int slot : m_workingTerrainAtlas->mixedEdgeRecipes()) result.insert(slot);
+    return result;
+}
+
+quint32 CView::terrainRandomPaintSeed() const
+{
+    return m_terrainEdit.hasRandomPaintSeed()
+        ? m_terrainEdit.randomPaintSeed() : m_terrainSemanticSeed;
+}
+
+void CView::randomizeTerrainPaintCommand(STerrainTileCommand* command,
+    const CTerrainTransitionCatalog& catalog)
+{
+    if(!command || !m_landscapeTools || !m_landscapeTools->randomPaintVariants()
+       || m_tileStrokeMixedEdge
+       || m_tileStrokePaletteMode == int(ETerrainPaintPaletteMode::Manual)) return;
+    QVector<QPoint> cells = command->semanticAudit.affectedCells;
+    QSet<int> animated;
+    for(const auto& animation : m_mprAnimatedTiles)
+        for(int frame = 0; frame < animation.frameCount; ++frame)
+            animated.insert(int(animation.tileIndex) + frame);
+    // Classic selection already chooses among signature symmetries. An
+    // animated/overlay tile must retain a fixed orientation before the
+    // cosmetic pass (which deliberately excludes these surfaces).
+    for(auto& delta : command->deltas) {
+        const auto tile = SMprPackedTile::decode(delta.after);
+        if(delta.layer == ETerrainTileLayer::Overlay || animated.contains(tile.atlasSlot())) {
+            bool known = false;
+            const auto signature = catalog.gridSignatureForPacked(delta.after, &known);
+            if(known && signature.northWest == signature.northEast
+               && signature.northWest == signature.southEast
+               && signature.northWest == signature.southWest)
+                delta.after = catalog.lowestPaintRotationForSlot(signature, delta.after);
+        }
+    }
+    if(m_tileStrokeLayer != ETerrainTileLayer::Land) return;
+    for(const auto& delta : command->deltas) cells.append(QPoint(delta.globalX, delta.globalY));
+    if(cells.isEmpty()) return;
+    CTerrainEditModel staged = m_terrainEdit;
+    if(!staged.apply(*command, true)) return;
+    const auto random = staged.makeRandomTilePaint(catalog, terrainRandomPaintSeed(),
+        QRect(0, 0, staged.tileCountX(), staged.tileCountY()), randomPaintExcludedSlots(), cells, false);
+    appendTerrainTileCommand(command, random);
+}
+
+void CView::shuffleTerrainTiles(bool selectionOnly, quint32 seed)
+{
+    if(!m_terrainEditAvailable || !m_pUndoStack || m_tilePaintStrokeActive
+       || !ensureTerrainAutoCatalogReady()) return;
+    QRect region(0, 0, m_terrainEdit.tileCountX(), m_terrainEdit.tileCountY());
+    QVector<QPoint> selectedCells;
+    if(selectionOnly) {
+        if(m_randomPaintSelection.width() < 3 || m_randomPaintSelection.height() < 3) {
+            emit updateMsg(tr("Draw a selection frame on the map first.")); return;
+        }
+        // Select visible cell centres in the same screen-space rectangle as
+        // the frame. A world-space bounding box over-selected rotated views.
+        for(int y=0;y<region.height();++y)for(int x=0;x<region.width();++x) {
+            const float worldX=x*2.0f+1,worldY=y*2.0f+1;
+            const QVector3D world(worldX,worldY,m_terrainEdit.terrainSurfaceHeight(worldX,worldY));
+            const auto screen=world.project(m_cam->viewMatrix(),m_projection,QRect(0,0,width(),height()));
+            if(screen.z()>=0 && screen.z()<=1 && m_randomPaintSelection.contains(
+                    QPoint(qRound(screen.x()),height()-qRound(screen.y())))) selectedCells.append(QPoint(x,y));
+        }
+        if(selectedCells.isEmpty()) { emit updateMsg(tr("Changed %1 cells").arg(0)); return; }
+    }
+    if(region.isEmpty()) return;
+    const auto& catalog = m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+        : m_terrainAtlasAnalysis.landCatalog;
+    auto command = m_terrainEdit.makeRandomTilePaint(catalog, seed, region, randomPaintExcludedSlots(), selectedCells);
+    command.description = tr("Shuffle tiles");
+    command.changesRandomSeed = !m_terrainEdit.hasRandomPaintSeed() || seed != m_terrainEdit.randomPaintSeed();
+    command.beforeRandomSeed = m_terrainEdit.randomPaintSeed();
+    command.beforeRandomSeedSet = m_terrainEdit.hasRandomPaintSeed();
+    command.afterRandomSeed = seed;
+    const int changed = command.deltas.size();
+    if(!command.isEmpty()) {
+        if(!applyTerrainTilePreview(command, true)) return;
+        m_pUndoStack->push(new CTerrainTilePreviewCommand(this, command, true));
+        syncMprDirtyState(); update();
+    }
+    emit updateMsg(tr("Changed %1 cells").arg(changed));
 }
 
 void CView::refreshTerrainTilePreview(const STerrainTileCommand& command,
