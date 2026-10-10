@@ -158,3 +158,115 @@ verified_clipboard_tests.pro не изменён; build-папки/проток�
 ```markdown
 - EI-CLIPBOARD-GUARD-OLE-BITMAP-SOURCE: исправлен отказ защиты буфера на реальном OLE-скриншоте PNG/ISTREAM+BITMAP/GDI. Если OLE не перечисляет DIB/DIBV5, guard сохраняет предоставленные Win32 источники с прежними проверками полноты/размера и восстанавливает их bytes/приоритет; метафайлы и ISTORAGE без источника по-прежнему отклоняются до записей. Проверено: native26/0/0; полный UI169/0 на живом скриншоте и новой OLE-синтетике, регрессы127/131; bytes сохранены, CF_BITMAP и PNG доступны. Evidence: docs/validation/ATAMAN_CLIPBOARD_OLE_BITMAP_SOURCE_20261010.md.
 ```
+
+
+## Передача 132
+
+Задача EI-FINALIZE-132, поручение владельца через Claude 2026-10-10.
+База и HEAD main: `6bd5e44e382fd201f322fc8ec3e3b96dff282151`.
+AGENTS.md проверен до работы и перед отчётом: SHA256
+`F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`.
+Правила передачи docs/TEST_BUILD_HANDOFF.md прочитаны; исключения поручения:
+обновление установки разрешено, старые rollback сохраняются, Git и общие
+документы не изменяются. ROADMAP текущей задачи прочитан; готовый текст ниже.
+
+### Сборка и происхождение
+
+`git archive` указанного коммита → `build-release-132-final/source.tar` →
+`build-release-132-final/src`. Архив выдавал CRLF для 1594 текстовых файлов:
+только в снимке они приведены к точным blob bytes коммита. Все **1805** файлов
+проверены по Git blob SHA1: **0 отличий / 0 пропусков / 0 дополнительных**,
+VERSION=132. Повторная проверка после сборки также 1805/0/0/0; штатный lrelease
+писал QM в снимок и воспроизвёл уже отслеживаемые bytes без изменения дерева.
+Незакоммиченные файлы параллельной задачи в сборку не включены.
+Receipts: `build-tests-132-final/provenance.json`, `provenance-after-build.json`.
+
+Свежий штатный Release wrapper из снимка, Qt5.12.12/MinGW7.3,
+shadow: `build-release-132-final/release`; выход:
+`build-release-132-final/release/release/EIMapperEndurance.exe`.
+Приложение и оба x86 runtime собраны из того же снимка, exit0 (121.08 с).
+`--version`: **EI Mapper Endurance Edition 132**, exit0.
+EXE SHA256 (сборка = staging = установка):
+**DF44E7E6BD840FAD308525A0C1E08B367805846A8F049086CC9E9CEC6A1FEA06**.
+
+### Регрессы финального EXE
+
+Все UI/native запуски под атомарным mkdir `build-locks/ui-tests.lock`,
+owner.txt с EI-FINALIZE-132/PID/временем и finally-удалением собственной
+блокировки. Ожидание занятой блокировки:20 с, предел30 мин. В конце lock
+отсутствует. Обычная Windows platform, скрытые виджеты, desktop OpenGL.
+Содержимое буфера не печаталось и не сохранялось в файлы; все его записи
+выполнялись внутри guard. Полный live UI выполнен до native fixtures.
+
+| Проверка | Результат | Протокол build-tests-132-final |
+| --- | --- | --- |
+| Полный --ui-widget-check на текущем живом изображении под --guard-live-child | **169 UI PASS / 0 FAIL**, ещё **4 внешних PASS**, exit0, 8.97 с | ui-live/0.out, result.json |
+| --scenario-layer-check | **50 PASS / 0 FAIL**, exit0, 1.36 с | scenario |
+| --dark-theme-check | **70 PASS / 0 FAIL**, exit0, 1.16 с | dark-theme |
+| Native clipboard | **26 PASS / 0 FAIL / 0 SKIP**, exit0, 4.84 с; дополнительный PASS возврата буфера | native/results.txt, 0.out |
+| Fresh Release + оба runtime | exit0 | release |
+| Built / staged --version | 132 / 132, exit0 | version/0.out, staged-version.out |
+
+Внешний live guard подтвердил read-only capture, точные image HGLOBAL bytes
+и CF_BITMAP, все **6 публичных byte-форматов** и доступность PNG, восстановление
+буфера владельца. Native также подтвердил возврат исходного буфера.
+Исходная причина исправления описана выше: OLE не перечисляет Win32-синтезированные
+DIB/DIBV5 при PNG/ISTREAM + BITMAP/GDI. Финальный132 сохраняет эти источники.
+
+### Staging, manifest и установка
+
+Создана ранее не существовавшая `build-staging-132-final` из снимка и свежих
+EXE/runtime; ресурсы icons/heightmaps, лицензии и текущие notes взяты из снимка.
+Qt/MinGW runtime развёрнут windeployqt --release --compiler-runtime.
+Raw/staged EXE hashes равны, staged --version132 проверен до finalizer.
+Первый finalizer отказал из-за отсутствующей **Qt5Concurrent.dll**: это FAIL,
+не PASS. DLL добавлена из того же Qt kit; повторный finalizer на изменённом
+собственном staging дал **PASS**, включая validate_distribution.ps1 и полный
+manifest **126 файлов**, удалено0 stale/private/runtime files.
+Протоколы `finalizer.out` (первичный отказ), `finalizer-final.out` (PASS).
+После финализации пакет не запускался и не изменялся. ZIP не запрашивался.
+
+Постоянный путь: `artifacts/EI-Mapper-Ataman-2-first-test`, **131 → 132**.
+Host Get-CimInstance Win32_Process: **0** процессов с ExecutablePath внутри
+этой установки. До записи проверены все **127** old-manifest hashes; конфликтов
+managed bytes и коллизий с unlisted user files нет. Изменено9 managed paths:
+CHANGELOG.md, EIMapperEndurance.exe, heightmaps/README.md, LICENSE.txt, NOTICE.md,
+Readme.md, runtime/EIMapperEnduranceJmvBridge.plg,
+runtime/EIMapperEnduranceRuntimeHost.exe, VERSION. Старый managed TRAVEL_EDITOR.md,
+отсутствующий в новом manifest, удалён только после проверки старого hash и backup.
+Текстовые отличия части лицензий/README — точные LF bytes снимка коммита.
+
+Rollback131: `artifacts/rollback-131-to-132-final` — **10 предыдущих managed
+файлов** (9 заменённых +1 удалённый) и прежний SHA256SUMS.txt; каждый backup
+побайтно проверен до замен. Это частичная техническая копия для возврата,
+не отдельная установка и не полный старый пакет. Старые rollback не удалялись.
+Замены через sibling temp + os.replace; новый manifest заменён последним.
+Все **126** установленных managed hashes совпали с новым manifest,
+**0 hash errors**, manifest совпал со staging; установленный VERSION=132.
+**23 062** пользовательских unlisted файла, включая настройки/логи/кэши,
+сохранены: одинаковый состав и SHA256 до/после, **0 ошибок**.
+Receipts: `pre-install.json`, `install.json`, `user-hashes-before.json`
+в build-tests-132-final (локальные данные, не для Git).
+Финализатор на постоянной установке не запускался.
+
+### Границы и передача сопровождающему
+
+Интерактивный редактор/игра не открывались; ручная вставка в Paint/браузер/Office
+и Windows history UI не проверялись. Автотесты/manifest не заменяют эту приёмку.
+Сеть, зависимости, ветки/worktree, git add/commit и записи в .git не применялись.
+Изменения исходной программы отсутствуют. Единственный файл для коммита задачи:
+`docs/validation/ATAMAN_CLIPBOARD_OLE_BITMAP_SOURCE_20261010.md`
+(только дополнение раздела «Передача132»). Build/staging/rollback/runtime receipts
+не включать в Git. Общие документы и чужие изменения сохранены.
+
+Готовое дополнение ROADMAP (в текущий пункт132, сопровождающему):
+
+```markdown
+- EI-FINALIZE-132: передача завершена из снимка main6bd5e44e382fd201f322fc8ec3e3b96dff282151, без параллельных правок. Fresh Release132/оба runtime; UI169+4/0 на живом изображении, scenario50/0, dark70/0, native26/0/0; буфер восстановлен. Finalizer/manifest126 PASS. Постоянная установка131→132:126 managed hashes/0 ошибок;23062 user files сохранены; rollback artifacts/rollback-131-to-132-final. Evidence: docs/validation/ATAMAN_CLIPBOARD_OLE_BITMAP_SOURCE_20261010.md, раздел Передача132. Следующий шаг: ручная приёмка владельцем; исходная автоматическая передача завершена.
+```
+
+Готовое дополнение CHANGELOG132 (сопровождающему):
+
+```markdown
+- EI-FINALIZE-132: свежая Release132 из коммита6bd5e44e382fd201f322fc8ec3e3b96dff282151 проверена на живом изображении: UI169/0 (+4 проверки сохранности), scenario50/0, dark70/0, native26/0/0. Постоянная установка обновлена131→132 с rollback и сохранением23062 пользовательских файлов; manifest126/0 ошибок. Evidence: docs/validation/ATAMAN_CLIPBOARD_OLE_BITMAP_SOURCE_20261010.md, Передача132.
+```
