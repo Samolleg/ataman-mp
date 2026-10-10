@@ -48,6 +48,7 @@ const PaletteApi& paletteApi()
 constexpr quint64 maxClipboardBytes = 128 * 1024 * 1024;
 constexpr quint64 maxSnapshotBytes = 256 * 1024 * 1024;
 int guardedWrites = 0; // GUI thread; ordinary Copy outside a check is unchanged.
+bool openNativeClipboard();
 bool readStream(IStream* stream, QByteArray& bytes)
 {
     if(!stream) return false;
@@ -210,6 +211,43 @@ struct NativeClipboardState
         if(next != S_FALSE && next != S_OK) ok = false;
         enumerator->Release();
         object->Release();
+        bool needsNativeSource = false;
+        if(ok) for(UINT format : deferred)
+            if(!canSynthesize(format, values)) needsNativeSource = true;
+        if(needsNativeSource) {
+            // OleSetClipboard exposes the object's formats through OLE, but
+            // Windows may synthesize DIB/DIBV5 only through the native API.
+            // Read both missing byte sources under one read-only open, keeping
+            // their native relative priority (not a fixed DIB/V5 ordering).
+            if(!openNativeClipboard()) return false; // Constructor retries contention.
+            QVector<UINT> sources;
+            UINT native = 0;
+            while((native = EnumClipboardFormats(native)) != 0)
+                if(native == CF_DIB || native == CF_DIBV5) sources.append(native);
+            for(UINT source : {UINT(CF_DIBV5), UINT(CF_DIB)})
+                if(!sources.contains(source) && IsClipboardFormatAvailable(source)) sources.append(source);
+            for(UINT source : sources) {
+                if(values.contains(source)) continue;
+                HANDLE handle = IsClipboardFormatAvailable(source) ? GetClipboardData(source) : nullptr;
+                const SIZE_T size = handle ? GlobalSize(handle) : 0;
+                const void* bytes = size && size <= maxClipboardBytes
+                    && totalBytes + size <= maxSnapshotBytes ? GlobalLock(handle) : nullptr;
+                if(!bytes) { ok = false; break; }
+                const QByteArray payload(static_cast<const char*>(bytes), int(size));
+                GlobalUnlock(handle);
+                QMap<UINT, QByteArray> candidate;
+                candidate.insert(source, payload);
+                if(!canSynthesize(CF_BITMAP, candidate)) { ok = false; break; }
+                totalBytes += size;
+                values.insert(source, payload);
+                priority.append(source);
+            }
+            CloseClipboard();
+            if(!ok) {
+                error = QStringLiteral("Native DIB synthesis source cannot be read completely within clipboard limits; check aborted before writes.");
+                return false;
+            }
+        }
         if(ok) for(UINT format : deferred) {
             if(!canSynthesize(format, values)) {
                 error = QStringLiteral("Native clipboard format %1 has no preservable synthesis source; check aborted before writes.")

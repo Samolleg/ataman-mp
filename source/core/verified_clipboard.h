@@ -48,6 +48,8 @@ QMenu* verifiedLineEditContextMenu(QLineEdit* editor);
 // Windows accepts complete seekable IStream byte payloads (128 MiB per format,
 // 256 MiB total). Storage/metafiles fail closed. OLE transport metadata is not
 // replayed; restored byte formats support native HGLOBAL and OLE ISTREAM.
+// Missing raster GDI sources may be read from Windows' synthesized DIB/DIBV5
+// under a read-only native open, with the same completeness and size limits.
 // A monitor-exclusion marker prevents restored content becoming a history item.
 class ClipboardRestoreGuard
 {

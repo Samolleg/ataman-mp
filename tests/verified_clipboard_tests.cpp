@@ -117,6 +117,7 @@ public:
     QMap<UINT, QByteArray> bytes;
     DWORD pngMedium = TYMED_ISTREAM;
     int streamFault = 0;
+    bool bitmapSource = false; // DIB is synthesized by Windows, never offered by OLE.
     StreamSource() {
         bytes.insert(RegisterClipboardFormatW(L"PNG"), pngBytes());
         bytes.insert(CF_DIB, rasterDib(false));
@@ -140,6 +141,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override {
         if(!f) return E_POINTER;
         if(f->ptd || f->lindex != -1 || f->dwAspect != DVASPECT_CONTENT) return DV_E_FORMATETC;
+        if(bitmapSource && f->cfFormat == CF_BITMAP) return (f->tymed & TYMED_GDI) ? S_OK : DV_E_TYMED;
         if(!bytes.contains(f->cfFormat)) return DV_E_FORMATETC;
         return (f->tymed & (f->cfFormat == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL))) ? S_OK : DV_E_TYMED;
     }
@@ -147,6 +149,16 @@ public:
         const HRESULT valid = QueryGetData(f);
         if(valid != S_OK) return valid;
         *m = {};
+        if(bitmapSource && f->cfFormat == CF_BITMAP) {
+            const QByteArray dib = rasterDib(false);
+            HDC dc = GetDC(nullptr);
+            m->tymed = TYMED_GDI;
+            m->hBitmap = CreateDIBitmap(dc, reinterpret_cast<const BITMAPINFOHEADER*>(dib.constData()),
+                CBM_INIT, dib.constData() + sizeof(BITMAPINFOHEADER),
+                reinterpret_cast<const BITMAPINFO*>(dib.constData()), DIB_RGB_COLORS);
+            ReleaseDC(nullptr, dc);
+            return m->hBitmap ? S_OK : E_FAIL;
+        }
         const QByteArray payload = bytes[f->cfFormat];
         if(f->cfFormat == RegisterClipboardFormatW(L"PNG") && (pngMedium & TYMED_ISTREAM)) {
             m->tymed = TYMED_ISTREAM;
@@ -176,6 +188,10 @@ public:
     HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD dir, IEnumFORMATETC** out) override {
         if(dir != DATADIR_GET) return E_NOTIMPL;
         QVector<FORMATETC> list;
+        if(bitmapSource) {
+            FORMATETC f = {}; f.cfFormat = CF_BITMAP; f.dwAspect = DVASPECT_CONTENT;
+            f.lindex = -1; f.tymed = TYMED_GDI; list.append(f);
+        }
         for(auto it = bytes.cbegin(); it != bytes.cend(); ++it) {
             FORMATETC f = {}; f.cfFormat = CLIPFORMAT(it.key()); f.dwAspect = DVASPECT_CONTENT; f.lindex = -1;
             f.tymed = it.key() == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL);
@@ -194,10 +210,12 @@ public:
     HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
 };
 
-static bool installStream(int fault = 0, DWORD medium = TYMED_ISTREAM)
+static bool installStream(int fault = 0, DWORD medium = TYMED_ISTREAM, bool bitmapSource = false)
 {
     auto* source = new StreamSource;
     source->streamFault = fault; source->pngMedium = medium;
+    source->bitmapSource = bitmapSource;
+    if(bitmapSource) { source->bytes.remove(CF_DIB); source->bytes.remove(CF_DIBV5); }
     QElapsedTimer timeout;
     timeout.start();
     HRESULT result;
@@ -408,6 +426,52 @@ private slots:
         QCOMPARE(status, HRESULT(S_OK)); QCOMPARE(stream, pngBytes());
         QVERIFY(!QImage::fromData(stream, "PNG").isNull());
         QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+#endif
+    }
+    void oleBitmapWithoutOleDibRestores()
+    {
+#ifdef Q_OS_WIN
+        QVERIFY(installStream(0, TYMED_ISTREAM, true));
+        IDataObject* object = nullptr;
+        QCOMPARE(OleGetClipboard(&object), HRESULT(S_OK));
+        QVERIFY(object);
+        IEnumFORMATETC* enumerator = nullptr;
+        const HRESULT result = object->EnumFormatEtc(DATADIR_GET, &enumerator);
+        object->Release();
+        QCOMPARE(result, HRESULT(S_OK));
+        QVERIFY(enumerator);
+        bool dibOffered = false, bitmapOffered = false, streamOffered = false;
+        FORMATETC format = {};
+        HRESULT next;
+        while((next = enumerator->Next(1, &format, nullptr)) == S_OK) {
+            dibOffered |= format.cfFormat == CF_DIB || format.cfFormat == CF_DIBV5;
+            bitmapOffered |= format.cfFormat == CF_BITMAP && format.tymed == TYMED_GDI;
+            streamOffered |= format.cfFormat == RegisterClipboardFormatW(L"PNG") && format.tymed == TYMED_ISTREAM;
+            if(format.ptd) CoTaskMemFree(format.ptd);
+        }
+        enumerator->Release();
+        QCOMPARE(next, HRESULT(S_FALSE));
+        QVERIFY(!dibOffered && bitmapOffered && streamOffered);
+        const QByteArray dib = readNativeBytes(CF_DIB), v5 = readNativeBytes(CF_DIBV5);
+        QVERIFY(!dib.isEmpty() && !v5.isEmpty());
+        const DWORD sequence = GetClipboardSequenceNumber();
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY2(guard.captured(), qPrintable(guard.error()));
+        QCOMPARE(GetClipboardSequenceNumber(), sequence); // Capture does not replace contents.
+        QVERIFY(ei::copyTextToClipboard("Temporary OLE bitmap replacement"));
+        QVERIFY2(guard.restore(), qPrintable(guard.error()));
+        QCOMPARE(readNativeBytes(CF_DIB), dib);
+        QCOMPARE(readNativeBytes(CF_DIBV5), v5);
+        StreamSource expected;
+        expected.bytes.remove(CF_DIB); expected.bytes.remove(CF_DIBV5);
+        for(auto it = expected.bytes.cbegin(); it != expected.bytes.cend(); ++it)
+            QCOMPARE(readNativeBytes(it.key()), it.value());
+        QCOMPARE(oleBytes(RegisterClipboardFormatW(L"PNG"), TYMED_ISTREAM), pngBytes());
+        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+        QVERIFY(openForCheck(nullptr));
+        const bool bitmap = GetClipboardData(CF_BITMAP) != nullptr;
+        CloseClipboard();
+        QVERIFY(bitmap);
 #endif
     }
     void storageRefusesBeforeWrites()
@@ -769,9 +833,11 @@ int main(int argc, char** argv)
 #endif
     ei::ClipboardRestoreGuard clipboard;
     if(!clipboard.captured()) { fprintf(stderr, "%s\n", qPrintable(clipboard.error())); return 2; }
-    if(argc == 3 && QByteArray(argv[1]) == "--guard-stream-child") {
+    const bool bitmapChild = argc == 3 && QByteArray(argv[1]) == "--guard-ole-bitmap-child";
+    const bool liveChild = argc == 3 && QByteArray(argv[1]) == "--guard-live-child";
+    if(argc == 3 && (QByteArray(argv[1]) == "--guard-stream-child" || bitmapChild)) {
 #ifdef Q_OS_WIN
-        if(!installStream()) return 2;
+        if(!installStream(0, TYMED_ISTREAM, bitmapChild)) return 2;
         if(!clipboardInventory()) return 2;
 #endif
     }
@@ -781,7 +847,7 @@ int main(int argc, char** argv)
         if(!installRaster(false, true)) return 2;
 #endif
     }
-    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child" || QByteArray(argv[1]) == "--guard-stream-child")) {
+    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child" || QByteArray(argv[1]) == "--guard-stream-child" || bitmapChild || liveChild)) {
         // Historical UI checks lack verified restoration. Keep their original
         // executable unchanged, while an independent parent preserves native
         // clipboard data for a safe baseline comparison.
@@ -795,6 +861,26 @@ int main(int argc, char** argv)
         const QByteArray imageBefore = readNativeBytes(CF_DIB);
         const QByteArray imageV5Before = readNativeBytes(CF_DIBV5);
         StreamSource expectedStream;
+        QMap<UINT, QByteArray> liveBytes;
+        if(liveChild || bitmapChild) {
+            if(!clipboardInventory() || !openForCheck(nullptr)) return 2;
+            QVector<UINT> ids;
+            UINT id = 0;
+            while((id = EnumClipboardFormats(id)) != 0) {
+                if(id != CF_BITMAP && id != CF_PALETTE
+                    && id != RegisterClipboardFormatW(L"DataObject")
+                    && id != RegisterClipboardFormatW(L"Ole Private Data")) ids.append(id);
+            }
+            CloseClipboard();
+            for(UINT id : ids) {
+                const QByteArray bytes = readNativeBytes(id);
+                if(bytes.isEmpty()) return 2;
+                liveBytes.insert(id, bytes);
+            }
+            if(imageBefore.isEmpty() || imageV5Before.isEmpty()
+                || !liveBytes.contains(RegisterClipboardFormatW(L"PNG"))) return 2;
+            printf("PASS: read-only capture of %d public byte formats before child\n", liveBytes.size());
+        }
 #endif
         child.start(QString::fromLocal8Bit(argv[2]), {"--ui-widget-check"});
         if(!child.waitForStarted(3000)) return 2;
@@ -811,11 +897,22 @@ int main(int argc, char** argv)
         fwrite(output.constData(), 1, size_t(output.size()), stdout);
         fwrite(errors.constData(), 1, size_t(errors.size()), stderr);
 #ifdef Q_OS_WIN
-        const bool imageRestored = QByteArray(argv[1]) != "--guard-image-child"
+        const bool imageRestored = !(liveChild || bitmapChild || QByteArray(argv[1]) == "--guard-image-child"
+                || QByteArray(argv[1]) == "--guard-stream-child")
             || (readNativeBytes(CF_DIB) == imageBefore && readNativeBytes(CF_DIBV5) == imageV5Before
                 && IsClipboardFormatAvailable(CF_BITMAP));
         printf("%s: child preserved image HGLOBAL bytes and CF_BITMAP availability\n", imageRestored ? "PASS" : "FAIL");
         bool streamRestored = true;
+        if(liveChild || bitmapChild) {
+            for(auto it = liveBytes.cbegin(); it != liveBytes.cend(); ++it)
+                streamRestored = streamRestored && readNativeBytes(it.key()) == it.value();
+            const UINT png = RegisterClipboardFormatW(L"PNG");
+            streamRestored = streamRestored && IsClipboardFormatAvailable(CF_BITMAP)
+                && IsClipboardFormatAvailable(png) && openForCheck(nullptr);
+            if(streamRestored) { streamRestored = GetClipboardData(CF_BITMAP) != nullptr; CloseClipboard(); }
+            printf("%s: child preserved all %d public format bytes, CF_BITMAP and PNG availability\n",
+                streamRestored ? "PASS" : "FAIL", liveBytes.size());
+        }
         if(QByteArray(argv[1]) == "--guard-stream-child") {
             for(auto it = expectedStream.bytes.cbegin(); it != expectedStream.bytes.cend(); ++it)
                 streamRestored = streamRestored && readNativeBytes(it.key()) == it.value();
