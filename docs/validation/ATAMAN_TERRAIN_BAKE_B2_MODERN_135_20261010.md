@@ -320,3 +320,168 @@ SHA256 `f6f201663fbb3da15d0102e00a5fde8442cfa371080637d17bddb2d8bdadf104`.
 Все новые данные и PNG — только `build-tests-135-bake/`; окончательную сборку,
 установку и ручную приёмку делает сопровождающий. Scoped-коммит main без push,
 полный SHA сообщается в итоговом ответе.
+
+## Передача 135
+
+**EI-FINALIZE-135, 2026-10-10: установка 135 ЗАБЛОКИРОВАНА порогом скорости.**
+Cold unmo: медианы 132 **80,988 мс**, установленной 134 **95,164 мс**,
+135 **96,301 мс**; 135 к132 **+15,313 мс / +18,91%**, к134 +1,137 мс / +1,19%.
+Условие «не хуже132 более чем на10% или ≤+15мс» не выполнено: превышены оба
+допуска. Cold stbu прошёл: 132 30,537 мс →135 31,984 мс (+1,447 мс/+4,74%).
+Повтор замера для обхода полученного порога не выполнялся. Этот раздел задаёт
+состояние передачи; подготовка чистого staging не означает установленный релиз.
+
+### База и свежая сборка
+
+- Поручение владельца через Claude 2026-10-10; уточнения имеют приоритет:
+  состав сравнивается с staging134; в ROADMAP изменён только пункт135.
+  Ветка main, исходное дерево чистое, source HEAD
+  `3ce012182db78e38290ab109af48c0e99a932ef5`, VERSION135.
+  AGENTS.md прочитан, SHA256
+  `F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`.
+  Применён docs/TEST_BUILD_HANDOFF.md; все старые rollback сохраняются.
+- Свежий git archive → `build-release-135-final/src`, shadow
+  `build-release-135-final/release`; 1820 tracked blobs,
+  1609 архивных текстов приведены к точным LF-байтам Git.
+  До и после штатной Release/lrelease/обеих x86 runtime-сборок: 0 blob-mismatches.
+  Qt5.12.12/MinGW7.3 из существующего toolchain только для чтения.
+  Wrapper exit0, 90,937 с. `--version` после развёртывания runtime:
+  `EI Mapper Endurance Edition 135`, exit0.
+- Первый raw `--version` до windeployqt завершился с exit3221227010 без вывода;
+  не PASS. После штатного развёртывания compiler/Qt runtime тот же EXE успешно
+  подтвердил135 и выполнил регресс; этот исходный сбой сохранён в version.{out,err,json}.
+  EXE SHA256 **`12C10B81846545510BF8465C725BDF978F8CDC66F0EB383968897900D08AFB43`**.
+  [Provenance](../../build-tests-135-final/provenance.json),
+  [сборка](../../build-tests-135-final/release-build.log),
+  [version после deploy](../../build-tests-135-final/version-deployed.out).
+- Параллельных задач/подагентов, сети, установки зависимостей и интерактивного
+  редактора не было. Навыки приватного движка недоступны; приватный код не читался.
+  Игру/мод/живые карты/Endurance не изменяли; приватные fixtures вне Git/пакета.
+
+### Регресс изолированного буфера и terrain
+
+Все UI/clipboard/reader/terrain/benchmark процессы запускались последовательно
+под атомарным `build-locks/ui-tests.lock` с owner receipt; lock освобождён.
+Обязательный набор tests/clipboard_isolation_regression.ps1 exit0, включая
+полный UI без фильтра. **Native guard-тесты не запускались.** Три отрицательные
+пробы сторожа входят в11 обязательных clipboard случаев: ожидаемый exit2,
+реальное обращение блокируется до чтения/записи, это не native guard suite.
+
+`PASS: harness clipboard metadata sequence=33629->33629 formats=2,8,17,49470,49794,49795->2,8,17,49470,49794,49795 unchanged=1`
+
+У обычных проверок nativeAttempts=0. Сохранены sequence **33629→33629** и точные
+6 format IDs:2,8,17,49470,49794,49795. Benchmark отдельно:33638→33638, те же8
+форматов; synthetic и Zone6:33647→33647,8→8, unchanged=1.
+Числа CLI ниже не включают отдельный PASS clipboard receipt.
+
+| Проверка | PASS | FAIL | SKIP | Evidence в build-tests-135-final |
+|---|---:|---:|---:|---|
+| полный --ui-widget-check |169|0|0|ui-widget.stdout.log|
+| --scenario-layer-check |50|0|0|scenario.stdout.log|
+| --dark-theme-check |70|0|0|dark-theme.stdout.log|
+| обязательные verified_clipboard_tests |11|0|0|clipboard/release/clipboard-results.txt|
+| reader-drain, точные production objects135 |23|0|0|reader-drain/fixtures-resdrain/reader-drain-results.txt|
+| --terrain-mixed-edge-check, synthetic |63|0|0|terrain-ready-synthetic.out|
+| тот же check, копия Zone6 |53|0|0|terrain-ready-zone6.out|
+| terrain_recipe_bake_tests |17425|0|0|recipe.out|
+| world_terrain_sculpt_tests |45|**1**|0|world_terrain_sculpt_tests/qtest.txt|
+
+Gallery PASS,497 моделей/7165 текстур: open7мс/select3мс/Shift2мс,
+close во время600мс worker1мс; cache/queue/stale/parallel/all-N checks PASS.
+Zone6:24576 клеток,1216→1230 working slots,1162 published,16 shared edges/
+8192 RGBA comparisons; сохранение/диск/reopen, Undo/Redo, повтор0 новых слотов
+и0 SEC deltas. Синтетика63/0 и core17425/0 закрывают новые mixed-edge сценарии.
+
+Первый synthetic вызов: FAIL isolated fixture directory, exit1 — каталог вывода
+в test setup не был создан. Исправлена только подготовка собственного каталога,
+без изменения программы/фикстуры/бинарника; повтор63/0/0. Неисправный preflight
+сохранён как terrain-synthetic.{out,err,json}, не скрыт как PASS.
+
+OFF/Classic/Manual: по **79954616 bytes** совпали с назначенной базой134:
+Modern OFF `823432AF35B7DE7294AE4D6E814C594D9CE6F879ED26EF2139E56A0504D8832E`,
+Classic `81792E8669278AC936F3B94FF90151E4B45F96FFD30328190F1C53620081BC5E`,
+Manual `9A5714D25F8801436F7E977042E514D7FD77AD26A1CAA2DBC5E00945D1885379`.
+Новые OFF и world binaries собраны из снимка135; база сравнения — сохранённые
+проверки b87df6f91ae486a8fe49943180d8cd72ea3887af (134), build-tests-135-bake.
+575 файлов сохранённой базы сверены с Git blobs134, включая исходники world.
+[OFF](../../build-tests-135-final/off-comparison.json).
+
+World **45/1/0, exit1**: прежний
+WorldTerrainTests::installedZone11Zone12ReadOnly / BoundaryFill(mode4),
+gap-after0.000585550; имя/условие FAIL совпадают с134, порог не ослаблен.
+Это известный **FAIL, не PASS**, код дефекта не изменяли и причину не исследовали.
+[Сравнение](../../build-tests-135-final/world-comparison.json),
+[134](../../build-tests-135-bake/world-baseline/qtest.txt),
+[135](../../build-tests-135-final/world_terrain_sculpt_tests/qtest.txt).
+Первичная postprocessing-сверка остановилась из-за отсутствующего импорта re
+в локальном runner. После исправления завершена отдельным audit.py по уже
+полученным логам; успешные тесты повторно не запускались. Эта ошибка runner
+не меняет world exit1 и не превращает его в PASS.
+
+### Скорость unmo/stbu: 5 повторов
+
+Одинаковый harness `build-tests-133-perf/real-benchmark.cpp` связан отдельно с
+точными Release objects132/134/135, исключён только main.o. EXE134 из этой
+сборки совпадает SHA256 с установленным134. Использован прежний read-only
+профиль129 DejaVu/Base:unmo36/stbu71,8 видимых плиток.
+В каждом повторе новая app-папка, первый процесс — cold и повтор памяти,
+второй — warm disk и повтор памяти. Порядок132/134/135 чередуется.
+Cold означает новый процесс + miss thumbnail memory/disk; OS file cache
+не очищали. Кэши владельца и установки не использовались и не очищались.
+Всего30 процессов/120 измерений, все exit0, visible8/ready8/unavailable0/
+complete1; provider calls8 для cold,0 для disk/repeat. Нет SKIP/таймаутов/сбоев.
+
+| Fill, мс (min / median / max), n=5 | 132 | 134 установленная | 135 | Δ135 к134, мс / % |
+|---|---|---|---|---|
+| unmo, cold | 79,439 / 80,988 / 82,769 | 92,270 / 95,164 / 97,892 | 92,980 / 96,301 / 104,657 | 1,137 / 1,19% |
+| unmo, тёплый диск | 29,230 / 31,371 / 32,953 | 30,247 / 32,931 / 33,357 | 30,645 / 31,507 / 33,333 | -1,424 / -4,32% |
+| unmo, повтор после cold | 5,050 / 5,305 / 5,562 | 5,049 / 5,516 / 5,805 | 5,260 / 5,599 / 5,750 | 0,083 / 1,50% |
+| unmo, повтор после диска | 5,245 / 5,357 / 5,579 | 5,066 / 5,206 / 5,610 | 5,139 / 5,397 / 6,065 | 0,191 / 3,67% |
+| stbu, cold | 30,257 / 30,537 / 31,609 | 30,600 / 31,787 / 39,311 | 29,467 / 31,984 / 34,612 | 0,197 / 0,62% |
+| stbu, тёплый диск | 9,672 / 10,671 / 10,972 | 9,553 / 10,467 / 13,385 | 9,998 / 10,329 / 11,766 | -0,138 / -1,32% |
+| stbu, повтор после cold | 5,755 / 5,886 / 6,216 | 5,885 / 5,965 / 7,865 | 5,789 / 5,900 / 5,992 | -0,065 / -1,09% |
+| stbu, повтор после диска | 6,030 / 6,366 / 7,489 | 5,750 / 6,149 / 6,325 | 5,811 / 6,146 / 6,274 | -0,003 / -0,05% |
+
+Gate применяется к cold медианам135 против132: unmo **FAIL**, stbu PASS;
+малое отличие135 от134 не отменяет порученный порог относительно132.
+[Raw samples](../../build-tests-135-final/benchmark-raw.json),
+[итог](../../build-tests-135-final/benchmark-summary.json),
+[clipboard metadata](../../build-tests-135-final/benchmark-clipboard.json).
+
+### Состав, staging и сохранённая установка
+
+- Новый собственный `build-staging-135-final`, staged EXE=проверенный EXE по SHA256,
+  staged --version135 до finalizer. Finalizer из git archive применён **только** к
+  staging, внутренний validate_distribution exit0;127/127 payload hashes,0 missing,
+  0 extras. После финализации staging не запускался и не изменялся.
+- Состав совпадает с `build-staging-134-final`:0 добавленных/удалённых paths.
+  Различаются ровно6 версионных файлов:EXE, оба runtime-компонента,
+  VERSION, Readme.md, CHANGELOG.md; manifest закономерно пересоздан.
+  Qt/compiler runtime, synthetic fixtures, LICENSE, NOTICE и manual неизменны.
+- TRAVEL_EDITOR.md уже возвращён финализатором134; совпадает с source135 после
+  нормализации и со staging134:SHA256
+  `945D3E7B5905944D8735D07E518063DBC04BCDA15887CFD5B119F463EF1ACC83`.
+  Политика133 сохранена:UTF-8 без BOM, CRLF для всех текстов пакета и manifest,
+  Git blobs не менялись. Правки упаковочных скриптов **не потребовались**.
+  SHA256 manifest135:`8AC0A85ABF127BB83932AD572455991D647B0D3D3922A4CC9F2F76FA81DAA319`.
+  [Package receipt](../../build-tests-135-final/package-receipt.json),
+  [finalizer](../../build-tests-135-final/finalizer.out).
+- **134→135 не выполнялось из-за speed gate.** Постоянная папка
+  `artifacts/EI-Mapper-Ataman-2-first-test` остаётся134;
+  все127 managed hashes соответствуют её manifest/staging134,
+  TRAVEL_EDITOR.md присутствует. EXE134 SHA256
+  `EA881BD6647F5FD792F7E41197A4EC49332321F5047C9E665FE8BB897A149B56`;
+  manifest134:`1FD79984B7A79447A308FD947193094D6D3426AB402A667FEC2E9BE380B90945`.
+  Пользовательские файлы/кэши не затрагивались, installationWrites=0,
+  rollback134 не создавался; все6 прежних rollback сохранены.
+  [Receipt](../../build-tests-135-final/preserved-installation.json).
+
+Опция остаётся **экспериментальной, ВЫКЛ по умолчанию**. Известны вытянутые
+штрихи вдоль границ клеток на траве и кромке камень/земля:
+`build-tests-135-bake/sharp-edge/*5x5*.png`. Ground одной карты, shared brush
+явно отказывает; художественная/ручная/игровая приёмка открыта.
+Следующий шаг: решение сопровождающего по превышению speed gate или отдельное
+поручение на причину/исправление производительности. После нового основания —
+необходимый замер и разрешённая установка с verified rollback134; до этого135
+не установлена. Scoped-коммит только этого отчёта и статуса пункта135 в ROADMAP,
+без push/изменения глобальной Git identity.
