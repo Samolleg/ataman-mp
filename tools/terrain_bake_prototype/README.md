@@ -106,3 +106,50 @@ monitoring and game acceptance are separate. See the generated memory-kit README
 
 Commit source files and the dated stage-1 validation report only; no private
 PNG, maps, RES, manifests, logs or binary outputs.
+
+## Stage 1b: full stock ownership strips in N4 recipes
+
+`stage1b.py` is a separate offline experiment for `EI-TERRAIN-BAKE-STAGE-1B`.
+Run with the existing Python/numpy/Pillow, from the checkout root:
+
+```powershell
+python -B tools/terrain_bake_prototype/stage1b.py `
+  build-tests-terrain-bake-research-0 build-tests-terrain-bake-stage-1 `
+  build-tests-terrain-bake-stage-1b
+```
+
+Only the last, ignored directory is written. No mapper/game/clipboard is opened;
+the UI test lock is therefore unnecessary. The tool verifies the live source
+MPR fingerprint and the complete decoded stock atlas fingerprint, then reads
+existing snapshots. It neither builds nor installs anything.
+
+The brush is the full unblurred two-dimensional RGB ownership estimate, rather
+than a mean alpha profile plus a weak residual. Each material pair has its own
+512px bank of deterministic 64px stock fragments. Straight 2/2, corner 1/3 and
+alternating diagonal 2/2 topologies are fitted against uniform stock textures.
+An 8px-smoothed guide derived from a 6px-blurred estimate removes the coarse
+source curve; nearest-pixel samples transport the remaining width, tongues and
+flecks. A 12px pure-side score prior confines uncertain RGB classification to
+the +/-32px band. The original artist's alpha/dithering cannot be recovered from
+opaque baked RGB. Source fit errors and pre-prior contamination are reported.
+
+Three N4 variants use binary ownership, a 1.45x widened strip with coarse stock
+contour displacement, and a mixed 1.15x strip with five ownership levels.
+The curve uses smooth scores and a first-order gradient-normalized distance,
+not an exact Euclidean SDF. Each shared edge has canonical gradient/brush phase;
+interior variation fades at the edge. Corner/class/label keys, label assignment
+and texture/color variation stay identical to stage 1 N4. No new edge labels
+are introduced. All saved RGB seams and independently evaluated ownership/RGB
+traces are checked. This establishes C0, not C1, compressed mip or game fidelity.
+
+`preview.png` is <=2048px wide and compares current stock, stage 1 B in N4 form,
+and the three new N4 variants at equal scale. `edge-closeup.png` uses the exact
+earlier 5x5 window; three additional windows cover different material pairs.
+Full 4096px renders, source/brush analysis and JSON evidence are private outputs.
+Top-two ownership at triple junctions, distorted arc phase near edges, periodic
+fragment banks, uncertain coarse artwork fits and clipped wide fringes remain
+limitations; owner visual acceptance is separate from seam/budget checks.
+
+Commit only `stage1b.py`, this README section and
+`docs/validation/ATAMAN_TERRAIN_BAKE_STAGE_1B_20261010.md`. Do not commit any
+generated game pixels, input snapshots or build-test artifacts.
