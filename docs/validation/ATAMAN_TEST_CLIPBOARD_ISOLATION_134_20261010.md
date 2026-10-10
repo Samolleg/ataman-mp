@@ -220,3 +220,153 @@ Copy/Paste/Cut/Undo Qt. Убран RestoreGuard из обязательного 
 native guard tests запускаются отдельно. Сторож блокирует нативные обращения
 и проверяет неизменность sequence/formats. UI 169/0, scenario 50/0, dark 70/0,
 gallery PASS, clipboard 11/0/0, reader-drain 23/0/0; буфер неизменён.
+
+## Передача 134
+
+**EI-FINALIZE-134, 2026-10-10: передача завершена, постоянная установка
+обновлена 132→134.** Версия 133 (RES reader drain 50eba3aa и исправление
+скорости 209af800) установлена в составе 134, отдельно не устанавливалась.
+Ручная визуальная/игровая приёмка остаётся владельцу.
+
+### База и свежая сборка
+
+- Поручение владельца через сопровождающего Claude от 2026-10-10; main,
+  исходный HEAD `6497562675cde4289f4c96b21e4a4b23e4cd59cf`, VERSION=134,
+  чистый рабочий каталог. AGENTS.md проверен: SHA256
+  `F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`;
+  применён текущий docs/TEST_BUILD_HANDOFF.md.
+- Свежий git archive распакован в `build-release-134-final/src`.
+  Архивные окончания строк приведены к точным байтам Git blobs; все 1811
+  файлов совпали до сборки и после lrelease/build, лишних/отсутствующих 0.
+  Штатный build_release.cmd/build_release.ps1, Qt 5.12.12/MinGW 7.3 x64,
+  shadow build `build-release-134-final/release`, EXE
+  `release/release/EIMapperEndurance.exe`; обе runtime-компоненты собраны x86.
+  Toolchain только читался; Endurance не изменялся.
+- Первый внешний PowerShell-вызов с ErrorActionPreference=Stop прервался
+  на диагностике Qt private headers в stderr и не дал надёжного receipt:
+  это не PASS оболочечного вызова. Дочерняя сборка создала свежие EXE/objects.
+  Для подтверждения завершения повторён штатный wrapper с независимым
+  захватом stdout/stderr/exit через subprocess: exit 0, 18,125 с;
+  использованы свежие objects первого вызова, runtime-компоненты пересобраны.
+  [Receipt](../../build-tests-134-final/release-receipt.json),
+  [stdout](../../build-tests-134-final/release-receipt.out),
+  [stderr](../../build-tests-134-final/release-receipt.err).
+- Свежий и staged EXE совпали; оба `--version` вернули
+  `EI Mapper Endurance Edition 134`, exit 0. EXE SHA256:
+  `EA881BD6647F5FD792F7E41197A4EC49332321F5047C9E665FE8BB897A149B56`.
+
+### Обязательный регресс и системный буфер
+
+Весь регресс выполнен штатным `tests/clipboard_isolation_regression.ps1`
+с AppBuild=`build-release-134-final/release`, TestBuild=`build-tests-134-final`.
+PrepareReader создал изолированный entry point исходного reader-набора;
+он связан с точными production objects134 без main.o. Clipboard-набор собран
+из git-снимка134. Прогоны и benchmark выполнялись под атомарным mkdir
+`build-locks/ui-tests.lock`, owner.txt, finally-release; lock освобождён.
+Редактор интерактивно не открывался. Необязательный native guard-набор
+не запускался; три запрещающие child-пробы входят в обязательный набор.
+
+| Проверка | Результат |
+|---|---|
+| Полный --ui-widget-check | 169 функциональных PASS + PASS isolation; 0 FAIL, exit 0 |
+| --scenario-layer-check | 50 PASS / 0 FAIL + PASS isolation, exit 0 |
+| --dark-theme-check | 70 PASS / 0 FAIL + PASS isolation, exit 0 |
+| --model-gallery-check | PASS + PASS isolation, exit 0; 497 моделей/7165 текстур, open 6 мс/select 2 мс/close 0 мс |
+| verified_clipboard_tests, default | 11 PASS / 0 FAIL / 0 SKIP, 266 мс, exit 0 |
+| tests/res_reader_drain_tests | 23 PASS / 0 FAIL / 0 SKIP, 12031 мс, exit 0 |
+| Отрицательные clipboard child-пробы | 3/3 ожидаемых exit 2; обычный backend child PASS |
+| Внешний harness, весь прогон | sequence 33600→33600; format IDs 1,7,13,16,49383,49770,49794,49795 неизменны |
+
+В положительных процессах nativeAttempts=0, hookedImports=14 (app/reader)
+и 15 (clipboard). Метаданные снимаются без OpenClipboard и чтения payload.
+Reader: собственный reader 185 мс, 1 commit/1 checkpoint; 4/4 thumbnails +
+1/1 hydration, drain 180 мс; новые 5/5 consumers дождались публикации и
+прочитали новые bytes. Admission timeout 10008 мс — ожидаемое исключение
+проверяемого сценария, повтор provider успешен; это не таймаут harness.
+
+Первый регресс **не прошёл**: clipboard 10 PASS / 1 FAIL / 0 SKIP,
+проба `--probe-system-qpa` exit 0 вместо 2. Test driver задавал внешние
+QT_PLUGIN_PATH/QT_QPA_PLATFORM_PLUGIN_PATH на toolchain, хотя windeployqt
+развернул собственный qwindows.dll, который preloader выбирает рядом с
+Qt5Core. После удаления обоих внешних переопределений из окружения child
+тот же неизменённый EXE дал ожидаемые три exit 2 и полный PASS выше.
+Наблюдение указывает на несовпадение выбранной QPA-копии и preloaded plugin;
+поддержка сторонних переопределений QPA этим прогоном не доказана.
+Исходный FAIL сохранён, не переименован в PASS; его sequence тоже 33600→33600.
+[Первый FAIL](../../build-tests-134-final/clipboard-first-failed.txt),
+[полный успешный регресс](../../build-tests-134-final/regression-packaged-qpa.out),
+[harness receipt](../../build-tests-134-final/harness-receipt.txt).
+Все stdout/stderr и QtTest results находятся в `build-tests-134-final`.
+
+### Скорость 132 против 134
+
+Повторены средства `build-tests-133-final`/`build-tests-133-perf`:
+тот же real-benchmark.cpp, связанный отдельно с точными Release objects132
+и134 без main.o, профиль DejaVu/Base, private fixture129, unmo36/stbu71,
+восемь видимых плиток. EXE исходной сборки132 побайтно совпадает с
+установленной132: `DF44E7E6BD840FAD308525A0C1E08B367805846A8F049086CC9E9CEC6A1FEA06`.
+Версии чередовались между пятью повторами. Cold — новая app-папка без
+производного disk/memory thumbnail cache; disk-warm — второй процесс той
+же папки; repeat — повторный показ в памяти процесса. OS file cache и
+пользовательские кэши не очищались. Все 20 процессов exit 0, все 80 samples
+complete=1/visible=8/ready=8/unavailable=0; cold calls=8, остальные calls=0.
+
+| Fill, мс; n=5 | 132 min / median / max | 134 min / median / max | Δ median мс / % |
+|---|---:|---:|---:|
+| unmo cold | 72,124 / 74,448 / 76,669 | 80,666 / 84,710 / 88,728 | +10,262 / +13,78% |
+| unmo disk-warm | 27,950 / 28,611 / 29,213 | 27,561 / 28,154 / 28,869 | -0,457 / -1,60% |
+| unmo repeat | 4,877 / 4,980 / 5,611 | 4,927 / 4,973 / 5,868 | -0,007 / -0,14% |
+| unmo repeat-after-disk | 4,829 / 4,961 / 5,347 | 4,850 / 5,094 / 5,321 | +0,133 / +2,68% |
+| stbu cold | 28,720 / 29,354 / 33,866 | 28,536 / 29,383 / 30,821 | +0,029 / +0,10% |
+| stbu disk-warm | 9,693 / 10,144 / 10,443 | 9,379 / 9,912 / 9,950 | -0,232 / -2,29% |
+| stbu repeat | 5,450 / 5,813 / 7,417 | 5,403 / 5,608 / 7,304 | -0,205 / -3,53% |
+| stbu repeat-after-disk | 5,471 / 5,600 / 6,243 | 5,537 / 5,711 / 6,044 | +0,111 / +1,98% |
+
+Порог холодного заполнения по медианам «≤+10% **или** ≤+15 мс» выполнен:
+unmo проходит абсолютную ветвь +10,262≤15 мс, stbu — обе ветви.
+[80 samples](../../build-tests-134-final/benchmark-raw.json),
+[min/median/max и порог](../../build-tests-134-final/benchmark-summary.json).
+
+### Состав и установка
+
+- Создан ранее несуществовавший `build-staging-134-final`; базовые assets/Qt
+  взяты из проверенных 127/127 manifest-файлов staging131, EXE и два runtime
+  заменены свежими, документы — из снимка134; windeployqt --compiler-runtime.
+- Исправлены `packaging/finalize_package.ps1` (автоматически добавляет
+  docs/TRAVEL_EDITOR.md и нормализует тексты копии пакета в UTF-8 без BOM,
+  CRLF) и `packaging/validate_distribution.ps1` (руководство обязательно).
+  В новом staging руководство намеренно отсутствовало до finalizer — он
+  успешно восстановил его из исходника. Finalizer запущен только на этом
+  новом staging: exit 0, внутренняя проверка PASS, удалено 0 файлов.
+  После finalizer пакет не запускался и не менялся.
+- Manifest: 127 payloads, отсутствующих/лишних 0. В сравнении с
+  `build-staging-131-stream-handoff` отличаются ровно 6 payloads: EXE,
+  два заново собранных runtime (включая build identity), VERSION134,
+  Readme134 и единственный текущий CHANGELOG с ручными шагами.
+  SHA256SUMS.txt закономерно новый. Остальные 121 payload побайтно совпали.
+  LICENSE, NOTICE, heightmaps/README и TRAVEL_EDITOR совпали с CRLF130/131;
+  SHA256 руководства `945D3E7B5905944D8735D07E518063DBC04BCDA15887CFD5B119F463EF1ACC83`.
+  Manifest SHA256 `1FD79984B7A79447A308FD947193094D6D3426AB402A667FEC2E9BE380B90945`.
+  [Package receipt](../../build-tests-134-final/package-receipt.json).
+- Постоянная установка `artifacts/EI-Mapper-Ataman-2-first-test`:
+  исходные 126/126 managed hashes132 совпали, коллизий с user-файлами 0;
+  host-level проверка процессов перед backup и непосредственно перед записью
+  не обнаружила запущенных компонентов установки. Backup10 файлов
+  (9 заменяемых + старый manifest) в `artifacts/rollback-132-to-134-final`
+  проверен по SHA256 до первой замены. Файлы заменены атомарно, manifest
+  последним; добавлен TRAVEL_EDITOR, удалено 0. Установленные 127/127 hashes
+  и manifest совпали со staging, VERSION134. Все 23062 пользовательских
+  файлов/кэшей вне manifest побайтно сохранены; все 5 прежних rollback
+  сохранены. Finalizer на установке не запускался.
+  [Install receipt](../../build-tests-134-final/install-receipt.json),
+  [backup receipt](../../build-tests-134-final/backup-receipt.json).
+
+Scoped-набор коммита: этот отчёт, три относящихся статуса ROADMAP.md и два
+скрипта упаковки. VERSION остаётся134; исходный код программы не менялся.
+Технические scripts/logs/binaries/private fixtures не включаются в Git.
+Коммит в main с process-local GIT_AUTHOR_NAME/GIT_COMMITTER_NAME=Codex,
+GIT_AUTHOR_EMAIL/GIT_COMMITTER_EMAIL=codex@localhost, trailer
+`Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+Сеть, push, установка зависимостей, глобальный git config, игра, мод,
+живые карты и Endurance не изменялись. ZIP не требовался: это обычная
+передача в постоянную локальную установку. Ручная приёмка не заявляется.

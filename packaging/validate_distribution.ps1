@@ -11,6 +11,7 @@ $requiredFiles = @(
     'EIMapperEndurance.exe',
     'VERSION',
     'Readme.md',
+    'TRAVEL_EDITOR.md',
     'LICENSE.txt',
     'NOTICE.md',
     'Qt5Core.dll',

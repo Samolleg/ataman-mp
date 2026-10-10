@@ -73,6 +73,26 @@ if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
     }
 }
 
+# This user manual is part of every package, including git-archive builds.
+# Resolve it from the source tree owning this finalizer, never a previous install.
+$travelSource = Join-Path (Split-Path -Parent $PSScriptRoot) 'docs\TRAVEL_EDITOR.md'
+if (-not (Test-Path -LiteralPath $travelSource -PathType Leaf)) {
+    throw "Required package manual source is missing: $travelSource"
+}
+Copy-Item -LiteralPath $travelSource -Destination (Join-Path $root 'TRAVEL_EDITOR.md') -Force
+
+# Owner's finalization-133 policy: UTF-8 without BOM, CRLF package texts.
+# Normalize package copies only; source files and Git blobs stay untouched.
+$utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+    $_.Extension -in @('.md', '.txt', '.json') -or $_.Name -eq 'VERSION'
+}) {
+    if ($file.Name -eq 'SHA256SUMS.txt') { continue }
+    $text = [System.IO.File]::ReadAllText($file.FullName, $utf8)
+    $text = $text.TrimStart([char]0xFEFF).Replace("`r`n", "`n").Replace("`r", "`n").Replace("`n", "`r`n")
+    [System.IO.File]::WriteAllText($file.FullName, $text, $utf8)
+}
+
 $checksums = Join-Path $root 'SHA256SUMS.txt'
 if (Test-Path -LiteralPath $checksums) {
     [System.IO.File]::Delete($checksums)
