@@ -243,3 +243,72 @@ model_gallery.h и gallery_thumbnail_cache.cpp/.h не изменены. Дру�
   shutdown3/3; реальные RES cold/session/disk warm. Full UI пока BLOCKED guard
   формата49470; перед финальной передачей обязателен отдельный успешный прогон.
   Рабочая сборка128, общий номер129 назначает сопровождающий. Evidence: отчёт выше.
+
+## Передача 130
+
+EI-FINALIZE-130, поручение владельца через Claude от 2026-10-10. Ветка main,
+снимок `git archive 32a2c512247c533a4a9482e6307e19182b47adbc`, VERSION=130.
+AGENTS.md актуален: SHA256
+`F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`.
+Сборка из `build-release-130-final/src`, fresh shadow `build-release-130-final`,
+EXE `build-release-130-final/release/EIMapperEndurance.exe`.
+1783 файла снимка сверены с архивом; checkout EOL Git сохранены, lrelease
+сгенерировал qm только внутри снимка. Qt 5.12.12 / MinGW7.3 x64;
+оба x86 runtime-компонента пересобраны. Первый внешний PowerShell вызов дал
+NativeCommandError на stderr qmake; отдельный wrapper receipt подтвердил exit0
+и завершение runtime build (это не повторный функциональный тест).
+
+EXE SHA256 (tested = staged = installed):
+`9EBC89BD809042F4AA97884F38CCB42C124C8CEDF4991F4FD8D2F5812867D421`.
+
+| Проверка | Результат |
+| --- | --- |
+| Release / --version | exit0 / EI Mapper Endurance Edition 130 |
+| Полный --ui-widget-check под image guard | **BLOCKED**, child не запускался; не PASS |
+| --scenario-layer-check | 50 PASS / 0 FAIL / 0 SKIP, exit0 |
+| --dark-theme-check | 70 PASS / 0 FAIL / 0 SKIP, exit0 |
+| --model-gallery-check | 1 полный functional suite PASS, 497 моделей / 7165 текстур, exit0 |
+| world_brush_130_integration (регресс129) | 8/8 отдельных случаев; Qt24 PASS (с init/cleanup) / 0 FAIL / 0 SKIP, exit0 |
+| gallery_thumbnail_cache_tests | Qt7 PASS / 0 FAIL / 0 SKIP, exit0 |
+| Staging --version / identity | 130, хеш EXE совпадает с tested |
+| Finalizer + internal validator | PASS, 127 managed payload files |
+| Установка и сохранность | 127/127 hashes PASS; 22433/22433 user files unchanged |
+
+Перед UI выполнена только нативная инвентаризация форматов буфера:
+49161, 2, **49470**, 49678, 49679, 49171, 8, 17. Unicode text13 отсутствовал.
+Формат49470 ранее отвергнут guard как несохраняемый; по текущему поручению
+буфер не изменялся, fixture не ставился и child не запускался. Это BLOCKED,
+а не успешный прогон. Владельцу сообщено; требуется простой текст в буфере,
+затем обязательный полный UI на том же EXE под `--guard-image-child`.
+На все выполненные UI/native проверки захватывался `build-locks/ui-tests.lock`
+через mkdir с owner.txt EI-FINALIZE-130; lock освобождался в finally.
+
+Новый staging: `build-staging-130-final-handoff`; finalizer применён только
+к этой собственной новой папке. Runtime Qt/MinGW и прочие неизменные payloads
+взяты по проверенному manifest чистого staging129; новые EXE/runtime/VERSION/notes
+из текущего снимка. Русский перевод уже встроен через qrc; временно добавленный
+внешний qm удалён из собственного staging, затем finalizer/validator повторён
+после этого изменения. После финализации staging не запускался и не менялся.
+Manifest SHA256: `52A8E058031EBE82154C3FB4F01A9F9011996BAD7690440E8268B1BA4ED442C9`.
+
+Постоянная установка: `artifacts/EI-Mapper-Ataman-2-first-test`, **129 → 130**.
+Перед записью выполнены process guard и сверка всех старых managed hashes.
+Старый EXE SHA256: `B70F56E4F8D0B2E187E5469923644613CDA81B0CC41BCE4E07D0B767D9245CA5`.
+Старый manifest: `6D08B53C84547CF6DDF95B72F170CD0DCA8F68B7CBD310223E183E4EAAFE5631`.
+Заменены 6 managed файлов: CHANGELOG.md, EIMapperEndurance.exe, Readme.md,
+VERSION, runtime/EIMapperEnduranceJmvBridge.plg,
+runtime/EIMapperEnduranceRuntimeHost.exe; manifest заменён последним.
+Каждый backup проверен по SHA256 до атомарной замены. Rollback129:
+`artifacts/rollback-EI-Mapper-Ataman-v129-to-130-20261010`.
+Старые rollback127/128 не удалены. Настройки, карты, сохранения, логи и кэши
+сохранены: хеши всех22433 unlisted user files до/после равны.
+Receipts: `build-tests-130-final/{snapshot,release-result,staging-result,install-plan,install-result,rollback-hashes,user-files-before,user-files-after,process-guard}.json`;
+результаты и stdout/stderr каждого теста — в одноимённых подпапках этого каталога.
+
+**Ограничение передачи:** установка130 и независимые проверки завершены;
+полная функциональная приёмка EI-GALLERY-THUMB-DEADLINE-130 остаётся открытой
+до обязательного полного UI. Для129 исходный мазок Swamp zone3obr и ручная
+смена карты остаются ручной приёмкой; synthetic/native не заменяют её.
+Следующий шаг: сохраняемый буфер → полный UI под guard и lock → обновление
+этого результата. Живые игровые/модовые данные, карты и Endurance не изменялись;
+интерактивного запуска, сети, установки зависимостей и push не было.
