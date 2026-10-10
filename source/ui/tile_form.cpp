@@ -491,12 +491,9 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
               images.size() / 64, tileTypes.size(), images.size(),
               tileTypes.size()))
         return false;
-    const QSize size = images.front().size();
-    if(size.width() <= 0 || size.width() != size.height())
+    const QSize size = terrainAtlasMaximumNativeTileSize(images);
+    if(size.isEmpty())
         return false;
-    for(const QImage& image : images)
-        if(image.isNull() || image.size() != size)
-            return false;
     m_tileImages = images;
     m_nTextureAtlas = images.size() / 64;
     m_originalTilesize = size.width();

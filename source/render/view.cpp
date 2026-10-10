@@ -40,6 +40,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "terrain_atlas_shape_policy.h"
 #include "verified_clipboard.h"
 #include "selection_region.h"
 #include "neighbor_visual_preparation.h"
@@ -12038,7 +12039,7 @@ void CView::rebuildTerrainAutoCatalog()
                     family, mprNamespace,
                     m_authoredTerrainTileImages.isEmpty()
                         ? QSize()
-                        : m_authoredTerrainTileImages.front().size(),
+                        : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages),
                     m_terrainGlobalUniformTileCache, &selectedSource);
             if(!source.isNull())
             {
@@ -12215,7 +12216,7 @@ void CView::rebuildTerrainAutoCatalog()
     if(m_terrainAtlasAnalysis.usable)
     {
         const QSize tileSize = m_authoredTerrainTileImages.isEmpty()
-            ? QSize() : m_authoredTerrainTileImages.front().size();
+            ? QSize() : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages);
         startDeferredGlobalTerrainPaletteHydration(
             mprNamespace, tileSize, hydrationGeneration);
     }
@@ -12592,7 +12593,7 @@ void CView::prewarmModernTerrainFamily(qint32 terrainType,
     const QStringList configuredArchives = CTextureList::getInstance()
         ->configuredResourceArchivePaths();
     const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-        ? QSize() : m_authoredTerrainTileImages.front().size();
+        ? QSize() : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages);
     const quint32 semanticSeed = m_terrainSemanticSeed;
     const qint64 guiMilliseconds = guiTimer.elapsed();
     auto* watcher = new QFutureWatcher<STerrainFamilyPrewarmResult>(this);
@@ -14125,7 +14126,7 @@ bool CView::ensureGlobalTerrainMaterialSources(
     required << signature.northWest << signature.northEast
              << signature.southEast << signature.southWest;
     const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-        ? QSize() : m_authoredTerrainTileImages.front().size();
+        ? QSize() : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages);
     for(qint32 material : required)
     {
         if(atlas->hasMaterialSource(material))
@@ -14262,7 +14263,7 @@ bool CView::realizeWorkingTerrainSignature(
                 < right.mprNamespace.toCaseFolded();
         });
         const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-            ? QSize() : m_authoredTerrainTileImages.front().size();
+            ? QSize() : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages);
         QSet<QByteArray> importedPhysical;
         QSet<QByteArray> importedPixels;
         CValidationReport libraryReport;
@@ -14535,22 +14536,13 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
             "The generated exact tiles have no valid logical tile-type table for the manual tile picker.");
         return false;
     }
-    const QSize tileSize = activeImages.front().size();
-    if(tileSize.width() <= 0 || tileSize.width() != tileSize.height())
+    if(terrainAtlasMaximumNativeTileSize(activeImages).isEmpty())
     {
         if(report) report->add("terrain.working_atlas_tile_picker",
             EValidationSeverity::Error,
             "The generated exact tiles have invalid physical image dimensions.");
         return false;
     }
-    for(const QImage& image : activeImages)
-        if(image.isNull() || image.size() != tileSize)
-        {
-            if(report) report->add("terrain.working_atlas_tile_picker",
-                EValidationSeverity::Error,
-                "The generated exact tiles do not form complete physical atlas pages.");
-            return false;
-        }
 
     const QVector<QImage> previousImages = m_pTileForm->tileImages();
     QVector<qint32> previousTypes;

@@ -514,6 +514,8 @@ class TerrainVirtualAtlasTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void mixedNativeSizesRenderGenerateAndPublish();
+    void mixedNativePublicationPreservesSmallTailPage();
     void oppositeBaselineOwnerDoesNotBlockStroke_data();
     void oppositeBaselineOwnerDoesNotBlockStroke();
     void virtualFieldPaintIsUnboundedByAtlas();
@@ -8152,6 +8154,101 @@ void TerrainVirtualAtlasTests::oppositeBaselineOwnerDoesNotBlockStroke()
     CTerrainVirtualMaterialField undone;QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.stableSha256(),beforeField.stableSha256());
     for(int slot=0;slot<fixture.images.size();++slot)QCOMPARE(working.activeTileImages().at(slot),fixture.images.at(slot));
+}
+
+void TerrainVirtualAtlasTests::mixedNativeSizesRenderGenerateAndPublish()
+{
+    Fixture fixture;
+    QVector<QImage> images;
+    // First page deliberately SMALL: the first image must not set generation.
+    for(int slot=0; slot<128; ++slot)
+        images.append(fixture.images.at(slot%4).scaled(slot<64?128:256, slot<64?128:256));
+    const auto before = images;
+    QVector<qint32> types(128, 1);
+    CTerrainVirtualAtlas atlas(fixture.catalog, images, 23, {}, {}, true, types);
+    QVERIFY2(atlas.isValid(), qPrintable(atlas.error()));
+    const auto grid = CTerrainVirtualAtlas::composeAtlasGrid(images, 2, 2);
+    QCOMPARE(grid.size(), QSize(4096, 2048));
+    QCOMPARE(images, before);
+    CValidationReport report;
+    const auto mixed = signature(1,2,3,4);
+    const auto tile = atlas.resolve(mixed,0,0,&report,1,1);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QVERIFY(tile.generatedIndex>=0);
+    QCOMPARE(atlas.generatedTiles().at(tile.generatedIndex).pixels.size(),QSize(256,256));
+    CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},types);
+    QMap<int,quint64> usage;
+    bool generated=false;
+    const auto packed=working.resolve(mixed,0,0,&usage,{},&generated,&report,1,1);
+    QVERIFY2(generated&&!report.hasErrors(),qPrintable(report.toText()));
+    QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(),128);
+    QCOMPARE(working.activeTileImages().at(128).size(),QSize(256,256));
+    QCOMPARE(working.activeTileImages().mid(0,128),before);
+    // A mixed-edge raster is already baked at the caller's maximum size.
+    const auto recipe=QString("mixed-edge-b2:")+QString(64,'a');
+    const int edge=working.importMixedEdgeTile(grid.copy(0,0,256,256),1,mixed,recipe,&report);
+    QVERIFY2(edge>=128,qPrintable(report.toText()));
+    QCOMPARE(working.activeTileImages().at(edge).size(),QSize(256,256));
+    QCOMPARE(working.activeTileImages().mid(0,128),before);
+    // Resolve/Finalize creates a NEW namespace at the maximum source size,
+    // even if the only retained authored tile lives in the small page.
+    CTerrainVirtualMaterialField field; QVERIFY(field.resize(16,16,1));
+    const auto finalized=atlas.finalize(field,"mixed137",192,types,&report);
+    QVERIFY2(finalized.success,qPrintable(finalized.error+report.toText()));
+    QCOMPARE(finalized.pages.front().size(),QSize(2048,2048));
+    QVector<QImage> decoded;
+    QVERIFY(CTerrainVirtualAtlas::decodePhysicalTileImages(finalized,&decoded,&report));
+    QCOMPARE(decoded.front().size(),QSize(256,256));
+    CMprDocument source;QVERIFY(source.loadBytes(portableMpr(),"mixed-finalize.mpr",&report));
+    const auto package=CTerrainVirtualAtlas::buildPortablePackage(source,finalized,ETerrainTileLayer::Land,&report);
+    QVERIFY2(package.success,qPrintable(package.error+report.toText()));
+    CMprDocument reopened;QVERIFY(reopened.loadBytes(package.mprBytes,"mixed-published.mpr",&report));
+    QCOMPARE(reopened.mapInfo().tileSize,quint32(256));
+    QCOMPARE(reopened.mapInfo().textureSize,quint32(2048));
+    QCOMPARE(images,before);
+}
+
+void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
+{
+    Fixture fixture;
+    QVector<QImage> images;
+    for(int slot=0;slot<128;++slot)
+        images.append(fixture.images.at(slot%4).scaled(slot<64?256:128,slot<64?256:128));
+    QVector<QByteArray> pages;
+    for(int page=0;page<2;++page)
+        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?256:128),true));
+    // Use the exact decoded native baseline, just as the adoption path does.
+    for(int slot=0;slot<128;++slot)
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
+    CResArchiveDocument source;QStringList errors;
+    QVERIFY(source.loadBytes(portableMpr(),"mixed-source.mpr",&errors));
+    QByteArray mp=source.memberPayload("CaveSet.MP").left(38);
+    qToLittleEndian<quint32>(2,reinterpret_cast<uchar*>(mp.data()+16));
+    qToLittleEndian<quint32>(2048,reinterpret_cast<uchar*>(mp.data()+20));
+    qToLittleEndian<quint32>(70,reinterpret_cast<uchar*>(mp.data()+24));
+    qToLittleEndian<quint32>(256,reinterpret_cast<uchar*>(mp.data()+28));
+    for(int slot=0;slot<70;++slot){char type[4];qToLittleEndian<qint32>(1,reinterpret_cast<uchar*>(type));mp.append(type,4);}
+    SResArchiveNewMember changed;changed.name="CaveSet.MP";changed.payload=mp;
+    QByteArray baseline;QVERIFY(source.buildWithPublishedMembers({changed},true,&baseline,&errors));
+    CMprDocument document;CValidationReport report;QVERIFY(document.loadBytes(baseline,"mixed-source.mpr",&report));
+    CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
+    QVERIFY(working.isValid());QMap<int,quint64> usage;bool generated=false;
+    const auto packed=working.resolve(signature(1,2,3,4),0,0,&usage,{},&generated,&report,1,1);
+    QVERIFY(generated);QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(),128);
+    const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(document,
+        working.activeTileImages(),working.activeTileTypes(),pages,&report);
+    QVERIFY2(package.success,qPrintable(package.error+report.toText()));
+    CResArchiveDocument reopened;QVERIFY(reopened.loadBytes(package.resourceArchiveBytes,"mixed-new.res",&errors));
+    QCOMPARE(reopened.memberPayload(package.resourceMembers.at(0)),pages.at(0));
+    QCOMPARE(reopened.memberPayload(package.resourceMembers.at(1)),pages.at(1));
+    QImage newTile;QVERIFY(ei::decodeMmpDxt1AtlasTile(reopened.memberPayload(package.resourceMembers.at(2)),0,&newTile));
+    QCOMPARE(newTile.size(),QSize(256,256));
+    QCOMPARE(working.activeTileImages().mid(0,128),images);
+    CTerrainWorkingAtlas imported(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
+    QImage newPixels(256,256,QImage::Format_RGBA8888);newPixels.fill(QColor(13,29,47));
+    QCOMPARE(imported.importPhysicalTile(newPixels,1,nullptr,"external137",0,&report),128);
+    QCOMPARE(imported.activeTileImages().at(128).size(),QSize(256,256));
+    QCOMPARE(imported.activeTileImages().mid(0,128),images);
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <future>
 #include "res_read_lease.h"
+#include "verified_clipboard.h"
 #include "res_archive_index.h"
 #include "res_archive_document.h"
 #include "map_save_batch.h"
@@ -492,7 +493,10 @@ private slots:
 };
 
 int main(int argc,char** argv) {
+    ei::TestClipboardSession clipboard(true);
+    if(!clipboard.prepared()) return 2;
     QApplication app(argc,argv);
+    if(!clipboard.install()) return 2;
     // Every temporary archive/backup is confined to the owned test tree.
     const QString root=QDir(QCoreApplication::applicationDirPath()).filePath("../fixtures-resdrain");
     if(!QDir().mkpath(root) || !QDir::setCurrent(root)) return 2;

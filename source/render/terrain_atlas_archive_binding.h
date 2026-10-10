@@ -41,6 +41,8 @@ struct STerrainAtlasEmbeddedBindingResult
                             const QByteArray& currentAtlasPixelSha256,
                             int currentAtlasSlotCount,
                             CValidationReport* report = nullptr) const;
+    // Sizes are native per-page sizes and may differ. Reuse never normalizes
+    // pixels: the resolver's namespace/physical-count/native-SHA proof applies.
     bool canReuseDecodedAtlasTiles(const QString& activeArchivePath,
                                    const QString& currentNamespace,
                                    int currentAtlasSlotCount,

@@ -400,6 +400,7 @@ private:
 
     const CTerrainTransitionCatalog& m_catalog;
     QVector<QImage> m_authoredTiles;
+    QSize m_generationSize;
     QMap<qint32, QImage> m_materialSources;
     QMap<qint32, int> m_materialSourceSlots;
     QVector<qint32> m_sourceTileTypes;

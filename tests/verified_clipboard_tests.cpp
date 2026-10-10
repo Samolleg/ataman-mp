@@ -1045,6 +1045,17 @@ private slots:
         QVERIFY(child.waitForFinished(10000)); QCOMPARE(child.exitCode(),0);
         QVERIFY(child.readAllStandardOutput().contains("backend=system"));
     }
+    void sentinelAcceptsExternalMetadata()
+    {
+        QProcess child; child.start(QCoreApplication::applicationFilePath(), {"--probe-external-metadata"});
+        QVERIFY(child.waitForFinished(10000));
+        QCOMPARE(child.exitCode(),0);
+        const auto output=child.readAllStandardOutput();
+        QVERIFY2(output.contains("PASS: clipboard isolation"),output.constData());
+        QVERIFY(output.contains("nativeAttempts=0"));
+        QVERIFY(output.contains("unchanged=0"));
+        QVERIFY(output.contains("INFO: external clipboard metadata changed"));
+    }
     void sentinelRejectsNativeAndSystemQpa()
     {
         for(const QString& probe : {QString("--probe-native-open"),QString("--probe-native-ole"),QString("--probe-system-qpa")}) {
@@ -1056,7 +1067,6 @@ private slots:
             const QByteArray output=child.readAllStandardError();
             QVERIFY2(output.contains("FAIL: clipboard isolation"),output.constData());
             QVERIFY(!output.contains("nativeAttempts=0"));
-            QVERIFY(output.contains("unchanged=1"));
         }
     }
 };
@@ -1083,6 +1093,33 @@ int main(int argc, char** argv)
         return system?0:2;
     }
 #ifdef Q_OS_WIN
+    if(option == "--probe-external-metadata") {
+        // Inject an external sequence observation in THIS process's import
+        // table. No clipboard is opened, written or held on the owner's PC.
+        auto base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+        auto dos=reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+        auto nt=reinterpret_cast<IMAGE_NT_HEADERS*>(base+dos->e_lfanew);
+        auto desc=reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base+
+            nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+        for(;desc->Name;++desc) {
+            if(!desc->OriginalFirstThunk) continue;
+            auto names=reinterpret_cast<IMAGE_THUNK_DATA*>(base+desc->OriginalFirstThunk);
+            auto addresses=reinterpret_cast<IMAGE_THUNK_DATA*>(base+desc->FirstThunk);
+            for(;names->u1.AddressOfData;++names,++addresses) {
+                if(IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+                auto name=reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base+names->u1.AddressOfData);
+                if(strcmp(reinterpret_cast<char*>(name->Name),"GetClipboardSequenceNumber")!=0) continue;
+                static DWORD externalSequence=GetClipboardSequenceNumber()+1;
+                static auto observation=+[]() -> DWORD { return externalSequence; };
+                DWORD prior=0;
+                if(!VirtualProtect(&addresses->u1.Function,sizeof(addresses->u1.Function),PAGE_READWRITE,&prior)) return 3;
+                addresses->u1.Function=reinterpret_cast<ULONG_PTR>(observation);
+                DWORD ignored=0;VirtualProtect(&addresses->u1.Function,sizeof(addresses->u1.Function),prior,&ignored);
+                return 0; // Destructor must PASS despite the sequence change.
+            }
+        }
+        return 3;
+    }
     if(option == "--probe-native-open") { OpenClipboard(nullptr); return 0; }
     if(option == "--probe-native-ole") { IDataObject* object=nullptr; OleGetClipboard(&object); return 0; }
     if(option == "--probe-system-qpa") {

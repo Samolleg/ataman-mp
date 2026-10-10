@@ -1,5 +1,13 @@
 # EI Mapper Ataman — roadmap
 
+## EI-TERRAIN-MIXED-RES-ATLAS-137 — mixed native atlas и clipboard sentinel
+
+- Поручение владельца через Claude 2026-10-10, база main b6b3be3cd3b3710613ae848182015f14f1240931, VERSION136→137. Результат: native identity при смешанных страницах, максимальный размер рендера/новых тайлов, сохранение authored payloads; изоляция буфера по nativeAttempts, внешняя метаинформация — INFO.
+- Границы: программа/tests/docs; собственные build-release-137-*/build-tests-137-* и copied maps; UI под ui-tests.lock; без открытия/удержания системного буфера, сети, подагентов, интерактивной игры/редактора, live writes, установки137 и push.
+- Статус: IMPLEMENTED, AUTOMATED GATES PASS, REVIEW/MANUAL ACCEPTANCE OPEN. Synthetic4/0, terrain146/0, random80/0, mixed-edge63/0, UI169/0/scenario50/0/dark70/0/gallery PASS, clipboard12/0, reader23/0 после первого сбоя.16 ожидаемых открытий; прежние semantic FAIL Zone2/Zone3obr сохранены. Uniform opening time≤+1.00%, memory≤+5.69%; thumbnails≤10% или≤+15ms.
+- Evidence: [ATAMAN_TERRAIN_MIXED_RES_ATLAS_137_20261010.md](docs/validation/ATAMAN_TERRAIN_MIXED_RES_ATLAS_137_20261010.md). Mixed MMP найдены в JamaisVu135 zone10/bz7g; игровая поддержка не доказана. Следующий шаг: ревью/договорная установка сопровождающим; отдельная game acceptance и задача guarded HDPack apply. Safe fallback — uniform256 новый namespace; к live не применён.
+
+
 ## EI-HDPACK-RESTORE-APPLY-20261010 — восстановление HDPack с переносом привязок
 
 - Поручение владельца через Claude 2026-10-10: «Оба шага»; здесь только data-only v2 от проверенного v1, перенос 12 embedded profiles/10 semantic documents и guarded replacement единственного Dejavu/res/HDPack_Terrain.res с backup. Функция пересборки опубликованных карт в HD — позднее, вне этой задачи.
@@ -906,7 +914,7 @@
 - Запрос владельца 2026-09-27: настроить маппер для `C:/GOG Games/PZ`. Ожидается распознавание портативной структуры Engine/Base/MODS, ресурсы и карты DejaVu, корректные пути проверки карты, сохранение поддержки старой установки. Разрешены изменения маппера и его настроек; игровые файлы не изменять. Ветка `codex/portable-pz-profile-v75` от `b8991f554dc00b30586a202f7f1a9fcfc3f4d2cf`.
 - Исходный отказ воспроизведён тестом до исправления. Версия 75 распознаёт обе структуры и передаёт runtime отдельные пути базовых ресурсов и стартера. 11 проверок профилей PASS без пропусков; 56 проверок запуска PASS с 3 пропусками внешних сценариев; native UI-check PASS; загрузка zone1 MPR/MOB из PZ и закрытие PASS. Offscreen-прогоны завершены по таймауту и не засчитаны; sandbox launcher имел 11 отказов доступа к временным папкам, native-прогон прошёл. Статус: версия 75 установлена в постоянную папку, профиль DejaVu/PZ настроен. Все 127 управляемых файлов проверены; изменены 6 программных файлов и только 5 полей настроек, резервная копия сохранена. Доказательства: docs/validation/ATAMAN_PORTABLE_PZ_75_20260927.md. Следующий шаг: ручная проверка ресурсов и запуска карты при открытом портативном стартере. Предупреждение Missing texture: vulkan — отдельное наблюдение, причина не установлена. Старые задачи не закрываются.
 
-Current Ataman version: `136` (каталог готовых сборок; ручная приёмка открыта). Ручная приёмка ID объектов, стыка zone6/zone4, исправления времени жизни текстур после сохранения, basecam, других стыков рельефа и материалов остаётся открытой.
+Current Ataman version: `137` (каталог готовых сборок; ручная приёмка открыта). Ручная приёмка ID объектов, стыка zone6/zone4, исправления времени жизни текстур после сохранения, basecam, других стыков рельефа и материалов остаётся открытой.
 
 ## EI-LEGACY-LIGHT-NID-COLLISION — объект и свет с одинаковым ID
 

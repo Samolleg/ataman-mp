@@ -130,11 +130,11 @@ bool CLandscape::previewTerrainAtlasIncremental(
        || textureCount != m_previewAtlasTextureCount
        || columns != m_previewAtlasColumns || changedSlots.isEmpty())
         return false;
-    const int tileSize = tileImages.front().width();
+    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
     const int pageSize = tileSize * 8;
     for(int slot : changedSlots)
         if(slot < 0 || slot >= tileImages.size()
-           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
+           || tileImages.at(slot).isNull())
             return false;
     // A same-layout publication updates the existing GL object. Keep a CPU
     // snapshot for the touched slots so a driver-side upload error can restore
@@ -142,7 +142,7 @@ bool CLandscape::previewTerrainAtlasIncremental(
     if(rollbackTileImages.size() != tileImages.size())
         return false;
     for(int slot : changedSlots)
-        if(rollbackTileImages.at(slot).size() != QSize(tileSize, tileSize))
+        if(rollbackTileImages.at(slot).isNull())
             return false;
 
     QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
@@ -167,9 +167,8 @@ bool CLandscape::previewTerrainAtlasIncremental(
                 + (local % 8) * tileSize;
             const int y = (page / columns) * pageSize
                 + (7 - local / 8) * tileSize;
-            const QImage image = images.at(slot).format()
-                == QImage::Format_RGBA8888 ? images.at(slot)
-                : images.at(slot).convertToFormat(QImage::Format_RGBA8888);
+            const QImage image = terrainAtlasRasterTile(images.at(slot), QSize(tileSize, tileSize))
+                .convertToFormat(QImage::Format_RGBA8888);
             gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y,
                                 tileSize, tileSize, GL_RGBA,
                                 GL_UNSIGNED_BYTE, image.constBits());
@@ -223,7 +222,7 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
        || m_previewAtlasTexture || changedSlots.isEmpty()
        || int(m_header.nTexture) <= 0 || textureCount <= int(m_header.nTexture))
         return false;
-    const int tileSize = tileImages.front().width();
+    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
     const int pageSize = tileSize * 8;
     const int width = columns * pageSize;
     const int height = rows * pageSize;
@@ -234,7 +233,7 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
         return false;
     for(int slot : changedSlots)
         if(slot < int(m_header.nTexture) * 64 || slot >= tileImages.size()
-           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
+           || tileImages.at(slot).isNull())
             return false;
 
     QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
@@ -380,9 +379,9 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
                 + (local % 8) * tileSize;
             const int y = (page / columns) * pageSize
                 + (7 - local / 8) * tileSize;
-            const QImage image = tileImages.at(slot).format()
-                == QImage::Format_RGBA8888 ? tileImages.at(slot)
-                : tileImages.at(slot).convertToFormat(QImage::Format_RGBA8888);
+            const QImage image = terrainAtlasRasterTile(
+                tileImages.at(slot), QSize(tileSize, tileSize))
+                .convertToFormat(QImage::Format_RGBA8888);
             gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, tileSize, tileSize,
                                 GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
         }
@@ -436,8 +435,8 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     if(textureCount <= 0 || tileImages.size() != textureCount * 64
        || !QOpenGLContext::currentContext())
         return false;
-    const int tileSize = tileImages.front().width();
-    if(tileSize <= 0 || tileImages.front().height() != tileSize)
+    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
+    if(tileSize <= 0)
         return false;
     const int pageSize = tileSize * 8;
     const int columns = CTile::preferredAtlasColumns(textureCount);

@@ -1942,12 +1942,15 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
             aPart.append(part);
         }
     }
-    //get min texture size
+    // Keep the zero-copy compressed path for uniform pages. Mixed pages
+    // need a display-only raster at the maximum native page size.
     ei::setCrashContext("mpr/terrain-atlas/combine:" + name);
     int minTexSize(aPart.first().header.m_width);
+    int maxTexSize = minTexSize;
     for(auto& part: aPart)
     {
         Q_ASSERT(part.header.m_width == part.header.m_height);
+        maxTexSize = qMax(maxTexSize, int(part.header.m_width));
         if(part.header.m_width < minTexSize)
             minTexSize = part.header.m_width;
     }
@@ -1955,6 +1958,55 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
     texCount = aPart.size();
     atlasColumns = CTile::preferredAtlasColumns(texCount);
     const int atlasRows = (texCount + atlasColumns - 1) / atlasColumns;
+    if(maxTexSize != minTexSize)
+    {
+        auto* context = QOpenGLContext::currentContext();
+        if(!context) return nullptr;
+        GLint maximum = 0;
+        context->functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximum);
+        if(maxTexSize * atlasColumns > maximum || maxTexSize * atlasRows > maximum)
+        {
+            ei::log(eLogWarning, "Mixed native terrain atlas exceeds this GPU; no downsampling was applied");
+            return nullptr;
+        }
+        QImage atlas(maxTexSize * atlasColumns, maxTexSize * atlasRows, QImage::Format_RGBA8888);
+        if(atlas.isNull()) return nullptr;
+        atlas.fill(Qt::transparent);
+        for(int index = 0; index < aPart.size(); ++index)
+        {
+            const auto& part = aPart.at(index);
+            const int nativeSize = part.header.m_width;
+            QImage native;
+            QString diagnostic;
+            if(!ei::decodeDxtImage(part.data.mid(part.header.size(), dxt1MipBytes(nativeSize, nativeSize)),
+                nativeSize, nativeSize, ei::DxtFormat::Dxt1, &native, &diagnostic))
+                return nullptr;
+            // Scale each tile independently to keep adjacent tile edges out
+            // of the interpolation footprint. Native payloads are untouched.
+            const int nativeTile = nativeSize / 8, renderTile = maxTexSize / 8;
+            for(int row = 0; row < 8; ++row) for(int column = 0; column < 8; ++column)
+            {
+                const QImage tile = native.copy(column * nativeTile, row * nativeTile, nativeTile, nativeTile)
+                    .scaled(renderTile, renderTile, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                    .convertToFormat(QImage::Format_RGBA8888);
+                const int x = (index % atlasColumns) * maxTexSize + column * renderTile;
+                const int y = (index / atlasColumns) * maxTexSize + row * renderTile;
+                for(int line = 0; line < renderTile; ++line)
+                    memcpy(atlas.scanLine(y + line) + x * 4, tile.constScanLine(line), size_t(renderTile) * 4);
+            }
+        }
+        auto* texture = new QOpenGLTexture(atlas, QOpenGLTexture::GenerateMipMaps);
+        if(!texture->isCreated()) { delete texture; return nullptr; }
+        texture->setMinificationFilter(m_terrainMipmappingEnabled ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+        texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+        texture->setWrapMode(QOpenGLTexture::Repeat);
+        m_aTexture[cacheKey] = texture;
+        m_terrainTextures.insert(texture);
+        m_terrainTextureUsers.insert(texture, 1);
+        ei::log(eLogInfo, QString("Mixed native terrain atlas map:%1 pages:%2 renderTilePx:%3 dimensions:%4x%5 displayOnly:true")
+            .arg(name).arg(texCount).arg(maxTexSize / 8).arg(atlas.width()).arg(atlas.height()));
+        return texture;
+    }
     // Select the authored level matching the smallest source tile. Sources in
     // one map can have different base resolutions, but all output levels must
     // line up in one horizontal atlas.
