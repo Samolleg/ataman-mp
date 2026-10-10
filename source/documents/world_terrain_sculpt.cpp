@@ -176,6 +176,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
     const double innerRadius=brush.radius*std::cos(pi/count);
     QSet<XY> frozenPositions;
     QMap<XY,double> limits;
+    QMap<XY,QVector<double>> initialHeights;
     for(int m:maps) {
         const auto& t=targets[m];
         for(const auto& anchor:frozen[m]) frozenPositions.insert(sharedPoint(t,m,anchor.first,anchor.second,rimKeys));
@@ -188,6 +189,7 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
         for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
             const auto key=sharedPoint(t,m,x,y,rimKeys);
             limits[key]=qMin(limits.value(key,std::numeric_limits<double>::max()),double(t.model->maxZ()));
+            if(rimKeys.contains({m,{x,y}})) initialHeights[key].append(height(t,x,y));
         }
     }
     QVector<double> distances(count),tangents(count);
@@ -224,7 +226,11 @@ SWorldTerrainStroke boundaryFill(const QVector<SWorldTerrainTarget>& targets,
                 blend*=f;
             }
             const double target=qBound(0.0,sum/total,limits.value(xy));
-            const double before=height(t,x,y),after=before+(target-before)*blend;
+            // Knitting has rounded each file to its own height quantum. Blend
+            // from one shared value, so a second rounding cannot amplify that
+            // residual into a crack at a mixed-scale rim.
+            const double before=rimKeys.contains({m,{x,y}})?mean(initialHeights.value(xy)):height(t,x,y);
+            const double after=before+(target-before)*blend;
             STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);
             d.after=quint16(qBound(0,qRound(after*65535.0/t.model->maxZ()),65535));
             if(d.after==d.before) continue;
