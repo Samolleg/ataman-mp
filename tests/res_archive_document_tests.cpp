@@ -796,7 +796,8 @@ void ResArchiveDocumentTests::draftPublicationKeepsPathsAndRollsBackEveryStage()
         QCOMPARE(reopened.memberPayload("opaque.bin"),old.memberPayload("opaque.bin"));
     }
     QVERIFY(layout.open(QIODevice::ReadOnly));QCOMPARE(layout.readAll(),world);
-    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true),ETerrainMprSaveRoute::PublishModernAtlas);
+    // Ataman122: saving a persisted draft in place does not republish RES.
+    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true,false),ETerrainMprSaveRoute::PlainMpr);
     QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true,true),ETerrainMprSaveRoute::PublishModernAtlas);
 }
 

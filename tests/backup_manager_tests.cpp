@@ -4,14 +4,36 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QStandardPaths>
 
 #include "backup_manager.h"
+
+namespace {
+class BackupRootEnvironmentGuard
+{
+public:
+    BackupRootEnvironmentGuard()
+        : m_root(qgetenv("EI_MAPPER_TEST_BACKUP_ROOT")),
+          m_testMode(QStandardPaths::isTestModeEnabled()) {}
+    ~BackupRootEnvironmentGuard()
+    {
+        qputenv("EI_MAPPER_TEST_BACKUP_ROOT", m_root);
+        QStandardPaths::setTestModeEnabled(m_testMode);
+    }
+private:
+    QByteArray m_root;
+    bool m_testMode;
+};
+}
 
 class BackupManagerTests : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void defaultSnapshotsUseProcessOwnedTestRoot();
+    void ordinaryRootRemainsUnchanged();
+    void qtTestModeUsesPrivateTemporaryRoot();
     void openSnapshotIsHashAddressedAndDeduplicated();
     void preSaveSnapshotsAreTimestampedAndExact();
     void retentionKeepsNewestFiftyPreSaveRevisions();
@@ -20,6 +42,60 @@ private slots:
     void uncleanSessionNotifiesEachRecoveryOnlyOnce();
     void cleanSessionDoesNotNotifyAndKeepsRecovery();
 };
+
+void BackupManagerTests::defaultSnapshotsUseProcessOwnedTestRoot()
+{
+    const QString root = qEnvironmentVariable("EI_MAPPER_TEST_BACKUP_ROOT");
+    QVERIFY(QDir::isAbsolutePath(root));
+    QVERIFY(root.startsWith(QDir::tempPath() + QLatin1Char('/')));
+    CBackupManager manager;
+    QCOMPARE(manager.rootPath(), QDir::cleanPath(root));
+    QTemporaryDir sourceDir;
+    QVERIFY(sourceDir.isValid());
+    const QString path = sourceDir.filePath("isolated.mob");
+    QFile source(path);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("original"), qint64(8));
+    source.close();
+    const auto opened = manager.snapshotOnOpen(QFileInfo(path));
+    const auto saved = manager.snapshotBeforeSave(QFileInfo(path));
+    const auto autosaved = manager.snapshotAutosave(QFileInfo(path), "edited");
+    for(const auto& snapshot : {opened, saved, autosaved})
+    {
+        QVERIFY2(snapshot.success, qPrintable(snapshot.error));
+        QVERIFY(snapshot.backupPath.startsWith(root + QLatin1Char('/')));
+        QVERIFY(QFileInfo::exists(snapshot.backupPath));
+    }
+    CBackupManager explicitManager(sourceDir.filePath("explicit-backups"));
+    QCOMPARE(explicitManager.rootPath(), sourceDir.filePath("explicit-backups"));
+}
+
+void BackupManagerTests::ordinaryRootRemainsUnchanged()
+{
+    BackupRootEnvironmentGuard guard;
+    qunsetenv("EI_MAPPER_TEST_BACKUP_ROOT");
+    QStandardPaths::setTestModeEnabled(false);
+    const QString expected = QDir(QStandardPaths::writableLocation(
+        QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups");
+    // Read-only: resolve the production path without creating any snapshots.
+    QCOMPARE(CBackupManager::defaultRootPath(), expected);
+    QCOMPARE(CBackupManager().rootPath(), expected);
+}
+
+void BackupManagerTests::qtTestModeUsesPrivateTemporaryRoot()
+{
+    BackupRootEnvironmentGuard guard;
+    qunsetenv("EI_MAPPER_TEST_BACKUP_ROOT");
+    QStandardPaths::setTestModeEnabled(true);
+    const QString sharedRoot = QDir(QStandardPaths::writableLocation(
+        QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups");
+    const QString isolatedRoot = CBackupManager::defaultRootPath();
+    QVERIFY(isolatedRoot != sharedRoot);
+    QVERIFY(QDir::isAbsolutePath(isolatedRoot));
+    QVERIFY(isolatedRoot.startsWith(QDir::tempPath() + QLatin1Char('/')));
+    QCOMPARE(CBackupManager().rootPath(), isolatedRoot);
+    QCOMPARE(CBackupManager::defaultRootPath(), isolatedRoot);
+}
 
 void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
 {
@@ -233,5 +309,5 @@ void BackupManagerTests::retentionKeepsNewestFiftyPreSaveRevisions()
     QVERIFY(QFileInfo::exists(openSnapshot.backupPath));
 }
 
-QTEST_MAIN(BackupManagerTests)
+QTEST_GUILESS_MAIN(BackupManagerTests)
 #include "backup_manager_tests.moc"

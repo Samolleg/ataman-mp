@@ -1,6 +1,7 @@
 #include "backup_manager.h"
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -13,6 +14,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
 
@@ -105,6 +107,35 @@ CBackupManager::CBackupManager(const QString& rootOverride)
 
 QString CBackupManager::defaultRootPath()
 {
+    // Native save tests supply a process-owned root before entering main.
+    // Invalid test configuration must never fall back to the user's backups.
+    const QString overrideRoot = qEnvironmentVariable("EI_MAPPER_TEST_BACKUP_ROOT");
+    if(!overrideRoot.isEmpty())
+    {
+        if(!QDir::isAbsolutePath(overrideRoot))
+            qFatal("EI_MAPPER_TEST_BACKUP_ROOT must be an absolute path");
+        return QDir::cleanPath(overrideRoot);
+    }
+
+    // Built-in checks also save documents. Qt's shared qttest directory is
+    // not private to this process, so test mode alone is not sufficient.
+    bool testRun = QStandardPaths::isTestModeEnabled();
+    if(QCoreApplication::instance())
+        for(const QString& argument : QCoreApplication::arguments().mid(1))
+        {
+            const QString option = argument.section(QLatin1Char('='), 0, 0);
+            testRun = testRun || (option.startsWith(QStringLiteral("--"))
+                                 && option.endsWith(QStringLiteral("-check")));
+        }
+    if(testRun)
+    {
+        static QTemporaryDir temporary(QDir::tempPath()
+            + QStringLiteral("/ei-mapper-test-backups-XXXXXX"));
+        if(!temporary.isValid())
+            qFatal("Cannot create an isolated test backup directory");
+        return temporary.filePath(QStringLiteral("backups"));
+    }
+
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
         .filePath("EI Mapper Endurance/backups");
 }

@@ -1,4 +1,5 @@
 #include <QtTest>
+#include "verified_clipboard.h"
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
@@ -2758,5 +2759,28 @@ void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()
     QCOMPARE(catalog.entries.value("MATERIAL Iron"),QString("Base Iron\r\nDescription"));
 }
 
-QTEST_MAIN(ProfileDatabaseTests)
+int main(int argc, char** argv)
+{
+    // This save/document suite also exercises database copy actions. Protect
+    // the owner's clipboard before QApplication initializes its native backend.
+    ei::TestClipboardSession clipboard(true);
+    if(!clipboard.prepared()) return 2;
+    QApplication app(argc, argv);
+    app.setAttribute(Qt::AA_Use96Dpi, true);
+    if(!clipboard.install()) return 2;
+    class HiddenWidgetFilter final : public QObject
+    {
+        bool eventFilter(QObject* object, QEvent* event) override
+        {
+            if(event->type() == QEvent::Polish)
+                if(QWidget* widget = qobject_cast<QWidget*>(object))
+                    widget->setAttribute(Qt::WA_DontShowOnScreen);
+            return false;
+        }
+    } hiddenWidgets;
+    app.installEventFilter(&hiddenWidgets);
+    ProfileDatabaseTests tests;
+    QTEST_SET_MAIN_SOURCE_PATH
+    return QTest::qExec(&tests, argc, argv);
+}
 #include "profile_database_tests.moc"

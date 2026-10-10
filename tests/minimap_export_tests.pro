@@ -2,6 +2,7 @@ QT += core gui widgets testlib
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = minimap_export_tests
+include(save_test_backup_root.pri)
 INCLUDEPATH += ../source/documents ../source/resources ../source/core ../source/app
 SOURCES += minimap_export_tests.cpp \
     ../source/documents/minimap_bake.cpp \

@@ -22,3 +22,4 @@ LIBS -= -lglu32 -lopengl32 -ldbghelp -luser32 -lole32
 LIBS += -lglu32 -lopengl32 -ldbghelp -luser32 -lole32
 
 PRE_TARGETDEPS += $$APP_OBJECTS
+include(save_test_backup_root.pri)
