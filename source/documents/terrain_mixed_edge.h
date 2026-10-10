@@ -9,6 +9,15 @@
 class CTerrainMixedEdge
 {
 public:
+    // Freeze the reviewed SD ownership bank for deterministic HD regeneration.
+    // This is the same selection/extraction path used by normal B2 painting.
+    static bool buildStockBrushes(const QVector<QImage>& images,
+        const QMap<qint32,QVector<int>>& uniforms,
+        const QMap<QPair<qint32,qint32>,QVector<int>>& stock,
+        const QMap<int,STerrainTransitionSignature>& sourceSignatures,
+        const QSet<QPair<qint32,qint32>>& pairs,
+        QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
+        CValidationReport* report = nullptr);
     static STerrainTileCommand resolve(const CTerrainEditModel& model,
         CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells,
         const QMap<qint32, qint32>& materialTypes,

@@ -7,27 +7,35 @@
 #include <QJsonObject>
 #include <QSharedPointer>
 
-// Exact evidence only: never substitute a visually similar tile or a source
-// selected from the map name. One index covers all configured stock namespaces.
+// Cross-namespace evidence index. Approximate matches require a calibrated
+// error bound, structural agreement and a margin over a different HD result.
 class CTerrainHdSources
 {
 public:
-    struct Source { int archive{-1}; QString page; int slot{-1}; int size{0}; };
+    struct Source { int archive{-1}; QString page; int slot{-1}; int size{0}; int rotation{0}; };
     bool open(const QStringList& archives, QString* error);
     bool match(const QImage& published, const STerrainAtlasProfileSlot& provenance,
-               Source* source, QString* reason) const;
+               Source* source, QString* reason, QJsonObject* evidence = nullptr) const;
     QImage image(const Source& source, int size, QString* error = nullptr) const;
     QByteArray payload(const Source& source, QString* error = nullptr) const;
     bool current(QString* error) const;
     bool find(const QString& nameSpace, int slot, Source* source) const;
     int sourceCount() const { return m_sources.size(); }
+    QJsonObject calibration() const { return m_calibration; }
 private:
+    struct Descriptor { int source; int rotation; int reduction; QVector<float> mean; };
     QVector<QSharedPointer<CResArchiveIndex>> m_archives;
     QVector<Source> m_sources;
     QHash<QByteArray,QVector<int>> m_byPixels;
     QHash<QString,int> m_byIdentity;
+    QHash<QByteArray,QStringList> m_sdOnly;
+    QHash<QString,STerrainAtlasProfile> m_origins;
     mutable QHash<int,QByteArray> m_hdHashes;
     mutable QMap<QString,QByteArray> m_payloadCache;
+    QVector<Descriptor> m_descriptors;
+    mutable QHash<QByteArray,QJsonObject> m_matchCache;
+    QJsonObject m_calibration;
+    double m_mseLimit{36.0};
 };
 
 struct STerrainHdRepublishResult
@@ -44,7 +52,7 @@ struct STerrainHdRepublishResult
 
 STerrainHdRepublishResult rebuildTerrainAtlasHd(
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& authoredPages,
-    const CTerrainHdSources& sources);
+    const CTerrainHdSources& sources, bool upgradePartialPages = true);
 
 class CMprDocument;
 bool prepareTerrainHdPublication(const CMprDocument& map,

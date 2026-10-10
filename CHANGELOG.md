@@ -1,8 +1,10 @@
-## Ataman 138 (WIP, не передан) — EI-TERRAIN-HD-REPUBLISH-138 — 2026-10-10
+## Ataman 138 — EI-TERRAIN-HD-REPUBLISH-138 — 2026-10-10 / продолжение2026-10-11
 
-- Подготовлены кнопка HD-пересборки опубликованного атласа текущей карты, пакетная check/build команда, exact cross-namespace stock matching и восстановление части Modern-рецептов; сохранение BC1-блоков и прежних128 страниц. Реализация неполная, mixed-edge regeneration отсутствует; whole-page fallback требует решения политики.
-- Fresh Release138; synthetic4 PASS/0 FAIL/0 SKIP. Первая публикация копии FAIL/exit2 (binary hash вместо hex namespace). STOP по поручению; полный регресс, openings/PNG/память и передача не выполнены. Последние guards исходников не пересобраны.
-- Установлена137; живые данные/84 защищённых входа и14 copied MPR неизменны. Scoped WIP-коммит не закрывает задачу. [Отчёт и следующий шаг](docs/validation/ATAMAN_TERRAIN_HD_REPUBLISH_138_20261010.md).
+- «Ландшафт → Дополнительно → Пересобрать атлас карты в HD…» и пакетный `--terrain-hd-republish-check`: все stock namespaces Dejavu/JamaisVu135, exact/provenance и калиброванные mip/box/4-rotation MSE/SSIM matching с отказом неоднозначности; Modern/mixed-edge256 тем же рецептом/ownership. Native HD BC1 переносится без перекомпрессии.
+- Все14 опубликованных карт на копиях: HD-stock6371, переходов256 1907, осталось SD128 detail3306 (native128 576, точный SD carrier256 2730). SEC/классы/вода/раскладка и semantic vertices сохранены; profile/semantic bindings переносятся без потери активности.
+- Production-linked synthetic4/0/0;28 actual mapper openings, private UI publication/reopen with byte-identical UI/CLI MPR; PNG5 карт, полный ui-widget/scenario/dark/gallery/nativeAttempts=0, terrain/mixed-resolution/random/mixed-edge/reader-drain; gallery benchmark137 проходит. World48/0/0 после принятого коммита02e01e55; backup isolation408aa5eb также включён в fresh combined build. Размеры/память и условный compressed budget в отчёте.
+- Принятые сопутствующие изменения138: общий rim knot World BoundaryFill смешивается от единой высоты, устраняя повторное округление; test backups изолированы, устаревшее ожидание save policy122 исправлено. [World](docs/validation/ATAMAN_WORLD_SCULPT_TEST_FAIL_20261011.md), [test tails](docs/validation/ATAMAN_TEST_TAILS_20261011.md).
+- Установлена137; живые84 входа и14 copied originals неизменны, без live apply/push. Новый scoped-коммит продолжает WIP без переписывания истории. [Отчёт, PNG, причины SD и план](docs/validation/ATAMAN_TERRAIN_HD_REPUBLISH_138_20261010.md).
 
 ## Ataman 137 — EI-TERRAIN-MIXED-RES-ATLAS-137 — 2026-10-10
 

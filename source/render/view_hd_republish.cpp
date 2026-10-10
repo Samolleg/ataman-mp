@@ -12,6 +12,7 @@
 #include <QCryptographicHash>
 #include <QApplication>
 #include <QRegularExpression>
+#include <QJsonArray>
 #include <QtConcurrent>
 
 void CView::republishTerrainAtlasHd()
@@ -29,13 +30,19 @@ void CView::republishTerrainAtlasHd()
        ||QFileInfo(archivePath).fileName().compare(QStringLiteral("HDPack_Terrain.res"),Qt::CaseInsensitive)!=0) {
         QMessageBox::information(this,tr("HD атлас"),tr("Команда работает только с опубликованным атласом Dejavu в HDPack_Terrain.res. Легаси-атласы не изменяются."));return;
     }
-    QProgressDialog progress(tr("Проверка точных HD-источников и рецептов переходов…"),QString(),0,0,this);
+    QProgressDialog progress(tr("Подбор HD-источников и восстановление рецептов переходов…"),QString(),0,0,this);
     progress.setWindowModality(Qt::ApplicationModal);progress.setCancelButton(nullptr);progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const STerrainAtlasProfile profile=m_terrainAtlasProfile;
-    auto future=QtConcurrent::run([archivePath,profile]() {
+    QStringList sourcePaths{archivePath};
+    const QDir modDirectory=QFileInfo(archivePath).dir().filePath("..");
+    if(QFileInfo(modDirectory.absolutePath()).fileName().compare(QStringLiteral("Dejavu"),Qt::CaseInsensitive)==0) {
+        const QString fallback=modDirectory.filePath("../JamaisVu135/res/HDPack_Terrain.res");
+        if(QFileInfo::exists(fallback))sourcePaths.append(QFileInfo(fallback).absoluteFilePath());
+    }
+    auto future=QtConcurrent::run([archivePath,sourcePaths,profile]() {
         STerrainHdRepublishResult result;CTerrainHdSources sources;QString error;
-        if(!sources.open({archivePath},&error)){result.error=error;return result;}
+        if(!sources.open(sourcePaths,&error)){result.error=error;return result;}
         CResArchiveIndex archive;if(!archive.open(archivePath,&error)){result.error=error;return result;}
         QVector<QByteArray> pages;
         for(int page=0;page<profile.textureCount;++page)pages.append(archive.readMember(QStringLiteral("%1%2.mmp").arg(profile.mprNamespace.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
@@ -47,7 +54,7 @@ void CView::republishTerrainAtlasHd()
     if(!result.success){QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;}
     const int hd=result.receipt["hdApplied"].toInt(),generated=result.receipt["regeneratedApplied"].toInt();
     if(hd+generated==0) {
-        QMessageBox::information(this,tr("HD атлас"),tr("Нет страниц с полным подтверждённым HD-происхождением. Старые 128 px страницы сохранены."));return;
+        QMessageBox::information(this,tr("HD атлас"),tr("Новых подтверждённых HD-источников или рецептов нет. Текущие страницы сохранены."));return;
     }
     QByteArray semantic=m_mprDocument.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
     if(semantic.isEmpty()) {
@@ -58,8 +65,8 @@ void CView::republishTerrainAtlasHd()
         QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;
     }
     const auto answer=QMessageBox::question(this,tr("Пересобрать атлас карты в HD"),
-        tr("Из HD: %1; переходов 256 px: %2; сохранено 128 px: %3.\n\nБудут опубликованы новая идентичность атласа в HDPack_Terrain.res и текущая MPR с резервными копиями. Слоты, повороты, классы и вода сохраняются.\n\nПродолжить?")
-            .arg(hd).arg(generated).arg(result.receipt["retained128"].toInt()));
+        tr("Из HD: %1; переходов 256 px: %2; осталось с детализацией 128 px: %3.\nИз них %4 перенесены без новых деталей в страницы 256 px, чтобы повысить соседние HD-тайлы.\n\nБудут опубликованы новая идентичность атласа в HDPack_Terrain.res и текущая MPR с резервными копиями. Слоты, повороты, классы и вода сохраняются.\n\nПродолжить?")
+            .arg(hd).arg(generated).arg(result.receipt["retained128"].toInt()).arg(result.receipt["sdCarried256"].toInt()));
     if(answer!=QMessageBox::Yes)return;
     bool ready=true;emit terrainPublicationPreflightRequested(archivePath,&ready);if(!ready)return;
     QFile archiveFile(archivePath);CResArchiveDocument baseline;QStringList errors;
@@ -67,6 +74,16 @@ void CView::republishTerrainAtlasHd()
         emit terrainPublicationFinished(archivePath,false);QMessageBox::critical(this,tr("HD пересборка отказана"),errors.join('\n'));return;
     }
     archiveFile.close();
+    const auto hashes=result.receipt["sourcePageSha256"].toArray();
+    bool unchanged=hashes.size()==profile.textureCount;
+    for(int page=0;page<hashes.size();++page) {
+        const QString member=QStringLiteral("%1%2.mmp").arg(profile.mprNamespace.toLower()).arg(page,3,10,QLatin1Char('0'));
+        unchanged=unchanged&&QString::fromLatin1(QCryptographicHash::hash(baseline.memberPayload(member),QCryptographicHash::Sha256).toHex())==hashes[page].toString();
+    }
+    if(!unchanged) {
+        emit terrainPublicationFinished(archivePath,false);
+        QMessageBox::critical(this,tr("HD пересборка отказана"),tr("Исходные страницы атласа изменились во время анализа. Повторите команду на актуальной карте."));return;
+    }
     SResPublishedMembersSaveRequest request;request.source=QFileInfo(archivePath);request.destination=request.source;request.published=result.publishedMembers;request.createBackup=true;
     const auto committed=commitStagedResPublishedMembers(baseline,request);
     if(!committed.success) {

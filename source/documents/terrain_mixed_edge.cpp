@@ -145,83 +145,7 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         materials.insert(id,material);
     }
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
-    auto orderedPairs=pairs.values(); std::sort(orderedPairs.begin(),orderedPairs.end());
-    for(const auto& pair:orderedPairs)
-    {
-        struct SStockCandidate { int slot, fragments; double score, residual, contrast; QVector<float> strip; };
-        QVector<SStockCandidate> candidates;
-        QString lastError;
-        // No generic replacement mask. Every bank is extracted from opaque
-        // reviewed physical two-material stock in the current map's atlas.
-        for(int slot:stock.value(pair))
-        {
-            QVector<float> strip; QString error;
-            const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
-            QImage bestFirst,bestSecond; double bestResidual=14;
-            for(int a:uniforms[pair.first]) for(int b:uniforms[pair.second])
-            {
-                const QImage first=images[a].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
-                const QImage second=images[b].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
-                QVector<float> ownership; double residual=0;
-                if(CTerrainRecipeBaker::estimateStockOwnership(transition,first,second,&ownership,&residual,&error)
-                   && residual<bestResidual)
-                { bestResidual=residual; bestFirst=first; bestSecond=second; }
-            }
-            if(!bestFirst.isNull() && CTerrainRecipeBaker::extractStockStrip(transition,
-                bestFirst,bestSecond,
-                pair.first,pair.second,
-                CTerrainTransitionCatalog::mirroredGridY(sourceSignatures[slot]),&strip,&error))
-            {
-                double contrast=0;
-                for(int y=0;y<128;++y) for(int x=0;x<128;++x)
-                {
-                    const QRgb a=bestFirst.pixel(x,y),b=bestSecond.pixel(x,y);
-                    contrast+=std::pow(qRed(a)-qRed(b),2)+std::pow(qGreen(a)-qGreen(b),2)
-                        +std::pow(qBlue(a)-qBlue(b),2);
-                }
-                contrast=std::sqrt(contrast/(128*128*3.0));
-                // Absolute RGB residual alone rewards uncertain low-contrast
-                // fits. Rank every local source by error relative to contrast,
-                // then by recovered fractional coverage. Never stop at the
-                // first four catalog entries (which can be soft legacy art).
-                double intermediate=0;
-                for(float v:strip) intermediate+=v>.1f && v<.9f;
-                intermediate/=strip.size();
-                const double relative=bestResidual/qMax(contrast,1.0);
-                const int fragments=stockFragments(strip);
-                if(contrast>1 && relative<.2)
-                    candidates.append({slot,fragments,relative+intermediate*.03-qMin(.15,fragments*.002),
-                        bestResidual,contrast,strip});
-                else lastError=QCoreApplication::translate("CTerrainMixedEdge", "Stock ownership is uncertain relative to material contrast.");
-            }
-            else lastError=error.isEmpty()?QStringLiteral("No trusted RGB ownership fit."):error;
-        }
-        std::sort(candidates.begin(),candidates.end(),[](const SStockCandidate& a,const SStockCandidate& b) {
-            return a.score==b.score ? a.slot<b.slot : a.score<b.score;
-        });
-        // Stage1b's art choice: prefer genuine stock flecks over a clean HD
-        // outline, but only among confident normalized RGB fits. A simple
-        // authored straight edge remains usable when no ragged source exists.
-        const bool ragged=std::any_of(candidates.cbegin(),candidates.cend(),[](const SStockCandidate& c) {
-            return c.fragments>=16 && c.residual/c.contrast<.15;
-        });
-        QVector<QVector<float>> strips;
-        for(const auto& c:candidates)
-        {
-            if(ragged && (c.fragments<16 || c.residual/c.contrast>=.15)) continue;
-            strips.append(c.strip);
-            if(report) report->add("terrain.mixed_edge.stock",EValidationSeverity::Info,
-                QStringLiteral("Crisp stock %1 / %2: slot %3, RGB RMSE %4, contrast RMS %5, relative score %6, fragments %7.")
-                    .arg(pair.first).arg(pair.second).arg(c.slot).arg(c.residual,0,'f',6)
-                    .arg(c.contrast,0,'f',6).arg(c.score,0,'f',6).arg(c.fragments));
-            if(strips.size()==4) break;
-        }
-        STerrainRecipeBrush brush; QString error;
-        if(strips.isEmpty() || !CTerrainRecipeBaker::makeBrush(pair.first,pair.second,strips,&brush,&error))
-            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile. %3").arg(pair.first).arg(pair.second).arg(error.isEmpty()?lastError:error));
-        CTerrainRecipeBaker::sharpenStockBrush(&brush);
-        brushes.insert(pair,brush);
-    }
+    if(!buildStockBrushes(images,uniforms,stock,sourceSignatures,pairs,&brushes,report))return {};
 
     for(int cell:ordered)
     {
@@ -306,4 +230,99 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         }
 
     return command;
+}
+
+bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
+    const QMap<qint32,QVector<int>>& uniforms,
+    const QMap<QPair<qint32,qint32>,QVector<int>>& stock,
+    const QMap<int,STerrainTransitionSignature>& sourceSignatures,
+    const QSet<QPair<qint32,qint32>>& pairs,
+    QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
+    CValidationReport* report)
+{
+    if(!output)return false;
+    auto refuseBrush=[&](const QString& message) {
+        if(report)report->add("terrain.mixed_edge.refused",EValidationSeverity::Error,message);
+        return false;
+    };
+    QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
+    auto orderedPairs=pairs.values(); std::sort(orderedPairs.begin(),orderedPairs.end());
+    for(const auto& pair:orderedPairs)
+    {
+        struct SStockCandidate { int slot, fragments; double score, residual, contrast; QVector<float> strip; };
+        QVector<SStockCandidate> candidates;
+        QString lastError;
+        // No generic replacement mask. Every bank is extracted from opaque
+        // reviewed physical two-material stock in the current map's atlas.
+        for(int slot:stock.value(pair))
+        {
+            QVector<float> strip; QString error;
+            const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+            QImage bestFirst,bestSecond; double bestResidual=14;
+            for(int a:uniforms[pair.first]) for(int b:uniforms[pair.second])
+            {
+                const QImage first=images[a].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+                const QImage second=images[b].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+                QVector<float> ownership; double residual=0;
+                if(CTerrainRecipeBaker::estimateStockOwnership(transition,first,second,&ownership,&residual,&error)
+                   && residual<bestResidual)
+                { bestResidual=residual; bestFirst=first; bestSecond=second; }
+            }
+            if(!bestFirst.isNull() && CTerrainRecipeBaker::extractStockStrip(transition,
+                bestFirst,bestSecond,
+                pair.first,pair.second,
+                CTerrainTransitionCatalog::mirroredGridY(sourceSignatures[slot]),&strip,&error))
+            {
+                double contrast=0;
+                for(int y=0;y<128;++y) for(int x=0;x<128;++x)
+                {
+                    const QRgb a=bestFirst.pixel(x,y),b=bestSecond.pixel(x,y);
+                    contrast+=std::pow(qRed(a)-qRed(b),2)+std::pow(qGreen(a)-qGreen(b),2)
+                        +std::pow(qBlue(a)-qBlue(b),2);
+                }
+                contrast=std::sqrt(contrast/(128*128*3.0));
+                // Absolute RGB residual alone rewards uncertain low-contrast
+                // fits. Rank every local source by error relative to contrast,
+                // then by recovered fractional coverage. Never stop at the
+                // first four catalog entries (which can be soft legacy art).
+                double intermediate=0;
+                for(float v:strip) intermediate+=v>.1f && v<.9f;
+                intermediate/=strip.size();
+                const double relative=bestResidual/qMax(contrast,1.0);
+                const int fragments=stockFragments(strip);
+                if(contrast>1 && relative<.2)
+                    candidates.append({slot,fragments,relative+intermediate*.03-qMin(.15,fragments*.002),
+                        bestResidual,contrast,strip});
+                else lastError=QCoreApplication::translate("CTerrainMixedEdge", "Stock ownership is uncertain relative to material contrast.");
+            }
+            else lastError=error.isEmpty()?QStringLiteral("No trusted RGB ownership fit."):error;
+        }
+        std::sort(candidates.begin(),candidates.end(),[](const SStockCandidate& a,const SStockCandidate& b) {
+            return a.score==b.score ? a.slot<b.slot : a.score<b.score;
+        });
+        // Stage1b's art choice: prefer genuine stock flecks over a clean HD
+        // outline, but only among confident normalized RGB fits. A simple
+        // authored straight edge remains usable when no ragged source exists.
+        const bool ragged=std::any_of(candidates.cbegin(),candidates.cend(),[](const SStockCandidate& c) {
+            return c.fragments>=16 && c.residual/c.contrast<.15;
+        });
+        QVector<QVector<float>> strips;
+        for(const auto& c:candidates)
+        {
+            if(ragged && (c.fragments<16 || c.residual/c.contrast>=.15)) continue;
+            strips.append(c.strip);
+            if(report) report->add("terrain.mixed_edge.stock",EValidationSeverity::Info,
+                QStringLiteral("Crisp stock %1 / %2: slot %3, RGB RMSE %4, contrast RMS %5, relative score %6, fragments %7.")
+                    .arg(pair.first).arg(pair.second).arg(c.slot).arg(c.residual,0,'f',6)
+                    .arg(c.contrast,0,'f',6).arg(c.score,0,'f',6).arg(c.fragments));
+            if(strips.size()==4) break;
+        }
+        STerrainRecipeBrush brush; QString error;
+        if(strips.isEmpty() || !CTerrainRecipeBaker::makeBrush(pair.first,pair.second,strips,&brush,&error))
+            return refuseBrush(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile. %3").arg(pair.first).arg(pair.second).arg(error.isEmpty()?lastError:error));
+        CTerrainRecipeBaker::sharpenStockBrush(&brush);
+        brushes.insert(pair,brush);
+    }
+
+    *output=brushes;return true;
 }
