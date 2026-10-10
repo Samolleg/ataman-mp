@@ -506,3 +506,183 @@ clipboard132 files в этот коммит не включать. `model_galler
 ```markdown
 - EI-PUBLICATION-RES-READER-DRAIN: надёжная атомарная публикация RES — короткое удержание QFile, осушение собственных readers, ограниченное ожидание новых фоновых запросов без блокировки GUI, точные I/O diagnostics и committed-but-unverified сообщение. Миниатюры и hydration не теряют результат при сохранении; timeout миниатюры не кэшируется, повтор читает архив заново. Sharing retry3× повторяет before-check и сохраняет backup/recovery/rollback78. Проверено: reader21 PASS, handler3 PASS на production objects, full UI PASS с verified clipboard restoration, scenario50/dark70/save12229/gallery PASS; resource-core22 PASS/2 SKIP. Evidence: docs/validation/ATAMAN_RES_READER_DRAIN_20261010.md.
 ```
+
+## Передача 133
+
+**EI-FINALIZE-133, 2026-10-10: передача ОСТАНОВЛЕНА по заданному порогу
+скорости; 133 НЕ установлена.** Этот раздел определяет состояние финальной
+передачи и имеет приоритет над прежними записями о готовности к интеграции.
+Холодное заполнение восьми видимых миниатюр замедлилось во всех пяти повторах:
+unmo +336,595 мс / +438,53%, stbu +332,822 мс / +1110% по медианам.
+Постоянная установка остаётся на 132. Новый staging, finalizer, manifest133,
+rollback132 и обновление установки не выполнялись в силу прямого условия
+«НЕ устанавливай, остановись»; старые rollback сохранены. TRAVEL_EDITOR.md
+пока не возвращён в постоянную папку. Это незавершённая передача, не PASS.
+
+### База, сборка и регресс
+
+- Поручение владельца через сопровождающего Claude от 2026-10-10. Ветка main,
+  чистая исходная рабочая копия, HEAD
+  `50eba3aaa02ce50037fa427de879960c41a6c5d6`, VERSION133.
+  AGENTS.md прочитан и проверен: SHA256
+  `F4B7FDD5EA82FCDF43D002D23D64EC36BE853650F054EDF70376527CD6432EC3`.
+  Договор docs/TEST_BUILD_HANDOFF.md применён; требование владельца сохранить
+  старые rollback учитывается. Параллельных задач/подагентов нет.
+- Свежий `git archive` указанного SHA распакован в
+  `build-release-133-final/src`; shadow build —
+  `build-release-133-final/release`, EXE — `release/release/EIMapperEndurance.exe`.
+  1809 tracked blobs сверены с Git: 0 отсутствующих/лишних/несовпадающих;
+  1598 архивных CRLF-файлов приведены к точным LF-байтам blobs перед сборкой.
+  После штатного build_release.ps1 снова 0 blob-несовпадений, включая перевод.
+  Qt5.12.12/MinGW7.3 взяты из установленного toolchain только для чтения.
+  Wrapper выполнил lrelease, Release и обе x86 runtime-сборки; exit0,
+  119,06 с. Сеть, установка зависимостей и изменения Endurance отсутствуют.
+- `--version`: `EI Mapper Endurance Edition 133`, exit0.
+  Свежий EXE SHA256:
+  `D94052AF103B05EC81D279E23AC44E0FD2BA8A1BE8917DEB3B9EAD9570ED3A9A`.
+- Все UI/native/scenario/dark/gallery/drain и benchmark-процессы выполнялись
+  под атомарным mkdir `build-locks/ui-tests.lock`, с owner.txt и finally-release.
+  Lock освобождён. Редактор и игра интерактивно не открывались. Буфер не очищался
+  вне guard; native suite захватила исходное содержимое до тестовых записей.
+
+| Проверка свежего результата | Результат | Evidence в build-tests-133-final |
+|---|---|---|
+| Полный --ui-widget-check на текущем OLE-скриншоте | 169 PASS + 4 PASS независимого parent, 0 FAIL, 0 SKIP, exit0; 8,38 с | ui-live/{0.out,0.err,result.json} |
+| Восстановление исходного буфера | Побайтно сохранены все 6 публичных форматов; PNG/CF_BITMAP доступны; parent восстановил original native clipboard | ui-live/0.out |
+| --scenario-layer-check | 50 PASS / 0 FAIL / 0 SKIP, exit0; 1,33 с | scenario/ |
+| --dark-theme-check | 70 PASS / 0 FAIL / 0 SKIP, exit0; 1,16 с | dark-theme/ |
+| --model-gallery-check | PASS, exit0; 1,77 с; 497 моделей/7165 текстур, open6мс/select3мс, Shift2мс, close0мс; queue/cache/stale/parallel/all-N подтверждены | gallery/0.out |
+| tests/res_reader_drain_tests из точных production objects133 | 21 PASS / 0 FAIL / 0 SKIP, exit0; 12,50 с | drain/results.txt |
+| Native clipboard tests из снимка133 | **25 PASS / 1 FAIL / 0 SKIP, exit1**, не PASS; 5,17 с | native/results.txt |
+
+Reader-drain: собственный reader180мс, 1 commit/1 checkpoint; concurrency
+4/4 thumbnails +1/1 hydration, drain198мс; admission timeout10020мс возвращает
+явную ошибку, повтор того же provider успешен. Его синтетические RES и backups
+ограничены собственным test tree; request.backupRootOverride задан в тесте.
+
+Native FAIL: `restoreAllFormatsAndFlushNativeData`, assertion guard.captured(),
+`Native clipboard format 49968 cannot be read completely within clipboard
+limits; check aborted before writes.` Read-only GetClipboardFormatNameW
+определил49968 как `image/icns`. В том же suite есть сообщения transient
+OleSetClipboard busy; причинная связь с этим FAIL не доказана. Исходный буфер
+после suite восстановлен; последующий полный UI подтвердил точные bytes и
+PNG/CF_BITMAP. Прогон не скрыт и не заменён PASS; после speed-stop повторов
+не выполнялось. Дальше нужен отдельный контроль synthetic image/icns fixture
+и guard capture, если сопровождающий поручит продолжение.
+
+### Скорость на реальном профиле
+
+Один и тот же скрытый native harness из
+`build-tests-129-thumbs/real-benchmark.cpp` связан отдельно с точными Release
+objects132 и133, исключён только main.o. Использованы те же разрешённые
+DejaVu/Base RES и private model-catalog/models/textures из отчёта129: unmo36,
+stbu71, по8 видимых плиток. Это профиль замера129, а не активный JamaisVu135
+из пользовательских настроек. Живые RES/карты/каталог/кэши установки не менялись.
+Подготовленные harness находятся в собственных build-tests; приватные fixtures
+и бинарники не включаются в Git или передачу.
+
+Пять повторов для каждой версии; порядок132/133 чередуется между повторами.
+Для каждого повтора — новая app-папка с отсутствующим производным cache:
+первый процесс измеряет cold и повтор в памяти; второй процесс той же app-папки
+измеряет warm disk и ещё один повтор в памяти. Холодный режим означает новый
+процесс и miss thumbnail memory/disk, не принудительную очистку файлового кэша
+ОС. Ни OS cache, ни чужие кэши не очищались. На каждом cold provider8 calls,
+на каждом disk/session0 calls. Все80 измерений завершились: visible8/ready8,
+unavailable0, complete1, без timeout/crash. Все20 процессов exit0.
+Fill начинается после show; total включает ctor/show, как в отчёте129.
+
+| Fill, мс; n=5 на каждую ячейку | 132 min / median / max | 133 min / median / max | Δ median, мс / % |
+|---|---:|---:|---:|
+| unmo cold | 73,062 / 76,755 / 98,384 | 405,497 / 413,350 / 436,267 | +336,595 / +438,53% |
+| stbu cold | 28,252 / 29,984 / 30,548 | 351,698 / 362,806 / 377,640 | +332,822 / +1110% |
+| unmo warm disk | 28,356 / 28,966 / 31,267 | 27,653 / 29,152 / 34,595 | +0,186 / +0,64% |
+| stbu warm disk | 9,281 / 9,659 / 10,032 | 9,307 / 9,650 / 10,662 | −0,009 / −0,09% |
+| unmo повтор в памяти после cold | 5,045 / 5,274 / 5,673 | 4,950 / 5,065 / 5,377 | −0,209 / −3,96% |
+| stbu повтор в памяти после cold | 5,500 / 5,696 / 6,426 | 5,441 / 6,203 / 6,364 | +0,507 / +8,90% |
+| unmo повтор после warm disk | 4,888 / 4,952 / 5,201 | 4,816 / 5,073 / 5,135 | +0,121 / +2,44% |
+| stbu повтор после warm disk | 5,547 / 5,633 / 6,242 | 5,488 / 5,717 / 6,482 | +0,084 / +1,49% |
+
+Оба cold-сценария превышают оба запретительных порога (>20% или >50мс).
+Тёплый диск и память почти не изменились: регресс связан с путём production
+provider на miss, не подтверждает конкретную внутреннюю причину.
+Сырые samples, total/open/show/GUI-gap и итог:
+[benchmark-raw.json](../../build-tests-133-final/benchmark-raw.json),
+[benchmark-summary.json](../../build-tests-133-final/benchmark-summary.json),
+`bench-{132,133}-{01..05}/{cold,disk-warm}.{out,err}`.
+
+Предложение исправления, **гипотеза, без изменения кода**: профилировать
+provider отдельно по admission/generation, каталогу, чтению, decode/render;
+хранить immutable shared catalog snapshot на поколение и заменять его при
+publication, передавая worker общий const snapshot. При этом QVector в
+CResourceCatalog использует implicit sharing: глубокое копирование всего
+каталога пока не доказано. `resIo::generation(path)` и ReadLease повторно
+вызывают pathKey с QFileInfo::canonicalFilePath; проверить стоимость повторной
+канонизации всех source paths и возможность переиспользовать canonical keys/
+registry handles на протяжении snapshot без ослабления read-drain и проверки
+поколения. После изменения обязательны cold/warm/repeat132-vs-new и concurrency
+регресс; повышать дедлайн либо обходить защиту публикации не предлагается.
+
+### Состав и байты пакета: аудит, передача отложена
+
+Сверены все payload hashes и manifest исторических staging130/131. В каждом
+127 managed files; между130 и131 менялись только EXE, два runtime-компонента,
+VERSION, Readme.md и CHANGELOG.md. TRAVEL_EDITOR.md, LICENSE, NOTICE и
+heightmaps/README.md оставались побайтно одинаковыми.
+
+Процедуры `build-tests-130-final/stage.py` и
+`build-tests-131-stream/stage.py` копировали каждый hash-проверенный файл
+предыдущего manifest (129→130→131), затем заменяли шесть текущих файлов.
+TRAVEL_EDITOR.md наследовался этой цепочкой; его содержимое совпадает с
+`docs/TRAVEL_EDITOR.md` снимка133 после CRLF-нормализации. LICENSE/NOTICE
+наследовались из предыдущего staging; Readme брался из working checkout,
+где `git ls-files --eol` показывает i/lf, w/crlf, attr/text=auto. Это источник
+CRLF-различия с точными LF-байтами Git-снимка132. Текущий tracked build wrapper/
+finalizer не добавляет TRAVEL_EDITOR автоматически: финализация не заменяет
+полную подготовку состава. Сравнение и источники:
+[package-audit.json](../../build-tests-133-final/package-audit.json).
+
+В staging132 осталось126 файлов, TRAVEL_EDITOR отсутствует; кроме версионных
+шести файлов отличаются LICENSE.txt, NOTICE.md и heightmaps/README.md только
+окончаниями строк. Для следующей передачи выбрана явная политика: UTF-8 с
+CRLF для текстов пакета (не менять Git blobs/исходники; не добавлять BOM).
+Она сохраняет точные bytes неизменённых документов130/131 и устраняет случайную
+зависимость от checkout/archive. VERSION и текущий CHANGELOG тоже записывать
+CRLF; это уже версионные файлы. В данном поручении политика установлена в
+отчёте, но к пакету ещё не применена: staging133 не создан из-за speed-stop.
+
+| Неизменяемый документ из снимка133, после CRLF | SHA256, совпадает с130/131 |
+|---|---|
+| LICENSE.txt | B25CBCA477B14288BB1294C969392C11B86500CD47567188040885151F2A9DFF |
+| NOTICE.md | F59B2224AFDB75D7A006BE11C626A28A0078123B08253FB3AD622EC704DD88F5 |
+| docs/TRAVEL_EDITOR.md → TRAVEL_EDITOR.md | 945D3E7B5905944D8735D07E518063DBC04BCDA15887CFD5B119F463EF1ACC83 |
+| heightmaps/README.md | 051A5079ED12BDF76F9DACFDB6D4BF37DC89E0C668C4646C3B010616A5887ACE |
+
+Планируемый набор следующего staging должен восстановить127 managed payloads;
+допустимые отличия от131 — только EXE, два заново собранных runtime-файла,
+VERSION, Readme и текущий CHANGELOG, с объяснением результатов сборки/версии.
+Фактического сравнения staging133, успешного finalizer или manifest133 нет,
+и их PASS не заявляется. Скрипты упаковки в Git не менялись.
+
+### Состояние установки и scoped-коммит
+
+Read-only после остановки:
+`artifacts/EI-Mapper-Ataman-2-first-test`, VERSION132,
+126/126 managed hashes совпали, ошибок0; TRAVEL_EDITOR отсутствует.
+Установленный EXE SHA256
+`DF44E7E6BD840FAD308525A0C1E08B367805846A8F049086CC9E9CEC6A1FEA06`;
+manifest SHA256
+`8ACFF8F7C3A1145671A77625521E982A53EF99F22A0CF2D5E50FAC52F0766660`.
+Никаких операций записи/backup/замены/очистки постоянной установки нет;
+пользовательские файлы/кэши, старые rollback, игра, мод и живые карты сохранены.
+Receipt: [stop-receipt.json](../../build-tests-133-final/stop-receipt.json).
+
+Для scoped-коммита разрешены и изменены только этот отчёт и два статуса в
+ROADMAP.md. Версия остаётся133; реализации и tracked packaging scripts не
+менялись. Engineering scripts/logs/binaries/fixtures из build-tests/build-release
+не входят в Git. Коммит выполняется в main с process-local переменными
+GIT_AUTHOR_NAME/GIT_COMMITTER_NAME=Codex,
+GIT_AUTHOR_EMAIL/GIT_COMMITTER_EMAIL=codex@localhost и trailer
+`Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+Push/remote/network и изменения глобального Git config запрещены и не выполнялись.
+Ручная визуальная/игровая приёмка не проводилась; следующий шаг — поручение на
+устранение speed-регресса и native image/icns FAIL, затем полная передача пакета.
