@@ -3,6 +3,7 @@
 #include <QClipboard>
 #include <QElapsedTimer>
 #include <QImage>
+#include <QBuffer>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
@@ -18,10 +19,21 @@
 #include "verified_clipboard.h"
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
+#include <ole2.h>
 #endif
 
 #ifdef Q_OS_WIN
 // Native fixtures and readback deliberately avoid Qt's image MIME conversion.
+static bool openForCheck(HWND window)
+{
+    QElapsedTimer timeout;
+    timeout.start();
+    do {
+        if(OpenClipboard(window)) return true;
+        QTest::qWait(10);
+    } while(timeout.elapsed() < 1000);
+    return false;
+}
 static QByteArray rasterDib(bool indexed)
 {
     BITMAPINFOHEADER header = {};
@@ -42,6 +54,213 @@ static QByteArray rasterDib(bool indexed)
         for(int i = 0; i < 16; ++i) bytes[int(sizeof(header)) + i] = char(i * 11);
     }
     return bytes;
+}
+
+static QByteArray pngBytes()
+{
+    QImage image(2, 2, QImage::Format_ARGB32);
+    image.fill(QColor(30, 90, 150, 200));
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+// Exercise real COM failure/short-read semantics without allocating huge data.
+class FaultStream : public IStream
+{
+    ULONG refs = 1;
+    IStream* inner;
+    int fault;
+public:
+    FaultStream(IStream* stream, int mode) : inner(stream), fault(mode) {}
+    virtual ~FaultStream() { inner->Release(); }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if(!out) return E_POINTER;
+        *out = nullptr;
+        if(iid == IID_IUnknown || iid == IID_IStream || iid == IID_ISequentialStream) { *out = this; AddRef(); return S_OK; }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
+    ULONG STDMETHODCALLTYPE Release() override { ULONG n = --refs; if(!n) delete this; return n; }
+    HRESULT STDMETHODCALLTYPE Read(void* p, ULONG n, ULONG* read) override {
+        if(fault == 2) { if(read) *read = 0; return STG_E_READFAULT; }
+        return inner->Read(p, n, read);
+    }
+    HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER n, DWORD origin, ULARGE_INTEGER* pos) override {
+        return fault == 1 ? STG_E_INVALIDFUNCTION : inner->Seek(n, origin, pos);
+    }
+    HRESULT STDMETHODCALLTYPE Stat(STATSTG* stat, DWORD flags) override {
+        const HRESULT result = inner->Stat(stat, flags);
+        if(result == S_OK && fault == 3) ++stat->cbSize.QuadPart;
+        if(result == S_OK && fault == 4) stat->cbSize.QuadPart = 129ULL * 1024 * 1024;
+        return result;
+    }
+    HRESULT STDMETHODCALLTYPE Write(const void* p, ULONG n, ULONG* written) override { return inner->Write(p,n,written); }
+    HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER n) override { return inner->SetSize(n); }
+    HRESULT STDMETHODCALLTYPE CopyTo(IStream* p, ULARGE_INTEGER n, ULARGE_INTEGER* r, ULARGE_INTEGER* w) override { return inner->CopyTo(p,n,r,w); }
+    HRESULT STDMETHODCALLTYPE Commit(DWORD n) override { return inner->Commit(n); }
+    HRESULT STDMETHODCALLTYPE Revert() override { return inner->Revert(); }
+    HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER a, ULARGE_INTEGER b, DWORD c) override { return inner->LockRegion(a,b,c); }
+    HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER a, ULARGE_INTEGER b, DWORD c) override { return inner->UnlockRegion(a,b,c); }
+    HRESULT STDMETHODCALLTYPE Clone(IStream**) override { return E_NOTIMPL; }
+};
+
+// Real OLE source, PNG deliberately rejects HGLOBAL. Ownership and delayed
+// rendering stay in this process; parent must pump OLE while child runs.
+class StreamSource : public IDataObject
+{
+    ULONG refs = 1;
+public:
+    virtual ~StreamSource() = default;
+    QMap<UINT, QByteArray> bytes;
+    DWORD pngMedium = TYMED_ISTREAM;
+    int streamFault = 0;
+    StreamSource() {
+        bytes.insert(RegisterClipboardFormatW(L"PNG"), pngBytes());
+        bytes.insert(CF_DIB, rasterDib(false));
+        BITMAPV5HEADER header = {};
+        const QByteArray dib = rasterDib(false);
+        memcpy(&header, dib.constData(), sizeof(BITMAPINFOHEADER));
+        header.bV5Size = sizeof(header);
+        bytes.insert(CF_DIBV5, QByteArray(reinterpret_cast<const char*>(&header), sizeof(header)) + dib.mid(sizeof(BITMAPINFOHEADER)));
+        bytes.insert(RegisterClipboardFormatW(L"CanUploadToCloudClipboard"), QByteArray::fromHex("01000000"));
+        bytes.insert(RegisterClipboardFormatW(L"CanIncludeInClipboardHistory"), QByteArray::fromHex("01000000"));
+        bytes.insert(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing"), QByteArray(4, '\0'));
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+        if(!out) return E_POINTER;
+        *out = nullptr;
+        if(iid == IID_IUnknown || iid == IID_IDataObject) { *out = static_cast<IDataObject*>(this); AddRef(); return S_OK; }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
+    ULONG STDMETHODCALLTYPE Release() override { const ULONG n = --refs; if(!n) delete this; return n; }
+    HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override {
+        if(!f) return E_POINTER;
+        if(f->ptd || f->lindex != -1 || f->dwAspect != DVASPECT_CONTENT) return DV_E_FORMATETC;
+        if(!bytes.contains(f->cfFormat)) return DV_E_FORMATETC;
+        return (f->tymed & (f->cfFormat == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL))) ? S_OK : DV_E_TYMED;
+    }
+    HRESULT STDMETHODCALLTYPE GetData(FORMATETC* f, STGMEDIUM* m) override {
+        const HRESULT valid = QueryGetData(f);
+        if(valid != S_OK) return valid;
+        *m = {};
+        const QByteArray payload = bytes[f->cfFormat];
+        if(f->cfFormat == RegisterClipboardFormatW(L"PNG") && (pngMedium & TYMED_ISTREAM)) {
+            m->tymed = TYMED_ISTREAM;
+            if(CreateStreamOnHGlobal(nullptr, TRUE, &m->pstm) != S_OK) return E_OUTOFMEMORY;
+            ULONG written = 0;
+            if(m->pstm->Write(payload.constData(), ULONG(payload.size()), &written) != S_OK || written != ULONG(payload.size())) {
+                ReleaseStgMedium(m); *m = {}; return E_FAIL;
+            }
+            if(streamFault) m->pstm = new FaultStream(m->pstm, streamFault);
+            // Return positioned at EOF, forcing guard to seek to the start.
+            return S_OK;
+        }
+        if(pngMedium == TYMED_ISTORAGE && f->cfFormat == RegisterClipboardFormatW(L"PNG")) {
+            ILockBytes* lock = nullptr;
+            if(CreateILockBytesOnHGlobal(nullptr, TRUE, &lock) != S_OK) return E_FAIL;
+            m->tymed = TYMED_ISTORAGE;
+            const HRESULT result = StgCreateDocfileOnILockBytes(lock, STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &m->pstg);
+            lock->Release(); return result;
+        }
+        m->tymed = TYMED_HGLOBAL;
+        m->hGlobal = GlobalAlloc(GMEM_MOVEABLE, SIZE_T(payload.size()));
+        void* data = m->hGlobal ? GlobalLock(m->hGlobal) : nullptr;
+        if(!data) { ReleaseStgMedium(m); *m = {}; return E_OUTOFMEMORY; }
+        memcpy(data, payload.constData(), size_t(payload.size())); GlobalUnlock(m->hGlobal);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD dir, IEnumFORMATETC** out) override {
+        if(dir != DATADIR_GET) return E_NOTIMPL;
+        QVector<FORMATETC> list;
+        for(auto it = bytes.cbegin(); it != bytes.cend(); ++it) {
+            FORMATETC f = {}; f.cfFormat = CLIPFORMAT(it.key()); f.dwAspect = DVASPECT_CONTENT; f.lindex = -1;
+            f.tymed = it.key() == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL);
+            list.append(f);
+        }
+        // Resolve OS helper; application/test needs no new dependency.
+        typedef HRESULT (WINAPI *CreateEnum)(UINT, FORMATETC*, IEnumFORMATETC**);
+        static const auto create = reinterpret_cast<CreateEnum>(GetProcAddress(LoadLibraryW(L"shell32.dll"), "SHCreateStdEnumFmtEtc"));
+        return create ? create(UINT(list.size()), list.data(), out) : E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC*, FORMATETC* out) override { if(out) out->ptd = nullptr; return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override { return OLE_E_ADVISENOTSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
+};
+
+static bool installStream(int fault = 0, DWORD medium = TYMED_ISTREAM)
+{
+    auto* source = new StreamSource;
+    source->streamFault = fault; source->pngMedium = medium;
+    QElapsedTimer timeout;
+    timeout.start();
+    HRESULT result;
+    do {
+        result = OleSetClipboard(source);
+        if(result == S_OK) break;
+        QTest::qWait(10);
+    } while(timeout.elapsed() < 1000);
+    source->Release();
+    return result == S_OK;
+}
+
+static QByteArray oleBytes(UINT id, DWORD tymed, HRESULT* status = nullptr)
+{
+    QByteArray result;
+    IDataObject* object = nullptr;
+    HRESULT hr = OleGetClipboard(&object);
+    if(hr == S_OK && object) {
+        FORMATETC f = {}; f.cfFormat = CLIPFORMAT(id); f.dwAspect = DVASPECT_CONTENT; f.lindex = -1; f.tymed = tymed;
+        STGMEDIUM m = {}; hr = object->GetData(&f, &m);
+        if(hr == S_OK && m.tymed == TYMED_HGLOBAL) {
+            const SIZE_T size = GlobalSize(m.hGlobal);
+            const void* data = GlobalLock(m.hGlobal);
+            if(data && size <= INT_MAX) result = QByteArray(static_cast<const char*>(data), int(size));
+            if(data) GlobalUnlock(m.hGlobal);
+        } else if(hr == S_OK && m.tymed == TYMED_ISTREAM) {
+            LARGE_INTEGER zero = {}; m.pstm->Seek(zero, STREAM_SEEK_SET, nullptr);
+            char chunk[4096]; ULONG read = 0;
+            do { hr = m.pstm->Read(chunk, sizeof(chunk), &read); result.append(chunk, int(read)); } while(hr == S_OK && read);
+            if(hr == S_FALSE) hr = S_OK;
+        }
+        ReleaseStgMedium(&m); object->Release();
+    }
+    if(status) *status = hr;
+    return result;
+}
+
+static bool clipboardInventory()
+{
+    HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const bool opened = openForCheck(window);
+    if(!opened) { if(window) DestroyWindow(window); return false; }
+    UINT id = 0;
+    while((id = EnumClipboardFormats(id))) {
+        wchar_t name[256] = {};
+        GetClipboardFormatNameW(id, name, 256);
+        printf("Native format %u %s\n", id, qPrintable(QString::fromWCharArray(name)));
+    }
+    CloseClipboard();
+    DestroyWindow(window);
+    IDataObject* object = nullptr;
+    if(OleGetClipboard(&object) != S_OK || !object) return false;
+    IEnumFORMATETC* enumerator = nullptr;
+    const HRESULT result = object->EnumFormatEtc(DATADIR_GET, &enumerator);
+    if(result != S_OK || !enumerator) { object->Release(); return false; }
+    FORMATETC format = {};
+    while(enumerator->Next(1, &format, nullptr) == S_OK) {
+        printf("OLE format %u tymed=%lu aspect=%lu index=%ld\n", format.cfFormat,
+            static_cast<unsigned long>(format.tymed), static_cast<unsigned long>(format.dwAspect), static_cast<long>(format.lindex));
+        if(format.ptd) CoTaskMemFree(format.ptd);
+    }
+    enumerator->Release(); object->Release(); return true;
 }
 
 static bool installRaster(bool indexed, bool bitmapFirst = false)
@@ -66,9 +285,14 @@ static bool installRaster(bool indexed, bool bitmapFirst = false)
     }
     HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
         HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
-    bool ok = window && (!bitmapFirst || bitmap) && (!indexed || palette) && OpenClipboard(window);
+    HGLOBAL excluded = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+    bool ok = window && excluded && (!bitmapFirst || bitmap) && (!indexed || palette) && openForCheck(window);
     if(ok) {
         ok = EmptyClipboard();
+        if(ok) {
+            ok = SetClipboardData(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing"), excluded);
+            if(ok) excluded = nullptr;
+        }
         if(ok && bitmapFirst) {
             ok = SetClipboardData(CF_BITMAP, bitmap);
             if(ok) bitmap = nullptr;
@@ -81,19 +305,23 @@ static bool installRaster(bool indexed, bool bitmapFirst = false)
     if(bitmap) DeleteObject(bitmap);
     if(palette) DeleteObject(palette);
     if(block) GlobalFree(block);
+    if(excluded) GlobalFree(excluded);
     return ok;
 }
 
 static QByteArray readNativeBytes(UINT format)
 {
     QByteArray result;
-    if(OpenClipboard(nullptr)) {
+    HWND window = CreateWindowExW(0, L"STATIC", L"", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if(openForCheck(window)) {
         HANDLE block = GetClipboardData(format);
         const SIZE_T size = block ? GlobalSize(block) : 0;
         const void* bytes = size && size <= INT_MAX ? GlobalLock(block) : nullptr;
         if(bytes) { result = QByteArray(static_cast<const char*>(bytes), int(size)); GlobalUnlock(block); }
         CloseClipboard();
     }
+    if(window) DestroyWindow(window);
     return result;
 }
 #endif
@@ -111,18 +339,6 @@ class HiddenWidgets : public QObject
 class VerifiedClipboardTests : public QObject
 {
     Q_OBJECT
-#ifdef Q_OS_WIN
-    bool openForCheck(HWND window)
-    {
-        QElapsedTimer timeout;
-        timeout.start();
-        do {
-            if(window && OpenClipboard(window)) return true;
-            QTest::qWait(10);
-        } while(timeout.elapsed() < 1000);
-        return false;
-    }
-#endif
     bool holdClipboard(QProcess& holder, int ms)
     {
         QTemporaryDir ready;
@@ -146,6 +362,83 @@ class VerifiedClipboardTests : public QObject
             && holder.exitStatus() == QProcess::NormalExit && holder.exitCode() == 0;
     }
 private slots:
+    void explicitMonitorMarkerIsNotOverwritten()
+    {
+#ifdef Q_OS_WIN
+        QMimeData original;
+        original.setText("Synthetic marker preservation");
+        const QString markerName = QStringLiteral("ExcludeClipboardContentFromMonitorProcessing");
+        const QByteArray marker = QByteArray::fromHex("01000000");
+        original.setData(markerName, marker);
+        QVERIFY(ei::copyMimeDataToClipboard(original));
+        QVERIFY(OleFlushClipboard() == S_OK);
+        QCOMPARE(readNativeBytes(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing")), marker);
+        QVERIFY(ei::copyTextToClipboard("Synthetic automatic marker"));
+        QVERIFY(OleFlushClipboard() == S_OK);
+        QCOMPARE(readNativeBytes(RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing")), QByteArray(4, '\0'));
+#endif
+    }
+    void emptyVerifiedWriteRemainsEmpty()
+    {
+        QMimeData empty;
+        const auto snapshot = ei::ClipboardSnapshot::fromMimeData(empty);
+        const auto result = ei::writeClipboard(snapshot);
+        QVERIFY2(result.ok, qPrintable(result.error));
+        QVERIFY(snapshot.matches(QApplication::clipboard()->mimeData()));
+        QVERIFY(QApplication::clipboard()->mimeData()->formats().isEmpty());
+    }
+    void streamOnlyPngRestoresBothMedia()
+    {
+#ifdef Q_OS_WIN
+        StreamSource source;
+        FORMATETC f = {}; f.cfFormat = CLIPFORMAT(RegisterClipboardFormatW(L"PNG"));
+        f.dwAspect = DVASPECT_CONTENT; f.lindex = -1; f.tymed = TYMED_HGLOBAL;
+        QCOMPARE(source.QueryGetData(&f), HRESULT(DV_E_TYMED));
+        QVERIFY(installStream());
+        QCOMPARE(oleBytes(f.cfFormat, TYMED_ISTREAM), pngBytes());
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY2(guard.captured(), qPrintable(guard.error()));
+        const auto original = source.bytes;
+        QVERIFY(ei::copyTextToClipboard("Temporary replacement"));
+        QVERIFY2(guard.restore(), qPrintable(guard.error()));
+        for(auto it = original.cbegin(); it != original.cend(); ++it) QCOMPARE(readNativeBytes(it.key()), it.value());
+        HRESULT status = E_FAIL;
+        QCOMPARE(oleBytes(f.cfFormat, TYMED_HGLOBAL, &status), pngBytes()); QCOMPARE(status, HRESULT(S_OK));
+        const QByteArray stream = oleBytes(f.cfFormat, TYMED_ISTREAM, &status);
+        QCOMPARE(status, HRESULT(S_OK)); QCOMPARE(stream, pngBytes());
+        QVERIFY(!QImage::fromData(stream, "PNG").isNull());
+        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
+#endif
+    }
+    void storageRefusesBeforeWrites()
+    {
+#ifdef Q_OS_WIN
+        QVERIFY(installStream(false, TYMED_ISTORAGE));
+        const DWORD sequence = GetClipboardSequenceNumber();
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY(!guard.captured()); QVERIFY(!guard.error().isEmpty());
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
+#endif
+    }
+    void unreadableStreamRefusesBeforeWrites_data()
+    {
+        QTest::addColumn<int>("fault");
+        QTest::newRow("not-seekable") << 1;
+        QTest::newRow("read-failure") << 2;
+        QTest::newRow("truncated") << 3;
+        QTest::newRow("over-128MiB") << 4;
+    }
+    void unreadableStreamRefusesBeforeWrites()
+    {
+#ifdef Q_OS_WIN
+        QFETCH(int, fault);
+        QVERIFY(installStream(fault));
+        const DWORD sequence = GetClipboardSequenceNumber();
+        ei::ClipboardRestoreGuard guard;
+        QVERIFY(!guard.captured()); QVERIFY(!guard.error().isEmpty());
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
+#endif
+    }
     void nativeBitmapBeforeDibRestores()
     {
 #ifdef Q_OS_WIN
@@ -159,7 +452,7 @@ private slots:
         QVERIFY2(guard.restore(), qPrintable(guard.error()));
         QCOMPARE(readNativeBytes(CF_DIB), original);
         QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
-        QVERIFY(OpenClipboard(nullptr));
+        QVERIFY(openForCheck(nullptr));
         const bool bitmapAvailable = GetClipboardData(CF_BITMAP) != nullptr;
         CloseClipboard();
         QVERIFY(bitmapAvailable);
@@ -169,7 +462,7 @@ private slots:
     {
 #ifdef Q_OS_WIN
         QVERIFY(installRaster(true));
-        QVERIFY(OpenClipboard(nullptr));
+        QVERIFY(openForCheck(nullptr));
         const bool available = GetClipboardData(CF_BITMAP) && GetClipboardData(CF_PALETTE);
         CloseClipboard();
         QVERIFY(available);
@@ -180,7 +473,7 @@ private slots:
         QCOMPARE(readNativeBytes(CF_DIB), rasterDib(true));
         QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
         QVERIFY(IsClipboardFormatAvailable(CF_PALETTE));
-        QVERIFY(OpenClipboard(nullptr));
+        QVERIFY(openForCheck(nullptr));
         HPALETTE palette = HPALETTE(GetClipboardData(CF_PALETTE));
         PALETTEENTRY entries[2] = {};
         const UINT count = palette ? GetPaletteEntries(palette, 0, 2, entries) : 0;
@@ -471,15 +764,24 @@ int main(int argc, char** argv)
     QApplication app(argc, argv);
     HiddenWidgets hidden;
     app.installEventFilter(&hidden);
+#ifdef Q_OS_WIN
+    if(argc == 2 && QByteArray(argv[1]) == "--inventory") return clipboardInventory() ? 0 : 2;
+#endif
     ei::ClipboardRestoreGuard clipboard;
     if(!clipboard.captured()) { fprintf(stderr, "%s\n", qPrintable(clipboard.error())); return 2; }
+    if(argc == 3 && QByteArray(argv[1]) == "--guard-stream-child") {
+#ifdef Q_OS_WIN
+        if(!installStream()) return 2;
+        if(!clipboardInventory()) return 2;
+#endif
+    }
     if(argc == 3 && QByteArray(argv[1]) == "--guard-image-child") {
 #ifdef Q_OS_WIN
         // The owner's contents are captured before installing any fixture.
         if(!installRaster(false, true)) return 2;
 #endif
     }
-    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child")) {
+    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child" || QByteArray(argv[1]) == "--guard-stream-child")) {
         // Historical UI checks lack verified restoration. Keep their original
         // executable unchanged, while an independent parent preserves native
         // clipboard data for a safe baseline comparison.
@@ -492,6 +794,7 @@ int main(int argc, char** argv)
 #ifdef Q_OS_WIN
         const QByteArray imageBefore = readNativeBytes(CF_DIB);
         const QByteArray imageV5Before = readNativeBytes(CF_DIBV5);
+        StreamSource expectedStream;
 #endif
         child.start(QString::fromLocal8Bit(argv[2]), {"--ui-widget-check"});
         if(!child.waitForStarted(3000)) return 2;
@@ -512,12 +815,26 @@ int main(int argc, char** argv)
             || (readNativeBytes(CF_DIB) == imageBefore && readNativeBytes(CF_DIBV5) == imageV5Before
                 && IsClipboardFormatAvailable(CF_BITMAP));
         printf("%s: child preserved image HGLOBAL bytes and CF_BITMAP availability\n", imageRestored ? "PASS" : "FAIL");
+        bool streamRestored = true;
+        if(QByteArray(argv[1]) == "--guard-stream-child") {
+            for(auto it = expectedStream.bytes.cbegin(); it != expectedStream.bytes.cend(); ++it)
+                streamRestored = streamRestored && readNativeBytes(it.key()) == it.value();
+            const UINT png = RegisterClipboardFormatW(L"PNG");
+            HRESULT globalStatus = E_FAIL, streamStatus = E_FAIL;
+            const QByteArray global = oleBytes(png, TYMED_HGLOBAL, &globalStatus);
+            const QByteArray stream = oleBytes(png, TYMED_ISTREAM, &streamStatus);
+            streamRestored = streamRestored && globalStatus == S_OK && streamStatus == S_OK
+                && global == pngBytes() && stream == global && !QImage::fromData(stream, "PNG").isNull();
+            printf("%s: child preserved all stream fixture bytes, PNG HGLOBAL/ISTREAM and decoding\n", streamRestored ? "PASS" : "FAIL");
+            if(!clipboardInventory()) streamRestored = false;
+        }
 #else
         const bool imageRestored = true;
+        const bool streamRestored = true;
 #endif
         const bool restored = clipboard.restore();
         printf("%s: baseline parent restored original native clipboard\n", restored ? "PASS" : "FAIL");
-        if(!finished || !restored || !imageRestored || child.exitStatus() != QProcess::NormalExit) return 2;
+        if(!finished || !restored || !imageRestored || !streamRestored || child.exitStatus() != QProcess::NormalExit) return 2;
         return child.exitCode();
     }
     VerifiedClipboardTests tests;

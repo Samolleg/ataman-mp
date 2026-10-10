@@ -1,5 +1,32 @@
 # EI Mapper Ataman — roadmap
 
+## EI-CLIPBOARD-GUARD-STREAM-131 — OLE ISTREAM в защите буфера
+
+- Поручение владельца через Claude 2026-10-10 «Делаем 131». База main
+  `8f3128085d3bd8db5641d0598854945b70f1888c`, VERSION130→131; текущая версия131.
+  Разрешены только verified_clipboard.{cpp,h}, его тесты/.pro, документы версии
+  и отчёт; Release131, регресс под ui-tests.lock, staging/finalizer/manifest,
+  установка130→131 с rollback130 и сохранением всех user files/старых rollback,
+  scoped-коммиты main. Сеть, подагенты, интерактивный редактор, живые данные запрещены.
+- Исходная проблема: screenshot PNG49470 отвергается guard130. Ожидается полный
+  захват ISTREAM с начала в пределах разумного размера и точное восстановление
+  PNG для потребителей HGLOBAL/ISTREAM. ISTORAGE/метафайлы/неполные данные — отказ
+  до записей. OLE metadata не replay; cloud/history bytes сохраняются, monitor
+  exclusion предотвращает повторную историю. Буфер владельца только под guard.
+- Критерии: PNG-only ISTREAM+DIB/DIBV5+cloud markers под внешним guard, полный UI
+  и все payload bytes/PNG decoding после; прежние17 native и случаи127,
+  scenario/dark/gallery; свежие Release/version/staging/finalizer/manifest,
+  установка с verified rollback, сохранность QM и user files; два scoped-коммита.
+- Подтверждено:130 на собственном OLE источнике отвергает49470 до UI;131
+  восстанавливает PNG побайтно по обоим medium. Конечные native25/0/0,
+  full UI169/0 при ISTREAM (+3 внешних PASS) и BITMAP (+2 PASS), scenario50/0,
+  dark70/0, gallery PASS. Release131/оба runtime/version/QM HEAD PASS.
+  EXE SHA25639707F231B5FCAFD8A292EF4CA58BB9F499E4B4A4F66B03939A15724F643DBD3.
+  Буфер владельца восстановлен; medium исходного screenshot остаётся гипотезой.
+- Статус: реализация/регресс готовы. Следующий шаг — scoped-коммит,
+  staging/установка130→131 и запись передачи вторым коммитом. Evidence:
+  docs/validation/ATAMAN_CLIPBOARD_STREAM_131_20261010.md.
+
 ## EI-GALLERY-THUMB-DEADLINE-130 — дедлайн видимых миниатюр
 
 - Поручение2026-10-10 через Claude; база main33d5c29f6cbca25483dcc589a0efa43ad3db42a7,

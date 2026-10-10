@@ -45,6 +45,10 @@ QMenu* verifiedLineEditContextMenu(QLineEdit* editor);
 // Used by native checks, never by ordinary Copy. An unreadable clipboard must
 // abort the check before its first synthetic write. Native data is materialized
 // before the check process exits, without Qt MIME alias conversion.
+// Windows accepts complete seekable IStream byte payloads (128 MiB per format,
+// 256 MiB total). Storage/metafiles fail closed. OLE transport metadata is not
+// replayed; restored byte formats support native HGLOBAL and OLE ISTREAM.
+// A monitor-exclusion marker prevents restored content becoming a history item.
 class ClipboardRestoreGuard
 {
 public:

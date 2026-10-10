@@ -43,6 +43,47 @@ const PaletteApi& paletteApi()
     static const PaletteApi api;
     return api;
 }
+
+// Bounds apply before allocation and while reading (Stat is not trusted).
+constexpr quint64 maxClipboardBytes = 128 * 1024 * 1024;
+constexpr quint64 maxSnapshotBytes = 256 * 1024 * 1024;
+int guardedWrites = 0; // GUI thread; ordinary Copy outside a check is unchanged.
+bool readStream(IStream* stream, QByteArray& bytes)
+{
+    if(!stream) return false;
+    LARGE_INTEGER zero = {};
+    ULARGE_INTEGER position = {};
+    if(stream->Seek(zero, STREAM_SEEK_CUR, &position) != S_OK) return false;
+    struct RestorePosition {
+        IStream* stream;
+        ULARGE_INTEGER position;
+        ~RestorePosition() {
+            LARGE_INTEGER offset; offset.QuadPart = position.QuadPart;
+            stream->Seek(offset, STREAM_SEEK_SET, nullptr);
+        }
+    } restore{stream, position};
+    if(stream->Seek(zero, STREAM_SEEK_SET, nullptr) != S_OK) return false;
+    STATSTG stat = {};
+    if(stream->Stat(&stat, STATFLAG_NONAME) != S_OK || stat.cbSize.QuadPart > maxClipboardBytes)
+        return false;
+    bytes.clear();
+    char chunk[64 * 1024];
+    for(;;) {
+        ULONG count = 0;
+        const HRESULT result = stream->Read(chunk, sizeof(chunk), &count);
+        if((result != S_OK && result != S_FALSE) || count > sizeof(chunk)
+            || quint64(bytes.size()) + count > maxClipboardBytes) return false;
+        bytes.append(chunk, int(count));
+        if(result == S_FALSE || !count) break;
+    }
+    // A short/failed/truncated stream must never become a restorable snapshot.
+    return quint64(bytes.size()) == stat.cbSize.QuadPart;
+}
+
+UINT monitorExclusion()
+{
+    return RegisterClipboardFormatW(L"ExcludeClipboardContentFromMonitorProcessing");
+}
 }
 #endif
 struct NativeClipboardState
@@ -94,6 +135,7 @@ struct NativeClipboardState
         QVector<UINT> priority;
         QVector<UINT> deferred;
         QByteArray palette;
+        quint64 totalBytes = 0;
         FORMATETC format;
         bool ok = true;
         HRESULT next;
@@ -103,14 +145,16 @@ struct NativeClipboardState
             const bool rasterGdi = (format.cfFormat == CF_BITMAP || format.cfFormat == CF_PALETTE)
                 && (format.tymed & TYMED_GDI);
             if(format.ptd || format.lindex != -1 || format.dwAspect != DVASPECT_CONTENT
-                || (!(format.tymed & TYMED_HGLOBAL) && !rasterGdi)) {
+                || (format.tymed & TYMED_ISTORAGE)
+                || format.cfFormat == CF_ENHMETAFILE || format.cfFormat == CF_METAFILEPICT
+                || (!(format.tymed & (TYMED_HGLOBAL | TYMED_ISTREAM)) && !rasterGdi)) {
                 if(format.ptd) CoTaskMemFree(format.ptd);
                 error = QStringLiteral("Native clipboard format %1 is not preservable; check aborted before writes.")
                     .arg(format.cfFormat);
                 ok = false;
                 break;
             }
-            if(!(format.tymed & TYMED_HGLOBAL)) {
+            if(!(format.tymed & (TYMED_HGLOBAL | TYMED_ISTREAM))) {
                 if(format.cfFormat == CF_PALETTE) {
                     if(!paletteApi().available()) { ok = false; break; }
                     format.tymed = TYMED_GDI;
@@ -130,18 +174,37 @@ struct NativeClipboardState
                 if(!deferred.contains(format.cfFormat)) deferred.append(format.cfFormat);
                 continue;
             }
-            format.tymed = TYMED_HGLOBAL;
+            const DWORD offered = format.tymed;
+            format.tymed = offered & TYMED_HGLOBAL ? TYMED_HGLOBAL : TYMED_ISTREAM;
             STGMEDIUM medium = {};
-            if(object->GetData(&format, &medium) != S_OK) { ok = false; break; }
-            const SIZE_T size = medium.tymed == TYMED_HGLOBAL ? GlobalSize(medium.hGlobal) : 0;
-            const void* bytes = size && size <= INT_MAX ? GlobalLock(medium.hGlobal) : nullptr;
-            if(!bytes) ok = false;
-            else {
-                if(!values.contains(format.cfFormat)) priority.append(format.cfFormat);
-                values.insert(format.cfFormat, QByteArray(static_cast<const char*>(bytes), int(size)));
-                GlobalUnlock(medium.hGlobal);
+            HRESULT received = object->GetData(&format, &medium);
+            if(received != S_OK && (offered & TYMED_ISTREAM) && format.tymed == TYMED_HGLOBAL) {
+                ReleaseStgMedium(&medium);
+                medium = {};
+                format.tymed = TYMED_ISTREAM;
+                received = object->GetData(&format, &medium);
             }
+            QByteArray payload;
+            if(received != S_OK) ok = false;
+            else if(medium.tymed == TYMED_ISTREAM && format.tymed == TYMED_ISTREAM)
+                ok = readStream(medium.pstm, payload);
+            else if(medium.tymed == TYMED_HGLOBAL && format.tymed == TYMED_HGLOBAL) {
+                const SIZE_T size = GlobalSize(medium.hGlobal);
+                const void* bytes = size && size <= maxClipboardBytes ? GlobalLock(medium.hGlobal) : nullptr;
+                ok = bytes != nullptr;
+                if(bytes) {
+                    payload = QByteArray(static_cast<const char*>(bytes), int(size));
+                    GlobalUnlock(medium.hGlobal);
+                }
+            } else ok = false;
             ReleaseStgMedium(&medium);
+            if(ok && values.contains(format.cfFormat)) ok = values[format.cfFormat] == payload;
+            else if(ok) {
+                totalBytes += quint64(payload.size());
+                ok = totalBytes <= maxSnapshotBytes;
+                if(ok) { priority.append(format.cfFormat); values.insert(format.cfFormat, payload); }
+            }
+            if(!ok) error = QStringLiteral("Native clipboard format %1 cannot be read completely within clipboard limits; check aborted before writes.").arg(format.cfFormat);
             if(!ok) break;
         }
         if(next != S_FALSE && next != S_OK) ok = false;
@@ -183,6 +246,7 @@ struct NativeClipboardState
         for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
             HANDLE handle = GetClipboardData(it.key());
             if(!handle || GlobalSize(handle) != SIZE_T(it.value().size())) return false;
+            if(it.value().isEmpty()) continue;
             const void* bytes = GlobalLock(handle);
             if(!bytes) return false;
             const bool same = memcmp(bytes, it.value().constData(), size_t(it.value().size())) == 0;
@@ -222,13 +286,30 @@ struct NativeClipboardState
         }
         for(auto it = formats.cbegin(); it != formats.cend(); ++it) {
             HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE, SIZE_T(it.value().size()));
+            if(block && it.value().isEmpty()) { blocks.insert(it.key(), block); continue; }
             void* bytes = block ? GlobalLock(block) : nullptr;
             if(!bytes) { if(block) GlobalFree(block); ok = false; break; }
             memcpy(bytes, it.value().constData(), size_t(it.value().size()));
             GlobalUnlock(block);
             blocks.insert(it.key(), block);
         }
+        // OLE's DataObject/Ole Private Data are transport metadata, excluded by
+        // EnumFormatEtc, not user payloads to replay as stale process pointers.
+        // Persist user bytes as native HGLOBAL: Windows' OLE wrapper exposes
+        // registered byte formats through HGLOBAL AND ISTREAM after owner exit.
+        // Keep existing cloud/history marker bytes; add only the documented
+        // monitor exclusion to prevent re-inserting restored content in history.
+        const UINT exclusion = monitorExclusion();
+        HGLOBAL excluded = nullptr;
+        if(ok && !formats.isEmpty() && !formats.contains(exclusion)) {
+            excluded = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
+            ok = excluded != nullptr;
+        }
         if(ok) ok = EmptyClipboard();
+        if(ok && excluded) {
+            ok = SetClipboardData(exclusion, excluded);
+            if(ok) excluded = nullptr;
+        }
         if(ok) for(UINT format : order) {
             if(!SetClipboardData(format, blocks[format])) { ok = false; break; }
             blocks[format] = nullptr; // Ownership transferred to Windows.
@@ -238,6 +319,7 @@ struct NativeClipboardState
             if(ok) palette = nullptr;
         }
         if(palette) paletteApi().destroy(palette);
+        if(excluded) GlobalFree(excluded);
         for(HGLOBAL block : blocks) if(block) GlobalFree(block);
         return ok; // Windows finishes synthesis when CloseClipboard is called.
     }
@@ -366,7 +448,18 @@ ClipboardWriteResult writeClipboard(const ClipboardSnapshot& data, int timeoutMs
         // clipboard open. A race after this preflight is handled by readback.
         if(nativeAvailable()) {
             ++result.attempts;
-            clipboard->setMimeData(data.createMimeData());
+            QMimeData* mime = data.createMimeData();
+#ifdef Q_OS_WIN
+            // EmptyClipboard has no content to monitor. Keep an explicitly
+            // empty verified write empty, including its strict MIME readback.
+            const QString exclusionName = QStringLiteral("ExcludeClipboardContentFromMonitorProcessing");
+            // For writes Qt registers the literal MIME name. Its Windows MIME
+            // alias is a read representation and would create a different ID.
+            if(guardedWrites && (!data.formats.isEmpty() || data.image.isValid())
+                && !mime->hasFormat(exclusionName))
+                mime->setData(exclusionName, QByteArray(4, '\0'));
+#endif
+            clipboard->setMimeData(mime);
             // The transferred pointer may already have been deleted. Read
             // only the current clipboard and compare with our value snapshot.
             if(clipboard->ownsClipboard() && data.matches(clipboard->mimeData())) {
@@ -478,7 +571,7 @@ ClipboardRestoreGuard::ClipboardRestoreGuard()
             if(saved && openNativeClipboard()) {
                 m_captured = sequence == GetClipboardSequenceNumber() && m_native->matches();
                 CloseClipboard();
-                if(m_captured) return;
+                if(m_captured) { ++guardedWrites; return; }
             }
 #else
             const QMimeData* mime = QApplication::clipboard()->mimeData();
@@ -537,5 +630,8 @@ ClipboardRestoreGuard::~ClipboardRestoreGuard()
 {
     if(m_captured && !m_restored && !restore())
         qWarning("Clipboard restoration failed; native check is not a PASS.");
+#ifdef Q_OS_WIN
+    if(m_captured) --guardedWrites;
+#endif
 }
 }
