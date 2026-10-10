@@ -50,3 +50,59 @@ runtime classes. The tool does not encode DXT1, mipmaps, gutters or game-ready
 atlas pages, and it does not prove a finite N recipe scheme is seamless.
 
 See the dated validation report for measurements, assumptions and runtime gates.
+
+## Stage 1: measured stock edges, anti-tiling and finite seamless recipes
+
+`stage1.py` reads the previous private snapshot and verifies the selected source
+MPR hash. It copies stock tiles only into `build-tests-terrain-bake-stage-1/input/`.
+It produces nine same-scale 4096px PNGs, a <=2048px contact sheet, edge close-up,
+stock RGB/estimated ownership analysis, homogeneous anti-tiling study and JSON
+slot budgets. No mapper code or project is changed. Run with existing Python:
+
+```powershell
+python -B tools/terrain_bake_prototype/stage1.py `
+  build-tests-terrain-bake-research-0 build-tests-terrain-bake-stage-1
+```
+
+Stock ownership is estimated by per-pixel RGB projection against every available
+uniform pair; the lowest residual wins. Measured contour/width, transverse mean
+profile and actual ownership residual texture modulate a continuous world score
+field. Original authoring alpha cannot be uniquely recovered from baked RGB.
+This is a score-distance proxy, not a metric signed-distance implementation.
+
+The finite grammar uses ordered corner IDs, predecessor runtime class and N
+interior labels. Edges have one fixed midpoint/texture phase; perturbation,
+source mixtures and color modulation vanish at edges. Shared endpoints give
+identical ownership and RGB there. Recipe rasters include their exact edge
+samples. This guarantees C0 edge equality in this prototype; it does not guarantee
+tangent continuity, DXT/mip equality, or arbitrary-world-curve preservation.
+Several crossing/tangent states would multiply keys and require an edge-state
+solver. Current full-corpus figures are conditional grammar budgets, not a bake
+or visual acceptance of every map. The selected crop alone is pixel-deduplicated.
+
+Zero-slot rendering changes only homogeneous cells to existing uniform slots of
+the same material and runtime class with coordinate-deterministic quarter turns.
+Isotropy and matching texture borders remain owner/material acceptance gates.
+No MPR is saved for this visual experiment. Free world anti-tiling mixes three
+phased/rotated uniform sources with low-frequency noise and adds macro color;
+it deliberately exposes its unique-slot cost. No hex/stochastic algorithm is
+claimed by this experiment.
+
+`memory_pack.cpp` is a separate headless QCoreApplication. Build `memory_pack.pro`
+using the same existing Qt/MinGW kit in `build-tests-terrain-bake-stage-1/compiler`.
+Run it with `build-tests-terrain-bake-stage-1/memory-config.json`, produced by the
+renderer. It validates current MPR and source RES page/pixel hashes, creates four
+private 2048/4096 x 128/256 capacity fixtures via the ordinary codec/transactions,
+then reopens and checks class/rotation/overlay/full SEC conservation and all-page
+reference coverage. It neither installs nor starts anything. 256px is resampled
+stock artwork for memory testing, not new detail. Run `prepare_kit.py <root>` for
+baseline/witnesses/owner instructions, then `verify_stage1.py <root>` for independent
+archive/metadata/PNG/raster-seam readback. Both restrict writes to the same root.
+
+`sample_memory.ps1` is an owner-run, read-only process monitor writing only below
+the private stage-1 root. It checks a 32-bit target and samples private/working
+set and VA regions. Syntax/C# compilation is preparation evidence; actual game
+monitoring and game acceptance are separate. See the generated memory-kit README.
+
+Commit source files and the dated stage-1 validation report only; no private
+PNG, maps, RES, manifests, logs or binary outputs.
