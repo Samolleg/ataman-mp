@@ -114,12 +114,40 @@ QRgb sample(const QVector<QImage>& textures, double x, double y, int variant, in
     return image.pixel(ix,n-1-iy);
 }
 
-QImage render(const SPrepared& p, const STerrainRecipe& r, int size)
+// Pair distance is the first-order metric score difference, not an exact SDF.
+// x/y are the fractional coordinates of the world grid. Periodic pair phase
+// and zero interior fade on every grid line keep the finite recipe grammar.
+double pairOwnership(const SPrepared& p, const QVector<qint32>& s,
+    const QVector<double>& sc, const QVector<double>& xp, const QVector<double>& xm,
+    const QVector<double>& yp, const QVector<double>& ym,
+    int a, int b, double x, double y, int v, double* distanceOut)
+{
+    const auto* brush=p.brushes.value(qMakePair(p.ids[a],p.ids[b]),nullptr);
+    const double eps=1e-4, fade=16*x*(1-x)*y*(1-y);
+    const double nx=((xp[b]-xm[b])-(xp[a]-xm[a]))/(2*eps)*smooth(qMin(x,1-x)*8);
+    const double ny=((yp[b]-ym[b])-(yp[a]-ym[a]))/(2*eps)*smooth(qMin(y,1-y)*8);
+    const double distance=(sc[b]-sc[a])/qMax(std::hypot(nx,ny),.15)*127/1.15;
+    if(distanceOut) *distanceOut=distance;
+    double q[4];
+    for(int c=0;c<4;++c) q[c]=int(s[c]==p.ids[b])-int(s[c]==p.ids[a]);
+    double cx=.5*((q[1]-q[0])+(q[2]-q[3]));
+    double cy=.5*((q[3]-q[0])+(q[2]-q[1]));
+    double cn=std::hypot(cx,cy);
+    if(cn<1e-6) { cx=1; cy=1; cn=std::sqrt(2.0); }
+    const double along=((-cy*x+cx*y)/cn*128+v*47)*fade+seed(p.ids[a],p.ids[b],0)%512;
+    const int ti=int(std::floor(along-std::floor(along/512)*512));
+    const int di=qBound(0,int(std::nearbyint(distance))+32,64);
+    return brush ? std::nearbyint(brush->ownership[ti*65+di]*4)/4 : 1;
+}
+
+QImage render(const SPrepared& p, const STerrainRecipe& r, int size, bool legacy)
 {
     const QVector<qint32> s = corners(r.signature);
     QImage image(size,size,QImage::Format_RGBA8888);
     if(image.isNull()) return image;
     const int v = r.variant;
+    QSet<qint32> distinct; for(qint32 material:s) distinct.insert(material);
+    const bool junction=distinct.size()>2 && !legacy;
     for(int py = 0; py < size; ++py)
     {
         uchar* row = image.scanLine(size-1-py);
@@ -135,6 +163,7 @@ QImage render(const SPrepared& p, const STerrainRecipe& r, int size)
                 else if(a < 0 || sc[i] >= sc[a]) a = i;
             }
             double alpha = 1;
+            QVector<double> weights(sc.size(),0);
             if(a >= 0 && sc[a] > 0 && sc[b] > 0)
             {
                 if(a > b) std::swap(a,b);
@@ -145,30 +174,43 @@ QImage render(const SPrepared& p, const STerrainRecipe& r, int size)
                     const double eps = 1e-4;
                     const auto xp = scores(p,s,x+eps,y,v), xm = scores(p,s,x-eps,y,v);
                     const auto yp = scores(p,s,x,y+eps,v), ym = scores(p,s,x,y-eps,v);
-                    double nx = ((xp[b]-xm[b])-(xp[a]-xm[a]))/(2*eps)*smooth(qMin(x,1-x)*8);
-                    double ny = ((yp[b]-ym[b])-(yp[a]-ym[a]))/(2*eps)*smooth(qMin(y,1-y)*8);
-                    const double norm = qMax(std::hypot(nx,ny),.15);
-                    const double distance = (sc[b]-sc[a])/norm*127/1.15;
-                    double q[4];
-                    for(int c=0;c<4;++c) q[c] = int(s[c]==p.ids[b])-int(s[c]==p.ids[a]);
-                    double cx = .5*((q[1]-q[0])+(q[2]-q[3]));
-                    double cy = .5*((q[3]-q[0])+(q[2]-q[1]));
-                    double cn = std::hypot(cx,cy);
-                    if(cn < 1e-6) { cx=1; cy=1; cn=std::sqrt(2.0); }
-                    const double along = ((-cy*x+cx*y)/cn*128+v*47)*fade
-                        + seed(p.ids[a],p.ids[b],0)%512;
-                    const int ti = int(std::floor(along-std::floor(along/512)*512));
-                    // nearbyint uses the prototype's ties-to-even rounding.
-                    const int di = qBound(0,int(std::nearbyint(distance))+32,64);
-                    alpha = std::nearbyint(brush->ownership[ti*65+di]*4)/4;
+                    alpha=pairOwnership(p,s,sc,xp,xm,yp,ym,a,b,x,y,v,nullptr);
+                    if(junction && fade>0)
+                    {
+                        // Product of pair victories avoids switching the top-two
+                        // identity. Every pair keeps its own transported stock bank.
+                        for(int i=0;i<sc.size();++i) if(sc[i]>0) weights[i]=1;
+                        for(int i=0;i<sc.size();++i) if(sc[i]>0)
+                            for(int j=i+1;j<sc.size();++j) if(sc[j]>0)
+                            {
+                                double d=0;
+                                double win=pairOwnership(p,s,sc,xp,xm,yp,ym,i,j,x,y,v,&d);
+                                double third=0;
+                                for(int k=0;k<sc.size();++k) if(k!=i && k!=j) third=qMax(third,sc[k]);
+                                // At triple competition replace high-frequency
+                                // fragments with a compact smooth blend. It fades
+                                // continuously, and never modifies boundary bytes.
+                                const double centre=smooth((third/qMax(qMin(sc[i],sc[j]),1e-12)-.35)/.55)
+                                    *smooth(fade*4);
+                                win=win*(1-centre)+smooth((d+12)/24)*centre;
+                                weights[i]*=1-win; weights[j]*=win;
+                            }
+                        double sum=0; for(double w:weights) sum+=w;
+                        // Quantized pair banks can contain a cyclic tournament.
+                        // Bilinear scores provide a deterministic, finite fallback.
+                        if(sum<=1e-12) { weights=sc; sum=0; for(double w:weights) sum+=w; }
+                        for(double& w:weights) w/=sum;
+                    }
                 }
             }
             else { a = -1; }
+            if(!junction || fade==0) { if(a>=0) weights[a]=1-alpha; weights[b]=alpha; }
+            else if(a<0) weights[b]=1;
             double rgb[3] = {0,0,0};
-            for(int i : {a,b})
+            for(int i=0;i<weights.size();++i)
             {
-                if(i < 0) continue;
-                const double weight = i == b ? alpha : 1-alpha;
+                if(weights[i]==0) continue;
+                const double weight = weights[i];
                 const QRgb base = sample(p.textures[i],x,y,0,0);
                 const QRgb alt = sample(p.textures[i],x+.27,y+.43,v,v%4);
                 const double mix = fade*.55*smooth((noise(x*2,y*2,quint64(p.ids[i]&0xffff)+quint64(v)*33)+1)/2);
@@ -433,7 +475,7 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
             if(!materials.contains(mat)) { invalid=true; result.diagnostics.append(QStringLiteral("terrain.recipe.missing_material: cell %1 material %2").arg(cell).arg(mat)); }
             else ++coverage[materials[mat].runtimeTerrainType];
         }
-        if(distinct.size()>2)
+        if(distinct.size()>2 && options.diagnosticJunctionPreview)
         {
             r.supported=false; result.unsupportedCells.append(cell);
             result.diagnostics.append(QStringLiteral("terrain.recipe.unsupported_junction: cell %1 materials %2").arg(cell).arg(distinct.size()));
@@ -502,7 +544,7 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
         int tile=recipeCache.value(key,-1);
         if(tile<0)
         {
-            STerrainRecipeBakedTile baked; baked.pixels=render(prepared,r,options.tileSize);
+            STerrainRecipeBakedTile baked; baked.pixels=render(prepared,r,options.tileSize,options.diagnosticJunctionPreview);
             if(baked.pixels.isNull()) { result.diagnostics.append(QStringLiteral("terrain.recipe.allocation_failed")); return result; }
             baked.pixelSha256=pixelHash(baked.pixels); baked.runtimeTerrainType=r.runtimeTerrainType;
             const QByteArray typed=baked.pixelSha256+':'+QByteArray::number(r.runtimeTerrainType);

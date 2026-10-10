@@ -1,5 +1,14 @@
 # EI Mapper Ataman — roadmap
 
+## EI-TERRAIN-BAKE-B1-JUNCTIONS — узлы mixed-edge из 3–4 материалов
+
+- Поручение владельца через Claude 2026-10-10 «запускай этап B»; B1 на main 9114a68111b68946cc0ebb2f83a80231057bfd9c, VERSION 134 без изменения. Только автономное ядро, его тесты, prototype tooling, приватный build-tests-B1-junctions и отчёт; scoped-коммит без push, без Modern wiring, установки и живых записей.
+- Проблема: этап A отказывает на 250 узлах Zone6 (88,136) 32×32. Результат: детерминированные 3/4-material recipes с mixed-edge каждой пары, общими RGBA-рёбрами, majority/tie классами и измеренным бюджетом/корпусной оценкой.
+- Критерии: unsupported=0 на Zone6 и всех синтетических конфигурациях; побайтные рёбра с соседями любой сложности; регресс этапа A; object compile с флагами ei_maper.pro без warnings; PNG current/A-marked/B1 и пять closeup 5×5, preview ≤2048; честные визуальные ограничения.
+- Результат B1: все пары композируются по distance/ownership weights, центр сглаживается без изменения boundary bytes; Zone6 unsupported250→0, success=true, 439 typed tiles (270 простых +169 узлов, против полного A diagnostic рост0%). Синтетика17399 PASS/0 FAIL/0 SKIP, 16256 рёбер без различий; Zone6 1984 рёбра, PNG readback439/max error0; объект с флагами текущего ei_maper.pro без warnings/errors. Current/A-marked/B1, четыре triple closeup и один quad в build-tests-B1-junctions; preview2040×720.
+- Бюджет: finite N4 estimate41 карт DejaVu —33 в2048,40 в4096, max5207; junction N2 как предложение —35/40, max4704. Реальный полный raster/pinned reserve/animations не измерены. Узлы местами мягче/мутнее родной крошки, вытянутые штрихи у кромок остаются.
+- Статус: B1 реализован и локально проверен; scoped-коммит main без версии/подключения/сети. Evidence: docs/validation/ATAMAN_TERRAIN_BAKE_B1_JUNCTIONS_20261010.md. Следующий шаг родительского B — profile adapter, стабильные labels и Modern wiring по отдельному объёму; production-интеграция и художественная/игровая приёмка остаются открыты.
+
 ## EI-TEST-CLIPBOARD-ISOLATION-134 — тесты без системного буфера обмена
 
 - Поручение владельца 2026-10-10: «сделай тесты без системного буфера». Причина: guard системного буфера (120/127/131/132) трижды блокировал обязательный регресс и требовал действий владельца.

@@ -65,8 +65,8 @@ struct STerrainRecipeBakeOptions
     QPoint origin;
     quint64 reservedSlots{0}; // pinned other-layer/animation slots, supplied by caller
     quint64 slotLimit{4096};
-    // Explicit research-only top-two preview of unsupported 3/4-material nodes.
-    // It still reports success=false; it must never be published as supported.
+    // Explicit legacy stage-A top-two preview for comparison only. Marks 3/4
+    // nodes unsupported and success=false; default uses supported B1 composition.
     bool diagnosticJunctionPreview{false};
     // MVP's exact predecessor-preserving mode. Requires one reviewed class
     // per cell in preferredRuntimeTypes; ordinary generation uses majority/tie.
@@ -82,7 +82,10 @@ struct STerrainRecipeBakeInput
     QVector<qint32> vertexMaterials;
     QVector<STerrainRecipeMaterial> materials;
     QVector<STerrainRecipeBrush> brushes;
-    // Empty or one entry per cell; used only for equal class coverage.
+    // Empty or one entry per cell; used only for equal maximum class coverage.
+    // Count corners by runtime class (aliases accumulate). A 1+1+1+1 tie
+    // requires a preferred class/material among those tied; no implicit ID tie.
+    // A three-way maximum tie is impossible with four equally weighted corners.
     QVector<qint32> preferredMaterials;
     QVector<qint32> preferredRuntimeTypes;
 };

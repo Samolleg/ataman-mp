@@ -176,7 +176,7 @@ void synthetic()
     for(const QVector<qint32>& field : {QVector<qint32>{1,2,1,3},QVector<qint32>{1,2,4,3}})
     {
         in.vertexMaterials=field; r=CTerrainRecipeBaker::bake(in,o);
-        check(!r.success && r.tiles.isEmpty() && r.unsupportedCells==QVector<int>{0},"3/4-material junction explicit refusal");
+        check(r.success && r.tiles.size()==1 && r.unsupportedCells.isEmpty() && r.recipes[0].supported,"3/4-material junction supported");
         o.diagnosticJunctionPreview=true; r=CTerrainRecipeBaker::bake(in,o);
         check(!r.success && r.previewOnly && r.tiles.size()==1 && !r.recipes[0].supported,"junction diagnostic preview never success");
         o.diagnosticJunctionPreview=false;
@@ -237,6 +237,74 @@ void synthetic()
     check(!CTerrainRecipeBaker::extractStockStrip(st,sa,sb,1,2,signature,&strip,&error),"stock signature cannot substitute unrelated material");
 }
 
+void junctions()
+{
+    STerrainRecipeBakeOptions o; o.tileSize=9; o.origin=QPoint(-77,136);
+    // All 4^6 adjacent corner fields along both axes: includes every ordered
+    // 3/4-node next to every compatible uniform/2/3/4-node. Alternate classes
+    // are reviewed here to separate edge continuity from tie classification.
+    for(int axis=0;axis<2;++axis)
+    {
+        auto in=input(axis ? 1:2,axis ? 2:1,4);
+        in.preferredRuntimeTypes={0,1}; o.preserveReviewedCellRuntimeTypes=true;
+        for(int pattern=0;pattern<4096;++pattern)
+        {
+            int digits=pattern;
+            for(auto& m:in.vertexMaterials) { m=1+digits%4; digits/=4; }
+            const auto r=CTerrainRecipeBaker::bake(in,o);
+            check(r.success && r.unsupportedCells.isEmpty(),"all six-vertex four-material configurations supported");
+            if(r.success) seams(r,in.tileWidth,in.tileHeight,o.tileSize);
+        }
+    }
+    auto in=input(1,1,4); o.preserveReviewedCellRuntimeTypes=false; o.tileSize=33;
+    for(int pattern=0;pattern<256;++pattern)
+    {
+        int digits=pattern; QMap<int,int> counts;
+        for(auto& m:in.vertexMaterials) { m=1+digits%4; digits/=4; ++counts[m-1]; }
+        int maximum=0,chosen=-1;
+        for(auto it=counts.cbegin();it!=counts.cend();++it)
+            if(it.value()>=maximum) { maximum=it.value(); chosen=it.key(); }
+        in.preferredRuntimeTypes={chosen};
+        const auto r=CTerrainRecipeBaker::bake(in,o), again=CTerrainRecipeBaker::bake(in,o);
+        check(r.success && r.unsupportedCells.isEmpty() && r.recipes[0].runtimeTerrainType==chosen,
+              "all ordered signatures majority/tie including diagonal 2+2 and 1+1+2");
+        check(r.success && again.success && r.tileByCell==again.tileByCell && r.tiles[0].pixels==again.tiles[0].pixels,
+              "all ordered signatures deterministic bytes");
+    }
+    in.vertexMaterials={1,2,3,4}; in.preferredMaterials.clear(); in.preferredRuntimeTypes.clear();
+    check(!CTerrainRecipeBaker::bake(in,o).success,"four-way tie requires explicit preference");
+    in.preferredRuntimeTypes={7};
+    check(!CTerrainRecipeBaker::bake(in,o).success,"four-way tie outside tied classes refused");
+    for(int type=0;type<4;++type)
+    {
+        in.preferredRuntimeTypes={type};
+        const auto r=CTerrainRecipeBaker::bake(in,o);
+        check(r.success && r.recipes[0].runtimeTerrainType==type,"each four-way preferred class accepted");
+    }
+    in.vertexMaterials={1,2,3,4}; in.materials[2].runtimeTerrainType=1;
+    in.preferredRuntimeTypes={3};
+    auto r=CTerrainRecipeBaker::bake(in,o);
+    check(r.success && r.recipes[0].runtimeTerrainType==1,"class aliases accumulate majority over preference");
+    in.brushes.removeLast();
+    check(!CTerrainRecipeBaker::bake(in,o).success,"missing junction pair bank refused");
+    in=input(32,32,4); in.preferredRuntimeTypes.fill(0,1024);
+    o.preserveReviewedCellRuntimeTypes=true; o.tileSize=128;
+    quint32 random=456;
+    for(auto& m:in.vertexMaterials) { random=random*1664525+1013904223; m=1+int(random>>30); }
+    r=CTerrainRecipeBaker::bake(in,o);
+    check(r.success && r.unsupportedCells.isEmpty(),"N4 random four-material grid supported at 128px");
+    if(r.success) seams(r,32,32,128);
+    std::reverse(in.materials.begin(),in.materials.end()); std::reverse(in.brushes.begin(),in.brushes.end());
+    const auto reordered=CTerrainRecipeBaker::bake(in,o);
+    bool same=r.success && reordered.success && r.tileByCell==reordered.tileByCell && r.tiles.size()==reordered.tiles.size();
+    for(int i=0;same && i<r.tiles.size();++i) same &= r.tiles[i].pixels==reordered.tiles[i].pixels;
+    check(same,"junction material/brush order independent at 128px");
+    o.variants=8; o.tileSize=33;
+    r=CTerrainRecipeBaker::bake(in,o);
+    check(r.success,"junction N8 grid supported");
+    if(r.success) seams(r,32,32,33);
+}
+
 bool zone(const QString& path)
 {
     QFile file(path); if(!file.open(QIODevice::ReadOnly)) return false;
@@ -260,7 +328,8 @@ bool zone(const QString& path)
         brush.ownership.resize(512*65); std::memcpy(brush.ownership.data(),bytes.constData(),size_t(bytes.size()));
         in.brushes.append(brush);
     }
-    STerrainRecipeBakeOptions o; o.origin=QPoint(88,136); o.diagnosticJunctionPreview=true;
+    STerrainRecipeBakeOptions o; o.origin=QPoint(88,136);
+    o.diagnosticJunctionPreview=j["legacy"].toBool(false);
     o.preserveReviewedCellRuntimeTypes=true;
     const auto r=CTerrainRecipeBaker::bake(in,o);
     QTextStream(stdout) << "ZONE recipes=" << r.budget.recipeSlots << " typedUnique=" << r.tiles.size()
@@ -274,7 +343,8 @@ bool zone(const QString& path)
     }
     check(image.save(j["output"].toString()),"Zone6 PNG saved");
     seams(r,32,32,128);
-    check(r.previewOnly && !r.success && r.unsupportedCells.size()==250,"Zone6 unsupported nodes explicit");
+    check(o.diagnosticJunctionPreview ? (r.previewOnly && !r.success && r.unsupportedCells.size()==250)
+          : (r.success && !r.previewOnly && r.unsupportedCells.isEmpty()),"Zone6 junction support/legacy comparison");
     check(r.tiles.size()==439 && r.budget.recipeSlots==439,"Zone6 N4 prototype budget");
     return true;
 }
@@ -284,7 +354,7 @@ int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
     if(app.arguments().size()==3 && app.arguments()[1]=="--zone") check(zone(app.arguments()[2]),"Zone6 fixture loaded");
-    else synthetic();
+    else { synthetic(); junctions(); }
     QTextStream(stdout) << "RESULT PASS=" << passed << " FAIL=" << failed << " SKIP=0 edges=" << seamEdges
         << " RGBA_channel_comparisons=" << seamChannels << '\n';
     return failed ? 1:0;
