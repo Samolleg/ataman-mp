@@ -17384,5 +17384,9 @@ Line: %4</source><translation>Вызов:
         <source>Mixed-edge atlas budget exceeded: %1 / %2 slots. No material was substituted; extended 8192 is not enabled.</source>
         <translation>Превышен бюджет mixed-edge: %1 / %2 слотов. Материалы не подменены; расширенный предел 8192 не разрешён.</translation>
     </message>
+    <message>
+        <source>Stock ownership is uncertain relative to material contrast.</source>
+        <translation>Контраста материалов недостаточно для надёжного извлечения кромки из stock-перехода.</translation>
+    </message>
 </context>
 </TS>

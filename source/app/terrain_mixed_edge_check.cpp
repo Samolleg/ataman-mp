@@ -146,21 +146,28 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     const int w=model.tileCountX(),h=model.tileCountY(),vw=w+1;
     if(!real)baseline.fill(1,vw*(h+1));
     if(!check(model.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,baseline,baseline,&report),"authoritative vertex field restored"))return 1;
-    QRect region(real?109:2,real?95:2,real?16:12,real?16:12);
+    const int patchX=fixture.value("patchX").toInt(113),patchY=fixture.value("patchY").toInt(99);
+    QRect region(real?patchX-4:2,real?patchY-4:2,real?16:12,real?16:12);
     QVector<qint32> current=baseline;
     qint32 paint=2;
     // Real workload uses a measured 6x6 uniform vertex patch in the original
     // Zone6 field (113,99), so only the actual new brush ring is rebuilt.
     if(real)
     {
-        paint=1974896831;
-        bool patch=true;for(int y=99;y<105;++y)for(int x=113;x<119;++x)patch&=current[y*vw+x]==2142727678;
+        paint=fixture.value("paintMaterial").toInt(1974896831);
+        const qint32 base=fixture.value("baseMaterial").toInt(2142727678);
+        bool patch=patchX>=0 && patchY>=0 && patchX+6<=vw && patchY+6<=h+1;
+        if(patch) for(int y=patchY;y<patchY+6;++y)for(int x=patchX;x<patchX+6;++x)
+            patch&=current[y*vw+x]==base;
         if(!check(patch,"original Zone6 6x6 patch verified, no undercoat"))return 1;
     }
     const auto beforeStroke=model;auto beforeAtlas=atlas.createStagingCopy();
     QVector<qint32> beforeField,beforeBaseline;
     beforeStroke.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&beforeField,&beforeBaseline);
     if(!check(preview(model,atlas.activeTileImages(),region).save(output+"/before.png"),"before PNG"))return 1;
+    if(real && fixture.contains("nativeX") && fixture.contains("nativeY"))
+        check(preview(model,atlas.activeTileImages(),QRect(fixture["nativeX"].toInt()-2,
+            fixture["nativeY"].toInt()-2,5,5)).save(output+"/native5x5.png"),"native same-pair 5x5 PNG");
     STerrainTileCommand stroke;stroke.description="Mixed-edge stroke";stroke.semanticAudit.valid=true;
     stroke.semanticAudit.layer=ETerrainTileLayer::Land;stroke.semanticAudit.requestedMaterialId=paint;
     const int cx=region.x()+5,cy=region.y()+5;
@@ -177,12 +184,33 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     auto staged=atlas.createStagingCopy();CValidationReport bakeReport;
     auto resolution=CTerrainMixedEdge::resolve(model,staged.data(),affected,materialTypes,{},QPoint(),paint,17,false,&bakeReport);
     if(!check(!bakeReport.hasErrors()&&!resolution.deltas.isEmpty(),"mixed-edge physical resolution")){log<<bakeReport.toText();return 1;}
+    check(write(output+"/stock-diagnostics.txt",bakeReport.toText().toUtf8()),"measured stock source diagnostics");
     const int mixedSlot=SMprPackedTile::decode(resolution.deltas.first().after).atlasSlot();
     const auto mixedSignature=resolution.deltas.first().requestedSignature;
     const QString aliasKey=QStringLiteral("mixed-edge-b2:")+QString(64,QLatin1Char('a'));
     const int aliasSlot=staged->importMixedEdgeTile(staged->tileImages()[mixedSlot],
         staged->runtimeTerrainTypeForSlot(mixedSlot),mixedSignature,aliasKey,&bakeReport);
     check(aliasSlot==mixedSlot,"same pixels/signature/runtime class reuse slot with recipe alias");
+    // A saved soft B2 cache has all four old variant keys. The revised
+    // algorithm must regenerate their pixels, then reuse its own crisp keys.
+    auto legacy=beforeAtlas->createStagingCopy(); CValidationReport legacyReport;
+    const qint32 mixedType=staged->runtimeTerrainTypeForSlot(mixedSlot);
+    int legacySlot=-1;
+    for(int variant=0;variant<4;++variant)
+    {
+        QByteArray oldKey;
+        for(qint32 id:{mixedSignature.northWest,mixedSignature.northEast,mixedSignature.southEast,mixedSignature.southWest})
+            oldKey+=QByteArray::number(id)+',';
+        oldKey+='|'+QByteArray::number(variant)+'|'+QByteArray::number(mixedType);
+        const QString recipe=QStringLiteral("mixed-edge-b2:")
+            +QString::fromLatin1(QCryptographicHash::hash(oldKey,QCryptographicHash::Sha256).toHex());
+        legacySlot=legacy->importMixedEdgeTile(images.first(),mixedType,mixedSignature,recipe,&legacyReport);
+    }
+    const auto upgraded=CTerrainMixedEdge::resolve(model,legacy.data(),affected,materialTypes,{},QPoint(),paint,17,false,&legacyReport);
+    bool upgradedCache=legacySlot>=0 && !legacyReport.hasErrors() && !upgraded.deltas.isEmpty();
+    for(const auto& d:upgraded.deltas) if(d.requestedSignature==mixedSignature)
+        upgradedCache &= SMprPackedTile::decode(d.after).atlasSlot()!=legacySlot;
+    check(upgradedCache,"saved soft variant keys do not suppress crisp regeneration");
     auto typed=staged->createStagingCopy();
     const int typedSlot=typed->importMixedEdgeTile(staged->tileImages()[mixedSlot],
         (staged->runtimeTerrainTypeForSlot(mixedSlot)+1)%16,mixedSignature,
@@ -216,6 +244,9 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
             ++edges;for(int t=0;t<a.width();++t){seamMatch&=a.pixel(t,0)==b.pixel(t,b.height()-1);channels+=4;}
         }
     }
+    const auto tiedCell=SMprPackedTile::decode(model.packedTile(cx-1,cy+2,ETerrainTileLayer::Land));
+    check(atlas.runtimeTerrainTypeForSlot(tiedCell.atlasSlot())==materialTypes.value(paint),
+        "painted runtime class wins known two-two edge tie");
     check(seamMatch && edges>0,"integrated mixed-cell shared RGBA edges exact");
     if(!real)
     {
@@ -245,6 +276,8 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     if(!real)check(triple>0 && quad>0,"integrated three- and four-material nodes");
     log<<"Integrated edges="<<edges<<" channelComparisons="<<channels<<" triple="<<triple<<" quad="<<quad<<'\n';
     check(preview(model,atlas.activeTileImages(),region).save(output+"/after.png"),"after PNG");
+    if(real) check(preview(model,atlas.activeTileImages(),QRect(cx-2,cy-2,5,5)).save(output+"/edge5x5.png"),
+        "new edge 5x5 PNG");
     QVector<qint32> afterField,afterBaseline;model.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&afterField,&afterBaseline);
     const auto afterFingerprint=atlas.stateFingerprint();
     check(model.apply(stroke,false,&report)&&atlas.commitStaging(*beforeAtlas),"one transaction Undo");

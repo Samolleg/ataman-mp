@@ -196,6 +196,12 @@ void synthetic()
     a.fill(qRgb(20,40,60)); b.fill(qRgb(220,140,160)); t.fill(qRgb(120,90,110));
     check(CTerrainRecipeBaker::estimateStockOwnership(t,a,b,&fit,&rmse,&error)
         && rmse==0 && fit.size()==1024 && fit[0]==.5f,"runtime RGB ownership extraction on known mixture");
+    a.fill(qRgb(100,100,100)); b.fill(qRgb(106,104,102)); t.fill(qRgb(103,102,101));
+    check(CTerrainRecipeBaker::estimateStockOwnership(t,a,b,&fit,&rmse,&error)
+        && rmse==0 && fit[0]==.5f,"low contrast ownership is normalized without absolute denominator bias");
+    b=a;
+    check(CTerrainRecipeBaker::estimateStockOwnership(t,a,b,&fit,&rmse,&error)
+        && fit[0]==.5f,"indistinguishable source pixel marks uncertain ownership");
     check(!CTerrainRecipeBaker::estimateStockOwnership(QImage(),a,b,&fit,&rmse,&error) && !error.isEmpty(),"bad stock fit inputs refused");
     STerrainRecipeBrush brush;
     check(!CTerrainRecipeBaker::makeBrush(2,1,{{.5f}},&brush,&error),"invalid brush pair/shape refused");
@@ -214,6 +220,25 @@ void synthetic()
     check(CTerrainRecipeBaker::makeBrush(1,2,{strip},&brush,&error),"runtime extracted brush bank");
     bool tails=true; for(int y=0;y<512;++y) tails &= brush.ownership[y*65]==0 && brush.ownership[y*65+64]==1;
     check(tails,"extracted bank has pure tails");
+    auto crisp=brush,crispAgain=brush;
+    CTerrainRecipeBaker::sharpenStockBrush(&crisp);
+    CTerrainRecipeBaker::sharpenStockBrush(&crispAgain);
+    bool binary=true,pure=true;
+    for(int i=0;i<crisp.ownership.size();++i) {
+        binary &= crisp.ownership[i]==0 || crisp.ownership[i]==1;
+        if(brush.ownership[i]==0 || brush.ownership[i]==1) pure &= crisp.ownership[i]==brush.ownership[i];
+    }
+    check(binary && pure,"crisp stock preserves native pure fragments and has no fractional blur");
+    check(crisp.ownership==crispAgain.ownership,"five-level density dither is deterministic");
+    auto crispInput=input(32,32,4);quint32 rng=234;
+    for(auto& id:crispInput.vertexMaterials) {rng=rng*1664525+1013904223;id=1+int(rng>>30);}
+    for(int y=0;y<32;++y) for(int x=0;x<32;++x)
+        crispInput.preferredMaterials[y*32+x]=crispInput.vertexMaterials[y*33+x];
+    for(auto& bank:crispInput.brushes) CTerrainRecipeBaker::sharpenStockBrush(&bank);
+    STerrainRecipeBakeOptions crispOptions;crispOptions.tileSize=33;crispOptions.stableCoordinateVariants=true;
+    auto crispGrid=CTerrainRecipeBaker::bake(crispInput,crispOptions);
+    check(crispGrid.success,"crisp four-material grid supported");
+    if(crispGrid.success) seams(crispGrid,32,32,33);
     QVector<float> stripAgain;
     check(CTerrainRecipeBaker::extractStockStrip(st,sa,sb,1,2,signature,&stripAgain,&error)
         && stripAgain==strip,"runtime extraction repeatable");
@@ -353,6 +378,7 @@ bool zone(const QString& path)
 void incrementalMaps()
 {
     auto full=input(2,1,4);full.vertexMaterials={1,2,3,4,3,2};full.preferredMaterials={1,2};
+    for(auto& brush:full.brushes) CTerrainRecipeBaker::sharpenStockBrush(&brush);
     STerrainRecipeBakeOptions options;options.tileSize=33;options.stableCoordinateVariants=true;
     options.origin=QPoint(-19,27);
     const auto combined=CTerrainRecipeBaker::bake(full,options);

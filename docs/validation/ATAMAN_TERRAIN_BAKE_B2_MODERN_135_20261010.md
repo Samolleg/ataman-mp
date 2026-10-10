@@ -177,3 +177,146 @@ Exe SHA256: `2afaa335501620c4127167ce89a6552d7937094c51d1649c49f2cf2251a3be5d`.
 компоненты собраны, итоговый child exit0. QM пересобран существующим lrelease.
 Git identity — только env процесса команды; scoped-коммит в main с VERSION135,
 без push. Полный commit SHA сообщается сопровождающему в итоговом ответе.
+
+
+## Чёткая кромка — продолжение ревью 135, 2026-10-10
+
+Поручение: исправить мягкий ореол на grass-паре, сохранив швы, транзакции, бюджет,
+публикацию и OFF=134; показать grass и stone/ground на копии Zone6 рядом с родными
+переходами. База: main `d94e3a4bea3ecf8899df0751da051c26479bc793`.
+VERSION остаётся135 по прямому решению владельца: версия ещё не передана.
+Ни установка, ни live-данные, ни Endurance не менялись; push не выполнялся.
+
+### Измеренная причина
+
+Гипотеза о дробном RGB ownership подтвердилась, но причина шире одного низкого
+контраста: adapter брал **первые четыре** допустимых stock-тайла, игнорируя более
+надёжные и рассыпчатые источники. На grass это33/34/35/36: RGB RMSE6.693–9.728,
+доля ownership в(.1,.9) в извлечённых полосах40.35–42.73%. Ошибочный абсолютный
+floor знаменателя100 смещал владение к первому материалу на7.92–8.50% пикселей
+этих fits. Контрастные stone/ground также не защищены от first-four bias.
+
+Все1216 исходных PNG имеют128×128: SmoothTransformation **не выполнял ресайз**
+в этом конкретном воспроизведении и не объявляется его установленной причиной.
+На других размерах он мог бы сгладить бинарные детали, поэтому заменён nearest.
+Gaussian остаётся только в coarse-guide геометрии; перенос ownership не размывается.
+
+| Пара | Прежние stock-слоты | Промежуточные уровни после округления к5 | Новые stock-слоты | Промежуточные веса нового банка |
+|---|---|---:|---|---:|
+| Grass / Dark + Common |33,34,35,36|12164/33280 =36.55%|57,52|0/33280|
+| Ground / Dead + Stone / Lime |507,552,553,557|11590/33280 =34.83%|588,615,848,507|0/33280|
+
+До округления прежние банки имели17333 и17076 дробных samples из33280.
+Теперь fit нормируется истинным RGB контрастом без floor100; неразличимый пиксель
+помечается неопределённым ownership=.5. Контрольный low-contrast случай с
+RGB delta(6,4,2), denominator56, истинным alpha=.5 раньше дал бы.28; новый нативный
+тест подтверждает.5 и RGB RMSE0.
+
+Новые выбранные grass-источники: RGB RMSE2.031/3.580, contrast RMS30.456/30.940,
+81/146 отдельных4-connected фрагментов площадью2–64px в полосах.
+Stone/ground: RMSE1.501–3.732, contrast RMS38.449–40.562,54–73 фрагмента.
+Приоритет рассыпчатых sources применяется лишь при relative RMSE<.15 и≥16
+фрагментов; остальные sources допускаются только при relative RMSE<.2.
+Source rank дополнительно включает бонус за фрагменты и может быть отрицательным;
+это не отрицательная ошибка RGB. После makeBrush ownership округляется к пяти
+уровням0/.25/.5/.75/1 и переводится в бинарное покрытие детерминированным density
+dither в координатах периодического банка. Чистые stock-пиксели сохраняются.
+
+Измерения получены отдельными нативными probes со старым и новым core на одних
+копиях128px PNG; float strips и JSON сохранены приватно в task-каталоге.
+[Сводка измерений](../../build-tests-135-bake/sharp-edge/measurement.json),
+[старый probe](../../build-tests-135-bake/sharp-edge/probe-old/stock-measurement.json),
+[новый probe](../../build-tests-135-bake/sharp-edge/probe-new/stock-fragments.json),
+[grass diagnostics](../../build-tests-135-bake/sharp-edge/grass/stock-diagnostics.txt),
+[stone diagnostics](../../build-tests-135-bake/sharp-edge/stone/stock-diagnostics.txt).
+
+### Исправление и сохранность
+
+- Проверяются все stock-источники **той же пары** текущего атласа/профиля; выбирается
+  надёжная рассыпчатая кромка, а не первая четвёрка и не самый чистый HD-контур.
+  Материалы не подменяются. Банк другой пары не потребовался и не внедрялся;
+  без надёжного собственного источника остаётся явный отказ с русской причиной.
+- Nearest sampling, пять уровней + density dither исключают дробную мягкую маску
+  на двухматериальной кромке. World phase/recipe grammar не менялись; общий банк
+  используется обеими сторонами ребра, без отдельного pixel noise в каждой клетке.
+- Recipe hash содержит `crisp-stock-v1|`: старые мягкие135 keys не блокируют
+  перестроение. Старые слоты/aliases не уничтожаются; первое обновление может
+  потребовать новых слотов в пределах прежнего4096, повтор crisp —0 новых слотов.
+  Нативный check подставляет все четыре прежних variant keys и проверяет regeneration.
+- Проба stone выявила существующий `terrain.recipe.class_tie`: на границе
+  Ground / Dead(класс1)/Stone / Lime(0) старый SEC-слот853 имел класс4.
+  При равном покрытии покраска теперь предпочитает класс нарисованного материала,
+  если он среди максимальных покрытий; иначе остаётся предпочтение predecessor.
+  Repair сохраняет reviewed predecessor как раньше. Добавлен отдельный tie check.
+- Публикация, atlas-aware Undo/Redo, slot budget, option/UI paths не изменены.
+
+### Финальные проверки продолжения
+
+| Проверка | PASS | FAIL | SKIP |
+|---|---:|---:|---:|
+| terrain_mixed_edge_check synthetic |63|0|0|
+| terrain_mixed_edge_check Zone6, основной fixture |53|0|0|
+| Zone6 grass, дополнительный native5×5 |54|0|0|
+| Zone6 stone/ground, дополнительный native5×5 |54|0|0|
+| terrain_recipe_bake_tests |17425|0|0|
+| полный --ui-widget-check |169|0|0|
+| --scenario-layer-check |50|0|0|
+| --dark-theme-check |70|0|0|
+| save122 --terrain-height-res-save-check |29|0|0|
+
+UI/App-проверки выполнены под атомарным directory-lock `build-locks/ui-tests.lock`,
+вне интерактивного редактора; clipboard backend=in-memory, nativeAttempts0,
+sequence33622→33622, formats8→8. Lock снят после child exit0.
+Core проверяет18241 общих ребра/2240132 RGBA-channel comparisons, в том числе
+sharp4-material grid и независимые соседние карты с sharp bank/мировым origin.
+Обе реальные пробы:24576 SEC cells,1216→1230 working slots,1162 published;
+16 mixed edges/8192 channel comparisons, save→disk fresh reopen, Undo/Redo,
+старые cache keys, runtime tie; повтор до и после открытия0 новых слотов/0 SEC deltas.
+Synthetic:22 mixed edges/11264 comparisons,32 границы с unchanged uniform,
+тройные2/четверной1 узлы, одна настоящая QUndoStack entry и GL preview.
+
+OFF-regression заново собран/выполнен после изменения extraction: Modern OFF,
+Classic, Manual побайтово совпали с назначенным HEAD134 —79954616 bytes на режим,
+все три SHA остались указанными в исходном разделе отчёта.
+[OFF receipt](../../build-tests-135-bake/sharp-edge/off-comparison.json),
+[core receipt](../../build-tests-135-bake/terrain_recipe_bake_tests/receipt.json),
+[core totals](../../build-tests-135-bake/terrain_recipe_bake_tests/result.log),
+[финальная матрица](../../build-tests-135-bake/sharp-edge/final-summary.json).
+
+Первый stone прогон действительно отказал на class_tie и был исправлен;
+первый новый sharp-grid тест не задавал валидную tie preference — fixture
+исправлен без ослабления core. Эти попытки не считаются PASS; таблица выше
+относится к окончательному состоянию. Незапрошенные gallery/reader/world/document
+наборы из первоначального этапа здесь не объявляются новым прогоном:
+world45/1/0 и document192/0/18 остаются ранее зафиксированными ограничениями.
+
+### PNG и честная оценка
+
+- [Grass до/после](../../build-tests-135-bake/sharp-edge/grass-before-after.png),
+  [stone/ground до/после](../../build-tests-135-bake/sharp-edge/stone-before-after.png):2048×1090.
+- [Grass новая/native кромка5×5](../../build-tests-135-bake/sharp-edge/grass-edge5x5-vs-native.png),
+  [stone новая/native кромка5×5](../../build-tests-135-bake/sharp-edge/stone-edge5x5-vs-native.png):2560×1346,
+  целочисленное nearest увеличение2×. Есть варианты1:1:1280×706.
+- Исходные before/after renders:2048×2048; отдельные5×5:640×640.
+  [PNG dimensions/SHA](../../build-tests-135-bake/sharp-edge/png-receipt.json).
+- Grass: исходная неизменённая6×6 vertex patch(113,99), paint4×4(114,100),
+  native central cell(112,100), slot55. Stone:patch(50,122), paint(51,123),
+  native central cell(55,121), slot848. В обоих случаях без подстилающей перекраски.
+- Канонические zone6-before-after.png/zone6-closeup.png обновлены; прежний мягкий
+  review сохранён в sharp-edge/soft-review-*.png. Крупный канонический PNG1792×962.
+
+PNG открыты и визуально осмотрены. Широкий мягкий ореол исчез; у обеих пар есть
+чёткие отдельные включения, крошка и рваность, ближе к родным stock-переходам.
+**Не идентично родной кромке:** grain местами мельче, на stone заметны вытянутые
+штрихи из переноса полос, периодический банк и вариативные uniform textures
+всё ещё могут повторяться. Геометрия пятна остаётся гладкой/скруглённой на масштабе
+клеток. Плавный центр3/4-узлов B1 не заменён бинарным рисунком. Это честная оценка
+для ревью владельца, не художественная/игровая приёмка. RGBA-швы доказаны до DXT1;
+lossless/C1 после сжатия не заявляются. Ограничение Ground одной карты сохраняется.
+
+Проверенный shadow exe: `build-release-135-bake/release/EIMapperEndurance.exe`,
+SHA256 `f6f201663fbb3da15d0102e00a5fde8442cfa371080637d17bddb2d8bdadf104`.
+Русский QM пересобран existing lrelease:3309 finished/0 unfinished.
+Все новые данные и PNG — только `build-tests-135-bake/`; окончательную сборку,
+установку и ручную приёмку делает сопровождающий. Scoped-коммит main без push,
+полный SHA сообщается в итоговом ответе.

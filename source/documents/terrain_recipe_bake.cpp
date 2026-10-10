@@ -256,7 +256,10 @@ bool CTerrainRecipeBaker::estimateStockOwnership(const QImage& t, const QImage& 
         const int tv[]={qRed(tp),qGreen(tp),qBlue(tp)}, av[]={qRed(ap),qGreen(ap),qBlue(ap)}, bv[]={qRed(bp),qGreen(bp),qBlue(bp)};
         double dot=0,den=0;
         for(int c=0;c<3;++c) { dot+=(tv[c]-av[c])*(bv[c]-av[c]); den+=(bv[c]-av[c])*(bv[c]-av[c]); }
-        const double alpha=qBound(0.0,dot/qMax(den,100.0),1.0); result.append(float(alpha));
+        // The old absolute floor biased low-contrast ownership toward first.
+        // An indistinguishable pixel carries no recoverable ownership evidence.
+        const double alpha=den>0 ? qBound(0.0,dot/den,1.0) : .5;
+        result.append(float(alpha));
         for(int c=0;c<3;++c) { const double d=tv[c]-(av[c]+alpha*(bv[c]-av[c])); sum+=d*d; }
     }
     *output=result; *rmse=std::sqrt(sum/(t.width()*double(t.height())*3));
@@ -292,6 +295,20 @@ bool CTerrainRecipeBaker::makeBrush(qint32 a, qint32 b,
         }
     }
     *output=result; if(error) error->clear(); return true;
+}
+
+void CTerrainRecipeBaker::sharpenStockBrush(STerrainRecipeBrush* brush)
+{
+    if(!brush || brush->ownership.size()!=512*65) return;
+    for(int row=0;row<512;++row) for(int c=0;c<65;++c)
+    {
+        const double level=std::nearbyint(brush->ownership[row*65+c]*4)/4;
+        // Quantize the recovered coverage first, then distribute its uncertain
+        // quarter levels as stock flecks. Pure source pixels remain pure. This
+        // phase lives in the periodic bank, so shared world edges use it alike.
+        const double threshold=(seed(row,c,0x43524953u)%256+.5)/256;
+        brush->ownership[row*65+c]=level>threshold ? 1.f : 0.f;
+    }
 }
 
 bool CTerrainRecipeBaker::extractStockStrip(const QImage& transition,

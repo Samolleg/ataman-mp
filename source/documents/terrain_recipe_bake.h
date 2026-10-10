@@ -138,6 +138,9 @@ public:
     static bool makeBrush(qint32 firstMaterial, qint32 secondMaterial,
         const QVector<QVector<float>>& strips, STerrainRecipeBrush* brush,
         QString* error = nullptr);
+    // Modern's crisp stock edge: five-level ownership, deterministic density
+    // dithering, no interpolation of fragments. Material textures stay intact.
+    static void sharpenStockBrush(STerrainRecipeBrush* brush);
 };
 
 #endif

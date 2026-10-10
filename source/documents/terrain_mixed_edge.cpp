@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QCoreApplication>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 QVector<qint32> corners(const STerrainTransitionSignature& s)
@@ -16,6 +17,27 @@ bool opaque(const QImage& image)
     for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x)
         if(qAlpha(image.pixel(x,y))!=255) return false;
     return true;
+}
+int stockFragments(const QVector<float>& strip)
+{
+    QVector<bool> seen(strip.size(),false);
+    QVector<int> queue;
+    int fragments=0;
+    for(int start=0;start<strip.size();++start)
+    {
+        if(seen[start]) continue;
+        queue.clear(); queue.append(start); seen[start]=true;
+        const bool side=strip[start]>=.5f;
+        for(int i=0;i<queue.size();++i)
+        {
+            const int p=queue[i],x=p%65;
+            const int next[]={x>0?p-1:-1,x<64?p+1:-1,p-65,p+65};
+            for(int q:next) if(q>=0 && q<strip.size() && !seen[q] && (strip[q]>=.5f)==side)
+            { seen[q]=true; queue.append(q); }
+        }
+        if(queue.size()>=2 && queue.size()<=64) ++fragments;
+    }
+    return fragments;
 }
 }
 
@@ -126,19 +148,20 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     auto orderedPairs=pairs.values(); std::sort(orderedPairs.begin(),orderedPairs.end());
     for(const auto& pair:orderedPairs)
     {
-        QVector<QVector<float>> strips;
+        struct SStockCandidate { int slot, fragments; double score, residual, contrast; QVector<float> strip; };
+        QVector<SStockCandidate> candidates;
         QString lastError;
         // No generic replacement mask. Every bank is extracted from opaque
         // reviewed physical two-material stock in the current map's atlas.
         for(int slot:stock.value(pair))
         {
             QVector<float> strip; QString error;
-            const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+            const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
             QImage bestFirst,bestSecond; double bestResidual=14;
             for(int a:uniforms[pair.first]) for(int b:uniforms[pair.second])
             {
-                const QImage first=images[a].scaled(128,128,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
-                const QImage second=images[b].scaled(128,128,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+                const QImage first=images[a].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+                const QImage second=images[b].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
                 QVector<float> ownership; double residual=0;
                 if(CTerrainRecipeBaker::estimateStockOwnership(transition,first,second,&ownership,&residual,&error)
                    && residual<bestResidual)
@@ -149,14 +172,54 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
                 pair.first,pair.second,
                 CTerrainTransitionCatalog::mirroredGridY(sourceSignatures[slot]),&strip,&error))
             {
-                strips.append(strip);
-                if(strips.size()==4) break;
+                double contrast=0;
+                for(int y=0;y<128;++y) for(int x=0;x<128;++x)
+                {
+                    const QRgb a=bestFirst.pixel(x,y),b=bestSecond.pixel(x,y);
+                    contrast+=std::pow(qRed(a)-qRed(b),2)+std::pow(qGreen(a)-qGreen(b),2)
+                        +std::pow(qBlue(a)-qBlue(b),2);
+                }
+                contrast=std::sqrt(contrast/(128*128*3.0));
+                // Absolute RGB residual alone rewards uncertain low-contrast
+                // fits. Rank every local source by error relative to contrast,
+                // then by recovered fractional coverage. Never stop at the
+                // first four catalog entries (which can be soft legacy art).
+                double intermediate=0;
+                for(float v:strip) intermediate+=v>.1f && v<.9f;
+                intermediate/=strip.size();
+                const double relative=bestResidual/qMax(contrast,1.0);
+                const int fragments=stockFragments(strip);
+                if(contrast>1 && relative<.2)
+                    candidates.append({slot,fragments,relative+intermediate*.03-qMin(.15,fragments*.002),
+                        bestResidual,contrast,strip});
+                else lastError=QCoreApplication::translate("CTerrainMixedEdge", "Stock ownership is uncertain relative to material contrast.");
             }
             else lastError=error.isEmpty()?QStringLiteral("No trusted RGB ownership fit."):error;
+        }
+        std::sort(candidates.begin(),candidates.end(),[](const SStockCandidate& a,const SStockCandidate& b) {
+            return a.score==b.score ? a.slot<b.slot : a.score<b.score;
+        });
+        // Stage1b's art choice: prefer genuine stock flecks over a clean HD
+        // outline, but only among confident normalized RGB fits. A simple
+        // authored straight edge remains usable when no ragged source exists.
+        const bool ragged=std::any_of(candidates.cbegin(),candidates.cend(),[](const SStockCandidate& c) {
+            return c.fragments>=16 && c.residual/c.contrast<.15;
+        });
+        QVector<QVector<float>> strips;
+        for(const auto& c:candidates)
+        {
+            if(ragged && (c.fragments<16 || c.residual/c.contrast>=.15)) continue;
+            strips.append(c.strip);
+            if(report) report->add("terrain.mixed_edge.stock",EValidationSeverity::Info,
+                QStringLiteral("Crisp stock %1 / %2: slot %3, RGB RMSE %4, contrast RMS %5, relative score %6, fragments %7.")
+                    .arg(pair.first).arg(pair.second).arg(c.slot).arg(c.residual,0,'f',6)
+                    .arg(c.contrast,0,'f',6).arg(c.score,0,'f',6).arg(c.fragments));
+            if(strips.size()==4) break;
         }
         STerrainRecipeBrush brush; QString error;
         if(strips.isEmpty() || !CTerrainRecipeBaker::makeBrush(pair.first,pair.second,strips,&brush,&error))
             return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile. %3").arg(pair.first).arg(pair.second).arg(error.isEmpty()?lastError:error));
+        CTerrainRecipeBaker::sharpenStockBrush(&brush);
         brushes.insert(pair,brush);
     }
 
@@ -170,10 +233,25 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         STerrainRecipeBakeInput input; input.tileWidth=input.tileHeight=1;
         input.vertexMaterials={s.northWest,s.northEast,s.southWest,s.southEast};
         input.preferredMaterials={paintedMaterial};
-        input.preferredRuntimeTypes={atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot())};
+        qint32 preferredType=atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
+        if(paintedMaterial>0)
+        {
+            QMap<qint32,int> coverage;
+            int maximum=0;
+            for(qint32 id:corners(s)) maximum=qMax(maximum,++coverage[materials[id].runtimeTerrainType]);
+            const qint32 paintedType=materialTypes[paintedMaterial];
+            // A painted class among the maximal coverages wins a tie. The
+            // predecessor remains the preference on connected unpainted rings;
+            // it cannot override the material just painted with an unrelated
+            // old SEC class. Repair still preserves the reviewed predecessor.
+            if(coverage.value(paintedType)==maximum) preferredType=paintedType;
+        }
+        input.preferredRuntimeTypes={preferredType};
         QSet<qint32> ids; for(qint32 id:corners(s)) ids.insert(id);
         auto sorted=ids.values(); std::sort(sorted.begin(),sorted.end());
-        QByteArray key;
+        // Invalidate soft B2 recipes without discarding their saved slots or
+        // Undo history. New crisp recipes are reused across fresh reopen too.
+        QByteArray key("crisp-stock-v1|");
         for(qint32 id:corners(s)) key+=QByteArray::number(id)+',';
         for(qint32 id:sorted) input.materials.append(materials[id]);
         for(int i=0;i<sorted.size();++i) for(int j=i+1;j<sorted.size();++j) {
