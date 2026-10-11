@@ -44,6 +44,8 @@ struct STerrainPaintMaterialChoice
     bool cornerOnly{false};
     bool contextualStamp{false};
     bool used{false};
+    QStringList generatedIds;
+    QVector<QImage> generatedThumbnails;
 };
 
 enum class ETerrainPaintPaletteMode
@@ -117,6 +119,7 @@ public:
     bool tilePaintPreviewEnabled() const;
     bool randomizeUniformRotation() const;
     bool randomPaintVariants() const;
+    bool generatedHdVariants() const;
     quint32 randomPaintSeed() const;
     void setRandomPaintSeed(quint32 seed);
     bool landFamiliesAllowedInOverlay() const;
@@ -184,6 +187,8 @@ signals:
     void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
     void atlasHdRepublishRequested();
+    void generateHdVariantsRequested();
+    void generatedHdVariantsChanged(bool enabled);
     void exportPaintDiagnosticRequested();
     void openMprSettingsRequested();
     void openMprMaterialsRequested();
@@ -254,6 +259,7 @@ private:
     QCheckBox* m_modernMixedEdge{nullptr};
     QCheckBox* m_randomizeUniformRotation;
     QCheckBox* m_randomPaintVariants;
+    QCheckBox* m_generatedHdVariants{nullptr};
     QLineEdit* m_randomPaintSeed;
     QComboBox* m_randomPaintScope;
     QComboBox* m_paintIssueCategory;

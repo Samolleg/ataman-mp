@@ -187,6 +187,7 @@ class CView : public QGLWidget
     friend int runTerrainHeightResSaveCheck();
     friend int runTerrainMixedEdgeCheck(const QString& fixturePath);
     friend int runTerrainRandomPaintCheck(const QString& fixturePath);
+    friend class TerrainHdVariantBankTests;
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
     friend int runAiGraphRegenerationCheck();
@@ -748,6 +749,11 @@ private:
     void reviewTerrainAtlasProfileAtSlot(int initialSlot);
     void finalizeVirtualTerrainAtlas();
     void republishTerrainAtlasHd();
+    void generateTerrainHdVariants();
+    bool importTerrainHdVariants(qint32 material, ETerrainTileLayer layer,
+        CValidationReport* report, SWorkingTerrainResolveStage* staging=nullptr);
+    void applyTerrainHdVariantSelectionPolicy();
+    void refreshTerrainHdVariantChoices();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,

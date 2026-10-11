@@ -1,5 +1,6 @@
 #include "ui_theme.h"
 #include "landscape_tools.h"
+#include <QMenu>
 #include "types.h"
 
 #include <QCheckBox>
@@ -776,6 +777,18 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     hdRepublish->setToolTip(tr("Пересобрать опубликованный атлас текущей карты из точных HD-источников, сохранив слоты, повороты и воду."));
     advanced->addWidget(hdRepublish);
     connect(hdRepublish, &QPushButton::clicked, this, &CLandscapeTools::atlasHdRepublishRequested);
+    auto generateHd = new QPushButton(tr("Сгенерировать HD-варианты материалов…"),this);
+    generateHd->setObjectName(QStringLiteral("terrainHdVariantsGenerate"));
+    advanced->addWidget(generateHd);
+    connect(generateHd,&QPushButton::clicked,this,&CLandscapeTools::generateHdVariantsRequested);
+    m_generatedHdVariants=new QCheckBox(tr("Использовать сгенерированные варианты"),this);
+    m_generatedHdVariants->setObjectName(QStringLiteral("generatedHdVariants"));
+    m_generatedHdVariants->setChecked(settings.value(QStringLiteral("ui/landscape/generatedHdVariants"),true).toBool());
+    advanced->addWidget(m_generatedHdVariants);
+    connect(m_generatedHdVariants,&QCheckBox::toggled,this,[this](bool enabled){
+        QSettings().setValue(QStringLiteral("ui/landscape/generatedHdVariants"),enabled);
+        emit generatedHdVariantsChanged(enabled);
+    });
     m_overlayMprMaterials->setText(tr("Материалы поверхности…"));
     advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
     advanced->addWidget(m_modernMixedEdge);
@@ -1360,6 +1373,7 @@ bool CLandscapeTools::randomizeUniformRotation() const
         && (!randomPaintVariants() || modernMixedEdge());
 }
 bool CLandscapeTools::randomPaintVariants() const { return m_randomPaintVariants->isChecked(); }
+bool CLandscapeTools::generatedHdVariants() const { return m_generatedHdVariants&&m_generatedHdVariants->isChecked(); }
 quint32 CLandscapeTools::randomPaintSeed() const { return m_randomPaintSeed->text().toUInt(); }
 void CLandscapeTools::setRandomPaintSeed(quint32 seed) { m_randomPaintSeed->setText(QString::number(seed)); }
 bool CLandscapeTools::landFamiliesAllowedInOverlay() const
@@ -1865,6 +1879,15 @@ void CLandscapeTools::rebuildMaterialPalette()
                       + button->toolTip());
               }
               button->setMinimumSize(64, 64);
+              if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
+                  auto menu=new QMenu(button);
+                  for(int i=0;i<choice.generatedIds.size();++i){
+                      auto action=menu->addAction(QPixmap::fromImage(choice.generatedThumbnails.value(i)),tr("Сгенерирован: %1").arg(choice.generatedIds[i]));
+                      action->setToolTip(tr("Вариант участвует в покраске этого материала при включённой опции."));
+                  }
+                  button->setMenu(menu);button->setPopupMode(QToolButton::MenuButtonPopup);
+                  button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Стрелка открывает список с миниатюрами и ID.").arg(choice.generatedIds.size()));
+              }
               button->setMaximumHeight(64);
               button->setSizePolicy(QSizePolicy::Expanding,
                                     QSizePolicy::Fixed);

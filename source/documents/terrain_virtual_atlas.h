@@ -437,6 +437,8 @@ public:
     bool isValid() const;
     QString error() const;
     const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
+    void setSlotPaintSelectable(int slot,bool selectable) { m_workingCatalog.setSlotPaintSelectable(slot,selectable); }
+    void restoreHdVariantIdentity(int slot,const QString& id,const QVector<int>& aliases);
     const QVector<QImage>& tileImages() const { return m_workingImages; }
     // MP terrain types are logical per-slot metadata, while MMP imagery is
     // always stored in complete 64-tile physical pages.

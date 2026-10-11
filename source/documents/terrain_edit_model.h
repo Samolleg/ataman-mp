@@ -316,6 +316,7 @@ public:
                                          const QMap<qint32, int>& preferredMaterials = {}) const;
     QVector<STerrainTransitionSignature> gridSignatures() const;
     void removeAtlasSlot(int atlasSlot);
+    void setSlotPaintSelectable(int atlasSlot,bool selectable);
     bool paintGridMirrored() const { return m_mirrorPaintGridY; }
     void setRandomDistribution(bool enabled) { m_randomDistribution = enabled; }
     void setUniformPaintSeed(bool enabled, quint32 seed)

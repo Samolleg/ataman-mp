@@ -12,8 +12,8 @@
 class CTerrainHdProgressDialog : public QDialog
 {
 public:
-    explicit CTerrainHdProgressDialog(CTerrainHdProgress& progress,QWidget* parent=nullptr)
-        : QDialog(parent),m_progress(progress) {
+    explicit CTerrainHdProgressDialog(CTerrainHdProgress& progress,QWidget* parent=nullptr,bool variants=false)
+        : QDialog(parent),m_progress(progress),m_variants(variants) {
         setObjectName(QStringLiteral("terrainHdProgressDialog"));
         setWindowTitle(QStringLiteral("Пересборка атласа карты в HD"));
         setWindowModality(Qt::ApplicationModal);setMinimumWidth(540);
@@ -32,9 +32,11 @@ public:
     void refresh() {
         const auto s=m_progress.snapshot();m_bar->setValue(s.percent);
         m_label->setText(m_progress.cancelled()?QStringLiteral("Отмена подготовки…\nОжидание завершения текущей операции.\nRES и MPR не изменяются."):CTerrainHdProgress::label(s));
+        if(m_variants)m_label->setText(m_label->text().replace(QStringLiteral("Восстановление переходов"),QStringLiteral("Генерация материалов")));
     }
 private:
     CTerrainHdProgress& m_progress;
+    bool m_variants;
     QLabel* m_label;
     QProgressBar* m_bar;
     QPushButton* m_cancel;

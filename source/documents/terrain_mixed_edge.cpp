@@ -126,6 +126,16 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             stock[qMakePair(sorted[0],sorted[1])].append(slot);
         }
     }
+    auto stockUniforms=uniforms;
+    for(int slot=0;slot<atlas->activeTileCount();++slot) {
+        STerrainWorkingTileIdentity identity;
+        if(!atlas->tileIdentityForSlot(slot,&identity)||!identity.sourceNamespace.startsWith(QStringLiteral("hd-variant:")))continue;
+        const auto s=identity.canonicalSignature;
+        if(uniform(s)&&opaque(images[slot])) {
+            stockUniforms[s.northWest].removeAll(slot);
+            if(!uniforms[s.northWest].contains(slot))uniforms[s.northWest].append(slot);
+        }
+    }
     QVector<int> ordered=cells.values().toVector(); std::sort(ordered.begin(),ordered.end());
     QSet<qint32> required;
     if(paintedMaterial>0) required.insert(paintedMaterial);
@@ -183,7 +193,7 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         materials.insert(id,material);
     }
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
-    if(!buildStockBrushes(images,uniforms,stock,sourceSignatures,pairs,&brushes,report))return {};
+    if(!buildStockBrushes(images,stockUniforms,stock,sourceSignatures,pairs,&brushes,report))return {};
 
     for(int cell:ordered)
     {

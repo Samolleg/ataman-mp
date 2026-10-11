@@ -40,6 +40,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "terrain_hd_variant_bank.h"
 #include "terrain_atlas_shape_policy.h"
 #include "verified_clipboard.h"
 #include "selection_region.h"
@@ -1810,6 +1811,13 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::reviewTerrainAtlasProfile);
         connect(m_landscapeTools, &CLandscapeTools::atlasHdRepublishRequested,
                 this, &CView::republishTerrainAtlasHd);
+        connect(m_landscapeTools,&CLandscapeTools::generateHdVariantsRequested,this,&CView::generateTerrainHdVariants);
+        connect(m_landscapeTools,&CLandscapeTools::generatedHdVariantsChanged,this,[this](bool){
+            ++m_terrainFamilyPrewarmGeneration;m_preparedTerrainFamilyStage.clear();
+            applyTerrainHdVariantSelectionPolicy();
+            refreshTerrainHdVariantChoices();
+            refreshTerrainFamilyUsage();
+        });
         connect(m_landscapeTools, &CLandscapeTools::exportPaintDiagnosticRequested,
                 this, &CView::exportTerrainPaintDiagnostic);
         connect(m_landscapeTools, &CLandscapeTools::openMprSettingsRequested,
@@ -12050,6 +12058,8 @@ void CView::rebuildTerrainAutoCatalog()
         // when paint or Resolve Missing Blends actually needs their pixels.
         QElapsedTimer sourceHydrationTimer;
         sourceHydrationTimer.start();
+        const auto generatedBank=m_landscapeTools&&m_landscapeTools->generatedHdVariants()
+            ?TerrainHdVariantBank::available():QSharedPointer<const TerrainHdVariantBank::Bank>();
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
             STerrainGlobalMaterialSource selectedSource;
@@ -12077,6 +12087,11 @@ void CView::rebuildTerrainAutoCatalog()
             choice.thumbnail = source;
             choice.thumbnailPending = source.isNull();
             choice.assignedSlots = family.sources.size();
+            if(generatedBank) {
+                for(const auto& entry:TerrainHdVariantBank::forMaterial(*generatedBank,family.name,family.runtimeTerrainType,family.layer)) {
+                    choice.generatedIds.append(entry.id);choice.generatedThumbnails.append(entry.pixels.scaled(64,64));
+                }
+            }
             if(family.layer == ETerrainAtlasLayer::Land)
             {
                 m_terrainAtlasAnalysis.landCatalog.declareMaterial(family.id);
@@ -12175,6 +12190,7 @@ void CView::rebuildTerrainAutoCatalog()
             materialRuntimeTypes(m_terrainAtlasProfile,
                                  m_terrainGlobalFamilies)));
         workingAtlasMs = catalogDetailTimer.restart();
+        applyTerrainHdVariantSelectionPolicy();
         for(const auto& definition:m_terrainAtlasProfile.slotDefinitions)
             for(const auto& key:definition.mixedEdgeRecipes)
                 m_workingTerrainAtlas->restoreMixedEdgeRecipe(definition.slot,key);
@@ -12842,6 +12858,15 @@ bool CView::resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationRepo
     for(const auto& cell:stroke->semanticAudit.paintedCoreCells)
         cells.insert(cell.y()*w+cell.x());
     const QPoint origin(qRound(m_activeMapWorldOrigin.x()/2),qRound(m_activeMapWorldOrigin.y()/2));
+    if(m_landscapeTools&&m_landscapeTools->generatedHdVariants()) {
+        SWorkingTerrainResolveStage variantStage;variantStage.atlas=staged;variantStage.terrainEdit=m_terrainEdit;
+        CTerrainVirtualMaterialField field;QSet<qint32> materials;
+        if(m_terrainEdit.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false))
+            for(int cell:cells)for(int y=cell/w-1;y<=cell/w+2;++y)for(int x=cell%w-1;x<=cell%w+2;++x) {
+                bool found=false;const auto material=field.material(x,y,&found);if(found)materials.insert(material);
+            }
+        for(qint32 material:materials)if(!importTerrainHdVariants(material,ETerrainTileLayer::Land,report,&variantStage))return false;
+    }
     STerrainTileCommand resolution=CTerrainMixedEdge::resolve(m_terrainEdit,staged.data(),cells,
         types,m_mprAnimatedTiles,origin,stroke->semanticAudit.requestedMaterialId,
         m_tileStrokeDistributionSeed,m_landscapeTools && m_landscapeTools->randomizeUniformRotation(),report);
@@ -19419,6 +19444,11 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                          && !m_workingTerrainAtlas->changedSlots().isEmpty())
                         || workingAtlasPublicationPending;
                 }
+                if(exactSelected) {
+                    exactSelected=importTerrainHdVariants(terrainType,ETerrainTileLayer::Overlay,&report);
+                    workingAtlasPublicationPending=workingAtlasPublicationPending
+                        ||(m_workingTerrainAtlas&&!m_workingTerrainAtlas->changedSlots().isEmpty());
+                }
                 if(exactSelected)
                     exactSelected = selectWorkingPaintVariantWithRuntimeType(
                         *m_workingTerrainAtlas, pure,
@@ -19522,6 +19552,13 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
     const bool stableUniform = m_landscapeTools->randomPaintVariants() && !m_tileStrokeMixedEdge
         && layer == ETerrainTileLayer::Land;
+    if(preselectedMaterial&&!m_landscapeTools->manualTileSelectionEnabled()) {
+        if(!importTerrainHdVariants(preselectedTerrainType,layer,&report)) {
+            ++m_tileStrokeRefused;emit updateMsg(report.toText());return;
+        }
+        workingAtlasPublicationPending=workingAtlasPublicationPending
+            ||(m_workingTerrainAtlas&&!m_workingTerrainAtlas->changedSlots().isEmpty());
+    }
     if(m_workingTerrainAtlas)
         m_workingTerrainAtlas->setUniformPaintSeed(stableUniform, terrainRandomPaintSeed());
     m_terrainAtlasAnalysis.landCatalog.setUniformPaintSeed(stableUniform, terrainRandomPaintSeed());
@@ -19621,6 +19658,9 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
                  && !m_workingTerrainAtlas->changedSlots().isEmpty())
                 || workingAtlasPublicationPending;
             artworkProgress.hide();
+        }
+        if(!report.hasErrors()&&!importTerrainHdVariants(terrainType,layer,&report)) {
+            ++m_tileStrokeRefused;emit updateMsg(report.toText());return;
         }
         if(report.hasErrors())
         {
@@ -21318,6 +21358,9 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         }
         refreshTerrainTilePreview(command,forward);
         refreshWorkingTerrainPalettes();
+        if(command.changesRandomSeed&&m_landscapeTools)
+            m_landscapeTools->setRandomPaintSeed(m_terrainEdit.hasRandomPaintSeed()
+                ?m_terrainEdit.randomPaintSeed():m_terrainSemanticSeed);
         return true;
     }
     if(!m_terrainEdit.apply(command, forward, &report))
@@ -21408,9 +21451,22 @@ void CView::shuffleTerrainTiles(bool selectionOnly, quint32 seed)
         if(selectedCells.isEmpty()) { emit updateMsg(tr("Changed %1 cells").arg(0)); return; }
     }
     if(region.isEmpty()) return;
-    const auto& catalog = m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
+    SWorkingTerrainResolveStage variantsStage;
+    if(m_workingTerrainAtlas&&m_landscapeTools&&m_landscapeTools->generatedHdVariants()
+        &&TerrainHdVariantBank::available()) {
+        CValidationReport variantsReport;
+        variantsStage.atlas=m_workingTerrainAtlas->createStagingCopy();variantsStage.terrainEdit=m_terrainEdit;
+        for(const auto& family:m_terrainGlobalFamilies)if(family.layer==ETerrainAtlasLayer::Land)
+            if(!importTerrainHdVariants(family.id,ETerrainTileLayer::Land,&variantsReport,&variantsStage)){emit updateMsg(variantsReport.toText());return;}
+    }
+    const auto& catalog = variantsStage.atlas?variantsStage.atlas->catalog()
+        :m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
         : m_terrainAtlasAnalysis.landCatalog;
-    auto command = m_terrainEdit.makeRandomTilePaint(catalog, seed, region, randomPaintExcludedSlots(), selectedCells);
+    const auto& edit=variantsStage.atlas?variantsStage.terrainEdit:m_terrainEdit;
+    auto command = edit.makeRandomTilePaint(catalog, seed, region, randomPaintExcludedSlots(), selectedCells);
+    if(variantsStage.atlas&&variantsStage.atlas->activeTileCount()!=m_workingTerrainAtlas->activeTileCount()) {
+        command.workingAtlasBefore=m_workingTerrainAtlas->createStagingCopy();command.workingAtlasAfter=variantsStage.atlas;
+    }
     command.description = tr("Shuffle tiles");
     command.changesRandomSeed = !m_terrainEdit.hasRandomPaintSeed() || seed != m_terrainEdit.randomPaintSeed();
     command.beforeRandomSeed = m_terrainEdit.randomPaintSeed();

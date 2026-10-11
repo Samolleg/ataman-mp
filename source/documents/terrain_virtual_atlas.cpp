@@ -4808,6 +4808,15 @@ bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
         signature, pixels, sourceLabel, report, sourceNamespace, sourceSlot);
 }
 
+void CTerrainWorkingAtlas::restoreHdVariantIdentity(int slot,const QString& id,const QVector<int>& aliases)
+{
+    STerrainWorkingTileIdentity identity;
+    if(!id.startsWith(QStringLiteral("hd-variant:"))||!tileIdentityForSlot(slot,&identity))return;
+    identity.sourceNamespace=id;identity.sourceSlotAliases=aliases;
+    identity.sourceSlot=aliases.isEmpty()?-1:aliases.front();identity.origin=ETerrainWorkingTileOrigin::ImportedAuthored;
+    m_foreignPhysicalTiles[slot]=identity;
+}
+
 bool CTerrainWorkingAtlas::addStockBlendMaskTemplate(
     const STerrainTransitionSignature& signature, const QImage& pixels,
     const QString& sourceLabel, CValidationReport* report)
@@ -5462,7 +5471,8 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
         int sourceSlot,CValidationReport* report,bool preserveAuthoredPages)
 {
     if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
-       || pixels.size()!=terrainAtlasMaximumNativeTileSize(m_authoredImages)) {
+       || (pixels.size()!=terrainAtlasMaximumNativeTileSize(m_authoredImages)
+           && !(sourceNamespace.startsWith(QStringLiteral("hd-variant:"))&&pixels.size()==QSize(256,256)))) {
         if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
             "The selected physical tile has incompatible pixels or runtime type.");return -1;
     }
@@ -5487,9 +5497,16 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
     if(signature) {
         identity.canonicalSignature=*signature;
         const auto base=m_workingCatalog.paintGridMirrored()?CTerrainTransitionCatalog::mirroredGridY(*signature):*signature;
+        bool rotationsAllowed=true;
+        if(sourceNamespace.startsWith(QStringLiteral("hd-variant:"))) {
+            const auto anchors=m_workingCatalog.paintVariants(*signature);
+            rotationsAllowed=!anchors.isEmpty();
+            for(const auto& anchor:anchors)rotationsAllowed&=anchor.randomRotationAllowed;
+        }
         for(int rotation=0;rotation<4;++rotation) {
             SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);packed.rotation=quint8(rotation);
             STerrainTransitionVariant variant;variant.packedTile=packed.encode();
+            variant.randomRotationAllowed=rotationsAllowed;
             variant.signature=CTerrainTransitionCatalog::rotated(base,-rotation);m_workingCatalog.addVariant(variant,report);
         }
     }

@@ -1220,6 +1220,13 @@ void CTerrainTransitionCatalog::removeAtlasSlot(int atlasSlot)
     }
 }
 
+void CTerrainTransitionCatalog::setSlotPaintSelectable(int slot,bool selectable)
+{
+    for(auto& variant:m_variants)
+        if(SMprPackedTile::decode(variant.packedTile).atlasSlot()==slot)
+            variant.paintSelectable=selectable;
+}
+
 QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
     qint32 fromMaterial, qint32 toMaterial,
     const QMap<qint32, int>& preferredMaterials) const

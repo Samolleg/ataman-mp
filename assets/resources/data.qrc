@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="terrain_variant_rejects.json">../../data/terrain_variant_rejects.json</file>
         <file>optSet.txt</file>
         <file>_emptyIco.ico</file>
         <file>auxData.res</file>
