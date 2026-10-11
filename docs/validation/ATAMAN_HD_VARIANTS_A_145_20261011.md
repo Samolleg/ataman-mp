@@ -136,6 +136,70 @@ Scoped-коммит реализации в main: `a779e305445ca4544e26fbf3636d7
 Установка145 и push запрещены. Владелец сначала просматривает листы и задаёт
 исключения; установка выполняется отдельным поручением.
 
+## Установка 145
+
+EI-INSTALL-145, 2026-10-11. Владелец просмотрел листы всех101 групп и
+«принимаю все материалы». Исключений нет: `data/terrain_variant_rejects.json`
+содержит `{"rejects": []}` и не менялся. Это решение и поручение установки
+отменяют прежний запрет установки выше; запрет сети/push сохраняется.
+
+Вход: main `3101d4895e4dda323c3340b4792cbef235eff4ac`, VERSION145.
+AGENTS.md проверен: SHA-256
+`f4b7fdd5ea82fcdf43d002d23d64ec36be853650f054edf70376527cd6432ec3`;
+применён docs/TEST_BUILD_HANDOFF.md с явным сохранением всех старых rollback.
+
+Установлена готовая Release из `a779e305445ca4544e26fbf3636d7061e3ad9bda`,
+без пересборки и изменения исходников. Повторный git archive этого коммита
+совпал с квитанцией по SHA-256
+`36aff097a88d448b5d7ab02f86968f33437f726793c87ccb4493ce37763c2286`;
+VERSION коммита/staging равен145. В `build-staging-145-final` проверены
+127 manifest-файлов и полный состав; в ZIP проверены все128 файлов,
+единственная верхняя папка, каждый payload SHA и SHA самого ZIP.
+EXE, manifest и ZIP совпали с SHA раздела «Передача Release 145».
+
+Постоянный путь: `artifacts/EI-Mapper-Ataman-2-first-test`, переход144→145.
+Перед заменой проверены Win32_Process и пути процессов: редактор и runtime
+из установки не запущены, ожидание не потребовалось. Старые managed-файлы
+совпали с manifest144; конфликтов с пользовательскими файлами нет.
+Заменены CHANGELOG.md, EIMapperEndurance.exe, Readme.md, VERSION,
+runtime/EIMapperEnduranceJmvBridge.plg и runtime/EIMapperEnduranceRuntimeHost.exe;
+obsolete-файлов нет. Замены атомарные по файлам; manifest заменён последним.
+
+Rollback144: `artifacts/rollback144-to145-20261011-verified`.
+Шесть прежних файлов и прежний SHA256SUMS.txt сохранены, SHA всех семи копий
+проверены до замены; `backup-hashes.xml` хранит их контрольные суммы.
+Также сохранены резервные копии двух незавершённых попыток:
+`artifacts/rollback144-to145-20261011` и
+`artifacts/rollback144-to145-20261011-final`. Старые rollback не удалялись;
+`artifacts/rollback143-to144-final` не изменялся и не включён в коммит.
+
+Сохранены состав и SHA всех23 556 пользовательских файлов:
+23 167 в cache,354 в logs,32 в diagnostics, один в terrain-atlas-profiles,
+model-catalog.json и endurance-options.json. В стандартных каталогах
+LOCALAPPDATA/APPDATA/EIMapperAtaman/terrain-variants пользовательского банка
+не обнаружено; EI_MAPPER_HD_VARIANT_CACHE не задан. Внешние банки не менялись.
+
+Две ошибки установочного скрипта не засчитаны как PASS. В первой попытке
+ожидалось неверное имя приложения в --version; программа также ротировала
+workflow.log в рабочем каталоге установки. Программные файлы возвращены к144,
+исходный workflow.log восстановлен из ротационной копии по исходному SHA,
+созданная этой попыткой копия убрана, диагностический журнал сохранён в evidence.
+Во второй попытке Start-Process не предоставил ExitCode; откат144 и все
+пользовательские SHA проверены. Исправлены только средства установки:
+--version запускается с отдельным рабочим каталогом в build-tests-145,
+код завершения получен непосредственно через System.Diagnostics.Process.
+
+Итоговая проверка: PASS, все127 установленных файлов совпадают с manifest145,
+manifest SHA совпадает; `--version` → `EI Mapper Endurance Edition 145`, exit0.
+EXE SHA-256: `8a38e1b1e2f12465d07f325fca9cc58746583e7dd2f8a48724091ceeb81f40cb`.
+Полный состав установки и пользовательские SHA после запуска сохранены.
+Evidence: [install145-receipt.json](../../build-tests-145/install145-receipt.json),
+install145-user-files.xml, install145-user-banks.xml, install145-version.out/err
+в build-tests-145. Интерактивный редактор не запускался; это проверка установки,
+не новая игровая приёмка. Игра, мод, живые карты и HDPack не менялись.
+Коммит включает только этот отчёт и пункт EI-HD-VARIANTS-A-145 в ROADMAP;
+сеть и push не использовались.
+
 ## Shortfalls (128 candidates per group)
 
 | Material / reviewed class / MP class / layer | Originals + new | Rejected | Best rejected C4 RMSE64 | Reason |
