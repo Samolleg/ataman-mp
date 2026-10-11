@@ -100,3 +100,123 @@ Current Ataman version: `143`. Each separate fix advances the integer version.
 ```
 
 После назначения VERSION 143 необходима свежая сборка с этой меткой. Подготовленный здесь EXE сообщает 142 в соответствии с запретом менять VERSION. Установка и коммит не выполнялись.
+
+## Передача 143
+
+EI-FINALIZE-143, 2026-10-11: **установлена версия 143 вместо 142**.
+Поручение владельца через сопровождающего Claude; выполнено на `main`, без сети,
+push, установки зависимостей, интерактивного запуска редактора или игры.
+AGENTS.md проверен: SHA256 `f4b7fdd5ea82fcdf43d002d23d64ec36be853650f054edf70376527cd6432ec3`.
+Договор `docs/TEST_BUILD_HANDOFF.md` соблюдён; по явному поручению все старые rollback сохранены.
+Приватные engine-источники не использовались; соответствующие навыки недоступны.
+
+### Сборка и проверки
+
+Источник: точный `git archive ccda5dba71ad4d05f0ec456e20a7e80072c3ef1f`,
+`build-source-143-final/`; свежая Release `build-release-143-final/`.
+Wrapper завершился с кодом **0**, оба runtime-компонента пересобраны;
+`--version`: **EI Mapper Endurance Edition 143**.
+Сопоставлены 464 исходных файла снимка с архивом.
+Начальная PowerShell-обёртка потеряла статус из-за stderr Qt; подтверждающий запуск
+wrapper завершился 0. Ошибочная диагностическая команда с неподдерживаемым
+`--clipboard-isolation-check` завершилась 1 и не учитывалась как PASS;
+версия затем проверена корректным `--version`. Исходники программы не менялись.
+
+| Проверка | PASS | FAIL | SKIP |
+|---|---:|---:|---:|
+| terrain_hd_republish_tests | 8 | 0 | 0 |
+| terrain_virtual_atlas_tests | 146 | 0 | 0 |
+| terrain_resolve_audit_tests | 5 | 0 | 0 |
+| world_terrain_sculpt_tests | 48 | 0 | 0 |
+| terrain_mixed_resolution_tests | 4 | 0 | 0 |
+| terrain_recipe_bake_tests | 17451 | 0 | 0 |
+| ui (строки PASS, включая clipboard) | 233 | 0 | 0 |
+| scenario (строки PASS, включая clipboard) | 50 | 0 | 0 |
+| dark (строки PASS, включая clipboard) | 71 | 0 | 0 |
+| gallery (строки PASS, включая clipboard) | 1 | 0 | 0 |
+
+Scenario: 49 функциональных PASS; dark-theme: 70 PASS; у обоих отдельный PASS
+clipboard. Model-gallery: функциональный PASS на 497 моделях / 7165 текстурах,
+поиск, разделы, Escape, multi-select, Shift, закрытие при работе и thumbnail cache.
+Число строк PASS в таблице не является числом внутренних утверждений model-gallery.
+
+UI, scenario, gallery, Qt GUI-тесты и замеры выполнены под
+`build-locks/ui-tests.lock` (атомарный mkdir, owner.txt, проверка владельца и удаление).
+Запуски на скрытом изолированном desktop, clipboard backend=in-memory;
+в проверках изоляции **nativeAttempts=0**. Системный буфер владельца не открывался.
+Диалог проверен с реальным фоновым потоком: обновление процентов/счётчиков,
+появление ETA, кнопка отмены и Escape. Пять этапов кооперативной отмены сохраняют
+RES/MPR и файловый инвентарь; проверены cache miss/hit/corruption/invalidation.
+Снимок диалога просмотрен: текст, шкала и кнопка читаемы.
+[PNG](../../build-tests-143-final/hd-progress-dialog.png),
+[регресс](../../build-tests-143-final/regression.json).
+
+### Миниатюры 142 → 143
+
+Пять парных повторов, чередующийся порядок версий; оба набора в одном непрерывном
+захвате lock. Измеритель связан с production-объектами соответствующей версии;
+EXE baseline 142 совпадает по SHA с установленным 142.
+Алгоритм и fixture unmo/stbu сохранены из передачи 142.
+Cold — новый каталог дискового кэша, disk-warm — новый процесс с заполненным кэшем,
+repeat — повтор в том же процессе; кэш ОС не очищался.
+80 измерений, по 8/8 видимых готовых миниатюр, unavailable=0;
+число генераций cold=8, остальные режимы=0.
+
+Медианы заполнения, мс:
+
+| Группа | Режим | 142 | 143 | Δ мс | Δ % |
+|---|---|---:|---:|---:|---:|
+| characters-unmo | cold | 92.495 | 85.487 | -7.008 | -7.58% |
+| characters-unmo | disk-warm | 32.045 | 29.740 | -2.305 | -7.19% |
+| characters-unmo | repeat | 5.412 | 5.232 | -0.180 | -3.33% |
+| characters-unmo | repeat-after-disk | 4.987 | 5.030 | +0.043 | +0.86% |
+| equivalent-buildings-stbu | cold | 30.662 | 31.408 | +0.746 | +2.43% |
+| equivalent-buildings-stbu | disk-warm | 9.908 | 9.224 | -0.684 | -6.90% |
+| equivalent-buildings-stbu | repeat | 5.604 | 5.679 | +0.075 | +1.34% |
+| equivalent-buildings-stbu | repeat-after-disk | 5.695 | 5.803 | +0.108 | +1.90% |
+
+Обе группы прошли заданный порог cold: **≤+10% ИЛИ ≤+15 мс**.
+[Сырые измерения](../../build-tests-143-final/gallery-raw143.json),
+[сводка](../../build-tests-143-final/gallery-summary143.json).
+
+### Zone19 на копии
+
+Точный EXE 143 выполнил `--terrain-hd-republish-check` на новом приватном наборе;
+первый запуск без готового индекса, 346.750 с,
+пик рабочего набора процесса 5.159 ГиБ.
+**2/2 полных файлов (MPR и RES) побайтно равны результатам 141 и 142**:
+
+- MPR: 3047938 байт, SHA256 `9152b80d6958d217347cd4c3e1b7c3069e5990f3808c8bbd2515b5e1a6263331`.
+- RES: 1277997326 байт, SHA256 `1d010b40744cebe9eee2f97b3fda99e1a7c2b0df5e846e0eef084f16edc881df`.
+
+**81/81 входных файлов и их исходных тестовых копий неизменны**.
+Живые карты, игра, мод, HDPack и Endurance не изменялись.
+[Квитанция и побайтная сверка](../../build-tests-143-final/hd-verification.json).
+
+### Пакет и установка
+
+Новый `build-staging-143-final/`; tested EXE = staged EXE по SHA,
+staged `--version=143` проверен до финализации. Finalizer выполнен только на новой
+staging-папке, внутренний validator **PASS**. После финализации staging не запускался.
+Против staging 142: **127 managed-файлов**, добавлено 0, удалено 0;
+изменены: `CHANGELOG.md`, `EIMapperEndurance.exe`, `Readme.md`, `runtime/EIMapperEnduranceJmvBridge.plg`, `runtime/EIMapperEnduranceRuntimeHost.exe`, `VERSION`.
+EXE содержит 143, runtime пересобраны; Readme/VERSION/CHANGELOG отражают 143.
+`TRAVEL_EDITOR.md` присутствует и неизменён; **7 текстовых файлов**
+проверены: UTF-8 без BOM, CRLF. Ровно один текущий CHANGELOG.
+[Состав и manifest](../../build-tests-143-final/package-receipt.json).
+
+Установка: `artifacts/EI-Mapper-Ataman-2-first-test`, **142 → 143**.
+Перед записью и каждой заменой проверено отсутствие `EIMapperEndurance.exe` на хосте
+и компонентов из установки. Пользовательские процессы не завершались.
+Rollback: `artifacts/rollback142-to143-final`; **7 backup-файлов**
+проверены до записи. Заменены только изменённые managed-файлы, атомарно,
+manifest последним; **127 managed-файлов** сверены после записи.
+**23556 пользовательских файлов**, включая настройки и кэши,
+сохранены по SHA256; прежние rollback сохранены.
+[Установка](../../build-tests-143-final/install-receipt.json).
+
+EXE SHA256: `d49739c972d56638cc95f7239294a84852ce3c4a784e1d6731458ac7d27f97bf`.
+Manifest SHA256: `da4e7eacfbfefabbe606b9b0e65a22bee467e4fab807f2156deb858e4602ca8c`.
+Scoped-коммит включает только этот раздел отчёта и статус EI-TERRAIN-HD-PROGRESS-143
+в ROADMAP; версия не повышалась, push не выполнялся.
+Автоматическая передача не подменяет ручную и игровую приёмку владельца.
