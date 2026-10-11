@@ -123,14 +123,15 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     }
     else
     {
+        const int tileSize=fixture.value("tileSize").toInt(256);
         sourceBytes=syntheticMpr();
         const QRgb colors[]={qRgb(180,40,30),qRgb(30,190,50),qRgb(40,50,200),qRgb(210,180,30)};
-        for(int i=0;i<64;++i){QImage image(128,128,QImage::Format_RGBA8888);image.fill(QColor::fromRgba(colors[i<4?i:0]));images.append(image);}
+        for(int i=0;i<64;++i){QImage image(tileSize,tileSize,QImage::Format_RGBA8888);image.fill(QColor::fromRgba(colors[i<4?i:0]));images.append(image);}
         auto add=[&](int slot,const STerrainTransitionSignature& s){STerrainTransitionVariant v;v.signature=s;SMprPackedTile p;p.tileIndex=quint8(slot);v.packedTile=p.encode();catalog.addVariant(v);};
         for(int i=0;i<4;++i){add(i,sig(i+1,i+1,i+1,i+1));materialTypes.insert(i+1,i+1);}
         int slot=4;
         for(int a=1;a<=4;++a)for(int b=a+1;b<=4;++b,++slot) {
-            for(int y=0;y<128;++y)for(int x=0;x<128;++x)images[slot].setPixelColor(x,y,QColor::fromRgba(colors[x<64?a-1:b-1]));
+            for(int y=0;y<tileSize;++y)for(int x=0;x<tileSize;++x)images[slot].setPixelColor(x,y,QColor::fromRgba(colors[x<tileSize/2?a-1:b-1]));
             add(slot,sig(a,b,b,a));
         }
         for(int i=slot;i<64;++i)add(i,sig(1,1,1,1));
@@ -140,8 +141,11 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     if(types.size()<images.size())types.resize(images.size());
     CTerrainEditModel model;
     if(!check(model.load(document,&report),"edit model load"))return 1;
+    if(!real) model.setRandomPaintSeed(138);
     model.enableWorkingAtlasSlots(4096);
     CTerrainWorkingAtlas atlas(catalog,images,17,4096,{}, {},types,materialTypes);
+    for(const auto& definition:profile.slotDefinitions)
+        for(const auto& key:definition.mixedEdgeRecipes)atlas.restoreMixedEdgeRecipe(definition.slot,key);
     if(!check(atlas.isValid(),"working atlas valid: "+atlas.error()))return 1;
     const int w=model.tileCountX(),h=model.tileCountY(),vw=w+1;
     if(!real)baseline.fill(1,vw*(h+1));
@@ -162,6 +166,30 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
         if(!check(patch,"original Zone6 6x6 patch verified, no undercoat"))return 1;
     }
     const auto beforeStroke=model;auto beforeAtlas=atlas.createStagingCopy();
+    if(!real)
+    {
+        auto migration=model;auto migrationAtlas=beforeAtlas->createStagingCopy();
+        QVector<qint32> stripes(vw*(h+1),1);
+        for(int y=0;y<=h;++y){stripes[y*vw+5]=2;stripes[y*vw+7]=3;}
+        CValidationReport migrationReport;
+        const auto oldSignature=sig(1,3,3,1);
+        const int oldSlot=migrationAtlas->importMixedEdgeTile(images[0],1,oldSignature,
+            QStringLiteral("mixed-edge-b2:")+QString(64,QLatin1Char('c')),&migrationReport);
+        SMprPackedTile oldPacked;oldPacked.atlasIndex=oldSlot/64;oldPacked.tileIndex=oldSlot%64;
+        STerrainTileCommand oldPlacement;
+        for(int y=0;y<h;++y){STerrainTileDelta d;d.globalX=6;d.globalY=y;
+            d.before=migration.packedTile(6,y,ETerrainTileLayer::Land);d.after=oldPacked.encode();oldPlacement.deltas.append(d);}
+        check(oldSlot>=0&&migration.installWorkingAtlasSlotTypes(migrationAtlas->activeTileTypes())
+            &&migration.apply(oldPlacement,true,&migrationReport),"existing mixed-edge neighbor recipe staged");
+        check(migration.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,stripes,stripes,&migrationReport),
+            "migration field: parallel mixed strips sharing a uniform-material edge");
+        const auto migrated=CTerrainMixedEdge::resolve(migration,migrationAtlas.data(),{5*w+5},
+            materialTypes,{},QPoint(),2,17,false,&migrationReport);
+        check(!migrationReport.hasErrors()&&migrated.semanticAudit.affectedCells.contains(QPoint(6,5))
+            && !migrated.semanticAudit.affectedCells.contains(QPoint(4,5)),
+            "v1-to-v2 migration crosses homogeneous edges to recipes, preserving authored stock neighbors");
+        log<<"Migration mixed component="<<migrated.semanticAudit.affectedCells.size()<<" cells\n";
+    }
     QVector<qint32> beforeField,beforeBaseline;
     beforeStroke.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&beforeField,&beforeBaseline);
     if(!check(preview(model,atlas.activeTileImages(),region).save(output+"/before.png"),"before PNG"))return 1;
@@ -419,6 +447,8 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     CMprDocument candidate;check(candidate.loadBytes(package.mprBytes,"candidate.mpr",&saveReport),"MPR candidate reopen");
     STerrainSemanticFieldDocument semantics;semantics.mprNamespace=candidate.mapInfo().innerNamespace;
     semantics.vertexWidth=vw;semantics.vertexHeight=h+1;semantics.land=afterField;
+    semantics.hasRandomPaintSeed=model.hasRandomPaintSeed();
+    semantics.randomPaintSeed=model.randomPaintSeed();
     semantics.terrainTilesSha256=STerrainSemanticFieldDocument::tileBindingSha256(candidate);
     semantics.atlasPixelSha256=QByteArray::fromHex(CTerrainAtlasProfileInference::pixelSha256(physical));
     semantics.profileSha256=QCryptographicHash::hash(profileBytes,QCryptographicHash::Sha256);
@@ -429,6 +459,8 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     check(reopened.loadBytes(read(output+"/saved.mpr"),"saved.mpr",&saveReport)&&reopenedRes.loadBytes(read(output+"/saved.res"),"saved.res",&errors),"disk fresh reopen");
     STerrainSemanticFieldDocument restored;
     check(STerrainSemanticFieldDocument::fromBytes(reopened.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),&restored,&saveReport)&&restored.land==afterField,"reopened vertex field exact");
+    check(restored.hasRandomPaintSeed==model.hasRandomPaintSeed()
+        && restored.randomPaintSeed==model.randomPaintSeed(),"saved map variant seed exact");
     CTerrainEditModel loaded;check(loaded.load(reopened,&saveReport),"reopened edit model");
     bool secMatches=true;for(int y=0;y<h;++y)for(int x=0;x<w;++x)secMatches&=loaded.packedTile(x,y,ETerrainTileLayer::Land)==finalized.packedCells[y*w+x];
     check(secMatches,"all reopened SEC physical references exact");
@@ -440,6 +472,7 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     for(const auto& def:reopenedProfile.slotDefinitions)for(const auto& key:def.mixedEdgeRecipes)reopenedAtlas.restoreMixedEdgeRecipe(def.slot,key);
     check(!reopenedAtlas.mixedEdgeRecipes().isEmpty() && reopenedAtlas.mixedEdgeRecipes().size()==atlas.mixedEdgeRecipes().size(),"every recipe alias survives publication/profile reopen");
     loaded.enableWorkingAtlasSlots(4096);loaded.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,afterField,afterField,&saveReport);
+    if(restored.hasRandomPaintSeed)loaded.setRandomPaintSeed(restored.randomPaintSeed);
     CValidationReport reopenPaintReport;auto reopenedStage=reopenedAtlas.createStagingCopy();
     auto repaint=CTerrainMixedEdge::resolve(loaded,reopenedStage.data(),affected,materialTypes,{},QPoint(),paint,17,false,&reopenPaintReport);
     log<<"Repaint details: deltas="<<repaint.deltas.size()<<" slots="<<reopenedAtlas.activeTileCount()<<"->"<<reopenedStage->activeTileCount()<<'\n';

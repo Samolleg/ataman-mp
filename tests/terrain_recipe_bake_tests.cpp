@@ -77,7 +77,7 @@ void seams(const STerrainRecipeBakeResult& r,int width,int height,int size)
 
 void synthetic()
 {
-    STerrainRecipeBakeOptions o; o.tileSize=17;
+    STerrainRecipeBakeOptions o; o.tileSize=17;o.polishedMaterialEdges=true;
     for(int axis=0;axis<2;++axis) for(int pattern=0;pattern<64;++pattern)
     {
         auto in=input(axis ? 1:2,axis ? 2:1);
@@ -235,7 +235,7 @@ void synthetic()
     for(int y=0;y<32;++y) for(int x=0;x<32;++x)
         crispInput.preferredMaterials[y*32+x]=crispInput.vertexMaterials[y*33+x];
     for(auto& bank:crispInput.brushes) CTerrainRecipeBaker::sharpenStockBrush(&bank);
-    STerrainRecipeBakeOptions crispOptions;crispOptions.tileSize=33;crispOptions.stableCoordinateVariants=true;
+    STerrainRecipeBakeOptions crispOptions;crispOptions.tileSize=33;crispOptions.stableCoordinateVariants=true;crispOptions.polishedMaterialEdges=true;
     auto crispGrid=CTerrainRecipeBaker::bake(crispInput,crispOptions);
     check(crispGrid.success,"crisp four-material grid supported");
     if(crispGrid.success) seams(crispGrid,32,32,33);
@@ -264,7 +264,7 @@ void synthetic()
 
 void junctions()
 {
-    STerrainRecipeBakeOptions o; o.tileSize=9; o.origin=QPoint(-77,136);
+    STerrainRecipeBakeOptions o; o.tileSize=9; o.origin=QPoint(-77,136);o.polishedMaterialEdges=true;
     // All 4^6 adjacent corner fields along both axes: includes every ordered
     // 3/4-node next to every compatible uniform/2/3/4-node. Alternate classes
     // are reviewed here to separate edge continuity from tie classification.
@@ -379,7 +379,7 @@ void incrementalMaps()
 {
     auto full=input(2,1,4);full.vertexMaterials={1,2,3,4,3,2};full.preferredMaterials={1,2};
     for(auto& brush:full.brushes) CTerrainRecipeBaker::sharpenStockBrush(&brush);
-    STerrainRecipeBakeOptions options;options.tileSize=33;options.stableCoordinateVariants=true;
+    STerrainRecipeBakeOptions options;options.tileSize=33;options.stableCoordinateVariants=true;options.polishedMaterialEdges=true;
     options.origin=QPoint(-19,27);
     const auto combined=CTerrainRecipeBaker::bake(full,options);
     check(combined.success,"incremental paired-map reference bake");
@@ -403,11 +403,98 @@ void incrementalMaps()
     ++seamEdges;check(joined,"synthetic independent map pair shared edge exact");
 }
 
+void polish()
+{
+    auto in=input(5,5);
+    for(int y=0;y<6;++y)for(int x=0;x<6;++x)in.vertexMaterials[y*6+x]=x<3?1:2;
+    QImage red(256,256,QImage::Format_RGBA8888),green=red,blue=red;
+    red.fill(QColor(200,0,0));green.fill(QColor(0,200,0));blue.fill(QColor(0,0,200));
+    in.materials[0].uniformTiles={red,green,blue};in.materials[0].uniformWeights={1,3,6};
+    in.materials[1].uniformTiles={texture(2)};
+    STerrainRecipeBakeOptions o;o.tileSize=256;o.stableCoordinateVariants=true;o.origin=QPoint(-27,51);o.materialSeed=138;o.polishedMaterialEdges=true;
+    auto r=CTerrainRecipeBaker::bake(in,o),again=CTerrainRecipeBaker::bake(in,o);
+    check(r.success&&again.success,"HD weighted material variants supported");
+    if(r.success)seams(r,5,5,256);
+    QSet<QRgb> bodies;
+    bool repeat=r.tileByCell==again.tileByCell;
+    for(int i=0;i<r.tiles.size();++i)repeat&=r.tiles[i].pixels==again.tiles[i].pixels;
+    for(int y=0;y<5;++y)for(int x=0;x<2;++x)bodies.insert(r.tiles[r.tileByCell[y*5+x]].pixels.pixel(128,128));
+    check(repeat,"weighted map seed repeat bytes exact");
+    check(bodies.size()>1,"weighted body uses more than first source");
+    auto frequencies=input(1,1);frequencies.materials={in.materials[0]};frequencies.brushes.clear();
+    STerrainRecipeBakeOptions fo;fo.tileSize=17;fo.polishedMaterialEdges=true;int redBodies=0,greenBodies=0,blueBodies=0;
+    for(int mapSeed=0;mapSeed<512;++mapSeed){
+        fo.materialSeed=quint32(mapSeed);const auto f=CTerrainRecipeBaker::bake(frequencies,fo);
+        if(!f.success){check(false,"weighted frequency bake");break;}
+        const auto color=f.tiles.first().pixels.pixel(8,8);
+        redBodies+=color==red.pixel(0,0);greenBodies+=color==green.pixel(0,0);blueBodies+=color==blue.pixel(0,0);
+    }
+    QTextStream(stdout)<<"Weighted bodies seeds=512 red="<<redBodies<<" green="<<greenBodies<<" blue="<<blueBodies<<" weights=1:3:6\n";
+    check(redBodies+greenBodies+blueBodies==512&&std::abs(redBodies-51.2)<28
+        &&std::abs(greenBodies-153.6)<40&&std::abs(blueBodies-307.2)<44,"physical weights affect deterministic map-seed distribution");
+    check(r.budget.recipeSlots<=16,"four labels bound slots independent of source combinations");
+    o.materialSeed=139;const auto changed=CTerrainRecipeBaker::bake(in,o);
+    bool different=false,edgesSame=true;
+    for(int cell=0;cell<25;++cell){
+        const auto& a=r.tiles[r.tileByCell[cell]].pixels;const auto& b=changed.tiles[changed.tileByCell[cell]].pixels;
+        different|=a!=b;
+        for(int t=0;t<256;++t)edgesSame &= a.pixel(0,t)==b.pixel(0,t)&&a.pixel(255,t)==b.pixel(255,t)
+            &&a.pixel(t,0)==b.pixel(t,0)&&a.pixel(t,255)==b.pixel(t,255);
+    }
+    check(different&&edgesSame,"seed changes body without changing any boundary byte");
+    // Independent map/cell calls use the same HD sources and world origin.
+    // This is a kernel prerequisite, not permission for heterogeneous atlases.
+    o.materialSeed=138;
+    auto whole=input(2,1);whole.materials=in.materials;whole.brushes=in.brushes;
+    whole.vertexMaterials={1,2,1,2,1,2};whole.preferredMaterials={1,1};
+    const auto joined=CTerrainRecipeBaker::bake(whole,o);
+    for(int cell=0;cell<2;++cell){
+        auto part=whole;part.tileWidth=part.tileHeight=1;part.preferredMaterials={1};
+        part.vertexMaterials={whole.vertexMaterials[cell],whole.vertexMaterials[cell+1],
+            whole.vertexMaterials[cell+3],whole.vertexMaterials[cell+4]};
+        auto po=o;po.origin+=QPoint(cell,0);const auto split=CTerrainRecipeBaker::bake(part,po);
+        check(joined.success&&split.success&&joined.tiles[joined.tileByCell[cell]].pixels==split.tiles.first().pixels,
+            "independent weighted HD map pair equals combined bytes");
+    }
+    if(joined.success)seams(joined,2,1,256);
+    auto incompatible=whole;incompatible.materials[0].uniformTiles[0]=blue;
+    const auto otherBank=CTerrainRecipeBaker::bake(incompatible,o);
+    bool bankMismatch=false;
+    if(joined.success&&otherBank.success){
+        const auto& a=joined.tiles[joined.tileByCell[0]].pixels;
+        const auto& b=otherBank.tiles[otherBank.tileByCell[1]].pixels;
+        for(int t=0;t<256;++t)bankMismatch|=a.pixel(255,t)!=b.pixel(0,t);
+    }
+    check(bankMismatch,"same world coordinates cannot reconcile different local source banks");
+    in.materials[0].uniformWeights={1,0,6};
+    check(!CTerrainRecipeBaker::bake(in,o).success,"zero source weight refused");
+    in.materials[0].uniformWeights={1,2};
+    check(!CTerrainRecipeBaker::bake(in,o).success,"incomplete source weights refused");
+
+    // A high-frequency stock row near the cell border must advance normally.
+    // The old along*fade coordinate held one row and produced vertical bars.
+    in=input(1,1,2);in.vertexMaterials={1,2,1,2};in.preferredMaterials={1};
+    in.materials[0].uniformTiles={red};in.materials[1].uniformTiles={blue};
+    for(int row=0;row<512;++row)for(int d=0;d<65;++d)
+        in.brushes[0].ownership[row*65+d]=d<29?0:d>35?1:float(row%2);
+    o.tileSize=257;o.materialSeed=0;
+    const auto detail=CTerrainRecipeBaker::bake(in,o);
+    QSet<QRgb> nearEdge;
+    if(detail.success)for(int t=1;t<15;++t)nearEdge.insert(detail.tiles.first().pixels.pixel(128,256-t));
+    check(detail.success&&nearEdge.size()==2,"stock flecks do not freeze along border collar");
+    auto hd=input(8,8,4);quint32 random=138;
+    for(auto& m:hd.vertexMaterials){random=random*1664525+1013904223;m=1+int(random>>30);}
+    hd.preferredRuntimeTypes.fill(0,64);o.tileSize=256;o.preserveReviewedCellRuntimeTypes=true;
+    const auto junctions=CTerrainRecipeBaker::bake(hd,o);
+    check(junctions.success,"four-material HD junction grid supported");
+    if(junctions.success)seams(junctions,8,8,256);
+}
+
 int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
     if(app.arguments().size()==3 && app.arguments()[1]=="--zone") check(zone(app.arguments()[2]),"Zone6 fixture loaded");
-    else { synthetic(); junctions(); incrementalMaps(); }
+    else { synthetic(); junctions(); incrementalMaps(); polish(); }
     QTextStream(stdout) << "RESULT PASS=" << passed << " FAIL=" << failed << " SKIP=0 edges=" << seamEdges
         << " RGBA_channel_comparisons=" << seamChannels << '\n';
     return failed ? 1:0;

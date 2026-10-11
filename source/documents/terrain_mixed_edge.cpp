@@ -68,8 +68,10 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     if(atlas->activeTileCount()>slotLimit)
         return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge atlas budget exceeded: %1 / %2 slots. No material was substituted; extended 8192 is not enabled.").arg(atlas->activeTileCount()).arg(slotLimit));
 
-    // Follow the connected transition ring: leaving an old resolver tile on
-    // the other side of a mixed shared edge would break the new edge contract.
+    // Migrate generated neighbors across homogeneous shared edges too: their
+    // v1 cropped-texture anchor changes in v2. Authored stock on those edges
+    // keeps its previous contract and must not pull in unrelated corner-only
+    // materials with no local uniform source.
     QSet<int> cells=affectedCells;
     QVector<int> queue=cells.values().toVector();
     const int w=field.tileWidth(), h=field.tileHeight();
@@ -78,13 +80,22 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         const int cell=queue[i], x=cell%w, y=cell/w;
         if(cell<0 || cell>=w*h) return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge footprint is outside this map."));
         const auto s=field.cellSignature(x,y);
+        if(uniform(s))continue;
         const bool mixedEdges[]={s.northWest!=s.northEast,s.northEast!=s.southEast,
             s.southWest!=s.southEast,s.northWest!=s.southWest};
         const QPoint neighbors[]={QPoint(x,y-1),QPoint(x+1,y),QPoint(x,y+1),QPoint(x-1,y)};
         for(int edge=0;edge<4;++edge)
         {
             const auto p=neighbors[edge];
-            if(!mixedEdges[edge] || p.x()<0 || p.y()<0 || p.x()>=w || p.y()>=h) continue;
+            if(p.x()<0 || p.y()<0 || p.x()>=w || p.y()>=h
+               || uniform(field.cellSignature(p.x(),p.y()))) continue;
+            if(!mixedEdges[edge]) {
+                const int slot=SMprPackedTile::decode(model.packedTile(p.x(),p.y(),ETerrainTileLayer::Land)).atlasSlot();
+                STerrainWorkingTileIdentity identity;
+                if(!atlas->mixedEdgeRecipes().values().contains(slot)
+                   && (!atlas->tileIdentityForSlot(slot,&identity)
+                       || !identity.blendProvenance.startsWith(QStringLiteral("mixed-edge-b2:"))))continue;
+            }
             const int next=p.y()*w+p.x();
             if(!cells.contains(next)) { cells.insert(next); queue.append(next); }
         }
@@ -139,9 +150,36 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source or reviewed runtime class for material %1 in this map's atlas/profile.").arg(id));
         STerrainRecipeMaterial material;
         material.materialId=id; material.runtimeTerrainType=materialTypes[id];
-        // Physical slot order is stable across strokes. Keep one source per
-        // material: unrelated new recipes cannot reassign interior variants.
-        material.uniformTiles.append(images[uniforms[id].first()]);
+        QMap<int,int> weights;
+        STerrainTransitionSignature homogeneous;
+        homogeneous.northWest=homogeneous.northEast=homogeneous.southEast=homogeneous.southWest=id;
+        for(const auto& variant:catalog.paintVariants(homogeneous))
+            weights.insert(SMprPackedTile::decode(variant.packedTile).atlasSlot(),variant.distributionWeight);
+        // Physical artwork class and the reviewed output-cell class are
+        // independent in existing profiles (e.g. Zone6 Stone/Lime: 2 vs 0).
+        // Match variants to the original selectable uniform anchor's physical
+        // class, as 136 does for artwork; do not silently change reviewed SEC
+        // classification. Ownership extraction still uses the full stock bank.
+        qint32 sourceClass=-1;
+        for(int slot:uniforms[id])if(weights.value(slot,0)>0) {
+            sourceClass=atlas->runtimeTerrainTypeForSlot(slot);break;
+        }
+        if(sourceClass<0||sourceClass>15)
+            return refuse(QStringLiteral("Mixed-edge has no reviewed physical uniform class for material %1.").arg(id));
+        // Four recipe labels draw weighted artwork from the entire eligible
+        // physical bank. Rotations never multiply its weight. The first tile
+        // is solely a common border anchor, not the material's body selection.
+        for(int slot:uniforms[id]) if(weights.value(slot,0)>0
+            &&atlas->runtimeTerrainTypeForSlot(slot)==sourceClass) {
+            material.uniformTiles.append(images[slot]);
+            material.uniformWeights.append(weights[slot]);
+        }
+        if(material.uniformTiles.isEmpty())
+            return refuse(QStringLiteral("Mixed-edge has no selectable uniform variant for material %1.").arg(id));
+        if(report) report->add("terrain.mixed_edge.variants",EValidationSeverity::Info,
+            QStringLiteral("Material %1: %2 eligible physical variants, source class %3, reviewed cell class %4; four recipe labels, map seed %5.")
+                .arg(id).arg(material.uniformTiles.size()).arg(sourceClass).arg(material.runtimeTerrainType)
+                .arg(model.hasRandomPaintSeed()?model.randomPaintSeed():0));
         materials.insert(id,material);
     }
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
@@ -175,7 +213,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         auto sorted=ids.values(); std::sort(sorted.begin(),sorted.end());
         // Invalidate soft B2 recipes without discarding their saved slots or
         // Undo history. New crisp recipes are reused across fresh reopen too.
-        QByteArray key("crisp-stock-v1|");
+        QByteArray key("periodic-stock-v2|");
+        key+=QByteArray::number(model.hasRandomPaintSeed()?model.randomPaintSeed():0)+'|';
         for(qint32 id:corners(s)) key+=QByteArray::number(id)+',';
         for(qint32 id:sorted) input.materials.append(materials[id]);
         for(int i=0;i<sorted.size();++i) for(int j=i+1;j<sorted.size();++j) {
@@ -185,6 +224,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         STerrainRecipeBakeOptions options;
         options.tileSize=images.first().width(); options.origin=origin+QPoint(x,y);
         options.stableCoordinateVariants=true;
+        options.materialSeed=model.hasRandomPaintSeed()?model.randomPaintSeed():0;
+        options.polishedMaterialEdges=true;
         options.preserveReviewedCellRuntimeTypes=paintedMaterial<=0;
         // Bake only one cell at a time, keeping peak raster memory bounded.
         // Atlas insertion checks the actual typed-dedup budget afterward.

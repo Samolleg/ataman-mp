@@ -15,6 +15,8 @@ struct STerrainRecipeMaterial
     qint32 runtimeTerrainType{-1};
     // Full, opaque, square profile tiles, in reviewed physical-slot order.
     QVector<QImage> uniformTiles;
+    // One positive physical-artwork weight per source; empty means equal weights.
+    QVector<int> uniformWeights;
 };
 
 struct STerrainRecipeBrush
@@ -65,6 +67,10 @@ struct STerrainRecipeBakeOptions
     // Incremental editing must not renumber labels when the group grows.
     // Offline balanced assignment remains the default for existing callers.
     bool stableCoordinateVariants{false};
+    // Saved map seed, never the per-stroke nonce. Edge anchors are seed-neutral.
+    quint32 materialSeed{0};
+    // Explicit opt-in: HD rebuild must still reproduce crisp-stock-v1 bytes.
+    bool polishedMaterialEdges{false};
     QPoint origin;
     quint64 reservedSlots{0}; // pinned other-layer/animation slots, supplied by caller
     quint64 slotLimit{4096};
