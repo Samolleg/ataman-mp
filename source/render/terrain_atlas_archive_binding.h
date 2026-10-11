@@ -52,6 +52,9 @@ struct STerrainAtlasEmbeddedBindingResult
 class CTerrainAtlasArchiveBindingResolver
 {
 public:
+    // Drop residency only for our immutable temporary mapped pixel stores.
+    // Pixel data and QImage lifetimes remain valid; heap images are untouched.
+    static void releaseDecodedImageResidency(const QVector<QImage>& images);
     // Reads only the RES header, hash table, filename buffer, and requested
     // payloads. Large unrelated atlas pages are never copied or hashed.
     static bool readArchiveMembers(

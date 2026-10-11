@@ -46,6 +46,7 @@ const qint64 kPreparedCompositeBudget = 256ll * 1024ll * 1024ll;
 // return visit to re-upload older layered atlases from disk.
 const qint64 kLayeredTextureSessionBudget = 768ll * 1024ll * 1024ll;
 const qint64 kTextureImageSessionBudget = 128ll * 1024ll * 1024ll;
+const qint64 kCatalogTerrainTileBudget = 32ll * 1024ll * 1024ll;
 ERenderMaterialClass classifyDxt1Alpha(const QByteArray& data, int offset, int width, int height)
 {
     const int blocks = qMax(1, (width + 3) / 4) * qMax(1, (height + 3) / 4);
@@ -1316,6 +1317,21 @@ QOpenGLTexture* CTextureList::texture(const QStringList& names,const QString& mo
     return textureDefault();
 }
 
+void CTextureList::cacheTextureImage(const QString& key, const QImage& image)
+{
+    m_aTextureImages.insert(key, image);
+    m_textureImageLru.touch(key, qint64(image.sizeInBytes()));
+    for(const QString& evicted : m_textureImageLru.trim(kTextureImageSessionBudget))
+        m_aTextureImages.remove(evicted);
+    // Missing resources cost no pixels but must not create an unlimited map.
+    const QStringList oldest = m_textureImageLru.oldestFirst();
+    for(int index = 0; index < oldest.size() - 2048; ++index)
+    {
+        m_aTextureImages.remove(oldest.at(index));
+        m_textureImageLru.remove(oldest.at(index));
+    }
+}
+
 QImage CTextureList::loadTextureImageResource(const QString& name, const QString& modelName)
 {
     const QVector<QString> sources = configuredResourceSources(m_pSettings);
@@ -1331,8 +1347,7 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
     QImage cached;
     if(ei::readCachedVisualImage(cacheDirectory, cacheKey, &cached))
     {
-        m_aTextureImages.insert(key, cached);
-        m_textureImageLru.touch(key, qint64(cached.sizeInBytes()));
+        cacheTextureImage(key, cached);
         return cached;
     }
     for(const QString& candidate : ei::textureResourceCandidates(name, modelName))
@@ -1347,8 +1362,7 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         if(header.m_signature != 0x00504D4D || header.m_format != ETextureFormat::eMMP_PNT3)
         {
             ei::log(eLogWarning, "Shared body-atlas composition currently requires PNT3: " + candidate);
-            m_aTextureImages.insert(key, QImage());
-            m_textureImageLru.touch(key, 0);
+            cacheTextureImage(key, QImage());
             return QImage();
         }
         QImage image(header.m_width, header.m_height, QImage::Format_RGBA64);
@@ -1356,12 +1370,10 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         if(!decompressPnt3(image, data, uint(header.m_mipcount), &diagnostic))
         {
             ei::log(eLogWarning, "Invalid body-atlas layer " + candidate + ": " + diagnostic);
-            m_aTextureImages.insert(key, QImage());
-            m_textureImageLru.touch(key, 0);
+            cacheTextureImage(key, QImage());
             return QImage();
         }
-        m_aTextureImages.insert(key, image);
-        m_textureImageLru.touch(key, qint64(image.sizeInBytes()));
+        cacheTextureImage(key, image);
         // Persist the decoded source layer once. Final body atlases are still
         // composed and shared in memory by their complete ordered layer list;
         // caching those composites duplicated the same base pixels across
@@ -1370,8 +1382,7 @@ QImage CTextureList::loadTextureImageResource(const QString& name, const QString
         return image;
     }
     ei::log(eLogWarning, QString("Missing body-atlas layer: %1 model:%2").arg(name, modelName));
-    m_aTextureImages.insert(key, QImage());
-    m_textureImageLru.touch(key, 0);
+    cacheTextureImage(key, QImage());
     return QImage();
 }
 
@@ -1734,6 +1745,7 @@ bool CTextureList::catalogTerrainMmpTile(const QString& textureName,
     const auto cached = m_catalogTerrainTileCache.constFind(cacheKey);
     if(cached != m_catalogTerrainTileCache.constEnd())
     {
+        m_catalogTerrainTileLru.touchExisting(cacheKey);
         *tile = cached.value();
         if(sourceIdentity)
             *sourceIdentity = pageIdentity;
@@ -1753,6 +1765,9 @@ bool CTextureList::catalogTerrainMmpTile(const QString& textureName,
         return false;
     }
     m_catalogTerrainTileCache.insert(cacheKey, *tile);
+    m_catalogTerrainTileLru.touch(cacheKey, qint64(tile->sizeInBytes()));
+    for(const QString& evicted : m_catalogTerrainTileLru.trim(kCatalogTerrainTileBudget))
+        m_catalogTerrainTileCache.remove(evicted);
     if(sourceIdentity)
         *sourceIdentity = pageIdentity;
     return true;
@@ -2027,16 +2042,10 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
     for(int size = minTexSize; size >= 4; size /= 2)
         ++blockSafeMipCount;
     outputMipCount = qMax(1, qMin(outputMipCount, blockSafeMipCount));
-    QVector<QByteArray> combinedMips;
-    combinedMips.reserve(outputMipCount);
-    for(int level = 0; level < outputMipCount; ++level)
-        combinedMips.append(combineTerrainMip(aPart, level,
-            qMax(1, minTexSize >> level), atlasColumns));
-
     ei::log(eLogInfo, QString("Uploading terrain atlas map:%1 parts:%2 grid:%3x%4 dimensions:%5x%6 compressedBytes:%7")
             .arg(name).arg(texCount).arg(atlasColumns).arg(atlasRows)
             .arg(minTexSize * atlasColumns).arg(minTexSize * atlasRows)
-            .arg(combinedMips.first().size()));
+            .arg(dxt1MipBytes(minTexSize * atlasColumns, minTexSize * atlasRows)));
     ei::setCrashContext("mpr/terrain-atlas/opengl-create:" + name);
     const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
     if(currentContext)
@@ -2104,6 +2113,14 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                 .arg(name).arg(expectedTexCount).arg(texCount));
         return texture;
     }
+    QVector<QByteArray> combinedMips;
+    combinedMips.reserve(uploadedMipCount);
+    for(int level = 0; level < uploadedMipCount; ++level)
+        combinedMips.append(combineTerrainMip(aPart, level,
+            qMax(1, minTexSize >> level), atlasColumns));
+    // The combined authored BC1 levels now own the upload bytes. Source
+    // page/mip buffers are redundant before the driver allocates residency.
+    aPart.clear();
     texture->setFormat(QOpenGLTexture::TextureFormat::RGBA_DXT1); //todo: read texture format from file. EI can use both dxt3 and dxt1
     texture->setMipLevels(uploadedMipCount);
     texture->setSize(minTexSize * atlasColumns, minTexSize * atlasRows);
@@ -2111,8 +2128,11 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
     texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
     ei::setCrashContext("mpr/terrain-atlas/opengl-upload:" + name);
     for(int level = 0; level < uploadedMipCount; ++level)
+    {
         texture->setCompressedData(level, 0, combinedMips[level].size(),
                                    combinedMips[level].constData());
+        combinedMips[level].clear();
+    }
     m_aTexture[cacheKey] = texture;
     m_terrainTextures.insert(texture);
     m_terrainTextureUsers.insert(texture, 1);
@@ -2179,6 +2199,7 @@ void CTextureList::refreshConfiguredSources(bool sceneObjectsRetainTextures)
     m_missingTextureNames.clear();
     m_aTextureImages.clear();
     m_catalogTerrainTileCache.clear();
+    m_catalogTerrainTileLru.clear();
     QSet<QString> empty;
     loadTexture(empty);
 }

@@ -1,12 +1,26 @@
 #include "terrain_atlas_archive_binding.h"
 
 #include <QDataStream>
+#include <QCryptographicHash>
+#include <QHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
 #include <QTextCodec>
+#include <QTemporaryFile>
+#include <QSharedPointer>
+#include <QMutex>
+#include <cstring>
+#include <algorithm>
+#include <QtEndian>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include "mmp_codec.h"
 #include "endurance_document.h"
@@ -15,6 +29,144 @@
 #include "terrain_atlas_profile.h"
 
 namespace {
+#ifdef Q_OS_WIN
+struct SMappedTerrainPixels;
+QMutex mappedTerrainMutex;
+QVector<QWeakPointer<SMappedTerrainPixels>> mappedTerrainStores;
+// Keep large immutable decoded atlases out of private committed heap memory.
+// QImage's const-data constructor detaches on edits, even for a sole owner.
+// The temporary backing is deleted by Windows on the last handle close (also
+// on process termination); image cleanup keeps the mapping alive across COW
+// containers and background-to-GUI handoff without a QObject owner.
+struct SMappedTerrainPixels
+{
+    HANDLE file{INVALID_HANDLE_VALUE};
+    HANDLE mapping{nullptr};
+    uchar* data{nullptr};
+    qint64 size{0};
+    qint64 used{0};
+    qint64 discarded{0};
+    ~SMappedTerrainPixels()
+    {
+        if(data) UnmapViewOfFile(data);
+        if(mapping) CloseHandle(mapping);
+        if(file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    }
+    static QSharedPointer<SMappedTerrainPixels> create(qint64 bytes)
+    {
+        if(bytes < 32ll * 1024 * 1024 || bytes > 8ll * 1024 * 1024 * 1024)
+            return {};
+        QTemporaryFile temporary(QDir::tempPath()
+            + QStringLiteral("/ataman-terrain-pixels-XXXXXX.tmp"));
+        if(!temporary.open()) return {};
+        const QString path = temporary.fileName();
+        // QTemporaryFile::close() can retain its native temporary-file handle.
+        // Remove that reservation before atomically creating our own handle;
+        // CREATE_NEW cannot overwrite a file created by a competing process.
+        if(!temporary.remove()) return {};
+        temporary.setAutoRemove(false);
+        QSharedPointer<SMappedTerrainPixels> store(new SMappedTerrainPixels);
+        store->size = bytes;
+        store->file = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        if(store->file == INVALID_HANDLE_VALUE) return {};
+        LARGE_INTEGER end; end.QuadPart = bytes;
+        if(!SetFilePointerEx(store->file, end, nullptr, FILE_BEGIN)
+           || !SetEndOfFile(store->file)) return {};
+        const quint64 length = quint64(bytes);
+        store->mapping = CreateFileMappingW(store->file, nullptr, PAGE_READWRITE,
+            DWORD(length >> 32), DWORD(length & 0xffffffffu), nullptr);
+        if(!store->mapping) return {};
+        store->data = static_cast<uchar*>(MapViewOfFile(store->mapping,
+            FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, SIZE_T(bytes)));
+        if(store->data)
+        {
+            QMutexLocker lock(&mappedTerrainMutex);
+            for(int i = mappedTerrainStores.size() - 1; i >= 0; --i)
+                if(mappedTerrainStores.at(i).isNull()) mappedTerrainStores.removeAt(i);
+            mappedTerrainStores.append(store.toWeakRef());
+        }
+        return store->data ? store : QSharedPointer<SMappedTerrainPixels>();
+    }
+    static void cleanup(void* owner)
+    {
+        delete static_cast<QSharedPointer<SMappedTerrainPixels>*>(owner);
+    }
+    QImage storeTile(const QImage& tile, const QSharedPointer<SMappedTerrainPixels>& owner)
+    {
+        const qint64 bytes = qint64(tile.width()) * tile.height() * 4;
+        if(bytes > size - used) return tile;
+        uchar* pixels = data + used;
+        for(int y = 0; y < tile.height(); ++y)
+            memcpy(pixels + qint64(y) * tile.width() * 4,
+                   tile.constScanLine(y), size_t(tile.width()) * 4);
+        used += bytes;
+        return QImage(static_cast<const uchar*>(pixels), tile.width(), tile.height(),
+            tile.width() * 4, QImage::Format_RGBA8888, cleanup,
+            new QSharedPointer<SMappedTerrainPixels>(owner));
+    }
+    void discardResidentPages(bool all = false)
+    {
+        const qint64 begin = all ? 0 : discarded;
+        if(used <= begin) return;
+        // For unlocked file-backed pages Windows removes their working-set
+        // residency and returns ERROR_NOT_LOCKED. Contents stay file-backed;
+        // this never applies to private heap pixels or another process.
+        const DWORD previousError = GetLastError();
+        VirtualUnlock(data + begin, SIZE_T(used - begin));
+        SetLastError(previousError);
+        discarded = used;
+    }
+};
+
+qint64 nativeAtlasPixelBytes(const QVector<QByteArray>& pages, int slotCount)
+{
+    qint64 bytes = 0;
+    for(int page = 0; page < pages.size() && page * 64 < slotCount; ++page)
+    {
+        const QByteArray& payload = pages.at(page);
+        if(payload.size() < 76) return 0;
+        QDataStream stream(payload); stream.setByteOrder(QDataStream::LittleEndian);
+        quint32 signature = 0, width = 0, height = 0;
+        stream >> signature >> width >> height;
+        if(signature != 0x00504d4d || width == 0 || width != height
+           || width % 32 != 0 || width > 65536) return 0;
+        bytes += qint64(qMin(64, slotCount - page * 64)) * (width / 8) * (width / 8) * 4;
+    }
+    return bytes;
+}
+#endif
+uint decodedTileBucket(const QByteArray& payload, int slot, const QImage& tile)
+{
+    // Hash eight times fewer bytes: identical native BC1 blocks decode to the
+    // same image. Exact QImage equality below remains the collision guard.
+    // Different BC1 encodings of equal pixels may simply remain separate.
+    if(payload.size() >= 76)
+    {
+        const quint32 width = qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(payload.constData() + 4));
+        const quint32 height = qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(payload.constData() + 8));
+        if(width >= 32 && height >= 32 && width % 32 == 0 && height % 32 == 0
+           && width / 8 == quint32(tile.width()) && height / 8 == quint32(tile.height()))
+        {
+            uint bucket = qHash(width, qHash(height));
+            const quint64 stride = quint64(width) * 2, bytes = width / 4;
+            for(quint32 row = 0; row < height / 32; ++row)
+            {
+                // Keep the codec's inverted MPR-slot / raw-MMP row mapping.
+                const quint64 offset = 76 + (quint64(7 - slot / 8) * (height / 32) + row) * stride
+                    + quint64(slot % 8) * bytes;
+                if(offset > quint64(payload.size()) || bytes > quint64(payload.size()) - offset)
+                    return qHashBits(tile.constBits(), size_t(tile.sizeInBytes()));
+                bucket = qHashBits(payload.constData() + offset, size_t(bytes), bucket);
+            }
+            return bucket;
+        }
+    }
+    return qHashBits(tile.constBits(), size_t(tile.sizeInBytes()));
+}
+
 struct SArchiveMemberLocation
 {
     quint32 offset{0};
@@ -190,6 +342,51 @@ bool CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
             *bytesRead += payload.size();
     }
     return true;
+}
+
+void CTerrainAtlasArchiveBindingResolver::releaseDecodedImageResidency(const QVector<QImage>& images)
+{
+#ifdef Q_OS_WIN
+    QMutexLocker lock(&mappedTerrainMutex);
+    for(int index = mappedTerrainStores.size() - 1; index >= 0; --index)
+    {
+        const auto store = mappedTerrainStores.at(index).toStrongRef();
+        if(!store) { mappedTerrainStores.removeAt(index); continue; }
+        const quintptr begin = reinterpret_cast<quintptr>(store->data);
+        // Capacity is immutable after registration. A different store may
+        // still be decoding on a worker, so do not read its mutable used count.
+        const quintptr end = begin + quintptr(store->size);
+        QVector<QPair<quintptr, quintptr>> ranges;
+        // Images from this store are published only after decoding finishes;
+        // a concurrently decoding store cannot be present in this vector.
+        for(const QImage& image : images)
+        {
+            const quintptr pixels = reinterpret_cast<quintptr>(image.constBits());
+            if(pixels >= begin && pixels < end)
+            {
+                const quintptr length = quintptr(image.sizeInBytes());
+                if(length <= end - pixels) ranges.append(qMakePair(pixels, pixels + length));
+            }
+        }
+        if(ranges.isEmpty()) continue;
+        std::sort(ranges.begin(), ranges.end());
+        quintptr first = ranges.first().first, last = ranges.first().second;
+        const DWORD previousError = GetLastError();
+        for(int i = 1; i < ranges.size(); ++i)
+        {
+            if(ranges.at(i).first <= last) last = qMax(last, ranges.at(i).second);
+            else
+            {
+                VirtualUnlock(reinterpret_cast<void*>(first), SIZE_T(last - first));
+                first = ranges.at(i).first; last = ranges.at(i).second;
+            }
+        }
+        VirtualUnlock(reinterpret_cast<void*>(first), SIZE_T(last - first));
+        SetLastError(previousError);
+    }
+#else
+    Q_UNUSED(images);
+#endif
 }
 
 bool STerrainAtlasArchiveBindingResult::hasCompleteArchive(
@@ -444,6 +641,12 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         result.completeArchives.append(archive.absoluteFilePath());
         QVector<QImage> tiles;
         tiles.reserve(atlasSlotCount);
+        QHash<uint, QVector<QImage>> uniqueTiles;
+#ifdef Q_OS_WIN
+        const auto mapped = SMappedTerrainPixels::create(nativeAtlasPixelBytes(pages, atlasSlotCount));
+#endif
+        QCryptographicHash atlasHash(QCryptographicHash::Sha256);
+        atlasHash.addData(QByteArray::number(atlasSlotCount)); atlasHash.addData("\n", 1);
         QString diagnostic;
         for(int slot = 0; slot < atlasSlotCount; ++slot)
         {
@@ -454,12 +657,51 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
                 tiles.clear();
                 break;
             }
-            tiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+            tile = tile.convertToFormat(QImage::Format_RGBA8888);
+            // Same serialization as pixelSha256(), evaluated while one decoded
+            // tile is already resident. Do not fault the whole mapped atlas back
+            // into RAM merely to hash the final image vector a second time.
+            atlasHash.addData(QByteArray::number(tile.width()) + 'x'
+                              + QByteArray::number(tile.height()));
+            atlasHash.addData("\n", 1);
+            for(int y = 0; y < tile.height(); ++y)
+                atlasHash.addData(reinterpret_cast<const char*>(tile.constScanLine(y)), tile.width() * 4);
+            // Exact QImage comparison guards every bucket collision. The
+            // saved atlas identity above remains SHA-256 without hashing
+            // every pixel cryptographically twice just for deduplication.
+            auto& candidates = uniqueTiles[decodedTileBucket(pages.at(slot / 64), slot % 64, tile)];
+            bool shared = false;
+            for(const QImage& candidate : candidates)
+                if(candidate == tile)
+                {
+                    tile = candidate;
+                    shared = true;
+                    break;
+                }
+            if(!shared)
+            {
+#ifdef Q_OS_WIN
+                if(mapped) tile = mapped->storeTile(tile, mapped);
+#endif
+                candidates.append(tile);
+            }
+            tiles.append(tile);
+            // Decoding is complete for this page; do not retain all authored
+            // BC1 mip payloads beside the growing native RGBA tile vector.
+            if(slot % 64 == 63 || slot + 1 == atlasSlotCount)
+            {
+                pages[slot / 64].clear();
+#ifdef Q_OS_WIN
+                if(mapped) mapped->discardResidentPages();
+#endif
+            }
         }
         if(tiles.size() != atlasSlotCount)
             continue;
-        const QByteArray actual =
-            CTerrainAtlasProfileInference::pixelSha256(tiles);
+        const QByteArray actual = atlasHash.result().toHex();
+#ifdef Q_OS_WIN
+        if(mapped) mapped->discardResidentPages(true);
+#endif
         QFileInfo archiveAfterRead(archive.absoluteFilePath());
         archiveAfterRead.refresh();
         if(generation != resIo::generation(archive.absoluteFilePath())

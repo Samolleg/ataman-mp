@@ -30,6 +30,7 @@
 #include "terrain_edit_model.h"
 #include "terrain_virtual_atlas.h"
 #include "terrain_atlas_shape_policy.h"
+#include "terrain_atlas_archive_binding.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -94,13 +95,68 @@ CLandscape::CLandscape(bool readOnlyBackground):
 bool CLandscape::previewTerrainAtlasFullUpload(
     const QVector<QImage>& tileImages, int textureCount, int columns, int rows)
 {
-    const QImage combined = CTerrainVirtualAtlas::composeAtlasGrid(
-        tileImages, textureCount, columns);
-    if(combined.isNull())
+    if(textureCount <= 0 || tileImages.size() != textureCount * 64
+       || columns <= 0 || columns > textureCount
+       || rows != (textureCount + columns - 1) / columns
+       || !QOpenGLContext::currentContext())
         return false;
-    QOpenGLTexture* replacement = new QOpenGLTexture(
-        combined, QOpenGLTexture::GenerateMipMaps);
-    if(!replacement->isCreated())
+    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
+    if(tileSize <= 0) return false;
+    const int pageSize = tileSize * 8;
+    const int width = pageSize * columns, height = pageSize * rows;
+    auto* gl = QOpenGLContext::currentContext()->functions();
+    GLint priorActiveTexture = GL_TEXTURE0, priorTexture = 0, priorUnpackAlignment = 4;
+    gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &priorActiveTexture);
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &priorTexture);
+    gl->glGetIntegerv(GL_UNPACK_ALIGNMENT, &priorUnpackAlignment);
+    while(gl->glGetError() != GL_NO_ERROR) {}
+    QOpenGLTexture* replacement = new QOpenGLTexture(QOpenGLTexture::Target2D);
+    bool installed = replacement->create();
+    if(installed)
+    {
+        replacement->setSize(width, height);
+        replacement->setFormat(QOpenGLTexture::RGBA8_UNorm);
+        replacement->setMipLevels(1 + int(std::floor(std::log2(double(qMax(width, height))))));
+        CTerrainAtlasArchiveBindingResolver::releaseDecodedImageResidency(tileImages);
+        replacement->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+        gl->glBindTexture(GL_TEXTURE_2D, replacement->textureId());
+        gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        installed = replacement->isStorageAllocated() && gl->glGetError() == GL_NO_ERROR;
+        // Keep only one page-sized staging image. The old path allocated an
+        // entire RGBA grid in addition to every authored/working tile and the
+        // old and candidate GL textures. Padding pages must still be zeroed.
+        qint64 warmPixelBudget = 32ll * 1024 * 1024;
+        for(int page = 0; installed && page < columns * rows; ++page)
+        {
+            const QImage pixels = CTerrainVirtualAtlas::composePage(
+                tileImages, page * 64, tileSize);
+            if(pixels.isNull()) { installed = false; break; }
+            gl->glTexSubImage2D(GL_TEXTURE_2D, 0,
+                               (page % columns) * pageSize, (page / columns) * pageSize,
+                               pageSize, pageSize, GL_RGBA, GL_UNSIGNED_BYTE, pixels.constBits());
+            installed = gl->glGetError() == GL_NO_ERROR;
+            // Keep at most two initial native pages, within a hard 32 MiB
+            // budget even for mixed resolutions, warm for palette/brush use.
+            if(installed)
+            {
+                const auto pageTiles = tileImages.mid(page * 64, 64);
+                qint64 nativeBytes = 0;
+                for(const QImage& tile : pageTiles) nativeBytes += qint64(tile.sizeInBytes());
+                if(page < 2 && nativeBytes <= warmPixelBudget) warmPixelBudget -= nativeBytes;
+                else CTerrainAtlasArchiveBindingResolver::releaseDecodedImageResidency(pageTiles);
+            }
+        }
+        if(installed)
+        {
+            gl->glGenerateMipmap(GL_TEXTURE_2D);
+            installed = gl->glGetError() == GL_NO_ERROR;
+        }
+    }
+    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, priorUnpackAlignment);
+    gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
+    gl->glActiveTexture(GLenum(priorActiveTexture));
+    if(!installed)
     {
         delete replacement;
         return false;
@@ -116,7 +172,7 @@ bool CLandscape::previewTerrainAtlasFullUpload(
     ei::log(eLogInfo, QString(
         "Working terrain atlas full upload: slots:%1 pages:%2 grid:%3x%4 dimensions:%5x%6")
         .arg(tileImages.size()).arg(textureCount).arg(columns).arg(rows)
-        .arg(combined.width()).arg(combined.height()));
+        .arg(width).arg(height));
     return true;
 }
 

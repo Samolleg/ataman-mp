@@ -206,6 +206,7 @@ private:
     QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName,
                                         bool* found = nullptr);
     QImage loadTextureImageResource(const QString& name, const QString& modelName);
+    void cacheTextureImage(const QString& key, const QImage& image);
 
 private:
     static CTextureList* m_pTextureContainer;
@@ -222,6 +223,7 @@ private:
     QList<QString> m_arrCellComboBox; //optimization for cell widget
     QString m_mapLocalTerrainArchive;
     mutable QMap<QString, QImage> m_catalogTerrainTileCache;
+    mutable ei::CVisualCacheLru m_catalogTerrainTileLru;
 };
 
 
