@@ -44,6 +44,7 @@ QByteArray mapBytes()
     for(int i=0;i<64;++i)out<<qint32(i==1?2:1);out<<quint16(60)<<quint16(4);
     QByteArray sector;QDataStream sec(&sector,QIODevice::WriteOnly);sec.setByteOrder(QDataStream::LittleEndian);sec<<quint32(0xCF4BF774)<<quint8(0);
     sector.append(QByteArray(33*33*8+16*16*2,'\0'));
+    for(int i=0;i<256;++i){SMprPackedTile t;t.tileIndex=i%64;t.rotation=i%4;qToLittleEndian<quint16>(t.encode(),reinterpret_cast<uchar*>(sector.data()+5+33*33*8+i*2));}
     QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
     CResArchiveDocument res;res.loadBytes(empty);QByteArray bytes;SResArchiveNewMember a,b;a.name="published.mp";a.payload=mp;b.name="published000000.sec";b.payload=sector;
     res.buildWithAppendedMembers({a,b},&bytes);return bytes;
@@ -73,9 +74,28 @@ private slots:
         QCOMPARE(first.pages[0].mid(76,2048*2048/2),hd.mid(76,2048*2048/2));
         const auto repeat=rebuildTerrainAtlasHd(p,{sd},sources);QCOMPARE(repeat.pages,first.pages);QCOMPARE(repeat.profile.toBytes(),first.profile.toBytes());
         CMprDocument map;CValidationReport report;QVERIFY(map.loadBytes(mapBytes(),"test.mpr",&report));
+        // Real published maps have fewer MP class records than physical page slots.
+        CMprEditTransaction shorten;QByteArray shortMp=map.memberPayload(map.mapInfo().memberName);
+        shortMp.remove(38+61*4,3*4);qToLittleEndian<quint32>(61,reinterpret_cast<uchar*>(shortMp.data()+24));
+        qToLittleEndian<quint16>(1,reinterpret_cast<uchar*>(shortMp.data()+38+61*4+2));
+        for(const auto& member:map.members())if(member.name==map.mapInfo().memberName)shorten.replaceMemberPayload(member.name,member.sha256,shortMp);
+        const auto sectorInfo=map.sectors()[0];const auto sectorMember=map.members()[sectorInfo.memberIndex];QByteArray shortSec=sectorMember.payload;
+        for(int cell=0;cell<256;++cell){uchar* at=reinterpret_cast<uchar*>(shortSec.data()+sectorInfo.landTileOffset+cell*2);auto tile=SMprPackedTile::decode(qFromLittleEndian<quint16>(at));if(tile.atlasSlot()>=61){tile.tileIndex=0;qToLittleEndian<quint16>(tile.encode(),at);}}
+        shorten.replaceMemberPayload(sectorMember.name,sectorMember.sha256,shortSec);QByteArray shortBytes;QVERIFY(map.applyTransaction(shorten,&shortBytes,&report));
+        CMprDocument shortMap;QVERIFY(shortMap.loadBytes(shortBytes,"short.mpr",&report));auto shortResult=first;
+        QVERIFY2(prepareTerrainHdPublication(shortMap,{},&shortResult),qPrintable(shortResult.error));
+        CMprDocument paddedMap;QVERIFY(paddedMap.loadBytes(shortResult.mprBytes,"padded.mpr",&report));
+        QCOMPARE(paddedMap.mapInfo().tileTypes.mid(0,61),shortMap.mapInfo().tileTypes);
         auto candidate=first;QVERIFY2(prepareTerrainHdPublication(map,{},&candidate),qPrintable(candidate.error));
         QVERIFY(QRegularExpression("^[a-zA-Z0-9_]+_[0-9a-f]{12}$").match(candidate.profile.mprNamespace).hasMatch());
         CMprDocument reopened;QVERIFY(reopened.loadBytes(candidate.mprBytes,"candidate.mpr",&report));
+        auto legacyRecovery=candidate.receipt;legacyRecovery.remove("outputSlots");
+        auto legacyRows=legacyRecovery["slots"].toArray();
+        for(int i=0;i<legacyRows.size();++i){auto row=legacyRows[i].toObject();row.remove("outputSlot");legacyRows[i]=row;}legacyRecovery["slots"]=legacyRows;
+        auto legacyPages=legacyRecovery["pages"].toArray();
+        for(int i=0;i<legacyPages.size();++i){auto page=legacyPages[i].toObject();page.remove("tileSize");legacyPages[i]=page;}legacyRecovery["pages"]=legacyPages;
+        const auto legacyAgain=rebuildTerrainAtlasHd(candidate.profile,candidate.pages,sources,true,reopened.mapInfo().animatedTiles,QJsonDocument(legacyRecovery).toJson());
+        QVERIFY2(legacyAgain.success,qPrintable(legacyAgain.error));QCOMPARE(legacyAgain.pages,candidate.pages);
         QCOMPARE(reopened.mapInfo().tileTypes,map.mapInfo().tileTypes);QCOMPARE(reopened.mapInfo().animatedTiles,map.mapInfo().animatedTiles);
         QCOMPARE(reopened.sectors().size(),map.sectors().size());
         QCOMPARE(reopened.members()[reopened.sectors()[0].memberIndex].payload,map.members()[map.sectors()[0].memberIndex].payload);
@@ -104,10 +124,72 @@ private slots:
         const auto partialSd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(partial,0,128),true,nullptr);
         QVector<QImage> partialDecoded;for(int i=0;i<64;++i){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(partialSd,i,&image));partialDecoded.append(image);}
         const auto carried=rebuildTerrainAtlasHd(profile(partialDecoded),{partialSd},sources);
-        QVERIFY2(carried.success,qPrintable(carried.error));QCOMPARE(carried.receipt["hdApplied"].toInt(),63);QCOMPARE(carried.receipt["retained128"].toInt(),1);QCOMPARE(carried.receipt["sdCarried256"].toInt(),1);
-        QCOMPARE(carried.after[3],partialDecoded[3].scaled(256,256,Qt::IgnoreAspectRatio,Qt::FastTransformation));
-        const auto retainedMip=lowMip(carried.pages[0]);
-        for(int row=0;row<32;++row) {const int offset=76+((224+row)*256+96)*8;QCOMPARE(retainedMip.mid(offset,32*8),partialSd.mid(offset,32*8));}
+        QVERIFY2(carried.success,qPrintable(carried.error));QCOMPARE(carried.receipt["hdApplied"].toInt(),63);QCOMPARE(carried.receipt["retained128"].toInt(),1);QCOMPARE(carried.receipt["sdCarried256"].toInt(),0);
+        QCOMPARE(carried.after[carried.slotRemap[3]],partialDecoded[3]);
+        QCOMPARE(carried.after[carried.slotRemap[3]].width(),128);
+        QCOMPARE(carried.pages.size(),2);
+        STerrainAtlasProfile portable;QVERIFY2(STerrainAtlasProfile::fromBytes(carried.profile.toBytes(),&portable,&report),qPrintable(report.toText()));
+        QCOMPARE(portable.atlasSlotCount,128);QCOMPARE(portable.slotDefinitions.size(),128);
+        QCOMPARE(qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(carried.pages[1].constData()+4)),quint32(1024));
+        QVERIFY(carried.pages[0].size()+carried.pages[1].size()<2*hd.size());
+        auto remapped=carried;QVERIFY2(prepareTerrainHdPublication(map,{},&remapped),qPrintable(remapped.error));
+        CMprDocument moved;QVERIFY(moved.loadBytes(remapped.mprBytes,"moved.mpr",&report));
+        QCOMPARE(moved.mapInfo().tileTypes[carried.slotRemap[1]],map.mapInfo().tileTypes[1]);
+        QCOMPARE(moved.mapInfo().animatedTiles[0].tileIndex,quint16(carried.slotRemap[60]));
+        auto remappedField=field;
+        remappedField.atlasPixelSha256=QByteArray::fromHex(profile(partialDecoded).atlasPixelSha256);
+        remappedField.profileSha256=QCryptographicHash::hash(profile(partialDecoded).toBytes(),QCryptographicHash::Sha256);
+        auto semanticRemap=carried;QVERIFY2(prepareTerrainHdPublication(map,remappedField.toBytes(),&semanticRemap),qPrintable(semanticRemap.error));
+        CMprDocument semanticMoved;QVERIFY(semanticMoved.loadBytes(semanticRemap.mprBytes,"repacked-semantic.mpr",&report));
+        STerrainSemanticFieldDocument remappedSaved;
+        QVERIFY(STerrainSemanticFieldDocument::fromBytes(semanticMoved.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),&remappedSaved));
+        QCOMPARE(remappedSaved.land,field.land);QCOMPARE(remappedSaved.overlay,field.overlay);QCOMPARE(remappedSaved.randomPaintSeed,field.randomPaintSeed);
+        QVERIFY(remappedSaved.validateBinding(semanticRemap.profile.mprNamespace,{},QByteArray::fromHex(semanticRemap.profile.atlasPixelSha256),QCryptographicHash::hash(semanticRemap.profile.toBytes(),QCryptographicHash::Sha256),17,17,&report,STerrainSemanticFieldDocument::tileBindingSha256(semanticMoved)));
+
+        QVERIFY(remapped.receipt["SECReferencesEquivalent"].toBool());
+        QVERIFY(remapped.receipt["remappedCells"].toInt()>0);
+        const auto oldSec=map.sectors()[0],newSec=moved.sectors()[0];
+        const auto oldPayload=map.members()[oldSec.memberIndex].payload,newPayload=moved.members()[newSec.memberIndex].payload;
+        for(int cell=0;cell<256;++cell) {
+            const auto a=SMprPackedTile::decode(qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(oldPayload.constData()+oldSec.landTileOffset+cell*2)));
+            const auto b=SMprPackedTile::decode(qFromLittleEndian<quint16>(reinterpret_cast<const uchar*>(newPayload.constData()+newSec.landTileOffset+cell*2)));
+            QCOMPARE(b.atlasSlot(),carried.slotRemap[a.atlasSlot()]);QCOMPARE(b.rotation,a.rotation);
+        }
+        const auto recovery=QJsonDocument(remapped.receipt).toJson(QJsonDocument::Compact);
+        const auto again=rebuildTerrainAtlasHd(remapped.profile,remapped.pages,sources,true,moved.mapInfo().animatedTiles,recovery);
+        QVERIFY2(again.success,qPrintable(again.error));QCOMPARE(again.pages,remapped.pages);
+        QCOMPARE(again.receipt["nativeHdSourceRecovered"].toInt(),63);
+        CTerrainHdSources::Source nativeSource;
+        QVERIFY(sources.matchNativeHd(first.after[0],before[0],&nativeSource));
+        QCOMPARE(sources.image(nativeSource,128),before[0]);
+        QVERIFY(!sources.matchNativeHd(first.after[0],partialDecoded[3],&nativeSource));
+        const auto order=again.receipt["sourceOrder"].toArray();QCOMPARE(order.size(),128);
+        for(int i=0;i<64;++i)QCOMPARE(order[i].toInt(),carried.slotRemap[i]);
+        auto brokenRecovery=remapped.receipt;auto rows=brokenRecovery["slots"].toArray();rows[1]=rows[0];brokenRecovery["slots"]=rows;
+        QVERIFY(!rebuildTerrainAtlasHd(remapped.profile,remapped.pages,sources,true,moved.mapInfo().animatedTiles,QJsonDocument(brokenRecovery).toJson()).success);
+        auto noOp=again;QVERIFY(prepareTerrainHdPublication(moved,{},&noOp));
+        QCOMPARE(noOp.mprBytes,remapped.mprBytes);QVERIFY(noOp.publishedMembers.isEmpty());
+        const auto third=rebuildTerrainAtlasHd(remapped.profile,remapped.pages,sources,true,moved.mapInfo().animatedTiles,QJsonDocument(noOp.receipt).toJson());
+        QVERIFY2(third.success,qPrintable(third.error));QCOMPARE(third.pages,remapped.pages);
+        const QString root=dir.path()+"/build-tests-cli";QVERIFY(QDir().mkpath(root+"/maps"));QVERIFY(QDir().mkpath(root+"/inputs"));
+        auto saveCopy=[](const QString& path,const QByteArray& data){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&f.write(data)==data.size()&&f.commit();};
+        QByteArray publishedArchive;QVERIFY(archive.buildWithPublishedMembers(remapped.publishedMembers,false,&publishedArchive));
+        QVERIFY(saveCopy(root+"/inputs/pack.res",publishedArchive));QVERIFY(saveCopy(root+"/maps/test.mpr",remapped.mprBytes));
+        QJsonObject cfg{{"testRoot",root},{"archive",root+"/inputs/pack.res"},{"sources",QJsonArray{root+"/inputs/pack.res"}},
+            {"maps",QJsonArray{root+"/maps/test.mpr"}},{"mode","build"},{"output",root+"/out"},{"receipt",root+"/receipt.json"}};
+        QVERIFY(saveCopy(root+"/fixture.json",QJsonDocument(cfg).toJson()));
+        QCOMPARE(runTerrainHdRepublish(root+"/fixture.json"),0);
+        QFile repeatedMap(root+"/out/test/test.mpr");QVERIFY(repeatedMap.open(QIODevice::ReadOnly));QCOMPARE(repeatedMap.readAll(),remapped.mprBytes);
+        QFile repeatedPack(root+"/out/test/HDPack_Terrain.res");QVERIFY(repeatedPack.open(QIODevice::ReadOnly));QCOMPARE(repeatedPack.readAll(),publishedArchive);
+        cfg["receipt"]=dir.path()+"/outside.json";QVERIFY(saveCopy(root+"/fixture.json",QJsonDocument(cfg).toJson()));
+        QCOMPARE(runTerrainHdRepublish(root+"/fixture.json"),2);QVERIFY(!QFileInfo::exists(dir.path()+"/outside.json"));
+
+        // An SD frame keeps the complete animation native, never stretched.
+        SMprAnimatedTileRecord interval;interval.tileIndex=2;interval.frameCount=3;
+        const auto animation=rebuildTerrainAtlasHd(profile(partialDecoded),{partialSd},sources,true,{interval});
+        QVERIFY(animation.success);QCOMPARE(animation.receipt["animationBlockedHd"].toInt(),2);
+        for(int frame=2;frame<5;++frame)QCOMPARE(animation.after[animation.slotRemap[frame]].width(),128);
+        QCOMPARE(animation.slotRemap[4],animation.slotRemap[2]+2);
         const auto conservative=rebuildTerrainAtlasHd(profile(partialDecoded),{partialSd},sources,false);QCOMPARE(conservative.pages[0],partialSd);
         // Different native HD tiles with an identical SD mip must be refused.
         auto collision=hd;const auto otherBase=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(QVector<QImage>(64,pattern(1)),0,256),true,nullptr);
@@ -154,6 +236,68 @@ private slots:
         QVERIFY2(mixedHd.success,qPrintable(mixedHd.error));
         QVERIFY2(mixedHd.receipt["slots"].toArray()[3].toObject()["regenerated"].toBool(),qPrintable(QString(QJsonDocument(mixedHd.receipt).toJson())));
         QCOMPARE(mixedHd.after[3].size(),QSize(256,256));QCOMPARE(mixedHd.profile.slotDefinitions[3].mixedEdgeRecipes,mixedProfile.slotDefinitions[3].mixedEdgeRecipes);
+    }
+    void cleanupOrphanAndSharedNamespace()
+    {
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        const QString ns="published_123456789abc",next="published_987654321abc";
+        QDir().mkpath(dir.path()+"/Dejavu");QDir().mkpath(dir.path()+"/Base");
+        const QString current=dir.path()+"/Dejavu/current.mpr",baseMap=dir.path()+"/Base/base.mpr";
+        auto save=[](const QString& path,const QByteArray& bytes){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&f.write(bytes)==bytes.size()&&f.commit();};
+        CMprDocument map;QVERIFY(map.loadBytes(mapBytes(),"fixture"));
+        auto named=[&](const QString& name){QByteArray bytes;CMprEditTransaction tx;map.applyIsolatedNamespaceTransaction(tx,name,&bytes);return bytes;};
+        QVERIFY(save(current,named(next)));QVERIFY(save(baseMap,mapBytes()));
+        QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument blank;QVERIFY(blank.loadBytes(empty));
+        auto p=profile(QVector<QImage>(64,pattern(0)));p.mprNamespace=ns;p.provenance=CTerrainAtlasProfileStore::workingAtlasProvenance();
+        QVector<SResArchiveNewMember> members;
+        for(const auto& pair:QVector<QPair<QString,QByteArray>>{{ns+"000.mmp","old-page"},{CTerrainAtlasProfileStore::embeddedMemberName(ns),p.toBytes()},{"stock000.mmp","stock"},{next+"000.mmp","new-page"},{ns+"000.mmp.extra","unrelated"}}) {
+            SResArchiveNewMember m;m.name=pair.first;m.payload=pair.second;m.lastWriteTime=123;members.append(m);
+        }
+        QByteArray bytes;QVERIFY(blank.buildWithAppendedMembers(members,&bytes));CResArchiveDocument archive;QVERIFY(archive.loadBytes(bytes));
+        const QStringList roots{dir.path()+"/Dejavu",dir.path()+"/Base"};QByteArray candidate;QJsonObject receipt;QString error;
+        auto stockProfile=p;stockProfile.provenance="authored-template:stock";
+        SResArchiveNewMember stockMetadata;stockMetadata.name=CTerrainAtlasProfileStore::embeddedMemberName(ns);stockMetadata.payload=stockProfile.toBytes();
+        QByteArray stockBytes;QVERIFY(archive.buildWithPublishedMembers({stockMetadata},true,&stockBytes));
+        CResArchiveDocument stockArchive;QVERIFY(stockArchive.loadBytes(stockBytes));
+        QVERIFY(buildTerrainHdCleanup(stockArchive,ns,next,current,roots,&candidate,&receipt,&error));
+        QCOMPARE(candidate,stockBytes);QCOMPARE(receipt["reason"].toString(),QString("stock-or-unverified-original-atlas"));
+
+        QVERIFY(buildTerrainHdCleanup(archive,ns,next,current,roots,&candidate,&receipt,&error));
+        QCOMPARE(receipt["removedMembers"].toInt(),2);CResArchiveDocument cleaned;QVERIFY(cleaned.loadBytes(candidate));
+        QCOMPARE(cleaned.members().size(),3);QCOMPARE(cleaned.memberPayload("stock000.mmp"),QByteArray("stock"));
+        QCOMPARE(cleaned.memberPayload(ns+"000.mmp.extra"),QByteArray("unrelated"));
+        QVERIFY(save(baseMap,named(ns)));
+        QVERIFY(buildTerrainHdCleanup(archive,ns,next,current,roots,&candidate,&receipt,&error));QCOMPARE(candidate,bytes);QCOMPARE(receipt["reason"].toString(),QString("shared-namespace"));
+        QVERIFY(save(baseMap,QByteArray("broken")));
+        QVERIFY(buildTerrainHdCleanup(archive,ns,next,current,roots,&candidate,&receipt,&error));QCOMPARE(candidate,bytes);QVERIFY(receipt["reason"].toString().startsWith("unreadable-MPR"));
+        QVERIFY(buildTerrainHdCleanup(archive,"stock",next,current,roots,&candidate,&receipt,&error));QCOMPARE(candidate,bytes);QCOMPARE(receipt["reason"].toString(),QString("stock-or-unverified-original-atlas"));
+        QVERIFY(buildTerrainHdCleanup(archive,ns,next,current,{roots.first()},&candidate,&receipt,&error));QCOMPARE(candidate,bytes);
+        QVERIFY(save(baseMap,mapBytes()));
+        QVERIFY(buildTerrainHdCleanup(archive,ns,next,current,roots,&candidate,&receipt,&error));
+        const QString archivePath=dir.path()+"/pack.res";QVERIFY(save(archivePath,bytes));
+        // An MPR appearing after the orphan scan cancels cleanup before any write.
+        const QString lateMap=dir.path()+"/Base/late.mpr";QVERIFY(save(lateMap,named(ns)));
+        QVERIFY(!commitTerrainHdCleanup(archivePath,bytes,candidate,receipt,&error));
+        QFile readback(archivePath);QVERIFY(readback.open(QIODevice::ReadOnly));QCOMPARE(readback.readAll(),bytes);readback.close();
+        QVERIFY(QFile::remove(lateMap));
+        // Exact archive baseline is mandatory even if the candidate is valid.
+        QVERIFY(!commitTerrainHdCleanup(archivePath,bytes+"changed",candidate,receipt,&error));
+        QVERIFY2(commitTerrainHdCleanup(archivePath,bytes,candidate,receipt,&error),qPrintable(error));
+        QVERIFY(readback.open(QIODevice::ReadOnly));QCOMPARE(readback.readAll(),candidate);
+
+    }
+    void expandedAtlasKeepsNativeSd()
+    {
+        QVector<QImage> tile(64,pattern(0).scaled(128,128));
+        const auto page=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(tile,0,128),true,nullptr);
+        QVector<QImage> decoded;
+        for(int i=0;i<64;++i){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(page,i,&image));decoded.append(image);}
+        QVector<QImage> images;for(int i=0;i<18;++i)images+=decoded;
+        auto p=profile(decoded);p.textureCount=18;p.atlasSlotCount=1152;p.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(images);
+        for(int i=64;i<1152;++i){auto d=p.slotDefinitions[i%64];d.slot=i;p.slotDefinitions.append(d);}
+        CTerrainHdSources empty;const auto result=rebuildTerrainAtlasHd(p,QVector<QByteArray>(18,page),empty);
+        QVERIFY2(result.success,qPrintable(result.error));QCOMPARE(result.after.size(),1152);QCOMPARE(result.pages,QVector<QByteArray>(18,page));
     }
     void missingSourceKeepsOriginalPage()
     {
