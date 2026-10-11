@@ -13043,6 +13043,8 @@ void CView::refreshClassicAutoPalette()
                 stamp.supportId = support;
                 stamp.contextualStamp = true;
                 stamp.cornerOnly = true;
+                stamp.generatedIds.clear();
+                stamp.generatedThumbnails.clear();
                 stamp.name = tr("%1 (stamp on %2)").arg(
                     choice.name,
                     materialNames.value(support,

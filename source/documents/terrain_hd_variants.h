@@ -11,7 +11,7 @@
 // Algorithm A: local four-sided minimum-error quilting; never synthesizes a
 // material boundary. Changing any pixel/seed/acceptance rule requires a new ID.
 namespace TerrainHdVariants {
-const int AlgorithmVersion = 1;
+const int AlgorithmVersion = 2;
 const int Rim = 24;
 const int TargetCount = 6;
 const int MaxAttemptsPerVariant = 128;

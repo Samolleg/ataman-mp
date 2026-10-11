@@ -25,6 +25,11 @@ Bank load(const QString& root,QString* error=nullptr);
 QSharedPointer<const Bank> available();
 void forget();
 QSet<QString> rejects();
+// Semantic authority for generation; an opaque image with equal corners alone
+// is insufficient for water, animated surfaces and contextual/generated blends.
+bool staticMaterial(const QString& name,int reviewedClass,int physicalClass);
+bool uniformDonor(const STerrainAtlasProfileFamily& family,
+                  const STerrainAtlasProfileSlot& slot,int physicalClass,bool animated);
 QStringList groupNames(const Bank& bank);
 QVector<Entry> forMaterial(const Bank& bank,const QString& name,int reviewedClass,ETerrainAtlasLayer layer,
                            const QSet<QString>& excluded=rejects());

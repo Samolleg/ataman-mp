@@ -18,24 +18,50 @@
 #include <algorithm>
 #include <cstring>
 #include <QFile>
+#include <QRegularExpression>
+#include "types.h"
 
 namespace TerrainHdVariantBank {
 namespace {
 QMutex mutex;QSharedPointer<Bank> cached;QString cachedRoot;
 QByteArray read(const QString& path){QFile file(path);return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray();}
 QByteArray sha(const QByteArray& data){return QCryptographicHash::hash(data,QCryptographicHash::Sha256).toHex();}
-QByteArray fileSha(const QString& path,CTerrainHdProgress* progress=nullptr){QFile file(path);if(!file.open(QIODevice::ReadOnly))return {};
-    QCryptographicHash hash(QCryptographicHash::Sha256);while(!file.atEnd()){if(progress&&progress->cancelled())return {};auto bytes=file.read(4*1024*1024);if(bytes.isEmpty()&&file.error()!=QFile::NoError)return {};hash.addData(bytes);}return hash.result().toHex();}
 bool save(const QString& path,const QByteArray& bytes){QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&f.write(bytes)==bytes.size()&&f.commit();}
-QJsonObject identity(const QString& path,CTerrainHdProgress* p){QFileInfo before(path);const auto hash=fileSha(path,p);QFileInfo after(path);
-    if(hash.isEmpty()||before.size()!=after.size()||before.lastModified()!=after.lastModified())return {};
-    return {{"path",before.absoluteFilePath()},{"size",double(before.size())},{"sha256",QString::fromLatin1(hash)}};}
-bool current(const QJsonObject& manifest,bool full){for(const auto& v:manifest["inputs"].toArray()){auto x=v.toObject();QFileInfo f(x["path"].toString());
-    if(!f.exists()||double(f.size())!=x["size"].toDouble())return false;
-    if(full&&fileSha(f.absoluteFilePath())!=x["sha256"].toString().toLatin1())return false;}return true;}
+bool current(const QJsonObject& manifest){
+    const auto inputs=manifest["inputs"].toArray();if(inputs.isEmpty())return false;
+    QMap<QString,QVector<QJsonObject>> byArchive;
+    for(const auto& value:inputs){const auto input=value.toObject();
+        if(input["path"].toString().isEmpty()||input["member"].toString().isEmpty()
+           ||input["sha256"].toString().size()!=64)return false;
+        byArchive[input["path"].toString()].append(input);}
+    for(auto it=byArchive.cbegin();it!=byArchive.cend();++it){
+        CResArchiveIndex archive;if(!archive.open(it.key()))return false;
+        for(const auto& input:it.value())
+            if(sha(archive.readMember(input["member"].toString()))!=input["sha256"].toString().toLatin1())return false;
+        if(!archive.sourceIsCurrent())return false;
+    }
+    return true;
+}
 QString key(const QString& material,int reviewed,int physical,const QString& layer){return QStringLiteral("%1|%2|%3|%4").arg(material).arg(reviewed).arg(physical).arg(layer);}
 QVector<QImage> tiles(const QByteArray& page){QVector<QImage> out;for(int i=0;i<64;++i){QImage image;if(!ei::decodeMmpDxt1AtlasTile(page,i,&image))return {};out.append(image);}return out;}
 bool opaque(const QImage& a){for(int y=0;y<a.height();++y)for(int x=0;x<a.width();++x)if(qAlpha(a.pixel(x,y))!=255)return false;return true;}
+}
+bool staticMaterial(const QString& name,int reviewed,int physical){
+    const auto staticClass=[](int type){return type>=0&&type<16
+        &&type!=eWater&&type!=eLava&&type!=eSwamp;};
+    // Water can be labelled Ground by the MP witness (e.g. a shallow patch).
+    // Inspect the reviewed semantic name as well as both runtime classes.
+    static const QRegularExpression water(QStringLiteral("\\b(water|lava)\\b|вода|водя|лава"),QRegularExpression::CaseInsensitiveOption);
+    return !name.trimmed().isEmpty()&&staticClass(reviewed)&&staticClass(physical)
+        &&!water.match(name).hasMatch();
+}
+bool uniformDonor(const STerrainAtlasProfileFamily& family,const STerrainAtlasProfileSlot& slot,int physical,bool animated){
+    const auto& s=slot.signature;
+    return slot.assigned&&!slot.ambiguous&&!family.ambiguous&&family.paintSelectable
+        &&!animated&&slot.routeOwnerMaterial==0&&slot.mixedEdgeRecipes.isEmpty()
+        &&s.northWest==family.id&&s.northEast==family.id
+        &&s.southEast==family.id&&s.southWest==family.id
+        &&staticMaterial(family.name,family.tileType,physical);
 }
 QString defaultRoot(){const auto override=qEnvironmentVariable("EI_MAPPER_HD_VARIANT_CACHE");if(!override.isEmpty())return override;
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)).filePath("EIMapperAtaman/terrain-variants");}
@@ -57,15 +83,13 @@ Bank generate(const Config& config,CTerrainHdProgress* progress){
     Bank bank;QElapsedTimer timer;timer.start();auto fail=[&](const QString& error){bank.error=error;bank.cancelled=progress&&progress->cancelled();return bank;};
     auto step=[&](CTerrainHdProgress::Stage stage,int done,int total){return !progress||progress->update(stage,done,total);};
     if(config.archives.isEmpty()||config.maps.isEmpty())return fail(QStringLiteral("Нужны настроенные HDPack и карты с MP-классами (Base/Maps)."));
-    QJsonArray inputs;QStringList paths=config.archives+config.maps;paths.removeDuplicates();
-    for(int i=0;i<paths.size();++i){if(!step(CTerrainHdProgress::Opening,i,paths.size()))return fail("Cancelled");auto id=identity(paths[i],progress);if(id.isEmpty())return fail("Source changed/unreadable: "+paths[i]);inputs.append(id);}
+    if(!step(CTerrainHdProgress::Opening,0,config.archives.size()))return fail("Cancelled");
+    QMap<QString,QJsonObject> usedInputs;
+    const auto rememberInput=[&](const QString& path,const QString& member,const QByteArray& payload){
+        usedInputs[path+QChar(0)+member]=QJsonObject{{"path",QFileInfo(path).absoluteFilePath()},
+            {"member",member},{"sha256",QString::fromLatin1(sha(payload))}};
+    };
     auto presetBytes=read(":/terrain_atlas_presets.json");const auto presets=QJsonDocument::fromJson(presetBytes).object()["presets"].toArray();
-    QByteArray cacheIdentity=QByteArray::number(TerrainHdVariants::AlgorithmVersion)+sha(presetBytes);
-    for(const auto& i:inputs) {
-        const auto input=i.toObject();
-        cacheIdentity+=input["path"].toString().toUtf8()+QByteArray(1,'\0')+input["sha256"].toString().toLatin1();
-    }
-    const auto bankId=sha(cacheIdentity);bank.directory=QDir(config.cacheRoot).filePath(QString::fromLatin1(bankId));
     QMap<QString,SMprMapInfo> maps,dejavuMaps;
     for(const auto& path:config.maps){CMprDocument doc;if(!doc.load(QFileInfo(path)))return fail("Cannot read MP metadata: "+path);
         const auto info=doc.mapInfo();const auto ns=info.innerNamespace.toLower();
@@ -85,12 +109,12 @@ Bank generate(const Config& config,CTerrainHdProgress* progress){
             const auto digest=CTerrainAtlasProfileInference::pixelSha256(images.mid(0,count));
             auto profile=CTerrainAtlasPresetCatalog::exactProfile(ns,digest,count);
             const auto fullDigest=CTerrainAtlasProfileInference::pixelSha256(images);
-            int exact=0;
+            int exact=0;QString profileMember;QByteArray profilePayload;
             for(const auto& member:archive.members())if(member.name.startsWith("ei_atlas_profile_")&&member.name.endsWith(".json")) {
                 STerrainAtlasProfile candidate;
                 if(STerrainAtlasProfile::fromBytes(archive.readMember(member.name),&candidate)&&candidate.approved
                     &&candidate.mprNamespace.compare(ns,Qt::CaseInsensitive)==0&&candidate.atlasSlotCount==images.size()
-                    &&candidate.atlasPixelSha256==fullDigest){profile=candidate;++exact;}
+                    &&candidate.atlasPixelSha256==fullDigest){profile=candidate;++exact;profileMember=member.name;profilePayload=archive.readMember(member.name);}
             }
             if(exact>1)return fail("Ambiguous exact profiles: "+ns);
             if(exact)count=images.size();
@@ -101,14 +125,16 @@ Bank generate(const Config& config,CTerrainHdProgress* progress){
             for(const auto& slot:profile.slotDefinitions){int s=slot.slot;const auto sig=slot.signature;
                 if(!slot.assigned||slot.ambiguous||sig.northWest!=sig.northEast||sig.northWest!=sig.southEast||sig.northWest!=sig.southWest
                    ||s<0||s>=count||s>=mp.tileTypes.size()||animations.contains(s)||images[s].size()!=QSize(256,256)||!opaque(images[s]))continue;
-                auto family=families.value(sig.northWest);if(family.name.isEmpty()||family.name.startsWith("Water /"))continue;
-                const int physical=mp.tileTypes[s];if(physical<0||physical>15)continue;
+                auto family=families.value(sig.northWest);
+                const int physical=mp.tileTypes[s];if(!uniformDonor(family,slot,physical,animations.contains(s)))continue;
                 for(const auto layer:{ETerrainAtlasLayer::Land,ETerrainAtlasLayer::Overlay})if(family.allows(layer)){
                     QString layerName=layer==ETerrainAtlasLayer::Land?"land":"overlay";auto& g=groups[key(family.name,family.tileType,physical,layerName)];
                     g.material=family.name;g.reviewed=family.tileType;g.physical=physical;g.layer=layerName;
                     auto hash=TerrainHdVariants::canonicalD4(images[s]);if(g.hashes.contains(hash))continue;
                     TerrainHdVariants::Source source;source.id=ns+":"+QString::number(s)+":"+QString::fromLatin1(terrainProvenancePixelSha(images[s]));source.pixels=images[s];source.blocks=ei::terrainTileMipChain(pages[s/64],s%64);
                     if(source.blocks.size()!=7)return fail("Missing native mip levels: "+source.id);g.sources.append(source);g.hashes.insert(hash);
+                    rememberInput(path,QStringLiteral("%1%2.mmp").arg(ns).arg(s/64,3,10,QLatin1Char('0')),pages[s/64]);
+                    if(!profileMember.isEmpty())rememberInput(path,profileMember,profilePayload);
                 }
             }
         }
@@ -121,6 +147,21 @@ Bank generate(const Config& config,CTerrainHdProgress* progress){
             auto& g=groups[key(rule.material,rule.reviewedClass,2,"land")];g.material=rule.material;g.reviewed=rule.reviewedClass;g.physical=2;g.layer="land";
             if(!g.hashes.contains(TerrainHdVariants::canonicalD4(s.pixels))){g.sources.append(s);g.hashes.insert(TerrainHdVariants::canonicalD4(s.pixels));}break;}}
     if(groups.isEmpty())return fail("No confirmed static uniform HD groups");
+    // MPRs supply class witnesses while assembling this donor set. Persist the
+    // consumed class/layer/ordered donor identities, not mutable map-file hashes.
+    // Stock member payloads remain the live dependencies. Publishing unrelated
+    // namespaces, MPRs or changing RES offsets/timestamps does not change them.
+    QJsonArray inputs,donorIdentity;QSet<QByteArray> payloadIdentities;
+    for(const auto& input:usedInputs){inputs.append(input);auto stable=input;stable.remove("path");
+        payloadIdentities.insert(QJsonDocument(stable).toJson(QJsonDocument::Compact));}
+    QList<QByteArray> orderedPayloads=payloadIdentities.values();std::sort(orderedPayloads.begin(),orderedPayloads.end());
+    QByteArray cacheIdentity=QByteArray::number(TerrainHdVariants::AlgorithmVersion)+sha(presetBytes);
+    for(const auto& value:orderedPayloads)cacheIdentity+=value+'\n';
+    for(auto it=groups.cbegin();it!=groups.cend();++it){QJsonArray donors;
+        for(const auto& s:it->sources)donors.append(s.id);
+        donorIdentity.append(QJsonObject{{"key",it.key()},{"sources",donors}});}
+    cacheIdentity+=QJsonDocument(donorIdentity).toJson(QJsonDocument::Compact);
+    const auto bankId=sha(cacheIdentity);bank.directory=QDir(config.cacheRoot).filePath(QString::fromLatin1(bankId));
     QJsonArray metadata,groupMetadata;QVector<TerrainHdVariants::Variant> variants;int rejected=0,shortfalls=0,index=0;
     for(auto it=groups.cbegin();it!=groups.cend();++it,++index){
         if(!step(CTerrainHdProgress::Recovering,index,groups.size()))return fail("Cancelled");const auto& group=it.value();
@@ -133,7 +174,7 @@ Bank generate(const Config& config,CTerrainHdProgress* progress){
     }
     bank.manifest={{"algorithm",TerrainHdVariants::AlgorithmVersion},{"id",QString::fromLatin1(bankId)},{"inputs",inputs},{"presetSha",QString::fromLatin1(sha(presetBytes))},
         {"groups",groupMetadata},{"entries",metadata},{"generated",variants.size()},{"rejected",rejected},{"shortfalls",shortfalls},{"omissions",omissions}};
-    if(!current(bank.manifest,true))return fail("Sources changed during generation");
+    if(!current(bank.manifest))return fail("Sources changed during generation");
     if(!step(CTerrainHdProgress::Preparing,0,(variants.size()+63)/64))return fail("Cancelled");
     const QString stage=bank.directory+".preparing";if(QFileInfo::exists(stage))return fail("Previous interrupted generation exists: "+stage);
     if(!QDir().mkpath(stage))return fail("Cannot create user cache");
@@ -163,11 +204,11 @@ Bank load(const QString& root,QString* error){Bank bank;auto fail=[&](const QStr
     QString id=QJsonDocument::fromJson(read(QDir(root).filePath("current.json"))).object()["id"].toString();
     if(id.size()!=64||id.contains('/')||id.contains('\\')||id.contains('.'))return fail("No generated bank");bank.directory=QDir(root).filePath(id);
     bank.manifest=QJsonDocument::fromJson(read(bank.directory+"/manifest.json")).object();
-    if(bank.manifest["algorithm"].toInt()!=TerrainHdVariants::AlgorithmVersion||bank.manifest["presetSha"].toString().toLatin1()!=sha(read(":/terrain_atlas_presets.json"))||!current(bank.manifest,true))return fail("Generated bank sources changed; regenerate");
+    if(bank.manifest["algorithm"].toInt()!=TerrainHdVariants::AlgorithmVersion||bank.manifest["presetSha"].toString().toLatin1()!=sha(read(":/terrain_atlas_presets.json"))||!current(bank.manifest))return fail("Generated bank sources changed; regenerate");
     QVector<QByteArray> pages;for(const auto& v:bank.manifest["pages"].toArray()){auto object=v.toObject();QString name=object["file"].toString();if(name.contains('/')||name.contains('\\')||name.contains(".."))return fail("Unsafe bank page");auto payload=read(bank.directory+"/"+name);
         if(sha(payload)!=object["sha256"].toString().toLatin1())return fail("Damaged bank page");pages.append(payload);}
     for(const auto& v:bank.manifest["entries"].toArray()){auto object=v.toObject();Entry e;e.metadata=object;e.id=object["id"].toString();e.material=object["material"].toString();e.reviewedClass=object["reviewedClass"].toInt(-1);e.physicalClass=object["physicalClass"].toInt(-1);e.layer=object["layer"].toString();e.slot=object["slot"].toInt(-1);
-        if(e.slot<0||e.slot/64>=pages.size()||e.physicalClass<0||e.physicalClass>15)return fail("Invalid bank identity");
+        if(e.slot<0||e.slot/64>=pages.size()||!staticMaterial(e.material,e.reviewedClass,e.physicalClass))return fail("Invalid bank identity");
         e.blocks=ei::terrainTileMipChain(pages[e.slot/64],e.slot%64);if(!ei::decodeMmpDxt1AtlasTile(pages[e.slot/64],e.slot%64,&e.pixels)||!ei::rememberTerrainMipChain(e.pixels,e.blocks))return fail("Invalid protected mip chain");bank.entries.append(e);}
     for(const auto& input:bank.manifest["inputs"].toArray()) {
         const auto path=input.toObject()["path"].toString();QFileInfo info(path);
@@ -180,19 +221,23 @@ QSharedPointer<const Bank> available(){QMutexLocker lock(&mutex);const auto root
     if(!cached->success)return {};
     for(auto it=cached->sourceStats.cbegin();it!=cached->sourceStats.cend();++it) {
         QFileInfo info(it.key());
-        if(!info.exists()||qMakePair(info.size(),info.lastModified().toMSecsSinceEpoch())!=it.value())return {};
+        if(!info.exists()||qMakePair(info.size(),info.lastModified().toMSecsSinceEpoch())!=it.value()){
+            // A republished RES needs a new index, not a new generated bank.
+            cached.reset(new Bank(load(root)));if(!cached->success)return {};return cached;
+        }
     }
     return cached;
 }
 void forget(){QMutexLocker lock(&mutex);cached.clear();}
 QStringList groupNames(const Bank& bank){QStringList names;for(const auto& v:bank.manifest["groups"].toArray())names.append(v.toObject()["key"].toString());return names;}
 QVector<Entry> forMaterial(const Bank& bank,const QString& name,int reviewed,ETerrainAtlasLayer layer,const QSet<QString>& excluded){QVector<Entry> result;
-    for(const auto& e:bank.entries)if(!excluded.contains(e.id)&&e.reviewedClass==reviewed&&e.layer==(layer==ETerrainAtlasLayer::Land?"land":"overlay")
+    for(const auto& e:bank.entries)if(staticMaterial(e.material,e.reviewedClass,e.physicalClass)&&!excluded.contains(e.id)&&e.reviewedClass==reviewed&&e.layer==(layer==ETerrainAtlasLayer::Land?"land":"overlay")
         &&(e.material==name||CTerrainAtlasPresetCatalog::reviewedMaterialName(e.material,e.reviewedClass)==name))result.append(e);return result;}
 bool import(CTerrainWorkingAtlas* atlas,const QVector<Entry>& entries,qint32 material,CValidationReport* report){
     if(!atlas||entries.isEmpty())return true;STerrainTransitionSignature s;s.northWest=s.northEast=s.southEast=s.southWest=material;
     QSet<int> classes;for(const auto& v:atlas->catalog().paintVariants(s))classes.insert(atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(v.packedTile).atlasSlot()));
     for(const auto& e:entries) {
+        if(!staticMaterial(e.material,e.reviewedClass,e.physicalClass))continue;
         int targetClass=classes.contains(e.physicalClass)?e.physicalClass:-1;
         // Version144 explicitly binds the class-3 Stone/Desert material to
         // the pinned native HD witness whose source MP class is 2. Preserve

@@ -23,6 +23,7 @@
 #include <QTableWidget>
 #include <QLineEdit>
 #include <QUndoStack>
+#include <QToolButton>
 
 namespace {
 QByteArray read(const QString& p){QFile f(p);return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray();}
@@ -46,8 +47,9 @@ private slots:
  void initTestCase(){
   root=qEnvironmentVariable("EI_VARIANTS_TEST_ROOT");QVERIFY(!root.isEmpty());
   bank=TerrainHdVariantBank::load(root+"/bank");QVERIFY2(bank.success,qPrintable(bank.error));
-  QCOMPARE(bank.manifest["groups"].toArray().size(),101);
-  QCOMPARE(bank.entries.size(),350);QCOMPARE(bank.manifest["shortfalls"].toInt(),14);
+  QVERIFY(!bank.entries.isEmpty());QCOMPARE(bank.manifest["algorithm"].toInt(),TerrainHdVariants::AlgorithmVersion);
+  for(const auto& v:bank.manifest["groups"].toArray()){const auto g=v.toObject();
+   QVERIFY(TerrainHdVariantBank::staticMaterial(g["material"].toString(),g["reviewedClass"].toInt(),g["physicalClass"].toInt()));}
   QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,root+"/variant-settings");
   qputenv("EI_MAPPER_HD_VARIANT_CACHE",(root+"/bank").toUtf8());TerrainHdVariantBank::forget();
  }
@@ -72,18 +74,40 @@ private slots:
  void sourceShaInvalidatesAndCancel(){
   QTemporaryDir temp(root+"/cache-test-XXXXXX");QVERIFY(temp.isValid());
   const QString id=bank.manifest["id"].toString(),dir=temp.path()+"/"+id;QVERIFY(QDir().mkpath(dir));
-  auto manifest=bank.manifest;const QString source=temp.path()+"/input";QVERIFY(write(source,"abc"));
-  const QFileInfo info(source);manifest["inputs"]=QJsonArray{QJsonObject{{"path",source},{"size",3},{"mtime",double(info.lastModified().toMSecsSinceEpoch())},{"sha256",QString(QCryptographicHash::hash("abc",QCryptographicHash::Sha256).toHex())}}};
+  auto manifest=bank.manifest;const QString source=temp.path()+"/input.res";
+  auto resource=[](const QByteArray& donor,const QByteArray& unrelated){
+   QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+   CResArchiveDocument res;res.loadBytes(empty);SResArchiveNewMember a,b;a.name="stock000.mmp";a.payload=donor;b.name="another-map.mp";b.payload=unrelated;
+   QByteArray result;res.buildWithAppendedMembers({a,b},&result);return result;};
+  QVERIFY(write(source,resource("abc","first publication")));
+  manifest["inputs"]=QJsonArray{QJsonObject{{"path",source},{"member","stock000.mmp"},{"sha256",QString(QCryptographicHash::hash("abc",QCryptographicHash::Sha256).toHex())}}};
   for(const auto& v:manifest["pages"].toArray()){auto name=v.toObject()["file"].toString();QVERIFY(QFile::copy(bank.directory+"/"+name,dir+"/"+name));}
   QVERIFY(write(dir+"/manifest.json",QJsonDocument(manifest).toJson()));
   QVERIFY(write(temp.path()+"/current.json",QJsonDocument(QJsonObject{{"id",id}}).toJson()));
   QVERIFY(TerrainHdVariantBank::load(temp.path()).success);
-  QVERIFY(write(source,"abd"));QFile f(source);QVERIFY(f.open(QIODevice::ReadWrite));QVERIFY(f.setFileTime(info.lastModified(),QFileDevice::FileModificationTime));f.close();
+  qputenv("EI_MAPPER_HD_VARIANT_CACHE",temp.path().toUtf8());TerrainHdVariantBank::forget();QVERIFY(TerrainHdVariantBank::available());
+  QVERIFY(write(source,resource("abc","another map republished with different length and RES offsets")));
+  QVERIFY(TerrainHdVariantBank::load(temp.path()).success);QVERIFY(TerrainHdVariantBank::available());
+  const QFileInfo info(source);
+  QVERIFY(write(source,resource("abd","another map republished with different length and RES offsets")));QFile f(source);QVERIFY(f.open(QIODevice::ReadWrite));QVERIFY(f.setFileTime(info.lastModified(),QFileDevice::FileModificationTime));f.close();
   QVERIFY(!TerrainHdVariantBank::load(temp.path()).success);
+  qputenv("EI_MAPPER_HD_VARIANT_CACHE",(root+"/bank").toUtf8());TerrainHdVariantBank::forget();
   const auto cfg=QJsonDocument::fromJson(read(root+"/bank-fixture.json")).object();TerrainHdVariantBank::Config c;
   for(const auto& v:cfg["archives"].toArray())c.archives.append(v.toString());for(const auto& v:cfg["maps"].toArray())c.maps.append(v.toString());c.cacheRoot=temp.path()+"/cancelled";
   CTerrainHdProgress p;p.cancel();const auto cancelled=TerrainHdVariantBank::generate(c,&p);
   QVERIFY(cancelled.cancelled&&!cancelled.success);QVERIFY(!QFileInfo::exists(c.cacheRoot));
+ }
+ void contextualStampsHaveNoGeneratedMenu(){
+  CView view(nullptr,nullptr);CLandscapeTools panel;view.m_landscapeTools=&panel;
+  CTerrainTransitionCatalog catalog;STerrainTransitionVariant variant;
+  variant.signature.northWest=1;variant.signature.northEast=variant.signature.southEast=variant.signature.southWest=2;
+  QVERIFY(catalog.addVariant(variant));QImage pixels(128,128,QImage::Format_ARGB32);pixels.fill(Qt::green);
+  view.m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(catalog,QVector<QImage>(64,pixels),146,512));
+  STerrainPaintMaterialChoice choice;choice.id=1;choice.name="Contextual soil";choice.generatedIds=QStringList{"should-not-be-offered"};choice.generatedThumbnails={pixels};
+  view.m_modernLandPaintChoices={choice};view.refreshClassicAutoPalette();int stamps=0;
+  for(auto* button:panel.findChildren<QToolButton*>())if(button->property("terrainContextualStamp").toBool()){
+   ++stamps;QVERIFY(button->menu()==nullptr);}
+  QCOMPARE(stamps,1);view.m_landscapeTools=nullptr;
  }
  void controlsAndProgress(){
   QSettings().remove("ui/landscape/generatedHdVariants");CLandscapeTools panel;
