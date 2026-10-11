@@ -42,6 +42,10 @@ class CTreeView : public QTreeWidget
 {
     Q_OBJECT
 public:
+    enum SearchField { SearchId = 1, SearchName = 2, SearchModel = 4, SearchTexture = 8, SearchAll = 15 };
+    int searchFields() const { return m_searchFields; }
+    void setSearchFields(int fields);
+
     enum EItemDataRole
     {
         BehaviorItemRole = Qt::UserRole + 20,
@@ -98,7 +102,8 @@ private:
     QTreeWidgetItem* category(QString& categoryName);
     bool filterItem(QTreeWidgetItem* item, const QStringList& terms,
                     bool ancestorMatched, int* visible, int* total);
-    bool nodeMatches(CNode* node, const QStringList& terms) const;
+    bool nodeMatches(QTreeWidgetItem* item, CNode* node, const QStringList& terms);
+    void cacheSearchFields(QTreeWidgetItem* item, CNode* node);
     void expandBehaviorHierarchy(QTreeWidgetItem* ownerItem);
     bool textMatches(const QString& candidate, const QString& query,
                      ETextMatchMode mode = ETextMatchMode::Contains) const;
@@ -117,6 +122,12 @@ private slots:
 
 private:
     void syncSelectionToView();
+    struct SearchData {
+        QHash<QString, QStringList> fields;
+        QStringList renderedVisual;
+    };
+    QHash<QTreeWidgetItem*, SearchData> m_searchCache;
+    int m_searchFields{SearchAll};
     bool m_syncing{false};
     bool m_showAllMobs{false};
     bool m_refreshSignals{false};

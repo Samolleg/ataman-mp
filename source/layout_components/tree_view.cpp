@@ -18,8 +18,11 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QScrollBar>
 #include <QMouseEvent>
+#include <QSettings>
+#include "property.h"
 #include <QStyle>
 #include <QPainter>
 #include <QScopedValueRollback>
@@ -33,6 +36,7 @@
 CTreeView::CTreeView(QWidget *parent) : QTreeWidget(parent), m_pView(nullptr),
     m_filterTimer(new QTimer(this))
 {
+    m_searchFields = QSettings().value("ui/outlinerSearchFields", int(SearchAll)).toInt() & SearchAll;
     setIndentation(18);
     setRootIsDecorated(true);
     setUniformRowHeights(true);
@@ -60,7 +64,7 @@ bool CTreeObject::operator<(const QTreeWidgetItem& other) const
 
 void CTreeView::prepareForRebuild()
 {
-    m_filterTimer->stop(); m_expansionBeforeFilter.clear();
+    m_filterTimer->stop(); m_expansionBeforeFilter.clear(); m_searchCache.clear();
 }
 void CTreeView::clear()
 {
@@ -141,6 +145,9 @@ QTreeWidgetItem* CTreeView::acquireRow(const QString& key, QTreeWidgetItem* pare
         if(parent) parent->addChild(item); else addTopLevelItem(item);
     }
     if(auto* object = dynamic_cast<CTreeObject*>(item)) object->setNode(node);
+    m_searchCache.remove(item);
+    if(!m_filterText.trimmed().isEmpty() && !m_expansionBeforeFilter.contains(item))
+        m_expansionBeforeFilter.insert(item, item->isExpanded());
     item->setFlags(Qt::ItemIsEnabled | ((node || plain) ? Qt::ItemIsSelectable : Qt::NoItemFlags));
     // An empty QBrush is still a valid foreground role and paints black.
     // Clear the role so normal, selected and disabled rows inherit the palette.
@@ -166,11 +173,18 @@ void CTreeView::finishRefresh()
     }
     QSet<QTreeWidgetItem*> stale = QSet<QTreeWidgetItem*>::fromList(obsolete);
     for(auto* item : obsolete) {
-        m_rows.remove(item->data(0, RowKeyRole).toString()); m_expansionBeforeFilter.remove(item);
+        m_rows.remove(item->data(0, RowKeyRole).toString()); m_expansionBeforeFilter.remove(item); m_searchCache.remove(item);
     }
     QList<QTreeWidgetItem*> roots;
     for(auto* item : obsolete) if(!stale.contains(item->parent())) roots.append(item);
     qDeleteAll(roots);
+    QTreeWidgetItemIterator searchRows(this);
+    while(*searchRows) {
+        auto* row = dynamic_cast<CTreeObject*>(*searchRows);
+        if(row && row->node() && !row->data(0, BehaviorItemRole).toBool())
+            cacheSearchFields(row, row->node());
+        ++searchRows;
+    }
     blockSignals(m_refreshSignals); setUpdatesEnabled(true);
     applyFilter();
     if(m_pView) {
@@ -249,7 +263,7 @@ void CTreeView::setFilterText(const QString& text)
 {
     const bool wasEmpty = m_filterText.trimmed().isEmpty();
     m_filterText = text;
-    if(wasEmpty && !m_filterText.trimmed().isEmpty())
+    if(wasEmpty && !m_filterText.trimmed().isEmpty() && m_expansionBeforeFilter.isEmpty())
     {
         m_expansionBeforeFilter.clear();
         QTreeWidgetItemIterator it(this);
@@ -291,57 +305,127 @@ QString CTreeView::validationState(CNode* node) const
     return "clean";
 }
 
-bool CTreeView::nodeMatches(CNode* node, const QStringList& terms) const
+void CTreeView::setSearchFields(int fields)
 {
-    if(!node)
-        return false;
-    CUnit* unit = dynamic_cast<CUnit*>(node);
-    const QString type = objectNameByType(node->nodeType()) + " "
-        + QString::number(int(node->nodeType()));
-    const QString database = unit ? unit->databaseName() : QString();
-    CMob* owner = m_pView ? m_pView->ownerMob(node) : nullptr;
-    const QString mob = owner ? owner->mobName() : QString();
-    const QMap<QString, QString> fields{
-        {"name", node->mapName()}, {"alias", modelAlias(node->modelName())}, {"id", QString::number(node->mapId())},
-        {"nid", QString::number(node->mapId())}, {"type", type},
-        {"model", node->modelName()}, {"texture", node->textureName()},
-        {"db", database}, {"database", database}, {"prototype", database},
-        {"mob", mob}, {"validation", validationState(node)}
+    fields &= SearchAll;
+    if(m_searchFields == fields) return;
+    m_searchFields = fields;
+    QSettings().setValue("ui/outlinerSearchFields", fields);
+    applyFilter();
+}
+
+namespace {
+QStringList renderedSearchVisual(CUnit* unit)
+{
+    if(!unit) return {};
+    return QStringList{unit->renderedModelName(), unit->renderedPrimaryTextureName(),
+                       unit->renderedSecondaryTextureName()} + unit->renderedBodyTextureLayers();
+}
+// QTreeView::scrollTo expands ancestors. Never pass it an invisible descendant
+// during ordinary selection synchronization, including setCurrentItem's scroll.
+QTreeWidgetItem* visibleSelectionAnchor(QTreeWidgetItem* item)
+{
+    auto* anchor = item;
+    for(auto* parent = item->parent(); parent; parent = parent->parent())
+        if(!parent->isExpanded()) anchor = parent;
+    return anchor;
+}
+}
+
+void CTreeView::cacheSearchFields(QTreeWidgetItem* item, CNode* node)
+{
+    SearchData data;
+    auto* unit = dynamic_cast<CUnit*>(node);
+    auto add = [&data](const QString& key, const QString& value) {
+        if(!value.isEmpty()) data.fields[key].append(value.toCaseFolded());
     };
-    const QString everything = QStringList(fields.values()).join(' ');
-    for(const QString& rawTerm : terms)
-    {
+    add("id", QString::number(node->mapId()));
+    add("nid", QString::number(node->mapId()));
+    add("name", node->mapName());
+    add("alias", modelAlias(node->modelName()));
+    add("model", node->modelName());
+    add("texture", node->textureName());
+    if(auto* world = dynamic_cast<CWorldObj*>(node)) {
+        QSharedPointer<IPropertyBase> secondary;
+        world->getParam(secondary, eObjParam_SEC_TXTR);
+        if(auto* text = dynamic_cast<propStr*>(secondary.data())) add("texture", text->value());
+    }
+    data.renderedVisual = renderedSearchVisual(unit);
+    if(unit) {
+        // Read the authored part mask without loading figures or invoking a provider.
+        const auto parts = unit->CWorldObj::toJson().value("Object parts").toArray();
+        for(const auto& part : parts) add("model", part.toString());
+        add("model", unit->renderedModelName());
+        add("texture", unit->renderedPrimaryTextureName());
+        add("texture", unit->renderedSecondaryTextureName());
+        for(const auto& layer : unit->renderedBodyTextureLayers()) add("texture", layer);
+    }
+    add("type", objectNameByType(node->nodeType()) + " " + QString::number(int(node->nodeType())));
+    for(const auto& key : {"db", "database", "prototype"}) {
+        data.fields.insert(key, {});
+        if(unit) add(key, unit->databaseName());
+    }
+    CMob* owner = m_pView ? m_pView->ownerMob(node) : nullptr;
+    data.fields.insert("mob", {});
+    if(owner) add("mob", owner->mobName());
+    // Empty fields still recognize the legacy field syntax.
+    for(const auto& key : {"name", "alias", "model", "texture"})
+        if(!data.fields.contains(key)) data.fields.insert(key, {});
+    m_searchCache.insert(item, data);
+}
+
+bool CTreeView::nodeMatches(QTreeWidgetItem* item, CNode* node, const QStringList& terms)
+{
+    auto* unit = dynamic_cast<CUnit*>(node);
+    auto cached = m_searchCache.constFind(item);
+    // Visual preparation may finish after the last tree refresh.
+    if(cached == m_searchCache.constEnd()
+       || (unit && cached->renderedVisual != renderedSearchVisual(unit)))
+        cacheSearchFields(item, node);
+    const auto& fields = m_searchCache.constFind(item)->fields;
+    auto matches = [this](const QStringList& candidates, const QString& value, ETextMatchMode mode) {
+        for(const auto& candidate : candidates)
+            if(textMatches(candidate, value, mode)) return true;
+        return false;
+    };
+    for(const QString& rawTerm : terms) {
         const int colon = rawTerm.indexOf(':');
         const int equals = rawTerm.indexOf('=');
-        const int separator = colon > 0 && equals > 0 ? qMin(colon, equals)
-            : qMax(colon, equals);
-        if(separator > 0)
-        {
+        const int separator = colon > 0 && equals > 0 ? qMin(colon, equals) : qMax(colon, equals);
+        if(separator > 0) {
             const QString key = rawTerm.left(separator).toCaseFolded();
             QString value = rawTerm.mid(separator + 1);
-            if(fields.contains(key))
-            {
-                ETextMatchMode mode = rawTerm.at(separator) == '='
-                    ? ETextMatchMode::Exact : ETextMatchMode::Contains;
-                if(mode != ETextMatchMode::Exact && value.startsWith('~'))
-                {
-                    value.remove(0, 1);
-                    mode = ETextMatchMode::Fuzzy;
+            if(fields.contains(key) || key == "validation") {
+                auto mode = rawTerm.at(separator) == '=' ? ETextMatchMode::Exact : ETextMatchMode::Contains;
+                if(mode != ETextMatchMode::Exact && value.startsWith('~')) {
+                    value.remove(0, 1); mode = ETextMatchMode::Fuzzy;
                 }
-                if(!textMatches(fields.value(key), value, mode))
-                    return false;
+                const auto candidates = key == "validation" ? QStringList{validationState(node)} : fields.value(key);
+                if(!matches(candidates, value, mode)) return false;
                 continue;
             }
         }
         QString value = rawTerm;
-        ETextMatchMode mode = ETextMatchMode::Contains;
-        if(value.startsWith('~'))
-        {
-            value.remove(0, 1);
-            mode = ETextMatchMode::Fuzzy;
+        auto mode = ETextMatchMode::Contains;
+        if(value.startsWith('~')) {
+            // Bare fuzzy syntax predates the field checkboxes: retain its
+            // combined legacy haystack (including type/database/MOB).
+            QStringList everything;
+            auto keys=fields.keys(); keys.append("validation"); keys.sort();
+            for(const auto& key:keys) everything += key=="validation" ? QStringList{validationState(node)} : fields.value(key);
+            if(!textMatches(everything.join(' '), value.mid(1), ETextMatchMode::Fuzzy)) return false;
+            continue;
         }
-        if(!textMatches(everything, value, mode))
-            return false;
+        bool idOk = false;
+        const qulonglong id = value.toULongLong(&idOk);
+        const bool matched = ((m_searchFields & SearchId) &&
+            (mode == ETextMatchMode::Fuzzy ? matches(fields.value("id"), value, mode)
+             : idOk && id == node->mapId()))
+            || ((m_searchFields & SearchName) && matches(fields.value("name"), value, mode))
+            || ((m_searchFields & SearchModel) && (matches(fields.value("model"), value, mode)
+                                                   || matches(fields.value("alias"), value, mode)))
+            || ((m_searchFields & SearchTexture) && matches(fields.value("texture"), value, mode));
+        if(!matched) return false;
     }
     return true;
 }
@@ -365,32 +449,20 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
                    value.remove(0, 1);
                    mode = ETextMatchMode::Fuzzy;
                }
-               return !term.contains(':') && !term.contains('=')
+               return ((m_searchFields & SearchName) || term.startsWith('~'))
+                   && !term.contains(':') && !term.contains('=')
                    && textMatches(cachedText, value, mode);
            });
-    const bool textualGroupMatch = !node && !terms.isEmpty()
-        && std::all_of(terms.begin(), terms.end(), [this, item](const QString& term)
-           {
-               QString value = term;
-               ETextMatchMode mode = ETextMatchMode::Contains;
-               if(value.startsWith('~'))
-               {
-                   value.remove(0, 1);
-                   mode = ETextMatchMode::Fuzzy;
-               }
-               return !term.contains(':') && !term.contains('=')
-                   && textMatches(item->text(0), value, mode);
-           });
-    // If a parent category already matched (for example "unit" matching the
-    // Units group), every descendant is visible. Avoid rebuilding expensive
-    // object metadata for thousands of children that cannot change the result.
-    const bool selfMatches = terms.isEmpty() || ancestorMatched
+    const bool legacyFuzzyGroup = !node && !terms.isEmpty()
+        && std::all_of(terms.begin(), terms.end(), [this,item](const QString& term) {
+            return term.startsWith('~') && textMatches(item->text(0), term.mid(1), ETextMatchMode::Fuzzy);
+        });
+    const bool selfMatches = terms.isEmpty() || ancestorMatched || legacyFuzzyGroup
         // Behavior rows can outlive a logic projection refresh until the next
         // tree rebuild. Their searchable text is cached when the row is built,
         // so filtering never dereferences a possibly stale logic-node pointer.
         || cachedTextMatch
-        || (node && !behaviorItem && nodeMatches(node, terms))
-        || textualGroupMatch;
+        || (node && !behaviorItem && nodeMatches(item, node, terms));
     bool childMatches = false;
     for(int index = 0; index < item->childCount(); ++index)
         childMatches = filterItem(item->child(index), terms,
@@ -407,6 +479,10 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
 
 void CTreeView::applyFilter()
 {
+    m_filterTimer->stop();
+    // CView routes property edits and their Undo/Redo here through
+    // CChangeProp::updateParam, without necessarily rebuilding the tree.
+    if(sender() && sender()->inherits("CChangeProp")) m_searchCache.clear();
     QElapsedTimer elapsed;
     elapsed.start();
     const bool updatesWereEnabled = updatesEnabled();
@@ -764,6 +840,8 @@ void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
 
 void CTreeView::revealNode(CNode* pNode)
 {
+    // This is also called by viewport picking and selection undo/redo, not
+    // just an explicit reveal command. Scroll to a visible anchor only.
     markNode(pNode, true);
 }
 
@@ -804,13 +882,6 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
         {
             if(item->node() != m_focusedLogicUnit)
                 item->setSelected(true);
-            if(CScene::getInstance()->getMode() == eEditModeLogic
-               && item->node()
-               && (item->node()->nodeType() == eUnit
-                   || item->node()->nodeType() == eMagicTrap))
-                expandBehaviorHierarchy(item);
-            for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
-                parent->setExpanded(true);
             if(item->node() == primaryNode)
                 primaryItem = item;
         }
@@ -818,9 +889,10 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
     }
     if(primaryItem)
     {
-        setCurrentItem(primaryItem, 0, QItemSelectionModel::NoUpdate);
-        if(scrollToPrimary)
-            scrollToItem(primaryItem, QAbstractItemView::PositionAtCenter);
+        auto* anchor = visibleSelectionAnchor(primaryItem);
+        setCurrentItem(anchor, 0, QItemSelectionModel::NoUpdate);
+        if(scrollToPrimary && !anchor->isHidden())
+            scrollToItem(anchor, QAbstractItemView::PositionAtCenter);
     }
     if(m_focusedLogicUnit)
         focusLogicSlot(m_focusedLogicUnit, m_focusedLogicSlot, scrollToPrimary);
@@ -844,12 +916,10 @@ void CTreeView::focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToFocused
         {
             clearSelection();
             item->setSelected(true);
-            setCurrentItem(item, 0, QItemSelectionModel::NoUpdate);
-            for(QTreeWidgetItem* parent = item->parent(); parent; parent = parent->parent())
-                parent->setExpanded(true);
-            item->setExpanded(true);
-            if(scrollToFocused)
-                scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            auto* anchor = visibleSelectionAnchor(item);
+            setCurrentItem(anchor, 0, QItemSelectionModel::NoUpdate);
+            if(scrollToFocused && !anchor->isHidden())
+                scrollToItem(anchor, QAbstractItemView::PositionAtCenter);
             return;
         }
         ++it;

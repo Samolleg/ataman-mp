@@ -14959,6 +14959,38 @@ It could not be opened automatically.</source>
 
     <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
     <message><source>NPC diplomacy groups in connected MOBs and scripts</source><translation>Группы дипломатии НПС в подключённых MOB и скриптах</translation></message>
+    <message>
+        <source>Search objects...</source>
+        <translation>Поиск объектов...</translation>
+    </message>
+    <message>
+        <source>Fields</source>
+        <translation>Поля</translation>
+    </message>
+    <message>
+        <source>Choose one or more search fields</source>
+        <translation>Выберите одно или несколько полей поиска</translation>
+    </message>
+    <message>
+        <source>ID</source>
+        <translation>ID</translation>
+    </message>
+    <message>
+        <source>Object name</source>
+        <translation>Имя объекта</translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation>Модель</translation>
+    </message>
+    <message>
+        <source>Texture</source>
+        <translation>Текстура</translation>
+    </message>
+    <message>
+        <source>Plain words search the checked fields (OR); space-separated terms combine with AND. ID is an exact number; names, models and textures contain text, ignoring case. Model includes catalog aliases. Use id:81 for a partial ID, id=81 for exact, or ~ for fuzzy matching. Explicit fields and ~ terms ignore the checkboxes: name:, id:, type:, model:, texture:, alias:, db:, prototype:, mob:, validation:.</source>
+        <translation>Простые слова ищутся в отмеченных полях (ИЛИ); условия через пробел объединяются по И. ID — точное число; имя, модель и текстура — вхождение без учёта регистра. Модель включает названия из каталога и части тела юнита. Частичный ID: id:81, точный: id=81; ~ — нечёткий поиск. Явные поля и условия с ~ работают независимо от флагов: name:, id:, type:, model:, texture:, alias:, db:, prototype:, mob:, validation:.</translation>
+    </message>
 </context>
     <context>
         <name>MobDiffTerms</name>

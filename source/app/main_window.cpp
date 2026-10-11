@@ -811,12 +811,36 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->setContentsMargins(0, 0, 0, 0);
     m_outlinerFilterEdit = new QLineEdit(outlinerContainer);
     m_outlinerFilterEdit->setClearButtonEnabled(true);
-    m_outlinerFilterEdit->setPlaceholderText(tr("Filter objects (name, ID, model, texture, database...)") );
+    m_outlinerFilterEdit->setPlaceholderText(tr("Search objects..."));
     m_outlinerFilterEdit->setToolTip(tr(
-        "Searches for contiguous text by default. Combine terms with spaces. "
-        "Use field=value for an exact match or prefix a value with ~ for fuzzy subsequence matching "
-        "(for example id:123, id=123, or id:~123). Optional fields: "
-        "name:, id:, type:, model:, texture:, db:, prototype:, mob:, validation:."));
+        "Plain words search the checked fields (OR); space-separated terms combine with AND. "
+        "ID is an exact number; names, models and textures contain text, ignoring case. "
+        "Model includes catalog aliases. Use id:81 for a partial ID, id=81 for exact, "
+        "or ~ for fuzzy matching. Explicit fields and ~ terms ignore the checkboxes: "
+        "name:, id:, type:, model:, texture:, alias:, db:, prototype:, mob:, validation:."));
+    auto* searchFieldsButton = new QToolButton(outlinerContainer);
+    searchFieldsButton->setObjectName("outlinerSearchFields");
+    searchFieldsButton->setText(tr("Fields"));
+    searchFieldsButton->setToolTip(tr("Choose one or more search fields"));
+    searchFieldsButton->setPopupMode(QToolButton::InstantPopup);
+    auto* searchFieldsMenu = new QMenu(searchFieldsButton);
+    const QList<QPair<QString, int>> searchFields{
+        {tr("ID"), CTreeView::SearchId}, {tr("Object name"), CTreeView::SearchName},
+        {tr("Model"), CTreeView::SearchModel}, {tr("Texture"), CTreeView::SearchTexture}};
+    for(const auto& field : searchFields) {
+        auto* action = searchFieldsMenu->addAction(field.first);
+        action->setCheckable(true);
+        action->setChecked(m_ui->treeWidget->searchFields() & field.second);
+        action->setData(field.second);
+        connect(action, &QAction::toggled, m_ui->treeWidget, [this, searchFieldsMenu]() {
+            int fields = 0;
+            for(auto* action : searchFieldsMenu->actions())
+                if(action->isChecked()) fields |= action->data().toInt();
+            m_ui->treeWidget->setSearchFields(fields);
+        });
+    }
+    searchFieldsButton->setMenu(searchFieldsMenu);
+    filterLayout->addWidget(searchFieldsButton);
     m_outlinerFilterStatus = new QLabel(tr("0 / 0"), outlinerContainer);
     m_outlinerFilterStatus->setMinimumWidth(72);
     m_outlinerFilterStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
