@@ -258,3 +258,138 @@ HD атлас сохранён
 
 Атлас карты пересобран в HD: %1 слотов, %2 переходов.
 ```
+
+## Передача 142
+
+EI-FINALIZE-142, 2026-10-11. Объединённая версия **142 установлена вместо 138**.
+Этот раздел фиксирует последующую интеграционную проверку; разделы выше сохраняют
+историю отдельного задания 141. Ручная и игровая приёмка остаются за владельцем.
+
+- Исходники: `main`, `c11bba9efada778c4d0b06b6aa1ce5a86af77bae`, VERSION 142;
+  объединены 139 (`eb344e09`), 140 (`061d7219`), 141 (`c1d3a072`), 142 (`c11bba9e`).
+- Свежий `git archive` распакован в `build-source-142-final`; Release в
+  `build-release-142-final`, включая заново собранные runtime bridge/host.
+  `--version` до staging, в staging и после установки: `EI Mapper Endurance Edition 142`.
+  Сверены 462 файла исходного кода со снимком, с учётом нормализации EOL.
+- AGENTS.md SHA256 `f4b7fdd5ea82fcdf43d002d23d64ec36be853650f054edf70376527cd6432ec3`.
+  Соблюдён `docs/TEST_BUILD_HANDOFF.md`; сеть/установка зависимостей не использовались.
+  Toolchain Endurance использован только на чтение, его файлы и проект не менялись.
+- UI/gallery/scenario/terrain/измерения выполнены под атомарным
+  `build-locks/ui-tests.lock` с `owner.txt`; захваты освобождены.
+  Изоляция 134: `PASS: clipboard isolation`, `nativeAttempts=0`;
+  системный буфер не открывался и не блокировался. Настройки, temp и backups изолированы.
+  Выполнены проверки из `tests/clipboard_isolation_regression.ps1` эквивалентным runner
+  с теми же entry points и проверкой receipts, без повторения уже успешного полного UI.
+  Интерактивный редактор и игра не запускались.
+
+### Объединённый регресс
+
+Полный `--ui-widget-check` PASS; scenario **49/0**; dark **0 failures**;
+gallery **497 models / 7165 textures** PASS; иерархия **94/0**,
+15 масок поиска по 5009 объектам: максимум 16 мс; проверки панели входят в полный UI.
+Terrain height-save и MOB-height: 0 failures; random **80/0/0**;
+mixed-edge **67/0/0**; recipe **17451/0/0**, 18394 edges, 2396804 RGBA comparisons.
+
+| QtTest | PASS / FAIL / SKIP |
+|---|---:|
+| verified_clipboard_tests | 12 / 0 / 0 |
+| terrain_virtual_atlas_tests | 146 / 0 / 0 |
+| terrain_resolve_audit_tests | 5 / 0 / 0 |
+| world_terrain_sculpt_tests | 48 / 0 / 0 |
+| terrain_mixed_resolution_tests | 4 / 0 / 0 |
+| res_reader_drain_tests | 23 / 0 / 0 |
+| terrain_hd_republish_tests | 6 / 0 / 0 |
+| terrain_hd_memory_tests | 7 / 0 / 0 |
+
+World terrain: упомянутое в поручении историческое **45/1** зафиксировано без
+исправлений этой передачей. На заданном c11bba9e с полными копиями fixture фактически
+**48/0/0**, как уже записано в `build-tests-138-final/world_terrain_sculpt_tests/qtest138.txt`.
+Код world-terrain не менялся в 139–142. Первый собственный runner не передал
+`EI_WORLD_SCULPT_MAPS`: 43/0/5 не засчитан; после исправления окружения получен результат выше.
+Первый random runner отказал до сценария из-за несозданной output-папки;
+папка создана, последующий прогон 80/0/0. Ошибки настройки инструмента не выдавались за PASS.
+
+[Полный регресс](../../build-tests-142-final/regression.json),
+[QtTest world](../../build-tests-142-final/world_terrain_sculpt_tests/qtest.txt).
+
+### Миниатюры 138 → 142
+
+5 повторов, 80 измерений; обе версии в **одном захвате lock**, порядок чередовался.
+Baseline EXE установленной 138 SHA256 `eafaa4899cf5a8987c7dda12dd60b43a28b4168a7f47770df4b85832903d8f31`
+совпал со сборкой 138, с объектами которой связан измеритель.
+Один и тот же benchmark использует production objects каждой версии, изменён только entry point.
+Все видимые миниатюры 8/8 готовы, unavailable 0; cold вызывает provider 8 раз,
+disk-warm/repeat — 0. Cold означает пустой кэш миниатюр в новой папке, не сброс Windows file cache.
+
+| Группа | Режим | 138, мс | 142, мс | Δ, мс | Δ, % |
+|---|---|---:|---:|---:|---:|
+| unmo | cold | 90.244 | 87.758 | -2.486 | -2.75% |
+| unmo | disk-warm | 31.446 | 30.940 | -0.506 | -1.61% |
+| unmo | repeat | 5.372 | 5.202 | -0.170 | -3.16% |
+| unmo | repeat-after-disk | 5.049 | 4.887 | -0.162 | -3.21% |
+| stbu | cold | 30.491 | 31.742 | +1.251 | +4.10% |
+| stbu | disk-warm | 9.444 | 9.421 | -0.023 | -0.24% |
+| stbu | repeat | 6.225 | 6.379 | +0.154 | +2.47% |
+| stbu | repeat-after-disk | 5.763 | 6.154 | +0.391 | +6.78% |
+
+Порог cold `≤+10% ИЛИ ≤+15 мс` пройден для обеих групп; остальные режимы тоже в пороге.
+[Все измерения](../../build-tests-142-final/gallery-raw142.json),
+[медианы](../../build-tests-142-final/gallery-summary142.json).
+
+### Память Zone9 и перевод Zone19
+
+Измеритель `tests/terrain_hd_memory_measure.py` импортирован без изменения алгоритма;
+runner ограничил набор одной новой копией Zone9, выполнил 3 парных открытия 138/142
+в чередующемся порядке. Baseline — проверенный production-linked probe 138 из HD-MEMORY,
+candidate probe связан со свежими объектами объединённой 142.
+Медианы: пик открытия **1671.88 → 1273.99 (-23.80%) МиБ**;
+рабочий набор при готовности **1371.60 → 737.68 (-46.22%) МиБ**;
+время готовности **10574.00 → 10715.00 (+1.33%) мс**. Снижение памяти сохранено.
+Hash-поля атласа/профиля/MPR/семантики совпали в 3 парах, исходные MPR/RES не менялись.
+Это opening/census, не повторный замер покраски/сохранения.
+[Замер](../../build-tests-142-final/memory/summary.json),
+[парные receipts](../../build-tests-142-final/memory/results.json).
+
+Zone19 переведена точным EXE 142 через `--terrain-hd-republish-check` исключительно
+на новых копиях; 81 входной файл сверён SHA256. Живые карты/Dejavu HDPack не изменялись.
+HD **45**, переходы 256 px **100**, native 128 px **815**;
+SD carrier 256 px: **0**; удалено 17 прежних members после проверки 79 MPR.
+Расчёт до записи: **1270745195 → 1277997326 байт**, прирост
+**7252131 байт (6.92 МиБ)**; размер результата совпал точно.
+Это CLI forecast/readback, не отдельная ручная приёмка диалога.
+Независимо проверены **76817 SEC ссылок**, включая 11281 водных:
+классы, повороты, анимации, palette/families и семантика сохранены.
+MPR и все 16 native pages побайтно совпали с отдельным результатом 141.
+Нативный `--roundtrip-check --json` объединённого EXE: `loaded=true`,
+`byteIdentical=true`, 258 members / 3047938 bytes, ошибок нет.
+В RES 1205 сохраняемых members имеют прежние payloads и timestamps.
+[Проверка MPR/страниц](../../build-tests-142-final/hd-verification.json),
+[сохранность RES](../../build-tests-142-final/pack-integrity.json),
+[входные копии](../../build-tests-142-final/copy-integrity.json).
+
+### Пакет и установка
+
+Новый `build-staging-142-final`; finalizer запущен только на нём, итоговый validator PASS.
+После финализации staging не запускался и не изменялся.
+Состав против staging 138: **127 managed-файлов**, добавлено 0, удалено 0.
+Изменены только: `CHANGELOG.md`, `EIMapperEndurance.exe`, `Readme.md`, `runtime/EIMapperEnduranceJmvBridge.plg`, `runtime/EIMapperEnduranceRuntimeHost.exe`, `VERSION`.
+EXE включает 139–142 и перевод; runtime-компоненты пересобраны; VERSION/Readme/CHANGELOG
+обновлены для 142. `TRAVEL_EDITOR.md` на месте и неизменён. Политика finalization 133:
+**UTF-8 без BOM, CRLF** для 7 текстовых файлов пакета проверена;
+архивные исходники сопоставлены с нормализацией EOL.
+Пакет содержит ровно один текущий CHANGELOG, settings/logs/cache/maps в него не добавлялись.
+[Manifest и состав](../../build-tests-142-final/package-receipt.json).
+
+Установка: `artifacts/EI-Mapper-Ataman-2-first-test`, **138 → 142**.
+Перед каждой заменой проверено отсутствие процессов из установки; пользовательские процессы
+не завершались. Backup **7 файлов** проверен до записи:
+`artifacts/rollback-138-to-142-final`; старые rollback сохранены.
+Управляемые файлы заменены атомарно, manifest последним; все 127
+managed-файлов проверены после записи. **23555 пользовательских файлов**,
+включая настройки и кэши, сохранились по SHA256.
+[Установка](../../build-tests-142-final/install-receipt.json).
+
+EXE SHA256: `f965ba8e15975a4cba9631261b61469c27402c8509aa3df8ec8a03234ea23f78`.
+Manifest SHA256: `141d665004ce9f49b79ef842c823bf3bae652932aa546693c887fc27920695d5`.
+Scoped-коммит содержит только этот отчёт и статусы 141/EI-MAPPER-HD-MEMORY в ROADMAP;
+VERSION остаётся 142. Push не выполнялся.
