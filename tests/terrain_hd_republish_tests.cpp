@@ -12,6 +12,11 @@
 #include "terrain_semantic_field_store.h"
 #include "terrain_mixed_edge.h"
 #include <QCryptographicHash>
+#include "terrain_hd_progress_dialog.h"
+#include "verified_clipboard.h"
+#include <QtConcurrent>
+#include "ui_theme.h"
+#include <QStyleFactory>
 
 namespace {
 QImage pattern(int n)
@@ -54,6 +59,73 @@ class TerrainHdRepublishTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void progressCacheAndCancellation()
+    {
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        QVector<QImage> tiles(64,pattern(0));tiles[1]=pattern(1);
+        const auto hd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(tiles,0,256),true,nullptr);
+        QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument archive;QVERIFY(archive.loadBytes(empty));SResArchiveNewMember member;member.name="stock000.mmp";member.payload=hd;
+        QByteArray res;QVERIFY(archive.buildWithAppendedMembers({member},&res));
+        const QString path=dir.path()+"/stock.res",cache=dir.path()+"/cache";
+        QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write(res),qint64(res.size()));file.close();
+        const auto sd=lowMip(hd);QVector<QImage> before;
+        for(int i=0;i<64;++i){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(sd,i,&image));before.append(image);}
+        const auto p=profile(before);QString error;
+        CMprDocument map;CValidationReport report;QVERIFY(map.loadBytes(mapBytes(),"test.mpr",&report));
+        for(int stage=CTerrainHdProgress::Opening;stage<=CTerrainHdProgress::Preparing;++stage) {
+            bool reached=false;int last=0;
+            CTerrainHdProgress progress([&](const CTerrainHdProgress::Snapshot& s) {
+                QVERIFY(s.percent>=last);last=s.percent;
+                if(int(s.stage)==stage&&(stage!=CTerrainHdProgress::Indexing||s.done>=8)) {reached=true;progress.cancel();}
+            });
+            CTerrainHdSources sources;
+            if(sources.open({path},&error,&progress,cache)) {
+                const auto result=rebuildTerrainAtlasHd(p,{sd},sources,true,{}, {},&progress);
+                QVERIFY(result.cancelled);QVERIFY(!result.success);QVERIFY(result.publishedMembers.isEmpty());QVERIFY(result.mprBytes.isEmpty());
+            }
+            QVERIFY(reached);QVERIFY(progress.cancelled());QVERIFY(!sources.saveCache());
+            QCOMPARE(QDir(dir.path()).entryList(QDir::Files|QDir::Dirs|QDir::NoDotAndDotDot),QStringList{"stock.res"});
+            QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),res);file.close();
+        }
+        int last=0;QSet<int> stages;
+        CTerrainHdProgress progress([&](const CTerrainHdProgress::Snapshot& s){QVERIFY(s.percent>=last);QVERIFY(s.percent<=100);last=s.percent;stages.insert(s.stage);});
+        CTerrainHdSources first;QVERIFY(first.open({path},&error,&progress,cache));QVERIFY(!first.cacheHit());
+        auto result=rebuildTerrainAtlasHd(p,{sd},first,true,{}, {},&progress);QVERIFY(result.success);
+        QVERIFY(prepareTerrainHdPublication(map,{},&result));progress.update(CTerrainHdProgress::Complete,1,1);
+        QCOMPARE(last,100);QCOMPARE(stages.size(),6);QVERIFY(first.saveCache());
+        CTerrainHdSources cached;QVERIFY(cached.open({path},&error,nullptr,cache));QVERIFY(cached.cacheHit());
+        auto again=rebuildTerrainAtlasHd(p,{sd},cached);QVERIFY(prepareTerrainHdPublication(map,{},&again));
+        QCOMPARE(again.pages,result.pages);QCOMPARE(again.mprBytes,result.mprBytes);QCOMPARE(again.profile.toBytes(),result.profile.toBytes());
+        QCOMPARE(again.receipt,result.receipt);QCOMPARE(again.publishedMembers.size(),result.publishedMembers.size());
+        for(int i=0;i<again.publishedMembers.size();++i)QCOMPARE(again.publishedMembers[i].payload,result.publishedMembers[i].payload);
+        // A corrupt cache is ignored; source content is still authoritative.
+        const auto entries=QDir(cache).entryList({"*.cache"},QDir::Files);QCOMPARE(entries.size(),1);
+        QFile broken(cache+"/"+entries.first());QVERIFY(broken.open(QIODevice::WriteOnly));broken.write("broken");broken.close();
+        CTerrainHdSources fallback;QVERIFY(fallback.open({path},&error,nullptr,cache));QVERIFY(!fallback.cacheHit());QVERIFY(fallback.saveCache());
+        // Invalidate even when size and mtime stay identical (full SHA key).
+        const auto stamp=QFileInfo(path).lastModified();QVERIFY(file.open(QIODevice::ReadWrite));
+        const auto changedOffset=res.indexOf(hd)+hd.size()-1;QVERIFY(changedOffset>=0);QVERIFY(file.seek(changedOffset));char byte=0;QCOMPARE(file.read(&byte,1),qint64(1));byte^=1;QVERIFY(file.seek(changedOffset));QCOMPARE(file.write(&byte,1),qint64(1));
+        QVERIFY(file.setFileTime(stamp,QFileDevice::FileModificationTime));file.close();QCOMPARE(QFileInfo(path).lastModified(),stamp);
+        CTerrainHdSources changed;QVERIFY(changed.open({path},&error,nullptr,cache));QVERIFY(!changed.cacheHit());
+    }
+    void progressDialogResponsiveAndCancel()
+    {
+        qApp->setStyle(QStyleFactory::create("Fusion"));
+        ei::installDarkUiPalette();
+        CTerrainHdProgress progress;CTerrainHdProgressDialog dialog(progress);
+        dialog.show();
+        auto future=QtConcurrent::run([&](){for(int i=0;i<=1000&&!progress.cancelled();++i){progress.update(CTerrainHdProgress::Recovering,i,1000);QThread::msleep(10);}});
+        QTRY_VERIFY(dialog.findChild<QProgressBar*>()->value()>55);
+        auto label=dialog.findChild<QLabel*>("hdProgressLabel");QVERIFY(label);QVERIFY(label->text().contains(QStringLiteral("Восстановление переходов")));
+        QTest::qWait(3200);dialog.refresh();QVERIFY(progress.snapshot().stageRemainingMs>0);
+        const QString png=qEnvironmentVariable("EI_HD_PROGRESS_PNG");
+        if(!png.isEmpty())QVERIFY(dialog.grab().save(png,"PNG"));
+        QTest::mouseClick(dialog.findChild<QPushButton*>("hdProgressCancel"),Qt::LeftButton);
+        QVERIFY(progress.cancelled());QVERIFY(!dialog.findChild<QPushButton*>("hdProgressCancel")->isEnabled());
+        future.waitForFinished();QVERIFY(dialog.isVisible());dialog.accept();
+        CTerrainHdProgress escape;CTerrainHdProgressDialog escaped(escape);escaped.show();QTest::keyClick(&escaped,Qt::Key_Escape);QVERIFY(escape.cancelled());escaped.accept();
+    }
     void originalBlocksAndDeterminism()
     {
         QTemporaryDir dir;QVERIFY(dir.isValid());
@@ -308,5 +380,10 @@ private slots:
         QVERIFY(result.success);QCOMPARE(result.pages[0],sd);QCOMPARE(result.receipt["retained128"].toInt(),64);QCOMPARE(result.profile.atlasPixelSha256,CTerrainAtlasProfileInference::pixelSha256(before));
     }
 };
-QTEST_GUILESS_MAIN(TerrainHdRepublishTests)
+int main(int argc,char** argv)
+{
+    ei::TestClipboardSession clipboard(true);if(!clipboard.prepared())return 2;
+    QApplication app(argc,argv);if(!clipboard.install())return 2;
+    TerrainHdRepublishTests tests;return QTest::qExec(&tests,argc,argv);
+}
 #include "terrain_hd_republish_tests.moc"

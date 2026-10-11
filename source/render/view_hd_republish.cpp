@@ -8,7 +8,7 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QMessageBox>
-#include <QProgressDialog>
+#include "terrain_hd_progress_dialog.h"
 #include <QCryptographicHash>
 #include <QApplication>
 #include <QRegularExpression>
@@ -30,9 +30,8 @@ void CView::republishTerrainAtlasHd()
        ||QFileInfo(archivePath).fileName().compare(QStringLiteral("HDPack_Terrain.res"),Qt::CaseInsensitive)!=0) {
         QMessageBox::information(this,tr("HD атлас"),tr("Команда работает только с опубликованным атласом Dejavu в HDPack_Terrain.res. Легаси-атласы не изменяются."));return;
     }
-    QProgressDialog progress(tr("Подбор HD-источников и восстановление рецептов переходов…"),QString(),0,0,this);
-    progress.setWindowModality(Qt::ApplicationModal);progress.setCancelButton(nullptr);progress.show();
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    CTerrainHdProgress state;
+    CTerrainHdProgressDialog progress(state,this);progress.show();
     const STerrainAtlasProfile profile=m_terrainAtlasProfile;
     QStringList sourcePaths{archivePath};
     const QDir modDirectory=QFileInfo(archivePath).dir().filePath("..");
@@ -40,44 +39,79 @@ void CView::republishTerrainAtlasHd()
         const QString fallback=modDirectory.filePath("../JamaisVu135/res/HDPack_Terrain.res");
         if(QFileInfo::exists(fallback))sourcePaths.append(QFileInfo(fallback).absoluteFilePath());
     }
-    const auto animations=m_mprDocument.mapInfo().animatedTiles;
-    auto future=QtConcurrent::run([archivePath,sourcePaths,profile,animations]() {
-        STerrainHdRepublishResult result;CTerrainHdSources sources;QString error;
-        if(!sources.open(sourcePaths,&error)){result.error=error;return result;}
-        CResArchiveIndex archive;if(!archive.open(archivePath,&error)){result.error=error;return result;}
-        // A portable working profile can already be published in HDPack.
-        // Accept only the exact saved profile, never unsaved palette metadata.
+    const auto map=m_mprDocument;
+    const QString mapPath=m_pLand->filePath().absoluteFilePath();
+    const QStringList mapRoots{modDirectory.filePath("Maps"),modDirectory.filePath("../../Base/Maps")};
+    struct Prepared {
+        STerrainHdRepublishResult result;
+        QByteArray semantic,baselineSha;
+        QJsonObject cleanup;
+        double expectedGrowth{0},expectedTotal{0};
+    };
+    QSharedPointer<CTerrainHdSources> sources(new CTerrainHdSources);
+    auto future=QtConcurrent::run([archivePath,sourcePaths,profile,map,mapPath,mapRoots,sources,&state]() {
+        Prepared prepared;auto& result=prepared.result;QString error;
+        auto cancelled=[&]() {if(!state.cancelled())return false;result.success=false;result.cancelled=true;result.error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true;};
+        if(!sources->open(sourcePaths,&error,&state)){result.error=error;cancelled();return prepared;}
+        CResArchiveIndex archive;if(!archive.open(archivePath,&error)){result.error=error;return prepared;}
         STerrainAtlasProfile savedProfile;
         if(!STerrainAtlasProfile::fromBytes(archive.readMember(CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace)),&savedProfile)
            ||savedProfile.toBytes()!=profile.toBytes()) {
-            result.error=QStringLiteral("Профиль атласа отличается от сохранённого в HDPack_Terrain.res. Сначала сохраните изменения.");return result;
+            result.error=QStringLiteral("Профиль атласа отличается от сохранённого в HDPack_Terrain.res. Сначала сохраните изменения.");return prepared;
         }
         QVector<QByteArray> pages;
-        for(int page=0;page<profile.textureCount;++page)pages.append(archive.readMember(QStringLiteral("%1%2.mmp").arg(profile.mprNamespace.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
+        for(int page=0;page<profile.textureCount;++page) {
+            if(cancelled())return prepared;
+            pages.append(archive.readMember(QStringLiteral("%1%2.mmp").arg(profile.mprNamespace.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
+        }
         const auto previous=archive.readMember("ei_atlas_hd_recovery_"+profile.mprNamespace+".json");
-        return rebuildTerrainAtlasHd(profile,pages,sources,true,animations,previous);
+        result=rebuildTerrainAtlasHd(profile,pages,*sources,true,map.mapInfo().animatedTiles,previous,&state);
+        if(!result.success||cancelled())return prepared;
+        if(result.receipt["hdApplied"].toInt()+result.receipt["regeneratedApplied"].toInt()==0) {
+            state.update(CTerrainHdProgress::Complete,1,1);return prepared;
+        }
+        prepared.semantic=map.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
+        if(prepared.semantic.isEmpty())prepared.semantic=archive.readMember(STerrainSemanticFieldDocument::memberName(profile.mprNamespace,QFileInfo(mapPath)));
+        if(!prepareTerrainHdPublication(map,prepared.semantic,&result,&state)){result.success=false;return prepared;}
+        state.update(CTerrainHdProgress::Preparing,2,5);if(cancelled())return prepared;
+        QFile file(archivePath);CResArchiveDocument baseline;QStringList errors;
+        if(!file.open(QIODevice::ReadOnly)||!baseline.loadBytes(file.readAll(),archivePath,&errors)) {
+            result.success=false;result.error=errors.join('\n')+file.errorString();return prepared;
+        }
+        file.close();
+        const qint64 baselineSize=baseline.originalBytes().size();
+        prepared.baselineSha=QCryptographicHash::hash(baseline.originalBytes(),QCryptographicHash::Sha256);
+        state.update(CTerrainHdProgress::Preparing,3,5);if(cancelled())return prepared;
+        QByteArray publishedBytes,estimatedBytes;
+        if(!baseline.buildWithPublishedMembers(result.publishedMembers,false,&publishedBytes,&errors)) {
+            result.success=false;result.error=errors.join('\n');return prepared;
+        }
+        // Release the old parsed archive before parsing its replacement. Each
+        // document retains both original bytes and per-member payloads.
+        baseline=CResArchiveDocument();
+        state.update(CTerrainHdProgress::Preparing,4,5);if(cancelled())return prepared;
+        CResArchiveDocument published;
+        if(!published.loadBytes(publishedBytes)) {result.success=false;result.error=QStringLiteral("Не удалось проверить подготовленный RES");return prepared;}
+        publishedBytes.clear();
+        if(!buildTerrainHdCleanup(published,profile.mprNamespace,result.profile.mprNamespace,mapPath,mapRoots,&estimatedBytes,&prepared.cleanup,&error,&state)) {
+            result.success=false;result.error=error;return prepared;
+        }
+        prepared.expectedGrowth=(estimatedBytes.size()-baselineSize)/1048576.0;
+        prepared.expectedTotal=estimatedBytes.size()/1048576.0;
+        if(cancelled())return prepared;
+        state.update(CTerrainHdProgress::Complete,1,1);return prepared;
     });
-    QFutureWatcher<STerrainHdRepublishResult> watcher;QEventLoop loop;
-    connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);watcher.setFuture(future);loop.exec(QEventLoop::ExcludeUserInputEvents);
-    auto result=future.result();progress.close();
+    QFutureWatcher<Prepared> watcher;QEventLoop loop;
+    connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);watcher.setFuture(future);
+    if(!future.isFinished())loop.exec();
+    auto prepared=future.result();progress.accept();auto result=prepared.result;
+    if(state.cancelled()||result.cancelled) {QMessageBox::information(this,tr("HD атлас"),tr("Подготовка отменена. RES и MPR не изменены."));return;}
     if(!result.success){QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;}
     const int hd=result.receipt["hdApplied"].toInt(),generated=result.receipt["regeneratedApplied"].toInt();
-    if(hd+generated==0) {
-        QMessageBox::information(this,tr("HD атлас"),tr("Новых подтверждённых HD-источников или рецептов нет. Текущие страницы сохранены."));return;
-    }
-    QByteArray semantic=m_mprDocument.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
-    if(semantic.isEmpty()) {
-        CResArchiveIndex archive;QString error;
-        if(archive.open(archivePath,&error))semantic=archive.readMember(STerrainSemanticFieldDocument::memberName(profile.mprNamespace,m_pLand->filePath()));
-    }
-    if(!prepareTerrainHdPublication(m_mprDocument,semantic,&result)) {
-        QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;
-    }
-    QFile archiveFile(archivePath);CResArchiveDocument baseline;QStringList errors;
-    if(!archiveFile.open(QIODevice::ReadOnly)||!baseline.loadBytes(archiveFile.readAll(),archivePath,&errors)) {
-        QMessageBox::critical(this,tr("HD пересборка отказана"),errors.join('\n'));return;
-    }
-    archiveFile.close();
+    if(hd+generated==0) {sources->saveCache();QMessageBox::information(this,tr("HD атлас"),tr("Новых подтверждённых HD-источников или рецептов нет. Текущие страницы сохранены."));return;}
+    const auto semantic=prepared.semantic;
+    const auto cleanup=prepared.cleanup;
+    const double expectedGrowth=prepared.expectedGrowth,expectedTotal=prepared.expectedTotal;
     const auto cleanupReason=[this](const QJsonObject& detail) {
         const QString reason=detail["reason"].toString();
         if(reason=="shared-namespace")return tr("на него ссылаются другие карты: %1").arg(detail["references"].toArray().size());
@@ -88,18 +122,6 @@ void CView::republishTerrainAtlasHd()
         if(reason.contains(':'))return tr("не удалось проверить все MPR Dejavu/Base: %1").arg(reason.mid(reason.indexOf(':')+1).trimmed());
         return tr("не удалось проверить все MPR Dejavu/Base");
     };
-    const QStringList mapRoots{modDirectory.filePath("Maps"),modDirectory.filePath("../../Base/Maps")};
-    QByteArray publishedBytes,estimatedBytes;CResArchiveDocument published;QJsonObject cleanup;QString cleanupError;
-    if(!baseline.buildWithPublishedMembers(result.publishedMembers,false,&publishedBytes,&errors)
-       ||!published.loadBytes(publishedBytes)
-       ||!buildTerrainHdCleanup(published,profile.mprNamespace,result.profile.mprNamespace,m_pLand->filePath().absoluteFilePath(),mapRoots,&estimatedBytes,&cleanup,&cleanupError)) {
-        QMessageBox::critical(this,tr("HD пересборка отказана"),errors.join('\n')+cleanupError);return;
-    }
-    const double expectedGrowth=(estimatedBytes.size()-baseline.originalBytes().size())/1048576.0;
-    const double expectedTotal=estimatedBytes.size()/1048576.0;
-    // The size estimate has served its purpose. Do not retain multiple full
-    // RES copies while the owner considers the dialog or during publication.
-    publishedBytes.clear();estimatedBytes.clear();published=CResArchiveDocument();
     const int blockedAnimation=result.receipt["animationBlockedHd"].toInt();
     const QString animationNotice=blockedAnimation>0
         ?tr("\nКадров с HD-источником оставлено 128 px: %1. В их анимации есть SD-кадры; непрерывный порядок кадров сохранён.").arg(blockedAnimation):QString();
@@ -111,6 +133,15 @@ void CView::republishTerrainAtlasHd()
         .arg(cleanup["removedMembers"].toInt()?tr("будет удалён после сохранения карты"):tr("сохранён (%1)").arg(cleanupReason(cleanup))).arg(animationNotice),
         QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
     if(answer!=QMessageBox::Yes)return;
+    sources->saveCache();
+    // Preparation used a snapshot. Refuse a changed RES before requesting the
+    // publication lease; the existing coordinator also checks the commit source.
+    QFile archiveFile(archivePath);CResArchiveDocument baseline;QStringList errors;QString cleanupError;
+    if(!archiveFile.open(QIODevice::ReadOnly)||!baseline.loadBytes(archiveFile.readAll(),archivePath,&errors)
+       ||QCryptographicHash::hash(baseline.originalBytes(),QCryptographicHash::Sha256)!=prepared.baselineSha) {
+        QMessageBox::critical(this,tr("HD пересборка отказана"),tr("RES изменился во время подготовки. Повторите команду."));return;
+    }
+    archiveFile.close();
     bool ready=true;emit terrainPublicationPreflightRequested(archivePath,&ready);if(!ready)return;
     // The archive baseline used by the confirmation is also the commit guard.
     const auto hashes=result.receipt["sourcePageSha256"].toArray();

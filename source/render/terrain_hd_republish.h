@@ -7,6 +7,8 @@
 #include "mpr_document.h"
 #include <QJsonObject>
 #include <QSharedPointer>
+#include <QCache>
+#include "terrain_hd_progress.h"
 
 // Cross-namespace evidence index. Approximate matches require a calibrated
 // error bound, structural agreement and a margin over a different HD result.
@@ -14,7 +16,12 @@ class CTerrainHdSources
 {
 public:
     struct Source { int archive{-1}; QString page; int slot{-1}; int size{0}; int rotation{0}; };
-    bool open(const QStringList& archives, QString* error);
+    bool open(const QStringList& archives, QString* error, CTerrainHdProgress* progress = nullptr,
+              const QString& cacheDirectory = {});
+    // Explicitly deferred until preparation has succeeded and cancellation is
+    // no longer available. open/rebuild/cancel never create cache or data files.
+    bool saveCache() const;
+    bool cacheHit() const { return m_cacheHit; }
     bool match(const QImage& published, const STerrainAtlasProfileSlot& provenance,
                Source* source, QString* reason, QJsonObject* evidence = nullptr) const;
     bool matchNativeHd(const QImage& high, const QImage& mip128, Source* source) const;
@@ -25,6 +32,12 @@ public:
     int sourceCount() const { return m_sources.size(); }
     QJsonObject calibration() const { return m_calibration; }
 private:
+    bool loadCache();
+    QByteArray cacheBytes() const;
+    QString m_cachePath;
+    QByteArray m_cacheKey;
+    bool m_cacheHit{false};
+    CTerrainHdProgress* m_progress{nullptr}; // borrowed for this preparation only
     struct Descriptor { int source; int rotation; int reduction; QVector<float> mean; };
     QVector<QSharedPointer<CResArchiveIndex>> m_archives;
     QVector<Source> m_sources;
@@ -35,6 +48,7 @@ private:
     QHash<QString,STerrainAtlasProfile> m_origins;
     mutable QHash<int,QByteArray> m_hdHashes;
     mutable QMap<QString,QByteArray> m_payloadCache;
+    mutable QCache<QString,QImage> m_imageCache{32768}; // KiB; decoded recipe inputs
     QVector<Descriptor> m_descriptors;
     mutable QHash<QByteArray,QJsonObject> m_matchCache;
     QJsonObject m_calibration;
@@ -44,6 +58,7 @@ private:
 struct STerrainHdRepublishResult
 {
     bool success{false};
+    bool cancelled{false};
     QString error;
     STerrainAtlasProfile profile;
     QVector<QImage> before, after;
@@ -59,18 +74,18 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& authoredPages,
     const CTerrainHdSources& sources, bool upgradePartialPages = true,
     const QVector<SMprAnimatedTileRecord>& animations = {},
-    const QByteArray& previousPublication = {});
+    const QByteArray& previousPublication = {}, CTerrainHdProgress* progress = nullptr);
 
 // Conservative garbage collection: incomplete inventories never authorize removal.
 bool buildTerrainHdCleanup(const CResArchiveDocument& archive, const QString& oldNamespace,
     const QString& newNamespace, const QString& replacedMap, const QStringList& mapRoots,
-    QByteArray* candidate, QJsonObject* receipt, QString* error);
+    QByteArray* candidate, QJsonObject* receipt, QString* error, CTerrainHdProgress* progress = nullptr);
 bool commitTerrainHdCleanup(const QString& archivePath, const QByteArray& expected,
     const QByteArray& candidate, const QJsonObject& receipt, QString* error);
 
 class CMprDocument;
 bool prepareTerrainHdPublication(const CMprDocument& map,
-    const QByteArray& oldSemantic, STerrainHdRepublishResult* result);
+    const QByteArray& oldSemantic, STerrainHdRepublishResult* result, CTerrainHdProgress* progress = nullptr);
 
 int runTerrainHdRepublish(const QString& fixturePath);
 
