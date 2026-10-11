@@ -17,9 +17,9 @@ The valid repeated 148 sequence used the normal Maps-browser `openMapPair` route
 | gz1g | 1699 / 116 | 1068 | 477.5 | 1960 |
 | gz9g | 2080 / 196 | 1385 | 656.5 | 2121.5 |
 | gz7g | 3327 / 221 | 1278 | 856.5 | 1556 |
-| bz1g | 495 / 51 | 482 | 195.5 | 997.5 |
+| bz1g | 495 / 51 | 482 | 195 | 997.5 |
 
-The table uses the final five-stage sequence. Warm medians average the two middle values from stages 2–5. Exact cold/warm-median MOB values are gz1g 1068/477.5, gz9g 1385/656.5, gz7g 1278/856.5, bz1g 482/195.5 ms. Workspace totals are full map-open durations, not the separately forced catalog hydration total.
+The table uses the final five-stage sequence. Warm medians average the two middle values from stages 2–5. Exact cold/warm-median MOB values are gz1g 1068/477.5, gz9g 1385/656.5, gz7g 1278/856.5, bz1g 482/195 ms. Workspace totals are full map-open durations, not the separately forced catalog hydration total.
 
 The v148 detailed gz1g warm MOB phases were: file read 0 ms, structural validation 42–46 ms, backup 5 ms, projection 102–106 ms, provenance 64–66 ms, `End update objects` 92–93 ms, post-object work through the read timer about 334–346 ms, and activation/outliner about 127–131 ms. The 148 warm MOB median is below the v126 installed gz1g point of 1162 ms by about 59%, with the same 1699 objects and 116 units.
 
@@ -38,7 +38,7 @@ Available historical observations by version (single retained install-log points
 | 145 | — | — | 5879 | — |
 | 146 | about 5000; 14968 during parallel build | — | — | — |
 | 147 | 4953–5813 across retained logs | — | 5879 | 1858 |
-| 148 | 1068 cold / 477.5 warm median | 1385 / 656.5 | 1278 / 856.5 | 482 / 195.5 |
+| 148 | 1068 cold / 477.5 warm median | 1385 / 656.5 | 1278 / 856.5 | 482 / 195 |
 
 
 **Historical matrix limitation:** controlled five-run replays for v126/128/131/137/146/147 were not completed. Their `QStandardPaths` routes the script workspaces to the Windows user profile even when `APPDATA` and `LOCALAPPDATA` are overridden; pre-v138 releases also lack the isolated-backup override. One v126 control was stopped after logs exposed that routing. The v126 number is excluded from the controlled matrix. Four matching script-workspace hashes and many timestamped backup directories were observed in user AppData; baseline ownership/content could not be established, so those paths were left untouched. No further historical EXE map loads were started. Historical attribution above is from retained install logs and source history, not a completed binary bisection.
