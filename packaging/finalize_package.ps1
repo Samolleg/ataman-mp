@@ -124,15 +124,14 @@ Get-ChildItem -LiteralPath $root -Recurse -File |
         "$hash *$relative"
     } | Set-Content -LiteralPath $checksums -Encoding ascii
 
-$validatorArguments = @($root)
+$validatorArguments = @{ PackageRoot = $root }
 if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot))
 {
-    $validatorArguments += @('-PreviousPackageRoot', $PreviousPackageRoot)
+    $validatorArguments.PreviousPackageRoot = $PreviousPackageRoot
 }
 if($AllowedRemovedPath.Count -gt 0)
 {
-    $validatorArguments += '-AllowedRemovedPath'
-    $validatorArguments += $AllowedRemovedPath
+    $validatorArguments.AllowedRemovedPath = $AllowedRemovedPath
 }
 & (Join-Path $PSScriptRoot 'validate_distribution.ps1') @validatorArguments
 if (-not $?) {
