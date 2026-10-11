@@ -9,6 +9,7 @@
 #include <QSharedPointer>
 #include <QCache>
 #include "terrain_hd_progress.h"
+#include "terrain_hd_provenance.h"
 
 // Cross-namespace evidence index. Approximate matches require a calibrated
 // error bound, structural agreement and a margin over a different HD result.
@@ -16,6 +17,7 @@ class CTerrainHdSources
 {
 public:
     struct Source { int archive{-1}; QString page; int slot{-1}; int size{0}; int rotation{0}; };
+    explicit CTerrainHdSources(const QVector<STerrainConfirmedHdProvenance>& rules = terrainConfirmedHdProvenance()) : m_confirmed(rules) {}
     bool open(const QStringList& archives, QString* error, CTerrainHdProgress* progress = nullptr,
               const QString& cacheDirectory = {});
     // Explicitly deferred until preparation has succeeded and cancellation is
@@ -23,7 +25,10 @@ public:
     bool saveCache() const;
     bool cacheHit() const { return m_cacheHit; }
     bool match(const QImage& published, const STerrainAtlasProfileSlot& provenance,
-               Source* source, QString* reason, QJsonObject* evidence = nullptr) const;
+               Source* source, QString* reason, QJsonObject* evidence = nullptr,
+               const STerrainAtlasProfileFamily* family = nullptr) const;
+    // Called only with a decoded, exact-bound stock witness and verified donor.
+    bool addExactSdWitness(const QImage& sd, const Source& hd, const QByteArray& expectedHdSha);
     bool matchNativeHd(const QImage& high, const QImage& mip128, Source* source) const;
     QImage image(const Source& source, int size, QString* error = nullptr) const;
     QByteArray payload(const Source& source, QString* error = nullptr) const;
@@ -32,6 +37,8 @@ public:
     int sourceCount() const { return m_sources.size(); }
     QJsonObject calibration() const { return m_calibration; }
 private:
+    QVector<STerrainConfirmedHdProvenance> m_confirmed;
+    QHash<QByteArray,QVector<int>> m_exactSdAliases;
     bool loadCache();
     QByteArray cacheBytes() const;
     QString m_cachePath;

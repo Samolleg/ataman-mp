@@ -58,6 +58,12 @@ struct STerrainGlobalMaterialSource
     int atlasSlotCount{0};
     int uniformSlot{-1};
     QString variantName;
+    // Optional owner-confirmed SD -> HD provenance. Both native pixel hashes
+    // must match at load time; the source keeps the target family's class.
+    QString confirmedSdPage;
+    int confirmedSdSlot{-1};
+    QByteArray confirmedSdPixelSha256;
+    QByteArray confirmedHdPixelSha256;
 };
 
 struct STerrainGlobalMaterialFamily
@@ -282,6 +288,10 @@ public:
         CValidationReport* report = nullptr);
     static int presetCount(CValidationReport* report = nullptr);
     static QString materialTheme(const QString& variantName);
+    static QString reviewedMaterialName(const QString& name, int reviewedClass);
+    static bool validateConfirmedSource(const STerrainGlobalMaterialSource& source,
+        const QImage& nativeHd,
+        const std::function<bool(const QString&, QByteArray*)>& pageLoader);
     static qint32 globalMaterialId(const QString& variantName,
                                    ETerrainAtlasLayer layer,
                                    const QByteArray& atlasIdentity = QByteArray(),

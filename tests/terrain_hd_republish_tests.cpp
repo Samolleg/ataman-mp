@@ -59,6 +59,113 @@ class TerrainHdRepublishTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void stockStoneCopies()
+    {
+        const QString fixture=qEnvironmentVariable("EI_STONE_HD_FIXTURE");
+        if(fixture.isEmpty())QSKIP("Private stock fixture not configured");
+        QFile file(fixture);QVERIFY(file.open(QIODevice::ReadOnly));const auto cfg=QJsonDocument::fromJson(file.readAll()).object();
+        QStringList archives;for(const auto& value:cfg["sources"].toArray())archives.append(value.toString());
+        CTerrainHdSources sources;QString error;QVERIFY2(sources.open(archives,&error,nullptr,cfg["cache"].toString()),qPrintable(error));
+        CResArchiveIndex stock;QVERIFY(stock.open(archives.last(),&error));
+        QVector<QImage> tiles;
+        for(int page=0;page<8;++page) {
+            const auto payload=stock.readMember(QString("zone19%1.mmp").arg(page,3,10,QLatin1Char('0')),&error);
+            for(int slot=0;slot<64;++slot){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(payload,slot,&image));tiles.append(image);}
+        }
+        const auto p=CTerrainAtlasPresetCatalog::exactProfile("zone19",CTerrainAtlasProfileInference::pixelSha256(tiles),tiles.size());
+        QVERIFY(p.approved);QJsonArray rows;
+        for(int slot:{43,44,45}) {
+            STerrainAtlasProfileSlot definition;for(const auto& d:p.slotDefinitions)if(d.slot==slot)definition=d;
+            STerrainAtlasProfileFamily family;for(const auto& f:p.families)if(f.id==definition.signature.northWest)family=f;
+            QCOMPARE(family.name,QString("Stone / Desert"));QCOMPARE(family.tileType,3);
+            CTerrainHdSources::Source source;QString reason;QJsonObject evidence;
+            QVERIFY2(sources.match(tiles[slot],definition,&source,&reason,&evidence,&family),qPrintable(reason));
+            QCOMPARE(source.page,QString("bz16h007.mmp"));QCOMPARE(source.slot,15);QCOMPARE(source.rotation,0);
+            const auto high=sources.image(source,256);QCOMPARE(high.size(),QSize(256,256));
+            QCOMPARE(terrainProvenancePixelSha(high),QByteArray("d5855c1f92eca2b4e85d6f539fb616de44e2ce4a650dd7eaf25d24cc99737bcb"));
+            QCOMPARE(evidence["method"].toString(),slot==44?QString("exact-SD-alias"):QString("owner-confirmed-provenance"));
+            evidence["stockSlot"]=slot;evidence["targetClass"]=family.tileType;rows.append(evidence);
+        }
+        bool palette=false;
+        for(const auto& family:CTerrainAtlasPresetCatalog::globalUniformFamilies())if(family.name=="Stone / Desert [class 3]") {
+            QMap<QString,QByteArray> pages;QSet<QString> missing;QMap<QString,QImage> decoded;STerrainGlobalMaterialSource selected;
+            const auto image=CTerrainAtlasPresetCatalog::loadGlobalUniformSource(family,{},QSize(256,256),&pages,&missing,&decoded,
+                [&](const QString& page,QByteArray* bytes){*bytes=stock.readMember(page);return !bytes->isEmpty();},false,&selected);
+            QCOMPARE(image.size(),QSize(256,256));QCOMPARE(terrainProvenancePixelSha(image),QByteArray("d5855c1f92eca2b4e85d6f539fb616de44e2ce4a650dd7eaf25d24cc99737bcb"));
+            QCOMPARE(family.runtimeTerrainType,3);palette=true;
+        }
+        QVERIFY(palette);QVERIFY(sources.saveCache());
+        QFile receipt(cfg["stockReceipt"].toString());QVERIFY(receipt.open(QIODevice::WriteOnly));
+        receipt.write(QJsonDocument(QJsonObject{{"stockSlots",rows},{"paletteClass3Hd",palette}}).toJson());
+    }
+    void exactAliasesAndConfirmedProvenance()
+    {
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        QVector<QImage> highTiles(64,pattern(0));highTiles[1]=pattern(1);
+        const auto highPage=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(highTiles,0,256),true,nullptr);
+        QImage high,other;QVERIFY(ei::decodeMmpDxt1AtlasTile(highPage,0,&high));QVERIFY(ei::decodeMmpDxt1AtlasTile(highPage,1,&other));
+        QImage witness(128,128,QImage::Format_RGBA8888);
+        for(int y=0;y<128;++y)for(int x=0;x<128;++x)witness.setPixel(x,y,qRgb((x*13+y*7)%256,(x*17+y*11)%256,(x*19+y*3)%256));
+        const auto sdPage=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(QVector<QImage>(64,witness),0,128),true,nullptr);
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(sdPage,0,&witness));
+        QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument archive;QVERIFY(archive.loadBytes(empty));
+        SResArchiveNewMember member;member.name="stock000.mmp";member.payload=highPage;
+        QByteArray bytes;QVERIFY(archive.buildWithAppendedMembers({member},&bytes));
+        const QString path=dir.path()+"/sources.res";QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write(bytes),qint64(bytes.size()));file.close();
+        QString error,reason;CTerrainHdSources::Source donor,second,matched;QJsonObject evidence;
+        CTerrainHdSources exact;QVERIFY(exact.open({path},&error,nullptr,dir.path()+"/cache"));
+        QVERIFY(exact.find("stock",0,&donor));QVERIFY(exact.find("stock",1,&second));
+        QVERIFY(exact.addExactSdWitness(witness,donor,terrainProvenancePixelSha(high)));
+        STerrainAtlasProfileSlot definition;
+        QVERIFY(exact.match(witness,definition,&matched,&reason,&evidence));QCOMPARE(evidence["method"].toString(),QString("exact-SD-alias"));
+        QCOMPARE(exact.image(matched,256),high);
+        const auto turned=witness.transformed(QTransform().rotate(90));
+        QVERIFY(exact.match(turned,definition,&matched,&reason,&evidence));QCOMPARE(matched.rotation,1);
+        QImage changed=witness.copy();changed.setPixel(11,17,changed.pixel(11,17)^0x00010000);
+        QVERIFY(!exact.match(changed,definition,&matched,&reason));
+        QVERIFY(exact.addExactSdWitness(witness,second,terrainProvenancePixelSha(other)));
+        QVERIFY(!exact.match(witness,definition,&matched,&reason));QCOMPARE(reason,QString("ambiguous-exact-SD-alias"));
+        QVector<QImage> lows(64,witness);auto p=profile(lows);
+        const auto ambiguous=rebuildTerrainAtlasHd(p,{sdPage},exact);
+        QVERIFY2(ambiguous.success,qPrintable(ambiguous.error));QCOMPARE(ambiguous.receipt["hdApplied"].toInt(),0);QCOMPARE(ambiguous.receipt["native128Slots"].toInt(),64);
+
+        STerrainConfirmedHdProvenance rule{terrainProvenancePixelSha(witness),"Test Stone",3,ETerrainAtlasLayer::Land,0,"stock",0,terrainProvenancePixelSha(high),"synthetic-owner"};
+        STerrainAtlasProfileFamily family;family.id=1;family.name=rule.material;family.tileType=3;
+        CTerrainHdSources confirmed({rule});QVERIFY(confirmed.open({path},&error,nullptr,dir.path()+"/cache"));
+        QVERIFY(confirmed.match(witness,definition,&matched,&reason,&evidence,&family));
+        QCOMPARE(evidence["method"].toString(),QString("owner-confirmed-provenance"));QCOMPARE(confirmed.image(matched,256),high);
+        QVERIFY(!confirmed.match(changed,definition,&matched,&reason,&evidence,&family));
+        QCOMPARE(reason,QString("confirmed-provenance-SD-SHA-mismatch"));
+        auto wrongMaterial=family;wrongMaterial.name="Other Stone";QVERIFY(!confirmed.match(witness,definition,&matched,&reason,&evidence,&wrongMaterial));
+        auto publishedFamily=family;publishedFamily.tileType=2;QVERIFY(confirmed.match(witness,definition,&matched,&reason,&evidence,&publishedFamily));
+        QCOMPARE(evidence["targetReviewedClass"].toInt(),2);
+        p.families={family};for(auto& d:p.slotDefinitions)d.signature.northWest=d.signature.northEast=d.signature.southEast=d.signature.southWest=1;
+        const auto upgraded=rebuildTerrainAtlasHd(p,{sdPage},confirmed);
+        QVERIFY2(upgraded.success,qPrintable(upgraded.error));QCOMPARE(upgraded.receipt["hdApplied"].toInt(),64);QCOMPARE(upgraded.receipt["ownerConfirmedHdApplied"].toInt(),64);QCOMPARE(upgraded.profile.families.first().tileType,3);
+        rule.hdPixelSha256=terrainProvenancePixelSha(other);
+        CTerrainHdSources wrongHd({rule});QVERIFY(wrongHd.open({path},&error,nullptr,dir.path()+"/cache"));
+        QVERIFY(!wrongHd.match(witness,definition,&matched,&reason,&evidence,&family));QCOMPARE(reason,QString("confirmed-provenance-HD-SHA-mismatch"));
+        const auto retained=rebuildTerrainAtlasHd(p,{sdPage},wrongHd);
+        QVERIFY2(retained.success,qPrintable(retained.error));QCOMPARE(retained.receipt["hdApplied"].toInt(),0);QCOMPARE(retained.receipt["native128Slots"].toInt(),64);
+
+        STerrainGlobalMaterialSource paletteSource;paletteSource.mprNamespace="stock";paletteSource.uniformSlot=0;paletteSource.confirmedSdPage="sd000.mmp";paletteSource.confirmedSdSlot=0;
+        paletteSource.confirmedSdPixelSha256=terrainProvenancePixelSha(witness);paletteSource.confirmedHdPixelSha256=terrainProvenancePixelSha(high);
+        const auto loader=[&](const QString& name,QByteArray* payload){if(name=="stock000.mmp"){*payload=highPage;return true;}if(name!="sd000.mmp")return false;*payload=sdPage;return true;};
+        QVERIFY(CTerrainAtlasPresetCatalog::validateConfirmedSource(paletteSource,high,loader));
+        QVERIFY(!CTerrainAtlasPresetCatalog::validateConfirmedSource(paletteSource,other,loader));
+        paletteSource.confirmedSdPixelSha256=terrainProvenancePixelSha(changed);
+        QVERIFY(!CTerrainAtlasPresetCatalog::validateConfirmedSource(paletteSource,high,loader));
+        paletteSource.confirmedSdPixelSha256=terrainProvenancePixelSha(witness);
+        const auto missingHd=[&](const QString& name,QByteArray* payload){if(name=="stock000.mmp")return false;return loader(name,payload);};
+        QVERIFY(!CTerrainAtlasPresetCatalog::validateConfirmedSource(paletteSource,high,missingHd));
+        bool foundClass3=false;
+        for(const auto& f:CTerrainAtlasPresetCatalog::globalUniformFamilies())if(f.name=="Stone / Desert [class 3]") {
+            foundClass3=true;QCOMPARE(f.runtimeTerrainType,3);QVERIFY(!f.sources.isEmpty());
+            for(const auto& source:f.sources){QCOMPARE(source.mprNamespace,QString("bz16h"));QCOMPARE(source.uniformSlot,463);QVERIFY(!source.confirmedHdPixelSha256.isEmpty());}
+        }
+        QVERIFY(foundClass3);
+    }
     void progressCacheAndCancellation()
     {
         QTemporaryDir dir;QVERIFY(dir.isValid());

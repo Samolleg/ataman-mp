@@ -24,6 +24,7 @@
 #include <functional>
 #include <QDataStream>
 #include "persistent_visual_cache.h"
+#include "terrain_atlas_archive_binding.h"
 
 namespace {
 quint32 word(const QByteArray& b,int p)
@@ -229,7 +230,7 @@ QImage mixedEdgeHd(const STerrainAtlasProfile& profile,int target,
 bool CTerrainHdSources::open(const QStringList& paths,QString* error,CTerrainHdProgress* progress,const QString& cacheDirectory)
 {
     m_progress=progress;
-    m_imageCache.clear();
+    m_imageCache.clear();m_exactSdAliases.clear();
     m_archives.clear();m_sources.clear();m_byPixels.clear();m_byNativePixels.clear();m_byIdentity.clear();m_hdHashes.clear();m_payloadCache.clear();m_descriptors.clear();m_matchCache.clear();m_sdOnly.clear();m_origins.clear();
     m_cachePath.clear();m_cacheKey.clear();m_cacheHit=false;
     auto cancelled=[&]() { if(!progress||!progress->cancelled())return false;if(error)*error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true; };
@@ -259,7 +260,7 @@ bool CTerrainHdSources::open(const QStringList& paths,QString* error,CTerrainHdP
     m_cacheKey=fingerprint.result();
     // One replaceable cache per ordered source set; publishing a new namespace
     // invalidates the key without accumulating an index for every old RES.
-    m_cachePath=QDir(root).filePath(QStringLiteral("v143-1-")+QString::fromLatin1(pathIdentity.result().toHex())+QStringLiteral(".cache"));
+    m_cachePath=QDir(root).filePath(QStringLiteral("v144-1-")+QString::fromLatin1(pathIdentity.result().toHex())+QStringLiteral(".cache"));
     if(progress)progress->update(CTerrainHdProgress::Indexing,0,1);
     if(cancelled())return false;
     if(loadCache()) {m_cacheHit=true;if(progress)progress->update(CTerrainHdProgress::Indexing,1,1);return !cancelled()&&current(error);}
@@ -353,6 +354,48 @@ bool CTerrainHdSources::open(const QStringList& paths,QString* error,CTerrainHdP
             }
         }
     }
+    for(const auto& origin:terrainConfirmedStockHdOrigins()) {
+        Source donor;if(!find(origin.hdNamespace,origin.hdSlot,&donor))continue;
+        const QString page=QStringLiteral("%1%2.mmp").arg(origin.sdNamespace).arg(origin.sdSlot/64,3,10,QLatin1Char('0'));
+        for(const auto& archive:m_archives) {
+            if(cancelled())return false;
+            if(archive->memberIndex(page)<0)continue;
+            QImage sd;
+            if(ei::decodeMmpDxt1AtlasTile(archive->readMember(page),origin.sdSlot%64,&sd)
+               &&terrainProvenancePixelSha(sd)==origin.sdPixelSha256)
+                addExactSdWitness(sd,donor,origin.hdPixelSha256);
+        }
+    }
+    // Reviewed alternate namespace bindings describe the same stock slot.
+    // Both complete atlases must bind exactly before their SD pixels become a
+    // cross-namespace witness. No material-name similarity or fuzzy score here.
+    const auto families=CTerrainAtlasPresetCatalog::globalUniformFamilies();
+    QMap<QString,QVector<QImage>> bound;
+    QSet<QString> attempted;
+    auto stockTiles=[&](const STerrainGlobalMaterialSource& source)->const QVector<QImage>& {
+        const QString key=source.mprNamespace+":"+QString::fromLatin1(source.atlasPixelSha256);
+        if(!attempted.contains(key)) {
+            attempted.insert(key);QVector<QImage> tiles;
+            const auto binding=CTerrainAtlasArchiveBindingResolver::findExactArchive(paths,
+                source.mprNamespace,source.textureCount,source.atlasSlotCount,source.atlasPixelSha256,{},&tiles);
+            if(binding.success())bound.insert(key,tiles);
+        }
+        return bound[key];
+    };
+    for(const auto& family:families) for(const auto& witness:family.sources) {
+        if(cancelled())return false;
+        // No work for HD entries or entries with no reviewed HD counterpart.
+        if(m_byIdentity.contains(witness.mprNamespace.toLower()+":"+QString::number(witness.uniformSlot)))continue;
+        for(const auto& donor:family.sources) {
+            if(witness.atlasIdentity!=donor.atlasIdentity||witness.uniformSlot!=donor.uniformSlot)continue;
+            Source hd;if(!find(donor.mprNamespace,donor.uniformSlot,&hd))continue;
+            const auto& sdTiles=stockTiles(witness);
+            if(witness.uniformSlot<0||witness.uniformSlot>=sdTiles.size()||sdTiles[witness.uniformSlot].width()!=128)continue;
+            const auto& hdTiles=stockTiles(donor);
+            if(donor.uniformSlot<0||donor.uniformSlot>=hdTiles.size())continue;
+            addExactSdWitness(sdTiles[witness.uniformSlot],hd,terrainProvenancePixelSha(hdTiles[donor.uniformSlot]));
+        }
+    }
     std::sort(compressionErrors.begin(),compressionErrors.end());
     std::sort(structuralScores.begin(),structuralScores.end());
     const double p99=compressionErrors.isEmpty()?0:compressionErrors[qMin(compressionErrors.size()-1,int(compressionErrors.size()*.99))];
@@ -372,9 +415,9 @@ bool CTerrainHdSources::current(QString* error) const
 QByteArray CTerrainHdSources::cacheBytes() const
 {
     QByteArray bytes;QDataStream out(&bytes,QIODevice::WriteOnly);out.setVersion(QDataStream::Qt_5_12);
-    out<<quint32(0x48444931)<<qint32(m_sources.size());
+    out<<quint32(0x48444932)<<qint32(m_sources.size());
     for(const auto& s:m_sources)out<<s.archive<<s.page<<s.slot<<s.size<<s.rotation;
-    out<<m_byPixels<<m_byNativePixels<<m_byIdentity<<m_sdOnly<<m_hdHashes;
+    out<<m_byPixels<<m_byNativePixels<<m_byIdentity<<m_sdOnly<<m_hdHashes<<m_exactSdAliases;
     QMap<QString,QByteArray> origins;
     for(auto it=m_origins.cbegin();it!=m_origins.cend();++it)origins[it.key()]=it.value().toBytes();
     out<<origins<<qint32(m_descriptors.size());
@@ -390,7 +433,7 @@ bool CTerrainHdSources::loadCache()
     if(all.left(32)!=m_cacheKey||QCryptographicHash::hash(bytes,QCryptographicHash::Sha256)!=all.mid(32,32))return false;
     QDataStream in(bytes);in.setVersion(QDataStream::Qt_5_12);
     quint32 magic;qint32 count;in>>magic>>count;
-    if(magic!=0x48444931||count<0||count>1000000)return false;
+    if(magic!=0x48444932||count<0||count>1000000)return false;
     CTerrainHdSources cached;
     for(int i=0;i<count;++i) {
         Source s;in>>s.archive>>s.page>>s.slot>>s.size>>s.rotation;
@@ -398,7 +441,8 @@ bool CTerrainHdSources::loadCache()
            ||m_archives[s.archive]->memberIndex(s.page)<0)return false;
         cached.m_sources.append(s);
     }
-    in>>cached.m_byPixels>>cached.m_byNativePixels>>cached.m_byIdentity>>cached.m_sdOnly>>cached.m_hdHashes;
+    in>>cached.m_byPixels>>cached.m_byNativePixels>>cached.m_byIdentity>>cached.m_sdOnly>>cached.m_hdHashes>>cached.m_exactSdAliases;
+    for(const auto& ids:cached.m_exactSdAliases)for(int id:ids)if(id<0||id/4>=cached.m_sources.size())return false;
     QMap<QString,QByteArray> origins;in>>origins;
     for(auto it=origins.cbegin();it!=origins.cend();++it) {
         STerrainAtlasProfile p;if(!STerrainAtlasProfile::fromBytes(it.value(),&p))return false;cached.m_origins[it.key()]=p;
@@ -412,7 +456,7 @@ bool CTerrainHdSources::loadCache()
     QByteArray calibration;in>>calibration>>cached.m_mseLimit;
     cached.m_calibration=QJsonDocument::fromJson(calibration).object();
     if(in.status()!=QDataStream::Ok||!in.atEnd()||cached.m_calibration.isEmpty())return false;
-    m_sources.swap(cached.m_sources);m_byPixels.swap(cached.m_byPixels);m_byNativePixels.swap(cached.m_byNativePixels);
+    m_exactSdAliases.swap(cached.m_exactSdAliases);m_sources.swap(cached.m_sources);m_byPixels.swap(cached.m_byPixels);m_byNativePixels.swap(cached.m_byNativePixels);
     m_byIdentity.swap(cached.m_byIdentity);m_sdOnly.swap(cached.m_sdOnly);m_hdHashes.swap(cached.m_hdHashes);
     m_origins.swap(cached.m_origins);m_descriptors.swap(cached.m_descriptors);
     m_calibration=cached.m_calibration;m_mseLimit=cached.m_mseLimit;return true;
@@ -459,9 +503,61 @@ bool CTerrainHdSources::matchNativeHd(const QImage& high,const QImage& mip128,So
     if(encoded<0||!source)return false;
     *source=m_sources[encoded/4];source->rotation=encoded%4;return true;
 }
-bool CTerrainHdSources::match(const QImage& published,const STerrainAtlasProfileSlot& p,Source* source,QString* reason,QJsonObject* evidence) const
+bool CTerrainHdSources::addExactSdWitness(const QImage& sd,const Source& hd,const QByteArray& expectedHdSha)
+{
+    if(sd.size()!=QSize(128,128)||hd.rotation!=0)return false;
+    const auto high=image(hd,256);
+    if(high.size()!=QSize(256,256)||terrainProvenancePixelSha(high)!=expectedHdSha)return false;
+    const int id=m_byIdentity.value(identity(hd),-1);if(id<0)return false;
+    for(int rotation=0;rotation<4;++rotation) {
+        auto& candidates=m_exactSdAliases[pixelsHash(rotated(sd,rotation))];
+        const int encoded=id*4+rotation;if(!candidates.contains(encoded))candidates.append(encoded);
+    }
+    return true;
+}
+bool CTerrainHdSources::match(const QImage& published,const STerrainAtlasProfileSlot& p,Source* source,QString* reason,QJsonObject* evidence,const STerrainAtlasProfileFamily* family) const
 {
     const QByteArray hash=pixelsHash(published);
+    const auto aliases=m_exactSdAliases.value(hash);
+    if(!aliases.isEmpty()) {
+        QByteArray accepted;Source selected;
+        for(int encoded:aliases) {
+            auto candidate=m_sources[encoded/4];candidate.rotation=encoded%4;
+            const auto detail=terrainProvenancePixelSha(image(candidate,256));
+            if(!accepted.isEmpty()&&accepted!=detail) {
+                if(reason)*reason="ambiguous-exact-SD-alias";
+                if(evidence)*evidence={{"method","exact-SD-alias"},{"reason","ambiguous-exact-SD-alias"}};
+                return false;
+            }
+            if(accepted.isEmpty())selected=candidate;accepted=detail;
+        }
+        *source=selected;
+        if(evidence)*evidence={{"method","exact-SD-alias"},{"rotation",selected.rotation},
+            {"sdPixelSha256",QString::fromLatin1(terrainProvenancePixelSha(published))},
+            {"hdPixelSha256",QString::fromLatin1(accepted)}};
+        return true;
+    }
+    bool confirmedFamily=false;
+    for(const auto& rule:m_confirmed) {
+        if(!family||family->ambiguous||family->name!=rule.material||family->layer!=rule.layer)continue;
+        // reviewedClass describes the audited stock witness. A published map
+        // may already have a different class; retain its own class verbatim.
+        confirmedFamily=true;
+        if(published.size()!=QSize(128,128)||terrainProvenancePixelSha(published)!=rule.sdPixelSha256)continue;
+        Source donor;
+        if(!find(rule.hdNamespace,rule.hdSlot,&donor)||terrainProvenancePixelSha(image(donor,256))!=rule.hdPixelSha256) {
+            if(reason)*reason="confirmed-provenance-HD-SHA-mismatch";
+            if(evidence)*evidence={{"method","owner-confirmed-provenance"},{"reason","confirmed-provenance-HD-SHA-mismatch"}};
+            return false;
+        }
+        donor.rotation=rule.rotation;*source=donor;
+        if(evidence)*evidence={{"method","owner-confirmed-provenance"},
+            {"label",QStringLiteral("HD по подтверждённому происхождению")},{"rotation",rule.rotation},
+            {"sdPixelSha256",QString::fromLatin1(rule.sdPixelSha256)},
+            {"hdPixelSha256",QString::fromLatin1(rule.hdPixelSha256)},
+            {"material",rule.material},{"reviewedClass",rule.reviewedClass},{"targetReviewedClass",family->tileType},{"authority",rule.authority}};
+        return true;
+    }
     QVector<int> candidates=m_byPixels.value(hash);
     QSet<int> originIds;QSet<QString> visited;
     std::function<void(const STerrainAtlasProfileSlot&,int)> trace=[&](const STerrainAtlasProfileSlot& d,int depth) {
@@ -493,6 +589,7 @@ bool CTerrainHdSources::match(const QImage& published,const STerrainAtlasProfile
     }
     if(originMatch>=0){*source=m_sources[originMatch];if(evidence)*evidence={{"method","exact-provenance"}};return true;}
     if(candidates.isEmpty()) {
+        if(confirmedFamily) {if(reason)*reason="confirmed-provenance-SD-SHA-mismatch";return false;}
         if(m_sdOnly.contains(hash)) {
             QStringList sd=m_sdOnly.value(hash);sd.removeDuplicates();bool hdAlias=false;
             for(const auto& alias:sd)hdAlias=hdAlias||m_byIdentity.contains(alias);
@@ -676,7 +773,11 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         if(transparent){slotRows.append(QJsonObject{{"slot",slot},{"reason","unassigned-transparent-padding"}});continue;}
         CTerrainHdSources::Source s;QString reason;
         QJsonObject evidence;
-        bool matched=sources.match(r.before[slot],defs.value(slot),&s,&reason,&evidence);
+        const auto definition=defs.value(slot);const auto signature=definition.signature;
+        const STerrainAtlasProfileFamily* semantic=nullptr;
+        if(definition.assigned&&!definition.ambiguous&&signature.northWest==signature.northEast&&signature.northWest==signature.southEast&&signature.northWest==signature.southWest)
+            for(const auto& family:profile.families)if(family.id==signature.northWest){semantic=&family;break;}
+        bool matched=sources.match(r.before[slot],definition,&s,&reason,&evidence,semantic);
         QJsonObject row;row["slot"]=slot;row["assigned"]=defs.value(slot).assigned;
         row["stockMatched"]=matched;
         row["matching"]=evidence;
@@ -917,6 +1018,13 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     r.receipt["sourcePageSha256"]=hashes;r.receipt["slots"]=slotRows;r.receipt["pages"]=pageRows;
     r.receipt["stockMatched"]=hd;r.receipt["regenerated"]=generated;
     if(nativeSources)r.receipt["nativeHdSourceRecovered"]=nativeSources;
+    int confirmedApplied=0;
+    for(const auto& value:slotRows) {
+        const auto row=value.toObject();
+        if(row["matching"].toObject()["method"].toString()=="owner-confirmed-provenance"
+           && row["stockMatched"].toBool() && !upgraded[row["slot"].toInt()].isNull())++confirmedApplied;
+    }
+    if(confirmedApplied)r.receipt["ownerConfirmedHdApplied"]=confirmedApplied;
     if(!previousPublication.isEmpty()) {
         QJsonArray nextOrder;QSet<int> used;
         for(int slot:sourceOrder){const int output=r.slotRemap[slot];nextOrder.append(output);used.insert(output);}

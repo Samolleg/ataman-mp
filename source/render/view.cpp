@@ -625,6 +625,20 @@ struct STerrainGlobalBindingHydrationResult
     QString error;
 };
 
+bool validConfirmedGlobalSource(const STerrainGlobalMaterialSource& source,
+    const QImage& nativeHd,const QStringList& archives)
+{
+    return CTerrainAtlasPresetCatalog::validateConfirmedSource(source,nativeHd,
+        [&](const QString& page,QByteArray* bytes) {
+            for(const auto& archive:archives) {
+                QMap<QString,QByteArray> members;
+                if(CTerrainAtlasArchiveBindingResolver::readArchiveMembers(archive,{page},&members)
+                   &&!members.value(page).isEmpty()){*bytes=members.value(page);return true;}
+            }
+            return false;
+        });
+}
+
 STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
     const STerrainGlobalBindingHydrationTask& task)
 {
@@ -686,7 +700,8 @@ STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
                 continue;
         }
         tile = tile.convertToFormat(QImage::Format_RGBA8888);
-        if(!task.requiredSize.isEmpty() && tile.size() != task.requiredSize)
+        if(!validConfirmedGlobalSource(request.source,tile,task.configuredArchives))continue;
+        if(request.source.confirmedSdPixelSha256.isEmpty() && !task.requiredSize.isEmpty() && tile.size() != task.requiredSize)
             tile = tile.scaled(task.requiredSize, Qt::IgnoreAspectRatio,
                                Qt::SmoothTransformation);
         STerrainGlobalHydratedThumbnail hydrated;
@@ -695,7 +710,7 @@ STerrainGlobalBindingHydrationResult hydrateTerrainGlobalBinding(
         hydrated.source = request.source;
         hydrated.tileCacheKey = terrainAtlasTileCacheKey(
             task.bindingKey, request.source.uniformSlot,
-            task.requiredSize);
+            request.source.confirmedSdPixelSha256.isEmpty()?task.requiredSize:QSize(256,256));
         hydrated.image = tile;
         result.thumbnails.append(hydrated);
     }
@@ -805,7 +820,9 @@ QImage loadBoundGlobalUniformSource(
             if(existing.mprNamespace.compare(
                    source.mprNamespace, Qt::CaseInsensitive) == 0
                && existing.uniformSlot == source.uniformSlot
-               && existing.atlasPixelSha256 == source.atlasPixelSha256)
+               && existing.atlasPixelSha256 == source.atlasPixelSha256
+               && existing.confirmedSdPage == source.confirmedSdPage
+               && existing.confirmedSdSlot == source.confirmedSdSlot)
                 return;
         sources.append(source);
     };
@@ -827,9 +844,9 @@ QImage loadBoundGlobalUniformSource(
         const QImage tile = loadBoundTerrainAtlasTile(
             source.mprNamespace, source.atlasPixelSha256,
             source.textureCount, source.atlasSlotCount,
-            source.uniformSlot, requiredSize, boundAtlasCache,
+            source.uniformSlot, source.confirmedSdPixelSha256.isEmpty()?requiredSize:QSize(256,256), boundAtlasCache,
             missingBindingCache, decodedTileCache);
-        if(tile.isNull())
+        if(tile.isNull()||!validConfirmedGlobalSource(source,tile,CTextureList::getInstance()->configuredResourceArchivePaths()))
             continue;
         if(selectedSource)
             *selectedSource = source;
@@ -855,6 +872,7 @@ QImage currentMapGlobalUniformSource(
                || source.uniformSlot < 0
                || source.uniformSlot >= currentTiles.size())
                 continue;
+            if(!validConfirmedGlobalSource(source,currentTiles.at(source.uniformSlot),CTextureList::getInstance()->configuredResourceArchivePaths()))continue;
             if(selectedSource)
                 *selectedSource = source;
             return currentTiles.at(source.uniformSlot);
@@ -878,7 +896,9 @@ QImage cachedGlobalUniformSource(
             if(existing.mprNamespace.compare(
                    source.mprNamespace, Qt::CaseInsensitive) == 0
                && existing.uniformSlot == source.uniformSlot
-               && existing.atlasPixelSha256 == source.atlasPixelSha256)
+               && existing.atlasPixelSha256 == source.atlasPixelSha256
+               && existing.confirmedSdPage == source.confirmedSdPage
+               && existing.confirmedSdSlot == source.confirmedSdSlot)
                 return;
         sources.append(source);
     };
@@ -904,9 +924,10 @@ QImage cachedGlobalUniformSource(
             source.mprNamespace, source.atlasPixelSha256,
             source.textureCount, source.atlasSlotCount);
         const QString tileKey = terrainAtlasTileCacheKey(
-            bindingKey, source.uniformSlot, requiredSize);
+            bindingKey, source.uniformSlot, source.confirmedSdPixelSha256.isEmpty()?requiredSize:QSize(256,256));
         const auto cached = decodedTileCache.constFind(tileKey);
-        if(cached == decodedTileCache.constEnd() || cached.value().isNull())
+        if(cached == decodedTileCache.constEnd() || cached.value().isNull()
+           ||!validConfirmedGlobalSource(source,cached.value(),CTextureList::getInstance()->configuredResourceArchivePaths()))
             continue;
         if(selectedSource)
             *selectedSource = source;
@@ -12292,7 +12313,9 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
                        source.mprNamespace, Qt::CaseInsensitive) == 0
                    && existing.atlasPixelSha256
                         == source.atlasPixelSha256
-                   && existing.uniformSlot == source.uniformSlot)
+                   && existing.uniformSlot == source.uniformSlot
+                   && existing.confirmedSdPage == source.confirmedSdPage
+                   && existing.confirmedSdSlot == source.confirmedSdSlot)
                     return;
             ordered.append(source);
         };

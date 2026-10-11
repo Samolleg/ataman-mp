@@ -123,8 +123,10 @@ void CView::republishTerrainAtlasHd()
         return tr("не удалось проверить все MPR Dejavu/Base");
     };
     const int blockedAnimation=result.receipt["animationBlockedHd"].toInt();
-    const QString animationNotice=blockedAnimation>0
+    QString animationNotice=blockedAnimation>0
         ?tr("\nКадров с HD-источником оставлено 128 px: %1. В их анимации есть SD-кадры; непрерывный порядок кадров сохранён.").arg(blockedAnimation):QString();
+    if(result.receipt["ownerConfirmedHdApplied"].toInt()>0)
+        animationNotice+=tr("\nHD по подтверждённому происхождению: %1 слотов.").arg(result.receipt["ownerConfirmedHdApplied"].toInt());
     const auto answer=QMessageBox::question(this,tr("Пересобрать атлас карты в HD"),
         tr("Из HD: %1; перерисовано переходов: %2; останется 128 px: %3.\nОжидаемый прирост HDPack_Terrain.res: %4 МиБ; итог: %5 МиБ.\nСтарый атлас: %6.%7\n\nСсылки ячеек, классы, вода и анимация сохраняются при упаковке страниц. Будут созданы резервные копии.\n\nПродолжить?")
         .arg(hd).arg(generated).arg(result.receipt["native128Slots"].toInt())

@@ -22,9 +22,9 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `143`. Each separate fix advances the integer version.
-138 adds HD republishing for Dejavu map atlases, with calibrated source matching and preserved terrain bindings.
-The permanent installation remains 137; live maps were not changed. See the [validation report and application plan](docs/validation/ATAMAN_TERRAIN_HD_REPUBLISH_138_20261010.md).
+Current Ataman version: `144`. Each separate fix advances the integer version.
+144 adds exact SD pixel aliases and SHA-guarded owner-confirmed HD provenance for Stone / Desert class 3, preserving target terrain bindings.
+Live maps are unchanged. See the [validation and installation report](docs/validation/ATAMAN_STONE_DESERT_HD_144_20261011.md).
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
