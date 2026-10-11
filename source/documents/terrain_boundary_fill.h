@@ -64,7 +64,8 @@ inline bool solve(const QVector<Node>& nodes, QVector<double>* heights)
 // fixes this vertex as part of the contour. No inferred heights beyond data.
 template<class Sample>
 QMap<QPair<int,int>,double> grid(double cx,double cy,double radius,
-                               int width,int height,Sample sample)
+                               int width,int height,Sample sample,
+                               bool square=false)
 {
     using XY=QPair<int,int>;
     QMap<XY,int> indices;
@@ -76,7 +77,8 @@ QMap<QPair<int,int>,double> grid(double cx,double cy,double radius,
     const int y0=int(qBound(0.0,std::floor(cy-radius),double(height-1)));
     const int y1=int(qBound(0.0,std::ceil(cy+radius),double(height-1)));
     for(int y=y0;y<=y1;++y) for(int x=x0;x<=x1;++x) {
-        if(std::hypot(x-cx,y-cy)>radius) continue;
+        const double dx=std::fabs(x-cx),dy=std::fabs(y-cy);
+        if(square ? qMax(dx,dy)>radius : std::hypot(dx,dy)>radius) continue;
         double value=0;if(!sample(x,y,&value)||!std::isfinite(value)) continue;
         indices[{x,y}]=nodes.size();Node node;node.before=value;nodes.append(node);
     }

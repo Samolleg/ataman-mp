@@ -92,7 +92,9 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
         CLandscapeTools restored;restored.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         check(restored.modernMixedEdge(),"mixed-edge preference persisted");
         restored.setPaintPaletteMode(ETerrainPaintPaletteMode::ClassicAuto);
-        check(!restored.modernMixedEdge(),"Classic ignores mixed-edge");
+        check(restored.paintPaletteMode() == ETerrainPaintPaletteMode::Modern
+              && restored.modernMixedEdge(),
+              "legacy Classic selection resolves to Modern");
         restored.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
         check(!restored.modernMixedEdge(),"Manual ignores mixed-edge");
         for(int usedSlots:{2048,2049,4096,4097}) {

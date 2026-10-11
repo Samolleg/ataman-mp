@@ -1334,6 +1334,24 @@ private slots:
         QVERIFY(s.documents["a"]->terrain.height(32,16)!=s.documents["b"]->terrain.height(0,16));
         // Reproduces the original single-model route's failed seam expectation.
     }
+    void sculptBrushShapeControlsCornerVertices()
+    {
+        CWorldTerrainSession session;add(session,"shape");
+        STerrainBrush brush;brush.centerX=16;brush.centerY=16;brush.radius=1;
+        brush.falloff=ETerrainBrushFalloff::Constant;
+        const auto circle=session.documents["shape"]->terrain.makeRaiseLower(
+            brush,1000,true);
+        brush.shape=ETerrainTileBrushShape::Square;
+        const auto square=session.documents["shape"]->terrain.makeRaiseLower(
+            brush,1000,true);
+        const auto hasDiagonal=[](const STerrainHeightCommand& command) {
+            for(const auto& delta : command.deltas)
+                if(delta.globalX==17 && delta.globalY==17) return true;
+            return false;
+        };
+        QVERIFY(!hasDiagonal(circle));
+        QVERIFY(hasDiagonal(square));
+    }
     void modesEdgesCornersAndOrder()
     {
         for(auto mode:{EWorldSculptMode::Raise,EWorldSculptMode::Lower,EWorldSculptMode::Flatten,EWorldSculptMode::Smooth})

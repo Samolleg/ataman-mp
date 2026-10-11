@@ -1173,7 +1173,7 @@ CTileBrush::CTileBrush(CView* pView)
     :CState(pView)
 {
     qDebug()<< "CTileBrush init ";
-    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc-Cancel, LMB-paint, RMB-pick tile, Alt+Wheel-size, Shift+Wheel-material/rotate, Wheel-camera. M/O toggle main terrain/overlays.");
+    CStatusConnector::getInstance()->updateStatus("brush.ico", "Esc — выход; ЛКМ — покраска; ПКМ — образец; Alt+колесо — размер; Shift+колесо — материал/поворот; колесо — камера; M/O — земля/поверхности.");
     CButtonConnector::getInstance()->pressButton(EButtonOpTilebrush);
     m_pView->showOutliner(false);
 }
@@ -1191,18 +1191,13 @@ void CTileBrush::keyPress(COperation* pOp, EKeyCode key)
         break;
     }
     case eKey_Z:
-    case eKey_X:
-    case eKey_C:
     {
         if(pOp->keyManager()->isPressed(eKey_Ctrl))
         {
             pOp->keyManager()->press(key);
             break;
         }
-        m_pView->selectTerrainPaintPaletteMode(key == eKey_Z
-            ? ETerrainPaintPaletteMode::Modern
-            : key == eKey_X ? ETerrainPaintPaletteMode::ClassicAuto
-                            : ETerrainPaintPaletteMode::Manual);
+        m_pView->selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         break;
     }
     case eKey_1:

@@ -2064,7 +2064,7 @@ void CView::syncLandscapeToolState()
             changeOperation(EButtonOpSelect, true);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt, RMB-sample raw height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Noise via Tool list, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/range/flatten target, M/O-main terrain/overlays, L/Esc-close.");
+            "ЛКМ — рельеф; Ctrl+ЛКМ или ПКМ — взять высоту; Alt+колесо — размер; Shift+колесо — сила; Alt+Shift+колесо — шаг/диапазон/цель; [ ] — размер; M/O — земля/поверхности; L/Esc — выход.");
         emit updateMsg(tr("Landscape sculpt mode enabled."));
         break;
     case ELandscapeEditMode::TilePaint:
@@ -2088,7 +2088,7 @@ void CView::syncLandscapeToolState()
         CScene::getInstance()->setLandTileEditMode(false);
         setPreviewTile(false);
         CStatusConnector::getInstance()->updateStatus("landscape.ico",
-            "LMB-sculpt overlay, RMB-sample raw overlay height, Z/X/C/V-Raise/Lower/Smooth/Flatten, Noise via Tool list, Alt+Wheel-radius, Shift+Wheel-strength, Alt+Shift+Wheel-step/range/flatten target, M/O-main terrain/overlays, L/Esc-close.");
+            "ЛКМ — рельеф поверхности; Ctrl+ЛКМ или ПКМ — взять высоту; Alt+колесо — размер; Shift+колесо — сила; Alt+Shift+колесо — шаг/диапазон/цель; [ ] — размер; M/O — земля/поверхности; L/Esc — выход.");
         emit updateMsg(tr("Overlay-only sculpting enabled for active surfaces."));
         break;
     }
@@ -11565,14 +11565,20 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
         if(m_sculptOutlineGeometryDirty)
         {
             m_sculptOutlineVertices.clear();
-            constexpr int segments = 64;
+            const bool squareBrush = m_landscapeTools->paintShape()
+                == ETerrainTileBrushShape::Square;
+            const int segments = squareBrush ? 4 : 64;
             m_sculptOutlineVertices.reserve(segments);
             const float radius = m_landscapeTools->radius();
             for(int segment = 0; segment < segments; ++segment)
             {
-                const float angle = float(segment) * float(2.0 * M_PI / segments);
-                QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * radius,
-                                m_sculptOutlineCenter.y() + qSin(angle) * radius, 0.0f);
+                const float angle = squareBrush
+                    ? float(M_PI / 4.0 + segment * M_PI / 2.0)
+                    : float(segment) * float(2.0 * M_PI / segments);
+                const float outlineRadius = squareBrush ? radius * 1.41421356f
+                                                       : radius;
+                QVector3D point(m_sculptOutlineCenter.x() + qCos(angle) * outlineRadius,
+                                m_sculptOutlineCenter.y() + qSin(angle) * outlineRadius, 0.0f);
                 bool projected=m_pLand->projectPt(point, landSculpt);
                 if(!projected && m_worldTerrainEnabled)
                     for(const auto& loaded:m_neighborLandscapes)
@@ -20622,8 +20628,8 @@ void CView::selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode)
 {
     if(!m_landscapeTools)
         return;
-    if(!ensureTerrainAutoCatalogReady())
-        return;
+    if(mode != ETerrainPaintPaletteMode::Manual)
+        ensureTerrainAutoCatalogReady();
     cancelTileBrushGroup();
     m_landscapeTools->setPaintPaletteMode(mode);
     syncLandscapeToolState();
@@ -22877,7 +22883,10 @@ void CView::mousePressEvent(QMouseEvent* event)
         return;
     }
     if(m_landscapeTools && m_landscapeTools->sculptEnabled()
-        && m_terrainEditAvailable && event->button() == Qt::RightButton)
+        && m_terrainEditAvailable
+        && (event->button() == Qt::RightButton
+            || (event->button() == Qt::LeftButton
+                && event->modifiers().testFlag(Qt::ControlModifier))))
     {
         QVector3D position;
         bool positionValid = false;
@@ -23051,6 +23060,7 @@ void CView::sculptTerrainAt(const QVector3D& position, float stampFraction)
     brush.centerX = position.x();
     brush.centerY = position.y();
     brush.radius = m_landscapeTools->radius();
+    brush.shape = m_landscapeTools->paintShape();
     brush.falloff = m_landscapeTools->falloff();
     const float blendStrength = landscapeSculptEffectiveStrength(
         m_landscapeTools->strength(), stampFraction);

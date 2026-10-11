@@ -529,6 +529,7 @@ struct STerrainBrush
     float centerX{0.0f};
     float centerY{0.0f};
     float radius{1.0f};
+    ETerrainTileBrushShape shape{ETerrainTileBrushShape::Circle};
     ETerrainBrushFalloff falloff{ETerrainBrushFalloff::Smooth};
 };
 
@@ -863,6 +864,7 @@ private:
     quint32 packedNormal(int globalX, int globalY) const;
     bool normalNeighborhoodIsEditable(int globalX, int globalY) const;
     float brushWeight(float distance, float radius, ETerrainBrushFalloff falloff) const;
+    float brushWeight(const STerrainBrush& brush, float dx, float dy) const;
     STerrainHeightCommand makeBlendedCommand(const QString& description,
                                              const STerrainBrush& brush,
                                              const QVector<float>& targets,

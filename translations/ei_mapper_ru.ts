@@ -1294,7 +1294,126 @@ Restore the runtime paths for the selected installation, then retry Test Current
         <source>%1 / %2 slots, %3 available</source>
         <translation>%1 / %2 слотов, свободно %3</translation>
     </message>
-</context>
+
+        <message><location filename="../source/ui/landscape_tools.cpp" line="188" /><source>Двигать объекты с землёй</source><translation>Двигать объекты с землёй</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="193" /><location filename="../source/ui/landscape_tools.cpp" line="694" /><source>Только на карте</source><translation>Только на карте</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="184" /><location filename="../source/ui/landscape_tools.cpp" line="1488" /><source>Шаг высоты</source><translation>Шаг высоты</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="185" /><source>Высота цели</source><translation>Высота цели</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="186" /><source>Спад</source><translation>Спад</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="300" /><source>Покраска</source><translation>Покраска</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="301" /><source>Рельеф</source><translation>Рельеф</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="302" /><location filename="../source/ui/landscape_tools.cpp" line="345" /><source>Поверхности</source><translation>Поверхности</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="330" /><source>Рисовать существующее покрытие</source><translation>Рисовать существующее покрытие</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="332" /><source>Добавлять / удалять поверхности</source><translation>Добавлять / удалять поверхности</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="334" /><source>Рельеф поверхностей</source><translation>Рельеф поверхностей</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="345" /><location filename="../source/ui/landscape_tools.cpp" line="524" /><location filename="../source/ui/landscape_tools.cpp" line="564" /><source>Земля</source><translation>Земля</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="348" /><source>Показать землю (M)</source><translation>Показать землю (M)</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="348" /><source>Показать поверхности (O)</source><translation>Показать поверхности (O)</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="352" /><source>Поднять</source><translation>Поднять</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="353" /><source>Опустить</source><translation>Опустить</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="354" /><source>Сгладить</source><translation>Сгладить</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="355" /><source>Выровнять</source><translation>Выровнять</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="356" /><source>Шум</source><translation>Шум</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="357" /><source>От границы</source><translation>От границы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="359" /><source>Сохраняет внешний ряд вершин внутри кисти и заполняет середину по их высотам. Сила задаёт смешивание; фиксированной высоты нет.</source><translation>Сохраняет внешний ряд вершин внутри кисти и заполняет середину по их высотам. Сила задаёт смешивание; фиксированной высоты нет.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="379" /><source>Линейный</source><translation>Линейный</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="380" /><source>Ровный</source><translation>Ровный</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="391" /><source>Если выключено, объекты сохраняют высоту за счёт изменения смещения Z в MOB. Сохраните MPR и MOB. Юниты остаются на земле; свет, звук и частицы уже используют абсолютную высоту.</source><translation>Если выключено, объекты сохраняют высоту за счёт изменения смещения Z в MOB. Сохраните MPR и MOB. Юниты остаются на земле; свет, звук и частицы уже используют абсолютную высоту.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="466" /><source>Общая кисть включена по умолчанию для всех доступных карт. Здесь можно отключить её или исключить отдельные карты.</source><translation>Общая кисть включена по умолчанию для всех доступных карт. Здесь можно отключить её или исключить отдельные карты.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="468" /><source>Общая кисть включена; выбраны все доступные карты.</source><translation>Общая кисть включена; выбраны все доступные карты.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="484" /><source>Общая кисть</source><translation>Общая кисть</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="485" /><source>Отменить общий мазок</source><translation>Отменить общий мазок</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="486" /><source>Повторить общий мазок</source><translation>Повторить общий мазок</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="487" /><source>Сохранить все изменённые карты…</source><translation>Сохранить все изменённые карты…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="498" /><source>ЛКМ — рельеф; Ctrl+щелчок берёт высоту карты для выравнивания. Alt+колесо меняет размер; Shift+колесо — силу; Alt+Shift+колесо — шаг, диапазон шума или высоту цели. Колесо без модификатора управляет камерой. Каждый мазок — один шаг отмены.</source><translation>ЛКМ — рельеф; Ctrl+щелчок берёт высоту карты для выравнивания. Alt+колесо меняет размер; Shift+колесо — силу; Alt+Shift+колесо — шаг, диапазон шума или высоту цели. Колесо без модификатора управляет камерой. Каждый мазок — один шаг отмены.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="530" /><location filename="../source/ui/landscape_tools.cpp" line="566" /><source>Под водой</source><translation>Под водой</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="538" /><location filename="../source/ui/landscape_tools.cpp" line="565" /><source>Покрытие</source><translation>Покрытие</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="626" /><source>Варианты выбранного материала</source><translation>Варианты выбранного материала</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2184" /><source>Сгенерирован: %1</source><translation>Сгенерирован: %1</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2185" /><source>Вариант участвует в покраске этого материала при включённой опции.</source><translation>Вариант участвует в покраске этого материала при включённой опции.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2188" /><source>
+Сгенерированных вариантов: %1. Стрелка открывает список с миниатюрами и ID.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="377" /><source>Плавный</source><translation>Плавный</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="670" /><source>Ручная покраска активна, пока удерживается C. Выбранный физический слот и поворот ставятся напрямую; отпустите C, чтобы вернуться к современной покраске.</source><translation>Ручная покраска активна, пока удерживается C. Выбранный физический слот и поворот ставятся напрямую; отпустите C, чтобы вернуться к современной покраске.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="691" /><source>Поиск материала…</source><translation>Поиск материала…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="699" /><location filename="../source/ui/landscape_tools.cpp" line="912" /><source>Современная покраска</source><translation>Современная покраска</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="700" /><location filename="../source/ui/landscape_tools.cpp" line="1063" /><source>Слоты атласа</source><translation>Слоты атласа</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="769" /><source>Тайл</source><translation>Тайл</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="770" /><source>Вершина</source><translation>Вершина</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="785" /><source>Добавить поверхность</source><translation>Добавить поверхность</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="786" /><source>Удалить поверхность</source><translation>Удалить поверхность</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="821" /><source>Сила</source><translation>Сила</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="824" /><source>Размер</source><translation>Размер</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="825" /><source>Форма</source><translation>Форма</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="826" /><source>Цель</source><translation>Цель</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="830" /><source>Alt+колесо — размер · Shift+колесо — материал / сила · [ ] — размер · C — удерживать для ручной покраски</source><translation>Alt+колесо — размер · Shift+колесо — материал / сила · [ ] — размер · C — удерживать для ручной покраски</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="836" /><source>Размер общей кисти. Alt+колесо или [ ] изменяют размер.</source><translation>Размер общей кисти. Alt+колесо или [ ] изменяют размер.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="837" /><source>Круглая кисть</source><translation>Круглая кисть</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="838" /><source>Квадратная кисть</source><translation>Квадратная кисть</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="883" /><source>Нет перехода / неверный переход</source><translation>Нет перехода / неверный переход</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="884" /><source>Неверный материал / группа</source><translation>Неверный материал / группа</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="885" /><source>Неверный поворот</source><translation>Неверный поворот</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="887" /><source>Отметить плохие тайлы</source><translation>Отметить плохие тайлы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="904" /><source>Save the working MPR and its exact atlas pages/material profile into the configured HDPack_Terrain.res, even when the MPR itself has no unsaved changes. Normal Save MPR and Save MPR As publish finalized pages into the same archive.</source><translation>Сохраняет рабочую MPR, точные страницы её атласа и профиль материалов в настроенный HDPack_Terrain.res, даже если в самой MPR нет несохранённых изменений. Обычные команды сохранения MPR публикуют готовые страницы в этот же архив.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="909" /><source>Карта</source><translation>Карта</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="913" /><source>Ручные слоты атласа (удерживайте C)</source><translation>Ручные слоты атласа (удерживайте C)</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="915" /><source>Удерживайте C, чтобы напрямую наносить выбранный физический слот и поворот.</source><translation>Удерживайте C, чтобы напрямую наносить выбранный физический слот и поворот.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="922" /><source>Автоматические переходы</source><translation>Автоматические переходы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="923" /><source>Только точные переходы</source><translation>Только точные переходы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="924" /><source>Менять поворот тайлов</source><translation>Менять поворот тайлов</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="925" /><source>Номера материалов</source><translation>Номера материалов</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="927" /><source>Импорт карты высот…</source><translation>Импорт карты высот…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="928" /><source>Настройки карты…</source><translation>Настройки карты…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="929" /><source>Исправить переходы…</source><translation>Исправить переходы…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="930" /><source>Сохранить черновик…</source><translation>Сохранить черновик…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="931" /><source>Экспорт диагностики…</source><translation>Экспорт диагностики…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="932" /><source>Редактор атласа…</source><translation>Редактор атласа…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="933" /><source>Пересобрать атлас карты в HD…</source><translation>Пересобрать атлас карты в HD…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="935" /><source>Пересобрать опубликованный атлас текущей карты из точных HD-источников, сохранив слоты, повороты и воду.</source><translation>Пересобрать опубликованный атлас текущей карты из точных HD-источников, сохранив слоты, повороты и воду.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="938" /><source>Сгенерировать HD-варианты материалов…</source><translation>Сгенерировать HD-варианты материалов…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="942" /><source>Использовать сгенерированные варианты</source><translation>Использовать сгенерированные варианты</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="949" /><source>Материалы поверхности…</source><translation>Материалы поверхности…</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="979" /><source>Авто-переходы</source><translation>Авто-переходы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="980" /><source>Плавные границы</source><translation>Плавные границы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="981" /><source>Случайные варианты</source><translation>Случайные варианты</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="982" /><source>HD-варианты</source><translation>HD-варианты</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="983" /><source>Поворот</source><translation>Поворот</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1000" /><source>Размер тайлов</source><translation>Размер тайлов</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1019" /><source>Вся текущая карта</source><translation>Вся текущая карта</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1020" /><source>Рамка выделения</source><translation>Рамка выделения</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1026" /><source>Новое зерно</source><translation>Новое зерно</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1033" /><source>Перемешать тайлы</source><translation>Перемешать тайлы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1042" /><source>Диагностика и атлас</source><translation>Диагностика и атлас</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1048" /><source>Дополнительно</source><translation>Дополнительно</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1056" /><source>Справка</source><translation>Справка</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1063" /><source>Авто</source><translation>Авто</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1080" /><source>Действие</source><translation>Действие</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1081" /><source>Свойства поверхности</source><translation>Свойства поверхности</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1082" /><source>Материал MPR: оттенок, прозрачность и анимация поверхности</source><translation>Материал MPR: оттенок, прозрачность и анимация поверхности</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1488" /><source>Диапазон шума</source><translation>Диапазон шума</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1516" /><source>
+Нажмите, чтобы включить общую кисть или выбрать карты.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1517" /><source>Кисть: %1 карт</source><translation>Кисть: %1 карт</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="1517" /><source>Кисть: одна карта</source><translation>Кисть: одна карта</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2113" /><source>На карте нет материалов этого слоя.</source><translation>На карте нет материалов этого слоя.</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2202" /><source>Материалы на карте</source><translation>Материалы на карте</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2202" /><source>Все материалы</source><translation>Все материалы</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2204" /><source>Только у стыков</source><translation>Только у стыков</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2269" /><source>Варианты: %1</source><translation>Варианты: %1</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2286" /><source>Исходный</source><translation>Исходный</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2287" /><source>Исходный тайл материала %1</source><translation>Исходный тайл материала %1</translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2290" /><source>HD · %1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/ui/landscape_tools.cpp" line="2292" /><source>Сгенерированный вариант материала %1</source><translation>Сгенерированный вариант материала %1</translation></message>
+            <message>
+            <location filename="../source/ui/landscape_tools.cpp" line="702" />
+            <source>Современная покраска использует точные переходы атласа и создаёт недостающие варианты. Щёлкните материал, чтобы выбрать его.</source>
+            <translation>Современная покраска использует точные переходы атласа и создаёт недостающие варианты. Щёлкните материал, чтобы выбрать его.</translation>
+        </message>
+        <message>
+            <location filename="../source/ui/landscape_tools.cpp" line="705" />
+            <source>Здесь доступны физические слоты атласа. Пока удерживается C, выбранный слот и поворот наносятся напрямую.</source>
+            <translation>Здесь доступны физические слоты атласа. Пока удерживается C, выбранный слот и поворот наносятся напрямую.</translation>
+        </message></context>
     <context>
         <name>CMapTableEditorDialog</name>
         <message>
@@ -10836,7 +10955,170 @@ Save all, discard the entire session, or cancel?</source>
         <source>Mixed-edge cannot replace animated Ground cells. Disable the option to use the previous Modern path.</source>
         <translation>Mixed-edge не может заменять анимированную землю. Отключите опцию и используйте прежний Modern.</translation>
     </message>
-</context>
+
+        <message><location filename="../source/render/view.cpp" line="2670" /><source>Переходы</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="2670" /><source>Показать области появления и перехода текущей и соседних карт.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="2674" /><source>Show all neighboring MPR maps from the active profile as a read-only background. Single-clicking a neighbor does not select or edit it. Double-click a neighbor to open its MPR/MOB pair. Turn on Arrange maps to drag neighboring maps into their correct world positions. Background data is excluded from saving, export, and Test Current Map.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="3156" /><source>Show all neighboring MPR maps from the active profile as a background, protected by default. Landscape Tools can explicitly enable shared terrain sculpting and saving for selected neighbors. Double-click a neighbor to open its MPR/MOB pair. Arrange maps edits the world layout. Background objects and textures remain read-only; Test Current Map uses the active map.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9096" /><source>Interrupted world terrain save</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9097" /><source>Restore all MPRs in this interrupted save from their verified backups before opening?
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9101" /><source>Terrain recovery failed</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9208" /><source>No configured HDPack_Terrain.res was found. The exact atlas cannot be restored into the active game resources, so the MPR was not opened.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10611" /><source>The changed MPR save did not complete.
+
+Phase: %1
+%2
+
+Backup: %3</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="14256" /><source>Нет общего источника текстуры материала %1 для стыка карт.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15051" /><source>Save result: the selected MPR and HDPack_Terrain.res will be updated together. The MPR includes every current landscape edit, including sculpted heights and the latest paint stroke. Resource identity: %1 (%2). Editor-side JSON review metadata stays beside the MPR and is never put inside the runtime RES archive.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15185" /><source>Creating a new content identity is the safest export option because it avoids conflicts with existing map atlases. New content defaults to &lt;map&gt;_&lt;12-character content hash&gt;. Using an existing identity can affect every MPR that resolves the same MMP page names in HDPack_Terrain.res.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15268" /><source>Choose configured HDPack_Terrain.res</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15284" /><source>Save will publish every current landscape edit in one operation.
+
+MPR: %1
+HDPack_Terrain.res: %2
+Resource identity: %3 (%4)
+Layers: %5
+
+Editor-side JSON review metadata stays beside the MPR and is never put inside the runtime RES archive.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15330" /><source>HDPack_Terrain.res publication refused</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15349" /><source>Replace HDPack_Terrain.res in place</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15514" /><source>Building and reopening the complete HDPack_Terrain.res candidate...</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15544" /><source>The complete HDPack_Terrain.res candidate could not be built. No output was written.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15558" /><source>The complete staged HDPack_Terrain.res failed reopen. No output was written.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15578" /><source>The staged HDPack_Terrain.res did not reopen with its exact embedded material profile. No output was written.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15584" /><source>Backing up and atomically replacing HDPack_Terrain.res...</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15586" /><source>Atomically replacing HDPack_Terrain.res...</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15616" /><source>HDPack_Terrain.res publication failed</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15618" /><source>The archive was committed, but verification failed. Reopen it before saving again.
+Backup: %3
+
+Phase: %1
+%2</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15620" /><source>Publication did not complete.
+
+Phase: %1
+%2</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15676" /><source>Publication did not complete. HDPack_Terrain.res rollback: %1; MPR rollback: %2.
+
+Phase: %3
+%4</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15693" /><source>The validated HDPack_Terrain.res and MPR are saved, but this session could not adopt them. Reopen the MPR before editing further.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="15718" /><source>HDPack_Terrain.res was updated in place and the saved MPR is now the open editing baseline. No reload is required.
+
+MPR: %1
+HDPack_Terrain.res: %2
+Identity: %3
+Used tiles: %4 / %5
+Texture pages: %6
+
+Undo history was cleared because publication changed external resource identity and physical atlas ownership.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="20719" /><source>Исправить недостающие переходы</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="20724" /><source>Технический отчёт доступен в подробностях.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="20842" /><source>Исправить переходы земли и покрытий на текущей карте и общих краях соседей, выбранных для общей кисти?
+
+Полностью закрашенные тайлы учитываются при согласовании материалов стыка. Материалы граничных вершин и рисунок переходов согласуются с обеих сторон. Все изменения отменяются одним шагом общей кисти; новые текстуры остаются в рабочем атласе.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="20976" /><source>Проверены стыки соседних карт: исправлено вершин материалов — %1.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="21121" /><source>Исправление не выполнено. Ячейки MPR не изменены.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="21129" /><source>Изменений для применения не найдено. Карта не изменена.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="21139" /><source>Исправление не удалось применить. MPR, атлас, предпросмотр и история отмены не изменены.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="21178" /><location filename="../source/render/view.cpp" line="21189" /><source>Исправление отклонено. MPR, атлас, предпросмотр и история отмены не изменены.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9216" /><source>This MPR has an exact editor recovery snapshot, but its matching self-describing RES is not configured.
+
+Restore its exact pages and profile into the configured HDPack_Terrain.res?
+%1
+
+No atlas identity will be inferred; unrelated RES members will be preserved.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9243" /><source>The exact recovery archive could not be reopened. The MPR was not opened.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9271" /><source>The saved material profile failed validation. The MPR was not opened.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9291" /><source>The recovery archive has no embedded material profile. The MPR was not opened.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9311" /><source>The configured HDPack_Terrain.res could not be safely merged with the exact recovery atlas. The MPR was not opened.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9328" /><source>HDPack_Terrain.res could not be committed. The MPR was not opened.
+
+Phase: %1
+%2</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="9368" /><source>The exact terrain atlas was restored into HDPack_Terrain.res and will be used to open this MPR.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10235" /><source>This map contains modern terrain atlas edits. Use Save MPR or Save MPR As to publish them, or use Save MPR as modern draft to keep the working atlas in the configured HDPack_Terrain.res.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10343" /><source>Select configured HDPack_Terrain.res</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10345" /><location filename="../source/render/view.cpp" line="15270" /><source>HDPack_Terrain.res (HDPack_Terrain.res)</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10352" /><location filename="../source/render/view.cpp" line="15277" /><source>Choose the configured HDPack_Terrain.res archive. No destination was changed.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10412" /><source>The configured HDPack_Terrain.res could not be read and validated. No destination was changed.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10424" /><source>Replace shared terrain atlas pages?</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10425" /><source>Saving this draft will replace atlas/profile entries in the configured HDPack_Terrain.res. Other maps using the same terrain resource identity may also use these pages. All unrelated RES members will be preserved. Continue?</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10438" /><source>The atlas pages and exact material profile could not be merged into HDPack_Terrain.res. No destination was changed.
+
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10481" /><source>Staging and verifying HDPack_Terrain.res...</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10494" /><source>HDPack_Terrain.res was not committed.
+
+Phase: %1
+%2</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10543" /><source>The paired MPR and HDPack_Terrain.res were saved, but the current session could not adopt them. Reopen this MPR before editing further:
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view.cpp" line="10551" /><source>Modern draft and terrain atlas saved: %1 | %2</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="54" /><source>The MPR changed externally. Retained edits are still in the world session. Save/recover or explicitly discard that session before reopening this file.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="84" /><source>Не удалось обновить атлас соседней карты.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="96" /><source>Neighbor terrain preview failed: %1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="247" /><source>Invalid terrain height scale.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="318" /><source>Сохранение общего ландшафта</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="319" /><source>Сохранить перечисленные карты и их атласы с резервными копиями?
+
+%1
+
+После сохранения история общей кисти будет очищена.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="331" /><source>Карты не сохранены</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="340" /><source>Не определён архив текстур карты %1.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="349" /><source>Размер исходного атласа изменился.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="352" /><source>Текстуры изменены другой программой: %1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="357" /><source>Рабочий атлас потерял исходные страницы.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="376" /><source>Карты используют одну текстуру %1 с разными изменениями. Сохранение отменено.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="409" /><source>Несовместимые профили общего атласа.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="413" /><source>Несовместимые поля материалов одного пространства имён.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="437" /><source>Другой компонент изменяет тот же файл: %1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="445" /><source>Архив пока недоступен для записи: %1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="463" /><source>Файлы сохранены, но предпросмотр требует повторного открытия карты.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="466" /><location filename="../source/render/view_world_terrain.cpp" line="472" /><source>Файлы сохранены; откройте карту заново.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="476" /><source>Сохранено карт: %1. Атласы проверены, резервные копии сохранены. История общей кисти очищена.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="506" /><source>Save or finalize pending map-parameter/atlas changes before retaining this map in the world terrain session.
+%1</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="663" /><source>Не найден полный атлас соседней карты %1. Исправление отменено.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="683" /><source>Не удалось определить материалы соседней карты %1.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="746" /><source>Исправление переходов между картами не выполнено. Изменения не применены.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="757" /><source>Не удалось подготовить переходы; общая операция отменена.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="759" /><location filename="../source/render/view_world_terrain.cpp" line="804" /><source>земля</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="759" /><location filename="../source/render/view_world_terrain.cpp" line="804" /><source>покрытие</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="790" /><source>Не удалось прочитать материалы карты %1.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="803" /><source>%1, %2, вершина %3,%4: нет единственного материала стыка; исходное значение сохранено.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="835" /><source>Не удалось подготовить точный переход %1: %2,%3.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="857" /><source>Размеры текстур соседних карт различаются. Исправление не применено.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="883" /><source>Согласовать рисунок стыка карт</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="927" /><source>Предпросмотр не обновлён; исправление отменено.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="940" /><source>Исправлено тайлов: %1; карт: %2. Согласовано граничных вершин: %3.
+Отменить исправление можно кнопкой общей кисти.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="942" /><source>
+Неоднозначных точек на стыках: %1. Их исходные материалы сохранены; подробности — в отчёте.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="980" /><source>Выберите материал или тайл.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="985" /><source>Выберите материал покрытия.</source><translation type="unfinished"></translation></message>
+        <message><location filename="../source/render/view_world_terrain.cpp" line="1126" /><source>Предпросмотр общей кисти не обновлён; мазок отменён.</source><translation type="unfinished"></translation></message>
+    </context>
     <context>
         <name>CViewportMinimapWidget</name>
         <message>

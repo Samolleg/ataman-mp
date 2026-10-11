@@ -1717,6 +1717,15 @@ float CTerrainEditModel::brushWeight(float distance, float radius,
     return linear * linear * (3.0f - 2.0f * linear);
 }
 
+float CTerrainEditModel::brushWeight(const STerrainBrush& brush,
+                                     float dx, float dy) const
+{
+    const float distance = brush.shape == ETerrainTileBrushShape::Square
+        ? qMax(std::fabs(dx), std::fabs(dy))
+        : std::sqrt(dx * dx + dy * dy);
+    return brushWeight(distance, brush.radius, brush.falloff);
+}
+
 STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
     const STerrainBrush& brush, float rawHeightDelta,
     bool allowSaturation) const
@@ -1737,8 +1746,7 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
-                                             brush.radius, brush.falloff);
+            const float weight = brushWeight(brush, dx, dy);
             if(weight <= 0.0f)
                 continue;
             STerrainHeightDelta delta;
@@ -1774,8 +1782,7 @@ STerrainHeightCommand CTerrainEditModel::makeNoise(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
-                                             brush.radius, brush.falloff);
+            const float weight = brushWeight(brush, dx, dy);
             if(weight <= 0.0f)
                 continue;
             STerrainHeightDelta delta;
@@ -1812,8 +1819,7 @@ STerrainHeightCommand CTerrainEditModel::makeBlendedCommand(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
-                                             brush.radius, brush.falloff) * strength;
+            const float weight = brushWeight(brush, dx, dy) * strength;
             if(weight <= 0.0f)
                 continue;
             const int index = globalIndex(x, y);
@@ -1846,11 +1852,13 @@ STerrainHeightCommand CTerrainEditModel::makeBoundaryFill(
     const auto targets=TerrainBoundaryFill::grid(brush.centerX,brush.centerY,brush.radius,
         m_vertexCountX,m_vertexCountY,[this](int x,int y,double* value) {
             *value=height(x,y);return true;
-        });
+        }, brush.shape == ETerrainTileBrushShape::Square);
     for(auto it=targets.cbegin();it!=targets.cend();++it) {
         const int x=it.key().first,y=it.key().second;
-        const double weight=brushWeight(std::hypot(x-brush.centerX,y-brush.centerY),
-            brush.radius,brush.falloff)*qBound(0.0f,strength,1.0f);
+        const float dx = float(x) - brush.centerX;
+        const float dy = float(y) - brush.centerY;
+        const double weight=brushWeight(brush, dx, dy)
+            * qBound(0.0f,strength,1.0f);
         STerrainHeightDelta delta;delta.globalX=x;delta.globalY=y;delta.before=height(x,y);
         delta.after=clampedHeight(delta.before+(it.value()-delta.before)*weight);
         if(delta.before!=delta.after) command.deltas.append(delta);
@@ -2669,7 +2677,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 const auto it=heights.constFind(globalIndex(x,y));
                 if(it==heights.cend()) return false;
                 *value=it.value();return true;
-            });
+            }, brush.shape == ETerrainTileBrushShape::Square);
     QMap<int, quint16> afterHeights = heights;
     QSet<int> changedVertices;
     for(int key : activeVertices)
@@ -2680,8 +2688,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         const int y = key / m_vertexCountX;
         const float dx = float(x) - brush.centerX;
         const float dy = float(y) - brush.centerY;
-        const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
-                                         brush.radius, brush.falloff);
+        const float weight = brushWeight(brush, dx, dy);
         if(weight <= 0.0f)
             continue;
         const float before = float(heights.value(key));

@@ -19,6 +19,7 @@ class QLineEdit;
 class QListWidget;
 class QButtonGroup;
 class QGridLayout;
+class QHBoxLayout;
 class QProgressBar;
 class QPushButton;
 class QResizeEvent;
@@ -230,12 +231,16 @@ private:
     QWidget* m_classicModePage;
     QWidget* m_manualModePage;
     QScrollArea* m_groundMaterialScroll;
+    QScrollArea* m_underwaterMaterialScroll;
     QScrollArea* m_overlayMaterialScroll;
     QWidget* m_groundMaterialPage;
+    QWidget* m_underwaterMaterialPage;
     QWidget* m_overlayMaterialPage;
     QGridLayout* m_groundMaterialGrid;
     QGridLayout* m_underwaterMaterialGrid;
     QGridLayout* m_overlayMaterialGrid;
+    QLabel* m_variantStripTitle{nullptr};
+    QHBoxLayout* m_variantStripLayout{nullptr};
     QButtonGroup* m_groundMaterialButtons;
     QButtonGroup* m_overlayMaterialButtons;
     QScrollArea* m_classicGroundMaterialScroll;
@@ -310,6 +315,7 @@ private:
     void applyPaintFilter();
     void refreshPaletteColumns(bool rebuild = true);
     void schedulePaletteRelayout();
+    void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
     QButtonGroup* activeMaterialButtons() const;
 };
 

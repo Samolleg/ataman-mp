@@ -224,7 +224,8 @@ bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
         t.model=&m_worldTerrainSession.documents[id]->terrain;t.editable=true;targets.append(t);
     }
     STerrainBrush brush;brush.centerX=position.x()+m_activeMapWorldOrigin.x();
-    brush.centerY=position.y()+m_activeMapWorldOrigin.y();brush.radius=m_landscapeTools->radius();brush.falloff=m_landscapeTools->falloff();
+    brush.centerY=position.y()+m_activeMapWorldOrigin.y();brush.radius=m_landscapeTools->radius();
+    brush.shape=m_landscapeTools->paintShape();brush.falloff=m_landscapeTools->falloff();
     EWorldSculptMode mode=EWorldSculptMode::Raise;
     switch(m_landscapeTools->sculptTool())
     {
