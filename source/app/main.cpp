@@ -584,6 +584,9 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption workspaceVisualSequenceOption("workspace-visual-sequence",
         "Open semicolon-separated MPR|MOB stages in one process and exit after each stage resolves.",
         "stages");
+    QCommandLineOption workspaceMapPairSequenceOption("workspace-map-pair-sequence",
+        "Open semicolon-separated MPR|MOB|zone stages through the Maps browser workspace path.",
+        "stages");
     QCommandLineOption terrainStampRegressionOption("terrain-stamp-regression",
         "Run one real 6x6 Modern Lava-on-Water overlay viewport stamp, frame-capture it, validate undo/redo, then exit.");
     QCommandLineOption terrainStampRegressionResultOption(
@@ -628,6 +631,7 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(workspaceLoadSmokeOption);
     parser.addOption(workspaceVisualSmokeOption);
     parser.addOption(workspaceVisualSequenceOption);
+    parser.addOption(workspaceMapPairSequenceOption);
     parser.addOption(terrainStampRegressionOption);
     parser.addOption(terrainStampRegressionResultOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
@@ -644,6 +648,11 @@ int runHeadlessCommand(QApplication& app)
     {
         app.setProperty("workspaceVisualSmoke", true);
         app.setProperty("workspaceVisualSequence", parser.value(workspaceVisualSequenceOption));
+    }
+    if(parser.isSet(workspaceMapPairSequenceOption))
+    {
+        app.setProperty("workspaceVisualSmoke", true);
+        app.setProperty("workspaceMapPairSequence", parser.value(workspaceMapPairSequenceOption));
     }
     if(parser.isSet(terrainStampRegressionOption))
     {
@@ -4399,6 +4408,72 @@ int main(int argc, char *argv[])
         };
         QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
                          &window, [advance]() { QTimer::singleShot(100, *advance); });
+        QTimer::singleShot(0, *advance);
+        return app.exec();
+    }
+    const QString mapPairSequence = qApp->property(
+        "workspaceMapPairSequence").toString();
+    if(!mapPairSequence.isEmpty())
+    {
+        QVector<QStringList> stages;
+        for(const QString& stageText : mapPairSequence.split(';', QString::SkipEmptyParts))
+        {
+            const QStringList fields = stageText.split('|');
+            if(fields.size() == 3)
+                stages.append(fields);
+        }
+        QSharedPointer<int> stageIndex(new int(0));
+        QSharedPointer<int> stageWaitingForVisuals(new int(0));
+        QSharedPointer<std::function<void()>> advance(new std::function<void()>);
+        *advance = [&window, stages, stageIndex, stageWaitingForVisuals, advance]()
+        {
+            if(*stageIndex >= stages.size())
+            {
+                const bool forceCatalog = qEnvironmentVariableIntValue(
+                    "EI_MAPPER_MAP_PAIR_SMOKE_FORCE_CATALOG") == 1;
+                if(forceCatalog)
+                {
+                    window.view()->prepareLandscapeTilePainting(false);
+                    ei::log(eLogInfo,
+                            "Workspace map-pair sequence deferred terrain catalog hydrated after map open");
+                }
+                ei::log(eLogInfo, QString("Workspace map-pair sequence complete stages:%1")
+                        .arg(stages.size()));
+                QTimer::singleShot(250, &window, [&window]() {
+                    window.close();
+                    QCoreApplication::exit(0);
+                });
+                return;
+            }
+            const QStringList stage = stages.at((*stageIndex)++);
+            const int currentStage = *stageIndex;
+            *stageWaitingForVisuals = currentStage;
+            ei::log(eLogInfo, QString("Workspace map-pair sequence stage:%1/%2 zone:%3")
+                    .arg(*stageIndex).arg(stages.size()).arg(stage.at(2)));
+            window.openMapPairForLoadSmoke(stage.at(0), stage.at(1), stage.at(2));
+            if(window.view()->mobs().isEmpty())
+            {
+                ei::log(eLogWarning, "Workspace map-pair sequence did not load a MOB");
+                QCoreApplication::exit(3);
+                return;
+            }
+            QTimer::singleShot(30000, &window, [stageWaitingForVisuals,
+                                                currentStage]() {
+                if(*stageWaitingForVisuals == currentStage)
+                {
+                    ei::log(eLogWarning,
+                            "Workspace map-pair sequence timed out waiting for unit visuals");
+                    QCoreApplication::exit(5);
+                }
+            });
+        };
+        QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
+                         &window, [stageWaitingForVisuals, advance]() {
+            if(*stageWaitingForVisuals <= 0)
+                return;
+            *stageWaitingForVisuals = 0;
+            QTimer::singleShot(100, *advance);
+        });
         QTimer::singleShot(0, *advance);
         return app.exec();
     }

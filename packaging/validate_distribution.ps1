@@ -1,6 +1,8 @@
 ﻿param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [string]$PackageRoot
+    [string]$PackageRoot,
+    [string]$PreviousPackageRoot,
+    [string[]]$AllowedRemovedPath = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,9 +41,32 @@ $requiredIcons = @(
     'icons_fluent\landscape.ico',
     'icons_fluent\undo.ico'
 )
-foreach ($relative in $requiredIcons) {
+$requiredHeightmaps = @(
+    'heightmaps\README.md',
+    'heightmaps\diagonal_ramp_257.png',
+    'heightmaps\mixed_features_heightmap_1254.png',
+    'heightmaps\orientation_corners_257.png',
+    'heightmaps\radial_hill_257.png',
+    'heightmaps\seam_cross_257.png',
+    'heightmaps\terraced_basin_257.png'
+)
+$requiredColorIcons = @(
+    'icons_color\copy.ico', 'icons_color\copy.png',
+    'icons_color\cut.ico', 'icons_color\cut.png',
+    'icons_color\delete.ico', 'icons_color\delete.png',
+    'icons_color\erase.ico', 'icons_color\erase.png',
+    'icons_color\move.ico', 'icons_color\move.png',
+    'icons_color\new.ico', 'icons_color\new.png',
+    'icons_color\paste.ico', 'icons_color\paste.png',
+    'icons_color\redo.ico', 'icons_color\redo.png',
+    'icons_color\rotate.png',
+    'icons_color\scale.ico', 'icons_color\scale.png',
+    'icons_color\select.ico', 'icons_color\select.png',
+    'icons_color\undo.ico', 'icons_color\undo.png'
+)
+foreach ($relative in @($requiredIcons) + @($requiredHeightmaps) + @($requiredColorIcons)) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
-        $failures.Add("required UI icon is missing: $relative")
+        $failures.Add("required package asset is missing: $relative")
     }
 }
 
@@ -216,6 +241,87 @@ if(Test-Path -LiteralPath $checksums)
     foreach($entry in $forbiddenManifestEntries)
     {
         $failures.Add("checksum manifest references a private/runtime artifact: $($entry.Line)")
+    }
+
+    if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot))
+    {
+        $previousRoot = (Resolve-Path -LiteralPath $PreviousPackageRoot).Path
+        if($previousRoot -eq $root)
+        {
+            $failures.Add('previous package root must be a different staging directory')
+        }
+        else
+        {
+            $previousChecksums = Join-Path $previousRoot 'SHA256SUMS.txt'
+            if(-not (Test-Path -LiteralPath $previousChecksums -PathType Leaf))
+            {
+                $failures.Add("previous package manifest is missing: $previousChecksums")
+            }
+            else
+            {
+                $previousPaths = [System.Collections.Generic.HashSet[string]]::new(
+                    [System.StringComparer]::OrdinalIgnoreCase)
+                $previousVersionPath = Join-Path $previousRoot 'VERSION'
+                if(-not (Test-Path -LiteralPath $previousVersionPath -PathType Leaf))
+                {
+                    $failures.Add('previous package VERSION is missing')
+                }
+                foreach($line in Get-Content -LiteralPath $previousChecksums)
+                {
+                    if($line -notmatch '^([0-9a-fA-F]{64}) \*(.+)$')
+                    {
+                        $failures.Add("malformed previous checksum entry: $line")
+                        continue
+                    }
+                    $relative = $Matches[2].Replace('\','/')
+                    if([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or
+                       $relative.Split('/') -contains '..' -or $relative.Split('/') -contains '.' -or
+                       $relative -eq 'SHA256SUMS.txt')
+                    {
+                        $failures.Add("unsafe path in previous package manifest: $relative")
+                        continue
+                    }
+                    if(-not $previousPaths.Add($relative))
+                    {
+                        $failures.Add("duplicate path in previous package manifest: $relative")
+                    }
+                }
+                $allowed = [System.Collections.Generic.HashSet[string]]::new(
+                    [System.StringComparer]::OrdinalIgnoreCase)
+                foreach($path in $AllowedRemovedPath)
+                {
+                    $null = $allowed.Add($path.Replace('\','/'))
+                }
+                foreach($path in $allowed)
+                {
+                    if(-not $previousPaths.Contains($path))
+                    {
+                        $failures.Add("allowed removal is absent from previous package manifest: $path")
+                    }
+                }
+                $removedPaths = @($previousPaths | Where-Object {
+                    -not $manifestPaths.ContainsKey($_)
+                } | Sort-Object)
+                $unexplained = @($removedPaths | Where-Object { -not $allowed.Contains($_) })
+                foreach($path in $unexplained)
+                {
+                    $failures.Add("package path removed without an explicit explanation: $path")
+                }
+                Write-Output "Previous package path comparison: $($previousPaths.Count) prior, $($manifestPaths.Count) current, $($removedPaths.Count) removed"
+                if($removedPaths.Count -eq 0)
+                {
+                    Write-Output 'Removed paths: none'
+                }
+                else
+                {
+                    foreach($path in $removedPaths)
+                    {
+                        $classification = if($allowed.Contains($path)) { 'allowed' } else { 'unexplained' }
+                        Write-Output "Removed path ($classification): $path"
+                    }
+                }
+            }
+        }
     }
 }
 else

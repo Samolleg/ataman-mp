@@ -1148,6 +1148,7 @@ private:
     bool m_terrainAutoCatalogPending{false};
     bool m_terrainAutoCatalogBuildQueued{false};
     bool m_terrainAutoCatalogBuilding{false};
+    bool m_terrainAutoCatalogDeferredByWorkspace{false};
     QFileInfo m_pendingTerrainAutoCatalogMprPath;
     QElapsedTimer m_terrainAutoCatalogLoadTimer;
     qint64 m_terrainAutoCatalogFirstFrameMs{-1};

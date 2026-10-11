@@ -9506,6 +9506,7 @@ void CView::deferTerrainAutoCatalogBuild(const QFileInfo& mprFile)
     m_terrainAutoCatalogPending = true;
     m_terrainAutoCatalogBuildQueued = false;
     m_terrainAutoCatalogBuilding = false;
+    m_terrainAutoCatalogDeferredByWorkspace = false;
     m_pendingTerrainAutoCatalogMprPath = mprFile.absoluteFilePath();
     m_deferManualAtlasPalette = true;
     m_manualAtlasPaletteDirty = true;
@@ -9513,6 +9514,27 @@ void CView::deferTerrainAutoCatalogBuild(const QFileInfo& mprFile)
 
 void CView::queueDeferredTerrainAutoCatalogBuild()
 {
+    if(!m_terrainAutoCatalogPending)
+        return;
+    if(terrainCatalogWorkspaceHold(m_unitVisualPreparationSuspended, false))
+    {
+        if(m_terrainAutoCatalogFirstFrameMs < 0)
+        {
+            m_terrainAutoCatalogFirstFrameMs =
+                m_terrainAutoCatalogLoadTimer.isValid()
+                ? m_terrainAutoCatalogLoadTimer.elapsed() : -1;
+            ei::log(eLogInfo, QString(
+                "MPR first landscape frame file:%1 startToPaintCompleteMs:%2")
+                .arg(m_pendingTerrainAutoCatalogMprPath.fileName())
+                .arg(m_terrainAutoCatalogFirstFrameMs));
+        }
+        m_terrainAutoCatalogDeferredByWorkspace = true;
+        return;
+    }
+    // Once a first frame lands inside a full map open, keep the paint-only
+    // catalog lazy until a terrain edit/save action explicitly needs it.
+    if(m_terrainAutoCatalogDeferredByWorkspace)
+        return;
     if(terrainCatalogLoadAction(
            m_terrainAutoCatalogPending,
            m_terrainAutoCatalogBuildQueued,
@@ -9539,6 +9561,7 @@ bool CView::ensureTerrainAutoCatalogReady()
 {
     if(!m_terrainAutoCatalogPending)
         return !m_terrainAutoCatalogBuilding;
+    m_terrainAutoCatalogDeferredByWorkspace = false;
     if(terrainCatalogLoadAction(
            m_terrainAutoCatalogPending,
            m_terrainAutoCatalogBuildQueued,
@@ -9743,6 +9766,7 @@ void CView::unloadLand(bool promptForSave)
     m_terrainAutoCatalogPending = false;
     m_terrainAutoCatalogBuildQueued = false;
     m_terrainAutoCatalogBuilding = false;
+    m_terrainAutoCatalogDeferredByWorkspace = false;
     m_pendingTerrainAutoCatalogMprPath = QFileInfo();
     m_terrainAutoCatalogFirstFrameMs = -1;
     m_terrainEditAvailable = false;
@@ -16297,7 +16321,8 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
             {
                 ei::log(eLogInfo, "Workspace visual smoke complete");
                 emit unitVisualPreparationComplete();
-                if(!qApp->property("workspaceVisualSequence").isValid())
+                if(!qApp->property("workspaceVisualSequence").isValid()
+                        && !qApp->property("workspaceMapPairSequence").isValid())
                 {
                     QTimer::singleShot(500, this, [this]()
                     {

@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [string]$PackageRoot
+    [string]$PackageRoot,
+    [string]$PreviousPackageRoot,
+    [string[]]$AllowedRemovedPath = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,6 +83,23 @@ if (-not (Test-Path -LiteralPath $travelSource -PathType Leaf)) {
 }
 Copy-Item -LiteralPath $travelSource -Destination (Join-Path $root 'TRAVEL_EDITOR.md') -Force
 
+# Preserve the complete color-icon payload carried by historical Ataman
+# packages. The current source tree has no direct references to this directory;
+# keep it as part of the existing distribution composition contract.
+$colorIconSource = Join-Path (Split-Path -Parent $PSScriptRoot) 'packaging\assets\icons_color'
+$colorIconFiles = @(Get-ChildItem -LiteralPath $colorIconSource -File)
+if($colorIconFiles.Count -ne 23)
+{
+    throw "Expected 23 archived icons_color assets, found $($colorIconFiles.Count): $colorIconSource"
+}
+$colorIconDestination = Join-Path $root 'icons_color'
+$null = New-Item -ItemType Directory -Force -Path $colorIconDestination
+foreach($file in $colorIconFiles)
+{
+    Copy-Item -LiteralPath $file.FullName `
+        -Destination (Join-Path $colorIconDestination $file.Name) -Force
+}
+
 # Owner's finalization-133 policy: UTF-8 without BOM, CRLF package texts.
 # Normalize package copies only; source files and Git blobs stay untouched.
 $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
@@ -105,7 +124,17 @@ Get-ChildItem -LiteralPath $root -Recurse -File |
         "$hash *$relative"
     } | Set-Content -LiteralPath $checksums -Encoding ascii
 
-& (Join-Path $PSScriptRoot 'validate_distribution.ps1') $root
+$validatorArguments = @($root)
+if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot))
+{
+    $validatorArguments += @('-PreviousPackageRoot', $PreviousPackageRoot)
+}
+if($AllowedRemovedPath.Count -gt 0)
+{
+    $validatorArguments += '-AllowedRemovedPath'
+    $validatorArguments += $AllowedRemovedPath
+}
+& (Join-Path $PSScriptRoot 'validate_distribution.ps1') @validatorArguments
 if (-not $?) {
     exit 1
 }

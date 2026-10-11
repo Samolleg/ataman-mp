@@ -1,5 +1,16 @@
 # EI Mapper Ataman — roadmap
 
+## EI-MOB-LOAD-148 — ускорение открытия карты и восстановление состава пакета
+
+- Поручение 2026-10-12 от VERSION/установки147 на main `c2f4d6d43b6388363727844435f6df84eb6a7e1b`. Ожидалось: пятипрогонная cold/warm матрица по историческим сборкам и четырём картам; установить причину задержек MOB и каталога; оставить объекты, сцену и палитру прежними; вернуть v146 состав staging; сборка из git archive, два scoped-коммита и установка с rollback.
+- Разрешено менять только программу, packaging, тесты, VERSION/changelog/Readme/этот пункт/validation report и `build-*-148*`. Живые данные только читать; UI под `build-locks/ui-tests.lock`; без сети, новых зависимостей, редактора, игры/мода/Endurance, системного буфера и push. Ожидать завершения владельческого `EIMapperEndurance.exe` до 60 минут с проверкой раз в минуту. Не трогать `.claude/`, чужие rollback* и `world-terrain-controls.png`.
+- Готовность: MOB около v126 ±15%; paint catalog не блокирует открытие; сцена/счётчики/палитра сохранены; требуемый UI/terrain regressions; comparison manifest допускает только объяснённые удаления; staging 148 = v146 payload + новое, 0 необъяснённых удалений; guarded install сохраняет пользовательские файлы.
+- Статус реализации/тестов: в v148 deferred paint catalog/source hydration удерживается на время полного workspace open и создаётся при первом явном запросе инструмента покраски. v148 пять стадий на карту: gz1g 1699/116, MOB cold/warm median 1068/477 мс; gz9g 2080/196, 1385/657; gz7g 3327/221, 1278/860; bz1g 495/51, 482/197. Исторические install logs дали gz1g v126 1162 мс, v137 5813 мс; исторический пятипрогонный version matrix остановлен, так как старые Qt-сборки маршрутизируют script-workspace в профиль Windows вопреки APPDATA override. Детали и ограничение указаны в validation report. Сцена подтверждена по неизменным SHA входов и счётчикам, полный byte-roundtrip не делался.
+- Причина каталога: `72d75d0f`/`ff8b66bc` перенесли paint palette за первый landscape frame, но hydration всё ещё синхронно исполнялся на GUI thread; `a779e305` добавил в catalog HD variant bank. Версия 147 (`42d87a68`) каталог не меняла. Замер v148 после явного запроса на gz1g: catalog 1987 мс, source hydration 954 мс; эти ~5.0 с полной deferred-фазы не входят в карту-open.
+- Упаковка: сравнение v147 с v146 выявило 30 исчезнувших путей (7 heightmaps, 23 icons_color). Heightmaps — примеры импорта; color icon payload возвращён как исторический состав пакета без утверждения, что текущая программа использует эту тему. Validator требует эти файлы и падает при необъяснённом удалении.
+- Следующий шаг: scoped implementation commit, git-archive Release148 и чистый staging/manifest с нулём необъяснённых удалений; затем ожидание EXE, guarded install/readback и второй scoped commit передачи.
+ EI Mapper Ataman — roadmap
+
 ## EI-LANDSCAPE-PANEL-147 — единая русская панель покраски, рельефа и поверхностей
 
 - Поручение владельца 2026-10-11; база `main` `2d4a27c068e3b5b327c5089c69df6acc777cdef0`, установленная VERSION146. Задача: убрать неудобство тесной палитры, скрытых настроек и разрозненного sculpt; сохранить все действия overlay. Classic Auto исключить, Manual оставить удержанием C с прежним точным физическим размещением.

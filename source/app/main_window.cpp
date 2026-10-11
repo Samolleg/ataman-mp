@@ -2236,7 +2236,8 @@ MainWindow::MainWindow(QWidget* parent) :
     CBackupManager backupManager;
     const bool workspaceSmoke = qApp->property("workspaceLoadSmoke").toBool()
         || qApp->property("workspaceVisualSmoke").toBool()
-        || qApp->property("workspaceVisualSequence").isValid();
+        || qApp->property("workspaceVisualSequence").isValid()
+        || qApp->property("workspaceMapPairSequence").isValid();
     m_backupSessionStarted = workspaceSmoke ? false : backupManager.beginEditorSession(
         &recoveries, &backupSessionError);
     if(workspaceSmoke)
@@ -5798,7 +5799,8 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
     // every normal validation trigger remain unchanged.
     if(qApp && (qApp->property("workspaceLoadSmoke").toBool()
             || qApp->property("workspaceVisualSmoke").toBool()
-            || qApp->property("workspaceVisualSequence").isValid()))
+            || qApp->property("workspaceVisualSequence").isValid()
+            || qApp->property("workspaceMapPairSequence").isValid()))
         return;
     if(m_validationTimer)
         m_validationTimer->start(qMax(0, delayMs));
@@ -7039,6 +7041,13 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
                              const QString& zoneId)
 {
     openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF(), QPointF());
+}
+
+void MainWindow::openMapPairForLoadSmoke(const QString& mprPath,
+                                         const QString& mobPath,
+                                         const QString& zoneId)
+{
+    openMapPair(mprPath, mobPath, zoneId);
 }
 
 void MainWindow::openNeighborMapPair(const QString& mprPath,

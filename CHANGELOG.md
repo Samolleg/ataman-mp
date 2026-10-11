@@ -1,3 +1,9 @@
+## Ataman 148 — EI-MOB-LOAD-148 — 2026-10-12
+
+- Opening a map no longer waits for the terrain paint catalog, global material source hydration, or thumbnail palette construction. These remain available and build on the first explicit terrain paint action.
+- Added phase-level MOB and ordinary map-pair smoke telemetry. Diagnostic results and full package handoff: `docs/validation/ATAMAN_MOB_LOAD_148_20261012.md`.
+- Distribution validation requires the tracked `heightmaps/` examples and legacy `icons_color/` payload, and compares the package against a previous manifest to reject unexplained removals.
+
 ## Ataman 147 — EI-LANDSCAPE-PANEL-147 — 2026-10-11
 
 - Правая панель объединяет «Покраска / Рельеф / Поверхности»; режимы overlay сохранены и собраны во вкладке «Поверхности».

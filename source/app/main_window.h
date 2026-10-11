@@ -104,6 +104,9 @@ public:
     bool replaceLoadedLandscape(const QFileInfo& fileName);
     bool loadMobWithProgress(QFileInfo fileName);
     bool loadLandscapeWithProgress(const QFileInfo& fileName);
+    void openMapPairForLoadSmoke(const QString& mprPath,
+                                 const QString& mobPath,
+                                 const QString& zoneId);
     void configureAutosaveTimer();
     void configureAutosaveTimer(bool enabled, int intervalMinutes);
     void performAutosave();
