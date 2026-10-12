@@ -22,4 +22,16 @@ Ordinary Save previously built/reopened the entire RES candidate in CView and ag
 
 ## Final build and delivery
 
-Pending: fresh Release159, same-angle paint measurement, changed-atlas world seam/UI checks, guarded permanent-install update. Owner mapper remains open; it must not be terminated by the agent. Completion of the functional158 task is not a blanket performance acceptance.
+Final program source: main `8af2c3144dd145f2ba01ce4a437ef428bc085fa2` (implementation `96db02cdf521670d33c29da0f787af3bb9aec12b` plus rollback guard). Fresh snapshot `C:/Users/samol/AppData/Local/Temp/Ataman159-performance-final-b`, build `build-release-159-clean/release/EIMapperEndurance.exe`. EXE SHA256 `279BE1D25A9DA789AC8AC7FFB8AD4716726831D2424C1DF52FB1549DE0A31D6F`. The earlier clean snapshot preceded the rollback fix and is not the deliverable.
+
+- Final same-angle zone1 run `build-tests-155-matrix/fixture-release156/perf159-final-same-angle`:36/0. Identical 41/54 changed-tile strokes to baseline. Release224309us/16397us against5966538us/5569579us; movement6196–16389us. First press193303us still includes the first atlas expansion; subsequent press10139us. No claim of zero first-use cost.
+- Final `ui159-final`:exit0, widget interaction/lifecycle PASS.
+- Final `build-tests-158-seam/stroke159-final`:57 PASS, no FAIL, exit0. Real two-map native stroke, exact Undo/Redo, shared Save, reopened border pixels and untouched neighboring MOB. Viewed `stroke-after-viewport.png`; the changed upload path retains terrain and the continuous seam.
+- Final `build-tests-157-hd/perf159-save-rollback-final`:23/0, exit0. Test-owned Windows read handle denies replacing only the private MPR. RES publishes, MPR atomic replacement fails, verified candidate SHA permits exact RES rollback. Both original MPR bytes and original RES SHA are preserved. The inherited dialog conservatively reports MPR manual recovery although that file remained unchanged; deferred message issue, not an observed data-loss result. This test validates the rollback fix rather than repeating the happy-path save.
+- Clipboard isolation: nativeAttempts0. No live map/resource writes; no interactive editor launched.
+
+Staging `build-staging-159-performance-final`, version159 confirmed. Finalizer PASS:139 managed paths,0 removed, removed only stage-generated workflow.log. Manifest SHA256 `310A93789677EF941C7E1A47B267BE36B743559B1778F11FE36C04915FB5AF00`. The finalized staging directory was not launched again or edited.
+
+Installed on2026-10-13 after the host process check found the owner editor closed: `artifacts/EI-Mapper-Ataman-2-first-test`,158→159.139 managed files,6 replaced/1 added/0 removed; installed managed hashes match staging.23824 unlisted owner files preserved, before/after digest `4AC4B6F31767759BB0C3A65B8C9CBA04770223D11B95F8805109966ACF777DE3`. Receipt `build-tests-159-release/install-receipt.txt`. Retained verified rollback158: `artifacts/rollback158-EI-PERFORMANCE-159-20261012`. Removed only the identified own rollback156 (7 files), preserving foreign older rollback folders; receipt `build-tests-159-release/rollback-cleanup-receipt.txt`.
+
+Program implementation and delivery complete. Full owner MOB-scene interaction and gameplay are not claimed as covered by these bounded tests. Whole-archive Save remains noninstantaneous; this change removes redundant work while retaining backup and integrity checks.
