@@ -218,7 +218,7 @@ void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation()
     tools.resize(280, 1100);
     QTest::qWait(100);
     QVERIFY(buttonFor(102)->isChecked());
-    QVERIFY(buttonFor(100)->width() >= 64);
+    QVERIFY(buttonFor(100)->width() >= 32); // A narrow dock can scale its four previews down.
     QVERIFY2(buttonFor(102)->geometry().right() <= scroll->viewport()->width(),
              qPrintable(QStringLiteral("button right=%1 viewport width=%2 scroll area width=%3")
                  .arg(buttonFor(102)->geometry().right())
@@ -226,6 +226,7 @@ void LandscapeToolsWidgetTests::paintPaletteUsesVisibleWidthOnFirstActivation()
     tools.resize(420, 1100);
     QTest::qWait(100);
     QCOMPARE(buttonFor(102)->pos(), firstPosition);
+    QVERIFY(buttonFor(100)->width() >= 64); // Full-width dock retains large previews.
     auto* filter = tools.findChild<QLineEdit*>(QStringLiteral("terrainPaintFilter"));
     QVERIFY(filter);
     filter->setText(QStringLiteral("Grass 2"));
@@ -1101,6 +1102,26 @@ void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
     QCOMPARE(paintSegment->font().pixelSize(), 20);
     qApp->setProperty("enduranceUiScalePercent", previousScale);
     tools.setFont(panelFont);QApplication::processEvents();
+    auto* tileSize = tools.findChild<QSlider*>("terrainPaletteColumns");
+    auto* materialScroll = tools.findChild<QScrollArea*>("groundMaterialScroll");
+    QVERIFY(tileSize && materialScroll);
+    const auto previewSize = [materialScroll]() {
+        const auto buttons=materialScroll->findChildren<QToolButton*>();
+        return buttons.isEmpty() ? 0 : buttons.first()->iconSize().width();
+    };
+    tileSize->setValue(3);QApplication::processEvents();
+    const int smallPreview = previewSize();
+    QVERIFY(smallPreview>0);
+    tileSize->setValue(8);
+    QTRY_VERIFY(previewSize()>smallPreview);
+    tileSize->setValue(6);QApplication::processEvents();
+    choice.authoredThumbnails = {choice.thumbnail,choice.thumbnail,choice.thumbnail};
+    choice.thumbnail = QImage();
+    choice.assignedSlots = 3;
+    tools.setPaintMaterials({choice}, {}, {}, 3, 3);
+    const auto authoredButtons = variantStrip->findChildren<QToolButton*>();
+    QCOMPARE(authoredButtons.size(), 3);
+    QVERIFY(variantTitle->text().contains(QStringLiteral("3 исходных + 0 сгенерированных")));
     tools.setPaintMaterials({}, {}, {}, 0, 0);
     QVERIFY(variantTitle->isHidden());
     QVERIFY(variantStrip->isHidden());
@@ -1160,7 +1181,7 @@ void LandscapeToolsWidgetTests::sharedBrushSizePersistsAcrossModes()
 {
     const QString sizeKey = QStringLiteral("ui/landscape/brushSize");
     const QString shapeKey = QStringLiteral("ui/landscape/brushShape");
-    const QString columnsKey = QStringLiteral("ui/landscape/paletteColumns");
+    const QString columnsKey = QStringLiteral("ui/landscape/paletteTileSize");
     QSettings().remove(sizeKey);
     QSettings().remove(shapeKey);
     QSettings().remove(columnsKey);
@@ -1176,8 +1197,8 @@ void LandscapeToolsWidgetTests::sharedBrushSizePersistsAcrossModes()
     square->click();
     QCOMPARE(tools.paintShape(), ETerrainTileBrushShape::Square);
     size->setValue(7);
-    columns->setValue(6);
-    QCOMPARE(QSettings().value(columnsKey).toInt(), 6);
+    columns->setValue(7);
+    QCOMPARE(QSettings().value(columnsKey).toInt(), 7);
     QCOMPARE(tools.radius(), 7.0f);
     QCOMPARE(tools.paintShape(), ETerrainTileBrushShape::Square);
     tools.activateMode(ELandscapeEditMode::Sculpt, false);
@@ -1197,7 +1218,7 @@ void LandscapeToolsWidgetTests::sharedBrushSizePersistsAcrossModes()
     tools.adjustSculptRadius(2);
     QCOMPARE(size->value(), 9);
     CLandscapeTools restored;
-    QCOMPARE(restored.findChild<QSlider*>("terrainPaletteColumns")->value(), 6);
+    QCOMPARE(restored.findChild<QSlider*>("terrainPaletteColumns")->value(), 7);
     QCOMPARE(restored.radius(), 9.0f);
     QCOMPARE(restored.paintRadius(), 8.0f); // UI size 9 maps to zero-based brush radius 8
     QCOMPARE(restored.paintShape(), ETerrainTileBrushShape::Square);

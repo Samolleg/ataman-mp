@@ -790,7 +790,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_circlePaintShape->setChecked(!squareBrush);
     m_squarePaintShape->setChecked(squareBrush);
     const QString strongChoiceStyle = QStringLiteral(
-        "QToolButton { border: 1px solid palette(mid); border-radius: 8px; padding: 4px 7px; }"
+        "QToolButton { border: 1px solid palette(mid); border-radius: 8px; padding: 3px 4px; }"
         "QToolButton:hover { border-color: #2f6fb5; }"
         "QToolButton:checked { border: 2px solid #2f6fb5; "
         "background: #1f3a5c; color: #8fc1ff; font-weight: 600; }");
@@ -849,8 +849,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QHBoxLayout* shapeRow = new QHBoxLayout;
     shapeRow->setContentsMargins(0, 0, 0, 0);
     shapeRow->setSpacing(4);
-    m_circlePaintShape->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_squarePaintShape->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_circlePaintShape->setText(tr("● Круг"));
+    m_squarePaintShape->setText(tr("■ Квадрат"));
+    m_circlePaintShape->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_squarePaintShape->setToolButtonStyle(Qt::ToolButtonTextOnly);
     shapeRow->addWidget(m_circlePaintShape);
     shapeRow->addWidget(m_squarePaintShape);
     shapeRow->addStretch(1);
@@ -1087,7 +1089,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paletteColumns->setObjectName(QStringLiteral("terrainPaletteColumns"));
     paletteColumns->setRange(3, 8);
     paletteColumns->setValue(qBound(3, settings.value(
-        QStringLiteral("ui/landscape/paletteColumns"), 4).toInt(), 8));
+        QStringLiteral("ui/landscape/paletteTileSize"), 6).toInt(), 8));
     QLabel* paletteColumnsValue = new QLabel(QString::number(paletteColumns->value()),
                                                paletteColumnControl);
     columnRow->addWidget(columnLabel);
@@ -1096,7 +1098,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintLayout->insertWidget(3, paletteColumnControl);
     connect(paletteColumns, &QSlider::valueChanged, this, [this, paletteColumnsValue](int value) {
         paletteColumnsValue->setText(QString::number(value));
-        QSettings().setValue(QStringLiteral("ui/landscape/paletteColumns"), value);
+        QSettings().setValue(QStringLiteral("ui/landscape/paletteTileSize"), value);
         refreshPaletteColumns();
     });
     auto* optionCaption = new QLabel(tr("Опции покраски — всегда на виду"), m_paintControls);
@@ -2317,7 +2319,7 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setCheckable(true);
               button->setAutoRaise(false);
               button->setStyleSheet(QStringLiteral(
-                  "QToolButton { border: 1px solid palette(mid); border-radius: 4px; padding: 2px; }"
+                  "QToolButton { border: 1px solid palette(mid); border-radius: 4px; padding: 0px; }"
                   "QToolButton:hover { border-color: #2f6fb5; }"
                   "QToolButton:checked { border: 3px solid #2f6fb5; "
                   "background: #1f3a5c; padding: 0px; }"));
@@ -2336,7 +2338,7 @@ void CLandscapeTools::rebuildMaterialPalette()
               if(!choice.thumbnail.isNull())
               {
                   button->setIcon(QPixmap::fromImage(choice.thumbnail));
-                  button->setIconSize(QSize(60, 60));
+                  button->setIconSize(QSize(m_paletteCellSize-4, m_paletteCellSize-4));
               }
               else
               {
@@ -2348,19 +2350,13 @@ void CLandscapeTools::rebuildMaterialPalette()
                       : tr("No exact reviewed-HD preview is available.\n"))
                       + button->toolTip());
               }
-              button->setMinimumSize(70, 70);
+              button->setMinimumSize(m_paletteCellSize, m_paletteCellSize);
               connect(button, &QToolButton::clicked, this,
                       [this, choice]() { updateVariantStrip(choice); });
               if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
-                  auto menu=new QMenu(button);
-                  for(int i=0;i<choice.generatedIds.size();++i){
-                      auto action=menu->addAction(QPixmap::fromImage(choice.generatedThumbnails.value(i)),tr("Сгенерирован: %1").arg(choice.generatedIds[i]));
-                      action->setToolTip(tr("Вариант участвует в покраске этого материала при включённой опции."));
-                  }
-                  button->setMenu(menu);button->setPopupMode(QToolButton::MenuButtonPopup);
-                  button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Стрелка открывает список с миниатюрами и ID.").arg(choice.generatedIds.size()));
+                  button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Миниатюры и ID показаны в ленте выбранного материала.").arg(choice.generatedIds.size()));
               }
-              button->setMaximumHeight(72);
+              button->setMaximumHeight(m_paletteCellSize);
               button->setSizePolicy(QSizePolicy::Expanding,
                                     QSizePolicy::Fixed);
               group->addButton(button);
@@ -2451,6 +2447,8 @@ void CLandscapeTools::updateVariantStrip(
         delete item;
     }
     bool hasVariants = !choice.thumbnail.isNull();
+    for(const QImage& image : choice.authoredThumbnails)
+        hasVariants = hasVariants || !image.isNull();
     if(generatedHdVariants())
         for(const QImage& image : choice.generatedThumbnails)
             hasVariants = hasVariants || !image.isNull();
@@ -2480,13 +2478,19 @@ void CLandscapeTools::updateVariantStrip(
         m_variantStripLayout->addWidget(button);
         button->show();
     };
-    addVariant(tr("Исходный"), choice.thumbnail,
-               tr("Исходный тайл материала %1").arg(choice.name));
+    if(choice.authoredThumbnails.isEmpty())
+        addVariant(tr("Исходный"), choice.thumbnail,
+                   tr("Исходный тайл материала %1").arg(choice.name));
+    else
+        for(int index=0;index<choice.authoredThumbnails.size();++index)
+            addVariant(tr("Исх. %1").arg(index+1), choice.authoredThumbnails.at(index),
+                       tr("Исходный вариант %1 материала %2").arg(index+1).arg(choice.name));
     if(generatedHdVariants())
         for(int index = 0; index < choice.generatedIds.size(); ++index)
-            addVariant(tr("HD · %1").arg(choice.generatedIds.at(index)),
+            addVariant(tr("HD %1").arg(index+1),
                        choice.generatedThumbnails.value(index),
-                       tr("Сгенерированный вариант материала %1").arg(choice.name));
+                       tr("Сгенерированный вариант %1 материала %2")
+                           .arg(choice.generatedIds.at(index)).arg(choice.name));
     m_variantStripLayout->addStretch(1);
     if(strip && strip->widget())
         strip->widget()->show();
@@ -2580,13 +2584,15 @@ void CLandscapeTools::refreshPaletteColumns(bool rebuild)
         viewportWidth = m_paintModeTabs->width() - 16;
     if(viewportWidth < 70)
         viewportWidth = width() - 24;
-    const int requestedColumns = qBound(3, QSettings().value(
-        QStringLiteral("ui/landscape/paletteColumns"), 4).toInt(), 8);
-    const int fittingColumns = qMax(3, (qMax(210, viewportWidth) - 12) / 70);
-    const int columns = qMin(requestedColumns, qMin(8, fittingColumns));
-    if(columns == m_paletteColumns)
+    const int tileSize = qBound(3, QSettings().value(
+        QStringLiteral("ui/landscape/paletteTileSize"), 6).toInt(), 8);
+    const int requestedColumns = 10-tileSize;
+    const int columns = qBound(1, requestedColumns, qMax(1,(viewportWidth-12)/38));
+    const int cellSize = qBound(32,(viewportWidth-12-(columns-1)*6)/columns,128);
+    if(columns == m_paletteColumns && cellSize == m_paletteCellSize)
         return;
     m_paletteColumns = columns;
+    m_paletteCellSize = cellSize;
     if(rebuild)
         requestMaterialPaletteRebuild();
 }

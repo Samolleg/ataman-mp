@@ -37,6 +37,7 @@ struct STerrainPaintMaterialChoice
     QString name;
     QString familyName;
     QImage thumbnail;
+    QVector<QImage> authoredThumbnails;
     // The semantic brush is already selectable while its exact reviewed-HD
     // artwork is verified off the UI thread.  A pending entry must never fall
     // back to misleading initials that look like a finished brush preview.
@@ -318,6 +319,7 @@ private:
     void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
     void refreshVariantStrip();
     bool m_updatingPanelFontStyle{false};
+    int m_paletteCellSize{64};
     QButtonGroup* activeMaterialButtons() const;
 };
 

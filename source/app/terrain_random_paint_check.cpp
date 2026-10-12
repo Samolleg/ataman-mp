@@ -40,6 +40,8 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QTabWidget>
+#include <QScrollArea>
+#include <climits>
 
 namespace {
 QByteArray read(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }
@@ -139,6 +141,16 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
         }
         log<<"TIMING thumbnailWaitMs="<<thumbnails.elapsed()<<'\n';
+        if(fixture.value("panelOnly").toBool()) {
+            int families=0,available=0;
+            for(const auto& choice:view.m_modernLandPaintChoices) {
+                int sources=0;for(const auto& image:choice.authoredThumbnails)sources+=!image.isNull();
+                if(sources>1)++families;available+=sources;
+                check(choice.authoredThumbnails.size()==choice.assignedSlots,"authored strip retains exact source count");
+            }
+            log<<"ORIGINALS multiSourceFamilies="<<families<<" available="<<available<<'\n';
+            check(families>0,"real-map palette supplies several verified originals per material");
+        }
         panel.activateMode(ELandscapeEditMode::TilePaint,true);panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         int land=0,overlay=0;
         for(const auto& family:view.m_terrainGlobalFamilies) {
@@ -156,7 +168,20 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 panel.resize(width,1000);
                 for(auto mode : {ELandscapeEditMode::TilePaint,ELandscapeEditMode::Sculpt,ELandscapeEditMode::OverlaySurface}) {
                     panel.activateMode(mode,true);
-                    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                    QElapsedTimer layout;layout.start();
+                    while(layout.elapsed()<300) {
+                        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
+                    }
+                    if(mode==ELandscapeEditMode::TilePaint) {
+                        auto* scroll=panel.findChild<QScrollArea*>("groundMaterialScroll");
+                        int firstY=INT_MAX,columns=0;
+                        if(scroll)for(auto* button:scroll->findChildren<QToolButton*>())
+                            if(button->property("terrainMaterialId").isValid() && button->isVisible())firstY=qMin(firstY,button->y());
+                        if(scroll)for(auto* button:scroll->findChildren<QToolButton*>())
+                            if(button->property("terrainMaterialId").isValid() && button->isVisible() && button->y()==firstY)++columns;
+                        log<<"LAYOUT width="<<width<<" firstMaterialRow="<<columns<<" fontPx="<<panel.font().pixelSize()<<'\n';
+                        check(columns==4,"default real-map palette has four tiles per row");
+                    }
                     check(panel.grab().save(output+QString("/panel-%1-%2.png").arg(width).arg(int(mode))),"real-map panel snapshot");
                 }
             }

@@ -937,6 +937,28 @@ QImage cachedGlobalUniformSource(
     return QImage();
 }
 
+QVector<QImage> authoredGlobalSourcePreviews(
+    const STerrainGlobalMaterialFamily& family,
+    const QString& currentNamespace, const QByteArray& currentAtlasHash,
+    const QVector<QImage>& currentTiles, const QSize& requiredSize,
+    const QMap<QString,QImage>& cache, bool includeCached)
+{
+    QVector<QImage> images;
+    images.reserve(family.sources.size());
+    for(const auto& source : family.sources) {
+        STerrainGlobalMaterialFamily single = family;
+        single.sources = {source};single.thumbnailSources.clear();
+        QImage image = currentMapGlobalUniformSource(single,currentNamespace,
+            currentAtlasHash,currentTiles);
+        if(image.isNull() && includeCached)
+            image = cachedGlobalUniformSource(single,currentNamespace,requiredSize,cache);
+        // Preserve source positions. An unavailable exact source stays visibly
+        // unavailable rather than becoming a copy of the primary thumbnail.
+        images.append(image);
+    }
+    return images;
+}
+
 QVector4D aiGraphLayerColor(int layer)
 {
     static const QVector4D colors[CAiGraphDocument::LayerCount] = {
@@ -12275,6 +12297,9 @@ void CView::rebuildTerrainAutoCatalog()
             choice.thumbnail = source;
             choice.thumbnailPending = source.isNull();
             choice.assignedSlots = family.sources.size();
+            choice.authoredThumbnails = authoredGlobalSourcePreviews(family,
+                mprNamespace,m_terrainAtlasProfile.atlasPixelSha256,
+                m_pTileForm->tileImages(),QSize(),m_terrainGlobalUniformTileCache,false);
             if(generatedBank) {
                 for(const auto& entry:TerrainHdVariantBank::forMaterial(*generatedBank,family.name,family.runtimeTerrainType,family.layer)) {
                     choice.generatedIds.append(entry.id);choice.generatedThumbnails.append(entry.pixels.scaled(64,64));
@@ -12507,8 +12532,8 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
 
     for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
     {
-        if(m_terrainGlobalMaterialSources.contains(family.id))
-            continue;
+        // A current-map primary preview does not cover every original variant.
+        // Hydrate other exact sources in the background for the selected strip.
         QVector<STerrainGlobalMaterialSource> ordered;
         const auto appendUnique = [&ordered](
             const STerrainGlobalMaterialSource& source) {
@@ -12673,6 +12698,16 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
                 choice.thumbnailPending = pending;
                 changed = true;
             }
+            if(complete)for(const auto& family:m_terrainGlobalFamilies)
+                if(family.id==choice.id) {
+                    const auto originals=authoredGlobalSourcePreviews(family,
+                        m_mprDocument.mapInfo().innerNamespace,m_terrainAtlasProfile.atlasPixelSha256,
+                        m_authoredTerrainTileImages,
+                        m_authoredTerrainTileImages.isEmpty()?QSize():terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages),
+                        m_terrainGlobalUniformTileCache,true);
+                    if(choice.authoredThumbnails!=originals) {choice.authoredThumbnails=originals;changed=true;}
+                    break;
+                }
         }
     };
     updateChoices(&m_modernLandPaintChoices);
