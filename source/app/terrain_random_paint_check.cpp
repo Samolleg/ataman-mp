@@ -167,6 +167,11 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[](const QString&,bool* accepted){if(accepted)*accepted=true;});
         QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){
             for(auto* widget:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(widget)) {
+                if(box->text().startsWith(QStringLiteral("Saving this draft will replace atlas/profile entries"))
+                   && box->standardButtons().testFlag(QMessageBox::Yes)) {
+                    log<<"Accept copied-HDPack draft replacement\n";
+                    box->button(QMessageBox::Yes)->click();continue;
+                }
                 log<<"Unexpected save dialog: "<<box->text()<<'\n';++failed;box->reject();
             }
         });dismiss.start(50);
