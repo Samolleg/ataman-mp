@@ -2,6 +2,7 @@
 #include "terrain_mixed_edge.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_semantic_field_store.h"
+#include "world_material_boundary.h"
 #include "mpr_document.h"
 #include "res_archive_document.h"
 #include "endurance_document.h"
@@ -84,6 +85,25 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,output+"/settings");
     QSettings::setPath(QSettings::IniFormat,QSettings::SystemScope,output+"/settings");
     QSettings().remove(QStringLiteral("ui/landscape/modernMixedEdge"));
+    {
+        const QPair<qint32,qint32> pair(41,73);
+        QVector<QImage> bankImages(2,QImage(128,128,QImage::Format_RGB32));
+        bankImages[0].fill(QColor(175,82,37));bankImages[1].fill(QColor(44,119,181));
+        QMap<qint32,QVector<int>> uniforms;uniforms[pair.first]={0};uniforms[pair.second]={1};
+        QMap<QPair<qint32,qint32>,QVector<int>> noStock;
+        QMap<int,STerrainTransitionSignature> noSignatures;
+        const QSet<QPair<qint32,qint32>> pairs{pair};
+        QMap<QPair<qint32,qint32>,STerrainRecipeBrush> local,worldA,worldB;
+        check(!CTerrainMixedEdge::buildStockBrushes(bankImages,uniforms,noStock,noSignatures,
+            pairs,&local,nullptr,false),"single-map mixed-edge still refuses a missing reviewed pair");
+        const bool generatedA=CTerrainMixedEdge::buildStockBrushes(bankImages,uniforms,noStock,
+            noSignatures,pairs,&worldA,nullptr,true);
+        const bool generatedB=CTerrainMixedEdge::buildStockBrushes(bankImages,uniforms,noStock,
+            noSignatures,pairs,&worldB,nullptr,true);
+        check(generatedA&&generatedB&&worldA.value(pair).ownership.size()==512*65
+            &&worldA.value(pair).ownership==worldB.value(pair).ownership,
+            "world mixed-edge fallback is deterministic for the shared material key");
+    }
     {
         CLandscapeTools panel;panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         auto option=panel.findChild<QCheckBox*>("modernMixedEdge");
@@ -317,6 +337,50 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     check(undoCells && atlas.stateFingerprint()==beforeAtlas->stateFingerprint(),"Undo exact SEC and atlas fingerprint");
     check(atlas.commitStaging(*staged)&&model.installWorkingAtlasSlotTypes(atlas.activeTileTypes())&&model.apply(stroke,true,&report),"one transaction Redo");
     check(atlas.stateFingerprint()==afterFingerprint,"Redo exact atlas fingerprint");
+    if(!real)
+    {
+        CTerrainEditModel left=model,right=model;
+        auto leftAtlas=atlas.createStagingCopy(),rightAtlas=atlas.createStagingCopy();
+        SWorldMaterialRepairMap lm,rm;lm.id="left";rm.id="right";rm.origin=QPointF(w*2,0);
+        lm.geometry=&left;rm.geometry=&right;lm.catalog=&leftAtlas->catalog();rm.catalog=&rightAtlas->catalog();
+        left.copyVirtualMaterialField(ETerrainTileLayer::Land,&lm.field,false);
+        right.copyVirtualMaterialField(ETerrainTileLayer::Land,&rm.field,false);
+        const QVector<SWorldMaterialRepairMap> cohort{lm,rm};
+        const auto worldPlan=planWorldMaterialRepair(cohort,true);
+        const auto seamSides=worldMaterialSeamSides(cohort);
+        auto setField=[&](CTerrainEditModel* target,const CTerrainVirtualMaterialField& field) {
+            QVector<qint32> current,base;target->copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&current,&base);
+            for(int y=0;y<=h;++y)for(int x=0;x<=w;++x)current[y*(w+1)+x]=field.material(x,y);
+            return target->restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,current,base,&report);
+        };
+        bool cohortOk=setField(&left,worldPlan.fields.value("left"))
+            &&setField(&right,worldPlan.fields.value("right"));
+        QSet<int> lc,rc;for(int cell:seamSides.value("left").keys())lc.insert(cell);
+        for(int cell:seamSides.value("right").keys())rc.insert(cell);
+        auto lcmd=CTerrainMixedEdge::resolve(left,leftAtlas.data(),lc,materialTypes,{},QPoint(),0,17,false,&report);
+        auto rcmd=CTerrainMixedEdge::resolve(right,rightAtlas.data(),rc,materialTypes,{},QPoint(w,0),0,17,false,&report);
+        cohortOk=cohortOk&&!report.hasErrors()&&left.installWorkingAtlasSlotTypes(leftAtlas->activeTileTypes())
+            &&right.installWorkingAtlasSlotTypes(rightAtlas->activeTileTypes())
+            &&left.apply(lcmd,true,&report)&&right.apply(rcmd,true,&report);
+        QMap<qint32,QImage> sources;for(int id=1;id<=4&&id<=images.size();++id)sources[id]=images[id-1];
+        const QSize size=images.first().size();QImage placeholder(size,QImage::Format_RGBA8888);placeholder.fill(Qt::transparent);
+        CTerrainVirtualAtlas shared(CTerrainTransitionCatalog(),{placeholder},0,sources,{},true);
+        QMap<QByteArray,QImage> cache;bool edgePixelsMatch=cohortOk;int checkedRows=0;
+        const auto leftSides=seamSides.value("left"),rightSides=seamSides.value("right");
+        for(auto side=leftSides.cbegin();side!=leftSides.cend();++side) {
+            const int x=side.key()%w,y=side.key()/w;
+            const int rx=y*w;if(!rightSides.contains(rx))continue;
+            const auto leftSig=worldPlan.fields.value("left").cellSignature(x,y);
+            const auto rightSig=worldPlan.fields.value("right").cellSignature(0,y);
+            const auto lp=shared.worldBoundaryTile(leftSig,left,QPointF(0,0),x,y,side.value(),&cache,&report);
+            const auto rp=shared.worldBoundaryTile(rightSig,right,QPointF(w*2,0),0,y,rightSides.value(rx),&cache,&report);
+            if(lp.isNull()||rp.isNull()){edgePixelsMatch=false;continue;}
+            for(int py=0;py<lp.height();++py)edgePixelsMatch&=lp.pixel(lp.width()-1,py)==rp.pixel(0,py);
+            ++checkedRows;
+        }
+        check(cohortOk&&edgePixelsMatch&&checkedRows>0,
+            "two-map mixed-edge planner resolves both private atlases and exact shared boundary pixels");
+    }
     auto repeat=atlas.createStagingCopy();CValidationReport repeatReport;
     auto repeated=CTerrainMixedEdge::resolve(model,repeat.data(),affected,materialTypes,{},QPoint(),paint,17,false,&repeatReport);
     check(!repeatReport.hasErrors()&&repeated.deltas.isEmpty()&&repeat->activeTileCount()==used,"repeat stroke reuses all physical slots");

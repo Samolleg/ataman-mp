@@ -315,6 +315,82 @@ bool CTerrainRecipeBaker::makeBrush(qint32 a, qint32 b,
     *output=result; if(error) error->clear(); return true;
 }
 
+QImage CTerrainRecipeBaker::makeOpaqueMaterialSource(const QImage& source)
+{
+    if(source.isNull() || source.width()!=source.height())return {};
+    bool fullyOpaque=true;
+    for(int y=0;y<source.height()&&fullyOpaque;++y)
+        for(int x=0;x<source.width();++x)
+            if(qAlpha(source.pixel(x,y))!=255){fullyOpaque=false;break;}
+    if(fullyOpaque)return source;
+
+    const QImage input=source.convertToFormat(QImage::Format_ARGB32);
+    const int width=input.width(),height=input.height(),count=width*height;
+    QVector<int> nearest(count,-1),queue;queue.reserve(count);
+    int maxAlpha=0;
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x)
+        maxAlpha=qMax(maxAlpha,qAlpha(input.pixel(x,y)));
+    if(maxAlpha==0)return {};
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+        const int index=y*width+x;
+        if(qAlpha(input.pixel(x,y))==255) {
+            nearest[index]=index;queue.append(index);
+        }
+    }
+    if(queue.isEmpty())for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+        const int index=y*width+x;
+        if(qAlpha(input.pixel(x,y))==maxAlpha){nearest[index]=index;queue.append(index);}
+    }
+    for(int head=0;head<queue.size();++head) {
+        const int index=queue[head],x=index%width,y=index/width;
+        const int neighbors[4]={x>0?index-1:-1,x+1<width?index+1:-1,
+            y>0?index-width:-1,y+1<height?index+width:-1};
+        for(int other:neighbors)if(other>=0&&nearest[other]<0) {
+            nearest[other]=nearest[index];queue.append(other);
+        }
+    }
+    QImage result(width,height,QImage::Format_ARGB32);
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x) {
+        const int index=y*width+x;
+        const int baseIndex=nearest[index];
+        const QRgb pixel=input.pixel(x,y),base=input.pixel(baseIndex%width,baseIndex/width);
+        const int alpha=qAlpha(pixel),inverse=255-alpha;
+        const auto blend=[&](int value,int background) {
+            return (value*alpha+background*inverse+127)/255;
+        };
+        result.setPixel(x,y,qRgba(blend(qRed(pixel),qRed(base)),
+            blend(qGreen(pixel),qGreen(base)),blend(qBlue(pixel),qBlue(base)),255));
+    }
+    return result;
+}
+
+bool CTerrainRecipeBaker::makeDeterministicWorldBrush(qint32 first,qint32 second,
+    STerrainRecipeBrush* output,QString* error)
+{
+    if(!output||first<=0||second<=first) {
+        if(error)*error=QStringLiteral("World brush requires an ordered positive material pair.");
+        return false;
+    }
+    QVector<float> strip(512*65,0.f);
+    quint32 state=quint32(first)*0x9e3779b9u
+        ^ quint32(second)*0x85ebca6bu ^ 0x43524f53u;
+    if(state==0)state=1;
+    const double phase=double((state>>8)&0xffffu)/65536.0*6.283185307179586;
+    for(int row=0;row<512;++row) {
+        const double wave=32.0+5.0*std::sin(row*6.283185307179586/83.0+phase)
+            +2.0*std::sin(row*6.283185307179586/27.0+phase*1.7);
+        state=state*1664525u+1013904223u;
+        const double edge=wave+(double((state>>24)&0xffu)/255.0-.5)*2.0;
+        for(int column=0;column<65;++column) {
+            const double t=qBound(0.0,(column-edge+2.0)/4.0,1.0);
+            strip[row*65+column]=float(t*t*(3.0-2.0*t));
+        }
+    }
+    if(!makeBrush(first,second,{strip},output,error))return false;
+    sharpenStockBrush(output);
+    return true;
+}
+
 void CTerrainRecipeBaker::sharpenStockBrush(STerrainRecipeBrush* brush)
 {
     if(!brush || brush->ownership.size()!=512*65) return;

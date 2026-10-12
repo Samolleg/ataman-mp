@@ -14408,14 +14408,43 @@ bool CView::loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
         const QImage pixels=loadBoundGlobalUniformSource(family,QString(),size,
             &m_terrainGlobalBoundAtlasCache,&m_terrainGlobalTransitionMissingPages,
             &m_terrainGlobalUniformTileCache);
-        if(pixels.isNull()) {
+        const QImage opaque=CTerrainRecipeBaker::makeOpaqueMaterialSource(pixels);
+        if(opaque.isNull()) {
             report->add("terrain.world.material_source",EValidationSeverity::Error,
-                tr("Нет общего источника текстуры материала %1 для стыка карт.").arg(material));
+                tr("Нет пригодного источника текстуры материала %1 для стыка карт.").arg(material));
             return false;
         }
-        result->insert(material,pixels);
+        result->insert(material,opaque);
     }
     return true;
+}
+
+bool CView::importWorldMixedEdgeTransitionBank(
+    QMap<QString,SWorkingTerrainResolveStage>* stages,
+    const QSet<QPair<qint32,qint32>>& materialPairs,
+    const QMap<qint32,qint32>& materialTypes,
+    const QSize& tileSize,CValidationReport* report)
+{
+    if(!stages||materialPairs.isEmpty())return true;
+    for(const STerrainGlobalTransitionSource& source:m_terrainGlobalTransitionSources.values()) {
+        if(source.layer!=ETerrainAtlasLayer::Land||source.slot<0||source.slot>=source.atlasSlotCount)continue;
+        QSet<qint32> ids{source.signature.northWest,source.signature.northEast,
+            source.signature.southEast,source.signature.southWest};
+        if(ids.size()!=2)continue;
+        auto ordered=ids.values();std::sort(ordered.begin(),ordered.end());
+        if(!materialPairs.contains(qMakePair(ordered[0],ordered[1])))continue;
+        const int runtime=materialTypes.value(ordered[0],-1);
+        if(runtime<0||runtime>15)continue;
+        const QImage pixels=loadGlobalTransitionTile(source,tileSize,
+            &m_terrainGlobalBoundAtlasCache,&m_terrainGlobalTransitionMissingPages,
+            &m_terrainGlobalTransitionTileCache);
+        if(pixels.isNull())continue;
+        for(auto target=stages->begin();target!=stages->end();++target)
+            if(target->atlas->importPhysicalTile(pixels,runtime,&source.signature,
+                QStringLiteral("world-bank:global:%1:%2").arg(source.mprNamespace).arg(source.slot),
+                source.slot,report)<0)return false;
+    }
+    return !report->hasErrors();
 }
 
 bool CView::realizeWorkingTerrainSignature(
@@ -19529,14 +19558,14 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     if(!m_tilePaintStrokeActive || m_tileStrokeFinishing)
         return;
 
-    if(m_tileStrokeMixedEdge && (!bLand
-       || (m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty())))
+    if(m_tileStrokeMixedEdge && !bLand)
     {
         ++m_tileStrokeRefused;
-        emit updateMsg(tr("Mixed-edge supports Ground on one map only. Disable the option for Overlay/water/animation, or disable the shared brush for neighboring maps."));
+        emit updateMsg(tr("Mixed-edge supports Ground only. Disable the option for Overlay, water, or animation painting."));
         return;
     }
-    if(!m_tileStrokeMixedEdge && paintWorldTerrainAt(posOnLand,bLand))return;
+    if((!m_tileStrokeMixedEdge || (m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty()))
+       && paintWorldTerrainAt(posOnLand,bLand))return;
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
@@ -20927,6 +20956,14 @@ void CView::resolveMissingTerrainBlends()
         endTileBrushGroup();
         CValidationReport mixedReport;
         if(!m_terrainEditAvailable || !m_workingTerrainAtlas || !m_pUndoStack) return;
+        if(m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty()) {
+            QString summary;
+            if(resolveWorldMaterialBlends(&summary,&mixedReport,nullptr)) {
+                emit updateMsg(mixedReport.hasErrors()?mixedReport.toText():summary);
+                return;
+            }
+            if(mixedReport.hasErrors()) {emit updateMsg(mixedReport.toText());return;}
+        }
         STerrainTileCommand footprint; footprint.semanticAudit.layer=ETerrainTileLayer::Land;
         footprint.semanticAudit.requestedMaterialId=0;
         for(int y=0;y<m_terrainEdit.tileCountY();++y)

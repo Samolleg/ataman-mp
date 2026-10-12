@@ -676,9 +676,15 @@ private:
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
     bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,
-                                   STerrainResolveAuditSession* audit = nullptr);
+                                   STerrainResolveAuditSession* audit = nullptr,
+                                   bool seamsOnly = false);
     bool loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
         const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report);
+    bool importWorldMixedEdgeTransitionBank(
+        QMap<QString,SWorkingTerrainResolveStage>* stages,
+        const QSet<QPair<qint32,qint32>>& materialPairs,
+        const QMap<qint32,qint32>& materialTypes,
+        const QSize& tileSize, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();

@@ -4954,7 +4954,9 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
        || m_workingImages.at(slot).isNull())
         return false;
     if(m_foreignPhysicalTiles.contains(slot)) {
-        *identity=m_foreignPhysicalTiles.value(slot);return true;
+        *identity=m_foreignPhysicalTiles.value(slot);
+        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
+        return true;
     }
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
@@ -4971,6 +4973,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
         identity->workingSlot = slot;
         identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));
         identity->runtimeTerrainType = runtimeTerrainTypeForSlot(slot);
+        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
         return true;
     }
 
@@ -5002,6 +5005,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
                 packed.encode(), &variantFound);
         if(variantFound)
             identity->routeOwnerMaterial = variant.routeOwnerMaterial;
+        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
         return true;
     }
     if(!m_resolver || sourceIndex < 0
@@ -5020,6 +5024,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     identity->stockDerivedBlend = source.stockDerivedBlend;
     identity->canonicalGeneratedBlend = source.canonicalGeneratedBlend;
     identity->routeOwnerMaterial = source.routeOwnerMaterial;
+    identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
     return true;
 }
 
@@ -5481,7 +5486,11 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
            && m_workingImages.at(slot)==pixels) {
             SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
             bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);
-            if(!signature || (known && existing==*signature))return slot;
+            if(!signature || (known && existing==*signature)) {
+                if(sourceNamespace.startsWith(QStringLiteral("world-bank:")))
+                    m_worldBankNamespaceAliases[slot].append(sourceNamespace);
+                return slot;
+            }
         }
     int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
     if(slot<m_authoredImages.size() && m_authoredImages.at(slot).size()!=pixels.size())

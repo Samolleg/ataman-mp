@@ -149,6 +149,7 @@ struct STerrainWorkingTileIdentity
     int sourceSlot{-1};
     QVector<int> sourceSlotAliases;
     QString sourceNamespace;
+    QStringList sourceNamespaceAliases;
     STerrainTransitionSignature canonicalSignature;
     QByteArray physicalPixelSha256;
     QString blendProvenance;
@@ -569,6 +570,7 @@ private:
     // identity without pretending to be a new authored/generated provenance.
     QMap<int, int> m_animationCopySources;
     QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
+    QMap<int, QStringList> m_worldBankNamespaceAliases;
     QMap<QString, int> m_mixedEdgeRecipes;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};

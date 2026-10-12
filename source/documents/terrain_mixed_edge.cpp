@@ -18,6 +18,44 @@ bool opaque(const QImage& image)
         if(qAlpha(image.pixel(x,y))!=255) return false;
     return true;
 }
+QSet<int> expandMixedCells(const CTerrainEditModel& model,
+    const CTerrainWorkingAtlas* atlas,const QSet<int>& affectedCells,bool* valid)
+{
+    if(valid)*valid=false;
+    if(!atlas||!atlas->isValid())return {};
+    CTerrainVirtualMaterialField field;
+    if(!model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false))return {};
+    QSet<int> cells=affectedCells;
+    QVector<int> queue=cells.values().toVector();
+    const int w=field.tileWidth(),h=field.tileHeight();
+    const QSet<int> recipeSlots=atlas->mixedEdgeRecipes().values().toSet();
+    for(int i=0;i<queue.size();++i) {
+        const int cell=queue[i],x=cell%w,y=cell/w;
+        if(cell<0||cell>=w*h)return {};
+        const auto s=field.cellSignature(x,y);
+        if(uniform(s))continue;
+        const bool mixedEdges[]={s.northWest!=s.northEast,s.northEast!=s.southEast,
+            s.southWest!=s.southEast,s.northWest!=s.southWest};
+        const QPoint neighbors[]={QPoint(x,y-1),QPoint(x+1,y),QPoint(x,y+1),QPoint(x-1,y)};
+        for(int edge=0;edge<4;++edge) {
+            const auto p=neighbors[edge];
+            if(p.x()<0||p.y()<0||p.x()>=w||p.y()>=h
+               ||uniform(field.cellSignature(p.x(),p.y())))continue;
+            if(!mixedEdges[edge]) {
+                const int slot=SMprPackedTile::decode(model.packedTile(p.x(),p.y(),
+                    ETerrainTileLayer::Land)).atlasSlot();
+                STerrainWorkingTileIdentity identity;
+                if(!recipeSlots.contains(slot)
+                   &&(!atlas->tileIdentityForSlot(slot,&identity)
+                      ||!identity.blendProvenance.startsWith(QStringLiteral("mixed-edge-b2:"))))continue;
+            }
+            const int next=p.y()*w+p.x();
+            if(!cells.contains(next)){cells.insert(next);queue.append(next);}
+        }
+    }
+    if(valid)*valid=true;
+    return cells;
+}
 int stockFragments(const QVector<float>& strip)
 {
     QVector<bool> seen(strip.size(),false);
@@ -39,6 +77,15 @@ int stockFragments(const QVector<float>& strip)
     }
     return fragments;
 }
+
+}
+
+QSet<int> CTerrainMixedEdge::expandAffectedCells(const CTerrainEditModel& model,
+    const CTerrainWorkingAtlas* stagedAtlas,const QSet<int>& affectedCells)
+{
+    bool valid=false;
+    const auto result=expandMixedCells(model,stagedAtlas,affectedCells,&valid);
+    return valid?result:QSet<int>();
 }
 
 STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
@@ -46,7 +93,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     const QMap<qint32, qint32>& materialTypes,
     const QVector<SMprAnimatedTileRecord>& animations,
     const QPoint& origin, qint32 paintedMaterial, quint32 uniformSeed,
-    bool randomizeUniformRotation, CValidationReport* report, int slotLimit)
+    bool randomizeUniformRotation, CValidationReport* report, int slotLimit,
+    bool includeWorldMaterialBank,bool expandConnectedFootprint)
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve mixed-edge terrain");
@@ -72,34 +120,16 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     // v1 cropped-texture anchor changes in v2. Authored stock on those edges
     // keeps its previous contract and must not pull in unrelated corner-only
     // materials with no local uniform source.
-    QSet<int> cells=affectedCells;
-    QVector<int> queue=cells.values().toVector();
-    const int w=field.tileWidth(), h=field.tileHeight();
-    for(int i=0;i<queue.size();++i)
-    {
-        const int cell=queue[i], x=cell%w, y=cell/w;
-        if(cell<0 || cell>=w*h) return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge footprint is outside this map."));
-        const auto s=field.cellSignature(x,y);
-        if(uniform(s))continue;
-        const bool mixedEdges[]={s.northWest!=s.northEast,s.northEast!=s.southEast,
-            s.southWest!=s.southEast,s.northWest!=s.southWest};
-        const QPoint neighbors[]={QPoint(x,y-1),QPoint(x+1,y),QPoint(x,y+1),QPoint(x-1,y)};
-        for(int edge=0;edge<4;++edge)
-        {
-            const auto p=neighbors[edge];
-            if(p.x()<0 || p.y()<0 || p.x()>=w || p.y()>=h
-               || uniform(field.cellSignature(p.x(),p.y()))) continue;
-            if(!mixedEdges[edge]) {
-                const int slot=SMprPackedTile::decode(model.packedTile(p.x(),p.y(),ETerrainTileLayer::Land)).atlasSlot();
-                STerrainWorkingTileIdentity identity;
-                if(!atlas->mixedEdgeRecipes().values().contains(slot)
-                   && (!atlas->tileIdentityForSlot(slot,&identity)
-                       || !identity.blendProvenance.startsWith(QStringLiteral("mixed-edge-b2:"))))continue;
-            }
-            const int next=p.y()*w+p.x();
-            if(!cells.contains(next)) { cells.insert(next); queue.append(next); }
-        }
+    bool validFootprint=false;
+    QSet<int> cells=expandConnectedFootprint
+        ?expandMixedCells(model,atlas,affectedCells,&validFootprint):affectedCells;
+    if(!expandConnectedFootprint) {
+        validFootprint=true;
+        for(int cell:cells)if(cell<0||cell>=field.tileWidth()*field.tileHeight())
+            validFootprint=false;
     }
+    if(!validFootprint)return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge footprint is outside this map."));
+    const int w=field.tileWidth();
     QSet<int> animatedSlots;
     for(const auto& animation:animations)
         for(int i=0;i<animation.frameCount;++i) animatedSlots.insert(animation.tileIndex+i);
@@ -107,6 +137,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     const auto& catalog=atlas->catalog();
     QMap<qint32,QVector<int>> uniforms;
     QMap<QPair<qint32,qint32>,QVector<int>> stock;
+    QMap<qint32,QVector<int>> worldUniforms;
+    QMap<QPair<qint32,qint32>,QVector<int>> worldStock;
     QMap<int,STerrainTransitionSignature> sourceSignatures;
     for(int slot=0;slot<atlas->authoredSlotCount();++slot)
     {
@@ -125,6 +157,46 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             auto sorted=ids.values(); std::sort(sorted.begin(),sorted.end());
             stock[qMakePair(sorted[0],sorted[1])].append(slot);
         }
+    }
+    if(includeWorldMaterialBank)for(int slot=0;slot<atlas->activeTileCount();++slot) {
+        STerrainWorkingTileIdentity identity;
+        if(!atlas->tileIdentityForSlot(slot,&identity)
+           ||slot<0||slot>=images.size()||!opaque(images[slot]))continue;
+        bool sharedBank=identity.sourceNamespace.startsWith(QStringLiteral("world-bank:"));
+        for(const QString& alias:identity.sourceNamespaceAliases)
+            sharedBank|=alias.startsWith(QStringLiteral("world-bank:"));
+        if(!sharedBank)continue;
+        bool known=false;
+        SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
+        auto signature=catalog.gridSignatureForPacked(packed.encode(),&known);
+        if(sharedBank) {
+            const auto& imported=identity.canonicalSignature;
+            if(imported.northWest>0&&imported.northEast>0
+               &&imported.southEast>0&&imported.southWest>0) {
+                // Pixel-deduplicated world-bank tiles can occupy a local slot
+                // whose authored catalog index has no matching entry. Their
+                // imported identity carries the source signature needed to
+                // recover the shared uniform/edge bank.
+                signature=imported;known=true;
+            }
+        }
+        if(!known)continue;
+        sourceSignatures.insert(slot,signature);
+        QSet<qint32> ids;for(qint32 id:corners(signature))ids.insert(id);
+        if(ids.size()==1) { uniforms[*ids.cbegin()].append(slot); worldUniforms[*ids.cbegin()].append(slot); }
+        else if(ids.size()==2) {
+            auto sorted=ids.values();std::sort(sorted.begin(),sorted.end());
+            stock[qMakePair(sorted[0],sorted[1])].append(slot);
+            worldStock[qMakePair(sorted[0],sorted[1])].append(slot);
+        }
+    }
+    if(includeWorldMaterialBank) {
+        // Both sides of a world seam resolve against the same imported
+        // artwork and transition pixels while keeping atlas slots local.
+        for(auto it=worldUniforms.cbegin();it!=worldUniforms.cend();++it)
+            uniforms[it.key()]=it.value();
+        for(auto it=worldStock.cbegin();it!=worldStock.cend();++it)
+            stock[it.key()]=it.value();
     }
     auto stockUniforms=uniforms;
     for(int slot=0;slot<atlas->activeTileCount();++slot) {
@@ -156,8 +228,10 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     QMap<qint32,STerrainRecipeMaterial> materials;
     for(qint32 id:required)
     {
-        if(uniforms.value(id).isEmpty() || materialTypes.value(id,-1)<0 || materialTypes.value(id,-1)>15)
-            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source or reviewed runtime class for material %1 in this map's atlas/profile.").arg(id));
+        if(uniforms.value(id).isEmpty())
+            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source for material %1 in this map's atlas/profile.").arg(id));
+        if(materialTypes.value(id,-1)<0 || materialTypes.value(id,-1)>15)
+            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no reviewed runtime class for material %1 in this map's atlas/profile.").arg(id));
         STerrainRecipeMaterial material;
         material.materialId=id; material.runtimeTerrainType=materialTypes[id];
         QMap<int,int> weights;
@@ -193,7 +267,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         materials.insert(id,material);
     }
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
-    if(!buildStockBrushes(images,stockUniforms,stock,sourceSignatures,pairs,&brushes,report))return {};
+    if(!buildStockBrushes(images,stockUniforms,stock,sourceSignatures,pairs,&brushes,report,
+        includeWorldMaterialBank))return {};
 
     for(int cell:ordered)
     {
@@ -289,7 +364,7 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
     const QMap<int,STerrainTransitionSignature>& sourceSignatures,
     const QSet<QPair<qint32,qint32>>& pairs,
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
-    CValidationReport* report)
+    CValidationReport* report,bool allowDeterministicWorldFallback)
 {
     if(!output)return false;
     auto refuseBrush=[&](const QString& message) {
@@ -303,10 +378,12 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
         struct SStockCandidate { int slot, fragments; double score, residual, contrast; QVector<float> strip; };
         QVector<SStockCandidate> candidates;
         QString lastError;
+        int inspectedSources=0;
         // No generic replacement mask. Every bank is extracted from opaque
         // reviewed physical two-material stock in the current map's atlas.
         for(int slot:stock.value(pair))
         {
+            ++inspectedSources;
             QVector<float> strip; QString error;
             const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);
             QImage bestFirst,bestSecond; double bestResidual=14;
@@ -369,9 +446,17 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
             if(strips.size()==4) break;
         }
         STerrainRecipeBrush brush; QString error;
-        if(strips.isEmpty() || !CTerrainRecipeBaker::makeBrush(pair.first,pair.second,strips,&brush,&error))
-            return refuseBrush(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile. %3").arg(pair.first).arg(pair.second).arg(error.isEmpty()?lastError:error));
-        CTerrainRecipeBaker::sharpenStockBrush(&brush);
+        const bool generatedWorld=strips.isEmpty()&&allowDeterministicWorldFallback;
+        const bool built=generatedWorld
+            ?CTerrainRecipeBaker::makeDeterministicWorldBrush(pair.first,pair.second,&brush,&error)
+            :(!strips.isEmpty()&&CTerrainRecipeBaker::makeBrush(pair.first,pair.second,strips,&brush,&error));
+        if(!built)
+            return refuseBrush(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no usable stock edge for materials %1 / %2 in this map's atlas/profile (sources inspected: %3). %4")
+                .arg(pair.first).arg(pair.second).arg(inspectedSources).arg(error.isEmpty()?lastError:error));
+        if(generatedWorld&&report)report->add("terrain.mixed_edge.world_generated",EValidationSeverity::Warning,
+            QStringLiteral("No reviewed stock edge exists for world material pair %1 / %2; a shared deterministic seam recipe is used.")
+                .arg(pair.first).arg(pair.second));
+        if(!generatedWorld)CTerrainRecipeBaker::sharpenStockBrush(&brush);
         brushes.insert(pair,brush);
     }
 

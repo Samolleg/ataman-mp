@@ -121,6 +121,9 @@ struct STerrainRecipeBakeResult
 class CTerrainRecipeBaker
 {
 public:
+    // Deterministic opaque source used by world mixed-edge bakes. Transparent
+    // texels are composited against the nearest visible source texel.
+    static QImage makeOpaqueMaterialSource(const QImage& source);
     static STerrainRecipeBakeResult bake(const STerrainRecipeBakeInput& input,
         const STerrainRecipeBakeOptions& options = STerrainRecipeBakeOptions());
     static STerrainRecipeBudget budget(quint64 recipeSlots, quint64 uniqueSlots,
@@ -143,6 +146,10 @@ public:
     // bank. No embedded stock masks. Canonical input order is the caller's duty.
     static bool makeBrush(qint32 firstMaterial, qint32 secondMaterial,
         const QVector<QVector<float>>& strips, STerrainRecipeBrush* brush,
+        QString* error = nullptr);
+    // Pair-keyed shared-world recipe for maps with no reviewed stock edge.
+    static bool makeDeterministicWorldBrush(qint32 firstMaterial,
+        qint32 secondMaterial, STerrainRecipeBrush* brush,
         QString* error = nullptr);
     // Modern's crisp stock edge: five-level ownership, deterministic density
     // dithering, no interpolation of fragments. Material textures stay intact.

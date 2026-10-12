@@ -16,6 +16,8 @@
 #include "mmp_inspector.h"
 #include "mpr_document.h"
 #include "res_archive_document.h"
+#include "terrain_recipe_bake.h"
+#include "terrain_mixed_edge.h"
 #include "terrain_virtual_atlas.h"
 
 namespace {
@@ -522,6 +524,10 @@ private slots:
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
+    void worldBankNamespaceSurvivesPixelDeduplication();
+    void worldMaterialSourceIsFlattenedDeterministically();
+    void deterministicWorldBrushIsStableForMaterialPair();
+    void worldMixedEdgeUsesSharedFallbackOnlyWhenEnabled();
     void mirroredGeneratedBlendRemainsPaintable_data();
     void mirroredGeneratedBlendRemainsPaintable();
     void mirroredVertexStrokeResolvesAndUndoesExactly();
@@ -1339,6 +1345,75 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QCOMPARE(flattened.stableSha256.size(), 64);
     QVERIFY(QRegularExpression(QStringLiteral("^caveset_[0-9a-f]{12}$"))
                 .match(flattened.isolatedNamespace).hasMatch());
+}
+
+void TerrainVirtualAtlasTests::worldBankNamespaceSurvivesPixelDeduplication()
+{
+    Fixture fixture;
+    const auto types=reviewedFixtureTileTypes(fixture.images.size());
+    const auto materialTypes=reviewedFixtureMaterialTypes(fixture.catalog);
+    CTerrainWorkingAtlas atlas(fixture.catalog,fixture.images,47u,32,{}, {},types,materialTypes);
+    QVERIFY(atlas.isValid());
+    const auto pure=signature(1,1,1,1);
+    CValidationReport report;
+    QCOMPARE(atlas.importPhysicalTile(fixture.images.at(0),types.at(0),&pure,
+        QStringLiteral("world-bank:uniform:1"),0,&report),0);
+    STerrainWorkingTileIdentity identity;
+    QVERIFY(atlas.tileIdentityForSlot(0,&identity));
+    QVERIFY(identity.sourceNamespaceAliases.contains(QStringLiteral("world-bank:uniform:1")));
+}
+
+void TerrainVirtualAtlasTests::worldMaterialSourceIsFlattenedDeterministically()
+{
+    QImage source(3,3,QImage::Format_ARGB32);source.fill(qRgba(0,220,0,0));
+    source.setPixel(1,1,qRgba(200,40,20,255));
+    source.setPixel(2,1,qRgba(20,220,60,128));
+    const auto first=CTerrainRecipeBaker::makeOpaqueMaterialSource(source);
+    const auto second=CTerrainRecipeBaker::makeOpaqueMaterialSource(source);
+    QVERIFY(!first.isNull());
+    QCOMPARE(first,second);
+    QCOMPARE(first.pixel(0,0),qRgba(200,40,20,255));
+    QCOMPARE(qAlpha(first.pixel(2,1)),255);
+    QCOMPARE(qRed(first.pixel(2,1)),110);
+    QCOMPARE(qGreen(first.pixel(2,1)),130);
+    QCOMPARE(qBlue(first.pixel(2,1)),40);
+    const QImage opaque=solid(qRgba(31,57,91,255));
+    QCOMPARE(CTerrainRecipeBaker::makeOpaqueMaterialSource(opaque),opaque);
+}
+
+void TerrainVirtualAtlasTests::deterministicWorldBrushIsStableForMaterialPair()
+{
+    STerrainRecipeBrush first,repeat,otherPair;
+    QString error;
+    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,73,&first,&error));
+    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,73,&repeat,&error));
+    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,74,&otherPair,&error));
+    QCOMPARE(first.firstMaterial,qint32(41));
+    QCOMPARE(first.secondMaterial,qint32(73));
+    QCOMPARE(first.ownership.size(),512*65);
+    QCOMPARE(first.ownership,repeat.ownership);
+    QVERIFY(first.ownership!=otherPair.ownership);
+}
+
+void TerrainVirtualAtlasTests::worldMixedEdgeUsesSharedFallbackOnlyWhenEnabled()
+{
+    const QPair<qint32,qint32> pair(41,73);
+    QVector<QImage> images{solid(qRgba(175,82,37,255)),solid(qRgba(44,119,181,255))};
+    QMap<qint32,QVector<int>> uniforms;
+    uniforms[pair.first]={0};uniforms[pair.second]={1};
+    const QMap<QPair<qint32,qint32>,QVector<int>> stock;
+    const QMap<int,STerrainTransitionSignature> signatures;
+    const QSet<QPair<qint32,qint32>> pairs{pair};
+    QMap<QPair<qint32,qint32>,STerrainRecipeBrush> local,world;
+    QVERIFY(!CTerrainMixedEdge::buildStockBrushes(images,uniforms,stock,signatures,
+        pairs,&local,nullptr,false));
+    QVERIFY(local.isEmpty());
+    QVERIFY(CTerrainMixedEdge::buildStockBrushes(images,uniforms,stock,signatures,
+        pairs,&world,nullptr,true));
+    QCOMPARE(world.value(pair).ownership.size(),512*65);
+    STerrainRecipeBrush expected;
+    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(pair.first,pair.second,&expected));
+    QCOMPARE(world.value(pair).ownership,expected.ownership);
 }
 
 void TerrainVirtualAtlasTests::workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases()

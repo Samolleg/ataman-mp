@@ -9,6 +9,8 @@
 class CTerrainMixedEdge
 {
 public:
+    static QSet<int> expandAffectedCells(const CTerrainEditModel& model,
+        const CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells);
     // Freeze the reviewed SD ownership bank for deterministic HD regeneration.
     // This is the same selection/extraction path used by normal B2 painting.
     static bool buildStockBrushes(const QVector<QImage>& images,
@@ -17,14 +19,17 @@ public:
         const QMap<int,STerrainTransitionSignature>& sourceSignatures,
         const QSet<QPair<qint32,qint32>>& pairs,
         QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        bool allowDeterministicWorldFallback = false);
     static STerrainTileCommand resolve(const CTerrainEditModel& model,
         CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells,
         const QMap<qint32, qint32>& materialTypes,
         const QVector<SMprAnimatedTileRecord>& animations,
         const QPoint& worldCellOrigin, qint32 paintedMaterial,
         quint32 uniformSeed, bool randomizeUniformRotation,
-        CValidationReport* report, int slotLimit = 4096);
+        CValidationReport* report, int slotLimit = 4096,
+        bool includeWorldMaterialBank = false,
+        bool expandConnectedFootprint = true);
 };
 
 #endif

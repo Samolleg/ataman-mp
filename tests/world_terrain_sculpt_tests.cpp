@@ -149,6 +149,37 @@ private slots:
         c.origin={32,-32};b.origin={33,0};
         QVERIFY(worldMaterialSeamSides({a,b,c}).isEmpty()); // gap and corner
     }
+    void fourMapMaterialPlannerClosesSharedCorner()
+    {
+        SWorldMaterialRepairMap nw,ne,sw,se;
+        nw.id="nw";ne.id="ne";sw.id="sw";se.id="se";
+        ne.origin={32,0};sw.origin={0,32};se.origin={32,32};
+        QVERIFY(nw.field.resize(16,16,4));
+        QVERIFY(ne.field.resize(16,16,3));
+        QVERIFY(sw.field.resize(16,16,2));
+        QVERIFY(se.field.resize(16,16,1));
+        const auto plan=planWorldMaterialRepair({nw,ne,sw,se},true);
+        QCOMPARE(plan.fields["nw"].material(16,16),1);
+        QCOMPARE(plan.fields["ne"].material(0,16),1);
+        QCOMPARE(plan.fields["sw"].material(16,0),1);
+        QCOMPARE(plan.fields["se"].material(0,0),1);
+        QVERIFY(plan.changedVertices>=4);
+        QVERIFY(!worldMaterialSeamSides({nw,ne,sw,se}).value("nw").isEmpty());
+        QCOMPARE(planWorldMaterialRepair({se,sw,ne,nw},true).changedCells,plan.changedCells);
+    }
+    void materialStitchGeometryRejectsMisalignedPair()
+    {
+        QMap<QString,QPointF> origins;
+        QMap<QString,QSizeF> sizes;
+        origins["active"]={0,0};origins["shifted"]={32,0.5};
+        sizes["active"]={32,32};sizes["shifted"]={32,32};
+        const auto rejected=worldMaterialIncompatibleStitchMaps(origins,sizes);
+        QCOMPARE(rejected.size(),2);
+        QVERIFY(rejected.contains("active"));
+        QVERIFY(rejected.contains("shifted"));
+        origins["shifted"]={32,2};
+        QVERIFY(worldMaterialIncompatibleStitchMaps(origins,sizes).isEmpty());
+    }
     void worldBoundaryImportPreservesAuthoredPagePadding()
     {
         QImage old(64,64,QImage::Format_RGBA8888);old.fill(Qt::green);

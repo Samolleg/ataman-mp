@@ -22,6 +22,29 @@ struct SWorldMaterialRepairMap
     ETerrainTileLayer layer{ETerrainTileLayer::Land};
     bool editable{true};
 };
+inline QSet<QString> worldMaterialIncompatibleStitchMaps(
+        const QMap<QString,QPointF>& origins,const QMap<QString,QSizeF>& sizes)
+{
+    QSet<QString> result;const double epsilon=1e-5;
+    for(auto a=origins.cbegin();a!=origins.cend();++a) {
+        const QRectF ar(a.value(),sizes.value(a.key()));
+        if(ar.width()<=0||ar.height()<=0)continue;
+        auto b=a;++b;
+        for(;b!=origins.cend();++b) {
+            const QRectF br(b.value(),sizes.value(b.key()));
+            if(br.width()<=0||br.height()<=0)continue;
+            const bool touching=((qAbs(ar.right()-br.left())<epsilon||qAbs(ar.left()-br.right())<epsilon)
+                    &&qMin(ar.bottom(),br.bottom())-qMax(ar.top(),br.top())>epsilon)
+                ||((qAbs(ar.bottom()-br.top())<epsilon||qAbs(ar.top()-br.bottom())<epsilon)
+                    &&qMin(ar.right(),br.right())-qMax(ar.left(),br.left())>epsilon);
+            const QPointF phase=a.value()-b.value();
+            const bool aligned=qAbs(phase.x()/2-qRound(phase.x()/2))<epsilon
+                &&qAbs(phase.y()/2-qRound(phase.y()/2))<epsilon;
+            if(touching&&!aligned){result.insert(a.key());result.insert(b.key());}
+        }
+    }
+    return result;
+}
 struct SWorldMaterialRepairPlan
 {
     QMap<QString,CTerrainVirtualMaterialField> fields;
@@ -90,13 +113,13 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
         if(stitchAlignedEdges)return m.origin+QPointF(x,y);
         return m.origin+(m.geometry?m.geometry->terrainVertexPosition(x,y):QPointF(x,y));
     };
-    const auto adjacent=[](const SWorldMaterialRepairMap& a,const SWorldMaterialRepairMap& b) {
+    const auto touchesAtEdgeOrCorner=[](const SWorldMaterialRepairMap& a,const SWorldMaterialRepairMap& b) {
         const QRectF ar(a.origin,QSizeF(a.field.tileWidth()*2,a.field.tileHeight()*2));
         const QRectF br(b.origin,QSizeF(b.field.tileWidth()*2,b.field.tileHeight()*2));
-        return ((qAbs(ar.right()-br.left())<1e-5 || qAbs(ar.left()-br.right())<1e-5)
-                && qMin(ar.bottom(),br.bottom())-qMax(ar.top(),br.top())>1e-5)
-            || ((qAbs(ar.bottom()-br.top())<1e-5 || qAbs(ar.top()-br.bottom())<1e-5)
-                && qMin(ar.right(),br.right())-qMax(ar.left(),br.left())>1e-5);
+        const double overlapX=qMin(ar.right(),br.right())-qMax(ar.left(),br.left());
+        const double overlapY=qMin(ar.bottom(),br.bottom())-qMax(ar.top(),br.top());
+        return overlapX>=-1e-5 && overlapY>=-1e-5
+            && (qAbs(overlapX)<1e-5 || qAbs(overlapY)<1e-5);
     };
     for(int i=0;i<maps.size();++i) {
         const auto& m=maps[i];plan.fields[m.id]=m.field;
@@ -128,7 +151,10 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
             bool aligned=true;
             bool ownSurface=m.layer!=ETerrainTileLayer::Overlay || !m.geometry;
             for(const auto& e:edges) {
-                if(e.map!=i && !adjacent(m,maps[e.map]))continue;
+                // A diagonal map shares the same world vertex at a four-map
+                // corner even though it has no positive-length raster seam.
+                // Its endpoint is material evidence for vertex reconciliation.
+                if(e.map!=i && !touchesAtEdgeOrCorner(m,maps[e.map]))continue;
                 bool on=false;double position=0;
                 for(int j=0;j<2;++j) {
                     const auto d=e.p[j+1]-e.p[j];const double length=d.x()*d.x()+d.y()*d.y();

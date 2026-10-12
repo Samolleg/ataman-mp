@@ -1,3 +1,10 @@
+## EI-CROSSMAP-TRANSITIONS-151 — mixed-edge общей кистью через стыки
+
+- Цель и разрешение: жалоба владельца «общая кисть не может исправить mixed-edge»; реализовать покраску и ремонт переходов через стыки выбранных карт, сохраняя отдельные атласы, общие пиксели, SEC, atomic Undo/Redo и batch save. Main, VERSION 150→151, копии соседних карт; живые данные только читать. Чужая задача EI-HD-ALL-256 исключена.
+- Реализация: общий planner согласует материалы по XY boundary vertices; для каждого MPR остаётся свой atlas namespace, world-bank tile identity переживает pixel dedup, seam artwork детерминирован, межкартная кисть/ремонт — одна cohort transaction. Несовпадающие пары не меняются. Обычный ремонт всех selected maps сохраняет прежний полный охват; seam-only параметр используется integration harness для сфокусированной real-seam проверки.
+- Подтверждено на копиях zone4/zone6: stroke через стык, repair, save/reopen; 0 mismatched shared vertices и 0 mismatched seam pixels на 125 парах вне SEC-исключения; SEC/runtime, authored slots и untouched interiors корректны; Undo/Redo точны, repeat repair idempotent, RES опубликован раз, обе MPR повторно открываются. Время integration 350.6 s. PNG до/после просмотрены: `docs/validation/ATAMAN_CROSSMAP_TRANSITIONS_151_20261012_{before,after}.png`.
+- Финальные после последней правки unit runs: terrain_virtual_atlas 150/0/0; world sculpt 46/0/5 optional skips. Mixed-edge OFF/single-map byte-identical 150 CLI и короткий UI widget на финальном Release с nativeAttempts=0 остаются до commit/archive build.
+- Следующий шаг: scoped source commit, clean `git archive` Release 151, mixed-edge CLI и один UI widget под lock, staging/finalizer/manifest, guarded 150→151 installation with rollback150 and preservation; then transfer commit.
 # EI Mapper Ataman — roadmap
 
 ## EI-SAVE-PERF-150 — отзывчивое сохранение MPR/MOB и recovery autosave
