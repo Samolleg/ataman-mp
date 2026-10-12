@@ -88,6 +88,31 @@ class QUndoStack;
 class QThreadPool;
 struct SParam;
 class CComboBoxItem;
+
+struct SMprAutosaveSnapshot
+{
+    CMprDocument document;
+    CTerrainEditModel terrain;
+    QVector<SMprMaterialRecord> materials;
+    QVector<SMprAnimatedTileRecord> animatedTiles;
+    QFileInfo source;
+    QString innerNamespace;
+    bool stageWorkingAtlas{false};
+    int activeSlots{0};
+    QVector<QImage> activeTileImages;
+    QVector<qint32> activeTileTypes;
+    QVector<QByteArray> authoredPages;
+};
+
+struct SMprAutosaveCandidate
+{
+    bool success{false};
+    QByteArray mprBytes;
+    QByteArray terrainAtlasResource;
+    int atlasPages{0};
+    int atlasSlots{0};
+    QString error;
+};
 class CProgressView;
 class CTableManager;
 class COperation;
@@ -227,6 +252,10 @@ public:
                                           QByteArray* terrainAtlasResource = nullptr,
                                           int* terrainAtlasPages = nullptr,
                                           int* terrainAtlasSlots = nullptr);
+    bool captureLandscapeAutosaveSnapshot(
+        SMprAutosaveSnapshot* snapshot, CValidationReport* report = nullptr);
+    static SMprAutosaveCandidate buildLandscapeAutosaveCandidate(
+        const SMprAutosaveSnapshot& snapshot);
     QString activeTerrainArchivePath() const
     {
         return m_activeTerrainArchivePath;

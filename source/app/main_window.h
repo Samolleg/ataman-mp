@@ -2,6 +2,7 @@
 #define MAIN_WINDOW_H
 
 #include <QMainWindow>
+#include <QFutureWatcher>
 #include <QKeyEvent>
 #include <QSharedPointer>
 #include <QUndoStack>
@@ -388,12 +389,11 @@ private:
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
-    QTimer* m_autosaveCountdownTimer{nullptr};
     QTimer* m_cameraSpeedPersistTimer{nullptr};
     QFrame* m_autosaveNotification{nullptr};
-    QLabel* m_autosaveCountdownLabel{nullptr};
-    QPushButton* m_cancelAutosaveButton{nullptr};
-    int m_autosaveCountdownSeconds{0};
+    QLabel* m_autosaveStatusLabel{nullptr};
+    bool m_autosaveInProgress{false};
+    QFutureWatcher<QPair<int, int>>* m_autosaveWatcher{nullptr};
     int m_recoverableAutosaveNoticeCount{0};
     QStringList m_recoverableAutosaveNoticeKeys;
     bool m_backupSessionStarted{false};

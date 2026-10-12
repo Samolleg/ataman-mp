@@ -20,8 +20,13 @@
 
 #include <QCryptographicHash>
 #include <QDataStream>
+#include <QElapsedTimer>
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QThread>
 #include <QtEndian>
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -207,6 +212,8 @@ private slots:
     void publishMembersRequiresExplicitReplacementAndPreservesUnrelatedBytes();
     void publishedMembersCommitInPlaceWithOptionalBackup();
     void failedPublishedMembersCommitLeavesArchiveUntouched();
+    void killedPublisherKeepsOriginalArchiveIntact();
+    void largeHDPackPublishBenchmark();
 };
 
 void ResArchiveDocumentTests::noOpIsByteIdentical()
@@ -553,6 +560,140 @@ void ResArchiveDocumentTests::failedPublishedMembersCommitLeavesArchiveUntouched
     QFile unchanged(archivePath);
     QVERIFY(unchanged.open(QIODevice::ReadOnly));
     QCOMPARE(unchanged.readAll(), original);
+}
+
+void ResArchiveDocumentTests::killedPublisherKeepsOriginalArchiveIntact()
+{
+    if(qgetenv("EI_RES_INTERRUPT_CHILD") == "1")
+    {
+        const QString archivePath = QString::fromLocal8Bit(qgetenv("EI_RES_INTERRUPT_ARCHIVE"));
+        const QString markerPath = QString::fromLocal8Bit(qgetenv("EI_RES_INTERRUPT_MARKER"));
+        QFile archive(archivePath);
+        if(!archive.open(QIODevice::ReadOnly)) qFatal("child cannot read archive");
+        const QByteArray original = archive.readAll();
+        CResArchiveDocument baseline;
+        QStringList errors;
+        if(!baseline.loadBytes(original, archivePath, &errors)) qFatal("child cannot parse archive");
+        SResPublishedMembersSaveRequest request;
+        request.source = QFileInfo(archivePath);
+        request.destination = QFileInfo(archivePath);
+        SResArchiveNewMember page;
+        page.name = QStringLiteral("zone2_deadbeef000.mmp");
+        page.payload = QByteArray("new terrain page");
+        request.published.append(page);
+        request.createBackup = false;
+        request.pauseAfterPartialWriteForTest = true;
+        request.interruptionMarkerForTest = markerPath;
+        commitStagedResPublishedMembers(baseline, request);
+        QFAIL("interruption hook returned unexpectedly");
+        return;
+    }
+
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString archivePath = directory.filePath("textures.res");
+    const QString markerPath = directory.filePath("partial-write.marker");
+    const QByteArray original = syntheticRes();
+    QFile archive(archivePath);
+    QVERIFY(archive.open(QIODevice::WriteOnly));
+    QCOMPARE(archive.write(original), qint64(original.size()));
+    archive.close();
+
+    QProcess child;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("EI_RES_INTERRUPT_CHILD", "1");
+    environment.insert("EI_RES_INTERRUPT_ARCHIVE", archivePath);
+    environment.insert("EI_RES_INTERRUPT_MARKER", markerPath);
+    child.setProcessEnvironment(environment);
+    child.setProgram(QCoreApplication::applicationFilePath());
+    child.setArguments(QStringList() << "killedPublisherKeepsOriginalArchiveIntact"
+                                      << "-platform" << "minimal");
+    child.start();
+    QVERIFY(child.waitForStarted());
+    QElapsedTimer timer;
+    timer.start();
+    while(!QFileInfo::exists(markerPath) && timer.elapsed() < 10000)
+        QTest::qWait(10);
+    QVERIFY2(QFileInfo::exists(markerPath), qPrintable(child.readAllStandardError()));
+    QVERIFY(child.state() == QProcess::Running);
+    child.kill();
+    QVERIFY(child.waitForFinished());
+
+    QFile unchanged(archivePath);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), original);
+    // An OS-killed writer can leave its unpublished sidecar; remove the test-only
+    // residue after proving that the named game archive stayed byte-identical.
+    QDir directoryEntries(directory.path());
+    for(const QString& name : directoryEntries.entryList(QStringList() << ".EIMapperEndurance-res-publish-stage-*",
+                                                          QDir::Files))
+        QVERIFY(QFile::remove(directory.filePath(name)));
+}
+
+void ResArchiveDocumentTests::largeHDPackPublishBenchmark()
+{
+    const QString sourcePath = QString::fromLocal8Bit(qgetenv("EI_SAVE_PERF_SOURCE"));
+    const QString destinationPath = QString::fromLocal8Bit(qgetenv("EI_SAVE_PERF_DEST"));
+    const QString zone = QString::fromLocal8Bit(qgetenv("EI_SAVE_PERF_ZONE"));
+    QVERIFY2(!sourcePath.isEmpty() && !destinationPath.isEmpty() && !zone.isEmpty(),
+             "Set EI_SAVE_PERF_SOURCE, EI_SAVE_PERF_DEST, and EI_SAVE_PERF_ZONE.");
+
+    QElapsedTimer timer;
+    timer.start();
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const QByteArray sourceBytes = source.readAll();
+    QVERIFY(!sourceBytes.isEmpty());
+    const qint64 sourceReadMs = timer.elapsed();
+
+    timer.restart();
+    CResArchiveDocument baseline;
+    QStringList errors;
+    QVERIFY2(baseline.loadBytes(sourceBytes, sourcePath, &errors),
+             qPrintable(errors.join('\n')));
+    const qint64 parseMs = timer.elapsed();
+    QVERIFY(!baseline.members().isEmpty());
+    QByteArray samplePage;
+    for(const SResArchiveMember& member : baseline.members())
+        if(member.name.endsWith(QStringLiteral(".mmp"), Qt::CaseInsensitive)
+           && !member.payload.isEmpty())
+        {
+            samplePage = member.payload;
+            break;
+        }
+    QVERIFY(!samplePage.isEmpty());
+
+    SResPublishedMembersSaveRequest request;
+    request.source = QFileInfo(sourcePath);
+    request.destination = QFileInfo(destinationPath);
+    request.createBackup = qgetenv("EI_SAVE_PERF_BACKUP") == "1";
+    request.backupRootOverride = QString::fromLocal8Bit(
+        qgetenv("EI_SAVE_PERF_BACKUP_ROOT"));
+    SResArchiveNewMember page;
+    page.name = QStringLiteral("ataman_perf_%1.mmp").arg(zone);
+    page.payload = samplePage;
+    request.published.append(page);
+    timer.restart();
+    const SResPublishedMembersSaveResult result =
+        commitStagedResPublishedMembers(baseline, request);
+    const qint64 transactionMs = timer.elapsed();
+    QVERIFY2(result.success, qPrintable(result.phase + QStringLiteral(": ") + result.error));
+
+    timer.restart();
+    QFile destination(destinationPath);
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    const QByteArray savedBytes = destination.readAll();
+    CResArchiveDocument reopened;
+    QVERIFY2(reopened.loadBytes(savedBytes, destinationPath, &errors),
+             qPrintable(errors.join('\n')));
+    for(const SResArchiveMember& member : baseline.members())
+        QCOMPARE(reopened.memberPayload(member.name), member.payload);
+    QCOMPARE(reopened.memberPayload(page.name), page.payload);
+    const qint64 verifyMs = timer.elapsed();
+    qInfo().noquote() << QStringLiteral(
+        "SAVE_PERF zone:%1 bytes:%2 members:%3 sourceReadMs:%4 parseAndHashesMs:%5 transactionMs:%6 postReadAndMemberByteCompareMs:%7")
+        .arg(zone).arg(sourceBytes.size()).arg(baseline.members().size())
+        .arg(sourceReadMs).arg(parseMs).arg(transactionMs).arg(verifyMs);
 }
 
 void ResArchiveDocumentTests::bulkAppendBuildsAllMembersInOneDerivedArchive()

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <functional>
 
 #include "res_archive_document.h"
 
@@ -45,8 +46,13 @@ struct SResPublishedMembersSaveRequest
     bool allowReplaceExisting{false};
     bool createBackup{true};
     QString backupRootOverride;
+    // Called from the worker thread with a short phase label and overall
+    // progress percentage. UI callers must marshal it to their GUI thread.
+    std::function<void(const QString&, int)> progress;
 #ifdef QT_TESTLIB_LIB
     bool simulateAtomicCommitFailure{false};
+    QString interruptionMarkerForTest;
+    bool pauseAfterPartialWriteForTest{false};
 #endif
 };
 

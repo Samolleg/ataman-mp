@@ -10160,6 +10160,144 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
     return true;
 }
 
+bool CView::captureLandscapeAutosaveSnapshot(
+    SMprAutosaveSnapshot* snapshot, CValidationReport* report)
+{
+    if(!snapshot || !ensureTerrainAutoCatalogReady()
+       || !m_pLand->isMprLoad() || !m_terrainEditAvailable)
+    {
+        if(report)
+            report->add(QStringLiteral("mpr.autosave.snapshot.unavailable"),
+                EValidationSeverity::Error,
+                tr("Canonical terrain ownership is unavailable."));
+        return false;
+    }
+    finishSculptStroke();
+    endTileBrushGroup();
+
+    SMprAutosaveSnapshot captured;
+    captured.document = m_mprDocument;
+    captured.terrain = m_terrainEdit;
+    captured.materials = m_mprMaterials;
+    captured.animatedTiles = m_mprAnimatedTiles;
+    captured.source = m_pLand->filePath();
+    captured.innerNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const bool workingAtlasAvailable = m_workingTerrainAtlas
+        && m_workingTerrainAtlas->isValid();
+    captured.stageWorkingAtlas = terrainMapTestNeedsWorkingAtlasPackage(
+        workingAtlasAvailable,
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land),
+        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
+        workingAtlasAvailable ? m_workingTerrainAtlas->activeTextureCount() : 0,
+        int(m_mprDocument.mapInfo().textureCount));
+    if(captured.stageWorkingAtlas)
+    {
+        if(!workingAtlasAvailable)
+        {
+            if(report)
+                report->add(QStringLiteral("mpr.autosave.atlas.unavailable"),
+                    EValidationSeverity::Error,
+                    tr("The active working terrain atlas is unavailable."));
+            return false;
+        }
+        captured.activeTileImages = m_workingTerrainAtlas->activeTileImages();
+        captured.activeTileTypes = m_workingTerrainAtlas->activeTileTypes();
+        captured.activeSlots = m_workingTerrainAtlas->activeTileCount();
+        const QStringList names = ei::terrainTextureResourceNames(
+            captured.innerNamespace,
+            int(captured.document.mapInfo().textureCount));
+        for(const QString& name : names)
+        {
+            QByteArray payload;
+            QString sourcePath;
+            if(!CTextureList::getInstance()->terrainMmpPayload(
+                   name, &payload, &sourcePath))
+            {
+                if(report)
+                    report->add(QStringLiteral("mpr.autosave.atlas.source"),
+                        EValidationSeverity::Error,
+                        tr("The authored terrain page '%1' could not be read for recovery.")
+                            .arg(name));
+                return false;
+            }
+            captured.authoredPages.append(payload);
+        }
+    }
+    *snapshot = captured;
+    return true;
+}
+
+SMprAutosaveCandidate CView::buildLandscapeAutosaveCandidate(
+    const SMprAutosaveSnapshot& snapshot)
+{
+    SMprAutosaveCandidate result;
+    CValidationReport report;
+    CMprEditTransaction transaction(QObject::tr("Stage recovery landscape"));
+    if(!snapshot.terrain.appendSectorEdits(&transaction, &report)
+       || !(snapshot.stageWorkingAtlas
+            ? snapshot.document.appendMaxZEdit(
+                  snapshot.terrain.maxZ(), &transaction, &report)
+            : snapshot.document.appendMapParametersEdit(
+                  snapshot.terrain.maxZ(), snapshot.materials,
+                  snapshot.animatedTiles, &transaction, &report))
+       || report.hasErrors()
+       || (transaction.isEmpty() && !snapshot.stageWorkingAtlas))
+    {
+        result.error = report.toText();
+        return result;
+    }
+
+    QTemporaryDir validationDirectory;
+    if(!validationDirectory.isValid())
+    {
+        result.error = QObject::tr("Could not create an isolated MPR recovery validation directory.");
+        return result;
+    }
+    const QFileInfo validationPath(validationDirectory.filePath(
+        QStringLiteral("recovery-current-map.mpr")));
+    const SStagedMprTransactionValidation validation =
+        validateStagedMprTransaction(snapshot.document, transaction,
+                                     validationPath);
+    if(!validation.success)
+    {
+        result.error = validation.error;
+        return result;
+    }
+    result.mprBytes = validation.candidateBytes;
+    if(snapshot.stageWorkingAtlas)
+    {
+        CMprDocument stagedDocument;
+        CValidationReport stagedReport;
+        if(!stagedDocument.loadBytes(result.mprBytes,
+                                     QStringLiteral("recovery-current-map.mpr"),
+                                     &stagedReport)
+           || stagedReport.hasErrors())
+        {
+            result.error = QObject::tr(
+                "The edited MPR could not be reopened before staging its working atlas.")
+                + QStringLiteral("\n") + stagedReport.toText();
+            return result;
+        }
+        const STerrainPortableAtlasPackage package =
+            CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+                stagedDocument, snapshot.activeTileImages,
+                snapshot.activeTileTypes, snapshot.authoredPages,
+                snapshot.materials, snapshot.animatedTiles, &stagedReport);
+        if(!package.success)
+        {
+            result.error = package.error + QStringLiteral("\n")
+                + stagedReport.toText();
+            return result;
+        }
+        result.mprBytes = package.mprBytes;
+        result.terrainAtlasResource = package.resourceArchiveBytes;
+        result.atlasPages = package.resourceMembers.size();
+        result.atlasSlots = snapshot.activeSlots;
+    }
+    result.success = true;
+    return result;
+}
+
 bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
@@ -14812,13 +14950,15 @@ void CView::finalizeVirtualTerrainAtlas()
     finishSculptStroke();
     endTileBrushGroup();
     QProgressDialog finalizeProgress(
-        tr("Preparing map-specific terrain atlas..."),QString(),0,0,this);
+        tr("Preparing map-specific terrain atlas..."),QString(),0,100,this);
     finalizeProgress.setWindowTitle(tr("Saving MPR"));
     finalizeProgress.setCancelButton(nullptr);
     finalizeProgress.setWindowModality(Qt::WindowModal);
     finalizeProgress.setMinimumDuration(0);
     finalizeProgress.show();
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    QElapsedTimer publicationPrepareTimer;
+    publicationPrepareTimer.start();
     CValidationReport report;
     const CTerrainTransitionCatalog& catalog=m_workingTerrainAtlas
         ?m_workingTerrainAtlas->catalog()
@@ -14914,29 +15054,9 @@ void CView::finalizeVirtualTerrainAtlas()
     const QVector<qint32> authoredTypes=m_workingTerrainAtlas
         ?m_workingTerrainAtlas->activeTileTypes()
         :m_mprDocument.mapInfo().tileTypes;
-    CTerrainVirtualAtlas atlas(catalog, authoredImages, m_terrainSemanticSeed,
-                               m_terrainGlobalMaterialSources,
-                               globalMaterialBlendStyles(m_terrainGlobalFamilies),
-                               layer == ETerrainTileLayer::Land,
-                               authoredTypes,
-                               materialRuntimeTypes(m_terrainAtlasProfile,
-                                                    m_terrainGlobalFamilies));
     finalizeProgress.setLabelText(tr(
-        "Loading exact stock transitions used by this map..."));
-    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    for(auto imported = m_importedTerrainTransitions.cbegin();
-        imported != m_importedTerrainTransitions.cend(); ++imported)
-        if(!atlas.addAuthoredLibraryTransition(
-               imported.value().first, imported.value().second,
-               QStringLiteral("stock-jmv-finalization"), &report))
-        {
-            QMessageBox::critical(this,tr("Modern MPR save refused"),
-                tr("An authored stock transition used by this map could not be imported into the isolated final atlas.\n\n%1")
-                    .arg(report.toText()));
-            return;
-        }
-    finalizeProgress.setLabelText(tr(
-        "Resolving, evicting unused tiles, and rebuilding physical pages..."));
+        "Preparing exact stock transitions and rebuilding terrain pages in the background..."));
+    finalizeProgress.setValue(10);
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QVector<qint32> placedCellTypes;
     QVector<quint16> placedPackedCells;
@@ -14982,12 +15102,70 @@ void CView::finalizeVirtualTerrainAtlas()
         range.frameCount = animation.frameCount;
         animationRanges.append(range);
     }
-    STerrainAtlasFinalization finalized=atlas.finalize(
-        field,m_mprDocument.mapInfo().innerNamespace,
-        kMprPackedTerrainAtlasSlotLimit,
-        authoredTypes,&report,pinned,placedCellTypes,placedPackedCells,
-        placedRouteOwners,
-        finalizedDecodeCatalog,preservePlacedCells,animationRanges);
+    finalizeProgress.setLabelText(tr(
+        "Resolving and rebuilding terrain pages in the background..."));
+    finalizeProgress.setValue(20);
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const QString atlasNamespace = m_mprDocument.mapInfo().innerNamespace;
+    const int atlasSlotLimit = kMprPackedTerrainAtlasSlotLimit;
+    const CTerrainTransitionCatalog publicationCatalog = catalog;
+    const CTerrainTransitionCatalog decodeCatalog = *finalizedDecodeCatalog;
+    const QMap<qint32, QImage> materialSources = m_terrainGlobalMaterialSources;
+    const QMap<qint32, ETerrainBlendStyle> blendStyles =
+        globalMaterialBlendStyles(m_terrainGlobalFamilies);
+    const QMap<qint32, qint32> runtimeTypes = materialRuntimeTypes(
+        m_terrainAtlasProfile, m_terrainGlobalFamilies);
+    const quint32 semanticSeed = m_terrainSemanticSeed;
+    const bool generatedTilesOpaque = layer == ETerrainTileLayer::Land;
+    const auto importedTransitions = m_importedTerrainTransitions;
+    const qint64 guiPreparationMs = publicationPrepareTimer.elapsed();
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication phase:gui-snapshot-preparation elapsedMs:%1 thread:gui")
+        .arg(guiPreparationMs));
+    QElapsedTimer finalizeWaitTimer;
+    finalizeWaitTimer.start();
+    QFuture<STerrainAtlasFinalization> finalizeFuture = QtConcurrent::run(
+        [publicationCatalog, authoredImages, semanticSeed, materialSources,
+         blendStyles, generatedTilesOpaque, authoredTypes, runtimeTypes,
+         importedTransitions, field, atlasNamespace, atlasSlotLimit,
+         pinned, placedCellTypes, placedPackedCells, placedRouteOwners,
+         decodeCatalog, preservePlacedCells, animationRanges]() mutable {
+            CValidationReport workerReport;
+            CTerrainVirtualAtlas atlas(
+                publicationCatalog, authoredImages, semanticSeed,
+                materialSources, blendStyles, generatedTilesOpaque,
+                authoredTypes, runtimeTypes);
+            for(auto imported = importedTransitions.cbegin();
+                imported != importedTransitions.cend(); ++imported)
+                if(!atlas.addAuthoredLibraryTransition(
+                       imported.value().first, imported.value().second,
+                       QStringLiteral("stock-jmv-finalization"),
+                       &workerReport))
+                {
+                    STerrainAtlasFinalization failed;
+                    failed.error = workerReport.toText();
+                    return failed;
+                }
+            STerrainAtlasFinalization result = atlas.finalize(
+                field, atlasNamespace, atlasSlotLimit, authoredTypes,
+                &workerReport, pinned, placedCellTypes, placedPackedCells,
+                placedRouteOwners, &decodeCatalog, preservePlacedCells,
+                animationRanges);
+            if(!workerReport.findings().isEmpty())
+                result.error = workerReport.toText();
+            return result;
+        });
+    QFutureWatcher<STerrainAtlasFinalization> finalizeWatcher;
+    QEventLoop finalizeLoop;
+    connect(&finalizeWatcher, &QFutureWatcherBase::finished,
+            &finalizeLoop, &QEventLoop::quit);
+    finalizeWatcher.setFuture(finalizeFuture);
+    finalizeLoop.exec(QEventLoop::ExcludeUserInputEvents);
+    STerrainAtlasFinalization finalized = finalizeFuture.result();
+    ei::log(eLogInfo, QStringLiteral(
+        "Modern terrain publication phase:atlas-finalize-and-responsive-wait elapsedMs:%1 thread:gui-event-loop")
+        .arg(finalizeWaitTimer.elapsed()));
+    finalizeProgress.setValue(70);
     if(!finalized.success)
     {
         const QString findings=report.findings().isEmpty()
@@ -15531,30 +15709,79 @@ void CView::finalizeVirtualTerrainAtlas()
     // alive through staging, replacement, and post-commit verification.
     QProgressDialog publishProgress(
         tr("Building and reopening the complete HDPack_Terrain.res candidate..."),
-        QString(), 0, 0, this);
+        QString(), 0, 100, this);
     publishProgress.setWindowTitle(tr("Saving modern MPR"));
     publishProgress.setWindowModality(Qt::ApplicationModal);
     publishProgress.setCancelButton(nullptr);
     publishProgress.setMinimumDuration(0);
     publishProgress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    QFuture<QPair<QByteArray, QStringList>> stageResFuture = QtConcurrent::run(
-        [sourceArchive, pages, replaceIdentity]() {
-            QByteArray bytes;
-            QStringList errors;
+    QPointer<QProgressDialog> publishProgressGuard(&publishProgress);
+    struct SStagedResResult
+    {
+        QByteArray bytes;
+        QStringList errors;
+        QString profileError;
+        bool valid{false};
+    };
+    QFuture<SStagedResResult> stageResFuture = QtConcurrent::run(
+        [sourceArchive, pages, replaceIdentity, publishProgressGuard,
+         profileMemberName = embeddedProfileMember.name,
+         mprNamespace = portableProfile.mprNamespace,
+         pixelHash = portableProfile.atlasPixelSha256,
+         slotCount = portableProfile.atlasSlotCount]() {
+            SStagedResResult result;
             sourceArchive.buildWithPublishedMembers(
-                pages, replaceIdentity, &bytes, &errors);
-            return qMakePair(bytes, errors);
+                pages, replaceIdentity, &result.bytes, &result.errors,
+                [publishProgressGuard](int value) {
+                    if(!publishProgressGuard) return;
+                    QMetaObject::invokeMethod(publishProgressGuard.data(),
+                        [publishProgressGuard, value]() {
+                            if(!publishProgressGuard) return;
+                            publishProgressGuard->setLabelText(
+                                QObject::tr("Building and validating HDPack members..."));
+                            publishProgressGuard->setValue(10 + (value * 35) / 100);
+                        }, Qt::QueuedConnection);
+                });
+            if(result.bytes.isEmpty())
+                return result;
+            QMetaObject::invokeMethod(publishProgressGuard.data(),
+                [publishProgressGuard]() {
+                    if(publishProgressGuard) {
+                        publishProgressGuard->setLabelText(
+                            QObject::tr("Reopening and validating HDPack..."));
+                        publishProgressGuard->setValue(48);
+                    }
+                }, Qt::QueuedConnection);
+            CResArchiveDocument reopened;
+            if(!reopened.loadBytes(result.bytes,
+                                   QStringLiteral("staged-textures.res"),
+                                   &result.errors))
+                return result;
+            STerrainAtlasProfile profile;
+            CValidationReport profileReport;
+            if(!STerrainAtlasProfile::fromBytes(
+                   reopened.memberPayload(profileMemberName), &profile,
+                   &profileReport,
+                   QStringLiteral("staged-textures.res:") + profileMemberName)
+               || !profile.validateBinding(
+                   mprNamespace, pixelHash, slotCount, &profileReport))
+            {
+                result.profileError = profileReport.toText().trimmed();
+                return result;
+            }
+            result.valid = true;
+            return result;
         });
-    QFutureWatcher<QPair<QByteArray, QStringList>> stageResWatcher;
+    QFutureWatcher<SStagedResResult> stageResWatcher;
     QEventLoop stageResLoop;
     connect(&stageResWatcher, &QFutureWatcherBase::finished,
             &stageResLoop, &QEventLoop::quit);
     stageResWatcher.setFuture(stageResFuture);
-    stageResLoop.exec(QEventLoop::ExcludeUserInputEvents);
-    const QPair<QByteArray, QStringList> stagedResResult = stageResFuture.result();
-    const QByteArray stagedResBytes = stagedResResult.first;
-    publishErrors.append(stagedResResult.second);
+    stageResLoop.exec();
+    const SStagedResResult stagedResResult = stageResFuture.result();
+    const QByteArray stagedResBytes = stagedResResult.bytes;
+    publishErrors.append(stagedResResult.errors);
     if(stagedResBytes.isEmpty())
     {
         publishProgress.close();
@@ -15565,41 +15792,20 @@ void CView::finalizeVirtualTerrainAtlas()
                 .arg(publishErrors.join(QStringLiteral("\n"))));
         return;
     }
-    CResArchiveDocument stagedRes;
-    QStringList stagedResErrors;
-    if(!stagedRes.loadBytes(stagedResBytes,
-                            QStringLiteral("staged-textures.res"),
-                            &stagedResErrors))
+    if(!stagedResResult.valid)
     {
         publishProgress.close();
         emit terrainPublicationFinished(texturesPath, false);
         QMessageBox::critical(this, tr("Atlas publication refused"),
-            tr("The complete staged HDPack_Terrain.res failed reopen. No output was "
-               "written.\n\n%1")
-                .arg(stagedResErrors.join(QStringLiteral("\n"))));
-        return;
-    }
-    STerrainAtlasProfile stagedEmbeddedProfile;
-    CValidationReport stagedEmbeddedReport;
-    if(!STerrainAtlasProfile::fromBytes(
-           stagedRes.memberPayload(embeddedProfileMember.name),
-           &stagedEmbeddedProfile, &stagedEmbeddedReport,
-           QStringLiteral("staged-textures.res:")
-               + embeddedProfileMember.name)
-       || !stagedEmbeddedProfile.validateBinding(
-           portableProfile.mprNamespace,
-           portableProfile.atlasPixelSha256,
-           portableProfile.atlasSlotCount, &stagedEmbeddedReport))
-    {
-        publishProgress.close();
-        emit terrainPublicationFinished(texturesPath, false);
-        QMessageBox::critical(this, tr("Atlas publication refused"),
-            tr("The staged HDPack_Terrain.res did not reopen with its exact "
-               "embedded material profile. No output was written.\n\n%1")
-                .arg(stagedEmbeddedReport.toText().trimmed()));
+            tr("The complete staged HDPack_Terrain.res failed reopen or its "
+               "embedded profile binding. No output was written.\n\n%1")
+                .arg((!stagedResResult.profileError.isEmpty()
+                          ? stagedResResult.profileError
+                          : stagedResResult.errors.join(QStringLiteral("\n")))));
         return;
     }
 
+    publishProgress.setValue(45);
     publishProgress.setLabelText(createTexturesBackup ? tr(
         "Backing up and atomically replacing HDPack_Terrain.res...")
         : tr("Atomically replacing HDPack_Terrain.res..."));
@@ -15616,7 +15822,17 @@ void CView::finalizeVirtualTerrainAtlas()
             texturesPath,stagedResBytes,&resResult.error,&originalTexturesBytes);
         resResult.phase=QStringLiteral("no-op");
     } else {
-    QFuture<SResPublishedMembersSaveResult> publishFuture =
+        resRequest.progress = [publishProgressGuard](const QString& phase,
+                                                       int value) {
+            if(!publishProgressGuard) return;
+            QMetaObject::invokeMethod(publishProgressGuard.data(),
+                [publishProgressGuard, phase, value]() {
+                    if(!publishProgressGuard) return;
+                    publishProgressGuard->setLabelText(phase);
+                    publishProgressGuard->setValue(value);
+                }, Qt::QueuedConnection);
+        };
+        QFuture<SResPublishedMembersSaveResult> publishFuture =
         QtConcurrent::run([sourceArchive, resRequest]() {
             return commitStagedResPublishedMembers(sourceArchive, resRequest);
         });
@@ -15625,7 +15841,7 @@ void CView::finalizeVirtualTerrainAtlas()
     connect(&publishWatcher, &QFutureWatcherBase::finished,
             &publishLoop, &QEventLoop::quit);
     publishWatcher.setFuture(publishFuture);
-    publishLoop.exec(QEventLoop::ExcludeUserInputEvents);
+    publishLoop.exec();
     resResult = publishFuture.result();
     }
     if(!resResult.success)
@@ -15684,7 +15900,17 @@ void CView::finalizeVirtualTerrainAtlas()
         mprResult.success=commitMapCohortMpr(mprDestination,package.mprBytes,&mprResult.error);
         mprResult.candidateSha256=QString::fromLatin1(QCryptographicHash::hash(package.mprBytes,QCryptographicHash::Sha256).toHex());
         mprResult.phase=QStringLiteral("map-cohort");
-    } else mprResult=commitValidatedMprBytes(mprRequest);
+    } else {
+        QFuture<SMprBytesSaveCommitResult> mprFuture = QtConcurrent::run(
+            [mprRequest]() { return commitValidatedMprBytes(mprRequest); });
+        QFutureWatcher<SMprBytesSaveCommitResult> mprWatcher;
+        QEventLoop mprLoop;
+        connect(&mprWatcher, &QFutureWatcherBase::finished,
+                &mprLoop, &QEventLoop::quit);
+        mprWatcher.setFuture(mprFuture);
+        mprLoop.exec();
+        mprResult = mprFuture.result();
+    }
     if(!mprResult.success)
     {
         publishProgress.close();

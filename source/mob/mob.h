@@ -39,6 +39,15 @@ struct SMobParameterState
     bool operator!=(const SMobParameterState& other) const { return !(*this == other); }
 };
 
+struct SMobAutosaveSnapshot
+{
+    QFileInfo source;
+    QByteArray originalData;
+    QByteArray cleanProjection;
+    QByteArray currentProjection;
+    int expectedObjectCount{0};
+};
+
 ///
 /// \brief The CMob class provides reading, saving and editing of *.mob file.
 ///
@@ -70,6 +79,11 @@ public:
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);
+    SMobAutosaveSnapshot captureAutosaveSnapshot();
+    static bool buildAutosaveCandidate(const SMobAutosaveSnapshot& snapshot,
+                                       QByteArray* data,
+                                       CValidationReport* report = nullptr,
+                                       QString* saveClass = nullptr);
     bool buildCanvasCropCandidate(float offsetX, float offsetY,
                                   float resultWidth, float resultHeight,
                                   bool removeOutside, float closedEdgeWidth,

@@ -1,3 +1,9 @@
+## Ataman 150 — EI-SAVE-PERF-150 — 2026-10-12
+
+- Modern atlas finalization, complete RES candidate rebuild/reopen/backup/atomic replacement, and MPR commit now run off the GUI thread with a live phase percentage. RES remains a full atomic replacement because the game reader does not safely accept a stale directory embedded ahead of an appended table.
+- Recovery autosave captures MPR/MOB state immediately, writes generations in the background, and stores a paired terrain RES sidecar when the MPR candidate depends on an unsaved working atlas. Removed the fixed 15-second countdown; the non-modal status leaves editing available while disk work runs.
+- Workflow logs are explicitly UTF-8. Phase measurements, byte-preservation checks, crash interruption, regression results, and handoff evidence: `docs/validation/ATAMAN_SAVE_PERF_150_20261012.md`.
+
 ## Ataman 149 — EI-PANEL-POLISH-149 — 2026-10-12
 
 - «Перемешать тайлы» выбирает новое системное зерно при каждом нажатии. Зерно сохраняется в MPR; одна команда Undo/Redo охватывает раскладку и зерно.

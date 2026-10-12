@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QStandardPaths>
+#include <QCryptographicHash>
 
 #include "backup_manager.h"
 
@@ -39,6 +40,7 @@ private slots:
     void retentionKeepsNewestFiftyPreSaveRevisions();
     void failureIsReportedWithoutChangingSource();
     void autosavesAreVersionedAndDeduplicated();
+    void mprAutosaveKeepsRequiredAtlasCompanion();
     void uncleanSessionNotifiesEachRecoveryOnlyOnce();
     void cleanSessionDoesNotNotifyAndKeepsRecovery();
 };
@@ -135,6 +137,46 @@ void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
     QVERIFY(clean.success);
     QVERIFY(clean.skipped);
     QVERIFY(clean.backupPath.isEmpty());
+}
+
+void BackupManagerTests::mprAutosaveKeepsRequiredAtlasCompanion()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString sourcePath = temporary.filePath("zone1.mpr");
+    QFile source(sourcePath);
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    QCOMPARE(source.write("source-mpr"), qint64(10));
+    source.close();
+    const QByteArray candidate("recovery-mpr");
+    const QByteArray atlas("paired-terrain-res");
+    CBackupManager manager(temporary.filePath("backups"));
+
+    const SBackupResult saved = manager.snapshotAutosaveWithCompanion(
+        QFileInfo(sourcePath), candidate, QStringLiteral("terrain.res"), atlas);
+    QVERIFY2(saved.success, qPrintable(saved.error));
+    QVERIFY(!saved.skipped);
+    QFile payload(saved.backupPath);
+    QVERIFY(payload.open(QIODevice::ReadOnly));
+    QCOMPARE(payload.readAll(), candidate);
+    QFile metadataFile(saved.backupPath + ".json");
+    QVERIFY(metadataFile.open(QIODevice::ReadOnly));
+    const QJsonObject metadata = QJsonDocument::fromJson(
+        metadataFile.readAll()).object();
+    const QString companionPath = metadata.value("companionPath").toString();
+    QVERIFY(!companionPath.isEmpty());
+    QFile companion(companionPath);
+    QVERIFY(companion.open(QIODevice::ReadOnly));
+    QCOMPARE(companion.readAll(), atlas);
+    QCOMPARE(metadata.value("companionSha256").toString(),
+        QString::fromLatin1(QCryptographicHash::hash(
+            atlas, QCryptographicHash::Sha256).toHex()));
+
+    const SBackupResult duplicate = manager.snapshotAutosaveWithCompanion(
+        QFileInfo(sourcePath), candidate, QStringLiteral("terrain.res"), atlas);
+    QVERIFY(duplicate.success);
+    QVERIFY(duplicate.skipped);
+    QCOMPARE(duplicate.backupPath, saved.backupPath);
 }
 
 void BackupManagerTests::uncleanSessionNotifiesEachRecoveryOnlyOnce()

@@ -2122,6 +2122,71 @@ bool CMob::buildRawObjectSequenceCandidate(
     return true;
 }
 
+SMobAutosaveSnapshot CMob::captureAutosaveSnapshot()
+{
+    SMobAutosaveSnapshot snapshot;
+    snapshot.source = m_filePath;
+    snapshot.originalData = m_originalData;
+    snapshot.cleanProjection = m_cleanProjection;
+    snapshot.expectedObjectCount = m_aNode.size();
+    serializeMob(snapshot.currentProjection, false);
+    return snapshot;
+}
+
+bool CMob::buildAutosaveCandidate(const SMobAutosaveSnapshot& snapshot,
+                                  QByteArray* data,
+                                  CValidationReport* report,
+                                  QString* saveClass)
+{
+    if(!data || snapshot.source.absoluteFilePath().isEmpty()
+       || snapshot.originalData.isEmpty()
+       || snapshot.cleanProjection.isEmpty()
+       || snapshot.currentProjection.isEmpty())
+        return false;
+    data->clear();
+    if(saveClass) saveClass->clear();
+    if(snapshot.currentProjection == snapshot.cleanProjection)
+    {
+        *data = snapshot.originalData;
+        if(saveClass) *saveClass = QStringLiteral("BYTE_IDENTICAL");
+    }
+    else
+    {
+        CMobEditTransaction transaction;
+        QString candidateClass;
+        if(!CMobDocument::buildOwnedRootProjectionCandidate(
+               snapshot.originalData, snapshot.source.filePath(),
+               snapshot.cleanProjection, snapshot.currentProjection,
+               &transaction, data, &candidateClass, report))
+        {
+            if(data) data->clear();
+            return false;
+        }
+        if(saveClass) *saveClass = candidateClass;
+    }
+    if(data->size() < 16
+       || data->left(4) != snapshot.originalData.left(4))
+    {
+        if(report)
+            report->add("mob.candidate.envelope", EValidationSeverity::Error,
+                        "The generated MOB autosave candidate failed its envelope check",
+                        snapshot.source.filePath());
+        data->clear();
+        return false;
+    }
+    CMobDocument freshDocument;
+    CValidationReport freshReport;
+    if(!freshDocument.loadBytes(*data, "in-memory-autosave-candidate.mob",
+                                &freshReport)
+       || freshDocument.objects().size() != snapshot.expectedObjectCount)
+    {
+        if(report) *report = freshReport;
+        data->clear();
+        return false;
+    }
+    return true;
+}
+
 bool CMob::buildValidatedCandidate(QByteArray* data,
                                    CValidationReport* report,
                                    QString* saveClass)

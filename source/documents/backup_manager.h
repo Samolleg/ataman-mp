@@ -33,6 +33,9 @@ public:
     SBackupResult snapshotOnOpen(const QFileInfo& source) const;
     SBackupResult snapshotBeforeSave(const QFileInfo& source) const;
     SBackupResult snapshotAutosave(const QFileInfo& source, const QByteArray& candidate) const;
+    SBackupResult snapshotAutosaveWithCompanion(
+        const QFileInfo& source, const QByteArray& candidate,
+        const QString& companionName, const QByteArray& companionCandidate) const;
 
     QString rootPath() const { return m_rootPath; }
     static QString defaultRootPath();
@@ -46,6 +49,9 @@ public:
 
 private:
     SBackupResult createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const;
+    SBackupResult snapshotAutosaveImpl(
+        const QFileInfo& source, const QByteArray& candidate,
+        const QString& companionName, const QByteArray& companionCandidate) const;
     QString sourceDirectory(const QFileInfo& source) const;
     QVector<SRecoverableAutosave> recoverableAutosavesForRoot() const;
     void enforceRetention(const QString& directoryPath) const;

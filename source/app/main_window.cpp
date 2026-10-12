@@ -8081,7 +8081,6 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     if(!enabled)
     {
         m_autosaveTimer->stop();
-        if(m_autosaveCountdownTimer) m_autosaveCountdownTimer->stop();
         if(m_autosaveNotification) m_autosaveNotification->hide();
         ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
         return;
@@ -8095,81 +8094,9 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
 
 void MainWindow::beginAutosaveCountdown()
 {
-    if(m_shutdownInProgress)
-        return;
-    if(!m_pView || m_pView->hasPendingOperation())
-    {
-        ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
-        return;
-    }
-    bool dirty = false;
-    for(CMob* mob : m_pView->mobs())
-        dirty = dirty || (mob && mob->isDirty());
-    dirty = dirty || (CLandscape::getInstance()->isMprLoad()
-                      && CLandscape::getInstance()->isDirty());
-    if(!dirty)
-    {
-        ei::log(eLogInfo, "Recovery autosave tick skipped because no document is dirty");
-        return;
-    }
-    if(m_autosaveCountdownTimer && m_autosaveCountdownTimer->isActive())
-        return;
-
-    if(!m_autosaveNotification)
-    {
-        m_autosaveNotification = new QFrame(this);
-        m_autosaveNotification->setObjectName("autosaveNotification");
-        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
-        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
-        m_autosaveNotification->setStyleSheet(
-            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
-            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
-        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
-        layout->setContentsMargins(12, 10, 12, 10);
-        m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
-        m_cancelAutosaveButton = new QPushButton(
-            tr("Cancel Autosave"), m_autosaveNotification);
-        layout->addWidget(m_autosaveCountdownLabel, 1);
-        layout->addWidget(m_cancelAutosaveButton);
-        m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
-        m_autosaveCountdownTimer->setInterval(1000);
-        connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
-        {
-            --m_autosaveCountdownSeconds;
-            if(m_autosaveCountdownSeconds <= 0)
-            {
-                m_autosaveCountdownTimer->stop();
-                m_autosaveCountdownLabel->setText(tr("Autosaving..."));
-                m_cancelAutosaveButton->setEnabled(false);
-                m_autosaveNotification->adjustSize();
-                positionAutosaveNotification();
-                m_autosaveNotification->repaint();
-                performAutosave();
-                m_autosaveNotification->hide();
-                m_cancelAutosaveButton->setEnabled(true);
-                return;
-            }
-            m_autosaveCountdownLabel->setText(
-                tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
-        });
-        connect(m_cancelAutosaveButton, &QPushButton::clicked, this, [this]()
-        {
-            m_autosaveCountdownTimer->stop();
-            m_autosaveNotification->hide();
-            ei::log(eLogInfo, "Recovery autosave occurrence skipped by user");
-            statusBar()->showMessage(tr("This recovery autosave was skipped."), 3000);
-        });
-    }
-    m_autosaveCountdownSeconds = 15;
-    m_cancelAutosaveButton->setEnabled(true);
-    m_autosaveCountdownLabel->setText(
-        tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
-    m_autosaveNotification->adjustSize();
-    positionAutosaveNotification();
-    m_autosaveNotification->show();
-    m_autosaveNotification->raise();
-    m_autosaveCountdownTimer->start();
-    ei::log(eLogInfo, "Recovery autosave countdown started seconds:15");
+    // Recovery snapshots no longer need a user countdown: candidate creation is
+    // a short immutable snapshot and disk work runs in the background.
+    performAutosave();
 }
 
 void MainWindow::performAutosave()
@@ -8184,39 +8111,49 @@ void MainWindow::performAutosave()
         ei::log(eLogInfo, "Recovery autosave deferred while an edit operation is pending");
         return;
     }
-    int written = 0;
+    if(m_autosaveInProgress)
+    {
+        ei::log(eLogInfo, "Recovery autosave deferred because the previous generation is still writing");
+        return;
+    }
+    struct SAutosaveWorkItem
+    {
+        QFileInfo source;
+        QByteArray candidate;
+        QString companionName;
+        QByteArray companion;
+        SMobAutosaveSnapshot mobSnapshot;
+        SMprAutosaveSnapshot mprSnapshot;
+        bool buildMobCandidate{false};
+        bool buildMprCandidate{false};
+    };
+    QVector<SAutosaveWorkItem> work;
     int failed = 0;
-    CBackupManager manager;
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob || !mob->isDirty())
             continue;
-        QByteArray candidate;
-        CValidationReport report;
-        QString saveClass;
-        if(!mob->buildValidatedCandidate(&candidate, &report, &saveClass))
-        {
-            ++failed;
-            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
-                .arg(mob->filePath().absoluteFilePath(), report.toText().trimmed()));
-            continue;
-        }
-        const SBackupResult result = manager.snapshotAutosave(mob->filePath(), candidate);
-        if(result.success)
-            written += result.skipped ? 0 : 1;
-        else
-        {
-            ++failed;
-            ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
-                .arg(mob->filePath().absoluteFilePath(), result.error));
-        }
+        QElapsedTimer snapshotTimer;
+        snapshotTimer.start();
+        SMobAutosaveSnapshot snapshot = mob->captureAutosaveSnapshot();
+        ei::log(eLogInfo, QString("Recovery autosave GUI snapshot phase document:MOB path:%1 elapsedMs:%2 projectionBytes:%3 objects:%4")
+            .arg(mob->filePath().absoluteFilePath()).arg(snapshotTimer.elapsed())
+            .arg(snapshot.currentProjection.size())
+            .arg(snapshot.expectedObjectCount));
+        SAutosaveWorkItem item;
+        item.source = mob->filePath();
+        item.mobSnapshot = snapshot;
+        item.buildMobCandidate = true;
+        work.append(item);
     }
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad() && landscape->isDirty())
     {
-        QByteArray candidate;
+        QElapsedTimer snapshotTimer;
+        snapshotTimer.start();
+        SMprAutosaveSnapshot snapshot;
         CValidationReport report;
-        if(!m_pView->buildValidatedLandscapeCandidate(&candidate, &report))
+        if(!m_pView->captureLandscapeAutosaveSnapshot(&snapshot, &report))
         {
             ++failed;
             ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
@@ -8225,27 +8162,128 @@ void MainWindow::performAutosave()
         }
         else
         {
-            const SBackupResult result = manager.snapshotAutosave(
-                landscape->filePath(), candidate);
-            if(result.success)
-            {
-                written += result.skipped ? 0 : 1;
-                ei::log(eLogInfo, QString("Recovery autosave MPR path:%1 sha256:%2 skipped:%3")
-                    .arg(landscape->filePath().absoluteFilePath(),
-                         result.sha256).arg(result.skipped));
-            }
-            else
-            {
-                ++failed;
-                ei::log(eLogWarning, QString("Recovery autosave failed MPR path:%1 error:%2")
-                    .arg(landscape->filePath().absoluteFilePath(), result.error));
-            }
+            ei::log(eLogInfo, QString("Recovery autosave GUI snapshot phase document:MPR path:%1 elapsedMs:%2 sourceBytes:%3 atlasPages:%4 atlasSlots:%5")
+                .arg(landscape->filePath().absoluteFilePath()).arg(snapshotTimer.elapsed())
+                .arg(snapshot.document.originalBytes().size())
+                .arg(snapshot.authoredPages.size()).arg(snapshot.activeSlots));
+            SAutosaveWorkItem item;
+            item.source = snapshot.source;
+            item.mprSnapshot = snapshot;
+            item.buildMprCandidate = true;
+            work.append(item);
         }
     }
-    if(written > 0)
-        statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
-    ei::log(failed > 0 ? eLogWarning : eLogInfo,
-            QString("Recovery autosave pass complete written:%1 failed:%2").arg(written).arg(failed));
+    if(work.isEmpty())
+    {
+        ei::log(failed > 0 ? eLogWarning : eLogInfo,
+                QString("Recovery autosave snapshot pass complete queued:0 failed:%1").arg(failed));
+        return;
+    }
+    if(!m_autosaveNotification)
+    {
+        m_autosaveNotification = new QFrame(this);
+        m_autosaveNotification->setObjectName("autosaveNotification");
+        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
+        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_autosaveNotification->setStyleSheet(
+            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; }");
+        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_autosaveStatusLabel = new QLabel(m_autosaveNotification);
+        layout->addWidget(m_autosaveStatusLabel, 1);
+    }
+    m_autosaveStatusLabel->setText(tr("Creating recovery snapshots in the background...")
+        + QStringLiteral(" (%1)").arg(work.size()));
+    m_autosaveNotification->adjustSize();
+    positionAutosaveNotification();
+    m_autosaveNotification->show();
+    m_autosaveNotification->raise();
+    m_autosaveInProgress = true;
+    if(!m_autosaveWatcher)
+    {
+        m_autosaveWatcher = new QFutureWatcher<QPair<int, int>>(this);
+        connect(m_autosaveWatcher, &QFutureWatcher<QPair<int, int>>::finished,
+                this, [this, failed]()
+        {
+            const QPair<int, int> counts = m_autosaveWatcher->result();
+            m_autosaveInProgress = false;
+            ei::log(counts.second + failed > 0 ? eLogWarning : eLogInfo,
+                QString("Recovery autosave pass complete written:%1 failed:%2")
+                    .arg(counts.first).arg(counts.second + failed));
+            if(counts.first > 0)
+                statusBar()->showMessage(
+                    tr("Recovery autosave created %1 new generation(s).")
+                        .arg(counts.first), 4000);
+            if(m_autosaveNotification)
+                m_autosaveNotification->hide();
+            m_autosaveWatcher->deleteLater();
+            m_autosaveWatcher = nullptr;
+        });
+    }
+    m_autosaveWatcher->setFuture(QtConcurrent::run([work]()
+    {
+        int written = 0;
+        int failedWrites = 0;
+        CBackupManager manager;
+        for(const SAutosaveWorkItem& item : work)
+        {
+            QElapsedTimer writeTimer;
+            writeTimer.start();
+            QByteArray candidate = item.candidate;
+            QByteArray companion = item.companion;
+            QString saveClass;
+            CValidationReport report;
+            qint64 serializationMs = 0;
+            if(item.buildMobCandidate
+               && !CMob::buildAutosaveCandidate(
+                    item.mobSnapshot, &candidate, &report, &saveClass))
+            {
+                ++failedWrites;
+                ei::log(eLogWarning,
+                    QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
+                        .arg(item.source.absoluteFilePath(),
+                             report.toText().trimmed()));
+                continue;
+            }
+            if(item.buildMobCandidate)
+                serializationMs = writeTimer.elapsed();
+            if(item.buildMprCandidate)
+            {
+                const SMprAutosaveCandidate built =
+                    CView::buildLandscapeAutosaveCandidate(item.mprSnapshot);
+                if(!built.success)
+                {
+                    ++failedWrites;
+                    ei::log(eLogWarning,
+                        QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
+                            .arg(item.source.absoluteFilePath(), built.error));
+                    continue;
+                }
+                candidate = built.mprBytes;
+                companion = built.terrainAtlasResource;
+                serializationMs = writeTimer.elapsed();
+            }
+            const SBackupResult result = companion.isEmpty()
+                ? manager.snapshotAutosave(item.source, candidate)
+                : manager.snapshotAutosaveWithCompanion(
+                      item.source, candidate,
+                      QStringLiteral("terrain.res"), companion);
+            if(result.success)
+                written += result.skipped ? 0 : 1;
+            else
+                ++failedWrites;
+            ei::log(result.success ? eLogInfo : eLogWarning,
+                QString("Recovery autosave background phase path:%1 serializationMs:%2 ioAndVerificationMs:%3 bytes:%4 companionBytes:%5 saveClass:%6 skipped:%7 error:%8")
+                    .arg(item.source.absoluteFilePath()).arg(serializationMs)
+                    .arg(writeTimer.elapsed() - serializationMs)
+                    .arg(candidate.size()).arg(companion.size())
+                    .arg(saveClass).arg(result.skipped).arg(result.error));
+        }
+        return qMakePair(written, failedWrites);
+    }));
+    ei::log(eLogInfo, QString("Recovery autosave snapshot pass complete queued:%1 failed:%2")
+        .arg(work.size()).arg(failed));
 }
 
 void MainWindow::showRecoverableAutosaves()
@@ -9288,6 +9326,13 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if(m_autosaveInProgress)
+    {
+        statusBar()->showMessage(
+            tr("Recovery snapshots are still being written. Close again when they finish."), 5000);
+        e->ignore();
+        return;
+    }
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
         const QMessageBox::StandardButton answer = QMessageBox::question(this,
@@ -9327,8 +9372,6 @@ void MainWindow::closeEvent(QCloseEvent *e)
         QObject::disconnect(m_travelPanel, nullptr, this, nullptr);
     if(m_autosaveTimer)
         m_autosaveTimer->stop();
-    if(m_autosaveCountdownTimer)
-        m_autosaveCountdownTimer->stop();
     if(m_validationTimer)
         m_validationTimer->stop();
     if(m_mapTestResultTimer)
