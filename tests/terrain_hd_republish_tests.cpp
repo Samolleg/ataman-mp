@@ -6,6 +6,7 @@
 #include <QTransform>
 #include "terrain_hd_republish.h"
 #include "terrain_hd_library.h"
+#include "terrain_hd_variant_bank.h"
 #include "terrain_virtual_atlas.h"
 #include "mmp_codec.h"
 #include "mpr_document.h"
@@ -81,8 +82,25 @@ private slots:
         QVERIFY(QFile::remove(game));QStringList repeated;QVERIFY(TerrainHdLibrary::ensure({game},&repeated,&error,nullptr,library));QCOMPARE(repeated,local);
         CTerrainHdSources next;QVERIFY(next.open(repeated,&error,nullptr,library+"/index"));QVERIFY(next.cacheHit());
         CTerrainHdSources::Source donor;QVERIFY(next.find("stock",0,&donor));QCOMPARE(next.payload(donor),hd);
+        // Painting validates local pages/inputs, without the deleted game RES.
+        const QString bankId(64,'a'),bankRoot=library+"/variants",bankDirectory=bankRoot+"/"+bankId;
+        QVERIFY(QDir().mkpath(bankDirectory));
+        auto put=[](const QString& path,const QByteArray& bytes){QFile file(path);return file.open(QIODevice::WriteOnly)&&file.write(bytes)==bytes.size();};
+        auto hash=[](const QByteArray& bytes){return QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());};
+        QFile presets(":/terrain_atlas_presets.json");QVERIFY(presets.open(QIODevice::ReadOnly));
+        const QJsonObject manifest{{"algorithm",TerrainHdVariants::AlgorithmVersion},{"id",bankId},{"presetSha",hash(presets.readAll())},
+            {"inputs",QJsonArray{QJsonObject{{"path","@library/sources/"+QFileInfo(local.first()).fileName()},{"member",terrain.name},{"sha256",hash(hd)}}}},
+            {"pages",QJsonArray{QJsonObject{{"file","variants000.mmp"},{"sha256",hash(hd)}}}},
+            {"entries",QJsonArray{QJsonObject{{"slot",0},{"id","fixture"},{"material","Grass"},{"reviewedClass",0},{"physicalClass",0},{"layer","land"}}}}};
+        QVERIFY(put(bankDirectory+"/variants000.mmp",hd));QVERIFY(put(bankDirectory+"/manifest.json",QJsonDocument(manifest).toJson()));
+        QVERIFY(put(bankRoot+"/current.json",QJsonDocument(QJsonObject{{"id",bankId}}).toJson()));
+        const auto bank=TerrainHdVariantBank::load(bankRoot);QVERIFY2(bank.success,qPrintable(bank.error));QCOMPARE(bank.entries.size(),1);
+        const QString moved=dir.filePath("moved-library");QVERIFY(QDir().rename(library,moved));
+        QVERIFY(TerrainHdLibrary::ensure({},&local,&error,nullptr,moved));
+        CTerrainHdSources relocated;QVERIFY(relocated.open(local,&error,nullptr,moved+"/index"));QVERIFY(relocated.cacheHit());
+        const auto movedBank=TerrainHdVariantBank::load(moved+"/variants");QVERIFY2(movedBank.success,qPrintable(movedBank.error));QCOMPARE(movedBank.entries.first().blocks,bank.entries.first().blocks);
         QFile broken(local.first());QVERIFY(broken.open(QIODevice::WriteOnly|QIODevice::Truncate));broken.write("broken");broken.close();
-        QVERIFY(!TerrainHdLibrary::ensure({},&repeated,&error,nullptr,library));
+        QVERIFY(!TerrainHdLibrary::ensure({},&repeated,&error,nullptr,moved));
     }
     void lowContrastTransitionKeepsReviewedTopology()
     {

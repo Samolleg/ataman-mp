@@ -439,10 +439,15 @@ bool CTerrainHdSources::open(const QStringList& paths,QString* error,CTerrainHdP
         QFile file(path);if(!file.open(QIODevice::ReadOnly)){if(error)*error=file.errorString();return false;}
         QCryptographicHash hash(QCryptographicHash::Sha256);
         while(!file.atEnd()) {if(cancelled())return false;const auto chunk=file.read(1024*1024);if(chunk.isEmpty()&&file.error()!=QFile::NoError){if(error)*error=file.errorString();return false;}hash.addData(chunk);}
-        fingerprint.addData(QFileInfo(path).absoluteFilePath().toUtf8());fingerprint.addData("\0",1);
-        pathIdentity.addData(QFileInfo(path).absoluteFilePath().toUtf8());pathIdentity.addData("\0",1);
+        // An explicitly owned index travels with its library. Full payload SHA
+        // retains corruption detection without binding it to install path/mtime.
+        const auto identity=cacheDirectory.isEmpty()?QFileInfo(path).absoluteFilePath().toUtf8()
+            :QByteArray::number(m_archives.size())+'/'+QFileInfo(path).fileName().toUtf8();
+        fingerprint.addData(identity);fingerprint.addData("\0",1);
+        pathIdentity.addData(identity);pathIdentity.addData("\0",1);
         fingerprint.addData(QByteArray::number(archive->sourceSize()));fingerprint.addData("/",1);
-        fingerprint.addData(QByteArray::number(archive->sourceModified().toMSecsSinceEpoch()));fingerprint.addData(hash.result());
+        if(cacheDirectory.isEmpty())fingerprint.addData(QByteArray::number(archive->sourceModified().toMSecsSinceEpoch()));
+        fingerprint.addData(hash.result());
         m_archives.append(archive);
     }
     // Resolve the standard location without the visual cache's legacy-cleanup
