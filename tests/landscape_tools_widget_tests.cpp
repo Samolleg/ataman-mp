@@ -85,6 +85,11 @@ private slots:
         QVERIFY(!tools.modernMixedEdge());QVERIFY(!tools.modernAutoResolveBlends());QVERIFY(!tools.generatedHdVariants());
         tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         QVERIFY(tools.modernMixedEdge());QVERIFY(tools.modernAutoResolveBlends());QVERIFY(tools.generatedHdVariants());
+        tools.setUnderwaterFamiliesVisible(true);
+        tools.setPaintMaterials({ground},{},{water},2,2);
+        tools.setPaintIssueMarkingEnabled(true);
+        QVERIFY(tools.selectPaintTerrainType(1));
+        QVERIFY(!tools.underwaterFamiliesVisible());QVERIFY(!tools.paintIssueMarkingEnabled());
     }
     void initTestCase()
     {

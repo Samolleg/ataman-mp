@@ -39,7 +39,7 @@ Native изображения: штатный `CView::draw`, отдельный 
 
 ## Доказательства и статус
 
-Адресные Windows widget tests: 9 PASS/0 FAIL/0 SKIP, `build-tests-155-widget-final.log`; hidden windows до Polish, UI lock. Настоящий Windows/DPI font, чипы320px, сегменты и target transitions. Offscreen-font fallback с отсутствующим font directory не используется для font acceptance.
+Адресные Windows widget tests: 9 PASS/0 FAIL/0 SKIP, `build-tests-155-widget-marker-final.log`; hidden windows до Polish, UI lock. Настоящий Windows/DPI font, чипы320px, сегменты и target transitions. Offscreen-font fallback с отсутствующим font directory не используется для font acceptance.
 
 Связанный CPU регресс модели: 8 PASS/0 FAIL/0 SKIP, `build-tests-155-documents.log`: Manual baseline, legacy fieldless painting, Modern initialization, first Resolve, shared corner ordering и sparse Undo/Redo. Последующие изменения renderer/profile этих исходников модели не меняли.
 
@@ -48,3 +48,5 @@ Native изображения: штатный `CView::draw`, отдельный 
 Ранние diagnostic1 и offscreen widget font run не считаются PASS: harness не активировал editing, radius cast был неверен, font backend не имел Windows fonts. Diagnostic2 выявил реальные C/Save отказы. Diagnostic3 raw264/0 не закрывает задачу: поздний тест выявил непригодную fresh authoring palette. Diagnostic4 подтвердил исправленное fresh painting и все12 sculpt pixel paths; topology counter ошибочно считал inactive packed0, а требование byte-identical до/после обычной DXT1 конверсии было неверным. Эти ранние итоги не подменяют завершающую строгую матрицу.
 
 Диагностическая завершающая матрица310 PASS/0 FAIL, `build-tests-155-matrix/palette-diagnostic5.log`, exit0, nativeAttempts0/unchanged1. Анимации8×256px и32×128px сохраняют frame order/content; вторая штатно публикуется256px через DXT1, без утверждения о настоящем HD. Чистая версия155 дополнительно проверит длинный120px drag и несколько brush centers. Source commit, clean Release/staging и guarded установка пока ожидаются. Ручная приёмка владельца остаётся отдельной; основная EI-RECOVERY-20261012 не закрывается этой версией.
+
+Общий UI-check первоначального clean155 выявил связанный marker-selection регресс: выключенный родитель палитры ошибочно считался недоступным источником. Доступность теперь хранится у самого материала, явный выбор корректно выходит из marker; отдельная legacy underwater палитра сохраняет видимость при смене слоя. Дополненный widget9/0 и UI-check uild-tests-155-release/ui-marker-final.log PASS. nativeAttempts0; внешние clipboard sequence/formats изменились5516→5524 при нулевых native calls, повтор ради unchanged не выполнялся. Snapshot a524 после адресной правки является диагностическим и не выдаётся как финальный clean artifact. Следующий шаг — новый scoped source SHA и fresh archive Release с длинным drag.

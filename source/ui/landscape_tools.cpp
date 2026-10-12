@@ -1309,7 +1309,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         // material button and option applicability even when mode ID stays 1.
         bool selected=false;const auto material=paintTerrainType(&selected);
         if(selected && paintPaletteMode()==ETerrainPaintPaletteMode::Modern)
-            selectPaintTerrainType(material);
+        {
+            const auto& choices=index==1?m_overlayPaintTypes:index==2?m_underwaterPaintTypes:m_landPaintTypes;
+            qint32 visibleMaterial=-1;
+            for(const auto& choice:choices)if(choice.paintAvailable) {
+                if(visibleMaterial<0)visibleMaterial=choice.id;
+                if(choice.id==material){visibleMaterial=material;break;}
+            }
+            if(visibleMaterial>=0)selectPaintTerrainType(visibleMaterial);
+        }
         updatePaintOptionApplicability();
         emit editingStateChanged();
     });
@@ -2399,6 +2407,7 @@ void CLandscapeTools::rebuildMaterialPalette()
             {
               QToolButton* button = new QToolButton(this);
               button->setProperty("terrainMaterialId", choice.id);
+              button->setProperty("terrainPaintAvailable",choice.paintAvailable);
               button->setProperty("terrainUnderwaterChoice",grid==m_underwaterMaterialGrid);
               button->setProperty("terrainSupportMaterialId", choice.supportId);
               button->setProperty("terrainContextualStamp", choice.contextualStamp);
@@ -2809,8 +2818,17 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
     QButtonGroup* group = activeMaterialButtons();
     if(!group)
         return false;
+    if(group==m_groundMaterialButtons && underwaterFamiliesVisible())
+    {
+        bool availableHere=false,availableOnGround=false;
+        for(const auto& choice:m_underwaterPaintTypes)
+            availableHere |= choice.id==terrainType && choice.paintAvailable;
+        for(const auto& choice:m_landPaintTypes)
+            availableOnGround |= choice.id==terrainType && choice.paintAvailable;
+        if(!availableHere && availableOnGround)setUnderwaterFamiliesVisible(false);
+    }
     for(QAbstractButton* button : group->buttons())
-        if(button->isEnabled()
+        if(button->property("terrainPaintAvailable").toBool()
            && (group!=m_groundMaterialButtons || button->property("terrainUnderwaterChoice").toBool()==underwaterFamiliesVisible())
            && button->property("terrainMaterialId").toInt() == terrainType)
         {
