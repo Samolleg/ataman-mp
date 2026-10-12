@@ -24,6 +24,8 @@ fast Evil Islands and Jamais Vu map editing.
 
 Current Ataman version: `161`. Each separate fix advances the integer version.
 
+161 keeps private HD terrain donors in `hd-library` beside the executable: `sources` contains imported terrain pages/profiles, `index` contains the reusable matcher, and `variants` contains painting materials. Import reads game archives once; later HD conversions and painting-bank loads use local files. Game resource publication still writes the map's required atlas through the normal guarded save route. Keep `hd-library` with your settings and maps when updating the program; it is user data, not part of a distributable package. A changed game HDPack does not automatically replace this library.
+
 160 allows HD conversion of original map namespaces and saves a shared-brush session with only the current map changed through the normal MPR save route. HD output uses the configured HDPack_Terrain.res; source pages and native animation frames are preserved. Performance improvements from159 remain included.
 
 Evidence: [zone2 HD and Save](docs/validation/ATAMAN_ZONE2_HD_SAVE_160_20261013.md).
