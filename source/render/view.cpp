@@ -9866,9 +9866,23 @@ void CView::saveLand()
 {
     syncWorldTerrainActive();
     const auto dirtyWorld = m_worldTerrainSession.dirtyPaths();
-    if(!dirtyWorld.isEmpty()
-       && (dirtyWorld.size()!=1 || CWorldTerrainSession::key(dirtyWorld.first())
-           != CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())))
+    const bool activeOnly = dirtyWorld.size()==1
+        && CWorldTerrainSession::key(dirtyWorld.first())
+            == CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    const auto checkpointActive = [this,activeOnly]() {
+        if(!activeOnly || m_pLand->isDirty() || mprParametersDirty())return;
+        // A local save is also the checkpoint of a shared-brush session that
+        // changed only this map. Discard stale atlas baselines/history only
+        // after the normal save has committed and adopted its new baseline.
+        syncWorldTerrainActive();
+        if(!m_worldTerrainSession.dirtyPaths().isEmpty())return;
+        m_worldTerrainSession.clearHistory();
+        const auto id=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+        if(auto doc=m_worldTerrainSession.documents.value(id))doc->atlas.clear();
+        m_worldTerrainAtlasSources.remove(id);
+        updateWorldTerrainStatus();
+    };
+    if(!dirtyWorld.isEmpty() && !activeOnly)
     {
         if(!saveWorldTerrainMaps()) {
             if(m_mapCohortActive)m_mapCohortCommitted=false;
@@ -9903,10 +9917,12 @@ void CView::saveLand()
         {
             m_requestedTerrainMprDestination = m_pLand->filePath();
             finalizeVirtualTerrainAtlas();
+            checkpointActive();
             return;
         }
         if(saveLandscapeDocument(m_pLand->filePath()))
             emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
+        checkpointActive();
     }
 }
 
@@ -10352,11 +10368,17 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool allowModernDraft)
 {
     syncWorldTerrainActive();
-    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
+    const auto dirtyWorld=m_worldTerrainSession.dirtyPaths();
+    const bool activeOnly=dirtyWorld.size()==1
+        && CWorldTerrainSession::key(dirtyWorld.first())
+            == CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    if(!dirtyWorld.isEmpty() && !activeOnly)
     {
-        QMessageBox::information(this,tr("World terrain save"),
-            tr("Save the world terrain session together before saving a separate draft or publishing this map."));
-        return false;
+        if(!saveWorldTerrainMaps())return false;
+        // The current destination was included in the durable checkpoint.
+        // Exporting a separate draft still continues against its new baseline.
+        if(!allowModernDraft && CWorldTerrainSession::key(destination.absoluteFilePath())
+            == CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath()))return true;
     }
     if(!ensureTerrainAutoCatalogReady())
         return false;

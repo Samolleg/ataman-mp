@@ -220,7 +220,9 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             describeAnimations("before");
             QVector<QVector3D> points;
             if(saveOnly)points={QVector3D(73,1,0),QVector3D(139,1,0),QVector3D(451,9,0),QVector3D(349,123,0)};
-            if(!saveOnly)for(int slot:{34,44,215,666}) {
+            if(fixture.value("legacyHd").toBool())
+                points={QVector3D(25,25,0),QVector3D(55,45,0),QVector3D(65,75,0)};
+            if(!saveOnly&&!fixture.value("legacyHd").toBool())for(int slot:{34,44,215,666}) {
                 bool found=false;
                 for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
                     for(int x=0;x<view.m_terrainEdit.tileCountX()&&!found;++x)
@@ -260,10 +262,31 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                             else ++failed;
                             box->reject();
                         }
+                        else if(box->standardButtons()&QMessageBox::Save)box->button(QMessageBox::Save)->click();
                         else box->accept();
                     }
                 }
             });dialogs.start(50);
+            if(fixture.value("legacySaveOnly").toBool()) {
+                QString error;
+                const auto oldBytes=read(map);
+                STerrainTileBrush brush;brush.centerX=12;brush.centerY=12;brush.radius=0;
+                const auto packed=SMprPackedTile::decode(view.m_terrainEdit.packedTile(12,12,ETerrainTileLayer::Land));
+                const auto command=view.m_terrainEdit.makeTilePaint(brush,ETerrainTileLayer::Land,
+                    packed.atlasIndex,packed.tileIndex,(packed.rotation+1)%4);
+                check(!command.isEmpty()&&view.m_terrainEdit.apply(command,true),"ordinary authored tile rotation changes legacy map");
+                view.m_pLand->setDirty(true);
+                check(view.m_worldTerrainSession.load(map,&error),"retain legacy map for shared brush");
+                view.syncWorldTerrainActive();
+                check(view.m_worldTerrainSession.dirtyPaths().size()==1,"legacy single-map world save repro");
+                const auto expected=snapshot(view.m_terrainEdit);
+                view.saveLand();
+                check(!view.m_pLand->isDirty()&&view.m_worldTerrainSession.dirtyPaths().isEmpty(),"legacy normal Save checkpoints both owners");
+                check(read(map)!=oldBytes&&view.m_mprDocument.mapInfo().innerNamespace==oldNamespace,"legacy edit saves without unnecessary atlas publication");
+                view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);
+                check(view.ensureTerrainAutoCatalogReady()&&snapshot(view.m_terrainEdit)==expected,"legacy Save fresh reopen retains exact edit");
+                dialogs.stop();log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+            }
             if(saveOnly)view.shuffleTerrainTiles(false);
             else {
                 view.republishTerrainAtlasHd();
@@ -299,7 +322,15 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     check(false,"rollback lock probe requires Windows");return 1;
 #endif
                 }
+                if(fixture.value("singleWorldSave").toBool()) {
+                    QString error;
+                    check(view.m_worldTerrainSession.load(map,&error),"retain current map in shared brush session");
+                    view.syncWorldTerrainActive();
+                    check(view.m_worldTerrainSession.dirtyPaths().size()==1,"single active dirty map reproduces owner save path");
+                }
                 view.saveLand();check(!view.m_pLand->isDirty(),"layout saves through normal MPR path");
+                if(fixture.value("singleWorldSave").toBool())
+                    check(view.m_worldTerrainSession.dirtyPaths().isEmpty(),"normal Save checkpoints the shared brush session");
             } else check(!view.m_pLand->isDirty(),"unchecked HD conversion adds no layout edit");
             const auto saved=snapshot(view.m_terrainEdit);
             view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);
