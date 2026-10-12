@@ -41,6 +41,7 @@
 #include <QMessageBox>
 #include <QTabWidget>
 #include <QScrollArea>
+#include <QToolButton>
 #include <climits>
 
 namespace {
