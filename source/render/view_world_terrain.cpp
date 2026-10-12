@@ -1574,7 +1574,13 @@ bool CView::previewWorldPaintState(const QString& id)
         if(!landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,payload))return false;
     }
     if(id==active) {
+        int selectedSlot=-1,selectedRotation=0;
+        m_pTileForm->getSelectedTile(selectedSlot,selectedRotation);
         if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
+        // Atlas uploads rebuild the legacy picker. Preserve its cursor so a
+        // held-C drag keeps painting after the first world-brush stamp.
+        if(selectedSlot>=0 && m_pTileForm->selectTile(selectedSlot))
+            m_pTileForm->setTileRotation(selectedRotation);
         m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
         // Restore the immutable source together with its working cache. The
         // renderer/picker contain edited slots and cannot serve as that source.
@@ -1588,6 +1594,7 @@ bool CView::previewWorldPaintState(const QString& id)
         m_pLand->setCanonicalTerrainModel(&m_terrainEdit);syncMprDirtyState();
         m_landscapeTools->setOverlayMaterials(worldRenderMaterials(m_mprMaterials));
         m_landscapeTools->setGeneratedAtlasTileCount(m_workingTerrainAtlas->generatedTileCount());
+        refreshWorkingTerrainPalettes();
     } else for(auto& neighbor:m_neighborLandscapes)
         if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id) {
             neighbor.terrainPreviewAtlas=doc->atlas;neighbor.drawCacheDirty=true;
