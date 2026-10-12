@@ -315,6 +315,7 @@ private:
     void refreshPaletteColumns(bool rebuild = true);
     void schedulePaletteRelayout();
     void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
+    void refreshVariantStrip();
     QButtonGroup* activeMaterialButtons() const;
 };
 

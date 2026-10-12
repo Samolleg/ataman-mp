@@ -248,6 +248,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintControls(new QWidget(this))
 {
     m_paintControls->setObjectName(QStringLiteral("landscapePaintControls"));
+    const QVariant configuredScale = QCoreApplication::instance()
+        ? QCoreApplication::instance()->property("enduranceUiScalePercent") : QVariant();
+    const double panelScale = (configuredScale.isValid() ? configuredScale.toInt() : 100) / 100.0;
+    QFont panelFont = font();
+    panelFont.setPixelSize(qMax(1, qRound(13 * panelScale)));
+    setFont(panelFont);
     // A short dock scrolls the complete tool panel instead of overlapping its
     // controls or collapsing the material palette to an empty viewport.
     QVBoxLayout* outerLayout = new QVBoxLayout(this);
@@ -555,13 +561,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
 
     QVBoxLayout* groundPalette = new QVBoxLayout(m_groundMaterialPage);
     groundPalette->setContentsMargins(6, 6, 6, 6);
-    groundPalette->addWidget(new QLabel(tr("Земля"), m_groundMaterialPage));
     QWidget* groundGrid = new QWidget(m_groundMaterialPage);
     groundGrid->setLayout(m_groundMaterialGrid);
     groundPalette->addWidget(groundGrid);
     QVBoxLayout* underwaterPalette = new QVBoxLayout(m_underwaterMaterialPage);
     underwaterPalette->setContentsMargins(6, 6, 6, 6);
-    underwaterPalette->addWidget(new QLabel(tr("Под водой"), m_underwaterMaterialPage));
     QWidget* underwaterGrid = new QWidget(m_underwaterMaterialPage);
     underwaterGrid->setLayout(m_underwaterMaterialGrid);
     underwaterPalette->addWidget(underwaterGrid);
@@ -569,7 +573,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     groundPalette->addStretch(1);
     QVBoxLayout* overlayPalette = new QVBoxLayout(m_overlayMaterialPage);
     overlayPalette->setContentsMargins(6, 6, 6, 6);
-    overlayPalette->addWidget(new QLabel(tr("Покрытие"), m_overlayMaterialPage));
     QWidget* overlayGrid = new QWidget(m_overlayMaterialPage);
     overlayGrid->setLayout(m_overlayMaterialGrid);
     overlayPalette->addWidget(overlayGrid);
@@ -901,7 +904,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         sharedBrush);
     brushShortcuts->setObjectName(QStringLiteral("landscapeBrushShortcuts"));
     brushShortcuts->setWordWrap(true);
-    brushShortcuts->setStyleSheet(QStringLiteral("color: %1; font-size: 8pt;")
+    QFont shortcutFont = brushShortcuts->font();
+    shortcutFont.setPixelSize(qMax(1, qRound(11 * panelScale)));
+    brushShortcuts->setFont(shortcutFont);
+    brushShortcuts->setStyleSheet(QStringLiteral("color: %1;")
         .arg(panelPalette.color(QPalette::Mid).name()));
     brushShortcuts->setToolTip(brushShortcuts->text());
     sharedBrushForm->addRow(brushShortcuts);
@@ -1036,7 +1042,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     chipRows->setContentsMargins(0, 0, 0, 0);
     chipRows->setSpacing(2);
     const QString chipStyle = QStringLiteral(
-        "QCheckBox { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 8px; font-size: 9pt; }"
+        "QCheckBox { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 8px; }"
         "QCheckBox::indicator { width: 0px; height: 0px; image: none; border: 0; }"
         "QCheckBox:checked { background: #1f3a5c; color: #8fc1ff; border: 1px solid #2f6fb5; font-weight: 600; }");
     for(QCheckBox* chip : {m_modernAutoResolveBlends, m_modernMixedEdge,
@@ -1093,6 +1099,38 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         QSettings().setValue(QStringLiteral("ui/landscape/paletteColumns"), value);
         refreshPaletteColumns();
     });
+    auto* optionCaption = new QLabel(tr("Опции покраски — всегда на виду"), m_paintControls);
+    optionCaption->setObjectName(QStringLiteral("terrainPaintOptionsCaption"));
+    optionCaption->setStyleSheet(QStringLiteral("font-weight: 600;"));
+    auto* layerSegments = new QWidget(m_paintControls);
+    layerSegments->setObjectName(QStringLiteral("terrainMaterialLayerSegments"));
+    auto* layerRow = new QHBoxLayout(layerSegments);
+    layerRow->setContentsMargins(0,0,0,0);layerRow->setSpacing(3);
+    auto* layerGroup = new QButtonGroup(layerSegments);
+    for(int i=0;i<3;++i) {
+        auto* button = new QToolButton(layerSegments);
+        button->setObjectName(QStringLiteral("terrainLayerSegment_%1").arg(i));
+        button->setProperty("terrainLayerIndex",i);
+        button->setText(m_materialTabs->tabText(i));button->setCheckable(true);
+        button->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+        button->setMinimumHeight(30);button->setStyleSheet(selectedButtonStyle);
+        layerGroup->addButton(button,i);layerRow->addWidget(button,1);
+        connect(button,&QToolButton::clicked,this,[this,i](){m_materialTabs->setCurrentIndex(i);});
+    }
+    connect(m_materialTabs,&QTabWidget::currentChanged,this,[this,layerGroup](int index){
+        if(auto* button=layerGroup->button(index))button->setChecked(true);
+        refreshVariantStrip();
+    });
+    layerGroup->button(m_materialTabs->currentIndex())->setChecked(true);
+    m_materialTabs->tabBar()->hide();
+    paintLayout->removeWidget(searchRowWidget);
+    paintLayout->removeWidget(paintChips);
+    paintLayout->removeWidget(paletteColumnControl);
+    paintLayout->insertWidget(1,optionCaption);
+    paintLayout->insertWidget(2,paintChips);
+    paintLayout->insertWidget(3,layerSegments);
+    paintLayout->insertWidget(4,searchRowWidget);
+    paintLayout->insertWidget(5,paletteColumnControl);
     m_randomPaintScope = new QComboBox(this);
     m_randomPaintScope->setObjectName(QStringLiteral("randomPaintScope"));
     m_randomPaintScope->addItem(tr("Вся текущая карта"), false);
@@ -1170,6 +1208,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     for(auto button:findChildren<QPushButton*>()) button->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     for(auto row:{sizeRow,shapeRow,targetRow})row->setContentsMargins(0,0,0,0);
     for(auto label:findChildren<QLabel*>()) {auto policy=label->sizePolicy();policy.setVerticalPolicy(QSizePolicy::Fixed);label->setSizePolicy(policy);}
+    m_variantStripTitle->setWordWrap(true);
+    m_variantStripTitle->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
     for(auto check:findChildren<QCheckBox*>())check->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
     m_sculptControls->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Maximum);
     worldControls->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);
@@ -1557,6 +1597,11 @@ void CLandscapeTools::updateModeVisibility()
         m_classicMaterialTabs->setCurrentIndex(overlayMode ? 1 : 0);
     }
     m_materialTabs->tabBar()->setEnabled(!overlaySurface);
+    for(auto* button:findChildren<QToolButton*>())
+        if(button->property("terrainLayerIndex").isValid()) {
+            button->setChecked(button->property("terrainLayerIndex").toInt()==m_materialTabs->currentIndex());
+            button->setEnabled(!overlaySurface);
+        }
     m_classicMaterialTabs->tabBar()->setEnabled(!overlaySurface);
     if(overlaySurface)
     {
@@ -1605,6 +1650,11 @@ void CLandscapeTools::updateModeVisibility()
     if(m_vertexPaintTarget)
         m_vertexPaintTarget->setEnabled(!paintIssueMarkingEnabled()
                                         && !manual && !overlaySurface);
+    if(auto* layers=findChild<QWidget*>(QStringLiteral("terrainMaterialLayerSegments")))
+        layers->setVisible(!manual);
+    if(auto* caption=findChild<QWidget*>(QStringLiteral("terrainPaintOptionsCaption")))
+        caption->setVisible(!manual);
+    refreshVariantStrip();
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -2236,10 +2286,12 @@ void CLandscapeTools::rebuildMaterialPalette()
               }
               return;
           }
-          QLabel* heading = new QLabel(title, this);
-          heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
-          grid->addWidget(heading, row++, 0, 1, columns);
-          heading->show();
+          if(usedOnly || junctionOnly || classicAuto) {
+              QLabel* heading = new QLabel(title, this);
+              heading->setStyleSheet(QStringLiteral("QLabel { font-weight: bold; margin-top: 5px; }"));
+              grid->addWidget(heading, row++, 0, 1, columns);
+              heading->show();
+          }
           QMap<QString, QVector<STerrainPaintMaterialChoice>> byFamily;
           for(const STerrainPaintMaterialChoice& choice : section)
               byFamily[choice.familyName.isEmpty() ? choice.name
@@ -2366,27 +2418,26 @@ void CLandscapeTools::rebuildMaterialPalette()
            && !m_classicOverlayMaterialButtons->buttons().isEmpty())
             m_classicOverlayMaterialButtons->buttons().front()->setChecked(true);
     }
+    refreshVariantStrip();
+    applyPaintFilter();
+}
+
+void CLandscapeTools::refreshVariantStrip()
+{
     bool selected = false;
     const int selectedId = paintTerrainType(&selected);
-    if(selected)
-    {
-        const auto* list = editMode() == ELandscapeEditMode::OverlayPaint
+    if(selected && paintPaletteMode() == ETerrainPaintPaletteMode::Modern) {
+        const auto* choices = editMode() == ELandscapeEditMode::OverlayPaint
             || editMode() == ELandscapeEditMode::OverlaySurface
             || editMode() == ELandscapeEditMode::OverlaySculpt
             ? &m_overlayPaintTypes : underwaterFamiliesVisible()
                 ? &m_underwaterPaintTypes : &m_landPaintTypes;
-        for(const STerrainPaintMaterialChoice& choice : *list)
-                if(choice.id == selectedId)
-                    updateVariantStrip(choice);
+        for(const auto& choice : *choices)
+            if(choice.id == selectedId) { updateVariantStrip(choice); return; }
     }
-    else
-    {
-        m_variantStripTitle->hide();
-        if(auto* strip = findChild<QScrollArea*>(
-               QStringLiteral("terrainVariantStripScroll")))
-            strip->hide();
-    }
-    applyPaintFilter();
+    m_variantStripTitle->hide();
+    if(auto* strip=findChild<QScrollArea*>(QStringLiteral("terrainVariantStripScroll")))
+        strip->hide();
 }
 
 void CLandscapeTools::updateVariantStrip(
