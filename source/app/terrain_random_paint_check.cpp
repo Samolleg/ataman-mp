@@ -126,7 +126,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
     auto check=[&](bool condition,const QString& name) {log<<(condition?"PASS ":"FAIL ")<<name<<'\n';log.flush();condition?++passed:++failed;return condition;};
     const auto fixture=QJsonDocument::fromJson(read(fixturePath)).object();
     HiddenCheckWindows hiddenWindows;
-    if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool())qApp->installEventFilter(&hiddenWindows);
+    if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool() || fixture.value("hdPublication").toBool())qApp->installEventFilter(&hiddenWindows);
     const QString output=fixture.value("output").toString();
     if(!check(!output.isEmpty() && QDir(output).exists(),"owned output directory")) return 1;
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -143,7 +143,9 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         QVector<QString> probeResources={root+"/res"};
         for(const auto& extra:fixture.value("readOnlyResourceRoots").toArray())probeResources.append(extra.toString());
         roots->setValue(probeResources);
-        if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool()) {
+        if(fixture.value("hdPublication").toBool())
+            if(auto* profile=dynamic_cast<COptString*>(settings.opt("resourceProfile")))profile->setValue("deja-vu");
+        if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool() || fixture.value("hdPublication").toBool()) {
             if(auto* lighting=dynamic_cast<COptInt*>(settings.opt("renderLightingMode")))lighting->setValue(0);
             if(auto* culling=dynamic_cast<COptBool*>(settings.opt("frustumCulling")))culling->setValue(false);
         }
@@ -180,6 +182,102 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        if(fixture.value("hdPublication").toBool()) {
+            if(!check(root.contains("/build-tests-157-hd/"),"HD publication restricted to private fixture"))return 1;
+            const bool distribute=fixture.value("distribute").toBool();
+            const bool saveOnly=fixture.value("hdSaveOnly").toBool();
+            const QString oldNamespace=view.m_mprDocument.mapInfo().innerNamespace;
+            const auto animations=[&](){QVector<QImage> frames;for(const auto& a:view.m_mprAnimatedTiles)
+                for(int f=0;f<a.frameCount;++f)frames.append(view.m_authoredTerrainTileImages.value(a.tileIndex+f));return frames;};
+            const auto oldAnimations=animations();
+            const auto oldAnimationRecords=view.m_mprAnimatedTiles;
+            const auto sameAnimationPixels=[](const QVector<QImage>& a,const QVector<QImage>& b) {
+                if(a.size()!=b.size())return false;
+                for(int i=0;i<a.size();++i)
+                    if(a[i].isNull()||b[i].isNull()
+                       ||a[i].convertToFormat(QImage::Format_RGBA8888)!=b[i].convertToFormat(QImage::Format_RGBA8888))return false;
+                return true;
+            };
+            const auto describeAnimations=[&](const QString& phase) {
+                const auto frames=animations();
+                for(int i=0;i<frames.size();++i) {
+                    const auto rgba=frames[i].convertToFormat(QImage::Format_RGBA8888);
+                    log<<"HD ANIMATION "<<phase<<" frame="<<i<<" size="<<rgba.width()<<"x"<<rgba.height()
+                       <<" format="<<int(frames[i].format())<<" rgba="
+                       <<QCryptographicHash::hash(QByteArray(reinterpret_cast<const char*>(rgba.constBits()),int(rgba.sizeInBytes())),QCryptographicHash::Sha256).toHex()<<"\n";
+                }
+                for(const auto& a:view.m_mprAnimatedTiles)log<<"HD ANIMATION RANGE "<<phase<<" start="<<a.tileIndex<<" frames="<<a.frameCount<<"\n";
+                log.flush();
+            };
+            describeAnimations("before");
+            QVector<QVector3D> points;
+            if(saveOnly)points={QVector3D(73,1,0),QVector3D(139,1,0),QVector3D(451,9,0),QVector3D(349,123,0)};
+            if(!saveOnly)for(int slot:{34,44,215,666}) {
+                bool found=false;
+                for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
+                    for(int x=0;x<view.m_terrainEdit.tileCountX()&&!found;++x)
+                        if(SMprPackedTile::decode(view.m_terrainEdit.packedTile(x,y,ETerrainTileLayer::Land)).atlasSlot()==slot) {
+                            points.append(QVector3D(x*2+1,y*2+1,0));found=true;
+                            log<<"HD VIEW slot="<<slot<<" centre="<<x*2+1<<","<<y*2+1<<"\n";
+                        }
+                check(found,QString("real map uses review slot %1").arg(slot));
+            }
+            const auto capture=[&](const QString& phase){
+                view.m_fogVisible=false;view.m_sceneLightsVisible=false;view.m_bDrawWater=false;
+                view.m_bDrawLand=true;view.m_bPreviewTile=false;view.m_tileGridVisible=false;
+                view.resize(1024,1024);QApplication::processEvents();
+                for(int i=0;i<points.size();++i) {
+                    view.makeCurrent();view.resizeGL(1024,1024);view.m_cam->setLocation(points[i]+QVector3D(0,0,256),QVector3D(),QVector3D());
+                    view.m_projection.setToIdentity();view.m_projection.ortho(-5,5,-5,5,1,512);
+                    QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+                    QOpenGLFramebufferObject target(QSize(1024,1024),format);view.m_sceneReviewTarget=&target;
+                    view.draw();QOpenGLContext::currentContext()->functions()->glFinish();
+                    const auto frame=target.toImage();view.m_sceneReviewTarget=nullptr;target.release();
+                    check(view.m_landProgram.isLinked()&&!frame.isNull()&&frame.save(output+QString("/%1-%2-viewport.png").arg(phase).arg(i)),"HD native viewport "+phase);
+                }
+            };
+            capture("before");
+            bool confirmed=false;QByteArray publishedBaseline;bool oldSeed=false;quint32 oldSeedValue=0;
+            QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
+            QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,&view,[&](){
+                for(auto* w:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(w)) {
+                    auto* option=box->findChild<QCheckBox*>("terrainHdDistributeVariants");
+                    if(option&&!confirmed) {
+                        check(!option->isChecked(),"HD distribute checkbox defaults OFF");
+                        option->setChecked(distribute);confirmed=true;box->button(QMessageBox::Yes)->click();
+                    } else if(!option) {
+                        log<<"HD DIALOG "<<box->text()<<"\n";log.flush();
+                        if(box->icon()==QMessageBox::Critical){++failed;box->reject();}
+                        else box->accept();
+                    }
+                }
+            });dialogs.start(50);
+            if(saveOnly)view.shuffleTerrainTiles(false);
+            else {
+                view.republishTerrainAtlasHd();
+                check(confirmed,"real HD confirmation accepted");
+                check(view.m_mprDocument.mapInfo().innerNamespace!=oldNamespace && view.m_terrainAtlasAnalysis.usable,"published MPR/RES adopted by real editor");
+            }
+            describeAnimations("after");
+            check(sameAnimationPixels(animations(),oldAnimations),"all native animation pixels remain exact after adoption");
+            check(view.m_mprAnimatedTiles==oldAnimationRecords,"all animation ranges remain exact after adoption");
+            capture("after");
+            if(distribute) {
+                const auto laidOut=snapshot(view.m_terrainEdit);
+                const auto seed=view.m_terrainEdit.randomPaintSeed();
+                check(view.m_pLand->isDirty()&&history.canUndo(),"checked layout is an undoable dirty edit");
+                history.undo();const auto baseline=snapshot(view.m_terrainEdit);
+                check(baseline!=laidOut,"Undo restores pre-layout terrain");
+                history.redo();check(snapshot(view.m_terrainEdit)==laidOut && view.m_terrainEdit.randomPaintSeed()==seed,"Redo restores exact layout and seed");
+                view.saveLand();check(!view.m_pLand->isDirty(),"layout saves through normal MPR path");
+            } else check(!view.m_pLand->isDirty(),"unchecked HD conversion adds no layout edit");
+            const auto saved=snapshot(view.m_terrainEdit);
+            view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);
+            check(view.ensureTerrainAutoCatalogReady()&&snapshot(view.m_terrainEdit)==saved,"fresh reopen retains published HD terrain and layout");
+            check(sameAnimationPixels(animations(),oldAnimations)&&view.m_mprAnimatedTiles==oldAnimationRecords,"fresh reopen retains native animation artwork and ranges");
+            capture("reopened");dialogs.stop();
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<"\n";return failed?1:0;
+        }
         if(fixture.value("paintMatrix").toBool()) {
             // This branch owns copied real MPR/RES inputs. Every edit below enters
             // through Qt mouse/key events; no direct setTile or forced footprint.

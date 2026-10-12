@@ -995,6 +995,9 @@ private:
     QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_localShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_editorQueryFbo{nullptr};
+    // Optional full-scene review target; unlike minimap capture it includes
+    // selected neighboring maps through the normal viewport render path.
+    QOpenGLFramebufferObject* m_sceneReviewTarget{nullptr};
     bool m_editorQueryFramebufferFailureLogged{false};
     int m_shadowResolution{0};
     QMatrix4x4 m_staticLightSpaceMatrix;

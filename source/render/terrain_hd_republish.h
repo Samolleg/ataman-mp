@@ -81,7 +81,9 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& authoredPages,
     const CTerrainHdSources& sources, bool upgradePartialPages = true,
     const QVector<SMprAnimatedTileRecord>& animations = {},
-    const QByteArray& previousPublication = {}, CTerrainHdProgress* progress = nullptr);
+    const QByteArray& previousPublication = {}, CTerrainHdProgress* progress = nullptr,
+    const CMprDocument* mapContext = nullptr,
+    const QByteArray& semanticField = QByteArray());
 
 // Conservative garbage collection: incomplete inventories never authorize removal.
 bool buildTerrainHdCleanup(const CResArchiveDocument& archive, const QString& oldNamespace,

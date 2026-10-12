@@ -22,7 +22,9 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `156`. Each separate fix advances the integer version.
+Current Ataman version: `157`. Each separate fix advances the integer version.
+
+157 rebuilds published static terrain from verified native HD sources, including recovered multi-material transitions. Native animation frames stay unchanged. The optional variant layout is off by default and supports Undo/Redo and ordinary Save. Native-render evidence and integration status: [HD and seams review](docs/validation/ATAMAN_HD_SEAMS_NATIVE_157_158_20261012.md).
 
 156 fixes Ground strokes disappearing on mouse release when neighboring maps are selected. Local Mixed-edge strokes now commit with the shared brush enabled. Failure diagnostics and the regression use the production neighbor context. Validation: docs/validation/ATAMAN_PAINT_RELEASE_156_20261012.md.
 

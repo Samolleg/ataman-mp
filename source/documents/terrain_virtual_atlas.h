@@ -65,6 +65,7 @@ struct STerrainFinalizedTile
     QImage pixels;
     QByteArray pixelSha256;
     bool authored{false};
+    bool physicalPadding{false};
     int sourceSlot{-1};
     QString sourceNamespace;
     // Every authored physical slot represented by this retained artwork.
@@ -322,7 +323,8 @@ public:
                                        const QVector<qint32>& preferredPaintMaterials = {},
                                        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr,
                                        const QVector<bool>& preservePreferredPackedCells = {},
-                                       const QVector<STerrainAtlasAnimationRange>& animations = {});
+                                       const QVector<STerrainAtlasAnimationRange>& animations = {},
+                                       const QVector<QByteArray>& authoredPagePayloads = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);

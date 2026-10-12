@@ -7,6 +7,8 @@
 #include "endurance_document.h"
 #include "mmp_codec.h"
 #include "terrain_mixed_edge.h"
+#include "terrain_hd_variant_bank.h"
+#include "terrain_recipe_bake.h"
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -59,6 +61,169 @@ QImage roundTrip(const QImage& image)
 }
 QImage rotated(const QImage& image,int rotation)
 { return rotation?image.transformed(QTransform().rotate(90*rotation)):image; }
+
+// Recover ownership from the authored tile itself. HD material pixels are
+// sampled only after mask reconstruction, never by enlarging the SD artwork.
+QImage semanticMaskedHd(const QImage& authored, const STerrainTransitionSignature& signature,
+    const QMap<qint32,QImage>& hd, QJsonObject* evidence)
+{
+    if(authored.size()!=QSize(128,128)||hd.size()<2||hd.size()>4)return {};
+    const qint32 corners[]={signature.northWest,signature.northEast,signature.southEast,signature.southWest};
+    const QPoint patches[]={QPoint(4,4),QPoint(112,4),QPoint(112,112),QPoint(4,112)};
+    QMap<qint32,QVector<double>> colors;QMap<qint32,int> samples;
+    for(int corner=0;corner<4;++corner) {
+        if(!hd.contains(corners[corner])||hd[corners[corner]].size()!=QSize(256,256))return {};
+        if(!colors.contains(corners[corner]))colors[corners[corner]]=QVector<double>(3,0);
+        auto& color=colors[corners[corner]];
+        for(int y=0;y<12;++y)for(int x=0;x<12;++x) {
+            const auto pixel=authored.pixel(patches[corner]+QPoint(x,y));
+            if(qAlpha(pixel)!=255)return {};
+            color[0]+=qRed(pixel);color[1]+=qGreen(pixel);color[2]+=qBlue(pixel);++samples[corners[corner]];
+        }
+    }
+    for(auto it=colors.begin();it!=colors.end();++it)for(auto& channel:it.value())channel/=samples[it.key()];
+    const auto ids=colors.keys();double separation=1e9;
+    for(int a=0;a<ids.size();++a)for(int b=a+1;b<ids.size();++b) {
+        double d=0;for(int c=0;c<3;++c)d+=std::pow(colors[ids[a]][c]-colors[ids[b]][c],2);
+        separation=qMin(separation,d);
+    }
+    QVector<double> activity;
+    int channels=3;
+    if(separation<225) {
+        // Sand and paving can have the same mean RGB. Their authored texture
+        // contrast still identifies the regions (e.g. zone19 slot44). Use a
+        // local, low-frequency activity channel only for this low-color case;
+        // it supplies ownership, while all output detail comes from HD donors.
+        QVector<double> integral(129*129,0);activity.resize(128*128);
+        for(int y=0;y<128;++y)for(int x=0;x<128;++x) {
+            const auto p=authored.pixel(x,y),east=authored.pixel(qMin(127,x+1),y),south=authored.pixel(x,qMin(127,y+1));
+            const double e=(std::abs(qRed(p)-qRed(east))+std::abs(qGreen(p)-qGreen(east))+std::abs(qBlue(p)-qBlue(east))
+                +std::abs(qRed(p)-qRed(south))+std::abs(qGreen(p)-qGreen(south))+std::abs(qBlue(p)-qBlue(south)))/6.0;
+            integral[(y+1)*129+x+1]=e+integral[y*129+x+1]+integral[(y+1)*129+x]-integral[y*129+x];
+        }
+        for(int y=0;y<128;++y)for(int x=0;x<128;++x) {
+            const int left=qMax(0,x-4),right=qMin(128,x+5),top=qMax(0,y-4),bottom=qMin(128,y+5);
+            activity[y*128+x]=8*(integral[bottom*129+right]-integral[top*129+right]-integral[bottom*129+left]+integral[top*129+left])/((right-left)*(bottom-top));
+        }
+        for(auto it=colors.begin();it!=colors.end();++it)it.value().append(0);
+        for(int corner=0;corner<4;++corner)for(int y=0;y<12;++y)for(int x=0;x<12;++x)
+            colors[corners[corner]][3]+=activity[(patches[corner].y()+y)*128+patches[corner].x()+x]/samples[corners[corner]];
+        separation=1e9;channels=4;
+        for(int a=0;a<ids.size();++a)for(int b=a+1;b<ids.size();++b) {
+            double d=0;for(int c=0;c<channels;++c)d+=std::pow(colors[ids[a]][c]-colors[ids[b]][c],2);
+            separation=qMin(separation,d);
+        }
+        (*evidence)["ownershipFeature"]=QStringLiteral("authored-RGB-and-local-texture-activity");
+    }
+    (*evidence)["cornerColorSeparationSquared"]=separation;
+    // Multi-material masks select a discrete corner class rather than fitting
+    // a two-source alpha ramp. An eight-level feature distance suffices to
+    // separate those classes; the stricter pair guard protects alpha fits.
+    const double minimumSeparation=ids.size()>2?64.0:225.0;
+    (*evidence)["minimumCornerSeparationSquared"]=minimumSeparation;
+    if(separation<minimumSeparation){(*evidence)["maskRefusal"]=QStringLiteral("indistinguishable-authored-corner-colors");return {};}
+    QVector<QImage> masks;
+    for(int i=0;i<ids.size();++i){QImage mask(128,128,QImage::Format_Grayscale8);masks.append(mask);}
+    for(int y=0;y<128;++y)for(int x=0;x<128;++x) {
+        const auto pixel=authored.pixel(x,y);if(qAlpha(pixel)!=255)return {};
+        const double rgb[]={double(qRed(pixel)),double(qGreen(pixel)),double(qBlue(pixel)),activity.isEmpty()?0:activity[y*128+x]};
+        QVector<double> weights(ids.size(),0);
+        if(ids.size()==2) {
+            double dot=0,norm=0;
+            for(int c=0;c<channels;++c){const double delta=colors[ids[1]][c]-colors[ids[0]][c];dot+=(rgb[c]-colors[ids[0]][c])*delta;norm+=delta*delta;}
+            weights[1]=qBound(0.0,dot/norm,1.0);weights[0]=1-weights[1];
+        } else {
+            // Crisp multi-material junction: preserve the observed regions.
+            double best=1e99;int winner=0;
+            for(int i=0;i<ids.size();++i){double d=0;for(int c=0;c<channels;++c)d+=std::pow(rgb[c]-colors[ids[i]][c],2);if(d<best){best=d;winner=i;}}
+            weights[winner]=1;
+        }
+        for(int i=0;i<ids.size();++i)masks[i].scanLine(y)[x]=uchar(qRound(weights[i]*255));
+    }
+    for(auto& mask:masks)mask=mask.scaled(256,256,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+    QImage result(256,256,QImage::Format_RGBA8888);
+    for(int y=0;y<256;++y)for(int x=0;x<256;++x) {
+        double sum=0,r=0,g=0,b=0;
+        for(int i=0;i<ids.size();++i){const double w=qGray(masks[i].pixel(x,y));const auto p=hd[ids[i]].pixel(x,y);if(qAlpha(p)!=255)return {};sum+=w;r+=w*qRed(p);g+=w*qGreen(p);b+=w*qBlue(p);}
+        if(sum<=0)return {};result.setPixel(x,y,qRgb(qRound(r/sum),qRound(g/sum),qRound(b/sum)));
+    }
+    (*evidence)["algorithm"]=QStringLiteral("authored-corner-RGB-mask/HD-material-composite");
+    (*evidence)["cornerColorSeparationSquared"]=separation;
+    (*evidence)["materialCount"]=ids.size();
+    return result;
+}
+
+QMap<int, STerrainTransitionSignature> semanticSlotSignatures(
+    const CMprDocument& map, const QByteArray& semanticBytes,
+    const STerrainAtlasProfile& profile, const QVector<QImage>& atlas,
+    QString* diagnostic)
+{
+    QMap<int, STerrainTransitionSignature> result;
+    if(semanticBytes.isEmpty()) {
+        if(diagnostic) *diagnostic = QStringLiteral("semantic-field-absent");
+        return result;
+    }
+    STerrainSemanticFieldDocument field; CValidationReport report;
+    if(!STerrainSemanticFieldDocument::fromBytes(semanticBytes, &field, &report)) {
+        if(diagnostic) *diagnostic = QStringLiteral("semantic-field-invalid");
+        return result;
+    }
+    auto boundProfile = profile;
+    boundProfile.atlasPixelSha256 = CTerrainAtlasProfileInference::pixelSha256(atlas);
+    const QByteArray profileSha = QCryptographicHash::hash(boundProfile.toBytes(), QCryptographicHash::Sha256);
+    const QByteArray atlasSha = QByteArray::fromHex(boundProfile.atlasPixelSha256);
+    if(!field.validateBinding(profile.mprNamespace,
+            QCryptographicHash::hash(map.originalBytes(), QCryptographicHash::Sha256),
+            atlasSha, profileSha, int(map.mapInfo().sectorCountX) * 16 + 1,
+            int(map.mapInfo().sectorCountY) * 16 + 1, &report,
+            STerrainSemanticFieldDocument::tileBindingSha256(map))) {
+        if(diagnostic) *diagnostic = QStringLiteral("semantic-field-binding-mismatch");
+        return result;
+    }
+    using SignatureCounts = QMap<QString, QPair<int, STerrainTransitionSignature>>;
+    QMap<int, SignatureCounts> votes;
+    auto keyFor = [](const STerrainTransitionSignature& signature) {
+        return QStringLiteral("%1,%2,%3,%4").arg(signature.northWest).arg(signature.northEast)
+            .arg(signature.southEast).arg(signature.southWest);
+    };
+    auto valueAt = [&](int x, int y) -> qint32 {
+        if(x < 0 || y < 0 || x >= field.vertexWidth || y >= field.vertexHeight
+           || field.land.size() != field.vertexWidth * field.vertexHeight) return 0;
+        return field.land[y * field.vertexWidth + x];
+    };
+    for(const auto& sector : map.sectors()) {
+        if(sector.sectorX < 0 || sector.sectorY < 0 || !sector.landTileOffset
+           || sector.memberIndex < 0 || sector.memberIndex >= map.members().size()) continue;
+        const auto& payload = map.members()[sector.memberIndex].payload;
+        if(sector.landTileOffset + 512 > quint64(payload.size())) continue;
+        for(int cell = 0; cell < 256; ++cell) {
+            const int localX = cell % 16, localY = cell / 16;
+            const int x = sector.sectorX * 16 + localX, y = sector.sectorY * 16 + localY;
+            STerrainTransitionSignature grid;
+            grid.northWest = valueAt(x, y); grid.northEast = valueAt(x + 1, y);
+            grid.southEast = valueAt(x + 1, y + 1); grid.southWest = valueAt(x, y + 1);
+            if(grid.northWest <= 0 || grid.northEast <= 0 || grid.southEast <= 0 || grid.southWest <= 0) continue;
+            const auto packed = SMprPackedTile::decode(qFromLittleEndian<quint16>(
+                reinterpret_cast<const uchar*>(payload.constData() + sector.landTileOffset + cell * 2)));
+            const int slot = packed.atlasSlot();
+            if(slot < 0 || slot >= profile.atlasSlotCount) continue;
+            const auto canonical = CTerrainTransitionCatalog::mirroredGridY(
+                CTerrainTransitionCatalog::rotated(grid, -int(packed.rotation)));
+            auto& vote = votes[slot][keyFor(canonical)];
+            ++vote.first; vote.second = canonical;
+        }
+    }
+    for(auto it = votes.cbegin(); it != votes.cend(); ++it) {
+        int best = 0, second = 0; STerrainTransitionSignature winner;
+        for(auto vote = it.value().cbegin(); vote != it.value().cend(); ++vote) {
+            if(vote.value().first > best) { second = best; best = vote.value().first; winner = vote.value().second; }
+            else second = qMax(second, vote.value().first);
+        }
+        if(best > second) result.insert(it.key(), winner);
+    }
+    if(diagnostic) *diagnostic = QStringLiteral("semantic-slot-signatures:%1").arg(result.size());
+    return result;
+}
 QVector<float> descriptor(const QImage& source)
 {
     const QImage image=source.convertToFormat(QImage::Format_RGBA8888);
@@ -97,7 +262,8 @@ bool read(const QString& path,QByteArray* b)
 { QFile f(path);if(!f.open(QIODevice::ReadOnly))return false;*b=f.readAll();return f.error()==QFile::NoError; }
 bool write(const QString& path,const QByteArray& b)
 { QSaveFile f(path);return f.open(QIODevice::WriteOnly)&&f.write(b)==b.size()&&f.commit(); }
-bool previews(const CMprDocument& map,STerrainHdRepublishResult* result,const QString& directory)
+bool previews(const CMprDocument& map,STerrainHdRepublishResult* result,const QString& directory,
+    const QVector<int>& requestedSlots = {})
 {
     CTerrainEditModel model;CValidationReport report;if(!model.load(map,&report))return false;
     const auto rows=result->receipt["slots"].toArray();int best=-1;QPoint center(model.tileCountX()/2,model.tileCountY()/2);
@@ -124,8 +290,34 @@ bool previews(const CMprDocument& map,STerrainHdRepublishResult* result,const QS
         const QRect detail((center.x()-region.x())*256,(region.bottom()-center.y())*256,256,256);
         if(!image.copy(detail).scaled(1024,1024,Qt::IgnoreAspectRatio,Qt::FastTransformation).save(directory+"/transition-"+label+".png"))return false;
     }
+    QJsonArray slotPreviews;
+    for(int target:requestedSlots) {
+        if(target<0||target>=rows.size())return false;
+        QPoint location(-1,-1);
+        for(int y=0;y<model.tileCountY()&&location.x()<0;++y)for(int x=0;x<model.tileCountX();++x) {
+            bool available=false;const auto packed=SMprPackedTile::decode(model.packedTile(x,y,ETerrainTileLayer::Land,&available));
+            if(available&&packed.atlasSlot()==target){location=QPoint(x,y);break;}
+        }
+        if(location.x()<0)return false;
+        QImage pair(1024,512,QImage::Format_RGB32);pair.fill(Qt::magenta);QPainter pairPainter(&pair);
+        for(int side=0;side<2;++side) {
+            const auto& tiles=side?result->after:result->before;
+            bool available=false;const auto packed=SMprPackedTile::decode(model.packedTile(location.x(),location.y(),ETerrainTileLayer::Land,&available));
+            if(!available||packed.atlasSlot()>=tiles.size())return false;
+            const int outSlot=side?result->slotRemap.value(packed.atlasSlot(),-1):packed.atlasSlot();
+            if(outSlot<0||outSlot>=tiles.size())return false;
+            const QImage tile=tiles[outSlot].transformed(QTransform().rotate(-90*packed.rotation));
+            pairPainter.drawImage(QRect(side?512:0,0,512,512),tile);
+        }
+        pairPainter.end();
+        const QString file=QStringLiteral("transition-slot-%1-before-after.png").arg(target,4,10,QLatin1Char('0'));
+        if(!pair.save(directory+"/"+file))return false;
+        slotPreviews.append(QJsonObject{{"slot",target},{"cellX",location.x()},{"cellY",location.y()},
+            {"projection","left=128-pixel source rendered at 4x; right=HD 256-pixel regenerated tile at 2x"},{"file",file}});
+    }
     result->receipt["preview"]=QJsonObject{{"x",region.x()},{"y",region.y()},{"width",width},{"height",height},
         {"detailX",center.x()},{"detailY",center.y()},{"projection","SEC Ground RGB, north-up, 256 output pixels/cell; no 3D lighting or overlay"}};
+    result->receipt["requestedTransitionPreviews"]=slotPreviews;
     return true;
 }
 bool transplantTile(QByteArray* destination,int to,const QByteArray& source,int from,int rotation=0)
@@ -671,7 +863,8 @@ bool CTerrainHdSources::match(const QImage& published,const STerrainAtlasProfile
 
 STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& profile,
     const QVector<QByteArray>& authored,const CTerrainHdSources& sources,bool upgradePartialPages,
-    const QVector<SMprAnimatedTileRecord>& animations,const QByteArray& previousPublication,CTerrainHdProgress* progress)
+    const QVector<SMprAnimatedTileRecord>& animations,const QByteArray& previousPublication,CTerrainHdProgress* progress,
+    const CMprDocument* mapContext,const QByteArray& semanticField)
 {
     STerrainHdRepublishResult r;r.profile=profile;r.originalProfile=profile;
     auto cancelled=[&]() {if(!progress||!progress->cancelled())return false;r.cancelled=true;r.success=false;r.error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true;};
@@ -688,11 +881,33 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     QJsonArray slotRows;int hd=0,generated=0;
     QMap<int,STerrainAtlasProfileSlot> defs;
     for(const auto& d:profile.slotDefinitions)defs.insert(d.slot,d);
+    QString semanticDiagnostic = QStringLiteral("semantic-field-not-supplied");
+    const auto contextualSignatures = mapContext
+        ? semanticSlotSignatures(*mapContext, semanticField, profile, r.before, &semanticDiagnostic)
+        : QMap<int, STerrainTransitionSignature>();
+    for(auto it=contextualSignatures.cbegin();it!=contextualSignatures.cend();++it) {
+        auto definition=defs.value(it.key());
+        const QSet<qint32> profileIds{definition.signature.northWest,definition.signature.northEast,
+            definition.signature.southEast,definition.signature.southWest};
+        const QSet<qint32> semanticIds{it.value().northWest,it.value().northEast,it.value().southEast,it.value().southWest};
+        const bool profileUsable=definition.assigned&&!definition.ambiguous
+            &&definition.signature.northWest>0&&definition.signature.northEast>0
+            &&definition.signature.southEast>0&&definition.signature.southWest>0;
+        // A sound profile signature remains the atlas authority. Map evidence
+        // fills missing/ambiguous signatures and resolves unsupported profile
+        // junctions when the map's unanimous majority provides a supported pair.
+        if(!profileUsable|| (profileIds.size()>2&&semanticIds.size()<=2)) {
+            definition.slot=it.key(); definition.assigned=true; definition.ambiguous=false;
+            definition.signature=it.value();
+            defs.insert(it.key(),definition);
+        }
+    }
     // Physical packing must not change the logical ordering used by source
     // selection or tie breaking. The publication receipt owns that bijection.
-    QVector<int> sourceOrder;QMap<int,QJsonObject> priorRows;
+    QVector<int> sourceOrder;QMap<int,QJsonObject> priorRows;QSet<int> priorAnimationPadding;
     if(!previousPublication.isEmpty()) {
         const auto prior=QJsonDocument::fromJson(previousPublication).object();
+        for(const auto& value:prior["animationPagePaddingSlots"].toArray())priorAnimationPadding.insert(value.toInt(-1));
         const bool legacy=!prior.contains("outputSlots"); // 138 never moved physical slots.
         const auto rows=prior["slots"].toArray();const int oldCount=prior["physicalSlots"].toInt();
         auto invalid=[&](){r.error="HD recovery does not bind to the current slot layout";return r;};
@@ -704,8 +919,10 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             if(slot<0||slot>=oldCount||output<0||output>=r.before.size()||logical.contains(slot)||used.contains(output))return invalid();
             QString result=row["result"].toString();
             if(legacy&&(result=="retained-128-detail-in-256-carrier"||row["alreadyHd"].toBool()))result="already-HD-unchanged";
-            const int expected=result=="retained-128"?128:256;
-            if((result!="retained-128"&&result!="original-HD-BC1"&&result!="regenerated-256"&&result!="already-HD-unchanged")
+            const bool nativePage=result=="retained-128"||result=="superseded-128-slot"||result=="empty-animation-padding";
+            const int expected=nativePage?128:256;
+            if((!nativePage&&result!="original-HD-BC1"&&result!="regenerated-256"&&result!="already-HD-unchanged"
+                &&result!="hd-variant"&&result!="upscaled-128-to-256"&&result!="empty-HD-padding")
                ||r.before[output].width()!=expected)return invalid();
             logical[slot]=output;used.insert(output);priorRows[output]=row;
         }
@@ -740,10 +957,33 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     }
     QVector<CTerrainHdSources::Source> matchedSources(r.before.size());
     QVector<QImage> upgraded(r.before.size());
+    QSet<int> emptyAnimationPadding,supersededAnimationSlots,emptyStaticPadding;
+    QSet<int> animationSlots;
+    for(const auto& animation:animations) {
+        const int stop=animation.tileIndex+animation.frameCount;
+        if(stop>r.before.size()||stop<=animation.tileIndex){r.error="Invalid animation interval";return r;}
+        for(int slot=animation.tileIndex;slot<stop;++slot)animationSlots.insert(slot);
+    }
+    QSet<int> animationPages;for(int slot:animationSlots)animationPages.insert(slot/64);
     QMap<int,QByteArray> nativeMips;int nativeSources=0;
     for(int slot=0;slot<r.before.size();++slot) {
         if(progress)progress->update(CTerrainHdProgress::Matching,slot,r.before.size());
         if(cancelled())return r;
+        if(animationSlots.contains(slot)) {
+            QJsonObject row{{"slot",slot},{"alreadyHd",r.before[slot].width()==256},{"animationUnchanged",true}};
+            if(r.before[slot].width()==256)upgraded[slot]=r.before[slot];
+            slotRows.append(row);continue;
+        }
+        if(priorAnimationPadding.contains(slot)&&!defs.value(slot).assigned) {
+            emptyAnimationPadding.insert(slot);slotRows.append(QJsonObject{{"slot",slot},{"emptyAnimationPadding",true}});continue;
+        }
+        if(!defs.value(slot).assigned&&r.before[slot].width()==128&&slot/64<authored.size()
+           &&int(word(authored[slot/64],4))/8==128&&animationPages.contains(slot/64)) {
+            bool transparent=true;const QImage& image=r.before[slot];
+            for(int y=0;y<image.height()&&transparent;++y)for(int x=0;x<image.width();++x)
+                if(qAlpha(image.pixel(x,y))!=0){transparent=false;break;}
+            if(transparent){emptyAnimationPadding.insert(slot);slotRows.append(QJsonObject{{"slot",slot},{"emptyAnimationPadding",true}});continue;}
+        }
         if(r.before[slot].width()==256) {
             // Keep already-HD uniform tiles in the local recipe candidate set.
             // Otherwise a second run can lose ambiguity witnesses and falsely
@@ -770,7 +1010,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         bool transparent=!defs.value(slot).assigned;
         if(transparent)for(int y=0;y<r.before[slot].height()&&transparent;++y)
             for(int x=0;x<r.before[slot].width();++x)if(qAlpha(r.before[slot].pixel(x,y))!=0){transparent=false;break;}
-        if(transparent){slotRows.append(QJsonObject{{"slot",slot},{"reason","unassigned-transparent-padding"}});continue;}
+        if(transparent){emptyStaticPadding.insert(slot);slotRows.append(QJsonObject{{"slot",slot},{"reason","unassigned-transparent-padding"}});continue;}
         CTerrainHdSources::Source s;QString reason;
         QJsonObject evidence;
         const auto definition=defs.value(slot);const auto signature=definition.signature;
@@ -789,6 +1029,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     const auto global=CTerrainAtlasPresetCatalog::globalUniformFamilies();
     QMap<qint32,ETerrainBlendStyle> styles;
     for(const auto& f:profile.families)styles[f.id]=CTerrainVirtualAtlas::blendStyleForMaterialName(f.name);
+    const auto variantBank=TerrainHdVariantBank::load(TerrainHdVariantBank::defaultRoot());
     // Historical profiles omit variation/source selection. Recover only by
     // reproducing every pixel of the old encoded result with the production
     // compositor. Signature alone is never a recipe witness.
@@ -825,7 +1066,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     if(progress)progress->update(CTerrainHdProgress::Recovering,0,transitions);
     for(int slot=0;slot<r.before.size();++slot) {
         if(cancelled())return r;
-        if(!upgraded[slot].isNull()||!defs.value(slot).assigned)continue;
+        if(animationSlots.contains(slot)||!upgraded[slot].isNull()||!defs.value(slot).assigned)continue;
         if(progress)progress->update(CTerrainHdProgress::Recovering,completedTransitions++,transitions);
         if(cancelled())return r;
         const auto d=defs.value(slot);
@@ -834,9 +1075,11 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             const auto detail=mixedEdgeHd(orderedProfile,slot,r.before,matchedSources,sources,&recipe,&why,progress);
             if(cancelled())return r;
             auto row=slotRows[slot].toObject();
-            if(!detail.isNull()){upgraded[slot]=detail;row["regenerated"]=true;row["recipe"]=recipe;row.remove("reason");++generated;}
-            else row["reason"]=why;
-            slotRows[slot]=row;continue;
+            if(!detail.isNull()) {
+                upgraded[slot]=detail;row["regenerated"]=true;row["recipe"]=recipe;row.remove("reason");++generated;
+                slotRows[slot]=row;continue;
+            }
+            row["mixedEdgeRecoveryReason"]=why;slotRows[slot]=row;
         }
         const auto signature=CTerrainTransitionCatalog::mirroredGridY(d.signature);
         QSet<qint32> ids{signature.northWest,signature.northEast,signature.southEast,signature.southWest};
@@ -907,22 +1150,290 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         }
         ambiguous=!witness.isNull()&&secondError<qMax(bestError*1.8,bestError+4);
         if(bestError>sources.calibration()["acceptedMseMax"].toDouble()||recipe["score"].toObject()["ssim"].toDouble()<sources.calibration()["ssimMin"].toDouble())witness=QImage();
+        if(witness.isNull()&&!ambiguous&&ids.size()==2) {
+            auto orderedIds=ids.values();std::sort(orderedIds.begin(),orderedIds.end());
+            for(const auto& selected:slotPolicies) {
+                if(!selected.contains(orderedIds[0])||!selected.contains(orderedIds[1]))continue;
+                const auto firstSource=selected.value(orderedIds[0]),secondSource=selected.value(orderedIds[1]);
+                if(firstSource.archive<0||secondSource.archive<0)continue;
+                const QImage firstLow=sources.image(firstSource,128),secondLow=sources.image(secondSource,128);
+                const QImage firstHigh=sources.image(firstSource,256),secondHigh=sources.image(secondSource,256);
+                if(firstLow.isNull()||secondLow.isNull()||firstHigh.isNull()||secondHigh.isNull())continue;
+                QVector<float> strip;QString extractionError;
+                if(!CTerrainRecipeBaker::extractStockStrip(r.before[slot],firstLow,secondLow,
+                    orderedIds[0],orderedIds[1],signature,&strip,&extractionError)) {
+                    QVector<float> ownership;double classificationRmse=0;QString classificationError;
+                    if(!CTerrainRecipeBaker::estimateStockOwnership(r.before[slot],firstLow,secondLow,
+                            &ownership,&classificationRmse,&classificationError))continue;
+                    QMap<qint32,QImage> classifierLow{{orderedIds[0],firstLow},{orderedIds[1],secondLow}};
+                    QMap<qint32,QImage> classifierHigh{{orderedIds[0],firstHigh},{orderedIds[1],secondHigh}};
+                    CTerrainTransitionCatalog empty;
+                    const bool opaque=std::all_of(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return !ids.contains(f.id)||!f.overlayAllowed;});
+                    CTerrainVirtualAtlas oldClassifier(empty,QVector<QImage>{firstLow,secondLow},0,classifierLow,styles,opaque);
+                    CTerrainVirtualAtlas hdClassifier(empty,QVector<QImage>{firstHigh,secondHigh},0,classifierHigh,styles,opaque);
+                    double bestMaskError=1e9;int bestVariation=0;qint32 bestOwner=orderedIds[1];
+                    QImage classified(128,128,QImage::Format_Grayscale8);
+                    for(int y=0;y<128;++y)for(int x=0;x<128;++x) {
+                        const int value=qBound(0,qRound(ownership[y*128+x]*255.0),255);
+                        classified.setPixel(x,y,qRgb(value,value,value));
+                    }
+                    for(qint32 owner:orderedIds)for(int variation=0;variation<CTerrainVirtualAtlas::blendVariationLimit(signature);++variation) {
+                        const QImage candidate=oldClassifier.reviewEffectiveBlendMask(signature,owner,variation,nullptr,owner);
+                        if(candidate.isNull()||candidate.size()!=classified.size())continue;
+                        const QImage mask=candidate.convertToFormat(QImage::Format_Grayscale8);
+                        double error=0;
+                        for(int y=0;y<128;++y)for(int x=0;x<128;++x) {
+                            double observed=qGray(classified.pixel(x,y))/255.0;
+                            if(owner==orderedIds[0])observed=1.0-observed;
+                            const double expected=qGray(mask.pixel(x,y))/255.0,difference=observed-expected;
+                            error+=difference*difference;
+                        }
+                        error/=16384.0;
+                        if(error<bestMaskError) {bestMaskError=error;bestVariation=variation;bestOwner=owner;}
+                    }
+                    if(bestMaskError>=1e9)continue;
+                    witness=hdClassifier.reviewGeneratedBlend(signature,bestVariation,nullptr,nullptr,bestOwner);
+                    if(witness.isNull())continue;
+                    recipe={{"algorithm","hd-material-pixel-classification/virtual-atlas-fallback"},
+                        {"context",contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature")},
+                        {"classification","HD-uniform-source RGB ownership"},{"classificationRmse",classificationRmse},
+                        {"bestSupportedMaskMse",bestMaskError},{"maskExtractionFallback",extractionError},
+                        {"variation",bestVariation},{"owner",bestOwner},
+                        {"sources",QJsonObject{{QString::number(orderedIds[0]),identity(firstSource)},
+                                               {QString::number(orderedIds[1]),identity(secondSource)}}}};
+                    break;
+                }
+                STerrainRecipeBrush brush;
+                if(!CTerrainRecipeBaker::makeBrush(orderedIds[0],orderedIds[1],{strip},&brush,&extractionError))continue;
+                STerrainRecipeBakeInput input;input.tileWidth=input.tileHeight=1;
+                input.vertexMaterials={signature.northWest,signature.northEast,signature.southWest,signature.southEast};
+                for(int index=0;index<2;++index) {
+                    const qint32 id=orderedIds[index];
+                    const auto family=std::find_if(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return f.id==id;});
+                    if(family==profile.families.cend()) {input.materials.clear();break;}
+                    STerrainRecipeMaterial material;material.materialId=id;material.runtimeTerrainType=family->tileType;
+                    material.uniformTiles={index==0?firstHigh:secondHigh};input.materials.append(material);
+                }
+                if(input.materials.size()!=2)continue;
+                input.brushes.append(brush);
+                STerrainRecipeBakeOptions options;options.tileSize=256;options.variants=1;
+                options.stableCoordinateVariants=true;options.origin=QPoint(slot%97,slot/97);
+                const auto baked=CTerrainRecipeBaker::bake(input,options);
+                if(!baked.success||baked.tileByCell.isEmpty())continue;
+                const int bakedIndex=baked.tileByCell.first();
+                if(bakedIndex<0||bakedIndex>=baked.tiles.size())continue;
+                witness=baked.tiles[bakedIndex].pixels;
+                recipe={{"algorithm","hd-material-pixel-classification/recipe-bake"},
+                    {"context",contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature")},
+                    {"classification","HD-uniform-source RGB ownership"},{"stripSamples",strip.size()},
+                    {"sources",QJsonObject{{QString::number(orderedIds[0]),identity(firstSource)},
+                                           {QString::number(orderedIds[1]),identity(secondSource)}}},
+                    {"originX",options.origin.x()},{"originY",options.origin.y()}};
+                break;
+            }
+        }
+        if(witness.isNull()&&!ambiguous&&ids.size()==2&&variantBank.success) {
+            auto orderedIds=ids.values();std::sort(orderedIds.begin(),orderedIds.end());
+            QMap<qint32,QImage> bankHigh,bankLow;QMap<qint32,QString> bankIdentity;
+            for(qint32 id:orderedIds) {
+                const auto family=std::find_if(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return f.id==id;});
+                if(family==profile.families.cend())continue;
+                const auto entries=TerrainHdVariantBank::forMaterial(variantBank,family->name,family->tileType,family->layer);
+                QVector<int> eligible;
+                for(int index=0;index<entries.size();++index)if(entries[index].physicalClass==family->tileType&&entries[index].pixels.size()==QSize(256,256))eligible.append(index);
+                if(eligible.isEmpty())continue;
+                const QByteArray seed=profile.mprNamespace.toUtf8()+QByteArray::number(slot)+QByteArray::number(id);
+                const QByteArray digest=QCryptographicHash::hash(seed,QCryptographicHash::Sha256);
+                const quint32 pick=qFromBigEndian<quint32>(reinterpret_cast<const uchar*>(digest.constData()));
+                const auto& entry=entries[eligible[int(pick%quint32(eligible.size()))]];
+                bankHigh[id]=entry.pixels;bankLow[id]=entry.pixels.scaled(128,128,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+                bankIdentity[id]=QStringLiteral("bank:")+entry.id;
+            }
+            if(bankHigh.size()==2) {
+                QVector<float> ownership;double classificationRmse=0;QString classificationError;
+                if(CTerrainRecipeBaker::estimateStockOwnership(r.before[slot],bankLow[orderedIds[0]],bankLow[orderedIds[1]],&ownership,&classificationRmse,&classificationError)) {
+                    QVector<float> strip;QString extractionError;
+                    if(CTerrainRecipeBaker::extractStockStrip(r.before[slot],bankLow[orderedIds[0]],bankLow[orderedIds[1]],
+                        orderedIds[0],orderedIds[1],signature,&strip,&extractionError)) {
+                        STerrainRecipeBrush brush;
+                        if(CTerrainRecipeBaker::makeBrush(orderedIds[0],orderedIds[1],{strip},&brush,&extractionError)) {
+                            STerrainRecipeBakeInput input;input.tileWidth=input.tileHeight=1;
+                            input.vertexMaterials={signature.northWest,signature.northEast,signature.southWest,signature.southEast};
+                            for(qint32 id:orderedIds) {
+                                const auto family=std::find_if(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return f.id==id;});
+                                if(family==profile.families.cend()){input.materials.clear();break;}
+                                STerrainRecipeMaterial material;material.materialId=id;material.runtimeTerrainType=family->tileType;
+                                material.uniformTiles={bankHigh[id]};input.materials.append(material);
+                            }
+                            if(input.materials.size()==2) {
+                                input.brushes.append(brush);STerrainRecipeBakeOptions options;options.tileSize=256;options.variants=1;
+                                options.stableCoordinateVariants=true;options.origin=QPoint(slot%97,slot/97);
+                                const auto baked=CTerrainRecipeBaker::bake(input,options);
+                                if(baked.success&&!baked.tileByCell.isEmpty()) {
+                                    const int index=baked.tileByCell.first();
+                                    if(index>=0&&index<baked.tiles.size())witness=baked.tiles[index].pixels;
+                                }
+                            }
+                        }
+                    }
+                    if(witness.isNull()) {
+                        QMap<qint32,QImage> lowMap{{orderedIds[0],bankLow[orderedIds[0]]},{orderedIds[1],bankLow[orderedIds[1]]}};
+                        CTerrainTransitionCatalog empty;const bool opaque=std::all_of(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return !ids.contains(f.id)||!f.overlayAllowed;});
+                        CTerrainVirtualAtlas old(empty,{bankLow[orderedIds[0]],bankLow[orderedIds[1]]},0,lowMap,styles,opaque);
+                        QMap<qint32,QImage> highMap{{orderedIds[0],bankHigh[orderedIds[0]]},{orderedIds[1],bankHigh[orderedIds[1]]}};
+                        CTerrainVirtualAtlas high(empty,{bankHigh[orderedIds[0]],bankHigh[orderedIds[1]]},0,highMap,styles,opaque);
+                        QImage classified(128,128,QImage::Format_Grayscale8);
+                        for(int y=0;y<128;++y)for(int x=0;x<128;++x){const int value=qBound(0,qRound(ownership[y*128+x]*255.0),255);classified.setPixel(x,y,qRgb(value,value,value));}
+                        double bestMaskError=1e9;int bestVariation=0;qint32 bestOwner=orderedIds[1];
+                        for(qint32 owner:orderedIds)for(int variation=0;variation<CTerrainVirtualAtlas::blendVariationLimit(signature);++variation) {
+                            const QImage candidate=old.reviewEffectiveBlendMask(signature,owner,variation,nullptr,owner);
+                            if(candidate.isNull()||candidate.size()!=classified.size())continue;
+                            const QImage mask=candidate.convertToFormat(QImage::Format_Grayscale8);double error=0;
+                            for(int y=0;y<128;++y)for(int x=0;x<128;++x){double observed=qGray(classified.pixel(x,y))/255.0;if(owner==orderedIds[0])observed=1.0-observed;const double d=observed-qGray(mask.pixel(x,y))/255.0;error+=d*d;}
+                            error/=16384.0;if(error<bestMaskError){bestMaskError=error;bestVariation=variation;bestOwner=owner;}
+                        }
+                        if(bestMaskError<1e9)witness=high.reviewGeneratedBlend(signature,bestVariation,nullptr,nullptr,bestOwner);
+                        if(!witness.isNull())recipe={{"algorithm","HD-variant-bank-classification/recipe-generator"},
+                            {"context",contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature")},
+                            {"classification","HD-bank-source RGB ownership"},{"classificationRmse",classificationRmse},
+                            {"bestSupportedMaskMse",bestMaskError},{"maskExtractionFallback",extractionError},
+                            {"variation",bestVariation},{"owner",bestOwner},
+                            {"sources",QJsonObject{{QString::number(orderedIds[0]),bankIdentity[orderedIds[0]]},{QString::number(orderedIds[1]),bankIdentity[orderedIds[1]]}}}};
+                    }
+                }
+                if(!witness.isNull()&&recipe.isEmpty())recipe={{"algorithm","HD-variant-bank-classification/recipe-bake"},
+                    {"context",contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature")},
+                    {"classification","HD-bank-source RGB ownership"},{"classificationRmse",classificationRmse},
+                    {"sources",QJsonObject{{QString::number(orderedIds[0]),bankIdentity[orderedIds[0]]},{QString::number(orderedIds[1]),bankIdentity[orderedIds[1]]}}}};
+            }
+        }
+        if((witness.isNull()||ambiguous)&&ids.size()>=2&&ids.size()<=4&&!ids.contains(0)) {
+            QMap<qint32,QImage> donors;QJsonObject donorEvidence;
+            for(qint32 id:ids) {
+                // Select only this profile's material/class/layer. Global IDs
+                // alone do not establish that a foreign donor is compatible.
+                const auto family=std::find_if(profile.families.cbegin(),profile.families.cend(),[&](const STerrainAtlasProfileFamily& f){return f.id==id;});
+                if(family==profile.families.cend()||family->layer!=ETerrainAtlasLayer::Land)continue;
+                for(int policy=0;policy<slotPolicies.size()&&!donors.contains(id);++policy) {
+                    if(!slotPolicies[policy].contains(id))continue;
+                    if(policy==2&&!std::any_of(global.cbegin(),global.cend(),[&](const STerrainGlobalMaterialFamily& f){return f.id==id&&f.layer==family->layer&&f.runtimeTerrainType==family->tileType;}))continue;
+                    const auto source=slotPolicies[policy][id];const auto image=sources.image(source,256);
+                    if(image.size()==QSize(256,256)){donors[id]=image;donorEvidence[QString::number(id)]=identity(source);}
+                }
+                if(!donors.contains(id)&&variantBank.success) {
+                    const auto entries=TerrainHdVariantBank::forMaterial(variantBank,family->name,family->tileType,family->layer);
+                    for(const auto& entry:entries)if(entry.physicalClass==family->tileType&&entry.pixels.size()==QSize(256,256)){donors[id]=entry.pixels;donorEvidence[QString::number(id)]=QStringLiteral("bank:")+entry.id;break;}
+                }
+            }
+            recipe["maskDonors"]=donorEvidence;
+            if(donors.size()==ids.size()) {
+                witness=semanticMaskedHd(r.before[slot],d.signature,donors,&recipe);
+                if(!witness.isNull()){ambiguous=false;recipe["sources"]=donorEvidence;recipe["context"]=contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature");}
+            } else recipe["maskRefusal"]=QStringLiteral("missing-compatible-HD-material-donors");
+        }
         recipe["secondDifferentHdMse"]=secondError;
         QJsonObject row=slotRows[slot].toObject();
         if(!witness.isNull()&&!ambiguous){upgraded[slot]=witness;row["regenerated"]=true;row["recipe"]=recipe;row.remove("reason");++generated;}
-        else row["reason"]=ambiguous?"ambiguous-generated-HD-recipe":"legacy-recipe-not-reproducible";
+        else {row["reason"]=ambiguous?"ambiguous-generated-HD-recipe":"legacy-recipe-not-reproducible";row["recoveryDiagnostic"]=recipe;}
+        row["effectiveSignature"]=QJsonArray{d.signature.northWest,d.signature.northEast,d.signature.southEast,d.signature.southWest};
+        slotRows[slot]=row;
+    }
+    // A published HD atlas is a carrier for every authored slot. For uniform
+    // materials, prefer a reviewed same-material/class/layer bank entry (the
+    // bank is read-only here); otherwise use a deterministic uniform HD source
+    // from the same semantic family. Variant generation preserves anchor edges.
+    QVector<QString> outputKind(r.before.size());
+    for(int slot=0;slot<r.before.size();++slot) {
+        if(animationSlots.contains(slot)||!upgraded[slot].isNull()||r.before[slot].size()!=QSize(128,128))continue;
+        const auto d=defs.value(slot);const auto s=d.signature;
+        if(!d.assigned||d.ambiguous||d.routeOwnerMaterial!=0||!d.mixedEdgeRecipes.isEmpty()
+           ||s.northWest!=s.northEast||s.northWest!=s.southEast||s.northWest!=s.southWest)continue;
+        const STerrainAtlasProfileFamily* family=nullptr;
+        for(const auto& f:profile.families)if(f.id==s.northWest){family=&f;break;}
+        if(!family||family->ambiguous||!family->paintSelectable
+           ||!TerrainHdVariantBank::staticMaterial(family->name,family->tileType,family->tileType))continue;
+        QImage choice;QString choiceId;
+        if(variantBank.success) {
+            auto entries=TerrainHdVariantBank::forMaterial(variantBank,family->name,family->tileType,family->layer);
+            QVector<int> eligible;
+            for(int i=0;i<entries.size();++i)
+                if(entries[i].physicalClass==family->tileType&&entries[i].pixels.size()==QSize(256,256))eligible.append(i);
+            if(!eligible.isEmpty()) {
+                const QByteArray seed=profile.mprNamespace.toUtf8()+QByteArray::number(slot)+pixelsHash(r.before[slot]);
+                const quint32 pick=qFromBigEndian<quint32>(reinterpret_cast<const uchar*>(QCryptographicHash::hash(seed,QCryptographicHash::Sha256).constData()));
+                const auto& entry=entries[eligible[int(pick%quint32(eligible.size()))]];
+                choice=entry.pixels;choiceId=QStringLiteral("bank:")+entry.id;
+            }
+        }
+        if(choice.isNull()) {
+            const QMap<qint32,CTerrainHdSources::Source>* candidates=nullptr;
+            for(int policyIndex=0;policyIndex<policies.size();++policyIndex) {
+                const auto& policy=policies[policyIndex];
+                if(!policy.contains(family->id))continue;
+                if(policyIndex==2) {
+                    bool compatible=false;
+                    for(const auto& globalFamily:global)
+                        if(globalFamily.id==family->id&&globalFamily.layer==family->layer
+                           &&globalFamily.runtimeTerrainType==family->tileType)compatible=true;
+                    if(!compatible)continue;
+                }
+                candidates=&policy;break;
+            }
+            if(candidates)choice=sources.image(candidates->value(family->id),256);
+            if(!choice.isNull())choiceId=identity(candidates->value(family->id));
+        }
+        if(!choice.isNull()) {
+            upgraded[slot]=choice;outputKind[slot]=QStringLiteral("hd-variant");
+            auto row=slotRows[slot].toObject();row["sameMaterialVariant"]=true;row["variantSource"]=choiceId;row.remove("reason");slotRows[slot]=row;
+        }
+    }
+    // No non-animated native 128-pixel payload may survive a completed
+    // rebuild. Animation frames are explicitly excluded and remain byte-pixel
+    // identical, including partially HD ranges.
+    int enlarged=0,upscaledTransitions=0;
+    QJsonObject upscaleReasonCounts;
+    // Keep complete recovery evidence even if publication must be refused.
+    // All slots have been examined before the residual pass begins.
+    r.receipt["slots"]=slotRows;r.receipt["stockMatched"]=hd;r.receipt["regenerated"]=generated;
+    r.receipt["semanticContextDiagnostic"]=semanticDiagnostic;
+    r.receipt["semanticContextSlots"]=contextualSignatures.size();
+    for(int slot=0;slot<r.before.size();++slot)if(!animationSlots.contains(slot)&&upgraded[slot].isNull()&&r.before[slot].size()==QSize(128,128)) {
+        if(emptyStaticPadding.contains(slot)) {
+            QImage blank(256,256,QImage::Format_RGBA8888);blank.fill(Qt::transparent);
+            upgraded[slot]=blank;outputKind[slot]=QStringLiteral("empty-HD-padding");continue;
+        }
+        const auto d=defs.value(slot);const auto sig=d.signature;
+        const QSet<qint32> ids{sig.northWest,sig.northEast,sig.southEast,sig.southWest};
+        const bool transition=d.assigned&&ids.size()>1;
+        const bool profileEvidence=std::any_of(profile.slotDefinitions.cbegin(),profile.slotDefinitions.cend(),[&](const STerrainAtlasProfileSlot& original) {
+            return original.slot==slot&&original.assigned&&!original.ambiguous;
+        });
+        QString reason;
+        if(transition) {
+            if(ids.size()<=2&&(contextualSignatures.contains(slot)||profileEvidence)) {
+                r.error=QStringLiteral("Recognized two-material transition %1 could not be reconstructed from classified HD sources").arg(slot);
+                return r;
+            }
+            reason=ids.size()>2?QStringLiteral("unsupported-more-than-two-corner-materials")
+                :QStringLiteral("no-semantic-or-profile-signature");
+            ++upscaledTransitions;
+        } else reason=QStringLiteral("no-HD-source-upscaled");
+        upgraded[slot]=r.before[slot].scaled(256,256,Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+        outputKind[slot]=QStringLiteral("upscaled-128-to-256");++enlarged;
+        upscaleReasonCounts[reason]=upscaleReasonCounts[reason].toInt()+1;
+        auto row=slotRows[slot].toObject();row["upscaled128To256"]=true;
+        row["reason"]=reason;
         slotRows[slot]=row;
     }
     if(progress)progress->update(CTerrainHdProgress::Recovering,transitions,transitions);
     if(progress)progress->update(CTerrainHdProgress::Preparing,0,5);
     if(cancelled())return r;
-    // Physical slots are partitioned by native resolution. Animation intervals
-    // are indivisible: their frame ordering is part of the runtime contract.
+    // Physical slots are partitioned by native resolution. Keep each animation
+    // interval contiguous and preserve every frame's original pixels.
     const int count=r.before.size();
     QVector<int> end(count);for(int i=0;i<count;++i)end[i]=i+1;
     for(const auto& animation:animations) {
         const int start=animation.tileIndex,stop=start+animation.frameCount;
-        if(start<0||stop>count||stop<=start){r.error="Invalid animation interval";return r;}
         end[start]=qMax(end[start],stop);
     }
     QVector<QVector<int>> groups;
@@ -931,24 +1442,35 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         for(int j=i;j<stop;++j){stop=qMax(stop,end[j]);group.append(j);}
         groups.append(group);i=stop;
     }
-    int blocked=0;
-    for(const auto& group:groups) {
-        bool all=true;for(int slot:group)all=all&&!upgraded[slot].isNull();
-        if(!all)for(int slot:group)if(!upgraded[slot].isNull()) {
-            if(r.before[slot].width()!=128){r.error="Mixed native animation requires explicit author review";return r;}
-            upgraded[slot]=QImage();++blocked;
-            auto row=slotRows[slot].toObject();row["reason"]="animation-has-SD-frame";slotRows[slot]=row;
-        }
-    }
-    if(!upgradePartialPages)for(int page=0;page<authored.size();++page) {
-        bool all=true;for(int i=0;i<64;++i)all=all&&!upgraded[page*64+i].isNull();
-        if(!all)for(int i=0;i<64;++i)upgraded[page*64+i]=QImage();
-    }
+    const int unchangedAnimationFrames=animationSlots.size();
+    int blocked=unchangedAnimationFrames;
     bool mixed=false;
     for(int page=0;page<authored.size();++page)for(int i=1;i<64;++i)
         mixed=mixed||(upgraded[page*64].isNull()!=upgraded[page*64+i].isNull());
     QVector<int> order,sizes;
-    if(!mixed)for(int slot=0;slot<count;++slot){order.append(slot);sizes.append(upgraded[slot].isNull()?128:256);}
+    const bool preserveAnimationRanges=!animationSlots.isEmpty();
+    QVector<int> appendedHdSlots;
+    if(preserveAnimationRanges) {
+        // Keep every animation interval at its original index. Pages that
+        // hold 128-pixel animation frames stay 128-pixel pages; their other
+        // slots become empty padding and their upgraded terrain copies are
+        // appended to 256-pixel pages. Other 128-pixel pages upgrade in place.
+        for(int slot=0;slot<count;++slot) {
+            order.append(slot);
+            const int sourceSize=int(word(authored[slot/64],4))/8;
+            const bool animationPage128=sourceSize==128&&animationPages.contains(slot/64);
+            sizes.append(animationPage128?128:qMax(256,sourceSize));
+            if(animationPage128&&!animationSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)
+                &&!priorAnimationPadding.contains(slot)&&!upgraded[slot].isNull())
+                appendedHdSlots.append(slot);
+        }
+        for(int slot:appendedHdSlots) {
+            const int output=order.size();
+            order.append(slot);sizes.append(256);
+            r.slotRemap[slot]=output;
+        }
+        while(order.size()%64){order.append(-1);sizes.append(256);}
+    } else if(!mixed)for(int slot=0;slot<count;++slot){order.append(slot);sizes.append(upgraded[slot].isNull()?128:256);}
     else for(int size:{256,128}) {
         for(const auto& group:groups)if((upgraded[group.first()].isNull()?128:256)==size)
             for(int slot:group){order.append(slot);sizes.append(size);}
@@ -959,12 +1481,25 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     for(int output=0;output<order.size();++output) {
         const int slot=order[output];
         if(slot<0){QImage pad(sizes[output],sizes[output],QImage::Format_RGBA8888);pad.fill(Qt::transparent);images.append(pad);continue;}
-        r.slotRemap[slot]=output;
-        images.append(upgraded[slot].isNull()?r.before[slot]:upgraded[slot]);
+        if(!preserveAnimationRanges||output>=count||!appendedHdSlots.contains(slot))r.slotRemap[slot]=output;
+        const bool appendedUpgrade=preserveAnimationRanges&&output>=count;
+        if(appendedUpgrade)images.append(upgraded[slot]);
+        else if(preserveAnimationRanges) {
+            const bool animationPage128=int(word(authored[slot/64],4))/8==128&&animationPages.contains(slot/64);
+            if(animationPage128&&!animationSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)) {
+                supersededAnimationSlots.insert(slot);QImage empty(128,128,QImage::Format_RGBA8888);empty.fill(Qt::transparent);images.append(empty);
+            } else if(animationPage128&&emptyAnimationPadding.contains(slot))images.append(r.before[slot]);
+            else images.append(upgraded[slot].isNull()?r.before[slot]:upgraded[slot]);
+        } else images.append(upgraded[slot].isNull()?r.before[slot]:upgraded[slot]);
         auto row=slotRows[slot].toObject();row["outputSlot"]=output;
-        if(upgraded[slot].isNull()){row["result"]="retained-128";++native128;}
+        if(emptyAnimationPadding.contains(slot))row["result"]="empty-animation-padding";
+        else if(animationSlots.contains(slot)&&r.before[slot].width()==128){row["result"]="retained-128";++native128;}
+        else if(preserveAnimationRanges&&output<count&&supersededAnimationSlots.contains(slot))row["result"]="superseded-128-slot";
         else if(r.before[slot].width()==256)row["result"]="already-HD-unchanged";
         else if(matchedSources[slot].archive>=0){row["result"]="original-HD-BC1";++appliedHd;}
+        else if(outputKind[slot]==QStringLiteral("empty-HD-padding"))row["result"]="empty-HD-padding";
+        else if(outputKind[slot]==QStringLiteral("hd-variant")){row["result"]="hd-variant";++appliedGenerated;}
+        else if(outputKind[slot]==QStringLiteral("upscaled-128-to-256")){row["result"]="upscaled-128-to-256";}
         else {row["result"]="regenerated-256";++appliedGenerated;}
         slotRows[slot]=row;
     }
@@ -981,27 +1516,45 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         if(payload.isEmpty())return r;
         if(!unchanged)for(int local=0;local<64;++local) {
             const int slot=order[page*64+local];if(slot<0)continue;
+            const bool blankAnimationPageSlot=preserveAnimationRanges
+                &&page<authored.size()&&int(word(authored[page],4))/8==128&&animationPages.contains(page)
+                &&!animationSlots.contains(slot);
+            if(blankAnimationPageSlot)continue;
             const auto source=matchedSources[slot];
             QByteArray original;int from=slot%64,rotation=0;
-            if(size==128||r.before[slot].width()==256)original=authored[slot/64];
-            else if(source.archive>=0){original=sources.payload(source);from=source.slot;rotation=source.rotation;}
+            if(preserveAnimationRanges&&page<authored.size()) {
+                const bool sourceAnimationPage128=int(word(authored[page],4))/8==128&&animationPages.contains(page);
+                if(sourceAnimationPage128&&animationSlots.contains(slot))original=authored[page];
+                else if(size==256&&r.before[slot].width()==256)original=authored[page];
+            }
+            if(original.isEmpty()) {
+                if(size==128||r.before[slot].width()==256)original=authored[slot/64];
+                else if(source.archive>=0){original=sources.payload(source);from=source.slot;rotation=source.rotation;}
+            }
             if(!original.isEmpty()&&!transplantTile(&payload,local,original,from,rotation)){r.error="Native BC1 transplant failed";return r;}
         }
         r.pages.append(payload);
         for(int local=0;local<64;++local) {
             QImage pixels;if(!ei::decodeMmpDxt1AtlasTile(payload,local,&pixels,&r.error))return r;
             const int slot=order[page*64+local];
-            if(slot>=0&&size==128&&pixels!=r.before[slot]){r.error="Native SD pixels changed";return r;}
+            const bool blankAnimationPageSlot=preserveAnimationRanges&&size==128
+                &&animationPages.contains(page)&&!animationSlots.contains(slot);
+            if(slot>=0&&size==128&&pixels!=r.before[slot]&&!blankAnimationPageSlot){r.error="Native SD pixels changed";return r;}
             r.after.append(pixels);
         }
         pageRows.append(QJsonObject{{"page",page},{"tileSize",size},{"bytesAfter",payload.size()}});
     }
-    for(auto& definition:r.profile.slotDefinitions)definition.slot=r.slotRemap.value(definition.slot,-1);
-    for(int slot=0;slot<order.size();++slot)if(order[slot]<0) {
+    for(auto& definition:r.profile.slotDefinitions) {
+        if(contextualSignatures.contains(definition.slot)&&!animationSlots.contains(definition.slot)
+           &&!upgraded[definition.slot].isNull())definition=defs.value(definition.slot);
+        definition.slot=r.slotRemap.value(definition.slot,-1);
+    }
+    QSet<int> definedSlots;for(const auto& definition:r.profile.slotDefinitions)definedSlots.insert(definition.slot);
+    for(int slot=0;slot<order.size();++slot)if(order[slot]<0||!definedSlots.contains(slot)) {
         if(r.profile.slotDefinitions.isEmpty()){r.error="Missing profile definitions";return r;}
         STerrainAtlasProfileSlot padding;padding.slot=slot;padding.assigned=false;
         padding.signature=r.profile.slotDefinitions.first().signature;
-        r.profile.slotDefinitions.append(padding);
+        r.profile.slotDefinitions.append(padding);definedSlots.insert(slot);
     }
     std::sort(r.profile.slotDefinitions.begin(),r.profile.slotDefinitions.end(),[](const STerrainAtlasProfileSlot& a,const STerrainAtlasProfileSlot& b){return a.slot<b.slot;});
     for(auto& family:r.profile.families) {
@@ -1031,9 +1584,31 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         for(int slot=0;slot<r.after.size();++slot)if(!used.contains(slot))nextOrder.append(slot);
         r.receipt["sourceOrder"]=nextOrder;
     }
+    if(preserveAnimationRanges) {
+        QJsonArray physicalOrder;for(int slot=0;slot<r.after.size();++slot)physicalOrder.append(slot);
+        r.receipt["sourceOrder"]=physicalOrder;
+        QSet<int> paddingSlots=emptyAnimationPadding;for(int slot:supersededAnimationSlots)paddingSlots.insert(slot);
+        QVector<int> emptySlots=paddingSlots.values().toVector();std::sort(emptySlots.begin(),emptySlots.end());
+        QJsonArray emptyRows;for(int slot:emptySlots)emptyRows.append(slot);
+        r.receipt["animationPagePaddingSlots"]=emptyRows;
+    }
     r.receipt["hdApplied"]=appliedHd;r.receipt["regeneratedApplied"]=appliedGenerated;
     r.receipt["retained128"]=native128;r.receipt["native128Slots"]=native128;r.receipt["sdCarried256"]=0;
-    r.receipt["animationBlockedHd"]=blocked;r.receipt["upgradePartialPages"]=upgradePartialPages;
+    r.receipt["animationBlockedHd"]=blocked;r.receipt["animationUnchangedFrames"]=unchangedAnimationFrames;
+    r.receipt["upgradePartialPages"]=upgradePartialPages;
+    r.receipt["hdVariantsApplied"]=std::count(outputKind.cbegin(),outputKind.cend(),QStringLiteral("hd-variant"));
+    r.receipt["upscaled128To256"]=enlarged;
+    r.receipt["emptyStaticPaddingSlots"]=emptyStaticPadding.size();
+    r.receipt["upscaledTransitions"]=upscaledTransitions;
+    r.receipt["upscaledReasonCounts"]=upscaleReasonCounts;
+    r.receipt["semanticContextDiagnostic"]=semanticDiagnostic;
+    r.receipt["semanticContextSlots"]=contextualSignatures.size();
+    int priorUpscales=0;
+    for(auto it=priorRows.cbegin();it!=priorRows.cend();++it)
+        if(it.value()["result"].toString()==QStringLiteral("upscaled-128-to-256"))++priorUpscales;
+    r.receipt["previouslyUpscaled256"]=priorUpscales;
+    r.receipt["allStaticSlotsTrueHd"]=enlarged==0&&priorUpscales==0;
+    r.receipt["native128Slots"]=native128;
     if(cancelled())return r;
     if(progress)progress->update(CTerrainHdProgress::Preparing,1,5);
     r.success=sources.current(&r.error);return r;
@@ -1043,6 +1618,11 @@ bool prepareTerrainHdPublication(const CMprDocument& map,const QByteArray& oldSe
     STerrainHdRepublishResult* r,CTerrainHdProgress* progress)
 {
     if(!r||!r->success||r->pages.isEmpty())return false;
+    if(!r->receipt["allStaticSlotsTrueHd"].toBool()) {
+        r->success=false;
+        r->error=QStringLiteral("HD publication refused: some static artwork has no verified HD source or mask. Enlarged SD artwork is diagnostic only, never published as HD.");
+        return false;
+    }
     auto cancelled=[&]() {if(!progress||!progress->cancelled())return false;r->success=false;r->cancelled=true;r->error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true;};
     if(cancelled())return false;
     r->publishedMembers.clear();
@@ -1072,6 +1652,7 @@ bool prepareTerrainHdPublication(const CMprDocument& map,const QByteArray& oldSe
     put(mp,16,r->pages.size());put(mp,20,size*8);put(mp,24,newTypes);put(mp,28,size);
     for(int i=0;i<map.mapInfo().animatedTiles.size();++i) {
         const auto a=map.mapInfo().animatedTiles[i];const int start=r->slotRemap.value(a.tileIndex,-1);
+        if(r->receipt["animationUnchangedFrames"].toInt()>0&&start!=a.tileIndex){r->error="Animation interval start changed";return false;}
         for(int frame=0;frame<a.frameCount;++frame)if(r->slotRemap.value(a.tileIndex+frame,-1)!=start+frame){r->error="Animation frames are not contiguous";return false;}
         qToLittleEndian<quint16>(quint16(start),reinterpret_cast<uchar*>(mp.data()+typeOffset+newTypes*4+i*4));
     }
@@ -1276,16 +1857,26 @@ int runTerrainHdRepublish(const QString& path)
     QStringList guarded=archives;guarded<<cfg["archive"].toString()<<cfg["receipt"].toString();
     for(const auto& m:cfg["maps"].toArray())guarded<<m.toString();
     for(const auto& root:cfg["mapRoots"].toArray())guarded<<root.toString();
-    if(cfg["mode"].toString()=="build")guarded<<cfg["output"].toString();
+    if(cfg["mode"].toString()=="build"||cfg["mode"].toString()=="preview")guarded<<cfg["output"].toString();
     for(const auto& file:guarded)if(!inCopies(file)){QTextStream(stderr)<<"HD check accepts only paths inside an explicit build-tests-* copy root: "<<file<<'\n';return 2;}
     if(archives.isEmpty()||cfg["maps"].toArray().isEmpty())return 2;
-    CTerrainHdSources sources;QString error;CTerrainHdProgress progress;
-    if(!sources.open(archives,&error,&progress)) {QTextStream(stderr)<<error<<'\n';return 2;}
+    int reportedStage=-1;qint64 reportedDone=-64;
+    CTerrainHdSources sources;QString error;
+    CTerrainHdProgress progress([&](const CTerrainHdProgress::Snapshot& snapshot) {
+        if(!cfg["progress"].toBool())return;
+        if(reportedStage!=int(snapshot.stage)||snapshot.done>=reportedDone+64) {
+            reportedStage=int(snapshot.stage);reportedDone=snapshot.done;
+            QTextStream(stderr)<<"HD stage="<<reportedStage<<" work="<<snapshot.done<<'/'<<snapshot.total<<endl;
+        }
+    });
+    const QString indexCache=QDir(testRoot).filePath("hd-index-cache");
+    if(!sources.open(archives,&error,&progress,indexCache)) {QTextStream(stderr)<<error<<'\n';return 2;}
     QTextStream(stdout)<<"HD index: cacheHit="<<sources.cacheHit()<<" elapsedMs="<<progress.snapshot().elapsedMs<<endl;
     CResArchiveIndex published;if(!published.open(cfg["archive"].toString(),&error))return 2;
     QJsonArray results;
     const QString outputRoot=cfg["output"].toString();
-    const bool build=cfg["mode"].toString()==QStringLiteral("build");
+    const bool previewOnly=cfg["mode"].toString()==QStringLiteral("preview");
+    const bool build=previewOnly||cfg["mode"].toString()==QStringLiteral("build");
     if(build) {
         if(outputRoot.isEmpty()||QFileInfo::exists(outputRoot)) {QTextStream(stderr)<<"Build output must be a new directory\n";return 2;}
         const QString absolute=QDir::cleanPath(QFileInfo(outputRoot).absoluteFilePath());
@@ -1304,16 +1895,32 @@ int runTerrainHdRepublish(const QString& path)
         QVector<QByteArray> pages;
         for(int page=0;page<int(map.mapInfo().textureCount);++page)pages.append(published.readMember(QStringLiteral("%1%2.mmp").arg(ns.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
         const auto previous=published.readMember("ei_atlas_hd_recovery_"+ns+".json");
-        auto result=rebuildTerrainAtlasHd(p,pages,sources,cfg["upgradePartialPages"].toBool(true),map.mapInfo().animatedTiles,previous);
-        if(!result.success){QTextStream(stderr)<<result.error<<'\n';return 2;}
+        QByteArray semantic=map.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
+        if(semantic.isEmpty())semantic=published.readMember(STerrainSemanticFieldDocument::memberName(ns,QFileInfo(mapPath)));
+        auto result=rebuildTerrainAtlasHd(p,pages,sources,cfg["upgradePartialPages"].toBool(true),map.mapInfo().animatedTiles,previous,&progress,&map,semantic);
+        if(!result.success){
+            result.receipt["map"]=mapPath;result.receipt["error"]=result.error;results.append(result.receipt);
+            QJsonObject failed{{"complete",false},{"maps",results}};
+            write(cfg["receipt"].toString(),QJsonDocument(failed).toJson());
+            if(cfg["mode"].toString()=="audit"&&sources.current(&error))sources.saveCache();
+            QTextStream(stderr)<<result.error<<'\n';return 2;
+        }
         if(build) {
             const QString output=QDir(outputRoot).filePath(QFileInfo(mapPath).completeBaseName());
             if(!QDir().mkpath(output))return 2;
-            QByteArray semantic=map.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
-            if(semantic.isEmpty())semantic=published.readMember(STerrainSemanticFieldDocument::memberName(ns,QFileInfo(mapPath)));
             if(!prepareTerrainHdPublication(map,semantic,&result)){QTextStream(stderr)<<result.error<<'\n';return 2;}
             if(cfg["pngMaps"].toArray().contains(QFileInfo(mapPath).completeBaseName()))
-                if(!previews(map,&result,output)){QTextStream(stderr)<<"Preview export failed\n";return 2;}
+            {
+                QVector<int> previewSlots;const auto selected=cfg["previewSlots"].toObject()[QFileInfo(mapPath).completeBaseName()].toArray();
+                for(const auto& slot:selected)previewSlots.append(slot.toInt(-1));
+                if(!previews(map,&result,output,previewSlots)){QTextStream(stderr)<<"Preview export failed\n";return 2;}
+            }
+            if(previewOnly) {
+                if(!write(QDir(output).filePath(QFileInfo(mapPath).fileName()),result.mprBytes)
+                   ||!write(QDir(output).filePath("receipt.json"),QJsonDocument(result.receipt).toJson()))return 2;
+                result.receipt["output"]=output;result.receipt["map"]=mapPath;
+                result.receipt["archivePublished"]=false;results.append(result.receipt);continue;
+            }
             CResArchiveDocument archive,publishedArchive;QStringList errors;QByteArray archiveBytes,bytes,compact;
             if(!read(cfg["archive"].toString(),&archiveBytes)||!archive.loadBytes(archiveBytes))return 2;
             const qint64 originalSize=archiveBytes.size();archiveBytes.clear();

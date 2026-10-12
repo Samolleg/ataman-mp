@@ -540,6 +540,7 @@ private slots:
     void lavaUsesOnlyExplicitR123ReviewedMaskRoutes();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
     void canonicalMasksMeetQuarterCoverageAndCornerContract();
+    void mixedNativeAnimationSavePreservesCompressedPage();
     void canonicalMasksAreExactComplementsAndRotationCovariant();
     void canonicalMaskVariationsAreDeterministicAndMacroDistinct();
     void canonicalAdjacentAndDiagonalTopologiesStayAnchored();
@@ -8306,6 +8307,39 @@ void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
     SResArchiveNewMember changed;changed.name="CaveSet.MP";changed.payload=mp;
     QByteArray baseline;QVERIFY(source.buildWithPublishedMembers({changed},true,&baseline,&errors));
     CMprDocument document;CValidationReport report;QVERIFY(document.loadBytes(baseline,"mixed-source.mpr",&report));
+void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
+{
+    Fixture fixture;
+    QVector<QImage> images;
+    CTerrainTransitionCatalog catalog=fixture.catalog;
+    for(int slot=0;slot<128;++slot) {
+        images.append(fixture.images.at(slot%4).scaled(slot<64?128:256,slot<64?128:256));
+        STerrainTransitionVariant variant;
+        variant.signature=signature(slot%4+1,slot%4+1,slot%4+1,slot%4+1);
+        SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
+        variant.packedTile=packed.encode();
+        if(slot<32 || slot>=64)catalog.addVariant(variant);
+    }
+    QVector<QByteArray> pages;
+    for(int slot=32;slot<64;++slot)images[slot].fill(Qt::transparent);
+    for(int page=0;page<2;++page)
+        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?128:256),true));
+    for(int slot=0;slot<128;++slot)
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
+    QVector<qint32> types(128,1);
+    CTerrainVirtualAtlas atlas(catalog,images,23,{}, {},true,types);
+    CTerrainVirtualMaterialField field;QVERIFY(field.resize(16,16,1));
+    CValidationReport report;STerrainAtlasAnimationRange animation;animation.tileIndex=0;animation.frameCount=32;
+    const auto result=atlas.finalize(field,"native-animation",192,types,&report,{}, {}, {}, {},nullptr,{}, {animation},pages);
+    QVERIFY2(result.success,qPrintable(result.error+report.toText()));
+    QCOMPARE(result.pages.front().size(),QSize(1024,1024));
+    QCOMPARE(result.pageMmpPayloads.front(),pages.front());
+    QCOMPARE(result.animations.front().tileIndex,quint16(0));
+    QCOMPARE(result.animations.front().frameCount,quint16(32));
+    for(int slot=0;slot<32;++slot)QCOMPARE(result.authoredSlotRemap.value(slot,-1),slot);
+    for(int slot=32;slot<64;++slot)QVERIFY(!result.authoredSlotRemap.contains(slot));
+}
+
     CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
     QVERIFY(working.isValid());QMap<int,quint64> usage;bool generated=false;
     const auto packed=working.resolve(signature(1,2,3,4),0,0,&usage,{},&generated,&report,1,1);

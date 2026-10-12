@@ -3384,7 +3384,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const QVector<qint32>& preferredPaintMaterials,
     const CTerrainTransitionCatalog* authoredDecodeCatalog,
     const QVector<bool>& preservePreferredPackedCells,
-    const QVector<STerrainAtlasAnimationRange>& animations)
+    const QVector<STerrainAtlasAnimationRange>& animations,
+    const QVector<QByteArray>& authoredPagePayloads)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -3646,8 +3647,52 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         ++animationIndex)
     {
         const STerrainAtlasAnimationRange& animation = animations.at(animationIndex);
+    // A native animation page cannot share a texture with larger HD tiles.
+    // Retain its physical slots together so the original compressed mip chain
+    // can be published verbatim, including the unused part of that page.
+    QMap<int, int> nativeAnimationPages;
+    QSet<int> retainedAnimationSourcePages;
+    for(const SAnimationSourceBlock& block : mergedBlocks)
+    {
+        const int sourcePage = block.start / kTerrainAtlasSlotsPerPage;
+        if(m_authoredTiles.at(block.start).size() == m_generationSize
+           || retainedAnimationSourcePages.contains(sourcePage))
+            continue;
+        const int first = sourcePage * kTerrainAtlasSlotsPerPage;
+        if(first + kTerrainAtlasSlotsPerPage > liveSourceSlotCount)
+        {
+            result.error = QStringLiteral("A native animation page is incomplete in the working atlas.");
+            return result;
+        }
+        nativeAnimationPages.insert(denseImages.size() / kTerrainAtlasSlotsPerPage, sourcePage);
+        retainedAnimationSourcePages.insert(sourcePage);
+        for(int slot = first; slot < first + kTerrainAtlasSlotsPerPage; ++slot)
+        {
+            bool transparent = !animatedSourceSlots.contains(slot);
+            const QImage& pixels = m_authoredTiles.at(slot);
+            for(int y = 0; y < pixels.height() && transparent; ++y)
+                for(int x = 0; x < pixels.width(); ++x)
+                    if(qAlpha(pixels.pixel(x,y)) != 0) { transparent = false; break; }
+            if(transparent)
+            {
+                // Unassigned HD padding is physical storage, not a selectable
+                // material. Do not give it a remap or forged semantic identity.
+                STerrainFinalizedTile padding;
+                padding.physicalPadding = true;
+                padding.pixels = pixels;
+                padding.pixelSha256 = imageHash(pixels);
+                padding.runtimeTerrainType = sourceTileTypes.value(slot, 0);
+                denseImages.append(pixels);
+                result.tiles.append(padding);
+            }
+            else if(!addAuthoredOutput(slot, QStringLiteral("A native animation page is outside the working atlas."), true))
+                return result;
+        }
+    }
         const int sourceStart = int(animation.tileIndex);
         const int physicalCount = qMax(1, int(animation.frameCount));
+        if(retainedAnimationSourcePages.contains(block.start / kTerrainAtlasSlotsPerPage))
+            continue;
         const int outputStart = authoredOutput.value(sourceStart, -1);
         if(outputStart < 0
            || outputStart % kTerrainAtlasSlotsPerPage + physicalCount
@@ -3824,9 +3869,14 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     result.textureCount = (denseImages.size() + 63) / 64;
     for(int page = 0; page < result.textureCount; ++page)
     {
-        const QImage image = composePage(denseImages, page * 64, tileSize);
+        const bool nativeAnimationPage = nativeAnimationPages.contains(page);
+        const QImage image = composePage(denseImages, page * 64,
+            nativeAnimationPage ? denseImages.at(page * 64).width() : tileSize);
         QString diagnostic;
-        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
+        const int sourcePage = nativeAnimationPages.value(page, -1);
+        const QByteArray mmp = nativeAnimationPage && sourcePage < authoredPagePayloads.size()
+            ? authoredPagePayloads.at(sourcePage)
+            : ei::encodeMmpDxt1(image, true, &diagnostic);
         if(mmp.isEmpty())
         {
             result.error = QStringLiteral("Could not encode atlas page: %1").arg(diagnostic);

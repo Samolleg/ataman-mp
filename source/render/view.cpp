@@ -8467,7 +8467,12 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         // enters draw() with its private FBO and review-size viewport already
         // bound; rebinding the widget target here exposes the top-down capture
         // as a one-frame flash after any edit that refreshes the minimap.
-        if(!m_minimapCaptureActive)
+        if(m_sceneReviewTarget)
+        {
+            m_sceneReviewTarget->bind();
+            ei::gl::Viewport(0, 0, m_sceneReviewTarget->width(), m_sceneReviewTarget->height());
+        }
+        else if(!m_minimapCaptureActive)
         {
             QOpenGLFramebufferObject::bindDefault();
             ei::gl::Viewport(0, 0, m_width, m_height);
@@ -15215,6 +15220,24 @@ void CView::finalizeVirtualTerrainAtlas()
     finalizeProgress.setValue(20);
     QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const QString atlasNamespace = m_mprDocument.mapInfo().innerNamespace;
+    QVector<QByteArray> animationSourcePages;
+    if(!animationRanges.isEmpty())
+    {
+        const QStringList names = ei::terrainTextureResourceNames(
+            atlasNamespace, int(m_mprDocument.mapInfo().textureCount));
+        for(const QString& name : names)
+        {
+            QByteArray payload;
+            QString sourcePath;
+            if(!CTextureList::getInstance()->terrainMmpPayload(name, &payload, &sourcePath))
+            {
+                QMessageBox::critical(this, tr("Modern MPR save refused"),
+                    tr("The original animation texture '%1' could not be read.").arg(name));
+                return;
+            }
+            animationSourcePages.append(payload);
+        }
+    }
     const int atlasSlotLimit = kMprPackedTerrainAtlasSlotLimit;
     const CTerrainTransitionCatalog publicationCatalog = catalog;
     const CTerrainTransitionCatalog decodeCatalog = *finalizedDecodeCatalog;
@@ -15237,7 +15260,7 @@ void CView::finalizeVirtualTerrainAtlas()
          blendStyles, generatedTilesOpaque, authoredTypes, runtimeTypes,
          importedTransitions, field, atlasNamespace, atlasSlotLimit,
          pinned, placedCellTypes, placedPackedCells, placedRouteOwners,
-         decodeCatalog, preservePlacedCells, animationRanges]() mutable {
+         decodeCatalog, preservePlacedCells, animationRanges, animationSourcePages]() mutable {
             CValidationReport workerReport;
             CTerrainVirtualAtlas atlas(
                 publicationCatalog, authoredImages, semanticSeed,
@@ -15258,7 +15281,7 @@ void CView::finalizeVirtualTerrainAtlas()
                 field, atlasNamespace, atlasSlotLimit, authoredTypes,
                 &workerReport, pinned, placedCellTypes, placedPackedCells,
                 placedRouteOwners, &decodeCatalog, preservePlacedCells,
-                animationRanges);
+                animationRanges, animationSourcePages);
             if(!workerReport.findings().isEmpty())
                 result.error = workerReport.toText();
             return result;
@@ -15307,7 +15330,7 @@ void CView::finalizeVirtualTerrainAtlas()
     for(int slot=0;slot<finalized.tiles.size();++slot)
     {
         const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
-        generatedCount+=!tile.authored;
+        generatedCount+=!tile.authored && !tile.physicalPadding;
         importedStockCount+=tile.authored&&!retainedSourceOutputs.contains(slot);
     }
     const int retainedAuthored=retainedSourceOutputs.size();
@@ -15425,7 +15448,7 @@ void CView::finalizeVirtualTerrainAtlas()
     for(int slot=0;slot<finalized.tiles.size();++slot)
     {
         const STerrainFinalizedTile& tile=finalized.tiles.at(slot);
-        if(retainedSourceOutputs.contains(slot))continue;
+        if(tile.physicalPadding || retainedSourceOutputs.contains(slot))continue;
         QToolButton* item=new QToolButton(addedPage);
         item->setIcon(QPixmap::fromImage(tile.pixels));
         item->setIconSize(QSize(96,96));
@@ -15743,8 +15766,12 @@ void CView::finalizeVirtualTerrainAtlas()
     portableProfile.resourceArchiveHint = archiveHint;
     portableProfile.textureCount = finalized.textureCount;
     const bool portableUsable=portableProfile.usableAnalysis(&portableProfileReport).usable;
+    const int logicalSlotCount = int(std::count_if(finalized.tiles.cbegin(),
+        finalized.tiles.cend(), [](const STerrainFinalizedTile& tile) {
+            return !tile.physicalPadding;
+        }));
     if(portableProfileReport.hasErrors() || !portableUsable
-       || portableProfile.assignedSlotCount()!=finalized.requiredSlots)
+       || portableProfile.assignedSlotCount()!=logicalSlotCount)
     {
         QMessageBox::critical(this,tr("Atlas package not written"),
             tr("The isolated material profile does not describe every logical "

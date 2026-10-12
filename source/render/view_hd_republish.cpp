@@ -1,6 +1,7 @@
 #include "view.h"
 #include "landscape.h"
 #include "settings.h"
+#include "log.h"
 #include "terrain_hd_republish.h"
 #include "terrain_semantic_field_store.h"
 #include "res_save_coordinator.h"
@@ -13,6 +14,7 @@
 #include <QApplication>
 #include <QRegularExpression>
 #include <QJsonArray>
+#include <QCheckBox>
 #include <QtConcurrent>
 
 void CView::republishTerrainAtlasHd()
@@ -30,7 +32,14 @@ void CView::republishTerrainAtlasHd()
        ||QFileInfo(archivePath).fileName().compare(QStringLiteral("HDPack_Terrain.res"),Qt::CaseInsensitive)!=0) {
         QMessageBox::information(this,tr("HD атлас"),tr("Команда работает только с опубликованным атласом Dejavu в HDPack_Terrain.res. Легаси-атласы не изменяются."));return;
     }
-    CTerrainHdProgress state;
+    int loggedStage=-1,loggedPercent=-1;
+    CTerrainHdProgress state([&](const CTerrainHdProgress::Snapshot& value) {
+        if(int(value.stage)!=loggedStage || value.percent>=loggedPercent+5) {
+            ei::log(eLogInfo,QString("HD publication preparation stage:%1 progress:%2 work:%3/%4")
+                .arg(int(value.stage)).arg(value.percent).arg(value.done).arg(value.total));
+            loggedStage=int(value.stage);loggedPercent=value.percent;
+        }
+    });
     CTerrainHdProgressDialog progress(state,this);progress.show();
     const STerrainAtlasProfile profile=m_terrainAtlasProfile;
     QStringList sourcePaths{archivePath};
@@ -65,13 +74,19 @@ void CView::republishTerrainAtlasHd()
             pages.append(archive.readMember(QStringLiteral("%1%2.mmp").arg(profile.mprNamespace.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
         }
         const auto previous=archive.readMember("ei_atlas_hd_recovery_"+profile.mprNamespace+".json");
-        result=rebuildTerrainAtlasHd(profile,pages,*sources,true,map.mapInfo().animatedTiles,previous,&state);
-        if(!result.success||cancelled())return prepared;
-        if(result.receipt["hdApplied"].toInt()+result.receipt["regeneratedApplied"].toInt()==0) {
-            state.update(CTerrainHdProgress::Complete,1,1);return prepared;
-        }
         prepared.semantic=map.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
         if(prepared.semantic.isEmpty())prepared.semantic=archive.readMember(STerrainSemanticFieldDocument::memberName(profile.mprNamespace,QFileInfo(mapPath)));
+        result=rebuildTerrainAtlasHd(profile,pages,*sources,true,map.mapInfo().animatedTiles,previous,&state,&map,prepared.semantic);
+        if(!result.success||cancelled())return prepared;
+        if(!result.receipt["allStaticSlotsTrueHd"].toBool()) {
+            result.success=false;
+            result.error=QStringLiteral("Для части статических тайлов нет проверенного HD-источника или маски. Растянутые SD-текстуры не публикуются как HD. MPR и RES не изменены.");
+            return prepared;
+        }
+        if(result.receipt["hdApplied"].toInt()+result.receipt["regeneratedApplied"].toInt()==0) {
+            sources->saveCache();
+            state.update(CTerrainHdProgress::Complete,1,1);return prepared;
+        }
         if(!prepareTerrainHdPublication(map,prepared.semantic,&result,&state)){result.success=false;return prepared;}
         state.update(CTerrainHdProgress::Preparing,2,5);if(cancelled())return prepared;
         QFile file(archivePath);CResArchiveDocument baseline;QStringList errors;
@@ -99,6 +114,7 @@ void CView::republishTerrainAtlasHd()
         prepared.expectedGrowth=(estimatedBytes.size()-baselineSize)/1048576.0;
         prepared.expectedTotal=estimatedBytes.size()/1048576.0;
         if(cancelled())return prepared;
+        sources->saveCache();
         state.update(CTerrainHdProgress::Complete,1,1);return prepared;
     });
     QFutureWatcher<Prepared> watcher;QEventLoop loop;
@@ -108,7 +124,7 @@ void CView::republishTerrainAtlasHd()
     if(state.cancelled()||result.cancelled) {QMessageBox::information(this,tr("HD атлас"),tr("Подготовка отменена. RES и MPR не изменены."));return;}
     if(!result.success){QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;}
     const int hd=result.receipt["hdApplied"].toInt(),generated=result.receipt["regeneratedApplied"].toInt();
-    if(hd+generated==0) {sources->saveCache();QMessageBox::information(this,tr("HD атлас"),tr("Новых подтверждённых HD-источников или рецептов нет. Текущие страницы сохранены."));return;}
+    if(hd+generated==0) {QMessageBox::information(this,tr("HD атлас"),tr("Новых подтверждённых HD-источников или рецептов нет. Текущие страницы сохранены."));return;}
     const auto semantic=prepared.semantic;
     const auto cleanup=prepared.cleanup;
     const double expectedGrowth=prepared.expectedGrowth,expectedTotal=prepared.expectedTotal;
@@ -122,20 +138,30 @@ void CView::republishTerrainAtlasHd()
         if(reason.contains(':'))return tr("не удалось проверить все MPR Dejavu/Base: %1").arg(reason.mid(reason.indexOf(':')+1).trimmed());
         return tr("не удалось проверить все MPR Dejavu/Base");
     };
-    const int blockedAnimation=result.receipt["animationBlockedHd"].toInt();
-    QString animationNotice=blockedAnimation>0
-        ?tr("\nКадров с HD-источником оставлено 128 px: %1. В их анимации есть SD-кадры; непрерывный порядок кадров сохранён.").arg(blockedAnimation):QString();
+    const int unchangedAnimationFrames=result.receipt["animationUnchangedFrames"].toInt();
+    QString animationNotice;
     if(result.receipt["ownerConfirmedHdApplied"].toInt()>0)
         animationNotice+=tr("\nHD по подтверждённому происхождению: %1 слотов.").arg(result.receipt["ownerConfirmedHdApplied"].toInt());
-    const auto answer=QMessageBox::question(this,tr("Пересобрать атлас карты в HD"),
-        tr("Из HD: %1; перерисовано переходов: %2; останется 128 px: %3.\nОжидаемый прирост HDPack_Terrain.res: %4 МиБ; итог: %5 МиБ.\nСтарый атлас: %6.%7\n\nСсылки ячеек, классы, вода и анимация сохраняются при упаковке страниц. Будут созданы резервные копии.\n\nПродолжить?")
-        .arg(hd).arg(generated).arg(result.receipt["native128Slots"].toInt())
+    int repaintedTransitions=0;
+    for(const auto& value:result.receipt["slots"].toArray())
+        if(value.toObject()["result"].toString()==QStringLiteral("regenerated-256"))++repaintedTransitions;
+    const int hdVariants=result.receipt["hdVariantsApplied"].toInt();
+    const int enlarged=result.receipt["upscaled128To256"].toInt();
+    QMessageBox confirmation(QMessageBox::Question,tr("Пересобрать атлас карты в HD"),
+        tr("HD-оригинал: %1; HD-вариант: %2; перерисовано переходов: %3; увеличено 128→256: %4; анимации без изменений: %5 кадров.\nОжидаемый прирост HDPack_Terrain.res: %6 МиБ; итог: %7 МиБ.\nСтарый атлас: %8.%9\n\nСсылки ячеек, классы, вода и анимация сохраняются при упаковке страниц. Будут созданы резервные копии.\n\nПродолжить?")
+        .arg(hd).arg(hdVariants).arg(repaintedTransitions).arg(enlarged).arg(unchangedAnimationFrames)
         .arg(expectedGrowth,0,'f',2)
         .arg(expectedTotal,0,'f',2)
         .arg(cleanup["removedMembers"].toInt()?tr("будет удалён после сохранения карты"):tr("сохранён (%1)").arg(cleanupReason(cleanup))).arg(animationNotice),
-        QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
-    if(answer!=QMessageBox::Yes)return;
-    sources->saveCache();
+        QMessageBox::Yes|QMessageBox::No,this);
+    confirmation.setDefaultButton(QMessageBox::No);
+    QCheckBox distribute(tr("Разложить варианты по карте"),&confirmation);
+    distribute.setObjectName(QStringLiteral("terrainHdDistributeVariants"));
+    distribute.setChecked(false);
+    distribute.setToolTip(tr("После перевода перемешать тайлы с новым случайным зерном. Раскладку можно отменить и повторить; сохраните карту для записи раскладки."));
+    confirmation.setCheckBox(&distribute);
+    if(confirmation.exec()!=QMessageBox::Yes)return;
+    const bool distributeVariants=distribute.isChecked();
     // Preparation used a snapshot. Refuse a changed RES before requesting the
     // publication lease; the existing coordinator also checks the commit source.
     QFile archiveFile(archivePath);CResArchiveDocument baseline;QStringList errors;QString cleanupError;
@@ -196,5 +222,24 @@ void CView::republishTerrainAtlasHd()
     const bool adopted=adoptCompleteTerrainBaseline(mapRequest.destination,saved.candidateSha256,result.after,archivePath,result.profile,!semantic.isEmpty());
     emit terrainPublicationFinished(archivePath,true);
     if(!adopted){QMessageBox::warning(this,tr("HD атлас сохранён"),tr("Пара MPR/RES сохранена. Откройте карту заново для продолжения редактирования."));return;}
-    emit mprSaveStateChanged();emit updateMsg(tr("Атлас карты пересобран в HD: %1 слотов, %2 переходов.").arg(hd).arg(generated));
+    // Use the normal terrain transaction: one undo command with captured packed
+    // values and a fresh seed. Saving persists that command through the usual
+    // MPR/semantic-field path; the unchecked default keeps the existing workflow.
+    QString completion=tr("Атлас карты пересобран в HD: %1 слотов, %2 переходов.").arg(hd).arg(generated);
+    if(distributeVariants) {
+        const bool hadSeed=m_terrainEdit.hasRandomPaintSeed();
+        const quint32 previousSeed=m_terrainEdit.randomPaintSeed();
+        QString detail;
+        const auto observer=connect(this,&CView::updateMsg,this,[&detail](const QString& text){detail=text;});
+        shuffleTerrainTiles(false);disconnect(observer);
+        const bool applied=m_terrainEdit.hasRandomPaintSeed()
+            &&(!hadSeed||m_terrainEdit.randomPaintSeed()!=previousSeed)&&m_pLand->isDirty();
+        if(!applied) {
+            const QString message=tr("HD-пара сохранена, но раскладка вариантов не применена. %1").arg(detail);
+            emit updateMsg(message);QMessageBox::warning(this,tr("Раскладка вариантов"),message);
+            emit mprSaveStateChanged();return;
+        }
+        completion+=tr(" Варианты разложены в рабочей карте; сохраните MPR для записи раскладки. Undo/Redo доступны.");
+    }
+    emit mprSaveStateChanged();emit updateMsg(completion);
 }

@@ -1034,7 +1034,8 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     {
         STerrainAtlasProfileSlot definition;
         definition.slot = slot;
-        definition.assigned = slot < finalization.tiles.size();
+        definition.assigned = slot < finalization.tiles.size()
+            && !finalization.tiles.at(slot).physicalPadding;
         definition.ambiguous = false;
         if(definition.assigned)
         {
