@@ -54,15 +54,17 @@
 - Release build VERSION 150: `mingw32-make -j4 release` — PASS; существующие предупреждения компилятора остаются.
 - RES archive tests: 29 passed / 0 failed / 0 skipped; backup manager tests: 13 / 0 / 0.
 - Kill/interruption test: именованный исходный архив побайтно неизменен после убийства publisher на частичной записи временного файла.
-- `--ui-widget-check`: exit 0, `nativeAttempts=0`, sequence/formats/clipboard unchanged; пройден под `build-locks/ui-tests.lock` с изолированными профилями.
+- `--ui-widget-check`: exit 0, `nativeAttempts=0`, sequence/formats/clipboard unchanged; source Release под `build-locks/ui-tests.lock`. После сборки package exact EXE (SHA-256 ниже) повторно прошёл тот же check под lock на изолированной копии package runtime.
 - `--scenario-layer-check`: 49 passed / 0 failed; `--dark-theme-check`: 0 failures.
-- `--terrain-height-res-save-check`: PASS для смешанной покраски+высоты, повторного открытия и отсутствия повторной публикации при height-only save.
+- `--terrain-height-res-save-check`: PASS для смешанной покраски+высоты, повторного открытия и отсутствия повторной публикации при height-only save. Точный package EXE повторно прошёл этот check: GUI snapshot 0 мс, MPR 13 099 байт; worker MPR и paired RES candidate PASS.
 - `--terrain-hd-republish-check`: PASS; результаты на копиях zone19 и zone6, соответственно 47 и 602 уже имеющихся страниц применены без потери соседних членов.
 - `--terrain-hd-variants-check`: PASS на 79-map fixture; 6 итоговых страниц, проверка записей только в `build-tests-150-save-perf`.
 - `--terrain-mixed-edge-check`: 67 passed / 0 failed / 0 skipped; `--terrain-random-paint-check`: 82 / 0 / 0, включая exact undo/redo bytes.
 - Миниатюры: 149 cold check — 0/5 PASS, видимый queue 1–2/5, median first sample 194 мс и elapsed 299 мс; 150 — 5/5 PASS, median first sample 34 мс, elapsed 44 мс, GUI gap 6–8 мс. Это диагностический benchmark; 150 добавляет только его timing output.
 - Backup MPR paired atlas проверен тестами manager: generation/manifest/sha и связанный `terrain.res`; путь назначения передаётся в autosave builder, отказ `mpr.test.atlas.destination` не маскируется ослаблением валидации.
 
-## Ограничения передачи
+## Release и установка
 
-К этому отчёту относятся только тестовые сборки из `build-*-150*`. Чистый `git archive` Release, finalizer/manifest и guarded install 149→150 требуют завершения последующих этапов карты. Игровая совместимость подтверждена парсером игрового RES и тестами всех исходных членов, но запуск игры и ручная приёмка владельца не выполнялись.
+- Реализационный commit: `7427aa67e45b4659620bdbaa10ebb73318c8f415`; чистый `git archive` SHA-256 `D15656B79C6DD04F51757DA05E5F3E649373906815DD6CA0E4124C29581C331F`. Archive Release VERSION150, `--version` PASS. Точный Release EXE, staging и установленный EXE побайтно совпадают, SHA-256 `A32F9C3558F0446E7D051677AE2A719BCD9C35A8F048315A72B437E2327F85B4`.
+- Staging manifest SHA-256 `2633F6A1FD2A464049AC9A4491900536DAD02D39833A348C8B27342F46856513`. Finalizer на свежей staging-папке: 129 прежних / 130 текущих / 0 удалённых / 0 необъяснённых удалений. Передача в `artifacts/EI-Mapper-Ataman-2-first-test`: 6 заменяемых файлов, 1 новый отчёт, 0 удалений; `rollback149-to150-EI-SAVE-PERF-150-20261012` содержит исходные программные файлы и SHA-256. После установки все 130 managed paths совпали с manifest; все 22 941 unmanaged-файла (4 516 692 037 байт) сохранились; inventory SHA-256 до/после `649545EF0904CF53CF1C23CE6DB4300578A1BB88A6D2E6CC4C4901634BD0E1A3`.
+- Ограничения: интерактивный редактор/игра и runtime autosave реальных zone1/zone9 MPR/MOB не запускались. Capture 0 мс — синтетическая карта ~13 KB, поэтому latency больших реальных документов и реальное время фаз autosave MPR/MOB на целевой установке не измерены. RES coordinator на HDPack-копии 1,31 GB исполнялся в worker; его peak working set около 12,9 GB может ограничивать системы с низкой RAM. Game compatibility проверена парсером игрового формата и побайтной проверкой payloads 1226 членов, но игровой запуск/ручная приёмка владельца не выполнялись.
