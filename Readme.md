@@ -26,6 +26,8 @@ Current Ataman version: `160`. Each separate fix advances the integer version.
 
 160 allows HD conversion of original map namespaces and saves a shared-brush session with only the current map changed through the normal MPR save route. HD output uses the configured HDPack_Terrain.res; source pages and native animation frames are preserved. Performance improvements from159 remain included.
 
+Evidence: [zone2 HD and Save](docs/validation/ATAMAN_ZONE2_HD_SAVE_160_20261013.md).
+
 158 fixes the visible boundary between neighboring maps, preserving mixed tile bodies and respecting the renderer UV range. Includes HD157 with native128 water preserved through ordinary Save.
 
 157 rebuilds published static terrain from verified native HD sources, including recovered multi-material transitions. Native animation frames stay unchanged. The optional variant layout is off by default and supports Undo/Redo and ordinary Save. Native-render evidence and integration status: [HD and seams review](docs/validation/ATAMAN_HD_SEAMS_NATIVE_157_158_20261012.md).
