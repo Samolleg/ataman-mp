@@ -3,7 +3,7 @@
 - Общая кисть проводит Modern mixed-edge через выбранные смежные карты. Общие вершины материалов согласуются одним world planner; каждая карта хранит свои SEC и namespace атласа, а пиксели граничных клеток создаются из общей детерминированной world-boundary bank.
 - «Исправить переходы…» с общей кистью использует mixed-edge resolver для стыков и неполных переходов; несовпадающая геометрия пары отказывается без staging-применения.
 - Один world stroke сохраняется в одной cohort Undo/Redo записи. Общие карты проходят общую staging-публикацию; детали и границы проверок — `docs/validation/ATAMAN_CROSSMAP_TRANSITIONS_151_20261012.md`.
-- Копии zone4/zone6: мазок, seam repair, save/reopen, Undo/Redo и сохранённые граничные пиксели прошли; terrain_virtual_atlas 150/0/0, world sculpt 46/0/5 optional skips. Короткий финальный UI/CLI и release handoff зафиксированы в отчёте передачи.
+- Копии zone4/zone6: мазок, seam repair, save/reopen и Undo/Redo прошли; 0 несовпадающих вершин и пикселей шва. terrain_virtual_atlas 150/0/0, world sculpt 46/0/5 optional skips, mixed-edge CLI 70/0/0. OFF/one-map побайтно совпал с VERSION 150. Release 151 установлен; подробности и PNG: `docs/validation/ATAMAN_CROSSMAP_TRANSITIONS_151_20261012.md`.
 ## Ataman 150 — EI-SAVE-PERF-150 — 2026-10-12
 
 - Modern atlas finalization, complete RES candidate rebuild/reopen/backup/atomic replacement, and MPR commit now run off the GUI thread with a live phase percentage. RES remains a full atomic replacement because the game reader does not safely accept a stale directory embedded ahead of an appended table.
