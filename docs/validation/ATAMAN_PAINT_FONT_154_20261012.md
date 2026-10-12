@@ -1,0 +1,28 @@
+# EI-PAINT-FONT-154 — рисование и читаемый шрифт
+
+Дата:2026-10-12. База main `c8a50ba6fdf2c009e5ad81976e5a6f6a998ece42`, VERSION/установка153. Версия154 назначена после сверки main/VERSION/CHANGELOG. Повод — видео владельца `20261012-1103-25.8062377.mp4`: Grass / Yellow lichen, Vertex,size3, Auto/Smooth/Random/HD ON; ERROR terrain.virtual_paint_preview и мелкие13px надписи рядом с остальным UI ~20px. Приёмка153 повторно открыта, общая EI-RECOVERY-20261012 не закрыта.
+
+## Изменение
+
+Панель наследует DPI-aware font приложения. Убраны13px stylesheet cascade,11px shortcut override и8pt relief help. Глобальный UI-scale пользователя не увеличивается. При нехватке ширины опции/команды переходят в одну колонку, форма/цель — в два ряда; широкая760px панель сохраняет две колонки и общий ряд. Данные, радиус и режимы кисти не меняются ради компоновки.
+
+`makeVirtualMaterialPaintVertices` прежде называл отсутствующий mixed tuple при семантическом no-op отсутствием structurally uniform source и отказывал всему мазку. Теперь неизменная mixed ячейка сохраняет прежние pixels; недостающий pure source при настоящем изменении по-прежнему запрещён.
+
+На реальной zone1 выявлен также release-отказ Mixed-edge: его специальный алгоритм требует пригодных местных uniform/stock ownership для всей связанной цепочки, тогда как палитра предлагает глобальные материалы. Эксперимент загрузки большого глобального банка отклонён: он всё равно встретил пары без пригодного авторского ownership и затрагивал связанную цепочку. Диагностический patch сохранён приватно в `build-tests-154-owner-regression/rejected-bank.patch`.
+
+Для структурированного `terrain.mixed_edge.bank_unavailable` caller откатывает private preview и применяет существующий exact Modern builder к footprint мазка, сохраняя один Undo. Последний статус явно говорит, что специальный банк Mixed-edge отсутствует и использованы точные Modern-переходы. Это не PASS специального stock-алгоритма для неподдерживаемой пары. Поддельные uniform картинки, SD upscale под видом HD и новые heuristic ownership не добавлены. Анимация, неверный footprint, ошибки генерации/upload и бюджет остаются отказами. Budget проверяется прежде отсутствующего класса и повторно после подготовки exact fallback; лимит4096 не обходится.
+
+## Существенные проверки
+
+- Адресные widget-сценарии:7 PASS/0 FAIL/0 SKIP. Фактический `applyUiScalePercent(150)` меняет panel children вместе с font приложения;320px русские опции не обрезаны, обе палитры, общий размер/режимы сохранены. Receipt: `build-tests-153-panel/owner-font-tests.log`.
+- Synthetic random-paint/self-paint/budget:64 PASS/0 FAIL/0 SKIP. Новый no-op fixture с nonresident mixed tuple сохраняет artwork без ложного uniform-source отказа. В валидном64-slot atlas при limit63 и одновременно неизвестном классе бюджет не классифицируется как missing-bank. Receipt: `build-tests-154-cpu/palette-budget-final.log`.
+- Native Windows QPA, скрытые окна и desktop OpenGL: mouse events проходят CView→COperationManager→CTileBrush; не вызывается programmatic begin/set/end для доказательства. Yellow lichen выбран по точному имени, все owner options ON, size3/Vertex/Circle; ray hits world33,33 с ошибкой <1m без footprint override. Первый мазок меняет24 ячейки и даёт одну Undo-транзакцию; Undo/Redo sectors точны, повторный mouse stroke не отказывает. Связанный mouse drag даёт несколько stamp в одной транзакции; его Undo/Redo sectors также точны. Wide/drag final:25 PASS/0 FAIL. Receipts: `build-tests-154-owner-regression/palette-wide-final.log`, `palette-drag-final.log`. Native painting/relief PNG просмотрены, шрифт одного размера с UI приложения.
+- Native GPU before/after просмотрены: штатный `CView::draw` terrain pass в отдельном FBO, top-down orthographic/unlit Ground, overlays выключены только для захвата underlay; shader linked, GL error0, изменённый Yellow lichen виден. Это не экран владельца, не Full environment и не игровая/артистическая приёмка. PNG: `build-tests-154-owner-regression/output/owner-paint-before.png`, `owner-paint-after.png`; CPU atlas previews отдельно названы `owner-pixels-*`. Чёрный hidden window framebuffer и ранний непригодный FBO не приняты как доказательства.
+- Ordinary Save MPR на отдельной приватной MPR/RES паре:26 PASS/0 FAIL, archive publication58447ms, затем явный `unloadLand(false)` и fresh load; exact committed sectors и весь mouse-painted semantic field совпали с expected snapshot. Receipt: `build-tests-154-owner-save/palette-reopen-corrected.log`. Ранний `ordinary-save` ошибочно пытался открыть уже загруженную карту; его reopen PASS отозван, он не используется как доказательство. Все тестовые windows скрываются на Polish; неожиданные QMessageBox отклоняются, не получают согласия.
+- Каждый CLI прогон: in-memory clipboard, nativeAttempts0, formats/sequence unchanged. UI lock, profile/CWD/backup paths изолированы; интерактивный редактор вместо владельца не запускался.
+
+Входные копии: source zone1 SHA-256 `1333A596DB880C9D73670F24F115BECB38BAB45D3D2B04BD9662CCD3DB23DA87`, source HDPack `79AE99A3BD47CDE0B36E73A774B20E2CFBABCDD9491AAD49DC1E1CF8D3376909`. Контроль живой MPR подтвердил тот же hash. Обычный Save менял только `build-tests-154-owner-save/fixture`; source/reference fixture и живые карты не изменены. Приватные данные/PNG не включаются в Git или staging.
+
+## Передача и границы
+
+Чистая Release/staging, полный UI-check, независимый package check и guarded установка154 — следующий шаг; пока установленная153 сохранена. Полные SHA/manifest/install receipts будут добавлены после проверки артефакта. Ручная приёмка читаемости и рисования на экране владельца остаётся отдельной. Кандидаты HD ALL 256 и стыков сохранены, не попадают в154; интеграция HD приостановлена последним поручением.

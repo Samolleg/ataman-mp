@@ -248,12 +248,6 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     , m_paintControls(new QWidget(this))
 {
     m_paintControls->setObjectName(QStringLiteral("landscapePaintControls"));
-    const QVariant configuredScale = QCoreApplication::instance()
-        ? QCoreApplication::instance()->property("enduranceUiScalePercent") : QVariant();
-    const double panelScale = (configuredScale.isValid() ? configuredScale.toInt() : 100) / 100.0;
-    QFont panelFont = font();
-    panelFont.setPixelSize(qMax(1, qRound(13 * panelScale)));
-    setFont(panelFont);
     // A short dock scrolls the complete tool panel instead of overlapping its
     // controls or collapsing the material palette to an empty viewport.
     QVBoxLayout* outerLayout = new QVBoxLayout(this);
@@ -913,21 +907,20 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     sharedBrushForm->addRow(tr("Размер"), sizeWidget);
     QWidget* shapeTargetRow = new QWidget(sharedBrush);
     shapeTargetRow->setObjectName(QStringLiteral("terrainShapeTargetRow"));
-    auto* shapeTargetLayout = new QHBoxLayout(shapeTargetRow);
+    auto* shapeTargetLayout = new QGridLayout(shapeTargetRow);
+    shapeTargetLayout->setObjectName(QStringLiteral("terrainShapeTargetLayout"));
     shapeTargetLayout->setContentsMargins(0, 0, 0, 0);
     shapeTargetLayout->setSpacing(4);
-    shapeTargetLayout->addWidget(new QLabel(tr("Форма"), shapeTargetRow));
-    shapeTargetLayout->addWidget(shapeWidget, 1);
-    shapeTargetLayout->addWidget(targetWidget);
+    shapeTargetLayout->addWidget(new QLabel(tr("Форма"), shapeTargetRow),0,0);
+    shapeTargetLayout->addWidget(shapeWidget,0,1);
+    shapeTargetLayout->addWidget(targetWidget,0,2);
+    shapeTargetLayout->setColumnStretch(1,1);
     sharedBrushForm->addRow(shapeTargetRow);
     QLabel* brushShortcuts = new QLabel(
         tr("Alt+колесо — размер · Shift+колесо — материал / сила · [ ] — размер · C — удерживать для ручной покраски"),
         sharedBrush);
     brushShortcuts->setObjectName(QStringLiteral("landscapeBrushShortcuts"));
     brushShortcuts->setWordWrap(true);
-    QFont shortcutFont = brushShortcuts->font();
-    shortcutFont.setPixelSize(qMax(1, qRound(11 * panelScale)));
-    brushShortcuts->setFont(shortcutFont);
     brushShortcuts->setStyleSheet(QStringLiteral("color: %1;")
         .arg(panelPalette.color(QPalette::Mid).name()));
     brushShortcuts->setToolTip(brushShortcuts->text());
@@ -1088,6 +1081,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_randomizeUniformRotation->setToolTip(tr("Распределять разрешённые повороты однородных тайлов."));
     m_randomizeUniformRotation->setObjectName(QStringLiteral("randomizeUniformRotation"));
     QGridLayout* chipGrid = new QGridLayout;
+    chipGrid->setObjectName(QStringLiteral("terrainPaintChipGrid"));
     chipGrid->setContentsMargins(0, 0, 0, 0);
     chipGrid->setHorizontalSpacing(4);
     chipGrid->setVerticalSpacing(3);
@@ -1186,6 +1180,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     auto* mapButtons = new QWidget(advanced->parentWidget());
     mapButtons->setObjectName(QStringLiteral("landscapeMapCommands"));
     auto* mapGrid = new QGridLayout(mapButtons);
+    mapGrid->setObjectName(QStringLiteral("terrainMapCommandGrid"));
     mapGrid->setContentsMargins(0, 0, 0, 0);
     mapGrid->setSpacing(4);
     const QList<QPushButton*> commands = {shuffle, resolveMissing, hdRepublish,
@@ -1203,7 +1198,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     mapGrid->setColumnStretch(1, 1);
     advanced->insertWidget(0, mapButtons);
     help->setObjectName(QStringLiteral("landscapeSculptShortcuts"));
-    help->setStyleSheet(QStringLiteral("color: %1; font-size: 8pt;")
+    help->setStyleSheet(QStringLiteral("color: %1;")
         .arg(panelPalette.color(QPalette::Mid).name()));
     form->addRow(help);
     m_tool->setToolTip(help->text());
@@ -2552,28 +2547,12 @@ void CLandscapeTools::resizeEvent(QResizeEvent* event)
     schedulePaletteRelayout();
 }
 
-void CLandscapeTools::changeEvent(QEvent* event)
-{
-    QWidget::changeEvent(event);
-    if(event->type() == QEvent::FontChange && !m_updatingPanelFontStyle) {
-        // Qt stylesheet polish otherwise resolves each child back to the
-        // platform point font. Keep the panel's pixel font through polish,
-        // and follow live UI-scale changes rather than freezing their size.
-        m_updatingPanelFontStyle = true;
-        const QVariant configuredScale = QCoreApplication::instance()
-            ? QCoreApplication::instance()->property("enduranceUiScalePercent") : QVariant();
-        const int percent = configuredScale.isValid() ? configuredScale.toInt() : 100;
-        setStyleSheet(QStringLiteral("QWidget { font-size: %1px; }")
-            .arg(qMax(1,qRound(13 * percent / 100.0))));
-        m_updatingPanelFontStyle = false;
-    }
-}
-
 bool CLandscapeTools::eventFilter(QObject* watched, QEvent* event)
 {
     // A palette can become visible or change width without resizing the outer
     // tools panel (Sculpt -> Paint, layer tabs, scroll bars, dock layout).
-    if(event->type() == QEvent::Show || event->type() == QEvent::Resize)
+    if(event->type() == QEvent::Show || event->type() == QEvent::Resize
+       || event->type() == QEvent::FontChange)
         schedulePaletteRelayout();
     return QWidget::eventFilter(watched, event);
 }
@@ -2588,8 +2567,43 @@ void CLandscapeTools::schedulePaletteRelayout()
     // event queue once the viewport has its final width.
     QTimer::singleShot(0, this, [this]() {
         m_paletteRelayoutPending = false;
+        refreshResponsiveControls();
         refreshPaletteColumns();
     });
+}
+
+void CLandscapeTools::refreshResponsiveControls()
+{
+    // Keep the application's readable font. Narrow docks trade columns for
+    // rows instead of reducing text to a fixed physical pixel size.
+    const int available=qMax(1,width()-24);
+    for(const char* name:{"terrainPaintChipGrid","terrainMapCommandGrid"}) {
+        auto* grid=findChild<QGridLayout*>(QString::fromLatin1(name));
+        if(!grid)continue;
+        QVector<QWidget*> widgets;int widest=0;
+        for(int i=0;i<grid->count();++i)if(QWidget* widget=grid->itemAt(i)->widget()) {
+            widgets.append(widget);widest=qMax(widest,widget->sizeHint().width());
+        }
+        const int columns=2*widest+grid->horizontalSpacing()<=available?2:1;
+        if(grid->property("responsiveColumns").toInt()==columns)continue;
+        while(QLayoutItem* item=grid->takeAt(0))delete item;
+        for(int i=0;i<widgets.size();++i)grid->addWidget(widgets.at(i),i/columns,i%columns);
+        grid->setColumnStretch(0,1);grid->setColumnStretch(1,columns==2?1:0);
+        grid->setProperty("responsiveColumns",columns);
+    }
+    auto* shape=findChild<QGridLayout*>(QStringLiteral("terrainShapeTargetLayout"));
+    if(shape && shape->count()==3) {
+        QVector<QWidget*> widgets;int needed=2*shape->spacing();
+        for(int i=0;i<3;++i) {QWidget* widget=shape->itemAt(i)->widget();widgets.append(widget);needed+=widget->sizeHint().width();}
+        const bool stacked=needed>available;
+        if(!shape->property("responsiveStacked").isValid()
+           ||shape->property("responsiveStacked").toBool()!=stacked) {
+            while(QLayoutItem* item=shape->takeAt(0))delete item;
+            shape->addWidget(widgets.at(0),0,0);shape->addWidget(widgets.at(1),0,1);
+            shape->addWidget(widgets.at(2),stacked?1:0,stacked?1:2);
+            shape->setProperty("responsiveStacked",stacked);
+        }
+    }
 }
 
 void CLandscapeTools::refreshPaletteColumns(bool rebuild)

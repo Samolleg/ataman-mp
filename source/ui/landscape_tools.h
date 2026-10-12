@@ -206,10 +206,10 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
-    void changeEvent(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    void refreshResponsiveControls();
     bool m_editingActive{false};
     QComboBox* m_mode;
     QComboBox* m_tool;
@@ -318,7 +318,6 @@ private:
     void schedulePaletteRelayout();
     void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
     void refreshVariantStrip();
-    bool m_updatingPanelFontStyle{false};
     int m_paletteCellSize{64};
     QButtonGroup* activeMaterialButtons() const;
 };

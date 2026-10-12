@@ -6790,6 +6790,15 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
                 randomizeUniformRotation, &selected);
         if(!selected)
         {
+            // Repainting an unchanged vertex can touch a neighbouring mixed
+            // cell whose exact tuple is not resident. There is no semantic
+            // edit to resolve there: keep its existing artwork rather than
+            // refusing the whole brush as if the selected pure source failed.
+            if(command.virtualVertices.isEmpty() && !exactUniform)
+            {
+                command.semanticAudit.affectedCells.append(QPoint(x,y));
+                continue;
+            }
             if(report)report->add("terrain.virtual_paint_preview",
                 EValidationSeverity::Error,
                 "This material has no structurally uniform authored tile for an honest unblended preview");

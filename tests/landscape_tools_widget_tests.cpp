@@ -35,6 +35,7 @@
 
 #include "loaded_map_panel_policy.h"
 #include "landscape_tools.h"
+#include "endurance_ui_scale.h"
 #include "types.h"
 
 class LandscapeToolsWidgetTests : public QObject
@@ -1040,7 +1041,7 @@ void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
 
     auto* shortcuts = tools.findChild<QLabel*>("landscapeBrushShortcuts");
     QVERIFY(shortcuts);
-    QVERIFY(shortcuts->font().pointSizeF() <= 9.0);
+    QCOMPARE(QFontMetrics(shortcuts->font()).height(), QFontMetrics(tools.font()).height());
     auto* undo = tools.findChild<QPushButton*>("worldTerrainUndo");
     auto* redo = tools.findChild<QPushButton*>("worldTerrainRedo");
     QVERIFY(undo && redo);
@@ -1093,15 +1094,14 @@ void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
     QVERIFY(variantTitle->text().startsWith(QStringLiteral("Выбрано: Тестовый материал")));
     auto* paintSegment = tools.findChild<QToolButton*>("landscapePaintSegment");
     QVERIFY(paintSegment);
-    QCOMPARE(paintSegment->font().pixelSize(), tools.font().pixelSize());
-    const QFont panelFont = tools.font();
-    const QVariant previousScale = qApp->property("enduranceUiScalePercent");
-    qApp->setProperty("enduranceUiScalePercent", 150);
-    QFont scaledPanelFont = panelFont;scaledPanelFont.setPixelSize(20);
-    tools.setFont(scaledPanelFont);QApplication::processEvents();
-    QCOMPARE(paintSegment->font().pixelSize(), 20);
-    qApp->setProperty("enduranceUiScalePercent", previousScale);
-    tools.setFont(panelFont);QApplication::processEvents();
+    QCOMPARE(paintSegment->font().pointSizeF(), QApplication::font().pointSizeF());
+    const QFont appFont = QApplication::font();
+    const int previousScale=qApp->property("enduranceUiScalePercent").isValid()
+        ?qApp->property("enduranceUiScalePercent").toInt():100;
+    ei::applyUiScalePercent(150);QApplication::processEvents();
+    QCOMPARE(paintSegment->font().pointSizeF(), QApplication::font().pointSizeF());
+    ei::applyUiScalePercent(previousScale);QApplication::processEvents();
+    QCOMPARE(QApplication::font().pointSizeF(), appFont.pointSizeF());
     auto* tileSize = tools.findChild<QSlider*>("terrainPaletteColumns");
     auto* materialScroll = tools.findChild<QScrollArea*>("groundMaterialScroll");
     QVERIFY(tileSize && materialScroll);
@@ -1241,11 +1241,11 @@ void LandscapeToolsWidgetTests::paintOptionsRemainVisibleAsRussianChips()
     tools.show();
     QApplication::processEvents();
     const QMap<QString, QString> expected = {
-        {"modernAutoResolveBlends", "Переходы"},
-        {"modernMixedEdge", "Кромки"},
-        {"randomPaintVariants", "Варианты"},
-        {"generatedHdVariants", "HD"},
-        {"randomizeUniformRotation", "Повороты"},
+        {"modernAutoResolveBlends", "Авто-переходы"},
+        {"modernMixedEdge", "Плавные границы"},
+        {"randomPaintVariants", "Случайные варианты"},
+        {"generatedHdVariants", "HD-варианты"},
+        {"randomizeUniformRotation", "Поворот"},
     };
     for(auto it = expected.cbegin(); it != expected.cend(); ++it)
     {

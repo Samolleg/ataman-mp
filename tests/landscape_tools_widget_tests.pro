@@ -9,6 +9,7 @@ SOURCES += \
     landscape_tools_widget_tests.cpp \
     ../source/ui/landscape_tools.cpp
 SOURCES += ../source/ui/ui_theme.cpp
+SOURCES += ../source/app/endurance_ui_scale.cpp
 
 HEADERS += \
     ../source/app/loaded_map_panel_policy.h \

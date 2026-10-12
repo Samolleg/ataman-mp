@@ -22,7 +22,9 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `153`. Each separate fix advances the integer version.
+Current Ataman version: `154`. Each separate fix advances the integer version.
+
+154 restores readable landscape-tool fonts using the application font and DPI, with responsive controls for narrow docks. Repainting an unchanged material preserves nonresident mixed artwork; when Mixed-edge lacks a usable stock bank, painting uses the existing exact Modern path and reports that choice. Budget and animation refusals remain strict. Validation: docs/validation/ATAMAN_PAINT_FONT_154_20261012.md.
 
 153 follows the approved landscape-panel mockup with larger material tiles, visible option chips, one shape/target row, selected-material counts and compact map command buttons. Validation: docs/validation/ATAMAN_PANEL_MOCKUP_153_20261012.md.
 

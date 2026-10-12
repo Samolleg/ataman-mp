@@ -8,12 +8,14 @@
 #include "res_archive_document.h"
 #include "endurance_document.h"
 #include "view.h"
+#include "camera.h"
 #include "landscape.h"
 #include "settings.h"
 #include "progressview.h"
 #include "tile_form.h"
 #include "tree_view.h"
 #include "terrain_virtual_atlas.h"
+#include "terrain_mixed_edge.h"
 #include "resourcemanager.h"
 #include <QApplication>
 #include <QTableWidget>
@@ -42,6 +44,12 @@
 #include <QTabWidget>
 #include <QScrollArea>
 #include <QToolButton>
+#include <QMouseEvent>
+#include <QSlider>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLFunctions>
+#include <QOpenGLContext>
+#include <QGridLayout>
 #include <climits>
 
 namespace {
@@ -98,13 +106,24 @@ public:
 private:
     CTerrainEditModel* m_model;STerrainTileCommand m_command;
 };
+class HiddenCheckWindows : public QObject {
+public:
+    bool eventFilter(QObject* watched,QEvent* event) override {
+        if(event->type()==QEvent::Polish)
+            if(auto* widget=qobject_cast<QWidget*>(watched))
+                if(widget->isWindow())widget->setAttribute(Qt::WA_DontShowOnScreen);
+        return false;
+    }
+};
 }
 
 int runTerrainRandomPaintCheck(const QString& fixturePath)
 {
-    QTextStream log(stdout);int passed=0,failed=0;
+    QTextStream log(stdout);log.setCodec("UTF-8");int passed=0,failed=0;
     auto check=[&](bool condition,const QString& name) {log<<(condition?"PASS ":"FAIL ")<<name<<'\n';log.flush();condition?++passed:++failed;return condition;};
     const auto fixture=QJsonDocument::fromJson(read(fixturePath)).object();
+    HiddenCheckWindows hiddenWindows;
+    if(fixture.value("ownerPaintRegression").toBool())qApp->installEventFilter(&hiddenWindows);
     const QString output=fixture.value("output").toString();
     if(!check(!output.isEmpty() && QDir(output).exists(),"owned output directory")) return 1;
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -119,6 +138,10 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         auto* roots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots"));
         if(!check(roots && QFileInfo(root+"/res/HDPack_Terrain.res").isFile(),"copied atlas resource root"))return 1;
         roots->setValue({root+"/res"});
+        if(fixture.value("ownerPaintRegression").toBool()) {
+            if(auto* lighting=dynamic_cast<COptInt*>(settings.opt("renderLightingMode")))lighting->setValue(0);
+            if(auto* culling=dynamic_cast<COptBool*>(settings.opt("frustumCulling")))culling->setValue(false);
+        }
         CTextureList::getInstance()->attachSettings(&settings);
         CObjectList::getInstance()->attachSettings(&settings);
         QUndoStack history;CTreeView tree;QTableWidget properties;properties.setColumnCount(2);
@@ -149,6 +172,139 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        if(fixture.value("ownerPaintRegression").toBool()) {
+            panel.activateMode(ELandscapeEditMode::TilePaint,true);
+            qint32 material=-1;
+            for(const auto& family:view.m_terrainGlobalFamilies)
+                if(family.layer==ETerrainAtlasLayer::Land && family.name.contains("Yellow lichen"))material=family.id;
+            if(!check(material>=0 && panel.selectPaintTerrainType(material),"owner Yellow lichen material selected"))return 1;
+            for(const char* name:{"modernAutoResolveBlends","modernMixedEdge","randomPaintVariants","generatedHdVariants","vertexPaintTarget","circlePaintShape"}) {
+                auto* option=panel.findChild<QAbstractButton*>(name);
+                if(!check(option!=nullptr,QString("owner option %1").arg(name)))return 1;
+                option->setChecked(true);
+            }
+            auto* radius=panel.findChild<QSlider*>("terrainPaintRadius");
+            if(!check(radius!=nullptr,"owner brush size control"))return 1;
+            radius->setValue(3);
+            QObject::connect(&view,&CView::updateMsg,[&](const QString& message){log<<"MESSAGE "<<message<<'\n';log.flush();});
+            QVector3D world(33,33,0);view.m_pLand->projectPt(world,true);
+            view.moveCameraToPoint(world);view.m_cam->moveAwayOn(35);view.update();
+            view.updateGL();
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            const QVector3D projected=world.project(view.m_cam->viewMatrix(),view.m_projection,QRect(0,0,view.width(),view.height()));
+            const QPoint pointer(qRound(projected.x()),qRound(view.height()-projected.y()));
+            if(!check(view.rect().contains(pointer) && projected.z()>=0 && projected.z()<=1,"owner world point projects inside viewport"))return 1;
+            bool picked=false;const QVector3D hit=view.getTerrainBrushPos(pointer.x(),pointer.y(),&picked,true);
+            log<<"OWNER PICK requested="<<world.x()<<','<<world.y()<<','<<world.z()<<" actual="<<hit.x()<<','<<hit.y()<<','<<hit.z()<<'\n';
+            if(!check(picked && (hit-world).length()<1,"owner mouse ray hits requested terrain point"))return 1;
+            const auto captureViewport=[&](){
+                view.makeCurrent();
+                QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+                QOpenGLFramebufferObject target(view.size(),format);
+                if(!target.isValid() || !target.bind())return QImage();
+                auto* gl=QOpenGLContext::currentContext()->functions();
+                gl->glViewport(0,0,view.width(),view.height());gl->glEnable(GL_DEPTH_TEST);gl->glDepthMask(GL_TRUE);
+                gl->glClearColor(0,0,0,1);gl->glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+                const QMatrix4x4 previousProjection=view.m_projection;
+                view.m_projection.setToIdentity();view.m_projection.ortho(-9,9,-7,7,1,100);
+                view.m_minimapCaptureActive=true;view.m_minimapCaptureUnlitPass=true;
+                view.m_minimapCaptureCameraPosition=world+QVector3D(0,0,50);
+                view.m_minimapCaptureView.setToIdentity();
+                view.m_minimapCaptureView.lookAt(view.m_minimapCaptureCameraPosition,world,QVector3D(0,1,0));
+                const bool previousWater=view.m_bDrawWater;view.m_bDrawWater=false;
+                view.draw();const QImage frame=target.toImage();
+                log<<"OWNER GL landProgram="<<view.m_landProgram.isLinked()<<" error="<<gl->glGetError()<<'\n';
+                view.m_bDrawWater=previousWater;view.m_projection=previousProjection;
+                view.m_minimapCaptureActive=false;view.m_minimapCaptureUnlitPass=false;
+                target.release();return frame;
+            };
+            const auto frameBefore=captureViewport();frameBefore.save(output+"/owner-paint-before.png");
+            const QRect pixelRegion(qMax(0,qRound(hit.x()/2)-4),qMax(0,qRound(hit.y()/2)-4),9,9);
+            preview(view.m_terrainEdit,view.m_workingTerrainAtlas->activeTileImages(),pixelRegion).save(output+"/owner-pixels-before.png");
+            const auto baseline=snapshot(view.m_terrainEdit);
+            const int undoBefore=history.count();
+            for(auto type:{QEvent::MouseMove,QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
+                QMouseEvent event(type,pointer,type==QEvent::MouseMove?Qt::NoButton:Qt::LeftButton,
+                    type==QEvent::MouseButtonPress?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(&view,&event);
+                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+            const auto painted=snapshot(view.m_terrainEdit);
+            const auto frameAfter=captureViewport();frameAfter.save(output+"/owner-paint-after.png");
+            preview(view.m_terrainEdit,view.m_workingTerrainAtlas->activeTileImages(),pixelRegion).save(output+"/owner-pixels-after.png");
+            check(!frameBefore.isNull() && !frameAfter.isNull() && frameBefore!=frameAfter,
+                  "owner native offscreen viewport presents changed terrain pixels");
+            check(painted!=baseline,"owner mouse route changes Yellow lichen terrain");
+            check(history.count()==undoBefore+1,"owner mouse stroke is one undo transaction");
+            history.undo();check(snapshot(view.m_terrainEdit)==baseline,"owner mouse stroke Undo exact");
+            history.redo();check(snapshot(view.m_terrainEdit)==painted,"owner mouse stroke Redo exact");
+            for(auto type:{QEvent::MouseMove,QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
+                QMouseEvent event(type,pointer,type==QEvent::MouseMove?Qt::NoButton:Qt::LeftButton,
+                    type==QEvent::MouseButtonPress?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(&view,&event);
+                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+            check(view.m_tileStrokeRefused==0,"owner repeated mouse stroke does not refuse a nonresident mixed tuple");
+            const auto dragBefore=snapshot(view.m_terrainEdit);const int dragUndoBefore=history.count();
+            const QPoint dragEnd=pointer+QPoint(25,0);
+            for(int step=0;step<4;++step) {
+                const auto type=step==0?QEvent::MouseMove:step==1?QEvent::MouseButtonPress:step==2?QEvent::MouseMove:QEvent::MouseButtonRelease;
+                const QPoint position=step<2?pointer:dragEnd;
+                QMouseEvent event(type,position,(step==1||step==3)?Qt::LeftButton:Qt::NoButton,
+                    (step==1||step==2)?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(&view,&event);QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+            const auto dragged=snapshot(view.m_terrainEdit);
+            check(view.m_tileStrokeRefused==0 && dragged!=dragBefore && history.count()==dragUndoBefore+1,
+                  "owner mouse drag aggregates stamps in one exact transaction");
+            history.undo();check(snapshot(view.m_terrainEdit)==dragBefore,"owner mouse drag Undo exact");
+            history.redo();check(snapshot(view.m_terrainEdit)==dragged,"owner mouse drag Redo exact");
+            panel.resize(760,1400);
+            QElapsedTimer panelLayout;panelLayout.start();
+            while(panelLayout.elapsed()<300) {QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);}
+            if(auto* chips=panel.findChild<QGridLayout*>("terrainPaintChipGrid")) {
+                int row=0,column=0,rowSpan=0,columnSpan=0;chips->getItemPosition(1,&row,&column,&rowSpan,&columnSpan);
+                check(column==1,"readable owner-width panel keeps two option columns");
+            }
+            panel.grab().save(output+"/owner-panel.png");
+            panel.activateMode(ELandscapeEditMode::Sculpt,true);QApplication::processEvents();
+            panel.grab().save(output+"/owner-relief-panel.png");
+            panel.activateMode(ELandscapeEditMode::TilePaint,true);QApplication::processEvents();
+            view.updateGL();view.grabFrameBuffer().save(output+"/owner-paint.png");
+            if(fixture.value("ownerSaveRegression").toBool()) {
+                if(!check(root.contains("/build-tests-154-owner-save/fixture"),"ordinary Save writes only the owned private fixture"))return 1;
+                QVector<qint32> expectedField,originalField;
+                check(view.m_terrainEdit.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&expectedField,&originalField),
+                      "mouse stroke owns a complete semantic field before Save");
+                const auto mapBefore=QCryptographicHash::hash(read(map),QCryptographicHash::Sha256);
+                QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){
+                    if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");
+                });
+                QTimer refuseUnexpectedDialog;
+                QObject::connect(&refuseUnexpectedDialog,&QTimer::timeout,[&](){
+                    for(auto* widget:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(widget)) {
+                        log<<"Unexpected ordinary Save dialog: "<<box->text()<<'\n';++failed;box->reject();
+                    }
+                });refuseUnexpectedDialog.start(50);
+                QElapsedTimer saveTimer;saveTimer.start();view.saveLand();
+                log<<"TIMING ordinarySaveMs="<<saveTimer.elapsed()<<'\n';
+                if(!check(!view.m_pLand->isDirty()
+                    && QCryptographicHash::hash(read(map),QCryptographicHash::Sha256)!=mapBefore,
+                    "ordinary Save MPR publishes and adopts the copied pair"))return 1;
+                const auto savedSectors=snapshot(view.m_terrainEdit);
+                view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);view.updateGL();
+                QElapsedTimer reload;reload.start();
+                while(reload.elapsed()<120000 && (view.m_terrainAutoCatalogPending || view.m_terrainAutoCatalogBuilding)) {
+                    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
+                }
+                check(snapshot(view.m_terrainEdit)==savedSectors,"ordinary Save reopen retains exact committed sectors");
+                QVector<qint32> reopenedField,reopenedBaseline;
+                check(view.m_terrainEdit.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&reopenedField,&reopenedBaseline)
+                    && reopenedField==expectedField,"ordinary Save reopen retains exact mouse-painted material identities");
+                refuseUnexpectedDialog.stop();
+            }
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+        }
         if(fixture.value("panelOnly").toBool()) {
             int families=0,available=0;
             for(const auto& choice:view.m_modernLandPaintChoices) {
@@ -274,6 +430,31 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
     profile.normalizeMembership();
     const auto catalog=profile.usableAnalysis(&report).landCatalog;
     check(catalog.size()>0,"reviewed catalog");
+    {
+        CTerrainEditModel selfPaint=model;CValidationReport selfReport;
+        QVector<qint32> field(17*17,1);field[9*17+9]=3;
+        check(selfPaint.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,field,&selfReport),
+              "self-paint baseline with a nonresident neighbouring tuple");
+        STerrainTileBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=0;
+        const auto command=selfPaint.makeVirtualMaterialPaint(8,8,brush,ETerrainTileLayer::Land,1,catalog,0,&selfReport,false);
+        bool mixedPreserved=true;
+        for(const auto& delta:command.deltas)if(delta.globalX==8 && delta.globalY==8)mixedPreserved=false;
+        check(!selfReport.hasErrors() && command.virtualVertices.isEmpty() && mixedPreserved,
+              "self-paint keeps nonresident mixed artwork without false uniform-source refusal");
+        if(selfReport.hasErrors())log<<selfReport.toText();
+        QImage budgetImage(32,32,QImage::Format_RGB32);budgetImage.fill(Qt::gray);
+        QVector<QImage> images(64,budgetImage);
+        CTerrainWorkingAtlas budgetAtlas(catalog,images,0,128,{}, {},document.mapInfo().tileTypes,{{1,1},{2,2},{3,3}});
+        CValidationReport budgetReport;
+        const auto refused=CTerrainMixedEdge::resolve(selfPaint,&budgetAtlas,{8*16+8},{{1,1},{2,2},{3,3}},
+            {},QPoint(),999,0,false,&budgetReport,63);
+        bool bankUnavailable=false;
+        for(const auto& finding:budgetReport.findings())bankUnavailable|=finding.code=="terrain.mixed_edge.bank_unavailable";
+        check(budgetAtlas.isValid() && budgetAtlas.activeTileCount()>63
+              && refused.isEmpty() && budgetReport.hasErrors() && !bankUnavailable
+              && budgetReport.toText().contains("atlas budget exceeded"),
+              "Mixed-edge budget refusal cannot be classified as missing stock for exact fallback");
+    }
     STerrainAtlasProfile loaded;
     check(STerrainAtlasProfile::fromBytes(profile.toBytes(),&loaded,&report)
         && loaded.families[0].randomRotationAllowed && !loaded.families[1].randomRotationAllowed

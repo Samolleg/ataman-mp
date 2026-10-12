@@ -101,8 +101,11 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     command.semanticAudit.layer=ETerrainTileLayer::Land;
     command.semanticAudit.valid=true;
     command.semanticAudit.solverMode=QStringLiteral("mixed-edge-b2");
-    auto refuse=[&](const QString& reason) {
-        if(report) report->add("terrain.mixed_edge.refused", EValidationSeverity::Error, reason);
+    auto refuse=[&](const QString& reason,bool bankUnavailable=false) {
+        if(report) {
+            report->add("terrain.mixed_edge.refused", EValidationSeverity::Error, reason);
+            if(bankUnavailable)report->add("terrain.mixed_edge.bank_unavailable",EValidationSeverity::Error,reason);
+        }
         return STerrainTileCommand();
     };
     CTerrainVirtualMaterialField field;
@@ -110,11 +113,11 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
        || !model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false))
         return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge requires a complete Ground material field and a valid working atlas."));
 
-    if(paintedMaterial>0 && !materialTypes.contains(paintedMaterial))
-        return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source or reviewed runtime class for material %1 in this map's atlas/profile.").arg(paintedMaterial));
-
     if(atlas->activeTileCount()>slotLimit)
         return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge atlas budget exceeded: %1 / %2 slots. No material was substituted; extended 8192 is not enabled.").arg(atlas->activeTileCount()).arg(slotLimit));
+
+    if(paintedMaterial>0 && !materialTypes.contains(paintedMaterial))
+        return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source or reviewed runtime class for material %1 in this map's atlas/profile.").arg(paintedMaterial),true);
 
     // Migrate generated neighbors across homogeneous shared edges too: their
     // v1 cropped-texture anchor changes in v2. Authored stock on those edges
@@ -229,9 +232,9 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     for(qint32 id:required)
     {
         if(uniforms.value(id).isEmpty())
-            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source for material %1 in this map's atlas/profile.").arg(id));
+            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no opaque non-animated uniform source for material %1 in this map's atlas/profile.").arg(id),true);
         if(materialTypes.value(id,-1)<0 || materialTypes.value(id,-1)>15)
-            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no reviewed runtime class for material %1 in this map's atlas/profile.").arg(id));
+            return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge has no reviewed runtime class for material %1 in this map's atlas/profile.").arg(id),true);
         STerrainRecipeMaterial material;
         material.materialId=id; material.runtimeTerrainType=materialTypes[id];
         QMap<int,int> weights;
@@ -249,7 +252,7 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             sourceClass=atlas->runtimeTerrainTypeForSlot(slot);break;
         }
         if(sourceClass<0||sourceClass>15)
-            return refuse(QStringLiteral("Mixed-edge has no reviewed physical uniform class for material %1.").arg(id));
+            return refuse(QStringLiteral("Mixed-edge has no reviewed physical uniform class for material %1.").arg(id),true);
         // Four recipe labels draw weighted artwork from the entire eligible
         // physical bank. Rotations never multiply its weight. The first tile
         // is solely a common border anchor, not the material's body selection.
@@ -259,7 +262,7 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             material.uniformWeights.append(weights[slot]);
         }
         if(material.uniformTiles.isEmpty())
-            return refuse(QStringLiteral("Mixed-edge has no selectable uniform variant for material %1.").arg(id));
+            return refuse(QStringLiteral("Mixed-edge has no selectable uniform variant for material %1.").arg(id),true);
         if(report) report->add("terrain.mixed_edge.variants",EValidationSeverity::Info,
             QStringLiteral("Material %1: %2 eligible physical variants, source class %3, reviewed cell class %4; four recipe labels, map seed %5.")
                 .arg(id).arg(material.uniformTiles.size()).arg(sourceClass).arg(material.runtimeTerrainType)
@@ -368,7 +371,10 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
 {
     if(!output)return false;
     auto refuseBrush=[&](const QString& message) {
-        if(report)report->add("terrain.mixed_edge.refused",EValidationSeverity::Error,message);
+        if(report) {
+            report->add("terrain.mixed_edge.refused",EValidationSeverity::Error,message);
+            report->add("terrain.mixed_edge.bank_unavailable",EValidationSeverity::Error,message);
+        }
         return false;
     };
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;

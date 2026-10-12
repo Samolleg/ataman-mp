@@ -20571,16 +20571,62 @@ void CView::endTileBrushGroup()
             if(!resolveMixedEdgeTerrain(&m_tileStrokeCommand,&mixedReport))
             {
                 applyTerrainTilePreview(m_tileStrokeCommand,false);
-                if(m_mixedEdgeStrokeAtlasBefore)
+                bool missingReviewedBank=false;
+                for(const auto& finding:mixedReport.findings())
+                    if(finding.code==QStringLiteral("terrain.mixed_edge.bank_unavailable"))
+                        missingReviewedBank=true;
+                bool exactFallback=false;
+                if(missingReviewedBank)
                 {
-                    STerrainTileCommand restore;
-                    restore.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
-                    restore.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
-                    applyTerrainTilePreview(restore,false);
+                    // Mixed-edge needs a complete local stock ownership bank,
+                    // whereas the palette offers reviewed global materials.
+                    // Use the existing exact Modern builder for this footprint
+                    // when the special stock path is unavailable. It still
+                    // requires honest sources and preserves the atomic stroke.
+                    CValidationReport exactReport;
+                    STerrainTileCommand exactCommand=m_tileStrokeCommand;
+                    bool publicationPending=false;
+                    bool exactApplied=false;
+                    const bool exactPrepared=prepareExactModernTerrainStamp(&exactCommand,
+                        m_tileStrokeMaterialId,&exactReport,&publicationPending);
+                    if(exactPrepared && m_workingTerrainAtlas->activeTileCount()>4096)
+                        exactReport.add("terrain.mixed_edge.budget",EValidationSeverity::Error,
+                            tr("Mixed-edge remains limited to 4096 atlas slots; the exact fallback was not applied."));
+                    exactFallback=exactPrepared && !exactReport.hasErrors()
+                        && (exactApplied=applyTerrainTilePreview(exactCommand,true));
+                    if(exactFallback && publicationPending)
+                        exactFallback=syncWorkingTerrainAtlas(&exactReport,nullptr,true);
+                    if(exactFallback)
+                    {
+                        exactCommand.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
+                        exactCommand.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
+                        exactCommand.semanticAudit.solverMode=QStringLiteral("mixed-edge-exact-fallback");
+                        m_tileStrokeCommand=exactCommand;
+                        emit updateMsg(tr("Для этих материалов нет пригодного банка Mixed-edge. Мазок выполнен точными переходами Modern из подтверждённых текстур."));
+                        ei::log(eLogWarning,QStringLiteral("Mixed-edge used exact Modern for this stroke:\n")+mixedReport.toText());
+                    }
+                    else
+                    {
+                        // A failed upload may have applied the document first.
+                        // Roll it back before restoring the original atlas.
+                        if(exactApplied)applyTerrainTilePreview(exactCommand,false);
+                        mixedReport.add("terrain.mixed_edge.exact_fallback",EValidationSeverity::Error,
+                            exactReport.toText());
+                    }
                 }
-                m_tileStrokeCommand=STerrainTileCommand();
-                ++m_tileStrokeRefused;
-                emit updateMsg(tr("Terrain stroke refused without substituting material identities:\n%1").arg(mixedReport.toText()));
+                if(!exactFallback)
+                {
+                    if(m_mixedEdgeStrokeAtlasBefore)
+                    {
+                        STerrainTileCommand restore;
+                        restore.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
+                        restore.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
+                        applyTerrainTilePreview(restore,false);
+                    }
+                    m_tileStrokeCommand=STerrainTileCommand();
+                    ++m_tileStrokeRefused;
+                    emit updateMsg(tr("Terrain stroke refused without substituting material identities:\n%1").arg(mixedReport.toText()));
+                }
             }
         }
         else if(m_tileStrokeAutoResolveBlends
@@ -20832,7 +20878,9 @@ void CView::endTileBrushGroup()
             .arg(m_tileStrokeNoOps).arg(m_tileStrokeRefused)
             .arg(m_tileStrokeUndoCheckpointed
                 ? tr(" Preview cache checkpointed; earlier undo history was cleared.")
-                : QString()).arg(safeDetail));
+                : QString()).arg(safeDetail
+                    +(m_tileStrokeCommand.semanticAudit.solverMode==QStringLiteral("mixed-edge-exact-fallback")
+                        ? tr(" Нет банка Mixed-edge; использованы точные переходы Modern.") : QString())));
         const QString paletteLabel = m_tileStrokePaletteMode
                 == int(ETerrainPaintPaletteMode::Modern)
             ? QStringLiteral("modern")
