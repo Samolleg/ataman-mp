@@ -3657,19 +3657,20 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             mergedBlocks.back().end = qMax(
                 mergedBlocks.back().end, block.end);
     }
-    // A native animation page cannot share a texture with larger HD tiles.
-    // Retain its physical slots together so the original compressed mip chain
-    // can be published verbatim, including the unused part of that page.
+    // Keep supplied native animation pages verbatim, at every resolution.
+    // Recompressing even a 256px frame changes its BC1 pixels/mips on each
+    // ordinary Save. A smaller native page also cannot share larger HD tiles.
     QMap<int, int> nativeAnimationPages;
     QSet<int> retainedAnimationSourcePages;
     for(const SAnimationSourceBlock& block : mergedBlocks)
     {
         const int sourcePage = block.start / kTerrainAtlasSlotsPerPage;
-        if(m_authoredTiles.at(block.start).size() == m_generationSize
+        if((m_authoredTiles.at(block.start).size() == m_generationSize
+            && sourcePage >= authoredPagePayloads.size())
            || retainedAnimationSourcePages.contains(sourcePage))
             continue;
         const int first = sourcePage * kTerrainAtlasSlotsPerPage;
-        if(first + kTerrainAtlasSlotsPerPage > liveSourceSlotCount)
+        if(first + kTerrainAtlasSlotsPerPage > m_authoredTiles.size())
         {
             result.error = QStringLiteral("A native animation page is incomplete in the working atlas.");
             return result;
@@ -3683,7 +3684,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             for(int y = 0; y < pixels.height() && transparent; ++y)
                 for(int x = 0; x < pixels.width(); ++x)
                     if(qAlpha(pixels.pixel(x,y)) != 0) { transparent = false; break; }
-            if(transparent)
+            if(transparent || slot >= liveSourceSlotCount)
             {
                 // Unassigned HD padding is physical storage, not a selectable
                 // material. Do not give it a remap or forged semantic identity.

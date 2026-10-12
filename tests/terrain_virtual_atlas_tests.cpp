@@ -8328,11 +8328,12 @@ void TerrainVirtualAtlasTests::mixedNativeSizesRenderGenerateAndPublish()
 
 void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
 {
+    for(const int nativeSize : {128,256}) {
     Fixture fixture;
     QVector<QImage> images;
     CTerrainTransitionCatalog catalog=fixture.catalog;
     for(int slot=0;slot<128;++slot) {
-        images.append(fixture.images.at(slot%4).scaled(slot<64?128:256,slot<64?128:256));
+        images.append(fixture.images.at(slot%4).scaled(slot<64?nativeSize:256,slot<64?nativeSize:256));
         STerrainTransitionVariant variant;
         variant.signature=signature(slot%4+1,slot%4+1,slot%4+1,slot%4+1);
         SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
@@ -8342,7 +8343,7 @@ void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
     QVector<QByteArray> pages;
     for(int slot=32;slot<64;++slot)images[slot].fill(Qt::transparent);
     for(int page=0;page<2;++page)
-        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?128:256),true));
+        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?nativeSize:256),true));
     for(int slot=0;slot<128;++slot)
         QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
     QVector<qint32> types(128,1);
@@ -8351,12 +8352,13 @@ void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
     CValidationReport report;STerrainAtlasAnimationRange animation;animation.tileIndex=0;animation.frameCount=32;
     const auto result=atlas.finalize(field,"native-animation",192,types,&report,{}, {}, {}, {},nullptr,{}, {animation},pages);
     QVERIFY2(result.success,qPrintable(result.error+report.toText()));
-    QCOMPARE(result.pages.front().size(),QSize(1024,1024));
+    QCOMPARE(result.pages.front().size(),QSize(nativeSize*8,nativeSize*8));
     QCOMPARE(result.pageMmpPayloads.front(),pages.front());
     QCOMPARE(result.animations.front().tileIndex,quint16(0));
     QCOMPARE(result.animations.front().frameCount,quint16(32));
     for(int slot=0;slot<32;++slot)QCOMPARE(result.authoredSlotRemap.value(slot,-1),slot);
     for(int slot=32;slot<64;++slot)QVERIFY(!result.authoredSlotRemap.contains(slot));
+    }
 }
 
 void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()

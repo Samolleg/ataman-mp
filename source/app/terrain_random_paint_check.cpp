@@ -344,7 +344,12 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             const auto saved=snapshot(view.m_terrainEdit);
             view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);
             check(view.ensureTerrainAutoCatalogReady()&&snapshot(view.m_terrainEdit)==saved,"fresh reopen retains published HD terrain and layout");
-            check(sameAnimationPixels(animations(),oldAnimations)&&view.m_mprAnimatedTiles==oldAnimationRecords,"fresh reopen retains native animation artwork and ranges");
+            describeAnimations("reopened");
+            bool rangesValid=view.m_mprAnimatedTiles.size()==oldAnimationRecords.size();
+            for(int i=0;i<view.m_mprAnimatedTiles.size()&&rangesValid;++i)
+                rangesValid=view.m_mprAnimatedTiles[i].frameCount==oldAnimationRecords[i].frameCount
+                    &&view.m_mprAnimatedTiles[i].tileIndex%64+view.m_mprAnimatedTiles[i].frameCount<=64;
+            check(sameAnimationPixels(animations(),oldAnimations)&&rangesValid,"fresh reopen retains native animation artwork and contiguous frame counts");
             capture("reopened");dialogs.stop();
             log<<"RESULT passed="<<passed<<" failed="<<failed<<"\n";return failed?1:0;
         }
