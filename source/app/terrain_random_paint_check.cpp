@@ -355,7 +355,12 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     const QPoint pos=start+(step>1&&drag?QPoint((step==2?60:120),0):QPoint());
                     QMouseEvent event(type,pos,(type==QEvent::MouseMove)?Qt::NoButton:Qt::LeftButton,
                         (step>=1 && type!=QEvent::MouseButtonRelease)?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
-                    QApplication::sendEvent(&view,&event);settle();
+                    QElapsedTimer eventTimer;eventTimer.start();
+                    QApplication::sendEvent(&view,&event);
+                    const auto eventUs=eventTimer.nsecsElapsed()/1000;
+                    settle();
+                    log<<"TIMING paint="<<name<<" step="<<step<<" eventUs="<<eventUs
+                       <<" includingQueuedUs="<<eventTimer.nsecsElapsed()/1000<<'\n';
                     const auto currentStamp=snapshot(view.m_terrainEdit);
                     if(step>=1 && type!=QEvent::MouseButtonRelease && currentStamp!=previousStamp)++changedCenters;
                     previousStamp=currentStamp;
@@ -401,6 +406,24 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 click("landscapePaintSegment");click("terrainLayerSegment_0");
                 click("circlePaintShape");click("vertexPaintTarget");
                 radius->setValue(fixture.value("ownerBrushSize").toInt(4));
+                if(fixture.value("performanceCamera").toBool()) {
+                    aim(QVector3D(55,40,0));
+                    QVector<qint64> frames;
+                    const QPoint center=view.rect().center();
+                    for(int frame=0;frame<40;++frame) {
+                        QElapsedTimer elapsed;elapsed.start();
+                        QMouseEvent move(QEvent::MouseMove,center+QPoint(frame%20,frame/20),
+                                         Qt::NoButton,Qt::MiddleButton,Qt::NoModifier);
+                        QApplication::sendEvent(&view,&move);
+                        view.updateGL();view.makeCurrent();
+                        QOpenGLContext::currentContext()->functions()->glFinish();
+                        frames.append(elapsed.nsecsElapsed()/1000);
+                        settle();
+                    }
+                    std::sort(frames.begin(),frames.end());
+                    log<<"TIMING cameraFrames=40 medianUs="<<frames[20]
+                       <<" p95Us="<<frames[37]<<" maxUs="<<frames.last()<<'\n';
+                }
                 QStringList materials={"Ground / Common","Yellow lichen","Grass / Burnt"};
                 if(fixture.contains("releaseMaterials")){materials.clear();for(const auto& v:fixture["releaseMaterials"].toArray())materials.append(v.toString());}
                 QVector<QPoint> points={QPoint(45,33),QPoint(73,50),QPoint(90,70)};

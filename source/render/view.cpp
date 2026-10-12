@@ -13239,7 +13239,10 @@ bool CView::prepareExactModernTerrainStamp(
 
 void CView::refreshClassicAutoPalette()
 {
-    if(!m_landscapeTools)
+    // The current panel exposes Modern and Manual only. Do not derive an
+    // invisible Classic bank (and rebuild the visible grids as a side effect)
+    // on every stroke and every asynchronous thumbnail delivery.
+    if(!m_landscapeTools || !m_landscapeTools->classicAutoPaintingEnabled())
         return;
     QMap<qint32, QString> materialNames;
     for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
@@ -14196,9 +14199,11 @@ bool CView::adoptCompleteTerrainBaseline(
     m_pTileForm->setAnimTile(m_pLand->animTiles());
     CTextureList::getInstance()->setMapLocalTerrainArchive(terrainArchivePath);
     m_activeTerrainArchivePath = terrainArchivePath;
-    m_prevalidatedTerrainEmbeddedBinding =
-        STerrainAtlasEmbeddedBindingResult();
-    m_prevalidatedTerrainTilesAdopted = false;
+    // This binding was freshly reopened and checked against these exact
+    // pixels above. Consume it once during the immediately following catalog
+    // rebuild instead of decoding and hashing the same atlas again.
+    m_prevalidatedTerrainEmbeddedBinding = binding;
+    m_prevalidatedTerrainTilesAdopted = true;
     m_mprDocument = reopenedDocument;
     m_terrainEdit = reopenedTerrain;
     // Publication may compact animation frames into different atlas slots.
@@ -15887,11 +15892,28 @@ void CView::finalizeVirtualTerrainAtlas()
     };
     QFuture<SStagedResResult> stageResFuture = QtConcurrent::run(
         [sourceArchive, pages, replaceIdentity, publishProgressGuard,
+         buildForCohort = m_mapCohortActive,
+         profileBytes = embeddedProfileMember.payload,
          profileMemberName = embeddedProfileMember.name,
          mprNamespace = portableProfile.mprNamespace,
          pixelHash = portableProfile.atlasPixelSha256,
          slotCount = portableProfile.atlasSlotCount]() {
             SStagedResResult result;
+            // The normal coordinator builds, reopens and verifies the complete
+            // RES before committing it. Only a multi-file cohort needs its own
+            // candidate here. Validate the exact profile payload that the
+            // coordinator will verify on disk, without rebuilding the RES twice.
+            if(!buildForCohort)
+            {
+                STerrainAtlasProfile profile;
+                CValidationReport profileReport;
+                result.valid = STerrainAtlasProfile::fromBytes(
+                    profileBytes, &profile, &profileReport, profileMemberName)
+                    && profile.validateBinding(mprNamespace, pixelHash,
+                                               slotCount, &profileReport);
+                result.profileError = profileReport.toText().trimmed();
+                return result;
+            }
             sourceArchive.buildWithPublishedMembers(
                 pages, replaceIdentity, &result.bytes, &result.errors,
                 [publishProgressGuard](int value) {
@@ -15943,7 +15965,7 @@ void CView::finalizeVirtualTerrainAtlas()
     const SStagedResResult stagedResResult = stageResFuture.result();
     const QByteArray stagedResBytes = stagedResResult.bytes;
     publishErrors.append(stagedResResult.errors);
-    if(stagedResBytes.isEmpty())
+    if(m_mapCohortActive && stagedResBytes.isEmpty())
     {
         publishProgress.close();
         emit terrainPublicationFinished(texturesPath, false);
@@ -16105,7 +16127,9 @@ void CView::finalizeVirtualTerrainAtlas()
     m_worldTerrainAtlasSources.remove(CWorldTerrainSession::key(mprRequest.source.absoluteFilePath()));
     updateWorldTerrainStatus();
     publishProgress.close();
-    emit terrainPublicationFinished(texturesPath, true);
+    // The new map-local namespace is already adopted above. Other maps keep
+    // their existing members; only the browser index needs to be refreshed.
+    emit terrainPublicationFinished(texturesPath, true, replaceIdentity);
     m_requestedTerrainResourceIdentity.clear();
     m_requestedTerrainIdentityReplacement = false;
     m_requestedTerrainIdentityFinalization = false;

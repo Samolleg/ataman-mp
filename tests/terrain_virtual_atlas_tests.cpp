@@ -548,6 +548,7 @@ private slots:
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
+    void workingIdentityHashTracksImageMutation();
     void worldBankNamespaceSurvivesPixelDeduplication();
     void worldMaterialSourceIsFlattenedDeterministically();
     void deterministicWorldBrushIsStableForMaterialPair();
@@ -1257,6 +1258,24 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
         keptImportedPixels |= tile.authored && tile.sourceSlot < 0
             && tile.pixels == authoredBlend;
     QVERIFY(keptImportedPixels);
+}
+
+void TerrainVirtualAtlasTests::workingIdentityHashTracksImageMutation()
+{
+    Fixture fixture;
+    CTestTerrainWorkingAtlas original(fixture.catalog, fixture.images, 47u, 32);
+    STerrainWorkingTileIdentity before, repeated, changed;
+    QVERIFY(original.tileIdentityForSlot(0, &before));
+    QVERIFY(original.tileIdentityForSlot(0, &repeated));
+    QCOMPARE(before.physicalPixelSha256, repeated.physicalPixelSha256);
+    fixture.images[0].setPixelColor(0, 0, QColor(13, 27, 49, 127));
+    CTestTerrainWorkingAtlas modified(fixture.catalog, fixture.images, 47u, 32);
+    QVERIFY(modified.tileIdentityForSlot(0, &changed));
+    QVERIFY(changed.physicalPixelSha256 != before.physicalPixelSha256);
+    QVERIFY(original.tileIdentityForSlot(0, &repeated));
+    QCOMPARE(before.physicalPixelSha256, repeated.physicalPixelSha256);
+    QVERIFY(modified.tileIdentityForSlot(0, &repeated));
+    QCOMPARE(changed.physicalPixelSha256, repeated.physicalPixelSha256);
 }
 
 void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProvenance()

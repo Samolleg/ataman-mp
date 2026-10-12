@@ -2,6 +2,7 @@
 #include "../core/terrain_atlas_shape_policy.h"
 
 #include <QCryptographicHash>
+#include <QCache>
 #include <QDataStream>
 #include <QRegularExpression>
 #include <QTransform>
@@ -21,6 +22,13 @@
 namespace {
 QByteArray imageHash(const QImage& image)
 {
+    // QImage changes its key on pixel mutation/detachment. Retain only the
+    // small digest, not the image: stroke snapshots share immutable artwork
+    // and previously rehashed hundreds of MB just to inspect tile identities.
+    static thread_local QCache<qint64, QByteArray> hashes(8192);
+    const qint64 key = image.cacheKey();
+    if(const auto* cached = hashes.object(key))
+        return *cached;
     const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
     QCryptographicHash hash(QCryptographicHash::Sha256);
     const qint32 width = rgba.width();
@@ -30,7 +38,9 @@ QByteArray imageHash(const QImage& image)
     for(int y = 0; y < rgba.height(); ++y)
         hash.addData(reinterpret_cast<const char*>(rgba.constScanLine(y)),
                      rgba.bytesPerLine());
-    return hash.result().toHex();
+    const QByteArray result = hash.result().toHex();
+    hashes.insert(key, new QByteArray(result));
+    return result;
 }
 
 QVector<qint32> corners(const STerrainTransitionSignature& signature)

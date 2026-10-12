@@ -494,24 +494,34 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
     const QSize size = terrainAtlasMaximumNativeTileSize(images);
     if(size.isEmpty())
         return false;
+    // Keep unchanged icons and table selection during brush uploads. Replacing
+    // every item also leaked a new set of delegates on each stamp.
+    const QVector<QImage> previousImages = m_tileImages;
     m_tileImages = images;
     m_nTextureAtlas = images.size() / 64;
     m_originalTilesize = size.width();
     m_tileTypes.clear();
     for(qint32 type : tileTypes)
         m_tileTypes.append(ETileType(type));
-    m_icoList.clear();
+    while(m_icoList.size() > images.size()) m_icoList.removeLast();
+    while(m_icoList.size() < images.size()) m_icoList.append(QIcon());
     for(int slot = 0; slot < images.size(); ++slot)
-        m_icoList.append(QIcon());
-    ui->tableTile->clearContents();
+        if(slot >= previousImages.size()
+           || images.at(slot).cacheKey() != previousImages.at(slot).cacheKey())
+        {
+            m_icoList[slot] = QIcon();
+            if(auto* item = ui->tableTile->item(slot / m_nTilePerRow,
+                                               slot % m_nTilePerRow))
+                item->setIcon(QIcon());
+        }
     ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
     ui->tableTile->setColumnCount(m_nTilePerRow);
     for(int column = 0; column < m_nTilePerRow; ++column)
     {
-        ui->tableTile->setItemDelegateForColumn(
-            column, new IconDelegate(ui->tableTile));
-        ui->tableQuick->setItemDelegateForColumn(
-            column, new IconDelegate(ui->tableQuick));
+        if(!dynamic_cast<IconDelegate*>(ui->tableTile->itemDelegateForColumn(column)))
+            ui->tableTile->setItemDelegateForColumn(column, new IconDelegate(ui->tableTile));
+        if(!dynamic_cast<IconDelegate*>(ui->tableQuick->itemDelegateForColumn(column)))
+            ui->tableQuick->setItemDelegateForColumn(column, new IconDelegate(ui->tableQuick));
     }
     for(int& slot : m_arrQuickTile)
         if(slot < 0 || slot >= images.size())

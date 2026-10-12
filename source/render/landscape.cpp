@@ -515,13 +515,28 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     const bool stableLayout = m_previewAtlasTexture
         && m_previewAtlasTexture->isCreated()
         && textureCount == m_previewAtlasTextureCount
-        && columns == m_previewAtlasColumns && !changedSlots.isEmpty();
+        && columns == m_previewAtlasColumns
+        && m_previewAtlasTexture->width() == pageSize * columns
+        && m_previewAtlasTexture->height() == pageSize * rows;
+    QSet<int> changed = changedSlots;
+    if(stableLayout && m_previewAtlasImages.size() == tileImages.size())
+    {
+        // World strokes and baseline adoption also use this entry point.
+        // QImage keys detect modifications without hashing every pixel.
+        // Undo can invalidate every slot even though only a few changed.
+        changed.clear();
+        for(int slot = 0; slot < tileImages.size(); ++slot)
+            if(tileImages.at(slot).cacheKey() != m_previewAtlasImages.at(slot).cacheKey())
+                changed.insert(slot);
+        if(changed.isEmpty())
+            return true;
+    }
     bool installed = false;
-    if(stableLayout)
+    if(stableLayout && !changed.isEmpty())
     {
         installed = previewTerrainAtlasIncremental(
-            tileImages, textureCount, columns, rows, changedSlots,
-            rollbackTileImages);
+            tileImages, textureCount, columns, rows, changed,
+            rollbackTileImages.isEmpty() ? m_previewAtlasImages : rollbackTileImages);
         if(!installed)
             return false;
         route = QStringLiteral("in-place");
@@ -537,6 +552,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
             tileImages, textureCount, columns, rows);
     if(!installed)
         return false;
+    m_previewAtlasImages = tileImages;
     m_renderTextureCount = textureCount;
     m_renderAtlasColumns = columns;
     if(textureCount != m_previewAtlasTextureCount
@@ -550,13 +566,14 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     }
     ei::log(eLogInfo, QString(
         "Working terrain atlas uploaded: route:%1 changedSlots:%2 slots:%3 pages:%4 grid:%5x%6 elapsedMs:%7")
-        .arg(route).arg(changedSlots.size()).arg(tileImages.size())
+        .arg(route).arg(changed.size()).arg(tileImages.size())
         .arg(textureCount).arg(columns).arg(rows).arg(uploadTimer.elapsed()));
     return true;
 }
 
 void CLandscape::clearPreviewTerrainAtlas()
 {
+    m_previewAtlasImages.clear();
     m_texture = m_baseAtlasTexture;
     m_renderTextureCount = qMax(1, int(m_header.nTexture));
     m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);

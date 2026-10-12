@@ -1,6 +1,7 @@
 #include "terrain_mixed_edge.h"
 #include "endurance_document.h"
 #include <QCryptographicHash>
+#include <QCache>
 #include <QCoreApplication>
 #include <algorithm>
 #include <cmath>
@@ -14,8 +15,14 @@ bool uniform(const STerrainTransitionSignature& s)
 bool opaque(const QImage& image)
 {
     if(image.isNull() || image.width()!=image.height()) return false;
+    static thread_local QCache<qint64, bool> opacity(8192);
+    const qint64 key = image.cacheKey();
+    if(const auto* cached = opacity.object(key)) return *cached;
     for(int y=0;y<image.height();++y) for(int x=0;x<image.width();++x)
-        if(qAlpha(image.pixel(x,y))!=255) return false;
+        if(qAlpha(image.pixel(x,y))!=255) {
+            opacity.insert(key,new bool(false)); return false;
+        }
+    opacity.insert(key,new bool(true));
     return true;
 }
 QSet<int> expandMixedCells(const CTerrainEditModel& model,

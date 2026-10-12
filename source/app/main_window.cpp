@@ -1706,11 +1706,12 @@ MainWindow::MainWindow(QWidget* parent) :
             m_resourceBrowser->beginInternalPublication(resourceArchivePath);
     });
     connect(m_pView, &CView::terrainPublicationFinished,
-            this, [this](const QString& resourceArchivePath, bool committed)
+            this, [this](const QString& resourceArchivePath, bool committed,
+                         bool refreshVisualResources)
     {
         if(m_resourceBrowser)
             m_resourceBrowser->finishInternalPublication(
-                resourceArchivePath, committed);
+                resourceArchivePath, committed, refreshVisualResources);
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
