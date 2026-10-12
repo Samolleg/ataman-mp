@@ -8,7 +8,7 @@
 class CTerrainWorkingAtlas;
 class CValidationReport;
 namespace TerrainHdVariantBank {
-struct Config { QStringList archives, maps; QString cacheRoot; };
+struct Config { QStringList archives, maps; QString cacheRoot, mapWitnessFile; };
 struct Entry { QString material,layer,id;int reviewedClass{-1},physicalClass{-1},slot{-1};QImage pixels;QVector<QByteArray> blocks;QJsonObject metadata; };
 struct Bank {
     QString directory,error;
@@ -22,6 +22,7 @@ QString defaultRoot();
 Config configured(const QStringList& resources);
 Bank generate(const Config& config,CTerrainHdProgress* progress=nullptr);
 Bank load(const QString& root,QString* error=nullptr);
+bool migrateLegacy(const QStringList& localArchives,QString* error=nullptr);
 QSharedPointer<const Bank> available();
 void forget();
 QSet<QString> rejects();

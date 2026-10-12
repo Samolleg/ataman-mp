@@ -2,6 +2,7 @@
 #include "landscape_tools.h"
 #include "resourcemanager.h"
 #include "terrain_hd_variant_bank.h"
+#include "terrain_hd_library.h"
 #include "terrain_hd_progress_dialog.h"
 #include "mmp_codec.h"
 #include "resource_name.h"
@@ -12,10 +13,19 @@
 
 void CView::generateTerrainHdVariants()
 {
-    auto config=TerrainHdVariantBank::configured(CTextureList::getInstance()->configuredResourceArchivePaths());
+    const auto resources=CTextureList::getInstance()->configuredResourceArchivePaths();
+    auto config=TerrainHdVariantBank::configured(resources);
+    const auto sources=TerrainHdLibrary::configuredSources(resources);
     CTerrainHdProgress state;CTerrainHdProgressDialog dialog(state,this,true);
     dialog.setWindowTitle(tr("HD-варианты материалов"));dialog.show();
-    auto future=QtConcurrent::run([config,&state](){return TerrainHdVariantBank::generate(config,&state);});
+    auto future=QtConcurrent::run([config,sources,&state]() mutable {
+        QString error;QStringList local;
+        if(!TerrainHdLibrary::ensure(sources,&local,&error,&state)) {
+            TerrainHdVariantBank::Bank failed;failed.error=error;failed.cancelled=state.cancelled();return failed;
+        }
+        config.archives=local;
+        return TerrainHdVariantBank::generate(config,&state);
+    });
     QFutureWatcher<TerrainHdVariantBank::Bank> watcher;QEventLoop loop;
     connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);watcher.setFuture(future);
     if(!future.isFinished())loop.exec();auto bank=future.result();dialog.accept();

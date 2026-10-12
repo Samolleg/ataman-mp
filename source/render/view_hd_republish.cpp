@@ -3,6 +3,8 @@
 #include "settings.h"
 #include "log.h"
 #include "terrain_hd_republish.h"
+#include "terrain_hd_library.h"
+#include "terrain_hd_variant_bank.h"
 #include "terrain_semantic_field_store.h"
 #include "res_save_coordinator.h"
 #include "staged_save_validator.h"
@@ -61,9 +63,7 @@ void CView::republishTerrainAtlasHd()
     });
     CTerrainHdProgressDialog progress(state,this);progress.show();
     const STerrainAtlasProfile profile=m_terrainAtlasProfile;
-    QStringList sourcePaths{archivePath};
-    for(const auto& configured:CTextureList::getInstance()->configuredResourceArchivePaths())
-        if(terrainPublicationIsHDPackArchive(configured))sourcePaths.append(configured);
+    QStringList sourcePaths=TerrainHdLibrary::configuredSources(CTextureList::getInstance()->configuredResourceArchivePaths());
     sourcePaths.append(authoredSources);sourcePaths.removeDuplicates();
     const QDir modDirectory=QFileInfo(archivePath).dir().filePath("..");
     if(QFileInfo(modDirectory.absolutePath()).fileName().compare(QStringLiteral("Dejavu"),Qt::CaseInsensitive)==0) {
@@ -83,7 +83,13 @@ void CView::republishTerrainAtlasHd()
     auto future=QtConcurrent::run([archivePath,sourcePaths,profile,map,mapPath,mapRoots,sources,authoredPages,&state]() {
         Prepared prepared;auto& result=prepared.result;QString error;
         auto cancelled=[&]() {if(!state.cancelled())return false;result.success=false;result.cancelled=true;result.error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true;};
-        if(!sources->open(sourcePaths,&error,&state)){result.error=error;cancelled();return prepared;}
+        QStringList localSources;
+        if(!TerrainHdLibrary::ensure(sourcePaths,&localSources,&error,&state)
+           ||!sources->open(localSources,&error,&state,QDir(TerrainHdLibrary::root()).filePath("index"))){result.error=error;cancelled();return prepared;}
+        // Donor indexing is reusable even when this particular map cannot be
+        // converted. Publishing the game's output archive never invalidates it.
+        if(!sources->saveCache()){result.error=QStringLiteral("Не удалось сохранить индекс HD-библиотеки.");cancelled();return prepared;}
+        if(!TerrainHdVariantBank::migrateLegacy(localSources,&error)){result.error=error;return prepared;}
         CResArchiveIndex archive;if(!archive.open(archivePath,&error)){result.error=error;return prepared;}
         STerrainAtlasProfile savedProfile;
         const auto embeddedProfile=archive.readMember(CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace));

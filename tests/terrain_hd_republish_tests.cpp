@@ -5,6 +5,7 @@
 #include <QDataStream>
 #include <QTransform>
 #include "terrain_hd_republish.h"
+#include "terrain_hd_library.h"
 #include "terrain_virtual_atlas.h"
 #include "mmp_codec.h"
 #include "mpr_document.h"
@@ -63,6 +64,26 @@ class TerrainHdRepublishTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void localLibrarySurvivesGameChangesAndCancellation()
+    {
+        ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
+        const auto hd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(QVector<QImage>(64,pattern(0)),0,256),true,nullptr);
+        QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument archive;QVERIFY(archive.loadBytes(empty));SResArchiveNewMember terrain,unrelated;
+        terrain.name="stock000.mmp";terrain.payload=hd;unrelated.name="unrelated-model.bin";unrelated.payload="not terrain";QByteArray bytes;
+        QVERIFY(archive.buildWithAppendedMembers({terrain,unrelated},&bytes));
+        const QString game=dir.filePath("game.res"),library=dir.filePath("hd-library");QFile file(game);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write(bytes),qint64(bytes.size()));file.close();
+        QStringList local;QString error;CTerrainHdProgress cancelled;cancelled.cancel();
+        QVERIFY(!TerrainHdLibrary::ensure({game},&local,&error,&cancelled,library));QVERIFY(!QFileInfo::exists(library+"/sources"));
+        QVERIFY2(TerrainHdLibrary::ensure({game},&local,&error,nullptr,library),qPrintable(error));QCOMPARE(local.size(),1);
+        CResArchiveIndex imported;QVERIFY(imported.open(local.first()));QCOMPARE(imported.readMember(terrain.name),hd);QVERIFY(imported.readMember(unrelated.name).isEmpty());
+        CTerrainHdSources first;QVERIFY2(first.open(local,&error,nullptr,library+"/index"),qPrintable(error));QVERIFY(first.saveCache());QVERIFY(!first.cacheHit());
+        QVERIFY(QFile::remove(game));QStringList repeated;QVERIFY(TerrainHdLibrary::ensure({game},&repeated,&error,nullptr,library));QCOMPARE(repeated,local);
+        CTerrainHdSources next;QVERIFY(next.open(repeated,&error,nullptr,library+"/index"));QVERIFY(next.cacheHit());
+        CTerrainHdSources::Source donor;QVERIFY(next.find("stock",0,&donor));QCOMPARE(next.payload(donor),hd);
+        QFile broken(local.first());QVERIFY(broken.open(QIODevice::WriteOnly|QIODevice::Truncate));broken.write("broken");broken.close();
+        QVERIFY(!TerrainHdLibrary::ensure({},&repeated,&error,nullptr,library));
+    }
     void lowContrastTransitionKeepsReviewedTopology()
     {
         ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
@@ -662,7 +683,7 @@ private slots:
 int main(int argc,char** argv)
 {
     if(argc>1&&std::strcmp(argv[1],"--headless-only")==0) {
-        const QSet<QByteArray> safeFunctions{"lowContrastTransitionKeepsReviewedTopology","originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
+        const QSet<QByteArray> safeFunctions{"localLibrarySurvivesGameChangesAndCancellation","lowContrastTransitionKeepsReviewedTopology","originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
         if(argc<3)return 2;
         std::vector<char*> filtered;filtered.reserve(size_t(argc));filtered.push_back(argv[0]);
         for(int i=2;i<argc;++i) {
