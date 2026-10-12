@@ -42,10 +42,53 @@ class LandscapeToolsWidgetTests : public QObject
 {
     Q_OBJECT
     QTemporaryDir settingsDirectory;
+    bool eventFilter(QObject* watched,QEvent* event) override
+    {
+        if(event->type()==QEvent::Polish)
+            if(auto* widget=qobject_cast<QWidget*>(watched))
+                if(widget->isWindow())widget->setAttribute(Qt::WA_DontShowOnScreen);
+        return false;
+    }
 
 private slots:
+    void paintOptionsFollowSupportedModeAndPreservePreferences()
+    {
+        CLandscapeTools tools;
+        STerrainPaintMaterialChoice ground;ground.id=1;ground.name="Ground";ground.generatedIds=QStringList{"variant"};
+        STerrainPaintMaterialChoice water=ground;water.id=2;water.name="Water";water.animated=true;
+        STerrainPaintMaterialChoice missing=ground;missing.id=3;missing.name="Missing";missing.paintAvailable=false;missing.paintUnavailableReason="Missing source";
+        tools.setPaintMaterials({missing,ground,water},{ground},{water},3,3);
+        tools.activateMode(ELandscapeEditMode::TilePaint);
+        tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        QVERIFY(tools.selectPaintTerrainType(1));
+        for(const char* name:{"modernAutoResolveBlends","modernMixedEdge","randomPaintVariants","generatedHdVariants","randomizeUniformRotation"})
+        {auto* box=tools.findChild<QCheckBox*>(name);QVERIFY(box);box->setChecked(true);}
+        QVERIFY(tools.modernMixedEdge());QVERIFY(tools.randomPaintVariants());QVERIFY(tools.generatedHdVariants());
+        QVERIFY(!tools.selectPaintTerrainType(3));QCOMPARE(tools.paintTerrainType(),qint32(1));
+        for(auto mode:{ELandscapeEditMode::OverlayPaint,ELandscapeEditMode::OverlaySurface,ELandscapeEditMode::OverlaySculpt,ELandscapeEditMode::Sculpt})
+        {
+            tools.activateMode(mode);
+            QVERIFY(!tools.modernMixedEdge());QVERIFY(!tools.randomPaintVariants());QVERIFY(!tools.randomizeUniformRotation());
+            auto* smooth=tools.findChild<QCheckBox*>("modernMixedEdge");QVERIFY(smooth->isChecked());QVERIFY(!smooth->isEnabled());QVERIFY(!smooth->toolTip().isEmpty());
+        }
+        tools.activateMode(ELandscapeEditMode::TilePaint);tools.setUnderwaterFamiliesVisible(false);QVERIFY(tools.selectPaintTerrainType(1));
+        QVERIFY(tools.modernMixedEdge());
+        tools.setUnderwaterFamiliesVisible(true);QVERIFY(!tools.modernMixedEdge());
+        QVERIFY(!tools.findChild<QCheckBox*>("modernMixedEdge")->isEnabled());
+        QVERIFY(tools.selectPaintTerrainType(1));
+        int selectedUnderwater=0;for(auto* button:tools.findChildren<QToolButton*>())
+            if(button->isChecked() && button->property("terrainUnderwaterChoice").toBool())++selectedUnderwater;
+        QCOMPARE(selectedUnderwater,1);
+        tools.setUnderwaterFamiliesVisible(false);QVERIFY(tools.selectPaintTerrainType(2));
+        QVERIFY(!tools.modernMixedEdge());QVERIFY(!tools.randomPaintVariants());QVERIFY(!tools.generatedHdVariants());
+        QVERIFY(tools.selectPaintTerrainType(1));tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Manual);
+        QVERIFY(!tools.modernMixedEdge());QVERIFY(!tools.modernAutoResolveBlends());QVERIFY(!tools.generatedHdVariants());
+        tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        QVERIFY(tools.modernMixedEdge());QVERIFY(tools.modernAutoResolveBlends());QVERIFY(tools.generatedHdVariants());
+    }
     void initTestCase()
     {
+        if(qEnvironmentVariableIsSet("EI_MAPPER_WIDGET_HIDDEN"))qApp->installEventFilter(this);
         QVERIFY(settingsDirectory.isValid());
         QCoreApplication::setOrganizationName("AtamanTests");
         QCoreApplication::setApplicationName("LandscapeTools");

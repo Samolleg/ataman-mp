@@ -1,3 +1,9 @@
+## Ataman 155 — EI-PAINT-MODES-155 — 2026-10-12
+
+- Исправлены все существующие ветви рисования после повторной жалобы владельца: Ground/Overlay/Underwater, Surface add/delete, временный C и переходы. Опции действуют по применимости и сохраняют предпочтения; недоступные источники явно предотвращены. Шрифт154 сохранён.
+- Восстановлены underwater palette/selection, Vertex после C, безопасный Manual baseline и пригодный portable profile после mixed-mode Save. Modern выбирает старт flipbook, сохраняет его кадры; анимационный Ground фон проходит отдельный exact Modern fallback, guard Mixed-edge остаётся.
+- Диагностическая native Qt/GPU матрица310/0 включает все12 инструментов рельефа, оба слоя, точный Undo/Redo, обычный Save, fresh reopen и дальнейший мазок; widget9/0 и CPU8/0. Чистая версия155 дополнительно проверяет длинный drag с несколькими brush centers. Отчёт: docs/validation/ATAMAN_PAINT_MODES_155_20261012.md. HD ALL256 и стыки отложены.
+
 ## Ataman 154 — EI-PAINT-FONT-154 — 2026-10-12
 
 - Исправлены жалобы владельца после153: читаемый DPI-aware шрифт панели рисования/рельефа вместо физических13px, адаптивные ряды формы/цели и команд в узком dock.

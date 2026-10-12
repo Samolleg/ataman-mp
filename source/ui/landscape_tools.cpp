@@ -1058,7 +1058,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     const QString chipStyle = QStringLiteral(
         "QCheckBox { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 8px; }"
         "QCheckBox::indicator { width: 0px; height: 0px; image: none; border: 0; }"
-        "QCheckBox:checked { background: #1f3a5c; color: #8fc1ff; border: 1px solid #2f6fb5; font-weight: 600; }");
+        "QCheckBox:checked { background: #1f3a5c; color: #8fc1ff; border: 1px solid #2f6fb5; font-weight: 600; }"
+        "QCheckBox:disabled { color: palette(mid); background: transparent; border: 1px solid palette(mid); }");
     for(QCheckBox* chip : {m_modernAutoResolveBlends, m_modernMixedEdge,
                            m_randomPaintVariants, m_generatedHdVariants,
                            m_randomizeUniformRotation})
@@ -1281,6 +1282,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
                 emit paintTerrainTypeChanged(selected ? material : -1);
                 emit editingStateChanged();
             });
+    for(auto* group:{m_groundMaterialButtons,m_overlayMaterialButtons})
+        connect(group,QOverload<QAbstractButton*,bool>::of(&QButtonGroup::buttonToggled),this,
+            [this](QAbstractButton*,bool checked){if(checked)updatePaintOptionApplicability();});
     const auto connectClassicGroup = [this](QButtonGroup* group) {
         connect(group, QOverload<int>::of(&QButtonGroup::buttonClicked),
                 this, [this](int) {
@@ -1301,6 +1305,13 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
             activateMode(ELandscapeEditMode::TilePaint);
         else if(index == 1 && editMode() == ELandscapeEditMode::TilePaint)
             activateMode(ELandscapeEditMode::OverlayPaint);
+        // Ground and Underwater are views of one field. Rebind the visible
+        // material button and option applicability even when mode ID stays 1.
+        bool selected=false;const auto material=paintTerrainType(&selected);
+        if(selected && paintPaletteMode()==ETerrainPaintPaletteMode::Modern)
+            selectPaintTerrainType(material);
+        updatePaintOptionApplicability();
+        emit editingStateChanged();
     });
     connect(m_classicMaterialTabs, &QTabWidget::currentChanged, this,
             [this](int index) {
@@ -1328,6 +1339,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         }
         if(paintPaletteMode() == ETerrainPaintPaletteMode::Manual)
             emit manualAtlasPaletteRequested();
+        updateModeVisibility();
         updatePaintIssueUi();
         bool selected = false;
         const qint32 material = paintTerrainType(&selected);
@@ -1561,6 +1573,9 @@ void CLandscapeTools::setEditingEnabled(bool enabled, bool notify)
 void CLandscapeTools::updateModeVisibility()
 {
     const ELandscapeEditMode currentMode = editMode();
+    if(currentMode!=ELandscapeEditMode::TilePaint && currentMode!=ELandscapeEditMode::OverlayPaint
+       && paintPaletteMode()==ETerrainPaintPaletteMode::Manual)
+        m_paintModeTabs->setCurrentIndex(0);
     if(auto* paint = findChild<QToolButton*>(QStringLiteral("landscapePaintSegment")))
         paint->setChecked(currentMode == ELandscapeEditMode::TilePaint);
     if(auto* sculptButton = findChild<QToolButton*>(QStringLiteral("landscapeSculptSegment")))
@@ -1676,6 +1691,7 @@ void CLandscapeTools::updateModeVisibility()
     if(auto* caption=findChild<QWidget*>(QStringLiteral("terrainPaintOptionsCaption")))
         caption->setVisible(!manual);
     refreshVariantStrip();
+    updatePaintOptionApplicability();
 }
 ELandscapeSculptTool CLandscapeTools::sculptTool() const
 {
@@ -1781,8 +1797,50 @@ ETerrainTileBrushShape CLandscapeTools::paintShape() const
 }
 bool CLandscapeTools::modernMixedEdge() const
 {
-    return paintPaletteMode() == ETerrainPaintPaletteMode::Modern
+    return mixedEdgeApplicable()
         && m_modernMixedEdge && m_modernMixedEdge->isChecked();
+}
+const STerrainPaintMaterialChoice* CLandscapeTools::selectedPaintChoice() const
+{
+    bool selected=false;const int id=paintTerrainType(&selected);
+    if(!selected)return nullptr;
+    const auto& choices=(editMode()==ELandscapeEditMode::OverlayPaint || editMode()==ELandscapeEditMode::OverlaySurface)
+        ?m_overlayPaintTypes:underwaterFamiliesVisible()?m_underwaterPaintTypes:m_landPaintTypes;
+    for(const auto& choice:choices)if(choice.id==id)return &choice;
+    return nullptr;
+}
+bool CLandscapeTools::semanticPaintOptionsApplicable() const
+{
+    return paintPaletteMode()==ETerrainPaintPaletteMode::Modern
+        && (editMode()==ELandscapeEditMode::TilePaint || editMode()==ELandscapeEditMode::OverlayPaint);
+}
+bool CLandscapeTools::mixedEdgeApplicable() const
+{
+    const auto* choice=selectedPaintChoice();
+    return semanticPaintOptionsApplicable() && editMode()==ELandscapeEditMode::TilePaint
+        && !underwaterFamiliesVisible() && (!choice || !choice->animated);
+}
+void CLandscapeTools::updatePaintOptionApplicability()
+{
+    if(!m_modernMixedEdge)return;
+    const bool semantic=semanticPaintOptionsApplicable();
+    const auto* choice=selectedPaintChoice();
+    const bool ground=semantic && editMode()==ELandscapeEditMode::TilePaint && (!choice || !choice->animated);
+    m_modernMixedEdge->setEnabled(mixedEdgeApplicable());
+    m_modernMixedEdge->setToolTip(mixedEdgeApplicable()
+        ?tr("Плавные границы земли. При отсутствии stock-банка используются точные переходы Modern.")
+        :tr("Применяется только к обычной земле в Modern. Для покрытия, воды, анимации и ручного C не действует; настройка сохранена для возврата к земле."));
+    m_modernAutoResolveBlends->setEnabled(semantic);
+    m_randomPaintVariants->setEnabled(ground);
+    m_generatedHdVariants->setEnabled(semantic && (!choice || (!choice->animated && !choice->generatedIds.isEmpty())));
+    m_randomizeUniformRotation->setEnabled(ground);
+    const QString inactive=tr("В этом режиме опция не применяется; её предпочтение сохранено.");
+    for(auto* option:{m_modernAutoResolveBlends,m_randomPaintVariants,m_generatedHdVariants,m_randomizeUniformRotation})
+    {
+        if(!option->property("applicableToolTip").isValid())
+            option->setProperty("applicableToolTip",option->toolTip());
+        option->setToolTip(option->isEnabled()?option->property("applicableToolTip").toString():inactive);
+    }
 }
 bool CLandscapeTools::manualTileSelectionEnabled() const
 {
@@ -1819,7 +1877,7 @@ bool CLandscapeTools::classicAutoSafeMode() const
 }
 bool CLandscapeTools::modernAutoResolveBlends() const
 {
-    return m_modernAutoResolveBlends
+    return semanticPaintOptionsApplicable() && m_modernAutoResolveBlends
         && m_modernAutoResolveBlends->isChecked();
 }
 bool CLandscapeTools::tilePaintPreviewEnabled() const
@@ -1835,11 +1893,22 @@ bool CLandscapeTools::randomizeUniformRotation() const
 {
     // The material-aware adapter owns rotations in the new mode. Preserve
     // the old switch for OFF and for the separate mixed-edge pipeline.
-    return m_randomizeUniformRotation->isChecked()
+    const auto* choice=selectedPaintChoice();
+    return semanticPaintOptionsApplicable() && editMode()==ELandscapeEditMode::TilePaint
+        && (!choice || !choice->animated) && m_randomizeUniformRotation->isChecked()
         && (!randomPaintVariants() || modernMixedEdge());
 }
-bool CLandscapeTools::randomPaintVariants() const { return m_randomPaintVariants->isChecked(); }
-bool CLandscapeTools::generatedHdVariants() const { return m_generatedHdVariants&&m_generatedHdVariants->isChecked(); }
+bool CLandscapeTools::randomPaintVariants() const {
+    const auto* choice=selectedPaintChoice();
+    return semanticPaintOptionsApplicable() && editMode()==ELandscapeEditMode::TilePaint
+        && (!choice || !choice->animated) && m_randomPaintVariants->isChecked();
+}
+bool CLandscapeTools::generatedHdVariantsRequested() const { return m_generatedHdVariants&&m_generatedHdVariants->isChecked(); }
+bool CLandscapeTools::generatedHdVariants() const {
+    const auto* choice=selectedPaintChoice();
+    return semanticPaintOptionsApplicable() && (!choice || (!choice->animated && !choice->generatedIds.isEmpty()))
+        && generatedHdVariantsRequested();
+}
 bool CLandscapeTools::landFamiliesAllowedInOverlay() const
 {
     return false;
@@ -1932,7 +2001,7 @@ qint32 CLandscapeTools::paintTerrainType(bool* selected) const
         && paintPaletteMode() == ETerrainPaintPaletteMode::ClassicAuto
         && paintTargetMode() == ETerrainPaintTargetMode::Tile
         && button->property("terrainCornerOnly").toBool();
-    const int id = button && !hiddenStamp
+    const int id = button && button->isEnabled() && !hiddenStamp
         ? button->property("terrainMaterialId").toInt() : -1;
     if(selected)
         *selected = id >= 0;
@@ -2009,6 +2078,7 @@ void CLandscapeTools::updatePaintIssueUi()
         m_vertexPaintTarget->setEnabled(!marking && !manual && !overlaySurface);
     if(m_paintModeTabs) m_paintModeTabs->setEnabled(!marking);
     updatePaintShapeUi();
+    updatePaintOptionApplicability();
 }
 
 void CLandscapeTools::updatePaintShapeUi()
@@ -2329,6 +2399,7 @@ void CLandscapeTools::rebuildMaterialPalette()
             {
               QToolButton* button = new QToolButton(this);
               button->setProperty("terrainMaterialId", choice.id);
+              button->setProperty("terrainUnderwaterChoice",grid==m_underwaterMaterialGrid);
               button->setProperty("terrainSupportMaterialId", choice.supportId);
               button->setProperty("terrainContextualStamp", choice.contextualStamp);
               button->setProperty("terrainCornerOnly", choice.cornerOnly);
@@ -2336,6 +2407,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                   QStringLiteral("%1 %2").arg(choice.name,
                                                choice.familyName));
               button->setCheckable(true);
+              button->setEnabled(choice.paintAvailable);
               button->setAutoRaise(false);
               button->setStyleSheet(QStringLiteral(
                   "QToolButton { border: 1px solid palette(mid); border-radius: 4px; padding: 0px; }"
@@ -2370,6 +2442,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                       + button->toolTip());
               }
               button->setMinimumSize(m_paletteCellSize, m_paletteCellSize);
+              if(!choice.paintAvailable)button->setToolTip(choice.paintUnavailableReason);
               connect(button, &QToolButton::clicked, this,
                       [this, choice]() { updateVariantStrip(choice); });
               if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
@@ -2408,9 +2481,11 @@ void CLandscapeTools::rebuildMaterialPalette()
     populate(m_classicOverlayMaterialGrid,
              m_classicOverlayMaterialButtons,
              m_classicOverlayPaintTypes, true);
-    const auto restore = [](QButtonGroup* group, const QPair<int, int>& selection) {
+    const auto restore = [this](QButtonGroup* group, const QPair<int, int>& selection) {
         for(QAbstractButton* button : group->buttons())
-            if(button->property("terrainMaterialId").toInt() == selection.first
+            if(button->isEnabled()
+               && (group!=m_groundMaterialButtons || button->property("terrainUnderwaterChoice").toBool()==underwaterFamiliesVisible())
+               && button->property("terrainMaterialId").toInt() == selection.first
                && button->property("terrainSupportMaterialId").toInt() == selection.second)
             {
                 button->setChecked(true);
@@ -2420,21 +2495,26 @@ void CLandscapeTools::rebuildMaterialPalette()
     };
     if(!paintIssueMarkingEnabled())
     {
+        const auto selectFirstAvailable=[this](QButtonGroup* group) {
+            for(auto* button:group->buttons())if(button->isEnabled()
+                && (group!=m_groundMaterialButtons || button->property("terrainUnderwaterChoice").toBool()==underwaterFamiliesVisible())){button->setChecked(true);break;}
+        };
         if(!restore(m_groundMaterialButtons, previousGround)
            && !m_groundMaterialButtons->buttons().isEmpty())
-            m_groundMaterialButtons->buttons().front()->setChecked(true);
+            selectFirstAvailable(m_groundMaterialButtons);
         if(!restore(m_overlayMaterialButtons, previousOverlay)
            && !m_overlayMaterialButtons->buttons().isEmpty())
-            m_overlayMaterialButtons->buttons().front()->setChecked(true);
+            selectFirstAvailable(m_overlayMaterialButtons);
         if(!restore(m_classicGroundMaterialButtons, previousClassicGround)
            && !m_classicGroundMaterialButtons->buttons().isEmpty())
-            m_classicGroundMaterialButtons->buttons().front()->setChecked(true);
+            selectFirstAvailable(m_classicGroundMaterialButtons);
         if(!restore(m_classicOverlayMaterialButtons, previousClassicOverlay)
            && !m_classicOverlayMaterialButtons->buttons().isEmpty())
-            m_classicOverlayMaterialButtons->buttons().front()->setChecked(true);
+            selectFirstAvailable(m_classicOverlayMaterialButtons);
     }
     refreshVariantStrip();
     applyPaintFilter();
+    updatePaintOptionApplicability();
 }
 
 void CLandscapeTools::refreshVariantStrip()
@@ -2730,7 +2810,9 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
     if(!group)
         return false;
     for(QAbstractButton* button : group->buttons())
-        if(button->property("terrainMaterialId").toInt() == terrainType)
+        if(button->isEnabled()
+           && (group!=m_groundMaterialButtons || button->property("terrainUnderwaterChoice").toBool()==underwaterFamiliesVisible())
+           && button->property("terrainMaterialId").toInt() == terrainType)
         {
             setPaintIssueMarkingEnabled(false);
             button->setChecked(true);
@@ -2741,6 +2823,7 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
                     ? &m_underwaterPaintTypes : &m_landPaintTypes;
             for(const auto& choice : *choices)
                 if(choice.id == terrainType) { updateVariantStrip(choice); break; }
+            updatePaintOptionApplicability();
             emit paintTerrainTypeChanged(terrainType);
             emit editingStateChanged();
             return true;

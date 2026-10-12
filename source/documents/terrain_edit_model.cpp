@@ -3950,6 +3950,22 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     if(beforeCurrent.size() == expectedFieldSize
        && beforeBaseline.size() == expectedFieldSize)
     {
+        // Manual owns physical cells, including their hard seams. Updating a
+        // shared corner must not leave an incident Modern cell marked for a
+        // new blend at Save: that would reinterpret the physical Manual edit.
+        // Adopt the current field as the baseline for each incident cell,
+        // retaining its packed artwork and all current material identities.
+        QSet<int> baselineVertices;
+        for(auto value=finalValues.constBegin();value!=finalValues.constEnd();++value)
+        {
+            const int vx=value.key()%vertexWidth,vy=value.key()/vertexWidth;
+            for(int cy=qMax(0,vy-1);cy<=qMin(height-1,vy);++cy)
+                for(int cx=qMax(0,vx-1);cx<=qMin(width-1,vx);++cx)
+                    for(int dy=0;dy<=1;++dy)for(int dx=0;dx<=1;++dx)
+                        baselineVertices.insert((cy+dy)*vertexWidth+cx+dx);
+        }
+        for(int key:baselineVertices)
+            if(!finalValues.contains(key))finalValues.insert(key,beforeCurrent.at(key));
         // QMap iteration is cell-key order (y, then x). When several Manual
         // cells touch a vertex, the later explicit cell in that deterministic
         // order wins. Only the final values are stored; no origin or time data

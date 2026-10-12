@@ -6370,6 +6370,11 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     const quint16 manualPacked = manual.deltas.front().after;
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualPacked);
+    // A Modern stroke followed by a physical C placement must be saveable
+    // without inventing blends at its hard boundary. Those incident cells
+    // retain their current packed artwork as the publication baseline.
+    for(int y=7;y<=9;++y)for(int x=7;x<=9;++x)
+        QVERIFY(!terrain.virtualMaterialCellChanged(ETerrainTileLayer::Land,x,y));
     for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
                                  QPoint(9, 9), QPoint(8, 9)})
     {

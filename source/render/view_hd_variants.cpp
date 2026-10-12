@@ -33,7 +33,7 @@ void CView::generateTerrainHdVariants()
 
 void CView::refreshTerrainHdVariantChoices()
 {
-    const auto bank=m_landscapeTools&&m_landscapeTools->generatedHdVariants()
+    const auto bank=m_landscapeTools&&m_landscapeTools->generatedHdVariantsRequested()
         ?TerrainHdVariantBank::available():QSharedPointer<const TerrainHdVariantBank::Bank>();
     auto update=[&](QVector<STerrainPaintMaterialChoice>& choices,ETerrainAtlasLayer layer) {
         for(auto& choice:choices) {

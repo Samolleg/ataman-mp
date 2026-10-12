@@ -76,9 +76,12 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
     if(shortcut == ELandscapePhysicalShortcut::ManualPaint)
     {
         const bool paintMode = m_landscapeTools->tilePaintEnabled()
-            || m_landscapeTools->overlayPaintEnabled();
+            || m_landscapeTools->editMode()==ELandscapeEditMode::OverlayPaint;
         if(!paintMode)
-            return false;
+        {
+            if(pressed && !event->isAutoRepeat())emit updateMsg(tr("Ручной C доступен для покраски земли и существующего покрытия."));
+            return true;
+        }
         if(!event->isAutoRepeat())
             selectTerrainPaintPaletteMode(pressed
                 ? ETerrainPaintPaletteMode::Manual

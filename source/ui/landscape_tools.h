@@ -42,6 +42,9 @@ struct STerrainPaintMaterialChoice
     // artwork is verified off the UI thread.  A pending entry must never fall
     // back to misleading initials that look like a finished brush preview.
     bool thumbnailPending{false};
+    bool animated{false};
+    bool paintAvailable{true};
+    QString paintUnavailableReason;
     int assignedSlots{0};
     bool cornerOnly{false};
     bool contextualStamp{false};
@@ -123,6 +126,7 @@ public:
     bool randomizeUniformRotation() const;
     bool randomPaintVariants() const;
     bool generatedHdVariants() const;
+    bool generatedHdVariantsRequested() const;
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
     void setOverlayMaterialSlotLabelsVisible(bool visible);
@@ -210,6 +214,10 @@ protected:
 
 private:
     void refreshResponsiveControls();
+    const STerrainPaintMaterialChoice* selectedPaintChoice() const;
+    bool semanticPaintOptionsApplicable() const;
+    bool mixedEdgeApplicable() const;
+    void updatePaintOptionApplicability();
     bool m_editingActive{false};
     QComboBox* m_mode;
     QComboBox* m_tool;

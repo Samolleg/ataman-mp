@@ -12268,7 +12268,7 @@ void CView::rebuildTerrainAutoCatalog()
         // when paint or Resolve Missing Blends actually needs their pixels.
         QElapsedTimer sourceHydrationTimer;
         sourceHydrationTimer.start();
-        const auto generatedBank=m_landscapeTools&&m_landscapeTools->generatedHdVariants()
+        const auto generatedBank=m_landscapeTools&&m_landscapeTools->generatedHdVariantsRequested()
             ?TerrainHdVariantBank::available():QSharedPointer<const TerrainHdVariantBank::Bank>();
         for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)
         {
@@ -12297,6 +12297,16 @@ void CView::rebuildTerrainAutoCatalog()
             choice.thumbnail = source;
             choice.thumbnailPending = source.isNull();
             choice.assignedSlots = family.sources.size();
+            choice.paintAvailable=!family.sources.isEmpty() && family.runtimeTerrainType>=0 && family.runtimeTerrainType<16;
+            if(!choice.paintAvailable)choice.paintUnavailableReason=tr("Нет подтверждённого однородного источника или runtime-класса для рисования этим материалом.");
+            for(const auto& animation:m_mprAnimatedTiles)for(int frame=0;frame<animation.frameCount;++frame) {
+                SMprPackedTile tile;const int slot=animation.tileIndex+frame;
+                tile.atlasIndex=quint8(slot/64);tile.tileIndex=quint8(slot%64);
+                bool known=false;const auto signature=m_terrainAtlasAnalysis.catalog(
+                    family.layer==ETerrainAtlasLayer::Land?ETerrainTileLayer::Land:ETerrainTileLayer::Overlay).gridSignatureForPacked(tile.encode(),&known);
+                if(known && signature.northWest==family.id && signature.northEast==family.id
+                    && signature.southEast==family.id && signature.southWest==family.id)choice.animated=true;
+            }
             choice.authoredThumbnails = authoredGlobalSourcePreviews(family,
                 mprNamespace,m_terrainAtlasProfile.atlasPixelSha256,
                 m_pTileForm->tileImages(),QSize(),m_terrainGlobalUniformTileCache,false);
@@ -12328,6 +12338,10 @@ void CView::rebuildTerrainAutoCatalog()
             .arg(sourceHydrationMs));
         catalogDetailTimer.restart();
     }
+    // Underwater Ground edits the same land vertex field beneath overlays.
+    // The game-wide palette replaces the old profile list; populate its
+    // underwater view as well instead of leaving a selectable empty tab.
+    underwaterChoices = landChoices;
     QString status = m_terrainAtlasAnalysis.usable
         ? tr("%1 loaded: %2 land and %3 overlay materials.")
               .arg(m_terrainAtlasAnalysis.templateName)
@@ -12419,6 +12433,11 @@ void CView::rebuildTerrainAutoCatalog()
         protectTerrainAnimationRanges(
             m_mprAnimatedTiles, m_workingTerrainAtlas->activeTileCount(),
             &m_workingAtlasProtectedSlots);
+        // Only the record start activates a runtime flipbook. Later slots are
+        // frame storage, not alternative paint placements of the material.
+        for(const auto& animation:m_mprAnimatedTiles)
+            for(int frame=1;frame<animation.frameCount;++frame)
+                m_workingTerrainAtlas->setSlotPaintSelectable(animation.tileIndex+frame,false);
         ei::log(eLogInfo, QString(
             "Modern terrain working atlas ready authoredSlots:%1 authoredPages:%2 capacitySlots:%3 extensionSlots:%4 protectedAuthoredSlots:%5")
             .arg(m_authoredTerrainTileImages.size())
@@ -12738,6 +12757,12 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
         }
     }
 
+    if(complete)for(auto* choices:{&m_modernLandPaintChoices,&m_modernUnderwaterPaintChoices,&m_modernOverlayPaintChoices})
+        for(auto& choice:*choices)if(choice.paintAvailable && !m_terrainGlobalMaterialSources.contains(choice.id)) {
+            choice.paintAvailable=false;
+            choice.paintUnavailableReason=tr("Подтверждённый однородный тайл не найден в настроенных ресурсах. Выберите доступный материал или подключите его исходный архив.");
+            changed=true;
+        }
     if(changed && m_landscapeTools)
     {
         m_landscapeTools->beginTerrainPaletteUpdate();
@@ -13070,7 +13095,6 @@ bool CView::resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationRepo
     auto types=materialRuntimeTypes(m_terrainAtlasProfile,m_terrainGlobalFamilies);
     for(const auto& family:m_terrainAtlasProfile.families)
         if(family.underwater) types.remove(family.id);
-    for(const auto& choice:m_modernUnderwaterPaintChoices) types.remove(choice.id);
     auto staged=m_workingTerrainAtlas->createStagingCopy();
     QSet<int> cells;
     const int w=m_terrainEdit.tileCountX(),h=m_terrainEdit.tileCountY();
@@ -15680,6 +15704,31 @@ void CView::finalizeVirtualTerrainAtlas()
             family.tileType = global.runtimeTerrainType;
             publicationSourceProfile.families.append(family);
         }
+    // Manual C may intentionally place any physical tile in either layer.
+    // Preserve the usage that is actually present in this document instead
+    // of publishing a profile that rejects those existing mixed signatures.
+    QSet<qint32> placedLandMaterials,placedOverlayMaterials;
+    for(auto placedLayer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay})
+        for(int y=0;y<m_terrainEdit.tileCountY();++y)for(int x=0;x<m_terrainEdit.tileCountX();++x)
+        {
+            bool available=false,known=false;
+            if(placedLayer==ETerrainTileLayer::Overlay)
+            {
+                m_terrainEdit.overlayMaterialIndex(x,y,&available);
+                if(!available)continue;
+            }
+            const auto packed=m_terrainEdit.packedTile(x,y,placedLayer,&available);
+            if(!available || (placedLayer==ETerrainTileLayer::Overlay && packed==0xffffu))continue;
+            const auto signature=catalog.gridSignatureForPacked(packed,&known);
+            if(!known)continue;
+            auto& placed=placedLayer==ETerrainTileLayer::Land?placedLandMaterials:placedOverlayMaterials;
+            for(qint32 id:{signature.northWest,signature.northEast,signature.southEast,signature.southWest})placed.insert(id);
+        }
+    for(auto& family:publicationSourceProfile.families)
+    {
+        family.landAllowed=family.landAllowed || placedLandMaterials.contains(family.id);
+        family.overlayAllowed=family.overlayAllowed || placedOverlayMaterials.contains(family.id);
+    }
     STerrainAtlasProfile portableProfile=
         CTerrainAtlasProfileStore::portableFinalizedProfile(
             finalized,physicalTiles,publicationSourceProfile,
@@ -15696,7 +15745,8 @@ void CView::finalizeVirtualTerrainAtlas()
         archiveHint = QFileInfo(texturesPath).fileName();
     portableProfile.resourceArchiveHint = archiveHint;
     portableProfile.textureCount = finalized.textureCount;
-    if(portableProfileReport.hasErrors()
+    const bool portableUsable=portableProfile.usableAnalysis(&portableProfileReport).usable;
+    if(portableProfileReport.hasErrors() || !portableUsable
        || portableProfile.assignedSlotCount()!=finalized.requiredSlots)
     {
         QMessageBox::critical(this,tr("Atlas package not written"),
@@ -20571,12 +20621,15 @@ void CView::endTileBrushGroup()
             if(!resolveMixedEdgeTerrain(&m_tileStrokeCommand,&mixedReport))
             {
                 applyTerrainTilePreview(m_tileStrokeCommand,false);
-                bool missingReviewedBank=false;
+                bool missingReviewedBank=false,animationUnsupported=false;
                 for(const auto& finding:mixedReport.findings())
+                {
                     if(finding.code==QStringLiteral("terrain.mixed_edge.bank_unavailable"))
                         missingReviewedBank=true;
+                    if(finding.code==QStringLiteral("terrain.mixed_edge.animated"))animationUnsupported=true;
+                }
                 bool exactFallback=false;
-                if(missingReviewedBank)
+                if(missingReviewedBank || animationUnsupported)
                 {
                     // Mixed-edge needs a complete local stock ownership bank,
                     // whereas the palette offers reviewed global materials.
@@ -20600,9 +20653,12 @@ void CView::endTileBrushGroup()
                     {
                         exactCommand.workingAtlasBefore=m_mixedEdgeStrokeAtlasBefore;
                         exactCommand.workingAtlasAfter=m_workingTerrainAtlas->createStagingCopy();
-                        exactCommand.semanticAudit.solverMode=QStringLiteral("mixed-edge-exact-fallback");
+                        exactCommand.semanticAudit.solverMode=animationUnsupported
+                            ?QStringLiteral("mixed-edge-animation-exact-fallback"):QStringLiteral("mixed-edge-exact-fallback");
                         m_tileStrokeCommand=exactCommand;
-                        emit updateMsg(tr("Для этих материалов нет пригодного банка Mixed-edge. Мазок выполнен точными переходами Modern из подтверждённых текстур."));
+                        emit updateMsg(animationUnsupported
+                            ?tr("На анимационных ячейках Smooth не применяется. Мазок выполнен точными переходами Modern; исходные кадры сохранены.")
+                            :tr("Для этих материалов нет пригодного банка Mixed-edge. Мазок выполнен точными переходами Modern из подтверждённых текстур."));
                         ei::log(eLogWarning,QStringLiteral("Mixed-edge used exact Modern for this stroke:\n")+mixedReport.toText());
                     }
                     else
@@ -20880,7 +20936,9 @@ void CView::endTileBrushGroup()
                 ? tr(" Preview cache checkpointed; earlier undo history was cleared.")
                 : QString()).arg(safeDetail
                     +(m_tileStrokeCommand.semanticAudit.solverMode==QStringLiteral("mixed-edge-exact-fallback")
-                        ? tr(" Нет банка Mixed-edge; использованы точные переходы Modern.") : QString())));
+                        ? tr(" Нет банка Mixed-edge; использованы точные переходы Modern.")
+                        :m_tileStrokeCommand.semanticAudit.solverMode==QStringLiteral("mixed-edge-animation-exact-fallback")
+                            ?tr(" Smooth не применяется к анимации; использованы точные переходы Modern."):QString())));
         const QString paletteLabel = m_tileStrokePaletteMode
                 == int(ETerrainPaintPaletteMode::Modern)
             ? QStringLiteral("modern")
