@@ -87,6 +87,7 @@ public:
 
     QSize minimumSizeHint() const override;
     void setWorldTerrainStatus(const QString& status, bool canUndo, bool canRedo, bool dirty, bool enabled, int neighbors);
+    void setTerrainCatalogLoading(bool loading);
 
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
@@ -275,6 +276,7 @@ private:
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
+    bool m_terrainCatalogLoading{false};
     QLabel* m_atlasCoverage;
     QLabel* m_generatedAtlasTiles;
     QProgressBar* m_atlasCapacity;

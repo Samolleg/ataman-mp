@@ -1,3 +1,10 @@
+# EI Mapper Ataman — roadmap
+## EI-PALETTE-HOTFIX-152 — автоматическая загрузка палитры материалов
+
+- Цель и разрешение: устранить пустые «Земля»/«Покрытие» после открытия MPR; каталог строится после первого видимого кадра и при входе в режим покраски/поверхностей, показывая индикатор во время загрузки. Main, VERSION 151→152; копии zone1 и basegipat; UI-lock, без изменений игры/мода/Endurance и без запуска редактора интерактивно. Чужие HD ALL 256 файлы сохраняются.
+- Критерии: каталоги обоих слоёв непустые, мазок меняет >0 материалов; замер открытия gz1g до/после; Release 152, `--ui-widget-check` nativeAttempts=0, финализированный staging и guarded установка с rollback151.
+- Статус: исправление в работе; проверки, замеры и handoff будут добавлены в `docs/validation/ATAMAN_PALETTE_HOTFIX_152_20261012.md`.
+
 ## EI-CROSSMAP-TRANSITIONS-151 — mixed-edge общей кистью через стыки
 
 - Цель и разрешение: жалоба владельца «общая кисть не может исправить mixed-edge»; реализовать покраску и ремонт переходов через стыки выбранных карт, сохраняя отдельные атласы, общие пиксели, SEC, atomic Undo/Redo и batch save. Main, VERSION 150→151, копии соседних карт; живые данные только читать. Чужая задача EI-HD-ALL-256 исключена.
@@ -6,7 +13,6 @@
 - Финальные проверки: terrain_virtual_atlas 150/0/0; world sculpt 46/0/5 optional skips; mixed-edge CLI 70/0/0 за 67.4 s; OFF/single-map VERSION 150 и 151 побайтно совпали (319,029,944 bytes, SHA `046FBFA4…D70B51B`); Release UI widget 11.1 s, nativeAttempts=0. Встроенный `darkThemeWorks=1` был частью обязательного `--ui-widget-check`; отдельный dark-theme suite не запускался.
 - Передача: source commit `0ec9e6c27590f6210b97bb23eb87d7425033fce1`; Release 151 из clean `git archive`, EXE SHA-256 `CF6362BADD49BBC2CB863F574BE8FFCFA904DDE49B289740C844C2F6ECCA6E0C`. Финализированный staging `build-staging-151-crossmap-verified`: 132 paths, 1 объяснённое удаление устаревшей заметки 148, 0 необъяснённых. Установка 150→151 прошла с rollback150; 9 managed files changed, 1 obsolete changelist removed, 23,034 unmanaged/user files сохранены. Первый guard-откатил попытку на ошибке формы JSON-снимка; исправленный readback прошёл. PNG и точные receipts — в [отчёте](docs/validation/ATAMAN_CROSSMAP_TRANSITIONS_151_20261012.md).
 - Статус: реализация, проверки, Release, staging, guarded установка и передача завершены; следующий шаг по EI-CROSSMAP-TRANSITIONS-151 отсутствует.
-# EI Mapper Ataman — roadmap
 
 ## EI-SAVE-PERF-150 — отзывчивое сохранение MPR/MOB и recovery autosave
 

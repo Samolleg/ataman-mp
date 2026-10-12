@@ -1788,6 +1788,19 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         // work under non-Latin keyboard layouts.
         qApp->installEventFilter(this);
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
+        connect(m_landscapeTools, &CLandscapeTools::editingStateChanged,
+                this, [this]()
+        {
+            if(!m_terrainAutoCatalogPending || !m_landscapeTools)
+                return;
+            const ELandscapeEditMode mode = m_landscapeTools->editMode();
+            if(mode != ELandscapeEditMode::TilePaint
+               && mode != ELandscapeEditMode::OverlayPaint
+               && mode != ELandscapeEditMode::OverlaySurface)
+                return;
+            m_landscapeTools->setTerrainCatalogLoading(true);
+            queueDeferredTerrainAutoCatalogBuild();
+        });
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::shuffleTerrainTilesRequested,
@@ -1943,7 +1956,9 @@ void CView::prepareLandscapeTilePainting(bool showTools)
 {
     if(!m_landscapeTools)
         return;
-    ensureTerrainAutoCatalogReady();
+    if(m_terrainAutoCatalogPending)
+        m_landscapeTools->setTerrainCatalogLoading(true);
+    queueDeferredTerrainAutoCatalogBuild();
     if(m_landscapeTools->editMode() != ELandscapeEditMode::TilePaint)
         clearLandscapeBrushSelection();
     m_landscapeTools->activateMode(ELandscapeEditMode::TilePaint, false);
@@ -9531,10 +9546,9 @@ void CView::queueDeferredTerrainAutoCatalogBuild()
         m_terrainAutoCatalogDeferredByWorkspace = true;
         return;
     }
-    // Once a first frame lands inside a full map open, keep the paint-only
-    // catalog lazy until a terrain edit/save action explicitly needs it.
-    if(m_terrainAutoCatalogDeferredByWorkspace)
-        return;
+    // A first frame may arrive while the MOB workspace is still being built.
+    // Resume catalog hydration as soon as that hold clears; paint palettes
+    // must not depend on a later edit to become usable.
     if(terrainCatalogLoadAction(
            m_terrainAutoCatalogPending,
            m_terrainAutoCatalogBuildQueued,
@@ -9543,6 +9557,8 @@ void CView::queueDeferredTerrainAutoCatalogBuild()
        != ETerrainCatalogLoadAction::QueueAfterVisibleFrame)
         return;
 
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainCatalogLoading(true);
     m_terrainAutoCatalogBuildQueued = true;
     m_terrainAutoCatalogFirstFrameMs =
         m_terrainAutoCatalogLoadTimer.isValid()
@@ -9551,7 +9567,7 @@ void CView::queueDeferredTerrainAutoCatalogBuild()
         "MPR first landscape frame file:%1 startToPaintCompleteMs:%2")
         .arg(m_pendingTerrainAutoCatalogMprPath.fileName())
         .arg(m_terrainAutoCatalogFirstFrameMs));
-    QTimer::singleShot(0, this, [this]() {
+    QTimer::singleShot(50, this, [this]() {
         m_terrainAutoCatalogBuildQueued = false;
         ensureTerrainAutoCatalogReady();
     });
@@ -9574,6 +9590,8 @@ bool CView::ensureTerrainAutoCatalogReady()
     m_terrainAutoCatalogPending = false;
     m_terrainAutoCatalogBuildQueued = false;
     m_terrainAutoCatalogBuilding = true;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainCatalogLoading(true);
     QElapsedTimer deferredTimer;
     QElapsedTimer phaseTimer;
     deferredTimer.start();
@@ -9711,6 +9729,8 @@ bool CView::ensureTerrainAutoCatalogReady()
     emit selectionStateChanged(nSelectedNodes() > 0);
     m_terrainAutoCatalogBuilding = false;
     m_pendingTerrainAutoCatalogMprPath = QFileInfo();
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainCatalogLoading(false);
     if(m_landscapeTools && m_landscapeTools->editingEnabled())
         syncLandscapeToolState();
     emit loadedMapStateChanged();
@@ -9769,6 +9789,8 @@ void CView::unloadLand(bool promptForSave)
     m_terrainAutoCatalogDeferredByWorkspace = false;
     m_pendingTerrainAutoCatalogMprPath = QFileInfo();
     m_terrainAutoCatalogFirstFrameMs = -1;
+    if(m_landscapeTools)
+        m_landscapeTools->setTerrainCatalogLoading(false);
     m_terrainEditAvailable = false;
     finishSculptStroke();
     m_workingTerrainAtlas.reset();

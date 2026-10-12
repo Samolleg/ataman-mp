@@ -1975,6 +1975,14 @@ void CLandscapeTools::setPaintMaterials(
     requestPaintTerrainTypesRefresh();
 }
 
+void CLandscapeTools::setTerrainCatalogLoading(bool loading)
+{
+    if(m_terrainCatalogLoading == loading)
+        return;
+    m_terrainCatalogLoading = loading;
+    refreshPaintTerrainTypes();
+}
+
 void CLandscapeTools::setClassicAutoMaterials(
     const QVector<STerrainPaintMaterialChoice>& landTypes,
     const QVector<STerrainPaintMaterialChoice>& underwaterTypes,
@@ -2492,6 +2500,12 @@ void CLandscapeTools::setUsedTerrainFamilies(
 
 void CLandscapeTools::refreshPaintTerrainTypes()
 {
+    if(m_terrainCatalogLoading)
+    {
+        m_tilesetStatus->setText(tr("Загрузка материалов…"));
+        emit paintTerrainTypeChanged(-1);
+        return;
+    }
     const bool overlay = editMode() == ELandscapeEditMode::OverlayPaint
         || editMode() == ELandscapeEditMode::OverlaySurface;
     int materialCount = 0;
