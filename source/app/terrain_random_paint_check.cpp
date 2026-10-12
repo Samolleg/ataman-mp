@@ -137,11 +137,18 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         log<<"TIMING openReturnMs="<<openMs<<" paletteReadyMs="<<timer.elapsed()<<" firstFrameMs="<<view.m_terrainAutoCatalogFirstFrameMs<<'\n';
         if(!check(!view.m_terrainAutoCatalogPending && !view.m_terrainAutoCatalogBuilding && view.m_terrainEditAvailable,
                   "catalog fills automatically after a frame without harness ensure"))return 1;
+        QMap<qint32,QImage> initialPreviews;
+        for(const auto& choice:view.m_modernLandPaintChoices)
+            if(!choice.thumbnail.isNull())initialPreviews.insert(choice.id,choice.thumbnail);
         QElapsedTimer thumbnails;thumbnails.start();
         while(thumbnails.elapsed()<120000 && (view.m_terrainGlobalHydrationPendingJobs>0 || view.m_terrainGlobalHydrationPublishQueued)) {
             QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
         }
         log<<"TIMING thumbnailWaitMs="<<thumbnails.elapsed()<<'\n';
+        bool primaryStable=true;
+        for(const auto& choice:view.m_modernLandPaintChoices)
+            if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
+        check(primaryStable,"authored hydration preserves existing primary artwork");
         if(fixture.value("panelOnly").toBool()) {
             int families=0,available=0;
             for(const auto& choice:view.m_modernLandPaintChoices) {

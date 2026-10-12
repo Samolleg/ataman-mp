@@ -12687,7 +12687,8 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
         {
             const QImage thumbnail =
                 m_terrainGlobalHydrationBestThumbnails.value(choice.id);
-            if(!thumbnail.isNull() && choice.thumbnail != thumbnail)
+            if(!thumbnail.isNull() && choice.thumbnail != thumbnail
+               && !m_terrainGlobalMaterialSources.contains(choice.id))
             {
                 choice.thumbnail = thumbnail;
                 changed = true;
