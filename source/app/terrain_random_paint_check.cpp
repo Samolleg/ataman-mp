@@ -140,7 +140,9 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         const QString root=fixture.value("realRoot").toString();
         auto* roots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots"));
         if(!check(roots && QFileInfo(root+"/res/HDPack_Terrain.res").isFile(),"copied atlas resource root"))return 1;
-        roots->setValue({root+"/res"});
+        QVector<QString> probeResources={root+"/res"};
+        for(const auto& extra:fixture.value("readOnlyResourceRoots").toArray())probeResources.append(extra.toString());
+        roots->setValue(probeResources);
         if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool()) {
             if(auto* lighting=dynamic_cast<COptInt*>(settings.opt("renderLightingMode")))lighting->setValue(0);
             if(auto* culling=dynamic_cast<COptBool*>(settings.opt("frustumCulling")))culling->setValue(false);
@@ -248,12 +250,17 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 log<<"PICK "<<name<<' '<<hit.x()<<','<<hit.y()<<','<<hit.z()<<'\n';
                 const auto before=snapshot(view.m_terrainEdit),other=layerBytes(!ground);const auto frameBefore=capture();
                 const int count=history.count();
+                int changedCenters=0;
+                auto previousStamp=before;
                 for(int step=0;step<(drag?5:3);++step) {
                     const auto type=step==0?QEvent::MouseMove:step==1?QEvent::MouseButtonPress:step==(drag?4:2)?QEvent::MouseButtonRelease:QEvent::MouseMove;
                     const QPoint pos=start+(step>1&&drag?QPoint((step==2?60:120),0):QPoint());
                     QMouseEvent event(type,pos,(type==QEvent::MouseMove)?Qt::NoButton:Qt::LeftButton,
                         (step>=1 && type!=QEvent::MouseButtonRelease)?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
                     QApplication::sendEvent(&view,&event);settle();
+                    const auto currentStamp=snapshot(view.m_terrainEdit);
+                    if(step>=1 && type!=QEvent::MouseButtonRelease && currentStamp!=previousStamp)++changedCenters;
+                    previousStamp=currentStamp;
                     if(fixture.value("tracePaintDrag").toBool() && drag && !panel.sculptEnabled()) {
                         bool stepHit=false;const auto stepPoint=view.getTerrainBrushPos(pos.x(),pos.y(),&stepHit);
                         CTile* debugTile=nullptr;STileLocation debugLocation;STerrainTileBrush debugBrush;QPoint debugVertex;STerrainPaintFootprintSnapshot debugFootprint;
@@ -268,13 +275,50 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 frameBefore.save(output+"/"+name+"-before.png");frameAfter.save(output+"/"+name+"-after.png");
                 check(after!=before,"event stroke changes "+name);
                 check(layerBytes(!ground)==other,"other layer preserved "+name);
-                check(history.count()==count+1,"one Undo transaction "+name);
-                if(drag && !panel.sculptEnabled())check(view.m_tileStrokeActions>1,"drag crosses several brush centers "+name);
+                const auto* worldCommand=view.m_worldTerrainSession.nextCommand(false);
+                const bool worldStroke=history.count()==count && worldCommand && worldCommand->localUndoIndex==history.index();
+                check(history.count()==count+1 || worldStroke,"one Undo transaction "+name);
+                if(drag && !panel.sculptEnabled())check(changedCenters>1,"drag changes several brush centers "+name);
                 if(requirePixels)check(!frameBefore.isNull() && frameBefore!=frameAfter,"native pixels change "+name);
-                history.undo();check(snapshot(view.m_terrainEdit)==before,"exact Undo "+name);
-                history.redo();check(snapshot(view.m_terrainEdit)==after,"exact Redo "+name);
+                if(!view.worldTerrainHistory(false))history.undo();
+                check(snapshot(view.m_terrainEdit)==before,"exact Undo "+name);
+                if(!view.worldTerrainHistory(true))history.redo();
+                check(snapshot(view.m_terrainEdit)==after,"exact Redo "+name);
                 return after!=before;
             };
+            if(fixture.value("selectedDistantNeighbor").toBool()) {
+                SMapCatalogEntry active;active.zoneId="active";active.allodId="fixture";
+                active.mprName=view.m_mprDocument.mapInfo().innerNamespace;
+                active.mprPath=map;active.sectorWidth=view.m_mprDocument.mapInfo().sectorCountX;
+                active.sectorHeight=view.m_mprDocument.mapInfo().sectorCountY;
+                auto neighbor=active;neighbor.zoneId="distant";neighbor.mprPath=root+"/Maps/distant.mpr";
+                SWorldMapZoneOrigin origin;origin.profileId="fixture";origin.allodId="fixture";
+                origin.zoneId=active.zoneId;origin.mprIdentity=active.mprName;origin.componentAnchorZoneId=active.zoneId;
+                auto distantOrigin=origin;distantOrigin.zoneId=neighbor.zoneId;distantOrigin.origin=QPointF(1024,1024);
+                view.setNeighborMapContext({active,neighbor},{origin,distantOrigin},"fixture","fixture","active");
+                check(view.m_worldTerrainEnabled && view.m_hasActiveMapWorldOrigin
+                    && !view.m_worldTerrainEnabledPaths.isEmpty(),"production neighbor context enables shared brush");
+            }
+            if(fixture.value("ownerReleaseRegression").toBool()) {
+                click("landscapePaintSegment");click("terrainLayerSegment_0");
+                click("circlePaintShape");click("vertexPaintTarget");
+                radius->setValue(fixture.value("ownerBrushSize").toInt(4));
+                QStringList materials={"Ground / Common","Yellow lichen","Grass / Burnt"};
+                if(fixture.contains("releaseMaterials")){materials.clear();for(const auto& v:fixture["releaseMaterials"].toArray())materials.append(v.toString());}
+                QVector<QPoint> points={QPoint(45,33),QPoint(73,50),QPoint(90,70)};
+                if(fixture.contains("releasePoints")){points.clear();for(const auto& v:fixture["releasePoints"].toArray()){const auto p=v.toArray();if(!check(p.size()==2,"release point is an XY pair"))return 1;points.append(QPoint(p[0].toInt(),p[1].toInt()));}}
+                for(const QString& material:materials) {
+                    if(!choose(view.m_modernLandPaintChoices,material))continue;
+                    for(const QPoint& point:points) {
+                        const QString name=QString("release-%1-%2-%3").arg(panel.paintTerrainType()).arg(point.x()).arg(point.y());
+                        stroke(name,QVector3D(point.x(),point.y(),0),true,true);
+                        check(view.m_tileStrokeRefused==0,"release accepted "+name);
+                        log.flush();
+                        if(failed){log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return 1;}
+                    }
+                }
+                log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+            }
             // Owner screenshot: Surface delete while every stored paint option is ON.
             surface(ELandscapeEditMode::OverlaySurface);
             choose(view.m_modernOverlayPaintChoices,"Water / Still");click("squarePaintShape");

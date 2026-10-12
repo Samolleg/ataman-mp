@@ -13075,12 +13075,9 @@ bool CView::mixedEdgeTerrainEnabled() const
 bool CView::resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationReport* report)
 {
     if(!stroke || !m_workingTerrainAtlas) return false;
-    if(m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty())
-    {
-        report->add("terrain.mixed_edge.single_map", EValidationSeverity::Error,
-            tr("Mixed-edge is limited to one map. Disable the shared brush for neighboring maps before painting or resolving transitions."));
-        return false;
-    }
+    // Neighbor visibility does not make this a multi-map stroke. Strokes that
+    // cross map boundaries are handled by paintWorldTerrainAt; a local stroke
+    // must still resolve and commit when neighboring maps are selected.
     QSet<int> animatedSlots;
     for(const auto& animation:m_mprAnimatedTiles)
         for(int frame=0;frame<animation.frameCount;++frame) animatedSlots.insert(animation.tileIndex+frame);
@@ -20672,6 +20669,7 @@ void CView::endTileBrushGroup()
                 }
                 if(!exactFallback)
                 {
+                    ei::log(eLogWarning,QStringLiteral("Mixed-edge stroke release refused:\n")+mixedReport.toText());
                     if(m_mixedEdgeStrokeAtlasBefore)
                     {
                         STerrainTileCommand restore;
