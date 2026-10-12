@@ -499,7 +499,7 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
-    void shuffleTerrainTiles(bool selectionOnly, quint32 seed);
+    void shuffleTerrainTiles(bool selectionOnly);
     QSet<int> randomPaintExcludedSlots() const;
     quint32 terrainRandomPaintSeed() const;
     void randomizeTerrainPaintCommand(STerrainTileCommand* command,

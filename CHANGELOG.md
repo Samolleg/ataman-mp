@@ -1,3 +1,10 @@
+## Ataman 149 — EI-PANEL-POLISH-149 — 2026-10-12
+
+- «Перемешать тайлы» выбирает новое системное зерно при каждом нажатии. Зерно сохраняется в MPR; одна команда Undo/Redo охватывает раскладку и зерно.
+- В панели выделяются активные режим и инструмент рельефа; карта и диагностика перенесены вниз, палитра растягивается. Рельеф получил компактные слайдеры силы/шага, подсказки вместо секций «Дополнительно» и «Справка», сетку опций и подписанные Undo/Redo общей кисти.
+- Полоса «Варианты» показывает имя выбранного материала и его доступные миниатюры и скрывается, когда показывать нечего.
+- Проверки и PNG: `docs/validation/ATAMAN_PANEL_POLISH_149_20261012.md`.
+
 ## Ataman 148 — EI-MOB-LOAD-148 — 2026-10-12
 
 - Opening a map no longer waits for the terrain paint catalog, global material source hydration, or thumbnail palette construction. These remain available and build on the first explicit terrain paint action.

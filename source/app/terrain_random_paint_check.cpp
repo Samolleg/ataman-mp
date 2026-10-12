@@ -108,14 +108,14 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         check(!panel.randomizeUniformRotation(),"new rotation policy suppresses legacy uniform rotation");
         auto option=panel.findChild<QCheckBox*>("randomPaintVariants");
         auto shuffle=panel.findChild<QPushButton*>("shuffleTerrainTiles");
-        auto fresh=panel.findChild<QPushButton*>("newRandomPaintSeed");
         auto scope=panel.findChild<QComboBox*>("randomPaintScope");
-        check(option && shuffle && fresh && scope && scope->count()==2,"panel controls and both scopes");
-        panel.setRandomPaintSeed(0);fresh->click();
-        check(panel.randomPaintSeed()==0x9e3779b9u,"new seed field");
+        check(option && shuffle && !panel.findChild<QWidget*>("randomPaintSeed")
+            && !panel.findChild<QWidget*>("newRandomPaintSeed") && scope && scope->count()==2,
+            "panel exposes shuffle scopes without a seed editor");
         bool emitted=false;
-        QObject::connect(&panel,&CLandscapeTools::shuffleTerrainTilesRequested,[&](bool selection,quint32 seed){emitted=!selection && seed==0x9e3779b9u;});
-        shuffle->click();check(emitted,"shuffle signal carries seed and scope");
+        QObject::connect(&panel,&CLandscapeTools::shuffleTerrainTilesRequested,
+            [&](bool selection){emitted=!selection;});
+        shuffle->click();check(emitted,"shuffle signal carries scope; view creates its own seed");
         option->setChecked(false);CLandscapeTools restored;
         check(!restored.randomPaintVariants(),"OFF preference persists");
         check(restored.randomizeUniformRotation(),"OFF retains legacy uniform rotation switch");
@@ -253,13 +253,30 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         view.m_authoredTerrainTileImages=images;
         view.m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(catalog,images,123,4096,{}, {},document.mapInfo().tileTypes,{{1,1},{2,3},{3,1}}));
         view.m_mprAnimatedTiles=document.mapInfo().animatedTiles;tiles.adoptTileImages(images,document.mapInfo().tileTypes);
-        panel.setRandomPaintSeed(0);panel.findChild<QPushButton*>("shuffleTerrainTiles")->click();
+        auto* shuffleButton=panel.findChild<QPushButton*>("shuffleTerrainTiles");
+        shuffleButton->click();
+        const quint32 firstSeed=view.m_terrainEdit.randomPaintSeed();
+        const auto firstShuffle=snapshot(view.m_terrainEdit);
         check(history.count()==1 && view.m_terrainEdit.hasRandomPaintSeed()
-            && view.m_terrainEdit.randomPaintSeed()==0,"mapper button pushes one actual Undo entry with zero seed");
-        const auto shuffled=snapshot(view.m_terrainEdit);
-        check(shuffled!=before,"mapper button changes preview cells");
-        history.undo();check(snapshot(view.m_terrainEdit)==before && !view.m_terrainEdit.hasRandomPaintSeed(),"actual mapper Undo restores cells and seed");
-        history.redo();check(snapshot(view.m_terrainEdit)==shuffled && view.m_terrainEdit.hasRandomPaintSeed(),"actual mapper Redo restores cells and seed");
+            && firstSeed!=123,"first shuffle stores a fresh map seed in one Undo entry");
+        check(firstShuffle!=before,"first shuffle changes typical-map cells");
+        shuffleButton->click();
+        const quint32 secondSeed=view.m_terrainEdit.randomPaintSeed();
+        const auto secondShuffle=snapshot(view.m_terrainEdit);
+        check(history.count()==2 && secondSeed!=firstSeed,
+            "two consecutive shuffle clicks choose different seeds");
+        check(secondShuffle!=firstShuffle,
+            "two consecutive shuffle clicks produce different cell layouts");
+        history.undo();check(snapshot(view.m_terrainEdit)==firstShuffle
+            && view.m_terrainEdit.randomPaintSeed()==firstSeed,
+            "second shuffle Undo restores exact prior cells and seed");
+        history.undo();check(snapshot(view.m_terrainEdit)==before
+            && !view.m_terrainEdit.hasRandomPaintSeed(),
+            "first shuffle Undo restores original cells and seed state");
+        history.redo();history.redo();
+        check(snapshot(view.m_terrainEdit)==secondShuffle
+            && view.m_terrainEdit.randomPaintSeed()==secondSeed,
+            "Redo replays both shuffle transactions exactly");
         QJsonObject seedMember;SResArchiveNewMember member;QByteArray withSemantics;
         check(view.buildTerrainSemanticFieldMember(document.originalBytes(),QFileInfo(scenePath),"Random",
             profile.atlasPixelSha256,profile.toBytes(),&member,&report,nullptr,&withSemantics)
@@ -267,7 +284,8 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         CMprDocument seeded;STerrainSemanticFieldDocument savedSeed;
         check(seeded.loadBytes(withSemantics,"seeded.mpr",&report)
             && STerrainSemanticFieldDocument::fromBytes(seeded.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),&savedSeed,&report)
-            && savedSeed.hasRandomPaintSeed && savedSeed.randomPaintSeed==0,"mapper saved MPR reopens explicit zero seed");
+            && savedSeed.hasRandomPaintSeed && savedSeed.randomPaintSeed==secondSeed,
+            "mapper saved MPR reopens latest shuffle seed");
         history.clear();view.m_terrainEdit=baseline;
         view.m_tileStrokeLayer=ETerrainTileLayer::Land;
         view.m_tileStrokePaletteMode=int(ETerrainPaintPaletteMode::ClassicAuto);

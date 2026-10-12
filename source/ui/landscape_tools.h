@@ -121,8 +121,6 @@ public:
     bool randomizeUniformRotation() const;
     bool randomPaintVariants() const;
     bool generatedHdVariants() const;
-    quint32 randomPaintSeed() const;
-    void setRandomPaintSeed(quint32 seed);
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
     void setOverlayMaterialSlotLabelsVisible(bool visible);
@@ -179,7 +177,7 @@ public:
                               bool notify = false);
 
 signals:
-    void shuffleTerrainTilesRequested(bool selectionOnly, quint32 seed);
+    void shuffleTerrainTilesRequested(bool selectionOnly);
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();
@@ -265,7 +263,6 @@ private:
     QCheckBox* m_randomizeUniformRotation;
     QCheckBox* m_randomPaintVariants;
     QCheckBox* m_generatedHdVariants{nullptr};
-    QLineEdit* m_randomPaintSeed;
     QComboBox* m_randomPaintScope;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;

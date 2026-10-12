@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QSpinBox>
@@ -21,6 +22,8 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QGridLayout>
+#include <QSlider>
+#include <QVBoxLayout>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -98,6 +101,7 @@ private slots:
     void overlaySurfaceModesExposeMaterialSlotLabels();
     void overlayMaterialDropdownRefreshesImmediately();
     void landscapeModeSegmentsKeepEverySurfaceActionAvailable();
+    void landscapePanelPolishControlsAndOrder();
     void classicSettingsMigrateAndCUsesManualOnlyWhileHeld();
     void sharedBrushSizePersistsAcrossModes();
     void paintOptionsRemainVisibleAsRussianChips();
@@ -860,7 +864,6 @@ void LandscapeToolsWidgetTests::landscapeModeSegmentsKeepEverySurfaceActionAvail
         {QStringLiteral("Move objects with terrain"), QStringLiteral("landscapeMoveMobObjects")},
         {QStringLiteral("Map actions fold"), QStringLiteral("landscapeMapToggle")},
         {QStringLiteral("Shuffle tiles"), QStringLiteral("shuffleTerrainTiles")},
-        {QStringLiteral("Shuffle seed"), QStringLiteral("randomPaintSeed")},
         {QStringLiteral("Repair transitions"), QStringLiteral("resolveMissingBlendsButton")},
         {QStringLiteral("Convert to HD"), QStringLiteral("terrainHdRepublish")},
         {QStringLiteral("Generate HD variants"), QStringLiteral("terrainHdVariantsGenerate")},
@@ -907,8 +910,6 @@ void LandscapeToolsWidgetTests::landscapeModeSegmentsKeepEverySurfaceActionAvail
             QStringLiteral("saveModernDraftButton"),
             QStringLiteral("worldTerrainMaps"),
             QStringLiteral("worldTerrainSave"),
-            QStringLiteral("newRandomPaintSeed"),
-            QStringLiteral("randomPaintSeed"),
             QStringLiteral("randomPaintScope"),
             QStringLiteral("worldTerrainUndo"),
             QStringLiteral("worldTerrainRedo"),
@@ -926,7 +927,6 @@ void LandscapeToolsWidgetTests::landscapeModeSegmentsKeepEverySurfaceActionAvail
     auto* brushBody = tools.findChild<QWidget*>("landscapeSharedBrush");
     QVERIFY(mapBody && diagnosticBody && brushBody);
     for(const QString& name : {QStringLiteral("shuffleTerrainTiles"),
-            QStringLiteral("newRandomPaintSeed"),
             QStringLiteral("terrainHdRepublish"),
             QStringLiteral("terrainHdVariantsGenerate"),
             QStringLiteral("resolveMissingBlendsButton"),
@@ -968,6 +968,128 @@ void LandscapeToolsWidgetTests::landscapeModeSegmentsKeepEverySurfaceActionAvail
     QVERIFY(restored.findChild<QToolButton*>("landscapeDiagnosticsToggle")->isChecked());
     QSettings().remove(mapFoldKey);
     QSettings().remove(diagnosticsFoldKey);
+}
+
+void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
+{
+    QSettings().remove(QStringLiteral("ui/landscape/folds/landscapeMap"));
+    QSettings().remove(QStringLiteral("ui/landscape/folds/landscapeDiagnostics"));
+    CLandscapeTools tools;
+    tools.setEditingEnabled(true, false);
+    tools.resize(320, 760);
+    tools.show();
+    QApplication::processEvents();
+
+    auto* paint = tools.findChild<QToolButton*>("landscapePaintSegment");
+    auto* sculpt = tools.findChild<QToolButton*>("landscapeSculptSegment");
+    auto* surfaces = tools.findChild<QToolButton*>("landscapeSurfaceSegment");
+    QVERIFY(paint && sculpt && surfaces);
+    QVERIFY(!paint->text().isEmpty() && !sculpt->text().isEmpty()
+        && !surfaces->text().isEmpty());
+    QVERIFY(paint->isChecked());
+    QVERIFY(paint->styleSheet().contains(QStringLiteral(":checked")));
+    sculpt->click();
+    QVERIFY(sculpt->isChecked());
+    QVERIFY(!paint->isChecked());
+    surfaces->click();
+    QVERIFY(surfaces->isChecked());
+    QVERIFY(!sculpt->isChecked());
+    tools.activateMode(ELandscapeEditMode::Sculpt, false);
+    QVERIFY(sculpt->isChecked());
+    QVERIFY(!surfaces->isChecked());
+
+    for(int tool = int(ELandscapeSculptTool::Raise);
+        tool <= int(ELandscapeSculptTool::BoundaryFill); ++tool)
+    {
+        auto* button = tools.findChild<QToolButton*>(
+            QStringLiteral("sculptTool_%1").arg(tool));
+        QVERIFY(button);
+        button->click();
+        QVERIFY(button->isChecked());
+        QVERIFY(button->styleSheet().contains(QStringLiteral(":checked")));
+    }
+
+    QVERIFY(!tools.findChild<QWidget*>("landscapeSculptAdvanced"));
+    QVERIFY(!tools.findChild<QWidget*>("landscapeHelp"));
+    QVERIFY(tools.findChild<QLabel*>("landscapeSculptShortcuts"));
+    auto* strengthSlider = tools.findChild<QSlider*>("landscapeSculptStrengthSlider");
+    auto* strength = tools.findChild<QDoubleSpinBox*>("landscapeSculptStrength");
+    auto* stepSlider = tools.findChild<QSlider*>("landscapeRaiseLowerStepSlider");
+    auto* step = tools.findChild<QDoubleSpinBox*>("landscapeRaiseLowerStep");
+    QVERIFY(strengthSlider && strength && stepSlider && step);
+    QCOMPARE(step->singleStep(), 100.0);
+    strengthSlider->setValue(62);
+    QCOMPARE(strength->value(), 0.62);
+    stepSlider->setValue(27);
+    QCOMPARE(step->value(), 270.0);
+    tools.setSculptTool(ELandscapeSculptTool::Raise);
+    QVERIFY(!stepSlider->isHidden());
+
+    QVERIFY(!tools.findChild<QWidget*>("randomPaintSeed"));
+    QVERIFY(!tools.findChild<QWidget*>("newRandomPaintSeed"));
+    auto* shuffle = tools.findChild<QPushButton*>("shuffleTerrainTiles");
+    auto* scope = tools.findChild<QComboBox*>("randomPaintScope");
+    QVERIFY(shuffle && scope && scope->count() == 2);
+    QSignalSpy shuffleSpy(&tools, &CLandscapeTools::shuffleTerrainTilesRequested);
+    shuffle->click();
+    QCOMPARE(shuffleSpy.count(), 1);
+    QCOMPARE(shuffleSpy.takeFirst().at(0).toBool(), false);
+
+    auto* shortcuts = tools.findChild<QLabel*>("landscapeBrushShortcuts");
+    QVERIFY(shortcuts);
+    QVERIFY(shortcuts->font().pointSizeF() <= 9.0);
+    auto* undo = tools.findChild<QPushButton*>("worldTerrainUndo");
+    auto* redo = tools.findChild<QPushButton*>("worldTerrainRedo");
+    QVERIFY(undo && redo);
+    QVERIFY(!undo->text().isEmpty() && !redo->text().isEmpty());
+    QVERIFY(undo->toolTip().contains(QStringLiteral("Ctrl+Z")));
+    QVERIFY(redo->toolTip().contains(QStringLiteral("Ctrl+Y")));
+
+    auto* chips = tools.findChild<QWidget*>("terrainPaintOptionChips");
+    QVERIFY(chips && qobject_cast<QGridLayout*>(chips->layout()->itemAt(0)->layout()));
+    for(QCheckBox* chip : chips->findChildren<QCheckBox*>())
+    {
+        QVERIFY(chip->minimumHeight() >= 28);
+        QVERIFY(chip->styleSheet().contains(QStringLiteral(":checked")));
+    }
+    auto* variantTitle = tools.findChild<QLabel*>("terrainVariantStripTitle");
+    auto* variantStrip = tools.findChild<QScrollArea*>("terrainVariantStripScroll");
+    QVERIFY(variantTitle && variantStrip);
+    QVERIFY(variantTitle->isHidden());
+    QVERIFY(variantStrip->isHidden());
+    STerrainPaintMaterialChoice choice;
+    choice.id = 701;
+    choice.name = QStringLiteral("Тестовый материал");
+    choice.thumbnail = QImage(24, 24, QImage::Format_ARGB32_Premultiplied);
+    choice.thumbnail.fill(QColor(90, 130, 70));
+    tools.setPaintMaterials({choice}, {}, {}, 1, 1);
+    QVERIFY(!variantTitle->isHidden());
+    QVERIFY(!variantStrip->isHidden());
+    QCOMPARE(variantTitle->text(), QStringLiteral("Варианты: Тестовый материал"));
+    tools.activateMode(ELandscapeEditMode::TilePaint, false);
+    QApplication::processEvents();
+    const auto variantButtons = variantStrip->findChildren<QToolButton*>();
+    QVERIFY(variantButtons.size() >= 1);
+    QVERIFY(!variantButtons.front()->icon().isNull());
+    QVERIFY(variantButtons.front()->iconSize().width() >= 32);
+    QVERIFY(variantButtons.front()->width() >= 32);
+    tools.setPaintMaterials({}, {}, {}, 0, 0);
+    QVERIFY(variantTitle->isHidden());
+    QVERIFY(variantStrip->isHidden());
+
+    auto* panelScroll = tools.findChild<QScrollArea*>("landscapeToolScroll");
+    QVERIFY(panelScroll && panelScroll->widget());
+    auto* contentsLayout = qobject_cast<QVBoxLayout*>(panelScroll->widget()->layout());
+    auto* palette = tools.findChild<QWidget*>("landscapePaintControls");
+    auto* map = tools.findChild<QWidget*>("landscapeMapSection");
+    auto* diagnostics = tools.findChild<QWidget*>("landscapeDiagnosticsSection");
+    QVERIFY(contentsLayout && palette && map && diagnostics);
+    QVERIFY(contentsLayout->indexOf(palette) >= 0);
+    QVERIFY(contentsLayout->indexOf(palette) < contentsLayout->indexOf(map));
+    QVERIFY(contentsLayout->indexOf(map) < contentsLayout->indexOf(diagnostics));
+    QVERIFY(contentsLayout->stretch(contentsLayout->indexOf(palette)) > 0);
+    QVERIFY(palette->height() > 250);
+    tools.close();
 }
 
 void LandscapeToolsWidgetTests::classicSettingsMigrateAndCUsesManualOnlyWhileHeld()
@@ -1065,11 +1187,11 @@ void LandscapeToolsWidgetTests::paintOptionsRemainVisibleAsRussianChips()
     tools.show();
     QApplication::processEvents();
     const QMap<QString, QString> expected = {
-        {"modernAutoResolveBlends", "Авто-переходы"},
-        {"modernMixedEdge", "Плавные границы"},
-        {"randomPaintVariants", "Случайные варианты"},
-        {"generatedHdVariants", "HD-варианты"},
-        {"randomizeUniformRotation", "Поворот"}
+        {"modernAutoResolveBlends", "Переходы"},
+        {"modernMixedEdge", "Кромки"},
+        {"randomPaintVariants", "Варианты"},
+        {"generatedHdVariants", "HD"},
+        {"randomizeUniformRotation", "Повороты"},
     };
     for(auto it = expected.cbegin(); it != expected.cend(); ++it)
     {
@@ -1236,6 +1358,21 @@ void LandscapeToolsWidgetTests::capturesApprovedLandscapePanelScreenshots()
                 tools.resize(width, 880);
                 tools.show();
                 QApplication::processEvents();
+                if(mode.first == QStringLiteral("paint"))
+                {
+                    auto* strip = tools.findChild<QScrollArea*>(
+                        QStringLiteral("terrainVariantStripScroll"));
+                    if(strip)
+                    {
+                        const auto cards = strip->findChildren<QToolButton*>();
+                        if(!cards.isEmpty())
+                        {
+                            QVERIFY(cards.front()->isVisible());
+                            QVERIFY(cards.front()->geometry().height() >= 48);
+                            QVERIFY(!cards.front()->icon().isNull());
+                        }
+                    }
+                }
                 const QString file = QStringLiteral("%1-%2-%3.png")
                     .arg(theme.first, mode.first).arg(width);
                 QVERIFY2(tools.grab().save(QDir(output).filePath(file), "PNG"),

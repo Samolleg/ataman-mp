@@ -665,8 +665,8 @@ Restore the runtime paths for the selected installation, then retry Test Current
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="114" />
-            <source>Flip image vertically</source>
-            <translation>Перевернуть изображение по вертикали</translation>
+            <source>Flip vertically</source>
+            <translation>Отразить по вертикали</translation>
         </message>
         <message>
             <location filename="../source/ui/landscape_tools.cpp" line="156" />

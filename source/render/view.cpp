@@ -11868,8 +11868,6 @@ void CView::rebuildTerrainAutoCatalog()
     }
     m_terrainSemanticSeed = seed;
     const QString profilePath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
-    if(m_landscapeTools) m_landscapeTools->setRandomPaintSeed(
-        m_terrainEdit.hasRandomPaintSeed() ? m_terrainEdit.randomPaintSeed() : seed);
     bool reviewedProfileActive = false;
     bool provisionalProfileActive = false;
     bool staleProfile = false;
@@ -14155,9 +14153,6 @@ bool CView::restoreTerrainSemanticFieldFromArchive(
         return false;
     }
     if(document.hasRandomPaintSeed) terrain->setRandomPaintSeed(document.randomPaintSeed);
-    if(terrain == &m_terrainEdit && m_landscapeTools)
-        m_landscapeTools->setRandomPaintSeed(terrain->hasRandomPaintSeed()
-            ? terrain->randomPaintSeed() : m_terrainSemanticSeed);
     ei::log(eLogInfo, QStringLiteral(
         "Restored exact shared-corner terrain semantics from %1 payloadBytes:%2 archiveReadBytes:%3")
         .arg(bindingSource).arg(payload.size()).arg(archiveBytesRead));
@@ -21391,9 +21386,6 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         }
         refreshTerrainTilePreview(command,forward);
         refreshWorkingTerrainPalettes();
-        if(command.changesRandomSeed&&m_landscapeTools)
-            m_landscapeTools->setRandomPaintSeed(m_terrainEdit.hasRandomPaintSeed()
-                ?m_terrainEdit.randomPaintSeed():m_terrainSemanticSeed);
         return true;
     }
     if(!m_terrainEdit.apply(command, forward, &report))
@@ -21402,9 +21394,6 @@ bool CView::applyTerrainTilePreview(const STerrainTileCommand& command, bool for
         return false;
     }
     refreshTerrainTilePreview(command, forward);
-    if(command.changesRandomSeed && m_landscapeTools)
-        m_landscapeTools->setRandomPaintSeed(m_terrainEdit.hasRandomPaintSeed()
-            ? m_terrainEdit.randomPaintSeed() : m_terrainSemanticSeed);
     return true;
 }
 
@@ -21462,7 +21451,7 @@ void CView::randomizeTerrainPaintCommand(STerrainTileCommand* command,
     appendTerrainTileCommand(command, random);
 }
 
-void CView::shuffleTerrainTiles(bool selectionOnly, quint32 seed)
+void CView::shuffleTerrainTiles(bool selectionOnly)
 {
     if(!m_terrainEditAvailable || !m_pUndoStack || m_tilePaintStrokeActive
        || !ensureTerrainAutoCatalogReady()) return;
@@ -21496,12 +21485,15 @@ void CView::shuffleTerrainTiles(bool selectionOnly, quint32 seed)
         :m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
         : m_terrainAtlasAnalysis.landCatalog;
     const auto& edit=variantsStage.atlas?variantsStage.terrainEdit:m_terrainEdit;
+    quint32 seed = QRandomGenerator::system()->generate();
+    if(seed == terrainRandomPaintSeed())
+        ++seed;
     auto command = edit.makeRandomTilePaint(catalog, seed, region, randomPaintExcludedSlots(), selectedCells);
     if(variantsStage.atlas&&variantsStage.atlas->activeTileCount()!=m_workingTerrainAtlas->activeTileCount()) {
         command.workingAtlasBefore=m_workingTerrainAtlas->createStagingCopy();command.workingAtlasAfter=variantsStage.atlas;
     }
     command.description = tr("Shuffle tiles");
-    command.changesRandomSeed = !m_terrainEdit.hasRandomPaintSeed() || seed != m_terrainEdit.randomPaintSeed();
+    command.changesRandomSeed = true;
     command.beforeRandomSeed = m_terrainEdit.randomPaintSeed();
     command.beforeRandomSeedSet = m_terrainEdit.hasRandomPaintSeed();
     command.afterRandomSeed = seed;

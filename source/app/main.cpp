@@ -2369,11 +2369,11 @@ int runHeadlessCommand(QApplication& app)
             && circlePaintShape && squarePaintShape->isEnabled()
             && circlePaintShape->isEnabled();
         const QMap<QString, QString> requiredPaintChips = {
-            {QStringLiteral("modernAutoResolveBlends"), QStringLiteral("Авто-переходы")},
-            {QStringLiteral("modernMixedEdge"), QStringLiteral("Плавные границы")},
-            {QStringLiteral("randomPaintVariants"), QStringLiteral("Случайные варианты")},
-            {QStringLiteral("generatedHdVariants"), QStringLiteral("HD-варианты")},
-            {QStringLiteral("randomizeUniformRotation"), QStringLiteral("Поворот")}
+            {QStringLiteral("modernAutoResolveBlends"), QStringLiteral("Переходы")},
+            {QStringLiteral("modernMixedEdge"), QStringLiteral("Кромки")},
+            {QStringLiteral("randomPaintVariants"), QStringLiteral("Варианты")},
+            {QStringLiteral("generatedHdVariants"), QStringLiteral("HD")},
+            {QStringLiteral("randomizeUniformRotation"), QStringLiteral("Повороты")},
         };
         bool paintChipsAvailable = true;
         for(auto it = requiredPaintChips.cbegin(); it != requiredPaintChips.cend(); ++it)
