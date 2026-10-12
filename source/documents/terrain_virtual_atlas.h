@@ -289,11 +289,16 @@ public:
     // Cohort repair uses one reviewed source set and world-coordinate edge
     // ownership. The physical SEC edge may have an along-edge displacement.
     // Side bits are north=1, east=2, south=4, west=8 in terrain-grid space.
+    // A supplied body is native atlas artwork with its packed UV rotation.
+    // The returned artwork has rotation=0; pixels outside the seam band retain
+    // the body's world orientation. Only fallback generation uses the cache;
+    // no body/geometry-dependent output is cached by a material tuple.
     QImage worldBoundaryTile(const STerrainTransitionSignature& signature,
         const CTerrainEditModel& geometry, const QPointF& origin,
         int cellX, int cellY, int sides,
         QMap<QByteArray,QImage>* canonicalCache,
-        CValidationReport* report = nullptr) const;
+        CValidationReport* report = nullptr,
+        const QImage& resolvedBody = QImage(), quint8 bodyRotation = 0) const;
     // Review-only A/B compositor. Runtime generation remains encoded-RGB
     // until the focused visual comparison is explicitly accepted.
     QImage reviewGeneratedBlendLinearLight(

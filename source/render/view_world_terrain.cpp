@@ -1051,8 +1051,19 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
                 if(!available || (layer==ETerrainTileLayer::Overlay && before==0xffff))continue;
                 bool found=false;const auto sig=field.cellSignature(x,y,&found);
                 if(!found)continue;
+                const auto bodyTile=SMprPackedTile::decode(before);
+                const auto bodyImages=stage.atlas->activeTileImages();
+                // Mixed resolve rebuilds B2 cells before this pass. It retains
+                // already-matching uniform artwork, which can be an earlier
+                // anchored result; do not repeatedly feather that result.
+                const bool mixedSignature=!(sig.northWest==sig.northEast&&sig.northWest==sig.southEast&&sig.northWest==sig.southWest);
+                const bool preserveMixedBody=layer==ETerrainTileLayer::Land&&m_landscapeTools->modernMixedEdge()&&mixedSignature;
+                if(preserveMixedBody&&(bodyTile.atlasSlot()>=bodyImages.size()||bodyImages[bodyTile.atlasSlot()].isNull())) {
+                    failedMapStage(it.key(),layer);return true;
+                }
                 const QImage pixels=shared.worldBoundaryTile(sig,stage.terrainEdit,origins[it.key()],
-                    x,y,edge.value(),&canonicalCache,report);
+                    x,y,edge.value(),&canonicalCache,report,
+                    preserveMixedBody?bodyImages[bodyTile.atlasSlot()]:QImage(),preserveMixedBody?bodyTile.rotation:0);
                 if(pixels.isNull()){failedMapStage(it.key(),layer);return true;}
                 const int runtime=stage.atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
                 const int slot=stage.atlas->importWorldBoundaryTile(pixels,runtime,sig,report);
@@ -1496,7 +1507,15 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
                             if(!available)continue;
                             bool found=false;const auto signature=field.cellSignature(x,y,&found);if(!found)continue;
                             const auto side=seamSides.value(map.id).value(seamCell,0);
-                            const auto pixels=shared.worldBoundaryTile(signature,stage.terrainEdit,origins.value(map.id),x,y,side,&canonicalCache,&report);
+                            const auto bodyTile=SMprPackedTile::decode(before);
+                            const auto bodyImages=stage.atlas->activeTileImages();
+                            const bool mixedSignature=!(signature.northWest==signature.northEast&&signature.northWest==signature.southEast&&signature.northWest==signature.southWest);
+                            if(mixedSignature&&(bodyTile.atlasSlot()>=bodyImages.size()||bodyImages[bodyTile.atlasSlot()].isNull())) {
+                                report.add("terrain.world.boundary_body",EValidationSeverity::Error,
+                                    tr("Не удалось прочитать готовый рисунок перехода; общий мазок отменён."));break;
+                            }
+                            const auto pixels=shared.worldBoundaryTile(signature,stage.terrainEdit,origins.value(map.id),x,y,side,&canonicalCache,&report,
+                                mixedSignature?bodyImages[bodyTile.atlasSlot()]:QImage(),mixedSignature?bodyTile.rotation:0);
                             const int runtime=stage.atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
                             const int slot=pixels.isNull()?-1:stage.atlas->importWorldBoundaryTile(pixels,runtime,signature,&report);
                             if(slot<0)break;

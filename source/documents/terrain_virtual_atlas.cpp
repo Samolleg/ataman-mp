@@ -2883,18 +2883,65 @@ QImage CTerrainVirtualAtlas::worldBoundaryTile(
     const STerrainTransitionSignature& signature,
     const CTerrainEditModel& geometry, const QPointF& origin,
     int cellX, int cellY, int sides, QMap<QByteArray,QImage>* cache,
-    CValidationReport* report) const
+    CValidationReport* report, const QImage& resolvedBody, quint8 bodyRotation) const
 {
-    const QByteArray key=signatureKey(signature);
-    QImage canonical=cache?cache->value(key):QImage();
-    if(canonical.isNull()) {
-        canonical=reviewGeneratedBlend(signature,0,nullptr,report);
-        if(canonical.isNull())return {};
-        if(cache)cache->insert(key,canonical);
-    }
-    QImage grid=canonical.mirrored(false,true);
-    const int size=grid.width(),band=qMin(12,size/4),guard=qMin(4,band);
+    const auto refuse=[&](const QString& reason)->QImage {
+        if(report)report->add("terrain.world.boundary_input",EValidationSeverity::Error,reason);
+        return {};
+    };
+    if(!m_valid || cellX<0 || cellY<0 || cellX>=geometry.tileCountX()
+       || cellY>=geometry.tileCountY() || !std::isfinite(origin.x()) || !std::isfinite(origin.y())
+       || sides<0 || (sides&~15) || bodyRotation>3)
+        return refuse("World boundary composition requires a valid atlas, cell, origin, side mask and packed rotation.");
     const QVector<qint32> ids=corners(signature);
+    for(qint32 id:ids)
+        if(!m_materialSources.contains(id) || m_materialSources[id].size()!=m_generationSize)
+            return refuse("World boundary composition requires complete native-size material sources.");
+    if(m_generationSize.width()<2 || m_generationSize.width()!=m_generationSize.height()
+       || (!resolvedBody.isNull() && resolvedBody.size()!=m_generationSize))
+        return refuse("World boundary body/source dimensions differ; artwork was not resized.");
+    QImage body=resolvedBody;
+    if(body.isNull()) {
+        // A caller can reuse its fallback cache across source banks. Include
+        // the complete generation context, not just four material IDs.
+        QByteArray key=signatureKey(signature);QDataStream context(&key,QIODevice::Append);
+        context<<m_generationSize<<m_generatedTilesOpaque<<m_distributionSeed;
+        for(qint32 id:ids)context<<id<<imageHash(m_materialSources[id])<<qint32(m_materialBlendStyles.value(id,ETerrainBlendStyle::Organic));
+        for(const auto& mask:m_blendMaskTemplates)
+            context<<signatureKey(mask.signature)<<mask.ownerMaterial<<mask.otherMaterial
+                <<qint32(mask.ownerStyle)<<qint32(mask.otherStyle)<<mask.sourceLabel<<imageHash(mask.ownershipMask);
+        body=cache?cache->value(key):QImage();
+        if(body.isNull()) {
+            body=reviewGeneratedBlend(signature,0,nullptr,report);
+            if(body.isNull())return {};
+            if(cache)cache->insert(key,body);
+        }
+    }
+    // Match tile.cpp::getNewIndex(row,col,rotation): UV turns are applied in
+    // terrain-grid space after the atlas-to-grid Y mirror, with no resampling.
+    QImage grid=body.mirrored(false,true).transformed(
+        QTransform().rotate(-90.0*bodyRotation),Qt::FastTransformation);
+    const int size=grid.width(),band=qMax(1,qMin(12,size/4));
+    // CTile samples [1/16,15/16] of a tile. Constrain the visible edge,
+    // including both texels of its bilinear footprint, not the unused padding.
+    const int padding=size/16;
+    const auto surfaceCoordinate=[size,padding](int pixel) {
+        if(pixel<=padding)return 0.0;
+        if(pixel>=size-padding-1)return 1.0;
+        return (pixel+0.5-padding)/double(size-2*padding);
+    };
+    const auto worldPoint=[&](double u,double v) {
+        const double gx=2*u,gy=2*v;
+        const int qx=qMin(1,int(std::floor(gx))),qy=qMin(1,int(std::floor(gy)));
+        const double fx=gx-qx,fy=gy-qy;
+        const int vx=2*cellX+qx,vy=2*cellY+qy;
+        const QPointF p00=geometry.terrainVertexPosition(vx,vy),p11=geometry.terrainVertexPosition(vx+1,vy+1);
+        // Render triangles are (00,10,11) and (00,11,01) in each SEC quarter.
+        // Interpolating a bilinear quad changes the sample on warped geometry.
+        return origin+(fx>=fy
+            ?p00+(geometry.terrainVertexPosition(vx+1,vy)-p00)*(fx-fy)+(p11-p00)*fy
+            :p00+(p11-p00)*fx+(geometry.terrainVertexPosition(vx,vy+1)-p00)*(fy-fx));
+    };
     const auto sourcePixel=[&](qint32 material,const QPointF& world) {
         const QImage& source=m_materialSources[material];
         const auto phase=[size](double coordinate) {
@@ -2905,26 +2952,25 @@ QImage CTerrainVirtualAtlas::worldBoundaryTile(
     };
     for(int y=0;y<size;++y)for(int x=0;x<size;++x) {
         int side=-1,distance=band;
-        const int distances[4]={y,size-1-x,size-1-y,x};
+        const int distances[4]={qMax(0,y-padding),qMax(0,size-padding-1-x),qMax(0,size-padding-1-y),qMax(0,x-padding)};
         for(int candidate=0;candidate<4;++candidate)
             if((sides&(1<<candidate)) && distances[candidate]<distance) {
                 side=candidate;distance=distances[candidate];
             }
         if(side<0)continue;
         const bool vertical=side==1 || side==3;
-        const double t=double(vertical?y:x)/qMax(1,size-1);
-        const int vx=2*cellX+(side==1?2:0),vy=2*cellY+(side==2?2:0);
-        const int half=t<=0.5?0:1;
-        const QPointF first=geometry.terrainVertexPosition(vx+(vertical?0:half),vy+(vertical?half:0));
-        const QPointF last=geometry.terrainVertexPosition(vx+(vertical?0:half+1),vy+(vertical?half+1:0));
-        const QPointF world=origin+first+(last-first)*(t*2-half);
-        const double along=vertical?(world.y()-origin.y()-2*cellY)/2
-            :(world.x()-origin.x()-2*cellX)/2;
+        const double t=surfaceCoordinate(vertical?y:x);
+        const QPointF edgeWorld=worldPoint(vertical?(side==1?1:0):t,vertical?t:(side==2?1:0));
+        const QPointF world=worldPoint(surfaceCoordinate(x),surfaceCoordinate(y));
+        const double along=vertical?(edgeWorld.y()-origin.y()-2*cellY)/2
+            :(edgeWorld.x()-origin.x()-2*cellX)/2;
         const qint32 a=ids.at(side==0 || side==3?0:side==1?1:3);
         const qint32 b=ids.at(side==0?1:side==3?3:2);
         const double weight=a==b?0.0:qRound(smoothUnit((along-0.38)/0.24)*255)/255.0;
         const QColor ca=sourcePixel(a,world),cb=sourcePixel(b,world),old=grid.pixelColor(x,y);
-        const double fade=distance<guard?1.0:smoothUnit(double(band-distance)/(band-guard));
+        // Only the visible edge filter footprint is fully constrained. Inward
+        // texels use their own surface point and fade back to the resolved body.
+        const double fade=smoothUnit(1.0-double(distance)/band);
         const auto mix=[&](int av,int bv,int previous) {
             return qBound(0,qRound((av*(1-weight)+bv*weight)*fade+previous*(1-fade)),255);
         };

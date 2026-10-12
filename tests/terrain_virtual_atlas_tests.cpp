@@ -36,6 +36,23 @@ QImage solid(QRgb color)
     return image;
 }
 
+CTerrainEditModel boundaryTestGeometry(const QMap<QPair<int,int>,QPoint>& offsets,
+    CValidationReport* report, int heightBias=0)
+{
+    QByteArray payload(5+33*33*8+16*16*2,'\0');
+    qToLittleEndian<quint32>(0xCF4BF774,reinterpret_cast<uchar*>(payload.data()));
+    for(int y=0;y<33;++y)for(int x=0;x<33;++x) {
+        const int offset=5+(y*33+x)*8;const auto shift=offsets.value(qMakePair(x,y));
+        payload[offset]=char(shift.x());payload[offset+1]=char(shift.y());
+        qToLittleEndian<quint16>(quint16(4000+heightBias+x*x*11+y*57),reinterpret_cast<uchar*>(payload.data()+offset+2));
+    }
+    STerrainSectorSource source;source.memberName="Seam000000.SEC";source.sectorX=source.sectorY=0;
+    source.payload=payload;source.landTileOffset=5+33*33*8;
+    CTerrainEditModel model;
+    model.loadSources(1,1,100.0f,{source},report,1,QVector<qint32>(64,0),0);
+    return model;
+}
+
 QByteArray grayscalePixelHash(const QImage& source)
 {
     const QImage image = source.convertToFormat(QImage::Format_Grayscale8);
@@ -516,6 +533,12 @@ class TerrainVirtualAtlasTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void worldBoundarySamplesSurfaceTriangles();
+    void worldBoundaryPreservesResolvedBody_data();
+    void worldBoundaryPreservesResolvedBody();
+    void worldBoundaryJoinsDeformedMaps_data();
+    void worldBoundaryJoinsDeformedMaps();
+    void worldBoundaryCacheAndDimensions();
     void mixedNativeSizesRenderGenerateAndPublish();
     void mixedNativeAnimationSavePreservesCompressedPage();
     void mixedNativePublicationPreservesSmallTailPage();
@@ -8358,6 +8381,185 @@ void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
     QCOMPARE(imported.importPhysicalTile(newPixels,1,nullptr,"external137",0,&report),128);
     QCOMPARE(imported.activeTileImages().at(128).size(),QSize(256,256));
     QCOMPARE(imported.activeTileImages().mid(0,128),images);
+}
+
+void TerrainVirtualAtlasTests::worldBoundarySamplesSurfaceTriangles()
+{
+    QImage texture(64,64,QImage::Format_RGBA8888);
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x)
+        texture.setPixelColor(x,63-y,QColor(x*3,y*3,20,255));
+    CTerrainTransitionCatalog catalog;
+    STerrainTransitionVariant variant;variant.signature=signature(1,1,1,1);
+    QVERIFY(catalog.addVariant(variant));
+    CTestTerrainVirtualAtlas atlas(catalog,{texture},0,{}, {},true,{0},{{1,0}});
+    QVERIFY(atlas.isValid());
+    CValidationReport report;const auto flat=boundaryTestGeometry({},&report),
+        deformed=boundaryTestGeometry({{qMakePair(1,1),QPoint(63,-47)}},&report);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    const auto before=deformed.sectorPayload(0,0);
+    QMap<QByteArray,QImage> cache;
+    const QPointF origin(0.15,0.25);
+    const QImage a=atlas.worldBoundaryTile(signature(1,1,1,1),flat,origin,0,0,8,&cache,&report);
+    const QImage b=atlas.worldBoundaryTile(signature(1,1,1,1),deformed,origin,0,0,8,&cache,&report);
+    QVERIFY(!a.isNull()&&!b.isNull());
+    // Only the inner centre vertex moved; every point of the west border is
+    // unchanged. A projection onto that border misses this inward difference.
+    for(int y=0;y<64;++y)QCOMPARE(a.pixel(0,y),b.pixel(0,y));
+    QVERIFY(a.pixel(7,63-20)!=b.pixel(7,63-20));
+    QVERIFY(b.pixel(4,63-20)!=b.pixel(5,63-20));
+    // Independent oracle: lower triangle (00,11,01), not a bilinear quad.
+    const double fx=7.0/56,fy=33.0/56;
+    const QPointF world=origin+QPointF(fx*(1+63.0/254),fy-fx*47.0/254);
+    const int sx=int(std::floor(world.x()*32)),sy=int(std::floor(world.y()*32));
+    const double t=0.75,fade=t*t*(3-2*t);
+    QCOMPARE(b.pixelColor(7,63-20),QColor(qRound(sx*3*fade+21*(1-fade)),
+        qRound(sy*3*fade+60*(1-fade)),20,255));
+    // Upper triangle (00,10,11) is different on this warped quarter too.
+    const QImage north=atlas.worldBoundaryTile(signature(1,1,1,1),deformed,origin,0,0,1,&cache,&report);
+    const QPointF upperWorld=origin+QPointF(fy+fx*63.0/254,fx*(1-47.0/254));
+    const int ux=int(std::floor(upperWorld.x()*32)),uy=int(std::floor(upperWorld.y()*32));
+    QCOMPARE(north.pixelColor(20,63-7),QColor(qRound(ux*3*fade+60*(1-fade)),
+        qRound(uy*3*fade+21*(1-fade)),20,255));
+    QCOMPARE(deformed.sectorPayload(0,0),before);
+}
+
+void TerrainVirtualAtlasTests::worldBoundaryPreservesResolvedBody_data()
+{
+    QTest::addColumn<int>("rotation");QTest::addColumn<int>("sides");
+    for(int rotation=0;rotation<4;++rotation)for(int sides:{1,2,4,8,15})
+        QTest::newRow(qPrintable(QString("turn%1-sides%2").arg(rotation).arg(sides)))<<rotation<<sides;
+}
+
+void TerrainVirtualAtlasTests::worldBoundaryPreservesResolvedBody()
+{
+    QFETCH(int,rotation);QFETCH(int,sides);
+    QImage red(64,64,QImage::Format_RGBA8888),green=red;
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
+        red.setPixelColor(x,y,QColor(150+x,20+y,31,255));
+        green.setPixelColor(x,y,QColor(19,150+y,20+x,255));
+    }
+    CTerrainTransitionCatalog catalog;
+    for(int id:{1,2}) {
+        STerrainTransitionVariant variant;variant.signature=signature(id,id,id,id);
+        variant.packedTile=quint16(id-1);QVERIFY(catalog.addVariant(variant));
+    }
+    CTestTerrainVirtualAtlas atlas(catalog,{red,green},0,{}, {},true,{0,1},{{1,0},{2,1}});
+    QVERIFY(atlas.isValid());
+    STerrainRecipeBakeInput input;input.tileWidth=input.tileHeight=1;
+    input.vertexMaterials={1,2,2,2};input.preferredMaterials={1};
+    STerrainRecipeMaterial first,second;first.materialId=1;first.runtimeTerrainType=0;first.uniformTiles={red};
+    second.materialId=2;second.runtimeTerrainType=1;second.uniformTiles={green};input.materials={first,second};
+    STerrainRecipeBrush brush;QString error;
+    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(1,2,&brush,&error));input.brushes={brush};
+    STerrainRecipeBakeOptions options;options.tileSize=64;options.polishedMaterialEdges=true;
+    options.stableCoordinateVariants=true;options.origin=QPoint(8,8);
+    const auto baked=CTerrainRecipeBaker::bake(input,options);
+    QVERIFY2(baked.success,qPrintable(baked.diagnostics.join("\n")));
+    const QImage body=baked.tiles[baked.tileByCell.first()].pixels;
+    // Independent UV oracle from the public packed index contract. These
+    // pixels are the resolved B2 body, not the canonical variation-0 fallback.
+    QImage oriented(64,64,QImage::Format_RGBA8888);
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
+        int sx=x,sy=y;
+        switch(rotation) {
+        case 1:sx=63-y;sy=x;break;
+        case 2:sx=63-x;sy=63-y;break;
+        case 3:sx=y;sy=63-x;break;
+        }
+        oriented.setPixel(x,63-y,body.pixel(sx,63-sy));
+    }
+    CValidationReport report;const auto model=boundaryTestGeometry({},&report);
+    QMap<QByteArray,QImage> cache;
+    const auto wanted=CTerrainTransitionCatalog::rotated(signature(1,2,2,2),rotation);
+    const QImage result=atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,body,quint8(rotation));
+    QVERIFY2(!result.isNull()&&!report.hasErrors(),qPrintable(report.toText()));
+    QCOMPARE(result,atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,oriented,0));
+    QVERIFY(cache.isEmpty());
+    int unchanged=0,changed=0;
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
+        const bool band=((sides&1)&&y<16)||((sides&2)&&x>=48)
+            ||((sides&4)&&y>=48)||((sides&8)&&x<16);
+        if(!band){QCOMPARE(result.pixel(x,63-y),oriented.pixel(x,63-y));++unchanged;}
+        else changed+=result.pixel(x,63-y)!=oriented.pixel(x,63-y);
+    }
+    QVERIFY(unchanged>0);QVERIFY(changed>0);
+    // Opposite (interior-facing) edge is completely retained for one seam.
+    if(sides==8||sides==2)for(int y=0;y<64;++y)
+        QCOMPARE(result.pixel(sides==8?63:0,y),oriented.pixel(sides==8?63:0,y));
+    if(sides==1||sides==4)for(int x=0;x<64;++x)
+        QCOMPARE(result.pixel(x,sides==1?0:63),oriented.pixel(x,sides==1?0:63));
+    QCOMPARE(atlas.worldBoundaryTile(wanted,model,{},8,8,0,&cache,&report,body,quint8(rotation)),oriented);
+    QImage other=body;other.setPixelColor(30,29,QColor(1,2,245,255));
+    const QImage alternative=atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,other,quint8(rotation));
+    QVERIFY(result!=alternative); // A material-tuple cache must not erase body identity.
+    CTestTerrainWorkingAtlas working(catalog,{red,green},0,64,{}, {},{0,1},{{1,0},{2,1}});
+    const int slot=working.importWorldBoundaryTile(result,0,wanted,&report);
+    QVERIFY2(slot>=0&&!report.hasErrors(),qPrintable(report.toText()));
+    SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
+    QCOMPARE(packed.rotation,quint8(0));
+    bool found=false;QCOMPARE(working.catalog().gridSignatureForPacked(packed.encode(),&found),wanted);QVERIFY(found);
+    QCOMPARE(working.activeTileImages().at(slot),result);
+    QCOMPARE(working.runtimeTerrainTypeForSlot(slot),0);
+}
+
+void TerrainVirtualAtlasTests::worldBoundaryJoinsDeformedMaps_data()
+{
+    QTest::addColumn<bool>("horizontal");
+    QTest::newRow("east-west")<<false;QTest::newRow("south-north")<<true;
+}
+
+void TerrainVirtualAtlasTests::worldBoundaryJoinsDeformedMaps()
+{
+    QFETCH(bool,horizontal);
+    QImage first(64,64,QImage::Format_RGBA8888),second=first;
+    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
+        first.setPixelColor(x,y,QColor(120+x,25+y,22,255));
+        second.setPixelColor(x,y,QColor(10+x,120+y,55,255));
+    }
+    CTerrainTransitionCatalog catalog;
+    for(int id:{1,2}) {STerrainTransitionVariant v;v.signature=signature(id,id,id,id);v.packedTile=quint16(id-1);QVERIFY(catalog.addVariant(v));}
+    CTestTerrainVirtualAtlas atlas(catalog,{first,second},0,{}, {},true,{0,1},{{1,0},{2,1}});
+    CValidationReport report;
+    const auto left=boundaryTestGeometry({{horizontal?qMakePair(9,32):qMakePair(32,9),QPoint(31,-63)}},&report);
+    const auto right=boundaryTestGeometry({{horizontal?qMakePair(9,0):qMakePair(0,9),QPoint(31,-63)}},&report,1000);
+    const auto leftBytes=left.sectorPayload(0,0),rightBytes=right.sectorPayload(0,0);
+    QMap<QByteArray,QImage> cache;
+    const auto ls=signature(1,1,2,1),rs=signature(1,2,2,2);
+    const QImage a=atlas.worldBoundaryTile(ls,left,QPointF(0.25,0.4),horizontal?4:15,horizontal?15:4,
+        horizontal?4:2,&cache,&report,first,1);
+    const QImage b=atlas.worldBoundaryTile(rs,right,horizontal?QPointF(0.25,32.4):QPointF(32.25,0.4),
+        horizontal?4:0,horizontal?0:4,horizontal?1:8,&cache,&report,second,3);
+    QVERIFY2(!a.isNull()&&!b.isNull()&&!report.hasErrors(),qPrintable(report.toText()));
+    for(int i=0;i<64;++i)
+        QCOMPARE(horizontal?a.pixel(i,0):a.pixel(63,i),horizontal?b.pixel(i,63):b.pixel(0,i));
+    // Renderer UV endpoints are at 1/16 and15/16, halfway between
+    // texels3/4 and59/60 at64px. Both bilinear footprints must agree.
+    for(int i=4;i<60;++i)for(int offset=0;offset<2;++offset)
+        QCOMPARE(horizontal?a.pixel(i,3+offset):a.pixel(59+offset,i),
+                 horizontal?b.pixel(i,59+offset):b.pixel(3+offset,i));
+    QCOMPARE(left.sectorPayload(0,0),leftBytes);QCOMPARE(right.sectorPayload(0,0),rightBytes);
+    QVERIFY(left.height(1,1)!=right.height(1,1)); // A non-flat height fixture is retained, never reconciled.
+}
+
+void TerrainVirtualAtlasTests::worldBoundaryCacheAndDimensions()
+{
+    QImage first(64,64,QImage::Format_RGBA8888);first.fill(QColor(180,15,25,255));
+    QImage second=first;second.fill(QColor(15,190,30,255));
+    CTerrainTransitionCatalog catalog;STerrainTransitionVariant v;v.signature=signature(1,1,1,1);QVERIFY(catalog.addVariant(v));
+    CTestTerrainVirtualAtlas a(catalog,{first},0,{}, {},true,{0},{{1,0}}),b(catalog,{second},0,{}, {},true,{0},{{1,0}});
+    CValidationReport report;const auto model=boundaryTestGeometry({},&report);
+    QMap<QByteArray,QImage> cache;
+    QCOMPARE(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&report),first);
+    QCOMPARE(b.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&report),second);
+    QCOMPARE(cache.size(),2);
+    QImage wrong(32,64,QImage::Format_RGBA8888);wrong.fill(Qt::black);
+    CValidationReport invalid;
+    QVERIFY(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&invalid,wrong,0).isNull());
+    QVERIFY(invalid.hasErrors());QCOMPARE(cache.size(),2);
+    invalid=CValidationReport();
+    QVERIFY(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&invalid,first,4).isNull());QVERIFY(invalid.hasErrors());
+    invalid=CValidationReport();
+    QVERIFY(a.worldBoundaryTile(signature(999,999,999,999),model,{},0,0,8,&cache,&invalid,first,0).isNull());QVERIFY(invalid.hasErrors());
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

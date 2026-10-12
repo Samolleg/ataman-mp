@@ -27,6 +27,7 @@
 #include "mmp_codec.h"
 #include "neighbor_map_layout.h"
 #include "resource_name.h"
+#include "terrain_semantic_field_store.h"
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -38,11 +39,47 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QCryptographicHash>
+#include <QPainter>
+#include <functional>
+#include <QOpenGLFunctions>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLContext>
+
+namespace {
+class HiddenTerrainCheckWindows : public QObject {
+public:
+    bool eventFilter(QObject* watched,QEvent* event) override {
+        if(event->type()==QEvent::Polish)if(auto* widget=qobject_cast<QWidget*>(watched))
+            if(widget->isWindow())widget->setAttribute(Qt::WA_DontShowOnScreen);
+        return false;
+    }
+};
+// Atlas thumbnails have the opposite Y direction to the terrain grid. Apply
+// the packed UV turn using the same index mapping as tile.cpp::getNewIndex.
+QImage seamGridImage(const QImage& atlasImage, quint8 rotation)
+{
+    const QImage grid=atlasImage.mirrored(false,true);
+    if(grid.isNull() || grid.width()!=grid.height())return {};
+    QImage result(grid.size(),QImage::Format_ARGB32);
+    const int n=grid.width()-1;
+    for(int y=0;y<=n;++y)for(int x=0;x<=n;++x) {
+        int sx=x,sy=y;
+        switch(rotation&3) {
+        case 1:sx=n-y;sy=x;break;
+        case 2:sx=n-x;sy=n-y;break;
+        case 3:sx=y;sy=n-x;break;
+        }
+        result.setPixel(x,y,grid.pixel(sx,sy));
+    }
+    return result;
+}
+}
 
 // Opt-in hidden integration check. Real resources are read only; output and
 // settings are restricted to scratch. No normal editor window is shown.
 int runNeighborPerformanceCheck()
 {
+    HiddenTerrainCheckWindows hiddenWindows;qApp->installEventFilter(&hiddenWindows);
     QTextStream out(stdout); int failures=0;
     out.setCodec("UTF-8");
     const auto check=[&](bool pass,const char* label) {
@@ -176,11 +213,15 @@ int runNeighborPerformanceCheck()
         view.m_worldTerrainEnabled=true;view.m_neighborPlacements.clear();
         SNeighborMapPlacement adjacent;adjacent.mprPath=root+"/Maps/"+qEnvironmentVariable("EI_WORLD_BRUSH_NEIGHBOR","zone2")+".mpr";
         CMprDocument other;CValidationReport validation;
-        if(!other.load(QFileInfo(adjacent.mprPath),&validation))return 1;
+        if(!other.load(QFileInfo(adjacent.mprPath),&validation)) {out<<"Neighbor MPR error: "<<validation.toText()<<"\n";return 1;}
         adjacent.worldOrigin={view.m_terrainEdit.tileCountX()*2.0,0};adjacent.origin=adjacent.worldOrigin;
         adjacent.size={other.mapInfo().sectorCountX*32.0,other.mapInfo().sectorCountY*32.0};
         QVector3D seamPoint(float(adjacent.origin.x()),16.0f,0.0f);
         if(qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK")) {
+            check((zone=="zone4"&&qEnvironmentVariable("EI_WORLD_BRUSH_NEIGHBOR")=="zone6")
+                ||(zone=="zone6"&&qEnvironmentVariable("EI_WORLD_BRUSH_NEIGHBOR")=="zone4"),
+                "seam fixture explicitly selects the real zone4/zone6 pair");
+            if(failures)return 1;
             if(zone=="zone4") {
                 view.m_activeMapWorldOrigin={960,190};adjacent.worldOrigin={704,64};
                 seamPoint=QVector3D(0,16,0);
@@ -194,6 +235,108 @@ int runNeighborPerformanceCheck()
         view.m_worldTerrainEnabledPaths.insert(CWorldTerrainSession::key(adjacent.mprPath));
         tools.activateMode(ELandscapeEditMode::TilePaint,true);tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         const auto activeId=CWorldTerrainSession::key(placement.mprPath),neighborId=CWorldTerrainSession::key(adjacent.mprPath);
+        // Export a world-ordered neighbourhood, not two unrelated outer edges.
+        // The centre seam is x=960, with zone6 on the left and zone4 on the right.
+        // Semantic mixing and border continuity are separate assertions; neither
+        // is a substitute for reviewing the visible transition.
+        const auto inspectSeam=[&](const QString& name,const CTerrainEditModel& activeModel,
+            const CTerrainEditModel& neighborModel,
+            const std::function<QImage(bool,int,int)>& readTile,bool requireMixed) {
+            if(!qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK"))return;
+            const bool active4=zone=="zone4";
+            const auto& left=active4?neighborModel:activeModel;
+            const auto& right=active4?activeModel:neighborModel;
+            CTerrainVirtualMaterialField lf,rf;
+            bool valid=left.copyVirtualMaterialField(ETerrainTileLayer::Land,&lf,false)
+                &&right.copyVirtualMaterialField(ETerrainTileLayer::Land,&rf,false);
+            const int centre=qRound((view.m_activeMapWorldOrigin.y()+seamPoint.y()-190)/2.0);
+            QImage joined;int mixed[2]={0,0},borderMismatch=0;QByteArray manifest;
+            QTextStream meta(&manifest,QIODevice::WriteOnly);
+            meta<<"world x=[954,966), y=["<<190+(centre-3)*2<<","<<190+(centre+4)*2
+                <<"); zone6 left, zone4 right; grid +Y down; packed UV rotation applied\n";
+            for(int row=0;row<7;++row) {
+                QImage edges[2];
+                for(int col=0;col<6;++col) {
+                    const bool isLeft=col<3,isActive=isLeft?!active4:active4;
+                    const auto& model=isLeft?left:right;const auto& field=isLeft?lf:rf;
+                    const int x=isLeft?model.tileCountX()-3+col:col-3;
+                    const int y=centre-3+row+(isLeft?63:0);
+                    bool available=false;const auto packed=SMprPackedTile::decode(model.packedTile(x,y,ETerrainTileLayer::Land,&available));
+                    const QImage image=seamGridImage(readTile(isActive,x,y),packed.rotation);
+                    bool known=false;const auto sig=field.cellSignature(x,y,&known);
+                    const QSet<qint32> ids{sig.northWest,sig.northEast,sig.southEast,sig.southWest};
+                    valid &= available&&known&&!image.isNull();
+                    if((col==2||col==3)&&known&&ids.size()>1)++mixed[isLeft?0:1];
+                    meta<<(isLeft?"zone6":"zone4")<<" "<<x<<","<<y<<" slot="<<packed.atlasSlot()
+                        <<" rotation="<<packed.rotation<<" corners="<<sig.northWest<<","<<sig.northEast
+                        <<","<<sig.southEast<<","<<sig.southWest<<"\n";
+                    if(image.isNull())continue;
+                    if(joined.isNull()){joined=QImage(image.width()*6,image.height()*7,QImage::Format_ARGB32);joined.fill(Qt::magenta);}
+                    if(image.size()!=QSize(joined.width()/6,joined.height()/7)){valid=false;continue;}
+                    QPainter painter(&joined);painter.drawImage(col*image.width(),row*image.height(),image);
+                    if(col==2)edges[0]=image;if(col==3)edges[1]=image;
+                }
+                if(!edges[0].isNull()&&edges[0].size()==edges[1].size())
+                    for(int y=0;y<edges[0].height();++y)
+                        borderMismatch+=edges[0].pixel(edges[0].width()-1,y)!=edges[1].pixel(0,y);
+                else valid=false;
+            }
+            meta<<"mixed seam cells left="<<mixed[0]<<" right="<<mixed[1]<<" border mismatches="<<borderMismatch<<"\n";
+            meta.flush();out<<name<<": "<<manifest;out.flush();
+            check(valid,"seam neighbourhood has complete decoded tiles and semantic signatures");
+            if(requireMixed) {
+                check(mixed[0]>0&&mixed[1]>0,"mixed witness has non-uniform semantic seam cells on BOTH maps (visual acceptance remains open)");
+                check(valid&&borderMismatch==0,"mixed witness retains exact border continuity independently of semantic mixing");
+            }
+            QString directory=qEnvironmentVariable("EI_WORLD_REPAIR_SEAM_CAPTURE_DIR");
+            if(directory.isEmpty())directory=root+"/seam-captures";
+            const bool made=QDir().mkpath(directory);
+            QFile details(directory+"/"+name+".txt");
+            const bool wrote=details.open(QIODevice::WriteOnly)&&details.write(manifest)==manifest.size();details.close();
+            check(made&&wrote&&valid&&joined.save(directory+"/"+name+"-native.png","PNG")
+                &&joined.scaled(joined.size()*4,Qt::IgnoreAspectRatio,Qt::FastTransformation).save(directory+"/"+name+"-4x.png","PNG"),
+                "export world-ordered seam context and coordinate/signature receipt");
+        };
+        const auto inspectSession=[&](const QString& name,bool requireMixed) {
+            const auto a=view.m_worldTerrainSession.documents.value(activeId),b=view.m_worldTerrainSession.documents.value(neighborId);
+            if(!a||!b)return;
+            inspectSeam(name,a->terrain,b->terrain,[&](bool active,int x,int y) {
+                const auto doc=active?a:b;bool available=false;
+                const auto packed=SMprPackedTile::decode(doc->terrain.packedTile(x,y,ETerrainTileLayer::Land,&available));
+                const auto images=doc->atlas->activeTileImages();
+                return available&&packed.atlasSlot()<images.size()?images[packed.atlasSlot()]:QImage();
+            },requireMixed);
+        };
+        const auto nativeSeam=[&](const QString& name) {
+            if(!qEnvironmentVariableIsSet("EI_WORLD_NATIVE_SEAM_CAPTURE"))return;
+            view.m_neighborLandscapesVisible=true;
+            if(view.m_neighborLandscapes.isEmpty()) {
+                view.loadNeighborLandscapes();QElapsedTimer wait;wait.start();
+                while(view.m_neighborLandscapes.isEmpty() && wait.elapsed()<120000) {
+                    QApplication::processEvents();QThread::msleep(5);
+                }
+            }
+            check(view.m_neighborLandscapes.size()==1,"native viewport contains both real maps");
+            for(const auto& id:QStringList{activeId,neighborId})
+                if(view.m_worldTerrainSession.documents.contains(id))view.previewWorldPaintState(id);
+            if(auto* o=dynamic_cast<COptInt*>(settings.opt("renderLightingMode")))o->setValue(0);
+            if(auto* o=dynamic_cast<COptBool*>(settings.opt("frustumCulling")))o->setValue(false);
+            view.m_fogVisible=false;view.m_sceneLightsVisible=false;
+            view.m_bDrawWater=false;view.m_bDrawLand=true;view.m_bPreviewTile=false;view.m_tileGridVisible=false;
+            view.resize(1024,1024);QApplication::processEvents();view.makeCurrent();view.resizeGL(1024,1024);
+            view.m_cam->setLocation(seamPoint+QVector3D(0,0,256),QVector3D(),QVector3D());
+            view.m_projection.setToIdentity();view.m_projection.ortho(-8,8,-8,8,1,512);
+            QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+            QOpenGLFramebufferObject target(QSize(1024,1024),format);view.m_sceneReviewTarget=&target;
+            view.draw();QOpenGLContext::currentContext()->functions()->glFinish();
+            const QImage frame=target.toImage();view.m_sceneReviewTarget=nullptr;target.release();
+            const QString directory=qEnvironmentVariable("EI_WORLD_REPAIR_SEAM_CAPTURE_DIR");
+            QDir().mkpath(directory);
+            check(view.m_landProgram.isLinked()&&!frame.isNull()&&frame.save(directory+"/"+name+"-viewport.png"),"native terrain viewport capture saved");
+            out<<"VIEWPORT "<<name<<" size="<<frame.width()<<","<<frame.height()
+               <<" world centre="<<seamPoint.x()+view.m_activeMapWorldOrigin.x()<<","<<seamPoint.y()+view.m_activeMapWorldOrigin.y()
+               <<" ortho=16x16 eyeZ=256 rotation=0 land=1 water=0 lighting=0 minimap=0 neighbors="<<view.m_neighborLandscapes.size()<<"\n";out.flush();
+        };
         bool selected=false;
         QString selectedFamily;
         if(qEnvironmentVariableIsSet("EI_WORLD_MIXED_EDGE_BRUSH_CHECK")) {
@@ -304,12 +447,16 @@ int runNeighborPerformanceCheck()
                 recovered.copyVirtualMaterialField(ETerrainTileLayer::Overlay,&beforeOverlayFields[id],false);
             }
             inputHashes[root+"/world-map-layouts.json"]=digest(root+"/world-map-layouts.json");
+            inspectSession("repair-before",false);
+            nativeSeam("repair-before");
             QString summary;CValidationReport repair;STerrainResolveAuditSession audit;
             const bool repaired=view.resolveWorldMaterialBlends(&summary,&repair,&audit,seamPair) && !repair.hasErrors();
             if(!repaired)out<<"World repair summary: "<<summary<<"\n"<<repair.toText()<<"\n";
             check(repaired,"world physical blend repair completes");
             out<<summary<<"\n"<<repair.toText()<<"\n";out.flush();
             if(repair.hasErrors())return 1;
+            inspectSession("repair-after",qEnvironmentVariableIsSet("EI_WORLD_SEAM_MIXED_WITNESS"));
+            nativeSeam("repair-after");
             QMap<QString,QVector<QByteArray>> after;
             QMap<QString,QMap<QPair<int,int>,QByteArray>> afterByCoordinate;
             QMap<QString,QByteArray> materialHashes,afterModels,afterAtlases;
@@ -390,12 +537,14 @@ int runNeighborPerformanceCheck()
             QString error;
             if(view.m_worldTerrainSession.canUndo()) {
                 check(view.worldTerrainHistory(false,true),"three-map repair undo");
+                inspectSession("repair-undo",false);
                 for(auto it=beforeModels.cbegin();it!=beforeModels.cend();++it) {
                     const auto doc=view.m_worldTerrainSession.documents[it.key()];
                     check(modelState(*doc)==it.value() && doc->atlas->stateFingerprint()==beforeAtlases[it.key()],
                         "undo exactly restores physical payloads, both semantic field states and atlas");
                 }
                 check(view.worldTerrainHistory(true,true),"three-map repair redo");
+                inspectSession("repair-redo",qEnvironmentVariableIsSet("EI_WORLD_SEAM_MIXED_WITNESS"));
                 for(auto it=after.cbegin();it!=after.cend();++it) {
                     QVector<QByteArray> restored;const auto doc=view.m_worldTerrainSession.documents[it.key()];
                     for(const auto& sec:doc->baseline.sectors())restored.append(doc->terrain.sectorPayload(sec.sectorX,sec.sectorY));
@@ -499,6 +648,17 @@ int runNeighborPerformanceCheck()
                 }
                 check(reopened,"reopen both repaired copied maps with saved sectors intact");
                 if(reopened && seamPair) {
+                    for(const auto& id:cohort) {
+                        CValidationReport semanticReport;
+                        STerrainSemanticFieldDocument semantic;
+                        const bool valid=STerrainSemanticFieldDocument::fromBytes(
+                            diskMaps[id].memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),&semantic,&semanticReport)
+                            && semantic.terrainTilesSha256==STerrainSemanticFieldDocument::tileBindingSha256(diskMaps[id])
+                            && semantic.mprNamespace==diskMaps[id].mapInfo().innerNamespace
+                            && diskModels[id].restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,semantic.land,semantic.land,&semanticReport)
+                            && diskModels[id].restoreVirtualMaterialFieldState(ETerrainTileLayer::Overlay,semantic.overlay,semantic.overlay,&semanticReport);
+                        check(valid,"restore bound semantic fields after repair save");
+                    }
                     const auto id4=CWorldTerrainSession::key(root+"/Maps/zone4.mpr");
                     const auto id6=CWorldTerrainSession::key(root+"/Maps/zone6.mpr");
                     CTerrainVirtualMaterialField field4,field6;
@@ -522,6 +682,9 @@ int runNeighborPerformanceCheck()
                             pixels=false;
                         return tile;
                     };
+                    inspectSeam("repair-reopened",diskModels[activeId],diskModels[neighborId],
+                        [&](bool active,int x,int y){return decode(active?activeId:neighborId,x,y);},
+                        qEnvironmentVariableIsSet("EI_WORLD_SEAM_MIXED_WITNESS"));
                     for(int y=0;y<129 && pixels;++y) {
                         if(y+63>=179 && y+63<=182)continue;
                         const QImage a=decode(id4,0,y),b=decode(id6,127,y+63);
@@ -567,64 +730,32 @@ int runNeighborPerformanceCheck()
         const QByteArray activeBeforeState=worldState(*view.m_worldTerrainSession.documents.value(activeId));
         const QByteArray neighborBeforeState=worldState(*view.m_worldTerrainSession.documents.value(neighborId));
         QString message;QObject::connect(&view,&CView::updateMsg,&view,[&](const QString& text){message=text;});
+        nativeSeam("stroke-before");
+        if(qEnvironmentVariableIsSet("EI_WORLD_NATIVE_REOPEN_ONLY"))return failures?1:0;
         view.beginTileBrushGroup();
         check(view.paintWorldTerrainAt(seamPoint,true),"shared painter handles boundary stamp");
         out<<"Painter message: "<<message<<"\n";
         check(view.m_worldTerrainStroke.paint.contains(activeId)&&view.m_worldTerrainStroke.paint.contains(neighborId),"one stroke changes both real independent atlases");
-        if(qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK")) {
-            const auto seamTile=[](const CTerrainEditModel& model,const CTerrainWorkingAtlas* atlas,int x,int y) {
-                if(!atlas)return QImage();bool available=false;
-                const quint16 packed=model.packedTile(x,y,ETerrainTileLayer::Land,&available);
-                const int slot=SMprPackedTile::decode(packed).atlasSlot();const auto images=atlas->activeTileImages();
-                return available&&slot>=0&&slot<images.size()?images[slot]:QImage();
-            };
-            const int activeY=qBound(0,int(std::floor(seamPoint.y()/2.0f)),before.tileCountY()-1);
-            const double worldY=view.m_activeMapWorldOrigin.y()+seamPoint.y();
-            const int neighborY=qBound(0,int(std::floor((worldY-adjacent.worldOrigin.y())/2.0)),neighborBefore.tileCountY()-1);
-            const bool activeIsZone4=zone=="zone4";
-            const QImage a=seamTile(before,activeBeforeAtlas.data(),activeIsZone4?0:before.tileCountX()-1,activeY);
-            const QImage b=seamTile(neighborBefore,neighborBeforeAtlas.data(),activeIsZone4?neighborBefore.tileCountX()-1:0,neighborY);
-            QImage seam(a.width()*2,a.height(),QImage::Format_ARGB32);seam.fill(Qt::black);
-            if(!a.isNull()&&!b.isNull()) {QPainter painter(&seam);painter.drawImage(0,0,a);painter.drawImage(a.width(),0,b);painter.end();}
-            const bool saved=!a.isNull()&&!b.isNull()&&seam.scaled(seam.size()*4,Qt::IgnoreAspectRatio,Qt::FastTransformation)
-                .save(qEnvironmentVariable("EI_NEIGHBOR_PERF_ROOT")+"/seam-before.png","PNG");
-            check(saved,"export copied-map seam-before PNG");
-        }
+        inspectSeam("stroke-before",before,neighborBefore,[&](bool active,int x,int y) {
+            const auto& model=active?before:neighborBefore;const auto atlas=active?activeBeforeAtlas:neighborBeforeAtlas;
+            bool available=false;const auto tile=SMprPackedTile::decode(model.packedTile(x,y,ETerrainTileLayer::Land,&available));
+            const auto images=atlas->activeTileImages();
+            return available&&tile.atlasSlot()<images.size()?images[tile.atlasSlot()]:QImage();
+        },false);
         view.endTileBrushGroup();
         check(view.m_worldTerrainSession.canUndo(),"one shared stroke creates one undo transaction for both maps");
-        if(qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK")) {
-            const auto activeDoc=view.m_worldTerrainSession.documents.value(activeId);
-            const auto neighborDoc=view.m_worldTerrainSession.documents.value(neighborId);
-            const int activeY=qBound(0,int(std::floor(seamPoint.y()/2.0f)),activeDoc->terrain.tileCountY()-1);
-            const double worldY=view.m_activeMapWorldOrigin.y()+seamPoint.y();
-            const int neighborY=qBound(0,int(std::floor((worldY-adjacent.worldOrigin.y())/2.0)),neighborDoc->terrain.tileCountY()-1);
-            const bool activeIsZone4=zone=="zone4";
-            const auto seamTile=[](const SWorldTerrainDocument& doc,int x,int y) {
-                bool available=false;const quint16 packed=doc.terrain.packedTile(x,y,ETerrainTileLayer::Land,&available);
-                const int slot=SMprPackedTile::decode(packed).atlasSlot();const auto images=doc.atlas->activeTileImages();
-                return available&&slot>=0&&slot<images.size()?images[slot]:QImage();
-            };
-            const QImage a=seamTile(*activeDoc,activeIsZone4?0:activeDoc->terrain.tileCountX()-1,activeY);
-            const QImage b=seamTile(*neighborDoc,activeIsZone4?neighborDoc->terrain.tileCountX()-1:0,neighborY);
-            int mismatches=1;
-            if(!a.isNull()&&a.size()==b.size()) {
-                mismatches=0;
-                for(int y=0;y<a.height();++y)
-                    mismatches+=a.pixel(activeIsZone4?0:a.width()-1,y)!=b.pixel(activeIsZone4?b.width()-1:0,y);
-            }
-            check(mismatches==0,"copied-map mixed-edge pixels match across the real zone4/zone6 seam");
-            QImage seam(a.width()*2,a.height(),QImage::Format_ARGB32);seam.fill(Qt::black);
-            if(!a.isNull()&&!b.isNull()) {QPainter painter(&seam);painter.drawImage(0,0,a);painter.drawImage(a.width(),0,b);painter.end();}
-            const bool saved=!a.isNull()&&!b.isNull()&&seam.scaled(seam.size()*4,Qt::IgnoreAspectRatio,Qt::FastTransformation)
-                .save(qEnvironmentVariable("EI_NEIGHBOR_PERF_ROOT")+"/seam-after.png","PNG");
-            check(saved,"export copied-map seam-after PNG");
-        }
+        inspectSession("stroke-after",true);
+        nativeSeam("stroke-after");
         QString error;check(view.m_worldTerrainSession.undo(&error),"undo complete paint cohort");out<<error<<"\n";
         check(view.m_worldTerrainSession.documents.value(activeId)
             && worldState(*view.m_worldTerrainSession.documents[activeId])==activeBeforeState
             && worldState(*view.m_worldTerrainSession.documents[neighborId])==neighborBeforeState,
             "undo restores both maps byte-for-byte, including semantic fields and atlas pixels");
+        inspectSession("stroke-undo",false);
+        nativeSeam("stroke-undo");
         check(view.m_worldTerrainSession.redo(&error),"redo complete paint cohort");
+        inspectSession("stroke-redo",true);
+        nativeSeam("stroke-redo");
         for(const auto& id:QStringList{activeId,neighborId})check(view.previewWorldPaintState(id),"restore redo preview for each world document");
         const QByteArray activeAfterState=worldState(*view.m_worldTerrainSession.documents[activeId]);
         const QByteArray neighborAfterState=worldState(*view.m_worldTerrainSession.documents[neighborId]);
@@ -647,6 +778,17 @@ int runNeighborPerformanceCheck()
                 && activeModel.load(reopenedActive,&reopenedReport) && neighborModel.load(reopenedNeighbor,&reopenedReport);
             check(reopened && !reopenedReport.hasErrors(),"reopen both saved copied maps from disk");
             if(reopened) {
+                const auto restoreSemantics=[&](const CMprDocument& mpr,CTerrainEditModel& model) {
+                    STerrainSemanticFieldDocument semantic;
+                    const bool valid=STerrainSemanticFieldDocument::fromBytes(mpr.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),&semantic,&reopenedReport)
+                        && semantic.terrainTilesSha256==STerrainSemanticFieldDocument::tileBindingSha256(mpr)
+                        && semantic.mprNamespace==mpr.mapInfo().innerNamespace;
+                    check(valid,"reopened semantic payload binds to saved tile topology");
+                    if(!valid)return;
+                    check(model.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,semantic.land,semantic.land,&reopenedReport)
+                        &&model.restoreVirtualMaterialFieldState(ETerrainTileLayer::Overlay,semantic.overlay,semantic.overlay,&reopenedReport),"restore persisted semantic fields before inspecting reopened seam");
+                };
+                restoreSemantics(reopenedActive,activeModel);restoreSemantics(reopenedNeighbor,neighborModel);
                 const bool zone4Active=zone=="zone4";
                 const int activeEdge=zone4Active?0:activeModel.tileCountX()-1;
                 const int neighborEdge=zone4Active?neighborModel.tileCountX()-1:0;
@@ -679,6 +821,9 @@ int runNeighborPerformanceCheck()
                     }
                     return image;
                 };
+                inspectSeam("stroke-reopened",activeModel,neighborModel,
+                    [&](bool active,int x,int y){return active?compareEdge(reopenedActive,activeModel,x,y)
+                        :compareEdge(reopenedNeighbor,neighborModel,x,y);},true);
                 const int paintedY=qBound(0,int(std::floor(seamPoint.y()/2.0f)),activeModel.tileCountY()-1);
                 for(int y=qMax(0,paintedY-1);y<=qMin(activeModel.tileCountY()-1,paintedY+1) && decoded;++y) {
                     const int worldY=int((zone4Active?190:64)+y*2);
