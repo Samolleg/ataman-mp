@@ -517,6 +517,7 @@ class TerrainVirtualAtlasTests:public QObject
     Q_OBJECT
 private slots:
     void mixedNativeSizesRenderGenerateAndPublish();
+    void mixedNativeAnimationSavePreservesCompressedPage();
     void mixedNativePublicationPreservesSmallTailPage();
     void oppositeBaselineOwnerDoesNotBlockStroke_data();
     void oppositeBaselineOwnerDoesNotBlockStroke();
@@ -540,7 +541,6 @@ private slots:
     void lavaUsesOnlyExplicitR123ReviewedMaskRoutes();
     void authoredMapTransitionsDoNotPopulateObsoleteMaskPool();
     void canonicalMasksMeetQuarterCoverageAndCornerContract();
-    void mixedNativeAnimationSavePreservesCompressedPage();
     void canonicalMasksAreExactComplementsAndRotationCovariant();
     void canonicalMaskVariationsAreDeterministicAndMacroDistinct();
     void canonicalAdjacentAndDiagonalTopologiesStayAnchored();
@@ -8284,29 +8284,6 @@ void TerrainVirtualAtlasTests::mixedNativeSizesRenderGenerateAndPublish()
     QCOMPARE(images,before);
 }
 
-void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
-{
-    Fixture fixture;
-    QVector<QImage> images;
-    for(int slot=0;slot<128;++slot)
-        images.append(fixture.images.at(slot%4).scaled(slot<64?256:128,slot<64?256:128));
-    QVector<QByteArray> pages;
-    for(int page=0;page<2;++page)
-        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?256:128),true));
-    // Use the exact decoded native baseline, just as the adoption path does.
-    for(int slot=0;slot<128;++slot)
-        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
-    CResArchiveDocument source;QStringList errors;
-    QVERIFY(source.loadBytes(portableMpr(),"mixed-source.mpr",&errors));
-    QByteArray mp=source.memberPayload("CaveSet.MP").left(38);
-    qToLittleEndian<quint32>(2,reinterpret_cast<uchar*>(mp.data()+16));
-    qToLittleEndian<quint32>(2048,reinterpret_cast<uchar*>(mp.data()+20));
-    qToLittleEndian<quint32>(70,reinterpret_cast<uchar*>(mp.data()+24));
-    qToLittleEndian<quint32>(256,reinterpret_cast<uchar*>(mp.data()+28));
-    for(int slot=0;slot<70;++slot){char type[4];qToLittleEndian<qint32>(1,reinterpret_cast<uchar*>(type));mp.append(type,4);}
-    SResArchiveNewMember changed;changed.name="CaveSet.MP";changed.payload=mp;
-    QByteArray baseline;QVERIFY(source.buildWithPublishedMembers({changed},true,&baseline,&errors));
-    CMprDocument document;CValidationReport report;QVERIFY(document.loadBytes(baseline,"mixed-source.mpr",&report));
 void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
 {
     Fixture fixture;
@@ -8340,6 +8317,29 @@ void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
     for(int slot=32;slot<64;++slot)QVERIFY(!result.authoredSlotRemap.contains(slot));
 }
 
+void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
+{
+    Fixture fixture;
+    QVector<QImage> images;
+    for(int slot=0;slot<128;++slot)
+        images.append(fixture.images.at(slot%4).scaled(slot<64?256:128,slot<64?256:128));
+    QVector<QByteArray> pages;
+    for(int page=0;page<2;++page)
+        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?256:128),true));
+    // Use the exact decoded native baseline, just as the adoption path does.
+    for(int slot=0;slot<128;++slot)
+        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
+    CResArchiveDocument source;QStringList errors;
+    QVERIFY(source.loadBytes(portableMpr(),"mixed-source.mpr",&errors));
+    QByteArray mp=source.memberPayload("CaveSet.MP").left(38);
+    qToLittleEndian<quint32>(2,reinterpret_cast<uchar*>(mp.data()+16));
+    qToLittleEndian<quint32>(2048,reinterpret_cast<uchar*>(mp.data()+20));
+    qToLittleEndian<quint32>(70,reinterpret_cast<uchar*>(mp.data()+24));
+    qToLittleEndian<quint32>(256,reinterpret_cast<uchar*>(mp.data()+28));
+    for(int slot=0;slot<70;++slot){char type[4];qToLittleEndian<qint32>(1,reinterpret_cast<uchar*>(type));mp.append(type,4);}
+    SResArchiveNewMember changed;changed.name="CaveSet.MP";changed.payload=mp;
+    QByteArray baseline;QVERIFY(source.buildWithPublishedMembers({changed},true,&baseline,&errors));
+    CMprDocument document;CValidationReport report;QVERIFY(document.loadBytes(baseline,"mixed-source.mpr",&report));
     CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
     QVERIFY(working.isValid());QMap<int,quint64> usage;bool generated=false;
     const auto packed=working.resolve(signature(1,2,3,4),0,0,&usage,{},&generated,&report,1,1);
