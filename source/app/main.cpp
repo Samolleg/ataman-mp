@@ -1924,11 +1924,12 @@ int runHeadlessCommand(QApplication& app)
         const ELandscapeSculptTool initialSculptTool = landscapeTools.sculptTool();
         const quint16 initialFlattenHeight = landscapeTools.flattenHeight();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Raise);
+        const auto* sculptFalloffChoices = landscapeTools.findChild<QWidget*>("landscapeSculptFalloffChoices");
         const bool sculptRaiseShowsFalloff = flattenTarget && sculptFalloff
-            && flattenTarget->isHidden() && !sculptFalloff->isHidden();
+            && flattenTarget->isHidden() && sculptFalloffChoices && !sculptFalloffChoices->isHidden();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Flatten);
         const bool sculptFlattenShowsTarget = flattenTarget && sculptFalloff
-            && !flattenTarget->isHidden() && !sculptFalloff->isHidden();
+            && !flattenTarget->isHidden() && sculptFalloffChoices && !sculptFalloffChoices->isHidden();
         const bool sculptToolOrderMatchesShortcuts = sculptTool
             && sculptTool->count() == 6
             && sculptTool->itemData(0).toInt() == int(ELandscapeSculptTool::Raise)

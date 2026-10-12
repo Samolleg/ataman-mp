@@ -752,7 +752,7 @@ void LandscapeToolsWidgetTests::overlayModesExposeMprMaterialsShortcut()
     QToolButton* advanced = tools.findChild<QToolButton*>(
         QStringLiteral("landscapeMapToggle"));
     QVERIFY(advanced);
-    advanced->click();
+    if(!advanced->isChecked())advanced->click();
     QVERIFY(advanced->isChecked());
     QVERIFY(shortcut->isVisibleTo(&tools));
     shortcut->click();
@@ -764,7 +764,7 @@ void LandscapeToolsWidgetTests::overlayModesExposeMprMaterialsShortcut()
     QCOMPARE(requested.count(), 2);
 
     tools.activateMode(ELandscapeEditMode::TilePaint, false);
-    QVERIFY(!shortcut->isVisibleTo(&tools));
+    QVERIFY(shortcut->isVisibleTo(&tools)); // Map-level materials command is always available.
 }
 
 void LandscapeToolsWidgetTests::overlaySurfaceModesExposeMaterialSlotLabels()
@@ -1203,6 +1203,11 @@ void LandscapeToolsWidgetTests::sharedBrushSizePersistsAcrossModes()
     QCOMPARE(tools.paintShape(), ETerrainTileBrushShape::Square);
     tools.activateMode(ELandscapeEditMode::Sculpt, false);
     QCOMPARE(tools.radius(), 7.0f);
+    auto* linearFalloff=tools.findChild<QToolButton*>("landscapeFalloff_1");
+    auto* smoothFalloff=tools.findChild<QToolButton*>("landscapeFalloff_0");
+    QVERIFY(linearFalloff && smoothFalloff);
+    linearFalloff->click();QCOMPARE(tools.falloff(),ETerrainBrushFalloff::Linear);
+    smoothFalloff->click();QCOMPARE(tools.falloff(),ETerrainBrushFalloff::Smooth);
     auto* targetWidget = tools.findChild<QWidget*>("terrainPaintTargetWidget");
     auto* tileTarget = tools.findChild<QToolButton*>("tilePaintTarget");
     auto* vertexTarget = tools.findChild<QToolButton*>("vertexPaintTarget");

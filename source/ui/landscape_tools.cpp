@@ -496,7 +496,26 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     });
     form->addRow(m_deltaLabel, heightStepWidget);
     form->addRow(m_flattenLabel, m_flatten);
-    form->addRow(m_falloffLabel, m_falloff);
+    auto* falloffChoices = new QWidget(m_sculptControls);
+    falloffChoices->setObjectName(QStringLiteral("landscapeSculptFalloffChoices"));
+    auto* falloffRow = new QHBoxLayout(falloffChoices);
+    falloffRow->setContentsMargins(0,0,0,0);falloffRow->setSpacing(4);
+    auto* falloffGroup = new QButtonGroup(falloffChoices);
+    for(int i=0;i<m_falloff->count();++i) {
+        auto* button=new QToolButton(falloffChoices);
+        button->setText(m_falloff->itemText(i));button->setCheckable(true);
+        button->setObjectName(QStringLiteral("landscapeFalloff_%1").arg(i));
+        button->setStyleSheet(selectedButtonStyle);
+        button->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+        falloffGroup->addButton(button,i);falloffRow->addWidget(button,1);
+        connect(button,&QToolButton::clicked,this,[this,i](){m_falloff->setCurrentIndex(i);});
+    }
+    falloffGroup->button(m_falloff->currentIndex())->setChecked(true);
+    connect(m_falloff,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[falloffGroup](int index){
+        if(auto* button=falloffGroup->button(index))button->setChecked(true);
+    });
+    m_falloff->hide();
+    form->addRow(m_falloffLabel, falloffChoices);
     form->addRow(m_moveMobObjects);
     QWidget* worldControls = new QWidget(this);
     QVBoxLayout* worldLayout = new QVBoxLayout(worldControls);
@@ -674,7 +693,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     variantScroll->setFrameShape(QFrame::NoFrame);
     variantScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     variantScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    variantScroll->setFixedHeight(82);
+    variantScroll->setFixedHeight(106);
     auto* variantItems = new QWidget(variantScroll);
     m_variantStripLayout = new QHBoxLayout(variantItems);
     m_variantStripLayout->setContentsMargins(2, 0, 2, 0);
@@ -1056,6 +1075,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         chip->setMinimumHeight(28);
     }
+    m_moveMobObjects->setStyleSheet(chipStyle);
     m_modernAutoResolveBlends->setText(tr("Авто-переходы"));
     m_modernAutoResolveBlends->setToolTip(tr("Автоматически создавать точные переходные тайлы вокруг покрашенных клеток."));
     m_modernMixedEdge->setText(tr("Плавные границы"));
@@ -1151,7 +1171,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     diagnostics->addLayout(visibility);
     diagnostics->addWidget(m_showOverlayMaterialSlots);diagnostics->addWidget(exportDiagnostic);diagnostics->addLayout(issueRow);
     m_flipVertical->setToolTip(tr("Перевернуть карту высот по вертикали при импорте."));
-    form->addRow(m_flipVertical);
+    m_flipVertical->setText(tr("Перевернуть карту высот"));
+    advanced->addWidget(m_flipVertical);
     advanced->addWidget(importButton);
     advanced->addWidget(mprSettingsButton);
     advanced->addWidget(worldMaps);
@@ -1208,6 +1229,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     for(auto f:{form,paintForm,modeForm}) {f->setRowWrapPolicy(QFormLayout::WrapLongRows);f->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);}
     for(auto combo:findChildren<QComboBox*>()) {combo->setMinimumWidth(0);combo->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);}
     for(auto button:findChildren<QPushButton*>()) button->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
+    for(auto* command:commands)command->setIcon(QIcon());
     for(auto row:{sizeRow,shapeRow,targetRow})row->setContentsMargins(0,0,0,0);
     for(auto label:findChildren<QLabel*>()) {auto policy=label->sizePolicy();policy.setVerticalPolicy(QSizePolicy::Fixed);label->setSizePolicy(policy);}
     m_variantStripTitle->setWordWrap(true);
@@ -1587,7 +1609,7 @@ void CLandscapeTools::updateModeVisibility()
     const bool overlayMode = overlaySurface
         || editMode() == ELandscapeEditMode::OverlayPaint;
     m_showOverlayMaterialSlots->setVisible(overlayMode);
-    m_overlayMprMaterials->setVisible(overlayMode);
+    m_overlayMprMaterials->setVisible(true);
     {
         const QSignalBlocker blocker(m_materialTabs);
         const int layerIndex = overlayMode ? 1
@@ -1634,7 +1656,9 @@ void CLandscapeTools::updateModeVisibility()
     const bool noise = tool == ELandscapeSculptTool::Noise;
     m_flatten->setVisible(flatten);
     m_flattenLabel->setVisible(flatten);
-    m_falloff->setVisible(sculpt);
+    m_falloff->hide();
+    if(auto* choices=findChild<QWidget*>(QStringLiteral("landscapeSculptFalloffChoices")))
+        choices->setVisible(sculpt);
     m_falloffLabel->setVisible(sculpt);
     m_moveMobObjects->setVisible(sculpt && !overlaySculptEnabled());
     m_deltaLabel->setText(noise ? tr("Диапазон шума") : tr("Шаг высоты"));
@@ -2467,14 +2491,20 @@ void CLandscapeTools::updateVariantStrip(
         button->setText(label);
         button->setToolTip(detail);
         button->setIconSize(QSize(42, 42));
-        button->setMinimumWidth(54);
+        button->setFixedSize(64,76);
         button->setMaximumHeight(76);
         button->setAutoRaise(true);
         button->setAttribute(Qt::WA_TransparentForMouseEvents);
         if(!image.isNull())
             button->setIcon(QPixmap::fromImage(image));
-        else
-            button->setText(label + QStringLiteral("\n—"));
+        else {
+            QPixmap unavailable(42,42);unavailable.fill(palette().color(QPalette::Window));
+            QPainter painter(&unavailable);painter.setPen(palette().color(QPalette::Mid));
+            painter.drawRect(unavailable.rect().adjusted(0,0,-1,-1));
+            painter.drawText(unavailable.rect(),Qt::AlignCenter,QStringLiteral("—"));
+            button->setIcon(QIcon(unavailable));
+            button->setToolTip(detail+tr("\nНет проверенной миниатюры источника."));
+        }
         m_variantStripLayout->addWidget(button);
         button->show();
     };
@@ -2483,7 +2513,7 @@ void CLandscapeTools::updateVariantStrip(
                    tr("Исходный тайл материала %1").arg(choice.name));
     else
         for(int index=0;index<choice.authoredThumbnails.size();++index)
-            addVariant(tr("Исх. %1").arg(index+1), choice.authoredThumbnails.at(index),
+            addVariant(QString::number(index+1), choice.authoredThumbnails.at(index),
                        tr("Исходный вариант %1 материала %2").arg(index+1).arg(choice.name));
     if(generatedHdVariants())
         for(int index = 0; index < choice.generatedIds.size(); ++index)
