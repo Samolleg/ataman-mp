@@ -2233,7 +2233,7 @@ int runHeadlessCommand(QApplication& app)
             grassVariantButtons += button->property("terrainMaterialId").toInt() == 101
                 || button->property("terrainMaterialId").toInt() == 102;
         for(QLabel* label : landscapeTools.findChildren<QLabel*>())
-            grassFamilyHeadings += label->text() == QStringLiteral("Grass");
+            grassFamilyHeadings += label->text() == QStringLiteral("Grass 2");
         const bool materialVariantsRemainDistinctAndGrouped =
             grassVariantButtons == 2 && grassFamilyHeadings == 1
             && landscapeTools.selectPaintTerrainType(101)
@@ -2370,11 +2370,11 @@ int runHeadlessCommand(QApplication& app)
             && circlePaintShape && squarePaintShape->isEnabled()
             && circlePaintShape->isEnabled();
         const QMap<QString, QString> requiredPaintChips = {
-            {QStringLiteral("modernAutoResolveBlends"), QStringLiteral("Переходы")},
-            {QStringLiteral("modernMixedEdge"), QStringLiteral("Кромки")},
-            {QStringLiteral("randomPaintVariants"), QStringLiteral("Варианты")},
-            {QStringLiteral("generatedHdVariants"), QStringLiteral("HD")},
-            {QStringLiteral("randomizeUniformRotation"), QStringLiteral("Повороты")},
+            {QStringLiteral("modernAutoResolveBlends"), QStringLiteral("Авто-переходы")},
+            {QStringLiteral("modernMixedEdge"), QStringLiteral("Плавные границы")},
+            {QStringLiteral("randomPaintVariants"), QStringLiteral("Случайные варианты")},
+            {QStringLiteral("generatedHdVariants"), QStringLiteral("HD-варианты")},
+            {QStringLiteral("randomizeUniformRotation"), QStringLiteral("Поворот")},
         };
         bool paintChipsAvailable = true;
         for(auto it = requiredPaintChips.cbegin(); it != requiredPaintChips.cend(); ++it)
