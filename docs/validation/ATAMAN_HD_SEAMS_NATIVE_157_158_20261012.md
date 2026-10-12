@@ -1,6 +1,6 @@
 # HD and cross-map native review — 2026-10-12
 
-Status: IN PROGRESS. Source base main `df281e66f7575bf99b4b1e0121ebcab7c9723bc4`, installed156. Candidate changes are not installed or accepted yet. Work is performed personally under EI-HD-SEAMS-VISUAL-157-158; no delegated worker or live game-data write.
+Status: COMPLETE — HD/Save and seam fixes visually verified; clean release158 installed. Source base main `df281e66f7575bf99b4b1e0121ebcab7c9723bc4`, final program source `14e763d7133804a98bbed016fe4ada468ddc016f`. Work is performed personally under EI-HD-SEAMS-VISUAL-157-158; no delegated worker or live game-data write.
 
 ## Build identity and recovery
 
@@ -28,7 +28,7 @@ This first run is not a PASS: a combined animation-image/range assertion failed;
 
 The source-index cache was saved (47,852,619 bytes). Its full SHA-bound header and stream structure validated. An initial fixture reset incorrectly reparsed a PowerShell JSON DateTime through localized text, changing the test RES timestamp and correctly invalidating the cache. Subsequent fixture restoration uses numeric UTC ticks; this was a test setup error, not a relaxation of source-identity guards.
 
-Remaining: native unchecked/checked publication, review actual HD detail and transitions, animation equality, layout Undo/Redo/Save/reopen; native repair command; scoped157/158 source commits, clean release regression and guarded permanent installation.
+Historical remaining items below were closed by the follow-up recorded in the next section. Final release/install receipt appears at the end.
 
 ## Ordinary Save correction and bounded follow-up
 
@@ -41,3 +41,17 @@ Follow-up uses the already validated HD publication backup (RES8c172a8806945236f
 Repair command native before/after images were visually inspected. Real brush and repair retain a gradual mixed patch across the map boundary in this camera. Initial repair run passed transaction, exact Undo/Redo, repeated idempotence and save; reopened semantic checks lacked restoreVirtualMaterialFieldState, unlike the brush harness. This test-only omission is corrected using the bound embedded semantic payload.
 
 `save-native-final`: exit0,26 PASS/0 FAIL; variant layout Undo/Redo and exact seed, ordinary Save, fresh reopen, all32 canonical RGBA frames and animation ranges remain exact128px. Four native after/reopened views captured; reopened junction view visually opened with retained HD detail and material regions. This closes the real Save defect. Native source-page payload/mips are copied verbatim, padding is unassigned, and the completeness check counts logical slots separately. Pure UI follow-up hides padding from the newly generated material preview.
+
+`repair-final`: exit0,82 PASS/0 FAIL. The unchanged repair code passed with corrected fresh semantic restoration:82 includes both-map mixed witnesses, exact shared border, Undo/Redo, repeat repair idempotence, joint Save/reopen and unchanged MOB/unselected inputs. The first repair failure was harness-only; its record remains above. HD157 source is d2374ee0 + scoped placement correction7f2d9e2a. Final combined source158:14e763d7133804a98bbed016fe4ada468ddc016f. Clean release is built from its Git archive in Ataman158-hd-seams-final, not from the diagnostic snapshot.
+
+## Clean release158
+
+Clean Git-archive build exit0; source14e763d7133804a98bbed016fe4ada468ddc016f, --version158. EXE SHA25659CA79300BF264A9380FDEF5AA005818133D3167BA3BB28D5DA98DFC504308FE. `reopen-release158`exit0 and its actual native viewport visually inspected: saved repaired seam still gradual. Targeted original paint-release smoke36 PASS/0 FAIL (Ground/Common at55,40 and80,65, GPU changes and exact Undo/Redo, release accepted), `ui158-final`exit0 PASS widget interaction/secondary-window lifecycle. Clipboard nativeAttempts0 for all. Earlier complete painting323/0 and seam CPU174/0 suites were not repeated because their unrelated behavior was unchanged.
+
+Fresh staging inherits only137 hash-verified managed156 files, replaces the clean158 program/runtime/notes and adds this report. Staged EXE exactly matches the tested EXE; staged --version158 exit0. Finalization and guarded installation receipts are kept in build-tests-158-release. Live map/game files are unchanged. Visual acceptance here covers the recorded zone19 and zone4/zone6 views; gameplay acceptance remains separate.
+
+## Installation receipt
+
+Finalizer exit0 PASS, staging manifest SHA2561BCF8B639BE3764926549DFBBBF40D398804D63BA949C4A5D3502F7D14893AA4. The finalized staging was not run again. Guarded update of artifacts/EI-Mapper-Ataman-2-first-test156→158 completed exit0 after host CIM closure checks:138 managed files verified,6 replaced,1 added,0 removed. Installed executable matches the clean tested SHA above.23358 unlisted owner files preserved with identical before/after digest4EF65BDF04D8A1C8D2C88C1B7F9B288609D5F65862101785DF35C72C620328CD. Rollback156 is retained at artifacts/rollback156-EI-HD-SEAMS-158-20261012. Only our hash-verified obsolete rollback155 (7 files) was removed; unrelated older folders were preserved. Receipts: build-tests-158-release/install-receipt.txt and rollback-cleanup-receipt.txt.
+
+Visual files: build-tests-157-hd/save-native-final/reopened-2-viewport.png and reopened-3-viewport.png (HD after normal Save); build-tests-158-seam/reopen-release158/stroke-before-viewport.png (repaired seam, fresh final-release process). User maps/settings were not altered, and the interactive installed mapper was not launched.
