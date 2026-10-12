@@ -115,7 +115,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         const QString root=fixture.value("realRoot").toString();
         auto* roots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots"));
         if(!check(roots && QFileInfo(root+"/res/HDPack_Terrain.res").isFile(),"copied atlas resource root"))return 1;
-        roots->setValue({root+"/res/HDPack_Terrain.res"});
+        roots->setValue({root+"/res"});
         CTextureList::getInstance()->attachSettings(&settings);
         CObjectList::getInstance()->attachSettings(&settings);
         QUndoStack history;CTreeView tree;QTableWidget properties;properties.setColumnCount(2);
@@ -134,6 +134,11 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         log<<"TIMING openReturnMs="<<openMs<<" paletteReadyMs="<<timer.elapsed()<<" firstFrameMs="<<view.m_terrainAutoCatalogFirstFrameMs<<'\n';
         if(!check(!view.m_terrainAutoCatalogPending && !view.m_terrainAutoCatalogBuilding && view.m_terrainEditAvailable,
                   "catalog fills automatically after a frame without harness ensure"))return 1;
+        QElapsedTimer thumbnails;thumbnails.start();
+        while(thumbnails.elapsed()<120000 && (view.m_terrainGlobalHydrationPendingJobs>0 || view.m_terrainGlobalHydrationPublishQueued)) {
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
+        }
+        log<<"TIMING thumbnailWaitMs="<<thumbnails.elapsed()<<'\n';
         panel.activateMode(ELandscapeEditMode::TilePaint,true);panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         int land=0,overlay=0;
         for(const auto& family:view.m_terrainGlobalFamilies) {
