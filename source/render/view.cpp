@@ -16047,7 +16047,13 @@ void CView::finalizeVirtualTerrainAtlas()
             return false;
         const QByteArray currentPublishedBytes = publishedTextures.readAll();
         publishedTextures.close();
-        if(currentPublishedBytes != stagedResBytes)
+        // The coordinator owns the ordinary-save candidate now. Its verified
+        // digest is also the rollback guard; an unrelated later write must
+        // never be overwritten when the MPR half fails.
+        if(resResult.candidateSha256.isEmpty()
+           || QString::fromLatin1(QCryptographicHash::hash(
+                  currentPublishedBytes, QCryptographicHash::Sha256).toHex())
+                .compare(resResult.candidateSha256, Qt::CaseInsensitive) != 0)
             return false;
         QSaveFile restore(texturesPath);
         return restore.open(QIODevice::WriteOnly)

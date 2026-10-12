@@ -46,6 +46,12 @@
 #include <QScrollArea>
 #include <QToolButton>
 #include <QMouseEvent>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <QKeyEvent>
 #include <QDoubleSpinBox>
 #include <QSlider>
@@ -186,6 +192,8 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             if(!check(root.contains("/build-tests-157-hd/"),"HD publication restricted to private fixture"))return 1;
             const bool distribute=fixture.value("distribute").toBool();
             const bool saveOnly=fixture.value("hdSaveOnly").toBool();
+            const bool rollbackProbe=fixture.value("saveRollbackProbe").toBool();
+            bool rollbackDialog=false;
             const QString oldNamespace=view.m_mprDocument.mapInfo().innerNamespace;
             const auto animations=[&](){QVector<QImage> frames;for(const auto& a:view.m_mprAnimatedTiles)
                 for(int f=0;f<a.frameCount;++f)frames.append(view.m_authoredTerrainTileImages.value(a.tileIndex+f));return frames;};
@@ -247,7 +255,11 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                         option->setChecked(distribute);confirmed=true;box->button(QMessageBox::Yes)->click();
                     } else if(!option) {
                         log<<"HD DIALOG "<<box->text()<<"\n";log.flush();
-                        if(box->icon()==QMessageBox::Critical){++failed;box->reject();}
+                        if(box->icon()==QMessageBox::Critical){
+                            if(rollbackProbe && box->text().contains("HDPack_Terrain.res rollback: complete")) rollbackDialog=true;
+                            else ++failed;
+                            box->reject();
+                        }
                         else box->accept();
                     }
                 }
@@ -269,6 +281,24 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 history.undo();const auto baseline=snapshot(view.m_terrainEdit);
                 check(baseline!=laidOut,"Undo restores pre-layout terrain");
                 history.redo();check(snapshot(view.m_terrainEdit)==laidOut && view.m_terrainEdit.randomPaintSeed()==seed,"Redo restores exact layout and seed");
+                if(rollbackProbe) {
+#ifdef Q_OS_WIN
+                    const auto originalMpr=read(map);
+                    const QString archive=root+"/res/HDPack_Terrain.res";
+                    const auto originalResHash=QCryptographicHash::hash(read(archive),QCryptographicHash::Sha256);
+                    HANDLE locked=CreateFileW(reinterpret_cast<LPCWSTR>(map.utf16()),GENERIC_READ,
+                        FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                    if(!check(locked!=INVALID_HANDLE_VALUE,"MPR replacement denied by test-owned read handle"))return 1;
+                    view.saveLand();CloseHandle(locked);
+                    check(rollbackDialog,"MPR failure reports completed RES rollback");
+                    check(read(map)==originalMpr,"failed MPR save retains original bytes");
+                    check(QCryptographicHash::hash(read(archive),QCryptographicHash::Sha256)==originalResHash,
+                          "failed MPR save restores the original RES exactly");
+                    dialogs.stop();log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+#else
+                    check(false,"rollback lock probe requires Windows");return 1;
+#endif
+                }
                 view.saveLand();check(!view.m_pLand->isDirty(),"layout saves through normal MPR path");
             } else check(!view.m_pLand->isDirty(),"unchecked HD conversion adds no layout edit");
             const auto saved=snapshot(view.m_terrainEdit);
