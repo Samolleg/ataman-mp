@@ -151,6 +151,9 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         CProgressView progress;QLineEdit coordinates;CTileForm tiles;CLandscapeTools panel;
         panel.setAttribute(Qt::WA_DontShowOnScreen);panel.resize(360,900);panel.show();
         CView view(nullptr,nullptr);view.setAttribute(Qt::WA_DontShowOnScreen);
+        // Match CMainWindow's production viewport setup: Qt otherwise drops
+        // no-button hover events before they can update the displayed brush.
+        view.setMouseTracking(true);
         view.attach(&settings,&properties,&history,&progress,&coordinates,&tree,&tiles);
         view.attachLandscapeTools(&panel);view.resize(640,480);view.show();QApplication::processEvents();
         if(!check(view.isValid(),"hidden desktop OpenGL context"))return 1;
@@ -251,6 +254,15 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     QMouseEvent event(type,pos,(type==QEvent::MouseMove)?Qt::NoButton:Qt::LeftButton,
                         (step>=1 && type!=QEvent::MouseButtonRelease)?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
                     QApplication::sendEvent(&view,&event);settle();
+                    if(fixture.value("tracePaintDrag").toBool() && drag && !panel.sculptEnabled()) {
+                        bool stepHit=false;const auto stepPoint=view.getTerrainBrushPos(pos.x(),pos.y(),&stepHit);
+                        CTile* debugTile=nullptr;STileLocation debugLocation;STerrainTileBrush debugBrush;QPoint debugVertex;STerrainPaintFootprintSnapshot debugFootprint;
+                        const bool resolved=stepHit && view.resolveTerrainPaintFootprint(stepPoint,ground,&debugTile,&debugLocation,&debugBrush,&debugVertex,&debugFootprint);
+                        log<<"DRAG "<<name<<" step="<<step<<" hit="<<stepHit<<" xyz="<<stepPoint.x()<<','<<stepPoint.y()<<','<<stepPoint.z()
+                           <<" active="<<view.m_tilePaintStrokeActive<<" interrupted="<<view.m_landscapeGestureInterrupted<<" stamps="<<view.m_tileStrokeActions
+                           <<" resolved="<<resolved<<" displayed="<<view.m_terrainPaintFootprintValid<<':'<<view.m_terrainPaintFootprint.anchor.x()<<','<<view.m_terrainPaintFootprint.anchor.y()
+                           <<" fresh="<<debugFootprint.anchor.x()<<','<<debugFootprint.anchor.y()<<" centerValid="<<view.m_lastTerrainPaintCenterValid<<'\n';log.flush();
+                    }
                 }
                 const auto after=snapshot(view.m_terrainEdit);const auto frameAfter=capture();
                 frameBefore.save(output+"/"+name+"-before.png");frameAfter.save(output+"/"+name+"-after.png");
@@ -310,6 +322,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 check(panel.paintPaletteMode()==ETerrainPaintPaletteMode::Modern && panel.paintTargetMode()==ETerrainPaintTargetMode::Vertex,"release C restores Modern and Vertex preference");
             };
             manual(false);
+            if(fixture.value("tracePaintDrag").toBool()){log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;}
             click("landscapePaintSegment");click("terrainLayerSegment_0");click("circlePaintShape");
             if(choose(view.m_modernLandPaintChoices,"Yellow lichen"))stroke("ground-lichen",QVector3D(45,33,0),true,true);
             check(panel.modernMixedEdge() && button("modernMixedEdge")->isEnabled(),"return to static Ground restores Smooth");
