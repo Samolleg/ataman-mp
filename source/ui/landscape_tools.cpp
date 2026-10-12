@@ -110,7 +110,8 @@ QVBoxLayout* landscapeFold(QVBoxLayout* parent, const QString& title,
     QWidget* body = new QWidget(section); body->setObjectName(name);
     QVBoxLayout* content = new QVBoxLayout(body); content->setContentsMargins(6,2,0,4);content->setSpacing(5);
     const bool opened = QSettings().value(
-        QStringLiteral("ui/landscape/folds/") + name, false).toBool();
+        QStringLiteral("ui/landscape/folds/") + name,
+        name == QStringLiteral("landscapeMap")).toBool();
     toggle->setChecked(opened);
     box->addWidget(toggle);box->addWidget(body);body->setVisible(opened);
     toggle->setText(title + (opened ? QStringLiteral("  ▾") : QStringLiteral("  ▸")));
@@ -307,21 +308,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         button->setToolTip(button->text());
     const QPalette panelPalette = palette();
     const QString selectedButtonStyle = QStringLiteral(
-        "QToolButton { padding: 2px 1px; border: 1px solid %1; }"
-        "QToolButton:checked { background: %2; color: %3; border: 2px solid %2; font-weight: bold; }")
-        .arg(panelPalette.color(QPalette::Mid).name(),
-             panelPalette.color(QPalette::Highlight).name(),
-             panelPalette.color(QPalette::HighlightedText).name());
+        "QToolButton { padding: 7px 4px; border: 1px solid palette(mid); border-radius: 8px; }"
+        "QToolButton:checked { background: #1f3a5c; color: #8fc1ff; border: 2px solid #2f6fb5; font-weight: 600; }");
     for(auto* button : {paintSegment, sculptSegment, surfaceSegment})
     {
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         button->setCheckable(true);
         button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         button->setMinimumWidth(0);
-        button->setMinimumHeight(30);
-        QFont compactFont = button->font();
-        compactFont.setPointSizeF(qMax(7.0, compactFont.pointSizeF() - 5.0));
-        button->setFont(compactFont);
+        button->setMinimumHeight(36);
         button->setStyleSheet(selectedButtonStyle);
         modeSegmentGroup->addButton(button);
         modeSegmentLayout->addWidget(button, 1);
@@ -329,6 +324,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     paintSegment->setChecked(true);
     m_mode->hide();
     modeForm->addRow(modeSegments);
+    auto* sharedBrushCaption = new QLabel(
+        tr("Кисть — общая для всех режимов"), toolContents);
+    sharedBrushCaption->setObjectName(QStringLiteral("landscapeSharedBrushCaption"));
+    sharedBrushCaption->setStyleSheet(QStringLiteral("font-weight: 600;"));
+    modeForm->addRow(sharedBrushCaption);
     connect(paintSegment, &QToolButton::clicked, this, [this]() {
         m_mode->setCurrentIndex(int(ELandscapeEditMode::TilePaint));
     });
@@ -579,6 +579,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         // the next layout pass.  The scroll area must be allowed to resize the
         // palette page to its viewport before the visible-column pass runs.
         page->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        if(page->layout())
+            page->layout()->setSizeConstraint(QLayout::SetMinimumSize);
         scroll->setWidgetResizable(true);
         scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
         scroll->setMinimumSize(0, 0);
@@ -599,8 +601,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_materialTabs->addTab(m_overlayMaterialScroll, tr("Покрытие"));
     m_materialTabs->addTab(m_underwaterMaterialScroll, tr("Под водой"));
     m_materialTabs->setObjectName(QStringLiteral("modernMaterialLayerTabs"));
-    m_materialTabs->tabBar()->setStyleSheet(
-        QStringLiteral("QTabBar::tab { padding: 2px 4px; font-size: 8pt; }"));
+    m_materialTabs->tabBar()->setStyleSheet(QStringLiteral(
+        "QTabBar::tab { padding: 7px 8px; min-height: 22px; border: 1px solid palette(mid); border-radius: 8px; margin-right: 3px; }"
+        "QTabBar::tab:selected { background: #1f3a5c; color: #8fc1ff; border-color: #2f6fb5; font-weight: 600; }"));
 
     QVBoxLayout* classicGroundPalette = new QVBoxLayout(
         m_classicGroundMaterialPage);
@@ -726,12 +729,22 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintFilter->setObjectName(QStringLiteral("terrainPaintFilter"));
     m_paintFilter->setPlaceholderText(tr("Поиск материала…"));
     m_paintFilter->setClearButtonEnabled(true);
-    paintLayout->addWidget(m_paintFilter);
+    QWidget* searchRowWidget = new QWidget(m_paintControls);
+    searchRowWidget->setObjectName(QStringLiteral("terrainMaterialSearchRow"));
+    auto* searchRow = new QHBoxLayout(searchRowWidget);
+    searchRow->setContentsMargins(0, 0, 0, 0);
+    searchRow->setSpacing(6);
     m_usedMaterialsOnly->setText(tr("Только на карте"));
     m_usedMaterialsOnly->setObjectName(QStringLiteral("terrainUsedMaterialsOnly"));
     m_usedMaterialsOnly->setChecked(settings.value(
         QStringLiteral("ui/landscape/usedMaterialsOnly"), false).toBool());
-    paintLayout->addWidget(m_usedMaterialsOnly);
+    searchRow->addWidget(m_paintFilter, 1);
+    searchRow->addWidget(m_usedMaterialsOnly);
+    paintLayout->addWidget(searchRowWidget);
+    m_usedMaterialsOnly->setStyleSheet(QStringLiteral(
+        "QCheckBox { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 8px; }"
+        "QCheckBox::indicator { width: 0px; height: 0px; image: none; border: 0; }"
+        "QCheckBox:checked { background: #1f3a5c; color: #8fc1ff; border: 1px solid #2f6fb5; }"));
     m_paintModeTabs->addTab(m_modernModePage, tr("Современная покраска"));
     m_paintModeTabs->addTab(m_manualModePage, tr("Слоты атласа"));
     m_paintModeTabs->setObjectName(QStringLiteral("materialPaletteTabs"));
@@ -759,14 +772,14 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_paintRadius->setValue(qBound(1, qRound(commonBrushSize), 33));
     m_paintRadiusValue->setText(QString::number(m_paintRadius->value()));
     m_circlePaintShape->setIcon(brushShapeIcon(true));
-    m_circlePaintShape->setIconSize(QSize(32, 32));
-    m_circlePaintShape->setFixedSize(38, 38);
+    m_circlePaintShape->setIconSize(QSize(16, 16));
+    m_circlePaintShape->setText(tr("Круг"));
     m_circlePaintShape->setToolTip(tr("Circular brush"));
     m_circlePaintShape->setCheckable(true);
     m_circlePaintShape->setChecked(true);
     m_squarePaintShape->setIcon(brushShapeIcon(false));
-    m_squarePaintShape->setIconSize(QSize(32, 32));
-    m_squarePaintShape->setFixedSize(38, 38);
+    m_squarePaintShape->setIconSize(QSize(16, 16));
+    m_squarePaintShape->setText(tr("Квадрат"));
     m_squarePaintShape->setToolTip(tr("Square brush"));
     m_squarePaintShape->setCheckable(true);
     const bool squareBrush = settings.value(
@@ -774,10 +787,10 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     m_circlePaintShape->setChecked(!squareBrush);
     m_squarePaintShape->setChecked(squareBrush);
     const QString strongChoiceStyle = QStringLiteral(
-        "QToolButton { border: 2px solid palette(mid); padding: 2px; }"
-        "QToolButton:hover { border-color: #ffd34e; }"
-        "QToolButton:checked { border: 4px solid #ffd22e; "
-        "background: #6b4c00; padding: 0px; }");
+        "QToolButton { border: 1px solid palette(mid); border-radius: 8px; padding: 4px 7px; }"
+        "QToolButton:hover { border-color: #2f6fb5; }"
+        "QToolButton:checked { border: 2px solid #2f6fb5; "
+        "background: #1f3a5c; color: #8fc1ff; font-weight: 600; }");
     m_circlePaintShape->setObjectName(QStringLiteral("circlePaintShape"));
     m_squarePaintShape->setObjectName(QStringLiteral("squarePaintShape"));
     m_circlePaintShape->setStyleSheet(strongChoiceStyle);
@@ -831,14 +844,18 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QWidget* sizeWidget = new QWidget(this);
     sizeWidget->setLayout(sizeRow);
     QHBoxLayout* shapeRow = new QHBoxLayout;
+    shapeRow->setContentsMargins(0, 0, 0, 0);
+    shapeRow->setSpacing(4);
+    m_circlePaintShape->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_squarePaintShape->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     shapeRow->addWidget(m_circlePaintShape);
     shapeRow->addWidget(m_squarePaintShape);
     shapeRow->addStretch(1);
     QWidget* shapeWidget = new QWidget(this);
     shapeWidget->setLayout(shapeRow);
     QHBoxLayout* targetRow = new QHBoxLayout;
-    targetRow->addWidget(m_tilePaintTarget);
     targetRow->addWidget(m_vertexPaintTarget);
+    targetRow->addWidget(m_tilePaintTarget);
     targetRow->addStretch(1);
     QWidget* targetWidget = new QWidget(this);
     targetWidget->setLayout(targetRow);
@@ -846,7 +863,7 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     QWidget* sharedBrush = new QWidget(toolContents);
     sharedBrush->setObjectName(QStringLiteral("landscapeSharedBrush"));
     QFormLayout* sharedBrushForm = new QFormLayout(sharedBrush);
-    sharedBrushForm->setContentsMargins(6, 4, 6, 4);
+    sharedBrushForm->setContentsMargins(0, 0, 0, 0);
     sharedBrushForm->setSpacing(3);
     auto* strengthLabel = new QLabel(tr("Сила"), sharedBrush);
     strengthLabel->setObjectName(QStringLiteral("landscapeSculptStrengthLabel"));
@@ -870,10 +887,15 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     });
     sharedBrushForm->addRow(strengthLabel, strengthWidget);
     sharedBrushForm->addRow(tr("Размер"), sizeWidget);
-    sharedBrushForm->addRow(tr("Форма"), shapeWidget);
-    auto* targetLabel = new QLabel(tr("Цель"), sharedBrush);
-    targetLabel->setObjectName(QStringLiteral("terrainPaintTargetLabel"));
-    sharedBrushForm->addRow(targetLabel, targetWidget);
+    QWidget* shapeTargetRow = new QWidget(sharedBrush);
+    shapeTargetRow->setObjectName(QStringLiteral("terrainShapeTargetRow"));
+    auto* shapeTargetLayout = new QHBoxLayout(shapeTargetRow);
+    shapeTargetLayout->setContentsMargins(0, 0, 0, 0);
+    shapeTargetLayout->setSpacing(4);
+    shapeTargetLayout->addWidget(new QLabel(tr("Форма"), shapeTargetRow));
+    shapeTargetLayout->addWidget(shapeWidget, 1);
+    shapeTargetLayout->addWidget(targetWidget);
+    sharedBrushForm->addRow(shapeTargetRow);
     QLabel* brushShortcuts = new QLabel(
         tr("Alt+колесо — размер · Shift+колесо — материал / сила · [ ] — размер · C — удерживать для ручной покраски"),
         sharedBrush);
@@ -1014,11 +1036,9 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     chipRows->setContentsMargins(0, 0, 0, 0);
     chipRows->setSpacing(2);
     const QString chipStyle = QStringLiteral(
-        "QCheckBox { border: 1px solid %1; border-radius: 7px; padding: 2px 4px; font-size: 8pt; }"
-        "QCheckBox:checked { background: %2; color: %3; border: 2px solid %2; font-weight: bold; }")
-        .arg(panelPalette.color(QPalette::Mid).name(),
-             panelPalette.color(QPalette::Highlight).name(),
-             panelPalette.color(QPalette::HighlightedText).name());
+        "QCheckBox { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 8px; font-size: 9pt; }"
+        "QCheckBox::indicator { width: 0px; height: 0px; image: none; border: 0; }"
+        "QCheckBox:checked { background: #1f3a5c; color: #8fc1ff; border: 1px solid #2f6fb5; font-weight: 600; }");
     for(QCheckBox* chip : {m_modernAutoResolveBlends, m_modernMixedEdge,
                            m_randomPaintVariants, m_generatedHdVariants,
                            m_randomizeUniformRotation})
@@ -1028,12 +1048,12 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         chip->setMinimumHeight(28);
     }
-    m_modernAutoResolveBlends->setText(tr("Переходы"));
+    m_modernAutoResolveBlends->setText(tr("Авто-переходы"));
     m_modernAutoResolveBlends->setToolTip(tr("Автоматически создавать точные переходные тайлы вокруг покрашенных клеток."));
-    m_modernMixedEdge->setText(tr("Кромки"));
-    m_randomPaintVariants->setText(tr("Варианты"));
-    m_generatedHdVariants->setText(tr("HD"));
-    m_randomizeUniformRotation->setText(tr("Повороты"));
+    m_modernMixedEdge->setText(tr("Плавные границы"));
+    m_randomPaintVariants->setText(tr("Случайные варианты"));
+    m_generatedHdVariants->setText(tr("HD-варианты"));
+    m_randomizeUniformRotation->setText(tr("Поворот"));
     m_modernMixedEdge->setToolTip(tr("Сглаживать смешанные границы; только для поддерживаемой земли и одной карты."));
     m_randomPaintVariants->setToolTip(tr("Случайные варианты однородных тайлов при покраске."));
     m_generatedHdVariants->setToolTip(tr("Использовать проверенные HD-варианты материалов."));
@@ -1048,6 +1068,8 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
         m_randomizeUniformRotation};
     for(int i = 0; i < chips.size(); ++i)
         chipGrid->addWidget(chips.at(i), i / 2, i % 2);
+    chipGrid->setColumnStretch(0, 1);
+    chipGrid->setColumnStretch(1, 1);
     chipRows->addLayout(chipGrid);
     paintLayout->insertWidget(2, paintChips);
     QWidget* paletteColumnControl = new QWidget(m_paintControls);
@@ -1095,6 +1117,30 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     advanced->addWidget(worldMaps);
     advanced->addWidget(m_worldTerrainStatus);
     advanced->addWidget(worldSave);
+    // Compact visible map commands leave room for the material palette.
+    hdRepublish->setText(tr("Перевести в HD…"));
+    generateHd->setText(tr("HD-варианты…"));
+    importButton->setText(tr("Карта высот…"));
+    m_overlayMprMaterials->setText(tr("Материалы поверхности…"));
+    auto* mapButtons = new QWidget(advanced->parentWidget());
+    mapButtons->setObjectName(QStringLiteral("landscapeMapCommands"));
+    auto* mapGrid = new QGridLayout(mapButtons);
+    mapGrid->setContentsMargins(0, 0, 0, 0);
+    mapGrid->setSpacing(4);
+    const QList<QPushButton*> commands = {shuffle, resolveMissing, hdRepublish,
+        generateHd, importButton, m_overlayMprMaterials, mprSettingsButton, saveDraft};
+    for(int i = 0; i < commands.size(); ++i) {
+        auto* button = commands.at(i);
+        advanced->removeWidget(button);
+        button->setStyleSheet(QStringLiteral(
+            "QPushButton { border: 1px solid palette(mid); border-radius: 8px; padding: 5px 6px; text-align: left; }"
+            "QPushButton:hover { border-color: #2f6fb5; }"));
+        button->setMinimumHeight(30);
+        mapGrid->addWidget(button, i / 2, i % 2);
+    }
+    mapGrid->setColumnStretch(0, 1);
+    mapGrid->setColumnStretch(1, 1);
+    advanced->insertWidget(0, mapButtons);
     help->setObjectName(QStringLiteral("landscapeSculptShortcuts"));
     help->setStyleSheet(QStringLiteral("color: %1; font-size: 8pt;")
         .arg(panelPalette.color(QPalette::Mid).name()));
@@ -2200,7 +2246,8 @@ void CLandscapeTools::rebuildMaterialPalette()
                                                    : choice.familyName].append(choice);
           for(auto family = byFamily.cbegin(); family != byFamily.cend(); ++family)
           {
-            QLabel* familyHeading = new QLabel(family.key(), this);
+            QLabel* familyHeading = new QLabel(
+                tr("%1 %2").arg(family.key()).arg(family.value().size()), this);
             familyHeading->setStyleSheet(QStringLiteral("QLabel { margin-top: 3px; color: palette(mid); }"));
             grid->addWidget(familyHeading, row++, 0, 1, columns);
             familyHeading->show();
@@ -2218,10 +2265,10 @@ void CLandscapeTools::rebuildMaterialPalette()
               button->setCheckable(true);
               button->setAutoRaise(false);
               button->setStyleSheet(QStringLiteral(
-                  "QToolButton { border: 2px solid palette(mid); padding: 2px; }"
-                  "QToolButton:hover { border-color: #ffd34e; }"
-                  "QToolButton:checked { border: 4px solid #d8ff35; "
-                  "background: #315b16; padding: 0px; }"));
+                  "QToolButton { border: 1px solid palette(mid); border-radius: 4px; padding: 2px; }"
+                  "QToolButton:hover { border-color: #2f6fb5; }"
+                  "QToolButton:checked { border: 3px solid #2f6fb5; "
+                  "background: #1f3a5c; padding: 0px; }"));
               button->setToolTip((choice.contextualStamp
                   ? tr("%1 - exact authored one-corner stamp. Vertex target only. %2")
                         .arg(choice.name)
@@ -2237,7 +2284,7 @@ void CLandscapeTools::rebuildMaterialPalette()
               if(!choice.thumbnail.isNull())
               {
                   button->setIcon(QPixmap::fromImage(choice.thumbnail));
-                  button->setIconSize(QSize(52, 52));
+                  button->setIconSize(QSize(60, 60));
               }
               else
               {
@@ -2249,7 +2296,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                       : tr("No exact reviewed-HD preview is available.\n"))
                       + button->toolTip());
               }
-              button->setMinimumSize(64, 64);
+              button->setMinimumSize(70, 70);
               connect(button, &QToolButton::clicked, this,
                       [this, choice]() { updateVariantStrip(choice); });
               if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
@@ -2261,7 +2308,7 @@ void CLandscapeTools::rebuildMaterialPalette()
                   button->setMenu(menu);button->setPopupMode(QToolButton::MenuButtonPopup);
                   button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Стрелка открывает список с миниатюрами и ID.").arg(choice.generatedIds.size()));
               }
-              button->setMaximumHeight(64);
+              button->setMaximumHeight(72);
               button->setSizePolicy(QSizePolicy::Expanding,
                                     QSizePolicy::Fixed);
               group->addButton(button);
@@ -2323,9 +2370,12 @@ void CLandscapeTools::rebuildMaterialPalette()
     const int selectedId = paintTerrainType(&selected);
     if(selected)
     {
-        for(const auto* list : {&m_landPaintTypes, &m_underwaterPaintTypes,
-                                &m_overlayPaintTypes})
-            for(const STerrainPaintMaterialChoice& choice : *list)
+        const auto* list = editMode() == ELandscapeEditMode::OverlayPaint
+            || editMode() == ELandscapeEditMode::OverlaySurface
+            || editMode() == ELandscapeEditMode::OverlaySculpt
+            ? &m_overlayPaintTypes : underwaterFamiliesVisible()
+                ? &m_underwaterPaintTypes : &m_landPaintTypes;
+        for(const STerrainPaintMaterialChoice& choice : *list)
                 if(choice.id == selectedId)
                     updateVariantStrip(choice);
     }
@@ -2359,7 +2409,8 @@ void CLandscapeTools::updateVariantStrip(
         strip->setVisible(hasVariants);
     if(!hasVariants)
         return;
-    m_variantStripTitle->setText(tr("Варианты: %1").arg(choice.name));
+    m_variantStripTitle->setText(tr("Выбрано: %1 — %2 исходных + %3 сгенерированных")
+        .arg(choice.name).arg(choice.assignedSlots).arg(choice.generatedIds.size()));
     const auto addVariant = [this](const QString& label, const QImage& image,
                                    const QString& detail) {
         auto* button = new QToolButton(m_variantStripLayout->parentWidget());
@@ -2565,6 +2616,13 @@ bool CLandscapeTools::selectPaintTerrainType(qint32 terrainType)
         {
             setPaintIssueMarkingEnabled(false);
             button->setChecked(true);
+            const auto* choices = editMode() == ELandscapeEditMode::OverlayPaint
+                || editMode() == ELandscapeEditMode::OverlaySurface
+                || editMode() == ELandscapeEditMode::OverlaySculpt
+                ? &m_overlayPaintTypes : underwaterFamiliesVisible()
+                    ? &m_underwaterPaintTypes : &m_landPaintTypes;
+            for(const auto& choice : *choices)
+                if(choice.id == terrainType) { updateVariantStrip(choice); break; }
             emit paintTerrainTypeChanged(terrainType);
             emit editingStateChanged();
             return true;

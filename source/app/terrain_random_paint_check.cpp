@@ -151,6 +151,18 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         }
         panel.grab().save(output+"/palette-overlay.png");
         check(land>0 && overlay>0,QString("selectable land=%1 overlay=%2").arg(land).arg(overlay));
+        if(fixture.value("panelOnly").toBool()) {
+            for(int width : {360,420}) {
+                panel.resize(width,1000);
+                for(auto mode : {ELandscapeEditMode::TilePaint,ELandscapeEditMode::Sculpt,ELandscapeEditMode::OverlaySurface}) {
+                    panel.activateMode(mode,true);
+                    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                    check(panel.grab().save(output+QString("/panel-%1-%2.png").arg(width).arg(int(mode))),"real-map panel snapshot");
+                }
+            }
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';
+            return failed?1:0;
+        }
         panel.activateMode(ELandscapeEditMode::TilePaint,true);
         if(auto* option=panel.findChild<QAbstractButton*>("modernMixedEdge"))option->setChecked(false);
         const auto before=snapshot(view.m_terrainEdit);

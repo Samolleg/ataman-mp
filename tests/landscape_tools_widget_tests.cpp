@@ -131,7 +131,7 @@ void LandscapeToolsWidgetTests::usedMaterialFilterTracksMapAndSelection()
     QCOMPARE(scroll->findChildren<QToolButton*>().size(), 2);
     int headings = 0;
     for(auto* label : scroll->findChildren<QLabel*>())
-        headings += label->text() == "Grass";
+        headings += label->text() == "Grass 2";
     QCOMPARE(headings, 1); // Used and unused variants share the same family.
     QVERIFY(tools.selectPaintTerrainType(102));
     QSignalSpy changed(&tools, &CLandscapeTools::paintTerrainTypeChanged);
@@ -957,8 +957,10 @@ void LandscapeToolsWidgetTests::landscapeModeSegmentsKeepEverySurfaceActionAvail
         "landscapeDiagnosticsToggle");
     QVERIFY(mapToggle);
     QVERIFY(diagnosticsToggle);
-    QVERIFY(!mapToggle->isChecked());
+    QVERIFY(mapToggle->isChecked());
     QVERIFY(!diagnosticsToggle->isChecked());
+    mapToggle->click();
+    QVERIFY(!mapToggle->isChecked());
     mapToggle->click();
     QVERIFY(mapToggle->isChecked());
     diagnosticsToggle->click();
@@ -1065,7 +1067,7 @@ void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
     tools.setPaintMaterials({choice}, {}, {}, 1, 1);
     QVERIFY(!variantTitle->isHidden());
     QVERIFY(!variantStrip->isHidden());
-    QCOMPARE(variantTitle->text(), QStringLiteral("Варианты: Тестовый материал"));
+    QCOMPARE(variantTitle->text(), QStringLiteral("Выбрано: Тестовый материал — 0 исходных + 0 сгенерированных"));
     tools.activateMode(ELandscapeEditMode::TilePaint, false);
     QApplication::processEvents();
     const auto variantButtons = variantStrip->findChildren<QToolButton*>();
