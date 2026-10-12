@@ -14,6 +14,7 @@
 #include "tile_form.h"
 #include "tree_view.h"
 #include "terrain_virtual_atlas.h"
+#include "resourcemanager.h"
 #include <QApplication>
 #include <QTableWidget>
 #include <QDataStream>
@@ -34,6 +35,11 @@
 #include <QSettings>
 #include <QUndoStack>
 #include <QtEndian>
+#include <QElapsedTimer>
+#include <QThread>
+#include <QTimer>
+#include <QMessageBox>
+#include <QTabWidget>
 
 namespace {
 QByteArray read(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }
@@ -101,6 +107,72 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,output+"/settings");
     QSettings::setPath(QSettings::IniFormat,QSettings::SystemScope,output+"/settings");
+    if(fixture.value("paletteRecovery").toBool()) {
+        // Use the production first-frame/event-loop path, never ensure() from
+        // the harness. Resource roots and the map must be private copies.
+        QDir::setCurrent(output);
+        CSettings settings;
+        const QString root=fixture.value("realRoot").toString();
+        auto* roots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots"));
+        if(!check(roots && QFileInfo(root+"/res/HDPack_Terrain.res").isFile(),"copied atlas resource root"))return 1;
+        roots->setValue({root+"/res/HDPack_Terrain.res"});
+        CTextureList::getInstance()->attachSettings(&settings);
+        CObjectList::getInstance()->attachSettings(&settings);
+        QUndoStack history;CTreeView tree;QTableWidget properties;properties.setColumnCount(2);
+        CProgressView progress;QLineEdit coordinates;CTileForm tiles;CLandscapeTools panel;
+        panel.setAttribute(Qt::WA_DontShowOnScreen);panel.resize(360,900);panel.show();
+        CView view(nullptr,nullptr);view.setAttribute(Qt::WA_DontShowOnScreen);
+        view.attach(&settings,&properties,&history,&progress,&coordinates,&tree,&tiles);
+        view.attachLandscapeTools(&panel);view.resize(640,480);view.show();QApplication::processEvents();
+        if(!check(view.isValid(),"hidden desktop OpenGL context"))return 1;
+        const QString map=root+"/Maps/"+fixture.value("zone").toString("zone1")+".mpr";
+        QElapsedTimer timer;timer.start();view.loadLandscape(QFileInfo(map),false);
+        const qint64 openMs=timer.elapsed();
+        while(timer.elapsed()<120000 && (view.m_terrainAutoCatalogPending || view.m_terrainAutoCatalogBuilding)) {
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
+        }
+        log<<"TIMING openReturnMs="<<openMs<<" paletteReadyMs="<<timer.elapsed()<<" firstFrameMs="<<view.m_terrainAutoCatalogFirstFrameMs<<'\n';
+        if(!check(!view.m_terrainAutoCatalogPending && !view.m_terrainAutoCatalogBuilding && view.m_terrainEditAvailable,
+                  "catalog fills automatically after a frame without harness ensure"))return 1;
+        panel.activateMode(ELandscapeEditMode::TilePaint,true);panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        int land=0,overlay=0;
+        for(const auto& family:view.m_terrainGlobalFamilies) {
+            if(family.layer==ETerrainAtlasLayer::Land && panel.selectPaintTerrainType(family.id))++land;
+        }
+        panel.grab().save(output+"/palette-land.png");
+        panel.activateMode(ELandscapeEditMode::OverlayPaint,true);
+        for(const auto& family:view.m_terrainGlobalFamilies) {
+            if(family.layer==ETerrainAtlasLayer::Overlay && panel.selectPaintTerrainType(family.id))++overlay;
+        }
+        panel.grab().save(output+"/palette-overlay.png");
+        check(land>0 && overlay>0,QString("selectable land=%1 overlay=%2").arg(land).arg(overlay));
+        panel.activateMode(ELandscapeEditMode::TilePaint,true);
+        if(auto* option=panel.findChild<QAbstractButton*>("modernMixedEdge"))option->setChecked(false);
+        const auto before=snapshot(view.m_terrainEdit);
+        bool changed=false;
+        for(const auto& family:view.m_terrainGlobalFamilies) {
+            if(family.layer!=ETerrainAtlasLayer::Land || !panel.selectPaintTerrainType(family.id))continue;
+            QVector3D point(33,33,0);view.m_pLand->projectPt(point,true);
+            view.updatePreviewTile(point,true);view.beginTileBrushGroup();view.setTile(point,true);view.endTileBrushGroup();
+            if(snapshot(view.m_terrainEdit)!=before){changed=true;break;}
+        }
+        if(!check(changed,"production land brush changes real copied map"))return 1;
+        const auto painted=snapshot(view.m_terrainEdit);history.undo();check(snapshot(view.m_terrainEdit)==before,"stroke Undo");
+        history.redo();check(snapshot(view.m_terrainEdit)==painted,"stroke Redo");
+        QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[](const QString&,bool* accepted){if(accepted)*accepted=true;});
+        QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){
+            for(auto* widget:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(widget)) {
+                log<<"Unexpected save dialog: "<<box->text()<<'\n';++failed;box->reject();
+            }
+        });dismiss.start(50);
+        const bool saved=view.saveChangedLandscapeDocument(QFileInfo(map),true,true);
+        check(saved,"save through production writer on private copied map");
+        CMprDocument reopened;CTerrainEditModel model;CValidationReport report;
+        check(saved && reopened.load(QFileInfo(map),&report) && model.load(reopened,&report)
+              && !report.hasErrors() && snapshot(model)==painted,"reopen copied MPR with exact painted sectors");
+        log<<report.toText()<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';
+        return failed?1:0;
+    }
     QSettings().remove("ui/landscape/randomPaintVariants");
     {
         CLandscapeTools panel;
