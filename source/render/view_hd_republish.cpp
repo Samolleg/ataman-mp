@@ -242,6 +242,14 @@ void CView::republishTerrainAtlasHd()
     const bool adopted=adoptCompleteTerrainBaseline(mapRequest.destination,saved.candidateSha256,result.after,archivePath,result.profile,!semantic.isEmpty());
     emit terrainPublicationFinished(archivePath,true);
     if(!adopted){QMessageBox::warning(this,tr("HD атлас сохранён"),tr("Пара MPR/RES сохранена. Откройте карту заново для продолжения редактирования."));return;}
+    // An open shared-brush document must not retain the former slot layout or
+    // source pages after this map changes its atlas namespace.
+    syncWorldTerrainActive();
+    m_worldTerrainSession.clearHistory();
+    const auto active=CWorldTerrainSession::key(mapPath);
+    if(auto doc=m_worldTerrainSession.documents.value(active))doc->atlas.clear();
+    m_worldTerrainAtlasSources.remove(active);
+    updateWorldTerrainStatus();
     // Use the normal terrain transaction: one undo command with captured packed
     // values and a fresh seed. Saving persists that command through the usual
     // MPR/semantic-field path; the unchecked default keeps the existing workflow.

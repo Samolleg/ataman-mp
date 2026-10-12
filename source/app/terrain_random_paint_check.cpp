@@ -222,6 +222,15 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             if(saveOnly)points={QVector3D(73,1,0),QVector3D(139,1,0),QVector3D(451,9,0),QVector3D(349,123,0)};
             if(fixture.value("legacyHd").toBool())
                 points={QVector3D(25,25,0),QVector3D(55,45,0),QVector3D(65,75,0)};
+            if(fixture.value("legacyHd").toBool()) {
+                bool found=false;
+                for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
+                    for(int x=0;x<view.m_terrainEdit.tileCountX()&&!found;++x)
+                        if(SMprPackedTile::decode(view.m_terrainEdit.packedTile(x,y,ETerrainTileLayer::Land)).atlasSlot()==915) {
+                            points.append(QVector3D(x*2+1,y*2+1,0));found=true;
+                            log<<"HD VIEW former refusal slot915 centre="<<x*2+1<<","<<y*2+1<<'\n';
+                        }
+            }
             if(!saveOnly&&!fixture.value("legacyHd").toBool())for(int slot:{34,44,215,666}) {
                 bool found=false;
                 for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)

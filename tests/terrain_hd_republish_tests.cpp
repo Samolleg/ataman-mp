@@ -63,6 +63,40 @@ class TerrainHdRepublishTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void lowContrastTransitionKeepsReviewedTopology()
+    {
+        ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
+        QVector<QImage> tiles(64,pattern(0));tiles[1]=pattern(1);
+        for(int id=0;id<2;++id)for(int y=0;y<256;++y)for(int x=0;x<256;++x)
+            tiles[id].setPixel(x,y,qRgb(56+id*8+(x%17)/2,88-id*8+(y%17)/2,24));
+        const auto hd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(tiles,0,256),true,nullptr);
+        QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));
+        qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
+        CResArchiveDocument archive;QVERIFY(archive.loadBytes(empty));
+        SResArchiveNewMember member;member.name="stock000.mmp";member.payload=hd;QByteArray res;
+        QVERIFY(archive.buildWithAppendedMembers({member},&res));
+        const QString path=dir.path()+"/stock.res";QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(res),qint64(res.size()));file.close();
+        CTerrainHdSources sources;QString error;QVERIFY2(sources.open({path},&error),qPrintable(error));
+        QVector<QImage> low;const auto sd=lowMip(hd);
+        for(int slot=0;slot<64;++slot){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(sd,slot,&image));low.append(image);}
+        // No usable color/texture evidence remains in this authored carrier.
+        // Its reviewed semantic corners still distinguish the two materials.
+        low[2].fill(qRgb(100,100,100));
+        const auto authored=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(low,0,128),true,nullptr);
+        for(int slot=0;slot<64;++slot)QVERIFY(ei::decodeMmpDxt1AtlasTile(authored,slot,&low[slot]));
+        auto p=profile(low);auto& s=p.slotDefinitions[2].signature;
+        s.northWest=1;s.northEast=s.southEast=s.southWest=2;
+        const auto result=rebuildTerrainAtlasHd(p,{authored},sources);
+        QVERIFY2(result.success,qPrintable(result.error));
+        QVERIFY(result.receipt["allStaticSlotsTrueHd"].toBool());
+        const auto row=result.receipt["slots"].toArray()[2].toObject();
+        QCOMPARE(row["result"].toString(),QStringLiteral("regenerated-256"));
+        const auto output=result.after[result.slotRemap.value(2)];
+        QCOMPARE(output.size(),QSize(256,256));
+        QVERIFY(output!=low[2].scaled(256,256));
+        QVERIFY(output.pixel(8,8)!=output.pixel(247,247));
+    }
     void multiMaterialJunctionUsesHdPixels()
     {
         ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
@@ -628,7 +662,7 @@ private slots:
 int main(int argc,char** argv)
 {
     if(argc>1&&std::strcmp(argv[1],"--headless-only")==0) {
-        const QSet<QByteArray> safeFunctions{"originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
+        const QSet<QByteArray> safeFunctions{"lowContrastTransitionKeepsReviewedTopology","originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
         if(argc<3)return 2;
         std::vector<char*> filtered;filtered.reserve(size_t(argc));filtered.push_back(argv[0]);
         for(int i=2;i<argc;++i) {

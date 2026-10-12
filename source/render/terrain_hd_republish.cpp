@@ -1328,6 +1328,21 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             recipe["maskDonors"]=donorEvidence;
             if(donors.size()==ids.size()) {
                 witness=semanticMaskedHd(r.before[slot],d.signature,donors,&recipe);
+                if(witness.isNull()&&ids.size()==2
+                   &&recipe["maskRefusal"].toString()==QStringLiteral("indistinguishable-authored-corner-colors")) {
+                    // Two similar grasses can be semantically distinct while
+                    // their authored RGB/activity means are indistinguishable
+                    // (zone2 slot915). Preserve the reviewed corner topology;
+                    // regenerate its standard transition from the compatible
+                    // native HD donors instead of inventing a noisy RGB mask.
+                    CTerrainTransitionCatalog empty;
+                    CTerrainVirtualAtlas hdTopology(empty,{donors.first()},0,donors,styles,true);
+                    witness=hdTopology.reviewGeneratedBlend(signature,0);
+                    if(!witness.isNull()) {
+                        recipe["algorithm"]=QStringLiteral("reviewed-corner-topology/HD-material-composite");
+                        recipe["ownershipFallback"]=recipe.take("maskRefusal");
+                    }
+                }
                 if(!witness.isNull()){ambiguous=false;recipe["sources"]=donorEvidence;recipe["context"]=contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature");}
             } else recipe["maskRefusal"]=QStringLiteral("missing-compatible-HD-material-donors");
         }
@@ -1412,6 +1427,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         if(transition) {
             if(ids.size()<=2&&(contextualSignatures.contains(slot)||profileEvidence)) {
                 r.error=QStringLiteral("Recognized two-material transition %1 could not be reconstructed from classified HD sources").arg(slot);
+                r.receipt["slots"]=slotRows;
                 return r;
             }
             reason=ids.size()>2?QStringLiteral("unsupported-more-than-two-corner-materials")
@@ -1888,9 +1904,6 @@ int runTerrainHdRepublish(const QString& path)
         const QString mapPath=value.toString();QByteArray bytes;CMprDocument map;CValidationReport report;
         if(!read(mapPath,&bytes)||!map.loadBytes(bytes,mapPath,&report))return 2;
         const QString ns=map.mapInfo().innerNamespace;STerrainAtlasProfile p;
-        if(!QRegularExpression(QStringLiteral("_[0-9a-f]{12}$")).match(ns).hasMatch()) {
-            QTextStream(stderr)<<"Only published namespaces are eligible: "<<ns<<'\n';return 2;
-        }
         if(!STerrainAtlasProfile::fromBytes(published.readMember(CTerrainAtlasProfileStore::embeddedMemberName(ns),&error),&p,&report))return 2;
         QVector<QByteArray> pages;
         for(int page=0;page<int(map.mapInfo().textureCount);++page)pages.append(published.readMember(QStringLiteral("%1%2.mmp").arg(ns.toLower()).arg(page,3,10,QLatin1Char('0')),&error));
