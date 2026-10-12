@@ -2518,6 +2518,23 @@ void CLandscapeTools::resizeEvent(QResizeEvent* event)
     schedulePaletteRelayout();
 }
 
+void CLandscapeTools::changeEvent(QEvent* event)
+{
+    QWidget::changeEvent(event);
+    if(event->type() == QEvent::FontChange && !m_updatingPanelFontStyle) {
+        // Qt stylesheet polish otherwise resolves each child back to the
+        // platform point font. Keep the panel's pixel font through polish,
+        // and follow live UI-scale changes rather than freezing their size.
+        m_updatingPanelFontStyle = true;
+        const QVariant configuredScale = QCoreApplication::instance()
+            ? QCoreApplication::instance()->property("enduranceUiScalePercent") : QVariant();
+        const int percent = configuredScale.isValid() ? configuredScale.toInt() : 100;
+        setStyleSheet(QStringLiteral("QWidget { font-size: %1px; }")
+            .arg(qMax(1,qRound(13 * percent / 100.0))));
+        m_updatingPanelFontStyle = false;
+    }
+}
+
 bool CLandscapeTools::eventFilter(QObject* watched, QEvent* event)
 {
     // A palette can become visible or change width without resizing the outer

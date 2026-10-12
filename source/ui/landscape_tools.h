@@ -205,6 +205,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void changeEvent(QEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
@@ -316,6 +317,7 @@ private:
     void schedulePaletteRelayout();
     void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
     void refreshVariantStrip();
+    bool m_updatingPanelFontStyle{false};
     QButtonGroup* activeMaterialButtons() const;
 };
 

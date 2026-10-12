@@ -1090,6 +1090,17 @@ void LandscapeToolsWidgetTests::landscapePanelPolishControlsAndOrder()
     layerLand->click();
     QCOMPARE(tools.editMode(), ELandscapeEditMode::TilePaint);
     QVERIFY(variantTitle->text().startsWith(QStringLiteral("Выбрано: Тестовый материал")));
+    auto* paintSegment = tools.findChild<QToolButton*>("landscapePaintSegment");
+    QVERIFY(paintSegment);
+    QCOMPARE(paintSegment->font().pixelSize(), tools.font().pixelSize());
+    const QFont panelFont = tools.font();
+    const QVariant previousScale = qApp->property("enduranceUiScalePercent");
+    qApp->setProperty("enduranceUiScalePercent", 150);
+    QFont scaledPanelFont = panelFont;scaledPanelFont.setPixelSize(20);
+    tools.setFont(scaledPanelFont);QApplication::processEvents();
+    QCOMPARE(paintSegment->font().pixelSize(), 20);
+    qApp->setProperty("enduranceUiScalePercent", previousScale);
+    tools.setFont(panelFont);QApplication::processEvents();
     tools.setPaintMaterials({}, {}, {}, 0, 0);
     QVERIFY(variantTitle->isHidden());
     QVERIFY(variantStrip->isHidden());
