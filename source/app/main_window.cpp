@@ -7179,7 +7179,8 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!ordinaryMapOpen)
-        m_pView->beginNeighborMapTransition(mprPath,m_preferredEditorActiveMap,targetWorldOrigin);
+        m_pView->beginNeighborMapTransition(mprPath,m_preferredEditorActiveMap,targetWorldOrigin,
+            sourceCameraPosition,sourceCameraPivot,sourceCameraRotation,preserveNeighborCamera);
     m_undoStack->clear();
     m_pView->unloadMob("");
     // isExitAllowed() already collected the dirty-document decision.

@@ -16,11 +16,13 @@
 
 #include <cmath>
 #include <cstring>
+#include <utility>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
 #include "utils.h"
 #include "resourcemanager.h"
+#include "resource_name.h"
 #include "node.h"
 #include "sector.h"
 #include "backup_manager.h"
@@ -64,6 +66,7 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_renderTextureCount = 1;
+    m_terrainSourceArchives.clear();
     m_renderAtlasColumns = 1;
     m_bDirty = false;
     delete m_terrainShadowTexture;
@@ -733,6 +736,73 @@ bool CLandscape::readPreparedBackground(const QFileInfo& path,
     return isMprLoad();
 }
 
+void CLandscape::swapPreparedScene(CLandscape& other)
+{
+    // No serialization, texture upload or sector draw-data rebuild. Sectors
+    // contain pointers to their owner's tables, so rebind those pointers only.
+    using std::swap;
+    swap(m_worldOffset,other.m_worldOffset);
+    swap(m_header,other.m_header);
+    swap(m_aMaterial,other.m_aMaterial);
+    swap(m_aTileTypes,other.m_aTileTypes);
+    swap(m_aAnimTile,other.m_aAnimTile);
+    swap(m_renderTextureCount,other.m_renderTextureCount);
+    swap(m_renderAtlasColumns,other.m_renderAtlasColumns);
+    swap(m_aSector,other.m_aSector);
+    swap(m_texture,other.m_texture);
+    swap(m_baseAtlasTexture,other.m_baseAtlasTexture);
+    swap(m_baseAtlasColumns,other.m_baseAtlasColumns);
+    swap(m_previewAtlasTexture,other.m_previewAtlasTexture);
+    swap(m_previewAtlasImages,other.m_previewAtlasImages);
+    swap(m_previewAtlasTextureCount,other.m_previewAtlasTextureCount);
+    swap(m_previewAtlasColumns,other.m_previewAtlasColumns);
+    swap(m_filePath,other.m_filePath);
+    swap(m_innerMapName,other.m_innerMapName);
+    swap(m_originalMprData,other.m_originalMprData);
+    swap(m_terrainSourceArchives,other.m_terrainSourceArchives);
+    swap(m_arrIncorectTiles,other.m_arrIncorectTiles);
+    swap(m_bDirty,other.m_bDirty);
+    swap(m_materialDrawDataDirty,other.m_materialDrawDataDirty);
+    swap(m_canonicalTerrain,other.m_canonicalTerrain);
+    swap(m_shadowGeneration,other.m_shadowGeneration);
+    swap(m_terrainShadowFieldGeneration,other.m_terrainShadowFieldGeneration);
+    swap(m_terrainShadowSunDirection,other.m_terrainShadowSunDirection);
+    swap(m_terrainShadowTexture,other.m_terrainShadowTexture);
+    swap(m_terrainShadowTextureWidth,other.m_terrainShadowTextureWidth);
+    swap(m_terrainShadowTextureHeight,other.m_terrainShadowTextureHeight);
+    swap(m_terrainShadowFuture,other.m_terrainShadowFuture);
+    swap(m_terrainShadowFutureActive,other.m_terrainShadowFutureActive);
+    swap(m_terrainShadowDesiredGeneration,other.m_terrainShadowDesiredGeneration);
+    swap(m_terrainShadowDesiredDirection,other.m_terrainShadowDesiredDirection);
+    swap(m_terrainShadowFutureGeneration,other.m_terrainShadowFutureGeneration);
+    swap(m_terrainShadowFutureDirection,other.m_terrainShadowFutureDirection);
+    for(auto* owner:{this,&other})
+        for(auto& row:owner->m_aSector)for(auto* sector:row)
+            if(sector)sector->bindMapTables(&owner->m_aMaterial,&owner->m_aAnimTile);
+}
+
+void CLandscape::bindPreparedEditorSource(const QFileInfo& path,const QByteArray& bytes)
+{
+    if(m_readOnlyBackground)return;
+    m_filePath=path;m_originalMprData=bytes;
+}
+
+QStringList CLandscape::resolvedTerrainSourceArchives() const
+{
+    QStringList sources;
+    for(const auto& name:ei::terrainTextureResourceNames(m_innerMapName,int(m_header.nTexture))) {
+        QString source;
+        CTextureList::getInstance()->terrainMmpSourceArchive(name,&source);
+        sources.append(source.isEmpty()?QString():QFileInfo(source).absoluteFilePath());
+    }
+    return sources;
+}
+
+bool CLandscape::usesCurrentTerrainSources() const
+{
+    return m_terrainSourceArchives==resolvedTerrainSourceArchives();
+}
+
 void CLandscape::readMapInternal(const QFileInfo& path,
                                  bool createRecoverySnapshot,
                                  const QMap<QString,QByteArray>* prepared)
@@ -798,6 +868,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
         innerMapName, int(m_header.nTexture), texCount, atlasColumns);
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
+    m_terrainSourceArchives = resolvedTerrainSourceArchives();
     m_baseAtlasColumns = atlasColumns;
     m_renderAtlasColumns = qMax(1, atlasColumns);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
@@ -953,12 +1024,22 @@ bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& byt
 
 void CLandscape::setMaterials(const QVector<SMaterial>& arrMat)
 {
+    QByteArray before,after;
+    QDataStream oldTables(&before,QIODevice::WriteOnly),newTables(&after,QIODevice::WriteOnly);
+    util::formatStream(oldTables);util::formatStream(newTables);
+    oldTables<<m_aMaterial;newTables<<arrMat;
+    if(before==after)return;
     m_aMaterial = arrMat;
     m_materialDrawDataDirty = true;
 }
 
 void CLandscape::setAnimTils(const QVector<SAnimTile>& arrAnimTile)
 {
+    bool equal=m_aAnimTile.size()==arrAnimTile.size();
+    for(int i=0;equal && i<arrAnimTile.size();++i)
+        equal=m_aAnimTile[i].tileIndex==arrAnimTile[i].tileIndex
+            && m_aAnimTile[i].nPhase==arrAnimTile[i].nPhase;
+    if(equal)return;
     m_aAnimTile = arrAnimTile;
     m_materialDrawDataDirty = true;
 }

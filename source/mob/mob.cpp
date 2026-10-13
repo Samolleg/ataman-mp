@@ -61,6 +61,22 @@ CMob::~CMob()
         delete node;
 }
 
+QVector<QSharedPointer<CNode>> CMob::takeWorldObjectsForRetiredMob()
+{
+    QVector<QSharedPointer<CNode>> taken;QList<CNode*> remaining;QSet<CNode*> takenNodes;
+    for(auto* node:m_aNode) {
+        if(node->nodeType()!=ENodeType::eWorldObject) {remaining.append(node);continue;}
+        if(takenNodes.contains(node))continue;
+        takenNodes.insert(node);
+        m_aDeletedNode.removeAll(node);
+        node->setParent(nullptr);
+        if(node->nodeState()!=ENodeState::eHidden)node->setState(ENodeState::eDraw);
+        taken.append(QSharedPointer<CNode>(node));
+    }
+    m_aNode=remaining;
+    return taken;
+}
+
 void CMob::attach(CView *view, CProgressView *pProgress)
 {
     m_view = view;

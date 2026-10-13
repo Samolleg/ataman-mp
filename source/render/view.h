@@ -351,7 +351,11 @@ public:
         const QVector3D& sourceRotation);
     void beginNeighborMapTransition(const QString& targetPath,
                                     const QString& targetZone,
-                                    const QPointF& targetOrigin);
+                                    const QPointF& targetOrigin,
+                                    const QVector3D& sourcePosition,
+                                    const QVector3D& sourcePivot,
+                                    const QVector3D& sourceRotation,
+                                    bool preserveCamera);
     void endNeighborMapTransition();
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
@@ -668,9 +672,10 @@ private:
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
     void invalidateNeighborScenePreparation();
+    bool activateReadyNeighborTerrain(const QFileInfo& path,const CMprDocument& document);
     QByteArray neighborResourceRevision() const;
     QByteArray neighborSourceRevision(const SNeighborMapPlacement& placement,
-                                      bool objects) const;
+                                      bool objects, const QStringList& terrainArchives = QStringList()) const;
     void populateNeighborObjects(quint64 generation);
     void chooseWorldTerrainMaps();
     void updateWorldTerrainStatus();
@@ -1151,6 +1156,13 @@ private:
     QString m_neighborSceneProfileId;
     QString m_neighborActiveSceneId;
     bool m_neighborSceneTransition{false};
+    QVector<QSharedPointer<CNode>> m_neighborTransitionSourceObjects;
+    QByteArray m_neighborTransitionSourceObjectRevision;
+    bool m_neighborTransitionCameraValid{false};
+    QVector3D m_neighborTransitionCameraPosition;
+    QVector3D m_neighborTransitionCameraPivot;
+    QVector3D m_neighborTransitionCameraRotation;
+    QSharedPointer<SWorldTerrainDocument> m_adoptedNeighborTerrainDocument;
     SNeighborMapPlacement m_neighborTransitionSource;
     SNeighborMapPlacement m_neighborTransitionTarget;
     QThreadPool* m_neighborScenePool{nullptr};

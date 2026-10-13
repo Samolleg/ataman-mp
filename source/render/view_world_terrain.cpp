@@ -19,6 +19,7 @@
 #include <cmath>
 
 namespace {
+QVector<SMaterial> worldRenderMaterials(const QVector<SMprMaterialRecord>& records);
 bool inferWorldMaterialRuntimeTypes(const QMap<QString,SWorkingTerrainResolveStage>& stages,
         const QSet<qint32>& required,QMap<qint32,qint32>* types,CValidationReport* report)
 {
@@ -93,6 +94,30 @@ void CView::restoreWorldTerrainActive()
         QMessageBox::critical(this,tr("Retained terrain differs from disk"),
             tr("The MPR changed externally. Retained edits are still in the world session. Save/recover or explicitly discard that session before reopening this file."));
         return;
+    }
+    if(m_adoptedNeighborTerrainDocument==doc) {
+        // The adopted sector VBOs and preview atlas already show this model.
+        // Restore editor state without republishing every sector or atlas.
+        m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
+        if(doc->atlas) {
+            const auto images=doc->atlas->activeTileImages();
+            if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes())) {
+                m_terrainEditAvailable=false;return;
+            }
+            m_authoredTerrainTileImages=doc->atlas->authoredTileImages();
+            m_workingTerrainAtlas=doc->atlas->createStagingCopy();
+            const auto source=m_worldTerrainAtlasSources.constFind(id);
+            if(source!=m_worldTerrainAtlasSources.cend()) {
+                m_terrainAtlasProfile=source->profile;m_activeTerrainArchivePath=source->archive;
+            }
+            if(m_landscapeTools) {
+                m_landscapeTools->setOverlayMaterials(worldRenderMaterials(m_mprMaterials));
+                m_landscapeTools->setGeneratedAtlasTileCount(m_workingTerrainAtlas->generatedTileCount());
+            }
+            refreshWorkingTerrainPalettes();
+        }
+        m_pLand->setCanonicalTerrainModel(&m_terrainEdit);syncMprDirtyState();
+        updateWorldTerrainStatus();return;
     }
     if(doc->atlas) {
         if(!previewWorldPaintState(id)){m_terrainEditAvailable=false;return;}

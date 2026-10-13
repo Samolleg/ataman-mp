@@ -7,6 +7,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QSet>
+#include <QSharedPointer>
 #include <QOpenGLShader>
 #include <functional>
 
@@ -53,6 +54,10 @@ struct SMobAutosaveSnapshot
 ///
 class CMob
 {
+    friend class CView;
+    // Called only after accepted close decisions and history teardown, while
+    // this MOB is being retired. Removes the old raw owning references.
+    QVector<QSharedPointer<CNode>> takeWorldObjectsForRetiredMob();
     friend int runTerrainMobHeightCheck();
 public:
     struct SCanvasCropResult

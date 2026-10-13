@@ -52,7 +52,18 @@ public:
     bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
     void setWorldOffset(const QVector3D& offset)
-    { m_worldOffset = offset; updatePosition(); }
+    {
+        if(m_worldOffset==offset)return;
+        // Vertices/indices stay sector-local. Navigation changes only their
+        // world transform and culling center, never the ready GPU buffers.
+        m_boundsCenter += offset-m_worldOffset;
+        m_worldOffset = offset;
+        m_modelMatrix.setToIdentity();
+        m_modelMatrix.translate(QVector3D(m_index.x*32.0f,m_index.y*32.0f,0)+offset);
+    }
+    void bindMapTables(const QVector<SMaterial>* materials,
+                       const QVector<SAnimTile>* animatedTiles)
+    { m_materials=materials; m_animatedTiles=animatedTiles; }
     const UI2& index() {return m_index;}
     bool projectPt(QVector3D& origin, bool land = true);
     bool pickTile(int& row, int& col, QVector3D& point, bool bLand = true);
