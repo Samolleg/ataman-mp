@@ -45,6 +45,7 @@
 #include <QMessageBox>
 #include <QTabWidget>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QPointer>
 #include <QMouseEvent>
@@ -205,14 +206,23 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             for(auto* button:panel.findChildren<QToolButton*>())
                 if(button->property("terrainMaterialId").isValid()&&button->isEnabled()
                    &&button->toolTip().contains("Grass / Dark")){button->click();break;}
-            QApplication::processEvents();
+            // Resize schedules a deferred responsive relayout; capture only
+            // settled native geometry, not an intermediate synthetic frame.
+            QElapsedTimer settle;settle.start();while(settle.elapsed()<250) {
+                QApplication::processEvents();QThread::msleep(5);
+            }
+            auto* toolScroll=panel.findChild<QScrollArea*>("landscapeToolScroll");
+            const int scrollBefore=toolScroll->verticalScrollBar()->value();
             check(panel.grab().save(output+"/palette-before.png"),"native palette before capture");
             QVector<QPointer<QToolButton>> buttons;
             for(auto* button:panel.findChildren<QToolButton*>())
                 if(button->property("terrainMaterialId").isValid())buttons.append(button);
             // Same production catalog rebuild called by HD adoption, without
             // another multi-minute regeneration of unchanged texture artwork.
-            view.rebuildTerrainAutoCatalog();QApplication::processEvents();
+            view.rebuildTerrainAutoCatalog();settle.restart();while(settle.elapsed()<250) {
+                QApplication::processEvents();QThread::msleep(5);
+            }
+            check(toolScroll->verticalScrollBar()->value()==scrollBefore,"catalog rebuild preserves outer panel scroll");
             bool retained=!buttons.isEmpty();for(const auto& button:buttons)retained &= !button.isNull();
             check(retained,"palette keeps native buttons across atlas catalog rebuild");
             const auto stable=[&](const QVector<STerrainPaintMaterialChoice>& before,
