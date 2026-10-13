@@ -528,7 +528,7 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
-    void shuffleTerrainTiles(bool selectionOnly);
+    void shuffleTerrainTiles(bool selectionOnly,const std::function<void(const QString&,int)>& progress={});
     QSet<int> randomPaintExcludedSlots() const;
     quint32 terrainRandomPaintSeed() const;
     void randomizeTerrainPaintCommand(STerrainTileCommand* command,
@@ -618,7 +618,7 @@ private:
         const QVector<QImage>& physicalTiles,
         const QString& terrainArchivePath,
         const STerrainAtlasProfile& expectedProfile,
-        bool requireSemanticMember);
+        bool requireSemanticMember,const std::function<void(const QString&,int)>& progress={});
     bool buildTerrainSemanticFieldMember(
         const QByteArray& candidateMprBytes,
         const QFileInfo& destinationMpr,

@@ -186,17 +186,29 @@ void CView::republishTerrainAtlasHd()
     confirmation.setCheckBox(&distribute);
     if(confirmation.exec()!=QMessageBox::Yes)return;
     const bool distributeVariants=distribute.isChecked();
+    CTerrainHdProgress completionState;
+    CTerrainHdProgressDialog completionDialog(completionState,this);
+    completionDialog.lockForCommit();
+    const int completionSteps=distributeVariants?6:5;
+    completionState.operation(tr("Проверка исходных файлов"),1,completionSteps);
+    completionDialog.show();QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    bool ready=true;emit terrainPublicationPreflightRequested(archivePath,&ready);if(!ready)return;
+    SMprBytesSaveCommitRequest mapRequest;mapRequest.source=m_pLand->filePath();mapRequest.destination=mapRequest.source;
+    mapRequest.expectedSourceBytes=m_mprDocument.originalBytes();mapRequest.candidateBytes=result.mprBytes;mapRequest.createBackup=true;
+    struct Published {bool success{false},archiveTouched{false};QString error,cleanupNotice;SMprBytesSaveCommitResult saved;};
+    const auto publicationHashes=result.receipt["sourcePageSha256"].toArray();
+    auto publication=QtConcurrent::run([archivePath,profile,prepared,result,publicationHashes,authoredSources,pageNames,sources,mapRequest,mapRoots,completionSteps,&completionState]() {
+    Published outcome;
+    const auto& hashes=publicationHashes;
     // Preparation used a snapshot. Refuse a changed RES before requesting the
     // publication lease; the existing coordinator also checks the commit source.
     QFile archiveFile(archivePath);CResArchiveDocument baseline;QStringList errors;QString cleanupError;
     if(!archiveFile.open(QIODevice::ReadOnly)||!baseline.loadBytes(archiveFile.readAll(),archivePath,&errors)
        ||QCryptographicHash::hash(baseline.originalBytes(),QCryptographicHash::Sha256)!=prepared.baselineSha) {
-        QMessageBox::critical(this,tr("HD пересборка отказана"),tr("RES изменился во время подготовки. Повторите команду."));return;
+        outcome.error=QStringLiteral("RES изменился во время подготовки. Повторите команду.");return outcome;
     }
     archiveFile.close();
-    bool ready=true;emit terrainPublicationPreflightRequested(archivePath,&ready);if(!ready)return;
     // The archive baseline used by the confirmation is also the commit guard.
-    const auto hashes=result.receipt["sourcePageSha256"].toArray();
     bool unchanged=hashes.size()==profile.textureCount;
     for(int page=0;page<hashes.size();++page) {
         CResArchiveIndex source;QString error;
@@ -205,17 +217,28 @@ void CView::republishTerrainAtlasHd()
     }
     QString sourceError;unchanged=unchanged&&sources->current(&sourceError);
     if(!unchanged) {
-        emit terrainPublicationFinished(archivePath,false);
-        QMessageBox::critical(this,tr("HD пересборка отказана"),tr("Исходные страницы атласа изменились во время анализа. Повторите команду на актуальной карте."));return;
+        outcome.error=QStringLiteral("Исходные страницы атласа изменились во время анализа. Повторите команду на актуальной карте.");return outcome;
     }
     SResPublishedMembersSaveRequest request;request.source=QFileInfo(archivePath);request.destination=request.source;request.published=result.publishedMembers;request.createBackup=true;
+    request.progress=[&](const QString& phase,int percent){
+        QString text=QStringLiteral("Сохранение HD-атласа");
+        if(phase.contains("Reading"))text=QStringLiteral("Чтение исходного HDPack");
+        else if(phase.contains("Building"))text=QStringLiteral("Сборка и проверка HDPack");
+        else if(phase.contains("Staging"))text=QStringLiteral("Подготовка HDPack к записи");
+        else if(phase.contains("Waiting"))text=QStringLiteral("Ожидание освобождения ресурсов");
+        else if(phase.contains("backup"))text=QStringLiteral("Создание проверенной резервной копии");
+        else if(phase.contains("Writing"))text=QStringLiteral("Запись HDPack");
+        else if(phase.contains("Reopening"))text=QStringLiteral("Проверка записанного HDPack");
+        completionState.operation(text,2,completionSteps,percent,100);
+    };
     const auto committed=commitStagedResPublishedMembers(baseline,request);
+    outcome.archiveTouched=committed.committed;
     if(!committed.success) {
-        emit terrainPublicationFinished(archivePath,committed.committed);QMessageBox::critical(this,tr("HD публикация не завершена"),committed.error);return;
+        outcome.error=committed.error;return outcome;
     }
-    SMprBytesSaveCommitRequest mapRequest;mapRequest.source=m_pLand->filePath();mapRequest.destination=mapRequest.source;
-    mapRequest.expectedSourceBytes=m_mprDocument.originalBytes();mapRequest.candidateBytes=result.mprBytes;mapRequest.createBackup=true;
+    completionState.operation(QStringLiteral("Сохранение и проверка карты"),3,completionSteps);
     const auto saved=commitValidatedMprBytes(mapRequest);
+    outcome.saved=saved;
     if(!saved.success) {
         QFile current(archivePath);bool restored=false;
         if(current.open(QIODevice::ReadOnly)) {
@@ -225,12 +248,12 @@ void CView::republishTerrainAtlasHd()
                 restored=rollback.open(QIODevice::WriteOnly)&&rollback.write(old)==old.size()&&rollback.commit();
             }
         }
-        emit terrainPublicationFinished(archivePath,true);
-        QMessageBox::critical(this,tr("HD публикация не завершена"),saved.error+tr("\nОткат RES: %1").arg(restored?tr("выполнен"):tr("нужна ручная проверка")));return;
+        outcome.error=saved.error+QStringLiteral("\nОткат RES: %1").arg(restored?QStringLiteral("выполнен"):QStringLiteral("нужна ручная проверка"));return outcome;
     }
     // Only a committed new MPR may make its previous atlas an orphan.
     // Cleanup failure retains a valid pair and reports the recoverable extra data.
     QString cleanupNotice;
+    completionState.operation(QStringLiteral("Проверка старого атласа"),4,completionSteps);
     QFile currentArchive(archivePath);QByteArray currentBytes;
     if(currentArchive.open(QIODevice::ReadOnly))currentBytes=currentArchive.readAll();
     currentArchive.close();
@@ -238,16 +261,24 @@ void CView::republishTerrainAtlasHd()
     if(QString::fromLatin1(QCryptographicHash::hash(currentBytes,QCryptographicHash::Sha256).toHex())!=committed.candidateSha256
        ||!current.loadBytes(currentBytes)
        ||!buildTerrainHdCleanup(current,profile.mprNamespace,result.profile.mprNamespace,mapRequest.destination.absoluteFilePath(),mapRoots,&compacted,&finalCleanup,&cleanupError))
-        cleanupNotice=tr("Старый атлас сохранён: пакет или список карт изменился. %1").arg(cleanupError);
+        cleanupNotice=QStringLiteral("Старый атлас сохранён: пакет или список карт изменился. %1").arg(cleanupError);
     else if(finalCleanup["removedMembers"].toInt()) {
         if(!commitTerrainHdCleanup(archivePath,currentBytes,compacted,finalCleanup,&cleanupError))
-            cleanupNotice=tr("Карта сохранена; очистка старого атласа не завершена: %1").arg(cleanupError);
-    } else cleanupNotice=tr("Старый атлас сохранён: %1").arg(cleanupReason(finalCleanup));
+            cleanupNotice=QStringLiteral("Карта сохранена; очистка старого атласа не завершена: %1").arg(cleanupError);
+    } else if(finalCleanup["reason"].toString()!=QStringLiteral("stock-or-unverified-original-atlas"))cleanupNotice=QStringLiteral("Старый атлас сохранён (%1).").arg(finalCleanup["reason"].toString());
     baseline=CResArchiveDocument();current=CResArchiveDocument();currentBytes.clear();compacted.clear();
-    if(!cleanupNotice.isEmpty())QMessageBox::information(this,tr("HD атлас"),cleanupNotice);
-    const bool adopted=adoptCompleteTerrainBaseline(mapRequest.destination,saved.candidateSha256,result.after,archivePath,result.profile,!semantic.isEmpty());
+    outcome.cleanupNotice=cleanupNotice;outcome.success=true;return outcome;
+    });
+    QFutureWatcher<Published> publicationWatcher;QEventLoop publicationLoop;
+    connect(&publicationWatcher,&QFutureWatcherBase::finished,&publicationLoop,&QEventLoop::quit);
+    publicationWatcher.setFuture(publication);if(!publication.isFinished())publicationLoop.exec();
+    const auto published=publication.result();
+    if(!published.success){completionDialog.accept();emit terrainPublicationFinished(archivePath,published.archiveTouched);QMessageBox::critical(this,tr("HD публикация не завершена"),published.error);return;}
+    auto adoptionProgress=[&](const QString& phase,int percent){completionState.operation(phase,5,completionSteps,percent,100);completionDialog.refresh();QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);};
+    adoptionProgress(tr("Применение сохранённого атласа"),0);
+    const bool adopted=adoptCompleteTerrainBaseline(mapRequest.destination,published.saved.candidateSha256,result.after,archivePath,result.profile,!semantic.isEmpty(),adoptionProgress);
     emit terrainPublicationFinished(archivePath,true);
-    if(!adopted){QMessageBox::warning(this,tr("HD атлас сохранён"),tr("Пара MPR/RES сохранена. Откройте карту заново для продолжения редактирования."));return;}
+    if(!adopted){completionDialog.accept();QMessageBox::warning(this,tr("HD атлас сохранён"),tr("Пара MPR/RES сохранена. Откройте карту заново для продолжения редактирования."));return;}
     // An open shared-brush document must not retain the former slot layout or
     // source pages after this map changes its atlas namespace.
     syncWorldTerrainActive();
@@ -265,15 +296,19 @@ void CView::republishTerrainAtlasHd()
         const quint32 previousSeed=m_terrainEdit.randomPaintSeed();
         QString detail;
         const auto observer=connect(this,&CView::updateMsg,this,[&detail](const QString& text){detail=text;});
-        shuffleTerrainTiles(false);disconnect(observer);
+        auto shuffleProgress=[&](const QString& phase,int percent){completionState.operation(phase,6,completionSteps,qMax(0,percent),percent<0?0:100);completionDialog.refresh();QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);};
+        shuffleProgress(tr("Раскладка вариантов по карте"),0);
+        shuffleTerrainTiles(false,shuffleProgress);disconnect(observer);
         const bool applied=m_terrainEdit.hasRandomPaintSeed()
             &&(!hadSeed||m_terrainEdit.randomPaintSeed()!=previousSeed)&&m_pLand->isDirty();
         if(!applied) {
             const QString message=tr("HD-пара сохранена, но раскладка вариантов не применена. %1").arg(detail);
-            emit updateMsg(message);QMessageBox::warning(this,tr("Раскладка вариантов"),message);
+            completionDialog.accept();emit updateMsg(message);QMessageBox::warning(this,tr("Раскладка вариантов"),message);
             emit mprSaveStateChanged();return;
         }
         completion+=tr(" Варианты разложены в рабочей карте; сохраните MPR для записи раскладки. Undo/Redo доступны.");
     }
+    completionDialog.accept();
+    if(!published.cleanupNotice.isEmpty())completion+=QStringLiteral(" ")+published.cleanupNotice;
     emit mprSaveStateChanged();emit updateMsg(completion);
 }

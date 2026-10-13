@@ -401,6 +401,22 @@ private slots:
         future.waitForFinished();QVERIFY(dialog.isVisible());dialog.accept();
         CTerrainHdProgress escape;CTerrainHdProgressDialog escaped(escape);escaped.show();QTest::keyClick(&escaped,Qt::Key_Escape);QVERIFY(escape.cancelled());escaped.accept();
     }
+    void publicationDialogResponsiveAndLocked()
+    {
+        CTerrainHdProgress progress;CTerrainHdProgressDialog dialog(progress);dialog.setAttribute(Qt::WA_DontShowOnScreen);dialog.lockForCommit();dialog.show();
+        progress.operation(QStringLiteral("Запись HDPack"),2,6,10,100);dialog.refresh();
+        QVERIFY(!dialog.findChild<QPushButton*>("hdProgressCancel")->isEnabled());
+        QTest::keyClick(&dialog,Qt::Key_Escape);QVERIFY(!progress.cancelled());QVERIFY(dialog.isVisible());
+        int ticks=0;QTimer timer;connect(&timer,&QTimer::timeout,[&](){++ticks;});timer.start(30);
+        auto future=QtConcurrent::run([&](){for(int i=10;i<=90;++i){progress.operation(QStringLiteral("Запись HDPack"),2,6,i,100);QThread::msleep(45);}});
+        QTRY_VERIFY(future.isFinished());QVERIFY(ticks>30);QVERIFY(progress.snapshot().stageRemainingMs>=0);
+        progress.operation(QStringLiteral("Применение карты"),5,6);dialog.refresh();
+        QCOMPARE(dialog.findChild<QProgressBar*>()->maximum(),0);
+        QVERIFY(dialog.findChild<QLabel*>("hdProgressLabel")->text().contains(QStringLiteral("Шаг 5 из 6")));
+        const auto png=qEnvironmentVariable("EI_HD_PROGRESS_PNG");if(!png.isEmpty())QVERIFY(dialog.grab().save(png));
+        progress.operation(QStringLiteral("Раскладка завершена"),6,6,100,100);dialog.refresh();
+        QCOMPARE(dialog.findChild<QProgressBar*>()->value(),100);dialog.accept();
+    }
     void originalBlocksAndDeterminism()
     {
         ++headlessTestEntries;

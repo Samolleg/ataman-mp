@@ -258,7 +258,16 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             capture("before");
             bool confirmed=false;QByteArray publishedBaseline;bool oldSeed=false;quint32 oldSeedValue=0;
             QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
+            QElapsedTimer publicationClock;int publicationTicks=0;qint64 lastPublicationTick=0,maxPublicationGap=0;QSet<QString> publicationLabels;
             QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,&view,[&](){
+                if(fixture.value("publicationProgress").toBool()&&confirmed)for(auto* w:QApplication::topLevelWidgets()) {
+                    if(w->objectName()!=QStringLiteral("terrainHdProgressDialog")||!w->isVisible())continue;
+                    auto* cancel=w->findChild<QPushButton*>("hdProgressCancel");auto* label=w->findChild<QLabel*>("hdProgressLabel");
+                    if(!cancel||cancel->isEnabled()||!label)continue;
+                    if(!publicationClock.isValid())publicationClock.start();
+                    const auto now=publicationClock.elapsed();maxPublicationGap=qMax(maxPublicationGap,now-lastPublicationTick);lastPublicationTick=now;++publicationTicks;
+                    const auto text=label->text().section('\n',0);if(!publicationLabels.contains(text)){publicationLabels.insert(text);log<<"PUBLICATION "<<text<<"\n";log.flush();}
+                }
                 for(auto* w:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(w)) {
                     auto* option=box->findChild<QCheckBox*>("terrainHdDistributeVariants");
                     if(option&&!confirmed) {
@@ -299,6 +308,11 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             if(saveOnly)view.shuffleTerrainTiles(false);
             else {
                 view.republishTerrainAtlasHd();
+                if(fixture.value("publicationProgress").toBool()) {
+                    log<<"PUBLICATION ticks="<<publicationTicks<<" maxGapMs="<<maxPublicationGap<<"\n";
+                    check(publicationTicks>=5&&publicationLabels.size()>=4,"publication remains visible through multiple completion phases");
+                    check(maxPublicationGap<3000,"publication GUI timer gap stays below three seconds");
+                }
                 check(confirmed,"real HD confirmation accepted");
                 check(view.m_mprDocument.mapInfo().innerNamespace!=oldNamespace && view.m_terrainAtlasAnalysis.usable,"published MPR/RES adopted by real editor");
             }

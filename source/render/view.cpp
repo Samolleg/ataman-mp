@@ -1826,7 +1826,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::shuffleTerrainTilesRequested,
-                this, &CView::shuffleTerrainTiles);
+                this, [this](bool selectionOnly){shuffleTerrainTiles(selectionOnly);});
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, [this]()
         {
@@ -14096,8 +14096,9 @@ bool CView::adoptCompleteTerrainBaseline(
     const QVector<QImage>& physicalTiles,
     const QString& terrainArchivePath,
     const STerrainAtlasProfile& expectedProfile,
-    bool requireSemanticMember)
+    bool requireSemanticMember,const std::function<void(const QString&,int)>& progress)
 {
+    if(progress)progress(tr("Чтение сохранённой карты"),0);
     const auto adoptionFailure = [](const QString& phase,
                                     const QString& detail)
     {
@@ -14129,9 +14130,15 @@ bool CView::adoptCompleteTerrainBaseline(
            map.innerNamespace, physicalHash, physicalTiles.size(), &report))
         return adoptionFailure(QStringLiteral("staged-atlas-binding"),
                                report.toText().trimmed());
-    const STerrainAtlasEmbeddedBindingResult binding =
-        CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
-            {terrainArchivePath}, map.innerNamespace, terrainArchivePath);
+    if(progress)progress(tr("Проверка сохранённых текстур"),10);
+    const auto readBinding=[&](){return CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+            {terrainArchivePath}, map.innerNamespace, terrainArchivePath);};
+    STerrainAtlasEmbeddedBindingResult binding;
+    if(progress) {
+        auto future=QtConcurrent::run(readBinding);QFutureWatcher<STerrainAtlasEmbeddedBindingResult> watcher;QEventLoop loop;
+        connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);watcher.setFuture(future);
+        if(!future.isFinished())loop.exec();binding=future.result();
+    } else binding=readBinding();
     if(!binding.success()
        || !binding.canReuseDecodedAtlasTiles(
            terrainArchivePath, map.innerNamespace, physicalTiles.size(),
@@ -14171,8 +14178,10 @@ bool CView::adoptCompleteTerrainBaseline(
                 previousRendererTiles.size() / 64) && restored;
         return restored;
     };
+    int appliedSectors=0;
     for(const SMprSectorInfo& sector : reopenedDocument.sectors())
     {
+        if(progress&&(appliedSectors++%8==0))progress(tr("Обновление ландшафта"),30+30*appliedSectors/qMax(1,reopenedDocument.sectors().size()));
         const QByteArray payload = reopenedTerrain.sectorPayload(
             sector.sectorX, sector.sectorY);
         // The complete canonical preview updates land and overlay arrays in
@@ -14189,6 +14198,7 @@ bool CView::adoptCompleteTerrainBaseline(
                                   : QStringLiteral("failed")));
         }
     }
+    if(progress)progress(tr("Загрузка HD-текстур в видеопамять"),65);
     const bool acquireContext = isValid()
         && QGLContext::currentContext() != context();
     if(acquireContext)
@@ -14243,6 +14253,7 @@ bool CView::adoptCompleteTerrainBaseline(
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
     if(m_pUndoStack)
         m_pUndoStack->clear();
+    if(progress)progress(tr("Обновление палитры материалов"),85);
     rebuildTerrainAutoCatalog();
     m_pLand->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
@@ -14250,6 +14261,7 @@ bool CView::adoptCompleteTerrainBaseline(
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMprDirtyFlag, "");
     refreshMprSettingsDock();
     emit loadedMapStateChanged();
+    if(progress)progress(tr("Карта обновлена"),100);
     return true;
 }
 
@@ -21955,7 +21967,7 @@ void CView::randomizeTerrainPaintCommand(STerrainTileCommand* command,
     appendTerrainTileCommand(command, random);
 }
 
-void CView::shuffleTerrainTiles(bool selectionOnly)
+void CView::shuffleTerrainTiles(bool selectionOnly,const std::function<void(const QString&,int)>& progress)
 {
     if(!m_terrainEditAvailable || !m_pUndoStack || m_tilePaintStrokeActive
        || !ensureTerrainAutoCatalogReady()) return;
@@ -21982,8 +21994,11 @@ void CView::shuffleTerrainTiles(bool selectionOnly)
         &&TerrainHdVariantBank::available()) {
         CValidationReport variantsReport;
         variantsStage.atlas=m_workingTerrainAtlas->createStagingCopy();variantsStage.terrainEdit=m_terrainEdit;
-        for(const auto& family:m_terrainGlobalFamilies)if(family.layer==ETerrainAtlasLayer::Land)
-            if(!importTerrainHdVariants(family.id,ETerrainTileLayer::Land,&variantsReport,&variantsStage)){emit updateMsg(variantsReport.toText());return;}
+        int preparedFamilies=0;
+        for(const auto& family:m_terrainGlobalFamilies) {
+            if(progress)progress(tr("Подготовка вариантов материалов"),40*preparedFamilies++/qMax(1,m_terrainGlobalFamilies.size()));
+            if(family.layer==ETerrainAtlasLayer::Land&&!importTerrainHdVariants(family.id,ETerrainTileLayer::Land,&variantsReport,&variantsStage)){emit updateMsg(variantsReport.toText());return;}
+        }
     }
     const auto& catalog = variantsStage.atlas?variantsStage.atlas->catalog()
         :m_workingTerrainAtlas ? m_workingTerrainAtlas->catalog()
@@ -21992,7 +22007,16 @@ void CView::shuffleTerrainTiles(bool selectionOnly)
     quint32 seed = QRandomGenerator::system()->generate();
     if(seed == terrainRandomPaintSeed())
         ++seed;
-    auto command = edit.makeRandomTilePaint(catalog, seed, region, randomPaintExcludedSlots(), selectedCells);
+    const auto excluded=randomPaintExcludedSlots();
+    const auto prepareCommand=[&](){return edit.makeRandomTilePaint(catalog,seed,region,excluded,selectedCells);};
+    STerrainTileCommand command;
+    if(progress) {
+        progress(tr("Подбор вариантов для ячеек карты"),-1);
+        auto future=QtConcurrent::run(prepareCommand);QFutureWatcher<STerrainTileCommand> watcher;QEventLoop loop;
+        connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);watcher.setFuture(future);
+        if(!future.isFinished())loop.exec();command=future.result();
+        progress(tr("Применение раскладки"),85);
+    } else command=prepareCommand();
     if(variantsStage.atlas&&variantsStage.atlas->activeTileCount()!=m_workingTerrainAtlas->activeTileCount()) {
         command.workingAtlasBefore=m_workingTerrainAtlas->createStagingCopy();command.workingAtlasAfter=variantsStage.atlas;
     }
@@ -22008,6 +22032,7 @@ void CView::shuffleTerrainTiles(bool selectionOnly)
         syncMprDirtyState(); update();
     }
     emit updateMsg(tr("Changed %1 cells").arg(changed));
+    if(progress)progress(tr("Раскладка завершена"),100);
 }
 
 void CView::refreshTerrainTilePreview(const STerrainTileCommand& command,
