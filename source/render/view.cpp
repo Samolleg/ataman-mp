@@ -1893,6 +1893,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                  this, [this](qint32 terrainType)
         {
             cancelTileBrushGroup();
+            m_sampledWaterPacked = -1;
             queueModernTerrainFamilyPrewarm(terrainType);
             if(!manualTilePaintingEnabled())
             {
@@ -11994,6 +11995,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    m_sampledWaterPacked = -1;
     const quint64 hydrationGeneration =
         ++m_terrainGlobalHydrationGeneration;
     ++m_terrainFamilyPrewarmGeneration;
@@ -12878,6 +12880,11 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
 
 void CView::queueModernTerrainFamilyPrewarm(qint32 terrainType)
 {
+    // Sampling an existing physical tile never needs a family import.
+    if(m_terrainSampleGestureActive && !terrainTileEditLayerIsLand())
+        for(const auto& choice : m_modernOverlayPaintChoices)
+            if(choice.id == terrainType && choice.name.startsWith(QStringLiteral("Water")))
+                return;
     const quint64 requestGeneration = ++m_terrainFamilyPrewarmGeneration;
     m_preparedTerrainFamilyStage.clear();
     m_preparedTerrainFamily = -1;
@@ -19257,6 +19264,22 @@ bool CView::pickTile(QVector3D posOnLand, bool bLand)
             else
                 emit updateMsg(tr("The nearest vertex material is contextual and has no brush in this palette."));
         }
+        if(!bLand && m_landscapeTools->paintPaletteMode() == ETerrainPaintPaletteMode::Modern)
+            for(const auto& choice : m_modernOverlayPaintChoices)
+                if(choice.id == sampledMaterial && choice.name.startsWith(QStringLiteral("Water")))
+                {
+                    // A water family contains many different physical shore/depth
+                    // tiles. Keep the sampled artwork instead of resolving its
+                    // shared semantic family back to a different uniform tile.
+                    m_sampledWaterPacked = packed;
+                    ++m_terrainFamilyPrewarmGeneration;
+                    m_preparedTerrainFamilyStage.clear();
+                    m_terrainPaintFootprintValid = false;
+                    emit updateMsg(QString::fromUtf8("Образец воды: тайл %1, поворот %2°. ЛКМ переносит этот тайл; выбор материала в палитре сбрасывает образец.")
+                        .arg(SMprPackedTile::decode(packed).atlasSlot())
+                        .arg(int(SMprPackedTile::decode(packed).rotation) * 90));
+                    break;
+                }
     }
     if(!bLand)
         m_pTileForm->setActiveMatIndex(pTile->materialIndex());
@@ -19846,6 +19869,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
     bool preselectedMaterial = false;
     qint32 preselectedTerrainType = -1;
     const bool semanticPaint = !m_landscapeTools->manualTileSelectionEnabled()
+        && !sampledWaterPaintingEnabled()
         && (bLand || m_landscapeTools->overlaySurfaceOperation()
                         == EOverlaySurfaceOperation::PaintExisting);
     if(semanticPaint)
@@ -20098,7 +20122,7 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         ? m_workingTerrainAtlas->catalog()
         : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
                   : m_terrainAtlasAnalysis.catalog(layer));
-    const bool manual = m_landscapeTools->manualTileSelectionEnabled();
+    const bool manual = manualTilePaintingEnabled();
     qint32 terrainType = -1;
     STerrainTileCommand command;
     if(manual)
@@ -20106,6 +20130,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
         int selectedIndex = -1;
         int selectedRotation = 0;
         m_pTileForm->getSelectedTile(selectedIndex, selectedRotation);
+        if(sampledWaterPaintingEnabled())
+        {
+            const auto sample = SMprPackedTile::decode(quint16(m_sampledWaterPacked));
+            selectedIndex = sample.atlasSlot();
+            selectedRotation = sample.rotation;
+        }
         if(selectedIndex < 0)
         {
             emit updateMsg(tr("Choose an atlas tile before painting in manual mode."));
@@ -20638,7 +20668,15 @@ void CView::adjustTerrainPaintMaterial(int steps)
 
 bool CView::manualTilePaintingEnabled() const
 {
-    return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
+    return m_landscapeTools && (m_landscapeTools->manualTileSelectionEnabled()
+        || sampledWaterPaintingEnabled());
+}
+
+bool CView::sampledWaterPaintingEnabled() const
+{
+    return m_sampledWaterPacked >= 0 && m_landscapeTools
+        && m_landscapeTools->overlayPaintEnabled()
+        && m_landscapeTools->paintPaletteMode() == ETerrainPaintPaletteMode::Modern;
 }
 
 float CView::terrainPaintStampSpacing() const
@@ -21856,6 +21894,7 @@ void CView::beginTileBrushGroup()
              != ETerrainPaintPaletteMode::Modern
         || m_landscapeTools->modernAutoResolveBlends();
     m_tileStrokeMixedEdge=mixedEdgeTerrainEnabled();
+    if(sampledWaterPaintingEnabled())m_tileStrokeAutoResolveBlends=false;
     if(m_tileStrokeMixedEdge) m_tileStrokeAutoResolveBlends=true;
     m_mixedEdgeStrokeAtlasBefore=m_tileStrokeMixedEdge && m_workingTerrainAtlas
         ?m_workingTerrainAtlas->createStagingCopy():QSharedPointer<CTerrainWorkingAtlas>();

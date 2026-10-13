@@ -430,6 +430,9 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             const auto animationFrames=[&](){QVector<QVector<QImage>> sequences;for(const auto& animation:view.m_mprAnimatedTiles){QVector<QImage> frames;for(int frame=0;frame<animation.frameCount;++frame)frames.append(view.m_pTileForm->tileImages().value(animation.tileIndex+frame));sequences.append(frames);}return sequences;};
             const auto originalAnimationFrames=animationFrames();
             QObject::connect(&view,&CView::updateMsg,[&](const QString& message){log<<"MESSAGE "<<message<<'\n';log.flush();});
+            QTimer matrixDialogs;
+            QObject::connect(&matrixDialogs,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)){log<<"UNEXPECTED "<<b->text()<<'\n';log.flush();++failed;b->reject();}});
+            matrixDialogs.start(50);
             const auto settle=[](){QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);};
             const auto button=[&](const char* name){return panel.findChild<QAbstractButton*>(name);};
             const auto click=[&](const char* name){auto* b=button(name);if(check(b && b->isEnabled(),QString("UI %1 available").arg(name)))b->click();settle();};
@@ -545,6 +548,72 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 view.setNeighborMapContext({active,neighbor},{origin,distantOrigin},"fixture","fixture","active");
                 check(view.m_worldTerrainEnabled && view.m_hasActiveMapWorldOrigin
                     && !view.m_worldTerrainEnabledPaths.isEmpty(),"production neighbor context enables shared brush");
+            }
+            if(fixture.value("waterEyedrop").toBool()) {
+                surface(ELandscapeEditMode::OverlayPaint);
+                click("circlePaintShape");click("vertexPaintTarget");radius->setValue(1);
+                QPoint source(-1,-1),destination(-1,-1);quint16 sample=0;
+                const auto images=view.m_workingTerrainAtlas->activeTileImages();
+                const auto& catalog=view.m_workingTerrainAtlas->catalog();
+                for(int y=12;y<view.m_terrainEdit.tileCountY()-3 && destination.x()<0;++y)
+                    for(int x=3;x<view.m_terrainEdit.tileCountX()-3;++x) {
+                        bool present=false;
+                        const auto tile=view.m_terrainEdit.packedTile(x,y,ETerrainTileLayer::Overlay,&present);
+                        bool known=false;const auto s=catalog.gridSignatureForPacked(tile,&known);
+                        if(!present || !known || s.northWest!=1522175125 || s.northEast!=s.northWest
+                            || s.southEast!=s.northWest || s.southWest!=s.northWest)continue;
+                        const auto physical=SMprPackedTile::decode(tile);
+                        if(physical.atlasSlot()>=images.size())continue;
+                        if(source.x()<0){source=QPoint(x,y);sample=tile;continue;}
+                        if((source-QPoint(x,y)).manhattanLength()<8)continue;
+                        if(images[physical.atlasSlot()]!=images[SMprPackedTile::decode(sample).atlasSlot()]) {
+                            destination=QPoint(x,y);break;
+                        }
+                    }
+                if(!check(destination.x()>=0,"two visually different Water Still tiles in original zone1"))return 1;
+                log<<"SAMPLE source="<<source.x()<<','<<source.y()<<" destination="<<destination.x()<<','<<destination.y()<<" packed="<<sample<<'\n';
+                const auto pointer=aim(QVector3D(source.x()*2+1,source.y()*2+1,0));
+                for(const auto type:{QEvent::MouseMove,QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
+                    QMouseEvent event(type,pointer,type==QEvent::MouseMove?Qt::NoButton:Qt::RightButton,
+                        type==QEvent::MouseButtonPress?Qt::RightButton:Qt::NoButton,Qt::NoModifier);
+                    QApplication::sendEvent(&view,&event);settle();
+                }
+                check(view.sampledWaterPaintingEnabled() && view.m_sampledWaterPacked==sample,
+                    "RMB retains exact water tile and packed rotation in Modern");
+                const int atlasSize=view.m_workingTerrainAtlas->activeTileCount();
+                stroke("sampled-water",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,false);
+                check(view.m_terrainEdit.packedTile(destination.x(),destination.y(),ETerrainTileLayer::Overlay)==sample,
+                    "LMB transfers exact sampled water tile after release and Redo");
+                check(view.m_workingTerrainAtlas->activeTileCount()==atlasSize,"water sample creates no atlas variants");
+                check(view.sampledWaterPaintingEnabled(),"water sample survives stroke and Undo Redo");
+                stroke("sampled-water-drag",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);
+                check(animationFrames()==originalAnimationFrames,"native water animation images preserved");
+                choose(view.m_modernOverlayPaintChoices,"Lava");
+                check(!view.sampledWaterPaintingEnabled(),"palette selection clears physical water sample");
+                stroke("water-to-lava",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);
+                QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
+                QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)){log<<"UNEXPECTED "<<b->text()<<'\n';++failed;b->reject();}});dismiss.start(50);
+                view.saveLand();
+                if(!check(!view.m_pLand->isDirty(),"ordinary Save after sampled water and material brush"))return 1;
+                // Save may legitimately compact/remap physical atlas slots.
+                // Reopening must reproduce the committed post-save model.
+                const auto saved=snapshot(view.m_terrainEdit);
+                const auto savedImages=view.m_workingTerrainAtlas->activeTileImages();
+                const auto savedPacked=view.m_terrainEdit.packedTile(source.x(),source.y(),ETerrainTileLayer::Overlay);
+                const auto savedWater=SMprPackedTile::decode(savedPacked);
+                view.unloadLand(false);view.makeCurrent();view.loadLandscape(QFileInfo(map),false);view.updateGL();timer.restart();
+                while(timer.elapsed()<120000 && (view.m_terrainAutoCatalogPending || view.m_terrainAutoCatalogBuilding)){settle();QThread::msleep(5);}
+                check(snapshot(view.m_terrainEdit)==saved,"reopen preserves water and material stroke bytes");
+                const auto reopenedWater=SMprPackedTile::decode(view.m_terrainEdit.packedTile(source.x(),source.y(),ETerrainTileLayer::Overlay));
+                const auto waterBefore=savedImages.value(savedWater.atlasSlot());
+                const auto waterAfter=view.m_workingTerrainAtlas->activeTileImages().value(reopenedWater.atlasSlot());
+                log<<"WATER SAVE before="<<waterBefore.width()<<'x'<<waterBefore.height()<<" format="<<int(waterBefore.format())
+                    <<" after="<<waterAfter.width()<<'x'<<waterAfter.height()<<" format="<<int(waterAfter.format())
+                    <<" rotations="<<int(savedWater.rotation)<<','<<int(reopenedWater.rotation)<<'\n';
+                check(reopenedWater.rotation==savedWater.rotation
+                    && waterAfter.convertToFormat(QImage::Format_RGBA8888)==waterBefore.convertToFormat(QImage::Format_RGBA8888),
+                    "native water artwork and rotation survive Save/reopen");
+                log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
             }
             if(fixture.value("ownerReleaseRegression").toBool()) {
                 click("landscapePaintSegment");click("terrainLayerSegment_0");

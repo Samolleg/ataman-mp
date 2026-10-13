@@ -1159,7 +1159,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     }
     if(!ensureWorldTerrainAtlas(active,&report)){emit updateMsg(report.toText());return true;}
     const auto palette=m_landscapeTools->paintPaletteMode();
-    const bool manual=palette==ETerrainPaintPaletteMode::Manual;
+    const bool manual=manualTilePaintingEnabled();
     const bool classic=palette==ETerrainPaintPaletteMode::ClassicAuto;
     if(m_tileStrokeMixedEdge && (palette!=ETerrainPaintPaletteMode::Modern || !land)) {
         emit updateMsg(tr("Mixed-edge общей кисти поддерживает только покраску Ground в режиме Modern."));
@@ -1172,6 +1172,10 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     bool selected=false;const auto material=m_landscapeTools->paintTerrainType(&selected);
     int selectedSlot=-1,rotation=0;
     if(manual)m_pTileForm->getSelectedTile(selectedSlot,rotation);
+    if(sampledWaterPaintingEnabled()) {
+        const auto sample=SMprPackedTile::decode(quint16(m_sampledWaterPacked));
+        selectedSlot=sample.atlasSlot();rotation=sample.rotation;
+    }
     if((manual && selectedSlot<0) || (!manual && !selected)){emit updateMsg(tr("Выберите материал или тайл."));return true;}
     const auto activeAtlas=m_worldTerrainSession.documents[active]->atlas;
     int liquid=-1;
@@ -1197,7 +1201,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         stage.decodedTileCache=m_terrainGlobalTransitionTileCache;stage.uniformTileCache=m_terrainGlobalUniformTileCache;
         stage.atlas->setDistributionSeed(m_tileStrokeDistributionSeed);
         QMap<int,quint64> usage;
-        for(int y=0;y<stage.terrainEdit.tileCountY();++y)for(int x=0;x<stage.terrainEdit.tileCountX();++x)
+        if(!manual)for(int y=0;y<stage.terrainEdit.tileCountY();++y)for(int x=0;x<stage.terrainEdit.tileCountX();++x)
             for(const auto l:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
                 bool available=false;const auto packed=stage.terrainEdit.packedTile(x,y,l,&available);
                 if(available && !(l==ETerrainTileLayer::Overlay && packed==0xffff))++usage[SMprPackedTile::decode(packed).atlasSlot()];
@@ -1216,7 +1220,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             if(selectedSlot>=images.size()){report.add("terrain.world.selection",EValidationSeverity::Error,"Invalid selected atlas slot.");break;}
             SMprPackedTile packed;packed.atlasIndex=quint8(selectedSlot/64);packed.tileIndex=quint8(selectedSlot%64);
             bool known=false;const auto signature=activeAtlas->catalog().gridSignatureForPacked(packed.encode(),&known);
-            slot=stage.atlas->importPhysicalTile(images[selectedSlot],activeAtlas->runtimeTerrainTypeForSlot(selectedSlot),
+            slot=target.key()==active ? selectedSlot : stage.atlas->importPhysicalTile(images[selectedSlot],activeAtlas->runtimeTerrainTypeForSlot(selectedSlot),
                 known?&signature:nullptr,m_mprDocument.mapInfo().innerNamespace,selectedSlot,&report);
             if(slot<0)break;
         } else {
@@ -1540,7 +1544,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     if(stamp.isEmpty())return true;
     if(!m_worldTerrainSession.apply(stamp,true,&error)){emit updateMsg(error);return true;}
     bool previewed=true;
-    for(const auto& id:stamp.paint.keys())previewed=previewWorldPaintState(id) && previewed;
+    for(const auto& id:stamp.paint.keys())previewed=previewWorldPaintState(id,true) && previewed;
     if(!previewed) {
         m_worldTerrainSession.apply(stamp,false,&error);
         for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
@@ -1574,7 +1578,7 @@ QVector<SMaterial> worldRenderMaterials(const QVector<SMprMaterialRecord>& recor
 }
 }
 
-bool CView::previewWorldPaintState(const QString& id)
+bool CView::previewWorldPaintState(const QString& id, bool incremental)
 {
     const auto doc=m_worldTerrainSession.documents.value(id);if(!doc || !doc->atlas)return false;
     CTerrainPreviewContext guard(this);
@@ -1585,20 +1589,34 @@ bool CView::previewWorldPaintState(const QString& id)
         if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id){landscape=neighbor.landscape.data();break;}
     if(!landscape)return true; // unloaded neighbors still own the complete document
     const auto images=doc->atlas->activeTileImages();
-    if(!landscape->previewTerrainAtlas(images,doc->atlas->activeTextureCount()))return false;
-    landscape->setMaterials(worldRenderMaterials(doc->materials));
+    const bool activeMap=id==active;
+    const auto previousImages=incremental && activeMap && m_workingTerrainAtlas
+        ? m_workingTerrainAtlas->activeTileImages() : QVector<QImage>();
+    QSet<int> changedImages;
+    for(int index=0;index<images.size();++index)
+        if(index>=previousImages.size() || images[index].cacheKey()!=previousImages[index].cacheKey())
+            changedImages.insert(index);
+    const bool atlasChanged=images.size()!=previousImages.size() || !changedImages.isEmpty();
+    const bool typesChanged=!activeMap || !m_workingTerrainAtlas
+        || m_workingTerrainAtlas->activeTileTypes()!=doc->atlas->activeTileTypes();
+    if(atlasChanged && !landscape->previewTerrainAtlas(images,doc->atlas->activeTextureCount(),changedImages))return false;
+    const bool materialsChanged=!incremental || !activeMap || m_mprMaterials!=doc->materials;
+    if(materialsChanged)landscape->setMaterials(worldRenderMaterials(doc->materials));
     for(const auto& sector:doc->baseline.sectors()) {
         const auto payload=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
-
+        if(incremental && activeMap && payload==m_terrainEdit.sectorPayload(sector.sectorX,sector.sectorY))continue;
         if(!landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,payload))return false;
     }
     if(id==active) {
         int selectedSlot=-1,selectedRotation=0;
         m_pTileForm->getSelectedTile(selectedSlot,selectedRotation);
-        if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
+        // Restoring the inspector selection is not a user material change.
+        // Its onSelect signal would cancel the currently executing stroke.
+        const QSignalBlocker pickerSignals(m_pTileForm);
+        if((atlasChanged || typesChanged) && !m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
         // Atlas uploads rebuild the legacy picker. Preserve its cursor so a
         // held-C drag keeps painting after the first world-brush stamp.
-        if(selectedSlot>=0 && m_pTileForm->selectTile(selectedSlot))
+        if((atlasChanged || typesChanged) && selectedSlot>=0 && m_pTileForm->selectTile(selectedSlot))
             m_pTileForm->setTileRotation(selectedRotation);
         m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
         // Restore the immutable source together with its working cache. The
@@ -1611,13 +1629,13 @@ bool CView::previewWorldPaintState(const QString& id)
         }
         m_workingTerrainAtlas=doc->atlas->createStagingCopy();
         m_pLand->setCanonicalTerrainModel(&m_terrainEdit);syncMprDirtyState();
-        m_landscapeTools->setOverlayMaterials(worldRenderMaterials(m_mprMaterials));
+        if(materialsChanged)m_landscapeTools->setOverlayMaterials(worldRenderMaterials(m_mprMaterials));
         m_landscapeTools->setGeneratedAtlasTileCount(m_workingTerrainAtlas->generatedTileCount());
-        refreshWorkingTerrainPalettes();
+        if(atlasChanged || typesChanged)refreshWorkingTerrainPalettes();
     } else for(auto& neighbor:m_neighborLandscapes)
         if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id) {
             neighbor.terrainPreviewAtlas=doc->atlas;neighbor.drawCacheDirty=true;
             for(const auto& sector:doc->baseline.sectors())neighbor.terrainPreviewPayloads[qMakePair(sector.sectorX,sector.sectorY)]=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
         }
-    landscape->invalidateTerrainShadowField();update();return true;
+    update();return true;
 }

@@ -672,7 +672,7 @@ private:
     bool resolveWorldTerrainClose(bool retain);
     bool ensureWorldTerrainAtlas(const QString& id,CValidationReport* report);
     bool paintWorldTerrainAt(const QVector3D& position,bool land);
-    bool previewWorldPaintState(const QString& id);
+    bool previewWorldPaintState(const QString& id, bool incremental = false);
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
     bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,
@@ -1275,6 +1275,8 @@ private:
     bool m_terrainStampRegressionFrameCapture{false};
     QVector<QImage> m_terrainStampRegressionFrames;
     bool m_terrainSampleGestureActive{false};
+    int m_sampledWaterPacked{-1};
+    bool sampledWaterPaintingEnabled() const;
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;
     int m_lastTerrainSampleLayer{-1};
