@@ -9,6 +9,8 @@
 #include "endurance_document.h"
 #include "view.h"
 #include "camera.h"
+#include "mob.h"
+#include "render_performance.h"
 #include "landscape.h"
 #include "settings.h"
 #include "progressview.h"
@@ -136,7 +138,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
     auto check=[&](bool condition,const QString& name) {log<<(condition?"PASS ":"FAIL ")<<name<<'\n';log.flush();condition?++passed:++failed;return condition;};
     const auto fixture=QJsonDocument::fromJson(read(fixturePath)).object();
     HiddenCheckWindows hiddenWindows;
-    if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool() || fixture.value("hdPublication").toBool())qApp->installEventFilter(&hiddenWindows);
+    if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool() || fixture.value("hdPublication").toBool() || fixture.value("performanceScene").toBool())qApp->installEventFilter(&hiddenWindows);
     const QString output=fixture.value("output").toString();
     if(!check(!output.isEmpty() && QDir(output).exists(),"owned output directory")) return 1;
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -192,6 +194,33 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        if(fixture.value("performanceScene").toBool()) {
+            if(!check(root.contains("/build-perf-"),"performance scene uses owned map/resource copies"))return 1;
+            QFileInfo mob(root+"/Maps/"+fixture.value("zone").toString("zone1")+".mob");
+            QElapsedTimer mobTimer;mobTimer.start();
+            if(!check(view.loadMob(mob)&&!view.mobs().isEmpty(),"complete active MOB scene loaded"))return 1;
+            log<<"TIMING sceneMobLoadMs="<<mobTimer.elapsed()<<" objects="<<view.mobs().last()->nodes().size()<<'\n';
+            if(auto* counters=dynamic_cast<COptBool*>(settings.opt("renderPerformanceCounters")))counters->setValue(true);
+            QVector3D focus(55,40,0);view.m_pLand->projectPt(focus,true);view.moveCameraToPoint(focus);view.m_cam->moveAwayOn(35);
+            QVector<qint64> frames;quint64 candidates=0,submitted=0;
+            const QPoint center=view.rect().center();
+            for(int frame=0;frame<80;++frame) {
+                QElapsedTimer elapsed;elapsed.start();
+                QMouseEvent move(QEvent::MouseMove,center+QPoint(frame%20,frame/20),Qt::NoButton,Qt::MiddleButton,Qt::NoModifier);
+                QApplication::sendEvent(&view,&move);view.updateGL();view.makeCurrent();
+                QOpenGLContext::currentContext()->functions()->glFinish();
+                if(frame>=20)frames.append(elapsed.nsecsElapsed()/1000);
+                const auto& count=RenderPerformanceContext::instance().currentFrameCounters();
+                candidates+=count.nodesVisited;submitted+=count.nodesSubmitted;
+                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            }
+            std::sort(frames.begin(),frames.end());
+            log<<"TIMING completeSceneCameraFrames="<<frames.size()<<" medianUs="<<frames[frames.size()/2]
+               <<" p95Us="<<frames[qMin(frames.size()-1,int(frames.size()*.95))]<<" maxUs="<<frames.last()
+               <<" visited="<<candidates<<" submitted="<<submitted<<'\n';
+            check(submitted>0,"camera benchmark includes active scene objects");
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+        }
         if(fixture.value("localPalette").toBool()) {
             const auto local=TerrainHdLibrary::availableSources();
             check(!local.isEmpty(),"local palette library available");

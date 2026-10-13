@@ -3,6 +3,7 @@
 #include <QDataStream>
 #include <QCryptographicHash>
 #include <QHash>
+#include <QCache>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -29,6 +30,9 @@
 #include "terrain_atlas_profile.h"
 
 namespace {
+QMutex verifiedAtlasHashMutex;
+QCache<QByteArray, QByteArray> verifiedAtlasHashes(128);
+
 #ifdef Q_OS_WIN
 struct SMappedTerrainPixels;
 QMutex mappedTerrainMutex;
@@ -639,6 +643,42 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         if(!complete)
             continue;
         result.completeArchives.append(archive.absoluteFilePath());
+        // Different reviewed bindings and aliases can request the same native
+        // pages repeatedly. Cache only the proved pixel digest, keyed by every
+        // compressed source byte and the exact physical layout. No pixels are
+        // retained, and changed payloads invalidate even with unchanged metadata.
+        QCryptographicHash sourceHash(QCryptographicHash::Sha256);
+        sourceHash.addData(QByteArrayLiteral("native-atlas-pixels-v1\n"));
+        sourceHash.addData(QByteArray::number(textureCount) + '\n'
+                           + QByteArray::number(atlasSlotCount) + '\n');
+        for(const auto& page:pages) {
+            sourceHash.addData(QByteArray::number(page.size()) + '\n');
+            sourceHash.addData(page);
+        }
+        const QByteArray sourceKey=sourceHash.result();
+        QByteArray knownPixelHash;
+        {
+            QMutexLocker lock(&verifiedAtlasHashMutex);
+            if(const auto* known=verifiedAtlasHashes.object(sourceKey))
+                knownPixelHash=*known;
+        }
+        const auto sourceStillCurrent=[&]() {
+            QFileInfo after(archive.absoluteFilePath());after.refresh();
+            return generation==resIo::generation(archive.absoluteFilePath())
+                &&after.isFile()&&after.size()==archiveSize
+                &&after.lastModified().toMSecsSinceEpoch()==archiveLastModifiedMs;
+        };
+        if(!knownPixelHash.isEmpty()
+           &&(!decodedTiles || knownPixelHash.toLower()!=expectedAtlasPixelSha256.toLower())) {
+            if(!sourceStillCurrent())continue;
+            result.completeArchivePixelSha256.insert(archive.absoluteFilePath(),knownPixelHash);
+            if(knownPixelHash.toLower()!=expectedAtlasPixelSha256.toLower())continue;
+            result.archivePath=archive.absoluteFilePath();
+            result.decodedAtlasPixelSha256=knownPixelHash;
+            result.archiveSize=archiveSize;
+            result.archiveLastModifiedMs=archiveLastModifiedMs;
+            return result;
+        }
         QVector<QImage> tiles;
         tiles.reserve(atlasSlotCount);
         QHash<uint, QVector<QImage>> uniqueTiles;
@@ -712,6 +752,10 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
             continue;
         result.completeArchivePixelSha256.insert(
             archive.absoluteFilePath(), actual);
+        {
+            QMutexLocker lock(&verifiedAtlasHashMutex);
+            verifiedAtlasHashes.insert(sourceKey,new QByteArray(actual));
+        }
         if(actual.toLower() != expectedAtlasPixelSha256.toLower())
             continue;
         result.archivePath = archive.absoluteFilePath();

@@ -253,12 +253,19 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
             "mismatch: The source RES changed on disk. Reopen it before publishing.");
         return result;
     }
+    // The disk read has proved the immutable baseline. Keep its shared bytes
+    // for all later race checks instead of retaining another complete RES copy.
+    sourceBytes = baseline.originalBytes();
 
     const QFileInfo destination(request.destination.absoluteFilePath());
     const bool destinationExisted = destination.exists();
     QByteArray destinationBytes;
     phaseTimer.restart();
-    if(destinationExisted
+    const bool sameDestination = resIo::pathKey(request.source.absoluteFilePath())
+        == resIo::pathKey(destination.absoluteFilePath());
+    if(destinationExisted && sameDestination)
+        destinationBytes = sourceBytes;
+    else if(destinationExisted
        && !readFile(destination, &destinationBytes, &result.error))
     {
         result.phase = QStringLiteral("destination-check");
@@ -344,6 +351,11 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
                 .arg(member.name);
             return result;
         }
+    // The staged candidate has passed fresh parse and exact member validation.
+    // No later step uses this document; release its whole-archive byte buffers
+    // before backup and post-commit parsing allocate their own verification data.
+    reopened = CResArchiveDocument();
+    reopenedBytes.clear();
 
     result.phase = QStringLiteral("reader-drain");
     progress(QStringLiteral("Waiting for RES readers"), 55);
@@ -364,6 +376,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     if(!destinationMatches(destination, destinationExisted,
                            destinationBytes, &result.error))
         return result;
+    currentSource.clear();
 
     if(destinationExisted && request.createBackup)
     {
@@ -402,6 +415,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     if(!destinationMatches(destination, destinationExisted,
                            destinationBytes, &result.error))
         return result;
+    currentSource.clear();
 
 #ifdef QT_TESTLIB_LIB
     if(request.simulateAtomicCommitFailure)
