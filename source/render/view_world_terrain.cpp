@@ -1184,6 +1184,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         if(!selected || liquid<0 || liquid>=m_mprMaterials.size()){emit updateMsg(tr("Выберите материал покрытия."));return true;}
     }
     int planned=0;
+    int changedTiles=0;
     SWorldTerrainStroke stamp;
     const bool mixedEdge=m_tileStrokeMixedEdge;
     QMap<QString,SWorkingTerrainResolveStage> mixedStages;
@@ -1277,6 +1278,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             }
         }
         if(report.hasErrors() || (!command.isEmpty() && !stage.terrainEdit.apply(command,true,&report)))break;
+        changedTiles+=command.deltas.size();
         changed=changed || !command.isEmpty();
         if(!mixedEdge && !manual && !classic && m_tileStrokeAutoResolveBlends && !command.isEmpty()) {
             CTerrainVirtualMaterialField field;
@@ -1540,8 +1542,11 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         }
     }
     if(planned!=origins.size() && !report.hasErrors())report.add("terrain.world.stage",EValidationSeverity::Error,"Не удалось подготовить все карты; мазок отменён.");
-    if(report.hasErrors()){emit updateMsg(report.toText());return true;}
-    if(stamp.isEmpty())return true;
+    if(report.hasErrors()){++m_tileStrokeRefused;emit updateMsg(report.toText());return true;}
+    ++m_tileStrokeActions;
+    m_tileStrokeLayer=layer;
+    m_tileStrokeMaterialId=manual?-1:material;
+    if(stamp.isEmpty()){++m_tileStrokeNoOps;return true;}
     if(!m_worldTerrainSession.apply(stamp,true,&error)){emit updateMsg(error);return true;}
     bool previewed=true;
     for(const auto& id:stamp.paint.keys())previewed=previewWorldPaintState(id,true) && previewed;
@@ -1550,6 +1555,8 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
         emit updateMsg(tr("Предпросмотр общей кисти не обновлён; мазок отменён."));return true;
     }
+    ++m_tileStrokeApplied;
+    m_tileStrokeChangedTiles+=changedTiles;
     m_worldTerrainStroke.append(stamp);refreshWorldTerrainNeighbors();updateWorldTerrainStatus();return true;
 }
 

@@ -1,0 +1,19 @@
+# Ataman166 — first paint stamp and sampled-water circle
+
+Owner video20261013-0942-35.6771555.mp4 shows165, OverlayPaint/Modern/Vertex/Circle/size1. Sampling water changes the displayed footprint into a cell rectangle while Circle remains selected. The installed log also reports0 stamps for every attempt, including after hydration completed.
+
+## Diagnosis
+
+- The sampled-water path deliberately paints exact physical tiles and uses a cell-centered footprint. Its renderer always drew tile grid rectangles for cell-centered brushes, regardless of the selected Circle shape.
+- Local first-stamp handling deferred a click whenever the current pointer footprint differed from the last hover. A release arriving in a different cell could defer again, ending the gesture without applying any stamp. Native regression varies hover/press/release coordinates rather than keeping the synthetic cursor stationary.
+- Shared brush stamps also bypassed local stamp counters, so the0-stamp summary could describe successful world painting. This misleading diagnostic is addressed alongside the input failure.
+
+## Evidence
+
+Current HD zone1, private copied MPR/HDPack, installed local library read-only. Native Windows/OpenGL event path, hidden test windows and UI lock. Game originals preserved.
+
+Installed165 existing stationary-pointer cases: shared63/0 and local62/0, including rendered before/after/Undo/Redo and Save/reopen. These do not establish that the owner's rapid gesture works. Native changed-coordinate fail-before (`abrupt-before.stdout.log`):39 PASS /4 FAIL. First stamp lost, sampled destination unchanged, no Undo transaction/native pixel change for that click. Later stable drag passed, identifying first-stamp deferral rather than missing water files. Final corrected gesture and delivery pending.
+
+Intermediate corrected probe:46 PASS /1 FAIL. The fast release now painted a cell on the next drag's route, so that independent drag saw too few previously unpainted centers. The harness restores the first click before testing drag and checks the active Undo index when branching from Redo. A hidden grabFrameBuffer produced a blank image; it is excluded from visual evidence. Final capture renders the production outline into the known native framebuffer. One intermediate compile failed because the diagnostic block landed in the erase function; placement was corrected, final build PASS.
+
+Final native local scenario (inal.stdout.log):68 PASS /0 FAIL, exit0. Abrupt press/release transfers sampled water; drag, exact rendered Undo/Redo, ordinary Save/reopen and native128 water pixels/rotation pass. Shared-brush regression (world-after.stdout.log):66 PASS /0 FAIL, exit0; summary reports2/6 stamps and nonzero changed tiles. No second Save there. Native production circle outline in world-after/sampled-circle-preview.png and final painted pixels visually inspected. Earlier outline captures without clean overlay GL state are excluded. Widget lifecycle PASS. Delivery pending.

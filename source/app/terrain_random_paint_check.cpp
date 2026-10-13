@@ -60,6 +60,7 @@
 #include <QSlider>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions>
+#include <QOpenGLExtraFunctions>
 #include <QOpenGLContext>
 #include <QGridLayout>
 #include <climits>
@@ -493,7 +494,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 const auto p=world.project(view.m_cam->viewMatrix(),view.m_projection,QRect(0,0,view.width(),view.height()));
                 return QPoint(qRound(p.x()),qRound(view.height()-p.y()));
             };
-            const auto capture=[&](){
+            const auto capture=[&](bool outline=false){
                 view.makeCurrent();QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
                 QOpenGLFramebufferObject target(view.size(),format);if(!target.isValid() || !target.bind())return QImage();
                 auto* gl=QOpenGLContext::currentContext()->functions();gl->glViewport(0,0,view.width(),view.height());
@@ -503,7 +504,31 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 view.m_minimapCaptureActive=true;view.m_minimapCaptureUnlitPass=true;
                 view.m_minimapCaptureCameraPosition=world+QVector3D(0,-20,50);
                 view.m_minimapCaptureView.setToIdentity();view.m_minimapCaptureView.lookAt(view.m_minimapCaptureCameraPosition,world,QVector3D(0,1,0));
-                view.m_bDrawWater=!panel.tilePaintEnabled();view.draw();auto image=target.toImage();
+                view.m_bDrawWater=!panel.tilePaintEnabled();view.draw();
+                if(outline) {
+                    auto* extra=QOpenGLContext::currentContext()->extraFunctions();
+                    extra->glBindVertexArray(0);
+                    extra->glBindBuffer(GL_ARRAY_BUFFER,0);
+                    extra->glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
+                    GLint attributes=0;extra->glGetIntegerv(GL_MAX_VERTEX_ATTRIBS,&attributes);
+                    for(GLint attribute=0;attribute<attributes;++attribute)
+                        extra->glDisableVertexAttribArray(GLuint(attribute));
+                    view.m_program.bind();QMatrix4x4 identity;
+                    view.m_program.setUniformValue("u_projMmatrix",view.m_projection);
+                    view.m_program.setUniformValue("u_viewMmatrix",view.m_minimapCaptureView);
+                    view.m_program.setUniformValue("u_modelMmatrix",identity);
+                    view.m_program.setUniformValue("u_partAnimated",false);
+                    view.m_program.setUniformValue("u_instanced",false);
+                    view.m_program.setUniformValue("u_environmentEnabled",false);
+                    view.m_program.setUniformValue("u_fogEnabled",false);
+                    view.m_program.setUniformValue("u_shadowsEnabled",false);
+                    view.m_program.setUniformValue("u_highlight",false);
+                    const int position=view.m_program.attributeLocation("a_position");
+                    view.m_program.enableAttributeArray(position);
+                    view.drawTerrainPaintOutline(&view.m_program);
+                    view.m_program.disableAttributeArray(position);
+                }
+                auto image=target.toImage();
                 check(view.m_landProgram.isLinked() && gl->glGetError()==0,"native GL draw succeeds");
                 view.m_projection=projection;view.m_bDrawWater=water;view.m_minimapCaptureActive=false;view.m_minimapCaptureUnlitPass=false;
                 target.release();return image;
@@ -514,12 +539,14 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 check(view.rect().contains(start) && found,"ray hit "+name);
                 log<<"PICK "<<name<<' '<<hit.x()<<','<<hit.y()<<','<<hit.z()<<'\n';
                 const auto before=snapshot(view.m_terrainEdit),other=layerBytes(!ground);const auto frameBefore=capture();
-                const int count=history.count();
+                const int count=history.index();
                 int changedCenters=0;
                 auto previousStamp=before;
                 for(int step=0;step<(drag?5:3);++step) {
                     const auto type=step==0?QEvent::MouseMove:step==1?QEvent::MouseButtonPress:step==(drag?4:2)?QEvent::MouseButtonRelease:QEvent::MouseMove;
-                    const QPoint pos=start+(step>1&&drag?QPoint((step==2?60:120),0):QPoint());
+                    const QPoint pos=start+(fixture.value("abruptPaintGesture").toBool() && !drag
+                        ?(step==0?QPoint(-100,0):step==2?QPoint(40,0):QPoint())
+                        :(step>1&&drag?QPoint((step==2?60:120),0):QPoint()));
                     QMouseEvent event(type,pos,(type==QEvent::MouseMove)?Qt::NoButton:Qt::LeftButton,
                         (step>=1 && type!=QEvent::MouseButtonRelease)?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
                     QElapsedTimer eventTimer;eventTimer.start();
@@ -544,10 +571,12 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 const auto after=snapshot(view.m_terrainEdit);const auto frameAfter=capture();
                 frameBefore.save(output+"/"+name+"-before.png");frameAfter.save(output+"/"+name+"-after.png");
                 check(after!=before,"event stroke changes "+name);
+                if(!panel.sculptEnabled())check(view.m_tileStrokeActions>0,
+                    "stroke summary reports applied samples "+name);
                 check(layerBytes(!ground)==other,"other layer preserved "+name);
                 const auto* worldCommand=view.m_worldTerrainSession.nextCommand(false);
-                const bool worldStroke=history.count()==count && worldCommand && worldCommand->localUndoIndex==history.index();
-                check(history.count()==count+1 || worldStroke,"one Undo transaction "+name);
+                const bool worldStroke=history.index()==count && worldCommand && worldCommand->localUndoIndex==history.index();
+                check(history.index()==count+1 || worldStroke,"one Undo transaction "+name);
                 if(drag && !panel.sculptEnabled())check(changedCenters>1,"drag changes several brush centers "+name);
                 if(requirePixels)check(!frameBefore.isNull() && frameBefore!=frameAfter,"native pixels change "+name);
                 if(!view.worldTerrainHistory(false))history.undo();
@@ -613,18 +642,32 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 }
                 check(view.sampledWaterPaintingEnabled() && view.m_sampledWaterPacked==sample,
                     "RMB retains exact water tile and packed rotation in Modern");
+                check(panel.paintShape()==ETerrainTileBrushShape::Circle,
+                    "water sample preserves the selected Circle shape");
+                view.updatePreviewTile(view.getTerrainBrushPos(pointer.x(),pointer.y()),false);
+                check(capture(true).save(output+"/sampled-circle-preview.png"),
+                    "native sampled brush outline captured");
                 const int atlasSize=view.m_workingTerrainAtlas->activeTileCount();
                 stroke("sampled-water",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,false);
                 check(view.m_terrainEdit.packedTile(destination.x(),destination.y(),ETerrainTileLayer::Overlay)==sample,
                     "LMB transfers exact sampled water tile after release and Redo");
                 check(view.m_workingTerrainAtlas->activeTileCount()==atlasSize,"water sample creates no atlas variants");
                 check(view.sampledWaterPaintingEnabled(),"water sample survives stroke and Undo Redo");
+                if(fixture.value("abruptPaintGesture").toBool()) {
+                    // The fast-click release already paints cells on the drag
+                    // route. Restore them so the independent drag can change
+                    // several centers rather than hitting its own prior work.
+                    if(!view.worldTerrainHistory(false))history.undo();
+                }
                 stroke("sampled-water-drag",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);
                 check(animationFrames()==originalAnimationFrames,"native water animation images preserved");
                 if(failed){log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return 1;}
                 choose(view.m_modernOverlayPaintChoices,"Lava");
                 check(!view.sampledWaterPaintingEnabled(),"palette selection clears physical water sample");
                 stroke("water-to-lava",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);
+                if(fixture.value("paintOnly").toBool()) {
+                    log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+                }
                 QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
                 QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)){log<<"UNEXPECTED "<<b->text()<<'\n';++failed;b->reject();}});dismiss.start(50);
                 view.saveLand();

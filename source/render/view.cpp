@@ -11884,7 +11884,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     const QVector4D outlineColor = landLayer
         ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
         : QVector4D(0.10f, 0.82f, 1.0f, 0.95f);
-    if(cellCentered)
+    if(cellCentered && shape == ETerrainTileBrushShape::Square)
     {
         glDepthFunc(GL_ALWAYS);
         glLineWidth(2.5f);
@@ -19874,13 +19874,12 @@ void CView::setTile(QVector3D posOnLand, bool bLand)
               m_terrainPaintFootprintValid, m_terrainPaintFootprint,
               freshFootprint))
     {
-        // A press can arrive at a newer pointer coordinate than the last hover
-        // event. Refresh the displayed snapshot and defer this first stamp;
-        // release/drag may commit only after the user-visible footprint agrees.
+        // A real click may arrive at a newer coordinate than the last hover.
+        // Adopt that exact footprint and apply this sample in the same gesture;
+        // deferring again on a moved release can discard the entire click.
         m_terrainPaintFootprint = freshFootprint;
         m_terrainPaintFootprintValid = true;
         updatePreviewTile(posOnLand, bLand);
-        return;
     }
     m_terrainPaintFootprint = freshFootprint;
     m_terrainPaintFootprintValid = true;
