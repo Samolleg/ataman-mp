@@ -22008,7 +22008,7 @@ void CView::shuffleTerrainTiles(bool selectionOnly,const std::function<void(cons
     if(seed == terrainRandomPaintSeed())
         ++seed;
     const auto excluded=randomPaintExcludedSlots();
-    const auto prepareCommand=[&](){return edit.makeRandomTilePaint(catalog,seed,region,excluded,selectedCells);};
+    const auto prepareCommand=[catalog,edit,seed,region,excluded,selectedCells](){return edit.makeRandomTilePaint(catalog,seed,region,excluded,selectedCells);};
     STerrainTileCommand command;
     if(progress) {
         progress(tr("Подбор вариантов для ячеек карты"),-1);
