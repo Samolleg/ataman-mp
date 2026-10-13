@@ -2386,7 +2386,7 @@ void CLandscapeTools::rebuildMaterialPalette()
         signature<<grid.second->size();
         for(const auto& choice:*grid.second)
             signature<<choice.id<<choice.supportId<<choice.name<<choice.familyName
-                     <<choice.cornerOnly<<choice.contextualStamp<<choice.used<<choice.paintAvailable;
+                     <<choice.cornerOnly<<choice.contextualStamp<<choice.used;
     }
     if(topology==m_paletteTopology) {
         for(int g=0;g<grids.size();++g)
@@ -2397,6 +2397,13 @@ void CLandscapeTools::rebuildMaterialPalette()
                            &&button->property("terrainSupportMaterialId").toInt()==choice.supportId) {
                             updateMaterialButton(button,choice,g>=3);break;
                         }
+        for(auto* group:{m_groundMaterialButtons,m_overlayMaterialButtons,
+                         m_classicGroundMaterialButtons,m_classicOverlayMaterialButtons})
+            if(group->checkedButton()&&!group->checkedButton()->isEnabled())
+                for(auto* button:group->buttons())if(button->isEnabled()
+                    &&(group!=m_groundMaterialButtons||button->property("terrainUnderwaterChoice").toBool()==underwaterFamiliesVisible())) {
+                    button->setChecked(true);break;
+                }
         refreshVariantStrip();applyPaintFilter();updatePaintOptionApplicability();
         return;
     }

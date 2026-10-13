@@ -12333,6 +12333,17 @@ void CView::rebuildTerrainAutoCatalog()
             choice.assignedSlots = family.sources.size();
             choice.paintAvailable=!family.sources.isEmpty() && family.runtimeTerrainType>=0 && family.runtimeTerrainType<16;
             if(!choice.paintAvailable)choice.paintUnavailableReason=tr("Нет подтверждённого однородного источника или runtime-класса для рисования этим материалом.");
+            if(choice.paintAvailable&&source.isNull()) {
+                bool allMissing=true;
+                for(const auto& candidate:family.sources+family.thumbnailSources)
+                    allMissing &= m_terrainGlobalTransitionMissingPages.contains(terrainAtlasBindingKey(
+                        candidate.mprNamespace,candidate.atlasPixelSha256,candidate.textureCount,candidate.atlasSlotCount));
+                if(allMissing) {
+                    choice.paintAvailable=false;
+                    choice.paintUnavailableReason=tr("Подтверждённый источник отсутствует в локальной библиотеке.");
+                    choice.thumbnailPending=false;
+                }
+            }
             for(const auto& animation:m_mprAnimatedTiles)for(int frame=0;frame<animation.frameCount;++frame) {
                 SMprPackedTile tile;const int slot=animation.tileIndex+frame;
                 tile.atlasIndex=quint8(slot/64);tile.tileIndex=quint8(slot%64);
