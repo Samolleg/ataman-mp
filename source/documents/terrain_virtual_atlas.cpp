@@ -5582,8 +5582,14 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
         const STerrainTransitionSignature* signature,const QString& sourceNamespace,
         int sourceSlot,CValidationReport* report,bool preserveAuthoredPages)
 {
+    bool nativeBoundary=false;
+    if(sourceNamespace==QStringLiteral("canonical-world-boundary-v1"))
+        for(int slot=0;slot<m_authoredImages.size();++slot)
+            if(m_workingTileTypes.value(slot,-1)==runtimeType
+               && m_authoredImages[slot].size()==pixels.size()) {nativeBoundary=true;break;}
     if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
        || (pixels.size()!=terrainAtlasMaximumNativeTileSize(m_authoredImages)
+           && !nativeBoundary
            && !(sourceNamespace.startsWith(QStringLiteral("hd-variant:"))&&pixels.size()==QSize(256,256)))) {
         if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
             "The selected physical tile has incompatible pixels or runtime type.");return -1;

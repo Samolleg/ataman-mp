@@ -21,6 +21,7 @@ struct SWorldMaterialRepairMap
     const CTerrainTransitionCatalog* catalog{nullptr};
     ETerrainTileLayer layer{ETerrainTileLayer::Land};
     bool editable{true};
+    QSet<int> protectedCells;
 };
 inline QSet<QString> worldMaterialIncompatibleStitchMaps(
         const QMap<QString,QPointF>& origins,const QMap<QString,QSizeF>& sizes)
@@ -57,6 +58,7 @@ struct SWorldMaterialRepairPlan
 inline bool worldMaterialRepairCellAvailable(const SWorldMaterialRepairMap& map,int x,int y)
 {
     if(x<0 || y<0 || x>=map.field.tileWidth() || y>=map.field.tileHeight())return false;
+    if(map.protectedCells.contains(y*map.field.tileWidth()+x))return false;
     if(!map.geometry)return true; // abstract fields have no physical presence mask
     bool available=false;const auto packed=map.geometry->packedTile(x,y,map.layer,&available);
     // An absent overlay returns packed0, which is also a valid active atlas slot.
@@ -147,6 +149,11 @@ inline SWorldMaterialRepairPlan planWorldMaterialRepair(
         const int w=m.field.tileWidth(),h=m.field.tileHeight();
         for(int y=0;y<=h;++y)for(int x=0;x<=w;++x) {
             if(x && y && x<w && y<h)continue;
+            bool protectedVertex=false;
+            for(int cy:{y-1,y})for(int cx:{x-1,x})
+                if(cx>=0 && cy>=0 && cx<w && cy<h
+                   && m.protectedCells.contains(cy*w+cx))protectedVertex=true;
+            if(protectedVertex)continue;
             const auto p=point(m,2*x,2*y);QSet<qint32> pure,values;bool contact=false;
             bool aligned=true;
             bool ownSurface=m.layer!=ETerrainTileLayer::Overlay || !m.geometry;

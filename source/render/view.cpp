@@ -3245,7 +3245,21 @@ bool CView::activateReadyNeighborTerrain(const QFileInfo& path,const CMprDocumen
                 loaded.landscape->terrainSourceArchives())
            || !loaded.landscape->usesCurrentTerrainSources())continue;
         const auto retained=m_worldTerrainSession.documents.value(CWorldTerrainSession::key(path.absoluteFilePath()));
-        if(loaded.retainedTerrainDocument!=retained)continue;
+        if(loaded.retainedTerrainDocument!=retained) {
+            // A refused repair may have hydrated a baseline CPU document.
+            // It does not make the already displayed geometry stale.
+            bool baselineOnly=retained && !loaded.retainedTerrainDocument
+                && retained->baseline.originalBytes()==document.originalBytes()
+                && retained->materials==retained->baseline.mapInfo().materials;
+            if(baselineOnly && retained->atlas)
+                baselineOnly=retained->atlas->activeTileImages()==retained->atlas->authoredTileImages()
+                    && retained->atlas->activeTileTypes()==retained->baseline.mapInfo().tileTypes;
+            if(baselineOnly)for(const auto& sector:retained->baseline.sectors())
+                if(retained->terrain.sectorPayload(sector.sectorX,sector.sectorY)
+                   !=retained->baseline.memberPayload(sector.memberName)) {baselineOnly=false;break;}
+            if(!baselineOnly)continue;
+            loaded.retainedTerrainDocument=retained;
+        }
         if(int(loaded.landscape->widthInWorldUnits())!=document.mapInfo().sectorCountX*32
            || int(loaded.landscape->heightInWorldUnits())!=document.mapInfo().sectorCountY*32)continue;
         makeCurrent();
@@ -14974,10 +14988,14 @@ bool CView::importWorldMixedEdgeTransitionBank(
             &m_terrainGlobalBoundAtlasCache,&m_terrainGlobalTransitionMissingPages,
             &m_terrainGlobalTransitionTileCache);
         if(pixels.isNull())continue;
-        for(auto target=stages->begin();target!=stages->end();++target)
-            if(target->atlas->importPhysicalTile(pixels,runtime,&source.signature,
+        for(auto target=stages->begin();target!=stages->end();++target) {
+            const auto native=terrainAtlasMaximumNativeTileSize(target->atlas->authoredTileImages());
+            if(pixels.width()<native.width())continue;
+            const auto raster=terrainAtlasRasterTile(pixels,native);
+            if(target->atlas->importPhysicalTile(raster,runtime,&source.signature,
                 QStringLiteral("world-bank:global:%1:%2").arg(source.mprNamespace).arg(source.slot),
-                source.slot,report)<0)return false;
+                source.slot,report,true)<0)return false;
+        }
     }
     return !report->hasErrors();
 }

@@ -1,4 +1,5 @@
 #include "terrain_mixed_edge.h"
+#include "terrain_atlas_shape_policy.h"
 #include "endurance_document.h"
 #include <QCryptographicHash>
 #include <QCache>
@@ -309,6 +310,7 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         // Invalidate soft B2 recipes without discarding their saved slots or
         // Undo history. New crisp recipes are reused across fresh reopen too.
         QByteArray key("periodic-stock-v2|");
+        key+=QByteArray::number(terrainAtlasMaximumNativeTileSize(atlas->authoredTileImages()).width())+'|';
         key+=QByteArray::number(model.hasRandomPaintSeed()?model.randomPaintSeed():0)+'|';
         for(qint32 id:corners(s)) key+=QByteArray::number(id)+',';
         for(qint32 id:sorted) input.materials.append(materials[id]);
@@ -317,7 +319,8 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
             input.brushes.append(brushes[pair]);
         }
         STerrainRecipeBakeOptions options;
-        options.tileSize=images.first().width(); options.origin=origin+QPoint(x,y);
+        options.tileSize=terrainAtlasMaximumNativeTileSize(atlas->authoredTileImages()).width();
+        options.origin=origin+QPoint(x,y);
         options.stableCoordinateVariants=true;
         options.materialSeed=model.hasRandomPaintSeed()?model.randomPaintSeed():0;
         options.polishedMaterialEdges=true;
