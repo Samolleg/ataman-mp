@@ -16537,14 +16537,26 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
             if(hit)*hit=true;return point;
         }
     }
-    const bool addingSurface = m_landscapeTools
-        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface
-        && m_landscapeTools->overlaySurfaceOperation()
-            == EOverlaySurfaceOperation::Activate;
-    if(addingSurface)
+    const bool editingSurface = m_landscapeTools
+        && m_landscapeTools->editMode() == ELandscapeEditMode::OverlaySurface;
+    if(editingSurface)
     {
-        // Windows can deliver hundreds of pointer events per second. The add
-        // tool only commits on the brush cadence, so reuse a very recent CPU
+        // A stationary press/release must erase the displayed footprint only.
+        // Removing its center reveals lower ground at another ray intersection;
+        // keep this gesture's XY until the pointer moves or the stroke ends.
+        if(m_landscapeTools->overlaySurfaceOperation() == EOverlaySurfaceOperation::Deactivate
+           && m_tilePaintStrokeActive && m_overlayBrushPickValid
+           && m_overlayBrushPickCursor == QPoint(cursorPosX, cursorPosY))
+        {
+            QVector3D projection=m_overlayBrushPickPosition;
+            const bool land=!m_pLand->projectPt(projection,false);
+            if(m_terrainPaintProjectionLand!=land)m_terrainPaintOutlineGeometryDirty=true;
+            m_terrainPaintProjectionLand=land;
+            if(hit)*hit=true;
+            return m_overlayBrushPickPosition;
+        }
+        // Windows can deliver hundreds of pointer events per second. Surface
+        // tools only commit on the brush cadence, so reuse a recent CPU
         // pick while dragging and force an exact pick on press/release.
         if(!forcePick && m_overlayBrushPickTimer.isValid()
            && m_overlayBrushPickTimer.elapsed() < 16
@@ -16562,16 +16574,35 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         QVector3D pickedPosition;
         bool picked = false;
         bool pickedLand = true;
-        // Adding overlays is cell-based. Resolve the land ray once on the CPU,
+        // Deletion follows the actual surface ray: projecting a ground hit's
+        // XY onto a raised overlay can move the footprint away from the mouse.
+        if(m_landscapeTools->overlaySurfaceOperation() == EOverlaySurfaceOperation::Deactivate
+           && terrainPositionAt(QPoint(cursorPosX, cursorPosY), &pickedPosition, false))
+        {
+            picked = true;
+            pickedLand = false;
+            // The stepped CPU ray can straddle a newly erased edge. Do not
+            // accept its last surviving sample if it is off the mouse ray.
+            const QVector3D screen=pickedPosition.project(m_cam->viewMatrix(),m_projection,
+                QRect(0,0,width(),height()));
+            if(qAbs(screen.x()-cursorPosX)>1.0f || qAbs(height()-screen.y()-cursorPosY)>1.0f)
+            {
+                bool overlayHit=false;
+                pickedPosition=getTerrainPos(cursorPosX,cursorPosY,false,&overlayHit);
+                picked=overlayHit;
+            }
+        }
+        // Adding overlays is cell-based. Resolve the land ray on the CPU,
         // then locally project that XY onto an existing overlay when present.
         // The former overlay-first path redrew the complete overlay pass and,
         // on empty terrain, the complete land pass as well, with a synchronous
         // depth readback after each draw for every pointer event.
         QVector3D ground;
-        if(terrainPositionAt(QPoint(cursorPosX, cursorPosY), &ground, true))
+        if(!picked && terrainPositionAt(QPoint(cursorPosX, cursorPosY), &ground, true))
         {
             QVector3D overlay = ground;
-            if(m_pLand->projectPt(overlay, false))
+            if(m_landscapeTools->overlaySurfaceOperation() == EOverlaySurfaceOperation::Activate
+               && m_pLand->projectPt(overlay, false))
             {
                 pickedPosition = overlay;
                 picked = true;
@@ -20626,7 +20657,11 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     m_terrainPaintFootprintValid = true;
 
     const bool cellTarget = m_terrainPaintFootprint.cellCentered;
-    if(!cellTarget)
+    // Removing topology has no selected texture. Its footprint must stay
+    // visible even with an empty palette or after erasing the center surface.
+    const bool removingSurface = m_landscapeTools->overlaySurfaceEnabled()
+        && m_landscapeTools->overlaySurfaceOperation() == EOverlaySurfaceOperation::Deactivate;
+    if(!cellTarget || removingSurface)
     {
         m_terrainPaintOutlineValid = true;
         setPreviewTile(false);
@@ -22255,6 +22290,8 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
     m_sculptOutlineGeometryDirty = true;
     m_terrainPaintOutlineGeometryDirty = true;
     m_aiGraphOverlayDirty = true;
+    // A recent pick can point at a surface that this stamp just removed.
+    m_overlayBrushPickTimer.invalidate();
     // Terrain sculpt already defers title/status work until stroke release.
     // Keep overlay stamps on the same hot-path contract.
     if(!m_sculptStrokeActive && !m_tileBrushStrokePolicy.isActive())

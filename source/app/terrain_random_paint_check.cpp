@@ -654,6 +654,70 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 }
                 return after!=before;
             };
+            if(fixture.value("surfaceDeletePreview").toBool()) {
+                surface(ELandscapeEditMode::OverlaySurface);
+                auto* operation=panel.findChild<QComboBox*>("overlaySurfaceOperation");
+                operation->setCurrentIndex(1);settle();
+                // Erasing must work without selecting a material or thumbnail.
+                panel.setPaintMaterials({},{},{},0,0);settle();
+                bool selected=true;panel.paintTerrainType(&selected);
+                check(!selected,"delete preview has no selected material");
+                QPoint center(-1,-1);
+                for(int y=4;y<view.m_terrainEdit.tileCountY()-4 && center.x()<0;++y)
+                    for(int x=4;x<view.m_terrainEdit.tileCountX()-4 && center.x()<0;++x) {
+                        bool full=true;
+                        for(int dy=-3;dy<=3;++dy)for(int dx=-3;dx<=3;++dx) {
+                            bool active=false;view.m_terrainEdit.overlayMaterialIndex(x+dx,y+dy,&active);full &= active;
+                        }
+                        if(full)center=QPoint(x,y);
+                    }
+                if(!check(center.x()>=0,"complete overlay region for deletion"))return 1;
+                for(const char* shape:{"circlePaintShape","squarePaintShape"}) {
+                    click(shape);
+                    const auto before=snapshot(view.m_terrainEdit);const auto land=layerBytes(true);
+                    QSet<QPoint> activeBefore;
+                    for(int y=0;y<view.m_terrainEdit.tileCountY();++y)for(int x=0;x<view.m_terrainEdit.tileCountX();++x) {
+                        bool active=false;view.m_terrainEdit.overlayMaterialIndex(x,y,&active);
+                        if(active)activeBefore.insert(QPoint(x,y));
+                    }
+                    const int undo=history.index();
+                    const QPoint pointer=aim(QVector3D(center.x()*2+1,center.y()*2+1,0));
+                    QMouseEvent hover(QEvent::MouseMove,pointer,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+                    QApplication::sendEvent(&view,&hover);settle();
+                    check(view.m_terrainPaintFootprintValid && view.m_terrainPaintOutlineValid,
+                          QString("visible delete footprint without material ")+shape);
+                    check(view.m_terrainPaintFootprint.square==(QString(shape)=="squarePaintShape"),"delete shape matches selected UI");
+                    check(view.m_terrainPaintFootprint.anchor==center,"delete footprint centered at surface under mouse");
+                    const auto footprint=view.m_terrainPaintFootprint;
+                    const auto plain=capture(),outlined=capture(true);
+                    check(plain!=outlined && !outlined.isNull(),"native deletion outline changes rendered pixels");
+                    outlined.save(output+QString("/delete-%1-preview.png").arg(shape));
+                    for(const auto type:{QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
+                        QMouseEvent event(type,pointer,Qt::LeftButton,type==QEvent::MouseButtonPress?Qt::LeftButton:Qt::NoButton,Qt::NoModifier);
+                        QApplication::sendEvent(&view,&event);settle();
+                    }
+                    bool exact=true;
+                    for(int y=0;y<view.m_terrainEdit.tileCountY();++y)for(int x=0;x<view.m_terrainEdit.tileCountX();++x) {
+                        bool active=false;view.m_terrainEdit.overlayMaterialIndex(x,y,&active);
+                        exact &= active==(activeBefore.contains(QPoint(x,y)) && !footprint.contains(QPoint(x,y)));
+                    }
+                    check(exact && history.index()==undo+1,"click deletes displayed footprint in one transaction");
+                    check(layerBytes(true)==land,"surface deletion preserves ground");
+                    const auto after=snapshot(view.m_terrainEdit);
+                    QApplication::sendEvent(&view,&hover);settle();
+                    bool hit=false;const auto point=view.getTerrainBrushPos(pointer.x(),pointer.y(),&hit,true);
+                    const auto screen=point.project(view.m_cam->viewMatrix(),view.m_projection,QRect(0,0,view.width(),view.height()));
+                    check(hit && view.m_terrainPaintOutlineValid,
+                          "delete preview remains over erased center");
+                    check(qAbs(screen.x()-pointer.x())<2 && qAbs(view.height()-screen.y()-pointer.y())<2,
+                          "empty-center pick stays under mouse");
+                    capture(true).save(output+QString("/delete-%1-hole.png").arg(shape));
+                    history.undo();check(snapshot(view.m_terrainEdit)==before,"surface deletion exact Undo");
+                    history.redo();check(snapshot(view.m_terrainEdit)==after,"surface deletion exact Redo");
+                    history.undo();
+                }
+                log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+            }
             if(fixture.value("selectedDistantNeighbor").toBool()) {
                 SMapCatalogEntry active;active.zoneId="active";active.allodId="fixture";
                 active.mprName=view.m_mprDocument.mapInfo().innerNamespace;
