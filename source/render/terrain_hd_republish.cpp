@@ -866,6 +866,88 @@ bool CTerrainHdSources::match(const QImage& published,const STerrainAtlasProfile
     *source=m_sources[candidates.first()];if(evidence)*evidence={{"method","exact-pixels"}};return true;
 }
 
+bool reconcileWorkingTerrainHdRecovery(const STerrainAtlasProfile& profile,
+    const QVector<QByteArray>& pages, const QByteArray& previous,
+    QByteArray* current, QString* error)
+{
+    if(!current)return false;
+    *current=previous;
+    if(previous.isEmpty() || !CTerrainAtlasProfileStore::isWorkingAtlasProfile(profile))return true;
+    const auto fail=[&](const QString& reason) {
+        if(error)*error=QStringLiteral("HD recovery cannot follow the working atlas: ")+reason;
+        return false;
+    };
+    QJsonParseError parse;
+    const auto document=QJsonDocument::fromJson(previous,&parse);
+    if(parse.error!=QJsonParseError::NoError || !document.isObject())return fail("invalid JSON");
+    auto receipt=document.object();
+    const bool legacy=!receipt.contains("outputSlots");
+    const int count=pages.size()*64, oldCount=receipt["physicalSlots"].toInt(-1);
+    const int oldOutput=legacy?oldCount:receipt["outputSlots"].toInt(-1);
+    const auto rows=receipt["slots"].toArray(), oldPages=receipt["pages"].toArray();
+    if(receipt["publishedNamespace"].toString()!=profile.mprNamespace
+       || count!=profile.atlasSlotCount || oldCount<=0 || oldCount>oldOutput
+       || oldOutput>count || oldOutput%64 || rows.size()!=oldCount
+       || oldPages.size()!=oldOutput/64)return fail("namespace or page/row count mismatch");
+    QVector<int> sizes;
+    QJsonArray pageRows;
+    for(int page=0;page<pages.size();++page) {
+        const auto& bytes=pages[page];
+        if(bytes.size()<76)return fail("truncated page");
+        const int width=int(word(bytes,4));
+        if((width!=1024&&width!=2048) || int(word(bytes,8))!=width)return fail("invalid native page size");
+        if(page<oldPages.size()) {
+            const auto old=oldPages[page].toObject();
+            if(old["bytesAfter"].toInt()!=bytes.size()
+               ||(!legacy&&old["tileSize"].toInt()*8!=width))return fail("existing page dimensions changed");
+        }
+        sizes.append(width/8);
+        pageRows.append(QJsonObject{{"page",page},{"tileSize",width/8},{"bytesAfter",bytes.size()}});
+    }
+    QSet<int> logical,used;
+    QJsonArray newRows;
+    for(const auto& value:rows) {
+        auto row=value.toObject();const int slot=row["slot"].toInt(-1);
+        const int output=legacy?slot:row["outputSlot"].toInt(-1);
+        if(slot<0||slot>=oldCount||output<0||output>=oldOutput
+           ||logical.contains(slot)||used.contains(output))return fail("invalid slot mapping");
+        QString kind=row["result"].toString();
+        if(legacy&&(kind=="retained-128-detail-in-256-carrier"||row["alreadyHd"].toBool()))kind="already-HD-unchanged";
+        const bool native=kind=="retained-128"||kind=="superseded-128-slot"||kind=="empty-animation-padding";
+        if((!native&&kind!="original-HD-BC1"&&kind!="regenerated-256"&&kind!="already-HD-unchanged"
+            &&kind!="hd-variant"&&kind!="upscaled-128-to-256"&&kind!="empty-HD-padding")
+           ||sizes[output/64]!=(native?128:256))return fail("existing slot size/provenance mismatch");
+        logical.insert(slot);used.insert(output);
+        row["outputSlot"]=output;row["result"]=kind;newRows.append(row);
+    }
+    QJsonArray order=receipt["sourceOrder"].toArray();
+    if(receipt.contains("sourceOrder")) {
+        QSet<int> unique;
+        for(const auto& value:order) {
+            const int slot=value.toInt(-1);
+            if(slot<0||slot>=oldOutput||unique.contains(slot))return fail("invalid source order");
+            unique.insert(slot);
+        }
+        if(order.size()!=oldOutput)return fail("incomplete source order");
+    } else {
+        for(const auto& value:newRows)order.append(value.toObject()["outputSlot"]);
+        for(int slot=0;slot<oldOutput;++slot)if(!used.contains(slot))order.append(slot);
+    }
+    int logicalSlot=oldCount;
+    for(int output=0;output<count;++output)if(!used.contains(output)) {
+        newRows.append(QJsonObject{{"slot",logicalSlot++},{"outputSlot",output},
+            {"result",sizes[output/64]==128?"retained-128":"already-HD-unchanged"},
+            {"workingLayoutAdded",true}});
+    }
+    for(int slot=oldOutput;slot<count;++slot)order.append(slot);
+    receipt["physicalSlots"]=count;receipt["outputSlots"]=count;
+    receipt["slots"]=newRows;receipt["pages"]=pageRows;receipt["sourceOrder"]=order;
+    receipt["workingLayoutReconciled"]=true;
+    receipt["workingAtlasPixelSha256"]=QString::fromLatin1(profile.atlasPixelSha256);
+    *current=QJsonDocument(receipt).toJson(QJsonDocument::Compact);
+    return true;
+}
+
 STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& profile,
     const QVector<QByteArray>& authored,const CTerrainHdSources& sources,bool upgradePartialPages,
     const QVector<SMprAnimatedTileRecord>& animations,const QByteArray& previousPublication,CTerrainHdProgress* progress,
@@ -911,7 +993,9 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     // selection or tie breaking. The publication receipt owns that bijection.
     QVector<int> sourceOrder;QMap<int,QJsonObject> priorRows;QSet<int> priorAnimationPadding;
     if(!previousPublication.isEmpty()) {
-        const auto prior=QJsonDocument::fromJson(previousPublication).object();
+        QByteArray currentRecovery;
+        if(!reconcileWorkingTerrainHdRecovery(profile,authored,previousPublication,&currentRecovery,&r.error))return r;
+        const auto prior=QJsonDocument::fromJson(currentRecovery).object();
         for(const auto& value:prior["animationPagePaddingSlots"].toArray())priorAnimationPadding.insert(value.toInt(-1));
         const bool legacy=!prior.contains("outputSlots"); // 138 never moved physical slots.
         const auto rows=prior["slots"].toArray();const int oldCount=prior["physicalSlots"].toInt();
@@ -1407,9 +1491,8 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             auto row=slotRows[slot].toObject();row["sameMaterialVariant"]=true;row["variantSource"]=choiceId;row.remove("reason");slotRows[slot]=row;
         }
     }
-    // No non-animated native 128-pixel payload may survive a completed
-    // rebuild. Animation frames are explicitly excluded and remain byte-pixel
-    // identical, including partially HD ranges.
+    // Animation frames and proven empty padding on their native pages stay
+    // unchanged. Padding has no artwork to upgrade or count as enlarged SD.
     int enlarged=0,upscaledTransitions=0;
     QJsonObject upscaleReasonCounts;
     // Keep complete recovery evidence even if publication must be refused.
@@ -1417,7 +1500,9 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     r.receipt["slots"]=slotRows;r.receipt["stockMatched"]=hd;r.receipt["regenerated"]=generated;
     r.receipt["semanticContextDiagnostic"]=semanticDiagnostic;
     r.receipt["semanticContextSlots"]=contextualSignatures.size();
-    for(int slot=0;slot<r.before.size();++slot)if(!animationSlots.contains(slot)&&upgraded[slot].isNull()&&r.before[slot].size()==QSize(128,128)) {
+    for(int slot=0;slot<r.before.size();++slot)if(!animationSlots.contains(slot)
+        &&!emptyAnimationPadding.contains(slot)&&upgraded[slot].isNull()
+        &&r.before[slot].size()==QSize(128,128)) {
         if(emptyStaticPadding.contains(slot)) {
             QImage blank(256,256,QImage::Format_RGBA8888);blank.fill(Qt::transparent);
             upgraded[slot]=blank;outputKind[slot]=QStringLiteral("empty-HD-padding");continue;

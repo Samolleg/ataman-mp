@@ -4,6 +4,7 @@
 #include "terrain_preview_context.h"
 #include "terrain_mixed_edge.h"
 #include "terrain_hd_library.h"
+#include "terrain_hd_republish.h"
 #include <QDebug>
 #include <QtMath>       //for fabs
 #include <QMap>         //for parameters
@@ -10650,6 +10651,21 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             return false;
         }
         hdPackFile.close();
+        const QString recoveryName=QStringLiteral("ei_atlas_hd_recovery_")
+            +draftProfile.mprNamespace+QStringLiteral(".json");
+        const QByteArray oldRecovery=hdPackArchive.memberPayload(recoveryName);
+        if(!oldRecovery.isEmpty()) {
+            QVector<QByteArray> currentPages;
+            for(const QString& name:draft.resourceMembers)
+                currentPages.append(draftArchive.memberPayload(name));
+            QByteArray recovery;QString recoveryError;
+            if(!reconcileWorkingTerrainHdRecovery(draftProfile,currentPages,oldRecovery,&recovery,&recoveryError)) {
+                QMessageBox::critical(this,tr("Modern draft save refused"),recoveryError);
+                return false;
+            }
+            SResArchiveNewMember member;member.name=recoveryName;member.payload=recovery;
+            hdPackDraftMembers.append(member);
+        }
         bool replacesSharedMembers = false;
         for(const SResArchiveNewMember& member : hdPackDraftMembers)
             if(hdPackArchive.uniqueMemberIndex(member.name) >= 0

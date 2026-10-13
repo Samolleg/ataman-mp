@@ -85,6 +85,12 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(
     const CMprDocument* mapContext = nullptr,
     const QByteArray& semanticField = QByteArray());
 
+// Working saves preserve physical slot indices and may append pages/reuse
+// padding. Carry the verified old rows forward into that current layout.
+bool reconcileWorkingTerrainHdRecovery(const STerrainAtlasProfile& profile,
+    const QVector<QByteArray>& pages, const QByteArray& previous,
+    QByteArray* current, QString* error = nullptr);
+
 // Conservative garbage collection: incomplete inventories never authorize removal.
 bool buildTerrainHdCleanup(const CResArchiveDocument& archive, const QString& oldNamespace,
     const QString& newNamespace, const QString& replacedMap, const QStringList& mapRoots,

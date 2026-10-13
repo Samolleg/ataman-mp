@@ -19,6 +19,7 @@
 #include "terrain_virtual_atlas.h"
 #include "terrain_mixed_edge.h"
 #include "terrain_hd_library.h"
+#include "terrain_hd_republish.h"
 #include "resourcemanager.h"
 #include "mmp_codec.h"
 #include <QApplication>
@@ -155,7 +156,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         QVector<QString> probeResources={root+"/res"};
         for(const auto& extra:fixture.value("readOnlyResourceRoots").toArray())probeResources.append(extra.toString());
         roots->setValue(probeResources);
-        if(fixture.value("hdPublication").toBool())
+        if(fixture.value("hdPublication").toBool() || fixture.value("hdRecovery").toBool())
             if(auto* profile=dynamic_cast<COptString*>(settings.opt("resourceProfile")))profile->setValue("deja-vu");
         if(fixture.value("ownerPaintRegression").toBool() || fixture.value("paintMatrix").toBool() || fixture.value("hdPublication").toBool()) {
             if(auto* lighting=dynamic_cast<COptInt*>(settings.opt("renderLightingMode")))lighting->setValue(0);
@@ -194,6 +195,37 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        const auto checkHdRecovery=[&](const QString& phase) {
+            bool rejected=false;
+            QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){
+                if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");
+            });
+            QTimer dialogs;
+            QObject::connect(&dialogs,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)) {
+                log<<"HD RECOVERY "<<phase<<' '<<b->text()<<'\n';log.flush();
+                if(b->icon()==QMessageBox::Critical)rejected=true;
+                if(b->standardButtons().testFlag(QMessageBox::Yes))b->button(QMessageBox::Yes)->click();
+                else b->accept();
+            }});dialogs.start(50);
+            view.republishTerrainAtlasHd();dialogs.stop();
+            check(!rejected,"HD command accepts "+phase+" working layout");
+            // A no-op HD result need not write an already-HD map. The exact
+            // same production reconciliation must still bind the old receipt.
+            CResArchiveIndex archive;QString error;
+            if(!check(archive.open(root+"/res/HDPack_Terrain.res",&error),"reopen HD metadata "+phase))return;
+            const auto ns=view.m_mprDocument.mapInfo().innerNamespace;
+            QVector<QByteArray> pages;
+            for(int i=0;i<view.m_terrainAtlasProfile.textureCount;++i)
+                pages.append(archive.readMember(ns.toLower()+QString("%1.mmp").arg(i,3,10,QChar('0'))));
+            const auto previous=archive.readMember("ei_atlas_hd_recovery_"+ns+".json");QByteArray current;
+            check(!previous.isEmpty()&&reconcileWorkingTerrainHdRecovery(view.m_terrainAtlasProfile,pages,previous,&current,&error),
+                  "HD metadata binds current pages "+phase);
+        };
+        if(fixture.value("hdRecovery").toBool()) {
+            if(!check(root.contains("/build-tests-168-hd-recovery/"),"HD recovery restricted to owned fixture"))return 1;
+            checkHdRecovery("legacy-stale");
+            if(failed){log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return 1;}
+        }
         if(fixture.value("performanceScene").toBool()) {
             if(!check(root.contains("/build-perf-"),"performance scene uses owned map/resource copies"))return 1;
             QFileInfo mob(root+"/Maps/"+fixture.value("zone").toString("zone1")+".mob");
@@ -698,9 +730,16 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
                 }
                 QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
-                QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)){log<<"UNEXPECTED "<<b->text()<<'\n';++failed;b->reject();}});dismiss.start(50);
-                view.saveLand();
-                if(!check(!view.m_pLand->isDirty(),"ordinary Save after sampled water and material brush"))return 1;
+                QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,[&](){for(auto* w:QApplication::topLevelWidgets())if(auto* b=qobject_cast<QMessageBox*>(w)){
+                    if(fixture.value("hdRecovery").toBool() && b->standardButtons().testFlag(QMessageBox::Yes)) {
+                        log<<"PRIVATE DRAFT CONFIRM "<<b->text()<<'\n';b->button(QMessageBox::Yes)->click();
+                    } else {log<<"UNEXPECTED "<<b->text()<<'\n';++failed;b->reject();}
+                }});dismiss.start(50);
+                if(fixture.value("hdRecovery").toBool())
+                    check(view.saveChangedLandscapeDocument(QFileInfo(map),true,true),
+                          "working draft Save preserves edits and updates HD metadata");
+                else view.saveLand();
+                if(!check(!view.m_pLand->isDirty(),"Save after sampled water and material brush"))return 1;
                 // Save may legitimately compact/remap physical atlas slots.
                 // Reopening must reproduce the committed post-save model.
                 const auto saved=snapshot(view.m_terrainEdit);
@@ -719,6 +758,17 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 check(reopenedWater.rotation==savedWater.rotation
                     && waterAfter.convertToFormat(QImage::Format_RGBA8888)==waterBefore.convertToFormat(QImage::Format_RGBA8888),
                     "native water artwork and rotation survive Save/reopen");
+                if(fixture.value("hdRecovery").toBool()) {
+                    CResArchiveIndex archive;QString error;
+                    if(check(archive.open(root+"/res/HDPack_Terrain.res",&error),"saved recovery archive readable")) {
+                        const auto ns=view.m_mprDocument.mapInfo().innerNamespace;
+                        const auto receipt=QJsonDocument::fromJson(archive.readMember("ei_atlas_hd_recovery_"+ns+".json")).object();
+                        check(receipt["outputSlots"].toInt()==view.m_terrainAtlasProfile.atlasSlotCount
+                              &&receipt["pages"].toArray().size()==view.m_terrainAtlasProfile.textureCount,
+                              "working draft Save atomically updates HD recovery counts");
+                    }
+                    checkHdRecovery("saved-and-reopened");
+                }
                 log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
             }
             if(fixture.value("ownerReleaseRegression").toBool()) {

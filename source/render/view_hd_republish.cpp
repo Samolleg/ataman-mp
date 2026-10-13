@@ -103,6 +103,13 @@ void CView::republishTerrainAtlasHd()
         result=rebuildTerrainAtlasHd(profile,authoredPages,*sources,true,map.mapInfo().animatedTiles,previous,&state,&map,prepared.semantic);
         if(!result.success||cancelled())return prepared;
         if(!result.receipt["allStaticSlotsTrueHd"].toBool()) {
+            QJsonArray enlarged;
+            for(const auto& value:result.receipt["slots"].toArray())
+                if(value.toObject()["result"].toString()==QStringLiteral("upscaled-128-to-256"))enlarged.append(value);
+            ei::log(eLogWarning,QStringLiteral("HD quality refusal enlarged:%1 previous:%2 rows:%3")
+                .arg(result.receipt["upscaled128To256"].toInt())
+                .arg(result.receipt["previouslyUpscaled256"].toInt())
+                .arg(QString::fromUtf8(QJsonDocument(enlarged).toJson(QJsonDocument::Compact))));
             result.success=false;
             result.error=QStringLiteral("Для части статических тайлов нет проверенного HD-источника или маски. Растянутые SD-текстуры не публикуются как HD. MPR и RES не изменены.");
             return prepared;
