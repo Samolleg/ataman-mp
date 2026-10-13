@@ -12059,6 +12059,9 @@ void CView::rebuildTerrainAutoCatalog()
     CValidationReport report;
     const QString mprNamespace = m_mprDocument.mapInfo().innerNamespace;
     const int slotCount = m_pTileForm->tileImages().size();
+    // Map loading resets the authored snapshot; it is adopted later below.
+    // Look up ready library pixels using the incoming atlas dimensions.
+    const QSize paletteTileSize = terrainAtlasMaximumNativeTileSize(m_pTileForm->tileImages());
     QElapsedTimer atlasHashTimer;
     atlasHashTimer.start();
     const bool prevalidatedTilesAdopted =
@@ -12310,16 +12313,14 @@ void CView::rebuildTerrainAutoCatalog()
             if(source.isNull())
                 source = cachedGlobalUniformSource(
                     family, mprNamespace,
-                    m_authoredTerrainTileImages.isEmpty()
-                        ? QSize()
-                        : terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages),
+                    paletteTileSize,
                     m_terrainGlobalUniformTileCache, &selectedSource);
             if(!source.isNull())
             {
                 const QString bindingKey=terrainAtlasBindingKey(selectedSource.mprNamespace,
                     selectedSource.atlasPixelSha256,selectedSource.textureCount,selectedSource.atlasSlotCount);
                 const QSize size=selectedSource.confirmedSdPixelSha256.isEmpty()
-                    ?terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages):QSize(256,256);
+                    ?paletteTileSize:QSize(256,256);
                 m_terrainGlobalUniformTileCache.insert(
                     terrainAtlasTileCacheKey(bindingKey,selectedSource.uniformSlot,size),source);
                 m_terrainGlobalMaterialSources.insert(family.id, source);
@@ -12356,7 +12357,7 @@ void CView::rebuildTerrainAutoCatalog()
             }
             choice.authoredThumbnails = authoredGlobalSourcePreviews(family,
                 mprNamespace,m_terrainAtlasProfile.atlasPixelSha256,
-                m_pTileForm->tileImages(),terrainAtlasMaximumNativeTileSize(m_authoredTerrainTileImages),m_terrainGlobalUniformTileCache,true);
+                m_pTileForm->tileImages(),paletteTileSize,m_terrainGlobalUniformTileCache,true);
             if(generatedBank) {
                 for(const auto& entry:TerrainHdVariantBank::forMaterial(*generatedBank,family.name,family.runtimeTerrainType,family.layer)) {
                     choice.generatedIds.append(entry.id);choice.generatedThumbnails.append(entry.pixels.scaled(64,64));
@@ -12698,6 +12699,23 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
             ready=ready&&m_terrainGlobalUniformTileCache.contains(terrainAtlasTileCacheKey(
                 task.bindingKey,thumbnail.source.uniformSlot,
                 thumbnail.source.confirmedSdPixelSha256.isEmpty()?requiredSize:QSize(256,256)));
+        if(ready) {
+            // A catalog rebuild clears the per-generation material selection.
+            // Reuse decoded pixels, but still publish their source/rank into
+            // this generation just as a completed hydration worker would.
+            for(const auto& request:task.thumbnails) {
+                const QString key=terrainAtlasTileCacheKey(task.bindingKey,
+                    request.source.uniformSlot,
+                    request.source.confirmedSdPixelSha256.isEmpty()?requiredSize:QSize(256,256));
+                const QImage pixels=m_terrainGlobalUniformTileCache.value(key);
+                if(!pixels.isNull() && request.rank<m_terrainGlobalHydrationBestRanks.value(
+                       request.materialId,std::numeric_limits<int>::max())) {
+                    m_terrainGlobalHydrationBestRanks.insert(request.materialId,request.rank);
+                    m_terrainGlobalHydrationBestThumbnails.insert(request.materialId,pixels);
+                    m_terrainGlobalHydrationBestSources.insert(request.materialId,request.source);
+                }
+            }
+        }
         if(ready||m_terrainGlobalTransitionMissingPages.contains(task.bindingKey)) {
             --m_terrainGlobalHydrationPendingJobs;
             continue;

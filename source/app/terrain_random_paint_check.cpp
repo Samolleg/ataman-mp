@@ -201,6 +201,8 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             const auto beforeLand=view.m_modernLandPaintChoices;
             const auto beforeWater=view.m_modernUnderwaterPaintChoices;
             const auto beforeOverlay=view.m_modernOverlayPaintChoices;
+            const int sourceCount=view.m_terrainGlobalMaterialSources.size();
+            check(sourceCount>0,"cold palette has paintable local sources");
             panel.resize(760,1100);panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
             QApplication::processEvents();
             for(auto* button:panel.findChildren<QToolButton*>())
@@ -229,6 +231,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                                   const QVector<STerrainPaintMaterialChoice>& after) {
                 int ready=0;bool same=before.size()==after.size();
                 for(const auto& old:before)for(const auto& now:after)if(old.id==now.id) {
+                    same &= old.paintAvailable==now.paintAvailable;
                     if(!old.thumbnail.isNull()){++ready;same &= old.thumbnail==now.thumbnail;}
                     if(old.authoredThumbnails.size()!=now.authoredThumbnails.size())same=false;
                     else for(int i=0;i<old.authoredThumbnails.size();++i)
@@ -240,7 +243,24 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             check(stable(beforeWater,view.m_modernUnderwaterPaintChoices),"underwater thumbnails and variants never reset");
             check(stable(beforeOverlay,view.m_modernOverlayPaintChoices),"overlay thumbnails and variants never reset");
             check(view.m_terrainGlobalHydrationPendingJobs==0,"warm rebuild queues no archive rehydration");
+            check(view.m_terrainGlobalMaterialSources.size()==sourceCount,
+                  "warm rebuild retains all paintable local sources");
             check(panel.grab().save(output+"/palette-after.png"),"native palette after capture");
+            view.unloadLand(false);
+            view.makeCurrent();
+            view.loadLandscape(QFileInfo(map),false);
+            settle.restart();
+            while(settle.elapsed()<120000 && (view.m_terrainAutoCatalogPending
+                  || view.m_terrainAutoCatalogBuilding || view.m_terrainGlobalHydrationPendingJobs>0
+                  || view.m_terrainGlobalHydrationPublishQueued)) {
+                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents,50);QThread::msleep(5);
+            }
+            check(view.m_terrainGlobalMaterialSources.size()==sourceCount,
+                  "reopened map retains all local paint sources");
+            check(stable(beforeLand,view.m_modernLandPaintChoices),"reopened ground artwork and availability retained");
+            check(stable(beforeWater,view.m_modernUnderwaterPaintChoices),"reopened underwater artwork and availability retained");
+            check(stable(beforeOverlay,view.m_modernOverlayPaintChoices),"reopened overlay artwork and availability retained");
+            check(panel.grab().save(output+"/palette-reopened.png"),"native reopened palette capture");
             log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
         }
         if(fixture.value("hdPublication").toBool()) {
