@@ -532,8 +532,16 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 if(requirePixels)check(!frameBefore.isNull() && frameBefore!=frameAfter,"native pixels change "+name);
                 if(!view.worldTerrainHistory(false))history.undo();
                 check(snapshot(view.m_terrainEdit)==before,"exact Undo "+name);
+                if(fixture.value("waterEyedrop").toBool()) {
+                    const auto frame=capture();frame.save(output+"/"+name+"-undo.png");
+                    check(frame==frameBefore,"native Undo pixels restored "+name);
+                }
                 if(!view.worldTerrainHistory(true))history.redo();
                 check(snapshot(view.m_terrainEdit)==after,"exact Redo "+name);
+                if(fixture.value("waterEyedrop").toBool()) {
+                    const auto frame=capture();frame.save(output+"/"+name+"-redo.png");
+                    check(frame==frameAfter,"native Redo pixels restored "+name);
+                }
                 return after!=before;
             };
             if(fixture.value("selectedDistantNeighbor").toBool()) {
@@ -572,6 +580,11 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     }
                 if(!check(destination.x()>=0,"two visually different Water Still tiles in original zone1"))return 1;
                 log<<"SAMPLE source="<<source.x()<<','<<source.y()<<" destination="<<destination.x()<<','<<destination.y()<<" packed="<<sample<<'\n';
+                for(const auto point:{source,destination}) {
+                    const int index=view.m_terrainEdit.overlayMaterialIndex(point.x(),point.y());
+                    const auto material=view.m_mprMaterials.value(index);
+                    log<<"WATER MATERIAL cell="<<point.x()<<','<<point.y()<<" index="<<index<<" type="<<material.type<<" opacity="<<material.opacity<<'\n';
+                }
                 const auto pointer=aim(QVector3D(source.x()*2+1,source.y()*2+1,0));
                 for(const auto type:{QEvent::MouseMove,QEvent::MouseButtonPress,QEvent::MouseButtonRelease}) {
                     QMouseEvent event(type,pointer,type==QEvent::MouseMove?Qt::NoButton:Qt::RightButton,
@@ -588,6 +601,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 check(view.sampledWaterPaintingEnabled(),"water sample survives stroke and Undo Redo");
                 stroke("sampled-water-drag",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);
                 check(animationFrames()==originalAnimationFrames,"native water animation images preserved");
+                if(failed){log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return 1;}
                 choose(view.m_modernOverlayPaintChoices,"Lava");
                 check(!view.sampledWaterPaintingEnabled(),"palette selection clears physical water sample");
                 stroke("water-to-lava",QVector3D(destination.x()*2+1,destination.y()*2+1,0),false,true);

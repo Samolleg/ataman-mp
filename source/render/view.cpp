@@ -8599,7 +8599,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         }
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
-        if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
+        if(!m_minimapCaptureActive && m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
             drawTilePreview(&m_landProgram);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad()
            && m_bDrawLand && m_tileGridVisible)
