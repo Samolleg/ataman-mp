@@ -65,6 +65,21 @@ class TerrainHdRepublishTests:public QObject
 {
     Q_OBJECT
 private slots:
+    void nativeArtworkStillPublishesLegacyMapDimensions()
+    {
+        ++headlessTestEntries;CMprDocument map;QVERIFY(map.loadBytes(mapBytes(),"original.mpr"));
+        const auto hd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(QVector<QImage>(64,pattern(0)),0,256),true,nullptr);
+        QVector<QImage> images;for(int i=0;i<64;++i){QImage image;QVERIFY(ei::decodeMmpDxt1AtlasTile(hd,i,&image));images.append(image);}
+        CTerrainHdSources sources;auto result=rebuildTerrainAtlasHd(profile(images),{hd},sources);
+        QVERIFY2(result.success,qPrintable(result.error));QCOMPARE(result.receipt["hdApplied"].toInt(),0);
+        QVERIFY(terrainHdPublicationNeeded(map,result));QVERIFY(prepareTerrainHdPublication(map,{},&result));
+        QVERIFY(!result.publishedMembers.isEmpty());CMprDocument saved;QVERIFY(saved.loadBytes(result.mprBytes,"saved.mpr"));
+        QCOMPARE(saved.mapInfo().tileSize,quint32(256));QCOMPARE(saved.mapInfo().textureSize,quint32(2048));
+        auto repeat=rebuildTerrainAtlasHd(result.profile,result.pages,sources);
+        QVERIFY(repeat.success);QVERIFY(!terrainHdPublicationNeeded(saved,repeat));
+        QVERIFY(prepareTerrainHdPublication(saved,{},&repeat));QVERIFY(repeat.receipt["noOp"].toBool());
+        QCOMPARE(repeat.mprBytes,saved.originalBytes());
+    }
     void localLibrarySurvivesGameChangesAndCancellation()
     {
         ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
@@ -102,12 +117,19 @@ private slots:
         QFile broken(local.first());QVERIFY(broken.open(QIODevice::WriteOnly|QIODevice::Truncate));broken.write("broken");broken.close();
         QVERIFY(!TerrainHdLibrary::ensure({},&repeated,&error,nullptr,moved));
     }
+    void lowContrastTransitionKeepsReviewedTopology_data()
+    {
+        QTest::addColumn<int>("materials");
+        for(int n:{2,3,4})QTest::newRow(qPrintable(QString::number(n)))<<n;
+    }
     void lowContrastTransitionKeepsReviewedTopology()
     {
+        QFETCH(int,materials);
         ++headlessTestEntries;QTemporaryDir dir;QVERIFY(dir.isValid());
         QVector<QImage> tiles(64,pattern(0));tiles[1]=pattern(1);
-        for(int id=0;id<2;++id)for(int y=0;y<256;++y)for(int x=0;x<256;++x)
-            tiles[id].setPixel(x,y,qRgb(56+id*8+(x%17)/2,88-id*8+(y%17)/2,24));
+        const int donorSlots[]={0,1,3,4};
+        for(int id=0;id<materials;++id)for(int y=0;y<256;++y)for(int x=0;x<256;++x)
+            tiles[donorSlots[id]].setPixel(x,y,qRgb(56+id*8+(x%17)/2,88-id*8+(y%17)/2,24+id*3));
         const auto hd=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(tiles,0,256),true,nullptr);
         QByteArray empty(16,'\0');qToLittleEndian<quint32>(0x019ce23c,reinterpret_cast<uchar*>(empty.data()));
         qToLittleEndian<quint32>(16,reinterpret_cast<uchar*>(empty.data()+8));
@@ -125,16 +147,28 @@ private slots:
         const auto authored=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(low,0,128),true,nullptr);
         for(int slot=0;slot<64;++slot)QVERIFY(ei::decodeMmpDxt1AtlasTile(authored,slot,&low[slot]));
         auto p=profile(low);auto& s=p.slotDefinitions[2].signature;
-        s.northWest=1;s.northEast=s.southEast=s.southWest=2;
+        for(int id=3;id<=materials;++id) {
+            STerrainAtlasProfileFamily family;family.id=id;family.name=QString("Grass %1").arg(id);family.tileType=id;
+            p.families.append(family);
+            auto& donor=p.slotDefinitions[donorSlots[id-1]].signature;
+            donor.northWest=donor.northEast=donor.southEast=donor.southWest=id;
+        }
+        s.northWest=1;s.northEast=2;s.southEast=qMin(materials,3);s.southWest=materials;
         const auto result=rebuildTerrainAtlasHd(p,{authored},sources);
         QVERIFY2(result.success,qPrintable(result.error));
         QVERIFY(result.receipt["allStaticSlotsTrueHd"].toBool());
         const auto row=result.receipt["slots"].toArray()[2].toObject();
         QCOMPARE(row["result"].toString(),QStringLiteral("regenerated-256"));
+        if(materials>=3)QCOMPARE(row["recipe"].toObject()["materialCount"].toInt(),materials);
         const auto output=result.after[result.slotRemap.value(2)];
         QCOMPARE(output.size(),QSize(256,256));
         QVERIFY(output!=low[2].scaled(256,256));
         QVERIFY(output.pixel(8,8)!=output.pixel(247,247));
+        if(materials>=3) {
+            p.approved=false;
+            const auto unreviewed=rebuildTerrainAtlasHd(p,{authored},sources);
+            QVERIFY(!unreviewed.success||!unreviewed.receipt["allStaticSlotsTrueHd"].toBool());
+        }
     }
     void multiMaterialJunctionUsesHdPixels()
     {
@@ -717,11 +751,11 @@ private slots:
 int main(int argc,char** argv)
 {
     if(argc>1&&std::strcmp(argv[1],"--headless-only")==0) {
-        const QSet<QByteArray> safeFunctions{"localLibrarySurvivesGameChangesAndCancellation","lowContrastTransitionKeepsReviewedTopology","originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
+        const QSet<QByteArray> safeFunctions{"nativeArtworkStillPublishesLegacyMapDimensions","localLibrarySurvivesGameChangesAndCancellation","lowContrastTransitionKeepsReviewedTopology","originalBlocksAndDeterminism","expandedAtlasKeepsNativeSd","missingSourceKeepsOriginalPage","progressCacheAndCancellation","semanticTransitionUsesHdPixels","textureOwnershipUsesHdPixels","multiMaterialJunctionUsesHdPixels"};
         if(argc<3)return 2;
         std::vector<char*> filtered;filtered.reserve(size_t(argc));filtered.push_back(argv[0]);
         for(int i=2;i<argc;++i) {
-            if(!safeFunctions.contains(QByteArray(argv[i])))return 2;
+            if(!safeFunctions.contains(QByteArray(argv[i]).split(':').first()))return 2;
             filtered.push_back(argv[i]);
         }
         const int selectorCount=int(filtered.size())-1;

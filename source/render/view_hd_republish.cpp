@@ -114,7 +114,7 @@ void CView::republishTerrainAtlasHd()
             result.error=QStringLiteral("Для части статических тайлов нет проверенного HD-источника или маски. Растянутые SD-текстуры не публикуются как HD. MPR и RES не изменены.");
             return prepared;
         }
-        if(result.receipt["hdApplied"].toInt()+result.receipt["regeneratedApplied"].toInt()==0) {
+        if(!terrainHdPublicationNeeded(map,result)) {
             sources->saveCache();
             state.update(CTerrainHdProgress::Complete,1,1);return prepared;
         }
@@ -155,7 +155,7 @@ void CView::republishTerrainAtlasHd()
     if(state.cancelled()||result.cancelled) {QMessageBox::information(this,tr("HD атлас"),tr("Подготовка отменена. RES и MPR не изменены."));return;}
     if(!result.success){QMessageBox::critical(this,tr("HD пересборка отказана"),result.error);return;}
     const int hd=result.receipt["hdApplied"].toInt(),generated=result.receipt["regeneratedApplied"].toInt();
-    if(hd+generated==0) {QMessageBox::information(this,tr("HD атлас"),tr("Статические тайлы карты уже имеют размер 256×256. Повторная конвертация не требуется; анимация остаётся в исходном размере."));return;}
+    if(!terrainHdPublicationNeeded(map,result)) {QMessageBox::information(this,tr("HD атлас"),tr("Тайлы земли и статических покрытий уже в HD. Повторная конвертация не требуется; вода и анимация сохраняют исходный размер."));return;}
     const auto semantic=prepared.semantic;
     const auto cleanup=prepared.cleanup;
     const double expectedGrowth=prepared.expectedGrowth,expectedTotal=prepared.expectedTotal;
@@ -170,7 +170,9 @@ void CView::republishTerrainAtlasHd()
         return tr("не удалось проверить все MPR Dejavu/Base");
     };
     const int unchangedAnimationFrames=result.receipt["animationUnchangedFrames"].toInt();
-    QString animationNotice;
+    QString animationNotice=tr("\nВода: %1 тайлов без изменения размера и рисунка.")
+        .arg(result.receipt["waterUnchangedSlots"].toInt());
+    if(hd+generated==0)animationNotice+=tr("\nГотовые HD-текстуры сохраняются; параметры карты приводятся к размеру HD-атласа.");
     if(result.receipt["ownerConfirmedHdApplied"].toInt()>0)
         animationNotice+=tr("\nHD по подтверждённому происхождению: %1 слотов.").arg(result.receipt["ownerConfirmedHdApplied"].toInt());
     int repaintedTransitions=0;
@@ -297,7 +299,9 @@ void CView::republishTerrainAtlasHd()
     // Use the normal terrain transaction: one undo command with captured packed
     // values and a fresh seed. Saving persists that command through the usual
     // MPR/semantic-field path; the unchecked default keeps the existing workflow.
-    QString completion=tr("Атлас карты пересобран в HD: %1 слотов, %2 переходов.").arg(hd).arg(generated);
+    QString completion=hd+generated==0
+        ?tr("Карта переведена в HD. Готовые HD-текстуры сохранены без изменений.")
+        :tr("Атлас карты пересобран в HD: %1 слотов, %2 переходов.").arg(hd).arg(generated);
     if(distributeVariants) {
         const bool hadSeed=m_terrainEdit.hasRandomPaintSeed();
         const quint32 previousSeed=m_terrainEdit.randomPaintSeed();

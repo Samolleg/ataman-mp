@@ -21566,35 +21566,9 @@ void CView::requestResolveMissingTerrainBlends(
 
 void CView::resolveMissingTerrainBlends()
 {
-    if(mixedEdgeTerrainEnabled())
-    {
-        endTileBrushGroup();
-        CValidationReport mixedReport;
-        if(!m_terrainEditAvailable || !m_workingTerrainAtlas || !m_pUndoStack) return;
-        if(m_worldTerrainEnabled && !m_worldTerrainEnabledPaths.isEmpty()) {
-            QString summary;
-            if(resolveWorldMaterialBlends(&summary,&mixedReport,nullptr)) {
-                emit updateMsg(mixedReport.hasErrors()?mixedReport.toText():summary);
-                return;
-            }
-            if(mixedReport.hasErrors()) {emit updateMsg(mixedReport.toText());return;}
-        }
-        STerrainTileCommand footprint; footprint.semanticAudit.layer=ETerrainTileLayer::Land;
-        footprint.semanticAudit.requestedMaterialId=0;
-        for(int y=0;y<m_terrainEdit.tileCountY();++y)
-            for(int x=0;x<m_terrainEdit.tileCountX();++x)
-                if(m_terrainEdit.virtualMaterialCellChanged(ETerrainTileLayer::Land,x,y))
-                    footprint.semanticAudit.paintedCoreCells.append(QPoint(x,y));
-        m_mixedEdgeStrokeAtlasBefore=m_workingTerrainAtlas->createStagingCopy();
-        if(resolveMixedEdgeTerrain(&footprint,&mixedReport))
-        {
-            if(!footprint.isEmpty()) m_pUndoStack->push(new CTerrainTilePreviewCommand(this,footprint,true));
-            emit updateMsg(tr("Mixed-edge transitions resolved for the changed Ground region."));
-        }
-        else emit updateMsg(mixedReport.toText());
-        m_mixedEdgeStrokeAtlasBefore.clear();
-        return;
-    }
+    // This explicit map-wide action owns its scope. Smooth is a brush
+    // preference, not permission to restrict repair to edited Ground cells.
+    finishSculptStroke();endTileBrushGroup();
     const ETerrainResolveAuditTrigger trigger =
         m_pendingTerrainResolveAuditTrigger;
     m_pendingTerrainResolveAuditTrigger =
@@ -22128,11 +22102,10 @@ void CView::resolveMissingTerrainBlends()
     refreshClassicAutoPalette();
     refreshManualAtlasPalette();
     progress.setValue(5);
-    QString resolvedMessage = tr("Resolved %1 terrain cell(s) in one undo step; %2 exact atlas tuple(s) were added.")
+    QString resolvedMessage = tr("Исправлено ячеек: %1. Добавлено переходов: %2. Все изменения отменяются одним шагом.")
         .arg(combined.deltas.size()).arg(generated);
     emit updateMsg(resolvedMessage);
-    if(!report.findings().isEmpty())
-        showResolveResult(QMessageBox::Information, resolvedMessage);
+    showResolveResult(QMessageBox::Information, resolvedMessage);
     finishAudit(QStringLiteral("committed"));
 }
 

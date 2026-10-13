@@ -20,6 +20,7 @@
 #include "terrain_mixed_edge.h"
 #include "terrain_hd_library.h"
 #include "terrain_hd_republish.h"
+#include "terrain_atlas_archive_binding.h"
 #include "resourcemanager.h"
 #include "mmp_codec.h"
 #include <QApplication>
@@ -195,6 +196,47 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        if(fixture.value("hdAdoptionReplay").toBool()) {
+            if(!check(root.contains("/build-tests-171-hd-found/"),"saved HD replay restricted to owned fixture"))return 1;
+            QMap<int,QImage> water;QSet<qint32> families;
+            for(const auto& f:view.m_terrainAtlasProfile.families)if(f.tileType==eWater&&f.overlayAllowed)families.insert(f.id);
+            for(const auto& d:view.m_terrainAtlasProfile.slotDefinitions) {
+                const auto& s=d.signature;
+                if(d.assigned&&families.contains(s.northWest)&&families.contains(s.northEast)
+                   &&families.contains(s.southEast)&&families.contains(s.southWest))water[d.slot]=view.m_pTileForm->tileImages().value(d.slot);
+            }
+            const auto verify=[&](const QString& phase) {
+                bool exact=!water.isEmpty();
+                for(auto it=water.cbegin();it!=water.cend();++it) {
+                    const auto after=view.m_pTileForm->tileImages().value(it.key());
+                    const bool same=it.value().convertToFormat(QImage::Format_RGBA8888)==after.convertToFormat(QImage::Format_RGBA8888);
+                    if(it.value()!=after)log<<"WATER REPLAY "<<phase<<" slot="<<it.key()<<" before="<<it.value().width()<<" fmt="<<it.value().format()
+                        <<" after="<<after.width()<<" fmt="<<after.format()<<" normalizedEqual="<<same<<'\n';
+                    exact &= same;
+                }
+                return check(exact,"live native water preserved "+phase);
+            };
+            const auto published=read(root+"/Maps/zone6-published.mpr");
+            CMprDocument document;if(!check(document.loadBytes(published,map),"saved HD replay map readable"))return 1;
+            const QString archive=root+"/res/HDPack_Terrain.res";
+            const auto binding=CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive({archive},document.mapInfo().innerNamespace,archive);
+            if(!check(binding.success(),"saved HD replay exact-bound atlas readable"))return 1;
+            // Replay the HD builder's direct decoder, including its QImage
+            // format. The archive binding cache stores a normalized format.
+            QVector<QImage> physical;CResArchiveIndex index;QString error;
+            if(!check(index.open(archive,&error),"saved HD replay direct pages readable"))return 1;
+            for(int page=0;page<binding.profile.textureCount;++page) {
+                const auto payload=index.readMember(document.mapInfo().innerNamespace+QString("%1.mmp").arg(page,3,10,QChar('0')));
+                for(int slot=0;slot<64;++slot){QImage image;if(!ei::decodeMmpDxt1AtlasTile(payload,slot,&image,&error))return 1;physical.append(image);}
+            }
+            QFile replacement(map);if(!check(replacement.open(QIODevice::WriteOnly),"owned replay destination writable"))return 1;
+            check(replacement.write(published)==published.size(),"replace only owned replay MPR");replacement.close();
+            const bool adopted=view.adoptCompleteTerrainBaseline(QFileInfo(map),QString::fromLatin1(QCryptographicHash::hash(published,QCryptographicHash::Sha256).toHex()),
+                physical,archive,binding.profile,true);
+            check(adopted,"replay same production HD adoption without regenerating artwork");
+            verify("adoption");view.syncWorldTerrainActive();verify("world synchronization");
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+        }
         const auto checkHdRecovery=[&](const QString& phase) {
             bool rejected=false;
             QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){
@@ -326,7 +368,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
         }
         if(fixture.value("hdPublication").toBool()) {
-            if(!check(root.contains("/build-tests-157-hd/"),"HD publication restricted to private fixture"))return 1;
+            if(!check(root.contains("/build-tests-157-hd/")||root.contains("/build-tests-171-hd-found/"),"HD publication restricted to private fixture"))return 1;
             const bool distribute=fixture.value("distribute").toBool();
             const bool saveOnly=fixture.value("hdSaveOnly").toBool();
             const bool rollbackProbe=fixture.value("saveRollbackProbe").toBool();
@@ -336,6 +378,27 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 for(int f=0;f<a.frameCount;++f)frames.append(view.m_authoredTerrainTileImages.value(a.tileIndex+f));return frames;};
             const auto oldAnimations=animations();
             const auto oldAnimationRecords=view.m_mprAnimatedTiles;
+            QMap<int,QImage> oldWater;
+            QSet<qint32> waterFamilies;
+            for(const auto& family:view.m_terrainAtlasProfile.families)
+                if(family.tileType==eWater&&family.overlayAllowed)waterFamilies.insert(family.id);
+            for(const auto& d:view.m_terrainAtlasProfile.slotDefinitions) {
+                const auto& s=d.signature;
+                if(d.assigned&&waterFamilies.contains(s.northWest)&&waterFamilies.contains(s.northEast)
+                   &&waterFamilies.contains(s.southEast)&&waterFamilies.contains(s.southWest))
+                    oldWater[d.slot]=view.m_pTileForm->tileImages().value(d.slot);
+            }
+            const auto checkWater=[&](const QString& phase) {
+                bool exact=true;
+                for(auto it=oldWater.cbegin();it!=oldWater.cend();++it) {
+                    const auto after=view.m_pTileForm->tileImages().value(it.key());
+                    const bool same=it.value().convertToFormat(QImage::Format_RGBA8888)==after.convertToFormat(QImage::Format_RGBA8888);
+                    if(it.value()!=after)log<<"WATER "<<phase<<" slot="<<it.key()<<" before="<<it.value().width()<<" fmt="<<it.value().format()
+                        <<" after="<<after.width()<<" fmt="<<after.format()<<" normalizedEqual="<<same<<'\n';
+                    exact &= same;
+                }
+                check(exact,"native water size/artwork remain exact "+phase);
+            };
             const auto sameAnimationPixels=[](const QVector<QImage>& a,const QVector<QImage>& b) {
                 if(a.size()!=b.size())return false;
                 for(int i=0;i<a.size();++i)
@@ -359,6 +422,21 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
             if(saveOnly)points={QVector3D(73,1,0),QVector3D(139,1,0),QVector3D(451,9,0),QVector3D(349,123,0)};
             if(fixture.value("legacyHd").toBool())
                 points={QVector3D(25,25,0),QVector3D(55,45,0),QVector3D(65,75,0)};
+            if(fixture.value("hdFoundProblems").toBool()) {
+                check(view.m_terrainAtlasProfile.textureCount*64==view.m_terrainAtlasProfile.atlasSlotCount,
+                      "original/working profile declares exact physical pages");
+                const QVector<int> review=fixture.value("zone").toString()=="bz2g"?QVector<int>{0}:QVector<int>{608,739,874,971};
+                for(int slot:review) {
+                    bool found=false;
+                    for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
+                        for(int x=0;x<view.m_terrainEdit.tileCountX()&&!found;++x)
+                            if(SMprPackedTile::decode(view.m_terrainEdit.packedTile(x,y,ETerrainTileLayer::Land)).atlasSlot()==slot) {
+                                points.append(QVector3D(x*2+1,y*2+1,0));found=true;
+                                log<<"HD REVIEW slot="<<slot<<" center="<<x*2+1<<','<<y*2+1<<'\n';
+                            }
+                    check(found,QString("review region exists slot %1").arg(slot));
+                }
+            }
             if(fixture.value("legacyHd").toBool()) {
                 bool found=false;
                 for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
@@ -368,7 +446,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                             log<<"HD VIEW former refusal slot915 centre="<<x*2+1<<","<<y*2+1<<'\n';
                         }
             }
-            if(!saveOnly&&!fixture.value("legacyHd").toBool())for(int slot:{34,44,215,666}) {
+            if(!saveOnly&&!fixture.value("legacyHd").toBool()&&!fixture.value("hdFoundProblems").toBool())for(int slot:{34,44,215,666}) {
                 bool found=false;
                 for(int y=0;y<view.m_terrainEdit.tileCountY()&&!found;++y)
                     for(int x=0;x<view.m_terrainEdit.tileCountX()&&!found;++x)
@@ -393,7 +471,7 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 }
             };
             capture("before");
-            bool confirmed=false;QByteArray publishedBaseline;bool oldSeed=false;quint32 oldSeedValue=0;
+            bool confirmed=false;QStringList resultMessages;QByteArray publishedBaseline;bool oldSeed=false;quint32 oldSeedValue=0;
             QObject::connect(&view,&CView::terrainPublicationPreflightRequested,&view,[&](const QString& path,bool* accepted){if(accepted)*accepted=QDir::cleanPath(path)==QDir::cleanPath(root+"/res/HDPack_Terrain.res");});
             QElapsedTimer publicationClock;int publicationTicks=0;qint64 lastPublicationTick=0,maxPublicationGap=0;QSet<QString> publicationLabels;
             QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,&view,[&](){
@@ -412,12 +490,14 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                         option->setChecked(distribute);confirmed=true;box->button(QMessageBox::Yes)->click();
                     } else if(!option) {
                         log<<"HD DIALOG "<<box->text()<<"\n";log.flush();
+                        resultMessages.append(box->text());
                         if(box->icon()==QMessageBox::Critical){
                             if(rollbackProbe && box->text().contains("HDPack_Terrain.res rollback: complete")) rollbackDialog=true;
                             else ++failed;
                             box->reject();
                         }
                         else if(box->standardButtons()&QMessageBox::Save)box->button(QMessageBox::Save)->click();
+                        else if(box->standardButtons()&QMessageBox::Yes)box->button(QMessageBox::Yes)->click();
                         else box->accept();
                     }
                 }
@@ -450,12 +530,18 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                     check(publicationTicks>=5&&publicationLabels.size()>=4,"publication remains visible through multiple completion phases");
                     check(maxPublicationGap<3000,"publication GUI timer gap stays below three seconds");
                 }
-                check(confirmed,"real HD confirmation accepted");
-                check(view.m_mprDocument.mapInfo().innerNamespace!=oldNamespace && view.m_terrainAtlasAnalysis.usable,"published MPR/RES adopted by real editor");
+                if(fixture.value("hdAlreadyNative").toBool()) {
+                    check(!confirmed&&resultMessages.join('\n').contains("уже в HD"),"already-HD original map returns clear no-op");
+                    check(view.m_mprDocument.mapInfo().innerNamespace==oldNamespace,"HD no-op preserves original namespace");
+                } else {
+                    check(confirmed,"real HD confirmation accepted");
+                    check(view.m_mprDocument.mapInfo().innerNamespace!=oldNamespace && view.m_terrainAtlasAnalysis.usable,"published MPR/RES adopted by real editor");
+                }
             }
             describeAnimations("after");
             check(sameAnimationPixels(animations(),oldAnimations),"all native animation pixels remain exact after adoption");
             check(view.m_mprAnimatedTiles==oldAnimationRecords,"all animation ranges remain exact after adoption");
+            if(fixture.value("hdFoundProblems").toBool())checkWater("after adoption");
             capture("after");
             if(distribute) {
                 const auto laidOut=snapshot(view.m_terrainEdit);
@@ -501,7 +587,53 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
                 rangesValid=view.m_mprAnimatedTiles[i].frameCount==oldAnimationRecords[i].frameCount
                     &&view.m_mprAnimatedTiles[i].tileIndex%64+view.m_mprAnimatedTiles[i].frameCount<=64;
             check(sameAnimationPixels(animations(),oldAnimations)&&rangesValid,"fresh reopen retains native animation artwork and contiguous frame counts");
-            capture("reopened");dialogs.stop();
+            capture("reopened");
+            if(fixture.value("hdFoundProblems").toBool()) {
+                checkWater("after reopen");
+                if(!fixture.value("hdAlreadyNative").toBool()) {
+                    CResArchiveIndex archive;QString error;
+                    check(archive.open(root+"/res/HDPack_Terrain.res",&error),"published private HD archive readable");
+                    const auto ns=view.m_mprDocument.mapInfo().innerNamespace;
+                    const auto receipt=QJsonDocument::fromJson(archive.readMember("ei_atlas_hd_recovery_"+ns+".json")).object();
+                    check(receipt["allStaticSlotsTrueHd"].toBool()&&receipt["upscaled128To256"].toInt()==0,"HD publication contains no SD upscales");
+                    const QVector<int> recoverySlots=fixture.value("zone").toString()=="zone6"?
+                        QVector<int>{608,739,756,870,874,877,971,974,978}:QVector<int>{};
+                    for(int slot:recoverySlots) {
+                        bool recovered=false;
+                        for(const auto& value:receipt["slots"].toArray()) {
+                            const auto row=value.toObject();
+                            if(row["slot"].toInt()==slot)recovered=row["result"].toString()=="regenerated-256"
+                                &&row["recipe"].toObject()["algorithm"].toString()=="reviewed-corner-topology/HD-material-composite";
+                        }
+                        check(recovered,QString("recovered similar multi-material junction %1").arg(slot));
+                    }
+                    resultMessages.clear();
+                    check(view.m_mprDocument.mapInfo().tileSize==256&&view.m_mprDocument.mapInfo().textureSize==2048,
+                          "saved MPR declares HD tile and page dimensions");
+                    view.republishTerrainAtlasHd();
+                    check(resultMessages.join('\n').contains("уже в HD"),"repeat HD after reopen is an accepted no-op");
+                    checkWater("after repeat HD");
+                }
+                if(fixture.value("resolveFeedback").toBool()) {
+                    panel.activateMode(ELandscapeEditMode::TilePaint,true);
+                    if(auto* smooth=panel.findChild<QAbstractButton*>("modernMixedEdge"))smooth->setChecked(true);
+                    const auto before=snapshot(view.m_terrainEdit);const int undo=history.index();
+                    resultMessages.clear();
+                    auto* repair=panel.findChild<QPushButton*>("resolveMissingBlendsButton");
+                    if(check(repair&&repair->isEnabled(),"map repair UI action available with Smooth enabled"))repair->click();
+                    const auto message=resultMessages.join('\n');
+                    check(message.contains("Исправлено ячеек:")||message.contains("Изменений для применения не найдено"),"map repair reports a clear count or no-op");
+                    check(!message.contains("WARNING terrain.atlas_profile_corner_only_material"),"catalog information does not replace repair result");
+                    if(snapshot(view.m_terrainEdit)!=before) {
+                        const auto after=snapshot(view.m_terrainEdit);
+                        check(history.index()==undo+1,"map repair is one Undo transaction");
+                        history.undo();check(snapshot(view.m_terrainEdit)==before,"map repair exact Undo");
+                        history.redo();check(snapshot(view.m_terrainEdit)==after,"map repair exact Redo");
+                        history.undo();
+                    }
+                }
+            }
+            dialogs.stop();
             log<<"RESULT passed="<<passed<<" failed="<<failed<<"\n";return failed?1:0;
         }
         if(fixture.value("paintMatrix").toBool()) {

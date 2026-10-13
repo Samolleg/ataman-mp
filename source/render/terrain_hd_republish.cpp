@@ -1053,13 +1053,27 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         if(stop>r.before.size()||stop<=animation.tileIndex){r.error="Invalid animation interval";return r;}
         for(int slot=animation.tileIndex;slot<stop;++slot)animationSlots.insert(slot);
     }
-    QSet<int> animationPages;for(int slot:animationSlots)animationPages.insert(slot/64);
+    QSet<qint32> waterFamilies;
+    for(const auto& family:profile.families)
+        if(family.tileType==eWater&&family.overlayAllowed)
+            waterFamilies.insert(family.id);
+    QSet<int> waterSlots;
+    for(auto it=defs.cbegin();it!=defs.cend();++it) {
+        const auto& d=it.value();const auto& s=d.signature;
+        if(d.assigned&&!d.ambiguous&&waterFamilies.contains(s.northWest)
+           &&waterFamilies.contains(s.northEast)&&waterFamilies.contains(s.southEast)
+           &&waterFamilies.contains(s.southWest))waterSlots.insert(it.key());
+    }
+    QSet<int> nativeSlots=animationSlots;nativeSlots.unite(waterSlots);
+    QSet<int> nativePages;for(int slot:nativeSlots)nativePages.insert(slot/64);
     QMap<int,QByteArray> nativeMips;int nativeSources=0;
     for(int slot=0;slot<r.before.size();++slot) {
         if(progress)progress->update(CTerrainHdProgress::Matching,slot,r.before.size());
         if(cancelled())return r;
-        if(animationSlots.contains(slot)) {
-            QJsonObject row{{"slot",slot},{"alreadyHd",r.before[slot].width()==256},{"animationUnchanged",true}};
+        if(nativeSlots.contains(slot)) {
+            QJsonObject row{{"slot",slot},{"alreadyHd",r.before[slot].width()==256}};
+            if(animationSlots.contains(slot))row["animationUnchanged"]=true;
+            if(waterSlots.contains(slot))row["waterUnchanged"]=true;
             if(r.before[slot].width()==256)upgraded[slot]=r.before[slot];
             slotRows.append(row);continue;
         }
@@ -1067,7 +1081,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             emptyAnimationPadding.insert(slot);slotRows.append(QJsonObject{{"slot",slot},{"emptyAnimationPadding",true}});continue;
         }
         if(!defs.value(slot).assigned&&r.before[slot].width()==128&&slot/64<authored.size()
-           &&int(word(authored[slot/64],4))/8==128&&animationPages.contains(slot/64)) {
+           &&int(word(authored[slot/64],4))/8==128&&nativePages.contains(slot/64)) {
             bool transparent=true;const QImage& image=r.before[slot];
             for(int y=0;y<image.height()&&transparent;++y)for(int x=0;x<image.width();++x)
                 if(qAlpha(image.pixel(x,y))!=0){transparent=false;break;}
@@ -1151,11 +1165,11 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     }
     policies.append(selectedLocal);policies.append(firstLocal);policies.append(firstGlobal);
     int transitions=0,completedTransitions=0;
-    for(int slot=0;slot<r.before.size();++slot)if(upgraded[slot].isNull()&&defs.value(slot).assigned)++transitions;
+    for(int slot=0;slot<r.before.size();++slot)if(!nativeSlots.contains(slot)&&upgraded[slot].isNull()&&defs.value(slot).assigned)++transitions;
     if(progress)progress->update(CTerrainHdProgress::Recovering,0,transitions);
     for(int slot=0;slot<r.before.size();++slot) {
         if(cancelled())return r;
-        if(animationSlots.contains(slot)||!upgraded[slot].isNull()||!defs.value(slot).assigned)continue;
+        if(nativeSlots.contains(slot)||!upgraded[slot].isNull()||!defs.value(slot).assigned)continue;
         if(progress)progress->update(CTerrainHdProgress::Recovering,completedTransitions++,transitions);
         if(cancelled())return r;
         const auto d=defs.value(slot);
@@ -1417,19 +1431,24 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             recipe["maskDonors"]=donorEvidence;
             if(donors.size()==ids.size()) {
                 witness=semanticMaskedHd(r.before[slot],d.signature,donors,&recipe);
-                if(witness.isNull()&&ids.size()==2
+                if(witness.isNull()&&ids.size()>=2&&ids.size()<=4
+                   &&!d.ambiguous&&(profile.approved||contextualSignatures.contains(slot))
                    &&recipe["maskRefusal"].toString()==QStringLiteral("indistinguishable-authored-corner-colors")) {
-                    // Two similar grasses can be semantically distinct while
-                    // their authored RGB/activity means are indistinguishable
-                    // (zone2 slot915). Preserve the reviewed corner topology;
-                    // regenerate its standard transition from the compatible
-                    // native HD donors instead of inventing a noisy RGB mask.
+                    // Similar grass/soil materials can have indistinguishable
+                    // RGB/activity means at both pairs and multi-way junctions.
+                    // Approved corners own the topology; the standard reviewed
+                    // masks and compatible native HD donors own the new pixels.
                     CTerrainTransitionCatalog empty;
                     CTerrainVirtualAtlas hdTopology(empty,{donors.first()},0,donors,styles,true);
-                    witness=hdTopology.reviewGeneratedBlend(signature,0);
+                    QString topologyMask;
+                    witness=hdTopology.reviewGeneratedBlend(signature,0,&topologyMask,nullptr,d.routeOwnerMaterial);
                     if(!witness.isNull()) {
                         recipe["algorithm"]=QStringLiteral("reviewed-corner-topology/HD-material-composite");
                         recipe["ownershipFallback"]=recipe.take("maskRefusal");
+                        recipe["materialCount"]=ids.size();
+                        recipe["topologyMask"]=topologyMask;
+                        recipe["topologyBasis"]=contextualSignatures.contains(slot)
+                            ?QStringLiteral("bound-semantic-field"):QStringLiteral("approved-atlas-profile");
                     }
                 }
                 if(!witness.isNull()){ambiguous=false;recipe["sources"]=donorEvidence;recipe["context"]=contextualSignatures.contains(slot)?QStringLiteral("MPR-semantic-majority"):QStringLiteral("atlas-profile-signature");}
@@ -1448,7 +1467,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     // from the same semantic family. Variant generation preserves anchor edges.
     QVector<QString> outputKind(r.before.size());
     for(int slot=0;slot<r.before.size();++slot) {
-        if(animationSlots.contains(slot)||!upgraded[slot].isNull()||r.before[slot].size()!=QSize(128,128))continue;
+        if(nativeSlots.contains(slot)||!upgraded[slot].isNull()||r.before[slot].size()!=QSize(128,128))continue;
         const auto d=defs.value(slot);const auto s=d.signature;
         if(!d.assigned||d.ambiguous||d.routeOwnerMaterial!=0||!d.mixedEdgeRecipes.isEmpty()
            ||s.northWest!=s.northEast||s.northWest!=s.southEast||s.northWest!=s.southWest)continue;
@@ -1500,7 +1519,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     r.receipt["slots"]=slotRows;r.receipt["stockMatched"]=hd;r.receipt["regenerated"]=generated;
     r.receipt["semanticContextDiagnostic"]=semanticDiagnostic;
     r.receipt["semanticContextSlots"]=contextualSignatures.size();
-    for(int slot=0;slot<r.before.size();++slot)if(!animationSlots.contains(slot)
+    for(int slot=0;slot<r.before.size();++slot)if(!nativeSlots.contains(slot)
         &&!emptyAnimationPadding.contains(slot)&&upgraded[slot].isNull()
         &&r.before[slot].size()==QSize(128,128)) {
         if(emptyStaticPadding.contains(slot)) {
@@ -1554,7 +1573,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     for(int page=0;page<authored.size();++page)for(int i=1;i<64;++i)
         mixed=mixed||(upgraded[page*64].isNull()!=upgraded[page*64+i].isNull());
     QVector<int> order,sizes;
-    const bool preserveAnimationRanges=!animationSlots.isEmpty();
+    const bool preserveAnimationRanges=!nativeSlots.isEmpty();
     QVector<int> appendedHdSlots;
     if(preserveAnimationRanges) {
         // Keep every animation interval at its original index. Pages that
@@ -1564,9 +1583,9 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         for(int slot=0;slot<count;++slot) {
             order.append(slot);
             const int sourceSize=int(word(authored[slot/64],4))/8;
-            const bool animationPage128=sourceSize==128&&animationPages.contains(slot/64);
+            const bool animationPage128=sourceSize==128&&nativePages.contains(slot/64);
             sizes.append(animationPage128?128:qMax(256,sourceSize));
-            if(animationPage128&&!animationSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)
+            if(animationPage128&&!nativeSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)
                 &&!priorAnimationPadding.contains(slot)&&!upgraded[slot].isNull())
                 appendedHdSlots.append(slot);
         }
@@ -1591,15 +1610,15 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         const bool appendedUpgrade=preserveAnimationRanges&&output>=count;
         if(appendedUpgrade)images.append(upgraded[slot]);
         else if(preserveAnimationRanges) {
-            const bool animationPage128=int(word(authored[slot/64],4))/8==128&&animationPages.contains(slot/64);
-            if(animationPage128&&!animationSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)) {
+            const bool animationPage128=int(word(authored[slot/64],4))/8==128&&nativePages.contains(slot/64);
+            if(animationPage128&&!nativeSlots.contains(slot)&&!emptyAnimationPadding.contains(slot)) {
                 supersededAnimationSlots.insert(slot);QImage empty(128,128,QImage::Format_RGBA8888);empty.fill(Qt::transparent);images.append(empty);
             } else if(animationPage128&&emptyAnimationPadding.contains(slot))images.append(r.before[slot]);
             else images.append(upgraded[slot].isNull()?r.before[slot]:upgraded[slot]);
         } else images.append(upgraded[slot].isNull()?r.before[slot]:upgraded[slot]);
         auto row=slotRows[slot].toObject();row["outputSlot"]=output;
         if(emptyAnimationPadding.contains(slot))row["result"]="empty-animation-padding";
-        else if(animationSlots.contains(slot)&&r.before[slot].width()==128){row["result"]="retained-128";++native128;}
+        else if(nativeSlots.contains(slot)&&r.before[slot].width()==128){row["result"]="retained-128";++native128;}
         else if(preserveAnimationRanges&&output<count&&supersededAnimationSlots.contains(slot))row["result"]="superseded-128-slot";
         else if(r.before[slot].width()==256)row["result"]="already-HD-unchanged";
         else if(matchedSources[slot].archive>=0){row["result"]="original-HD-BC1";++appliedHd;}
@@ -1623,14 +1642,14 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
         if(!unchanged)for(int local=0;local<64;++local) {
             const int slot=order[page*64+local];if(slot<0)continue;
             const bool blankAnimationPageSlot=preserveAnimationRanges
-                &&page<authored.size()&&int(word(authored[page],4))/8==128&&animationPages.contains(page)
-                &&!animationSlots.contains(slot);
+                &&page<authored.size()&&int(word(authored[page],4))/8==128&&nativePages.contains(page)
+                &&!nativeSlots.contains(slot);
             if(blankAnimationPageSlot)continue;
             const auto source=matchedSources[slot];
             QByteArray original;int from=slot%64,rotation=0;
             if(preserveAnimationRanges&&page<authored.size()) {
-                const bool sourceAnimationPage128=int(word(authored[page],4))/8==128&&animationPages.contains(page);
-                if(sourceAnimationPage128&&animationSlots.contains(slot))original=authored[page];
+                const bool sourceAnimationPage128=int(word(authored[page],4))/8==128&&nativePages.contains(page);
+                if(sourceAnimationPage128&&nativeSlots.contains(slot))original=authored[page];
                 else if(size==256&&r.before[slot].width()==256)original=authored[page];
             }
             if(original.isEmpty()) {
@@ -1644,14 +1663,14 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
             QImage pixels;if(!ei::decodeMmpDxt1AtlasTile(payload,local,&pixels,&r.error))return r;
             const int slot=order[page*64+local];
             const bool blankAnimationPageSlot=preserveAnimationRanges&&size==128
-                &&animationPages.contains(page)&&!animationSlots.contains(slot);
+                &&nativePages.contains(page)&&!nativeSlots.contains(slot);
             if(slot>=0&&size==128&&pixels!=r.before[slot]&&!blankAnimationPageSlot){r.error="Native SD pixels changed";return r;}
             r.after.append(pixels);
         }
         pageRows.append(QJsonObject{{"page",page},{"tileSize",size},{"bytesAfter",payload.size()}});
     }
     for(auto& definition:r.profile.slotDefinitions) {
-        if(contextualSignatures.contains(definition.slot)&&!animationSlots.contains(definition.slot)
+        if(contextualSignatures.contains(definition.slot)&&!nativeSlots.contains(definition.slot)
            &&!upgraded[definition.slot].isNull())definition=defs.value(definition.slot);
         definition.slot=r.slotRemap.value(definition.slot,-1);
     }
@@ -1701,6 +1720,7 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     r.receipt["hdApplied"]=appliedHd;r.receipt["regeneratedApplied"]=appliedGenerated;
     r.receipt["retained128"]=native128;r.receipt["native128Slots"]=native128;r.receipt["sdCarried256"]=0;
     r.receipt["animationBlockedHd"]=blocked;r.receipt["animationUnchangedFrames"]=unchangedAnimationFrames;
+    r.receipt["waterUnchangedSlots"]=waterSlots.size();
     r.receipt["upgradePartialPages"]=upgradePartialPages;
     r.receipt["hdVariantsApplied"]=std::count(outputKind.cbegin(),outputKind.cend(),QStringLiteral("hd-variant"));
     r.receipt["upscaled128To256"]=enlarged;
@@ -1711,13 +1731,23 @@ STerrainHdRepublishResult rebuildTerrainAtlasHd(const STerrainAtlasProfile& prof
     r.receipt["semanticContextSlots"]=contextualSignatures.size();
     int priorUpscales=0;
     for(auto it=priorRows.cbegin();it!=priorRows.cend();++it)
-        if(it.value()["result"].toString()==QStringLiteral("upscaled-128-to-256"))++priorUpscales;
+        if(!waterSlots.contains(it.key())&&it.value()["result"].toString()==QStringLiteral("upscaled-128-to-256"))++priorUpscales;
     r.receipt["previouslyUpscaled256"]=priorUpscales;
     r.receipt["allStaticSlotsTrueHd"]=enlarged==0&&priorUpscales==0;
     r.receipt["native128Slots"]=native128;
     if(cancelled())return r;
     if(progress)progress->update(CTerrainHdProgress::Preparing,1,5);
     r.success=sources.current(&r.error);return r;
+}
+
+bool terrainHdPublicationNeeded(const CMprDocument& map,const STerrainHdRepublishResult& r)
+{
+    if(!r.success||r.pages.isEmpty()||r.after.isEmpty())return false;
+    int tileSize=0;for(const auto& image:r.after)tileSize=qMax(tileSize,image.width());
+    const auto& info=map.mapInfo();
+    return r.receipt["hdApplied"].toInt()+r.receipt["regeneratedApplied"].toInt()>0
+        ||info.textureCount!=quint32(r.pages.size())||info.textureSize!=quint32(tileSize*8)
+        ||info.tileCount!=quint32(r.after.size())||info.tileSize!=quint32(tileSize);
 }
 
 bool prepareTerrainHdPublication(const CMprDocument& map,const QByteArray& oldSemantic,
@@ -1732,7 +1762,7 @@ bool prepareTerrainHdPublication(const CMprDocument& map,const QByteArray& oldSe
     auto cancelled=[&]() {if(!progress||!progress->cancelled())return false;r->success=false;r->cancelled=true;r->error=QStringLiteral("Подготовка отменена. RES и MPR не изменены.");return true;};
     if(cancelled())return false;
     r->publishedMembers.clear();
-    if(r->receipt["hdApplied"].toInt()+r->receipt["regeneratedApplied"].toInt()==0) {
+    if(!terrainHdPublicationNeeded(map,*r)) {
         r->mprBytes=map.originalBytes();r->profile=r->originalProfile;
         r->receipt["noOp"]=true;r->receipt["publishedNamespace"]=map.mapInfo().innerNamespace;
         return true;

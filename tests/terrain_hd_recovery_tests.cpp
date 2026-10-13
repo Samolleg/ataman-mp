@@ -28,6 +28,40 @@ class TerrainHdRecoveryTests:public QObject {
           {"animationPagePaddingSlots",QJsonArray{32,33}}};
  }
 private slots:
+ void originalProfileConstructorsDeclarePages() {
+  auto builtin=CTerrainAtlasPresetCatalog::exactProfile("bz2g",
+      "10c214c7fcd677931efe2def80fafb5762f14527d7858514e38bd11bd8437156",512);
+  QVERIFY(builtin.approved);QCOMPARE(builtin.textureCount,8);
+  STerrainAtlasProfile parsed;QVERIFY(STerrainAtlasProfile::fromBytes(builtin.toBytes(),&parsed));
+  QCOMPARE(parsed.textureCount,8);
+  STerrainAtlasAnalysis analysis;auto authored=CTerrainAtlasProfileInference::fromAuthoredAnalysis("test","hash",128,analysis);
+  QCOMPARE(authored.textureCount,2);
+  QVector<QImage> images(64,QImage(128,128,QImage::Format_RGBA8888));
+  for(auto& image:images)image.fill(QColor(37,83,117));
+  auto inferred=CTerrainAtlasProfileInference::propose("test",images,QVector<qint32>(64,1),QVector<STerrainAtlasSlotUsage>(64));
+  QCOMPARE(inferred.textureCount,1);
+ }
+ void nativeStaticWaterIsPreservedAndOtherSdStillRefused() {
+  const auto payload=page(128);QVector<QImage> tiles;
+  for(int i=0;i<64;++i){QImage tile;QVERIFY(ei::decodeMmpDxt1AtlasTile(payload,i,&tile));tiles.append(tile);}
+  auto p=profile(64);p.approved=true;p.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(tiles);
+  STerrainAtlasProfileFamily family;family.id=1;family.name="Water / Still";family.tileType=6;
+  family.layer=ETerrainAtlasLayer::Overlay;family.overlayAllowed=true;family.landAllowed=false;
+  for(int i=0;i<64;++i){STerrainAtlasProfileSlot d;d.slot=i;
+   d.signature.northWest=d.signature.northEast=d.signature.southEast=d.signature.southWest=1;
+   p.slotDefinitions.append(d);family.memberSlots.append(i);}
+  p.families.append(family);CTerrainHdSources sources;
+  const auto water=rebuildTerrainAtlasHd(p,{payload},sources,true,{});
+  QVERIFY2(water.success,qPrintable(water.error));QVERIFY(water.receipt["allStaticSlotsTrueHd"].toBool());
+  QCOMPARE(water.receipt["waterUnchangedSlots"].toInt(),64);QCOMPARE(water.receipt["animationUnchangedFrames"].toInt(),0);
+  QCOMPARE(water.receipt["upscaled128To256"].toInt(),0);QCOMPARE(water.pages.first(),payload);
+  for(int i=0;i<64;++i)QCOMPARE(water.after[water.slotRemap[i]],tiles[i]);
+  p.slotDefinitions[63].assigned=false;
+  const auto mixed=rebuildTerrainAtlasHd(p,{payload},sources,true,{});
+  QVERIFY2(mixed.success,qPrintable(mixed.error));QVERIFY(!mixed.receipt["allStaticSlotsTrueHd"].toBool());
+  QCOMPARE(mixed.receipt["waterUnchangedSlots"].toInt(),63);QCOMPARE(mixed.receipt["upscaled128To256"].toInt(),1);
+  for(int i=0;i<63;++i)QCOMPARE(mixed.after[mixed.slotRemap[i]],tiles[i]);
+ }
  void emptyNativeAnimationPaddingIsNotAnUpscaledTexture() {
   QImage raster(1024,1024,QImage::Format_RGBA8888);raster.fill(Qt::transparent);
   for(int y=0;y<128;++y)for(int x=0;x<1024;++x)raster.setPixelColor(x,y,QColor(31,71,109));

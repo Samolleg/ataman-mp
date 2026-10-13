@@ -1,0 +1,9 @@
+# bz2g — причина Physical page/profile count differs
+
+Поручение13.10: проверить отказ HD карты bz2g в установленной169. Только диагностика, программа и игровые данные не изменены. Исходники принятой169 main805d5f03ea299040a16546f4d16ccb97251bd7dc; параллельная незавершённая170 сохранена.
+
+Подтверждено read-only скриптом `build-diagnose-hd-bz2g/inspect.ps1`, результат `page-counts.json`: bz2g.mpr MP.textureCount=8; в HDPack_Terrain.res все8 bz2g000–007.mmp присутствуют, каждый2048×2048,2796292 байта;512 физических ячеек. Embedded profile/HD receipt для bz2g отсутствуют. Preset bz2g содержит512 slots и3 точных pixel-hash bindings. Размер страниц сам по себе не является оценкой качества HD-рисунка.
+
+Причина в коде: `STerrainAtlasProfile::textureCount` по умолчанию0 (`terrain_atlas_profile.h`). `CTerrainAtlasPresetCatalog::exactProfile` заполняет atlasSlotCount512, provenance, approval и таблицу углов, но не textureCount. Альтернативные конструкторы `fromAuthoredAnalysis` и `propose` также не заполняют это поле; runtime-путь `rebuildTerrainAutoCatalog` не присваивает число страниц после них. `republishTerrainAtlasHd` читает страницы только в цикле page<profile.textureCount, получает пустой authoredPages. `rebuildTerrainAtlasHd` проверяет authored.size()*64 != profile.atlasSlotCount, т.е.0 !=512, и выдаёт именно сообщение со снимка. Отказ возникает до реконструкции и публикации.
+
+Это отдельный дефект формирования исходного/встроенного профиля, не прежний stale receipt рабочего атласа zone1 и не отсутствие страниц/доноров. Исправление должно задавать физическое число страниц во всех конструкторах профиля и проверять его связь с реальными MMP; блокирующую проверку HD убирать не требуется. Реализация/сборка/установка в это диагностическое поручение не добавлены. Не назначалась версия и не менялись чужие исходники170.

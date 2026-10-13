@@ -1603,8 +1603,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
                     : (family.memberSlots.isEmpty() ? -1 : family.memberSlots.front());
             material.thumbnailSlot = material.representativeSlot;
             if(report) report->add("terrain.atlas_profile_corner_only_material",
-                EValidationSeverity::Warning,
-                "This material has no uniform tile and paints contextually at terrain corners",
+                EValidationSeverity::Info,
+                "Материал представлен в переходах атласа; отдельного однородного тайла в этом атласе нет",
                 family.name);
         }
         else
@@ -1678,6 +1678,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
     profile.mprNamespace = mprNamespace;
     profile.atlasPixelSha256 = atlasPixelSha256;
     profile.atlasSlotCount = atlasSlotCount;
+    profile.textureCount = (atlasSlotCount + 63) / 64;
     profile.provenance = QStringLiteral("authored-template:%1").arg(analysis.templateName);
     profile.approved = analysis.usable;
 
@@ -1759,6 +1760,7 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
     result.mprNamespace = mprNamespace.trimmed();
     result.atlasPixelSha256 = pixelSha256(images);
     result.atlasSlotCount = images.size();
+    result.textureCount = (images.size() + 63) / 64;
     result.provenance = currentProvenance();
     if(result.mprNamespace.isEmpty() || images.isEmpty() || tileTypes.size() != images.size()
        || usage.size() != images.size())

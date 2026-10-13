@@ -99,6 +99,8 @@ bool commitTerrainHdCleanup(const QString& archivePath, const QByteArray& expect
     const QByteArray& candidate, const QJsonObject& receipt, QString* error);
 
 class CMprDocument;
+bool terrainHdPublicationNeeded(const CMprDocument& map,
+    const STerrainHdRepublishResult& result);
 bool prepareTerrainHdPublication(const CMprDocument& map,
     const QByteArray& oldSemantic, STerrainHdRepublishResult* result, CTerrainHdProgress* progress = nullptr);
 
