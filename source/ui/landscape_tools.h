@@ -315,6 +315,9 @@ private:
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();
+    void updateMaterialButton(QToolButton*, const STerrainPaintMaterialChoice&, bool classicAuto);
+    QByteArray m_paletteTopology;
+    QByteArray m_variantStripFingerprint;
     void requestMaterialPaletteRebuild();
     void requestPaintTerrainTypesRefresh();
     void refreshAtlasCapacity(int activeSlots);

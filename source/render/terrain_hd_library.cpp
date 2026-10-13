@@ -14,6 +14,9 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QtEndian>
+#include <QDateTime>
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace TerrainHdLibrary {
 QString root() {
@@ -30,6 +33,29 @@ QStringList configuredSources(const QStringList& archives) {
         }
     }
     result.removeDuplicates();return result;
+}
+QStringList availableSources() {
+    // Palette validation asks repeatedly for the same immutable source list.
+    // Cache only metadata, never game paths or unchecked texture payloads.
+    static QMutex mutex;QMutexLocker guard(&mutex);
+    static QString cachedIdentity;static QStringList cachedSources;
+    const QFileInfo manifestFile(QDir(root()).filePath("sources/manifest.json"));
+    const QString identity=manifestFile.absoluteFilePath()+QStringLiteral("|%1|%2")
+        .arg(manifestFile.size()).arg(manifestFile.lastModified().toMSecsSinceEpoch());
+    if(manifestFile.isFile()&&identity==cachedIdentity)return cachedSources;
+    QFile file(manifestFile.absoluteFilePath());
+    if(!file.open(QIODevice::ReadOnly))return {};
+    const auto manifest=QJsonDocument::fromJson(file.readAll()).object();
+    if(manifest["schema"].toInt()!=1)return {};
+    QStringList result;
+    for(const auto& value:manifest["archives"].toArray()) {
+        const auto entry=value.toObject();const QString name=entry["file"].toString();
+        if(!QRegularExpression("^source-[0-9]+(-dejavu)?\\.res$").match(name).hasMatch())return {};
+        const QFileInfo source(QDir(root()).filePath("sources/"+name));
+        if(!source.isFile()||source.size()!=qint64(entry["bytes"].toDouble()))return {};
+        result.append(source.absoluteFilePath());
+    }
+    cachedIdentity=identity;cachedSources=result;return result;
 }
 bool ensure(const QStringList& paths,QStringList* output,QString* error,CTerrainHdProgress* progress,const QString& directory) {
     const QString target=directory.isEmpty()?root():directory;

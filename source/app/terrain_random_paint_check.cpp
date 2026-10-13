@@ -16,6 +16,7 @@
 #include "tree_view.h"
 #include "terrain_virtual_atlas.h"
 #include "terrain_mixed_edge.h"
+#include "terrain_hd_library.h"
 #include "resourcemanager.h"
 #include "mmp_codec.h"
 #include <QApplication>
@@ -45,6 +46,7 @@
 #include <QTabWidget>
 #include <QScrollArea>
 #include <QToolButton>
+#include <QPointer>
 #include <QMouseEvent>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -188,6 +190,49 @@ int runTerrainRandomPaintCheck(const QString& fixturePath)
         for(const auto& choice:view.m_modernLandPaintChoices)
             if(initialPreviews.contains(choice.id))primaryStable &= choice.thumbnail==initialPreviews.value(choice.id);
         check(primaryStable,"authored hydration preserves existing primary artwork");
+        if(fixture.value("localPalette").toBool()) {
+            const auto local=TerrainHdLibrary::availableSources();
+            check(!local.isEmpty(),"local palette library available");
+            bool localOnly=!view.m_terrainGlobalBoundAtlasCache.isEmpty();
+            for(const auto& binding:view.m_terrainGlobalBoundAtlasCache)
+                localOnly &= local.contains(binding.archivePath);
+            check(localOnly,"every global palette binding comes from local library");
+            const auto beforeLand=view.m_modernLandPaintChoices;
+            const auto beforeWater=view.m_modernUnderwaterPaintChoices;
+            const auto beforeOverlay=view.m_modernOverlayPaintChoices;
+            panel.resize(760,1100);panel.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+            QApplication::processEvents();
+            for(auto* button:panel.findChildren<QToolButton*>())
+                if(button->property("terrainMaterialId").isValid()&&button->isEnabled()
+                   &&button->toolTip().contains("Grass / Dark")){button->click();break;}
+            QApplication::processEvents();
+            check(panel.grab().save(output+"/palette-before.png"),"native palette before capture");
+            QVector<QPointer<QToolButton>> buttons;
+            for(auto* button:panel.findChildren<QToolButton*>())
+                if(button->property("terrainMaterialId").isValid())buttons.append(button);
+            // Same production catalog rebuild called by HD adoption, without
+            // another multi-minute regeneration of unchanged texture artwork.
+            view.rebuildTerrainAutoCatalog();QApplication::processEvents();
+            bool retained=!buttons.isEmpty();for(const auto& button:buttons)retained &= !button.isNull();
+            check(retained,"palette keeps native buttons across atlas catalog rebuild");
+            const auto stable=[&](const QVector<STerrainPaintMaterialChoice>& before,
+                                  const QVector<STerrainPaintMaterialChoice>& after) {
+                int ready=0;bool same=before.size()==after.size();
+                for(const auto& old:before)for(const auto& now:after)if(old.id==now.id) {
+                    if(!old.thumbnail.isNull()){++ready;same &= old.thumbnail==now.thumbnail;}
+                    if(old.authoredThumbnails.size()!=now.authoredThumbnails.size())same=false;
+                    else for(int i=0;i<old.authoredThumbnails.size();++i)
+                        if(!old.authoredThumbnails[i].isNull())same &= old.authoredThumbnails[i]==now.authoredThumbnails[i];
+                }
+                return same&&ready>0;
+            };
+            check(stable(beforeLand,view.m_modernLandPaintChoices),"ground thumbnails and variants never reset");
+            check(stable(beforeWater,view.m_modernUnderwaterPaintChoices),"underwater thumbnails and variants never reset");
+            check(stable(beforeOverlay,view.m_modernOverlayPaintChoices),"overlay thumbnails and variants never reset");
+            check(view.m_terrainGlobalHydrationPendingJobs==0,"warm rebuild queues no archive rehydration");
+            check(panel.grab().save(output+"/palette-after.png"),"native palette after capture");
+            log<<"RESULT passed="<<passed<<" failed="<<failed<<'\n';return failed?1:0;
+        }
         if(fixture.value("hdPublication").toBool()) {
             if(!check(root.contains("/build-tests-157-hd/"),"HD publication restricted to private fixture"))return 1;
             const bool distribute=fixture.value("distribute").toBool();

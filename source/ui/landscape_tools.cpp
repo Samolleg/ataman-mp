@@ -8,11 +8,13 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QDoubleSpinBox>
 #include <QDir>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -2330,8 +2332,75 @@ void CLandscapeTools::applyPaintFilter()
         }
 }
 
+void CLandscapeTools::updateMaterialButton(QToolButton* button, const STerrainPaintMaterialChoice& choice, bool classicAuto)
+{
+    button->setEnabled(choice.paintAvailable);
+    button->setIcon(QIcon());
+    button->setText(QString());
+    button->setToolTip((choice.contextualStamp
+        ? tr("%1 - exact authored one-corner stamp. Vertex target only. %2")
+              .arg(choice.name)
+              .arg(classicAutoSafeMode()
+                  ? tr("Safe mode applies it only when every incident authored tile is exact.")
+                  : tr("It is restricted to its reviewed support material."))
+        : tr("%1 - %2 authored uniform source(s). %3")
+        .arg(choice.name).arg(choice.assignedSlots)
+        .arg(choice.used ? tr("Currently used on this map.")
+                  : (classicAuto
+                      ? tr("Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.")
+                      : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed.")))));
+    if(!choice.thumbnail.isNull())
+    {
+        button->setIcon(QPixmap::fromImage(choice.thumbnail));
+        button->setIconSize(QSize(m_paletteCellSize-4, m_paletteCellSize-4));
+    }
+    else
+    {
+        button->setText(choice.thumbnailPending
+            ? QString::fromUtf8("\xE2\x80\xA6")
+            : QString::fromUtf8("\xE2\x80\x94"));
+        button->setToolTip((choice.thumbnailPending
+            ? tr("Exact reviewed-HD preview is loading.\n")
+            : tr("No exact reviewed-HD preview is available.\n"))
+            + button->toolTip());
+    }
+    button->setMinimumSize(m_paletteCellSize, m_paletteCellSize);
+    if(!choice.paintAvailable)button->setToolTip(choice.paintUnavailableReason);
+
+    if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
+        button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Миниатюры и ID показаны в ленте выбранного материала.").arg(choice.generatedIds.size()));
+    }
+}
+
 void CLandscapeTools::rebuildMaterialPalette()
 {
+    // Pixel availability changes do not change the grid's structure. Keep
+    // native buttons, focus, hover and scroll position while previews arrive.
+    QByteArray topology;QDataStream signature(&topology,QIODevice::WriteOnly);
+    signature<<m_paletteColumns<<m_paletteCellSize<<m_usedMaterialsOnly->isChecked();
+    const QVector<QPair<QGridLayout*,const QVector<STerrainPaintMaterialChoice>*>> grids={
+        {m_groundMaterialGrid,&m_landPaintTypes},{m_underwaterMaterialGrid,&m_underwaterPaintTypes},
+        {m_overlayMaterialGrid,&m_overlayPaintTypes},{m_classicGroundMaterialGrid,&m_classicLandPaintTypes},
+        {m_classicUnderwaterMaterialGrid,&m_classicUnderwaterPaintTypes},{m_classicOverlayMaterialGrid,&m_classicOverlayPaintTypes}};
+    for(const auto& grid:grids) {
+        signature<<grid.second->size();
+        for(const auto& choice:*grid.second)
+            signature<<choice.id<<choice.supportId<<choice.name<<choice.familyName
+                     <<choice.cornerOnly<<choice.contextualStamp<<choice.used<<choice.paintAvailable;
+    }
+    if(topology==m_paletteTopology) {
+        for(int g=0;g<grids.size();++g)
+            for(int i=0;i<grids[g].first->count();++i)
+                if(auto* button=qobject_cast<QToolButton*>(grids[g].first->itemAt(i)->widget()))
+                    for(const auto& choice:*grids[g].second)
+                        if(button->property("terrainMaterialId").toInt()==choice.id
+                           &&button->property("terrainSupportMaterialId").toInt()==choice.supportId) {
+                            updateMaterialButton(button,choice,g>=3);break;
+                        }
+        refreshVariantStrip();applyPaintFilter();updatePaintOptionApplicability();
+        return;
+    }
+    m_paletteTopology=topology;
     const auto selectedMaterial = [](const QButtonGroup* group) {
         const QAbstractButton* button = group->checkedButton();
         return qMakePair(button ? button->property("terrainMaterialId").toInt() : -1,
@@ -2423,40 +2492,8 @@ void CLandscapeTools::rebuildMaterialPalette()
                   "QToolButton:hover { border-color: #2f6fb5; }"
                   "QToolButton:checked { border: 3px solid #2f6fb5; "
                   "background: #1f3a5c; padding: 0px; }"));
-              button->setToolTip((choice.contextualStamp
-                  ? tr("%1 - exact authored one-corner stamp. Vertex target only. %2")
-                        .arg(choice.name)
-                        .arg(classicAutoSafeMode()
-                            ? tr("Safe mode applies it only when every incident authored tile is exact.")
-                            : tr("It is restricted to its reviewed support material."))
-                  : tr("%1 - %2 authored uniform source(s). %3")
-                  .arg(choice.name).arg(choice.assignedSlots)
-                  .arg(choice.used ? tr("Currently used on this map.")
-                            : (classicAuto
-                                ? tr("Unused on this map; Classic Auto preserves available authored blends. Safe mode leaves a boundary unchanged when its exact blend is absent.")
-                                : tr("Unused on this map; Modern painting adds this material and generates exact blends as needed.")))));
-              if(!choice.thumbnail.isNull())
-              {
-                  button->setIcon(QPixmap::fromImage(choice.thumbnail));
-                  button->setIconSize(QSize(m_paletteCellSize-4, m_paletteCellSize-4));
-              }
-              else
-              {
-                  button->setText(choice.thumbnailPending
-                      ? QString::fromUtf8("\xE2\x80\xA6")
-                      : QString::fromUtf8("\xE2\x80\x94"));
-                  button->setToolTip((choice.thumbnailPending
-                      ? tr("Exact reviewed-HD preview is loading.\n")
-                      : tr("No exact reviewed-HD preview is available.\n"))
-                      + button->toolTip());
-              }
-              button->setMinimumSize(m_paletteCellSize, m_paletteCellSize);
-              if(!choice.paintAvailable)button->setToolTip(choice.paintUnavailableReason);
-              connect(button, &QToolButton::clicked, this,
-                      [this, choice]() { updateVariantStrip(choice); });
-              if(!choice.generatedIds.isEmpty()&&generatedHdVariants()) {
-                  button->setToolTip(button->toolTip()+tr("\nСгенерированных вариантов: %1. Миниатюры и ID показаны в ленте выбранного материала.").arg(choice.generatedIds.size()));
-              }
+              updateMaterialButton(button, choice, classicAuto);
+              connect(button, &QToolButton::clicked, this, [this]() { refreshVariantStrip(); });
               button->setMaximumHeight(m_paletteCellSize);
               button->setSizePolicy(QSizePolicy::Expanding,
                                     QSizePolicy::Fixed);
@@ -2549,6 +2586,15 @@ void CLandscapeTools::updateVariantStrip(
 {
     if(!m_variantStripLayout || !m_variantStripTitle)
         return;
+    QByteArray fingerprint;QDataStream stream(&fingerprint,QIODevice::WriteOnly);
+    stream<<choice.id<<choice.name<<choice.assignedSlots<<choice.generatedIds<<generatedHdVariants()
+          <<choice.thumbnail.cacheKey();
+    for(const auto& image:choice.authoredThumbnails)stream<<image.cacheKey();
+    for(const auto& image:choice.generatedThumbnails)stream<<image.cacheKey();
+    auto* previousStrip=findChild<QScrollArea*>(QStringLiteral("terrainVariantStripScroll"));
+    if(fingerprint==m_variantStripFingerprint&&previousStrip&&!previousStrip->isHidden())return;
+    const int previousScroll=previousStrip?previousStrip->horizontalScrollBar()->value():0;
+    m_variantStripFingerprint=fingerprint;
     while(QLayoutItem* item = m_variantStripLayout->takeAt(0))
     {
         delete item->widget();
@@ -2608,6 +2654,7 @@ void CLandscapeTools::updateVariantStrip(
     m_variantStripLayout->addStretch(1);
     if(strip && strip->widget())
         strip->widget()->show();
+    if(strip)strip->horizontalScrollBar()->setValue(previousScroll);
 }
 
 void CLandscapeTools::requestMaterialPaletteRebuild()

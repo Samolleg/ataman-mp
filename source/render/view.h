@@ -1218,6 +1218,7 @@ private:
     quint64 m_terrainGlobalHydrationGeneration{0};
     int m_terrainGlobalHydrationPendingJobs{0};
     bool m_terrainGlobalHydrationPublishQueued{false};
+    bool m_terrainLibraryImportPending{false};
     QMap<qint32, int> m_terrainGlobalHydrationBestRanks;
     QMap<qint32, QImage> m_terrainGlobalHydrationBestThumbnails;
     QMap<qint32, STerrainGlobalMaterialSource>
