@@ -7178,6 +7178,8 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    if(!ordinaryMapOpen)
+        m_pView->beginNeighborMapTransition(mprPath,m_preferredEditorActiveMap,targetWorldOrigin);
     m_undoStack->clear();
     m_pView->unloadMob("");
     // isExitAllowed() already collected the dirty-document decision.
@@ -7218,6 +7220,8 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     // The Maps browser already owns the current resource/map catalog. Opening
     // one entry must only bind that snapshot, not rescan every configured RES
     // and map root on the UI thread.
+    if(!ordinaryMapOpen)
+        m_pView->endNeighborMapTransition();
     refreshMapTestContext(false, false);
     const qint64 mapContextMs = mapLoadPhase.elapsed();
     ei::log(eLogInfo, QString(

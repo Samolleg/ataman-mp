@@ -83,19 +83,22 @@ QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document)
 }
 
 SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
-                                        bool loadStaticObjects)
+                                        bool loadStaticObjects, bool loadTerrain)
 {
     SNeighborSceneData result; result.placement=placement;
-    CMprDocument terrain; CValidationReport report;
-    if(!terrain.load(QFileInfo(placement.mprPath),&report) || report.hasErrors()
-       || int(terrain.mapInfo().sectorCountX)*32 != qRound(placement.size.width())
-       || int(terrain.mapInfo().sectorCountY)*32 != qRound(placement.size.height()))
+    if(loadTerrain)
     {
-        result.diagnostics.append("Neighbor terrain rejected: "+placement.zoneId+" "+report.toText());
-        return result;
+        CMprDocument terrain; CValidationReport report;
+        if(!terrain.load(QFileInfo(placement.mprPath),&report) || report.hasErrors()
+           || int(terrain.mapInfo().sectorCountX)*32 != qRound(placement.size.width())
+           || int(terrain.mapInfo().sectorCountY)*32 != qRound(placement.size.height()))
+        {
+            result.diagnostics.append("Neighbor terrain rejected: "+placement.zoneId+" "+report.toText());
+            return result;
+        }
+        for(const auto& member : terrain.members())
+            result.terrainMembers.insert(member.name,member.payload);
     }
-    for(const auto& member : terrain.members())
-        result.terrainMembers.insert(member.name,member.payload);
     result.valid=true;
     if(loadStaticObjects && !placement.mobPath.isEmpty())
     {

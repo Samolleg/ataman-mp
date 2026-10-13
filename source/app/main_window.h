@@ -98,6 +98,7 @@ public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
     friend int runAssemblyCatalogCheck();
     friend int runWorldMapSnapCheck();
+    friend int runNeighborNavigationReuseCheck();
     friend int runDiplomacyCheck();
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();

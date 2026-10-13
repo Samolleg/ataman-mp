@@ -208,6 +208,7 @@ class CView : public QGLWidget
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
+    friend int runNeighborNavigationReuseCheck();
     friend int runTerrainMobHeightCheck();
     friend int runTerrainHeightResSaveCheck();
     friend int runTerrainMixedEdgeCheck(const QString& fixturePath);
@@ -348,6 +349,10 @@ public:
         const QVector3D& sourcePosition,
         const QVector3D& sourcePivot,
         const QVector3D& sourceRotation);
+    void beginNeighborMapTransition(const QString& targetPath,
+                                    const QString& targetZone,
+                                    const QPointF& targetOrigin);
+    void endNeighborMapTransition();
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
     bool beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic = nullptr);
@@ -662,6 +667,10 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
+    void invalidateNeighborScenePreparation();
+    QByteArray neighborResourceRevision() const;
+    QByteArray neighborSourceRevision(const SNeighborMapPlacement& placement,
+                                      bool objects) const;
     void populateNeighborObjects(quint64 generation);
     void chooseWorldTerrainMaps();
     void updateWorldTerrainStatus();
@@ -1131,9 +1140,19 @@ private:
         QMap<QPair<int,int>,SNeighborSpatialGroup> spatialGroups;
         QPointF cachedOrigin;
         bool drawCacheDirty{true};
+        QByteArray terrainRevision;
+        QByteArray objectRevision;
+        QSharedPointer<SWorldTerrainDocument> retainedTerrainDocument;
     };
     void refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor);
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
+    QVector<SLoadedNeighborLandscape> m_parkedNeighborLandscapes;
+    QSet<QString> m_neighborSceneRequests;
+    QString m_neighborSceneProfileId;
+    QString m_neighborActiveSceneId;
+    bool m_neighborSceneTransition{false};
+    SNeighborMapPlacement m_neighborTransitionSource;
+    SNeighborMapPlacement m_neighborTransitionTarget;
     QThreadPool* m_neighborScenePool{nullptr};
     bool m_neighborObjectUploadScheduled{false};
     QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{

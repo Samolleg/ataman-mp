@@ -97,6 +97,10 @@ int runNeighborPerformanceCheck()
     roots->setValue(qEnvironmentVariable("EI_NEIGHBOR_PERF_RES").split(';',QString::SkipEmptyParts).toVector());
     CTextureList::getInstance()->attachSettings(&settings);
     CObjectList::getInstance()->attachSettings(&settings);
+    if(qEnvironmentVariableIsSet("EI_NEIGHBOR_NAV_REUSE_CHECK")) {
+        extern int runNeighborNavigationReuseCheck();
+        return runNeighborNavigationReuseCheck();
+    }
     if(qEnvironmentVariableIsSet("EI_GLOBAL_MAP_CHECK")) {
         CTravelDocument travel;QString error;
         check(travel.open(qEnvironmentVariable("EI_NEIGHBOR_PERF_ROOT")+"/res/texts.res",&error),"read real map.txt");

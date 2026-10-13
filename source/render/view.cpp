@@ -47,6 +47,7 @@
 #include "verified_clipboard.h"
 #include "selection_region.h"
 #include "neighbor_visual_preparation.h"
+#include "res_read_lease.h"
 #include "map_object_placement_policy.h"
 #include "landscape_operation_policy.h"
 #include "terrain_save_flow_policy.h"
@@ -3142,12 +3143,87 @@ void CView::updateVisualChannelAvailability()
                  mapLayoutEditingUnavailable);
 }
 
+namespace {
+QString neighborSceneIdentity(const SNeighborMapPlacement& placement)
+{
+    return placement.zoneId + QChar(0) + resIo::pathKey(placement.mprPath);
+}
+void appendNeighborSourceRevision(QDataStream& stream, const QString& path)
+{
+    const QFileInfo info(path);
+    stream << path << info.canonicalFilePath() << info.isFile()
+           << info.size() << info.lastModified()
+           << resIo::generation(path);
+    const auto handle=resIo::readPath(path);
+    stream << resIo::generationsMatch({handle},{resIo::generation(handle.handle)});
+}
+}
+
+QByteArray CView::neighborResourceRevision() const
+{
+    QByteArray key; QDataStream stream(&key,QIODevice::WriteOnly);
+    stream << m_neighborSceneProfileId;
+    for(const auto& archive:CTextureList::getInstance()->configuredResourceArchivePaths())
+        appendNeighborSourceRevision(stream,archive);
+    appendNeighborSourceRevision(stream,CTextureList::getInstance()->mapLocalTerrainArchive());
+    return key;
+}
+
+QByteArray CView::neighborSourceRevision(const SNeighborMapPlacement& placement,
+                                        bool objects) const
+{
+    QByteArray key; QDataStream stream(&key,QIODevice::WriteOnly);
+    stream << neighborResourceRevision();
+    appendNeighborSourceRevision(stream,objects?placement.mobPath:placement.mprPath);
+    if(!objects) stream << placement.size;
+    return key;
+}
+
+void CView::invalidateNeighborScenePreparation()
+{
+    ++(*m_neighborSceneGeneration);
+    m_neighborSceneRequests.clear();
+    m_neighborObjectUploadScheduled=false;
+}
+
+void CView::beginNeighborMapTransition(const QString& targetPath,
+                                      const QString& targetZone,
+                                      const QPointF& targetOrigin)
+{
+    m_neighborSceneTransition=true;
+    invalidateNeighborScenePreparation();
+    m_neighborTransitionTarget={};
+    m_neighborTransitionTarget.mprPath=targetPath;
+    m_neighborTransitionTarget.zoneId=targetZone;
+    m_neighborTransitionTarget.worldOrigin=targetOrigin;
+    m_neighborTransitionSource={};
+    m_neighborTransitionSource.zoneId=m_neighborActiveZoneId;
+    m_neighborTransitionSource.mprPath=m_pLand->filePath().absoluteFilePath();
+    m_neighborTransitionSource.worldOrigin=m_activeMapWorldOrigin;
+    m_neighborTransitionSource.size=QSizeF(m_pLand->widthInWorldUnits(),m_pLand->heightInWorldUnits());
+    if(m_environmentMob) m_neighborTransitionSource.mobPath=m_environmentMob->filePath().absoluteFilePath();
+}
+
+void CView::endNeighborMapTransition()
+{
+    m_neighborSceneTransition=false;
+    if(!m_pLand->isMprLoad()
+       || resIo::pathKey(m_pLand->filePath().absoluteFilePath())
+           !=resIo::pathKey(m_neighborTransitionTarget.mprPath))
+        clearNeighborLandscapes();
+    m_neighborTransitionSource={};m_neighborTransitionTarget={};
+    m_neighborContextKey.clear();
+}
+
 void CView::setNeighborMapContext(
     const QVector<SMapCatalogEntry>& topology,
     const QVector<SWorldMapZoneOrigin>& worldOrigins,
     const QString& profileId, const QString& activeAllodId,
     const QString& activeZoneId, const QString& layoutWarning)
 {
+    // The old workspace emits title/context updates while it is being unloaded.
+    // Bind the completed target once, after both MPR/MOB and camera are ready.
+    if(m_neighborSceneTransition) return;
     const SNeighborMapLayoutResult layout = CNeighborMapLayout::build(
         topology, worldOrigins, profileId, activeAllodId, activeZoneId, topology.size());
     auto placements = layout.placements;
@@ -3161,16 +3237,22 @@ void CView::setNeighborMapContext(
             << layout.tileGridAnchor << layout.hasTileGridAnchor
            << isValid() << m_neighborLandscapesVisible;
     const auto resourceRevision=[&stream](const QString& path) {
-        const QFileInfo info(path);
-        stream << path << info.canonicalFilePath() << info.size() << info.lastModified();
+        appendNeighborSourceRevision(stream,path);
     };
     for(const auto& placement : placements) {
         stream << placement.zoneId << placement.origin << placement.worldOrigin << placement.size << placement.fixedAnchor;
         resourceRevision(placement.mprPath);resourceRevision(placement.mobPath);
     }
     for(const auto& archive:CTextureList::getInstance()->configuredResourceArchivePaths()) resourceRevision(archive);
+    resourceRevision(CTextureList::getInstance()->mapLocalTerrainArchive());
     if(contextKey == m_neighborContextKey) return;
-    clearNeighborLandscapes();
+    invalidateNeighborScenePreparation();
+    m_neighborSceneProfileId=profileId;
+    m_neighborActiveSceneId.clear();
+    for(const auto& entry:topology) if(entry.zoneId==activeZoneId && entry.allodId==activeAllodId) {
+        SNeighborMapPlacement active;active.zoneId=activeZoneId;active.mprPath=entry.mprPath;
+        m_neighborActiveSceneId=neighborSceneIdentity(active);break;
+    }
     m_activeMapWorldOrigin = QPointF();
     m_neighborActiveZoneId=activeZoneId;
     m_worldTileGridAnchor=layout.tileGridAnchor;
@@ -3222,17 +3304,17 @@ void CView::setNeighborMapContext(
 void CView::clearNeighborLandscapes()
 {
     m_neighborContextKey.clear();
-    ++(*m_neighborSceneGeneration);
-    m_neighborObjectUploadScheduled = false;
+    invalidateNeighborScenePreparation();
     if(m_neighborLayoutDragActive)
         cancelNeighborLayoutDrag(true);
-    if(m_neighborLandscapes.isEmpty())
+    if(m_neighborLandscapes.isEmpty() && m_parkedNeighborLandscapes.isEmpty())
         return;
     if(isValid())
         makeCurrent();
     // Each landscape owns a lease on its base atlas and its own preview.
     // glTexture() may be a preview, so it cannot identify base-atlas owners.
     m_neighborLandscapes.clear();
+    m_parkedNeighborLandscapes.clear();
     if(isValid())
         doneCurrent();
     ei::log(eLogInfo, "Neighbor render backgrounds released; retained terrain documents preserved");
@@ -3240,53 +3322,127 @@ void CView::clearNeighborLandscapes()
 
 void CView::loadNeighborLandscapes()
 {
-    clearNeighborLandscapes();
-    if(!m_neighborLandscapesVisible || m_neighborPlacements.isEmpty()
+    if(m_neighborSceneTransition) return;
+    if(!m_neighborLandscapesVisible
        || !m_pLand || !m_pLand->isMprLoad() || !isValid())
         return;
+    // Coordinates and active-map role are not source revisions. Keep each
+    // ready landscape until its own MPR/resources change or it leaves the world.
+    QMap<QString,SNeighborMapPlacement> desired;
+    for(const auto& placement:m_neighborPlacements)
+        desired.insert(neighborSceneIdentity(placement),placement);
+    const QSizeF activeSize(m_pLand->widthInWorldUnits(),m_pLand->heightInWorldUnits());
+    makeCurrent();
+    QVector<SLoadedNeighborLandscape> retained,parked;
+    const auto retain=[&](SLoadedNeighborLandscape& loaded) {
+        const QString id=neighborSceneIdentity(loaded.placement);
+        const bool active=id==m_neighborActiveSceneId;
+        if(!active && !desired.contains(id)) return;
+        const auto placement=active?loaded.placement:desired.value(id);
+        if(loaded.terrainRevision!=neighborSourceRevision(placement,false)) return;
+        const auto document=m_worldTerrainSession.documents.value(
+            CWorldTerrainSession::key(placement.mprPath));
+        if(loaded.retainedTerrainDocument && loaded.retainedTerrainDocument!=document) {
+            // A discarded/replaced working model must not survive as a preview.
+            if(!loaded.terrainPreviewPayloads.isEmpty() || loaded.terrainPreviewAtlas) return;
+            loaded.landscape->setCanonicalTerrainModel(nullptr);
+            loaded.retainedTerrainDocument.clear();
+        }
+        if(active) {
+            if(parked.isEmpty()) parked.append(std::move(loaded));
+            return;
+        }
+        loaded.placement=placement;
+        loaded.landscape->setWorldOffset(QVector3D(
+            float(placement.origin.x()),float(placement.origin.y()),0));
+        if(!CNeighborMapLayout::touchesActiveMap(activeSize,placement)
+           || loaded.objectRevision!=neighborSourceRevision(placement,true)) {
+            loaded.pendingObjects.clear();loaded.pendingVisuals.clear();loaded.nextObject=0;
+            loaded.staticObjects.clear();loaded.staticLocalPositions.clear();loaded.distantParts.clear();
+            loaded.drawRecords.clear();loaded.spatialGroups.clear();loaded.drawCacheDirty=true;
+            loaded.objectRevision.clear();
+        }
+        retained.append(std::move(loaded));
+    };
+    for(auto& loaded:m_neighborLandscapes) retain(loaded);
+    for(auto& loaded:m_parkedNeighborLandscapes) retain(loaded);
+    m_neighborLandscapes=std::move(retained);
+    m_parkedNeighborLandscapes=std::move(parked);
+    doneCurrent();
     const quint64 generation = m_neighborSceneGeneration->load();
     const auto epoch = m_neighborSceneGeneration;
     const QStringList archives=CTextureList::getInstance()->configuredResourceArchivePaths();
-    const QSizeF activeSize(m_pLand->widthInWorldUnits(),
-                            m_pLand->heightInWorldUnits());
     for(const SNeighborMapPlacement& placement : m_neighborPlacements)
     {
+        const QString id=neighborSceneIdentity(placement);
+        const auto terrainRevision=neighborSourceRevision(placement,false);
+        const auto objectRevision=neighborSourceRevision(placement,true);
         const bool loadStaticObjects = CNeighborMapLayout::touchesActiveMap(
             activeSize, placement);
+        bool loadTerrain=true;
+        for(const auto& loaded:m_neighborLandscapes) if(neighborSceneIdentity(loaded.placement)==id) {
+            loadTerrain=false;
+            break;
+        }
+        if(!loadTerrain) {
+            bool objectsReady=!loadStaticObjects;
+            for(const auto& loaded:m_neighborLandscapes) if(neighborSceneIdentity(loaded.placement)==id)
+                objectsReady |= loaded.objectRevision==objectRevision;
+            if(objectsReady) continue;
+        }
+        if(m_neighborSceneRequests.contains(id)) continue;
+        m_neighborSceneRequests.insert(id);
         auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
         connect(watcher, &QFutureWatcher<SNeighborSceneData>::finished, this,
-                [this, watcher, generation]() {
+                [this, watcher, generation, id, terrainRevision, objectRevision,
+                 loadTerrain, loadStaticObjects]() {
             const SNeighborSceneData result = watcher->result();
             watcher->deleteLater();
             if(generation != m_neighborSceneGeneration->load()
-               || !m_neighborLandscapesVisible || !isValid()) return;
+               || m_neighborSceneTransition || !m_neighborLandscapesVisible || !isValid()
+               || !m_pLand->isMprLoad()) return;
+            m_neighborSceneRequests.remove(id);
+            SNeighborMapPlacement currentPlacement;
+            for(const auto& current:m_neighborPlacements)
+                if(neighborSceneIdentity(current)==id) {currentPlacement=current;break;}
+            if(currentPlacement.mprPath.isEmpty()) return;
+            const bool currentObjects=CNeighborMapLayout::touchesActiveMap(
+                QSizeF(m_pLand->widthInWorldUnits(),m_pLand->heightInWorldUnits()),currentPlacement);
+            if(terrainRevision!=neighborSourceRevision(currentPlacement,false)
+               || (loadStaticObjects && objectRevision!=neighborSourceRevision(currentPlacement,true))
+               || loadStaticObjects!=currentObjects) {
+                loadNeighborLandscapes();return;
+            }
             for(const QString& diagnostic : result.diagnostics)
                 ei::log(eLogWarning, diagnostic);
             if(!result.valid) return;
             // GPU resources are created only by their owning render context.
             // CPU workers return immutable values, never GL handles or nodes.
             makeCurrent();
-            SLoadedNeighborLandscape loaded;
-            loaded.placement = result.placement;
-            // A drag may have updated the placement while CPU work was pending.
-            for(const auto& current : m_neighborPlacements)
-                if(current.zoneId == loaded.placement.zoneId) loaded.placement = current;
-            loaded.landscape = CLandscape::createReadOnlyBackground();
-            if(!loaded.landscape->readPreparedBackground(
-                    QFileInfo(loaded.placement.mprPath), result.terrainMembers))
-            {
-                loaded.landscape.clear();
-                doneCurrent();
-                return;
+            if(loadTerrain) {
+                SLoadedNeighborLandscape loaded;
+                loaded.placement=currentPlacement;
+                loaded.landscape=CLandscape::createReadOnlyBackground();
+                if(!loaded.landscape->readPreparedBackground(
+                        QFileInfo(currentPlacement.mprPath),result.terrainMembers)) {
+                    loaded.landscape.clear();doneCurrent();return;
+                }
+                loaded.terrainRevision=terrainRevision;
+                m_neighborLandscapes.append(std::move(loaded));
             }
-            loaded.landscape->setWorldOffset(QVector3D(
-                float(loaded.placement.origin.x()), float(loaded.placement.origin.y()), 0));
-            loaded.pendingObjects = result.staticObjects;
-            loaded.pendingVisuals = result.visuals;
-            m_neighborLandscapes.append(loaded);
+            for(auto& loaded:m_neighborLandscapes) if(neighborSceneIdentity(loaded.placement)==id) {
+                loaded.placement=currentPlacement;
+                loaded.landscape->setWorldOffset(QVector3D(
+                    float(currentPlacement.origin.x()),float(currentPlacement.origin.y()),0));
+                loaded.pendingObjects=result.staticObjects;
+                loaded.pendingVisuals=result.visuals;
+                loaded.objectRevision=loadStaticObjects?objectRevision:QByteArray();
+                break;
+            }
             doneCurrent();
-            ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3")
-                    .arg(loaded.placement.zoneId).arg(result.staticObjects.size()).arg(generation));
+            ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3 terrainLoaded:%4")
+                    .arg(currentPlacement.zoneId).arg(result.staticObjects.size()).arg(generation)
+                    .arg(loadTerrain?"true":"false"));
             refreshWorldTerrainNeighbors();
             if(!m_neighborObjectUploadScheduled)
             {
@@ -3295,15 +3451,21 @@ void CView::loadNeighborLandscapes()
             }
             update();
         });
-        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, epoch, generation, archives]() {
+        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, loadTerrain, epoch, generation, archives]() {
             if(epoch->load() != generation) return SNeighborSceneData();
-            auto scene=prepareNeighborScene(placement, loadStaticObjects);
+            auto scene=prepareNeighborScene(placement, loadStaticObjects, loadTerrain);
             if(scene.valid && !scene.staticObjects.isEmpty()) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
                 return epoch->load()==generation;
             });
             return scene;
         }));
     }
+    // Resume a retained scene whose object upload was interrupted by navigation.
+    if(!m_neighborObjectUploadScheduled) {
+        m_neighborObjectUploadScheduled=true;
+        QTimer::singleShot(0,this,[this,generation](){populateNeighborObjects(generation);});
+    }
+    refreshWorldTerrainNeighbors();
 }
 
 void CView::populateNeighborObjects(quint64 generation)
@@ -9806,10 +9968,45 @@ void CView::unloadLand(bool promptForSave)
 
     }
 
-    clearNeighborLandscapes();
-    m_neighborPlacements.clear();
-    m_activeMapWorldOrigin = QPointF();
-    m_hasActiveMapWorldOrigin = false;
+    if(m_neighborSceneTransition) {
+        // The target's ready background is parked while that map is editable.
+        // Keep one such scene so returning to its neighbor does not rebuild it.
+        const QString targetId=neighborSceneIdentity(m_neighborTransitionTarget);
+        const QString sourceId=neighborSceneIdentity(m_neighborTransitionSource);
+        QVector<SLoadedNeighborLandscape> retained,parked;
+        makeCurrent();
+        const auto moveScene=[&](SLoadedNeighborLandscape& loaded) {
+            const QString id=neighborSceneIdentity(loaded.placement);
+            if(id==targetId) {
+                if(parked.isEmpty()) parked.append(std::move(loaded));
+                return;
+            }
+            if(id==sourceId) loaded.placement=m_neighborTransitionSource;
+            loaded.placement.origin=loaded.placement.worldOrigin-m_neighborTransitionTarget.worldOrigin;
+            loaded.landscape->setWorldOffset(QVector3D(float(loaded.placement.origin.x()),
+                                                       float(loaded.placement.origin.y()),0));
+            retained.append(std::move(loaded));
+        };
+        for(auto& loaded:m_neighborLandscapes) moveScene(loaded);
+        for(auto& loaded:m_parkedNeighborLandscapes) moveScene(loaded);
+        m_neighborLandscapes=std::move(retained);
+        m_parkedNeighborLandscapes=std::move(parked);
+        for(int i=m_neighborPlacements.size()-1;i>=0;--i)
+            if(neighborSceneIdentity(m_neighborPlacements[i])==targetId)
+                m_neighborPlacements.remove(i);
+        m_neighborPlacements.append(m_neighborTransitionSource);
+        for(auto& placement:m_neighborPlacements)
+            placement.origin=placement.worldOrigin-m_neighborTransitionTarget.worldOrigin;
+        m_neighborActiveSceneId=targetId;
+        m_activeMapWorldOrigin=m_neighborTransitionTarget.worldOrigin;
+        m_hasActiveMapWorldOrigin=true;
+        doneCurrent();
+    } else {
+        clearNeighborLandscapes();
+        m_neighborPlacements.clear();
+        m_activeMapWorldOrigin=QPointF();
+        m_hasActiveMapWorldOrigin=false;
+    }
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
     m_pLand->setCanonicalTerrainModel(nullptr);
@@ -9846,6 +10043,8 @@ void CView::unloadLand(bool promptForSave)
         m_pPreviewTile->releaseGpuResources();
     m_pPreviewTile.clear();
     m_pLand->unloadMpr();
+    if(!m_neighborSceneTransition && m_aMob.isEmpty())
+        CTextureList::getInstance()->trimTransientVisualCache();
     CTextureList::getInstance()->setMapLocalTerrainArchive(QString());
     m_activeTerrainArchivePath.clear();
     m_legacyTerrainProfileCollision = false;
@@ -17225,7 +17424,9 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         makeCurrent();
-        CTextureList::getInstance()->trimTransientVisualCache();
+        if(!m_neighborSceneTransition && m_neighborLandscapes.isEmpty()
+           && m_parkedNeighborLandscapes.isEmpty())
+            CTextureList::getInstance()->trimTransientVisualCache();
     }
     ei::log(eLogInfo, "Mob unloaded");
     refreshAiGraphPreviewSource();
@@ -17550,7 +17751,9 @@ void CView::unloadMob(QString mobName)
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         makeCurrent();
-        CTextureList::getInstance()->trimTransientVisualCache();
+        if(!m_neighborSceneTransition && m_neighborLandscapes.isEmpty()
+           && m_parkedNeighborLandscapes.isEmpty())
+            CTextureList::getInstance()->trimTransientVisualCache();
         // Keep the view context current for the next map's terrain/resource
         // uploads; this matches the renderer's existing context lifetime.
     }

@@ -20,5 +20,6 @@ struct SNeighborSceneData
 // Pure CPU snapshots: no QObject, singleton resource cache or GL access.
 QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document);
 SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
-                                        bool loadStaticObjects = true);
+                                        bool loadStaticObjects = true,
+                                        bool loadTerrain = true);
 #endif

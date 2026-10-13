@@ -119,6 +119,7 @@ void CView::refreshWorldTerrainNeighbors()
         const QString id=CWorldTerrainSession::key(loaded.placement.mprPath);
         if(!m_worldTerrainSession.documents.contains(id)) continue;
         auto doc=m_worldTerrainSession.documents[id];
+        loaded.retainedTerrainDocument=doc;
         loaded.landscape->setCanonicalTerrainModel(&doc->terrain);
         if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
             if(!previewWorldPaintState(id)){emit updateMsg(tr("Не удалось обновить атлас соседней карты."));continue;}
