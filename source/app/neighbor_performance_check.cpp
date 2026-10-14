@@ -455,8 +455,31 @@ int runNeighborPerformanceCheck()
             }
             inputHashes[root+"/world-map-layouts.json"]=digest(root+"/world-map-layouts.json");
             if(qEnvironmentVariableIsSet("EI_WORLD_RESOLVE_RESPONSIVE_CHECK")) {
+                const bool activeScope=qEnvironmentVariableIsSet("EI_WORLD_RESOLVE_ACTIVE_SCOPE_CHECK");
                 QMap<QString,CTerrainEditModel> originals;
                 for(const auto& id:cohort)originals[id]=view.m_worldTerrainSession.documents[id]->terrain;
+                QMap<QString,CTerrainVirtualMaterialField> originalFields[2];
+                if(activeScope) {
+                    check(zone=="zone1" && view.m_activeMapWorldOrigin==QPointF(0,0)
+                        && view.m_terrainEdit.tileCountX()==176 && view.m_terrainEdit.tileCountY()==144,
+                        "active-scope fixture uses the recorded zone1 layout");
+                    const QMap<QString,QPointF> expectedOrigins{{"zone2",{192,288}},
+                        {"zone3obr",{352,64}},{"zone7",{352,-256}}};
+                    for(auto it=expectedOrigins.cbegin();it!=expectedOrigins.cend();++it) {
+                        bool located=false;
+                        for(const auto& placement:view.m_neighborPlacements)
+                            if(QFileInfo(placement.mprPath).completeBaseName()==it.key())located=placement.worldOrigin==it.value();
+                        check(located,"recorded direct neighbor has the expected world placement");
+                    }
+                    if(failures)return 1;
+                    for(auto it=originals.begin();it!=originals.end();++it)
+                        for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                            auto recovered=it.value();const auto atlas=view.m_worldTerrainSession.documents[it.key()]->atlas;
+                            if(!recovered.initializeVirtualMaterialField(layer,atlas->catalog(),&setupReport,
+                                ETerrainMaterialFieldRecovery::RecoverDeterministically))return 1;
+                            recovered.copyVirtualMaterialField(layer,&originalFields[layer==ETerrainTileLayer::Land?0:1][it.key()],false);
+                        }
+                }
                 const int undoIndex=view.m_pUndoStack->index();
                 const auto matches=[&](const QMap<QString,QByteArray>& models,const QMap<QString,QByteArray>& atlases) {
                     bool same=true;
@@ -499,15 +522,44 @@ int runNeighborPerformanceCheck()
                 if(!repaired)return 1;
                 check(ticks>0&&maxGap<4000,"GUI event loop stays responsive throughout full cohort repair");
                 QMap<QString,QByteArray> afterModels,afterAtlases;
-                bool nativePreserved=true;
+                bool nativePreserved=true,scopePreserved=true;int untouchedMaps=0,outsideCells=0;
                 for(const auto& id:cohort) {
                     const auto doc=view.m_worldTerrainSession.documents[id];const auto& before=originals[id];
+                    const auto name=QFileInfo(id).completeBaseName();
+                    const bool direct=name=="zone2"||name=="zone3obr"||name=="zone7";
+                    CTerrainVirtualMaterialField afterFields[2];
+                    if(activeScope && (id==activeId||direct))
+                        for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                            auto recovered=doc->terrain;
+                            if(!recovered.initializeVirtualMaterialField(layer,doc->atlas->catalog(),&setupReport,
+                                ETerrainMaterialFieldRecovery::RecoverDeterministically))return 1;
+                            recovered.copyVirtualMaterialField(layer,&afterFields[layer==ETerrainTileLayer::Land?0:1],false);
+                        }
+                    if(activeScope && id!=activeId && !direct) {
+                        ++untouchedMaps;
+                        scopePreserved &= modelState(*doc)==beforeModels.value(id)
+                            &&doc->atlas->stateFingerprint()==beforeAtlases.value(id)
+                            &&!audit.worldPackedDeltas.contains(id);
+                    }
                     QSet<int> animated;
                     for(const auto& animation:doc->baseline.mapInfo().animatedTiles)
                         for(int frame=0;frame<qMax(1,int(animation.frameCount));++frame)animated.insert(animation.tileIndex+frame);
                     for(int y=0;y<before.tileCountY();++y)for(int x=0;x<before.tileCountX();++x)
                         for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
                             bool found=false;const auto packed=before.packedTile(x,y,layer,&found);
+                            // Independent footprint for the recorded layout: zone2's
+                            // north row, zone3obr's west rows0..111, zone7's west rows128..159.
+                            const bool allowed=id==activeId || (name=="zone2"&&y==0)
+                                ||(name=="zone3obr"&&x==0&&y<112)||(name=="zone7"&&x==0&&y>=128);
+                            if(activeScope && !allowed) {
+                                ++outsideCells;
+                                bool afterFound=false;const auto after=doc->terrain.packedTile(x,y,layer,&afterFound);
+                                scopePreserved &= packed==after && found==afterFound;
+                                if(direct) {
+                                    const int li=layer==ETerrainTileLayer::Land?0:1;
+                                    scopePreserved &= originalFields[li].value(id).cellSignature(x,y)==afterFields[li].cellSignature(x,y);
+                                }
+                            }
                             if(!found||packed==0xffff)continue;
                             const int slot=SMprPackedTile::decode(packed).atlasSlot();
                             if(animated.contains(slot)||doc->baseline.mapInfo().tileTypes.value(slot,-1)==6)
@@ -516,6 +568,12 @@ int runNeighborPerformanceCheck()
                     afterModels[id]=modelState(*doc);afterAtlases[id]=doc->atlas->stateFingerprint();
                 }
                 check(nativePreserved,"native water and animated packed references are unchanged on all maps");
+                if(activeScope) {
+                    check(scopePreserved && untouchedMaps==4 && outsideCells>0,
+                        "only active zone1 and its three touching tile strips may change; four remote maps and all other neighbor cells are exact");
+                    out<<"SCOPE untouchedMaps="<<untouchedMaps<<" outsideLayerCells="<<outsideCells
+                        <<" changedMaps="<<audit.worldPackedDeltas.size()<<'\n';
+                }
                 if(!audit.undoCommandId.isEmpty()) {
                     check(view.worldTerrainHistory(false,true)&&matches(beforeModels,beforeAtlases),"whole repair Undo restores exact cohort state");
                     check(view.worldTerrainHistory(true,true)&&matches(afterModels,afterAtlases),"whole repair Redo restores exact result");

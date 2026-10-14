@@ -207,6 +207,9 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
             &&migration.apply(oldPlacement,true,&migrationReport),"existing mixed-edge neighbor recipe staged");
         check(migration.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,stripes,stripes,&migrationReport),
             "migration field: parallel mixed strips sharing a uniform-material edge");
+        const QSet<int> allowed{5*w+5,6*w+5};
+        const auto bounded=CTerrainMixedEdge::expandAffectedCells(migration,migrationAtlas.data(),{5*w+5},&allowed);
+        check(bounded==allowed,"mixed-edge connected search stops at the allowed cell boundary");
         const auto migrated=CTerrainMixedEdge::resolve(migration,migrationAtlas.data(),{5*w+5},
             materialTypes,{},QPoint(),2,17,false,&migrationReport);
         check(!migrationReport.hasErrors()&&migrated.semanticAudit.affectedCells.contains(QPoint(6,5))

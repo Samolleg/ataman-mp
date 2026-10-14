@@ -58,6 +58,36 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void activeRepairLeavesNeighborOnlyEdgesAndOtherCellsUntouched()
+    {
+        SWorldMaterialRepairMap a,e,n,far;
+        a.id="active";e.id="east";n.id="north";far.id="far";
+        a.field.resize(4,4,4);e.field.resize(4,6,3);
+        n.field.resize(4,4,2);far.field.resize(4,6,1);
+        e.origin={8,-4};n.origin={0,-8};far.origin={16,-4};
+        QVector<SWorldMaterialRepairMap> maps{a,e,n,far};
+        const auto sides=worldMaterialSeamSides(maps,a.id);
+        QCOMPARE(sides.value(e.id).size(),4);
+        QCOMPARE(sides.value(n.id).size(),4);
+        QVERIFY(sides.value(far.id).isEmpty());
+        for(int y=0;y<6;++y)
+            QCOMPARE(sides.value(e.id).value(y*4),y>=2?8:0);
+        for(auto& map:maps)if(map.id!=a.id)
+            for(int cell=0;cell<map.field.tileWidth()*map.field.tileHeight();++cell)
+                if(!sides.value(map.id).contains(cell))map.protectedCells.insert(cell);
+        const auto plan=planWorldMaterialRepair(maps,true);
+        QVERIFY(plan.changedVertices>0);
+        QCOMPARE(plan.fields.value(far.id).stableSha256(),far.field.stableSha256());
+        for(const auto& map:maps)if(map.id!=a.id) {
+            for(int cell:plan.changedCells.value(map.id))QVERIFY(sides.value(map.id).contains(cell));
+            for(int cell:map.protectedCells)
+                QCOMPARE(plan.fields.value(map.id).cellSignature(cell%map.field.tileWidth(),cell/map.field.tileWidth()),
+                    map.field.cellSignature(cell%map.field.tileWidth(),cell/map.field.tileWidth()));
+        }
+        // Scope changes with the active map; it is not a fixed cohort boundary.
+        const auto switched=worldMaterialSeamSides(maps,e.id);
+        QVERIFY(!switched.value(far.id).isEmpty());
+    }
     void overlaySeamsRespectSparsePresenceAndSlotZero()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;

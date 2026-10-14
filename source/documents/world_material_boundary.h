@@ -24,7 +24,8 @@ struct SWorldMaterialRepairMap
     QSet<int> protectedCells;
 };
 inline QSet<QString> worldMaterialIncompatibleStitchMaps(
-        const QMap<QString,QPointF>& origins,const QMap<QString,QSizeF>& sizes)
+        const QMap<QString,QPointF>& origins,const QMap<QString,QSizeF>& sizes,
+        const QString& activeMap = {})
 {
     QSet<QString> result;const double epsilon=1e-5;
     for(auto a=origins.cbegin();a!=origins.cend();++a) {
@@ -32,6 +33,7 @@ inline QSet<QString> worldMaterialIncompatibleStitchMaps(
         if(ar.width()<=0||ar.height()<=0)continue;
         auto b=a;++b;
         for(;b!=origins.cend();++b) {
+            if(!activeMap.isEmpty() && a.key()!=activeMap && b.key()!=activeMap)continue;
             const QRectF br(b.value(),sizes.value(b.key()));
             if(br.width()<=0||br.height()<=0)continue;
             const bool touching=((qAbs(ar.right()-br.left())<epsilon||qAbs(ar.left()-br.right())<epsilon)
@@ -68,11 +70,12 @@ inline bool worldMaterialRepairCellAvailable(const SWorldMaterialRepairMap& map,
 // Select complete shared tile edges only; excluded maps, corner contacts and
 // old half-tile placements do not acquire invented raster correspondence.
 inline QMap<QString,QMap<int,int>> worldMaterialSeamSides(
-        const QVector<SWorldMaterialRepairMap>& maps)
+        const QVector<SWorldMaterialRepairMap>& maps,const QString& activeMap = {})
 {
     QMap<QString,QMap<int,int>> result;
     for(const auto& a:maps)for(const auto& b:maps) {
         if(a.id==b.id || !a.editable || !b.editable)continue;
+        if(!activeMap.isEmpty() && a.id!=activeMap && b.id!=activeMap)continue;
         const auto phase=a.origin-b.origin;
         if(qAbs(phase.x()/2-qRound(phase.x()/2))>1e-5
            || qAbs(phase.y()/2-qRound(phase.y()/2))>1e-5)continue;

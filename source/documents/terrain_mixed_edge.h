@@ -16,7 +16,8 @@ class CTerrainMixedEdge
 {
 public:
     static QSet<int> expandAffectedCells(const CTerrainEditModel& model,
-        const CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells);
+        const CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells,
+        const QSet<int>* allowedCells = nullptr);
     // Freeze the reviewed SD ownership bank for deterministic HD regeneration.
     // This is the same selection/extraction path used by normal B2 painting.
     static bool buildStockBrushes(const QVector<QImage>& images,

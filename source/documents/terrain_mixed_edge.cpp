@@ -27,13 +27,15 @@ bool opaque(const QImage& image)
     return true;
 }
 QSet<int> expandMixedCells(const CTerrainEditModel& model,
-    const CTerrainWorkingAtlas* atlas,const QSet<int>& affectedCells,bool* valid)
+    const CTerrainWorkingAtlas* atlas,const QSet<int>& affectedCells,bool* valid,
+    const QSet<int>* allowedCells = nullptr)
 {
     if(valid)*valid=false;
     if(!atlas||!atlas->isValid())return {};
     CTerrainVirtualMaterialField field;
     if(!model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false))return {};
     QSet<int> cells=affectedCells;
+    if(allowedCells)cells.intersect(*allowedCells);
     QVector<int> queue=cells.values().toVector();
     const int w=field.tileWidth(),h=field.tileHeight();
     const QSet<int> recipeSlots=atlas->mixedEdgeRecipes().values().toSet();
@@ -48,6 +50,7 @@ QSet<int> expandMixedCells(const CTerrainEditModel& model,
         for(int edge=0;edge<4;++edge) {
             const auto p=neighbors[edge];
             if(p.x()<0||p.y()<0||p.x()>=w||p.y()>=h
+               ||(allowedCells&&!allowedCells->contains(p.y()*w+p.x()))
                ||uniform(field.cellSignature(p.x(),p.y())))continue;
             if(!mixedEdges[edge]) {
                 const int slot=SMprPackedTile::decode(model.packedTile(p.x(),p.y(),
@@ -89,10 +92,11 @@ int stockFragments(const QVector<float>& strip)
 }
 
 QSet<int> CTerrainMixedEdge::expandAffectedCells(const CTerrainEditModel& model,
-    const CTerrainWorkingAtlas* stagedAtlas,const QSet<int>& affectedCells)
+    const CTerrainWorkingAtlas* stagedAtlas,const QSet<int>& affectedCells,
+    const QSet<int>* allowedCells)
 {
     bool valid=false;
-    const auto result=expandMixedCells(model,stagedAtlas,affectedCells,&valid);
+    const auto result=expandMixedCells(model,stagedAtlas,affectedCells,&valid,allowedCells);
     return valid?result:QSet<int>();
 }
 
