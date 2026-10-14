@@ -511,6 +511,7 @@ int runNeighborPerformanceCheck()
                     "actual eight-map repair cooperatively cancels during mixed-edge preparation");
                 check(matches(beforeModels,beforeAtlases)&&view.m_pUndoStack->index()==undoIndex,
                     "cancel preserves all cohort models, atlases and local Undo index");
+                check(!view.terrainResolveAlreadyComplete(),"cancelled repair does not mark its inputs complete");
                 if(cancelled.hasErrors())out<<cancelled.toText()<<'\n';
                 elapsed.restart();lastTick=0;maxGap=0;ticks=0;
                 CValidationReport repair;STerrainResolveAuditSession audit;
@@ -568,6 +569,52 @@ int runNeighborPerformanceCheck()
                     afterModels[id]=modelState(*doc);afterAtlases[id]=doc->atlas->stateFingerprint();
                 }
                 check(nativePreserved,"native water and animated packed references are unchanged on all maps");
+                const bool unchangedCheck=qEnvironmentVariableIsSet("EI_WORLD_RESOLVE_UNCHANGED_CHECK");
+                if(unchangedCheck) {
+                    check(view.terrainResolveAlreadyComplete(),"successful repair remembers the completed state");
+                    const auto preparations=view.m_terrainResolvePreparationCount;
+                    CValidationReport fastReport;STerrainResolveAuditSession fastAudit;
+                    QElapsedTimer fast;fast.start();
+                    const bool fastResult=view.resolveWorldMaterialBlends(&summary,&fastReport,&fastAudit);
+                    const auto fastMs=fast.elapsed();
+                    check(fastResult&&fastAudit.outcome=="unchanged"&&fastAudit.generatedTupleCount==0
+                        &&view.m_terrainResolvePreparationCount==preparations&&fastMs<100,
+                        "unchanged repeat returns before preparation or cell traversal in under100ms");
+                    const auto savedSeed=view.m_tileStrokeDistributionSeed;
+                    view.m_tileStrokeDistributionSeed^=1;
+                    check(!view.terrainResolveAlreadyComplete(),"distribution setting change invalidates completed repair");
+                    view.m_tileStrokeDistributionSeed=savedSeed;
+                    const auto activeModel=view.m_terrainEdit;
+                    view.m_terrainEdit.setRandomPaintSeed(activeModel.randomPaintSeed()^1);
+                    check(!view.terrainResolveAlreadyComplete(),"active map edit invalidates completed repair");
+                    view.m_terrainEdit=activeModel;
+                    const auto neighbor=view.m_worldTerrainSession.documents.value(CWorldTerrainSession::key(root+"/Maps/zone2.mpr"));
+                    const auto neighborModel=neighbor->terrain;neighbor->terrain.setRandomPaintSeed(neighborModel.randomPaintSeed()^1);
+                    check(!view.terrainResolveAlreadyComplete(),"direct neighbor edit invalidates completed repair");
+                    neighbor->terrain=neighborModel;
+                    const auto atlas=view.m_workingTerrainAtlas->createStagingCopy();
+                    view.m_workingTerrainAtlas->setDistributionSeed(savedSeed^1);
+                    check(!view.terrainResolveAlreadyComplete(),"atlas resolver change invalidates completed repair");
+                    view.m_workingTerrainAtlas=atlas;
+                    const auto sources=view.m_terrainGlobalMaterialSources;
+                    view.m_terrainGlobalMaterialSources.insert(123456,QImage(1,1,QImage::Format_RGB32));
+                    check(!view.terrainResolveAlreadyComplete(),"shared source change invalidates completed repair");
+                    view.m_terrainGlobalMaterialSources=sources;
+                    const auto origin=view.m_neighborPlacements[0].worldOrigin;
+                    view.m_neighborPlacements[0].worldOrigin+=QPointF(2,0);
+                    check(!view.terrainResolveAlreadyComplete(),"shared edge placement change invalidates completed repair");
+                    view.m_neighborPlacements[0].worldOrigin=origin;
+                    check(!view.terrainResolveAlreadyComplete(true),"different repair mode cannot reuse completion");
+                    tools.setAttribute(Qt::WA_DontShowOnScreen);tools.show();tools.setEditingEnabled(true,false);
+                    check(view.terrainResolveUiActive()&&view.terrainResolveAlreadyComplete(),"UI accepts the restored exact completed inputs");
+                    const auto auditActions=view.m_terrainResolveAuditActionId;fast.restart();
+                    view.resolveMissingTerrainBlends();const auto uiMs=fast.elapsed();
+                    check(view.m_terrainResolveAuditActionId==auditActions
+                        &&view.m_terrainResolvePreparationCount==preparations&&uiMs<100,
+                        "real UI repeat returns before full audit hashes, confirmation and scanning");
+                    tools.hide();
+                    out<<"UNCHANGED directMs="<<fastMs<<" uiMs="<<uiMs<<" preparations="<<preparations<<'\n';
+                }
                 if(activeScope) {
                     check(scopePreserved && untouchedMaps==4 && outsideCells>0,
                         "only active zone1 and its three touching tile strips may change; four remote maps and all other neighbor cells are exact");
@@ -576,6 +623,7 @@ int runNeighborPerformanceCheck()
                 }
                 if(!audit.undoCommandId.isEmpty()) {
                     check(view.worldTerrainHistory(false,true)&&matches(beforeModels,beforeAtlases),"whole repair Undo restores exact cohort state");
+                    if(unchangedCheck)check(!view.terrainResolveAlreadyComplete(),"Undo cannot use the completed post-repair state");
                     check(view.worldTerrainHistory(true,true)&&matches(afterModels,afterAtlases),"whole repair Redo restores exact result");
                 }
                 elapsed.restart();lastTick=0;maxGap=0;ticks=0;

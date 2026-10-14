@@ -58,6 +58,27 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void repairStateDetectsGeometryTilesMaterialsAndSeeds()
+    {
+        CWorldTerrainSession s;add(s,"a");
+        const auto frozen=s.documents["a"]->terrain;
+        auto changed=frozen;QVERIFY(changed.sharesRepairStateWith(frozen));
+        STerrainBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=2;
+        const auto raised=changed.makeRaiseLower(brush,1000,true);
+        QVERIFY(!raised.isEmpty()&&changed.apply(raised,true));
+        QVERIFY(!changed.sharesRepairStateWith(frozen));
+        changed=frozen;QVERIFY(changed.setWorkingAtlasSlotType(0,7));
+        QVERIFY(!changed.sharesRepairStateWith(frozen));
+        changed=frozen;changed.setRandomPaintSeed(17);
+        QVERIFY(!changed.sharesRepairStateWith(frozen));
+        changed=frozen;CValidationReport report;
+        QVector<qint32> field((changed.tileCountX()+1)*(changed.tileCountY()+1),1);
+        QVERIFY(changed.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,field,&report));
+        const auto semantic=changed;field[0]=2;
+        QVERIFY(changed.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,field,&report));
+        QVERIFY(!changed.sharesRepairStateWith(semantic));
+        QVERIFY(s.documents["a"]->terrain.sharesRepairStateWith(frozen));
+    }
     void activeRepairLeavesNeighborOnlyEdgesAndOtherCellsUntouched()
     {
         SWorldMaterialRepairMap a,e,n,far;

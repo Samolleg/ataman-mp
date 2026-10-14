@@ -12344,6 +12344,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    m_terrainResolveCompletion=STerrainResolveCompletion();
     m_sampledWaterPacked = -1;
     const quint64 hydrationGeneration =
         ++m_terrainGlobalHydrationGeneration;
@@ -21738,6 +21739,12 @@ void CView::resolveMissingTerrainBlends()
             .arg(terrainResolveAuditTriggerName(trigger)));
         return;
     }
+    if(terrainResolveAlreadyComplete())
+    {
+        emit updateMsg(tr("Карта не менялась. Повторное исправление переходов не требуется."));
+        ei::log(eLogInfo,QStringLiteral("Terrain resolve skipped before audit/scan: unchanged completed state."));
+        return;
+    }
     if(!ensureTerrainAutoCatalogReady())
         return;
 
@@ -21911,6 +21918,8 @@ void CView::resolveMissingTerrainBlends()
             :report.hasErrors()?QStringLiteral("world-refused"):QStringLiteral("world-completed"));
         return;
     }
+    m_terrainResolveCompletion=STerrainResolveCompletion();
+    ++m_terrainResolvePreparationCount;
     audit.landFieldBefore = fieldAudit(m_terrainEdit,
                                        ETerrainTileLayer::Land);
     audit.overlayFieldBefore = fieldAudit(m_terrainEdit,
@@ -22164,6 +22173,7 @@ void CView::resolveMissingTerrainBlends()
     if(combined.isEmpty() && !worldBoundaryChanged)
     {
         progress.setValue(5);
+        rememberTerrainResolveCompletion({CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())});
         showResolveResult(QMessageBox::Information,
             tr("Изменений для применения не найдено. Карта не изменена."));
         finishAudit(QStringLiteral("no-op"));
@@ -22272,6 +22282,7 @@ void CView::resolveMissingTerrainBlends()
     QString resolvedMessage = tr("Исправлено ячеек: %1. Добавлено переходов: %2. Все изменения отменяются одним шагом.")
         .arg(combined.deltas.size()).arg(generated);
     emit updateMsg(resolvedMessage);
+    rememberTerrainResolveCompletion({CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())});
     showResolveResult(QMessageBox::Information, resolvedMessage);
     finishAudit(QStringLiteral("committed"));
 }

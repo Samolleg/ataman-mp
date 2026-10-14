@@ -322,6 +322,7 @@ public:
     void setUniformPaintSeed(bool enabled, quint32 seed)
     { m_uniformPaintSeedEnabled = enabled; m_uniformPaintSeed = seed; }
     int size() const { return m_variants.size(); }
+    bool sharesRepairStateWith(const CTerrainTransitionCatalog& other) const;
 
 private:
     static QByteArray signatureKey(const STerrainTransitionSignature& signature);
@@ -603,6 +604,9 @@ public:
     STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;
     bool isDirty() const;
+    // Constant-time identity against a retained value copy. Qt detaches these
+    // shared containers on edits; never substitute a hash of all cells here.
+    bool sharesRepairStateWith(const CTerrainEditModel& other) const;
     bool usesUnsavedAtlasArtwork(const CTerrainWorkingAtlas& atlas) const;
     void extendMaterialTable(int count) { if(count>=m_materialCount && count<=32767)m_materialCount=count; }
     int tileCountX() const { return m_sectorCountX * 16; }

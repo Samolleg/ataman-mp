@@ -692,6 +692,9 @@ private:
     bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,
                                    STerrainResolveAuditSession* audit = nullptr,
                                    bool seamsOnly = false);
+    QByteArray terrainResolveContext(bool seamsOnly) const;
+    bool terrainResolveAlreadyComplete(bool seamsOnly = false) const;
+    void rememberTerrainResolveCompletion(const QStringList& paths, bool seamsOnly = false);
     bool loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
         const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report,
         const std::function<bool()>& checkpoint = {});
@@ -1287,6 +1290,22 @@ private:
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
     bool m_terrainResolveInProgress{false};
+    struct STerrainResolveCompletion {
+        struct Map {
+            CTerrainEditModel terrain;
+            QSharedPointer<CTerrainWorkingAtlas> atlas;
+            QByteArray baseline;
+            QVector<SMprMaterialRecord> materials;
+        };
+        QByteArray context;
+        QMap<QString,Map> maps;
+        QVector<STerrainGlobalMaterialFamily> families;
+        QMap<qint32,QImage> sources;
+        QMap<qint32,STerrainGlobalMaterialSource> sourceIdentities;
+        QMultiMap<QByteArray,STerrainGlobalTransitionSource> transitions;
+        QMultiMap<QByteArray,QPair<STerrainTransitionSignature,QImage>> importedTransitions;
+    } m_terrainResolveCompletion;
+    quint64 m_terrainResolvePreparationCount{0};
     CTileBrushStrokePolicy m_tileBrushStrokePolicy;
     bool m_terrainAssignmentPromptPending{false};
     bool m_tilePaintStrokeActive{false};

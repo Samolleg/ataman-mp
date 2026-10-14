@@ -4832,6 +4832,36 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
     return true;
 }
 
+bool CTerrainVirtualAtlas::sharesRepairStateWith(const CTerrainVirtualAtlas& o) const
+{
+    return m_authoredTiles.isSharedWith(o.m_authoredTiles) && m_generationSize==o.m_generationSize
+        && m_materialSources.isSharedWith(o.m_materialSources) && m_materialSourceSlots.isSharedWith(o.m_materialSourceSlots)
+        && m_sourceTileTypes.isSharedWith(o.m_sourceTileTypes) && m_materialRuntimeTypes.isSharedWith(o.m_materialRuntimeTypes)
+        && m_materialBlendStyles.isSharedWith(o.m_materialBlendStyles)
+        && m_generatedBySignature.isSharedWith(o.m_generatedBySignature) && m_generatedByPixels.isSharedWith(o.m_generatedByPixels)
+        && m_generatedTiles.isSharedWith(o.m_generatedTiles) && m_blendMaskTemplates.isSharedWith(o.m_blendMaskTemplates)
+        && m_authoredLibraryCatalog.sharesRepairStateWith(o.m_authoredLibraryCatalog)
+        && m_authoredLibraryGeneratedIndices.isSharedWith(o.m_authoredLibraryGeneratedIndices)
+        && m_distributionSeed==o.m_distributionSeed && m_generatedTilesOpaque==o.m_generatedTilesOpaque
+        && m_valid==o.m_valid && m_error==o.m_error;
+}
+
+bool CTerrainWorkingAtlas::sharesRepairStateWith(const CTerrainWorkingAtlas& o) const
+{
+    return m_capacityLimit==o.m_capacityLimit && m_authoredSlotCount==o.m_authoredSlotCount
+        && m_authoredCatalog.sharesRepairStateWith(o.m_authoredCatalog)
+        && m_workingCatalog.sharesRepairStateWith(o.m_workingCatalog)
+        && m_authoredImages.isSharedWith(o.m_authoredImages) && m_workingImages.isSharedWith(o.m_workingImages)
+        && m_workingTileTypes.isSharedWith(o.m_workingTileTypes)
+        && m_virtualToWorking.isSharedWith(o.m_virtualToWorking) && m_workingToVirtual.isSharedWith(o.m_workingToVirtual)
+        && m_animationCopySources.isSharedWith(o.m_animationCopySources)
+        && m_foreignPhysicalTiles.isSharedWith(o.m_foreignPhysicalTiles)
+        && m_worldBankNamespaceAliases.isSharedWith(o.m_worldBankNamespaceAliases)
+        && m_mixedEdgeRecipes.isSharedWith(o.m_mixedEdgeRecipes) && m_worldBoundaryRecipes.isSharedWith(o.m_worldBoundaryRecipes)
+        && bool(m_resolver)==bool(o.m_resolver)
+        && (!m_resolver || m_resolver->sharesRepairStateWith(*o.m_resolver));
+}
+
 QByteArray CTerrainWorkingAtlas::stateFingerprint() const
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);

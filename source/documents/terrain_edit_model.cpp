@@ -1568,6 +1568,35 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
     return range;
 }
 
+bool CTerrainTransitionCatalog::sharesRepairStateWith(const CTerrainTransitionCatalog& o) const
+{
+    return m_variants.isSharedWith(o.m_variants) && m_packedLookup.isSharedWith(o.m_packedLookup)
+        && m_signatureLookup.isSharedWith(o.m_signatureLookup) && m_materialIds==o.m_materialIds
+        && m_mirrorPaintGridY==o.m_mirrorPaintGridY && m_randomDistribution==o.m_randomDistribution
+        && m_uniformPaintSeedEnabled==o.m_uniformPaintSeedEnabled && m_uniformPaintSeed==o.m_uniformPaintSeed;
+}
+
+bool CTerrainEditModel::sharesRepairStateWith(const CTerrainEditModel& o) const
+{
+    return m_sectorCountX==o.m_sectorCountX && m_sectorCountY==o.m_sectorCountY
+        && m_vertexCountX==o.m_vertexCountX && m_vertexCountY==o.m_vertexCountY
+        && m_maxZ==o.m_maxZ && m_originalMaxZ==o.m_originalMaxZ
+        && m_textureCount==o.m_textureCount && m_materialCount==o.m_materialCount
+        && m_randomPaintSeed==o.m_randomPaintSeed && m_originalRandomPaintSeed==o.m_originalRandomPaintSeed
+        && m_randomPaintSeedSet==o.m_randomPaintSeedSet && m_originalRandomPaintSeedSet==o.m_originalRandomPaintSeedSet
+        && m_tileTypes.isSharedWith(o.m_tileTypes) && m_heights.isSharedWith(o.m_heights)
+        && m_originalHeights.isSharedWith(o.m_originalHeights)
+        && m_xOffsets.isSharedWith(o.m_xOffsets) && m_yOffsets.isSharedWith(o.m_yOffsets)
+        && m_refs.isSharedWith(o.m_refs) && m_conflictedVertices.isSharedWith(o.m_conflictedVertices)
+        && m_sectors.isSharedWith(o.m_sectors) && m_sectorLookup.isSharedWith(o.m_sectorLookup)
+        && m_virtualLandMaterials.isSharedWith(o.m_virtualLandMaterials)
+        && m_virtualOverlayMaterials.isSharedWith(o.m_virtualOverlayMaterials)
+        && m_originalVirtualLandMaterials.isSharedWith(o.m_originalVirtualLandMaterials)
+        && m_originalVirtualOverlayMaterials.isSharedWith(o.m_originalVirtualOverlayMaterials)
+        && m_pendingVirtualLandMaterials.isSharedWith(o.m_pendingVirtualLandMaterials)
+        && m_pendingVirtualOverlayMaterials.isSharedWith(o.m_pendingVirtualOverlayMaterials);
+}
+
 bool CTerrainEditModel::isDirty() const
 {
     if(m_randomPaintSeed != m_originalRandomPaintSeed

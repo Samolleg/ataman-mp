@@ -241,6 +241,20 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     if(!check(!bakeReport.hasErrors()&&!resolution.deltas.isEmpty(),"mixed-edge physical resolution")){log<<bakeReport.toText();return 1;}
     {
         const int count=staged->activeTileCount();
+        const auto frozen=staged->createStagingCopy();
+        const auto frozenModel=model;
+        check(staged->sharesRepairStateWith(*frozen)&&model.sharesRepairStateWith(frozenModel),
+            "frozen repair state compares without scanning cells or pixels");
+        auto changedModel=model;changedModel.setRandomPaintSeed(123456);
+        check(!changedModel.sharesRepairStateWith(frozenModel),"repair state rejects changed model seed");
+        auto changedAtlas=staged->createStagingCopy();changedAtlas->setDistributionSeed(123456);
+        check(!changedAtlas->sharesRepairStateWith(*frozen),"repair state rejects changed atlas resolver seed");
+        changedAtlas=staged->createStagingCopy();
+        QImage added(256,256,QImage::Format_RGB32);added.fill(Qt::cyan);
+        check(changedAtlas->addExternalMaterialSource(123456,added)
+            &&!changedAtlas->sharesRepairStateWith(*frozen),"repair state rejects a changed source bank");
+        staged->acknowledgeChangedSlots(staged->changedSlots());
+        check(staged->sharesRepairStateWith(*frozen),"preview upload bookkeeping keeps completed repair valid");
         const auto identity=staged->stateFingerprint();
         STerrainMixedEdgeStatistics warmStatistics;CValidationReport warmReport;
         QElapsedTimer timer;timer.start();

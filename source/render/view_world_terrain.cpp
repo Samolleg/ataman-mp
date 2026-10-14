@@ -2,6 +2,7 @@
 #include "view.h"
 #include "node.h"
 #include "resourcemanager.h"
+#include "res_read_lease.h"
 #include "resource_name.h"
 #include "mmp_codec.h"
 #include "tile_form.h"
@@ -843,10 +844,107 @@ bool CView::ensureWorldTerrainAtlas(const QString& id,CValidationReport* report)
     m_worldTerrainAtlasSources[id]=source;return true;
 }
 
+QByteArray CView::terrainResolveContext(bool seamsOnly) const
+{
+    QByteArray key;QDataStream out(&key,QIODevice::WriteOnly);
+    out << seamsOnly << m_pLand->filePath().absoluteFilePath()
+        << m_worldTerrainEnabled << m_hasActiveMapWorldOrigin << m_activeMapWorldOrigin
+        << m_neighborLayoutStorageWritable << m_neighborSceneProfileId
+        << m_terrainSemanticSeed << m_tileStrokeDistributionSeed
+        << (m_landscapeTools?int(m_landscapeTools->paintPaletteMode()):-1)
+        << (m_landscapeTools && m_landscapeTools->modernMixedEdge())
+        << (m_landscapeTools && m_landscapeTools->randomizeUniformRotation());
+    if(m_worldTerrainEnabled) {
+        const QRectF active(m_activeMapWorldOrigin,QSizeF(m_terrainEdit.tileCountX()*2,m_terrainEdit.tileCountY()*2));
+        for(const auto& placement:m_neighborPlacements) {
+            const auto id=CWorldTerrainSession::key(placement.mprPath);
+            if(!m_worldTerrainEnabledPaths.contains(id))continue;
+            const QRectF other(placement.worldOrigin,placement.size);
+            const double dx=qMin(active.right(),other.right())-qMax(active.left(),other.left());
+            const double dy=qMin(active.bottom(),other.bottom())-qMax(active.top(),other.top());
+            if((qAbs(dx)<1e-5&&dy>1e-5)||(qAbs(dy)<1e-5&&dx>1e-5))
+                out << id << placement.worldOrigin << placement.size;
+        }
+    }
+    // File metadata only: never read or hash resource payloads on a repeat.
+    auto archives=CTextureList::getInstance()->configuredResourceArchivePaths();
+    archives.append(m_activeTerrainArchivePath);
+    for(auto map=m_terrainResolveCompletion.maps.cbegin();map!=m_terrainResolveCompletion.maps.cend();++map) {
+        const auto source=m_worldTerrainAtlasSources.constFind(map.key());
+        if(source!=m_worldTerrainAtlasSources.cend())archives.append(source->archive);
+    }
+    archives.removeDuplicates();
+    for(const auto& path:archives) {
+        const QFileInfo file(path);
+        out << path << file.isFile() << file.size() << file.lastModified() << resIo::generation(path);
+    }
+    return key;
+}
+
+bool CView::terrainResolveAlreadyComplete(bool seamsOnly) const
+{
+    const auto& saved=m_terrainResolveCompletion;
+    if(saved.maps.isEmpty() || !m_pLand || !m_terrainEditAvailable
+       || m_terrainAutoCatalogPending || m_terrainAutoCatalogBuilding
+       || !saved.families.isSharedWith(m_terrainGlobalFamilies)
+       || !saved.sources.isSharedWith(m_terrainGlobalMaterialSources)
+       || !saved.sourceIdentities.isSharedWith(m_terrainGlobalMaterialSourceIdentities)
+       || !saved.transitions.isSharedWith(m_terrainGlobalTransitionSources)
+       || !saved.importedTransitions.isSharedWith(m_importedTerrainTransitions)
+       || saved.context!=terrainResolveContext(seamsOnly))return false;
+    const auto active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    for(auto it=saved.maps.cbegin();it!=saved.maps.cend();++it) {
+        const CTerrainEditModel* terrain=&m_terrainEdit;
+        const CMprDocument* baseline=&m_mprDocument;
+        const QVector<SMprMaterialRecord>* materials=&m_mprMaterials;
+        auto atlas=m_workingTerrainAtlas;
+        if(it.key()!=active) {
+            const auto doc=m_worldTerrainSession.documents.value(it.key());
+            if(!doc)return false;
+            terrain=&doc->terrain;baseline=&doc->baseline;materials=&doc->materials;atlas=doc->atlas;
+        }
+        if(!atlas || !it->atlas || !terrain->sharesRepairStateWith(it->terrain)
+           || baseline->originalBytes().constData()!=it->baseline.constData()
+           || !materials->isSharedWith(it->materials)
+           || !atlas->sharesRepairStateWith(*it->atlas))return false;
+    }
+    return true;
+}
+
+void CView::rememberTerrainResolveCompletion(const QStringList& paths,bool seamsOnly)
+{
+    STerrainResolveCompletion saved;
+    const auto active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
+    for(const auto& id:paths) {
+        auto& map=saved.maps[id];
+        if(id==active) {
+            if(!m_workingTerrainAtlas)return;
+            map.terrain=m_terrainEdit;map.atlas=m_workingTerrainAtlas->createStagingCopy();
+            map.baseline=m_mprDocument.originalBytes();map.materials=m_mprMaterials;
+        } else {
+            const auto doc=m_worldTerrainSession.documents.value(id);
+            if(!doc || !doc->atlas)return;
+            map.terrain=doc->terrain;map.atlas=doc->atlas->createStagingCopy();
+            map.baseline=doc->baseline.originalBytes();map.materials=doc->materials;
+        }
+    }
+    saved.families=m_terrainGlobalFamilies;saved.sources=m_terrainGlobalMaterialSources;
+    saved.sourceIdentities=m_terrainGlobalMaterialSourceIdentities;
+    saved.transitions=m_terrainGlobalTransitionSources;saved.importedTransitions=m_importedTerrainTransitions;
+    m_terrainResolveCompletion=saved;
+    m_terrainResolveCompletion.context=terrainResolveContext(seamsOnly);
+}
+
 bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* report,
     STerrainResolveAuditSession* audit,bool seamsOnly)
 {
     if(!m_worldTerrainEnabled || !m_hasActiveMapWorldOrigin || !m_neighborLayoutStorageWritable)return false;
+    if(terrainResolveAlreadyComplete(seamsOnly)) {
+        *summary=tr("Карта не менялась. Повторное исправление переходов не требуется.");
+        if(audit)audit->outcome=QStringLiteral("unchanged");
+        ei::log(eLogInfo,QStringLiteral("World material repair skipped: unchanged completed state."));
+        return true;
+    }
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     QMap<QString,QPointF> origins;origins[active]=m_activeMapWorldOrigin;
     const QRectF ar(m_activeMapWorldOrigin,QSizeF(m_terrainEdit.tileCountX()*2,m_terrainEdit.tileCountY()*2));
@@ -886,6 +984,8 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
         return false;
     }
     bool completed=false;
+    m_terrainResolveCompletion=STerrainResolveCompletion();
+    ++m_terrainResolvePreparationCount;
     // Keep the already presented scene while CPU-only staging runs. A busy
     // render timer would redraw shadows/terrain behind the modal dialog.
     const bool renderTimerWasActive=m_timer&&m_timer->isActive();
@@ -1312,6 +1412,7 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
     ei::log(eLogInfo,QString("World repair reuse recipesBaked:%1 recipesReused:%2 seamsBaked:%3 seamsReused:%4")
         .arg(generatedRecipes).arg(reusedRecipes).arg(generatedSeams).arg(reusedSeams));
     completed=true;
+    rememberTerrainResolveCompletion(origins.keys(),seamsOnly);
     return true;
 }
 

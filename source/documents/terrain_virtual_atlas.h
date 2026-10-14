@@ -378,6 +378,7 @@ private:
     CTerrainVirtualAtlas(const CTerrainVirtualAtlas&) = delete;
     CTerrainVirtualAtlas& operator=(const CTerrainVirtualAtlas&) = delete;
     friend class CTerrainWorkingAtlas;
+    bool sharesRepairStateWith(const CTerrainVirtualAtlas& other) const;
 
     QByteArray signatureKey(const STerrainTransitionSignature& signature) const;
     STerrainTransitionSignature canonicalSignature(
@@ -499,6 +500,9 @@ public:
     int catalogVariantCount() const { return m_workingCatalog.size(); }
     QSet<int> changedSlots() const { return m_changedSlots; }
     QByteArray stateFingerprint() const;
+    // Compare frozen staging storage, including the independently copied
+    // resolver. Upload bookkeeping is not an input to material repair.
+    bool sharesRepairStateWith(const CTerrainWorkingAtlas& other) const;
     void acknowledgeChangedSlots(const QSet<int>& changed);
     void setDistributionSeed(quint32 seed)
     { if(m_resolver) m_resolver->setDistributionSeed(seed); }
