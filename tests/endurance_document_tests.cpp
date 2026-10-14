@@ -11790,15 +11790,17 @@ void EnduranceDocumentTests::retainedRejectedArtworkStaysDecodableButNotPaintSel
         family.name=QString("Family %1").arg(material);family.tileType=0;
         source.families.append(family);
     }
-    for(int slot=0;slot<4;++slot) {
+    for(int slot=0;slot<64;++slot) {
         STerrainAtlasProfileSlot definition;definition.slot=slot;
+        definition.assigned=slot<4;
         definition.signature.northWest=definition.signature.southWest=slot==1?2:1;
         definition.signature.northEast=definition.signature.southEast=slot==0?1:2;
         definition.paintSelectable=slot!=2;source.slotDefinitions.append(definition);
     }
     CValidationReport report;QVERIFY(source.normalizeMembership(&report));
     STerrainAtlasProfile reopened;
-    QVERIFY(STerrainAtlasProfile::fromBytes(source.toBytes(),&reopened,&report));
+    QVERIFY2(STerrainAtlasProfile::fromBytes(source.toBytes(),&reopened,&report),
+             qPrintable(report.toText()));
     QVERIFY(!reopened.slotDefinitions[2].paintSelectable);
     QVERIFY(reopened.slotDefinitions[3].paintSelectable); // Missing optional field defaults to true.
     const auto analysis=reopened.usableAnalysis(&report);QVERIFY(analysis.usable);
