@@ -2265,30 +2265,18 @@ qint32 CTerrainVirtualAtlas::reviewedMaskStyleMaterial(
               preferredPaintMaterial, ETerrainBlendStyle::Organic)
               == style)
         return preferredPaintMaterial;
-    // Repair and shared-map seams have no selected brush. They must use the
-    // same approved authored mask language as painting, not mathematical
-    // circles merely because preferredPaintMaterial is absent.
+    // R63's Ice inside masks were explicitly approved before paint-material
+    // ownership was threaded through every context-free caller. Preserve that
+    // narrow fallback. Other reviewed families are activated only by the
+    // selected paint material and an exact reviewed style/topology lookup.
+    if(style != ETerrainBlendStyle::Ice)
+        return 0;
     for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
-        if(style == ETerrainBlendStyle::Ice && it.value() == 3
-           && m_materialBlendStyles.value(
+        if(it.value() == 3 && m_materialBlendStyles.value(
                it.key(), ETerrainBlendStyle::Organic)
                == ETerrainBlendStyle::Ice)
             return it.key();
-    qint32 candidate = 0;
-    int candidateCount = std::numeric_limits<int>::max();
-    for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
-        if(m_materialBlendStyles.value(it.key(), ETerrainBlendStyle::Organic)
-               == style
-           && (it.value() < candidateCount
-               || (it.value() == candidateCount
-                   && (candidate == 0 || it.key() < candidate))))
-        {
-            candidate = it.key();
-            candidateCount = it.value();
-        }
-    return counts.size() == 2 && candidate != 0
-        && !reviewedCanonicalVariations(signature, style, candidate).isEmpty()
-            ? candidate : 0;
+    return 0;
 }
 
 int CTerrainVirtualAtlas::blendVariationLimit(
@@ -2584,10 +2572,6 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
         gridSignature, preferredPaintMaterial);
     const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
         gridSignature, style, preferredPaintMaterial);
-    const QVector<int> approved = reviewedCanonicalVariations(
-        gridSignature, style, reviewedStyleMaterial);
-    if(preferredPaintMaterial == 0 && !approved.isEmpty())
-        variation = approved.at(qMax(0, variation) % approved.size());
     QString canonicalProvenance;
     QImage result = canonicalGeneratedOwnershipMask(
         m_authoredTiles.front().size(), preview, canonicalOwner,
@@ -2744,15 +2728,9 @@ QImage CTerrainVirtualAtlas::generateTile(
         for(qint32 material : unique)
         {
             QString source;
-            const ETerrainBlendStyle materialStyle =
-                m_materialBlendStyles.value(material, style);
-            const QVector<int> approved = reviewedCanonicalVariations(
-                preview, materialStyle, material);
-            const int materialVariation = approved.isEmpty() ? variation
-                : approved.at(qMax(0, variation) % approved.size());
             const QImage mask = canonicalGeneratedOwnershipMask(
                 m_authoredTiles.front().size(), preview, material,
-                materialStyle, materialVariation,
+                m_materialBlendStyles.value(material, style), variation,
                 material,
                 &source);
             if(mask.isNull())
@@ -2887,13 +2865,9 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlend(
 {
     const ETerrainBlendStyle style = blendStyleForSignature(
         gridSignature, preferredPaintMaterial);
-    const qint32 owner = reviewedMaskStyleMaterial(
-        gridSignature, style, preferredPaintMaterial);
-    const QVector<int> approved = reviewedCanonicalVariations(
-        gridSignature, style, owner);
-    if(preferredPaintMaterial == 0 && !approved.isEmpty())
-        variation = approved.at(qMax(0, variation) % approved.size());
-    return generateTile(gridSignature, style, qMax(0, variation), owner,
+    return generateTile(gridSignature, style, qMax(0, variation),
+                        reviewedMaskStyleMaterial(
+                            gridSignature, style, preferredPaintMaterial),
                         provenance, report);
 }
 
@@ -2904,71 +2878,12 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
 {
     const ETerrainBlendStyle style = blendStyleForSignature(
         gridSignature, preferredPaintMaterial);
-    const qint32 owner = reviewedMaskStyleMaterial(
-        gridSignature, style, preferredPaintMaterial);
-    const QVector<int> approved = reviewedCanonicalVariations(
-        gridSignature, style, owner);
-    if(preferredPaintMaterial == 0 && !approved.isEmpty())
-        variation = approved.at(qMax(0, variation) % approved.size());
-    return generateTile(gridSignature, style, qMax(0, variation), owner,
+    return generateTile(gridSignature, style, qMax(0, variation),
+                        reviewedMaskStyleMaterial(
+                            gridSignature, style, preferredPaintMaterial),
                         provenance, report, true);
 }
 
-QImage CTerrainVirtualAtlas::worldBoundaryTile(
-    const STerrainTransitionSignature& signature,
-    const CTerrainEditModel& geometry, const QPointF& origin,
-    int cellX, int cellY, int sides, QMap<QByteArray,QImage>* cache,
-    CValidationReport* report) const
-{
-    const QByteArray key=signatureKey(signature);
-    QImage canonical=cache?cache->value(key):QImage();
-    if(canonical.isNull()) {
-        canonical=reviewGeneratedBlend(signature,0,nullptr,report);
-        if(canonical.isNull())return {};
-        if(cache)cache->insert(key,canonical);
-    }
-    QImage grid=canonical.mirrored(false,true);
-    const int size=grid.width(),band=qMin(12,size/4),guard=qMin(4,band);
-    const QVector<qint32> ids=corners(signature);
-    const auto sourcePixel=[&](qint32 material,const QPointF& world) {
-        const QImage& source=m_materialSources[material];
-        const auto phase=[size](double coordinate) {
-            const double wrapped=coordinate/2-std::floor(coordinate/2);
-            return qBound(0,int(std::floor(wrapped*size+1e-7)),size-1);
-        };
-        return source.pixelColor(phase(world.x()),size-1-phase(world.y()));
-    };
-    for(int y=0;y<size;++y)for(int x=0;x<size;++x) {
-        int side=-1,distance=band;
-        const int distances[4]={y,size-1-x,size-1-y,x};
-        for(int candidate=0;candidate<4;++candidate)
-            if((sides&(1<<candidate)) && distances[candidate]<distance) {
-                side=candidate;distance=distances[candidate];
-            }
-        if(side<0)continue;
-        const bool vertical=side==1 || side==3;
-        const double t=double(vertical?y:x)/qMax(1,size-1);
-        const int vx=2*cellX+(side==1?2:0),vy=2*cellY+(side==2?2:0);
-        const int half=t<=0.5?0:1;
-        const QPointF first=geometry.terrainVertexPosition(vx+(vertical?0:half),vy+(vertical?half:0));
-        const QPointF last=geometry.terrainVertexPosition(vx+(vertical?0:half+1),vy+(vertical?half+1:0));
-        const QPointF world=origin+first+(last-first)*(t*2-half);
-        const double along=vertical?(world.y()-origin.y()-2*cellY)/2
-            :(world.x()-origin.x()-2*cellX)/2;
-        const qint32 a=ids.at(side==0 || side==3?0:side==1?1:3);
-        const qint32 b=ids.at(side==0?1:side==3?3:2);
-        const double weight=a==b?0.0:qRound(smoothUnit((along-0.38)/0.24)*255)/255.0;
-        const QColor ca=sourcePixel(a,world),cb=sourcePixel(b,world),old=grid.pixelColor(x,y);
-        const double fade=distance<guard?1.0:smoothUnit(double(band-distance)/(band-guard));
-        const auto mix=[&](int av,int bv,int previous) {
-            return qBound(0,qRound((av*(1-weight)+bv*weight)*fade+previous*(1-fade)),255);
-        };
-        grid.setPixelColor(x,y,QColor(mix(ca.red(),cb.red(),old.red()),
-            mix(ca.green(),cb.green(),old.green()),mix(ca.blue(),cb.blue(),old.blue()),
-            mix(ca.alpha(),cb.alpha(),old.alpha())));
-    }
-    return grid.mirrored(false,true);
-}
 
 QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
     const STerrainTransitionSignature& gridSignature,
@@ -3233,8 +3148,35 @@ STerrainVirtualTile CTerrainVirtualAtlas::resolve(
             ? preferredPaintMaterial : 0;
     const ETerrainBlendStyle style = blendStyleForSignature(
         canonical, preferredPaintMaterial);
-    const qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
+    qint32 reviewedStyleMaterial = reviewedMaskStyleMaterial(
         canonical, style, preferredPaintMaterial);
+    if(reviewedStyleMaterial == 0 && preferredPaintMaterial == 0)
+    {
+        // Production repair/reopen paths have no active brush, but they must
+        // not ignore an already reviewed authored-derived mask and fall back
+        // to obsolete procedural geometry. Infer only a same-style owner that
+        // actually has this canonical topology approved; otherwise retain the
+        // explicit mathematical fallback so it remains auditable for review.
+        QMap<qint32, int> counts;
+        for(qint32 material : corners(canonical))
+            ++counts[material];
+        qint32 candidate = 0;
+        int candidateCount = std::numeric_limits<int>::max();
+        for(auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+            if(m_materialBlendStyles.value(
+                   it.key(), ETerrainBlendStyle::Organic) == style
+               && (it.value() < candidateCount
+                   || (it.value() == candidateCount
+                       && (candidate == 0 || it.key() < candidate))))
+            {
+                candidate = it.key();
+                candidateCount = it.value();
+            }
+        if(counts.size() == 2 && candidate != 0
+           && !reviewedCanonicalVariations(
+               canonical, style, candidate).isEmpty())
+            reviewedStyleMaterial = candidate;
+    }
     int variation = 0;
     const QVector<int> reviewedVariations = reviewedCanonicalVariations(
         canonical, style, reviewedStyleMaterial);

@@ -567,7 +567,6 @@ private slots:
     void paintedMaterialOwnsGeneratedMaskFamily();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
-    void contextFreeRepairKeepsApprovedAuthoredMaskLanguage();
     void rotationsDeduplicateButSemanticAliasesRemainDistinct();
     void generatedTerrainTypeUsesMajorityAcrossRotation();
     void generatedTerrainTypeTieUsesPaintedMaterialAndTypedDedup();
@@ -2921,61 +2920,6 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
         }
     QCOMPARE(threeWay.generatedTiles().size(), 1);
     QCOMPARE(fourWay.generatedTiles().size(), 1);
-}
-
-void TerrainVirtualAtlasTests::contextFreeRepairKeepsApprovedAuthoredMaskLanguage()
-{
-    // Call the production API directly. CTestTerrainVirtualAtlas::resolve()
-    // supplies a brush owner, which hid the missing-owner repair regression.
-    const STerrainTransitionSignature requests[] = {
-        signature(1, 2, 2, 2), signature(1, 1, 2, 2),
-        signature(1, 2, 1, 2), signature(1, 1, 1, 2)};
-    for(int style : {1, 2, 3, 4, 5, 6, 7, 8, 9, 11})
-      for(const auto& requested : requests)
-      {
-        Fixture fixture;
-        for(QImage& image : fixture.images)
-            image = image.scaled(128, 128);
-        CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u,
-            {}, {{1, ETerrainBlendStyle(style)},
-                 {2, ETerrainBlendStyle(style)}});
-        CValidationReport report;
-        QString source;
-        const QImage actual = atlas.reviewGeneratedBlend(
-            requested, 0, &source, &report);
-        QVERIFY2(!actual.isNull(), qPrintable(report.toText()));
-        QVERIFY2(source.contains(QStringLiteral("-approved")),
-            qPrintable(QString("Style %1 used %2").arg(style).arg(source)));
-        bool matched = false;
-        // A context-free caller chooses a valid historical approved route;
-        // its pixels must be an existing brush route, never a new silhouette.
-        for(int owner : {1, 2})
-          for(int variation : {0, 1})
-          {
-            QString explicitSource;
-            const QImage expected = atlas.reviewGeneratedBlend(
-                requested, variation, &explicitSource, &report, owner);
-            matched |= source == explicitSource && actual == expected;
-          }
-        QVERIFY(matched);
-        CTerrainEditModel geometry;
-        QMap<QByteArray,QImage> cache;
-        QCOMPARE(atlas.worldBoundaryTile(requested, geometry, {}, 0, 0,
-                     0, &cache, &report), actual);
-      }
-    Fixture fixture;
-    CTerrainVirtualAtlas junction(fixture.catalog, fixture.images, 0, {},
-        {{1, ETerrainBlendStyle::Soil}, {2, ETerrainBlendStyle::Grass},
-         {3, ETerrainBlendStyle::Stone}});
-    for(int variation : {0, 1})
-    {
-        QString source;
-        QVERIFY(!junction.reviewGeneratedBlend(signature(1, 2, 3, 3),
-            variation, &source).isNull());
-        for(const QString& component : source.split(QStringLiteral("; ")))
-            QVERIFY2(component.contains(QStringLiteral("-approved")),
-                     qPrintable(source));
-    }
 }
 
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()

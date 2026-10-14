@@ -283,14 +283,6 @@ public:
         int variation = 0, QString* provenance = nullptr,
         CValidationReport* report = nullptr,
         qint32 preferredPaintMaterial = 0) const;
-    // Cohort repair uses one reviewed source set and world-coordinate edge
-    // ownership. The physical SEC edge may have an along-edge displacement.
-    // Side bits are north=1, east=2, south=4, west=8 in terrain-grid space.
-    QImage worldBoundaryTile(const STerrainTransitionSignature& signature,
-        const CTerrainEditModel& geometry, const QPointF& origin,
-        int cellX, int cellY, int sides,
-        QMap<QByteArray,QImage>* canonicalCache,
-        CValidationReport* report = nullptr) const;
     // Review-only A/B compositor. Runtime generation remains encoded-RGB
     // until the focused visual comparison is explicitly accepted.
     QImage reviewGeneratedBlendLinearLight(

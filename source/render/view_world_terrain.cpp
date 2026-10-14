@@ -777,7 +777,7 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             if(!stage.terrainEdit.initializeVirtualMaterialField(layer,stage.atlas->catalog(),report,
                     ETerrainMaterialFieldRecovery::RecoverDeterministically))return true;
     }
-    QMap<QString,QSet<int>> preserve[2];QMap<QString,QMap<int,int>> seamSides[2];
+    QMap<QString,QSet<int>> preserve[2];
     QSet<QString> semanticChanges;int conflicts=0,boundaryVertices=0;
     for(auto layer:layers) {
         const int li=layer==ETerrainTileLayer::Land?0:1;
@@ -791,7 +791,6 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             maps.append(m);
         }
         const auto plan=planWorldMaterialRepair(maps,true);boundaryVertices+=plan.changedVertices;
-        seamSides[li]=worldMaterialSeamSides(maps);
         for(auto changes=plan.changedCells.cbegin();changes!=plan.changedCells.cend();++changes)
             if(!changes->isEmpty())semanticChanges.insert(changes.key());
         for(auto it=stages.begin();it!=stages.end();++it) {
@@ -844,64 +843,9 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             cells+=command.deltas.size();
         }
     }
-    // The same canonical source set is used by every member of the cohort.
-    // Local atlases may contain different authored masks for identical tuples.
-    for(auto layer:layers) {
-        const int li=layer==ETerrainTileLayer::Land?0:1;
-        QSet<qint32> required;QSize size;
-        for(auto it=stages.cbegin();it!=stages.cend();++it) {
-            const auto candidate=it->atlas->activeTileImages().first().size();
-            if(!size.isEmpty() && size!=candidate) {
-                report->add("terrain.world.tile_size",EValidationSeverity::Error,
-                    tr("Размеры текстур соседних карт различаются. Исправление не применено."));return true;
-            }
-            size=candidate;CTerrainVirtualMaterialField field;
-            it->terrainEdit.copyVirtualMaterialField(layer,&field,false);
-            const auto edges=seamSides[li].value(it.key());
-            for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
-                const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
-                bool available=false;const auto packed=it->terrainEdit.packedTile(x,y,layer,&available);
-                if(!available || (layer==ETerrainTileLayer::Overlay && packed==0xffff))continue;
-                bool found=false;const auto sig=field.cellSignature(x,y,&found);
-                if(found)required<<sig.northWest<<sig.northEast<<sig.southEast<<sig.southWest;
-            }
-        }
-        if(required.isEmpty())continue;
-        QMap<qint32,QImage> sources;
-        if(!loadWorldTerrainMaterialSources(required,size,&sources,report))return true;
-        QImage placeholder(size,QImage::Format_RGBA8888);placeholder.fill(Qt::transparent);
-        QMap<qint32,ETerrainBlendStyle> styles;
-        for(const auto& family:m_terrainGlobalFamilies)
-            styles[family.id]=CTerrainVirtualAtlas::blendStyleForMaterialName(family.name);
-        CTerrainVirtualAtlas shared(CTerrainTransitionCatalog(),{placeholder},0,sources,
-            styles,layer==ETerrainTileLayer::Land);
-        QMap<QByteArray,QImage> canonicalCache;
-        for(auto it=stages.begin();it!=stages.end();++it) {
-            auto& stage=it.value();CTerrainVirtualMaterialField field;
-            stage.terrainEdit.copyVirtualMaterialField(layer,&field,false);
-            STerrainTileCommand command;command.description=tr("Согласовать рисунок стыка карт");
-            const auto edges=seamSides[li].value(it.key());
-            for(auto edge=edges.cbegin();edge!=edges.cend();++edge) {
-                const int x=edge.key()%field.tileWidth(),y=edge.key()/field.tileWidth();
-                bool available=false;const quint16 before=stage.terrainEdit.packedTile(x,y,layer,&available);
-                if(!available || (layer==ETerrainTileLayer::Overlay && before==0xffff))continue;
-                bool found=false;const auto sig=field.cellSignature(x,y,&found);
-                if(!found)continue;
-                const QImage pixels=shared.worldBoundaryTile(sig,stage.terrainEdit,origins[it.key()],
-                    x,y,edge.value(),&canonicalCache,report);
-                if(pixels.isNull()){failedMapStage(it.key(),layer);return true;}
-                const int runtime=stage.atlas->runtimeTerrainTypeForSlot(SMprPackedTile::decode(before).atlasSlot());
-                const int slot=stage.atlas->importWorldBoundaryTile(pixels,runtime,sig,report);
-                if(slot<0){failedMapStage(it.key(),layer);return true;}
-                SMprPackedTile tile;tile.atlasIndex=quint8(slot/64);tile.tileIndex=quint8(slot%64);
-                if(tile.encode()==before)continue;
-                STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
-                delta.before=before;delta.after=tile.encode();command.deltas.append(delta);
-            }
-            stage.terrainEdit.installWorkingAtlasSlotTypes(stage.atlas->activeTileTypes());
-            if(!stage.terrainEdit.apply(command,true,report)){failedMapStage(it.key(),layer);return true;}
-        }
-    }
+    // The normal131 resolver above keeps every already exact packed tile.
+    // Do not replace that resolved artwork with a second, context-free
+    // world-boundary generator or repaint a collar over its authored edge.
     cells=0;QMap<QString,QVector<STerrainTileDelta>> worldDeltas;
     for(auto it=stages.begin();it!=stages.end();++it) {
         auto& stage=it.value();const auto doc=m_worldTerrainSession.documents[it.key()];

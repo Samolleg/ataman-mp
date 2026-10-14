@@ -170,6 +170,99 @@ int runNeighborPerformanceCheck()
         for(const auto& family:view.m_terrainGlobalFamilies)if(tools.selectPaintTerrainType(family.id)){selected=true;break;}
         check(selected,"select a global painting family");
         const auto activeId=CWorldTerrainSession::key(placement.mprPath),neighborId=CWorldTerrainSession::key(adjacent.mprPath);
+        if(qEnvironmentVariableIsSet("EI_WORLD_READY_ARTWORK_CHECK")) {
+            // A full retained atlas needs no uniform bank and no new image
+            // when both maps already agree at their shared material vertices.
+            // Exercise the actual CView command, including all four packed
+            // rotations, distinct map-local artwork and both terrain layers.
+            SMprCreationRequest request;request.innerNamespace="ready-artwork";
+            request.createOverlayPlane=true;request.overlayMaterialIndex=0;
+            QByteArray fixture;CValidationReport setup;
+            check(document.buildNewCanvas(request,&fixture,&setup),"create private ready-artwork canvas");
+            if(fixture.isEmpty())return 1;
+            CTerrainTransitionCatalog catalog;
+            for(int slot=0;slot<2;++slot) {
+                STerrainTransitionSignature signature;
+                signature.northWest=signature.southEast=1+slot*2;
+                signature.northEast=signature.southWest=2+slot*2;
+                for(int rotation=0;rotation<4;++rotation) {
+                    SMprPackedTile packed;packed.tileIndex=quint8(slot);packed.rotation=quint8(rotation);
+                    STerrainTransitionVariant variant;variant.packedTile=packed.encode();
+                    variant.signature=CTerrainTransitionCatalog::rotated(signature,-rotation);
+                    check(catalog.addVariant(variant,&setup),"register ready physical rotation");
+                }
+            }
+            QMap<QString,QByteArray> originalModels,originalAtlases;
+            QMap<QString,QVector<QImage>> originalPixels;
+            const auto modelHash=[](const SWorldTerrainDocument& doc) {
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                for(const auto& sector:doc.baseline.sectors())
+                    hash.addData(doc.terrain.sectorPayload(sector.sectorX,sector.sectorY));
+                for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                    CTerrainVirtualMaterialField field;doc.terrain.copyVirtualMaterialField(layer,&field,false);
+                    hash.addData(field.stableSha256());
+                }
+                return hash.result();
+            };
+            view.m_worldTerrainSession.clear();view.m_worldTerrainAtlasSources.clear();
+            int mapIndex=0;
+            for(const auto& id:QStringList{activeId,neighborId}) {
+                QSharedPointer<SWorldTerrainDocument> doc(new SWorldTerrainDocument);doc->path=id;
+                check(doc->baseline.loadBytes(fixture,id,&setup) && doc->terrain.load(doc->baseline,&setup),"load private canvas in retained session");
+                QVector<QImage> images;
+                for(int slot=0;slot<64;++slot) {
+                    QImage image(32,32,QImage::Format_RGBA8888);
+                    for(int y=0;y<32;++y)for(int x=0;x<32;++x)
+                        image.setPixelColor(x,y,QColor((x*7+slot*3+mapIndex*37)%256,
+                            (y*5+slot*11)%256,(x+y+slot*17)%256,255));
+                    images.append(image);
+                }
+                QVector<qint32> types(64,3);types[1]=5;
+                doc->atlas.reset(new CTerrainWorkingAtlas(catalog,images,19,64,{}, {},types));
+                check(doc->atlas->isValid() && doc->atlas->activeTileCount()==64,"retain completely full authored atlas");
+                doc->terrain.enableWorkingAtlasSlots(64);
+                check(doc->terrain.installWorkingAtlasSlotTypes(types),"install original runtime surface classes");
+                STerrainTileCommand paint;paint.description="private ready artwork";
+                for(int y=0;y<16;++y)for(int x=0;x<16;++x)
+                    for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                        SMprPackedTile packed;packed.tileIndex=layer==ETerrainTileLayer::Land?0:1;
+                        packed.rotation=quint8((x+y)%4);
+                        STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.layer=layer;
+                        delta.before=doc->terrain.packedTile(x,y,layer);delta.after=packed.encode();paint.deltas.append(delta);
+                    }
+                check(doc->terrain.apply(paint,true,&setup),"install coherent ready tuples in both layers");
+                for(const auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay})
+                    check(doc->terrain.initializeVirtualMaterialField(layer,catalog,&setup,
+                        ETerrainMaterialFieldRecovery::RecoverDeterministically),"recover unchanged shared-corner field");
+                doc->materials=doc->baseline.mapInfo().materials;
+                view.m_worldTerrainSession.documents[id]=doc;
+                view.m_worldTerrainAtlasSources[id]=SWorldTerrainAtlasSource();
+                originalModels[id]=modelHash(*doc);originalAtlases[id]=doc->atlas->stateFingerprint();
+                originalPixels[id]=doc->atlas->activeTileImages();++mapIndex;
+            }
+            if(setup.hasErrors()){out<<setup.toText()<<"\n";return 1;}
+            const auto active=view.m_worldTerrainSession.documents[activeId];
+            view.m_mprDocument=active->baseline;view.m_terrainEdit=active->terrain;
+            view.m_workingTerrainAtlas=active->atlas;view.m_mprMaterials=active->materials;
+            view.m_neighborPlacements[0].worldOrigin={32,0};view.m_neighborPlacements[0].origin={32,0};
+            view.m_neighborPlacements[0].size={32,32};
+            for(int invocation=0;invocation<2;++invocation) {
+                QString summary;CValidationReport validation;STerrainResolveAuditSession audit;
+                check(view.resolveWorldMaterialBlends(&summary,&validation,&audit) && !validation.hasErrors(),
+                    "production world repair reuses ready artwork without free slots or uniform sources");
+                out<<summary<<"\n"<<validation.toText()<<"\n";out.flush();
+                check(audit.stagedCellCount==0 && audit.worldPackedDeltas.isEmpty(),"ready packed slots and all four rotations stay unchanged");
+                for(const auto& id:QStringList{activeId,neighborId}) {
+                    const auto doc=view.m_worldTerrainSession.documents[id];
+                    check(modelHash(*doc)==originalModels[id],"ready material fields and sector bytes stay unchanged");
+                    check(doc->atlas->stateFingerprint()==originalAtlases[id],"ready atlas identity and runtime classes stay unchanged");
+                    check(doc->atlas->activeTileImages()==originalPixels[id],"every ready pixel including transition borders stays unchanged");
+                }
+                check(!view.m_worldTerrainSession.canUndo(),"no new artwork or empty repair is added to world history");
+            }
+            check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"source map and objects remain unchanged");
+            return failures?1:0;
+        }
         if(qEnvironmentVariableIsSet("EI_WORLD_MATERIAL_CHECK")) {
             const bool seamPair=qEnvironmentVariableIsSet("EI_WORLD_SEAM_PAIR_CHECK");
             view.m_activeMapWorldOrigin=seamPair?(zone=="zone4"?QPointF(960,190):QPointF(704,64)):QPointF(0,0);
