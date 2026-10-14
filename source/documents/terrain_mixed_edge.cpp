@@ -102,13 +102,15 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
     const QVector<SMprAnimatedTileRecord>& animations,
     const QPoint& origin, qint32 paintedMaterial, quint32 uniformSeed,
     bool randomizeUniformRotation, CValidationReport* report, int slotLimit,
-    bool includeWorldMaterialBank,bool expandConnectedFootprint)
+    bool includeWorldMaterialBank,bool expandConnectedFootprint,
+    const std::function<bool(int,int)>& progress,STerrainMixedEdgeStatistics* statistics)
 {
     STerrainTileCommand command;
     command.description=QStringLiteral("Resolve mixed-edge terrain");
     command.semanticAudit.layer=ETerrainTileLayer::Land;
     command.semanticAudit.valid=true;
     command.semanticAudit.solverMode=QStringLiteral("mixed-edge-b2");
+    if(progress && !progress(0,affectedCells.size()))return {};
     auto refuse=[&](const QString& reason,bool bankUnavailable=false) {
         if(report) {
             report->add("terrain.mixed_edge.refused", EValidationSeverity::Error, reason);
@@ -278,11 +280,12 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         materials.insert(id,material);
     }
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush> brushes;
-    if(!buildStockBrushes(images,stockUniforms,stock,sourceSignatures,pairs,&brushes,report,
-        includeWorldMaterialBank))return {};
+    bool brushesReady=false;
 
+    int completedCells=0;
     for(int cell:ordered)
     {
+        if(progress && !progress(completedCells++,ordered.size()))return {};
         const int x=cell%w,y=cell/w;
         const auto s=field.cellSignature(x,y);
         if(uniform(s)) continue;
@@ -314,10 +317,6 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         key+=QByteArray::number(model.hasRandomPaintSeed()?model.randomPaintSeed():0)+'|';
         for(qint32 id:corners(s)) key+=QByteArray::number(id)+',';
         for(qint32 id:sorted) input.materials.append(materials[id]);
-        for(int i=0;i<sorted.size();++i) for(int j=i+1;j<sorted.size();++j) {
-            const auto pair=qMakePair(sorted[i],sorted[j]);
-            input.brushes.append(brushes[pair]);
-        }
         STerrainRecipeBakeOptions options;
         options.tileSize=terrainAtlasMaximumNativeTileSize(atlas->authoredTileImages()).width();
         options.origin=origin+QPoint(x,y);
@@ -327,14 +326,40 @@ STerrainTileCommand CTerrainMixedEdge::resolve(const CTerrainEditModel& model,
         options.preserveReviewedCellRuntimeTypes=paintedMaterial<=0;
         // Bake only one cell at a time, keeping peak raster memory bounded.
         // Atlas insertion checks the actual typed-dedup budget afterward.
-        auto baked=CTerrainRecipeBaker::bake(input,options);
-        if(!baked.success) return refuse(baked.diagnostics.join(QLatin1Char('\n')));
-        const auto& recipe=baked.recipes.first();
-        const auto& tile=baked.tiles[baked.tileByCell.first()];
-        key+='|'+QByteArray::number(recipe.variant)+'|'+QByteArray::number(recipe.runtimeTerrainType);
+        options.cancelled=[&progress,completedCells,&ordered]() {
+            return progress && !progress(completedCells,ordered.size());
+        };
+        // Plan the exact stable label and runtime class before any raster work.
+        // Keep the existing recipe key, including saved/reopened B2 recipes.
+        const int variant=CTerrainRecipeBaker::stableVariant(s,options.origin,options.materialSeed,options.variants);
+        qint32 runtimeType=preferredType;
+        if(!options.preserveReviewedCellRuntimeTypes) {
+            QMap<qint32,int> coverage;int maximum=0;
+            for(qint32 id:corners(s))maximum=qMax(maximum,++coverage[materials[id].runtimeTerrainType]);
+            QVector<qint32> tied;
+            for(auto it=coverage.cbegin();it!=coverage.cend();++it)if(it.value()==maximum)tied.append(it.key());
+            if(tied.size()==1)runtimeType=tied.first();
+            else if(!tied.contains(runtimeType))return refuse(QStringLiteral("terrain.recipe.class_tie"));
+        }
+        if(runtimeType<0 || runtimeType>15)return refuse(QStringLiteral("terrain.recipe.invalid_reviewed_cell_class"));
+        key+='|'+QByteArray::number(variant)+'|'+QByteArray::number(runtimeType);
         const QString recipeKey=QStringLiteral("mixed-edge-b2:")+QString::fromLatin1(QCryptographicHash::hash(key,QCryptographicHash::Sha256).toHex());
         int slot=atlas->mixedEdgeSlot(recipeKey);
-        if(slot<0) slot=atlas->importMixedEdgeTile(tile.pixels,tile.runtimeTerrainType,s,recipeKey,report);
+        if(slot<0) {
+            if(!brushesReady) {
+                if(!buildStockBrushes(images,stockUniforms,stock,sourceSignatures,pairs,&brushes,report,
+                    includeWorldMaterialBank,options.cancelled))return {};
+                brushesReady=true;
+            }
+            for(int i=0;i<sorted.size();++i)for(int j=i+1;j<sorted.size();++j)
+                input.brushes.append(brushes[qMakePair(sorted[i],sorted[j])]);
+            auto baked=CTerrainRecipeBaker::bake(input,options);
+            if(options.cancelled())return {};
+            if(!baked.success)return refuse(baked.diagnostics.join(QLatin1Char('\n')));
+            const auto& tile=baked.tiles[baked.tileByCell.first()];
+            slot=atlas->importMixedEdgeTile(tile.pixels,tile.runtimeTerrainType,s,recipeKey,report);
+            if(statistics)++statistics->rasterized;
+        } else if(statistics)++statistics->reused;
         if(slot<0 || atlas->activeTileCount()>slotLimit)
             return refuse(QCoreApplication::translate("CTerrainMixedEdge", "Mixed-edge atlas budget exceeded: %1 / %2 slots. No material was substituted; extended 8192 is not enabled.").arg(atlas->activeTileCount()).arg(slotLimit));
         SMprPackedTile packed; packed.atlasIndex=quint8(slot/64); packed.tileIndex=quint8(slot%64);
@@ -377,7 +402,7 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
     const QMap<int,STerrainTransitionSignature>& sourceSignatures,
     const QSet<QPair<qint32,qint32>>& pairs,
     QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
-    CValidationReport* report,bool allowDeterministicWorldFallback)
+    CValidationReport* report,bool allowDeterministicWorldFallback,const std::function<bool()>& cancelled)
 {
     if(!output)return false;
     auto refuseBrush=[&](const QString& message) {
@@ -391,6 +416,7 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
     auto orderedPairs=pairs.values(); std::sort(orderedPairs.begin(),orderedPairs.end());
     for(const auto& pair:orderedPairs)
     {
+        if(cancelled && cancelled())return false;
         struct SStockCandidate { int slot, fragments; double score, residual, contrast; QVector<float> strip; };
         QVector<SStockCandidate> candidates;
         QString lastError;
@@ -399,6 +425,7 @@ bool CTerrainMixedEdge::buildStockBrushes(const QVector<QImage>& images,
         // reviewed physical two-material stock in the current map's atlas.
         for(int slot:stock.value(pair))
         {
+            if(cancelled && cancelled())return false;
             ++inspectedSources;
             QVector<float> strip; QString error;
             const QImage transition=images[slot].scaled(128,128,Qt::IgnoreAspectRatio,Qt::FastTransformation);

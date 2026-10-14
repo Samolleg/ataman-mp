@@ -2889,6 +2889,23 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
                         provenance, report, true);
 }
 
+QByteArray CTerrainVirtualAtlas::worldBoundaryRecipeKey(
+    const STerrainTransitionSignature& signature,const CTerrainEditModel& geometry,
+    const QPointF& origin,int cellX,int cellY,int sides,const QImage& body,quint8 rotation) const
+{
+    QByteArray bytes("world-boundary-raster-v1");QDataStream stream(&bytes,QIODevice::Append);
+    stream<<signatureKey(signature)<<m_generationSize<<m_generatedTilesOpaque<<m_distributionSeed
+        <<origin<<sides<<rotation<<imageHash(body);
+    for(int y=0;y<3;++y)for(int x=0;x<3;++x)
+        stream<<geometry.terrainVertexPosition(2*cellX+x,2*cellY+y);
+    for(qint32 id:corners(signature))
+        stream<<id<<imageHash(m_materialSources.value(id))<<qint32(m_materialBlendStyles.value(id,ETerrainBlendStyle::Organic));
+    if(body.isNull())for(const auto& mask:m_blendMaskTemplates)
+        stream<<signatureKey(mask.signature)<<mask.ownerMaterial<<mask.otherMaterial
+            <<qint32(mask.ownerStyle)<<qint32(mask.otherStyle)<<mask.sourceLabel<<imageHash(mask.ownershipMask);
+    return QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);
+}
+
 QImage CTerrainVirtualAtlas::worldBoundaryTile(
     const STerrainTransitionSignature& signature,
     const CTerrainEditModel& geometry, const QPointF& origin,
@@ -4614,6 +4631,7 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_animationCopySources = staged.m_animationCopySources;
     m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
     m_mixedEdgeRecipes = staged.m_mixedEdgeRecipes;
+    m_worldBoundaryRecipes = staged.m_worldBoundaryRecipes;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
@@ -5562,6 +5580,20 @@ int CTerrainWorkingAtlas::importMixedEdgeTile(const QImage& pixels, qint32 runti
         recipeKey, -1, report, true);
     if(slot >= 0) restoreMixedEdgeRecipe(slot, recipeKey);
     return slot;
+}
+
+int CTerrainWorkingAtlas::worldBoundarySlot(const QByteArray& key) const
+{
+    const auto found=m_worldBoundaryRecipes.constFind(key);
+    if(found==m_worldBoundaryRecipes.cend())return -1;
+    const int slot=found->first;
+    return slot>=0&&slot<m_workingImages.size()&&imageHash(m_workingImages[slot])==found->second?slot:-1;
+}
+
+void CTerrainWorkingAtlas::rememberWorldBoundaryRecipe(const QByteArray& key,int slot)
+{
+    if(slot>=0&&slot<m_workingImages.size())
+        m_worldBoundaryRecipes.insert(key,qMakePair(slot,imageHash(m_workingImages[slot])));
 }
 
 int CTerrainWorkingAtlas::importWorldBoundaryTile(const QImage& pixels,qint32 runtimeType,

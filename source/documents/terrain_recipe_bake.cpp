@@ -1,6 +1,9 @@
 #include "terrain_recipe_bake.h"
 
 #include <QCryptographicHash>
+#include <QCache>
+#include <QDataStream>
+#include <QVarLengthArray>
 #include <QtEndian>
 #include <algorithm>
 #include <climits>
@@ -65,9 +68,14 @@ QByteArray pixelHash(const QImage& image)
 bool opaqueSquare(const QImage& image)
 {
     if(image.isNull() || image.width() != image.height() || image.width() < 2) return false;
+    static thread_local QCache<qint64,bool> cache(8192);
+    if(const auto* known=cache.object(image.cacheKey()))return *known;
     for(int y = 0; y < image.height(); ++y)
         for(int x = 0; x < image.width(); ++x)
-            if(qAlpha(image.pixel(x,y)) != 255) return false;
+            if(qAlpha(image.pixel(x,y)) != 255) {
+                cache.insert(image.cacheKey(),new bool(false));return false;
+            }
+    cache.insert(image.cacheKey(),new bool(true));
     return true;
 }
 
@@ -83,14 +91,16 @@ struct SPrepared
     QVector<qint32> ids;
     QVector<QVector<QImage>> textures;
     QMap<QPair<qint32,qint32>, const STerrainRecipeBrush*> brushes;
+    QVector<QVector<quint32>> pairPhases;
 };
 
-QVector<double> scores(const SPrepared& p, const QVector<qint32>& s,
+using Scores=QVarLengthArray<double,4>;
+Scores scores(const SPrepared& p, const QVector<qint32>& s,
                        double x, double y, int variant)
 {
     const double weights[] = {(1-x)*(1-y), x*(1-y), x*y, (1-x)*y};
     const double fade = 16*x*(1-x)*y*(1-y);
-    QVector<double> result(p.ids.size(), 0);
+    Scores result(p.ids.size());std::fill(result.begin(),result.end(),0.0);
     for(int i = 0; i < p.ids.size(); ++i)
     {
         double raw = 0;
@@ -118,8 +128,8 @@ QRgb sample(const QVector<QImage>& textures, double x, double y, int variant, in
 // x/y are the fractional coordinates of the world grid. Periodic pair phase
 // and zero interior fade on every grid line keep the finite recipe grammar.
 double pairOwnership(const SPrepared& p, const QVector<qint32>& s,
-    const QVector<double>& sc, const QVector<double>& xp, const QVector<double>& xm,
-    const QVector<double>& yp, const QVector<double>& ym,
+    const Scores& sc, const Scores& xp, const Scores& xm,
+    const Scores& yp, const Scores& ym,
     int a, int b, double x, double y, int v, bool polished, double* distanceOut)
 {
     const auto* brush=p.brushes.value(qMakePair(p.ids[a],p.ids[b]),nullptr);
@@ -135,7 +145,7 @@ double pairOwnership(const SPrepared& p, const QVector<qint32>& s,
     // inside the cell. Geometry noise still provides the four shape labels.
     const double along=(x+y)*128;
     int ti=(int(std::floor(along+1e-7))%128
-        + int(seed(p.ids[a],p.ids[b],0)%512))%512;
+        + int(p.pairPhases[a][b]))%512;
     if(!polished)
     {
         // Exact crisp-stock-v1 transport, retained for 138 HD witnesses.
@@ -146,14 +156,15 @@ double pairOwnership(const SPrepared& p, const QVector<qint32>& s,
         double cy=.5*((q[3]-q[0])+(q[2]-q[1]));
         double cn=std::hypot(cx,cy);
         if(cn<1e-6){cx=1;cy=1;cn=std::sqrt(2.0);}
-        const double oldAlong=((-cy*x+cx*y)/cn*128+v*47)*fade+seed(p.ids[a],p.ids[b],0)%512;
+        const double oldAlong=((-cy*x+cx*y)/cn*128+v*47)*fade+p.pairPhases[a][b];
         ti=int(std::floor(oldAlong-std::floor(oldAlong/512)*512));
     }
     const int di=qBound(0,int(std::nearbyint(distance))+32,64);
     return brush ? std::nearbyint(brush->ownership[ti*65+di]*4)/4 : 1;
 }
 
-QImage render(const SPrepared& p, const STerrainRecipe& r, int size, bool legacy, bool polished)
+QImage render(const SPrepared& p, const STerrainRecipe& r, int size, bool legacy, bool polished,
+    const std::function<bool()>& cancelled)
 {
     const QVector<qint32> s = corners(r.signature);
     QImage image(size,size,QImage::Format_RGBA8888);
@@ -163,12 +174,13 @@ QImage render(const SPrepared& p, const STerrainRecipe& r, int size, bool legacy
     const bool junction=distinct.size()>2 && !legacy;
     for(int py = 0; py < size; ++py)
     {
+        if(cancelled && cancelled())return {};
         uchar* row = image.scanLine(size-1-py);
         const double y = double(py)/(size-1);
         for(int px = 0; px < size; ++px)
         {
             const double x = double(px)/(size-1), fade = 16*x*(1-x)*y*(1-y);
-            const QVector<double> sc = scores(p,s,x,y,v);
+            const Scores sc = scores(p,s,x,y,v);
             int a = -1, b = -1;
             for(int i = 0; i < sc.size(); ++i)
             {
@@ -176,7 +188,7 @@ QImage render(const SPrepared& p, const STerrainRecipe& r, int size, bool legacy
                 else if(a < 0 || sc[i] >= sc[a]) a = i;
             }
             double alpha = 1;
-            QVector<double> weights(sc.size(),0);
+            Scores weights(sc.size());std::fill(weights.begin(),weights.end(),0.0);
             if(a >= 0 && sc[a] > 0 && sc[b] > 0)
             {
                 if(a > b) std::swap(a,b);
@@ -515,6 +527,14 @@ bool CTerrainRecipeBaker::extractStockStrip(const QImage& transition,
     *output=bestStrip; if(error) error->clear(); return true;
 }
 
+int CTerrainRecipeBaker::stableVariant(const STerrainTransitionSignature& signature,
+    const QPoint& origin, quint32 materialSeed, int variants)
+{
+    if(variants<1)return -1;
+    qint64 salt=0;for(qint32 material:corners(signature))salt+=material;
+    return int(seed(origin.x(),origin.y(),salt+materialSeed)%quint64(variants));
+}
+
 STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput& input,
                                                 const STerrainRecipeBakeOptions& options)
 {
@@ -554,13 +574,27 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
     }
     for(auto it=materials.cbegin();it!=materials.cend();++it)
     {
+        if(options.cancelled && options.cancelled()) {
+            result.diagnostics.append(QStringLiteral("terrain.recipe.cancelled"));return result;
+        }
         prepared.ids.append(it.key()); QVector<QImage> textures;
+        // Repeated one-cell calls share immutable source preparation. Image
+        // cache keys change with pixels; weights/seed/mode belong to the key.
+        static thread_local QCache<QByteArray,QVector<QImage>> sourceCache(64*1024);
+        QByteArray sourceKey;QDataStream keyStream(&sourceKey,QIODevice::WriteOnly);
+        keyStream<<it.key()<<options.variants<<options.materialSeed<<options.polishedMaterialEdges<<it->uniformWeights;
+        for(const auto& image:it->uniformTiles)keyStream<<image.cacheKey();
+        if(const auto* cached=sourceCache.object(sourceKey)) {
+            prepared.textures.append(*cached);continue;
+        }
         if(!options.polishedMaterialEdges)
         {
             for(const QImage& image:it->uniformTiles) {
                 const int pad=image.width()/16;
                 textures.append(image.copy(pad,pad,image.width()-2*pad,image.height()-2*pad));
             }
+            int cost=0;for(const auto& image:textures)cost+=image.width()*image.height()*4/1024+1;
+            sourceCache.insert(sourceKey,new QVector<QImage>(textures),qMax(1,cost));
             prepared.textures.append(textures);continue;
         }
         const auto weights=it->uniformWeights.isEmpty()
@@ -607,7 +641,12 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
             periodicSources.insert(index,periodic);
         }
         prepared.textures.append(textures);
+        int cost=0;for(const auto& image:textures)cost+=image.width()*image.height()*4/1024+1;
+        sourceCache.insert(sourceKey,new QVector<QImage>(textures),qMax(1,cost));
     }
+    prepared.pairPhases=QVector<QVector<quint32>>(prepared.ids.size(),QVector<quint32>(prepared.ids.size(),0));
+    for(int a=0;a<prepared.ids.size();++a)for(int b=a+1;b<prepared.ids.size();++b)
+        prepared.pairPhases[a][b]=seed(prepared.ids[a],prepared.ids[b],0)%512;
     for(const auto& brush : input.brushes)
     {
         const auto key=qMakePair(brush.firstMaterial,brush.secondMaterial);
@@ -678,12 +717,11 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
         const auto s=corners(result.recipes[members.front()].signature);
         if(options.stableCoordinateVariants)
         {
-            qint64 salt=0; for(qint32 mat : s) salt+=mat;
             QSet<int> labels;
             for(int cell : members)
             {
-                const int label=int(seed(qint64(options.origin.x())+cell%input.tileWidth,
-                    qint64(options.origin.y())+cell/input.tileWidth,salt+options.materialSeed)%quint64(options.variants));
+                const int label=stableVariant(result.recipes[cell].signature,
+                    options.origin+QPoint(cell%input.tileWidth,cell/input.tileWidth),options.materialSeed,options.variants);
                 result.recipes[cell].variant=label;
                 labels.insert(label);
             }
@@ -719,8 +757,9 @@ STerrainRecipeBakeResult CTerrainRecipeBaker::bake(const STerrainRecipeBakeInput
         int tile=recipeCache.value(key,-1);
         if(tile<0)
         {
-            STerrainRecipeBakedTile baked; baked.pixels=render(prepared,r,options.tileSize,options.diagnosticJunctionPreview,options.polishedMaterialEdges);
-            if(baked.pixels.isNull()) { result.diagnostics.append(QStringLiteral("terrain.recipe.allocation_failed")); return result; }
+            STerrainRecipeBakedTile baked; baked.pixels=render(prepared,r,options.tileSize,options.diagnosticJunctionPreview,options.polishedMaterialEdges,options.cancelled);
+            if(baked.pixels.isNull()) { result.diagnostics.append(options.cancelled&&options.cancelled()
+                ?QStringLiteral("terrain.recipe.cancelled"):QStringLiteral("terrain.recipe.allocation_failed")); return result; }
             baked.pixelSha256=pixelHash(baked.pixels); baked.runtimeTerrainType=r.runtimeTerrainType;
             const QByteArray typed=baked.pixelSha256+':'+QByteArray::number(r.runtimeTerrainType);
             tile=pixelCache.value(typed,-1);

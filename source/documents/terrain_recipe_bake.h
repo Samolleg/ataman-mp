@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QStringList>
 #include <QVector>
+#include <functional>
 #include "terrain_edit_model.h"
 
 // Offline RGB land bake only. No atlas publication, packed references, UI,
@@ -80,6 +81,8 @@ struct STerrainRecipeBakeOptions
     // MVP's exact predecessor-preserving mode. Requires one reviewed class
     // per cell in preferredRuntimeTypes; ordinary generation uses majority/tie.
     bool preserveReviewedCellRuntimeTypes{false};
+    // Worker-side cooperative cancellation. No GUI callback is invoked here.
+    std::function<bool()> cancelled;
 };
 
 struct STerrainRecipeBakeInput
@@ -121,6 +124,9 @@ struct STerrainRecipeBakeResult
 class CTerrainRecipeBaker
 {
 public:
+    // Same deterministic label used by bake(), without rasterizing a tile.
+    static int stableVariant(const STerrainTransitionSignature& signature,
+        const QPoint& origin, quint32 materialSeed, int variants = 4);
     // Deterministic opaque source used by world mixed-edge bakes. Transparent
     // texels are composited against the nearest visible source texel.
     static QImage makeOpaqueMaterialSource(const QImage& source);

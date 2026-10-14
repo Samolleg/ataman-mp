@@ -4,6 +4,12 @@
 #include "terrain_virtual_atlas.h"
 #include "terrain_recipe_bake.h"
 
+struct STerrainMixedEdgeStatistics
+{
+    int rasterized{0};
+    int reused{0};
+};
+
 // Private staging only; the caller owns committing model+atlas and uploading
 // the preview together. No file writes and no alternative publication path.
 class CTerrainMixedEdge
@@ -20,7 +26,8 @@ public:
         const QSet<QPair<qint32,qint32>>& pairs,
         QMap<QPair<qint32,qint32>,STerrainRecipeBrush>* output,
         CValidationReport* report = nullptr,
-        bool allowDeterministicWorldFallback = false);
+        bool allowDeterministicWorldFallback = false,
+        const std::function<bool()>& cancelled = {});
     static STerrainTileCommand resolve(const CTerrainEditModel& model,
         CTerrainWorkingAtlas* stagedAtlas, const QSet<int>& affectedCells,
         const QMap<qint32, qint32>& materialTypes,
@@ -29,7 +36,9 @@ public:
         quint32 uniformSeed, bool randomizeUniformRotation,
         CValidationReport* report, int slotLimit = 4096,
         bool includeWorldMaterialBank = false,
-        bool expandConnectedFootprint = true);
+        bool expandConnectedFootprint = true,
+        const std::function<bool(int,int)>& progress = {},
+        STerrainMixedEdgeStatistics* statistics = nullptr);
 };
 
 #endif

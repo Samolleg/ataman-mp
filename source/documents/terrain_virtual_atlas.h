@@ -299,6 +299,11 @@ public:
         QMap<QByteArray,QImage>* canonicalCache,
         CValidationReport* report = nullptr,
         const QImage& resolvedBody = QImage(), quint8 bodyRotation = 0) const;
+    // Complete raster identity, including sources, body, displaced geometry
+    // and world placement. Allows working atlases to reuse a ready seam tile.
+    QByteArray worldBoundaryRecipeKey(const STerrainTransitionSignature& signature,
+        const CTerrainEditModel& geometry,const QPointF& origin,int cellX,int cellY,
+        int sides,const QImage& resolvedBody = QImage(),quint8 bodyRotation = 0) const;
     // Review-only A/B compositor. Runtime generation remains encoded-RGB
     // until the focused visual comparison is explicitly accepted.
     QImage reviewGeneratedBlendLinearLight(
@@ -514,6 +519,8 @@ public:
         int sourceSlot, CValidationReport* report, bool preserveAuthoredPages = false);
     int importWorldBoundaryTile(const QImage& pixels, qint32 runtimeType,
         const STerrainTransitionSignature& signature, CValidationReport* report = nullptr);
+    int worldBoundarySlot(const QByteArray& key) const;
+    void rememberWorldBoundaryRecipe(const QByteArray& key,int slot);
     int mixedEdgeSlot(const QString& recipeKey) const
     { return m_mixedEdgeRecipes.value(recipeKey, -1); }
     const QMap<QString, int>& mixedEdgeRecipes() const { return m_mixedEdgeRecipes; }
@@ -579,6 +586,8 @@ private:
     QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
     QMap<int, QStringList> m_worldBankNamespaceAliases;
     QMap<QString, int> m_mixedEdgeRecipes;
+    // Pixel identity guards against a later reuse of an unreferenced slot.
+    QMap<QByteArray,QPair<int,QByteArray>> m_worldBoundaryRecipes;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
 };

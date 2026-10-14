@@ -34,6 +34,7 @@
 #include <QSettings>
 #include <QThreadPool>
 #include <QtConcurrent>
+#include <QScopedValueRollback>
 #include <QtEndian>
 #include <cstddef>
 #include <cmath>
@@ -14941,9 +14942,11 @@ bool CView::ensureGlobalTerrainMaterialSources(
 }
 
 bool CView::loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
-    const QSize& size, QMap<qint32,QImage>* result, CValidationReport* report)
+    const QSize& size, QMap<qint32,QImage>* result, CValidationReport* report,
+    const std::function<bool()>& checkpoint)
 {
     for(qint32 material:materials) {
+        if(checkpoint && !checkpoint())return false;
         STerrainGlobalMaterialFamily family;
         for(const auto& candidate:m_terrainGlobalFamilies)
             if(candidate.id==material){family=candidate;break;}
@@ -14972,10 +14975,11 @@ bool CView::importWorldMixedEdgeTransitionBank(
     QMap<QString,SWorkingTerrainResolveStage>* stages,
     const QSet<QPair<qint32,qint32>>& materialPairs,
     const QMap<qint32,qint32>& materialTypes,
-    const QSize& tileSize,CValidationReport* report)
+    const QSize& tileSize,CValidationReport* report,const std::function<bool()>& checkpoint)
 {
     if(!stages||materialPairs.isEmpty())return true;
     for(const STerrainGlobalTransitionSource& source:m_terrainGlobalTransitionSources.values()) {
+        if(checkpoint && !checkpoint())return false;
         if(source.layer!=ETerrainAtlasLayer::Land||source.slot<0||source.slot>=source.atlasSlotCount)continue;
         QSet<qint32> ids{source.signature.northWest,source.signature.northEast,
             source.signature.southEast,source.signature.southWest};
@@ -21718,6 +21722,8 @@ void CView::requestResolveMissingTerrainBlends(
 
 void CView::resolveMissingTerrainBlends()
 {
+    if(m_terrainResolveInProgress)return;
+    QScopedValueRollback<bool> resolveGuard(m_terrainResolveInProgress,true);
     // This explicit map-wide action owns its scope. Smooth is a brush
     // preference, not permission to restrict repair to edited Ground cells.
     finishSculptStroke();endTileBrushGroup();
@@ -21890,10 +21896,19 @@ void CView::resolveMissingTerrainBlends()
 
     finishSculptStroke();
     endTileBrushGroup();
+    const bool interactionWasSuspended=m_landscapeInteractionSuspended;
+    setLandscapeInteractionSuspended(true);
+    struct RestoreResolveInteraction {
+        std::function<void()> restore;
+        ~RestoreResolveInteraction(){restore();}
+    } restoreInteraction{[this,interactionWasSuspended]() {
+        setLandscapeInteractionSuspended(interactionWasSuspended);
+    }};
     QString worldSummary;
     if(resolveWorldMaterialBlends(&worldSummary,&report,&audit)) {
         showResolveResult(report.hasErrors()?QMessageBox::Critical:QMessageBox::Information,worldSummary);
-        finishAudit(report.hasErrors()?QStringLiteral("world-refused"):QStringLiteral("world-completed"));
+        finishAudit(audit.outcome==QStringLiteral("cancelled")?audit.outcome
+            :report.hasErrors()?QStringLiteral("world-refused"):QStringLiteral("world-completed"));
         return;
     }
     audit.landFieldBefore = fieldAudit(m_terrainEdit,

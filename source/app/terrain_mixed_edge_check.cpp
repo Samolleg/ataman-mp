@@ -1,5 +1,6 @@
 #include "terrain_mixed_edge_check.h"
 #include "terrain_mixed_edge.h"
+#include "terrain_resolve_task.h"
 #include "terrain_atlas_profile.h"
 #include "terrain_semantic_field_store.h"
 #include "world_material_boundary.h"
@@ -35,6 +36,7 @@
 #include <QCheckBox>
 #include <QProgressBar>
 #include <QSettings>
+#include <QElapsedTimer>
 
 namespace {
 QByteArray read(const QString& path) { QFile f(path); return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray(); }
@@ -234,6 +236,53 @@ int runTerrainMixedEdgeCheck(const QString& fixturePath)
     auto staged=atlas.createStagingCopy();CValidationReport bakeReport;
     auto resolution=CTerrainMixedEdge::resolve(model,staged.data(),affected,materialTypes,{},QPoint(),paint,17,false,&bakeReport);
     if(!check(!bakeReport.hasErrors()&&!resolution.deltas.isEmpty(),"mixed-edge physical resolution")){log<<bakeReport.toText();return 1;}
+    {
+        const int count=staged->activeTileCount();
+        const auto identity=staged->stateFingerprint();
+        STerrainMixedEdgeStatistics warmStatistics;CValidationReport warmReport;
+        QElapsedTimer timer;timer.start();
+        const auto warm=CTerrainMixedEdge::resolve(model,staged.data(),affected,materialTypes,{},QPoint(),paint,17,false,
+            &warmReport,4096,false,true,{},&warmStatistics);
+        bool identical=warm.deltas.size()==resolution.deltas.size();
+        for(int i=0;identical&&i<warm.deltas.size();++i) {
+            const auto& a=warm.deltas[i];const auto& b=resolution.deltas[i];
+            identical=a.globalX==b.globalX&&a.globalY==b.globalY&&a.before==b.before&&a.after==b.after;
+        }
+        check(!warmReport.hasErrors()&&identical&&warmStatistics.rasterized==0&&warmStatistics.reused>0
+            &&staged->activeTileCount()==count&&staged->stateFingerprint()==identity,
+            "ready recipes reuse exact packed deltas and atlas without rasterizing");
+        log<<"WARM resolveMs="<<timer.elapsed()<<" rasterized="<<warmStatistics.rasterized<<" reused="<<warmStatistics.reused<<'\n';
+        if(fixture.value("resolvePerformanceOnly").toBool()) {
+            // Use the production modal worker and cancellation path. GUI timer
+            // ticks while a real cold mixed-edge bake runs on an isolated copy.
+            const auto liveAtlas=atlas.stateFingerprint();
+            const auto fieldIdentity=[&]() {
+                CTerrainVirtualMaterialField field;
+                model.copyVirtualMaterialField(ETerrainTileLayer::Land,&field,false);
+                return field.stableSha256();
+            };
+            const auto liveField=fieldIdentity();
+            auto cold=atlas.createStagingCopy();CValidationReport cancelledReport;
+            STerrainTileCommand cancelledCommand;STerrainMixedEdgeStatistics cancelledStatistics;
+            int heartbeats=0;QTimer heartbeat;heartbeat.setInterval(2);
+            QObject::connect(&heartbeat,&QTimer::timeout,[&](){++heartbeats;});
+            CTerrainResolveTask task(nullptr);heartbeat.start();
+            QTimer::singleShot(20,&task,[&task](){task.reject();});
+            task.run(QStringLiteral("Проверка отмены подготовки переходов"),[&]() {
+                cancelledCommand=CTerrainMixedEdge::resolve(model,cold.data(),affected,materialTypes,{},QPoint(),paint,17,false,
+                    &cancelledReport,4096,false,true,[&](int done,int total){return task.updateWork(done,total);},&cancelledStatistics);
+                return !cancelledReport.hasErrors();
+            });
+            heartbeat.stop();
+            check(task.cancelled()&&heartbeats>0&&cancelledCommand.isEmpty()&&!cancelledReport.hasErrors(),
+                "GUI timer and cancellation remain responsive during cold worker preparation");
+            check(atlas.stateFingerprint()==liveAtlas
+                &&fieldIdentity()==liveField,
+                "cancelled staging leaves live atlas and material field unchanged");
+            log<<"CANCEL heartbeats="<<heartbeats<<" rasterized="<<cancelledStatistics.rasterized<<'\n';
+            log<<"RESULT PASS="<<passed<<" FAIL="<<failed<<" SKIP=0\n";return failed?1:0;
+        }
+    }
     check(write(output+"/stock-diagnostics.txt",bakeReport.toText().toUtf8()),"measured stock source diagnostics");
     const int mixedSlot=SMprPackedTile::decode(resolution.deltas.first().after).atlasSlot();
     const auto mixedSignature=resolution.deltas.first().requestedSignature;

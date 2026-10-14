@@ -35,6 +35,8 @@
 #include <QUndoStack>
 #include <QTextStream>
 #include <QThread>
+#include <QElapsedTimer>
+#include <QLabel>
 #include <QtConcurrent>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -206,7 +208,8 @@ int runNeighborPerformanceCheck()
         CLandscapeTools tools;view.attachLandscapeTools(&tools);
         // This opt-in diagnostic changes only in-memory models: no snapshots
         // of installed game resources are needed or written.
-        if(qEnvironmentVariableIsSet("EI_WORLD_MIXED_EDGE_BRUSH_CHECK")) {
+        if(qEnvironmentVariableIsSet("EI_WORLD_MIXED_EDGE_BRUSH_CHECK")
+           && !qEnvironmentVariableIsSet("EI_WORLD_RESOLVE_RESPONSIVE_CHECK")) {
         if(auto* resourceRoots=dynamic_cast<COptStringList*>(settings.opt(eOptSetResource,"resourceRoots")))
             resourceRoots->setValue({root+"/res/HDPack_Terrain.res"});
         }
@@ -451,6 +454,85 @@ int runNeighborPerformanceCheck()
                 recovered.copyVirtualMaterialField(ETerrainTileLayer::Overlay,&beforeOverlayFields[id],false);
             }
             inputHashes[root+"/world-map-layouts.json"]=digest(root+"/world-map-layouts.json");
+            if(qEnvironmentVariableIsSet("EI_WORLD_RESOLVE_RESPONSIVE_CHECK")) {
+                QMap<QString,CTerrainEditModel> originals;
+                for(const auto& id:cohort)originals[id]=view.m_worldTerrainSession.documents[id]->terrain;
+                const int undoIndex=view.m_pUndoStack->index();
+                const auto matches=[&](const QMap<QString,QByteArray>& models,const QMap<QString,QByteArray>& atlases) {
+                    bool same=true;
+                    for(const auto& id:cohort) {
+                        const auto doc=view.m_worldTerrainSession.documents[id];
+                        same &= modelState(*doc)==models.value(id)&&doc->atlas->stateFingerprint()==atlases.value(id);
+                    }
+                    return same;
+                };
+                QElapsedTimer elapsed;elapsed.start();qint64 lastTick=0,maxGap=0;int ticks=0;
+                QTimer heartbeat;heartbeat.setInterval(10);
+                QObject::connect(&heartbeat,&QTimer::timeout,[&]() {
+                    const auto now=elapsed.elapsed();maxGap=qMax(maxGap,now-lastTick);lastTick=now;++ticks;
+                });heartbeat.start();
+                bool cancelRequested=false;QTimer cancelTimer;cancelTimer.setInterval(10);
+                QObject::connect(&cancelTimer,&QTimer::timeout,[&]() {
+                    for(auto* widget:QApplication::topLevelWidgets())
+                        if(widget->objectName()==QStringLiteral("terrainResolveProgressDialog")) {
+                            const auto label=widget->findChild<QLabel*>();
+                            if(label&&label->text().startsWith(QStringLiteral("Переходы карты"))) {
+                                cancelRequested=true;static_cast<QDialog*>(widget)->reject();cancelTimer.stop();
+                            }
+                        }
+                });cancelTimer.start();
+                QString summary;CValidationReport cancelled;STerrainResolveAuditSession cancelledAudit;
+                const bool cancelledResult=view.resolveWorldMaterialBlends(&summary,&cancelled,&cancelledAudit);
+                cancelTimer.stop();
+                check(cancelledResult&&cancelRequested&&!cancelled.hasErrors()&&cancelledAudit.outcome=="cancelled",
+                    "actual eight-map repair cooperatively cancels during mixed-edge preparation");
+                check(matches(beforeModels,beforeAtlases)&&view.m_pUndoStack->index()==undoIndex,
+                    "cancel preserves all cohort models, atlases and local Undo index");
+                if(cancelled.hasErrors())out<<cancelled.toText()<<'\n';
+                elapsed.restart();lastTick=0;maxGap=0;ticks=0;
+                CValidationReport repair;STerrainResolveAuditSession audit;
+                const bool repaired=view.resolveWorldMaterialBlends(&summary,&repair,&audit)&&!repair.hasErrors();
+                const auto coldMs=elapsed.elapsed();
+                maxGap=qMax(maxGap,coldMs-lastTick);
+                check(repaired,"actual SD/HD eight-map repair completes after cancellation");
+                out<<summary<<'\n'<<repair.toText()<<'\n';out.flush();
+                if(!repaired)return 1;
+                check(ticks>0&&maxGap<4000,"GUI event loop stays responsive throughout full cohort repair");
+                QMap<QString,QByteArray> afterModels,afterAtlases;
+                bool nativePreserved=true;
+                for(const auto& id:cohort) {
+                    const auto doc=view.m_worldTerrainSession.documents[id];const auto& before=originals[id];
+                    QSet<int> animated;
+                    for(const auto& animation:doc->baseline.mapInfo().animatedTiles)
+                        for(int frame=0;frame<qMax(1,int(animation.frameCount));++frame)animated.insert(animation.tileIndex+frame);
+                    for(int y=0;y<before.tileCountY();++y)for(int x=0;x<before.tileCountX();++x)
+                        for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}) {
+                            bool found=false;const auto packed=before.packedTile(x,y,layer,&found);
+                            if(!found||packed==0xffff)continue;
+                            const int slot=SMprPackedTile::decode(packed).atlasSlot();
+                            if(animated.contains(slot)||doc->baseline.mapInfo().tileTypes.value(slot,-1)==6)
+                                nativePreserved &= packed==doc->terrain.packedTile(x,y,layer);
+                        }
+                    afterModels[id]=modelState(*doc);afterAtlases[id]=doc->atlas->stateFingerprint();
+                }
+                check(nativePreserved,"native water and animated packed references are unchanged on all maps");
+                if(!audit.undoCommandId.isEmpty()) {
+                    check(view.worldTerrainHistory(false,true)&&matches(beforeModels,beforeAtlases),"whole repair Undo restores exact cohort state");
+                    check(view.worldTerrainHistory(true,true)&&matches(afterModels,afterAtlases),"whole repair Redo restores exact result");
+                }
+                elapsed.restart();lastTick=0;maxGap=0;ticks=0;
+                CValidationReport repeat;STerrainResolveAuditSession repeated;
+                const bool warm=view.resolveWorldMaterialBlends(&summary,&repeat,&repeated)&&!repeat.hasErrors();
+                const auto warmMs=elapsed.elapsed();heartbeat.stop();
+                check(warm&&repeated.generatedTupleCount==0,"warm eight-map repair performs zero recipe or seam rasterizations");
+                check(matches(afterModels,afterAtlases),"warm repair preserves exact documents and ready atlases");
+                bool inputUnchanged=true;
+                for(auto it=inputHashes.cbegin();it!=inputHashes.cend();++it)inputUnchanged &= digest(it.key())==it.value();
+                check(inputUnchanged,"all copied MPR and world layout input bytes remain unchanged");
+                out<<"RESPONSIVE coldMs="<<coldMs<<" warmMs="<<warmMs<<" warmGenerated="<<repeated.generatedTupleCount
+                    <<" warmGuiTicks="<<ticks<<" warmMaxGapMs="<<maxGap<<"\n"<<repeat.toText()<<'\n';
+                out<<"RESULT failures="<<failures<<"\n";return failures?1:0;
+            }
             inspectSession("repair-before",false);
             nativeSeam("repair-before");
             QString summary;CValidationReport repair;STerrainResolveAuditSession audit;

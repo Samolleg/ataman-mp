@@ -693,12 +693,14 @@ private:
                                    STerrainResolveAuditSession* audit = nullptr,
                                    bool seamsOnly = false);
     bool loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
-        const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report);
+        const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report,
+        const std::function<bool()>& checkpoint = {});
     bool importWorldMixedEdgeTransitionBank(
         QMap<QString,SWorkingTerrainResolveStage>* stages,
         const QSet<QPair<qint32,qint32>>& materialPairs,
         const QMap<qint32,qint32>& materialTypes,
-        const QSize& tileSize, CValidationReport* report);
+        const QSize& tileSize, CValidationReport* report,
+        const std::function<bool()>& checkpoint = {});
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();
@@ -1284,6 +1286,7 @@ private:
     bool m_legacyTerrainProfileCollision{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
+    bool m_terrainResolveInProgress{false};
     CTileBrushStrokePolicy m_tileBrushStrokePolicy;
     bool m_terrainAssignmentPromptPending{false};
     bool m_tilePaintStrokeActive{false};
