@@ -645,6 +645,7 @@ private slots:
     void portableMprProfilesDoNotCollideForSharedResourceIdentity();
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
+    void retainedRejectedArtworkStaysDecodableButNotPaintSelectable();
     void embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes();
     void prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoadedAtlas();
     void indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads();
@@ -11774,6 +11775,58 @@ void EnduranceDocumentTests::finalizedProfileBindsPostDxtPhysicalPagesAndPadding
     QVERIFY(incompleteReport.hasErrors());
     QVERIFY(incompleteReport.toText().contains(
         QStringLiteral("logical slot 3")));
+}
+
+void EnduranceDocumentTests::retainedRejectedArtworkStaysDecodableButNotPaintSelectable()
+{
+    STerrainAtlasProfile source;
+    source.mprNamespace = "paint-policy";
+    source.atlasSlotCount = 64;source.textureCount = 1;source.approved = true;
+    QVector<QImage> images(64,QImage(8,8,QImage::Format_RGBA8888));
+    for(int i=0;i<images.size();++i)images[i].fill(QColor(i*3, i*2, i,255));
+    source.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(images);
+    for(int material:{1,2}) {
+        STerrainAtlasProfileFamily family;family.id=material;
+        family.name=QString("Family %1").arg(material);family.tileType=0;
+        source.families.append(family);
+    }
+    for(int slot=0;slot<4;++slot) {
+        STerrainAtlasProfileSlot definition;definition.slot=slot;
+        definition.signature.northWest=definition.signature.southWest=slot==1?2:1;
+        definition.signature.northEast=definition.signature.southEast=slot==0?1:2;
+        definition.paintSelectable=slot!=2;source.slotDefinitions.append(definition);
+    }
+    CValidationReport report;QVERIFY(source.normalizeMembership(&report));
+    STerrainAtlasProfile reopened;
+    QVERIFY(STerrainAtlasProfile::fromBytes(source.toBytes(),&reopened,&report));
+    QVERIFY(!reopened.slotDefinitions[2].paintSelectable);
+    QVERIFY(reopened.slotDefinitions[3].paintSelectable); // Missing optional field defaults to true.
+    const auto analysis=reopened.usableAnalysis(&report);QVERIFY(analysis.usable);
+    bool found=false;const auto signature=analysis.landCatalog.gridSignatureForPacked(2,&found);QVERIFY(found);
+    for(int x=0;x<32;++x) {
+        const auto selected=analysis.landCatalog.selectForPaint(signature,x,7,23,&found);
+        QVERIFY(found);QCOMPARE(SMprPackedTile::decode(selected).atlasSlot(),3);
+    }
+    const auto draft=CTerrainAtlasProfileStore::workingAtlasProfile("draft-policy",images,
+        analysis.landCatalog,reopened,{},&report);
+    QVERIFY(!draft.slotDefinitions[2].paintSelectable);
+    STerrainAtlasFinalization finalization;finalization.success=true;
+    finalization.isolatedNamespace="portable-policy";finalization.textureCount=1;
+    for(int slot=0;slot<4;++slot) {
+        STerrainFinalizedTile tile;tile.authored=true;tile.sourceSlot=slot;
+        tile.sourceNamespace=source.mprNamespace;tile.pixels=images[slot];
+        tile.pixelSha256=QByteArray(64,'a');tile.paintSelectable=source.slotDefinitions[slot].paintSelectable;
+        tile.canonicalSignature=CTerrainTransitionCatalog::mirroredGridY(source.slotDefinitions[slot].signature);
+        finalization.tiles.append(tile);
+    }
+    const auto portable=CTerrainAtlasProfileStore::portableFinalizedProfile(finalization,images,
+        source,ETerrainAtlasLayer::Land,{}, {},&report);
+    QVERIFY(!portable.slotDefinitions[2].paintSelectable);
+    STerrainAtlasProfile saved;
+    QVERIFY(STerrainAtlasProfile::fromBytes(portable.toBytes(),&saved,&report));
+    QVERIFY(!saved.slotDefinitions[2].paintSelectable);
+    QVERIFY(saved.usableAnalysis(&report).landCatalog.variantForPacked(2,&found).paintSelectable==false);
+    QVERIFY(found);QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
 }
 
 void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraftReopen()

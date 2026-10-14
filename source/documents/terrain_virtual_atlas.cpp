@@ -3406,8 +3406,11 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             decodeCatalog.variantForPacked(
                 basePacked.encode(), &provenanceFound);
         if(provenanceFound)
+        {
             candidate.routeOwnerMaterial =
                 provenanceVariant.routeOwnerMaterial;
+            candidate.paintSelectable = provenanceVariant.paintSelectable;
+        }
         const bool signatureAssigned = signatureFound
             && candidate.canonicalSignature.northWest > 0
             && candidate.canonicalSignature.northEast > 0
@@ -3429,7 +3432,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             + QByteArray(1, '\0')
             + QByteArray::number(candidate.runtimeTerrainType)
             + QByteArray(1, '\0')
-            + QByteArray::number(candidate.routeOwnerMaterial);
+            + QByteArray::number(candidate.routeOwnerMaterial)
+            + QByteArray(1, candidate.paintSelectable ? '\1' : '\0');
         const QVector<int> matchingHashes = exactAuthoredOutputs.value(dedupeKey);
         for(int outputSlot : matchingHashes)
         {
@@ -4673,6 +4677,15 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
     addInt(catalogSignatures.size());
     for(const STerrainTransitionSignature& signature : catalogSignatures)
         addSignature(signature);
+    for(int slot = 0; slot < activeTileCount(); ++slot)
+    {
+        SMprPackedTile packed;
+        packed.atlasIndex = quint8(slot / 64);
+        packed.tileIndex = quint8(slot % 64);
+        bool found = false;
+        const auto variant = m_workingCatalog.variantForPacked(packed.encode(), &found);
+        addInt(found ? int(variant.paintSelectable) : -1);
+    }
     addInt(m_workingImages.size());
     for(const QImage& image : m_workingImages)
         addBytes(imageHash(image));
@@ -5217,6 +5230,7 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             variant.routeOwnerMaterial = sourceTile.authored
                 ? 0 : sourceTile.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = !sourceTile.authored;
+            variant.paintSelectable = sourceTile.paintSelectable;
             // Global-authored and canonical-generated tiles fill an exact
             // signature/runtime gap. They are not an extra variation pool
             // when this map already authored a selectable candidate for that

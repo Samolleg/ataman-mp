@@ -303,6 +303,8 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
+        if(!slot.paintSelectable)
+            object.insert(QStringLiteral("paintSelectable"), false);
         if(slot.routeOwnerMaterial > 0)
             object.insert(QStringLiteral("routeOwnerMaterial"),
                           slot.routeOwnerMaterial);
@@ -431,6 +433,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         slot.assigned = schemaVersion >= 2
             ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
             : !slot.ambiguous;
+        slot.paintSelectable = item.value(
+            QStringLiteral("paintSelectable")).toBool(true);
         slot.routeOwnerMaterial = schemaVersion >= 10
             ? item.value(QStringLiteral("routeOwnerMaterial")).toInt(0) : 0;
         if(schemaVersion >= 8
@@ -1033,6 +1037,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
                 definition.sourcePixelSha256 = tile.pixelSha256;
             }
             definition.routeOwnerMaterial = tile.routeOwnerMaterial;
+            definition.paintSelectable = tile.paintSelectable;
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,
@@ -1165,8 +1170,11 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
                 workingCatalog.variantForPacked(
                     packed.encode(), &provenanceFound);
             if(provenanceFound)
+            {
                 definition.routeOwnerMaterial =
                     provenance.routeOwnerMaterial;
+                definition.paintSelectable = provenance.paintSelectable;
+            }
         }
         if(found)
             for(qint32 id : {definition.signature.northWest,
@@ -1526,6 +1534,7 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.packedTile = packed.encode();
             variant.routeOwnerMaterial = slot.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = slot.routeOwnerMaterial > 0;
+            variant.paintSelectable = slot.paintSelectable;
             if((allowLand && !result.landCatalog.addVariant(variant, report))
                || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))

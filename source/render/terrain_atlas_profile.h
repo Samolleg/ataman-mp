@@ -115,6 +115,9 @@ struct STerrainAtlasProfileSlot
     STerrainTransitionSignature signature;
     bool assigned{true};
     bool ambiguous{false};
+    // Retained artwork can remain decodable/renderable without being a
+    // candidate for new automatic strokes. Missing legacy metadata means true.
+    bool paintSelectable{true};
     // Optional provenance for a compacted portable atlas slot. Several
     // byte-identical authored source slots may alias one retained physical
     // slot without losing their original identities after save/reopen.

@@ -518,6 +518,7 @@ private slots:
     void oppositeBaselineOwnerDoesNotBlockStroke();
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
+    void rejectedPaintArtworkIsPreservedByExactFinalization();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void mirroredGeneratedBlendRemainsPaintable_data();
@@ -1176,6 +1177,35 @@ void TerrainVirtualAtlasTests::virtualFieldPaintIsUnboundedByAtlas()
     brush.centerX=1.5f; brush.centerY=1.5f; brush.radius=2.0f;
     QCOMPARE(field.paint(brush,99),12);
     QCOMPARE(field.material(1,1),qint32(99));
+}
+
+void TerrainVirtualAtlasTests::rejectedPaintArtworkIsPreservedByExactFinalization()
+{
+    Fixture fixture;
+    const auto mixed=signature(1,2,2,1);
+    fixture.images<<solid(qRgba(20,40,60,255))<<solid(qRgba(60,40,20,255));
+    for(int slot:{4,5})for(int rotation=0;rotation<4;++rotation) {
+        STerrainTransitionVariant variant;
+        variant.signature=CTerrainTransitionCatalog::rotated(mixed,-rotation);
+        SMprPackedTile packed;packed.tileIndex=slot;packed.rotation=rotation;
+        variant.packedTile=packed.encode();variant.paintSelectable=slot!=4;
+        QVERIFY(fixture.catalog.addVariant(variant));
+    }
+    CValidationReport report;bool found=false;
+    const auto desired=fixture.catalog.gridSignatureForPacked(4,&found);QVERIFY(found);
+    CTestTerrainVirtualAtlas atlas(fixture.catalog,fixture.images,23);
+    const auto fresh=atlas.resolve(desired,0,0,&report,1);
+    QVERIFY(fresh.authored);QCOMPARE(SMprPackedTile::decode(fresh.authoredPacked).atlasSlot(),5);
+    CTerrainVirtualMaterialField field;QVERIFY(field.resize(1,1,1));
+    field.setMaterial(0,0,desired.northWest);field.setMaterial(1,0,desired.northEast);
+    field.setMaterial(1,1,desired.southEast);field.setMaterial(0,1,desired.southWest);
+    const auto finalized=atlas.CTerrainVirtualAtlas::finalize(field,"preserved-rejected",64,
+        QVector<qint32>(6,0),&report,{}, {},{4},{},&fixture.catalog,{true});
+    QVERIFY2(finalized.success,qPrintable(report.toText()));
+    const int output=SMprPackedTile::decode(finalized.packedCells[0]).atlasSlot();
+    QCOMPARE(finalized.tiles[output].pixels,fixture.images[4]);
+    QVERIFY(!finalized.tiles[output].paintSelectable);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
 }
 
 void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()
