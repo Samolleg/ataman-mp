@@ -42,7 +42,7 @@ Untouched preferred packed cells сохраняются даже при paintSel
 
 ## Состояние
 
-VERIFIED, INSTALLATION PENDING. Source main
+Проверки перед установкой. Source main
 `ab487c775ed0b4962c314daa079c374f69f2a195`, свежая Release178 и оба runtime
 собраны; EXE SHA256
 `4731243b6872494ac4ee0af4655650ab3e8fe60549558a43c7ac77aa7b3f39bb`.
@@ -79,3 +79,34 @@ native-receipt.json, final-probe-receipt.json, final-run.stdout.log,
 actual178/after.png/result.json, metadata-candidate/receipt.json.
 Весь приватный fixture и инструменты — вне Git. Визуальная/игровая приёмка
 владельцем остаётся открытой; скрытая проверка её не заменяет.
+
+## Установка178
+
+PROGRAM AND METADATA INSTALLED, OWNER VISUAL ACCEPTANCE OPEN.
+Постоянный путь artifacts/EI-Mapper-Ataman-2-first-test.
+Finalizer и его distribution validator PASS; staged --version178 и EXE identity
+подтверждены до finalization. Manifest SHA256
+`fd5b3ae94ca6c210b27a1909edbdd328bfaa2476872d2ab3ba006c64ea3c8076`.
+Финализированная staging после этого не запускалась.
+
+Свежий process guard подтвердил закрытые редактор/игру. Установлены129 managed
+файлов:6 заменены,1 добавлен,1 старый managed отчёт убран в резерв.
+Все18 260 пользовательских файлов вне manifest побайтно сохранены.
+Полный installed manifest readback PASS; EXE и оба runtime соответствуют staging.
+Технический откат177: artifacts/rollback177-to178-new-brush-20261014;
+старые резервы по решению владельца не удалялись.
+
+После свежих guards исходного RES и194 файлов MAPS, проверки всех7 резервных
+исходников атомарно установлены10 профилей и6 metadata-only MPR. Итоговые hashes
+всех194 MAPS и RES проверены:188 файлов MAPS неизменны, у6 MPR только привязка
+прежних полей; physical SEC/геометрия/объекты не менялись. Все1098 MMP,
+15 страниц и embedded профиль zone19 сохранены. Installed RES SHA256 совпадает
+с metadata candidate f5593283479aec036927c594bc6697490f544b2755cc1c24980e763e3766632e.
+Резервы данных: build-new-brush-178-20261014/data-rollback/before и atomic-original.
+Receipts: staging-receipt.json, install-receipt.json, data-install-receipt.json
+в build-new-brush-178-20261014. Проверочный commit main
+`c5366414e019d4c7e511bd691bf251aa19e57015` меняет тест/отчёт, app source выше неизменен.
+
+Ручной следующий шаг: на zone13 нарисовать новую Stone / Gray полосу по Snow /
+Common, сравнить прежнюю кромку и выполнить Undo/Redo. Установка не перерисовывает
+ранее сохранённые заготовки автоматически. Ручная/игровая приёмка владельцем открыта.
