@@ -1118,7 +1118,9 @@ QVector<STerrainTransitionVariant> CTerrainTransitionCatalog::paintVariants(
         ? mirroredGridY(signature) : signature;
     QVector<STerrainTransitionVariant> result;
     for(int index : m_signatureLookup.value(signatureKey(lookup)))
-        if(m_variants.at(index).paintSelectable)
+        if(m_variants.at(index).paintSelectable
+           && (m_paintReferenceSha256.isEmpty()
+               || m_variants.at(index).referencePaintSelectable))
             result.append(m_variants.at(index));
     std::sort(result.begin(), result.end(), [](
         const STerrainTransitionVariant& left,

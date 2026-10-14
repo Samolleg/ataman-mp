@@ -520,6 +520,8 @@ private slots:
     void exactAuthoredTileIsReused();
     void rejectedPaintArtworkIsPreservedByExactFinalization();
     void paintReferenceImportsAuthorPixelsWithoutRebaking();
+    void authoredEdgesJoinAtRenderedInset_data();
+    void authoredEdgesJoinAtRenderedInset();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void mirroredGeneratedBlendRemainsPaintable_data();
@@ -1258,6 +1260,69 @@ void TerrainVirtualAtlasTests::paintReferenceImportsAuthorPixelsWithoutRebaking(
     const auto& output=final.tiles[SMprPackedTile::decode(final.packedCells[0]).atlasSlot()];
     QCOMPARE(output.pixels,fixture.images[4]);QVERIFY(output.paintSelectable);
     QVERIFY(!output.referencePaintSelectable);
+}
+
+void TerrainVirtualAtlasTests::authoredEdgesJoinAtRenderedInset_data()
+{
+    QTest::addColumn<int>("rotation");
+    QTest::addColumn<bool>("differentRuntime");
+    for(int rotation=0;rotation<4;++rotation) for(bool different : {false,true})
+        QTest::newRow(qPrintable(QString("rotation%1-runtime%2").arg(rotation).arg(different)))
+            <<rotation<<different;
+}
+
+void TerrainVirtualAtlasTests::authoredEdgesJoinAtRenderedInset()
+{
+    QFETCH(int,rotation);QFETCH(bool,differentRuntime);
+    CTerrainTransitionCatalog catalog;
+    QVector<QImage> images;
+    const auto mixed=signature(1,2,2,1);
+    const auto packed=[&](int slot){return quint16(slot|(rotation<<14));};
+    for(int slot=0;slot<5;++slot) {
+        QImage world(32,32,QImage::Format_RGBA8888);world.fill(Qt::white);
+        for(int y=1;y<31;++y)for(int x=1;x<31;++x)
+            if(slot<3 ? x>=(slot==1 ? 8:16) : slot==4)
+                world.setPixelColor(x,y,QColor(45,45,45));
+        images.append(world.transformed(QTransform().rotate(90*rotation),Qt::FastTransformation).mirrored(false,true));
+        STerrainTransitionVariant variant;
+        variant.packedTile=packed(slot);
+        variant.signature=slot<3 ? mixed : signature(slot==3?1:2,slot==3?1:2,slot==3?1:2,slot==3?1:2);
+        variant.referencePaintSelectable=slot!=2;
+        QVERIFY(catalog.addVariant(variant));
+    }
+    catalog.setPaintReference(QByteArray(64,'f'),true);
+    QCOMPARE(catalog.paintVariants(mixed).size(),2);
+    bool decoded=false;catalog.gridSignatureForPacked(packed(2),&decoded);QVERIFY(decoded);
+    QVector<qint32> types(5,0);if(differentRuntime)types[1]=1;
+    CTerrainWorkingAtlas atlas(catalog,images,0,64,{}, {},types,{{1,0},{2,0}});
+    QVERIFY2(atlas.isValid(),qPrintable(atlas.error()));
+    CMprDocument document;CValidationReport report;
+    QVERIFY(document.loadBytes(portableMpr(false,false,packed(0)),"join.mpr",&report));
+    CTerrainEditModel terrain;QVERIFY(terrain.load(document,&report));
+    terrain.enableWorkingAtlasSlots(types.size());
+    QVERIFY(terrain.installWorkingAtlasSlotTypes(types));
+    STerrainTileCommand existing;STerrainTileDelta bad;
+    bad.globalX=4;bad.globalY=6;bad.layer=ETerrainTileLayer::Land;
+    bad.before=packed(0);bad.after=packed(1);existing.deltas.append(bad);
+    QVERIFY(terrain.apply(existing,true,&report));
+    const auto originalPayload=terrain.sectorPayload(0,0);
+    const auto fingerprint=atlas.stateFingerprint();
+    STerrainTileCommand resolution;resolution.semanticAudit.layer=ETerrainTileLayer::Land;
+    for(int y=4;y<=9;++y)resolution.semanticAudit.affectedCells.append(QPoint(4,y));
+    // No preliminary physical delta at the bad cell: equal semantic corners
+    // used to keep its incompatible edge. All raw outer gutters are identical.
+    const auto joined=atlas.joinAuthoredTransitionEdges(terrain,resolution,&report);
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+    QCOMPARE(atlas.stateFingerprint(),fingerprint);
+    QCOMPARE(terrain.sectorPayload(0,0),originalPayload);
+    if(differentRuntime) {QVERIFY(joined.deltas.isEmpty());return;}
+    QCOMPARE(joined.deltas.size(),1);
+    QCOMPARE(joined.deltas.front().globalX,4);QCOMPARE(joined.deltas.front().globalY,6);
+    QCOMPARE(joined.deltas.front().before,packed(1));QCOMPARE(joined.deltas.front().after,packed(0));
+    QVERIFY(terrain.apply(joined,true,&report));
+    for(int y=4;y<=9;++y)QCOMPARE(terrain.packedTile(4,y,ETerrainTileLayer::Land),packed(0));
+    QVERIFY(atlas.joinAuthoredTransitionEdges(terrain,resolution,&report).deltas.isEmpty());
+    QVERIFY(terrain.apply(joined,false,&report));QCOMPARE(terrain.sectorPayload(0,0),originalPayload);
 }
 
 void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()

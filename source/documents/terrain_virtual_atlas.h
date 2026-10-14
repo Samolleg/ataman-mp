@@ -436,6 +436,12 @@ public:
     int activeTileCount() const;
     QVector<QImage> activeTileImages() const;
     QVector<qint32> activeTileTypes() const;
+    // Choose existing packed artwork jointly along visible edges. This never
+    // synthesizes pixels, allocates slots or changes the requested materials.
+    STerrainTileCommand joinAuthoredTransitionEdges(
+        const CTerrainEditModel& terrain, const STerrainTileCommand& resolution,
+        CValidationReport* report = nullptr,
+        const QMap<QPair<int,int>, QPair<QImage,quint8>>& boundaryTiles = {}) const;
     // Complete physical pages are required by the renderer, but only a slot
     // with a live identity can be painted manually.  Empty entries mark
     // physical page padding or an otherwise unaddressable slot.

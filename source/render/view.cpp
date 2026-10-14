@@ -12918,13 +12918,13 @@ bool CView::prepareExactModernTerrainStamp(
     if(report && report->hasErrors())
         return false;
 
-    const STerrainTileCommand resolution =
+    const STerrainTileCommand resolution = m_workingTerrainAtlas->joinAuthoredTransitionEdges(stagedEdit,
         stagedEdit.makeVirtualStrokeResolution(
             *command, m_workingTerrainAtlas->catalog(),
             m_tileStrokeDistributionSeed, report,
             m_landscapeTools
                 && m_landscapeTools->randomizeUniformRotation(),
-            terrainType);
+            terrainType), report);
     if(report && report->hasErrors())
         return false;
     appendTerrainTileCommand(command, resolution);
@@ -20280,6 +20280,9 @@ void CView::endTileBrushGroup()
                     m_landscapeTools
                         &&m_landscapeTools->randomizeUniformRotation(),
                     m_tileStrokeCommand.semanticAudit.requestedMaterialId);
+                if(m_workingTerrainAtlas && !releaseReport.hasErrors())
+                    resolution=m_workingTerrainAtlas->joinAuthoredTransitionEdges(
+                        m_terrainEdit,resolution,&releaseReport);
                 bool resolutionApplied = false;
                 if(!releaseReport.hasErrors() && !resolution.isEmpty())
                 {

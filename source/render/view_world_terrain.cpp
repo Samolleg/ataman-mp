@@ -935,6 +935,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     }
     int planned=0;
     SWorldTerrainStroke stamp;
+    QMap<QString,STerrainTileCommand> joinAreas;
     for(auto target=origins.cbegin();target!=origins.cend();++target) {
         if(!ensureWorldTerrainAtlas(target.key(),&report))break;
         const auto doc=m_worldTerrainSession.documents[target.key()];
@@ -1018,8 +1019,11 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
                 if(found && !realizeWorkingTerrainSignature(signature,cell.first,cell.second,&usage,&report,nullptr,material,-1,&stage))break;
             }
             if(report.hasErrors())break;
-            const auto resolution=stage.terrainEdit.makeVirtualStrokeResolution(command,stage.atlas->catalog(),m_tileStrokeDistributionSeed,&report,m_landscapeTools->randomizeUniformRotation(),material);
+            const auto resolution=stage.atlas->joinAuthoredTransitionEdges(stage.terrainEdit,
+                stage.terrainEdit.makeVirtualStrokeResolution(command,stage.atlas->catalog(),m_tileStrokeDistributionSeed,&report,m_landscapeTools->randomizeUniformRotation(),material),&report);
             if(!resolution.isEmpty() && !stage.terrainEdit.apply(resolution,true,&report))break;
+            joinAreas.insert(target.key(),resolution);
+            changed=changed || !resolution.isEmpty();
         }
         if(report.hasErrors())break;
         ++planned;
@@ -1028,6 +1032,56 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         stamp.paint.insert(target.key(),change);
     }
     if(planned!=origins.size() && !report.hasErrors())report.add("terrain.world.stage",EValidationSeverity::Error,"Не удалось подготовить все карты; мазок отменён.");
+    // Both maps must be staged before comparing a shared border. Their packed
+    // slot numbers are local identities, so pass the neighbor's actual image
+    // and rotation, never interpret its slot through the active map's atlas.
+    for(int pass=0;pass<4 && !report.hasErrors();++pass) {
+        bool adjusted=false;
+        for(auto it=stamp.paint.begin();it!=stamp.paint.end();++it) {
+            if(!joinAreas.contains(it.key()))continue;
+            auto& state=it.value().after;
+            const auto origin=origins.value(it.key());
+            QMap<QPair<int,int>,QPair<QImage,quint8>> boundary;
+            for(const auto& cell:joinAreas[it.key()].semanticAudit.affectedCells)
+                for(const auto& offset:{QPoint(-1,0),QPoint(1,0),QPoint(0,-1),QPoint(0,1)}) {
+                    const auto local=cell+offset;
+                    if(local.x()>=0 && local.x()<state.terrain.tileCountX()
+                       && local.y()>=0 && local.y()<state.terrain.tileCountY())continue;
+                    const QPointF world=origin+QPointF(local.x()*2,local.y()*2);
+                    for(auto other=origins.cbegin();other!=origins.cend();++other) {
+                        if(other.key()==it.key())continue;
+                        const auto doc=m_worldTerrainSession.documents.value(other.key());
+                        if(!doc || !doc->atlas)continue;
+                        const auto* neighborTerrain=&doc->terrain;
+                        auto neighborAtlas=doc->atlas;
+                        const auto staged=stamp.paint.constFind(other.key());
+                        if(staged!=stamp.paint.constEnd()) {
+                            neighborTerrain=&staged.value().after.terrain;
+                            neighborAtlas=staged.value().after.atlas;
+                        }
+                        const auto p=(world-other.value())/2.0;
+                        const int x=qRound(p.x()),y=qRound(p.y());
+                        if(std::abs(p.x()-x)>0.001 || std::abs(p.y()-y)>0.001
+                           || x<0 || y<0 || x>=neighborTerrain->tileCountX()
+                           || y>=neighborTerrain->tileCountY())continue;
+                        bool available=false;
+                        const auto packed=SMprPackedTile::decode(neighborTerrain->packedTile(x,y,layer,&available));
+                        if(!available || packed.atlasSlot()>=neighborAtlas->tileImages().size())continue;
+                        boundary.insert(qMakePair(local.x(),local.y()),
+                            qMakePair(neighborAtlas->tileImages().at(packed.atlasSlot()),packed.rotation));
+                        break;
+                    }
+                }
+            if(boundary.isEmpty())continue;
+            auto area=joinAreas.value(it.key());area.deltas.clear();
+            const auto joined=state.atlas->joinAuthoredTransitionEdges(state.terrain,area,&report,boundary);
+            if(!joined.isEmpty()) {
+                if(!state.terrain.apply(joined,true,&report))break;
+                adjusted=true;
+            }
+        }
+        if(!adjusted)break;
+    }
     if(report.hasErrors()){emit updateMsg(report.toText());return true;}
     if(stamp.isEmpty())return true;
     if(!m_worldTerrainSession.apply(stamp,true,&error)){emit updateMsg(error);return true;}

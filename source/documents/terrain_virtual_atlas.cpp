@@ -4863,6 +4863,260 @@ QVector<QByteArray> CTerrainWorkingAtlas::manualAtlasPhysicalIdentities() const
     return result;
 }
 
+STerrainTileCommand CTerrainWorkingAtlas::joinAuthoredTransitionEdges(
+    const CTerrainEditModel& terrain, const STerrainTileCommand& resolution,
+    CValidationReport* report,
+    const QMap<QPair<int,int>, QPair<QImage,quint8>>& boundaryTiles) const
+{
+    if(m_workingCatalog.paintReferenceSha256().isEmpty())
+        return resolution;
+    const int width = terrain.tileCountX(), height = terrain.tileCountY();
+    if(width <= 0 || height <= 0)
+        return resolution;
+    const auto layer = resolution.semanticAudit.layer;
+    QMap<int, quint16> planned;
+    QMap<int, STerrainTileDelta> deltas;
+    for(const auto& delta : resolution.deltas)
+        if(delta.layer == layer) {
+            const int key = delta.globalY * width + delta.globalX;
+            planned.insert(key, delta.after);
+            deltas.insert(key, delta);
+        }
+    const auto packedAt = [&](int key) {
+        return planned.contains(key) ? planned.value(key)
+            : terrain.packedTile(key % width, key / width, layer);
+    };
+    struct Node {
+        int key;
+        QVector<quint16> candidates;
+        QVector<quint64> unary;
+        int selected{0};
+    };
+    QVector<Node> nodes;
+    QMap<int, int> byCell;
+    for(const auto& cell : resolution.semanticAudit.affectedCells) {
+        const int key = cell.y() * width + cell.x();
+        if(cell.x() < 0 || cell.x() >= width || cell.y() < 0
+           || cell.y() >= height || byCell.contains(key))
+            continue;
+        const quint16 initial = packedAt(key);
+        bool decoded = false;
+        const auto signature = m_workingCatalog.gridSignatureForPacked(initial, &decoded);
+        if(!decoded || (signature.northWest == signature.northEast
+           && signature.northWest == signature.southEast
+           && signature.northWest == signature.southWest))
+            continue;
+        const int initialSlot = SMprPackedTile::decode(initial).atlasSlot();
+        const auto initialVariant = m_workingCatalog.variantForPacked(initial);
+        const qint32 runtimeType = runtimeTerrainTypeForSlot(initialSlot);
+        Node node; node.key = key;
+        for(const auto& variant : m_workingCatalog.paintVariants(signature)) {
+            const int slot = SMprPackedTile::decode(variant.packedTile).atlasSlot();
+            if(slot < 0 || slot >= m_workingImages.size()
+               || m_workingImages.at(slot).isNull()
+               || runtimeTerrainTypeForSlot(slot) != runtimeType
+               || variant.routeOwnerMaterial != initialVariant.routeOwnerMaterial
+               || variant.canonicalGeneratedRoute != initialVariant.canonicalGeneratedRoute)
+                continue;
+            node.candidates.append(variant.packedTile);
+        }
+        if(node.candidates.size() < 2)
+            continue;
+        const quint16 before = terrain.packedTile(cell.x(), cell.y(), layer);
+        const int retained = node.candidates.indexOf(before);
+        const int selected = node.candidates.indexOf(initial);
+        node.selected = retained >= 0 ? retained : qMax(0, selected);
+        byCell.insert(key, nodes.size());
+        nodes.append(node);
+    }
+    if(nodes.isEmpty())
+        return resolution;
+
+    // Profiles describe corner materials, not the shape of the authored edge.
+    // Sample the actual packed orientation and the same 1/16 UV inset used by
+    // CTile::generateDrawVertexData (4/512 of an eight-column atlas). Raw outer
+    // texels are gutters and do not describe the edge visible in the mapper.
+    constexpr int samples = 16;
+    struct Edges { quint16 value[4][samples * 4]{}; bool valid{false}; };
+    const auto sampleEdges = [&](const QImage& image, quint8 rotation) -> Edges {
+        Edges edges;
+        if(image.isNull()) return edges;
+        const auto sample = [&](double u, double v, double* rgba) {
+            double x = u, y = 1.0 - v;
+            switch(rotation) {
+            case 1: x = 1.0 - v; y = 1.0 - u; break;
+            case 2: x = 1.0 - u; y = v; break;
+            case 3: x = v; y = u; break;
+            }
+            x = qBound(0.0, x * image.width() - 0.5, double(image.width()-1));
+            y = qBound(0.0, y * image.height() - 0.5, double(image.height()-1));
+            const int ix = int(x), iy = int(y);
+            const double dx = x-ix, dy = y-iy;
+            for(int yy=0; yy<2; ++yy) for(int xx=0; xx<2; ++xx) {
+                const QColor c = image.pixelColor(qMin(ix+xx,image.width()-1),
+                                                  qMin(iy+yy,image.height()-1));
+                const double weight = (xx ? dx : 1-dx) * (yy ? dy : 1-dy);
+                const double alpha = c.alphaF();
+                rgba[0] += weight*c.red()*alpha; rgba[1] += weight*c.green()*alpha;
+                rgba[2] += weight*c.blue()*alpha; rgba[3] += weight*c.alpha();
+            }
+        };
+        const double inset = 1.0/16.0, span = 1.0-2*inset;
+        for(int side=0; side<4; ++side) for(int s=0; s<samples; ++s) {
+            double rgba[4]{};
+            // Tangential averaging suppresses DXT/texture grain, while keeping
+            // the silhouette and premultiplied alpha of the original artwork.
+            for(int tap=-1; tap<=1; ++tap) {
+                const double t = inset + span*qBound(0.0,
+                    (s+0.5+tap/3.0)/samples, 1.0);
+                const double u = side==1 ? 1-inset : side==3 ? inset : t;
+                const double v = side==0 ? inset : side==2 ? 1-inset : t;
+                sample(u,v,rgba);
+            }
+            for(int channel=0; channel<4; ++channel)
+                edges.value[side][s*4+channel] = quint16(qRound(rgba[channel]/3.0));
+        }
+        edges.valid = true; return edges;
+    };
+    QMap<quint16, Edges> edgeCache;
+    const auto edgesFor = [&](quint16 packed) -> Edges {
+        const auto cached = edgeCache.constFind(packed);
+        if(cached != edgeCache.constEnd()) return cached.value();
+        const auto physical = SMprPackedTile::decode(packed);
+        const int slot = physical.atlasSlot();
+        if(packed == 0xffff || slot >= m_workingImages.size()) return {};
+        const auto edges=sampleEdges(m_workingImages.at(slot),physical.rotation);
+        edgeCache.insert(packed,edges);return edges;
+    };
+    const auto edgeDifference = [&](const Edges& a,const Edges& b,int side) {
+        quint64 result=0;
+        if(a.valid && b.valid) for(int sample=0;sample<samples*4;++sample) {
+            const int delta=int(a.value[side][sample])-int(b.value[(side+2)%4][sample]);
+            result+=quint64(delta*delta);
+        }
+        return result;
+    };
+    QHash<quint64, quint64> pairCosts;
+    const auto cost = [&](quint16 first, quint16 second, int side) -> quint64 {
+        const quint64 key = (quint64(first)<<18) | (quint64(second)<<2) | quint64(side);
+        const auto existing = pairCosts.constFind(key);
+        if(existing != pairCosts.constEnd()) return existing.value();
+        const Edges a = edgesFor(first), b = edgesFor(second);
+        const quint64 result=edgeDifference(a,b,side);
+        // Keep sub-pixel texture differences well above the retention tie-break.
+        pairCosts.insert(key,result); return result;
+    };
+    const int dx[4]={0,1,0,-1}, dy[4]={-1,0,1,0};
+    QMap<QPair<int,int>,Edges> externalEdges;
+    for(auto it=boundaryTiles.cbegin();it!=boundaryTiles.cend();++it)
+        externalEdges.insert(it.key(),sampleEdges(it.value().first,it.value().second));
+    const auto adjacent = [&](int key, int side) {
+        const int x=key%width+dx[side], y=key/width+dy[side];
+        return x>=0 && x<width && y>=0 && y<height ? y*width+x : -1;
+    };
+    for(auto& node : nodes) {
+        const quint16 before = terrain.packedTile(node.key%width,node.key/width,layer);
+        for(quint16 candidate : node.candidates) {
+            quint64 unary = candidate==before ? 0 : 1;
+            for(int side=0; side<4; ++side) {
+                const int neighbor = adjacent(node.key,side);
+                if(neighbor>=0 && !byCell.contains(neighbor))
+                    unary += cost(candidate,packedAt(neighbor),side);
+                else if(neighbor<0) {
+                    const auto external=externalEdges.constFind(qMakePair(
+                        node.key%width+dx[side],node.key/width+dy[side]));
+                    if(external!=externalEdges.constEnd())
+                        unary+=edgeDifference(edgesFor(candidate),external.value(),side);
+                }
+            }
+            node.unary.append(unary);
+        }
+    }
+    // Optimize complete row/column chains, rather than choosing every cell
+    // independently. Each chain uses exact dynamic programming with its other
+    // neighbors fixed. Alternate axes until stable, with a bounded local scope.
+    const auto solveChain = [&](const QVector<int>& chain, bool horizontal) {
+        if(chain.isEmpty()) return false;
+        QVector<quint64> previous;
+        QVector<QVector<int>> back;
+        for(int pos=0; pos<chain.size(); ++pos) {
+            const Node& node=nodes.at(chain.at(pos));
+            QVector<quint64> current(node.candidates.size());
+            QVector<int> predecessor(node.candidates.size(),0);
+            for(int c=0; c<node.candidates.size(); ++c) {
+                quint64 value=node.unary.at(c);
+                for(int side : horizontal ? QVector<int>{0,2} : QVector<int>{1,3}) {
+                    const int other=byCell.value(adjacent(node.key,side),-1);
+                    if(other>=0) {
+                        const auto& n=nodes.at(other);
+                        value+=cost(node.candidates.at(c),n.candidates.at(n.selected),side);
+                    }
+                }
+                if(pos) {
+                    const auto& prior=nodes.at(chain.at(pos-1));
+                    quint64 best=std::numeric_limits<quint64>::max();
+                    for(int p=0; p<previous.size(); ++p) {
+                        const auto candidate=previous.at(p)+cost(prior.candidates.at(p),
+                            node.candidates.at(c),horizontal ? 1 : 2);
+                        if(candidate<best) {best=candidate;predecessor[c]=p;}
+                    }
+                    value+=best;
+                }
+                current[c]=value;
+            }
+            back.append(predecessor);previous=current;
+        }
+        int selected=0;
+        for(int i=1;i<previous.size();++i) if(previous.at(i)<previous.at(selected)) selected=i;
+        bool changed=false;
+        for(int pos=chain.size()-1;pos>=0;--pos) {
+            auto& node=nodes[chain.at(pos)]; changed=changed || node.selected!=selected;
+            node.selected=selected;selected=back.at(pos).at(selected);
+        }
+        return changed;
+    };
+    QMap<int,QVector<int>> rows,columns;
+    for(auto it=byCell.cbegin();it!=byCell.cend();++it) {
+        rows[it.key()/width].append(it.value());
+        columns[it.key()%width].append(it.value());
+    }
+    for(int pass=0;pass<8;++pass) {
+        bool changed=false;
+        for(int axis=0;axis<2;++axis) {
+            const auto& lines=axis==0 ? rows : columns;
+            for(const auto& line : lines) {
+                QVector<int> chain;
+                for(int index : line) {
+                    if(!chain.isEmpty() && nodes.at(index).key-nodes.at(chain.back()).key
+                       != (axis==0 ? 1 : width)) {
+                        changed=solveChain(chain,axis==0)||changed;chain.clear();
+                    }
+                    chain.append(index);
+                }
+                changed=solveChain(chain,axis==0)||changed;
+            }
+        }
+        if(!changed) break;
+    }
+    STerrainTileCommand result=resolution;
+    for(const auto& node : nodes) {
+        const quint16 selected=node.candidates.at(node.selected);
+        const quint16 before=terrain.packedTile(node.key%width,node.key/width,layer);
+        if(selected==before) {deltas.remove(node.key);continue;}
+        auto delta=deltas.value(node.key);
+        delta.globalX=node.key%width;delta.globalY=node.key/width;delta.layer=layer;
+        delta.before=before;delta.after=selected;delta.hasSemanticRequest=true;
+        delta.requestedSignature=m_workingCatalog.gridSignatureForPacked(selected);
+        deltas.insert(node.key,delta);
+    }
+    result.deltas.clear();
+    for(const auto& delta : resolution.deltas) if(delta.layer!=layer) result.deltas.append(delta);
+    for(const auto& delta : deltas) result.deltas.append(delta);
+    result.semanticAudit.solverMode=QStringLiteral("authored-edge-join");
+    Q_UNUSED(report);
+    return result;
+}
+
 qint32 CTerrainWorkingAtlas::runtimeTerrainTypeForSlot(int slot) const
 {
     return slot >= 0 && slot < m_workingTileTypes.size()
