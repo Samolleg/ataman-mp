@@ -1,8 +1,8 @@
 # EI Mapper Ataman
 
-Версия **177 в работе**: готовые переходы сохраняются при межкартовом ремонте.
-Оба кандидата177 отклонены владельцем и не устанавливались.
-В постоянной установке остаётся131; новую форму переходов не подбирать.
+Версия **177**: готовые переходы сохраняются при межкартовом ремонте.
+Удалён повторный проход из119; генератор и утверждённые маски131 сохранены.
+Установка программы сама не переписывает ранее сохранённые карты.
 [Сверка с исходными мапперами](docs/validation/ATAMAN_UPSTREAM_TRANSITIONS_REFERENCE_20261014.md).
 
 Рабочая основа — **131**, точный снимок
@@ -36,7 +36,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `131`. Each separate fix advances the integer version.
+Current Ataman version: `177`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
