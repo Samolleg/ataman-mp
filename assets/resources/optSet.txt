@@ -23,6 +23,7 @@ autosaveIntervalMinutes
 visualCacheLimitMiB
 Option set name:Resource
 resourceProfile
+terrainAuthoringArchive
 resourceRoots
 mapRoots
 figPaths

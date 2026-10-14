@@ -493,6 +493,7 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptStringList("resourceRoots", {})));
     aOpt.append(QSharedPointer<COpt>(new COptStringList("mapRoots", {})));
     aOpt.append(QSharedPointer<COpt>(new COptString("resourceProfile", "")));
+    aOpt.append(QSharedPointer<COpt>(new COptString("terrainAuthoringArchive", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("gameRoot", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("lastVisitedFolder", "")));
     aOpt.append(QSharedPointer<COpt>(new COptString("externalEditorPath", "")));

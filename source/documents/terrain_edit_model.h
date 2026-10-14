@@ -242,6 +242,7 @@ struct STerrainTransitionVariant
     // Decode-only entries remain available to signatureForPacked(), while
     // automatic painting considers only reviewed semantic catalog entries.
     bool paintSelectable{true};
+    bool referencePaintSelectable{true};
     // Zero is route-neutral authored artwork. Canonical generated artwork
     // records the material whose reviewed mask language produced its pixels.
     // This is exact provenance, not placement history.
@@ -292,6 +293,8 @@ public:
     QVector<STerrainTransitionVariant> paintVariants(
         const STerrainTransitionSignature& signature) const;
     void setMirrorPaintGridY(bool enabled) { m_mirrorPaintGridY = enabled; }
+    void setPaintReference(const QByteArray& sha256, bool retainPaintCandidates);
+    QByteArray paintReferenceSha256() const { return m_paintReferenceSha256; }
     STerrainTransitionSignature signatureForPacked(
         quint16 packedTile, bool* found = nullptr) const;
     STerrainTransitionSignature gridSignatureForPacked(
@@ -320,6 +323,7 @@ private:
     QHash<QByteArray, QVector<int>> m_signatureLookup;
     QSet<qint32> m_materialIds;
     bool m_mirrorPaintGridY{false};
+    QByteArray m_paintReferenceSha256;
 };
 
 struct STerrainHeightDelta

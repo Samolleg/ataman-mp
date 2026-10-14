@@ -66,6 +66,7 @@ struct STerrainFinalizedTile
     QByteArray pixelSha256;
     bool authored{false};
     bool paintSelectable{true};
+    bool referencePaintSelectable{true};
     int sourceSlot{-1};
     QString sourceNamespace;
     // Every authored physical slot represented by this retained artwork.
@@ -113,6 +114,7 @@ struct STerrainAtlasAnimationRange
 
 struct STerrainAtlasFinalization
 {
+    QByteArray paintReferenceSha256;
     bool success{false};
     QString error;
     QString isolatedNamespace;

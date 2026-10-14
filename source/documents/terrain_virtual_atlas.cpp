@@ -3340,6 +3340,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const QVector<STerrainAtlasAnimationRange>& animations)
 {
     STerrainAtlasFinalization result;
+    result.paintReferenceSha256 = m_catalog.paintReferenceSha256();
     result.capacityLimit = capacityLimit;
     if(!m_valid || field.tileWidth() <= 0 || field.tileHeight() <= 0
        || capacityLimit <= 0 || capacityLimit > 16384
@@ -3410,6 +3411,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             candidate.routeOwnerMaterial =
                 provenanceVariant.routeOwnerMaterial;
             candidate.paintSelectable = provenanceVariant.paintSelectable;
+            candidate.referencePaintSelectable = provenanceVariant.referencePaintSelectable;
         }
         const bool signatureAssigned = signatureFound
             && candidate.canonicalSignature.northWest > 0
@@ -3433,7 +3435,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             + QByteArray::number(candidate.runtimeTerrainType)
             + QByteArray(1, '\0')
             + QByteArray::number(candidate.routeOwnerMaterial)
-            + QByteArray(1, candidate.paintSelectable ? '\1' : '\0');
+            + QByteArray(1, candidate.paintSelectable ? '\1' : '\0')
+            + QByteArray(1, candidate.referencePaintSelectable ? '\1' : '\0');
         const QVector<int> matchingHashes = exactAuthoredOutputs.value(dedupeKey);
         for(int outputSlot : matchingHashes)
         {
@@ -4426,6 +4429,8 @@ bool CTerrainWorkingAtlas::canCommitStaging(
     // an unrelated atlas replace the immutable authored baseline.
     if(m_capacityLimit != staged.m_capacityLimit
        || m_authoredSlotCount != staged.m_authoredSlotCount
+       || m_authoredCatalog.paintReferenceSha256()
+            != staged.m_authoredCatalog.paintReferenceSha256()
        || m_authoredImages != staged.m_authoredImages
        || m_workingImages.size() != staged.m_workingImages.size()
        || m_workingTileTypes.size() != staged.m_workingTileTypes.size()
@@ -4675,6 +4680,7 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
     const QVector<STerrainTransitionSignature> catalogSignatures =
         m_workingCatalog.gridSignatures();
     addInt(catalogSignatures.size());
+    addBytes(m_workingCatalog.paintReferenceSha256());
     for(const STerrainTransitionSignature& signature : catalogSignatures)
         addSignature(signature);
     for(int slot = 0; slot < activeTileCount(); ++slot)
@@ -4685,6 +4691,7 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
         bool found = false;
         const auto variant = m_workingCatalog.variantForPacked(packed.encode(), &found);
         addInt(found ? int(variant.paintSelectable) : -1);
+        addInt(found ? int(variant.referencePaintSelectable) : -1);
     }
     addInt(m_workingImages.size());
     for(const QImage& image : m_workingImages)
@@ -5231,6 +5238,7 @@ void CTerrainWorkingAtlas::installCatalogVariants(
                 ? 0 : sourceTile.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = !sourceTile.authored;
             variant.paintSelectable = sourceTile.paintSelectable;
+            variant.referencePaintSelectable = sourceTile.referencePaintSelectable;
             // Global-authored and canonical-generated tiles fill an exact
             // signature/runtime gap. They are not an extra variation pool
             // when this map already authored a selectable candidate for that

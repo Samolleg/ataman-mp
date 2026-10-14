@@ -646,6 +646,7 @@ private slots:
     void finalizedProfileBindsPostDxtPhysicalPagesAndPadding();
     void workingAtlasProfileBindsExtensionSignaturesForDraftReopen();
     void retainedRejectedArtworkStaysDecodableButNotPaintSelectable();
+    void paintReferenceRoundTripsWithoutChangingLegacyEligibility();
     void embeddedTerrainAtlasProfileRoundTripsInsidePublishedRes();
     void prevalidatedEmbeddedAtlasBindingMatchesOnlyExactLoadedAtlas();
     void indexedTerrainArchiveMemberReadSkipsUnrelatedPayloads();
@@ -11829,6 +11830,59 @@ void EnduranceDocumentTests::retainedRejectedArtworkStaysDecodableButNotPaintSel
     QVERIFY(!saved.slotDefinitions[2].paintSelectable);
     QVERIFY(saved.usableAnalysis(&report).landCatalog.variantForPacked(2,&found).paintSelectable==false);
     QVERIFY(found);QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+}
+
+void EnduranceDocumentTests::paintReferenceRoundTripsWithoutChangingLegacyEligibility()
+{
+    STerrainAtlasProfile source;source.mprNamespace="author-reference";
+    source.atlasSlotCount=64;source.textureCount=1;source.approved=true;
+    source.paintReferenceSha256=QByteArray(64,'d');
+    QVector<QImage> images(64,QImage(8,8,QImage::Format_RGBA8888));
+    for(int i=0;i<64;++i)images[i].fill(QColor(i*3,i*2,i,255));
+    source.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(images);
+    for(int material:{1,2}) {
+        STerrainAtlasProfileFamily family;family.id=material;family.name=QString("Family %1").arg(material);
+        family.tileType=0;source.families.append(family);
+    }
+    for(int slot=0;slot<64;++slot) {
+        STerrainAtlasProfileSlot value;value.slot=slot;value.assigned=slot<4;
+        value.signature.northWest=value.signature.southWest=slot==1?2:1;
+        value.signature.northEast=value.signature.southEast=slot==0?1:2;
+        value.referencePaintSelectable=slot!=2;source.slotDefinitions.append(value);
+    }
+    CValidationReport report;QVERIFY(source.normalizeMembership(&report));
+    STerrainAtlasProfile reopened;QVERIFY(STerrainAtlasProfile::fromBytes(source.toBytes(),&reopened,&report));
+    QCOMPARE(reopened.paintReferenceSha256,source.paintReferenceSha256);
+    QVERIFY(reopened.slotDefinitions[2].paintSelectable);QVERIFY(!reopened.slotDefinitions[2].referencePaintSelectable);
+    auto catalog=reopened.usableAnalysis(&report).landCatalog;
+    QVERIFY(catalog.paintReferenceSha256().isEmpty()); // Classic catalog keeps its original authority.
+    bool found=false;const auto mixed=catalog.gridSignatureForPacked(2,&found);QVERIFY(found);
+    bool sawLegacy=false;
+    for(int x=0;x<32;++x)sawLegacy|=SMprPackedTile::decode(catalog.selectForPaint(mixed,x,7,23,&found)).atlasSlot()==2;
+    QVERIFY(sawLegacy);
+    catalog.setPaintReference(source.paintReferenceSha256,true);
+    for(int x=0;x<32;++x) {
+        QCOMPARE(SMprPackedTile::decode(catalog.selectForPaint(mixed,x,7,23,&found)).atlasSlot(),3);
+        QVERIFY(found);
+    }
+    const auto draft=CTerrainAtlasProfileStore::workingAtlasProfile("reference-draft",images,catalog,reopened,{},&report);
+    QCOMPARE(draft.paintReferenceSha256,source.paintReferenceSha256);
+    QVERIFY(!draft.slotDefinitions[2].referencePaintSelectable);
+    STerrainAtlasFinalization final;final.success=true;final.isolatedNamespace="reference-portable";
+    final.textureCount=1;final.paintReferenceSha256=source.paintReferenceSha256;
+    for(int slot=0;slot<4;++slot) {
+        STerrainFinalizedTile tile;tile.authored=true;tile.sourceSlot=slot;tile.sourceNamespace=source.mprNamespace;
+        tile.pixels=images[slot];tile.pixelSha256=QByteArray(64,'a');
+        tile.referencePaintSelectable=slot!=2;
+        tile.canonicalSignature=CTerrainTransitionCatalog::mirroredGridY(source.slotDefinitions[slot].signature);
+        final.tiles.append(tile);
+    }
+    const auto portable=CTerrainAtlasProfileStore::portableFinalizedProfile(final,images,source,ETerrainAtlasLayer::Land,{}, {},&report);
+    QCOMPARE(portable.paintReferenceSha256,source.paintReferenceSha256);
+    QVERIFY(!portable.slotDefinitions[2].referencePaintSelectable);
+    auto invalid=source.toJson();invalid["paintReferenceSha256"]="not-a-sha";
+    CValidationReport invalidReport;QVERIFY(!STerrainAtlasProfile::fromJson(invalid,&reopened,&invalidReport));
+    QVERIFY(invalidReport.hasErrors());QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
 }
 
 void EnduranceDocumentTests::workingAtlasProfileBindsExtensionSignaturesForDraftReopen()

@@ -519,6 +519,7 @@ private slots:
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void rejectedPaintArtworkIsPreservedByExactFinalization();
+    void paintReferenceImportsAuthorPixelsWithoutRebaking();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
     void mirroredGeneratedBlendRemainsPaintable_data();
@@ -1206,6 +1207,57 @@ void TerrainVirtualAtlasTests::rejectedPaintArtworkIsPreservedByExactFinalizatio
     QCOMPARE(finalized.tiles[output].pixels,fixture.images[4]);
     QVERIFY(!finalized.tiles[output].paintSelectable);
     QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+}
+
+void TerrainVirtualAtlasTests::paintReferenceImportsAuthorPixelsWithoutRebaking()
+{
+    Fixture fixture;
+    const auto mixed=signature(1,2,2,1);
+    fixture.images.append(solid(qRgba(20,40,60,255)));
+    STerrainTransitionVariant old;old.signature=mixed;old.packedTile=4;
+    QVERIFY(fixture.catalog.addVariant(old));
+    const auto reference=QByteArray(64,'e');
+    fixture.catalog.setPaintReference(reference,false);
+    bool found=false;
+    QCOMPARE(fixture.catalog.gridSignatureForPacked(4,&found),mixed);QVERIFY(found);
+    fixture.catalog.selectForPaint(mixed,0,0,23,&found);QVERIFY(!found);
+    auto legacy=fixture.catalog;legacy.setPaintReference({},true);
+    QCOMPARE(legacy.selectForPaint(mixed,0,0,23,&found),quint16(4));QVERIFY(found);
+
+    const QMap<qint32,qint32> runtime{{1,0},{2,0},{3,0},{4,0}};
+    CTerrainWorkingAtlas working(fixture.catalog,fixture.images,23,64,{}, {},
+        QVector<qint32>(5,0),runtime);
+    QVERIFY(working.isValid());CValidationReport report;
+    const QImage author=solid(qRgba(84,122,166,255));
+    QVERIFY(working.addAuthoredLibraryTransition(mixed,author,"author tile",&report,"native",7));
+    QMap<int,quint64> usage;const QSet<int> protectedSlots{0,1,2,3,4};
+    QVERIFY(working.realizeAuthoredLibraryVariants(mixed,&usage,protectedSlots,&report,1,0,true));
+    const auto packed=working.resolve(mixed,3,7,&usage,protectedSlots,nullptr,&report,1,0,true);
+    const int slot=SMprPackedTile::decode(packed).atlasSlot();
+    QCOMPARE(working.activeTileImages().at(slot),author);
+    STerrainWorkingTileIdentity identity;QVERIFY(working.tileIdentityForSlot(slot,&identity));
+    QCOMPARE(identity.sourceNamespace,QString("native"));
+    QVERIFY(!identity.canonicalGeneratedBlend);
+    const auto fingerprint=working.stateFingerprint();
+    QCOMPARE(working.resolve(mixed,3,7,&usage,protectedSlots,nullptr,&report,1,0,true),packed);
+    QCOMPARE(working.stateFingerprint(),fingerprint);
+    const auto staged=working.createStagingCopy();
+    QCOMPARE(staged->catalog().paintReferenceSha256(),reference);
+    QVERIFY(working.canCommitStaging(*staged));
+    for(int i=0;i<fixture.images.size();++i)QCOMPARE(working.activeTileImages().at(i),fixture.images.at(i));
+    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
+
+    CTestTerrainVirtualAtlas retained(fixture.catalog,fixture.images,23);
+    CTerrainVirtualMaterialField field;QVERIFY(field.resize(1,1,1));
+    field.setMaterial(0,0,1);field.setMaterial(1,0,2);
+    field.setMaterial(1,1,2);field.setMaterial(0,1,1);
+    const auto final=retained.CTerrainVirtualAtlas::finalize(field,"reference-policy",64,
+        QVector<qint32>(5,0),&report,{}, {},{4},{},&fixture.catalog,{true});
+    QVERIFY2(final.success,qPrintable(report.toText()));
+    QCOMPARE(final.paintReferenceSha256,reference);
+    const auto& output=final.tiles[SMprPackedTile::decode(final.packedCells[0]).atlasSlot()];
+    QCOMPARE(output.pixels,fixture.images[4]);QVERIFY(output.paintSelectable);
+    QVERIFY(!output.referencePaintSelectable);
 }
 
 void TerrainVirtualAtlasTests::exactAuthoredTileIsReused()

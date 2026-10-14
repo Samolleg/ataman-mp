@@ -267,6 +267,9 @@ QJsonObject STerrainAtlasProfile::toJson() const
     root.insert(QStringLiteral("textureCount"), textureCount > 0
                     ? textureCount : (atlasSlotCount + 63) / 64);
     root.insert(QStringLiteral("provenance"), provenance);
+    if(!paintReferenceSha256.isEmpty())
+        root.insert(QStringLiteral("paintReferenceSha256"),
+                    QString::fromLatin1(paintReferenceSha256));
     if(!resourceArchiveHint.trimmed().isEmpty())
         root.insert(QStringLiteral("resourceArchiveHint"),
                     QDir::fromNativeSeparators(resourceArchiveHint.trimmed()));
@@ -305,6 +308,8 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
         if(!slot.paintSelectable)
             object.insert(QStringLiteral("paintSelectable"), false);
+        if(!slot.referencePaintSelectable)
+            object.insert(QStringLiteral("referencePaintSelectable"), false);
         if(slot.routeOwnerMaterial > 0)
             object.insert(QStringLiteral("routeOwnerMaterial"),
                           slot.routeOwnerMaterial);
@@ -355,6 +360,16 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
     parsed.resourceArchiveHint = QDir::fromNativeSeparators(
         object.value(QStringLiteral("resourceArchiveHint")).toString().trimmed());
     parsed.approved = object.value(QStringLiteral("approved")).toBool(false);
+    parsed.paintReferenceSha256 = object.value(
+        QStringLiteral("paintReferenceSha256")).toString().toLatin1().toLower();
+    if(!parsed.paintReferenceSha256.isEmpty()
+       && !QRegularExpression(QStringLiteral("^[0-9a-f]{64}$"))
+               .match(QString::fromLatin1(parsed.paintReferenceSha256)).hasMatch())
+    {
+        if(report) report->add("terrain.atlas_profile_paint_reference",
+            EValidationSeverity::Error, "The paint-reference fingerprint is invalid");
+        return false;
+    }
     if(schemaVersion >= 6
        && object.value(QStringLiteral("cornerSpace")).toString()
             != QStringLiteral("tile-preview-nw-ne-se-sw-v1"))
@@ -435,6 +450,8 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
             : !slot.ambiguous;
         slot.paintSelectable = item.value(
             QStringLiteral("paintSelectable")).toBool(true);
+        slot.referencePaintSelectable = item.value(
+            QStringLiteral("referencePaintSelectable")).toBool(true);
         slot.routeOwnerMaterial = schemaVersion >= 10
             ? item.value(QStringLiteral("routeOwnerMaterial")).toInt(0) : 0;
         if(schemaVersion >= 8
@@ -993,6 +1010,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     profile.textureCount = finalization.textureCount > 0
         ? finalization.textureCount : (profile.atlasSlotCount + 63) / 64;
     profile.provenance = QStringLiteral("portable-finalized-modern-atlas-v1");
+    profile.paintReferenceSha256 = finalization.paintReferenceSha256;
     profile.approved = true;
 
     QMap<qint32, STerrainAtlasProfileFamily> sourceFamilies;
@@ -1038,6 +1056,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
             }
             definition.routeOwnerMaterial = tile.routeOwnerMaterial;
             definition.paintSelectable = tile.paintSelectable;
+            definition.referencePaintSelectable = tile.referencePaintSelectable;
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,
@@ -1114,6 +1133,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
     profile.atlasSlotCount = decodedPhysicalTiles.size();
     profile.textureCount = (profile.atlasSlotCount + 63) / 64;
     profile.provenance = workingAtlasProvenance();
+    profile.paintReferenceSha256 = workingCatalog.paintReferenceSha256();
     profile.approved = true;
 
     QMap<qint32, STerrainAtlasProfileFamily> families;
@@ -1174,6 +1194,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
                 definition.routeOwnerMaterial =
                     provenance.routeOwnerMaterial;
                 definition.paintSelectable = provenance.paintSelectable;
+                definition.referencePaintSelectable = provenance.referencePaintSelectable;
             }
         }
         if(found)
@@ -1535,6 +1556,7 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.routeOwnerMaterial = slot.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = slot.routeOwnerMaterial > 0;
             variant.paintSelectable = slot.paintSelectable;
+            variant.referencePaintSelectable = slot.referencePaintSelectable;
             if((allowLand && !result.landCatalog.addVariant(variant, report))
                || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))

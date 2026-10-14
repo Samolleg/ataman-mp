@@ -605,6 +605,7 @@ CTerrainTransitionCatalog CTerrainAtlasPresetCatalog::globalizedCatalog(
     }
     CTerrainTransitionCatalog result;
     result.setMirrorPaintGridY(source.paintGridMirrored());
+    result.setPaintReference(source.paintReferenceSha256(), true);
     for(int slot = 0; slot < profile.atlasSlotCount; ++slot)
         for(int rotation = 0; rotation < 4; ++rotation)
         {

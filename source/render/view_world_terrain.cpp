@@ -682,6 +682,12 @@ bool CView::ensureWorldTerrainAtlas(const QString& id,CValidationReport* report)
                 tr("Не удалось определить материалы соседней карты %1.").arg(QFileInfo(doc->path).fileName()));return false;
         }
         auto catalog=CTerrainAtlasPresetCatalog::globalizedCatalog(profile,analysis.overlayCatalogWithLandFamilies(),&m_terrainGlobalFamilies);
+        const auto* textures=CTextureList::getInstance();
+        if(!textures->terrainAuthoringArchivePath().isEmpty()) {
+            const auto reference=textures->terrainAuthoringReferenceSha256();
+            catalog.setPaintReference(reference.isEmpty()?QByteArray(64,'0'):reference,!reference.isEmpty()
+                && profile.paintReferenceSha256==reference);
+        }
 
         for(const auto& family:m_terrainGlobalFamilies)catalog.declareMaterial(family.id);
         QMap<qint32,ETerrainBlendStyle> styles;QMap<qint32,qint32> runtimeTypes;

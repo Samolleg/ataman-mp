@@ -194,6 +194,8 @@ public:
     // Expanded, ordered RES files from the active resource profile. Used to
     // bind a finalized atlas to one coherent archive before renderer loading.
     QStringList configuredResourceArchivePaths() const;
+    QString terrainAuthoringArchivePath() const;
+    QByteArray terrainAuthoringReferenceSha256() const;
     static SPreparedStaticTexture prepareStaticTexture(const QByteArray& data);
     QOpenGLTexture* uploadStaticTexture(const SPreparedStaticTexture& data,
                                        const QString& name, const QString& model);

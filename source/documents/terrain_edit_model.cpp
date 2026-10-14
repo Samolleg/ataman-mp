@@ -915,6 +915,15 @@ quint16 CTerrainTransitionCatalog::select(
                             false, nullptr, 0, found);
 }
 
+void CTerrainTransitionCatalog::setPaintReference(
+    const QByteArray& sha256, bool retainPaintCandidates)
+{
+    m_paintReferenceSha256 = sha256.toLower();
+    if(!retainPaintCandidates)
+        for(STerrainTransitionVariant& variant : m_variants)
+            variant.referencePaintSelectable = false;
+}
+
 quint16 CTerrainTransitionCatalog::selectCandidates(
     const STerrainTransitionSignature& signature, int globalX, int globalY,
     quint32 distributionSeed, bool paintOnly,
@@ -933,7 +942,9 @@ quint16 CTerrainTransitionCatalog::selectCandidates(
     for(int index : indexed)
     {
         const STerrainTransitionVariant& variant = m_variants.at(index);
-        if(paintOnly && !variant.paintSelectable)
+        if(paintOnly && (!variant.paintSelectable
+           || (!m_paintReferenceSha256.isEmpty()
+               && !variant.referencePaintSelectable)))
             continue;
         const int physicalSlot = SMprPackedTile::decode(
             variant.packedTile).atlasSlot();

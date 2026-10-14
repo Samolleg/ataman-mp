@@ -118,6 +118,8 @@ struct STerrainAtlasProfileSlot
     // Retained artwork can remain decodable/renderable without being a
     // candidate for new automatic strokes. Missing legacy metadata means true.
     bool paintSelectable{true};
+    // The reference filter is separate from legacy/manual atlas eligibility.
+    bool referencePaintSelectable{true};
     // Optional provenance for a compacted portable atlas slot. Several
     // byte-identical authored source slots may alias one retained physical
     // slot without losing their original identities after save/reopen.
@@ -145,6 +147,8 @@ struct STerrainAtlasProfile
     // Optional portable hint to the one RES archive that owns every page of a
     // published atlas. The decoded pixel hash remains the authority.
     QString resourceArchiveHint;
+    // Automatic-paint authority only; existing packed artwork remains intact.
+    QByteArray paintReferenceSha256;
     bool approved{false};
     QVector<STerrainAtlasProfileFamily> families;
     QVector<STerrainAtlasProfileSlot> slotDefinitions;
