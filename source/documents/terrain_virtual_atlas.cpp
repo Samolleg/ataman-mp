@@ -5031,6 +5031,12 @@ STerrainTileCommand CTerrainWorkingAtlas::joinAuthoredTransitionEdges(
             }
             node.unary.append(unary);
         }
+        // A new mixed cell must not inherit the old independent random draw
+        // as the initial geometry of a coupled solve. Start from its best
+        // fixed-neighbor fit; exact ties retain the existing packed artwork.
+        node.selected=0;
+        for(int c=1;c<node.unary.size();++c)
+            if(node.unary.at(c)<node.unary.at(node.selected))node.selected=c;
     }
     // Optimize complete row/column chains, rather than choosing every cell
     // independently. Each chain uses exact dynamic programming with its other
