@@ -491,37 +491,30 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
               images.size() / 64, tileTypes.size(), images.size(),
               tileTypes.size()))
         return false;
-    const QSize size = terrainAtlasMaximumNativeTileSize(images);
-    if(size.isEmpty())
+    const QSize size = images.front().size();
+    if(size.width() <= 0 || size.width() != size.height())
         return false;
-    // Keep unchanged icons and table selection during brush uploads. Replacing
-    // every item also leaked a new set of delegates on each stamp.
-    const QVector<QImage> previousImages = m_tileImages;
+    for(const QImage& image : images)
+        if(image.isNull() || image.size() != size)
+            return false;
     m_tileImages = images;
     m_nTextureAtlas = images.size() / 64;
     m_originalTilesize = size.width();
     m_tileTypes.clear();
     for(qint32 type : tileTypes)
         m_tileTypes.append(ETileType(type));
-    while(m_icoList.size() > images.size()) m_icoList.removeLast();
-    while(m_icoList.size() < images.size()) m_icoList.append(QIcon());
+    m_icoList.clear();
     for(int slot = 0; slot < images.size(); ++slot)
-        if(slot >= previousImages.size()
-           || images.at(slot).cacheKey() != previousImages.at(slot).cacheKey())
-        {
-            m_icoList[slot] = QIcon();
-            if(auto* item = ui->tableTile->item(slot / m_nTilePerRow,
-                                               slot % m_nTilePerRow))
-                item->setIcon(QIcon());
-        }
+        m_icoList.append(QIcon());
+    ui->tableTile->clearContents();
     ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
     ui->tableTile->setColumnCount(m_nTilePerRow);
     for(int column = 0; column < m_nTilePerRow; ++column)
     {
-        if(!dynamic_cast<IconDelegate*>(ui->tableTile->itemDelegateForColumn(column)))
-            ui->tableTile->setItemDelegateForColumn(column, new IconDelegate(ui->tableTile));
-        if(!dynamic_cast<IconDelegate*>(ui->tableQuick->itemDelegateForColumn(column)))
-            ui->tableQuick->setItemDelegateForColumn(column, new IconDelegate(ui->tableQuick));
+        ui->tableTile->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableTile));
+        ui->tableQuick->setItemDelegateForColumn(
+            column, new IconDelegate(ui->tableQuick));
     }
     for(int& slot : m_arrQuickTile)
         if(slot < 0 || slot >= images.size())

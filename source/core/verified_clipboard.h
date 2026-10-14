@@ -16,29 +16,6 @@ namespace ei {
 
 struct NativeClipboardState;
 
-// Explicit, process-lifetime test isolation. Construct BEFORE QApplication,
-// install AFTER QApplication but BEFORE any windows/clipboard use. The QPA
-// adapter covers Qt's built-in editors too; ordinary launches never install it.
-class TestClipboardSession
-{
-public:
-    explicit TestClipboardSession(bool enabled);
-    ~TestClipboardSession();
-    bool prepared() const;
-    bool install();
-    bool verify() const;
-    TestClipboardSession(const TestClipboardSession&) = delete;
-    TestClipboardSession& operator=(const TestClipboardSession&) = delete;
-private:
-    bool m_enabled;
-};
-bool testClipboardEnabled();
-bool testClipboardRequested(int argc, char** argv);
-const QMimeData* clipboardMimeData();
-QString clipboardText();
-// Negative-test probe: bypasses the adapter; native hooks MUST deny the access.
-void probeSystemClipboardForTest();
-
 // Value copies only: QClipboard may delete a transferred QMimeData inside
 // setMimeData() when the platform write fails.
 struct ClipboardSnapshot
@@ -71,8 +48,6 @@ QMenu* verifiedLineEditContextMenu(QLineEdit* editor);
 // Windows accepts complete seekable IStream byte payloads (128 MiB per format,
 // 256 MiB total). Storage/metafiles fail closed. OLE transport metadata is not
 // replayed; restored byte formats support native HGLOBAL and OLE ISTREAM.
-// Missing raster GDI sources may be read from Windows' synthesized DIB/DIBV5
-// under a read-only native open, with the same completeness and size limits.
 // A monitor-exclusion marker prevents restored content becoming a history item.
 class ClipboardRestoreGuard
 {

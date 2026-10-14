@@ -41,8 +41,6 @@ struct STerrainAtlasEmbeddedBindingResult
                             const QByteArray& currentAtlasPixelSha256,
                             int currentAtlasSlotCount,
                             CValidationReport* report = nullptr) const;
-    // Sizes are native per-page sizes and may differ. Reuse never normalizes
-    // pixels: the resolver's namespace/physical-count/native-SHA proof applies.
     bool canReuseDecodedAtlasTiles(const QString& activeArchivePath,
                                    const QString& currentNamespace,
                                    int currentAtlasSlotCount,
@@ -52,9 +50,6 @@ struct STerrainAtlasEmbeddedBindingResult
 class CTerrainAtlasArchiveBindingResolver
 {
 public:
-    // Drop residency only for our immutable temporary mapped pixel stores.
-    // Pixel data and QImage lifetimes remain valid; heap images are untouched.
-    static void releaseDecodedImageResidency(const QVector<QImage>& images);
     // Reads only the RES header, hash table, filename buffer, and requested
     // payloads. Large unrelated atlas pages are never copied or hashed.
     static bool readArchiveMembers(

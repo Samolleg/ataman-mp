@@ -27,10 +27,8 @@ enum class ELandscapePhysicalShortcut
     ToggleOverlay,
     Raise,
     Lower,
-    Flatten,
-    ManualPaint,
-    BrushSmaller,
-    BrushLarger
+    Smooth,
+    Flatten
 };
 
 ELandscapePhysicalShortcut landscapePhysicalShortcut(const QKeyEvent* event)
@@ -44,7 +42,7 @@ ELandscapePhysicalShortcut landscapePhysicalShortcut(const QKeyEvent* event)
     case 0x18: return ELandscapePhysicalShortcut::ToggleOverlay; // O
     case 0x2c: return ELandscapePhysicalShortcut::Raise;          // Z
     case 0x2d: return ELandscapePhysicalShortcut::Lower;          // X
-    case 0x2e: return ELandscapePhysicalShortcut::ManualPaint;     // C
+    case 0x2e: return ELandscapePhysicalShortcut::Smooth;         // C
     case 0x2f: return ELandscapePhysicalShortcut::Flatten;        // V
     default: break;
     }
@@ -55,10 +53,8 @@ ELandscapePhysicalShortcut landscapePhysicalShortcut(const QKeyEvent* event)
     case Qt::Key_O: return ELandscapePhysicalShortcut::ToggleOverlay;
     case Qt::Key_Z: return ELandscapePhysicalShortcut::Raise;
     case Qt::Key_X: return ELandscapePhysicalShortcut::Lower;
-    case Qt::Key_C: return ELandscapePhysicalShortcut::ManualPaint;
+    case Qt::Key_C: return ELandscapePhysicalShortcut::Smooth;
     case Qt::Key_V: return ELandscapePhysicalShortcut::Flatten;
-    case Qt::Key_BracketLeft: return ELandscapePhysicalShortcut::BrushSmaller;
-    case Qt::Key_BracketRight: return ELandscapePhysicalShortcut::BrushLarger;
     default: return ELandscapePhysicalShortcut::None;
     }
 }
@@ -73,21 +69,6 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
     const ELandscapePhysicalShortcut shortcut = landscapePhysicalShortcut(event);
     if(shortcut == ELandscapePhysicalShortcut::None)
         return false;
-    if(shortcut == ELandscapePhysicalShortcut::ManualPaint)
-    {
-        const bool paintMode = m_landscapeTools->tilePaintEnabled()
-            || m_landscapeTools->editMode()==ELandscapeEditMode::OverlayPaint;
-        if(!paintMode)
-        {
-            if(pressed && !event->isAutoRepeat())emit updateMsg(tr("Ручной C доступен для покраски земли и существующего покрытия."));
-            return true;
-        }
-        if(!event->isAutoRepeat())
-            selectTerrainPaintPaletteMode(pressed
-                ? ETerrainPaintPaletteMode::Manual
-                : ETerrainPaintPaletteMode::Modern);
-        return true;
-    }
     if(!pressed || event->isAutoRepeat())
         return true;
 
@@ -101,6 +82,7 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
         return true;
     case ELandscapePhysicalShortcut::Raise:
     case ELandscapePhysicalShortcut::Lower:
+    case ELandscapePhysicalShortcut::Smooth:
     case ELandscapePhysicalShortcut::Flatten:
         if(!m_landscapeTools->sculptEnabled())
             return false;
@@ -108,20 +90,10 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
             m_landscapeTools->setSculptTool(ELandscapeSculptTool::Raise);
         else if(shortcut == ELandscapePhysicalShortcut::Lower)
             m_landscapeTools->setSculptTool(ELandscapeSculptTool::Lower);
+        else if(shortcut == ELandscapePhysicalShortcut::Smooth)
+            m_landscapeTools->setSculptTool(ELandscapeSculptTool::Smooth);
         else
             m_landscapeTools->setSculptTool(ELandscapeSculptTool::Flatten);
-        return true;
-    case ELandscapePhysicalShortcut::BrushSmaller:
-    case ELandscapePhysicalShortcut::BrushLarger:
-        if(m_landscapeTools->sculptEnabled())
-            m_landscapeTools->adjustSculptRadius(
-                shortcut == ELandscapePhysicalShortcut::BrushLarger ? 1 : -1);
-        else if(m_landscapeTools->tilePaintEnabled()
-                || m_landscapeTools->overlayPaintEnabled())
-            m_landscapeTools->adjustPaintSize(
-                shortcut == ELandscapePhysicalShortcut::BrushLarger ? 1 : -1);
-        else
-            return false;
         return true;
     case ELandscapePhysicalShortcut::None:
         return false;

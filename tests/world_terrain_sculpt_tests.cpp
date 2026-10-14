@@ -58,57 +58,6 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
-    void repairStateDetectsGeometryTilesMaterialsAndSeeds()
-    {
-        CWorldTerrainSession s;add(s,"a");
-        const auto frozen=s.documents["a"]->terrain;
-        auto changed=frozen;QVERIFY(changed.sharesRepairStateWith(frozen));
-        STerrainBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=2;
-        const auto raised=changed.makeRaiseLower(brush,1000,true);
-        QVERIFY(!raised.isEmpty()&&changed.apply(raised,true));
-        QVERIFY(!changed.sharesRepairStateWith(frozen));
-        changed=frozen;QVERIFY(changed.setWorkingAtlasSlotType(0,7));
-        QVERIFY(!changed.sharesRepairStateWith(frozen));
-        changed=frozen;changed.setRandomPaintSeed(17);
-        QVERIFY(!changed.sharesRepairStateWith(frozen));
-        changed=frozen;CValidationReport report;
-        QVector<qint32> field((changed.tileCountX()+1)*(changed.tileCountY()+1),1);
-        QVERIFY(changed.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,field,&report));
-        const auto semantic=changed;field[0]=2;
-        QVERIFY(changed.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,field,&report));
-        QVERIFY(!changed.sharesRepairStateWith(semantic));
-        QVERIFY(s.documents["a"]->terrain.sharesRepairStateWith(frozen));
-    }
-    void activeRepairLeavesNeighborOnlyEdgesAndOtherCellsUntouched()
-    {
-        SWorldMaterialRepairMap a,e,n,far;
-        a.id="active";e.id="east";n.id="north";far.id="far";
-        a.field.resize(4,4,4);e.field.resize(4,6,3);
-        n.field.resize(4,4,2);far.field.resize(4,6,1);
-        e.origin={8,-4};n.origin={0,-8};far.origin={16,-4};
-        QVector<SWorldMaterialRepairMap> maps{a,e,n,far};
-        const auto sides=worldMaterialSeamSides(maps,a.id);
-        QCOMPARE(sides.value(e.id).size(),4);
-        QCOMPARE(sides.value(n.id).size(),4);
-        QVERIFY(sides.value(far.id).isEmpty());
-        for(int y=0;y<6;++y)
-            QCOMPARE(sides.value(e.id).value(y*4),y>=2?8:0);
-        for(auto& map:maps)if(map.id!=a.id)
-            for(int cell=0;cell<map.field.tileWidth()*map.field.tileHeight();++cell)
-                if(!sides.value(map.id).contains(cell))map.protectedCells.insert(cell);
-        const auto plan=planWorldMaterialRepair(maps,true);
-        QVERIFY(plan.changedVertices>0);
-        QCOMPARE(plan.fields.value(far.id).stableSha256(),far.field.stableSha256());
-        for(const auto& map:maps)if(map.id!=a.id) {
-            for(int cell:plan.changedCells.value(map.id))QVERIFY(sides.value(map.id).contains(cell));
-            for(int cell:map.protectedCells)
-                QCOMPARE(plan.fields.value(map.id).cellSignature(cell%map.field.tileWidth(),cell/map.field.tileWidth()),
-                    map.field.cellSignature(cell%map.field.tileWidth(),cell/map.field.tileWidth()));
-        }
-        // Scope changes with the active map; it is not a fixed cohort boundary.
-        const auto switched=worldMaterialSeamSides({a,e,n,far},e.id);
-        QVERIFY(!switched.value(far.id).isEmpty());
-    }
     void overlaySeamsRespectSparsePresenceAndSlotZero()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;
@@ -199,37 +148,6 @@ private slots:
         QCOMPARE(plan.fields["c"].material(0,16),1);
         c.origin={32,-32};b.origin={33,0};
         QVERIFY(worldMaterialSeamSides({a,b,c}).isEmpty()); // gap and corner
-    }
-    void fourMapMaterialPlannerClosesSharedCorner()
-    {
-        SWorldMaterialRepairMap nw,ne,sw,se;
-        nw.id="nw";ne.id="ne";sw.id="sw";se.id="se";
-        ne.origin={32,0};sw.origin={0,32};se.origin={32,32};
-        QVERIFY(nw.field.resize(16,16,4));
-        QVERIFY(ne.field.resize(16,16,3));
-        QVERIFY(sw.field.resize(16,16,2));
-        QVERIFY(se.field.resize(16,16,1));
-        const auto plan=planWorldMaterialRepair({nw,ne,sw,se},true);
-        QCOMPARE(plan.fields["nw"].material(16,16),1);
-        QCOMPARE(plan.fields["ne"].material(0,16),1);
-        QCOMPARE(plan.fields["sw"].material(16,0),1);
-        QCOMPARE(plan.fields["se"].material(0,0),1);
-        QVERIFY(plan.changedVertices>=4);
-        QVERIFY(!worldMaterialSeamSides({nw,ne,sw,se}).value("nw").isEmpty());
-        QCOMPARE(planWorldMaterialRepair({se,sw,ne,nw},true).changedCells,plan.changedCells);
-    }
-    void materialStitchGeometryRejectsMisalignedPair()
-    {
-        QMap<QString,QPointF> origins;
-        QMap<QString,QSizeF> sizes;
-        origins["active"]={0,0};origins["shifted"]={32,0.5};
-        sizes["active"]={32,32};sizes["shifted"]={32,32};
-        const auto rejected=worldMaterialIncompatibleStitchMaps(origins,sizes);
-        QCOMPARE(rejected.size(),2);
-        QVERIFY(rejected.contains("active"));
-        QVERIFY(rejected.contains("shifted"));
-        origins["shifted"]={32,2};
-        QVERIFY(worldMaterialIncompatibleStitchMaps(origins,sizes).isEmpty());
     }
     void worldBoundaryImportPreservesAuthoredPagePadding()
     {
@@ -1055,82 +973,6 @@ private slots:
         for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),before[t.id]);
         QVERIFY(s.redo(&error));
     }
-    void boundaryFillPartialStrengthSharesMixedScaleRim()
-    {
-        // Non-integral height scales expose repeated independent rounding;
-        // full-strength fill alone hides the faulty per-map blend baseline.
-        for(double shift:{0.0,0.5})
-        for(double strength:{0.2,0.7,1.0})
-        for(auto falloff:{ETerrainBrushFalloff::Constant,ETerrainBrushFalloff::Linear,ETerrainBrushFalloff::Smooth}) {
-            CWorldTerrainSession s;add(s,"a",30.16309928894043f,40000);add(s,"b",28.250459671020508f,40000);
-            const QVector<SWorldTerrainTarget> targets{target(s,"a",{0,0}),target(s,"b",{32,shift})};
-            for(const auto& t:targets) {
-                STerrainHeightCommand crater;
-                for(int y=10;y<=22;++y) for(int x=0;x<t.model->vertexCountX();++x) {
-                    const auto p=t.model->terrainVertexPosition(x,y)+t.origin;
-                    if(qAbs(p.x()-32)>3) continue;
-                    const double value=12+0.3*std::sin(p.y()*0.65)+0.2*std::cos(p.x()*0.45);
-                    STerrainHeightDelta d;d.globalX=x;d.globalY=y;d.before=t.model->height(x,y);
-                    d.after=quint16(qRound(value*65535/t.model->maxZ()));crater.deltas.append(d);
-                }
-                QVERIFY(s.documents[t.id]->terrain.apply(crater,true));
-            }
-            QMap<QString,QByteArray> before;for(const auto& t:targets) before[t.id]=t.model->sectorPayload(0,0);
-            STerrainBrush brush;brush.centerX=32;brush.centerY=16;brush.radius=7;brush.falloff=falloff;
-            const auto fill=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,strength);
-            QVERIFY2(fill.error.isEmpty(),qPrintable(fill.error));QCOMPARE(fill.maps.size(),2);
-            auto reverse=targets;std::reverse(reverse.begin(),reverse.end());
-            const auto reversed=makeWorldTerrainStamp(reverse,brush,EWorldSculptMode::BoundaryFill,0,0,strength);
-            QVERIFY2(reversed.error.isEmpty(),qPrintable(reversed.error));
-            QString error;QVERIFY2(s.apply(fill,true,&error),qPrintable(error));
-            QMap<QString,QByteArray> after;for(const auto& t:targets) after[t.id]=t.model->sectorPayload(0,0);
-            const double quantum=qMax(targets[0].model->maxZ(),targets[1].model->maxZ())/65535.0;
-            for(double y=11;y<=21;y+=0.125) {
-                const double gap=qAbs(edgeHeight(targets[0],32,false,y)-edgeHeight(targets[1],0,false,y));
-                QVERIFY2(std::isfinite(gap) && gap<quantum+1e-7,
-                    qPrintable(QString("shift=%1 strength=%2 falloff=%3 y=%4 gap=%5 quantum=%6")
-                        .arg(shift).arg(strength).arg(int(falloff)).arg(y).arg(gap,0,'g',17).arg(quantum,0,'g',17)));
-            }
-            for(const auto& t:targets) {
-                const auto doc=s.documents[t.id];CMprEditTransaction tx;CValidationReport report;QByteArray bytes;
-                QVERIFY(doc->terrain.appendSectorEdits(&tx,&report));
-                QVERIFY2(doc->baseline.applyTransaction(tx,&bytes,&report),qPrintable(report.toText()));
-                CMprDocument reopened;CTerrainEditModel model;
-                QVERIFY(reopened.loadBytes(bytes,"synthetic-memory-only.mpr",&report));QVERIFY(model.load(reopened,&report));
-                QCOMPARE(model.sectorPayload(0,0),after[t.id]);
-                // Both distant vertices and the cardinal contour are retained.
-                QCOMPARE(model.height(16,16),quint16(40000));
-                QCOMPARE(model.height(t.id=="a"?25:7,16),quint16(40000));
-            }
-            QVERIFY(s.apply(fill,false,&error));
-            for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),before[t.id]);
-            QVERIFY(s.apply(reversed,true,&error));
-            for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),after[t.id]);
-            QVERIFY(s.apply(reversed,false,&error));
-            QVERIFY(s.apply(fill,true,&error));s.record(fill);
-            QVERIFY(s.undo(&error));
-            for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),before[t.id]);
-            QVERIFY(s.redo(&error));
-            for(const auto& t:targets) QCOMPARE(t.model->sectorPayload(0,0),after[t.id]);
-        }
-    }
-    void boundaryFillOverlappingMapsRetainSeparateBaselines()
-    {
-        // Overlap does not make two interior vertices a knitted map rim.
-        CWorldTerrainSession s;add(s,"a",100,20000);add(s,"b",100,40000);
-        const QVector<SWorldTerrainTarget> targets{target(s,"a",{0,0}),target(s,"b",{0,0})};
-        STerrainBrush brush;brush.centerX=16;brush.centerY=16;brush.radius=7;
-        brush.falloff=ETerrainBrushFalloff::Constant;
-        const auto fill=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::BoundaryFill,0,0,0.5);
-        QVERIFY2(fill.error.isEmpty(),qPrintable(fill.error));QString error;
-        QVERIFY2(s.apply(fill,true,&error),qPrintable(error));
-        QCOMPARE(s.documents["a"]->terrain.height(16,16),quint16(25000));
-        QCOMPARE(s.documents["b"]->terrain.height(16,16),quint16(35000));
-        QCOMPARE(s.documents["a"]->terrain.height(9,16),quint16(20000));
-        QCOMPARE(s.documents["b"]->terrain.height(9,16),quint16(40000));
-        QVERIFY(s.apply(fill,false,&error));
-        QVERIFY(!s.documents["a"]->terrain.isDirty());QVERIFY(!s.documents["b"]->terrain.isDirty());
-    }
     void boundaryFillStaggeredInteriorIsNotFrozen()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");
@@ -1415,24 +1257,6 @@ private slots:
         QVERIFY(s.documents["a"]->terrain.apply(command,true));
         QVERIFY(s.documents["a"]->terrain.height(32,16)!=s.documents["b"]->terrain.height(0,16));
         // Reproduces the original single-model route's failed seam expectation.
-    }
-    void sculptBrushShapeControlsCornerVertices()
-    {
-        CWorldTerrainSession session;add(session,"shape");
-        STerrainBrush brush;brush.centerX=16;brush.centerY=16;brush.radius=1;
-        brush.falloff=ETerrainBrushFalloff::Constant;
-        const auto circle=session.documents["shape"]->terrain.makeRaiseLower(
-            brush,1000,true);
-        brush.shape=ETerrainTileBrushShape::Square;
-        const auto square=session.documents["shape"]->terrain.makeRaiseLower(
-            brush,1000,true);
-        const auto hasDiagonal=[](const STerrainHeightCommand& command) {
-            for(const auto& delta : command.deltas)
-                if(delta.globalX==17 && delta.globalY==17) return true;
-            return false;
-        };
-        QVERIFY(!hasDiagonal(circle));
-        QVERIFY(hasDiagonal(square));
     }
     void modesEdgesCornersAndOrder()
     {

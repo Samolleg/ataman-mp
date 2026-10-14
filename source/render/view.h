@@ -88,31 +88,6 @@ class QUndoStack;
 class QThreadPool;
 struct SParam;
 class CComboBoxItem;
-
-struct SMprAutosaveSnapshot
-{
-    CMprDocument document;
-    CTerrainEditModel terrain;
-    QVector<SMprMaterialRecord> materials;
-    QVector<SMprAnimatedTileRecord> animatedTiles;
-    QFileInfo source;
-    QString innerNamespace;
-    bool stageWorkingAtlas{false};
-    int activeSlots{0};
-    QVector<QImage> activeTileImages;
-    QVector<qint32> activeTileTypes;
-    QVector<QByteArray> authoredPages;
-};
-
-struct SMprAutosaveCandidate
-{
-    bool success{false};
-    QByteArray mprBytes;
-    QByteArray terrainAtlasResource;
-    int atlasPages{0};
-    int atlasSlots{0};
-    QString error;
-};
 class CProgressView;
 class CTableManager;
 class COperation;
@@ -208,12 +183,8 @@ class CView : public QGLWidget
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
-    friend int runNeighborNavigationReuseCheck();
     friend int runTerrainMobHeightCheck();
     friend int runTerrainHeightResSaveCheck();
-    friend int runTerrainMixedEdgeCheck(const QString& fixturePath);
-    friend int runTerrainRandomPaintCheck(const QString& fixturePath);
-    friend class TerrainHdVariantBankTests;
     friend int runPointerModesCheck();
     friend int runWorldMapSnapCheck();
     friend int runAiGraphRegenerationCheck();
@@ -253,10 +224,6 @@ public:
                                           QByteArray* terrainAtlasResource = nullptr,
                                           int* terrainAtlasPages = nullptr,
                                           int* terrainAtlasSlots = nullptr);
-    bool captureLandscapeAutosaveSnapshot(
-        SMprAutosaveSnapshot* snapshot, CValidationReport* report = nullptr);
-    static SMprAutosaveCandidate buildLandscapeAutosaveCandidate(
-        const SMprAutosaveSnapshot& snapshot);
     QString activeTerrainArchivePath() const
     {
         return m_activeTerrainArchivePath;
@@ -349,14 +316,6 @@ public:
         const QVector3D& sourcePosition,
         const QVector3D& sourcePivot,
         const QVector3D& sourceRotation);
-    void beginNeighborMapTransition(const QString& targetPath,
-                                    const QString& targetZone,
-                                    const QPointF& targetOrigin,
-                                    const QVector3D& sourcePosition,
-                                    const QVector3D& sourcePivot,
-                                    const QVector3D& sourceRotation,
-                                    bool preserveCamera);
-    void endNeighborMapTransition();
     QPoint operationAnchor() const;
     bool beginDatabasePlacement(CNode* prototype, QString* diagnostic = nullptr);
     bool beginTechnicalPlacement(const QJsonObject& descriptor,QString* diagnostic = nullptr);
@@ -537,12 +496,6 @@ public:
     bool applyTerrainVerticalScalePreview(const STerrainVerticalScaleCommand& command,
                                           bool forward);
     bool applyTerrainTilePreview(const STerrainTileCommand& command, bool forward);
-    void shuffleTerrainTiles(bool selectionOnly,const std::function<void(const QString&,int)>& progress={});
-    QSet<int> randomPaintExcludedSlots() const;
-    quint32 terrainRandomPaintSeed() const;
-    void randomizeTerrainPaintCommand(STerrainTileCommand* command,
-        const CTerrainTransitionCatalog& catalog);
-    QRect m_randomPaintSelection;
     bool terrainTileCommandInvalidatesAiGraph(
         const STerrainTileCommand& command) const;
     bool applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command, bool forward);
@@ -627,7 +580,7 @@ private:
         const QVector<QImage>& physicalTiles,
         const QString& terrainArchivePath,
         const STerrainAtlasProfile& expectedProfile,
-        bool requireSemanticMember,const std::function<void(const QString&,int)>& progress={});
+        bool requireSemanticMember);
     bool buildTerrainSemanticFieldMember(
         const QByteArray& candidateMprBytes,
         const QFileInfo& destinationMpr,
@@ -671,11 +624,6 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
-    void invalidateNeighborScenePreparation();
-    bool activateReadyNeighborTerrain(const QFileInfo& path,const CMprDocument& document);
-    QByteArray neighborResourceRevision() const;
-    QByteArray neighborSourceRevision(const SNeighborMapPlacement& placement,
-                                      bool objects, const QStringList& terrainArchives = QStringList()) const;
     void populateNeighborObjects(quint64 generation);
     void chooseWorldTerrainMaps();
     void updateWorldTerrainStatus();
@@ -686,24 +634,13 @@ private:
     bool resolveWorldTerrainClose(bool retain);
     bool ensureWorldTerrainAtlas(const QString& id,CValidationReport* report);
     bool paintWorldTerrainAt(const QVector3D& position,bool land);
-    bool previewWorldPaintState(const QString& id, bool incremental = false);
+    bool previewWorldPaintState(const QString& id);
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
     bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,
-                                   STerrainResolveAuditSession* audit = nullptr,
-                                   bool seamsOnly = false);
-    QByteArray terrainResolveContext(bool seamsOnly) const;
-    bool terrainResolveAlreadyComplete(bool seamsOnly = false) const;
-    void rememberTerrainResolveCompletion(const QStringList& paths, bool seamsOnly = false);
+                                   STerrainResolveAuditSession* audit = nullptr);
     bool loadWorldTerrainMaterialSources(const QSet<qint32>& materials,
-        const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report,
-        const std::function<bool()>& checkpoint = {});
-    bool importWorldMixedEdgeTransitionBank(
-        QMap<QString,SWorkingTerrainResolveStage>* stages,
-        const QSet<QPair<qint32,qint32>>& materialPairs,
-        const QMap<qint32,qint32>& materialTypes,
-        const QSize& tileSize, CValidationReport* report,
-        const std::function<bool()>& checkpoint = {});
+        const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
     void clearNeighborLandscapes();
@@ -763,9 +700,6 @@ private:
                                         qint32 terrainType,
                                         CValidationReport* report,
                                         bool* atlasPublicationPending);
-    bool resolveMixedEdgeTerrain(STerrainTileCommand* stroke, CValidationReport* report);
-    bool mixedEdgeTerrainEnabled() const;
-    bool confirmTerrainAtlasBudgetForSave(int usedSlots);
     void refreshClassicAutoPalette();
     void refreshManualAtlasPalette(bool invalidate = true);
     void refreshWorkingTerrainPalettes();
@@ -802,12 +736,6 @@ private:
     void reviewTerrainAtlasProfile();
     void reviewTerrainAtlasProfileAtSlot(int initialSlot);
     void finalizeVirtualTerrainAtlas();
-    void republishTerrainAtlasHd();
-    void generateTerrainHdVariants();
-    bool importTerrainHdVariants(qint32 material, ETerrainTileLayer layer,
-        CValidationReport* report, SWorkingTerrainResolveStage* staging=nullptr);
-    void applyTerrainHdVariantSelectionPolicy();
-    void refreshTerrainHdVariantChoices();
     void updateTerrainAtlasViewerAnnotations(const QString& status);
     void rebuildSpatialIndices();
     QVector<CNode*> spatiallyVisibleNodes(CMob* mob, const CViewFrustum* frustum,
@@ -913,8 +841,7 @@ signals:
     void terrainPublicationPreflightRequested(
         const QString& resourceArchivePath, bool* accepted);
     void terrainPublicationFinished(
-        const QString& resourceArchivePath, bool committed,
-        bool refreshVisualResources = true);
+        const QString& resourceArchivePath, bool committed);
     void nidChangeProposed(quint32 nid, const QString& mobPath);
     void nidAllocationRequested(const QString& mobPath, quint32* suggestion);
     void cameraSpeedMultiplierChanged(double multiplier);
@@ -1015,9 +942,6 @@ private:
     QOpenGLFramebufferObject* m_farDynamicShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_localShadowFbo{nullptr};
     QOpenGLFramebufferObject* m_editorQueryFbo{nullptr};
-    // Optional full-scene review target; unlike minimap capture it includes
-    // selected neighboring maps through the normal viewport render path.
-    QOpenGLFramebufferObject* m_sceneReviewTarget{nullptr};
     bool m_editorQueryFramebufferFailureLogged{false};
     int m_shadowResolution{0};
     QMatrix4x4 m_staticLightSpaceMatrix;
@@ -1150,26 +1074,9 @@ private:
         QMap<QPair<int,int>,SNeighborSpatialGroup> spatialGroups;
         QPointF cachedOrigin;
         bool drawCacheDirty{true};
-        QByteArray terrainRevision;
-        QByteArray objectRevision;
-        QSharedPointer<SWorldTerrainDocument> retainedTerrainDocument;
     };
     void refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor);
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
-    QVector<SLoadedNeighborLandscape> m_parkedNeighborLandscapes;
-    QSet<QString> m_neighborSceneRequests;
-    QString m_neighborSceneProfileId;
-    QString m_neighborActiveSceneId;
-    bool m_neighborSceneTransition{false};
-    QVector<QSharedPointer<CNode>> m_neighborTransitionSourceObjects;
-    QByteArray m_neighborTransitionSourceObjectRevision;
-    bool m_neighborTransitionCameraValid{false};
-    QVector3D m_neighborTransitionCameraPosition;
-    QVector3D m_neighborTransitionCameraPivot;
-    QVector3D m_neighborTransitionCameraRotation;
-    QSharedPointer<SWorldTerrainDocument> m_adoptedNeighborTerrainDocument;
-    SNeighborMapPlacement m_neighborTransitionSource;
-    SNeighborMapPlacement m_neighborTransitionTarget;
     QThreadPool* m_neighborScenePool{nullptr};
     bool m_neighborObjectUploadScheduled{false};
     QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{
@@ -1223,7 +1130,6 @@ private:
     bool m_terrainAutoCatalogPending{false};
     bool m_terrainAutoCatalogBuildQueued{false};
     bool m_terrainAutoCatalogBuilding{false};
-    bool m_terrainAutoCatalogDeferredByWorkspace{false};
     QFileInfo m_pendingTerrainAutoCatalogMprPath;
     QElapsedTimer m_terrainAutoCatalogLoadTimer;
     qint64 m_terrainAutoCatalogFirstFrameMs{-1};
@@ -1254,7 +1160,6 @@ private:
     quint64 m_terrainGlobalHydrationGeneration{0};
     int m_terrainGlobalHydrationPendingJobs{0};
     bool m_terrainGlobalHydrationPublishQueued{false};
-    bool m_terrainLibraryImportPending{false};
     QMap<qint32, int> m_terrainGlobalHydrationBestRanks;
     QMap<qint32, QImage> m_terrainGlobalHydrationBestThumbnails;
     QMap<qint32, STerrainGlobalMaterialSource>
@@ -1289,23 +1194,6 @@ private:
     bool m_legacyTerrainProfileCollision{false};
     bool m_terrainEditAvailable;
     bool m_landscapeInteractionSuspended{false};
-    bool m_terrainResolveInProgress{false};
-    struct STerrainResolveCompletion {
-        struct Map {
-            CTerrainEditModel terrain;
-            QSharedPointer<CTerrainWorkingAtlas> atlas;
-            QByteArray baseline;
-            QVector<SMprMaterialRecord> materials;
-        };
-        QByteArray context;
-        QMap<QString,Map> maps;
-        QVector<STerrainGlobalMaterialFamily> families;
-        QMap<qint32,QImage> sources;
-        QMap<qint32,STerrainGlobalMaterialSource> sourceIdentities;
-        QMultiMap<QByteArray,STerrainGlobalTransitionSource> transitions;
-        QMultiMap<QByteArray,QPair<STerrainTransitionSignature,QImage>> importedTransitions;
-    } m_terrainResolveCompletion;
-    quint64 m_terrainResolvePreparationCount{0};
     CTileBrushStrokePolicy m_tileBrushStrokePolicy;
     bool m_terrainAssignmentPromptPending{false};
     bool m_tilePaintStrokeActive{false};
@@ -1328,8 +1216,6 @@ private:
     bool m_terrainStampRegressionFrameCapture{false};
     QVector<QImage> m_terrainStampRegressionFrames;
     bool m_terrainSampleGestureActive{false};
-    int m_sampledWaterPacked{-1};
-    bool sampledWaterPaintingEnabled() const;
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;
     int m_lastTerrainSampleLayer{-1};
@@ -1370,8 +1256,6 @@ private:
     int m_tileStrokeTargetMode{-1};
     bool m_tileStrokeSafeMode{false};
     bool m_tileStrokeAutoResolveBlends{true};
-    bool m_tileStrokeMixedEdge{false};
-    QSharedPointer<CTerrainWorkingAtlas> m_mixedEdgeStrokeAtlasBefore;
     qint32 m_tileStrokeMaterialId{-1};
     ETerrainTileLayer m_tileStrokeLayer{ETerrainTileLayer::Land};
     int m_tileStrokeSafeSkippedVertices{0};

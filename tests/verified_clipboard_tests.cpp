@@ -117,7 +117,6 @@ public:
     QMap<UINT, QByteArray> bytes;
     DWORD pngMedium = TYMED_ISTREAM;
     int streamFault = 0;
-    bool bitmapSource = false; // DIB is synthesized by Windows, never offered by OLE.
     StreamSource() {
         bytes.insert(RegisterClipboardFormatW(L"PNG"), pngBytes());
         bytes.insert(CF_DIB, rasterDib(false));
@@ -141,7 +140,6 @@ public:
     HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* f) override {
         if(!f) return E_POINTER;
         if(f->ptd || f->lindex != -1 || f->dwAspect != DVASPECT_CONTENT) return DV_E_FORMATETC;
-        if(bitmapSource && f->cfFormat == CF_BITMAP) return (f->tymed & TYMED_GDI) ? S_OK : DV_E_TYMED;
         if(!bytes.contains(f->cfFormat)) return DV_E_FORMATETC;
         return (f->tymed & (f->cfFormat == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL))) ? S_OK : DV_E_TYMED;
     }
@@ -149,16 +147,6 @@ public:
         const HRESULT valid = QueryGetData(f);
         if(valid != S_OK) return valid;
         *m = {};
-        if(bitmapSource && f->cfFormat == CF_BITMAP) {
-            const QByteArray dib = rasterDib(false);
-            HDC dc = GetDC(nullptr);
-            m->tymed = TYMED_GDI;
-            m->hBitmap = CreateDIBitmap(dc, reinterpret_cast<const BITMAPINFOHEADER*>(dib.constData()),
-                CBM_INIT, dib.constData() + sizeof(BITMAPINFOHEADER),
-                reinterpret_cast<const BITMAPINFO*>(dib.constData()), DIB_RGB_COLORS);
-            ReleaseDC(nullptr, dc);
-            return m->hBitmap ? S_OK : E_FAIL;
-        }
         const QByteArray payload = bytes[f->cfFormat];
         if(f->cfFormat == RegisterClipboardFormatW(L"PNG") && (pngMedium & TYMED_ISTREAM)) {
             m->tymed = TYMED_ISTREAM;
@@ -188,10 +176,6 @@ public:
     HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD dir, IEnumFORMATETC** out) override {
         if(dir != DATADIR_GET) return E_NOTIMPL;
         QVector<FORMATETC> list;
-        if(bitmapSource) {
-            FORMATETC f = {}; f.cfFormat = CF_BITMAP; f.dwAspect = DVASPECT_CONTENT;
-            f.lindex = -1; f.tymed = TYMED_GDI; list.append(f);
-        }
         for(auto it = bytes.cbegin(); it != bytes.cend(); ++it) {
             FORMATETC f = {}; f.cfFormat = CLIPFORMAT(it.key()); f.dwAspect = DVASPECT_CONTENT; f.lindex = -1;
             f.tymed = it.key() == RegisterClipboardFormatW(L"PNG") ? pngMedium : DWORD(TYMED_HGLOBAL);
@@ -210,12 +194,10 @@ public:
     HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
 };
 
-static bool installStream(int fault = 0, DWORD medium = TYMED_ISTREAM, bool bitmapSource = false)
+static bool installStream(int fault = 0, DWORD medium = TYMED_ISTREAM)
 {
     auto* source = new StreamSource;
     source->streamFault = fault; source->pngMedium = medium;
-    source->bitmapSource = bitmapSource;
-    if(bitmapSource) { source->bytes.remove(CF_DIB); source->bytes.remove(CF_DIBV5); }
     QElapsedTimer timeout;
     timeout.start();
     HRESULT result;
@@ -426,52 +408,6 @@ private slots:
         QCOMPARE(status, HRESULT(S_OK)); QCOMPARE(stream, pngBytes());
         QVERIFY(!QImage::fromData(stream, "PNG").isNull());
         QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
-#endif
-    }
-    void oleBitmapWithoutOleDibRestores()
-    {
-#ifdef Q_OS_WIN
-        QVERIFY(installStream(0, TYMED_ISTREAM, true));
-        IDataObject* object = nullptr;
-        QCOMPARE(OleGetClipboard(&object), HRESULT(S_OK));
-        QVERIFY(object);
-        IEnumFORMATETC* enumerator = nullptr;
-        const HRESULT result = object->EnumFormatEtc(DATADIR_GET, &enumerator);
-        object->Release();
-        QCOMPARE(result, HRESULT(S_OK));
-        QVERIFY(enumerator);
-        bool dibOffered = false, bitmapOffered = false, streamOffered = false;
-        FORMATETC format = {};
-        HRESULT next;
-        while((next = enumerator->Next(1, &format, nullptr)) == S_OK) {
-            dibOffered |= format.cfFormat == CF_DIB || format.cfFormat == CF_DIBV5;
-            bitmapOffered |= format.cfFormat == CF_BITMAP && format.tymed == TYMED_GDI;
-            streamOffered |= format.cfFormat == RegisterClipboardFormatW(L"PNG") && format.tymed == TYMED_ISTREAM;
-            if(format.ptd) CoTaskMemFree(format.ptd);
-        }
-        enumerator->Release();
-        QCOMPARE(next, HRESULT(S_FALSE));
-        QVERIFY(!dibOffered && bitmapOffered && streamOffered);
-        const QByteArray dib = readNativeBytes(CF_DIB), v5 = readNativeBytes(CF_DIBV5);
-        QVERIFY(!dib.isEmpty() && !v5.isEmpty());
-        const DWORD sequence = GetClipboardSequenceNumber();
-        ei::ClipboardRestoreGuard guard;
-        QVERIFY2(guard.captured(), qPrintable(guard.error()));
-        QCOMPARE(GetClipboardSequenceNumber(), sequence); // Capture does not replace contents.
-        QVERIFY(ei::copyTextToClipboard("Temporary OLE bitmap replacement"));
-        QVERIFY2(guard.restore(), qPrintable(guard.error()));
-        QCOMPARE(readNativeBytes(CF_DIB), dib);
-        QCOMPARE(readNativeBytes(CF_DIBV5), v5);
-        StreamSource expected;
-        expected.bytes.remove(CF_DIB); expected.bytes.remove(CF_DIBV5);
-        for(auto it = expected.bytes.cbegin(); it != expected.bytes.cend(); ++it)
-            QCOMPARE(readNativeBytes(it.key()), it.value());
-        QCOMPARE(oleBytes(RegisterClipboardFormatW(L"PNG"), TYMED_ISTREAM), pngBytes());
-        QVERIFY(IsClipboardFormatAvailable(CF_BITMAP));
-        QVERIFY(openForCheck(nullptr));
-        const bool bitmap = GetClipboardData(CF_BITMAP) != nullptr;
-        CloseClipboard();
-        QVERIFY(bitmap);
 #endif
     }
     void storageRefusesBeforeWrites()
@@ -803,10 +739,7 @@ private slots:
     }
 };
 
-// Historical native guard fixtures are OPTIONAL and can touch the OS clipboard.
-// Only --native-clipboard-tests or their explicitly named helper modes enter
-// this suite. The default regression below never captures/restores OS data.
-int nativeClipboardMain(int argc, char** argv)
+int main(int argc, char** argv)
 {
 #ifdef Q_OS_WIN
     if(argc == 4 && QByteArray(argv[1]) == "--hold") {
@@ -836,11 +769,9 @@ int nativeClipboardMain(int argc, char** argv)
 #endif
     ei::ClipboardRestoreGuard clipboard;
     if(!clipboard.captured()) { fprintf(stderr, "%s\n", qPrintable(clipboard.error())); return 2; }
-    const bool bitmapChild = argc == 3 && QByteArray(argv[1]) == "--guard-ole-bitmap-child";
-    const bool liveChild = argc == 3 && QByteArray(argv[1]) == "--guard-live-child";
-    if(argc == 3 && (QByteArray(argv[1]) == "--guard-stream-child" || bitmapChild)) {
+    if(argc == 3 && QByteArray(argv[1]) == "--guard-stream-child") {
 #ifdef Q_OS_WIN
-        if(!installStream(0, TYMED_ISTREAM, bitmapChild)) return 2;
+        if(!installStream()) return 2;
         if(!clipboardInventory()) return 2;
 #endif
     }
@@ -850,7 +781,7 @@ int nativeClipboardMain(int argc, char** argv)
         if(!installRaster(false, true)) return 2;
 #endif
     }
-    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child" || QByteArray(argv[1]) == "--guard-stream-child" || bitmapChild || liveChild)) {
+    if(argc == 3 && (QByteArray(argv[1]) == "--guard-child" || QByteArray(argv[1]) == "--guard-image-child" || QByteArray(argv[1]) == "--guard-stream-child")) {
         // Historical UI checks lack verified restoration. Keep their original
         // executable unchanged, while an independent parent preserves native
         // clipboard data for a safe baseline comparison.
@@ -864,26 +795,6 @@ int nativeClipboardMain(int argc, char** argv)
         const QByteArray imageBefore = readNativeBytes(CF_DIB);
         const QByteArray imageV5Before = readNativeBytes(CF_DIBV5);
         StreamSource expectedStream;
-        QMap<UINT, QByteArray> liveBytes;
-        if(liveChild || bitmapChild) {
-            if(!clipboardInventory() || !openForCheck(nullptr)) return 2;
-            QVector<UINT> ids;
-            UINT id = 0;
-            while((id = EnumClipboardFormats(id)) != 0) {
-                if(id != CF_BITMAP && id != CF_PALETTE
-                    && id != RegisterClipboardFormatW(L"DataObject")
-                    && id != RegisterClipboardFormatW(L"Ole Private Data")) ids.append(id);
-            }
-            CloseClipboard();
-            for(UINT id : ids) {
-                const QByteArray bytes = readNativeBytes(id);
-                if(bytes.isEmpty()) return 2;
-                liveBytes.insert(id, bytes);
-            }
-            if(imageBefore.isEmpty() || imageV5Before.isEmpty()
-                || !liveBytes.contains(RegisterClipboardFormatW(L"PNG"))) return 2;
-            printf("PASS: read-only capture of %d public byte formats before child\n", liveBytes.size());
-        }
 #endif
         child.start(QString::fromLocal8Bit(argv[2]), {"--ui-widget-check"});
         if(!child.waitForStarted(3000)) return 2;
@@ -900,22 +811,11 @@ int nativeClipboardMain(int argc, char** argv)
         fwrite(output.constData(), 1, size_t(output.size()), stdout);
         fwrite(errors.constData(), 1, size_t(errors.size()), stderr);
 #ifdef Q_OS_WIN
-        const bool imageRestored = !(liveChild || bitmapChild || QByteArray(argv[1]) == "--guard-image-child"
-                || QByteArray(argv[1]) == "--guard-stream-child")
+        const bool imageRestored = QByteArray(argv[1]) != "--guard-image-child"
             || (readNativeBytes(CF_DIB) == imageBefore && readNativeBytes(CF_DIBV5) == imageV5Before
                 && IsClipboardFormatAvailable(CF_BITMAP));
         printf("%s: child preserved image HGLOBAL bytes and CF_BITMAP availability\n", imageRestored ? "PASS" : "FAIL");
         bool streamRestored = true;
-        if(liveChild || bitmapChild) {
-            for(auto it = liveBytes.cbegin(); it != liveBytes.cend(); ++it)
-                streamRestored = streamRestored && readNativeBytes(it.key()) == it.value();
-            const UINT png = RegisterClipboardFormatW(L"PNG");
-            streamRestored = streamRestored && IsClipboardFormatAvailable(CF_BITMAP)
-                && IsClipboardFormatAvailable(png) && openForCheck(nullptr);
-            if(streamRestored) { streamRestored = GetClipboardData(CF_BITMAP) != nullptr; CloseClipboard(); }
-            printf("%s: child preserved all %d public format bytes, CF_BITMAP and PNG availability\n",
-                streamRestored ? "PASS" : "FAIL", liveBytes.size());
-        }
         if(QByteArray(argv[1]) == "--guard-stream-child") {
             for(auto it = expectedStream.bytes.cbegin(); it != expectedStream.bytes.cend(); ++it)
                 streamRestored = streamRestored && readNativeBytes(it.key()) == it.value();
@@ -943,193 +843,5 @@ int nativeClipboardMain(int argc, char** argv)
     printf("%s: original clipboard restored and native data flushed\n", restored ? "PASS" : "FAIL");
     if(!restored) fprintf(stderr, "%s\n", qPrintable(clipboard.error()));
     return restored ? result : 1;
-}
-class IsolatedClipboardTests : public QObject
-{
-    Q_OBJECT
-private slots:
-    void init() { QApplication::clipboard()->clear(); }
-    void backendAndModes()
-    {
-        QVERIFY(ei::testClipboardEnabled());
-        QVERIFY(!QApplication::clipboard()->supportsSelection());
-        QVERIFY(!QApplication::clipboard()->supportsFindBuffer());
-        QVERIFY(!QApplication::clipboard()->ownsClipboard());
-    }
-    void valueReadback()
-    {
-        QMimeData original;
-        original.setText(QString::fromUtf8("Текст буфера"));
-        original.setHtml("<b>clipboard</b>");
-        original.setData("application/x-ataman", QByteArray::fromHex("0001ff007f"));
-        original.setUrls({QUrl("https://example.invalid/a%20b"), QUrl::fromLocalFile("C:/test/a")});
-        QImage image(3,2,QImage::Format_ARGB32); image.fill(QColor(30,60,90,123));
-        original.setImageData(image);
-        const auto snapshot = ei::ClipboardSnapshot::fromMimeData(original);
-        const auto result = ei::writeClipboard(snapshot);
-        QVERIFY2(result.ok, qPrintable(result.error));
-        QCOMPARE(result.attempts, 1);
-        QVERIFY(snapshot.matches(ei::clipboardMimeData()));
-        QCOMPARE(ei::clipboardMimeData()->formats().size(), original.formats().size());
-        QVERIFY(QApplication::clipboard()->ownsClipboard());
-    }
-    void replacementAndEmpty()
-    {
-        QMimeData data; data.setData("application/x-ataman", "payload");
-        QVERIFY(ei::copyMimeDataToClipboard(data));
-        QVERIFY(ei::copyTextToClipboard("replacement"));
-        QVERIFY(!ei::clipboardMimeData()->hasFormat("application/x-ataman"));
-        QCOMPARE(ei::clipboardText(), QString("replacement"));
-        QVERIFY(ei::writeClipboard(ei::ClipboardSnapshot()).ok);
-        QVERIFY(ei::clipboardMimeData()->formats().isEmpty());
-    }
-    void builtInLineEditCopyCutPasteUndo()
-    {
-        QLineEdit editor("abcdef"); editor.setAttribute(Qt::WA_DontShowOnScreen);
-        editor.setSelection(2,2);
-        editor.copy(); QCOMPARE(ei::clipboardText(), QString("cd"));
-        editor.cut(); QCOMPARE(editor.text(), QString("abef"));
-        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
-        editor.deselect(); editor.setCursorPosition(6); editor.paste();
-        QCOMPARE(editor.text(), QString("abcdefcd"));
-        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
-    }
-    void builtInMenuAndShortcuts()
-    {
-        QLineEdit editor("menu text"); editor.setAttribute(Qt::WA_DontShowOnScreen);
-        editor.selectAll();
-        QScopedPointer<QMenu> menu(editor.createStandardContextMenu());
-        bool copied = false;
-        for(QAction* action : menu->actions()) if(action->text().remove('&').startsWith("Copy")) {
-            action->trigger(); copied = true; break;
-        }
-        QVERIFY(copied); QCOMPARE(ei::clipboardText(), QString("menu text"));
-        QTest::keyClick(&editor, Qt::Key_X, Qt::ControlModifier);
-        QVERIFY(editor.text().isEmpty());
-        QTest::keyClick(&editor, Qt::Key_Z, Qt::ControlModifier);
-        QCOMPARE(editor.text(), QString("menu text"));
-        editor.deselect(); editor.setCursorPosition(9);
-        QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
-        QCOMPARE(editor.text(), QString("menu textmenu text"));
-    }
-    void verifiedMenuAndCut()
-    {
-        QLineEdit editor("abcdef"); editor.setSelection(2,2);
-        QScopedPointer<QMenu> menu(ei::verifiedLineEditContextMenu(&editor));
-        QAction* cut = menu->findChild<QAction*>("verifiedClipboardCut");
-        QVERIFY(cut); cut->trigger();
-        QCOMPARE(editor.text(), QString("abef")); QCOMPARE(ei::clipboardText(), QString("cd"));
-        editor.undo(); QCOMPARE(editor.text(), QString("abcdef"));
-    }
-    void signalsAndNestedWrite()
-    {
-        QSignalSpy spy(QApplication::clipboard(), &QClipboard::dataChanged);
-        bool attempted = false; bool nestedOk = true;
-        const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&] {
-            if(!attempted) { attempted=true; nestedOk=ei::copyTextToClipboard("nested"); }
-        });
-        QVERIFY(ei::copyTextToClipboard("outer"));
-        disconnect(connection);
-        QVERIFY(attempted); QVERIFY(!nestedOk);
-        QCOMPARE(ei::clipboardText(), QString("outer")); QCOMPARE(spy.count(),1);
-    }
-    void ordinaryModeSelectionAndAllCheckFlags()
-    {
-        char exe[]="mapper", ordinary[]="--version", check[]="--ui-widget-check", equals[]="--roundtrip-check=file";
-        char* normal[]={exe,ordinary}; char* testing[]={exe,check}; char* valued[]={exe,equals};
-        QVERIFY(!ei::testClipboardRequested(2,normal));
-        QVERIFY(ei::testClipboardRequested(2,testing));
-        QVERIFY(ei::testClipboardRequested(2,valued));
-        QProcess child;
-        child.start(QCoreApplication::applicationFilePath(), {"--backend-default-check"});
-        QVERIFY(child.waitForFinished(10000)); QCOMPARE(child.exitCode(),0);
-        QVERIFY(child.readAllStandardOutput().contains("backend=system"));
-    }
-    void sentinelAcceptsExternalMetadata()
-    {
-        QProcess child; child.start(QCoreApplication::applicationFilePath(), {"--probe-external-metadata"});
-        QVERIFY(child.waitForFinished(10000));
-        QCOMPARE(child.exitCode(),0);
-        const auto output=child.readAllStandardOutput();
-        QVERIFY2(output.contains("PASS: clipboard isolation"),output.constData());
-        QVERIFY(output.contains("nativeAttempts=0"));
-        QVERIFY(output.contains("unchanged=0"));
-        QVERIFY(output.contains("INFO: external clipboard metadata changed"));
-    }
-    void sentinelRejectsNativeAndSystemQpa()
-    {
-        for(const QString& probe : {QString("--probe-native-open"),QString("--probe-native-ole"),QString("--probe-system-qpa")}) {
-            QProcess child; child.start(QCoreApplication::applicationFilePath(), {probe});
-            QVERIFY(child.waitForFinished(10000));
-            qInfo().noquote() << probe << "exit=" << child.exitCode()
-                << child.readAllStandardOutput();
-            QCOMPARE(child.exitStatus(),QProcess::NormalExit); QCOMPARE(child.exitCode(),2);
-            const QByteArray output=child.readAllStandardError();
-            QVERIFY2(output.contains("FAIL: clipboard isolation"),output.constData());
-            QVERIFY(!output.contains("nativeAttempts=0"));
-        }
-    }
-};
-
-int main(int argc, char** argv)
-{
-    const QByteArray option = argc > 1 ? QByteArray(argv[1]) : QByteArray();
-    if(option == "--native-clipboard-tests") {
-        for(int i=1;i<argc-1;++i) argv[i]=argv[i+1];
-        --argc;
-        return nativeClipboardMain(argc,argv);
-    }
-    // Helpers are explicit native-only invocations; never run by qExec default.
-    if(option == "--hold" || option == "--inventory" || option.startsWith("--guard-"))
-        return nativeClipboardMain(argc,argv);
-    const bool ordinary = option == "--backend-default-check";
-    ei::TestClipboardSession clipboard(!ordinary);
-    if(!clipboard.prepared()) return 2;
-    QApplication app(argc,argv);
-    if(!clipboard.install()) return 2;
-    if(ordinary) {
-        const bool system = !ei::testClipboardEnabled();
-        printf("%s: backend=system without test activation\n",system?"PASS":"FAIL");
-        return system?0:2;
-    }
-#ifdef Q_OS_WIN
-    if(option == "--probe-external-metadata") {
-        // Inject an external sequence observation in THIS process's import
-        // table. No clipboard is opened, written or held on the owner's PC.
-        auto base=reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
-        auto dos=reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-        auto nt=reinterpret_cast<IMAGE_NT_HEADERS*>(base+dos->e_lfanew);
-        auto desc=reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base+
-            nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-        for(;desc->Name;++desc) {
-            if(!desc->OriginalFirstThunk) continue;
-            auto names=reinterpret_cast<IMAGE_THUNK_DATA*>(base+desc->OriginalFirstThunk);
-            auto addresses=reinterpret_cast<IMAGE_THUNK_DATA*>(base+desc->FirstThunk);
-            for(;names->u1.AddressOfData;++names,++addresses) {
-                if(IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
-                auto name=reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base+names->u1.AddressOfData);
-                if(strcmp(reinterpret_cast<char*>(name->Name),"GetClipboardSequenceNumber")!=0) continue;
-                static DWORD externalSequence=GetClipboardSequenceNumber()+1;
-                static auto observation=+[]() -> DWORD { return externalSequence; };
-                DWORD prior=0;
-                if(!VirtualProtect(&addresses->u1.Function,sizeof(addresses->u1.Function),PAGE_READWRITE,&prior)) return 3;
-                addresses->u1.Function=reinterpret_cast<ULONG_PTR>(observation);
-                DWORD ignored=0;VirtualProtect(&addresses->u1.Function,sizeof(addresses->u1.Function),prior,&ignored);
-                return 0; // Destructor must PASS despite the sequence change.
-            }
-        }
-        return 3;
-    }
-    if(option == "--probe-native-open") { OpenClipboard(nullptr); return 0; }
-    if(option == "--probe-native-ole") { IDataObject* object=nullptr; OleGetClipboard(&object); return 0; }
-    if(option == "--probe-system-qpa") {
-        // Test the REAL Windows clipboard class without the QPA adapter.
-        // The import hook must reject its read before any payload is obtained.
-        ei::probeSystemClipboardForTest();
-        return 0;
-    }
-#endif
-    HiddenWidgets hidden; app.installEventFilter(&hidden);
-    IsolatedClipboardTests tests; return QTest::qExec(&tests,argc,argv);
 }
 #include "verified_clipboard_tests.moc"

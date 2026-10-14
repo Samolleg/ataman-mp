@@ -1,5 +1,14 @@
 # EI Mapper Ataman
 
+Действующая рабочая база — **131**, точный снимок
+`5a81105903c4462a6694f2dd1aefcbdf5086404b` до нового ядра запекания переходов.
+По решению владельца2026-10-14 дальнейшие исправления выполняются поверх этой
+базы в main; ядро запекания пока не возвращается. Программные исходники и
+соответствующие тесты восстановлены к131 с сохранением истории132–176.
+Следующее отдельное исправление получает свободный номер177.
+[Закрепление базы](docs/validation/ATAMAN_BASELINE_131_20261014.md),
+[действующие правила](AGENTS.md), [дорожная карта](ROADMAP.md).
+
 Соавтору и новому Codex: [вход в проект](docs/COAUTHOR_HANDOFF.md),
 [шаблон задания](docs/CODEX_TASK_TEMPLATE.md). Начните с них перед настройкой
 окружения; действующие правила остаются в AGENTS.md и проектных договорах.
@@ -22,43 +31,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `176`. Each separate fix advances the integer version.
-
-161 keeps private HD terrain donors in `hd-library` beside the executable: `sources` contains imported terrain pages/profiles, `index` contains the reusable matcher, and `variants` contains painting materials. Import reads game archives once; later HD conversions and painting-bank loads use local files. Game resource publication still writes the map's required atlas through the normal guarded save route. Keep `hd-library` with your settings and maps when updating the program; it is user data, not part of a distributable package. A changed game HDPack does not automatically replace this library.
-
-160 allows HD conversion of original map namespaces and saves a shared-brush session with only the current map changed through the normal MPR save route. HD output uses the configured HDPack_Terrain.res; source pages and native animation frames are preserved. Performance improvements from159 remain included.
-
-Evidence: [zone2 HD and Save](docs/validation/ATAMAN_ZONE2_HD_SAVE_160_20261013.md).
-
-158 fixes the visible boundary between neighboring maps, preserving mixed tile bodies and respecting the renderer UV range. Includes HD157 with native128 water preserved through ordinary Save.
-
-157 rebuilds published static terrain from verified native HD sources, including recovered multi-material transitions. Native animation frames stay unchanged. The optional variant layout is off by default and supports Undo/Redo and ordinary Save. Native-render evidence and integration status: [HD and seams review](docs/validation/ATAMAN_HD_SEAMS_NATIVE_157_158_20261012.md).
-
-156 fixes Ground strokes disappearing on mouse release when neighboring maps are selected. Local Mixed-edge strokes now commit with the shared brush enabled. Failure diagnostics and the regression use the production neighbor context. Validation: docs/validation/ATAMAN_PAINT_RELEASE_156_20261012.md.
-
-154 restores readable landscape-tool fonts using the application font and DPI, with responsive controls for narrow docks. Repainting an unchanged material preserves nonresident mixed artwork; when Mixed-edge lacks a usable stock bank, painting uses the existing exact Modern path and reports that choice. Budget and animation refusals remain strict. Validation: docs/validation/ATAMAN_PAINT_FONT_154_20261012.md.
-
-153 follows the approved landscape-panel mockup with larger material tiles, visible option chips, one shape/target row, selected-material counts and compact map command buttons. Validation: docs/validation/ATAMAN_PANEL_MOCKUP_153_20261012.md.
-
-152 restores automatic terrain material palette loading after map open and starts it when a paint or surface palette is opened. See the [palette hotfix report](docs/validation/ATAMAN_PALETTE_HOTFIX_152_20261012.md).
-
-151 enables mixed-edge painting and transition repair across selected neighboring maps with shared material planning, canonical seam pixels, per-map atlas namespaces, and one cohort undo transaction. See the [cross-map transition report](docs/validation/ATAMAN_CROSSMAP_TRANSITIONS_151_20261012.md).
-
-149 polishes the landscape panel and makes every tile shuffle use a fresh map seed in one undoable action. See the [panel polish and handoff report](docs/validation/ATAMAN_PANEL_POLISH_149_20261012.md).
-
-148 keeps paint-only MPR catalog and source hydration out of the blocking map workspace load, and restores the complete v146 baseline package payload. See the [load and package validation report](docs/validation/ATAMAN_MOB_LOAD_148_20261012.md).
-
-147 unifies terrain paint, sculpt, and overlay-surface tools in a Russian landscape panel. Classic Auto settings migrate to Modern; holding C temporarily uses direct physical atlas-slot painting. See the [landscape panel validation and handoff report](docs/validation/ATAMAN_LANDSCAPE_PANEL_147_20261011.md).
-
-HD material variants are generated locally from configured HDPack sources:
-Landscape → Advanced → «Сгенерировать HD-варианты материалов…».
-The cancellable command stores BC1 pages and metadata in the user's data folder,
-outside the installation. «Использовать сгенерированные варианты» is ON by default;
-OFF keeps the previous painting behavior. After 128 candidates, any shortfall is
-reported without relaxing quality thresholds. Game textures are never shipped
-with the program. Owner exclusions live in `data/terrain_variant_rejects.json`.
-144 adds exact SD pixel aliases and SHA-guarded owner-confirmed HD provenance for Stone / Desert class 3, preserving target terrain bindings.
-Live maps are unchanged. See the [validation and installation report](docs/validation/ATAMAN_STONE_DESERT_HD_144_20261011.md).
+Current Ataman version: `131`. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

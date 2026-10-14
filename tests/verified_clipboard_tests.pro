@@ -1,4 +1,4 @@
-QT += core gui gui-private widgets testlib
+QT += core gui widgets testlib
 CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = verified_clipboard_tests

@@ -65,7 +65,6 @@ struct STerrainFinalizedTile
     QImage pixels;
     QByteArray pixelSha256;
     bool authored{false};
-    bool physicalPadding{false};
     int sourceSlot{-1};
     QString sourceNamespace;
     // Every authored physical slot represented by this retained artwork.
@@ -77,7 +76,6 @@ struct STerrainFinalizedTile
     // Empty for original map slots. Imported exact tiles and generated tiles
     // record their physical artwork provenance.
     QString blendProvenance;
-    QStringList mixedEdgeRecipes;
     bool stockDerivedBlend{false};
     bool canonicalGeneratedBlend{false};
     // Exact material whose reviewed route generated this transition. Zero is
@@ -150,7 +148,6 @@ struct STerrainWorkingTileIdentity
     int sourceSlot{-1};
     QVector<int> sourceSlotAliases;
     QString sourceNamespace;
-    QStringList sourceNamespaceAliases;
     STerrainTransitionSignature canonicalSignature;
     QByteArray physicalPixelSha256;
     QString blendProvenance;
@@ -289,21 +286,11 @@ public:
     // Cohort repair uses one reviewed source set and world-coordinate edge
     // ownership. The physical SEC edge may have an along-edge displacement.
     // Side bits are north=1, east=2, south=4, west=8 in terrain-grid space.
-    // A supplied body is native atlas artwork with its packed UV rotation.
-    // The returned artwork has rotation=0; pixels outside the seam band retain
-    // the body's world orientation. Only fallback generation uses the cache;
-    // no body/geometry-dependent output is cached by a material tuple.
     QImage worldBoundaryTile(const STerrainTransitionSignature& signature,
         const CTerrainEditModel& geometry, const QPointF& origin,
         int cellX, int cellY, int sides,
         QMap<QByteArray,QImage>* canonicalCache,
-        CValidationReport* report = nullptr,
-        const QImage& resolvedBody = QImage(), quint8 bodyRotation = 0) const;
-    // Complete raster identity, including sources, body, displaced geometry
-    // and world placement. Allows working atlases to reuse a ready seam tile.
-    QByteArray worldBoundaryRecipeKey(const STerrainTransitionSignature& signature,
-        const CTerrainEditModel& geometry,const QPointF& origin,int cellX,int cellY,
-        int sides,const QImage& resolvedBody = QImage(),quint8 bodyRotation = 0) const;
+        CValidationReport* report = nullptr) const;
     // Review-only A/B compositor. Runtime generation remains encoded-RGB
     // until the focused visual comparison is explicitly accepted.
     QImage reviewGeneratedBlendLinearLight(
@@ -333,8 +320,7 @@ public:
                                        const QVector<qint32>& preferredPaintMaterials = {},
                                        const CTerrainTransitionCatalog* authoredDecodeCatalog = nullptr,
                                        const QVector<bool>& preservePreferredPackedCells = {},
-                                       const QVector<STerrainAtlasAnimationRange>& animations = {},
-                                       const QVector<QByteArray>& authoredPagePayloads = {});
+                                       const QVector<STerrainAtlasAnimationRange>& animations = {});
 
     static QImage composePage(const QVector<QImage>& tiles, int firstTile,
                               int tileSize);
@@ -378,7 +364,6 @@ private:
     CTerrainVirtualAtlas(const CTerrainVirtualAtlas&) = delete;
     CTerrainVirtualAtlas& operator=(const CTerrainVirtualAtlas&) = delete;
     friend class CTerrainWorkingAtlas;
-    bool sharesRepairStateWith(const CTerrainVirtualAtlas& other) const;
 
     QByteArray signatureKey(const STerrainTransitionSignature& signature) const;
     STerrainTransitionSignature canonicalSignature(
@@ -414,7 +399,6 @@ private:
 
     const CTerrainTransitionCatalog& m_catalog;
     QVector<QImage> m_authoredTiles;
-    QSize m_generationSize;
     QMap<qint32, QImage> m_materialSources;
     QMap<qint32, int> m_materialSourceSlots;
     QVector<qint32> m_sourceTileTypes;
@@ -451,8 +435,6 @@ public:
     bool isValid() const;
     QString error() const;
     const CTerrainTransitionCatalog& catalog() const { return m_workingCatalog; }
-    void setSlotPaintSelectable(int slot,bool selectable) { m_workingCatalog.setSlotPaintSelectable(slot,selectable); }
-    void restoreHdVariantIdentity(int slot,const QString& id,const QVector<int>& aliases);
     const QVector<QImage>& tileImages() const { return m_workingImages; }
     // MP terrain types are logical per-slot metadata, while MMP imagery is
     // always stored in complete 64-tile physical pages.
@@ -500,38 +482,19 @@ public:
     int catalogVariantCount() const { return m_workingCatalog.size(); }
     QSet<int> changedSlots() const { return m_changedSlots; }
     QByteArray stateFingerprint() const;
-    // Compare frozen staging storage, including the independently copied
-    // resolver. Upload bookkeeping is not an input to material repair.
-    bool sharesRepairStateWith(const CTerrainWorkingAtlas& other) const;
     void acknowledgeChangedSlots(const QSet<int>& changed);
     void setDistributionSeed(quint32 seed)
     { if(m_resolver) m_resolver->setDistributionSeed(seed); }
-    void setUniformPaintSeed(bool enabled, quint32 seed)
-    {
-        m_authoredCatalog.setUniformPaintSeed(enabled, seed);
-        m_workingCatalog.setUniformPaintSeed(enabled, seed);
-    }
     bool hasMaterialSource(qint32 material) const
     { return m_resolver && m_resolver->hasMaterialSource(material); }
     bool addExternalMaterialSource(qint32 material, const QImage& pixels)
     { return m_resolver && m_resolver->addExternalMaterialSource(material, pixels); }
     QSet<int> takeChangedSlots();
-    void invalidatePreviewTiles()
-    { for(int slot=0; slot<activeTileCount(); ++slot) m_changedSlots.insert(slot); }
     int importPhysicalTile(const QImage& pixels, qint32 runtimeType,
         const STerrainTransitionSignature* signature, const QString& sourceNamespace,
         int sourceSlot, CValidationReport* report, bool preserveAuthoredPages = false);
     int importWorldBoundaryTile(const QImage& pixels, qint32 runtimeType,
         const STerrainTransitionSignature& signature, CValidationReport* report = nullptr);
-    int worldBoundarySlot(const QByteArray& key) const;
-    void rememberWorldBoundaryRecipe(const QByteArray& key,int slot);
-    int mixedEdgeSlot(const QString& recipeKey) const
-    { return m_mixedEdgeRecipes.value(recipeKey, -1); }
-    const QMap<QString, int>& mixedEdgeRecipes() const { return m_mixedEdgeRecipes; }
-    void restoreMixedEdgeRecipe(int slot, const QString& recipeKey);
-    int importMixedEdgeTile(const QImage& pixels, qint32 runtimeType,
-        const STerrainTransitionSignature& signature, const QString& recipeKey,
-        CValidationReport* report);
 
     bool addAuthoredLibraryTransition(
         const STerrainTransitionSignature& signature, const QImage& pixels,
@@ -588,10 +551,6 @@ private:
     // identity without pretending to be a new authored/generated provenance.
     QMap<int, int> m_animationCopySources;
     QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
-    QMap<int, QStringList> m_worldBankNamespaceAliases;
-    QMap<QString, int> m_mixedEdgeRecipes;
-    // Pixel identity guards against a later reuse of an unreferenced slot.
-    QMap<QByteArray,QPair<int,QByteArray>> m_worldBoundaryRecipes;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
 };

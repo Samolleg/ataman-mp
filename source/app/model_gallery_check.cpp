@@ -23,8 +23,6 @@
 bool runModelGalleryWidgetCheck(QString* diagnostic)
 {
     QString thumbnailFailure;
-    QString thumbnailTimingSample;
-    QString coldThumbnailTimingSample;
     const auto fail=[diagnostic,&thumbnailFailure](const QString& message){if(diagnostic)*diagnostic=message+thumbnailFailure;return false;};
     QTemporaryDir temp; if(!temp.isValid()) return fail("temporary directory");
     ei::TechnicalModelCatalog catalog; QString error;
@@ -194,8 +192,6 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         gap=qMax(gap,elapsed.elapsed()-last);
         const bool passed=complete && elapsed.elapsed()<limit && gap<100;
         thumbnailFailure=passed?QString():QString("; thumbnails elapsed=%1ms first=%2ms GUI-gap=%3ms visible=%4 ready=%5 (completion<%6ms, GUI-gap<100ms)").arg(elapsed.elapsed()).arg(first).arg(gap).arg(visible).arg(done).arg(limit);
-        thumbnailTimingSample = QString("thumbnail timing: elapsed=%1ms first=%2ms GUI-gap=%3ms visible=%4 ready=%5 complete=%6")
-            .arg(elapsed.elapsed()).arg(first).arg(gap).arg(visible).arg(done).arg(complete);
         if(qEnvironmentVariableIsSet("EI_GALLERY_TIMING_TRACE"))qInfo("GALLERY ready elapsed_ms=%lld first_ms=%lld gap_ms=%lld visible=%d done=%d complete=%d passed=%d",(long long)elapsed.elapsed(),(long long)first,(long long)gap,visible,done,complete,passed);
         return passed;
     };
@@ -249,7 +245,6 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
         if(cold.selectedModel()!="house" || cold.selectedTexture()!="wood") return fail("initial model and explicit texture");
         cold.setAttribute(Qt::WA_DontShowOnScreen);cold.show();clock.restart();
         if(!ready(cold,300)) return fail(QString("visible thumbnail queue responsiveness (limit300ms): calls=%1 viewport=%2x%3 elapsed=%4ms").arg(sharedCalls->load()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->width()).arg(cold.findChild<QListWidget*>("modelGalleryTiles")->viewport()->height()).arg(clock.elapsed()));
-        coldThumbnailTimingSample = thumbnailTimingSample;
         auto* tiles=cold.findChild<QListWidget*>("modelGalleryTiles");
         if(sharedCalls->load()==0 || sharedCalls->load()>=manyModels.size()) return fail("full-profile visible-only jobs");
         const int before=sharedCalls->load();
@@ -310,7 +305,6 @@ bool runModelGalleryWidgetCheck(QString* diagnostic)
     if(!started->load()){delete slow;return fail("slow worker started");}
     clock.restart();delete slow;const auto closeMs=clock.elapsed();
     if(closeMs>150)return fail("closing gallery waits for thumbnail worker");
-    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms;143 Shift=%4ms entries=%5ms; Shift pointer-motion/keyboard/Ctrl/reverse PASS; close during600ms worker=%3ms; thumbnail cache / bounded parallel / stale results / all-N close PASS; %6")
-        .arg(openMs).arg(selectMs).arg(closeMs).arg(rangeMs).arg(entriesMs).arg(coldThumbnailTimingSample);
+    if(diagnostic) *diagnostic=QString("functional sections/search/manual persistence/Escape/multi-select; 497 models/7165 textures: open=%1ms select=%2ms;143 Shift=%4ms entries=%5ms; Shift pointer-motion/keyboard/Ctrl/reverse PASS; close during600ms worker=%3ms; thumbnail cache / bounded parallel / stale results / all-N close PASS").arg(openMs).arg(selectMs).arg(closeMs).arg(rangeMs).arg(entriesMs);
     return true;
 }

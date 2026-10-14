@@ -16,13 +16,11 @@
 
 #include <cmath>
 #include <cstring>
-#include <utility>
 #include "render_performance.h"
 #include "view_frustum.h"
 #include "res_file.h"
 #include "utils.h"
 #include "resourcemanager.h"
-#include "resource_name.h"
 #include "node.h"
 #include "sector.h"
 #include "backup_manager.h"
@@ -32,7 +30,6 @@
 #include "terrain_edit_model.h"
 #include "terrain_virtual_atlas.h"
 #include "terrain_atlas_shape_policy.h"
-#include "terrain_atlas_archive_binding.h"
 
 CLandscape* CLandscape::m_pLand = nullptr;
 
@@ -66,7 +63,6 @@ void CLandscape::unloadMpr()
     m_aTileTypes.clear();
     m_aAnimTile.clear();
     m_renderTextureCount = 1;
-    m_terrainSourceArchives.clear();
     m_renderAtlasColumns = 1;
     m_bDirty = false;
     delete m_terrainShadowTexture;
@@ -98,68 +94,13 @@ CLandscape::CLandscape(bool readOnlyBackground):
 bool CLandscape::previewTerrainAtlasFullUpload(
     const QVector<QImage>& tileImages, int textureCount, int columns, int rows)
 {
-    if(textureCount <= 0 || tileImages.size() != textureCount * 64
-       || columns <= 0 || columns > textureCount
-       || rows != (textureCount + columns - 1) / columns
-       || !QOpenGLContext::currentContext())
+    const QImage combined = CTerrainVirtualAtlas::composeAtlasGrid(
+        tileImages, textureCount, columns);
+    if(combined.isNull())
         return false;
-    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
-    if(tileSize <= 0) return false;
-    const int pageSize = tileSize * 8;
-    const int width = pageSize * columns, height = pageSize * rows;
-    auto* gl = QOpenGLContext::currentContext()->functions();
-    GLint priorActiveTexture = GL_TEXTURE0, priorTexture = 0, priorUnpackAlignment = 4;
-    gl->glGetIntegerv(GL_ACTIVE_TEXTURE, &priorActiveTexture);
-    gl->glActiveTexture(GL_TEXTURE0);
-    gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &priorTexture);
-    gl->glGetIntegerv(GL_UNPACK_ALIGNMENT, &priorUnpackAlignment);
-    while(gl->glGetError() != GL_NO_ERROR) {}
-    QOpenGLTexture* replacement = new QOpenGLTexture(QOpenGLTexture::Target2D);
-    bool installed = replacement->create();
-    if(installed)
-    {
-        replacement->setSize(width, height);
-        replacement->setFormat(QOpenGLTexture::RGBA8_UNorm);
-        replacement->setMipLevels(1 + int(std::floor(std::log2(double(qMax(width, height))))));
-        CTerrainAtlasArchiveBindingResolver::releaseDecodedImageResidency(tileImages);
-        replacement->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
-        gl->glBindTexture(GL_TEXTURE_2D, replacement->textureId());
-        gl->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        installed = replacement->isStorageAllocated() && gl->glGetError() == GL_NO_ERROR;
-        // Keep only one page-sized staging image. The old path allocated an
-        // entire RGBA grid in addition to every authored/working tile and the
-        // old and candidate GL textures. Padding pages must still be zeroed.
-        qint64 warmPixelBudget = 32ll * 1024 * 1024;
-        for(int page = 0; installed && page < columns * rows; ++page)
-        {
-            const QImage pixels = CTerrainVirtualAtlas::composePage(
-                tileImages, page * 64, tileSize);
-            if(pixels.isNull()) { installed = false; break; }
-            gl->glTexSubImage2D(GL_TEXTURE_2D, 0,
-                               (page % columns) * pageSize, (page / columns) * pageSize,
-                               pageSize, pageSize, GL_RGBA, GL_UNSIGNED_BYTE, pixels.constBits());
-            installed = gl->glGetError() == GL_NO_ERROR;
-            // Keep at most two initial native pages, within a hard 32 MiB
-            // budget even for mixed resolutions, warm for palette/brush use.
-            if(installed)
-            {
-                const auto pageTiles = tileImages.mid(page * 64, 64);
-                qint64 nativeBytes = 0;
-                for(const QImage& tile : pageTiles) nativeBytes += qint64(tile.sizeInBytes());
-                if(page < 2 && nativeBytes <= warmPixelBudget) warmPixelBudget -= nativeBytes;
-                else CTerrainAtlasArchiveBindingResolver::releaseDecodedImageResidency(pageTiles);
-            }
-        }
-        if(installed)
-        {
-            gl->glGenerateMipmap(GL_TEXTURE_2D);
-            installed = gl->glGetError() == GL_NO_ERROR;
-        }
-    }
-    gl->glPixelStorei(GL_UNPACK_ALIGNMENT, priorUnpackAlignment);
-    gl->glBindTexture(GL_TEXTURE_2D, GLuint(priorTexture));
-    gl->glActiveTexture(GLenum(priorActiveTexture));
-    if(!installed)
+    QOpenGLTexture* replacement = new QOpenGLTexture(
+        combined, QOpenGLTexture::GenerateMipMaps);
+    if(!replacement->isCreated())
     {
         delete replacement;
         return false;
@@ -175,7 +116,7 @@ bool CLandscape::previewTerrainAtlasFullUpload(
     ei::log(eLogInfo, QString(
         "Working terrain atlas full upload: slots:%1 pages:%2 grid:%3x%4 dimensions:%5x%6")
         .arg(tileImages.size()).arg(textureCount).arg(columns).arg(rows)
-        .arg(width).arg(height));
+        .arg(combined.width()).arg(combined.height()));
     return true;
 }
 
@@ -189,11 +130,11 @@ bool CLandscape::previewTerrainAtlasIncremental(
        || textureCount != m_previewAtlasTextureCount
        || columns != m_previewAtlasColumns || changedSlots.isEmpty())
         return false;
-    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
+    const int tileSize = tileImages.front().width();
     const int pageSize = tileSize * 8;
     for(int slot : changedSlots)
         if(slot < 0 || slot >= tileImages.size()
-           || tileImages.at(slot).isNull())
+           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
             return false;
     // A same-layout publication updates the existing GL object. Keep a CPU
     // snapshot for the touched slots so a driver-side upload error can restore
@@ -201,7 +142,7 @@ bool CLandscape::previewTerrainAtlasIncremental(
     if(rollbackTileImages.size() != tileImages.size())
         return false;
     for(int slot : changedSlots)
-        if(rollbackTileImages.at(slot).isNull())
+        if(rollbackTileImages.at(slot).size() != QSize(tileSize, tileSize))
             return false;
 
     QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
@@ -226,8 +167,9 @@ bool CLandscape::previewTerrainAtlasIncremental(
                 + (local % 8) * tileSize;
             const int y = (page / columns) * pageSize
                 + (7 - local / 8) * tileSize;
-            const QImage image = terrainAtlasRasterTile(images.at(slot), QSize(tileSize, tileSize))
-                .convertToFormat(QImage::Format_RGBA8888);
+            const QImage image = images.at(slot).format()
+                == QImage::Format_RGBA8888 ? images.at(slot)
+                : images.at(slot).convertToFormat(QImage::Format_RGBA8888);
             gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y,
                                 tileSize, tileSize, GL_RGBA,
                                 GL_UNSIGNED_BYTE, image.constBits());
@@ -281,7 +223,7 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
        || m_previewAtlasTexture || changedSlots.isEmpty()
        || int(m_header.nTexture) <= 0 || textureCount <= int(m_header.nTexture))
         return false;
-    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
+    const int tileSize = tileImages.front().width();
     const int pageSize = tileSize * 8;
     const int width = columns * pageSize;
     const int height = rows * pageSize;
@@ -292,7 +234,7 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
         return false;
     for(int slot : changedSlots)
         if(slot < int(m_header.nTexture) * 64 || slot >= tileImages.size()
-           || tileImages.at(slot).isNull())
+           || tileImages.at(slot).size() != QSize(tileSize, tileSize))
             return false;
 
     QOpenGLFunctions* gl = QOpenGLContext::currentContext()->functions();
@@ -438,9 +380,9 @@ bool CLandscape::previewTerrainAtlasRegridCopy(
                 + (local % 8) * tileSize;
             const int y = (page / columns) * pageSize
                 + (7 - local / 8) * tileSize;
-            const QImage image = terrainAtlasRasterTile(
-                tileImages.at(slot), QSize(tileSize, tileSize))
-                .convertToFormat(QImage::Format_RGBA8888);
+            const QImage image = tileImages.at(slot).format()
+                == QImage::Format_RGBA8888 ? tileImages.at(slot)
+                : tileImages.at(slot).convertToFormat(QImage::Format_RGBA8888);
             gl->glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, tileSize, tileSize,
                                 GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
         }
@@ -494,8 +436,8 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     if(textureCount <= 0 || tileImages.size() != textureCount * 64
        || !QOpenGLContext::currentContext())
         return false;
-    const int tileSize = terrainAtlasMaximumNativeTileSize(tileImages).width();
-    if(tileSize <= 0)
+    const int tileSize = tileImages.front().width();
+    if(tileSize <= 0 || tileImages.front().height() != tileSize)
         return false;
     const int pageSize = tileSize * 8;
     const int columns = CTile::preferredAtlasColumns(textureCount);
@@ -518,28 +460,13 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     const bool stableLayout = m_previewAtlasTexture
         && m_previewAtlasTexture->isCreated()
         && textureCount == m_previewAtlasTextureCount
-        && columns == m_previewAtlasColumns
-        && m_previewAtlasTexture->width() == pageSize * columns
-        && m_previewAtlasTexture->height() == pageSize * rows;
-    QSet<int> changed = changedSlots;
-    if(stableLayout && m_previewAtlasImages.size() == tileImages.size())
-    {
-        // World strokes and baseline adoption also use this entry point.
-        // QImage keys detect modifications without hashing every pixel.
-        // Undo can invalidate every slot even though only a few changed.
-        changed.clear();
-        for(int slot = 0; slot < tileImages.size(); ++slot)
-            if(tileImages.at(slot).cacheKey() != m_previewAtlasImages.at(slot).cacheKey())
-                changed.insert(slot);
-        if(changed.isEmpty())
-            return true;
-    }
+        && columns == m_previewAtlasColumns && !changedSlots.isEmpty();
     bool installed = false;
-    if(stableLayout && !changed.isEmpty())
+    if(stableLayout)
     {
         installed = previewTerrainAtlasIncremental(
-            tileImages, textureCount, columns, rows, changed,
-            rollbackTileImages.isEmpty() ? m_previewAtlasImages : rollbackTileImages);
+            tileImages, textureCount, columns, rows, changedSlots,
+            rollbackTileImages);
         if(!installed)
             return false;
         route = QStringLiteral("in-place");
@@ -555,7 +482,6 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
             tileImages, textureCount, columns, rows);
     if(!installed)
         return false;
-    m_previewAtlasImages = tileImages;
     m_renderTextureCount = textureCount;
     m_renderAtlasColumns = columns;
     if(textureCount != m_previewAtlasTextureCount
@@ -569,14 +495,13 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     }
     ei::log(eLogInfo, QString(
         "Working terrain atlas uploaded: route:%1 changedSlots:%2 slots:%3 pages:%4 grid:%5x%6 elapsedMs:%7")
-        .arg(route).arg(changed.size()).arg(tileImages.size())
+        .arg(route).arg(changedSlots.size()).arg(tileImages.size())
         .arg(textureCount).arg(columns).arg(rows).arg(uploadTimer.elapsed()));
     return true;
 }
 
 void CLandscape::clearPreviewTerrainAtlas()
 {
-    m_previewAtlasImages.clear();
     m_texture = m_baseAtlasTexture;
     m_renderTextureCount = qMax(1, int(m_header.nTexture));
     m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);
@@ -736,73 +661,6 @@ bool CLandscape::readPreparedBackground(const QFileInfo& path,
     return isMprLoad();
 }
 
-void CLandscape::swapPreparedScene(CLandscape& other)
-{
-    // No serialization, texture upload or sector draw-data rebuild. Sectors
-    // contain pointers to their owner's tables, so rebind those pointers only.
-    using std::swap;
-    swap(m_worldOffset,other.m_worldOffset);
-    swap(m_header,other.m_header);
-    swap(m_aMaterial,other.m_aMaterial);
-    swap(m_aTileTypes,other.m_aTileTypes);
-    swap(m_aAnimTile,other.m_aAnimTile);
-    swap(m_renderTextureCount,other.m_renderTextureCount);
-    swap(m_renderAtlasColumns,other.m_renderAtlasColumns);
-    swap(m_aSector,other.m_aSector);
-    swap(m_texture,other.m_texture);
-    swap(m_baseAtlasTexture,other.m_baseAtlasTexture);
-    swap(m_baseAtlasColumns,other.m_baseAtlasColumns);
-    swap(m_previewAtlasTexture,other.m_previewAtlasTexture);
-    swap(m_previewAtlasImages,other.m_previewAtlasImages);
-    swap(m_previewAtlasTextureCount,other.m_previewAtlasTextureCount);
-    swap(m_previewAtlasColumns,other.m_previewAtlasColumns);
-    swap(m_filePath,other.m_filePath);
-    swap(m_innerMapName,other.m_innerMapName);
-    swap(m_originalMprData,other.m_originalMprData);
-    swap(m_terrainSourceArchives,other.m_terrainSourceArchives);
-    swap(m_arrIncorectTiles,other.m_arrIncorectTiles);
-    swap(m_bDirty,other.m_bDirty);
-    swap(m_materialDrawDataDirty,other.m_materialDrawDataDirty);
-    swap(m_canonicalTerrain,other.m_canonicalTerrain);
-    swap(m_shadowGeneration,other.m_shadowGeneration);
-    swap(m_terrainShadowFieldGeneration,other.m_terrainShadowFieldGeneration);
-    swap(m_terrainShadowSunDirection,other.m_terrainShadowSunDirection);
-    swap(m_terrainShadowTexture,other.m_terrainShadowTexture);
-    swap(m_terrainShadowTextureWidth,other.m_terrainShadowTextureWidth);
-    swap(m_terrainShadowTextureHeight,other.m_terrainShadowTextureHeight);
-    swap(m_terrainShadowFuture,other.m_terrainShadowFuture);
-    swap(m_terrainShadowFutureActive,other.m_terrainShadowFutureActive);
-    swap(m_terrainShadowDesiredGeneration,other.m_terrainShadowDesiredGeneration);
-    swap(m_terrainShadowDesiredDirection,other.m_terrainShadowDesiredDirection);
-    swap(m_terrainShadowFutureGeneration,other.m_terrainShadowFutureGeneration);
-    swap(m_terrainShadowFutureDirection,other.m_terrainShadowFutureDirection);
-    for(auto* owner:{this,&other})
-        for(auto& row:owner->m_aSector)for(auto* sector:row)
-            if(sector)sector->bindMapTables(&owner->m_aMaterial,&owner->m_aAnimTile);
-}
-
-void CLandscape::bindPreparedEditorSource(const QFileInfo& path,const QByteArray& bytes)
-{
-    if(m_readOnlyBackground)return;
-    m_filePath=path;m_originalMprData=bytes;
-}
-
-QStringList CLandscape::resolvedTerrainSourceArchives() const
-{
-    QStringList sources;
-    for(const auto& name:ei::terrainTextureResourceNames(m_innerMapName,int(m_header.nTexture))) {
-        QString source;
-        CTextureList::getInstance()->terrainMmpSourceArchive(name,&source);
-        sources.append(source.isEmpty()?QString():QFileInfo(source).absoluteFilePath());
-    }
-    return sources;
-}
-
-bool CLandscape::usesCurrentTerrainSources() const
-{
-    return m_terrainSourceArchives==resolvedTerrainSourceArchives();
-}
-
 void CLandscape::readMapInternal(const QFileInfo& path,
                                  bool createRecoverySnapshot,
                                  const QMap<QString,QByteArray>* prepared)
@@ -868,7 +726,6 @@ void CLandscape::readMapInternal(const QFileInfo& path,
         innerMapName, int(m_header.nTexture), texCount, atlasColumns);
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
-    m_terrainSourceArchives = resolvedTerrainSourceArchives();
     m_baseAtlasColumns = atlasColumns;
     m_renderAtlasColumns = qMax(1, atlasColumns);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
@@ -1024,22 +881,12 @@ bool CLandscape::adoptCanonicalSave(const QFileInfo& path, const QByteArray& byt
 
 void CLandscape::setMaterials(const QVector<SMaterial>& arrMat)
 {
-    QByteArray before,after;
-    QDataStream oldTables(&before,QIODevice::WriteOnly),newTables(&after,QIODevice::WriteOnly);
-    util::formatStream(oldTables);util::formatStream(newTables);
-    oldTables<<m_aMaterial;newTables<<arrMat;
-    if(before==after)return;
     m_aMaterial = arrMat;
     m_materialDrawDataDirty = true;
 }
 
 void CLandscape::setAnimTils(const QVector<SAnimTile>& arrAnimTile)
 {
-    bool equal=m_aAnimTile.size()==arrAnimTile.size();
-    for(int i=0;equal && i<arrAnimTile.size();++i)
-        equal=m_aAnimTile[i].tileIndex==arrAnimTile[i].tileIndex
-            && m_aAnimTile[i].nPhase==arrAnimTile[i].nPhase;
-    if(equal)return;
     m_aAnimTile = arrAnimTile;
     m_materialDrawDataDirty = true;
 }

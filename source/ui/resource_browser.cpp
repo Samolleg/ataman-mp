@@ -6,7 +6,6 @@
 #include "resource_model_preview.h"
 #include "profile_database.h"
 #include "unit_animation.h"
-#include "res_read_lease.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QApplication>
@@ -221,32 +220,6 @@ SResourceBrowserPreview makePreview(CResArchiveIndex archive, int memberIndex,
 {
     SResourceBrowserPreview result;
     result.generation = generation;
-    QVector<QString> paths;
-    for(int priority=0; const auto* source=catalog.archive(priority); ++priority)
-        paths.append(source->path());
-    if(!paths.contains(archive.path())) paths.append(archive.path());
-    resIo::ReadLeases leases(paths, &result.error);
-    if(!leases.acquired()) return result;
-    // A worker may have waited through a publication. Rebuild its private
-    // snapshot and relocate the member by name, never reuse old byte offsets.
-    bool catalogStale=false;
-    for(int priority=0; const auto* source=catalog.archive(priority); ++priority)
-        if(!source->sourceIsCurrent()) catalogStale=true;
-    if(memberIndex >= 0 && memberIndex < archive.memberCount()) {
-        const QString name=archive.member(memberIndex).name;
-        if(!archive.sourceIsCurrent()) {
-            const QString path=archive.path();
-            if(!archive.open(path, &result.error)) return result;
-            memberIndex=archive.memberIndex(name);
-        }
-    }
-    if(catalogStale) {
-        QStringList errors;
-        catalog.build(paths, &errors);
-        if(!errors.isEmpty()) { result.error=errors.join(QStringLiteral("\n")); return result; }
-    }
-    for(int priority=0; const auto* source=catalog.archive(priority); ++priority)
-        result.archiveGenerations.insert(source->path(),resIo::generation(source->path()));
     if(memberIndex < 0 || memberIndex >= archive.memberCount())
     {
         result.error = QStringLiteral("The selected archive member no longer exists.");
@@ -821,10 +794,6 @@ void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool activePr
     m_archives->clear();
     m_loadWatcher->setFuture(QtConcurrent::run([archives]() {
         SResourceBrowserLoadResult result;
-        QString error;
-        resIo::ReadLeases leases(archives, &error);
-        if(!leases.acquired()) { result.errors.append(error); return result; }
-        for(const auto& path : archives) result.archiveGenerations.insert(path, resIo::generation(path));
         result.catalog.build(archives, &result.errors);
         return result;
     }));
@@ -895,16 +864,7 @@ void CResourceBrowser::finishInternalPublication(
 
 void CResourceBrowser::finishLoad()
 {
-    // A queued finished signal may belong to an earlier request replaced by
-    // setFuture(). Never wait for the new worker from the GUI delivery slot.
-    if(!m_loadWatcher->isFinished()) return;
     const SResourceBrowserLoadResult result = m_loadWatcher->result();
-    for(auto it=result.archiveGenerations.cbegin(); it!=result.archiveGenerations.cend(); ++it)
-        if(resIo::generation(it.key()) != it.value()) {
-            m_openArchive->setEnabled(true);
-            m_summary->setText(tr("Archive publication changed this index; refresh required."));
-            return;
-        }
     m_catalog = result.catalog;
     auto* allArchives = new QTreeWidgetItem(m_archives,
         {tr("All archives"), QString::number(m_catalog.entries().size()), QString()});
@@ -1001,14 +961,8 @@ void CResourceBrowser::beginPreview(QTreeWidgetItem*)
 
 void CResourceBrowser::finishPreview()
 {
-    if(!m_previewWatcher->isFinished()) return;
     const SResourceBrowserPreview result = m_previewWatcher->result();
     if(result.generation != m_previewGeneration) return;
-    for(auto it=result.archiveGenerations.cbegin(); it!=result.archiveGenerations.cend(); ++it)
-        if(resIo::generation(it.key()) != it.value()) {
-            m_previewDetails->setText(tr("Archive publication changed this preview; refresh required."));
-            return;
-        }
     if(!result.valid)
     {
         m_previewDetails->setText(result.error);

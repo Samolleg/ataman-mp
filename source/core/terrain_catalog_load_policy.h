@@ -8,15 +8,6 @@ enum class ETerrainCatalogLoadAction
     BuildSynchronously
 };
 
-// A map workspace is not ready for interaction until its MOB has loaded.
-// A first landscape frame may happen while progress processing pumps the event
-// loop, so paint-only catalog hydration must remain lazy through that window.
-inline bool terrainCatalogWorkspaceHold(bool workspaceLoadInProgress,
-                                        bool interactionRequested)
-{
-    return workspaceLoadInProgress && !interactionRequested;
-}
-
 // Terrain pixels and their exact RES binding are part of opening an MPR.
 // Material catalogs, semantic paint fields, and palette thumbnails are paint
 // tooling.  Keep the latter behind the first presented landscape frame while

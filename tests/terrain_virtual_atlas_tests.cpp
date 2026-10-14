@@ -16,8 +16,6 @@
 #include "mmp_inspector.h"
 #include "mpr_document.h"
 #include "res_archive_document.h"
-#include "terrain_recipe_bake.h"
-#include "terrain_mixed_edge.h"
 #include "terrain_virtual_atlas.h"
 
 namespace {
@@ -34,23 +32,6 @@ QImage solid(QRgb color)
     QImage image(8,8,QImage::Format_RGBA8888);
     image.fill(QColor::fromRgba(color));
     return image;
-}
-
-CTerrainEditModel boundaryTestGeometry(const QMap<QPair<int,int>,QPoint>& offsets,
-    CValidationReport* report, int heightBias=0)
-{
-    QByteArray payload(5+33*33*8+16*16*2,'\0');
-    qToLittleEndian<quint32>(0xCF4BF774,reinterpret_cast<uchar*>(payload.data()));
-    for(int y=0;y<33;++y)for(int x=0;x<33;++x) {
-        const int offset=5+(y*33+x)*8;const auto shift=offsets.value(qMakePair(x,y));
-        payload[offset]=char(shift.x());payload[offset+1]=char(shift.y());
-        qToLittleEndian<quint16>(quint16(4000+heightBias+x*x*11+y*57),reinterpret_cast<uchar*>(payload.data()+offset+2));
-    }
-    STerrainSectorSource source;source.memberName="Seam000000.SEC";source.sectorX=source.sectorY=0;
-    source.payload=payload;source.landTileOffset=5+33*33*8;
-    CTerrainEditModel model;
-    model.loadSources(1,1,100.0f,{source},report,1,QVector<qint32>(64,0),0);
-    return model;
 }
 
 QByteArray grayscalePixelHash(const QImage& source)
@@ -533,26 +514,12 @@ class TerrainVirtualAtlasTests:public QObject
 {
     Q_OBJECT
 private slots:
-    void worldBoundarySamplesSurfaceTriangles();
-    void worldBoundaryPreservesResolvedBody_data();
-    void worldBoundaryPreservesResolvedBody();
-    void worldBoundaryJoinsDeformedMaps_data();
-    void worldBoundaryJoinsDeformedMaps();
-    void worldBoundaryCacheAndDimensions();
-    void mixedNativeSizesRenderGenerateAndPublish();
-    void mixedNativeAnimationSavePreservesCompressedPage();
-    void mixedNativePublicationPreservesSmallTailPage();
     void oppositeBaselineOwnerDoesNotBlockStroke_data();
     void oppositeBaselineOwnerDoesNotBlockStroke();
     void virtualFieldPaintIsUnboundedByAtlas();
     void exactAuthoredTileIsReused();
     void authoredGlobalBlendIsImportedBeforeGeneration();
     void workingAtlasReportsLiveImportedAndGeneratedProvenance();
-    void workingIdentityHashTracksImageMutation();
-    void worldBankNamespaceSurvivesPixelDeduplication();
-    void worldMaterialSourceIsFlattenedDeterministically();
-    void deterministicWorldBrushIsStableForMaterialPair();
-    void worldMixedEdgeUsesSharedFallbackOnlyWhenEnabled();
     void mirroredGeneratedBlendRemainsPaintable_data();
     void mirroredGeneratedBlendRemainsPaintable();
     void mirroredVertexStrokeResolvesAndUndoesExactly();
@@ -1260,24 +1227,6 @@ void TerrainVirtualAtlasTests::authoredGlobalBlendIsImportedBeforeGeneration()
     QVERIFY(keptImportedPixels);
 }
 
-void TerrainVirtualAtlasTests::workingIdentityHashTracksImageMutation()
-{
-    Fixture fixture;
-    CTestTerrainWorkingAtlas original(fixture.catalog, fixture.images, 47u, 32);
-    STerrainWorkingTileIdentity before, repeated, changed;
-    QVERIFY(original.tileIdentityForSlot(0, &before));
-    QVERIFY(original.tileIdentityForSlot(0, &repeated));
-    QCOMPARE(before.physicalPixelSha256, repeated.physicalPixelSha256);
-    fixture.images[0].setPixelColor(0, 0, QColor(13, 27, 49, 127));
-    CTestTerrainWorkingAtlas modified(fixture.catalog, fixture.images, 47u, 32);
-    QVERIFY(modified.tileIdentityForSlot(0, &changed));
-    QVERIFY(changed.physicalPixelSha256 != before.physicalPixelSha256);
-    QVERIFY(original.tileIdentityForSlot(0, &repeated));
-    QCOMPARE(before.physicalPixelSha256, repeated.physicalPixelSha256);
-    QVERIFY(modified.tileIdentityForSlot(0, &repeated));
-    QCOMPARE(changed.physicalPixelSha256, repeated.physicalPixelSha256);
-}
-
 void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProvenance()
 {
     Fixture fixture;
@@ -1388,75 +1337,6 @@ void TerrainVirtualAtlasTests::workingAtlasReportsLiveImportedAndGeneratedProven
     QCOMPARE(flattened.stableSha256.size(), 64);
     QVERIFY(QRegularExpression(QStringLiteral("^caveset_[0-9a-f]{12}$"))
                 .match(flattened.isolatedNamespace).hasMatch());
-}
-
-void TerrainVirtualAtlasTests::worldBankNamespaceSurvivesPixelDeduplication()
-{
-    Fixture fixture;
-    const auto types=reviewedFixtureTileTypes(fixture.images.size());
-    const auto materialTypes=reviewedFixtureMaterialTypes(fixture.catalog);
-    CTerrainWorkingAtlas atlas(fixture.catalog,fixture.images,47u,32,{}, {},types,materialTypes);
-    QVERIFY(atlas.isValid());
-    const auto pure=signature(1,1,1,1);
-    CValidationReport report;
-    QCOMPARE(atlas.importPhysicalTile(fixture.images.at(0),types.at(0),&pure,
-        QStringLiteral("world-bank:uniform:1"),0,&report),0);
-    STerrainWorkingTileIdentity identity;
-    QVERIFY(atlas.tileIdentityForSlot(0,&identity));
-    QVERIFY(identity.sourceNamespaceAliases.contains(QStringLiteral("world-bank:uniform:1")));
-}
-
-void TerrainVirtualAtlasTests::worldMaterialSourceIsFlattenedDeterministically()
-{
-    QImage source(3,3,QImage::Format_ARGB32);source.fill(qRgba(0,220,0,0));
-    source.setPixel(1,1,qRgba(200,40,20,255));
-    source.setPixel(2,1,qRgba(20,220,60,128));
-    const auto first=CTerrainRecipeBaker::makeOpaqueMaterialSource(source);
-    const auto second=CTerrainRecipeBaker::makeOpaqueMaterialSource(source);
-    QVERIFY(!first.isNull());
-    QCOMPARE(first,second);
-    QCOMPARE(first.pixel(0,0),qRgba(200,40,20,255));
-    QCOMPARE(qAlpha(first.pixel(2,1)),255);
-    QCOMPARE(qRed(first.pixel(2,1)),110);
-    QCOMPARE(qGreen(first.pixel(2,1)),130);
-    QCOMPARE(qBlue(first.pixel(2,1)),40);
-    const QImage opaque=solid(qRgba(31,57,91,255));
-    QCOMPARE(CTerrainRecipeBaker::makeOpaqueMaterialSource(opaque),opaque);
-}
-
-void TerrainVirtualAtlasTests::deterministicWorldBrushIsStableForMaterialPair()
-{
-    STerrainRecipeBrush first,repeat,otherPair;
-    QString error;
-    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,73,&first,&error));
-    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,73,&repeat,&error));
-    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(41,74,&otherPair,&error));
-    QCOMPARE(first.firstMaterial,qint32(41));
-    QCOMPARE(first.secondMaterial,qint32(73));
-    QCOMPARE(first.ownership.size(),512*65);
-    QCOMPARE(first.ownership,repeat.ownership);
-    QVERIFY(first.ownership!=otherPair.ownership);
-}
-
-void TerrainVirtualAtlasTests::worldMixedEdgeUsesSharedFallbackOnlyWhenEnabled()
-{
-    const QPair<qint32,qint32> pair(41,73);
-    QVector<QImage> images{solid(qRgba(175,82,37,255)),solid(qRgba(44,119,181,255))};
-    QMap<qint32,QVector<int>> uniforms;
-    uniforms[pair.first]={0};uniforms[pair.second]={1};
-    const QMap<QPair<qint32,qint32>,QVector<int>> stock;
-    const QMap<int,STerrainTransitionSignature> signatures;
-    const QSet<QPair<qint32,qint32>> pairs{pair};
-    QMap<QPair<qint32,qint32>,STerrainRecipeBrush> local,world;
-    QVERIFY(!CTerrainMixedEdge::buildStockBrushes(images,uniforms,stock,signatures,
-        pairs,&local,nullptr,false));
-    QVERIFY(local.isEmpty());
-    QVERIFY(CTerrainMixedEdge::buildStockBrushes(images,uniforms,stock,signatures,
-        pairs,&world,nullptr,true));
-    QCOMPARE(world.value(pair).ownership.size(),512*65);
-    STerrainRecipeBrush expected;
-    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(pair.first,pair.second,&expected));
-    QCOMPARE(world.value(pair).ownership,expected.ownership);
 }
 
 void TerrainVirtualAtlasTests::workingAtlasKeepsCurrentMapExactVariantAheadOfImportedAliases()
@@ -8272,315 +8152,6 @@ void TerrainVirtualAtlasTests::oppositeBaselineOwnerDoesNotBlockStroke()
     CTerrainVirtualMaterialField undone;QVERIFY(model.copyVirtualMaterialField(ETerrainTileLayer::Land,&undone));
     QCOMPARE(undone.stableSha256(),beforeField.stableSha256());
     for(int slot=0;slot<fixture.images.size();++slot)QCOMPARE(working.activeTileImages().at(slot),fixture.images.at(slot));
-}
-
-void TerrainVirtualAtlasTests::mixedNativeSizesRenderGenerateAndPublish()
-{
-    Fixture fixture;
-    QVector<QImage> images;
-    // First page deliberately SMALL: the first image must not set generation.
-    for(int slot=0; slot<128; ++slot)
-        images.append(fixture.images.at(slot%4).scaled(slot<64?128:256, slot<64?128:256));
-    const auto before = images;
-    QVector<qint32> types(128, 1);
-    CTerrainVirtualAtlas atlas(fixture.catalog, images, 23, {}, {}, true, types);
-    QVERIFY2(atlas.isValid(), qPrintable(atlas.error()));
-    const auto grid = CTerrainVirtualAtlas::composeAtlasGrid(images, 2, 2);
-    QCOMPARE(grid.size(), QSize(4096, 2048));
-    QCOMPARE(images, before);
-    CValidationReport report;
-    const auto mixed = signature(1,2,3,4);
-    const auto tile = atlas.resolve(mixed,0,0,&report,1,1);
-    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
-    QVERIFY(tile.generatedIndex>=0);
-    QCOMPARE(atlas.generatedTiles().at(tile.generatedIndex).pixels.size(),QSize(256,256));
-    CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},types);
-    QMap<int,quint64> usage;
-    bool generated=false;
-    const auto packed=working.resolve(mixed,0,0,&usage,{},&generated,&report,1,1);
-    QVERIFY2(generated&&!report.hasErrors(),qPrintable(report.toText()));
-    QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(),128);
-    QCOMPARE(working.activeTileImages().at(128).size(),QSize(256,256));
-    QCOMPARE(working.activeTileImages().mid(0,128),before);
-    // A mixed-edge raster is already baked at the caller's maximum size.
-    const auto recipe=QString("mixed-edge-b2:")+QString(64,'a');
-    const int edge=working.importMixedEdgeTile(grid.copy(0,0,256,256),1,mixed,recipe,&report);
-    QVERIFY2(edge>=128,qPrintable(report.toText()));
-    QCOMPARE(working.activeTileImages().at(edge).size(),QSize(256,256));
-    QCOMPARE(working.activeTileImages().mid(0,128),before);
-    // Resolve/Finalize creates a NEW namespace at the maximum source size,
-    // even if the only retained authored tile lives in the small page.
-    CTerrainVirtualMaterialField field; QVERIFY(field.resize(16,16,1));
-    const auto finalized=atlas.finalize(field,"mixed137",192,types,&report);
-    QVERIFY2(finalized.success,qPrintable(finalized.error+report.toText()));
-    QCOMPARE(finalized.pages.front().size(),QSize(2048,2048));
-    QVector<QImage> decoded;
-    QVERIFY(CTerrainVirtualAtlas::decodePhysicalTileImages(finalized,&decoded,&report));
-    QCOMPARE(decoded.front().size(),QSize(256,256));
-    CMprDocument source;QVERIFY(source.loadBytes(portableMpr(),"mixed-finalize.mpr",&report));
-    const auto package=CTerrainVirtualAtlas::buildPortablePackage(source,finalized,ETerrainTileLayer::Land,&report);
-    QVERIFY2(package.success,qPrintable(package.error+report.toText()));
-    CMprDocument reopened;QVERIFY(reopened.loadBytes(package.mprBytes,"mixed-published.mpr",&report));
-    QCOMPARE(reopened.mapInfo().tileSize,quint32(256));
-    QCOMPARE(reopened.mapInfo().textureSize,quint32(2048));
-    QCOMPARE(images,before);
-}
-
-void TerrainVirtualAtlasTests::mixedNativeAnimationSavePreservesCompressedPage()
-{
-    for(const int nativeSize : {128,256}) {
-    Fixture fixture;
-    QVector<QImage> images;
-    CTerrainTransitionCatalog catalog=fixture.catalog;
-    for(int slot=0;slot<128;++slot) {
-        images.append(fixture.images.at(slot%4).scaled(slot<64?nativeSize:256,slot<64?nativeSize:256));
-        STerrainTransitionVariant variant;
-        variant.signature=signature(slot%4+1,slot%4+1,slot%4+1,slot%4+1);
-        SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
-        variant.packedTile=packed.encode();
-        if(slot<32 || slot>=64)catalog.addVariant(variant);
-    }
-    QVector<QByteArray> pages;
-    for(int slot=32;slot<64;++slot)images[slot].fill(Qt::transparent);
-    for(int page=0;page<2;++page)
-        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?nativeSize:256),true));
-    for(int slot=0;slot<128;++slot)
-        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
-    QVector<qint32> types(128,1);
-    CTerrainVirtualAtlas atlas(catalog,images,23,{}, {},true,types);
-    CTerrainVirtualMaterialField field;QVERIFY(field.resize(16,16,1));
-    CValidationReport report;STerrainAtlasAnimationRange animation;animation.tileIndex=0;animation.frameCount=32;
-    const auto result=atlas.finalize(field,"native-animation",192,types,&report,{}, {}, {}, {},nullptr,{}, {animation},pages);
-    QVERIFY2(result.success,qPrintable(result.error+report.toText()));
-    QCOMPARE(result.pages.front().size(),QSize(nativeSize*8,nativeSize*8));
-    QCOMPARE(result.pageMmpPayloads.front(),pages.front());
-    QCOMPARE(result.animations.front().tileIndex,quint16(0));
-    QCOMPARE(result.animations.front().frameCount,quint16(32));
-    for(int slot=0;slot<32;++slot)QCOMPARE(result.authoredSlotRemap.value(slot,-1),slot);
-    for(int slot=32;slot<64;++slot)QVERIFY(!result.authoredSlotRemap.contains(slot));
-    }
-}
-
-void TerrainVirtualAtlasTests::mixedNativePublicationPreservesSmallTailPage()
-{
-    Fixture fixture;
-    QVector<QImage> images;
-    for(int slot=0;slot<128;++slot)
-        images.append(fixture.images.at(slot%4).scaled(slot<64?256:128,slot<64?256:128));
-    QVector<QByteArray> pages;
-    for(int page=0;page<2;++page)
-        pages.append(ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,page==0?256:128),true));
-    // Use the exact decoded native baseline, just as the adoption path does.
-    for(int slot=0;slot<128;++slot)
-        QVERIFY(ei::decodeMmpDxt1AtlasTile(pages.at(slot/64),slot%64,&images[slot]));
-    CResArchiveDocument source;QStringList errors;
-    QVERIFY(source.loadBytes(portableMpr(),"mixed-source.mpr",&errors));
-    QByteArray mp=source.memberPayload("CaveSet.MP").left(38);
-    qToLittleEndian<quint32>(2,reinterpret_cast<uchar*>(mp.data()+16));
-    qToLittleEndian<quint32>(2048,reinterpret_cast<uchar*>(mp.data()+20));
-    qToLittleEndian<quint32>(70,reinterpret_cast<uchar*>(mp.data()+24));
-    qToLittleEndian<quint32>(256,reinterpret_cast<uchar*>(mp.data()+28));
-    for(int slot=0;slot<70;++slot){char type[4];qToLittleEndian<qint32>(1,reinterpret_cast<uchar*>(type));mp.append(type,4);}
-    SResArchiveNewMember changed;changed.name="CaveSet.MP";changed.payload=mp;
-    QByteArray baseline;QVERIFY(source.buildWithPublishedMembers({changed},true,&baseline,&errors));
-    CMprDocument document;CValidationReport report;QVERIFY(document.loadBytes(baseline,"mixed-source.mpr",&report));
-    CTerrainWorkingAtlas working(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
-    QVERIFY(working.isValid());QMap<int,quint64> usage;bool generated=false;
-    const auto packed=working.resolve(signature(1,2,3,4),0,0,&usage,{},&generated,&report,1,1);
-    QVERIFY(generated);QCOMPARE(SMprPackedTile::decode(packed).atlasSlot(),128);
-    const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(document,
-        working.activeTileImages(),working.activeTileTypes(),pages,&report);
-    QVERIFY2(package.success,qPrintable(package.error+report.toText()));
-    CResArchiveDocument reopened;QVERIFY(reopened.loadBytes(package.resourceArchiveBytes,"mixed-new.res",&errors));
-    QCOMPARE(reopened.memberPayload(package.resourceMembers.at(0)),pages.at(0));
-    QCOMPARE(reopened.memberPayload(package.resourceMembers.at(1)),pages.at(1));
-    QImage newTile;QVERIFY(ei::decodeMmpDxt1AtlasTile(reopened.memberPayload(package.resourceMembers.at(2)),0,&newTile));
-    QCOMPARE(newTile.size(),QSize(256,256));
-    QCOMPARE(working.activeTileImages().mid(0,128),images);
-    CTerrainWorkingAtlas imported(fixture.catalog,images,23,192,{}, {},QVector<qint32>(70,1));
-    QImage newPixels(256,256,QImage::Format_RGBA8888);newPixels.fill(QColor(13,29,47));
-    QCOMPARE(imported.importPhysicalTile(newPixels,1,nullptr,"external137",0,&report),128);
-    QCOMPARE(imported.activeTileImages().at(128).size(),QSize(256,256));
-    QCOMPARE(imported.activeTileImages().mid(0,128),images);
-}
-
-void TerrainVirtualAtlasTests::worldBoundarySamplesSurfaceTriangles()
-{
-    QImage texture(64,64,QImage::Format_RGBA8888);
-    for(int y=0;y<64;++y)for(int x=0;x<64;++x)
-        texture.setPixelColor(x,63-y,QColor(x*3,y*3,20,255));
-    CTerrainTransitionCatalog catalog;
-    STerrainTransitionVariant variant;variant.signature=signature(1,1,1,1);
-    QVERIFY(catalog.addVariant(variant));
-    CTestTerrainVirtualAtlas atlas(catalog,{texture},0,{}, {},true,{0},{{1,0}});
-    QVERIFY(atlas.isValid());
-    CValidationReport report;const auto flat=boundaryTestGeometry({},&report),
-        deformed=boundaryTestGeometry({{qMakePair(1,1),QPoint(63,-47)}},&report);
-    QVERIFY2(!report.hasErrors(),qPrintable(report.toText()));
-    const auto before=deformed.sectorPayload(0,0);
-    QMap<QByteArray,QImage> cache;
-    const QPointF origin(0.15,0.25);
-    const QImage a=atlas.worldBoundaryTile(signature(1,1,1,1),flat,origin,0,0,8,&cache,&report);
-    const QImage b=atlas.worldBoundaryTile(signature(1,1,1,1),deformed,origin,0,0,8,&cache,&report);
-    QVERIFY(!a.isNull()&&!b.isNull());
-    // Only the inner centre vertex moved; every point of the west border is
-    // unchanged. A projection onto that border misses this inward difference.
-    for(int y=0;y<64;++y)QCOMPARE(a.pixel(0,y),b.pixel(0,y));
-    QVERIFY(a.pixel(7,63-20)!=b.pixel(7,63-20));
-    QVERIFY(b.pixel(4,63-20)!=b.pixel(5,63-20));
-    // Independent oracle: lower triangle (00,11,01), not a bilinear quad.
-    const double fx=7.0/56,fy=33.0/56;
-    const QPointF world=origin+QPointF(fx*(1+63.0/254),fy-fx*47.0/254);
-    const int sx=int(std::floor(world.x()*32)),sy=int(std::floor(world.y()*32));
-    const double t=0.75,fade=t*t*(3-2*t);
-    QCOMPARE(b.pixelColor(7,63-20),QColor(qRound(sx*3*fade+21*(1-fade)),
-        qRound(sy*3*fade+60*(1-fade)),20,255));
-    // Upper triangle (00,10,11) is different on this warped quarter too.
-    const QImage north=atlas.worldBoundaryTile(signature(1,1,1,1),deformed,origin,0,0,1,&cache,&report);
-    const QPointF upperWorld=origin+QPointF(fy+fx*63.0/254,fx*(1-47.0/254));
-    const int ux=int(std::floor(upperWorld.x()*32)),uy=int(std::floor(upperWorld.y()*32));
-    QCOMPARE(north.pixelColor(20,63-7),QColor(qRound(ux*3*fade+60*(1-fade)),
-        qRound(uy*3*fade+21*(1-fade)),20,255));
-    QCOMPARE(deformed.sectorPayload(0,0),before);
-}
-
-void TerrainVirtualAtlasTests::worldBoundaryPreservesResolvedBody_data()
-{
-    QTest::addColumn<int>("rotation");QTest::addColumn<int>("sides");
-    for(int rotation=0;rotation<4;++rotation)for(int sides:{1,2,4,8,15})
-        QTest::newRow(qPrintable(QString("turn%1-sides%2").arg(rotation).arg(sides)))<<rotation<<sides;
-}
-
-void TerrainVirtualAtlasTests::worldBoundaryPreservesResolvedBody()
-{
-    QFETCH(int,rotation);QFETCH(int,sides);
-    QImage red(64,64,QImage::Format_RGBA8888),green=red;
-    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
-        red.setPixelColor(x,y,QColor(150+x,20+y,31,255));
-        green.setPixelColor(x,y,QColor(19,150+y,20+x,255));
-    }
-    CTerrainTransitionCatalog catalog;
-    for(int id:{1,2}) {
-        STerrainTransitionVariant variant;variant.signature=signature(id,id,id,id);
-        variant.packedTile=quint16(id-1);QVERIFY(catalog.addVariant(variant));
-    }
-    CTestTerrainVirtualAtlas atlas(catalog,{red,green},0,{}, {},true,{0,1},{{1,0},{2,1}});
-    QVERIFY(atlas.isValid());
-    STerrainRecipeBakeInput input;input.tileWidth=input.tileHeight=1;
-    input.vertexMaterials={1,2,2,2};input.preferredMaterials={1};
-    STerrainRecipeMaterial first,second;first.materialId=1;first.runtimeTerrainType=0;first.uniformTiles={red};
-    second.materialId=2;second.runtimeTerrainType=1;second.uniformTiles={green};input.materials={first,second};
-    STerrainRecipeBrush brush;QString error;
-    QVERIFY(CTerrainRecipeBaker::makeDeterministicWorldBrush(1,2,&brush,&error));input.brushes={brush};
-    STerrainRecipeBakeOptions options;options.tileSize=64;options.polishedMaterialEdges=true;
-    options.stableCoordinateVariants=true;options.origin=QPoint(8,8);
-    const auto baked=CTerrainRecipeBaker::bake(input,options);
-    QVERIFY2(baked.success,qPrintable(baked.diagnostics.join("\n")));
-    const QImage body=baked.tiles[baked.tileByCell.first()].pixels;
-    // Independent UV oracle from the public packed index contract. These
-    // pixels are the resolved B2 body, not the canonical variation-0 fallback.
-    QImage oriented(64,64,QImage::Format_RGBA8888);
-    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
-        int sx=x,sy=y;
-        switch(rotation) {
-        case 1:sx=63-y;sy=x;break;
-        case 2:sx=63-x;sy=63-y;break;
-        case 3:sx=y;sy=63-x;break;
-        }
-        oriented.setPixel(x,63-y,body.pixel(sx,63-sy));
-    }
-    CValidationReport report;const auto model=boundaryTestGeometry({},&report);
-    QMap<QByteArray,QImage> cache;
-    const auto wanted=CTerrainTransitionCatalog::rotated(signature(1,2,2,2),rotation);
-    const QImage result=atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,body,quint8(rotation));
-    QVERIFY2(!result.isNull()&&!report.hasErrors(),qPrintable(report.toText()));
-    QCOMPARE(result,atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,oriented,0));
-    QVERIFY(cache.isEmpty());
-    int unchanged=0,changed=0;
-    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
-        const bool band=((sides&1)&&y<16)||((sides&2)&&x>=48)
-            ||((sides&4)&&y>=48)||((sides&8)&&x<16);
-        if(!band){QCOMPARE(result.pixel(x,63-y),oriented.pixel(x,63-y));++unchanged;}
-        else changed+=result.pixel(x,63-y)!=oriented.pixel(x,63-y);
-    }
-    QVERIFY(unchanged>0);QVERIFY(changed>0);
-    // Opposite (interior-facing) edge is completely retained for one seam.
-    if(sides==8||sides==2)for(int y=0;y<64;++y)
-        QCOMPARE(result.pixel(sides==8?63:0,y),oriented.pixel(sides==8?63:0,y));
-    if(sides==1||sides==4)for(int x=0;x<64;++x)
-        QCOMPARE(result.pixel(x,sides==1?0:63),oriented.pixel(x,sides==1?0:63));
-    QCOMPARE(atlas.worldBoundaryTile(wanted,model,{},8,8,0,&cache,&report,body,quint8(rotation)),oriented);
-    QImage other=body;other.setPixelColor(30,29,QColor(1,2,245,255));
-    const QImage alternative=atlas.worldBoundaryTile(wanted,model,QPointF(0.25,0.4),8,8,sides,&cache,&report,other,quint8(rotation));
-    QVERIFY(result!=alternative); // A material-tuple cache must not erase body identity.
-    CTestTerrainWorkingAtlas working(catalog,{red,green},0,64,{}, {},{0,1},{{1,0},{2,1}});
-    const int slot=working.importWorldBoundaryTile(result,0,wanted,&report);
-    QVERIFY2(slot>=0&&!report.hasErrors(),qPrintable(report.toText()));
-    SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
-    QCOMPARE(packed.rotation,quint8(0));
-    bool found=false;QCOMPARE(working.catalog().gridSignatureForPacked(packed.encode(),&found),wanted);QVERIFY(found);
-    QCOMPARE(working.activeTileImages().at(slot),result);
-    QCOMPARE(working.runtimeTerrainTypeForSlot(slot),0);
-}
-
-void TerrainVirtualAtlasTests::worldBoundaryJoinsDeformedMaps_data()
-{
-    QTest::addColumn<bool>("horizontal");
-    QTest::newRow("east-west")<<false;QTest::newRow("south-north")<<true;
-}
-
-void TerrainVirtualAtlasTests::worldBoundaryJoinsDeformedMaps()
-{
-    QFETCH(bool,horizontal);
-    QImage first(64,64,QImage::Format_RGBA8888),second=first;
-    for(int y=0;y<64;++y)for(int x=0;x<64;++x) {
-        first.setPixelColor(x,y,QColor(120+x,25+y,22,255));
-        second.setPixelColor(x,y,QColor(10+x,120+y,55,255));
-    }
-    CTerrainTransitionCatalog catalog;
-    for(int id:{1,2}) {STerrainTransitionVariant v;v.signature=signature(id,id,id,id);v.packedTile=quint16(id-1);QVERIFY(catalog.addVariant(v));}
-    CTestTerrainVirtualAtlas atlas(catalog,{first,second},0,{}, {},true,{0,1},{{1,0},{2,1}});
-    CValidationReport report;
-    const auto left=boundaryTestGeometry({{horizontal?qMakePair(9,32):qMakePair(32,9),QPoint(31,-63)}},&report);
-    const auto right=boundaryTestGeometry({{horizontal?qMakePair(9,0):qMakePair(0,9),QPoint(31,-63)}},&report,1000);
-    const auto leftBytes=left.sectorPayload(0,0),rightBytes=right.sectorPayload(0,0);
-    QMap<QByteArray,QImage> cache;
-    const auto ls=signature(1,1,2,1),rs=signature(1,2,2,2);
-    const QImage a=atlas.worldBoundaryTile(ls,left,QPointF(0.25,0.4),horizontal?4:15,horizontal?15:4,
-        horizontal?4:2,&cache,&report,first,1);
-    const QImage b=atlas.worldBoundaryTile(rs,right,horizontal?QPointF(0.25,32.4):QPointF(32.25,0.4),
-        horizontal?4:0,horizontal?0:4,horizontal?1:8,&cache,&report,second,3);
-    QVERIFY2(!a.isNull()&&!b.isNull()&&!report.hasErrors(),qPrintable(report.toText()));
-    for(int i=0;i<64;++i)
-        QCOMPARE(horizontal?a.pixel(i,0):a.pixel(63,i),horizontal?b.pixel(i,63):b.pixel(0,i));
-    // Renderer UV endpoints are at 1/16 and15/16, halfway between
-    // texels3/4 and59/60 at64px. Both bilinear footprints must agree.
-    for(int i=4;i<60;++i)for(int offset=0;offset<2;++offset)
-        QCOMPARE(horizontal?a.pixel(i,3+offset):a.pixel(59+offset,i),
-                 horizontal?b.pixel(i,59+offset):b.pixel(3+offset,i));
-    QCOMPARE(left.sectorPayload(0,0),leftBytes);QCOMPARE(right.sectorPayload(0,0),rightBytes);
-    QVERIFY(left.height(1,1)!=right.height(1,1)); // A non-flat height fixture is retained, never reconciled.
-}
-
-void TerrainVirtualAtlasTests::worldBoundaryCacheAndDimensions()
-{
-    QImage first(64,64,QImage::Format_RGBA8888);first.fill(QColor(180,15,25,255));
-    QImage second=first;second.fill(QColor(15,190,30,255));
-    CTerrainTransitionCatalog catalog;STerrainTransitionVariant v;v.signature=signature(1,1,1,1);QVERIFY(catalog.addVariant(v));
-    CTestTerrainVirtualAtlas a(catalog,{first},0,{}, {},true,{0},{{1,0}}),b(catalog,{second},0,{}, {},true,{0},{{1,0}});
-    CValidationReport report;const auto model=boundaryTestGeometry({},&report);
-    QMap<QByteArray,QImage> cache;
-    QCOMPARE(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&report),first);
-    QCOMPARE(b.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&report),second);
-    QCOMPARE(cache.size(),2);
-    QImage wrong(32,64,QImage::Format_RGBA8888);wrong.fill(Qt::black);
-    CValidationReport invalid;
-    QVERIFY(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&invalid,wrong,0).isNull());
-    QVERIFY(invalid.hasErrors());QCOMPARE(cache.size(),2);
-    invalid=CValidationReport();
-    QVERIFY(a.worldBoundaryTile(v.signature,model,{},0,0,8,&cache,&invalid,first,4).isNull());QVERIFY(invalid.hasErrors());
-    invalid=CValidationReport();
-    QVERIFY(a.worldBoundaryTile(signature(999,999,999,999),model,{},0,0,8,&cache,&invalid,first,0).isNull());QVERIFY(invalid.hasErrors());
 }
 
 QTEST_GUILESS_MAIN(TerrainVirtualAtlasTests)

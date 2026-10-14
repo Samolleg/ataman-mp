@@ -2,7 +2,6 @@ QT += core gui widgets testlib
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = res_archive_document_tests
-include(save_test_backup_root.pri)
 
 INCLUDEPATH += ../source/documents ../source/core ../source/app ../source/resources
 

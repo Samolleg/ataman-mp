@@ -23,7 +23,6 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QUndoStack>
-#include <QtConcurrent>
 #include <QtEndian>
 
 int runTerrainHeightResSaveCheck()
@@ -107,66 +106,6 @@ int runTerrainHeightResSaveCheck()
     STerrainBrush brush;brush.centerX=8;brush.centerY=8;brush.radius=1;
     auto height=view.m_terrainEdit.makeRaiseLower(brush,100);
     view.m_terrainEdit.apply(height,true,&report);view.m_pLand->setDirty(true);
-    QElapsedTimer snapshotTimer;
-    snapshotTimer.start();
-    SMprAutosaveSnapshot capturedSnapshot;
-    const bool captured=view.captureLandscapeAutosaveSnapshot(
-        &capturedSnapshot,&report);
-    const qint64 snapshotMs=snapshotTimer.elapsed();
-    out<<"MPR recovery GUI snapshot: elapsedMs="<<snapshotMs
-       <<" sourceBytes="<<capturedSnapshot.document.originalBytes().size()
-       <<" atlasPages="<<capturedSnapshot.authoredPages.size()<<"\n";
-    check(captured&&snapshotMs<=100,
-          "MPR autosave GUI snapshot is captured in at most 100 ms on the synthetic map");
-    SMprAutosaveSnapshot recoverySnapshot;
-    recoverySnapshot.document=mpr;recoverySnapshot.terrain=view.m_terrainEdit;
-    recoverySnapshot.materials=mpr.mapInfo().materials;
-    recoverySnapshot.animatedTiles=mpr.mapInfo().animatedTiles;
-    recoverySnapshot.source=QFileInfo(path);
-    recoverySnapshot.innerNamespace=mpr.mapInfo().innerNamespace;
-    const auto recoveryFuture=QtConcurrent::run([recoverySnapshot]() {
-        return CView::buildLandscapeAutosaveCandidate(recoverySnapshot);
-    });
-    const SMprAutosaveCandidate recoveryCandidate=recoveryFuture.result();
-    CMprDocument recoveryReopened;
-    check(recoveryCandidate.success
-          &&recoveryCandidate.mprBytes!=original
-          && recoveryReopened.loadBytes(recoveryCandidate.mprBytes,path,&report)
-          &&!recoveryReopened.originalBytes().isEmpty(),
-          "MPR autosave candidate builds and reopens from an immutable worker snapshot");
-    recoverySnapshot.stageWorkingAtlas=true;
-    recoverySnapshot.activeTileImages=images;
-    recoverySnapshot.activeTileTypes=mpr.mapInfo().tileTypes;
-    recoverySnapshot.activeSlots=images.size();
-    for(const auto& name:ei::terrainTextureResourceNames(
-            profile.mprNamespace,profile.textureCount))
-    { Q_UNUSED(name); recoverySnapshot.authoredPages.append(mmp); }
-    const auto pairedFuture=QtConcurrent::run([recoverySnapshot]() {
-        return CView::buildLandscapeAutosaveCandidate(recoverySnapshot);
-    });
-    const SMprAutosaveCandidate pairedRecovery=pairedFuture.result();
-    if(!pairedRecovery.success)
-        out<<"DETAIL: paired MPR recovery failed: "<<pairedRecovery.error<<"\n";
-    CResArchiveDocument pairedRecoveryArchive;
-    const bool pairedArchiveLoaded=!pairedRecovery.terrainAtlasResource.isEmpty()
-        &&pairedRecoveryArchive.loadBytes(pairedRecovery.terrainAtlasResource,
-                                          "recovery-terrain.res",&errors);
-    int pairedPageCount=0;
-    for(const SResArchiveMember& member : pairedRecoveryArchive.members())
-        if(member.name.endsWith(QStringLiteral(".mmp"),Qt::CaseInsensitive))
-            ++pairedPageCount;
-    if(!pairedRecovery.success||!pairedArchiveLoaded
-       ||pairedPageCount!=pairedRecovery.atlasPages||pairedPageCount==0)
-        out<<"DETAIL: paired-success="<<pairedRecovery.success
-           <<" bytes="<<pairedRecovery.terrainAtlasResource.size()
-           <<" loaded="<<pairedArchiveLoaded<<" members="
-           <<pairedRecoveryArchive.members().size()<<" pages="
-           <<pairedPageCount<<" expectedPages="<<pairedRecovery.atlasPages
-           <<" errors="<<errors.join(" | ")<<"\n";
-    check(pairedRecovery.success&&!pairedRecovery.terrainAtlasResource.isEmpty()
-          &&pairedArchiveLoaded&&pairedPageCount==pairedRecovery.atlasPages
-          &&pairedPageCount>0,
-          "working-atlas MPR recovery builds a paired RES candidate on the worker");
     check(view.currentTerrainMprSaveRoute(false)==ETerrainMprSaveRoute::PlainMpr,
           "height-only working profile chooses ordinary MPR save");
     check(CTerrainAtlasProfileStore::isWorkingAtlasProfile(view.m_terrainAtlasProfile),

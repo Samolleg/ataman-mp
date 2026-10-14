@@ -4,100 +4,22 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
-#include <QStandardPaths>
-#include <QCryptographicHash>
 
 #include "backup_manager.h"
-
-namespace {
-class BackupRootEnvironmentGuard
-{
-public:
-    BackupRootEnvironmentGuard()
-        : m_root(qgetenv("EI_MAPPER_TEST_BACKUP_ROOT")),
-          m_testMode(QStandardPaths::isTestModeEnabled()) {}
-    ~BackupRootEnvironmentGuard()
-    {
-        qputenv("EI_MAPPER_TEST_BACKUP_ROOT", m_root);
-        QStandardPaths::setTestModeEnabled(m_testMode);
-    }
-private:
-    QByteArray m_root;
-    bool m_testMode;
-};
-}
 
 class BackupManagerTests : public QObject
 {
     Q_OBJECT
 
 private slots:
-    void defaultSnapshotsUseProcessOwnedTestRoot();
-    void ordinaryRootRemainsUnchanged();
-    void qtTestModeUsesPrivateTemporaryRoot();
     void openSnapshotIsHashAddressedAndDeduplicated();
     void preSaveSnapshotsAreTimestampedAndExact();
     void retentionKeepsNewestFiftyPreSaveRevisions();
     void failureIsReportedWithoutChangingSource();
     void autosavesAreVersionedAndDeduplicated();
-    void mprAutosaveKeepsRequiredAtlasCompanion();
     void uncleanSessionNotifiesEachRecoveryOnlyOnce();
     void cleanSessionDoesNotNotifyAndKeepsRecovery();
 };
-
-void BackupManagerTests::defaultSnapshotsUseProcessOwnedTestRoot()
-{
-    const QString root = qEnvironmentVariable("EI_MAPPER_TEST_BACKUP_ROOT");
-    QVERIFY(QDir::isAbsolutePath(root));
-    QVERIFY(root.startsWith(QDir::tempPath() + QLatin1Char('/')));
-    CBackupManager manager;
-    QCOMPARE(manager.rootPath(), QDir::cleanPath(root));
-    QTemporaryDir sourceDir;
-    QVERIFY(sourceDir.isValid());
-    const QString path = sourceDir.filePath("isolated.mob");
-    QFile source(path);
-    QVERIFY(source.open(QIODevice::WriteOnly));
-    QCOMPARE(source.write("original"), qint64(8));
-    source.close();
-    const auto opened = manager.snapshotOnOpen(QFileInfo(path));
-    const auto saved = manager.snapshotBeforeSave(QFileInfo(path));
-    const auto autosaved = manager.snapshotAutosave(QFileInfo(path), "edited");
-    for(const auto& snapshot : {opened, saved, autosaved})
-    {
-        QVERIFY2(snapshot.success, qPrintable(snapshot.error));
-        QVERIFY(snapshot.backupPath.startsWith(root + QLatin1Char('/')));
-        QVERIFY(QFileInfo::exists(snapshot.backupPath));
-    }
-    CBackupManager explicitManager(sourceDir.filePath("explicit-backups"));
-    QCOMPARE(explicitManager.rootPath(), sourceDir.filePath("explicit-backups"));
-}
-
-void BackupManagerTests::ordinaryRootRemainsUnchanged()
-{
-    BackupRootEnvironmentGuard guard;
-    qunsetenv("EI_MAPPER_TEST_BACKUP_ROOT");
-    QStandardPaths::setTestModeEnabled(false);
-    const QString expected = QDir(QStandardPaths::writableLocation(
-        QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups");
-    // Read-only: resolve the production path without creating any snapshots.
-    QCOMPARE(CBackupManager::defaultRootPath(), expected);
-    QCOMPARE(CBackupManager().rootPath(), expected);
-}
-
-void BackupManagerTests::qtTestModeUsesPrivateTemporaryRoot()
-{
-    BackupRootEnvironmentGuard guard;
-    qunsetenv("EI_MAPPER_TEST_BACKUP_ROOT");
-    QStandardPaths::setTestModeEnabled(true);
-    const QString sharedRoot = QDir(QStandardPaths::writableLocation(
-        QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups");
-    const QString isolatedRoot = CBackupManager::defaultRootPath();
-    QVERIFY(isolatedRoot != sharedRoot);
-    QVERIFY(QDir::isAbsolutePath(isolatedRoot));
-    QVERIFY(isolatedRoot.startsWith(QDir::tempPath() + QLatin1Char('/')));
-    QCOMPARE(CBackupManager().rootPath(), isolatedRoot);
-    QCOMPARE(CBackupManager::defaultRootPath(), isolatedRoot);
-}
 
 void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
 {
@@ -137,46 +59,6 @@ void BackupManagerTests::autosavesAreVersionedAndDeduplicated()
     QVERIFY(clean.success);
     QVERIFY(clean.skipped);
     QVERIFY(clean.backupPath.isEmpty());
-}
-
-void BackupManagerTests::mprAutosaveKeepsRequiredAtlasCompanion()
-{
-    QTemporaryDir temporary;
-    QVERIFY(temporary.isValid());
-    const QString sourcePath = temporary.filePath("zone1.mpr");
-    QFile source(sourcePath);
-    QVERIFY(source.open(QIODevice::WriteOnly));
-    QCOMPARE(source.write("source-mpr"), qint64(10));
-    source.close();
-    const QByteArray candidate("recovery-mpr");
-    const QByteArray atlas("paired-terrain-res");
-    CBackupManager manager(temporary.filePath("backups"));
-
-    const SBackupResult saved = manager.snapshotAutosaveWithCompanion(
-        QFileInfo(sourcePath), candidate, QStringLiteral("terrain.res"), atlas);
-    QVERIFY2(saved.success, qPrintable(saved.error));
-    QVERIFY(!saved.skipped);
-    QFile payload(saved.backupPath);
-    QVERIFY(payload.open(QIODevice::ReadOnly));
-    QCOMPARE(payload.readAll(), candidate);
-    QFile metadataFile(saved.backupPath + ".json");
-    QVERIFY(metadataFile.open(QIODevice::ReadOnly));
-    const QJsonObject metadata = QJsonDocument::fromJson(
-        metadataFile.readAll()).object();
-    const QString companionPath = metadata.value("companionPath").toString();
-    QVERIFY(!companionPath.isEmpty());
-    QFile companion(companionPath);
-    QVERIFY(companion.open(QIODevice::ReadOnly));
-    QCOMPARE(companion.readAll(), atlas);
-    QCOMPARE(metadata.value("companionSha256").toString(),
-        QString::fromLatin1(QCryptographicHash::hash(
-            atlas, QCryptographicHash::Sha256).toHex()));
-
-    const SBackupResult duplicate = manager.snapshotAutosaveWithCompanion(
-        QFileInfo(sourcePath), candidate, QStringLiteral("terrain.res"), atlas);
-    QVERIFY(duplicate.success);
-    QVERIFY(duplicate.skipped);
-    QCOMPARE(duplicate.backupPath, saved.backupPath);
 }
 
 void BackupManagerTests::uncleanSessionNotifiesEachRecoveryOnlyOnce()
@@ -351,5 +233,5 @@ void BackupManagerTests::retentionKeepsNewestFiftyPreSaveRevisions()
     QVERIFY(QFileInfo::exists(openSnapshot.backupPath));
 }
 
-QTEST_GUILESS_MAIN(BackupManagerTests)
+QTEST_MAIN(BackupManagerTests)
 #include "backup_manager_tests.moc"

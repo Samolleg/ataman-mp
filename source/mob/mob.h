@@ -7,7 +7,6 @@
 #include <QVector>
 #include <QVector3D>
 #include <QSet>
-#include <QSharedPointer>
 #include <QOpenGLShader>
 #include <functional>
 
@@ -40,24 +39,11 @@ struct SMobParameterState
     bool operator!=(const SMobParameterState& other) const { return !(*this == other); }
 };
 
-struct SMobAutosaveSnapshot
-{
-    QFileInfo source;
-    QByteArray originalData;
-    QByteArray cleanProjection;
-    QByteArray currentProjection;
-    int expectedObjectCount{0};
-};
-
 ///
 /// \brief The CMob class provides reading, saving and editing of *.mob file.
 ///
 class CMob
 {
-    friend class CView;
-    // Called only after accepted close decisions and history teardown, while
-    // this MOB is being retired. Removes the old raw owning references.
-    QVector<QSharedPointer<CNode>> takeWorldObjectsForRetiredMob();
     friend int runTerrainMobHeightCheck();
 public:
     struct SCanvasCropResult
@@ -84,11 +70,6 @@ public:
     bool buildValidatedCandidate(QByteArray* data,
                                  CValidationReport* report = nullptr,
                                  QString* saveClass = nullptr);
-    SMobAutosaveSnapshot captureAutosaveSnapshot();
-    static bool buildAutosaveCandidate(const SMobAutosaveSnapshot& snapshot,
-                                       QByteArray* data,
-                                       CValidationReport* report = nullptr,
-                                       QString* saveClass = nullptr);
     bool buildCanvasCropCandidate(float offsetX, float offsetY,
                                   float resultWidth, float resultHeight,
                                   bool removeOutside, float closedEdgeWidth,

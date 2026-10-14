@@ -8,8 +8,6 @@ RESOURCES += ../assets/resources/terrain_blend_masks.qrc
 INCLUDEPATH += ../source/documents ../source/core ../source/resources
 SOURCES += \
     terrain_virtual_atlas_tests.cpp \
-    ../source/documents/terrain_mixed_edge.cpp \
-    ../source/documents/terrain_recipe_bake.cpp \
     ../source/documents/terrain_virtual_atlas.cpp \
     ../source/documents/terrain_edit_model.cpp \
     ../source/documents/mpr_document.cpp \

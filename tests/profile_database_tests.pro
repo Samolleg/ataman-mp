@@ -2,7 +2,6 @@ QT += core testlib gui-private widgets
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = profile_database_tests
-include(save_test_backup_root.pri)
 
 INCLUDEPATH += ../source/resources ../source/runtime/providers ../source/documents ../source/ui ../source/core
 SOURCES += \
@@ -43,8 +42,3 @@ HEADERS += \
     ../source/runtime/providers/jmv_profile_database_provider.h
 
 RESOURCES += ../assets/resources/data.qrc
-
-# Database copy actions and persisted dialog geometry are production dependencies.
-SOURCES += ../source/core/verified_clipboard.cpp ../source/ui/window_geometry.cpp
-HEADERS += ../source/core/verified_clipboard.h ../source/ui/window_geometry.h
-win32: LIBS += -lole32 -luser32 -lgdi32 -luuid

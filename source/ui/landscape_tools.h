@@ -19,7 +19,6 @@ class QLineEdit;
 class QListWidget;
 class QButtonGroup;
 class QGridLayout;
-class QHBoxLayout;
 class QProgressBar;
 class QPushButton;
 class QResizeEvent;
@@ -37,20 +36,14 @@ struct STerrainPaintMaterialChoice
     QString name;
     QString familyName;
     QImage thumbnail;
-    QVector<QImage> authoredThumbnails;
     // The semantic brush is already selectable while its exact reviewed-HD
     // artwork is verified off the UI thread.  A pending entry must never fall
     // back to misleading initials that look like a finished brush preview.
     bool thumbnailPending{false};
-    bool animated{false};
-    bool paintAvailable{true};
-    QString paintUnavailableReason;
     int assignedSlots{0};
     bool cornerOnly{false};
     bool contextualStamp{false};
     bool used{false};
-    QStringList generatedIds;
-    QVector<QImage> generatedThumbnails;
 };
 
 enum class ETerrainPaintPaletteMode
@@ -91,7 +84,6 @@ public:
 
     QSize minimumSizeHint() const override;
     void setWorldTerrainStatus(const QString& status, bool canUndo, bool canRedo, bool dirty, bool enabled, int neighbors);
-    void setTerrainCatalogLoading(bool loading);
 
     bool sculptEnabled() const;
     bool overlaySculptEnabled() const;
@@ -121,12 +113,8 @@ public:
     ETerrainPaintTargetMode paintTargetMode() const;
     bool classicAutoSafeMode() const;
     bool modernAutoResolveBlends() const;
-    bool modernMixedEdge() const;
     bool tilePaintPreviewEnabled() const;
     bool randomizeUniformRotation() const;
-    bool randomPaintVariants() const;
-    bool generatedHdVariants() const;
-    bool generatedHdVariantsRequested() const;
     bool landFamiliesAllowedInOverlay() const;
     bool overlayMaterialSlotLabelsVisible() const;
     void setOverlayMaterialSlotLabelsVisible(bool visible);
@@ -169,7 +157,7 @@ public:
                               // identity for the corresponding slot. Empty
                               // entries are unaddressable physical padding.
                               const QVector<QByteArray>& physicalIdentities = {});
-    void setGeneratedAtlasTileCount(int count, int activeSlots = -1);
+    void setGeneratedAtlasTileCount(int count);
     void setUsedTerrainFamilies(const QSet<qint32>& landFamilies,
                                 const QSet<qint32>& overlayFamilies);
     bool selectPaintTerrainType(qint32 terrainType);
@@ -183,7 +171,6 @@ public:
                               bool notify = false);
 
 signals:
-    void shuffleTerrainTilesRequested(bool selectionOnly);
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();
@@ -191,9 +178,6 @@ signals:
     void importHeightmapRequested();
     void resolveMissingBlendsRequested();
     void atlasProfileReviewRequested();
-    void atlasHdRepublishRequested();
-    void generateHdVariantsRequested();
-    void generatedHdVariantsChanged(bool enabled);
     void exportPaintDiagnosticRequested();
     void openMprSettingsRequested();
     void openMprMaterialsRequested();
@@ -213,11 +197,6 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    void refreshResponsiveControls();
-    const STerrainPaintMaterialChoice* selectedPaintChoice() const;
-    bool semanticPaintOptionsApplicable() const;
-    bool mixedEdgeApplicable() const;
-    void updatePaintOptionApplicability();
     bool m_editingActive{false};
     QComboBox* m_mode;
     QComboBox* m_tool;
@@ -240,16 +219,12 @@ private:
     QWidget* m_classicModePage;
     QWidget* m_manualModePage;
     QScrollArea* m_groundMaterialScroll;
-    QScrollArea* m_underwaterMaterialScroll;
     QScrollArea* m_overlayMaterialScroll;
     QWidget* m_groundMaterialPage;
-    QWidget* m_underwaterMaterialPage;
     QWidget* m_overlayMaterialPage;
     QGridLayout* m_groundMaterialGrid;
     QGridLayout* m_underwaterMaterialGrid;
     QGridLayout* m_overlayMaterialGrid;
-    QLabel* m_variantStripTitle{nullptr};
-    QHBoxLayout* m_variantStripLayout{nullptr};
     QButtonGroup* m_groundMaterialButtons;
     QButtonGroup* m_overlayMaterialButtons;
     QScrollArea* m_classicGroundMaterialScroll;
@@ -270,11 +245,7 @@ private:
     QToolButton* m_vertexPaintTarget;
     QCheckBox* m_classicAutoSafe;
     QCheckBox* m_modernAutoResolveBlends;
-    QCheckBox* m_modernMixedEdge{nullptr};
     QCheckBox* m_randomizeUniformRotation;
-    QCheckBox* m_randomPaintVariants;
-    QCheckBox* m_generatedHdVariants{nullptr};
-    QComboBox* m_randomPaintScope;
     QComboBox* m_paintIssueCategory;
     QToolButton* m_markPaintIssue;
     QCheckBox* m_showOverlayMaterialSlots;
@@ -286,12 +257,9 @@ private:
     QCheckBox* m_showMainTerrain;
     QCheckBox* m_showOverlays;
     QLabel* m_tilesetStatus;
-    bool m_terrainCatalogLoading{false};
     QLabel* m_atlasCoverage;
     QLabel* m_generatedAtlasTiles;
     QProgressBar* m_atlasCapacity;
-    int m_atlasActiveSlots{0};
-    int m_workingAtlasActiveSlots{-1};
     QLabel* m_atlasCapacityWarning;
     QWidget* m_sculptControls;
     QLabel* m_worldTerrainStatus{nullptr};
@@ -315,9 +283,6 @@ private:
     void updateModeVisibility();
     void refreshPaintTerrainTypes();
     void rebuildMaterialPalette();
-    void updateMaterialButton(QToolButton*, const STerrainPaintMaterialChoice&, bool classicAuto);
-    QByteArray m_paletteTopology;
-    QByteArray m_variantStripFingerprint;
     void requestMaterialPaletteRebuild();
     void requestPaintTerrainTypesRefresh();
     void refreshAtlasCapacity(int activeSlots);
@@ -327,9 +292,6 @@ private:
     void applyPaintFilter();
     void refreshPaletteColumns(bool rebuild = true);
     void schedulePaletteRelayout();
-    void updateVariantStrip(const STerrainPaintMaterialChoice& choice);
-    void refreshVariantStrip();
-    int m_paletteCellSize{64};
     QButtonGroup* activeMaterialButtons() const;
 };
 

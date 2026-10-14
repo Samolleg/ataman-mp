@@ -6370,11 +6370,6 @@ void EnduranceDocumentTests::manualTilePaintRebasesDecodedSemanticsAndInvalidate
     const quint16 manualPacked = manual.deltas.front().after;
     QCOMPARE(terrain.packedTile(8, 8, ETerrainTileLayer::Land),
              manualPacked);
-    // A Modern stroke followed by a physical C placement must be saveable
-    // without inventing blends at its hard boundary. Those incident cells
-    // retain their current packed artwork as the publication baseline.
-    for(int y=7;y<=9;++y)for(int x=7;x<=9;++x)
-        QVERIFY(!terrain.virtualMaterialCellChanged(ETerrainTileLayer::Land,x,y));
     for(const QPoint& vertex : {QPoint(8, 8), QPoint(9, 8),
                                  QPoint(9, 9), QPoint(8, 9)})
     {
@@ -14088,9 +14083,6 @@ void EnduranceDocumentTests::floatingResourceBrowserClosesBeforeViewTeardown()
 
 void EnduranceDocumentTests::terrainCatalogWaitsForVisibleLandscapeFrame()
 {
-    QVERIFY(terrainCatalogWorkspaceHold(true, false));
-    QVERIFY(!terrainCatalogWorkspaceHold(true, true));
-    QVERIFY(!terrainCatalogWorkspaceHold(false, false));
     QCOMPARE(terrainCatalogLoadAction(
                  true, false, false, false, false),
              ETerrainCatalogLoadAction::None);
@@ -14130,20 +14122,6 @@ void EnduranceDocumentTests::terrainCatalogWaitsForVisibleLandscapeFrame()
              "MPR loading again populates the tile picker before the first landscape frame");
     QVERIFY2(!load.contains("m_pTileForm->fillTable("),
              "MPR loading again decodes the tile picker before the first landscape frame");
-    QVERIFY2(source.contains("terrainCatalogWorkspaceHold(m_unitVisualPreparationSuspended, false)"),
-             "MPR paint catalog hydration is not held until the MOB workspace finishes");
-    QVERIFY2(source.contains("m_terrainAutoCatalogDeferredByWorkspace"),
-             "A workspace-held paint catalog can still be built explicitly on first terrain interaction");
-    const int queueStart = source.indexOf(
-        "void CView::queueDeferredTerrainAutoCatalogBuild");
-    const int ensureStart = source.indexOf(
-        "bool CView::ensureTerrainAutoCatalogReady", queueStart);
-    QVERIFY(queueStart >= 0 && ensureStart > queueStart);
-    const QByteArray queueSource = source.mid(queueStart, ensureStart - queueStart);
-    QVERIFY2(queueSource.indexOf("if(!m_terrainAutoCatalogPending)") >= 0
-                 && queueSource.indexOf("if(!m_terrainAutoCatalogPending)")
-                     < queueSource.indexOf("terrainCatalogWorkspaceHold"),
-             "Workspace suspension without a pending MPR must not set deferred catalog state");
 
     const int paintStart = source.indexOf("void CView::paintGL");
     const int shutdownStart = source.indexOf(

@@ -287,8 +287,6 @@ QJsonObject STerrainAtlasProfile::toJson() const
                       underwaterRoleName(family.underwaterRole));
         object.insert(QStringLiteral("ambiguous"), family.ambiguous);
         object.insert(QStringLiteral("paintSelectable"), family.paintSelectable);
-        if(family.randomRotationExplicit)
-            object.insert(QStringLiteral("randomRotationAllowed"), family.randomRotationAllowed);
         object.insert(QStringLiteral("tileType"), family.tileType);
         object.insert(QStringLiteral("thumbnailSlot"), family.thumbnailSlot);
         QJsonArray slotsArray;
@@ -305,10 +303,6 @@ QJsonObject STerrainAtlasProfile::toJson() const
         object.insert(QStringLiteral("signature"), signatureJson(slot.signature));
         object.insert(QStringLiteral("assigned"), slot.assigned);
         object.insert(QStringLiteral("ambiguous"), slot.ambiguous);
-        if(slot.distributionWeight != 1)
-            object.insert(QStringLiteral("distributionWeight"), slot.distributionWeight);
-        if(!slot.mixedEdgeRecipes.isEmpty())
-            object.insert(QStringLiteral("mixedEdgeRecipes"), QJsonArray::fromStringList(slot.mixedEdgeRecipes));
         if(slot.routeOwnerMaterial > 0)
             object.insert(QStringLiteral("routeOwnerMaterial"),
                           slot.routeOwnerMaterial);
@@ -421,20 +415,6 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         family.paintSelectable = schemaVersion >= 3
             ? item.value(QStringLiteral("paintSelectable")).toBool(true) : true;
         family.tileType = item.value(QStringLiteral("tileType")).toInt(-1);
-        // Conservative semantic default for old/built-in profiles. Direction
-        // detection from pixels is advisory research, never user authority.
-        const QString materialName = family.name.toLower();
-        const bool natural = QRegularExpression(QStringLiteral(
-            "grass|ground|earth|sand|stone|rock|snow|moss|gravel|dirt|mud|"
-            "трава|земля|песок|камень|скала|снег|мох|гравий|грязь"))
-                .match(materialName).hasMatch();
-        const bool directional = QRegularExpression(QStringLiteral(
-            "board|plank|wood|furrow|road|path|edge|border|water|lava|"
-            "доск|дерев|борозд|дорог|троп|край|кромк|вода|лав"))
-                .match(materialName).hasMatch();
-        family.randomRotationAllowed = item.value(QStringLiteral("randomRotationAllowed"))
-            .toBool(natural && !directional && family.landAllowed);
-        family.randomRotationExplicit = item.contains(QStringLiteral("randomRotationAllowed"));
         family.thumbnailSlot = schemaVersion >= 2
             ? item.value(QStringLiteral("thumbnailSlot")).toInt(-1) : -1;
         for(const QJsonValue& slot : item.value(QStringLiteral("slots")).toArray())
@@ -447,26 +427,12 @@ bool STerrainAtlasProfile::fromJson(const QJsonObject& object,
         const QJsonObject item = value.toObject();
         STerrainAtlasProfileSlot slot;
         slot.slot = item.value(QStringLiteral("slot")).toInt(-1);
-        slot.distributionWeight = item.value(QStringLiteral("distributionWeight")).toInt(1);
-        if(slot.distributionWeight <= 0) return false;
         slot.ambiguous = item.value(QStringLiteral("ambiguous")).toBool();
         slot.assigned = schemaVersion >= 2
             ? item.value(QStringLiteral("assigned")).toBool(!slot.ambiguous)
             : !slot.ambiguous;
         slot.routeOwnerMaterial = schemaVersion >= 10
             ? item.value(QStringLiteral("routeOwnerMaterial")).toInt(0) : 0;
-        for(const auto& value:item.value(QStringLiteral("mixedEdgeRecipes")).toArray())
-        {
-            const QString key=value.toString();
-            if(!QRegularExpression(QStringLiteral("^mixed-edge-b2:[0-9a-f]{64}$")).match(key).hasMatch()
-               || slot.mixedEdgeRecipes.contains(key))
-            {
-                if(report) report->add("terrain.atlas_profile_recipe", EValidationSeverity::Error,
-                    "The mixed-edge recipe identity is malformed or duplicated.");
-                return false;
-            }
-            slot.mixedEdgeRecipes.append(key);
-        }
         if(schemaVersion >= 8
            && item.value(QStringLiteral("sourceSlots")).isArray())
         {
@@ -1034,8 +1000,7 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
     {
         STerrainAtlasProfileSlot definition;
         definition.slot = slot;
-        definition.assigned = slot < finalization.tiles.size()
-            && !finalization.tiles.at(slot).physicalPadding;
+        definition.assigned = slot < finalization.tiles.size();
         definition.ambiguous = false;
         if(definition.assigned)
         {
@@ -1068,7 +1033,6 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::portableFinalizedProfile(
                 definition.sourcePixelSha256 = tile.pixelSha256;
             }
             definition.routeOwnerMaterial = tile.routeOwnerMaterial;
-            definition.mixedEdgeRecipes=tile.mixedEdgeRecipes;
             if(definition.assigned)
                 for(qint32 id : {definition.signature.northWest,
                                   definition.signature.northEast,
@@ -1523,7 +1487,6 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
                               slot.signature.southEast, slot.signature.southWest};
         bool allowLand = true;
         bool allowOverlay = true;
-        bool randomRotationAllowed = true;
         for(qint32 id : ids)
             if(!byId.contains(id))
             {
@@ -1536,10 +1499,6 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             {
                 allowLand &= byId.value(id).landAllowed;
                 allowOverlay &= byId.value(id).overlayAllowed;
-                randomRotationAllowed &= byId.value(id).randomRotationAllowed
-                    && byId.value(id).landAllowed;
-                randomRotationAllowed &= !QRegularExpression(QStringLiteral("water|lava|вода|лав"),
-                    QRegularExpression::CaseInsensitiveOption).match(byId.value(id).name).hasMatch();
             }
         if(!allowLand && !allowOverlay)
         {
@@ -1567,9 +1526,6 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
             variant.packedTile = packed.encode();
             variant.routeOwnerMaterial = slot.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = slot.routeOwnerMaterial > 0;
-            variant.randomRotationAllowed = randomRotationAllowed;
-            variant.mixedEdge = !slot.mixedEdgeRecipes.isEmpty();
-            variant.distributionWeight = slot.distributionWeight;
             if((allowLand && !result.landCatalog.addVariant(variant, report))
                || (allowOverlay && !result.overlayCatalog.addVariant(variant, report))
                || !result.overlayCompatibleCatalog.addVariant(variant, report))
@@ -1603,8 +1559,8 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
                     : (family.memberSlots.isEmpty() ? -1 : family.memberSlots.front());
             material.thumbnailSlot = material.representativeSlot;
             if(report) report->add("terrain.atlas_profile_corner_only_material",
-                EValidationSeverity::Info,
-                "Материал представлен в переходах атласа; отдельного однородного тайла в этом атласе нет",
+                EValidationSeverity::Warning,
+                "This material has no uniform tile and paints contextually at terrain corners",
                 family.name);
         }
         else
@@ -1678,7 +1634,6 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::fromAuthoredAnalysis(
     profile.mprNamespace = mprNamespace;
     profile.atlasPixelSha256 = atlasPixelSha256;
     profile.atlasSlotCount = atlasSlotCount;
-    profile.textureCount = (atlasSlotCount + 63) / 64;
     profile.provenance = QStringLiteral("authored-template:%1").arg(analysis.templateName);
     profile.approved = analysis.usable;
 
@@ -1760,7 +1715,6 @@ STerrainAtlasProfile CTerrainAtlasProfileInference::propose(
     result.mprNamespace = mprNamespace.trimmed();
     result.atlasPixelSha256 = pixelSha256(images);
     result.atlasSlotCount = images.size();
-    result.textureCount = (images.size() + 63) / 64;
     result.provenance = currentProvenance();
     if(result.mprNamespace.isEmpty() || images.isEmpty() || tileTypes.size() != images.size()
        || usage.size() != images.size())

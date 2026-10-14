@@ -48,7 +48,6 @@ void CLogger::log(ELogMessageType type, const QString msg)
         QString txt = QString("[%1] ").arg(entry.timestamp.toString("dd.MM.yyyy hh:mm:ss"));
 
         QTextStream textStream(&log_file);
-        textStream.setCodec("UTF-8");
         switch (type)
         {
         case eLogInfo: txt += QString("{INFO} \t %1").arg(msg); break;

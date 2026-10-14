@@ -1,5 +1,4 @@
 #include "terrain_atlas_profile.h"
-#include "terrain_hd_provenance.h"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -96,29 +95,6 @@ QString CTerrainAtlasPresetCatalog::materialTheme(const QString& variantName)
     return (separator < 0 ? trimmed : trimmed.left(separator)).trimmed();
 }
 
-QString CTerrainAtlasPresetCatalog::reviewedMaterialName(const QString& name,int reviewedClass)
-{
-    for(const auto& rule:terrainConfirmedHdProvenance())
-        if(name==rule.material&&reviewedClass==rule.reviewedClass)
-            return name+QStringLiteral(" [class %1]").arg(reviewedClass);
-    return name;
-}
-
-bool CTerrainAtlasPresetCatalog::validateConfirmedSource(const STerrainGlobalMaterialSource& source,
-    const QImage& nativeHd,const std::function<bool(const QString&,QByteArray*)>& loader)
-{
-    if(source.confirmedSdPixelSha256.isEmpty())return true;
-    if(nativeHd.size()!=QSize(256,256)||terrainProvenancePixelSha(nativeHd)!=source.confirmedHdPixelSha256||!loader)return false;
-    QByteArray bytes;QImage sd,currentHd;
-    const QString hdPage=QStringLiteral("%1%2.mmp").arg(source.mprNamespace.toLower()).arg(source.uniformSlot/64,3,10,QLatin1Char('0'));
-    return source.uniformSlot>=0 && loader(hdPage,&bytes)
-        &&ei::decodeMmpDxt1AtlasTile(bytes,source.uniformSlot%64,&currentHd)
-        &&terrainProvenancePixelSha(currentHd)==source.confirmedHdPixelSha256
-        &&loader(source.confirmedSdPage,&bytes)
-        &&ei::decodeMmpDxt1AtlasTile(bytes,source.confirmedSdSlot,&sd)
-        &&sd.size()==QSize(128,128)&&terrainProvenancePixelSha(sd)==source.confirmedSdPixelSha256;
-}
-
 qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
     const QString& variantName, ETerrainAtlasLayer layer,
     const QByteArray& atlasIdentity, qint32 localFamilyId)
@@ -180,8 +156,8 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         {
             const QJsonObject familyObject = familyValue.toObject();
             const int localId = familyObject.value(QStringLiteral("id")).toInt(-1);
-            const QString variantName = reviewedMaterialName(familyObject.value(
-                QStringLiteral("name")).toString(),familyObject.value(QStringLiteral("tileType")).toInt(-1));
+            const QString variantName = familyObject.value(
+                QStringLiteral("name")).toString();
             if(!familyObject.value(QStringLiteral("paintSelectable")).toBool(true))
                 continue;
             const int thumbnailSlot = familyObject.value(
@@ -297,25 +273,6 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
             }
         }
     }
-    for(const auto& rule:terrainConfirmedHdProvenance()) {
-        STerrainGlobalMaterialSource hd;bool found=false;
-        for(const auto& family:grouped)for(const auto& candidate:family.sources)
-            if(candidate.mprNamespace==rule.hdNamespace&&candidate.uniformSlot==rule.hdSlot){hd=candidate;found=true;break;}
-        if(!found)continue;
-        for(auto& family:grouped) {
-            if(family.name!=reviewedMaterialName(rule.material,rule.reviewedClass)
-               ||family.runtimeTerrainType!=rule.reviewedClass||family.layer!=rule.layer)continue;
-            QVector<STerrainGlobalMaterialSource> aliases;
-            for(const auto& sd:family.sources) {
-                auto alias=hd;alias.variantName=family.name;
-                alias.confirmedSdPage=QStringLiteral("%1%2.mmp").arg(sd.mprNamespace.toLower()).arg(sd.uniformSlot/64,3,10,QLatin1Char('0'));
-                alias.confirmedSdSlot=sd.uniformSlot%64;
-                alias.confirmedSdPixelSha256=rule.sdPixelSha256;alias.confirmedHdPixelSha256=rule.hdPixelSha256;
-                aliases.append(alias);
-            }
-            family.sources=aliases;family.thumbnailSources=aliases;
-        }
-    }
     QVector<STerrainGlobalMaterialFamily> result = grouped.values().toVector();
     std::sort(result.begin(), result.end(), [](
         const STerrainGlobalMaterialFamily& left,
@@ -352,9 +309,7 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
         for(const STerrainGlobalMaterialSource& existing : sources)
             if(existing.mprNamespace.compare(
                    source.mprNamespace, Qt::CaseInsensitive) == 0
-               && existing.uniformSlot == source.uniformSlot
-               && existing.confirmedSdPage == source.confirmedSdPage
-               && existing.confirmedSdSlot == source.confirmedSdSlot)
+               && existing.uniformSlot == source.uniformSlot)
                 return;
         sources.append(source);
     };
@@ -399,8 +354,7 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                || tile.isNull())
                 continue;
             tile = tile.convertToFormat(QImage::Format_RGBA8888);
-            if(!validateConfirmedSource(source,tile,pageLoader))continue;
-            if(!source.confirmedSdPixelSha256.isEmpty() || requiredSize.isEmpty() || tile.size() == requiredSize)
+            if(requiredSize.isEmpty() || tile.size() == requiredSize)
             {
                 if(selectedSource) *selectedSource = source;
                 return tile;
@@ -431,7 +385,7 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
             .arg(pageName, QString::fromLatin1(payloadSha256))
             .arg(source.uniformSlot % 64)
             .arg(requiredSize.width()).arg(requiredSize.height());
-        if(source.confirmedSdPixelSha256.isEmpty() && decodedTileCache->contains(tileCacheKey))
+        if(decodedTileCache->contains(tileCacheKey))
         {
             if(selectedSource) *selectedSource = source;
             return decodedTileCache->value(tileCacheKey);
@@ -443,8 +397,7 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalUniformSource(
                &tile, &diagnostic))
             continue;
         tile = tile.convertToFormat(QImage::Format_RGBA8888);
-        if(!validateConfirmedSource(source,tile,pageLoader))continue;
-        if(!source.confirmedSdPixelSha256.isEmpty() || requiredSize.isEmpty() || tile.size() == requiredSize)
+        if(requiredSize.isEmpty() || tile.size() == requiredSize)
         {
             decodedTileCache->insert(tileCacheKey, tile);
             if(selectedSource) *selectedSource = source;
@@ -721,7 +674,6 @@ STerrainAtlasProfile CTerrainAtlasPresetCatalog::exactProfile(
         profile.mprNamespace = requestedNamespace;
         profile.atlasPixelSha256 = requestedHash;
         profile.atlasSlotCount = atlasSlotCount;
-        profile.textureCount = (atlasSlotCount + 63) / 64;
         profile.provenance = QStringLiteral("built-in-material-atlas-v2");
         profile.approved = true;
         for(const QJsonValue& familyValue : preset.value(QStringLiteral("families")).toArray())

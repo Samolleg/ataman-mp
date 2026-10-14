@@ -1,7 +1,6 @@
 #include "backup_manager.h"
 
 #include <QCryptographicHash>
-#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -14,7 +13,6 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
-#include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
 
@@ -107,35 +105,6 @@ CBackupManager::CBackupManager(const QString& rootOverride)
 
 QString CBackupManager::defaultRootPath()
 {
-    // Native save tests supply a process-owned root before entering main.
-    // Invalid test configuration must never fall back to the user's backups.
-    const QString overrideRoot = qEnvironmentVariable("EI_MAPPER_TEST_BACKUP_ROOT");
-    if(!overrideRoot.isEmpty())
-    {
-        if(!QDir::isAbsolutePath(overrideRoot))
-            qFatal("EI_MAPPER_TEST_BACKUP_ROOT must be an absolute path");
-        return QDir::cleanPath(overrideRoot);
-    }
-
-    // Built-in checks also save documents. Qt's shared qttest directory is
-    // not private to this process, so test mode alone is not sufficient.
-    bool testRun = QStandardPaths::isTestModeEnabled();
-    if(QCoreApplication::instance())
-        for(const QString& argument : QCoreApplication::arguments().mid(1))
-        {
-            const QString option = argument.section(QLatin1Char('='), 0, 0);
-            testRun = testRun || (option.startsWith(QStringLiteral("--"))
-                                 && option.endsWith(QStringLiteral("-check")));
-        }
-    if(testRun)
-    {
-        static QTemporaryDir temporary(QDir::tempPath()
-            + QStringLiteral("/ei-mapper-test-backups-XXXXXX"));
-        if(!temporary.isValid())
-            qFatal("Cannot create an isolated test backup directory");
-        return temporary.filePath(QStringLiteral("backups"));
-    }
-
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
         .filePath("EI Mapper Endurance/backups");
 }
@@ -163,26 +132,8 @@ SBackupResult CBackupManager::snapshotBeforeSave(const QFileInfo& source) const
 SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
                                                const QByteArray& candidate) const
 {
-    return snapshotAutosaveImpl(source, candidate, QString(), QByteArray());
-}
-
-SBackupResult CBackupManager::snapshotAutosaveWithCompanion(
-    const QFileInfo& source, const QByteArray& candidate,
-    const QString& companionName, const QByteArray& companionCandidate) const
-{
-    return snapshotAutosaveImpl(source, candidate, companionName,
-                                companionCandidate);
-}
-
-SBackupResult CBackupManager::snapshotAutosaveImpl(
-    const QFileInfo& source, const QByteArray& candidate,
-    const QString& companionName, const QByteArray& companionCandidate) const
-{
     SBackupResult result;
-    const QString safeCompanionName = sanitizedName(companionName);
-    const bool hasCompanion = !companionName.isEmpty();
-    if(!source.exists() || !source.isFile() || candidate.isEmpty()
-       || (hasCompanion && companionCandidate.isEmpty()))
+    if(!source.exists() || !source.isFile() || candidate.isEmpty())
     {
         result.error = QString("Cannot autosave an unavailable or empty document: %1")
             .arg(source.absoluteFilePath());
@@ -199,10 +150,6 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
         QCryptographicHash::Sha256).toHex();
     result.sha256 = QCryptographicHash::hash(candidate,
         QCryptographicHash::Sha256).toHex();
-    const QString companionHash = hasCompanion
-        ? QString::fromLatin1(QCryptographicHash::hash(
-              companionCandidate, QCryptographicHash::Sha256).toHex())
-        : QString();
     if(result.sha256 == sourceHash)
     {
         result.success = true;
@@ -225,8 +172,7 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
         if(metadataFile.open(QIODevice::ReadOnly))
         {
             const QJsonObject metadata = QJsonDocument::fromJson(metadataFile.readAll()).object();
-            if(metadata.value("candidateSha256").toString() == result.sha256
-               && metadata.value("companionSha256").toString() == companionHash)
+            if(metadata.value("candidateSha256").toString() == result.sha256)
             {
                 result.success = true;
                 result.skipped = true;
@@ -240,18 +186,9 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
     const QString baseName = QString("%1-autosave-%2-%3")
         .arg(stamp, result.sha256.left(16), sanitizedName(source.fileName()));
     const QString autosavePath = directory.filePath(baseName);
-    const QString companionPath = hasCompanion
-        ? autosavePath + QStringLiteral(".companion-") + safeCompanionName
-        : QString();
     QString error;
-    if(hasCompanion && !writeAtomically(companionPath, companionCandidate, error))
-    {
-        result.error = QString("Cannot write autosave companion: %1").arg(error);
-        return result;
-    }
     if(!writeAtomically(autosavePath, candidate, error))
     {
-        if(hasCompanion) QFile::remove(companionPath);
         result.error = QString("Cannot write autosave: %1").arg(error);
         return result;
     }
@@ -263,12 +200,6 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
     metadata.insert("sourceSha256", sourceHash);
     metadata.insert("candidateSha256", result.sha256);
     metadata.insert("backupPath", autosavePath);
-    if(hasCompanion)
-    {
-        metadata.insert("companionPath", companionPath);
-        metadata.insert("companionSha256", companionHash);
-        metadata.insert("companionName", companionName);
-    }
     const QString sessionId = activeSessionId(m_rootPath);
     if(!sessionId.isEmpty())
         metadata.insert("sessionId", sessionId);
@@ -276,7 +207,6 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
                         QJsonDocument(metadata).toJson(QJsonDocument::Indented), error))
     {
         QFile::remove(autosavePath);
-        if(hasCompanion) QFile::remove(companionPath);
         result.error = QString("Cannot write autosave metadata: %1").arg(error);
         return result;
     }
@@ -289,20 +219,14 @@ SBackupResult CBackupManager::snapshotAutosaveImpl(
     {
         if(generation.fileName().endsWith(".json", Qt::CaseInsensitive))
             continue;
-        if(generation.fileName().contains(QStringLiteral(".companion-")))
-            continue;
         if(++retainedPayloads > m_maxAutosaves)
         {
-            const QJsonObject oldMetadata = readJsonObject(
-                generation.absoluteFilePath() + ".json");
             QFile::remove(generation.absoluteFilePath());
             QFile::remove(generation.absoluteFilePath() + ".json");
-            const QString oldCompanion = oldMetadata.value("companionPath").toString();
-            if(!oldCompanion.isEmpty()) QFile::remove(oldCompanion);
         }
     }
-    ei::log(eLogInfo, QString("Autosave generation created source:%1 candidateSha256:%2 companionSha256:%3 path:%4")
-        .arg(source.absoluteFilePath(), result.sha256, companionHash, autosavePath));
+    ei::log(eLogInfo, QString("Autosave generation created source:%1 candidateSha256:%2 path:%3")
+        .arg(source.absoluteFilePath(), result.sha256, autosavePath));
     return result;
 }
 

@@ -3,56 +3,10 @@
 #include <QtEndian>
 #include <QtMath>
 #include <QDataStream>
-#include <QCryptographicHash>
-#include <QMutex>
-#include <QMutexLocker>
 #include <cstring>
 #include <limits>
 
 namespace ei {
-
-namespace {
-QMutex terrainMipMutex;
-QHash<QByteArray,QVector<QByteArray>> terrainMips;
-QByteArray terrainPixelKey(const QImage& input) {
-    const auto a=input.convertToFormat(QImage::Format_RGBA8888);
-    QCryptographicHash h(QCryptographicHash::Sha256);
-    for(int y=0;y<a.height();++y)h.addData(reinterpret_cast<const char*>(a.constScanLine(y)),a.width()*4);
-    return h.result();
-}
-}
-bool rememberTerrainMipChain(const QImage& tile,const QVector<QByteArray>& levels) {
-    if(tile.size()!=QSize(256,256)||levels.size()!=7)return false;
-    for(int i=0,n=256;i<7;++i,n/=2)if(levels[i].size()!=n*n/2)return false;
-    QImage decoded;
-    if(!decodeDxtImage(levels[0],256,256,DxtFormat::Dxt1,&decoded)
-       ||decoded.convertToFormat(QImage::Format_RGBA8888)!=tile.convertToFormat(QImage::Format_RGBA8888))return false;
-    const auto key=terrainPixelKey(tile);QMutexLocker lock(&terrainMipMutex);
-    if(terrainMips.contains(key)&&terrainMips.value(key)!=levels)return false;
-    terrainMips.insert(key,levels);return true;
-}
-QVector<QByteArray> terrainTileMipChain(const QByteArray& page,int slot) {
-    if(page.size()<76||slot<0||slot>=64)return {};
-    const auto d=reinterpret_cast<const uchar*>(page.constData());
-    if(qFromLittleEndian<quint32>(d)!=0x00504d4d||qFromLittleEndian<quint32>(d+4)!=2048
-       ||qFromLittleEndian<quint32>(d+8)!=2048||qFromLittleEndian<quint32>(d+12)<7
-       ||qFromLittleEndian<quint32>(d+16)!=0x31545844)return {};
-    QVector<QByteArray> levels;int offset=76;
-    for(int n=256;n>=4;n/=2){int width=n*8,bytes=width*width/2;if(offset+bytes>page.size())return {};
-        QByteArray blocks;for(int y=0;y<n/4;++y){int by=(7-slot/8)*(n/4)+y,bx=(slot%8)*(n/4);
-            blocks.append(page.mid(offset+(by*(width/4)+bx)*8,(n/4)*8));}
-        levels.append(blocks);offset+=bytes;}
-    return levels;
-}
-bool transplantTerrainMipChain(QByteArray* page,int slot,const QVector<QByteArray>& levels) {
-    if(!page||terrainTileMipChain(*page,slot).size()!=7||levels.size()!=7)return false;
-    int offset=76;
-    for(int n=256,i=0;n>=4;n/=2,++i){if(levels[i].size()!=n*n/2)return false;
-        for(int y=0;y<n/4;++y){int by=(7-slot/8)*(n/4)+y,bx=(slot%8)*(n/4);
-            std::memcpy(page->data()+offset+(by*(n*2)+bx)*8,levels[i].constData()+y*(n/4)*8,(n/4)*8);}
-        offset+=(n*8)*(n*8)/2;}
-    return true;
-}
 
 namespace {
 quint32 readDword(const QByteArray& data, int offset)
@@ -886,16 +840,6 @@ QByteArray encodeMmpDxt1(const QImage& image, bool generateMipmaps,
         const QByteArray encoded=encodeDxt1Level(level,diagnostic);
         if(encoded.isEmpty()) return {};
         result.append(encoded);
-    }
-    if(generateMipmaps&&image.size()==QSize(2048,2048)) {
-        QMutexLocker lock(&terrainMipMutex);
-        if(!terrainMips.isEmpty())for(int slot=0;slot<64;++slot) {
-            const auto tile=image.copy((slot%8)*256,(7-slot/8)*256,256,256);
-            const auto found=terrainMips.constFind(terrainPixelKey(tile));
-            if(found!=terrainMips.cend()&&!transplantTerrainMipChain(&result,slot,found.value())) {
-                if(diagnostic)*diagnostic=QStringLiteral("Generated HD mip transplant refused");return {};
-            }
-        }
     }
     return result;
 }

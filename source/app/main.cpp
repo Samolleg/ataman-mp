@@ -2,10 +2,6 @@
 #include "database_creation_check.h"
 #include "terrain_mob_height_check.h"
 #include "terrain_height_res_save_check.h"
-#include "terrain_mixed_edge_check.h"
-#include "terrain_hd_republish.h"
-#include "terrain_hd_variant_bank.h"
-#include "terrain_random_paint_check.h"
 #include "ai_graph_regeneration_check.h"
 #include "pointer_modes_check.h"
 #include "world_map_snap_check.h"
@@ -557,14 +553,6 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption databasePreviewCheckOption("database-preview-check", "Run non-interactive database preview and pointer-placement checks with read-only test resources.");
     QCommandLineOption databaseCreationCheckOption("database-creation-check", "Validate fresh database object creation and persistence without installed data.");
     QCommandLineOption terrainHeightResSaveCheckOption("terrain-height-res-save-check", "Validate height-only MPR saves and unchanged terrain resources with synthetic data.");
-    QCommandLineOption terrainMixedEdgeCheckOption("terrain-mixed-edge-check", "Validate mixed-edge integration on an isolated map/atlas fixture.", "fixture-json");
-    parser.addOption(terrainMixedEdgeCheckOption);
-    QCommandLineOption terrainHdRepublishOption("terrain-hd-republish-check", "Check/build HD atlas candidates in a new isolated output directory; never modify source maps.", "fixture-json");
-    parser.addOption(terrainHdRepublishOption);
-    QCommandLineOption terrainHdVariantsOption("terrain-hd-variants-check","Generate and validate a private HD variant bank.","fixture-json");
-    parser.addOption(terrainHdVariantsOption);
-    QCommandLineOption terrainRandomPaintCheckOption("terrain-random-paint-check", "Validate deterministic cosmetic tile variation on isolated fixtures.", "fixture-json");
-    parser.addOption(terrainRandomPaintCheckOption);
     QCommandLineOption aiGraphRegenerationCheckOption("ai-graph-regeneration-check", "Validate explicit graph calculation, invalidation, queued clicks and current save candidates with synthetic data.");
     QCommandLineOption terrainMobHeightCheckOption("terrain-mob-height-check", "Validate terrain and MOB height history with synthetic data.");
     QCommandLineOption resourceNavigationCheckOption("resource-navigation-check",
@@ -583,9 +571,6 @@ int runHeadlessCommand(QApplication& app)
         "Open positional documents and exit after all background unit visuals resolve.");
     QCommandLineOption workspaceVisualSequenceOption("workspace-visual-sequence",
         "Open semicolon-separated MPR|MOB stages in one process and exit after each stage resolves.",
-        "stages");
-    QCommandLineOption workspaceMapPairSequenceOption("workspace-map-pair-sequence",
-        "Open semicolon-separated MPR|MOB|zone stages through the Maps browser workspace path.",
         "stages");
     QCommandLineOption terrainStampRegressionOption("terrain-stamp-regression",
         "Run one real 6x6 Modern Lava-on-Water overlay viewport stamp, frame-capture it, validate undo/redo, then exit.");
@@ -631,7 +616,6 @@ int runHeadlessCommand(QApplication& app)
     parser.addOption(workspaceLoadSmokeOption);
     parser.addOption(workspaceVisualSmokeOption);
     parser.addOption(workspaceVisualSequenceOption);
-    parser.addOption(workspaceMapPairSequenceOption);
     parser.addOption(terrainStampRegressionOption);
     parser.addOption(terrainStampRegressionResultOption);
     parser.addPositionalArgument("documents", "MPR and MOB documents to open in order.", "[documents...]");
@@ -648,11 +632,6 @@ int runHeadlessCommand(QApplication& app)
     {
         app.setProperty("workspaceVisualSmoke", true);
         app.setProperty("workspaceVisualSequence", parser.value(workspaceVisualSequenceOption));
-    }
-    if(parser.isSet(workspaceMapPairSequenceOption))
-    {
-        app.setProperty("workspaceVisualSmoke", true);
-        app.setProperty("workspaceMapPairSequence", parser.value(workspaceMapPairSequenceOption));
     }
     if(parser.isSet(terrainStampRegressionOption))
     {
@@ -692,14 +671,6 @@ int runHeadlessCommand(QApplication& app)
     const bool pointerModesCheck = parser.isSet(pointerModesCheckOption);
     const bool worldMapSnapCheck = parser.isSet(worldMapSnapCheckOption);
     const bool terrainHeightResSaveCheck = parser.isSet(terrainHeightResSaveCheckOption);
-    if(parser.isSet(terrainMixedEdgeCheckOption))
-        return runTerrainMixedEdgeCheck(parser.value(terrainMixedEdgeCheckOption));
-    if(parser.isSet(terrainHdRepublishOption))
-        return runTerrainHdRepublish(parser.value(terrainHdRepublishOption));
-    if(parser.isSet(terrainHdVariantsOption))
-        return TerrainHdVariantBank::runCheck(parser.value(terrainHdVariantsOption));
-    if(parser.isSet(terrainRandomPaintCheckOption))
-        return runTerrainRandomPaintCheck(parser.value(terrainRandomPaintCheckOption));
     const bool aiGraphRegenerationCheck = parser.isSet(aiGraphRegenerationCheckOption);
     const bool terrainMobHeightCheck = parser.isSet(terrainMobHeightCheckOption);
     const bool resourceNavigationCheck = parser.isSet(resourceNavigationCheckOption);
@@ -821,6 +792,13 @@ int runHeadlessCommand(QApplication& app)
             }
         } hiddenWidgetFilter;
         app.installEventFilter(&hiddenWidgetFilter);
+        // Native-platform checks must restore the user's clipboard afterwards.
+        ei::ClipboardRestoreGuard clipboardRestore;
+        if(!clipboardRestore.captured()) {
+            QTextStream(stderr) << "FAIL: cannot preserve native clipboard; UI check aborted before synthetic writes: "
+                                << clipboardRestore.error() << "\n";
+            return 2;
+        }
         bool clipboardWritesVerified = true;
         const auto setCheckMimeData = [&clipboardWritesVerified](QMimeData* data) {
             QScopedPointer<QMimeData> owned(data);
@@ -1310,7 +1288,7 @@ int runHeadlessCommand(QApplication& app)
 
         QKeyEvent copyModelField(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
         QApplication::sendEvent(sourcePropertyTable.cellWidget(sourceModelRow, 1), &copyModelField);
-        const bool fieldCopyAvailable = ei::clipboardText() == "copied_model";
+        const bool fieldCopyAvailable = QGuiApplication::clipboard()->text() == "copied_model";
 
         QList<QSharedPointer<IPropertyBase>> colorSource;
         colorSource << QSharedPointer<IPropertyBase>(new prop3D(eObjParam_LIGHT_COLOR, 0.1f, 0.2f, 0.3f));
@@ -1385,7 +1363,7 @@ int runHeadlessCommand(QApplication& app)
             QApplication::sendEvent(zComponentPlate, &copyZComponent);
         }
         const bool selectedComponentCopy = zComponentPlate && zComponentPlate->isChecked()
-                && ei::clipboardText() == "3.6";
+                && QGuiApplication::clipboard()->text() == "3.6";
         QList<QSharedPointer<IPropertyBase>> integerDestination;
         integerDestination << QSharedPointer<IPropertyBase>(new propUint(eObjParam_RANGE, 0));
         QTableWidget integerDestinationTable;
@@ -1533,8 +1511,8 @@ int runHeadlessCommand(QApplication& app)
         partialEditor.setSelection(2, 2);
         QKeyEvent copyPartialText(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier);
         QApplication::sendEvent(&partialEditor, &copyPartialText);
-        const bool partialCopyExact = ei::clipboardText() == "cd"
-                && !ei::clipboardMimeData()->hasFormat(
+        const bool partialCopyExact = QGuiApplication::clipboard()->text() == "cd"
+                && !QGuiApplication::clipboard()->mimeData()->hasFormat(
                     "application/x-ei-mapper-property-type");
         QSharedPointer<IPropertyBase> partialDestinationValue(
                     new propStr(eObjParam_COMMENTS, "123456"));
@@ -1857,26 +1835,18 @@ int runHeadlessCommand(QApplication& app)
                                landscapeSettingsDirectory.path());
         }
         CLandscapeTools landscapeTools;
-        QSlider* commonPaintBrushSize = landscapeTools.findChild<QSlider*>(
-            QStringLiteral("terrainPaintRadius"));
-        const bool minimumPaintBrushIsSingleTile = commonPaintBrushSize
-            && commonPaintBrushSize->minimum() >= 1
-            && commonPaintBrushSize->maximum() > commonPaintBrushSize->minimum();
+        const bool minimumPaintBrushIsSingleTile = qFuzzyIsNull(
+            landscapeTools.paintRadius());
         landscapeTools.setPaintTerrainTypes(
             {{2, "Ground"}}, {{1, "Underwater ground"}}, {{5, "Swamp"}});
         landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
-        QTabWidget* initialMaterialLayers = landscapeTools.findChild<QTabWidget*>(
-            QStringLiteral("modernMaterialLayerTabs"));
         const bool underwaterFamiliesVisibleByDefault =
-            initialMaterialLayers && initialMaterialLayers->count() == 3
-            && initialMaterialLayers->tabText(2) == QStringLiteral("Под водой");
-        if(initialMaterialLayers)
-            initialMaterialLayers->setCurrentIndex(2);
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
+        landscapeTools.setUnderwaterFamiliesVisible(false);
         const bool underwaterFamiliesRemainVisible =
-            initialMaterialLayers && initialMaterialLayers->currentIndex() == 2
-            && initialMaterialLayers->widget(2);
-        if(initialMaterialLayers)
-            initialMaterialLayers->setCurrentIndex(0);
+            landscapeTools.underwaterFamiliesVisible()
+            && landscapeTools.selectPaintTerrainType(1);
         const bool landscapeLayersVisibleByDefault =
             landscapeTools.mainTerrainVisible() && landscapeTools.overlaysVisible();
         landscapeTools.setTerrainVisibility(false, true);
@@ -1903,14 +1873,12 @@ int runHeadlessCommand(QApplication& app)
             && !overlaySlotLabels->isHidden()
             && landscapeTools.overlayMaterialSlotLabelsVisible();
         landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
-        if(initialMaterialLayers)
-            initialMaterialLayers->setCurrentIndex(0);
         const bool overlaySlotLabelsHiddenOutsideOverlayModes = overlaySlotLabels
             && overlaySlotLabels->isHidden();
         bool landModeSelectionValid = false;
         const bool programmaticModeRefreshesMaterials =
-            landscapeTools.selectPaintTerrainType(2)
-            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 2
+            !landscapeTools.selectPaintTerrainType(5)
+            && landscapeTools.paintTerrainType(&landModeSelectionValid) == 1
             && landModeSelectionValid;
         landscapeTools.activateMode(ELandscapeEditMode::Sculpt, false);
         QSpinBox* flattenTarget = landscapeTools.findChild<QSpinBox*>(
@@ -1924,12 +1892,11 @@ int runHeadlessCommand(QApplication& app)
         const ELandscapeSculptTool initialSculptTool = landscapeTools.sculptTool();
         const quint16 initialFlattenHeight = landscapeTools.flattenHeight();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Raise);
-        const auto* sculptFalloffChoices = landscapeTools.findChild<QWidget*>("landscapeSculptFalloffChoices");
         const bool sculptRaiseShowsFalloff = flattenTarget && sculptFalloff
-            && flattenTarget->isHidden() && sculptFalloffChoices && !sculptFalloffChoices->isHidden();
+            && flattenTarget->isHidden() && !sculptFalloff->isHidden();
         landscapeTools.setSculptTool(ELandscapeSculptTool::Flatten);
         const bool sculptFlattenShowsTarget = flattenTarget && sculptFalloff
-            && !flattenTarget->isHidden() && sculptFalloffChoices && !sculptFalloffChoices->isHidden();
+            && !flattenTarget->isHidden() && !sculptFalloff->isHidden();
         const bool sculptToolOrderMatchesShortcuts = sculptTool
             && sculptTool->count() == 6
             && sculptTool->itemData(0).toInt() == int(ELandscapeSculptTool::Raise)
@@ -2233,7 +2200,7 @@ int runHeadlessCommand(QApplication& app)
             grassVariantButtons += button->property("terrainMaterialId").toInt() == 101
                 || button->property("terrainMaterialId").toInt() == 102;
         for(QLabel* label : landscapeTools.findChildren<QLabel*>())
-            grassFamilyHeadings += label->text() == QStringLiteral("Grass 2");
+            grassFamilyHeadings += label->text() == QStringLiteral("Grass");
         const bool materialVariantsRemainDistinctAndGrouped =
             grassVariantButtons == 2 && grassFamilyHeadings == 1
             && landscapeTools.selectPaintTerrainType(101)
@@ -2249,6 +2216,8 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QTabWidget*>("materialPaletteTabs");
         QTabWidget* modernMaterialLayerTabs =
             landscapeTools.findChild<QTabWidget*>("modernMaterialLayerTabs");
+        QTabWidget* classicMaterialLayerTabs =
+            landscapeTools.findChild<QTabWidget*>("classicMaterialLayerTabs");
         QLineEdit* terrainPaintFilter =
             landscapeTools.findChild<QLineEdit*>("terrainPaintFilter");
         QListWidget* manualAtlasTileList =
@@ -2256,45 +2225,45 @@ int runHeadlessCommand(QApplication& app)
         QSlider* terrainPaintRadius =
             landscapeTools.findChild<QSlider*>("terrainPaintRadius");
         if(materialPaletteTabs)
-            materialPaletteTabs->setCurrentIndex(0);
-        const bool modernAndAtlasPaintPagesAvailable = materialPaletteTabs
-            && materialPaletteTabs->count() == 2
+            materialPaletteTabs->setCurrentIndex(1);
+        const bool threeTerrainPaintModesAvailable = materialPaletteTabs
+            && materialPaletteTabs->count() == 3
             && materialPaletteTabs->tabText(0) == QStringLiteral("Авто")
-            && materialPaletteTabs->tabText(1) == QStringLiteral("Слоты атласа")
-            && modernMaterialLayerTabs && modernMaterialLayerTabs->count() == 3
+            && materialPaletteTabs->tabText(1) == QStringLiteral("Классика")
+            && materialPaletteTabs->tabText(2) == QStringLiteral("Вручную")
+            && modernMaterialLayerTabs && classicMaterialLayerTabs
             && terrainPaintFilter && manualAtlasTileList;
-        landscapeTools.setPaintMaterials(
-            {darkGrass, freshGrass}, {}, {}, 2, 2);
+        landscapeTools.setClassicAutoMaterials(
+            {darkGrass, freshGrass}, {}, {});
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-        QToolButton* regularDarkButton = nullptr;
-        QToolButton* regularFreshButton = nullptr;
-        if(groundMaterialScroll)
+        QToolButton* classicDarkButton = nullptr;
+        QToolButton* classicFreshButton = nullptr;
+        if(classicMaterialLayerTabs)
             for(QToolButton* button :
-                groundMaterialScroll->findChildren<QToolButton*>())
+                classicMaterialLayerTabs->findChildren<QToolButton*>())
             {
                 const int id = button->property("terrainMaterialId").toInt();
-                if(id == 101) regularDarkButton = button;
-                if(id == 102) regularFreshButton = button;
+                if(id == 101) classicDarkButton = button;
+                if(id == 102) classicFreshButton = button;
             }
-        const bool mainPaletteStartsInMultipleColumns =
-            regularDarkButton && regularFreshButton
-            && regularDarkButton->geometry().top()
-                == regularFreshButton->geometry().top()
-            && regularDarkButton->geometry().left()
-                != regularFreshButton->geometry().left();
-        QSlider* paletteColumns = landscapeTools.findChild<QSlider*>(
-            QStringLiteral("terrainPaletteColumns"));
+        const bool classicPaletteStartsInMultipleColumns =
+            classicDarkButton && classicFreshButton
+            && classicDarkButton->geometry().top()
+                == classicFreshButton->geometry().top()
+            && classicDarkButton->geometry().left()
+                != classicFreshButton->geometry().left();
+        const int paletteBottom = materialPaletteTabs
+            ? materialPaletteTabs->mapTo(
+                  &landscapeTools, materialPaletteTabs->rect().bottomLeft()).y()
+            : -1;
         const int radiusTop = terrainPaintRadius
             ? terrainPaintRadius->mapTo(
                   &landscapeTools, terrainPaintRadius->rect().topLeft()).y()
             : -1;
-        const int paletteTop = modernMaterialLayerTabs
-            ? modernMaterialLayerTabs->mapTo(&landscapeTools, QPoint()).y() : -1;
         const bool classicPaletteFirstOpenDoesNotOverlapControls =
-            modernMaterialLayerTabs && paletteColumns && terrainPaintRadius
-            && paletteColumns->minimum() == 3 && paletteColumns->maximum() == 8
-            && radiusTop < paletteTop && mainPaletteStartsInMultipleColumns
-            && materialPaletteTabs && materialPaletteTabs->count() == 2;
+            materialPaletteTabs && terrainPaintRadius
+            && radiusTop < paletteBottom
+            && classicPaletteStartsInMultipleColumns;
         QToolButton* circlePaintShape =
             landscapeTools.findChild<QToolButton*>("circlePaintShape");
         QToolButton* squarePaintShape =
@@ -2303,92 +2272,50 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QToolButton*>("tilePaintTarget");
         QToolButton* vertexPaintTarget =
             landscapeTools.findChild<QToolButton*>("vertexPaintTarget");
+        QCheckBox* classicAutoSafe =
+            landscapeTools.findChild<QCheckBox*>("classicAutoSafeMode");
+        QPushButton* resolveMissingBlends =
+            landscapeTools.findChild<QPushButton*>("resolveMissingBlendsButton");
         STerrainPaintMaterialChoice irregularStamp = irregularOnDark;
-        irregularStamp.cornerOnly = true;
+        irregularStamp.supportId = 3;
+        irregularStamp.contextualStamp = true;
         irregularStamp.familyName = QStringLiteral("Grass");
-        landscapeTools.setPaintMaterials(
-            {darkGrass, irregularStamp}, {}, {}, 2, 2);
-        landscapeTools.activateMode(ELandscapeEditMode::TilePaint, false);
-        if(modernMaterialLayerTabs)
-            modernMaterialLayerTabs->setCurrentIndex(0);
-        landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+        landscapeTools.setClassicAutoMaterials({irregularStamp}, {}, {});
+        landscapeTools.setPaintPaletteMode(
+            ETerrainPaintPaletteMode::ClassicAuto);
         if(vertexPaintTarget) vertexPaintTarget->setChecked(true);
-        regularDarkButton = nullptr;
-        for(QToolButton* button : groundMaterialScroll->findChildren<QToolButton*>())
-            if(button->property("terrainMaterialId").toInt() == 101)
-                regularDarkButton = button;
         QToolButton* contextualStampButton = nullptr;
-        for(QToolButton* button : groundMaterialScroll->findChildren<QToolButton*>())
-            if(button->property("terrainCornerOnly").toBool()
+        for(QToolButton* button : landscapeTools.findChildren<QToolButton*>())
+            if(button->property("terrainContextualStamp").toBool()
                && button->property("terrainMaterialId").toInt() == 9
-               )
+               && button->property("terrainSupportMaterialId").toInt() == 3)
             {
                 contextualStampButton = button;
                 break;
             }
-        QGridLayout* contextualGrid = contextualStampButton
-            ? qobject_cast<QGridLayout*>(
-                contextualStampButton->parentWidget()->layout()) : nullptr;
-        QLabel* junctionHeading = nullptr;
-        int regularMaterialRow = -1, junctionHeadingRow = -1, cornerMaterialRow = -1;
-        if(contextualGrid)
-            for(int i = 0; i < contextualGrid->count(); ++i)
-            {
-                QLayoutItem* item = contextualGrid->itemAt(i);
-                int row = -1, column = -1, rowSpan = 0, columnSpan = 0;
-                contextualGrid->getItemPosition(i, &row, &column,
-                                                &rowSpan, &columnSpan);
-                if(item->widget() == contextualStampButton)
-                    cornerMaterialRow = row;
-                if(item->widget() == regularDarkButton)
-                    regularMaterialRow = row;
-                if(auto* label = qobject_cast<QLabel*>(item->widget()))
-                    if(label->text() == QStringLiteral("Только у стыков"))
-                    {
-                        junctionHeading = label;
-                        junctionHeadingRow = row;
-                    }
-            }
         bool contextualSelected = false;
         const bool contextualStampVisibleForVertex = contextualStampButton
-            && !contextualStampButton->isHidden()
-            && junctionHeading && !junctionHeading->isHidden()
-            && regularMaterialRow >= 0
-            && regularMaterialRow < junctionHeadingRow
-            && cornerMaterialRow > junctionHeadingRow
+            && contextualStampButton->isVisible()
             && landscapeTools.selectPaintTerrainType(9)
             && landscapeTools.paintTerrainType(&contextualSelected) == 9
             && contextualSelected
-            && contextualStampButton->property("terrainCornerOnly").toBool();
+            && landscapeTools.paintTerrainSupport() == 3;
         if(tilePaintTarget) tilePaintTarget->setChecked(true);
-        const bool contextualStampStillGroupedForTile = contextualStampButton
-            && !contextualStampButton->isHidden()
-            && junctionHeading && !junctionHeading->isHidden()
-            && regularMaterialRow < junctionHeadingRow
-            && cornerMaterialRow > junctionHeadingRow;
+        bool tileStampSelected = true;
+        landscapeTools.paintTerrainType(&tileStampSelected);
+        const bool contextualStampHiddenForTile = contextualStampButton
+            && !contextualStampButton->isVisible() && !tileStampSelected;
+        if(classicAutoSafe) classicAutoSafe->setChecked(true);
         const bool tilePaintTargetKeepsShapeChoice = squarePaintShape
             && circlePaintShape && squarePaintShape->isEnabled()
             && circlePaintShape->isEnabled();
-        const QMap<QString, QString> requiredPaintChips = {
-            {QStringLiteral("modernAutoResolveBlends"), QStringLiteral("Авто-переходы")},
-            {QStringLiteral("modernMixedEdge"), QStringLiteral("Плавные границы")},
-            {QStringLiteral("randomPaintVariants"), QStringLiteral("Случайные варианты")},
-            {QStringLiteral("generatedHdVariants"), QStringLiteral("HD-варианты")},
-            {QStringLiteral("randomizeUniformRotation"), QStringLiteral("Поворот")},
-        };
-        bool paintChipsAvailable = true;
-        for(auto it = requiredPaintChips.cbegin(); it != requiredPaintChips.cend(); ++it)
-        {
-            auto* chip = landscapeTools.findChild<QCheckBox*>(it.key());
-            paintChipsAvailable &= chip && chip->text() == it.value()
-                && chip->isVisibleTo(&landscapeTools);
-        }
         const bool terrainPaintBetaControlsAreExplicit = circlePaintShape
             && squarePaintShape && tilePaintTarget && vertexPaintTarget
-            && paintChipsAvailable
+            && classicAutoSafe && resolveMissingBlends
             && circlePaintShape->styleSheet().contains(
                 QStringLiteral("QToolButton:checked"))
             && tilePaintTarget->isChecked()
+            && classicAutoSafe->isChecked()
             && tilePaintTargetKeepsShapeChoice;
         landscapeTools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         if(materialPaletteTabs)
@@ -2453,28 +2380,40 @@ int runHeadlessCommand(QApplication& app)
                    terrainPaintRadius->rect().bottomLeft()).y()
                 < materialPaletteTabs->mapTo(&landscapeTools, QPoint()).y();
         bool landscapeRedesignGeometry = true;
-        QToolButton* paintSegment = landscapeTools.findChild<QToolButton*>(
-            QStringLiteral("landscapePaintSegment"));
-        QToolButton* sculptSegment = landscapeTools.findChild<QToolButton*>(
-            QStringLiteral("landscapeSculptSegment"));
-        QToolButton* surfacesSegment = landscapeTools.findChild<QToolButton*>(
-            QStringLiteral("landscapeSurfaceSegment"));
-        for(const QSize size : {QSize(320,700),QSize(320,1200),QSize(420,1000)}) {
+        for(const QSize size : {QSize(320,700),QSize(320,1200),QSize(600,1000)}) {
             landscapeTools.resize(size);
             for(auto mode:{ELandscapeEditMode::Sculpt,ELandscapeEditMode::TilePaint,
                            ELandscapeEditMode::OverlaySurface,ELandscapeEditMode::OverlayPaint,
                            ELandscapeEditMode::OverlaySculpt}) {
                 landscapeTools.activateMode(mode);
                 for(int i=0;i<4;++i)QApplication::processEvents();
-                const bool paintMode = mode == ELandscapeEditMode::TilePaint;
-                const bool sculptMode = mode == ELandscapeEditMode::Sculpt;
-                landscapeRedesignGeometry &= paintSegment && sculptSegment && surfacesSegment
-                    && paintSegment->isChecked() == paintMode
-                    && sculptSegment->isChecked() == sculptMode
-                    && surfacesSegment->isChecked()
-                        == (!paintMode && !sculptMode)
-                    && paintSegment->mapTo(&landscapeTools,QPoint()).y()<80
-                    && toolScroll && toolScroll->horizontalScrollBar()->maximum()==0;
+                auto selector=landscapeTools.findChild<QComboBox*>("landscapeMode");
+                auto advanced=landscapeTools.findChild<QToolButton*>("landscapePaintAdvancedToggle");
+                auto diagnostic=landscapeTools.findChild<QToolButton*>("landscapeDiagnosticsToggle");
+                landscapeRedesignGeometry &= selector && !selector->itemIcon(selector->currentIndex()).isNull()
+                    && selector->mapTo(&landscapeTools,QPoint()).y()<80
+                    && toolScroll->horizontalScrollBar()->maximum()==0;
+                if(mode==ELandscapeEditMode::TilePaint) {
+                    landscapeRedesignGeometry &= advanced && diagnostic && !advanced->isChecked() && !diagnostic->isChecked()
+                        && groundMaterialScroll->viewport()->height()>=64
+                        && terrainPaintRadius->mapTo(&landscapeTools,QPoint()).y()<materialPaletteTabs->mapTo(&landscapeTools,QPoint()).y();
+                    if(diagnostic && advanced) {
+                        diagnostic->click();advanced->click();
+                        for(int i=0;i<4;++i)QApplication::processEvents();
+                        landscapeRedesignGeometry &= landscapeTools.findChild<QWidget*>("landscapeDiagnostics")->isVisible()
+                            && toolScroll->horizontalScrollBar()->maximum()==0;
+                        const QString shots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
+                        if(!shots.isEmpty()) {QDir().mkpath(shots);landscapeTools.grab().save(QDir(shots).filePath(
+                            QString("panel-%1-%2-expanded.png").arg(size.width()).arg(size.height())));}
+                        diagnostic->click();advanced->click();
+                        for(int i=0;i<4;++i)QApplication::processEvents();
+                    }
+                }
+                for(const char* name:{"worldTerrainMaps","worldTerrainUndo","worldTerrainRedo","worldTerrainSave"}) {
+                    auto action=landscapeTools.findChild<QPushButton*>(name);
+                    landscapeRedesignGeometry &= action && !action->icon().isNull()
+                        && action->mapTo(&landscapeTools,action->rect().bottomRight()).x()<landscapeTools.width();
+                }
                 const QString shots=qEnvironmentVariable("EI_LANDSCAPE_SCREENSHOTS");
                 if(!shots.isEmpty()) {
                     QDir().mkpath(shots);landscapeTools.grab().save(QDir(shots).filePath(
@@ -2510,12 +2449,8 @@ int runHeadlessCommand(QApplication& app)
             landscapeTools.findChild<QProgressBar*>("terrainAtlasCapacity");
         QLabel* atlasCapacityWarning = landscapeTools.findChild<QLabel*>(
             "terrainAtlasCapacityWarning");
-        const bool atlasCapacityIsGreen = atlasCapacity
+        const bool expandedAtlasCapacityIsYellow = atlasCapacity
             && atlasCapacity->value() == 519
-            && atlasCapacity->styleSheet().contains(QStringLiteral("#35a853"));
-        landscapeTools.setGeneratedAtlasTileCount(1543);
-        const bool expandedAtlasCapacityIsYellow = atlasCapacityIsGreen && atlasCapacity
-            && atlasCapacity->value() == 2055
             && atlasCapacity->styleSheet().contains(QStringLiteral("#ebbe23"))
             && atlasCapacityWarning && atlasCapacityWarning->text().isEmpty();
         landscapeTools.setPaintMaterials(
@@ -2567,7 +2502,7 @@ int runHeadlessCommand(QApplication& app)
         const bool paintIssueMarkerAvailable = paintIssueCategory
             && paintIssueCategory->count() == 3
             && paintIssueCategory->itemData(0).toString() == "no-blend"
-            && !paintIssueCategory->itemText(0).isEmpty()
+            && paintIssueCategory->itemText(0) == "No / wrong blend"
             && paintIssueCategory->itemData(1).toString() == "tile-mismatch"
             && paintIssueCategory->itemData(2).toString() == "wrong-rotation"
             && markPaintIssueButton && markPaintIssueButton->isCheckable();
@@ -2579,7 +2514,7 @@ int runHeadlessCommand(QApplication& app)
             && landscapeTools.paintTerrainType(&materialSelectedWhileMarking) == 0
             && !materialSelectedWhileMarking
             && landscapeTools.editingEnabled()
-            && markPaintIssueButton->isChecked();
+            && markPaintIssueButton->text().contains("MARKING");
         bool materialSelectedAfterMarker = false;
         int markerExitStateSignals = 0;
         int markerExitMaterialSignals = 0;
@@ -3135,7 +3070,7 @@ int runHeadlessCommand(QApplication& app)
         setCheckMimeData(new QMimeData);
         QMetaObject::invokeMethod(&messageLog, "copySelectedMessages",
                                   Qt::DirectConnection);
-        const QString copiedMessages = ei::clipboardText();
+        const QString copiedMessages = QApplication::clipboard()->text();
         const bool messageLogMultiCopyWorks = copiedMessages.contains("{INFO}")
                 && copiedMessages.contains("{WARNING}")
                 && copiedMessages.contains("ui-check searchable information")
@@ -3605,11 +3540,14 @@ int runHeadlessCommand(QApplication& app)
         const bool groupRotationWorks = runGroupRotationCheck() == 0;
         const bool darkThemeWorks = runDarkThemeCheck() == 0;
         const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
-        QTextStream(clipboardWritesVerified ? stdout : stderr)
-            << (clipboardWritesVerified ? "PASS" : "FAIL")
-            << ": in-memory clipboard writes and verified readback"
-            << " clipboardWritesVerified=" << clipboardWritesVerified << "\n";
-        const bool passed = clipboardWritesVerified && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
+        const bool clipboardRestored = clipboardRestore.restore();
+        QTextStream(clipboardWritesVerified && clipboardRestored ? stdout : stderr)
+            << (clipboardWritesVerified && clipboardRestored ? "PASS" : "FAIL")
+            << ": native clipboard write preconditions and verified restoration"
+            << " clipboardWritesVerified=" << clipboardWritesVerified
+            << " clipboardRestored=" << clipboardRestored << "\n";
+        if(!clipboardRestored) QTextStream(stderr) << clipboardRestore.error() << "\n";
+        const bool passed = clipboardWritesVerified && clipboardRestored && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
                 && virtualLogicFocusWorks && virtualLogicFocusSurvivesRebuild
@@ -3742,11 +3680,11 @@ int runHeadlessCommand(QApplication& app)
             && landscapeToolsAreCompactAndPaletteFillsHeight
             && landscapeRedesignGeometry
                 && shortLandscapeDockScrollsWithoutOverlap
-            && modernAndAtlasPaintPagesAvailable
+            && threeTerrainPaintModesAvailable
             && classicPaletteFirstOpenDoesNotOverlapControls
             && terrainPaintBetaControlsAreExplicit
             && contextualStampVisibleForVertex
-            && contextualStampStillGroupedForTile
+            && contextualStampHiddenForTile
             && sharedTerrainPaintFilterWorks
             && manualAtlasGridUsesTooltips
             && defaultAtlasSourceVisible
@@ -3962,17 +3900,17 @@ int runHeadlessCommand(QApplication& app)
                << " landscapeRedesignGeometry=" << landscapeRedesignGeometry
                << " landscapeToolsAreCompactAndPaletteFillsHeight="
                << landscapeToolsAreCompactAndPaletteFillsHeight
-               << " modernAndAtlasPaintPagesAvailable="
-               << modernAndAtlasPaintPagesAvailable
+               << " threeTerrainPaintModesAvailable="
+               << threeTerrainPaintModesAvailable
                << " classicPaletteFirstOpenDoesNotOverlapControls="
                << classicPaletteFirstOpenDoesNotOverlapControls
                << " terrainPaintBetaControlsAreExplicit="
                << terrainPaintBetaControlsAreExplicit
                << " contextualStampVisibleForVertex="
                << contextualStampVisibleForVertex
-               << " contextualStampStillGroupedForTile="
-               << contextualStampStillGroupedForTile
-               << " materialPaletteTop=" << paletteTop
+               << " contextualStampHiddenForTile="
+               << contextualStampHiddenForTile
+               << " classicPaletteBottom=" << paletteBottom
                << " terrainPaintRadiusTop=" << radiusTop
                << " sharedTerrainPaintFilterWorks="
                << sharedTerrainPaintFilterWorks
@@ -4203,8 +4141,6 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
-    ei::TestClipboardSession clipboardSession(ei::testClipboardRequested(argc, argv));
-    if(!clipboardSession.prepared()) return 2;
 #ifdef Q_OS_WIN
     // Automated smoke runs must never leave a modal Windows crash dialog on
     // the operator's desktop. The normal unhandled-exception logger still
@@ -4227,10 +4163,6 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
-    if(!clipboardSession.install()) {
-        std::fprintf(stderr, "FAIL: could not install isolated test clipboard\n");
-        return 2;
-    }
     g_previousQtMessageHandler = qInstallMessageHandler(
         enduranceQtMessageHandler);
     app.setWindowIcon(QIcon(":/endurance_gate.png"));
@@ -4409,72 +4341,6 @@ int main(int argc, char *argv[])
         };
         QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
                          &window, [advance]() { QTimer::singleShot(100, *advance); });
-        QTimer::singleShot(0, *advance);
-        return app.exec();
-    }
-    const QString mapPairSequence = qApp->property(
-        "workspaceMapPairSequence").toString();
-    if(!mapPairSequence.isEmpty())
-    {
-        QVector<QStringList> stages;
-        for(const QString& stageText : mapPairSequence.split(';', QString::SkipEmptyParts))
-        {
-            const QStringList fields = stageText.split('|');
-            if(fields.size() == 3)
-                stages.append(fields);
-        }
-        QSharedPointer<int> stageIndex(new int(0));
-        QSharedPointer<int> stageWaitingForVisuals(new int(0));
-        QSharedPointer<std::function<void()>> advance(new std::function<void()>);
-        *advance = [&window, stages, stageIndex, stageWaitingForVisuals, advance]()
-        {
-            if(*stageIndex >= stages.size())
-            {
-                const bool forceCatalog = qEnvironmentVariableIntValue(
-                    "EI_MAPPER_MAP_PAIR_SMOKE_FORCE_CATALOG") == 1;
-                if(forceCatalog)
-                {
-                    window.view()->prepareLandscapeTilePainting(false);
-                    ei::log(eLogInfo,
-                            "Workspace map-pair sequence deferred terrain catalog hydrated after map open");
-                }
-                ei::log(eLogInfo, QString("Workspace map-pair sequence complete stages:%1")
-                        .arg(stages.size()));
-                QTimer::singleShot(250, &window, [&window]() {
-                    window.close();
-                    QCoreApplication::exit(0);
-                });
-                return;
-            }
-            const QStringList stage = stages.at((*stageIndex)++);
-            const int currentStage = *stageIndex;
-            *stageWaitingForVisuals = currentStage;
-            ei::log(eLogInfo, QString("Workspace map-pair sequence stage:%1/%2 zone:%3")
-                    .arg(*stageIndex).arg(stages.size()).arg(stage.at(2)));
-            window.openMapPairForLoadSmoke(stage.at(0), stage.at(1), stage.at(2));
-            if(window.view()->mobs().isEmpty())
-            {
-                ei::log(eLogWarning, "Workspace map-pair sequence did not load a MOB");
-                QCoreApplication::exit(3);
-                return;
-            }
-            QTimer::singleShot(30000, &window, [stageWaitingForVisuals,
-                                                currentStage]() {
-                if(*stageWaitingForVisuals == currentStage)
-                {
-                    ei::log(eLogWarning,
-                            "Workspace map-pair sequence timed out waiting for unit visuals");
-                    QCoreApplication::exit(5);
-                }
-            });
-        };
-        QObject::connect(window.view(), &CView::unitVisualPreparationComplete,
-                         &window, [stageWaitingForVisuals, advance]() {
-            if(*stageWaitingForVisuals <= 0)
-                return;
-            *stageWaitingForVisuals = 0;
-            QTimer::singleShot(100, *advance);
-        });
         QTimer::singleShot(0, *advance);
         return app.exec();
     }

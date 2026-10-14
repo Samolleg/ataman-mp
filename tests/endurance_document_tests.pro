@@ -2,7 +2,6 @@ QT += core gui widgets testlib
 CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
-include(save_test_backup_root.pri)
 
 RESOURCES += \
     ../assets/resources/semantic_atlas_presets.qrc \

@@ -12,13 +12,6 @@
 
 namespace ei {
 
-// Exact generated uniform tiles carry native BC1 mip footprints. The registry
-// is keyed by all decoded RGBA pixels, never by a filename or slot. Empty for
-// ordinary maps; retained chains also survive cache invalidation during edits.
-bool rememberTerrainMipChain(const QImage& tile, const QVector<QByteArray>& levels);
-QVector<QByteArray> terrainTileMipChain(const QByteArray& page, int slot);
-bool transplantTerrainMipChain(QByteArray* page, int slot, const QVector<QByteArray>& levels);
-
 enum class DxtFormat
 {
     Dxt1,

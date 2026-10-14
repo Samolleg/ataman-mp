@@ -2,7 +2,6 @@
 #define LANDSCAPE_H
 
 #include <QString>
-#include <QStringList>
 #include <QFileInfo>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLTexture>
@@ -86,12 +85,6 @@ public:
     bool readBackgroundMap(const QFileInfo& path);
     bool readPreparedBackground(const QFileInfo& path,
                                 const QMap<QString,QByteArray>& members);
-    // Transfer complete ready terrain, including VBOs/atlas/shadows. The
-    // instances retain their editor/background permissions and address.
-    void swapPreparedScene(CLandscape& other);
-    void bindPreparedEditorSource(const QFileInfo& path,const QByteArray& bytes);
-    const QStringList& terrainSourceArchives() const { return m_terrainSourceArchives; }
-    bool usesCurrentTerrainSources() const;
     void setWorldOffset(const QVector3D& offset);
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
@@ -170,11 +163,10 @@ private:
                                        int textureCount, int columns, int rows,
                                        const QSet<int>& changedSlots);
     void refreshMaterialDrawDataIfNeeded();
-    QStringList resolvedTerrainSourceArchives() const;
 
 private:
     static CLandscape* m_pLand;
-    SMapHeader m_header{};
+    SMapHeader m_header;
     QVector<SMaterial> m_aMaterial; //use pointers instead refs?
     QVector<ETileType> m_aTileTypes; //array using tyle type on current map
     QVector<SAnimTile> m_aAnimTile;
@@ -185,13 +177,11 @@ private:
     QOpenGLTexture* m_baseAtlasTexture{nullptr};
     int m_baseAtlasColumns{1};
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
-    QVector<QImage> m_previewAtlasImages;
     int m_previewAtlasTextureCount{0};
     int m_previewAtlasColumns{0};
     QFileInfo m_filePath;
     QString m_innerMapName;
     QByteArray m_originalMprData;
-    QStringList m_terrainSourceArchives;
     QVector<int> m_arrIncorectTiles;
     bool m_bDirty;
     bool m_materialDrawDataDirty;

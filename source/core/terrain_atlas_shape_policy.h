@@ -1,29 +1,6 @@
 #ifndef TERRAIN_ATLAS_SHAPE_POLICY_H
 #define TERRAIN_ATLAS_SHAPE_POLICY_H
 
-#include <QImage>
-#include <QVector>
-
-// Native images remain authoritative for binding and persistence. Consumers
-// that need a common raster size use the largest square, never the first/min.
-inline QSize terrainAtlasMaximumNativeTileSize(const QVector<QImage>& images)
-{
-    int maximum = 0;
-    for(const QImage& image : images)
-    {
-        if(image.isNull() || image.width() <= 0 || image.width() != image.height())
-            return {};
-        maximum = qMax(maximum, image.width());
-    }
-    return QSize(maximum, maximum);
-}
-
-inline QImage terrainAtlasRasterTile(const QImage& native, const QSize& size)
-{
-    return native.size() == size ? native : native.scaled(
-        size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-}
-
 inline bool terrainAtlasLogicalCountsFitPhysicalPages(
     int textureCount, int logicalTileCount, int physicalTileCount,
     int tileTypeCount)

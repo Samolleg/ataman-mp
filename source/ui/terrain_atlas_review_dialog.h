@@ -10,7 +10,6 @@ class CAtlasMaterialTree;
 class CAtlasTilePool;
 class CFamilyCornerButton;
 class QComboBox;
-class QCheckBox;
 class QLabel;
 class QPushButton;
 class QTreeWidgetItem;
@@ -78,7 +77,6 @@ private:
     QLabel* m_diagnostics;
     QLabel* m_familyReason;
     QComboBox* m_familyClass;
-    QCheckBox* m_randomRotation;
     QComboBox* m_atlasPage;
     QPushButton* m_confirmFamily;
     QPushButton* m_thumbnail;

@@ -811,36 +811,12 @@ MainWindow::MainWindow(QWidget* parent) :
     filterLayout->setContentsMargins(0, 0, 0, 0);
     m_outlinerFilterEdit = new QLineEdit(outlinerContainer);
     m_outlinerFilterEdit->setClearButtonEnabled(true);
-    m_outlinerFilterEdit->setPlaceholderText(tr("Search objects..."));
+    m_outlinerFilterEdit->setPlaceholderText(tr("Filter objects (name, ID, model, texture, database...)") );
     m_outlinerFilterEdit->setToolTip(tr(
-        "Plain words search the checked fields (OR); space-separated terms combine with AND. "
-        "ID is an exact number; names, models and textures contain text, ignoring case. "
-        "Model includes catalog aliases. Use id:81 for a partial ID, id=81 for exact, "
-        "or ~ for fuzzy matching. Explicit fields and ~ terms ignore the checkboxes: "
-        "name:, id:, type:, model:, texture:, alias:, db:, prototype:, mob:, validation:."));
-    auto* searchFieldsButton = new QToolButton(outlinerContainer);
-    searchFieldsButton->setObjectName("outlinerSearchFields");
-    searchFieldsButton->setText(tr("Fields"));
-    searchFieldsButton->setToolTip(tr("Choose one or more search fields"));
-    searchFieldsButton->setPopupMode(QToolButton::InstantPopup);
-    auto* searchFieldsMenu = new QMenu(searchFieldsButton);
-    const QList<QPair<QString, int>> searchFields{
-        {tr("ID"), CTreeView::SearchId}, {tr("Object name"), CTreeView::SearchName},
-        {tr("Model"), CTreeView::SearchModel}, {tr("Texture"), CTreeView::SearchTexture}};
-    for(const auto& field : searchFields) {
-        auto* action = searchFieldsMenu->addAction(field.first);
-        action->setCheckable(true);
-        action->setChecked(m_ui->treeWidget->searchFields() & field.second);
-        action->setData(field.second);
-        connect(action, &QAction::toggled, m_ui->treeWidget, [this, searchFieldsMenu]() {
-            int fields = 0;
-            for(auto* action : searchFieldsMenu->actions())
-                if(action->isChecked()) fields |= action->data().toInt();
-            m_ui->treeWidget->setSearchFields(fields);
-        });
-    }
-    searchFieldsButton->setMenu(searchFieldsMenu);
-    filterLayout->addWidget(searchFieldsButton);
+        "Searches for contiguous text by default. Combine terms with spaces. "
+        "Use field=value for an exact match or prefix a value with ~ for fuzzy subsequence matching "
+        "(for example id:123, id=123, or id:~123). Optional fields: "
+        "name:, id:, type:, model:, texture:, db:, prototype:, mob:, validation:."));
     m_outlinerFilterStatus = new QLabel(tr("0 / 0"), outlinerContainer);
     m_outlinerFilterStatus->setMinimumWidth(72);
     m_outlinerFilterStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -1706,12 +1682,11 @@ MainWindow::MainWindow(QWidget* parent) :
             m_resourceBrowser->beginInternalPublication(resourceArchivePath);
     });
     connect(m_pView, &CView::terrainPublicationFinished,
-            this, [this](const QString& resourceArchivePath, bool committed,
-                         bool refreshVisualResources)
+            this, [this](const QString& resourceArchivePath, bool committed)
     {
         if(m_resourceBrowser)
             m_resourceBrowser->finishInternalPublication(
-                resourceArchivePath, committed, refreshVisualResources);
+                resourceArchivePath, committed);
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)
@@ -2237,8 +2212,7 @@ MainWindow::MainWindow(QWidget* parent) :
     CBackupManager backupManager;
     const bool workspaceSmoke = qApp->property("workspaceLoadSmoke").toBool()
         || qApp->property("workspaceVisualSmoke").toBool()
-        || qApp->property("workspaceVisualSequence").isValid()
-        || qApp->property("workspaceMapPairSequence").isValid();
+        || qApp->property("workspaceVisualSequence").isValid();
     m_backupSessionStarted = workspaceSmoke ? false : backupManager.beginEditorSession(
         &recoveries, &backupSessionError);
     if(workspaceSmoke)
@@ -5800,8 +5774,7 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
     // every normal validation trigger remain unchanged.
     if(qApp && (qApp->property("workspaceLoadSmoke").toBool()
             || qApp->property("workspaceVisualSmoke").toBool()
-            || qApp->property("workspaceVisualSequence").isValid()
-            || qApp->property("workspaceMapPairSequence").isValid()))
+            || qApp->property("workspaceVisualSequence").isValid()))
         return;
     if(m_validationTimer)
         m_validationTimer->start(qMax(0, delayMs));
@@ -7044,13 +7017,6 @@ void MainWindow::openMapPair(const QString& mprPath, const QString& mobPath,
     openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, true, QPointF(), QPointF());
 }
 
-void MainWindow::openMapPairForLoadSmoke(const QString& mprPath,
-                                         const QString& mobPath,
-                                         const QString& zoneId)
-{
-    openMapPair(mprPath, mobPath, zoneId);
-}
-
 void MainWindow::openNeighborMapPair(const QString& mprPath,
                                      const QString& mobPath,
                                      const QString& zoneId,
@@ -7178,9 +7144,6 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    if(!ordinaryMapOpen)
-        m_pView->beginNeighborMapTransition(mprPath,m_preferredEditorActiveMap,targetWorldOrigin,
-            sourceCameraPosition,sourceCameraPivot,sourceCameraRotation,preserveNeighborCamera);
     m_undoStack->clear();
     m_pView->unloadMob("");
     // isExitAllowed() already collected the dirty-document decision.
@@ -7221,8 +7184,6 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     // The Maps browser already owns the current resource/map catalog. Opening
     // one entry must only bind that snapshot, not rescan every configured RES
     // and map root on the UI thread.
-    if(!ordinaryMapOpen)
-        m_pView->endNeighborMapTransition();
     refreshMapTestContext(false, false);
     const qint64 mapContextMs = mapLoadPhase.elapsed();
     ei::log(eLogInfo, QString(
@@ -8087,6 +8048,7 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
     if(!enabled)
     {
         m_autosaveTimer->stop();
+        if(m_autosaveCountdownTimer) m_autosaveCountdownTimer->stop();
         if(m_autosaveNotification) m_autosaveNotification->hide();
         ei::log(eLogInfo, "Periodic recovery autosave disabled from applied settings");
         return;
@@ -8100,9 +8062,81 @@ void MainWindow::configureAutosaveTimer(bool enabled, int intervalMinutes)
 
 void MainWindow::beginAutosaveCountdown()
 {
-    // Recovery snapshots no longer need a user countdown: candidate creation is
-    // a short immutable snapshot and disk work runs in the background.
-    performAutosave();
+    if(m_shutdownInProgress)
+        return;
+    if(!m_pView || m_pView->hasPendingOperation())
+    {
+        ei::log(eLogInfo, "Recovery autosave countdown deferred while an edit operation is pending");
+        return;
+    }
+    bool dirty = false;
+    for(CMob* mob : m_pView->mobs())
+        dirty = dirty || (mob && mob->isDirty());
+    dirty = dirty || (CLandscape::getInstance()->isMprLoad()
+                      && CLandscape::getInstance()->isDirty());
+    if(!dirty)
+    {
+        ei::log(eLogInfo, "Recovery autosave tick skipped because no document is dirty");
+        return;
+    }
+    if(m_autosaveCountdownTimer && m_autosaveCountdownTimer->isActive())
+        return;
+
+    if(!m_autosaveNotification)
+    {
+        m_autosaveNotification = new QFrame(this);
+        m_autosaveNotification->setObjectName("autosaveNotification");
+        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
+        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
+        m_autosaveNotification->setStyleSheet(
+            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
+            "QLabel { color: #eeeeee; } QPushButton { min-width: 88px; }");
+        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
+        layout->setContentsMargins(12, 10, 12, 10);
+        m_autosaveCountdownLabel = new QLabel(m_autosaveNotification);
+        m_cancelAutosaveButton = new QPushButton(
+            tr("Cancel Autosave"), m_autosaveNotification);
+        layout->addWidget(m_autosaveCountdownLabel, 1);
+        layout->addWidget(m_cancelAutosaveButton);
+        m_autosaveCountdownTimer = new QTimer(m_autosaveNotification);
+        m_autosaveCountdownTimer->setInterval(1000);
+        connect(m_autosaveCountdownTimer, &QTimer::timeout, this, [this]()
+        {
+            --m_autosaveCountdownSeconds;
+            if(m_autosaveCountdownSeconds <= 0)
+            {
+                m_autosaveCountdownTimer->stop();
+                m_autosaveCountdownLabel->setText(tr("Autosaving..."));
+                m_cancelAutosaveButton->setEnabled(false);
+                m_autosaveNotification->adjustSize();
+                positionAutosaveNotification();
+                m_autosaveNotification->repaint();
+                performAutosave();
+                m_autosaveNotification->hide();
+                m_cancelAutosaveButton->setEnabled(true);
+                return;
+            }
+            m_autosaveCountdownLabel->setText(
+                tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+        });
+        connect(m_cancelAutosaveButton, &QPushButton::clicked, this, [this]()
+        {
+            m_autosaveCountdownTimer->stop();
+            m_autosaveNotification->hide();
+            ei::log(eLogInfo, "Recovery autosave occurrence skipped by user");
+            statusBar()->showMessage(tr("This recovery autosave was skipped."), 3000);
+        });
+    }
+    m_autosaveCountdownSeconds = 15;
+    m_cancelAutosaveButton->setEnabled(true);
+    m_autosaveCountdownLabel->setText(
+        tr("Recovery autosave in %1 seconds...").arg(m_autosaveCountdownSeconds));
+    m_autosaveNotification->adjustSize();
+    positionAutosaveNotification();
+    m_autosaveNotification->show();
+    m_autosaveNotification->raise();
+    m_autosaveCountdownTimer->start();
+    ei::log(eLogInfo, "Recovery autosave countdown started seconds:15");
 }
 
 void MainWindow::performAutosave()
@@ -8117,49 +8151,39 @@ void MainWindow::performAutosave()
         ei::log(eLogInfo, "Recovery autosave deferred while an edit operation is pending");
         return;
     }
-    if(m_autosaveInProgress)
-    {
-        ei::log(eLogInfo, "Recovery autosave deferred because the previous generation is still writing");
-        return;
-    }
-    struct SAutosaveWorkItem
-    {
-        QFileInfo source;
-        QByteArray candidate;
-        QString companionName;
-        QByteArray companion;
-        SMobAutosaveSnapshot mobSnapshot;
-        SMprAutosaveSnapshot mprSnapshot;
-        bool buildMobCandidate{false};
-        bool buildMprCandidate{false};
-    };
-    QVector<SAutosaveWorkItem> work;
+    int written = 0;
     int failed = 0;
+    CBackupManager manager;
     for(CMob* mob : m_pView->mobs())
     {
         if(!mob || !mob->isDirty())
             continue;
-        QElapsedTimer snapshotTimer;
-        snapshotTimer.start();
-        SMobAutosaveSnapshot snapshot = mob->captureAutosaveSnapshot();
-        ei::log(eLogInfo, QString("Recovery autosave GUI snapshot phase document:MOB path:%1 elapsedMs:%2 projectionBytes:%3 objects:%4")
-            .arg(mob->filePath().absoluteFilePath()).arg(snapshotTimer.elapsed())
-            .arg(snapshot.currentProjection.size())
-            .arg(snapshot.expectedObjectCount));
-        SAutosaveWorkItem item;
-        item.source = mob->filePath();
-        item.mobSnapshot = snapshot;
-        item.buildMobCandidate = true;
-        work.append(item);
+        QByteArray candidate;
+        CValidationReport report;
+        QString saveClass;
+        if(!mob->buildValidatedCandidate(&candidate, &report, &saveClass))
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
+                .arg(mob->filePath().absoluteFilePath(), report.toText().trimmed()));
+            continue;
+        }
+        const SBackupResult result = manager.snapshotAutosave(mob->filePath(), candidate);
+        if(result.success)
+            written += result.skipped ? 0 : 1;
+        else
+        {
+            ++failed;
+            ei::log(eLogWarning, QString("Recovery autosave failed path:%1 error:%2")
+                .arg(mob->filePath().absoluteFilePath(), result.error));
+        }
     }
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad() && landscape->isDirty())
     {
-        QElapsedTimer snapshotTimer;
-        snapshotTimer.start();
-        SMprAutosaveSnapshot snapshot;
+        QByteArray candidate;
         CValidationReport report;
-        if(!m_pView->captureLandscapeAutosaveSnapshot(&snapshot, &report))
+        if(!m_pView->buildValidatedLandscapeCandidate(&candidate, &report))
         {
             ++failed;
             ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
@@ -8168,128 +8192,27 @@ void MainWindow::performAutosave()
         }
         else
         {
-            ei::log(eLogInfo, QString("Recovery autosave GUI snapshot phase document:MPR path:%1 elapsedMs:%2 sourceBytes:%3 atlasPages:%4 atlasSlots:%5")
-                .arg(landscape->filePath().absoluteFilePath()).arg(snapshotTimer.elapsed())
-                .arg(snapshot.document.originalBytes().size())
-                .arg(snapshot.authoredPages.size()).arg(snapshot.activeSlots));
-            SAutosaveWorkItem item;
-            item.source = snapshot.source;
-            item.mprSnapshot = snapshot;
-            item.buildMprCandidate = true;
-            work.append(item);
-        }
-    }
-    if(work.isEmpty())
-    {
-        ei::log(failed > 0 ? eLogWarning : eLogInfo,
-                QString("Recovery autosave snapshot pass complete queued:0 failed:%1").arg(failed));
-        return;
-    }
-    if(!m_autosaveNotification)
-    {
-        m_autosaveNotification = new QFrame(this);
-        m_autosaveNotification->setObjectName("autosaveNotification");
-        m_autosaveNotification->setFrameShape(QFrame::StyledPanel);
-        m_autosaveNotification->setAttribute(Qt::WA_ShowWithoutActivating);
-        m_autosaveNotification->setStyleSheet(
-            "QFrame#autosaveNotification { background: #292929; border: 1px solid #808080; border-radius: 4px; }"
-            "QLabel { color: #eeeeee; }");
-        QHBoxLayout* layout = new QHBoxLayout(m_autosaveNotification);
-        layout->setContentsMargins(12, 10, 12, 10);
-        m_autosaveStatusLabel = new QLabel(m_autosaveNotification);
-        layout->addWidget(m_autosaveStatusLabel, 1);
-    }
-    m_autosaveStatusLabel->setText(tr("Creating recovery snapshots in the background...")
-        + QStringLiteral(" (%1)").arg(work.size()));
-    m_autosaveNotification->adjustSize();
-    positionAutosaveNotification();
-    m_autosaveNotification->show();
-    m_autosaveNotification->raise();
-    m_autosaveInProgress = true;
-    if(!m_autosaveWatcher)
-    {
-        m_autosaveWatcher = new QFutureWatcher<QPair<int, int>>(this);
-        connect(m_autosaveWatcher, &QFutureWatcher<QPair<int, int>>::finished,
-                this, [this, failed]()
-        {
-            const QPair<int, int> counts = m_autosaveWatcher->result();
-            m_autosaveInProgress = false;
-            ei::log(counts.second + failed > 0 ? eLogWarning : eLogInfo,
-                QString("Recovery autosave pass complete written:%1 failed:%2")
-                    .arg(counts.first).arg(counts.second + failed));
-            if(counts.first > 0)
-                statusBar()->showMessage(
-                    tr("Recovery autosave created %1 new generation(s).")
-                        .arg(counts.first), 4000);
-            if(m_autosaveNotification)
-                m_autosaveNotification->hide();
-            m_autosaveWatcher->deleteLater();
-            m_autosaveWatcher = nullptr;
-        });
-    }
-    m_autosaveWatcher->setFuture(QtConcurrent::run([work]()
-    {
-        int written = 0;
-        int failedWrites = 0;
-        CBackupManager manager;
-        for(const SAutosaveWorkItem& item : work)
-        {
-            QElapsedTimer writeTimer;
-            writeTimer.start();
-            QByteArray candidate = item.candidate;
-            QByteArray companion = item.companion;
-            QString saveClass;
-            CValidationReport report;
-            qint64 serializationMs = 0;
-            if(item.buildMobCandidate
-               && !CMob::buildAutosaveCandidate(
-                    item.mobSnapshot, &candidate, &report, &saveClass))
-            {
-                ++failedWrites;
-                ei::log(eLogWarning,
-                    QString("Recovery autosave skipped unsafe MOB path:%1 findings:%2")
-                        .arg(item.source.absoluteFilePath(),
-                             report.toText().trimmed()));
-                continue;
-            }
-            if(item.buildMobCandidate)
-                serializationMs = writeTimer.elapsed();
-            if(item.buildMprCandidate)
-            {
-                const SMprAutosaveCandidate built =
-                    CView::buildLandscapeAutosaveCandidate(item.mprSnapshot);
-                if(!built.success)
-                {
-                    ++failedWrites;
-                    ei::log(eLogWarning,
-                        QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
-                            .arg(item.source.absoluteFilePath(), built.error));
-                    continue;
-                }
-                candidate = built.mprBytes;
-                companion = built.terrainAtlasResource;
-                serializationMs = writeTimer.elapsed();
-            }
-            const SBackupResult result = companion.isEmpty()
-                ? manager.snapshotAutosave(item.source, candidate)
-                : manager.snapshotAutosaveWithCompanion(
-                      item.source, candidate,
-                      QStringLiteral("terrain.res"), companion);
+            const SBackupResult result = manager.snapshotAutosave(
+                landscape->filePath(), candidate);
             if(result.success)
+            {
                 written += result.skipped ? 0 : 1;
+                ei::log(eLogInfo, QString("Recovery autosave MPR path:%1 sha256:%2 skipped:%3")
+                    .arg(landscape->filePath().absoluteFilePath(),
+                         result.sha256).arg(result.skipped));
+            }
             else
-                ++failedWrites;
-            ei::log(result.success ? eLogInfo : eLogWarning,
-                QString("Recovery autosave background phase path:%1 serializationMs:%2 ioAndVerificationMs:%3 bytes:%4 companionBytes:%5 saveClass:%6 skipped:%7 error:%8")
-                    .arg(item.source.absoluteFilePath()).arg(serializationMs)
-                    .arg(writeTimer.elapsed() - serializationMs)
-                    .arg(candidate.size()).arg(companion.size())
-                    .arg(saveClass).arg(result.skipped).arg(result.error));
+            {
+                ++failed;
+                ei::log(eLogWarning, QString("Recovery autosave failed MPR path:%1 error:%2")
+                    .arg(landscape->filePath().absoluteFilePath(), result.error));
+            }
         }
-        return qMakePair(written, failedWrites);
-    }));
-    ei::log(eLogInfo, QString("Recovery autosave snapshot pass complete queued:%1 failed:%2")
-        .arg(work.size()).arg(failed));
+    }
+    if(written > 0)
+        statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
+    ei::log(failed > 0 ? eLogWarning : eLogInfo,
+            QString("Recovery autosave pass complete written:%1 failed:%2").arg(written).arg(failed));
 }
 
 void MainWindow::showRecoverableAutosaves()
@@ -9332,13 +9255,6 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
-    if(m_autosaveInProgress)
-    {
-        statusBar()->showMessage(
-            tr("Recovery snapshots are still being written. Close again when they finish."), 5000);
-        e->ignore();
-        return;
-    }
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
         const QMessageBox::StandardButton answer = QMessageBox::question(this,
@@ -9378,6 +9294,8 @@ void MainWindow::closeEvent(QCloseEvent *e)
         QObject::disconnect(m_travelPanel, nullptr, this, nullptr);
     if(m_autosaveTimer)
         m_autosaveTimer->stop();
+    if(m_autosaveCountdownTimer)
+        m_autosaveCountdownTimer->stop();
     if(m_validationTimer)
         m_validationTimer->stop();
     if(m_mapTestResultTimer)

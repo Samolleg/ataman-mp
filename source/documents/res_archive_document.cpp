@@ -238,20 +238,17 @@ bool CResArchiveDocument::buildWithAppendedMembers(
 
 bool CResArchiveDocument::buildWithPublishedMembers(
     const QVector<SResArchiveNewMember>& publishedMembers,
-    bool allowReplaceExisting, QByteArray* output, QStringList* errors,
-    const std::function<void(int)>& progress) const
+    bool allowReplaceExisting, QByteArray* output, QStringList* errors) const
 {
     return buildWithMembers(publishedMembers, true, allowReplaceExisting,
-                            output, errors, progress);
+                            output, errors);
 }
 
 bool CResArchiveDocument::buildWithMembers(
     const QVector<SResArchiveNewMember>& requestedMembers,
     bool allowIdenticalExisting, bool allowReplaceExisting,
-    QByteArray* output, QStringList* errors,
-    const std::function<void(int)>& progress) const
+    QByteArray* output, QStringList* errors) const
 {
-    if(progress) progress(0);
     if(output)
         output->clear();
     if(requestedMembers.isEmpty() || !output)
@@ -338,14 +335,12 @@ bool CResArchiveDocument::buildWithMembers(
     if(!changed)
     {
         *output = m_originalBytes;
-        if(progress) progress(100);
         return true;
     }
     const quint32 count = quint32(members.size());
 
     QByteArray staged(int(kHeaderSize), '\0');
     QByteArray names;
-    int memberIndexForProgress = 0;
     for(BuildMember& member : members)
     {
         staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
@@ -359,8 +354,6 @@ bool CResArchiveDocument::buildWithMembers(
         member.nameOffset = quint32(names.size());
         staged.append(member.payload);
         names.append(member.name);
-        if(progress && (++memberIndexForProgress % qMax(1, members.size() / 80) == 0))
-            progress(qMin(75, (memberIndexForProgress * 75) / qMax(1, members.size())));
     }
     staged.append(QByteArray((16 - (staged.size() % 16)) % 16, '\0'));
     const quint32 tableOffset = quint32(staged.size());
@@ -421,7 +414,6 @@ bool CResArchiveDocument::buildWithMembers(
         addError(errors, "The derived RES archive failed structural reopen validation.");
         return false;
     }
-    if(progress) progress(80);
     for(const SResArchiveNewMember& published : requestedMembers)
     {
         if(reopened.memberPayload(published.name) != published.payload)
@@ -431,7 +423,6 @@ bool CResArchiveDocument::buildWithMembers(
             return false;
         }
     }
-    int validatedMemberIndex = 0;
     for(const SResArchiveMember& original : m_members)
     {
         if(replacedNames.contains(original.name.toCaseFolded()))
@@ -441,10 +432,7 @@ bool CResArchiveDocument::buildWithMembers(
             addError(errors, QString("Derived RES changed untouched member %1.").arg(original.name));
             return false;
         }
-        if(progress && (++validatedMemberIndex % qMax(1, m_members.size() / 20) == 0))
-            progress(80 + qMin(20, validatedMemberIndex * 20 / qMax(1, m_members.size())));
     }
-    if(progress) progress(100);
     *output = staged;
     return true;
 }

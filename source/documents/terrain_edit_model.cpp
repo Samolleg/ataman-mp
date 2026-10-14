@@ -495,18 +495,6 @@ void appendTerrainTileCommand(STerrainTileCommand* stroke,
 {
     if(!stroke)
         return;
-    if(stamp.changesRandomSeed) {
-        if(!stroke->changesRandomSeed) {
-            stroke->beforeRandomSeed = stamp.beforeRandomSeed;
-            stroke->beforeRandomSeedSet = stamp.beforeRandomSeedSet;
-        }
-        stroke->changesRandomSeed = true;
-        stroke->afterRandomSeed = stamp.afterRandomSeed;
-    }
-    if(stamp.workingAtlasBefore && !stroke->workingAtlasBefore)
-        stroke->workingAtlasBefore = stamp.workingAtlasBefore;
-    if(stamp.workingAtlasAfter)
-        stroke->workingAtlasAfter = stamp.workingAtlasAfter;
     // The release resolver needs the brush identity for equal-coverage
     // runtime terrain-type ties. Preserve it while composing incremental
     // preview stamps into the one undoable stroke; previously only tile and
@@ -986,26 +974,13 @@ quint16 CTerrainTransitionCatalog::selectCandidates(
             hash *= 16777619u;
         }
     };
-    // Keep legacy stroke selection for transitions, but make even the initial
-    // uniform builder selection stable before the material-aware adapter.
-    const bool uniform = signature.northWest == signature.northEast
-        && signature.northWest == signature.southEast
-        && signature.northWest == signature.southWest;
-    mix(paintOnly && m_uniformPaintSeedEnabled && uniform
-        ? m_uniformPaintSeed : distributionSeed);
+    mix(distributionSeed);
     mix(quint32(globalX));
     mix(quint32(globalY));
     mix(quint32(signature.northWest));
     mix(quint32(signature.northEast));
     mix(quint32(signature.southEast));
     mix(quint32(signature.southWest));
-    if(m_randomDistribution) {
-        // FNV low bits alone produce short coordinate periods for pools of
-        // two/four variants. Avalanche only the new cosmetic-selection path;
-        // legacy painting keeps its exact distribution bytes.
-        hash ^= hash >> 16; hash *= 0x7feb352du;
-        hash ^= hash >> 15; hash *= 0x846ca68bu; hash ^= hash >> 16;
-    }
     quint64 selection = quint64(hash) % totalWeight;
     QVector<int> selectedRotations;
     for(auto group = byPhysicalSlot.constBegin();
@@ -1220,13 +1195,6 @@ void CTerrainTransitionCatalog::removeAtlasSlot(int atlasSlot)
     }
 }
 
-void CTerrainTransitionCatalog::setSlotPaintSelectable(int slot,bool selectable)
-{
-    for(auto& variant:m_variants)
-        if(SMprPackedTile::decode(variant.packedTile).atlasSlot()==slot)
-            variant.paintSelectable=selectable;
-}
-
 QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
     qint32 fromMaterial, qint32 toMaterial,
     const QMap<qint32, int>& preferredMaterials) const
@@ -1339,8 +1307,6 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
                                     int materialCount)
 {
     m_sectorCountX = 0;
-    m_randomPaintSeed = m_originalRandomPaintSeed = 0;
-    m_randomPaintSeedSet = m_originalRandomPaintSeedSet = false;
     m_sectorCountY = 0;
     m_vertexCountX = 0;
     m_vertexCountY = 0;
@@ -1568,39 +1534,8 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
     return range;
 }
 
-bool CTerrainTransitionCatalog::sharesRepairStateWith(const CTerrainTransitionCatalog& o) const
-{
-    return m_variants.isSharedWith(o.m_variants) && m_packedLookup.isSharedWith(o.m_packedLookup)
-        && m_signatureLookup.isSharedWith(o.m_signatureLookup) && m_materialIds==o.m_materialIds
-        && m_mirrorPaintGridY==o.m_mirrorPaintGridY && m_randomDistribution==o.m_randomDistribution
-        && m_uniformPaintSeedEnabled==o.m_uniformPaintSeedEnabled && m_uniformPaintSeed==o.m_uniformPaintSeed;
-}
-
-bool CTerrainEditModel::sharesRepairStateWith(const CTerrainEditModel& o) const
-{
-    return m_sectorCountX==o.m_sectorCountX && m_sectorCountY==o.m_sectorCountY
-        && m_vertexCountX==o.m_vertexCountX && m_vertexCountY==o.m_vertexCountY
-        && m_maxZ==o.m_maxZ && m_originalMaxZ==o.m_originalMaxZ
-        && m_textureCount==o.m_textureCount && m_materialCount==o.m_materialCount
-        && m_randomPaintSeed==o.m_randomPaintSeed && m_originalRandomPaintSeed==o.m_originalRandomPaintSeed
-        && m_randomPaintSeedSet==o.m_randomPaintSeedSet && m_originalRandomPaintSeedSet==o.m_originalRandomPaintSeedSet
-        && m_tileTypes.isSharedWith(o.m_tileTypes) && m_heights.isSharedWith(o.m_heights)
-        && m_originalHeights.isSharedWith(o.m_originalHeights)
-        && m_xOffsets.isSharedWith(o.m_xOffsets) && m_yOffsets.isSharedWith(o.m_yOffsets)
-        && m_refs.isSharedWith(o.m_refs) && m_conflictedVertices.isSharedWith(o.m_conflictedVertices)
-        && m_sectors.isSharedWith(o.m_sectors) && m_sectorLookup.isSharedWith(o.m_sectorLookup)
-        && m_virtualLandMaterials.isSharedWith(o.m_virtualLandMaterials)
-        && m_virtualOverlayMaterials.isSharedWith(o.m_virtualOverlayMaterials)
-        && m_originalVirtualLandMaterials.isSharedWith(o.m_originalVirtualLandMaterials)
-        && m_originalVirtualOverlayMaterials.isSharedWith(o.m_originalVirtualOverlayMaterials)
-        && m_pendingVirtualLandMaterials.isSharedWith(o.m_pendingVirtualLandMaterials)
-        && m_pendingVirtualOverlayMaterials.isSharedWith(o.m_pendingVirtualOverlayMaterials);
-}
-
 bool CTerrainEditModel::isDirty() const
 {
-    if(m_randomPaintSeed != m_originalRandomPaintSeed
-       || m_randomPaintSeedSet != m_originalRandomPaintSeedSet) return true;
     if(m_maxZ != m_originalMaxZ || m_virtualLandMaterials!=m_originalVirtualLandMaterials
        || m_virtualOverlayMaterials!=m_originalVirtualOverlayMaterials)
         return true;
@@ -1746,15 +1681,6 @@ float CTerrainEditModel::brushWeight(float distance, float radius,
     return linear * linear * (3.0f - 2.0f * linear);
 }
 
-float CTerrainEditModel::brushWeight(const STerrainBrush& brush,
-                                     float dx, float dy) const
-{
-    const float distance = brush.shape == ETerrainTileBrushShape::Square
-        ? qMax(std::fabs(dx), std::fabs(dy))
-        : std::sqrt(dx * dx + dy * dy);
-    return brushWeight(distance, brush.radius, brush.falloff);
-}
-
 STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
     const STerrainBrush& brush, float rawHeightDelta,
     bool allowSaturation) const
@@ -1775,7 +1701,8 @@ STerrainHeightCommand CTerrainEditModel::makeRaiseLower(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(brush, dx, dy);
+            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                             brush.radius, brush.falloff);
             if(weight <= 0.0f)
                 continue;
             STerrainHeightDelta delta;
@@ -1811,7 +1738,8 @@ STerrainHeightCommand CTerrainEditModel::makeNoise(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(brush, dx, dy);
+            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                             brush.radius, brush.falloff);
             if(weight <= 0.0f)
                 continue;
             STerrainHeightDelta delta;
@@ -1848,7 +1776,8 @@ STerrainHeightCommand CTerrainEditModel::makeBlendedCommand(
         {
             const float dx = float(x) - brush.centerX;
             const float dy = float(y) - brush.centerY;
-            const float weight = brushWeight(brush, dx, dy) * strength;
+            const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                             brush.radius, brush.falloff) * strength;
             if(weight <= 0.0f)
                 continue;
             const int index = globalIndex(x, y);
@@ -1881,13 +1810,11 @@ STerrainHeightCommand CTerrainEditModel::makeBoundaryFill(
     const auto targets=TerrainBoundaryFill::grid(brush.centerX,brush.centerY,brush.radius,
         m_vertexCountX,m_vertexCountY,[this](int x,int y,double* value) {
             *value=height(x,y);return true;
-        }, brush.shape == ETerrainTileBrushShape::Square);
+        });
     for(auto it=targets.cbegin();it!=targets.cend();++it) {
         const int x=it.key().first,y=it.key().second;
-        const float dx = float(x) - brush.centerX;
-        const float dy = float(y) - brush.centerY;
-        const double weight=brushWeight(brush, dx, dy)
-            * qBound(0.0f,strength,1.0f);
+        const double weight=brushWeight(std::hypot(x-brush.centerX,y-brush.centerY),
+            brush.radius,brush.falloff)*qBound(0.0f,strength,1.0f);
         STerrainHeightDelta delta;delta.globalX=x;delta.globalY=y;delta.before=height(x,y);
         delta.after=clampedHeight(delta.before+(it.value()-delta.before)*weight);
         if(delta.before!=delta.after) command.deltas.append(delta);
@@ -2706,7 +2633,7 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
                 const auto it=heights.constFind(globalIndex(x,y));
                 if(it==heights.cend()) return false;
                 *value=it.value();return true;
-            }, brush.shape == ETerrainTileBrushShape::Square);
+            });
     QMap<int, quint16> afterHeights = heights;
     QSet<int> changedVertices;
     for(int key : activeVertices)
@@ -2717,7 +2644,8 @@ SOverlaySurfaceCommand CTerrainEditModel::makeOverlayHeightEdit(
         const int y = key / m_vertexCountX;
         const float dx = float(x) - brush.centerX;
         const float dy = float(y) - brush.centerY;
-        const float weight = brushWeight(brush, dx, dy);
+        const float weight = brushWeight(std::sqrt(dx * dx + dy * dy),
+                                         brush.radius, brush.falloff);
         if(weight <= 0.0f)
             continue;
         const float before = float(heights.value(key));
@@ -3764,85 +3692,6 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     return command;
 }
 
-STerrainTileCommand CTerrainEditModel::makeRandomTilePaint(
-    const CTerrainTransitionCatalog& catalog, quint32 seed,
-    const QRect& region, const QSet<int>& excludedSlots,
-    const QVector<QPoint>& cells, bool preserveDirectionalRotation) const
-{
-    STerrainTileCommand command;
-    command.description = QStringLiteral("Shuffle terrain tiles");
-    const QRect bounds = region.intersected(QRect(0, 0, tileCountX(), tileCountY()));
-    // Cache the filtered pool per predecessor: large maps generally use a
-    // small set of packed references. Weights remain per physical slot.
-    QMap<quint16, CTerrainTransitionCatalog> pools;
-    QSet<quint16> rejected;
-    QSet<int> visited;
-    const auto visit = [&](int x, int y) {
-        if(!bounds.contains(x, y) || visited.contains(y * tileCountX() + x)) return;
-        visited.insert(y * tileCountX() + x);
-        bool available = false;
-        const quint16 before = packedTile(x, y, ETerrainTileLayer::Land, &available);
-        const auto packed = SMprPackedTile::decode(before);
-        if(!available || excludedSlots.contains(packed.atlasSlot()) || rejected.contains(before)) return;
-        bool decoded = false;
-        const auto original = catalog.variantForPacked(before, &decoded);
-        bool typed = false;
-        const qint32 type = tileType(before, &typed);
-        if(!decoded || !typed || type < 0 || type >= 16 || !original.paintSelectable || original.mixedEdge) {
-            rejected.insert(before); return;
-        }
-        const auto signature = catalog.gridSignatureForPacked(before);
-        // Equal material corners do not imply compatible edge artwork.
-        // Never reroll a transition, including symmetric rotations.
-        if(signature.northWest != signature.northEast
-           || signature.northWest != signature.southEast
-           || signature.northWest != signature.southWest) {
-            rejected.insert(before); return;
-        }
-        if(!pools.contains(before)) {
-            CTerrainTransitionCatalog pool;
-            pool.setRandomDistribution(true);
-            QSet<int> directionalSlots;
-            for(const auto& candidate : catalog.paintVariants(signature)) {
-                const auto physical = SMprPackedTile::decode(candidate.packedTile);
-                bool candidateTyped = false;
-                const qint32 candidateType = tileType(candidate.packedTile, &candidateTyped);
-                if(!candidateTyped || candidateType != type || candidate.mixedEdge
-                   || excludedSlots.contains(physical.atlasSlot())
-                   || candidate.routeOwnerMaterial != original.routeOwnerMaterial
-                   || candidate.canonicalGeneratedRoute != original.canonicalGeneratedRoute) continue;
-                // Directional materials keep the user's physical orientation.
-                if((!original.randomRotationAllowed || !candidate.randomRotationAllowed)
-                   && (preserveDirectionalRotation ? physical.rotation != packed.rotation
-                       : directionalSlots.contains(physical.atlasSlot()))) continue;
-                if(!original.randomRotationAllowed || !candidate.randomRotationAllowed)
-                    directionalSlots.insert(physical.atlasSlot());
-                auto gridCandidate = candidate;
-                gridCandidate.signature = signature;
-                pool.addVariant(gridCandidate);
-            }
-            pools.insert(before, pool);
-        }
-        bool found = false;
-        // Candidates were normalized to the requested grid-space signature;
-        // the small pool has no mirror adapter.
-        const quint16 after = pools.value(before).select(signature, x, y, seed, &found);
-        if(found && before != after) {
-            STerrainTileDelta delta;
-            delta.globalX = x; delta.globalY = y;
-            delta.before = before; delta.after = after;
-            command.deltas.append(delta);
-        }
-    };
-    if(!cells.isEmpty()) {
-        for(const auto& cell : cells) visit(cell.x(), cell.y());
-    } else {
-        for(int y = bounds.top(); y <= bounds.bottom(); ++y)
-            for(int x = bounds.left(); x <= bounds.right(); ++x) visit(x, y);
-    }
-    return command;
-}
-
 STerrainTileCommand CTerrainEditModel::makeAtlasSlotRemap(
     const QMap<int, int>& slotRemap) const
 {
@@ -3979,22 +3828,6 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     if(beforeCurrent.size() == expectedFieldSize
        && beforeBaseline.size() == expectedFieldSize)
     {
-        // Manual owns physical cells, including their hard seams. Updating a
-        // shared corner must not leave an incident Modern cell marked for a
-        // new blend at Save: that would reinterpret the physical Manual edit.
-        // Adopt the current field as the baseline for each incident cell,
-        // retaining its packed artwork and all current material identities.
-        QSet<int> baselineVertices;
-        for(auto value=finalValues.constBegin();value!=finalValues.constEnd();++value)
-        {
-            const int vx=value.key()%vertexWidth,vy=value.key()/vertexWidth;
-            for(int cy=qMax(0,vy-1);cy<=qMin(height-1,vy);++cy)
-                for(int cx=qMax(0,vx-1);cx<=qMin(width-1,vx);++cx)
-                    for(int dy=0;dy<=1;++dy)for(int dx=0;dx<=1;++dx)
-                        baselineVertices.insert((cy+dy)*vertexWidth+cx+dx);
-        }
-        for(int key:baselineVertices)
-            if(!finalValues.contains(key))finalValues.insert(key,beforeCurrent.at(key));
         // QMap iteration is cell-key order (y, then x). When several Manual
         // cells touch a vertex, the later explicit cell in that deterministic
         // order wins. Only the final values are stored; no origin or time data
@@ -6835,15 +6668,6 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
                 randomizeUniformRotation, &selected);
         if(!selected)
         {
-            // Repainting an unchanged vertex can touch a neighbouring mixed
-            // cell whose exact tuple is not resident. There is no semantic
-            // edit to resolve there: keep its existing artwork rather than
-            // refusing the whole brush as if the selected pure source failed.
-            if(command.virtualVertices.isEmpty() && !exactUniform)
-            {
-                command.semanticAudit.affectedCells.append(QPoint(x,y));
-                continue;
-            }
             if(report)report->add("terrain.virtual_paint_preview",
                 EValidationSeverity::Error,
                 "This material has no structurally uniform authored tile for an honest unblended preview");
@@ -7537,10 +7361,6 @@ bool CTerrainEditModel::virtualMaterialCellChanged(
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
 {
-    if(command.changesRandomSeed && m_randomPaintSeed
-       != (forward ? command.beforeRandomSeed : command.afterRandomSeed)) return false;
-    if(command.changesRandomSeed && m_randomPaintSeedSet
-       != (forward ? command.beforeRandomSeedSet : true)) return false;
     QSet<int> commandFields;
     const int expectedFieldSize = (tileCountX() + 1) * (tileCountY() + 1);
     for(const STerrainTileCommand::SVirtualFieldDelta& delta
@@ -7746,10 +7566,6 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
             pending.remove(key);
         else
             pending.insert(key, value);
-    }
-    if(command.changesRandomSeed) {
-        m_randomPaintSeed = forward ? command.afterRandomSeed : command.beforeRandomSeed;
-        m_randomPaintSeedSet = forward ? true : command.beforeRandomSeedSet;
     }
     return true;
 }

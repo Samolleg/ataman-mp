@@ -61,22 +61,6 @@ CMob::~CMob()
         delete node;
 }
 
-QVector<QSharedPointer<CNode>> CMob::takeWorldObjectsForRetiredMob()
-{
-    QVector<QSharedPointer<CNode>> taken;QList<CNode*> remaining;QSet<CNode*> takenNodes;
-    for(auto* node:m_aNode) {
-        if(node->nodeType()!=ENodeType::eWorldObject) {remaining.append(node);continue;}
-        if(takenNodes.contains(node))continue;
-        takenNodes.insert(node);
-        m_aDeletedNode.removeAll(node);
-        node->setParent(nullptr);
-        if(node->nodeState()!=ENodeState::eHidden)node->setState(ENodeState::eDraw);
-        taken.append(QSharedPointer<CNode>(node));
-    }
-    m_aNode=remaining;
-    return taken;
-}
-
 void CMob::attach(CView *view, CProgressView *pProgress)
 {
     m_view = view;
@@ -1124,14 +1108,6 @@ int CMob::readMob(QFileInfo &path)
     if (!path.exists())
         return 1;
 
-    QElapsedTimer readTimer;
-    QElapsedTimer phaseTimer;
-    readTimer.start();
-    qint64 fileReadMs = 0;
-    qint64 structuralValidationMs = 0;
-    qint64 openBackupMs = 0;
-    qint64 projectionMs = 0;
-    qint64 provenanceMs = 0;
     m_filePath = path;
     QFile file(m_filePath.filePath());
     try
@@ -1144,8 +1120,6 @@ int CMob::readMob(QFileInfo &path)
         }
 
         m_originalData = file.readAll();
-        fileReadMs = readTimer.elapsed();
-        phaseTimer.start();
         CValidationReport structuralReport;
         CMobDocument structuralDocument;
         if(!structuralDocument.load(m_filePath, &structuralReport))
@@ -1160,7 +1134,6 @@ int CMob::readMob(QFileInfo &path)
             file.close();
             return 3;
         }
-        structuralValidationMs = phaseTimer.elapsed();
         QStringList criticalValidationMessages;
         for(const SValidationFinding& finding : structuralReport.findings())
         {
@@ -1190,9 +1163,7 @@ int CMob::readMob(QFileInfo &path)
                     "Fix the affected object before testing this map.")
                     .arg(criticalValidationMessages.join("\n\n")));
         }
-        phaseTimer.restart();
         const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
-        openBackupMs = phaseTimer.elapsed();
         if(!openBackup.success)
         {
             ei::log(eLogWarning, QString("MOB opened without recovery snapshot:%1 error:%2")
@@ -1204,7 +1175,6 @@ int CMob::readMob(QFileInfo &path)
                     "Do not edit or save this file until the backup location is writable.")
                     .arg(openBackup.error));
         }
-        phaseTimer.restart();
         if(!deserialize(m_originalData, &structuralDocument))
         {
             ei::log(eLogFatal, QString("Legacy MOB projection stopped before completing path:%1")
@@ -1217,9 +1187,7 @@ int CMob::readMob(QFileInfo &path)
             file.close();
             return 4;
         }
-        projectionMs = phaseTimer.elapsed();
 
-        phaseTimer.restart();
         QByteArray cleanProjectionBytes;
         serializeMob(cleanProjectionBytes, false);
         CMobDocument cleanProjectionDocument;
@@ -1275,7 +1243,6 @@ int CMob::readMob(QFileInfo &path)
                 .arg(m_filePath.absoluteFilePath()).arg(rawObjects.size()).arg(m_aNode.size())
                 .arg(projectionReport.toText().trimmed()));
         }
-        provenanceMs = phaseTimer.elapsed();
 
         // Only authored NID fields in the lossless document are authoritative.
         // Some projected object kinds have no authored NID and reuse legacy
@@ -1283,13 +1250,6 @@ int CMob::readMob(QFileInfo &path)
         m_duplicateIds = structuralDocument.duplicateIds();
 
         file.close();
-        ei::log(eLogInfo, QString(
-            "MOB read phases file:%1 bytes:%2 fileReadMs:%3 structuralValidationMs:%4 "
-            "openBackupMs:%5 projectionMs:%6 provenanceMs:%7 beforeUpdateMs:%8 objects:%9")
-            .arg(m_filePath.fileName()).arg(m_originalData.size())
-            .arg(fileReadMs).arg(structuralValidationMs).arg(openBackupMs)
-            .arg(projectionMs).arg(provenanceMs).arg(readTimer.elapsed())
-            .arg(m_aNode.size()));
     }
     catch (const std::exception& ex)
     {
@@ -1299,20 +1259,10 @@ int CMob::readMob(QFileInfo &path)
         return 5;
     }
     updateObjects();
-    phaseTimer.restart();
     logicNodesUpdate();
-    const qint64 logicNodesMs = phaseTimer.elapsed();
-    phaseTimer.restart();
     captureCleanProjection();
-    const qint64 cleanProjectionMs = phaseTimer.elapsed();
-    phaseTimer.restart();
     restoreAssemblyInstances();
     m_cleanAssemblyProjection=assemblyProjection();
-    ei::log(eLogInfo, QString(
-        "MOB post-object phases file:%1 logicNodesMs:%2 cleanProjectionMs:%3 "
-        "assemblyRestoreAndSnapshotMs:%4 totalMs:%5")
-        .arg(m_filePath.fileName()).arg(logicNodesMs).arg(cleanProjectionMs)
-        .arg(phaseTimer.elapsed()).arg(readTimer.elapsed()));
     return 0;
 }
 
@@ -2133,71 +2083,6 @@ bool CMob::buildRawObjectSequenceCandidate(
        candidateDocument.objects().size() != m_aNode.size())
     {
         candidate->clear();
-        return false;
-    }
-    return true;
-}
-
-SMobAutosaveSnapshot CMob::captureAutosaveSnapshot()
-{
-    SMobAutosaveSnapshot snapshot;
-    snapshot.source = m_filePath;
-    snapshot.originalData = m_originalData;
-    snapshot.cleanProjection = m_cleanProjection;
-    snapshot.expectedObjectCount = m_aNode.size();
-    serializeMob(snapshot.currentProjection, false);
-    return snapshot;
-}
-
-bool CMob::buildAutosaveCandidate(const SMobAutosaveSnapshot& snapshot,
-                                  QByteArray* data,
-                                  CValidationReport* report,
-                                  QString* saveClass)
-{
-    if(!data || snapshot.source.absoluteFilePath().isEmpty()
-       || snapshot.originalData.isEmpty()
-       || snapshot.cleanProjection.isEmpty()
-       || snapshot.currentProjection.isEmpty())
-        return false;
-    data->clear();
-    if(saveClass) saveClass->clear();
-    if(snapshot.currentProjection == snapshot.cleanProjection)
-    {
-        *data = snapshot.originalData;
-        if(saveClass) *saveClass = QStringLiteral("BYTE_IDENTICAL");
-    }
-    else
-    {
-        CMobEditTransaction transaction;
-        QString candidateClass;
-        if(!CMobDocument::buildOwnedRootProjectionCandidate(
-               snapshot.originalData, snapshot.source.filePath(),
-               snapshot.cleanProjection, snapshot.currentProjection,
-               &transaction, data, &candidateClass, report))
-        {
-            if(data) data->clear();
-            return false;
-        }
-        if(saveClass) *saveClass = candidateClass;
-    }
-    if(data->size() < 16
-       || data->left(4) != snapshot.originalData.left(4))
-    {
-        if(report)
-            report->add("mob.candidate.envelope", EValidationSeverity::Error,
-                        "The generated MOB autosave candidate failed its envelope check",
-                        snapshot.source.filePath());
-        data->clear();
-        return false;
-    }
-    CMobDocument freshDocument;
-    CValidationReport freshReport;
-    if(!freshDocument.loadBytes(*data, "in-memory-autosave-candidate.mob",
-                                &freshReport)
-       || freshDocument.objects().size() != snapshot.expectedObjectCount)
-    {
-        if(report) *report = freshReport;
-        data->clear();
         return false;
     }
     return true;

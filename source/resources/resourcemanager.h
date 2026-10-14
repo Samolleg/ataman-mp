@@ -191,7 +191,6 @@ public:
     // A finalized isolated MPR may carry a sibling <mpr>-atlas.res. This
     // session-only source is searched before configured shared terrain data.
     void setMapLocalTerrainArchive(const QString& path);
-    QString mapLocalTerrainArchive() const { return m_mapLocalTerrainArchive; }
     // Expanded, ordered RES files from the active resource profile. Used to
     // bind a finalized atlas to one coherent archive before renderer loading.
     QStringList configuredResourceArchivePaths() const;
@@ -207,7 +206,6 @@ private:
     QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName,
                                         bool* found = nullptr);
     QImage loadTextureImageResource(const QString& name, const QString& modelName);
-    void cacheTextureImage(const QString& key, const QImage& image);
 
 private:
     static CTextureList* m_pTextureContainer;
@@ -224,7 +222,6 @@ private:
     QList<QString> m_arrCellComboBox; //optimization for cell widget
     QString m_mapLocalTerrainArchive;
     mutable QMap<QString, QImage> m_catalogTerrainTileCache;
-    mutable ei::CVisualCacheLru m_catalogTerrainTileLru;
 };
 
 

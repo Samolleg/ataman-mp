@@ -5,7 +5,6 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
-#include <functional>
 
 struct SResArchiveMember
 {
@@ -66,8 +65,7 @@ public:
     bool buildWithPublishedMembers(const QVector<SResArchiveNewMember>& published,
                                    bool allowReplaceExisting,
                                    QByteArray* output,
-                                   QStringList* errors = nullptr,
-                                   const std::function<void(int)>& progress = {}) const;
+                                   QStringList* errors = nullptr) const;
 
     static bool validateReplacement(const CResArchiveDocument& baseline,
                                     const CResArchiveDocument& candidate,
@@ -80,8 +78,7 @@ private:
                           bool allowIdenticalExisting,
                           bool allowReplaceExisting,
                           QByteArray* output,
-                          QStringList* errors,
-                          const std::function<void(int)>& progress = {}) const;
+                          QStringList* errors) const;
 
     QByteArray m_originalBytes;
     QByteArray m_tableBytes;

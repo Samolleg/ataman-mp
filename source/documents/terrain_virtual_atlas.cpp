@@ -1,8 +1,6 @@
 #include "terrain_virtual_atlas.h"
-#include "../core/terrain_atlas_shape_policy.h"
 
 #include <QCryptographicHash>
-#include <QCache>
 #include <QDataStream>
 #include <QRegularExpression>
 #include <QTransform>
@@ -22,13 +20,6 @@
 namespace {
 QByteArray imageHash(const QImage& image)
 {
-    // QImage changes its key on pixel mutation/detachment. Retain only the
-    // small digest, not the image: stroke snapshots share immutable artwork
-    // and previously rehashed hundreds of MB just to inspect tile identities.
-    static thread_local QCache<qint64, QByteArray> hashes(8192);
-    const qint64 key = image.cacheKey();
-    if(const auto* cached = hashes.object(key))
-        return *cached;
     const QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
     QCryptographicHash hash(QCryptographicHash::Sha256);
     const qint32 width = rgba.width();
@@ -38,9 +29,7 @@ QByteArray imageHash(const QImage& image)
     for(int y = 0; y < rgba.height(); ++y)
         hash.addData(reinterpret_cast<const char*>(rgba.constScanLine(y)),
                      rgba.bytesPerLine());
-    const QByteArray result = hash.result().toHex();
-    hashes.insert(key, new QByteArray(result));
-    return result;
+    return hash.result().toHex();
 }
 
 QVector<qint32> corners(const STerrainTransitionSignature& signature)
@@ -2079,12 +2068,19 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
         m_error = QStringLiteral("The authored atlas is empty.");
         return;
     }
-    m_generationSize = terrainAtlasMaximumNativeTileSize(authoredTiles);
-    const QSize tileSize = m_generationSize;
-    if(tileSize.isEmpty())
+    const QSize tileSize = authoredTiles.front().size();
+    if(tileSize.width() <= 0 || tileSize.width() != tileSize.height())
     {
         m_error = QStringLiteral("Terrain atlas tiles must be non-empty squares.");
         return;
+    }
+    for(const QImage& image : authoredTiles)
+    {
+        if(image.isNull() || image.size() != tileSize)
+        {
+            m_error = QStringLiteral("Terrain atlas tiles have inconsistent dimensions.");
+            return;
+        }
     }
     for(qint32 material : catalog.materialIds())
     {
@@ -2099,8 +2095,8 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
             if(slot >= 0 && slot < authoredTiles.size())
             {
                 m_materialSources.insert(material, m_generatedTilesOpaque
-                    ? opaqueTerrainMaterialSource(terrainAtlasRasterTile(authoredTiles.at(slot), tileSize))
-                    : terrainAtlasRasterTile(authoredTiles.at(slot), tileSize).convertToFormat(
+                    ? opaqueTerrainMaterialSource(authoredTiles.at(slot))
+                    : authoredTiles.at(slot).convertToFormat(
                         QImage::Format_RGBA8888));
                 m_materialSourceSlots.insert(material,slot);
                 if(!m_materialRuntimeTypes.contains(material)
@@ -2123,8 +2119,8 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
         if(source.value().isNull() || source.value().size() != tileSize)
             continue;
         m_materialSources.insert(source.key(), m_generatedTilesOpaque
-            ? opaqueTerrainMaterialSource(terrainAtlasRasterTile(source.value(), tileSize))
-            : terrainAtlasRasterTile(source.value(), tileSize).convertToFormat(QImage::Format_RGBA8888));
+            ? opaqueTerrainMaterialSource(source.value())
+            : source.value().convertToFormat(QImage::Format_RGBA8888));
         // External uniform anchors have no slot in the opened map. They remain
         // logical sources until a pure or mixed tuple is realized into the
         // working cache/final atlas.
@@ -2138,7 +2134,6 @@ CTerrainVirtualAtlas::CTerrainVirtualAtlas(
     const CTerrainTransitionCatalog& catalog)
     : m_catalog(catalog),
       m_authoredTiles(other.m_authoredTiles),
-      m_generationSize(other.m_generationSize),
       m_materialSources(other.m_materialSources),
       m_materialSourceSlots(other.m_materialSourceSlots),
       m_sourceTileTypes(other.m_sourceTileTypes),
@@ -2164,11 +2159,11 @@ bool CTerrainVirtualAtlas::addExternalMaterialSource(
     if(m_materialSources.contains(material))
         return true;
     if(!m_valid || pixels.isNull() || m_authoredTiles.isEmpty()
-       || pixels.size() != m_generationSize)
+       || pixels.size() != m_authoredTiles.front().size())
         return false;
     m_materialSources.insert(material, m_generatedTilesOpaque
-        ? opaqueTerrainMaterialSource(terrainAtlasRasterTile(pixels, m_generationSize))
-        : terrainAtlasRasterTile(pixels, m_generationSize).convertToFormat(QImage::Format_RGBA8888));
+        ? opaqueTerrainMaterialSource(pixels)
+        : pixels.convertToFormat(QImage::Format_RGBA8888));
     m_materialSourceSlots.remove(material);
     return true;
 }
@@ -2579,7 +2574,7 @@ QImage CTerrainVirtualAtlas::reviewBlendMask(
         gridSignature, style, preferredPaintMaterial);
     QString canonicalProvenance;
     QImage result = canonicalGeneratedOwnershipMask(
-        m_generationSize, preview, canonicalOwner,
+        m_authoredTiles.front().size(), preview, canonicalOwner,
         style, qMax(0, variation), reviewedStyleMaterial,
         &canonicalProvenance);
     if(!result.isNull() && canonicalOwner != ownerMaterial)
@@ -2705,7 +2700,7 @@ QImage CTerrainVirtualAtlas::generateTile(
     {
         QString source;
         QImage owner = canonicalGeneratedOwnershipMask(
-            m_generationSize, preview, unique.at(0), style,
+            m_authoredTiles.front().size(), preview, unique.at(0), style,
             variation, reviewedStyleMaterial, &source);
         if(owner.isNull())
         {
@@ -2734,7 +2729,7 @@ QImage CTerrainVirtualAtlas::generateTile(
         {
             QString source;
             const QImage mask = canonicalGeneratedOwnershipMask(
-                m_generationSize, preview, material,
+                m_authoredTiles.front().size(), preview, material,
                 m_materialBlendStyles.value(material, style), variation,
                 material,
                 &source);
@@ -2752,7 +2747,7 @@ QImage CTerrainVirtualAtlas::generateTile(
     }
     sources.removeDuplicates();
     if(provenance) *provenance = sources.join(QStringLiteral("; "));
-    const int size = m_generationSize.width();
+    const int size = m_authoredTiles.front().width();
     QImage result(size, size, QImage::Format_RGBA8888);
     for(int y = 0; y < size; ++y)
         for(int x = 0; x < size; ++x)
@@ -2889,86 +2884,22 @@ QImage CTerrainVirtualAtlas::reviewGeneratedBlendLinearLight(
                         provenance, report, true);
 }
 
-QByteArray CTerrainVirtualAtlas::worldBoundaryRecipeKey(
-    const STerrainTransitionSignature& signature,const CTerrainEditModel& geometry,
-    const QPointF& origin,int cellX,int cellY,int sides,const QImage& body,quint8 rotation) const
-{
-    QByteArray bytes("world-boundary-raster-v1");QDataStream stream(&bytes,QIODevice::Append);
-    stream<<signatureKey(signature)<<m_generationSize<<m_generatedTilesOpaque<<m_distributionSeed
-        <<origin<<sides<<rotation<<imageHash(body);
-    for(int y=0;y<3;++y)for(int x=0;x<3;++x)
-        stream<<geometry.terrainVertexPosition(2*cellX+x,2*cellY+y);
-    for(qint32 id:corners(signature))
-        stream<<id<<imageHash(m_materialSources.value(id))<<qint32(m_materialBlendStyles.value(id,ETerrainBlendStyle::Organic));
-    if(body.isNull())for(const auto& mask:m_blendMaskTemplates)
-        stream<<signatureKey(mask.signature)<<mask.ownerMaterial<<mask.otherMaterial
-            <<qint32(mask.ownerStyle)<<qint32(mask.otherStyle)<<mask.sourceLabel<<imageHash(mask.ownershipMask);
-    return QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);
-}
-
 QImage CTerrainVirtualAtlas::worldBoundaryTile(
     const STerrainTransitionSignature& signature,
     const CTerrainEditModel& geometry, const QPointF& origin,
     int cellX, int cellY, int sides, QMap<QByteArray,QImage>* cache,
-    CValidationReport* report, const QImage& resolvedBody, quint8 bodyRotation) const
+    CValidationReport* report) const
 {
-    const auto refuse=[&](const QString& reason)->QImage {
-        if(report)report->add("terrain.world.boundary_input",EValidationSeverity::Error,reason);
-        return {};
-    };
-    if(!m_valid || cellX<0 || cellY<0 || cellX>=geometry.tileCountX()
-       || cellY>=geometry.tileCountY() || !std::isfinite(origin.x()) || !std::isfinite(origin.y())
-       || sides<0 || (sides&~15) || bodyRotation>3)
-        return refuse("World boundary composition requires a valid atlas, cell, origin, side mask and packed rotation.");
-    const QVector<qint32> ids=corners(signature);
-    for(qint32 id:ids)
-        if(!m_materialSources.contains(id) || m_materialSources[id].size()!=m_generationSize)
-            return refuse("World boundary composition requires complete native-size material sources.");
-    if(m_generationSize.width()<2 || m_generationSize.width()!=m_generationSize.height()
-       || (!resolvedBody.isNull() && resolvedBody.size()!=m_generationSize))
-        return refuse("World boundary body/source dimensions differ; artwork was not resized.");
-    QImage body=resolvedBody;
-    if(body.isNull()) {
-        // A caller can reuse its fallback cache across source banks. Include
-        // the complete generation context, not just four material IDs.
-        QByteArray key=signatureKey(signature);QDataStream context(&key,QIODevice::Append);
-        context<<m_generationSize<<m_generatedTilesOpaque<<m_distributionSeed;
-        for(qint32 id:ids)context<<id<<imageHash(m_materialSources[id])<<qint32(m_materialBlendStyles.value(id,ETerrainBlendStyle::Organic));
-        for(const auto& mask:m_blendMaskTemplates)
-            context<<signatureKey(mask.signature)<<mask.ownerMaterial<<mask.otherMaterial
-                <<qint32(mask.ownerStyle)<<qint32(mask.otherStyle)<<mask.sourceLabel<<imageHash(mask.ownershipMask);
-        body=cache?cache->value(key):QImage();
-        if(body.isNull()) {
-            body=reviewGeneratedBlend(signature,0,nullptr,report);
-            if(body.isNull())return {};
-            if(cache)cache->insert(key,body);
-        }
+    const QByteArray key=signatureKey(signature);
+    QImage canonical=cache?cache->value(key):QImage();
+    if(canonical.isNull()) {
+        canonical=reviewGeneratedBlend(signature,0,nullptr,report);
+        if(canonical.isNull())return {};
+        if(cache)cache->insert(key,canonical);
     }
-    // Match tile.cpp::getNewIndex(row,col,rotation): UV turns are applied in
-    // terrain-grid space after the atlas-to-grid Y mirror, with no resampling.
-    QImage grid=body.mirrored(false,true).transformed(
-        QTransform().rotate(-90.0*bodyRotation),Qt::FastTransformation);
-    const int size=grid.width(),band=qMax(1,qMin(12,size/4));
-    // CTile samples [1/16,15/16] of a tile. Constrain the visible edge,
-    // including both texels of its bilinear footprint, not the unused padding.
-    const int padding=size/16;
-    const auto surfaceCoordinate=[size,padding](int pixel) {
-        if(pixel<=padding)return 0.0;
-        if(pixel>=size-padding-1)return 1.0;
-        return (pixel+0.5-padding)/double(size-2*padding);
-    };
-    const auto worldPoint=[&](double u,double v) {
-        const double gx=2*u,gy=2*v;
-        const int qx=qMin(1,int(std::floor(gx))),qy=qMin(1,int(std::floor(gy)));
-        const double fx=gx-qx,fy=gy-qy;
-        const int vx=2*cellX+qx,vy=2*cellY+qy;
-        const QPointF p00=geometry.terrainVertexPosition(vx,vy),p11=geometry.terrainVertexPosition(vx+1,vy+1);
-        // Render triangles are (00,10,11) and (00,11,01) in each SEC quarter.
-        // Interpolating a bilinear quad changes the sample on warped geometry.
-        return origin+(fx>=fy
-            ?p00+(geometry.terrainVertexPosition(vx+1,vy)-p00)*(fx-fy)+(p11-p00)*fy
-            :p00+(p11-p00)*fx+(geometry.terrainVertexPosition(vx,vy+1)-p00)*(fy-fx));
-    };
+    QImage grid=canonical.mirrored(false,true);
+    const int size=grid.width(),band=qMin(12,size/4),guard=qMin(4,band);
+    const QVector<qint32> ids=corners(signature);
     const auto sourcePixel=[&](qint32 material,const QPointF& world) {
         const QImage& source=m_materialSources[material];
         const auto phase=[size](double coordinate) {
@@ -2979,25 +2910,26 @@ QImage CTerrainVirtualAtlas::worldBoundaryTile(
     };
     for(int y=0;y<size;++y)for(int x=0;x<size;++x) {
         int side=-1,distance=band;
-        const int distances[4]={qMax(0,y-padding),qMax(0,size-padding-1-x),qMax(0,size-padding-1-y),qMax(0,x-padding)};
+        const int distances[4]={y,size-1-x,size-1-y,x};
         for(int candidate=0;candidate<4;++candidate)
             if((sides&(1<<candidate)) && distances[candidate]<distance) {
                 side=candidate;distance=distances[candidate];
             }
         if(side<0)continue;
         const bool vertical=side==1 || side==3;
-        const double t=surfaceCoordinate(vertical?y:x);
-        const QPointF edgeWorld=worldPoint(vertical?(side==1?1:0):t,vertical?t:(side==2?1:0));
-        const QPointF world=worldPoint(surfaceCoordinate(x),surfaceCoordinate(y));
-        const double along=vertical?(edgeWorld.y()-origin.y()-2*cellY)/2
-            :(edgeWorld.x()-origin.x()-2*cellX)/2;
+        const double t=double(vertical?y:x)/qMax(1,size-1);
+        const int vx=2*cellX+(side==1?2:0),vy=2*cellY+(side==2?2:0);
+        const int half=t<=0.5?0:1;
+        const QPointF first=geometry.terrainVertexPosition(vx+(vertical?0:half),vy+(vertical?half:0));
+        const QPointF last=geometry.terrainVertexPosition(vx+(vertical?0:half+1),vy+(vertical?half+1:0));
+        const QPointF world=origin+first+(last-first)*(t*2-half);
+        const double along=vertical?(world.y()-origin.y()-2*cellY)/2
+            :(world.x()-origin.x()-2*cellX)/2;
         const qint32 a=ids.at(side==0 || side==3?0:side==1?1:3);
         const qint32 b=ids.at(side==0?1:side==3?3:2);
         const double weight=a==b?0.0:qRound(smoothUnit((along-0.38)/0.24)*255)/255.0;
         const QColor ca=sourcePixel(a,world),cb=sourcePixel(b,world),old=grid.pixelColor(x,y);
-        // Only the visible edge filter footprint is fully constrained. Inward
-        // texels use their own surface point and fade back to the resolved body.
-        const double fade=smoothUnit(1.0-double(distance)/band);
+        const double fade=distance<guard?1.0:smoothUnit(double(band-distance)/(band-guard));
         const auto mix=[&](int av,int bv,int previous) {
             return qBound(0,qRound((av*(1-weight)+bv*weight)*fade+previous*(1-fade)),255);
         };
@@ -3020,7 +2952,7 @@ QImage CTerrainVirtualAtlas::reviewGeneratedJunctionOwnershipMask(
     for(qint32 id : ids) unique.insert(id);
     if(unique.size() < 3 || !unique.contains(ownerMaterial)) return {};
     return canonicalGeneratedOwnershipMask(
-        m_generationSize, preview, ownerMaterial,
+        m_authoredTiles.front().size(), preview, ownerMaterial,
         m_materialBlendStyles.value(ownerMaterial,
             ETerrainBlendStyle::Organic), qMax(0, variation), ownerMaterial,
         provenance);
@@ -3031,7 +2963,7 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
     const QString& sourceLabel, CValidationReport* report,
     const QString& sourceNamespace, int sourceSlot)
 {
-    if(!m_valid || pixels.isNull() || pixels.size() != m_generationSize)
+    if(!m_valid || pixels.isNull() || pixels.size() != m_authoredTiles.front().size())
     {
         if(report) report->add("terrain.authored_library_pixels",
             EValidationSeverity::Error,
@@ -3045,8 +2977,7 @@ bool CTerrainVirtualAtlas::addAuthoredLibraryTransition(
         return false;
     STerrainFinalizedTile imported;
     imported.canonicalSignature = signature;
-    imported.pixels = terrainAtlasRasterTile(pixels, m_generationSize)
-        .convertToFormat(QImage::Format_RGBA8888);
+    imported.pixels = pixels.convertToFormat(QImage::Format_RGBA8888);
     imported.pixelSha256 = imageHash(imported.pixels);
     imported.authored = true;
     imported.sourceSlot = sourceSlot;
@@ -3372,8 +3303,8 @@ QImage CTerrainVirtualAtlas::composePage(const QVector<QImage>& tiles,
         // convention. Slot row zero is the visual top of the 8x8 page, so it
         // belongs in raw page row seven. Mirroring every tile and leaving the
         // page rows in visual order flips the complete atlas at upload time.
-        const QImage source = terrainAtlasRasterTile(tiles.at(firstTile + local),
-            QSize(tileSize, tileSize)).convertToFormat(QImage::Format_RGBA8888);
+        const QImage source = tiles.at(firstTile + local)
+            .convertToFormat(QImage::Format_RGBA8888);
         const int destinationX = (local % 8) * tileSize;
         const int destinationY = (7 - local / 8) * tileSize;
         for(int y = 0; y < tileSize; ++y)
@@ -3389,8 +3320,12 @@ QImage CTerrainVirtualAtlas::composeAtlasGrid(
     if(textureCount <= 0 || tiles.size() != textureCount * 64
        || columns <= 0 || columns > textureCount || tiles.isEmpty())
         return {};
-    const int tileSize = terrainAtlasMaximumNativeTileSize(tiles).width();
-    if(tileSize <= 0) return {};
+    const int tileSize = tiles.front().width();
+    if(tileSize <= 0 || tiles.front().height() != tileSize)
+        return {};
+    for(const QImage& tile : tiles)
+        if(tile.size() != QSize(tileSize, tileSize))
+            return {};
     const int pageSize = tileSize * 8;
     const int rows = (textureCount + columns - 1) / columns;
     QImage combined(pageSize * columns, pageSize * rows,
@@ -3457,8 +3392,7 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
     const QVector<qint32>& preferredPaintMaterials,
     const CTerrainTransitionCatalog* authoredDecodeCatalog,
     const QVector<bool>& preservePreferredPackedCells,
-    const QVector<STerrainAtlasAnimationRange>& animations,
-    const QVector<QByteArray>& authoredPagePayloads)
+    const QVector<STerrainAtlasAnimationRange>& animations)
 {
     STerrainAtlasFinalization result;
     result.capacityLimit = capacityLimit;
@@ -3674,53 +3608,8 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
             mergedBlocks.back().end = qMax(
                 mergedBlocks.back().end, block.end);
     }
-    // Keep supplied native animation pages verbatim, at every resolution.
-    // Recompressing even a 256px frame changes its BC1 pixels/mips on each
-    // ordinary Save. A smaller native page also cannot share larger HD tiles.
-    QMap<int, int> nativeAnimationPages;
-    QSet<int> retainedAnimationSourcePages;
     for(const SAnimationSourceBlock& block : mergedBlocks)
     {
-        const int sourcePage = block.start / kTerrainAtlasSlotsPerPage;
-        if((m_authoredTiles.at(block.start).size() == m_generationSize
-            && sourcePage >= authoredPagePayloads.size())
-           || retainedAnimationSourcePages.contains(sourcePage))
-            continue;
-        const int first = sourcePage * kTerrainAtlasSlotsPerPage;
-        if(first + kTerrainAtlasSlotsPerPage > m_authoredTiles.size())
-        {
-            result.error = QStringLiteral("A native animation page is incomplete in the working atlas.");
-            return result;
-        }
-        nativeAnimationPages.insert(denseImages.size() / kTerrainAtlasSlotsPerPage, sourcePage);
-        retainedAnimationSourcePages.insert(sourcePage);
-        for(int slot = first; slot < first + kTerrainAtlasSlotsPerPage; ++slot)
-        {
-            bool transparent = !animatedSourceSlots.contains(slot);
-            const QImage& pixels = m_authoredTiles.at(slot);
-            for(int y = 0; y < pixels.height() && transparent; ++y)
-                for(int x = 0; x < pixels.width(); ++x)
-                    if(qAlpha(pixels.pixel(x,y)) != 0) { transparent = false; break; }
-            if(transparent || slot >= liveSourceSlotCount)
-            {
-                // Unassigned HD padding is physical storage, not a selectable
-                // material. Do not give it a remap or forged semantic identity.
-                STerrainFinalizedTile padding;
-                padding.physicalPadding = true;
-                padding.pixels = pixels;
-                padding.pixelSha256 = imageHash(pixels);
-                padding.runtimeTerrainType = sourceTileTypes.value(slot, 0);
-                denseImages.append(pixels);
-                result.tiles.append(padding);
-            }
-            else if(!addAuthoredOutput(slot, QStringLiteral("A native animation page is outside the working atlas."), true))
-                return result;
-        }
-    }
-    for(const SAnimationSourceBlock& block : mergedBlocks)
-    {
-        if(retainedAnimationSourcePages.contains(block.start / kTerrainAtlasSlotsPerPage))
-            continue;
         const int blockLength = block.end - block.start;
         const int outputOffset = denseImages.size()
             % kTerrainAtlasSlotsPerPage;
@@ -3939,18 +3828,13 @@ STerrainAtlasFinalization CTerrainVirtualAtlas::finalize(
         }
         result.tileTypes.append(type);
     }
-    const int tileSize = m_generationSize.width();
+    const int tileSize = denseImages.front().width();
     result.textureCount = (denseImages.size() + 63) / 64;
     for(int page = 0; page < result.textureCount; ++page)
     {
-        const bool nativeAnimationPage = nativeAnimationPages.contains(page);
-        const QImage image = composePage(denseImages, page * 64,
-            nativeAnimationPage ? denseImages.at(page * 64).width() : tileSize);
+        const QImage image = composePage(denseImages, page * 64, tileSize);
         QString diagnostic;
-        const int sourcePage = nativeAnimationPages.value(page, -1);
-        const QByteArray mmp = nativeAnimationPage && sourcePage < authoredPagePayloads.size()
-            ? authoredPagePayloads.at(sourcePage)
-            : ei::encodeMmpDxt1(image, true, &diagnostic);
+        const QByteArray mmp = ei::encodeMmpDxt1(image, true, &diagnostic);
         if(mmp.isEmpty())
         {
             result.error = QStringLiteral("Could not encode atlas page: %1").arg(diagnostic);
@@ -4042,7 +3926,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildPortablePackage(
         reinterpret_cast<uchar*>(replacementMp.data()+20));
     qToLittleEndian<quint32>(quint32(finalization.tileTypes.size()),
         reinterpret_cast<uchar*>(replacementMp.data()+24));
-    qToLittleEndian<quint32>(quint32(finalization.pages.front().width() / 8),
+    qToLittleEndian<quint32>(quint32(finalization.tiles.front().pixels.width()),
         reinterpret_cast<uchar*>(replacementMp.data()+28));
     qToLittleEndian<quint32>(quint32(finalization.animations.size()),
         reinterpret_cast<uchar*>(replacementMp.data()+34));
@@ -4266,12 +4150,19 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
             "The working terrain atlas would discard authored texture pages.");
         return result;
     }
-    const QSize tileSize = terrainAtlasMaximumNativeTileSize(activeTiles);
+    const QSize tileSize = activeTiles.front().size();
     if(tileSize.isEmpty())
     {
-        result.error = QStringLiteral("The working terrain atlas contains a missing or non-square tile.");
+        result.error = QStringLiteral("The working terrain tiles have no pixels.");
         return result;
     }
+    for(const QImage& tile : activeTiles)
+        if(tile.size() != tileSize || tile.isNull())
+        {
+            result.error = QStringLiteral(
+                "The working terrain atlas contains a missing or mismatched tile.");
+            return result;
+        }
 
     // Reuse the canonical parameter validator for every live material value.
     // Its source animation table is known to fit the persisted baseline; live
@@ -4397,54 +4288,34 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
         if(partialPage < authoredPagePayloads.size())
         {
             QString diagnostic;
+            const QImage pixels = composePage(
+                activeTiles, partialPage * 64, tileSize.width());
+            const QByteArray payload = ei::encodeMmpDxt1(
+                pixels, true, &diagnostic);
+            if(payload.isEmpty())
+            {
+                result.error = QStringLiteral(
+                    "Could not encode reused authored-tail page %1: %2")
+                    .arg(partialPage).arg(diagnostic);
+                return result;
+            }
             QSet<int> reusedLocalSlots;
             const int pageFirstSlot = partialPage * 64;
             for(int slot = int(map.tileCount);
-                slot < activeTileTypes.size() && slot < pageFirstSlot + 64; ++slot)
+                slot < activeTileTypes.size()
+                    && slot < pageFirstSlot + 64; ++slot)
+                reusedLocalSlots.insert(slot - pageFirstSlot);
+            const QByteArray patched = ei::patchMmpDxt1AtlasTiles(
+                authoredPagePayloads.at(partialPage), payload,
+                reusedLocalSlots, &diagnostic);
+            if(patched.isEmpty())
             {
-                QImage original;
-                if(!ei::decodeMmpDxt1AtlasTile(authoredPagePayloads.at(partialPage),
-                        slot - pageFirstSlot, &original, &diagnostic))
-                {
-                    result.error = diagnostic;
-                    return result;
-                }
-                const QImage active = activeTiles.at(slot).convertToFormat(QImage::Format_RGBA8888);
-                if(active.size() != original.size())
-                {
-                    result.error = QStringLiteral("A new tile cannot resize an authored page; append a new page instead.");
-                    return result;
-                }
-                if(active != original.convertToFormat(QImage::Format_RGBA8888))
-                    reusedLocalSlots.insert(slot - pageFirstSlot);
+                result.error = QStringLiteral(
+                    "Could not patch reused authored-tail page %1: %2")
+                    .arg(partialPage).arg(diagnostic);
+                return result;
             }
-            // Merely extending MP's logical table across an untouched padding
-            // tail is not an edit to its compressed pixels.
-            if(!reusedLocalSlots.isEmpty())
-            {
-                const QImage pixels = composePage(
-                    activeTiles, partialPage * 64, activeTiles.at(partialPage * 64).width());
-                const QByteArray payload = ei::encodeMmpDxt1(
-                    pixels, true, &diagnostic);
-                if(payload.isEmpty())
-                {
-                    result.error = QStringLiteral(
-                        "Could not encode reused authored-tail page %1: %2")
-                        .arg(partialPage).arg(diagnostic);
-                    return result;
-                }
-                const QByteArray patched = ei::patchMmpDxt1AtlasTiles(
-                    authoredPagePayloads.at(partialPage), payload,
-                    reusedLocalSlots, &diagnostic);
-                if(patched.isEmpty())
-                {
-                    result.error = QStringLiteral(
-                        "Could not patch reused authored-tail page %1: %2")
-                        .arg(partialPage).arg(diagnostic);
-                    return result;
-                }
-                pagePayloads[partialPage] = patched;
-            }
+            pagePayloads[partialPage] = patched;
         }
     }
     for(int page = authoredPagePayloads.size(); page < textureCount; ++page)
@@ -4543,7 +4414,7 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
 {
     if(!authoredTiles.isEmpty() && m_workingImages.size() < m_capacityLimit)
     {
-        QImage blank(terrainAtlasMaximumNativeTileSize(authoredTiles), QImage::Format_RGBA8888);
+        QImage blank(authoredTiles.front().size(), QImage::Format_RGBA8888);
         blank.fill(Qt::transparent);
         m_workingImages.resize(m_capacityLimit);
         for(int slot = authoredTiles.size(); slot < m_workingImages.size(); ++slot)
@@ -4579,8 +4450,6 @@ QString CTerrainWorkingAtlas::error() const
 
 int CTerrainWorkingAtlas::generatedTileCount() const
 {
-    if(!m_mixedEdgeRecipes.isEmpty())
-        return qMax(0,activeTileCount()-m_authoredSlotCount);
     return m_resolver ? m_resolver->generatedTiles().size() : 0;
 }
 
@@ -4630,8 +4499,6 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_workingToVirtual = staged.m_workingToVirtual;
     m_animationCopySources = staged.m_animationCopySources;
     m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
-    m_mixedEdgeRecipes = staged.m_mixedEdgeRecipes;
-    m_worldBoundaryRecipes = staged.m_worldBoundaryRecipes;
     m_changedSlots = staged.m_changedSlots;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
@@ -4832,36 +4699,6 @@ bool CTerrainWorkingAtlas::normalizeAnimationRanges(
     return true;
 }
 
-bool CTerrainVirtualAtlas::sharesRepairStateWith(const CTerrainVirtualAtlas& o) const
-{
-    return m_authoredTiles.isSharedWith(o.m_authoredTiles) && m_generationSize==o.m_generationSize
-        && m_materialSources.isSharedWith(o.m_materialSources) && m_materialSourceSlots.isSharedWith(o.m_materialSourceSlots)
-        && m_sourceTileTypes.isSharedWith(o.m_sourceTileTypes) && m_materialRuntimeTypes.isSharedWith(o.m_materialRuntimeTypes)
-        && m_materialBlendStyles.isSharedWith(o.m_materialBlendStyles)
-        && m_generatedBySignature.isSharedWith(o.m_generatedBySignature) && m_generatedByPixels.isSharedWith(o.m_generatedByPixels)
-        && m_generatedTiles.isSharedWith(o.m_generatedTiles) && m_blendMaskTemplates.isSharedWith(o.m_blendMaskTemplates)
-        && m_authoredLibraryCatalog.sharesRepairStateWith(o.m_authoredLibraryCatalog)
-        && m_authoredLibraryGeneratedIndices.isSharedWith(o.m_authoredLibraryGeneratedIndices)
-        && m_distributionSeed==o.m_distributionSeed && m_generatedTilesOpaque==o.m_generatedTilesOpaque
-        && m_valid==o.m_valid && m_error==o.m_error;
-}
-
-bool CTerrainWorkingAtlas::sharesRepairStateWith(const CTerrainWorkingAtlas& o) const
-{
-    return m_capacityLimit==o.m_capacityLimit && m_authoredSlotCount==o.m_authoredSlotCount
-        && m_authoredCatalog.sharesRepairStateWith(o.m_authoredCatalog)
-        && m_workingCatalog.sharesRepairStateWith(o.m_workingCatalog)
-        && m_authoredImages.isSharedWith(o.m_authoredImages) && m_workingImages.isSharedWith(o.m_workingImages)
-        && m_workingTileTypes.isSharedWith(o.m_workingTileTypes)
-        && m_virtualToWorking.isSharedWith(o.m_virtualToWorking) && m_workingToVirtual.isSharedWith(o.m_workingToVirtual)
-        && m_animationCopySources.isSharedWith(o.m_animationCopySources)
-        && m_foreignPhysicalTiles.isSharedWith(o.m_foreignPhysicalTiles)
-        && m_worldBankNamespaceAliases.isSharedWith(o.m_worldBankNamespaceAliases)
-        && m_mixedEdgeRecipes.isSharedWith(o.m_mixedEdgeRecipes) && m_worldBoundaryRecipes.isSharedWith(o.m_worldBoundaryRecipes)
-        && bool(m_resolver)==bool(o.m_resolver)
-        && (!m_resolver || m_resolver->sharesRepairStateWith(*o.m_resolver));
-}
-
 QByteArray CTerrainWorkingAtlas::stateFingerprint() const
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
@@ -4920,9 +4757,6 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
         addInt(copy.key());
         addInt(copy.value());
     }
-    if(!m_mixedEdgeRecipes.isEmpty())
-        for(auto recipe=m_mixedEdgeRecipes.cbegin();recipe!=m_mixedEdgeRecipes.cend();++recipe)
-        { addBytes(recipe.key().toUtf8()); addInt(recipe.value()); }
     addInt(m_changedSlots.size());
     for(int slot : m_changedSlots)
         addInt(slot);
@@ -4961,15 +4795,6 @@ bool CTerrainWorkingAtlas::addAuthoredLibraryTransition(
 {
     return m_resolver && m_resolver->addAuthoredLibraryTransition(
         signature, pixels, sourceLabel, report, sourceNamespace, sourceSlot);
-}
-
-void CTerrainWorkingAtlas::restoreHdVariantIdentity(int slot,const QString& id,const QVector<int>& aliases)
-{
-    STerrainWorkingTileIdentity identity;
-    if(!id.startsWith(QStringLiteral("hd-variant:"))||!tileIdentityForSlot(slot,&identity))return;
-    identity.sourceNamespace=id;identity.sourceSlotAliases=aliases;
-    identity.sourceSlot=aliases.isEmpty()?-1:aliases.front();identity.origin=ETerrainWorkingTileOrigin::ImportedAuthored;
-    m_foreignPhysicalTiles[slot]=identity;
 }
 
 bool CTerrainWorkingAtlas::addStockBlendMaskTemplate(
@@ -5109,9 +4934,7 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
        || m_workingImages.at(slot).isNull())
         return false;
     if(m_foreignPhysicalTiles.contains(slot)) {
-        *identity=m_foreignPhysicalTiles.value(slot);
-        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
-        return true;
+        *identity=m_foreignPhysicalTiles.value(slot);return true;
     }
     const auto mapped = m_workingToVirtual.constFind(slot);
     if(mapped == m_workingToVirtual.constEnd())
@@ -5128,7 +4951,6 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
         identity->workingSlot = slot;
         identity->physicalPixelSha256 = imageHash(m_workingImages.at(slot));
         identity->runtimeTerrainType = runtimeTerrainTypeForSlot(slot);
-        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
         return true;
     }
 
@@ -5160,7 +4982,6 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
                 packed.encode(), &variantFound);
         if(variantFound)
             identity->routeOwnerMaterial = variant.routeOwnerMaterial;
-        identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
         return true;
     }
     if(!m_resolver || sourceIndex < 0
@@ -5179,7 +5000,6 @@ bool CTerrainWorkingAtlas::tileIdentityForSlot(
     identity->stockDerivedBlend = source.stockDerivedBlend;
     identity->canonicalGeneratedBlend = source.canonicalGeneratedBlend;
     identity->routeOwnerMaterial = source.routeOwnerMaterial;
-    identity->sourceNamespaceAliases=m_worldBankNamespaceAliases.value(slot);
     return true;
 }
 
@@ -5343,14 +5163,6 @@ bool CTerrainWorkingAtlas::restoreFinalizedProvenance(
             origins->retainedMapOutputs.insert(outputSlot);
     }
 
-    // Preserve every recipe alias when typed pixel dedup merges recipes.
-    for(auto recipe=m_mixedEdgeRecipes.cbegin();recipe!=m_mixedEdgeRecipes.cend();++recipe)
-    {
-        const int output=finalization->authoredSlotRemap.value(recipe.value(),-1);
-        if(output>=0 && output<finalization->tiles.size())
-            finalization->tiles[output].mixedEdgeRecipes.append(recipe.key());
-    }
-
     // The clean finalizer initially sees every live working slot as authored.
     // Its first hash therefore describes that flattened cache identity. Once
     // the real source/generated provenance is restored, rebuild the identity
@@ -5385,12 +5197,8 @@ int CTerrainWorkingAtlas::realize(
     // safe extension slot exactly when no layer references it and undo history
     // does not protect it. Do not skip that reusable tail merely because the
     // MMP page itself is physically complete.
-    const QSize generationSize = terrainAtlasMaximumNativeTileSize(m_authoredImages);
     for(int slot = m_authoredSlotCount; slot < m_capacityLimit; ++slot)
     {
-        if(slot < m_authoredImages.size()
-           && m_authoredImages.at(slot).size() != generationSize)
-            continue;
         if(workingUsage->value(slot) == 0 && !protectedSlots.contains(slot))
         {
             workingSlot = slot;
@@ -5464,15 +5272,6 @@ void CTerrainWorkingAtlas::installCatalogVariants(
             variant.routeOwnerMaterial = sourceTile.authored
                 ? 0 : sourceTile.routeOwnerMaterial;
             variant.canonicalGeneratedRoute = !sourceTile.authored;
-            variant.randomRotationAllowed = true;
-            for(qint32 material : {grid.northWest, grid.northEast, grid.southEast, grid.southWest}) {
-                STerrainTransitionSignature uniform;
-                uniform.northWest = uniform.northEast = uniform.southEast = uniform.southWest = material;
-                const auto anchors = m_authoredCatalog.paintVariants(uniform);
-                bool allowed = !anchors.isEmpty();
-                for(const auto& anchor : anchors) allowed &= anchor.randomRotationAllowed;
-                variant.randomRotationAllowed &= allowed;
-            }
             // Global-authored and canonical-generated tiles fill an exact
             // signature/runtime gap. They are not an extra variation pool
             // when this map already authored a selectable candidate for that
@@ -5584,48 +5383,6 @@ quint16 CTerrainWorkingAtlas::resolve(
     return packed.encode();
 }
 
-void CTerrainWorkingAtlas::restoreMixedEdgeRecipe(int slot, const QString& recipeKey)
-{
-    if(slot < 0 || slot >= activeTileCount()
-       || recipeKey.size()!=78 || !recipeKey.startsWith(QStringLiteral("mixed-edge-b2:")))
-        return;
-    m_mixedEdgeRecipes.insert(recipeKey, slot);
-    STerrainWorkingTileIdentity identity;
-    if(tileIdentityForSlot(slot, &identity))
-    {
-        identity.origin = ETerrainWorkingTileOrigin::CanonicalGenerated;
-        identity.canonicalGeneratedBlend = true;
-        identity.blendProvenance = recipeKey;
-        m_foreignPhysicalTiles.insert(slot, identity);
-    }
-}
-
-int CTerrainWorkingAtlas::importMixedEdgeTile(const QImage& pixels, qint32 runtimeType,
-    const STerrainTransitionSignature& signature, const QString& recipeKey,
-    CValidationReport* report)
-{
-    const int reused = mixedEdgeSlot(recipeKey);
-    if(reused >= 0) return reused;
-    const int slot = importPhysicalTile(pixels, runtimeType, &signature,
-        recipeKey, -1, report, true);
-    if(slot >= 0) restoreMixedEdgeRecipe(slot, recipeKey);
-    return slot;
-}
-
-int CTerrainWorkingAtlas::worldBoundarySlot(const QByteArray& key) const
-{
-    const auto found=m_worldBoundaryRecipes.constFind(key);
-    if(found==m_worldBoundaryRecipes.cend())return -1;
-    const int slot=found->first;
-    return slot>=0&&slot<m_workingImages.size()&&imageHash(m_workingImages[slot])==found->second?slot:-1;
-}
-
-void CTerrainWorkingAtlas::rememberWorldBoundaryRecipe(const QByteArray& key,int slot)
-{
-    if(slot>=0&&slot<m_workingImages.size())
-        m_worldBoundaryRecipes.insert(key,qMakePair(slot,imageHash(m_workingImages[slot])));
-}
-
 int CTerrainWorkingAtlas::importWorldBoundaryTile(const QImage& pixels,qint32 runtimeType,
     const STerrainTransitionSignature& signature,CValidationReport* report)
 {
@@ -5644,15 +5401,8 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
         const STerrainTransitionSignature* signature,const QString& sourceNamespace,
         int sourceSlot,CValidationReport* report,bool preserveAuthoredPages)
 {
-    bool nativeBoundary=false;
-    if(sourceNamespace==QStringLiteral("canonical-world-boundary-v1"))
-        for(int slot=0;slot<m_authoredImages.size();++slot)
-            if(m_workingTileTypes.value(slot,-1)==runtimeType
-               && m_authoredImages[slot].size()==pixels.size()) {nativeBoundary=true;break;}
     if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
-       || (pixels.size()!=terrainAtlasMaximumNativeTileSize(m_authoredImages)
-           && !nativeBoundary
-           && !(sourceNamespace.startsWith(QStringLiteral("hd-variant:"))&&pixels.size()==QSize(256,256)))) {
+       || pixels.size()!=m_authoredImages.first().size()) {
         if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
             "The selected physical tile has incompatible pixels or runtime type.");return -1;
     }
@@ -5661,15 +5411,9 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
            && m_workingImages.at(slot)==pixels) {
             SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
             bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);
-            if(!signature || (known && existing==*signature)) {
-                if(sourceNamespace.startsWith(QStringLiteral("world-bank:")))
-                    m_worldBankNamespaceAliases[slot].append(sourceNamespace);
-                return slot;
-            }
+            if(!signature || (known && existing==*signature))return slot;
         }
-    int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
-    if(slot<m_authoredImages.size() && m_authoredImages.at(slot).size()!=pixels.size())
-        slot=qMax(activeTileCount(),m_authoredImages.size());
+    const int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
     if(slot>=m_capacityLimit) {
         if(report)report->add("terrain.world.capacity",EValidationSeverity::Error,"The neighboring atlas is full.");return -1;
     }
@@ -5681,16 +5425,9 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
     if(signature) {
         identity.canonicalSignature=*signature;
         const auto base=m_workingCatalog.paintGridMirrored()?CTerrainTransitionCatalog::mirroredGridY(*signature):*signature;
-        bool rotationsAllowed=true;
-        if(sourceNamespace.startsWith(QStringLiteral("hd-variant:"))) {
-            const auto anchors=m_workingCatalog.paintVariants(*signature);
-            rotationsAllowed=!anchors.isEmpty();
-            for(const auto& anchor:anchors)rotationsAllowed&=anchor.randomRotationAllowed;
-        }
         for(int rotation=0;rotation<4;++rotation) {
             SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);packed.rotation=quint8(rotation);
             STerrainTransitionVariant variant;variant.packedTile=packed.encode();
-            variant.randomRotationAllowed=rotationsAllowed;
             variant.signature=CTerrainTransitionCatalog::rotated(base,-rotation);m_workingCatalog.addVariant(variant,report);
         }
     }
