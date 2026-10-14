@@ -1,11 +1,11 @@
 # EI Mapper Ataman
 
-Версия **179**, кандидат: автоматическая современная кисть получает явный
-эталонный RES, выбранный владельцем. Авторские тайлы одного родного атласа
-используются без смешения с другими банками того же материала. Происхождение
+Версия **179**: автоматическая современная кисть получает явный
+эталонный RES, выбранный владельцем. Родной атлас карты получает приоритет;
+варианты одной сигнатуры импортируются из одного авторского банка. Происхождение
 и разрешённые варианты сохраняются вместе с кэшем переходов.
-Проверка нового мазка и Save/reopen продолжается; визуальная готовность
-не объявлена. Живые карты и текстурные архивы при установке не подменяются.
+Новый мазок, Undo, Save/reopen и повторное использование кэша проверены;
+визуальная приёмка владельцем остаётся открытой. Живые карты и текстурные архивы при установке не подменяются.
 Генератор, формы и утверждённые маски131 сохранены.
 [Выбор исходного main](docs/validation/ATAMAN_ILUFUS_MAIN_TRANSITIONS_20261014.md).
 [Сверка с исходными мапперами](docs/validation/ATAMAN_UPSTREAM_TRANSITIONS_REFERENCE_20261014.md).
@@ -41,7 +41,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `178` in progress, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `179`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
