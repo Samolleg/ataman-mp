@@ -20,10 +20,43 @@ world-путь возвращает outcome `unchanged` до загрузки д
 
 ## Проверки
 
-Ещё не выполнены. Адресный набор: идентичность/отделение geometry, packed
-types, semantic field, seed, atlas source/resolver; реальный повтор в группе8
-карт без входа в подготовку, UI без audit/confirm, инвалидация активной и
-прямой соседней карты, seed, источников, стыка, режима и Undo. Нужны точные
-документы/атласы, прежняя область175, native/отмена/Undo/Redo и0 запеканий.
-Используются прежние приватные входы174 без записи в них. Ручная визуальная
-приёмка владельцем и исходная цель172 остаются открыты.
+Program source main `21ee8ee6801abd79ae2c85fb4c950eddfd1b31fd`.
+Release/CLI176 PASS. Проверенный EXE SHA256:
+`474E473320AE1660ED9BE9B7A407848E503AE883C6659C866126FBC2DDC60194`.
+
+- QtTest9 PASS /0 FAIL /0 SKIP: identity/отделение geometry, packed types,
+  semantic field, seed и прежний план области175;7 сценариев+init/cleanup.
+- Production mixed-edge31 PASS /0 FAIL /0 SKIP: замороженный atlas/resolver,
+  инвалидация источника и seed, upload bookkeeping без инвалидации,
+  готовые рецепты19 reuse /0 rasterized /1ms, GUI-отмена без изменения live.
+- Приватная группа8 карт52 PASS /0 FAIL, exit0. После отмены отметки нет.
+  Один успешный cold-проход90980ms:6664 изменения в4 картах,
+  прежние1282 B2 rasterized+5097 reuse и553 seam rasterizations.
+- Немедленный прямой повтор5ms, UI-путь4ms. Outcome `unchanged`,
+  0 rasterizations, счётчик подготовки остался2 (отмена+первый полный проход).
+  UI audit action counter не изменился: до подтверждения, hash-аудита,
+  загрузки атласов или обхода тайлов повтор не дошёл.
+- Инвалидация после изменения seed, активной/прямой соседней модели,
+  atlas resolver, источников, положения общего края, режима и Undo PASS.
+  Возврат точных входов и Redo допускают прежнее завершённое состояние.
+- Область175:4 дальние карты и417856 layer-cell вне области точны;
+  native-вода/animation refs, отмена и точные Undo/Redo сохранены.
+  Финальный повтор после Redo5ms/0 rasterizations, прежние модели/атласы.
+- Все входные MPR и layout остались побайтно неизменны. Использовались
+  прежние приватные входы174 без записи в них. Проверки175 на неизменённой
+  старой сборке не повторялись; проверялся новый176 и затронутое поведение.
+
+Логи/receipts: `build-resolve-unchanged-176-20261014` — `unit.stdout.log`,
+`mixed.stdout.log`, `world.stdout.log`, `validated-source.json`,
+`build-receipt.json`, `unit-receipt.json`, `mixed-receipt.json`,
+`world-receipt.json`. Сборка и игровая/визуальная приёмка различаются:
+ручная приёмка владельцем и исходная цель172 остаются открыты.
+
+## Пакет и передача
+
+`build-staging-176-unchanged`: чистый finalizer/validator PASS; staged EXE
+совпадает с проверенным, CLI176 PASS. Manifest SHA256:
+`92227273F0F5CB527F68657EC019F6BBE08F3489106C9BD3CEA5A0130F5D9C93`.
+Состояние подтверждено `staging-receipt.json`. Установка в постоянную папку
+остановлена host guard из-за работающего редактора PID38812; программные
+файлы175 не заменялись. Закрытие запрошено по договору передачи.
