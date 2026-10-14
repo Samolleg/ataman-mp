@@ -560,7 +560,7 @@ QString terrainAtlasBindingKey(
 
 STerrainAtlasArchiveBindingResult findTerrainPaintArchive(
     const QStringList& archives, const QString& referenceArchive,
-    const QString& ns, int pages, int slots, const QByteArray& pixels,
+    const QString& ns, int pages, int slotCount, const QByteArray& pixels,
     QVector<QImage>* decoded = nullptr)
 {
     if(!referenceArchive.isEmpty())
@@ -572,7 +572,7 @@ STerrainAtlasArchiveBindingResult findTerrainPaintArchive(
             return missing;
         }
         const auto reference = CTerrainAtlasArchiveBindingResolver::findExactArchive(
-            {referenceArchive}, ns, pages, slots, pixels, QString(), decoded);
+            {referenceArchive}, ns, pages, slotCount, pixels, QString(), decoded);
         // An explicit reference owns its complete native atlases. An older
         // binding in another RES cannot be mixed into that same paint pool.
         if(reference.success() || reference.hasCompleteArchive(referenceArchive))
@@ -580,7 +580,7 @@ STerrainAtlasArchiveBindingResult findTerrainPaintArchive(
     }
     // Custom user namespaces absent from the reference keep their sources.
     return CTerrainAtlasArchiveBindingResolver::findExactArchive(
-        archives, ns, pages, slots, pixels, QString(), decoded);
+        archives, ns, pages, slotCount, pixels, QString(), decoded);
 }
 
 QString terrainNativeSourceNamespace(QString ns)
