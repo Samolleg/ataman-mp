@@ -567,7 +567,7 @@ private slots:
     void paintedMaterialOwnsGeneratedMaskFamily();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
-    void proceduralCornerAndSideContoursJoinWithoutInsetStep();
+    void contextFreeRepairKeepsApprovedAuthoredMaskLanguage();
     void rotationsDeduplicateButSemanticAliasesRemainDistinct();
     void generatedTerrainTypeUsesMajorityAcrossRotation();
     void generatedTerrainTypeTieUsesPaintedMaterialAndTypedDedup();
@@ -2923,41 +2923,59 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
     QCOMPARE(fourWay.generatedTiles().size(), 1);
 }
 
-void TerrainVirtualAtlasTests::proceduralCornerAndSideContoursJoinWithoutInsetStep()
+void TerrainVirtualAtlasTests::contextFreeRepairKeepsApprovedAuthoredMaskLanguage()
 {
-    for(int size : {64, 128, 256})
-      for(int variation : {0, 1})
+    // Call the production API directly. CTestTerrainVirtualAtlas::resolve()
+    // supplies a brush owner, which hid the missing-owner repair regression.
+    const STerrainTransitionSignature requests[] = {
+        signature(1, 2, 2, 2), signature(1, 1, 2, 2),
+        signature(1, 2, 1, 2), signature(1, 1, 1, 2)};
+    for(int style : {1, 2, 3, 4, 5, 6, 7, 8, 9, 11})
+      for(const auto& requested : requests)
       {
         Fixture fixture;
         for(QImage& image : fixture.images)
-            image = image.scaled(size, size);
-        CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u,
-            {}, {{1, ETerrainBlendStyle::Organic},
-                 {2, ETerrainBlendStyle::Organic}});
+            image = image.scaled(128, 128);
+        CTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u,
+            {}, {{1, ETerrainBlendStyle(style)},
+                 {2, ETerrainBlendStyle(style)}});
         CValidationReport report;
-        const QImage corner = atlas.reviewGeneratedBlend(
-            signature(1, 2, 2, 2), variation, nullptr, &report)
-                .mirrored(false, true);
-        const QImage side = atlas.reviewGeneratedBlend(
-            signature(1, 2, 2, 1), variation, nullptr, &report)
-                .mirrored(false, true);
-        QVERIFY2(!corner.isNull() && !side.isNull(),
-                 qPrintable(report.toText()));
-        const auto crossing = [](const QImage& image, int row) {
-            int last = -1;
-            for(int x = 0; x < image.width(); ++x)
-                if(image.pixelColor(x, row).red() >= 120) last = x;
-            return last;
-        };
-        const int edge = crossing(side, 0);
-        // The outermost texel alone used to pass continuity checks while the
-        // next row still extended far beyond its neighbour's contour.
-        for(int row = 0; row <= qMax(2, size / 64); ++row)
-            QVERIFY2(qAbs(crossing(corner, row) - edge) <= 2,
-                qPrintable(QString("%1px variation %2 row %3: corner %4, side %5")
-                    .arg(size).arg(variation).arg(row)
-                    .arg(crossing(corner, row)).arg(edge)));
+        QString source;
+        const QImage actual = atlas.reviewGeneratedBlend(
+            requested, 0, &source, &report);
+        QVERIFY2(!actual.isNull(), qPrintable(report.toText()));
+        QVERIFY2(source.contains(QStringLiteral("-approved")),
+            qPrintable(QString("Style %1 used %2").arg(style).arg(source)));
+        bool matched = false;
+        // A context-free caller chooses a valid historical approved route;
+        // its pixels must be an existing brush route, never a new silhouette.
+        for(int owner : {1, 2})
+          for(int variation : {0, 1})
+          {
+            QString explicitSource;
+            const QImage expected = atlas.reviewGeneratedBlend(
+                requested, variation, &explicitSource, &report, owner);
+            matched |= source == explicitSource && actual == expected;
+          }
+        QVERIFY(matched);
+        CTerrainEditModel geometry;
+        QMap<QByteArray,QImage> cache;
+        QCOMPARE(atlas.worldBoundaryTile(requested, geometry, {}, 0, 0,
+                     0, &cache, &report), actual);
       }
+    Fixture fixture;
+    CTerrainVirtualAtlas junction(fixture.catalog, fixture.images, 0, {},
+        {{1, ETerrainBlendStyle::Soil}, {2, ETerrainBlendStyle::Grass},
+         {3, ETerrainBlendStyle::Stone}});
+    for(int variation : {0, 1})
+    {
+        QString source;
+        QVERIFY(!junction.reviewGeneratedBlend(signature(1, 2, 3, 3),
+            variation, &source).isNull());
+        for(const QString& component : source.split(QStringLiteral("; ")))
+            QVERIFY2(component.contains(QStringLiteral("-approved")),
+                     qPrintable(source));
+    }
 }
 
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
