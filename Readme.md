@@ -1,12 +1,12 @@
 # EI Mapper Ataman
 
-Версия **180**, кандидат: автоматическая современная кисть согласует готовые
+Версия **180**: автоматическая современная кисть согласует готовые
 тайлы выбранного HDPack по отображаемым кромкам соседей, с учётом поворота
 и UV-отступа рендерера. Совпадение четырёх материалов больше не означает
 случайную взаимозаменяемость разных рисунков края. Общая кисть учитывает
 исходные изображения соприкасающихся карт в их собственных атласах.
-Проверка настоящего нового мазка продолжается; прежний вид не объявлен
-восстановленным. Живые игровые карты и RES при установке не подменяются.
+Новый мазок, Undo/Save/reopen и общий стык двух атласов проверены;
+визуальная приёмка владельцем остаётся открытой. Живые игровые карты и RES при установке не подменяются.
 Генератор, формы и утверждённые маски131 сохранены.
 [Выбор исходного main](docs/validation/ATAMAN_ILUFUS_MAIN_TRANSITIONS_20261014.md).
 [Сверка с исходными мапперами](docs/validation/ATAMAN_UPSTREAM_TRANSITIONS_REFERENCE_20261014.md).
@@ -42,7 +42,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `180` in progress, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `180`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
