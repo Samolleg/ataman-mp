@@ -85,7 +85,7 @@ private slots:
                     map.field.cellSignature(cell%map.field.tileWidth(),cell/map.field.tileWidth()));
         }
         // Scope changes with the active map; it is not a fixed cohort boundary.
-        const auto switched=worldMaterialSeamSides(maps,e.id);
+        const auto switched=worldMaterialSeamSides({a,e,n,far},e.id);
         QVERIFY(!switched.value(far.id).isEmpty());
     }
     void overlaySeamsRespectSparsePresenceAndSlotZero()
