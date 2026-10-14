@@ -484,7 +484,7 @@ QImage rotateImageClockwise(const QImage& image)
 struct SCanonicalBlendMaskProfile
 {
     double cornerExponent{1.6};
-    double cornerExtent{0.62};
+    double cornerExtent{0.50};
     double adjacentExtent{0.50};
     double displacement{0.035};
     double featherEdge{0.012};
@@ -614,14 +614,20 @@ QImage canonicalNorthWestCornerMask(const QSize& size,
 {
     if(size.width() <= 0 || size.width() != size.height()) return {};
     SCanonicalBlendMaskProfile profile = canonicalBlendMaskProfile(style);
+    // Keep the corner substantial while both exterior crossings stay at 1/2.
+    profile.cornerExponent = qMax(2.1, profile.cornerExponent);
     // The two variants change the large silhouette rather than adding fine
     // grain. The exterior crossings remain fixed because their displacement
     // envelope is exactly zero on the tile boundary.
     if(variation & 1)
     {
-        profile.cornerExponent = qMax(1.25, profile.cornerExponent - 0.10);
+        profile.cornerExponent += 1.0;
         profile.displacement *= -0.90;
     }
+    // Corner and side silhouettes must meet at the same half-edge crossing,
+    // including the rows just inside the edge. A 0.62 corner hidden behind a
+    // corrected one-texel border left a 15px step beside a 0.50 side at 128px.
+    // Retain substantial corner coverage without extending its endpoints.
     QImage result(size, QImage::Format_Grayscale8);
     const int divisor = qMax(1, size.width() - 1);
     const double pi = 3.14159265358979323846;

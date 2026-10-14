@@ -567,6 +567,7 @@ private slots:
     void paintedMaterialOwnsGeneratedMaskFamily();
     void materialBlendStylesProvideBoundedDistinctVariants();
     void generatedNeighbourEdgesArePixelContinuous();
+    void proceduralCornerAndSideContoursJoinWithoutInsetStep();
     void rotationsDeduplicateButSemanticAliasesRemainDistinct();
     void generatedTerrainTypeUsesMajorityAcrossRotation();
     void generatedTerrainTypeTieUsesPaintedMaterialAndTypedDedup();
@@ -2920,6 +2921,43 @@ void TerrainVirtualAtlasTests::materialBlendStylesProvideBoundedDistinctVariants
         }
     QCOMPARE(threeWay.generatedTiles().size(), 1);
     QCOMPARE(fourWay.generatedTiles().size(), 1);
+}
+
+void TerrainVirtualAtlasTests::proceduralCornerAndSideContoursJoinWithoutInsetStep()
+{
+    for(int size : {64, 128, 256})
+      for(int variation : {0, 1})
+      {
+        Fixture fixture;
+        for(QImage& image : fixture.images)
+            image = image.scaled(size, size);
+        CTestTerrainVirtualAtlas atlas(fixture.catalog, fixture.images, 19u,
+            {}, {{1, ETerrainBlendStyle::Organic},
+                 {2, ETerrainBlendStyle::Organic}});
+        CValidationReport report;
+        const QImage corner = atlas.reviewGeneratedBlend(
+            signature(1, 2, 2, 2), variation, nullptr, &report)
+                .mirrored(false, true);
+        const QImage side = atlas.reviewGeneratedBlend(
+            signature(1, 2, 2, 1), variation, nullptr, &report)
+                .mirrored(false, true);
+        QVERIFY2(!corner.isNull() && !side.isNull(),
+                 qPrintable(report.toText()));
+        const auto crossing = [](const QImage& image, int row) {
+            int last = -1;
+            for(int x = 0; x < image.width(); ++x)
+                if(image.pixelColor(x, row).red() >= 120) last = x;
+            return last;
+        };
+        const int edge = crossing(side, 0);
+        // The outermost texel alone used to pass continuity checks while the
+        // next row still extended far beyond its neighbour's contour.
+        for(int row = 0; row <= qMax(2, size / 64); ++row)
+            QVERIFY2(qAbs(crossing(corner, row) - edge) <= 2,
+                qPrintable(QString("%1px variation %2 row %3: corner %4, side %5")
+                    .arg(size).arg(variation).arg(row)
+                    .arg(crossing(corner, row)).arg(edge)));
+      }
 }
 
 void TerrainVirtualAtlasTests::generatedNeighbourEdgesArePixelContinuous()
