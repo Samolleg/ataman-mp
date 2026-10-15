@@ -1002,6 +1002,7 @@ private:
     int m_objectEditBatchDepth{0};
     QSet<CMob*> m_objectEditBatchMobs;
     bool m_objectEditBatchParameters{false};
+    bool m_objectEditBatchTree{false};
     void prepareModelMagnet();
     bool beginPreparedObjectPlacement(const QJsonObject& descriptor,const QPoint& cursor,QString* diagnostic);
     void clearModelMagnet();

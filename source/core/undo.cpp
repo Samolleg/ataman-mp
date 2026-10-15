@@ -1328,6 +1328,11 @@ void CObjectEditBatchCommand::undo()
 
 void CObjectEditBatchCommand::redo()
 {
+    if(m_skipInitialRedo)
+    {
+        m_skipInitialRedo = false;
+        return;
+    }
     m_view->beginObjectEditBatch();
     QUndoCommand::redo();
     m_view->endObjectEditBatch();

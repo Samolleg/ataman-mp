@@ -1490,6 +1490,11 @@ QSet<quint32> CMob::occupiedMapIds() const
     QSet<quint32> result = m_auxiliaryIds;
     for(CNode* node : m_aNode)
         if(node) result.insert(node->mapId());
+    // Saving a deletion removes its on-disk ID, but Undo still owns this exact
+    // node. Reserve it for the loaded MOB's lifetime, like session allocations,
+    // so a subsequent creation cannot collide when the deletion is undone.
+    for(CNode* node : m_aDeletedNode)
+        if(node) result.insert(node->mapId());
     return result;
 }
 

@@ -18,17 +18,18 @@ class CUnit;
 class CLogic;
 class IPropertyBase;
 
-// A transform group applies its ordinary provenance-preserving child commands,
-// then refreshes the owning documents and property panel once, also on history.
+// Applies ordinary provenance-preserving child commands, then publishes their
+// tree, owning documents and property panel once, also on history.
 class CObjectEditBatchCommand : public QUndoCommand
 {
 public:
-    CObjectEditBatchCommand(CView* view, const QString& text)
-        : m_view(view) { setText(text); }
+    CObjectEditBatchCommand(CView* view, const QString& text, bool alreadyApplied = false)
+        : m_view(view), m_skipInitialRedo(alreadyApplied) { setText(text); }
     void undo() override;
     void redo() override;
 private:
     CView* m_view;
+    bool m_skipInitialRedo;
 };
 
 class CDeleteNodeCommand: public QObject, public QUndoCommand,

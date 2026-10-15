@@ -2514,7 +2514,13 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         bool layoutOnlyChange=first>=0 && first<last && last<=m_pUndoStack->count();
         for(int i=first;layoutOnlyChange && i<last;++i)
             layoutOnlyChange=dynamic_cast<const CWorldMapLayoutCommand*>(m_pUndoStack->command(i))!=nullptr;
-        if(!selectionOnly && !mprOnlyChange && !layoutOnlyChange)
+        // These commands publish their exact owning MOBs themselves. A global
+        // refresh here would serialize them a second time (or, on the initial
+        // Delete push, run inside the still-open publication batch).
+        bool objectBatchOnlyChange=first>=0 && first<last && last<=m_pUndoStack->count();
+        for(int i=first;objectBatchOnlyChange && i<last;++i)
+            objectBatchOnlyChange=dynamic_cast<const CObjectEditBatchCommand*>(m_pUndoStack->command(i))!=nullptr;
+        if(!selectionOnly && !mprOnlyChange && !layoutOnlyChange && !objectBatchOnlyChange)
         {
             refreshMobDirtyStates();
         }
@@ -21853,6 +21859,11 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
+    if(m_objectEditBatchDepth)
+    {
+        m_objectEditBatchTree = true;
+        return;
+    }
     m_pTree->beginRefresh();
 
     m_pTree->setColumnCount(3);
@@ -24916,9 +24927,12 @@ void CView::deleteSelectedNodes()
     if(!confirmScriptReferencedObjectIds(objectIds, tr("delete these objects")))
         return;
 
-    const bool grouped = targets.size() > 1;
-    if(grouped)
-        m_pUndoStack->beginMacro(tr("Delete %1 objects").arg(targets.size()));
+    // Apply children in the original order while capturing each deletion's
+    // current index. Constructing every child before any deletion would record
+    // wrong restore indices for the reverse-order Undo.
+    auto* batch = new CObjectEditBatchCommand(this,
+        tr("Delete %1 objects").arg(targets.size()), true);
+    beginObjectEditBatch();
 
     QVector<uint> arrMapId;
     CNode* pNode = nullptr;
@@ -24934,8 +24948,8 @@ void CView::deleteSelectedNodes()
             int patrolId(0);
             m_activeMob->getPatrolHash(unitId, patrolId, pPoint);
             QString hash = QString("%1.%2").arg(unitId).arg(patrolId);
-            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash);
-            m_pUndoStack->push(pOp);
+            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash, batch);
+            pOp->redo();
             break;
         }
         case eLookPoint:
@@ -24946,8 +24960,8 @@ void CView::deleteSelectedNodes()
             int viewId(0);
             m_activeMob->getViewHash(unitId, patrolId, viewId, pPoint);
             QString hash = QString("%1.%2.%3").arg(unitId).arg(patrolId).arg(viewId);
-            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash);
-            m_pUndoStack->push(pOp);
+            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash, batch);
+            pOp->redo();
             break;
         }
         case eTrapActZone:
@@ -24959,8 +24973,8 @@ void CView::deleteSelectedNodes()
             int zoneId(0);
             m_activeMob->getTrapZoneHash(unitId, zoneId, pZone);
             QString hash = QString("%1.%2.%3.%4").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId);
-            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash);
-            m_pUndoStack->push(pOp);
+            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash, batch);
+            pOp->redo();
             break;
         }
         case eTrapCastPoint:
@@ -24973,8 +24987,8 @@ void CView::deleteSelectedNodes()
             int castPointId(0);
             m_activeMob->getTrapCastHash(unitId, castPointId, pCast);
             QString hash = QString("%1.%2.%3.%4.%5").arg(unitId).arg(patrolId).arg(viewId).arg(zoneId).arg(castPointId);
-            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash);
-            m_pUndoStack->push(pOp);
+            CDeleteLogicPoint* pOp = new CDeleteLogicPoint(this, hash, batch);
+            pOp->redo();
             break;
         }
         default:
@@ -24987,16 +25001,15 @@ void CView::deleteSelectedNodes()
 
     for(auto& id : arrMapId)
     {
-        CDeleteNodeCommand* pUndo = new CDeleteNodeCommand(this, id);
+        CDeleteNodeCommand* pUndo = new CDeleteNodeCommand(this, id, batch);
         QObject::connect(pUndo, SIGNAL(deleteNodeSignal(uint)), m_pTree, SLOT(onNodeDelete(uint)));
         QObject::connect(pUndo, SIGNAL(undo_deleteNodeSignal(CNode*)), m_pTree, SLOT(addNodeToTree(CNode*)));
-        m_pUndoStack->push(pUndo);
+        pUndo->redo();
     }
 
-    if(grouped)
-        m_pUndoStack->endMacro();
     viewParameters();
-    //updateViewTree();
+    m_pUndoStack->push(batch);
+    endObjectEditBatch();
 }
 
 bool CView::copyLogicSlot(CUnit* owner, int logicSlot)
@@ -26152,6 +26165,10 @@ void CView::endObjectEditBatch()
     Q_ASSERT(m_objectEditBatchDepth > 0);
     if(--m_objectEditBatchDepth)
         return;
+    const bool tree = m_objectEditBatchTree;
+    m_objectEditBatchTree = false;
+    if(tree)
+        collectObjectTreeData();
     const auto mobs = m_objectEditBatchMobs;
     m_objectEditBatchMobs.clear();
     for(CMob* mob : mobs)

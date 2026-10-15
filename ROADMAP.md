@@ -1,4 +1,13 @@
 # EI Mapper Ataman — roadmap
+## EI-OBJECT-DELETE-FREEZE-20261015 — задержка удаления объектов
+
+- Поручение15.10: исправить задержку удаления, сохранить ID/script checks, качество миникарты и Undo/Redo, проверить связанные сценарии и установить. База main5d730671d56972ba2120c25676a6e681100ec40e/184; версия185. Работа лично в main, scoped-коммит и guarded передача; чужие изменения и живые карты сохраняются. Аудит docs/validation/ATAMAN_DELETE_FREEZE_AUDIT_184_20261015.md.
+- BUILT AND CHECKED185: пакетная публикация дерева/dirty projection на Delete и history; исходные дочерние команды и последовательный захват restore indices сохранены. Критерии: измерение184/185 одного набора, одиночное/групповое удаление, logic points, ID/script confirmation, точное восстановление порядка/байтов/clean state, миникарта после удаления и Undo/Redo. Release/native regression выполнены, детали ниже.
+
+- Native55/0: Delete24 4795→69ms, Undo1269→65ms, Redo5018→74ms;24→1 MOB/tree publications. Exact bytes/order/ID/script confirm/logic points/owner switch/Save→Undo/Redo и minimap pixels/graded MMP PASS. ID после сохранённого удаления зарезервирован через occupiedMapIds до закрытия MOB. Related suites272 PASS; UI-widget exit1 — прежний median346.541ms/лимит200ms для7164 textures, gallery прошла. Evidence docs/validation/ATAMAN_DELETE_FREEZE_185_20261015.md. Следующий шаг — scoped-коммит, fresh staging и guarded установка185; ручная приёмка отдельно.
+
+
+
 ## EI-OBJECT-EDIT-FREEZE-20261015 — паузы копирования/вставки/движения
 
 - Поручение: после аудита исправить фризы копирования/вставки/перемещения, сохранить ID checks/качество миникарты/Undo/Redo, проверить и установить. Версия184, база main589573ba946de25aabdb155364049ea89e835920/183. Реализация лично в main, scoped-коммит и guarded установка; игровые оригиналы и чужие изменения сохраняются. Аудит docs/validation/ATAMAN_OBJECT_EDIT_FREEZE_AUDIT_20261015.md основан на сессии182, не приписывается183.
@@ -7,6 +16,8 @@
 - INSTALLED184 / реализация и передача завершены: source mainab80d791c709a3bbabd2f001f3773cecbfc0e455. Fresh stage/finalizer и installed129 managed PASS;6 замен/1 добавление/1 удаление. Все16594 owner files побайтно сохранены. EXEa2320b32bb7b285ebb00135bae2a7601a552822d1ba059d445c030e3dcdd5725, manifestc4bce07bc71ce4a9c71cebbd08f3f87a92166fa5d529d2df5b45a703f88d3b17. Проверенный резерв183 artifacts/rollback183-to184-edit-20261015 оставлен; прежний точно опознанный резерв182 удалён по договору, остальные каталоги сохранены. Receipts build-edit-184-20261015/{install-receipt,rollback-retirement}.json. Следующий шаг — ручная приёмка владельцем копирования/вставки/перемещения и миникарты на привычном наборе. Известные gallery/large-selection timing limits остаются; GitHub не обновлялся, новые ядра переходов не возвращались.
 
 - PUBLISHED18415.10: по поручению владельца GitHub main обновлён fast-forward через очищенный экспорт. Исходный commit c696c647a1e3f9a26b0f98b4922ddcee41314ada соответствует GitHub commit 7d89cbc2952d938f2c42d256b03527c0e1bdcadc. Включены шесть зависимых коммитов182–184 поверх опубликованной181;1847 исходных файлов. Все новые деревья/родители/авторство/сообщения и110 QRC references проверены;41 новый blob без секретов и игровых/сборочных данных. Проверки неизменной ранее опубликованной истории переиспользованы. Локальная история, установка и чужие рабочие правки сохранены. Receipt: build-github-ataman184-20261015/final-result.json. Ручная приёмка184 владельцем остаётся открытой.
+
+- DIAGNOSED18415.10 / EI-OBJECT-DELETE-FREEZE-20261015: по новому поручению проверен журнал долгого удаления. В runtime184/zone3obr серии20/27/16 Delete растянуты на4/5/3с; обычный macro вызывает на каждый объект полный tree refresh, logicNodesUpdate и serializeMob для dirty projection. Удаление не использует object-edit batch184; тот же повтор сохраняется в Undo/Redo. Это подтверждённая лишняя работа; доля этапов не профилирована. Evidence docs/validation/ATAMAN_DELETE_FREEZE_AUDIT_184_20261015.md. Диагностика завершена, программа/установка/карты сохранены; следующий отдельный этап — пакетное удаление с сохранением ID/script checks/истории/качества миникарты. Исправление этим сообщением не поручено.
 
 
 ## EI-RECT-SELECTION-REGRESSION-182 — повторное выделение посторонних объектов

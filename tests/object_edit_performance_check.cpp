@@ -2,6 +2,10 @@
 #include "view.h"
 #include "mob.h"
 #include "worldobj.h"
+#include "unit.h"
+#include "magictrap.h"
+#include "tree_view.h"
+#include "undo.h"
 #include "settings.h"
 #include "resourcemanager.h"
 #include "resource_setup_dialog.h"
@@ -70,6 +74,121 @@ int runAssemblyCatalogCheck()
     mob->adoptCommittedBytes(initial);mob->attach(view,nullptr);view->m_aMob<<mob;view->m_activeMob=mob;
     view->m_clipboard_buffer_file.setFileName(scratch.filePath("clipboard.json"));
     out<<"FIXTURE nodes "<<mob->nodes().size()<<" bytes "<<initial.size()<<"\n";out.flush();
+    // Exercise the actual Delete entrypoint and native tree, including
+    // non-adjacent indices: reverse Undo must restore the exact original order.
+    const auto originalNodes=mob->nodes();
+    QList<CNode*> deletedNodes,remainingNodes;
+    for(int i=0;i<originalNodes.size();++i) {
+        const bool selected=i<24*7 && i%7==0;
+        originalNodes[i]->setState(selected?eSelect:eDraw);
+        (selected?deletedNodes:remainingNodes).append(originalNodes[i]);
+    }
+    view->collectObjectTreeData();
+    int publications=0,treePublications=0;
+    auto changed=QObject::connect(view,&CView::mobStateChanged,[&](){++publications;});
+    auto treeChanged=QObject::connect(view->m_pTree,&CTreeView::filterMatchCountChanged,[&](int,int){++treePublications;});
+    QElapsedTimer deletionTimer;deletionTimer.start();view->deleteSelectedNodes();
+    out<<"TIME delete24 "<<deletionTimer.elapsed()<<" ms\n";
+    out<<"PUBLICATIONS delete "<<publications<<" tree "<<treePublications<<"\n";out.flush();
+    check(mob->nodes()==remainingNodes && view->m_pUndoStack->count()==1,"group Delete removes exactly selected nodes in one history action");
+    bool missingRows=true;for(auto* n:deletedNodes)missingRows &= !view->m_pTree->rowForNode(n);
+    check(missingRows && mob->isDirty(),"Delete publishes current tree and dirty state");
+    check(aiGraphUndoCommandInvalidatesPreview(view->m_pUndoStack->command(0)),"Delete batch retains recursive navigation invalidation");
+#ifndef EI_EDIT_BASELINE
+    check(publications==1 && treePublications==1,"group Delete publishes MOB and tree once");
+#endif
+    QByteArray deletedProjection;mob->serializeMob(deletedProjection,false);
+    QByteArray deletionCandidate;CValidationReport deletionReport;QString deletionClass;
+    check(mob->buildValidatedCandidate(&deletionCandidate,&deletionReport,&deletionClass)
+          && deletionCandidate==deletedProjection,"deleted objects produce exact validated raw-sequence save candidate");
+    CMobDocument deletedDocument;
+    check(deletedDocument.loadBytes(deletionCandidate,"deleted-reopen.mob",&deletionReport),"fresh document reopen validates deletion candidate");
+    publications=treePublications=0;deletionTimer.restart();view->m_pUndoStack->undo();
+    out<<"TIME deleteUndo24 "<<deletionTimer.elapsed()<<" ms\n";
+    out<<"PUBLICATIONS undo "<<publications<<" tree "<<treePublications<<"\n";
+    QByteArray restoredProjection;mob->serializeMob(restoredProjection,false);
+    check(mob->nodes()==originalNodes && restoredProjection==initial && !mob->isDirty(),"Delete Undo restores exact pointers, ordering, bytes and clean state");
+#ifndef EI_EDIT_BASELINE
+    check(publications==1 && treePublications==1,"group Delete Undo publishes MOB and tree once");
+#endif
+    publications=treePublications=0;deletionTimer.restart();view->m_pUndoStack->redo();
+    out<<"TIME deleteRedo24 "<<deletionTimer.elapsed()<<" ms\n";
+    out<<"PUBLICATIONS redo "<<publications<<" tree "<<treePublications<<"\n";
+    QByteArray deletedAgain;mob->serializeMob(deletedAgain,false);
+    check(deletedAgain==deletedProjection && mob->nodes()==remainingNodes,"Delete Redo restores exact deleted projection and order");
+#ifndef EI_EDIT_BASELINE
+    check(publications==1 && treePublications==1,"group Delete Redo publishes MOB and tree once");
+#endif
+    out<<"DELETE "<<QCryptographicHash::hash(deletedAgain,QCryptographicHash::Sha256).toHex()<<"\n";
+    view->m_pUndoStack->undo();view->m_pUndoStack->clear();view->clearObjectSelection();
+    QObject::disconnect(changed);QObject::disconnect(treeChanged);
+
+    // Script references must still be confirmed before opening a batch or
+    // mutating history; test both outcomes without showing a desktop dialog.
+    mob->setScript("RemoveObject(GetObject(10000));");
+    view->restoreSelection({originalNodes[0]});
+    view->m_pUndoStack->clear();
+    bool warningSeen=false;int answer=QMessageBox::Cancel;
+    QTimer confirmation;QObject::connect(&confirmation,&QTimer::timeout,[&](){
+        for(QWidget* w:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(w)) {
+            warningSeen=true;box->done(answer);
+        }
+    });confirmation.start(1);
+    view->deleteSelectedNodes();
+    check(warningSeen && mob->nodes()==originalNodes && view->m_pUndoStack->count()==0,"script-referenced Delete Cancel preserves objects and history");
+    warningSeen=false;answer=QMessageBox::Yes;view->deleteSelectedNodes();confirmation.stop();
+    check(warningSeen && mob->nodes().size()==1999 && view->m_pUndoStack->count()==1,"confirmed single Delete preserves script check");
+    view->m_pUndoStack->undo();
+    check(mob->nodes()==originalNodes && mob->script()=="RemoveObject(GetObject(10000));","single Delete Undo retains original ID, position and script");
+    view->m_pUndoStack->clear();mob->setScript("");mob->refreshDirtyFromProjection();view->clearObjectSelection();
+#ifndef EI_EDIT_BASELINE
+    view->m_pUndoStack->clear();
+    auto* inactive=new CMob;inactive->setFileName(QFileInfo(scratch.filePath("inactive.mob")));
+    auto* inactiveNode=new Module;inactiveNode->setMapId(60000);inactive->nodes()<<inactiveNode;
+    inactive->captureCleanProjection();inactive->attach(view,nullptr);view->m_aMob<<inactive;
+    originalNodes[3]->setState(eSelect);originalNodes[8]->setState(eSelect);view->deleteSelectedNodes();
+    check(view->m_activeMob==mob && inactive->nodes().size()==1 && !inactive->isDirty(),"Delete leaves inactive MOB and active ownership unchanged");
+    view->m_activeMob=inactive;view->m_pUndoStack->undo();
+    check(view->m_activeMob==mob && mob->nodes()==originalNodes && !mob->isDirty() && !inactive->isDirty(),"ordinary Delete Undo after MOB switch restores exact owner without dirtying other maps");
+    view->m_pUndoStack->redo();view->m_pUndoStack->undo();view->m_pUndoStack->clear();
+    view->clearObjectSelection();view->m_pUndoStack->clear();view->deleteSelectedNodes();
+    check(view->m_pUndoStack->count()==0 && mob->nodes()==originalNodes,"empty Delete creates no history action");
+    view->m_aMob.removeOne(inactive);delete inactive;
+#endif
+
+    // Use an independent MOB to cover patrol/look/activation/cast children
+    // together and history after switching the active document.
+    auto* logicMob=new CMob;logicMob->setFileName(QFileInfo(scratch.filePath("logic.mob")));
+    auto* unit=new CUnit;unit->setMapId(50001);unit->addFirstPatrolPoint();
+    auto* patrol=unit->logicAt(0)->patrolPoints().first();patrol->addFirstViewPoint();
+    auto* look=patrol->lookPoint().first();
+    auto* trap=new CMagicTrap;trap->setMapId(50002);
+    auto* zone=trap->createActZone();auto* cast=trap->createCastPoint();
+    logicMob->nodes()<<unit<<trap;logicMob->logicNodesUpdate();
+    QByteArray logicBefore;logicMob->serializeMob(logicBefore,false);logicMob->captureCleanProjection();
+    logicMob->attach(view,nullptr);view->m_aMob<<logicMob;view->m_activeMob=logicMob;
+    CScene::getInstance()->changeMode(eEditModeLogic);view->setLogicSlotIndex(0);
+    view->clearObjectSelection();for(auto* n:QList<CNode*>{patrol,look,zone,cast})n->setState(eSelect);
+    view->m_pUndoStack->clear();
+    view->deleteSelectedNodes();
+    out<<"LOGIC history "<<view->m_pUndoStack->count()<<" flags "<<patrol->isMarkDeleted()<<look->isMarkDeleted()<<zone->isMarkDeleted()<<cast->isMarkDeleted()<<"\n";
+    check(view->m_pUndoStack->count()==1 && patrol->isMarkDeleted() && look->isMarkDeleted() && zone->isMarkDeleted() && cast->isMarkDeleted(),"mixed logic-point Delete marks all four kinds in one action");
+    view->m_activeMob=mob;view->m_pUndoStack->undo();
+    QByteArray logicUndo;logicMob->serializeMob(logicUndo,false);
+    check(logicUndo==logicBefore && !logicMob->isDirty() && view->m_activeMob==logicMob,"logic Delete Undo restores owning MOB bytes after active document switch");
+    view->m_pUndoStack->redo();
+    check(patrol->isMarkDeleted() && look->isMarkDeleted() && zone->isMarkDeleted() && cast->isMarkDeleted(),"logic Delete Redo retains exact targets");
+    view->m_pUndoStack->undo();view->m_pUndoStack->clear();
+#ifndef EI_EDIT_BASELINE
+    view->clearObjectSelection();view->m_pUndoStack->clear();unit->setState(eSelect);patrol->setState(eSelect);
+    view->deleteSelectedNodes();
+    check(!logicMob->nodes().contains(unit) && patrol->isMarkDeleted(),"mixed owner and child Delete applies logic child before removing owner");
+    view->m_pUndoStack->undo();QByteArray ownerUndo;logicMob->serializeMob(ownerUndo,false);
+    check(logicMob->nodes().first()==unit && ownerUndo==logicBefore && !logicMob->isDirty(),"mixed owner-child Undo restores original hierarchy and bytes");
+    view->m_pUndoStack->clear();
+#endif
+    view->m_aMob.removeOne(logicMob);delete logicMob;view->m_activeMob=mob;
+    CScene::getInstance()->changeMode(eEditModeObjects);view->clearObjectSelection();
     for(int i=0;i<24;++i)mob->nodes()[i]->setState(eSelect);
     QElapsedTimer timer;timer.start();view->selectedObjectToClipboardBuffer();
     out<<"TIME copy24 "<<timer.elapsed()<<" ms\n";out.flush();
@@ -135,12 +254,41 @@ int runAssemblyCatalogCheck()
     const auto imageHash=[](const QImage& image){return QCryptographicHash::hash(QByteArray(reinterpret_cast<const char*>(image.constBits()),int(image.sizeInBytes())),QCryptographicHash::Sha256).toHex();};
     out<<"IMAGE lit "<<imageHash(capture.bake.gameImage)<<" unlit "<<imageHash(capture.unlitGameImage)<<"\n";out.flush();
 #ifndef EI_EDIT_BASELINE
+    // Visible alpha-cutout modules must disappear from the full quality
+    // minimap and return byte-for-byte after Undo, including encoded MMP.
+    view->clearObjectSelection();view->m_pUndoStack->clear();
+    auto* visibleA=mob->nodes()[0];auto* visibleB=mob->nodes()[1];
+    visibleA->setState(eSelect);visibleB->setState(eSelect);
+    const auto generationBeforeDelete=window.m_minimapGeneration;
+    view->deleteSelectedNodes();
+    auto removedCapture=view->captureMinimapScene(true,1024);
+    check(removedCapture.bake.success && removedCapture.bake.gameImage!=capture.bake.gameImage
+          && window.m_minimapGeneration>generationBeforeDelete,"Delete invalidates automatic minimap and removes visible geometry at full resolution");
+    view->m_pUndoStack->undo();auto restoredCapture=view->captureMinimapScene(true,1024);
+    check(restoredCapture.bake.gameImage==capture.bake.gameImage
+          && restoredCapture.unlitGameImage==capture.unlitGameImage
+          && restoredCapture.bake.reviewImage==capture.bake.reviewImage,"Delete Undo restores exact lit, unlit and full review minimap pixels");
+    view->m_pUndoStack->redo();auto redoneCapture=view->captureMinimapScene(true,1024);
+    const auto gradeDeleted=gradeMinimapImage(removedCapture.unlitGameImage,removedCapture.bake.gameImage,window.m_minimapGrade);
+    const auto gradeRedone=gradeMinimapImage(redoneCapture.unlitGameImage,redoneCapture.bake.gameImage,window.m_minimapGrade);
+    QString deleteMmpError;
+    check(redoneCapture.bake.gameImage==removedCapture.bake.gameImage
+          && gradeDeleted==gradeRedone
+          && ei::encodeMmpDxt1(gradeDeleted,&deleteMmpError)==ei::encodeMmpDxt1(gradeRedone,&deleteMmpError),"Delete Redo preserves exact minimap grading and encoded MMP bytes");
+    view->m_pUndoStack->undo();view->m_pUndoStack->clear();
     auto raw=view->captureMinimapScene(true,1024,false);
     check(!raw.capturedReviewImage.isNull() && raw.capturedReviewImage.size()==QSize(3072,3072),"worker input retains full resolution capture");
     auto finished=CView::finishMinimapSceneCapture(raw);
     check(finished.bake.gameImage==capture.bake.gameImage && finished.unlitGameImage==capture.unlitGameImage,"split bake exactly equals synchronous lit and unlit images");
     check(finished.bake.reviewImage==capture.bake.reviewImage,"worker retains exact full resolution review pixels");
     QApplication::processEvents();view->updateGL();QApplication::processEvents();
+    // Delete/Undo above can already have started an automatic capture. Drain
+    // that invalidated job before timing a fresh generation for the final state.
+    QElapsedTimer drain;drain.start();
+    while(window.m_minimapCaptureRunning && drain.elapsed()<15000) {
+        window.m_minimapRefreshTimer->stop();QCoreApplication::processEvents(QEventLoop::AllEvents,10);
+    }
+    check(!window.m_minimapCaptureRunning,"previous deletion minimap worker finishes before fresh-generation comparison");
     window.m_minimapRefreshTimer->stop();window.m_embeddedMinimapImage=QImage();
     ++window.m_minimapGeneration;window.m_minimapNeedsRefresh=true;
     timer.restart();window.refreshViewportMinimap();
@@ -177,6 +325,23 @@ int runAssemblyCatalogCheck()
     view->operationSetBackup(eMove);view->m_pOp->changeState(new CMoveAxis(view,EOperateAxisXY));
     window.refreshViewportMinimap();check(!window.m_minimapCaptureRunning && window.m_minimapRefreshTimer->isActive(),"automatic minimap waits for unfinished pointer gesture");
     window.m_minimapRefreshTimer->stop();view->cancelPendingOperation();
+
+    view->clearObjectSelection();view->m_pUndoStack->clear();
+    QByteArray beforeSavedDelete;mob->serializeMob(beforeSavedDelete,false);
+    const auto beforeSavedNodes=mob->nodes();const uint heldId=beforeSavedNodes[0]->mapId();
+    beforeSavedNodes[0]->setState(eSelect);view->deleteSelectedNodes();
+    check(mob->save() && !mob->isDirty(),"Delete saves through real atomic MOB save and becomes clean");
+    QFile savedMob(mob->filePath().absoluteFilePath());savedMob.open(QIODevice::ReadOnly);
+    const auto savedBytes=savedMob.readAll();savedMob.close();CMobDocument savedDocument;CValidationReport savedReport;
+    check(savedDocument.loadBytes(savedBytes,mob->filePath().absoluteFilePath(),&savedReport)
+          && savedDocument.objects().size()==mob->nodes().size(),"saved Delete reopens with the exact retained object count");
+    const auto nextId=window.allocateFamilyNid(mob->filePath().absoluteFilePath());
+    out<<"ALLOCATE afterSavedDelete held "<<heldId<<" next "<<nextId<<"\n";
+    check(nextId!=0 && nextId!=heldId,"deleted ID retained by Undo is unavailable to family allocation after saving deletion");
+    view->m_pUndoStack->undo();QByteArray savedDeleteUndo;mob->serializeMob(savedDeleteUndo,false);
+    check(mob->nodes()==beforeSavedNodes && savedDeleteUndo==beforeSavedDelete && mob->isDirty(),"Undo after saving deletion restores exact original IDs, bytes and dirty state");
+    view->m_pUndoStack->redo();
+    check(!mob->isDirty(),"Redo after saving deletion returns to saved clean state");
 #endif
     // Dispose temporary dirty state without invoking save/owner prompts.
     view->m_pUndoStack->clear();mob->setDirty(false);view->m_activeMob=nullptr;view->m_aMob.removeAll(mob);delete mob;
