@@ -1160,15 +1160,14 @@ void util::removeProp(QList<QSharedPointer<IPropertyBase>> &aProp, EObjParam typ
         }
 }
 
-const QSharedPointer<IPropertyBase>& util::constProp(const QList<QSharedPointer<IPropertyBase>> &aProp, EObjParam type)
+QSharedPointer<IPropertyBase> util::constProp(const QList<QSharedPointer<IPropertyBase>> &aProp, EObjParam type)
 {
     for (const auto& prop: aProp)
-        if (prop->type() == type)
+        if (prop && prop->type() == type)
         {
             return prop;
         }
-    Q_ASSERT(false);
-    return aProp.back();
+    return {};
 }
 
 QQuaternion util::eulerToQuat(const QVector3D &rot)

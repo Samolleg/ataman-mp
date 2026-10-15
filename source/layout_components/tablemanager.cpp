@@ -1443,15 +1443,17 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
 
     auto insert3DProp =[this, &aProp](const int row, const EObjParam xPosProp)
     {
+        const auto x = util::constProp(aProp, xPosProp);
+        const auto y = util::constProp(aProp, EObjParam(xPosProp+1));
+        const auto z = util::constProp(aProp, EObjParam(xPosProp+2));
+        if(!x || !y || !z)
+            return false;
         m_pTable->insertRow(row);
         m_pTable->setItem(row, 0, new QTableWidgetItem(m_aRowName[EObjParam(xPosProp+3)]));
         blockEditWidget(m_pTable->item(row, 0));
-        auto* pItem = new C3DItem(util::constProp(aProp, xPosProp), util::constProp(aProp, EObjParam(xPosProp+1)), util::constProp(aProp, EObjParam(xPosProp+2)));
+        auto* pItem = new C3DItem(x, y, z);
         QObject::connect(pItem, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
         m_pTable->setCellWidget(row,1, pItem);
-        const QSharedPointer<IPropertyBase> x = util::constProp(aProp, xPosProp);
-        const QSharedPointer<IPropertyBase> y = util::constProp(aProp, EObjParam(xPosProp+1));
-        const QSharedPointer<IPropertyBase> z = util::constProp(aProp, EObjParam(xPosProp+2));
         QSharedPointer<IPropertyBase> aggregate;
         if(x->isInit() && y->isInit() && z->isInit())
             aggregate.reset(new prop3D(EObjParam(xPosProp+3), x->toString().toFloat(),
@@ -1460,11 +1462,14 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             aggregate.reset(new prop3D(EObjParam(xPosProp+3)));
         registerPropertyRow(row, aggregate);
         m_pTable->setRowHeight(row, pItem->height()*3);
+        return true;
     };
 
     for(int iParam(0); iParam < EObjParam::eObjParamCount; ++iParam)
     for (const auto& item : aProp)
     {
+        if(!item)
+            continue;
         type = item->type();
         if(type != iParam)
             continue; // fcking sort of properties
@@ -1647,16 +1652,17 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
             const EBehaviourType behavior = item->isInit()
                 ? EBehaviourType(dynamic_cast<propUint*>(item.get())->value())
                 : EBehaviourType::eIdle;
-            if(item->isInit() && (behavior == EBehaviourType::eRadius
+            const auto radius = util::constProp(aProp, eObjParam_GUARD_RADIUS);
+            if(radius && item->isInit() && (behavior == EBehaviourType::eRadius
                                   || behavior == EBehaviourType::eGuardAlaram))
             {
                 m_pTable->insertRow(i);
                 m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_GUARD_RADIUS]));
                 blockEditWidget(m_pTable->item(i, 0));
-                auto* pCellValue = new CValueItem(util::constProp(aProp, eObjParam_GUARD_RADIUS));
+                auto* pCellValue = new CValueItem(radius);
                 QObject::connect(pCellValue, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                 m_pTable->setCellWidget(i, 1, pCellValue);
-                registerPropertyRow(i, util::constProp(aProp, eObjParam_GUARD_RADIUS));
+                registerPropertyRow(i, radius);
                 m_pTable->resizeColumnToContents(0);
                 ++i;
             }
@@ -1686,16 +1692,18 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                 QVector<EObjParam> importStats;
                 importStats.resize(5);
                 auto ustat = util::constProp(aProp, eObjParam_UNIT_STATS);
-                m_pTable->insertRow(i);
-                m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_UNIT_STATS]));
-                blockEditWidget(m_pTable->item(i, 0));
-                auto* pMulti = new CUnitStatItem(ustat);
-                QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
-                m_pTable->setCellWidget(i, 1, pMulti);
-                registerPropertyRow(i, ustat);
-                m_pTable->resizeColumnToContents(0);
-                ++i;
-                //importStats[0] = eObjParam_UNIT_STATS;
+                if(ustat)
+                {
+                    m_pTable->insertRow(i);
+                    m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[eObjParam_UNIT_STATS]));
+                    blockEditWidget(m_pTable->item(i, 0));
+                    auto* pMulti = new CUnitStatItem(ustat);
+                    QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
+                    m_pTable->setCellWidget(i, 1, pMulti);
+                    registerPropertyRow(i, ustat);
+                    m_pTable->resizeColumnToContents(0);
+                    ++i;
+                }
                 importStats[0] = eObjParam_UNIT_WEAPONS;
                 importStats[1] = eObjParam_UNIT_ARMORS;
                 importStats[2] = eObjParam_UNIT_SPELLS;
@@ -1703,13 +1711,16 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
                 importStats[4] = eObjParam_UNIT_QUEST_ITEMS;
                 for(int j(0); j<importStats.size();++j)
                 {
+                    const auto imported = util::constProp(aProp, importStats[j]);
+                    if(!imported)
+                        continue;
                     m_pTable->insertRow(i);
                     m_pTable->setItem(i, 0, new QTableWidgetItem(m_aRowName[importStats[j]]));
                     blockEditWidget(m_pTable->item(i, 0));
-                    auto* pMulti = new CMultiLineButtonItem(util::constProp(aProp, importStats[j]));
+                    auto* pMulti = new CMultiLineButtonItem(imported);
                     QObject::connect(pMulti, SIGNAL(onParamChange(QSharedPointer<IPropertyBase>)), this, SLOT(onParamChange(QSharedPointer<IPropertyBase>)));
                     m_pTable->setCellWidget(i, 1, pMulti);
-                    registerPropertyRow(i, util::constProp(aProp, importStats[j]));
+                    registerPropertyRow(i, imported);
                     m_pTable->resizeColumnToContents(0);
                     ++i;
                 }
@@ -1761,8 +1772,8 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
         case eObjParam_COMPLECTION_X:
         case eObjParam_GUARD_PLACE_X:
         {
-            insert3DProp(i, type);
-            ++i;
+            if(insert3DProp(i, type))
+                ++i;
             break;
         }
         default:

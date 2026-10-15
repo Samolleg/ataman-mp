@@ -52,7 +52,8 @@ void addBodyPartParam(QList<QSharedPointer<IPropertyBase>>& aProp, IPropertyBase
 QVector3D getMinValue(const QVector3D& vec1, const QVector3D& vec2);
 QVector3D getMaxValue(const QVector3D& vec1, const QVector3D& vec2);
 void removeProp(QList<QSharedPointer<IPropertyBase>>& aProp, EObjParam type);
-const QSharedPointer<IPropertyBase>& constProp(const QList<QSharedPointer<IPropertyBase>>& aProp, EObjParam type);
+// A property may be absent from a mixed selection or a logic-only panel.
+QSharedPointer<IPropertyBase> constProp(const QList<QSharedPointer<IPropertyBase>>& aProp, EObjParam type);
 void propListToUnitStat(SUnitStat& stat, const QVector<QSharedPointer<IPropertyBase>>& val);
 void bodyPartToProp(QMap<QString, QSharedPointer<propBool>>& arrBodyPart,
                     const QString& modelName, const QStringList& bodyParts,
