@@ -36,6 +36,21 @@
 
 ## Сборка и передача
 
-Fresh Release: build-release-186-selection. Доказательства: build-selection-186-20261015/{profile-step.err,baseline-profile.out,final-profile-model-catalog-check.out,final-model-gallery-check.out,final-domain-checks.json,properties-candidate-native.out,checks.json}. Исходный SHA/EXE/runtime/source fingerprints записываются в build-receipt.json перед staging. Staging: build-staging-186-selection; постоянная установка: artifacts/EI-Mapper-Ataman-2-first-test. Итог guarded install и owner-file readback будет зафиксирован после передачи.
+Fresh Release: build-release-186-selection. Доказательства: build-selection-186-20261015/{profile-step.err,baseline-profile.out,final-profile-model-catalog-check.out,final-model-gallery-check.out,final-domain-checks.json,properties-candidate-native.out,checks.json}. Исходный SHA/EXE/runtime/source fingerprints зафиксированы в build-receipt.json перед staging. Staging: build-staging-186-selection; постоянная установка: artifacts/EI-Mapper-Ataman-2-first-test. Итог guarded install и owner-file readback зафиксирован ниже.
 
 Сборка и native-проверки не заменяют ручное выделение объектов на привычных картах владельца. Интерактивный редактор не запускается; обработка переходов131, карта/игровые ресурсы и алгоритмы истории185 не менялись.
+
+## Установка186 — завершена15.10
+
+Реализация main13b7cc507737976657501f03cfc84340cfef3cc3; подготовка передачи3277e5c6197207f40e7194b3401c3ecae42af927. Fresh staging/finalizer PASS; проверенные raw/staged executable и runtime совпали. После ответа владельца «закрыл» новый process guard подтвердил отсутствие компонентов постоянной установки. Старый manifest185 проверен до замены; изменяемые файлы и manifest сохранены с проверкой хешей. Замена атомарная, manifest установлен последним.
+
+Установлено в `artifacts/EI-Mapper-Ataman-2-first-test`:129 managed files проверены по новому manifest;6 замен/1 добавление/1 удаление. Все17182 пользовательских файла вне manifest побайтно сохранены; общий digest до/после `AB0886A90204AB9E97D89888B054EA28306B331BE2FB3FAFD731567E77E654F4`. Это проверка файлов установки, не утверждение о восстановлении исходного clipboard после описанного выше тестового AV.
+
+- VERSION186.
+- EXE SHA256 `66090b8d55b969d51bb846ef06735dbfdd488664ed0ec1d854223df37ccbc2fa`.
+- Manifest SHA256 `2332df8f7523cdd3255ce7bcfe99a44044c88ffcbaa12c14b8ccfae54c2b42b4`.
+- Runtime bridge `0ad301e2a0662ba5aa2c7fe7d1336b76efa10b77b0422e2793a5a57c9cc3b9ed`; runtime host `fb7250835b19c11ebcf2f3c8030bb6eb525a9935d2bf055fd57ce1eb824ad46b`.
+
+Резерв `artifacts/rollback185-to186-selection-20261015` проверен: в сочетании с неизменными файлами он восстанавливает каждый хеш старого manifest185 `E38B53CE79A0F77A76B845DC9688911E7F096A748B6F47BCD03C857BC0606ADF`. После этого удалён только точно опознанный предыдущий managed-резерв `artifacts/rollback184-to185-delete-20261015`; проверены его границы, отсутствие ссылок и соответствие всех файлов manifest184. Другие каталоги сохранены. Receipts: `build-selection-186-20261015/install-receipt.json`, `rollback-retirement.json`.
+
+Адресные функциональные проверки и установка завершены. Общий UI-набор остаётся UNAVAILABLE по clipboard guard; ручная приёмка выделения/панели/Undo/Redo на картах владельца остаётся открытой. Финализированная staging-папка и установленный редактор после передачи не запускались. GitHub186 не обновлялся: нового поручения на публикацию не было.
