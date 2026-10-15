@@ -30,6 +30,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QPointer>
 #include <algorithm>
 
 int runProfileModelCatalogCheck()
@@ -258,6 +259,8 @@ int runProfileModelCatalogCheck()
         << selectionTimes.at(2)/1e6 << "; maximum_ms=" << selectionTimes.last()/1e6 << "\n";
     check(selectionTimes.at(2)<200000000,
           "repeated object selection with 7164 textures stays below 200 ms median");
+    check(selectionTimes.last()<200000000,
+          "every selection including first large-list attachment stays below 200 ms");
     texture=properties.findChild<CComboDynItem*>("objectModelTextureChoices");
     check(texture && texture->count()==7167 && texture->findData("texture-7163")>=0
           && texture->currentText()==firstTexture,
@@ -272,6 +275,76 @@ int runProfileModelCatalogCheck()
           && secondObject->modelName()==secondModel && secondObject->textureName()==secondTexture
           && history.index()==historyBeforeSearch,
           "repeated selection does not mutate objects; search does not add undo commands");
+    // Uniform row sizing must retain real popup hit-testing, disabled group
+    // headings/separator and a complete scrollable list, not just findData().
+    const auto activeTexture=[&]() -> CComboDynItem* {
+        // Replaced cell editors remain QObject children until DeferredDelete.
+        // Only the table's current cell widget belongs to this selection.
+        for(int row=0;row<properties.rowCount();++row)
+            if(auto* item=qobject_cast<CComboDynItem*>(properties.cellWidget(row,1)))
+                if(item->value()->type()==eObjParam_PRIM_TXTR)return item;
+        return nullptr;
+    };
+    properties.setAttribute(Qt::WA_DontShowOnScreen);properties.resize(760,900);
+    properties.show();QApplication::processEvents();
+    texture=activeTexture();
+    for(int row=0;row<properties.rowCount();++row)
+        if(properties.cellWidget(row,1)==texture)properties.scrollToItem(properties.item(row,0));
+    texture->showPopup();QApplication::processEvents();
+    auto mouseChoice=[&](CComboDynItem* item,int row) {
+        QPointer<CComboDynItem> guard(item);
+        const auto index=item->model()->index(row,0);
+        item->view()->scrollTo(index,QAbstractItemView::PositionAtCenter);
+        QApplication::processEvents();
+        if(!guard)return false;
+        const QRect rect=item->view()->visualRect(index);
+        out<<"Texture popup row="<<row<<" rect="<<rect.x()<<","<<rect.y()<<","<<rect.width()<<","<<rect.height()
+           <<" viewport="<<item->view()->viewport()->width()<<","<<item->view()->viewport()->height()<<"\n";out.flush();
+        if(!rect.isValid() || !item->view()->viewport()->rect().intersects(rect))return false;
+        const QPoint point=rect.center();
+        QMouseEvent press(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+        QApplication::sendEvent(item->view()->viewport(),&press);
+        QApplication::sendEvent(item->view()->viewport(),&release);
+        return true;
+    };
+    const int historyBeforeTexture=history.index();
+    const bool clickedHeader=mouseChoice(texture,0);
+    out<<"Texture header expected="<<firstTexture<<" actual="<<object->textureName()
+       <<" history="<<historyBeforeTexture<<"/"<<history.index()<<"\n";out.flush();
+    check(clickedHeader && object->textureName()==firstTexture
+          && history.index()==historyBeforeTexture,"large texture popup heading cannot select or mutate history");
+    texture=activeTexture();texture->showPopup();
+    const int lastTextureRow=texture->findData("texture-7163");
+    check(!(texture->model()->flags(texture->model()->index(1,0)) & Qt::ItemIsEnabled),
+          "empty preferred-group separator remains disabled");
+    check(mouseChoice(texture,1) && object->textureName()==firstTexture
+          && history.index()==historyBeforeTexture,"large texture popup separator cannot commit the highlighted leaf");
+    const bool clickedLast=mouseChoice(texture,lastTextureRow);
+    out<<"Texture choice actual="<<object->textureName()<<" history="<<historyBeforeTexture<<"/"<<history.index()<<"\n";out.flush();
+    check(clickedLast && object->textureName()=="texture-7163"
+          && history.index()==historyBeforeTexture+1,"last texture popup row is reachable by real mouse and commits once");
+    history.undo();
+    check(object->textureName()==firstTexture && object->modelName()==firstModel
+          && secondObject->textureName()==secondTexture,"large texture choice Undo restores only its exact original target");
+    history.redo();
+    check(object->textureName()=="texture-7163" && object->modelName()==firstModel,"large texture choice Redo retains technical ID and model");
+    history.undo();view.viewParameters();
+    texture=activeTexture();
+    texture->setEditText("texture-7163");texture->_onFilterTextChanged(texture->currentText());
+    QKeyEvent textureEscape(QEvent::KeyPress,Qt::Key_Escape,Qt::NoModifier);
+    QApplication::sendEvent(texture,&textureEscape);
+    check(texture->currentText()==firstTexture && object->textureName()==firstTexture
+          && history.index()==historyBeforeTexture,"Escape cancels large-list search without a property command");
+    textures.append("texture-added-after-selection");view.viewParameters();
+    texture=activeTexture();
+    check(texture->findData("texture-added-after-selection")>=0 && texture->currentText()==firstTexture,
+          "resource catalog update reaches the next property selection without stale choices");
+    textures.removeLast();view.viewParameters();
+    texture=activeTexture();
+    check(texture->findData("texture-added-after-selection")==-1 && texture->count()==7167,
+          "removed resource disappears while full current catalog remains intact");
+    properties.hide();
     const QString screenshot=qEnvironmentVariable("EI_PROFILE_CATALOG_CHECK_SCREENSHOT");
     if(!screenshot.isEmpty()){properties.resize(760,900);properties.show();QApplication::processEvents();check(properties.grab().save(screenshot),"property screenshot");}
     out<<"Profile catalog checks: "<<failures<<" failure(s)\n";

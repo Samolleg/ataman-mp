@@ -1,4 +1,16 @@
 # EI Mapper Ataman — roadmap
+## EI-SELECTION-CATALOG-LATENCY-20261015 — выделение с большим каталогом текстур
+
+- Поручение15.10: устранить оставшуюся задержку выделения с большим каталогом текстур, сохранить панель свойств и Undo/Redo, проверить связанный регресс и установить. База main145b5f7bf38885dd4fdc001387c78f39f99a6519/185; следующий номер186. Работа лично в main, scoped-коммит и guarded установка; чужие изменения/настройки/карты сохраняются.
+- BUILT AND CHECKED186: исходный UI-набор185 показывает median346.541ms при7164 textures/493 models. Прослежен путь viewParameters → setNewData → setPreferredOptions → полный grouped QStandardItemModel и combo/proxy. Диагностика и адресные регрессы выполнены; полный UI ограничен clipboard guard, см. ниже. Критерий — исходный порог200ms без сокращения каталога/потери выбора и точное поведение history.
+
+- Причина локализована на185 с диагностическими таймерами:7164 rows build≈4ms, QComboBox::setModel≈280ms, proxy≈3ms. QListView single-line uniform sizing: setModel≈0.4ms, весь native selection median324→22ms; исходный UI-каталог и functional assertions прошли в эксперименте. В186 добавлена эта настройка без кеша/отсрочки/сокращения каталога; расширены popup mouse/disabled rows/history/Escape/resource-refresh проверки. Fresh Release и адресные регрессы выполнены ниже.
+
+
+- Final native:185 median333.624/max350.567→186 median23.0646/max25.2603ms при493 models/7164 textures, полный список7167 rows сохранён. Profile48/0, properties26/0 и gallery7165textures open8/select3ms PASS. Исправлена воспроизведённая185 ошибка heading-click wood→other/лишнего Undo. Общий UI exit2 недоступен из-за native clipboard guard; первый промежуточный UI-тест AV на stale cell исправлен, восстановление исходного clipboard после него не подтверждено. Guard restore перенесён до вложенных UI-checks. Evidence docs/validation/ATAMAN_SELECTION_CATALOG_LATENCY_186_20261015.md. Следующий шаг — scoped-коммит/fresh stage/guarded установка; полный UI может быть повторён после ответа владельца, ручная приёмка отдельно.
+
+
+
 ## EI-OBJECT-DELETE-FREEZE-20261015 — задержка удаления объектов
 
 - Поручение15.10: исправить задержку удаления, сохранить ID/script checks, качество миникарты и Undo/Redo, проверить связанные сценарии и установить. База main5d730671d56972ba2120c25676a6e681100ec40e/184; версия185. Работа лично в main, scoped-коммит и guarded передача; чужие изменения и живые карты сохраняются. Аудит docs/validation/ATAMAN_DELETE_FREEZE_AUDIT_184_20261015.md.

@@ -23,6 +23,7 @@
 #include <QScrollBar>
 #include <QItemSelectionModel>
 #include <QSortFilterProxyModel>
+#include <QListView>
 #include <QResizeEvent>
 #include <QTimer>
 #include <QDialog>
@@ -2046,6 +2047,10 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     setMinimumContentsLength(8);
     setEditable(true);
     setInsertPolicy(QComboBox::NoInsert);
+    // Asset choices are single-line rows. Without this, attaching a model
+    // makes QListView measure every styled row on each property selection.
+    if(auto* list = qobject_cast<QListView*>(view()))
+        list->setUniformItemSizes(true);
     view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_pListModel.reset(new AssetChoiceModel());
     setModel(m_pListModel.get());
@@ -2080,6 +2085,7 @@ CComboDynItem::CComboDynItem(const QSharedPointer<IPropertyBase> &prop)
     QObject::connect(lineEdit(), SIGNAL(textEdited(QString)), this, SLOT(_onFilterTextChanged(QString)));
     lineEdit()->installEventFilter(this);
     installEventFilter(this);
+    view()->viewport()->installEventFilter(this);
     updateDatabaseDiagnostic(m_committedText);
 }
 
@@ -2438,6 +2444,24 @@ void CComboDynItem::focusOutEvent(QFocusEvent* event)
 
 bool CComboDynItem::eventFilter(QObject* watched, QEvent* event)
 {
+    if((event->type()==QEvent::MouseButtonPress
+        || event->type()==QEvent::MouseButtonRelease
+        || event->type()==QEvent::MouseButtonDblClick)
+       && watched==view()->viewport())
+    {
+        const auto* mouse=static_cast<QMouseEvent*>(event);
+        const QModelIndex index=view()->indexAt(mouse->pos());
+        // Qt's combo popup can activate its previously highlighted leaf when
+        // a disabled heading or separator receives the release. These rows
+        // are presentation only and must never commit a property command.
+        if(mouse->button()==Qt::LeftButton
+           && (!index.isValid() || !(index.flags() & Qt::ItemIsEnabled)
+               || !(index.flags() & Qt::ItemIsSelectable)))
+        {
+            event->accept();
+            return true;
+        }
+    }
     if((watched==this || watched==lineEdit())
        && (event->type()==QEvent::FocusIn || event->type()==QEvent::MouseButtonPress)) {
         QWidget* parent=parentWidget();

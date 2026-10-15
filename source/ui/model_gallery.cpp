@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QComboBox>
+#include <QListView>
 #include <QCompleter>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
@@ -218,6 +219,8 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     // Layout must not measure thousands of texture labels on the GUI thread.
     // The expanding editable field and completer retain the complete catalog.
     m_texture->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    if(auto* list=qobject_cast<QListView*>(m_texture->view()))
+        list->setUniformItemSizes(true);
     m_texture->completer()->setFilterMode(Qt::MatchContains); m_texture->completer()->setCaseSensitivity(Qt::CaseInsensitive);
     textureRow->addWidget(m_texture,1);
     m_saveTexture=new QPushButton(tr("Bind texture"),this); m_saveTexture->setObjectName("modelGalleryBindTexture"); textureRow->addWidget(m_saveTexture); layout->addLayout(textureRow);

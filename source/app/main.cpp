@@ -3533,13 +3533,8 @@ int runHeadlessCommand(QApplication& app)
         const bool expandedWorkingTileSelectionRejected =
             !tileForm.selectTile(1393);
 
-        QString modelGalleryDiagnostic;
-        const bool modelGalleryWorks = runModelGalleryWidgetCheck(&modelGalleryDiagnostic);
-        QTextStream(stderr) << "Model gallery: " << modelGalleryDiagnostic << "\n";
-        const bool objectHierarchyWorks = runObjectHierarchyCheck() == 0;
-        const bool groupRotationWorks = runGroupRotationCheck() == 0;
-        const bool darkThemeWorks = runDarkThemeCheck() == 0;
-        const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
+        // Nested UI checks below do not write the clipboard. Restore it before
+        // entering them, so a failure there cannot strand our synthetic value.
         const bool clipboardRestored = clipboardRestore.restore();
         QTextStream(clipboardWritesVerified && clipboardRestored ? stdout : stderr)
             << (clipboardWritesVerified && clipboardRestored ? "PASS" : "FAIL")
@@ -3547,6 +3542,13 @@ int runHeadlessCommand(QApplication& app)
             << " clipboardWritesVerified=" << clipboardWritesVerified
             << " clipboardRestored=" << clipboardRestored << "\n";
         if(!clipboardRestored) QTextStream(stderr) << clipboardRestore.error() << "\n";
+        QString modelGalleryDiagnostic;
+        const bool modelGalleryWorks = runModelGalleryWidgetCheck(&modelGalleryDiagnostic);
+        QTextStream(stderr) << "Model gallery: " << modelGalleryDiagnostic << "\n";
+        const bool objectHierarchyWorks = runObjectHierarchyCheck() == 0;
+        const bool groupRotationWorks = runGroupRotationCheck() == 0;
+        const bool darkThemeWorks = runDarkThemeCheck() == 0;
+        const bool profileCatalogWorks = runProfileModelCatalogCheck() == 0;
         const bool passed = clipboardWritesVerified && clipboardRestored && profileCatalogWorks && darkThemeWorks && groupRotationWorks && objectHierarchyWorks && modelGalleryWorks && firstRunSetupCancelled && behaviorFilterUsesCachedText && behaviorFilterRebuildSafe
                 && resourceBrowserContract && sortedResourceReferenceSelectsExactTarget
                 && resourceNavigationPreservesDockedTarget
