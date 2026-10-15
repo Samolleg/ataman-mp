@@ -301,7 +301,8 @@ bool CView::worldTerrainHistory(bool forward,bool force)
         if(stroke.overlays.contains(active))applyOverlaySurfacePreview(stroke.overlays[active],forward);
         if(stroke.tiles.contains(active))applyTerrainTilePreview(stroke.tiles[active],forward);
     }
-    for(const auto& id:stroke.paint.keys())previewWorldPaintState(id);
+    for(auto it=stroke.paint.cbegin();it!=stroke.paint.cend();++it)
+        previewWorldPaintState(it.key(), forward ? &it->before.terrain : &it->after.terrain);
     applyTerrainMobHeights(stroke.mobHeightState.data(),forward);
     refreshWorldTerrainNeighbors();
     emit updateMsg(forward?tr("Redid one complete world terrain stroke."):tr("Undid one complete world terrain stroke."));
@@ -869,7 +870,9 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
     }
     if(!stamp.isEmpty()) {
         if(!m_worldTerrainSession.apply(stamp,true,&error)) {report->add("terrain.world.apply",EValidationSeverity::Error,error);return true;}
-        bool previewed=true;for(const auto& id:stamp.paint.keys())previewed=previewWorldPaintState(id) && previewed;
+        bool previewed=true;
+        for(auto it=stamp.paint.cbegin();it!=stamp.paint.cend();++it)
+            previewed=previewWorldPaintState(it.key(), &it->before.terrain) && previewed;
         if(!previewed) {
             m_worldTerrainSession.apply(stamp,false,&error);
             for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
@@ -1086,7 +1089,8 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     if(stamp.isEmpty())return true;
     if(!m_worldTerrainSession.apply(stamp,true,&error)){emit updateMsg(error);return true;}
     bool previewed=true;
-    for(const auto& id:stamp.paint.keys())previewed=previewWorldPaintState(id) && previewed;
+    for(auto it=stamp.paint.cbegin();it!=stamp.paint.cend();++it)
+        previewed=previewWorldPaintState(it.key(), &it->before.terrain) && previewed;
     if(!previewed) {
         m_worldTerrainSession.apply(stamp,false,&error);
         for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
@@ -1120,23 +1124,38 @@ QVector<SMaterial> worldRenderMaterials(const QVector<SMprMaterialRecord>& recor
 }
 }
 
-bool CView::previewWorldPaintState(const QString& id)
+bool CView::previewWorldPaintState(const QString& id,
+                                   const CTerrainEditModel* previousTerrain)
 {
     const auto doc=m_worldTerrainSession.documents.value(id);if(!doc || !doc->atlas)return false;
     CTerrainPreviewContext guard(this);
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     CLandscape* landscape=nullptr;
+    SLoadedNeighborLandscape* loadedNeighbor=nullptr;
     if(id==active)landscape=m_pLand;
     else for(auto& neighbor:m_neighborLandscapes)
-        if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id){landscape=neighbor.landscape.data();break;}
+        if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id){landscape=neighbor.landscape.data();loadedNeighbor=&neighbor;break;}
     if(!landscape)return true; // unloaded neighbors still own the complete document
     const auto images=doc->atlas->activeTileImages();
-    if(!landscape->previewTerrainAtlas(images,doc->atlas->activeTextureCount()))return false;
+    QElapsedTimer publicationTimer;publicationTimer.start();
+    if(!landscape->previewTerrainAtlasIfChanged(images,doc->atlas->activeTextureCount()))return false;
     landscape->setMaterials(worldRenderMaterials(doc->materials));
+    int updatedSectors=0;
     for(const auto& sector:doc->baseline.sectors()) {
         const auto payload=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
-
+        const auto key=qMakePair(int(sector.sectorX),int(sector.sectorY));
+        // A background renderer may have been loaded after the command was
+        // recorded. Its own published payloads, not history, are authoritative.
+        // No predecessor means restore/rebind/rollback: force a full sector
+        // publication even if a failed partial update left the cache unchanged.
+        const QByteArray before=!previousTerrain ? QByteArray()
+            : loadedNeighbor ? loadedNeighbor->terrainPreviewPayloads.value(key,
+                doc->baseline.memberPayload(sector.memberName))
+            : previousTerrain->sectorPayload(sector.sectorX,sector.sectorY);
+        if(before==payload)continue;
         if(!landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,payload))return false;
+        ++updatedSectors;
+        if(loadedNeighbor)loadedNeighbor->terrainPreviewPayloads[key]=payload;
     }
     if(id==active) {
         if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
@@ -1156,7 +1175,10 @@ bool CView::previewWorldPaintState(const QString& id)
     } else for(auto& neighbor:m_neighborLandscapes)
         if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id) {
             neighbor.terrainPreviewAtlas=doc->atlas;neighbor.drawCacheDirty=true;
-            for(const auto& sector:doc->baseline.sectors())neighbor.terrainPreviewPayloads[qMakePair(sector.sectorX,sector.sectorY)]=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
         }
-    landscape->invalidateTerrainShadowField();update();return true;
+    landscape->invalidateTerrainShadowField();
+    ei::log(eLogInfo,QString("World paint publication map:%1 sectors:%2/%3 elapsedMs:%4")
+        .arg(QFileInfo(id).fileName()).arg(updatedSectors).arg(doc->baseline.sectors().size())
+        .arg(publicationTimer.elapsed()));
+    update();return true;
 }

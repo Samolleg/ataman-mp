@@ -634,7 +634,8 @@ private:
     bool resolveWorldTerrainClose(bool retain);
     bool ensureWorldTerrainAtlas(const QString& id,CValidationReport* report);
     bool paintWorldTerrainAt(const QVector3D& position,bool land);
-    bool previewWorldPaintState(const QString& id);
+    bool previewWorldPaintState(const QString& id,
+                               const CTerrainEditModel* previousTerrain = nullptr);
     bool eraseWorldOverlayAt(const QVector3D& position);
     bool worldMaterialNeighbors(QVector<SWorldMaterialField>* land, QVector<SWorldMaterialField>* overlay, CValidationReport* report);
     bool resolveWorldMaterialBlends(QString* summary, CValidationReport* report,

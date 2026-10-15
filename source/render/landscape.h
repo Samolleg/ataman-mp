@@ -129,6 +129,9 @@ public:
         const QSet<int>& changedSlots = QSet<int>(),
         const QVector<QImage>& rollbackTileImages = QVector<QImage>());
     void clearPreviewTerrainAtlas();
+    // Compare with the last successful publication, including after Undo/Redo.
+    bool previewTerrainAtlasIfChanged(const QVector<QImage>& tileImages,
+                                      int textureCount);
     void setDirty(bool bDirty) {if(!m_readOnlyBackground) m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
@@ -179,6 +182,7 @@ private:
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
     int m_previewAtlasTextureCount{0};
     int m_previewAtlasColumns{0};
+    QVector<QImage> m_previewAtlasImages;
     QFileInfo m_filePath;
     QString m_innerMapName;
     QByteArray m_originalMprData;

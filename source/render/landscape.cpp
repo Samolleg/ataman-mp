@@ -493,6 +493,7 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
             for(CSector* sector : row)
                 if(sector) sector->setTerrainAtlasLayout(textureCount, columns);
     }
+    m_previewAtlasImages = tileImages;
     ei::log(eLogInfo, QString(
         "Working terrain atlas uploaded: route:%1 changedSlots:%2 slots:%3 pages:%4 grid:%5x%6 elapsedMs:%7")
         .arg(route).arg(changedSlots.size()).arg(tileImages.size())
@@ -500,8 +501,39 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     return true;
 }
 
+bool CLandscape::previewTerrainAtlasIfChanged(
+    const QVector<QImage>& tileImages, int textureCount)
+{
+    // A retained CPU snapshot is only evidence while its GL publication lives.
+    // Different dimensions/layouts use the existing full publication path.
+    if(!m_previewAtlasTexture || !m_previewAtlasTexture->isCreated()
+       || !QOpenGLContext::currentContext()
+       || textureCount != m_previewAtlasTextureCount
+       || tileImages.size() != textureCount * 64
+       || tileImages.size() != m_previewAtlasImages.size())
+        return previewTerrainAtlas(tileImages, textureCount);
+    QSet<int> changed;
+    for(int slot = 0; slot < tileImages.size(); ++slot)
+    {
+        if(tileImages.at(slot).size() != m_previewAtlasImages.at(slot).size())
+            return previewTerrainAtlas(tileImages, textureCount);
+        // QImage sharing makes unchanged slots cheap; equality still checks
+        // actual pixels when the producer returns a detached image.
+        if(tileImages.at(slot) != m_previewAtlasImages.at(slot))
+            changed.insert(slot);
+    }
+    if(changed.isEmpty())
+        return true;
+    const bool installed = previewTerrainAtlas(tileImages, textureCount, changed,
+                                               m_previewAtlasImages);
+    if(!installed)
+        m_previewAtlasImages.clear(); // A retry must not trust a failed GL rollback.
+    return installed;
+}
+
 void CLandscape::clearPreviewTerrainAtlas()
 {
+    m_previewAtlasImages.clear();
     m_texture = m_baseAtlasTexture;
     m_renderTextureCount = qMax(1, int(m_header.nTexture));
     m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);
