@@ -43,3 +43,14 @@ Evidence: build-edit-184-20261015/{release.log,final-rebuild.log,baseline-native
 ## Передача
 
 Fresh staging/finalizer и guarded установка184 по TEST_BUILD_HANDOFF. На постоянной установке финализатор не запускается; данные/настройки сохраняются,182/183 исправления присутствуют. Ручная приёмка исходного набора объектов/драйвера/миникарты владельцем отдельно от synthetic native evidence. Алгоритмы переходов/рендера не заменялись, GitHub этим поручением не обновляется.
+
+
+### Установка184 завершена
+
+Source mainab80d791c709a3bbabd2f001f3773cecbfc0e455. Fresh stage build-staging-184-edit и finalizer PASS; staged --version184 и EXE identity PASS до финализации. При передаче установленный редактор был закрыт, процессы дополнительно проверялись перед заменами.
+
+В постоянной artifacts/EI-Mapper-Ataman-2-first-test verified129 managed files:6 замен/1 добавление/1 удаление прежнего managed отчёта (changed counter7 включает удаление). Все16594 owner files вне manifest побайтно сохранены; digest2A9C5661D1659D1703ACAB72A6358942977948A50DC31BF057F3206471D63F86. EXEa2320b32bb7b285ebb00135bae2a7601a552822d1ba059d445c030e3dcdd5725; manifestc4bce07bc71ce4a9c71cebbd08f3f87a92166fa5d529d2df5b45a703f88d3b17.
+
+Резерв183 artifacts/rollback183-to184-edit-20261015 проверен: каждый файл прежнего manifest восстанавливается из backup+unchanged installed. Только точно опознанный предыдущий резерв182 artifacts/rollback182-to183-selection-20261015 удалён после подтверждения:19578445 bytes. Остальные исторические каталоги сохранены. Receipts build-edit-184-20261015/{staging-receipt,install-receipt,rollback-retirement}.json. На пользовательской установке finalizer не работал, интерактивно редактор не запускался. После финализации staging не менялась/не запускалась; эта запись добавлена только в исходный отчёт.
+
+Реализация/проверка/установка завершены; ручное подтверждение привычного набора объектов и полного UI остаётся владельцу. Известные пределы gallery/large selection указаны выше; полный UI PASS не заявляется. GitHub не обновлялся.
