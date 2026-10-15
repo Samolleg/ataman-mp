@@ -9,6 +9,8 @@
 
 - Final native:185 median333.624/max350.567→186 median23.0646/max25.2603ms при493 models/7164 textures, полный список7167 rows сохранён. Profile48/0, properties26/0 и gallery7165textures open8/select3ms PASS. Исправлена воспроизведённая185 ошибка heading-click wood→other/лишнего Undo. Общий UI exit2 недоступен из-за native clipboard guard; первый промежуточный UI-тест AV на stale cell исправлен, восстановление исходного clipboard после него не подтверждено. Guard restore перенесён до вложенных UI-checks. Evidence docs/validation/ATAMAN_SELECTION_CATALOG_LATENCY_186_20261015.md. Следующий шаг — scoped-коммит/fresh stage/guarded установка; полный UI может быть повторён после ответа владельца, ручная приёмка отдельно.
 
+- READY186 / INSTALL WAIT OWNER CLOSE: реализация main13b7cc507737976657501f03cfc84340cfef3cc3; fresh staging/finalizer PASS, EXE66090b8d55b969d51bb846ef06735dbfdd488664ed0ec1d854223df37ccbc2fa, manifest2332df8f7523cdd3255ce7bcfe99a44044c88ffcbaa12c14b8ccfae54c2b42b4. Перед установкой fresh process guard обнаружил установленный EIMapperEndurance.exe PID6288; владелец уведомлён по docs/TEST_BUILD_HANDOFF.md, запрошено закрытие. Постоянная установка185 и её данные не менялись. Следующий шаг — после подтверждения закрытия повторить process/manifest guards и установить186 с резервом185.
+
 
 
 ## EI-OBJECT-DELETE-FREEZE-20261015 — задержка удаления объектов
