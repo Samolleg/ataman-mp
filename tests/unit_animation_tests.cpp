@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QDataStream>
 #include <QTemporaryDir>
+#include <QtConcurrentRun>
 #include <QRandomGenerator>
 #include <QThread>
 #include "unit_animation.h"
@@ -128,6 +129,8 @@ private slots:
     void roundTripsFigureAssemblyAndUnknownPartNames();
     void retainsRecentlyUsedVisualsAcrossMapReplacement();
     void enforcesCombinedPersistentVisualCacheLimit();
+    void customVisualCacheNeverPrunesParent();
+    void concurrentWritesKeepBudgetAndPayloads();
     void leavesHeadroomAfterPruningVisualCache();
     void removesSlowerDeprecatedAssemblyCache();
     void malformedAndUnknownInputsFailStatic();
@@ -154,6 +157,55 @@ void UnitAnimationTests::retainsRecentlyUsedVisualsAcrossMapReplacement()
     QVERIFY(cache.oldestFirst().isEmpty());
 }
 
+
+void UnitAnimationTests::customVisualCacheNeverPrunesParent()
+{
+    QTemporaryDir owner;
+    QVERIFY(owner.isValid());
+    const QString category=owner.path()+"/custom";
+    const QString outside=owner.path()+"/outside.json";
+    const QByteArray original(2*1024*1024,'p');
+    QFile f(outside);QVERIFY(f.open(QIODevice::WriteOnly));
+    QCOMPARE(f.write(original),qint64(original.size()));f.close();
+    ei::setVisualCacheLimitMiB(1);
+    QVERIFY(ei::writeVisualCachePayload(category,"inside",77,QByteArray("valid")));
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+    ei::setVisualCacheLimitMiB(1);
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+    QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),original);f.close();
+    ei::setVisualCacheLimitMiB(4096);
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+}
+
+void UnitAnimationTests::concurrentWritesKeepBudgetAndPayloads()
+{
+    QTemporaryDir owner;QVERIFY(owner.isValid());
+    const QString category=ei::visualCacheDirectoryForApplication(owner.path(),"character-atlases");
+    QByteArray data(64*1024,Qt::Uninitialized);QRandomGenerator random(187);
+    for(char& c:data)c=char(random.generate()&255);
+    ei::setVisualCacheLimitMiB(1);
+    QVERIFY(ei::writeVisualCachePayload(category,"seed",77,data));
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+    const auto writer=[&](int start){
+        for(int i=start;i<start+20;++i)
+            if(!ei::writeVisualCachePayload(category,QString::number(i),77,data))return false;
+        return true;
+    };
+    auto a=QtConcurrent::run(writer,0),b=QtConcurrent::run(writer,20);
+    a.waitForFinished();b.waitForFinished();QVERIFY(a.result());QVERIFY(b.result());
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+    const auto files=QDir(category).entryInfoList({"*.cache"},QDir::Files);
+    qint64 total=0;
+    for(const auto& file:files){
+        total+=file.size();QByteArray decoded;
+        QVERIFY(ei::readVisualCachePayload(category,file.completeBaseName(),77,&decoded));
+        QCOMPARE(decoded,data);
+    }
+    QVERIFY(!files.isEmpty());QVERIFY(total<=1024*1024);
+    ei::setVisualCacheLimitMiB(4096);
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(),10000);
+}
+
 void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
 {
     QTemporaryDir application;
@@ -178,10 +230,12 @@ void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
     QCOMPARE(plan.write(noisy), qint64(noisy.size()));
     plan.close();
     ei::recordVisualCacheFileWrite(plans, 0, QFileInfo(planPath).size());
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
     QVERIFY(!QFileInfo(QDir(atlases).filePath(QStringLiteral("old.cache"))).exists());
     QVERIFY(QFileInfo(planPath).exists());
     QThread::msleep(20);
     QVERIFY(ei::writeVisualCachePayload(assemblies, QStringLiteral("new"), 77, noisy));
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
     QVERIFY(!QFileInfo(planPath).exists());
     QVERIFY(QFileInfo(QDir(assemblies).filePath(QStringLiteral("new.cache"))).exists());
 
@@ -190,12 +244,14 @@ void UnitAnimationTests::enforcesCombinedPersistentVisualCacheLimit()
                                         noisy + noisy));
     QVERIFY(QFileInfo(QDir(atlases).filePath(QStringLiteral("unlimited.cache"))).exists());
     ei::setVisualCacheLimitMiB(4096);
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
 }
 
 void UnitAnimationTests::leavesHeadroomAfterPruningVisualCache()
 {
     QTemporaryDir application;
     QVERIFY(application.isValid());
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
     struct RestoreLimit
     {
         int previous = ei::visualCacheLimitMiB();
@@ -210,6 +266,7 @@ void UnitAnimationTests::leavesHeadroomAfterPruningVisualCache()
         byte = char(random.generate() & 0xffu);
     for(int index = 0; index < 11; ++index)
         QVERIFY(ei::writeVisualCachePayload(atlases, QString::number(index), 77, noisy));
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
     const auto filesAfterPrune = QDir(atlases).entryInfoList(
         QStringList() << QStringLiteral("*.cache"), QDir::Files);
     qint64 bytesAfterPrune = 0;
@@ -218,6 +275,7 @@ void UnitAnimationTests::leavesHeadroomAfterPruningVisualCache()
     QVERIFY2(bytesAfterPrune <= (1024 * 1024) * 9 / 10,
              "A full cache must leave room for subsequent writes");
     QVERIFY(ei::writeVisualCachePayload(atlases, QStringLiteral("next"), 77, noisy));
+    QTRY_VERIFY_WITH_TIMEOUT(!ei::visualCacheMaintenancePending(), 10000);
     QCOMPARE(QDir(atlases).entryInfoList(QStringList() << QStringLiteral("*.cache"),
                                          QDir::Files).size(), filesAfterPrune.size() + 1);
 }

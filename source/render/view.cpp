@@ -84,6 +84,7 @@
 #include "tile.h"
 #include "view_frustum.h"
 #include "render_performance.h"
+#include "render_stall_trace.h"
 #include "frame_presentation_telemetry.h"
 #include "render_queue.h"
 #include "render_environment.h"
@@ -8221,6 +8222,7 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
 
 void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 {
+    CRenderStallTrace stallTrace("render");
 
     QMatrix4x4 camMatrix = m_minimapCaptureActive
         ? m_minimapCaptureView : m_cam->update();
@@ -8367,13 +8369,13 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     if(!m_minimapCaptureActive && terrainShadowsEnabled
             && m_pLand && m_pLand->isMprLoad())
         m_pLand->updateTerrainShadowVisibility(
-            environment.sunDirection, !m_sculptStrokeActive);
+            environment.sunDirection, !m_sculptStrokeActive && !m_tilePaintStrokeActive);
     syncEnvironmentPreviewWidget(environment.timeHours);
     if(!m_minimapCaptureActive && terrainShadowsEnabled && m_neighborLandscapesVisible)
         for(auto& neighbor : m_neighborLandscapes)
             if(neighbor.landscape)
                 neighbor.landscape->updateTerrainShadowVisibility(
-                    environment.sunDirection, !m_sculptStrokeActive);
+                    environment.sunDirection, !m_sculptStrokeActive && !m_tilePaintStrokeActive);
     QVector<ei::SScenePointLight> sceneLights;
     QVector<ei::SScenePointLight> shadowLights;
     if(environmentEnabled && sceneLightsEnabled)
@@ -8567,6 +8569,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition, logicalCameraPosition);
+    stallTrace.mark("setup");
     bool terrainDrawn = false;
     const auto drawTerrainColor = [&](bool withShadows)
     {
@@ -8784,11 +8787,14 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             }
             renderQueue.setShadowOnlyCollection(false);
         }
+        stallTrace.mark("scene-collect");
         const bool shadowReady = environmentEnabled && shadowsEnabled
             && renderShadowMap(logicalCameraPosition, cameraPivot, environment, shadowLights,
                                renderQueue, maximumShadowDistance, frameTelemetry);
+        stallTrace.mark("shadows");
         beginVisibleFrame();
         drawTerrainColor(shadowReady);
+        stallTrace.mark("terrain");
         if(frameTelemetry)
         {
             GLint framebuffer = -1;
@@ -8797,6 +8803,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         }
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
+        stallTrace.mark("objects");
         ei::gl::DepthFunc(GL_LEQUAL);
         for(CMob* mob : m_aMob)
             if(!m_minimapCaptureActive && isMobVisible(mob))
@@ -8851,6 +8858,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     }
 
     renderQueue.end();
+    stallTrace.mark("helpers");
     if(performance.collecting())
     {
         performance.counters().sharedMeshes = quint64(CPart::sharedMeshCount());
@@ -8923,9 +8931,11 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         m_landProgram.setUniformValue("transparency", 0.0f);
     }
 
+    stallTrace.mark("water");
     if(!m_minimapCaptureActive)
         if(m_particleVisualsVisible)
             drawParticles(camMatrix, cullingEnabled ? &frustum : nullptr);
+    stallTrace.mark("particles");
     logOpenGlErrors(QStringLiteral("draw/particles"));
 
 

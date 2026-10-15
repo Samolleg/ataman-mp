@@ -6,6 +6,8 @@
 #include "mmp_codec.h"
 #include "tile_form.h"
 #include "terrain_preview_context.h"
+#include "terrain_shadow_inputs.h"
+#include "render_stall_trace.h"
 #include "landscape.h"
 #include "landscape_tools.h"
 #include "endurance_document.h"
@@ -83,7 +85,7 @@ void CView::refreshWorldTerrainNeighbors()
         if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
             if(!previewWorldPaintState(id)){emit updateMsg(tr("Не удалось обновить атлас соседней карты."));continue;}
         }
-        bool changed=false;
+        bool changed=false, shadowChanged=false;
         for(const auto& sector:doc->baseline.sectors())
         {
             const auto key=qMakePair(sector.sectorX,sector.sectorY);
@@ -92,12 +94,13 @@ void CView::refreshWorldTerrainNeighbors()
             const auto after=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
             if(before==after) continue;
             if(loaded.landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,after))
-            { loaded.terrainPreviewPayloads[key]=after;changed=true; }
+            { loaded.terrainPreviewPayloads[key]=after;changed=true;
+              shadowChanged |= terrainShadowInputsChanged(before,after); }
             else emit updateMsg(tr("Neighbor terrain preview failed: %1").arg(loaded.placement.zoneId));
         }
         if(changed)
         {
-            loaded.landscape->invalidateTerrainShadowField();
+            if(shadowChanged)loaded.landscape->invalidateTerrainShadowField();
             loaded.drawCacheDirty=true;
             for(int index=0; index<loaded.staticObjects.size(); ++index)
             {
@@ -904,6 +907,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     if(m_landscapeTools->overlaySurfaceEnabled()
        && m_landscapeTools->overlaySurfaceOperation()==EOverlaySurfaceOperation::Deactivate)
         return eraseWorldOverlayAt(position);
+    CRenderStallTrace timing("world-paint");
     QString error;CValidationReport report;
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     if(!m_worldTerrainSession.load(m_pLand->filePath().absoluteFilePath(),&error)){emit updateMsg(error);return true;}
@@ -919,6 +923,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         origins.insert(id,placement.worldOrigin);
     }
     if(!ensureWorldTerrainAtlas(active,&report)){emit updateMsg(report.toText());return true;}
+    timing.mark("catalog");
     const auto palette=m_landscapeTools->paintPaletteMode();
     const bool manual=palette==ETerrainPaintPaletteMode::Manual;
     const bool classic=palette==ETerrainPaintPaletteMode::ClassicAuto;
@@ -959,6 +964,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             }
         for(const auto& animation:doc->baseline.mapInfo().animatedTiles)
             for(int frame=0;frame<qMax(1,int(animation.frameCount));++frame)stage.protectedSlots.insert(animation.tileIndex+frame);
+        timing.mark("stage-usage");
         STerrainTileBrush brush;brush.centerX=std::floor((world.x()-target.value().x())/2);
         brush.centerY=std::floor((world.y()-target.value().y())/2);
         brush.radius=m_landscapeTools->paintRadius();brush.shape=m_landscapeTools->paintShape();
@@ -1033,6 +1039,7 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         if(!changed)continue;
         change.after.terrain=stage.terrainEdit;change.after.atlas=stage.atlas;
         stamp.paint.insert(target.key(),change);
+        timing.mark("resolve");
     }
     if(planned!=origins.size() && !report.hasErrors())report.add("terrain.world.stage",EValidationSeverity::Error,"Не удалось подготовить все карты; мазок отменён.");
     // Both maps must be staged before comparing a shared border. Their packed
@@ -1086,8 +1093,10 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         if(!adjusted)break;
     }
     if(report.hasErrors()){emit updateMsg(report.toText());return true;}
+    timing.mark("join");
     if(stamp.isEmpty())return true;
     if(!m_worldTerrainSession.apply(stamp,true,&error)){emit updateMsg(error);return true;}
+    timing.mark("apply");
     bool previewed=true;
     for(auto it=stamp.paint.cbegin();it!=stamp.paint.cend();++it)
         previewed=previewWorldPaintState(it.key(), &it->before.terrain) && previewed;
@@ -1096,7 +1105,10 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
         for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
         emit updateMsg(tr("Предпросмотр общей кисти не обновлён; мазок отменён."));return true;
     }
-    m_worldTerrainStroke.append(stamp);refreshWorldTerrainNeighbors();updateWorldTerrainStatus();return true;
+    timing.mark("publish");
+    m_worldTerrainStroke.append(stamp);refreshWorldTerrainNeighbors();updateWorldTerrainStatus();
+    timing.mark("history-neighbors");
+    return true;
 }
 
 namespace {
@@ -1141,6 +1153,7 @@ bool CView::previewWorldPaintState(const QString& id,
     if(!landscape->previewTerrainAtlasIfChanged(images,doc->atlas->activeTextureCount()))return false;
     landscape->setMaterials(worldRenderMaterials(doc->materials));
     int updatedSectors=0;
+    bool shadowChanged=false;
     for(const auto& sector:doc->baseline.sectors()) {
         const auto payload=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
         const auto key=qMakePair(int(sector.sectorX),int(sector.sectorY));
@@ -1154,6 +1167,7 @@ bool CView::previewWorldPaintState(const QString& id,
             : previousTerrain->sectorPayload(sector.sectorX,sector.sectorY);
         if(before==payload)continue;
         if(!landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,payload))return false;
+        shadowChanged |= terrainShadowInputsChanged(before,payload);
         ++updatedSectors;
         if(loadedNeighbor)loadedNeighbor->terrainPreviewPayloads[key]=payload;
     }
@@ -1174,9 +1188,10 @@ bool CView::previewWorldPaintState(const QString& id,
         m_landscapeTools->setGeneratedAtlasTileCount(m_workingTerrainAtlas->generatedTileCount());
     } else for(auto& neighbor:m_neighborLandscapes)
         if(CWorldTerrainSession::key(neighbor.placement.mprPath)==id) {
-            neighbor.terrainPreviewAtlas=doc->atlas;neighbor.drawCacheDirty=true;
+            neighbor.terrainPreviewAtlas=doc->atlas;
+            neighbor.drawCacheDirty |= shadowChanged;
         }
-    landscape->invalidateTerrainShadowField();
+    if(shadowChanged)landscape->invalidateTerrainShadowField();
     ei::log(eLogInfo,QString("World paint publication map:%1 sectors:%2/%3 elapsedMs:%4")
         .arg(QFileInfo(id).fileName()).arg(updatedSectors).arg(doc->baseline.sectors().size())
         .arg(publicationTimer.elapsed()));

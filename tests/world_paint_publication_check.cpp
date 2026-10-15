@@ -15,6 +15,7 @@
 #include "terrain_atlas_archive_binding.h"
 #include "mmp_codec.h"
 #include <QElapsedTimer>
+#include <QThread>
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -120,10 +121,42 @@ int runNeighborPerformanceCheck()
         gl->glBindTexture(GL_TEXTURE_2D,GLuint(prior));return hash.result().toHex();
     };
     const auto firstTextureBefore=textureHash(view.m_pLand),secondTextureBefore=textureHash(loaded.landscape.data());
+    const auto shadowPixels=[&](CLandscape* land) {
+        view.makeCurrent();
+        const QVector3D sun=QVector3D(0.9f,0.2f,-0.4f).normalized();
+        QElapsedTimer ready;ready.start();
+        while(ready.elapsed()<1800) {
+            land->updateTerrainShadowVisibility(sun,true);QThread::msleep(10);
+        }
+        view.m_landProgram.bind();
+        auto* gl=QOpenGLContext::currentContext()->functions();
+        GLint active=0;gl->glGetIntegerv(GL_ACTIVE_TEXTURE,&active);
+        gl->glActiveTexture(GL_TEXTURE6);
+        GLint prior=0;gl->glGetIntegerv(GL_TEXTURE_BINDING_2D,&prior);
+        gl->glBindTexture(GL_TEXTURE_2D,0);
+        land->applyTerrainShadowUniforms(&view.m_landProgram,true);
+        gl->glActiveTexture(GL_TEXTURE6);
+        GLint texture=0;gl->glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture);
+        typedef void (APIENTRY *ReadTexture)(GLenum,GLint,GLenum,GLenum,void*);
+        auto read=reinterpret_cast<ReadTexture>(QOpenGLContext::currentContext()->getProcAddress("glGetTexImage"));
+        QByteArray result;
+        if(texture && read) {
+            QByteArray pixels((land->widthInWorldUnits()+1)*(land->heightInWorldUnits()+1)*4,0);
+            read(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+            result=QCryptographicHash::hash(pixels,QCryptographicHash::Sha256).toHex();
+        }
+        gl->glBindTexture(GL_TEXTURE_2D,GLuint(prior));gl->glActiveTexture(GLenum(active));
+        return result;
+    };
+    const auto firstShadowBefore=shadowPixels(view.m_pLand),secondShadowBefore=shadowPixels(loaded.landscape.data());
+    if(firstShadowBefore.isEmpty() || secondShadowBefore.isEmpty())return 115;
+
     QElapsedTimer timer;timer.start();view.beginTileBrushGroup();
     view.m_tileStrokeDistributionSeed=123456789u;
     view.m_workingTerrainAtlas->setDistributionSeed(view.m_tileStrokeDistributionSeed);
     QJsonArray stampMs;
+    const auto firstShadowGeneration=view.m_pLand->shadowGeneration();
+    const auto secondShadowGeneration=loaded.landscape->shadowGeneration();
     QElapsedTimer stampTimer;stampTimer.start();
     for(int dy=-3;dy<=3;++dy) {
         stampTimer.restart();
@@ -132,6 +165,12 @@ int runNeighborPerformanceCheck()
     }
     view.endTileBrushGroup();first=view.m_worldTerrainSession.documents[id];second=view.m_worldTerrainSession.documents[otherId];
     const qint64 brushMs=timer.elapsed();
+    const auto shadowInvalidations=view.m_pLand->shadowGeneration()-firstShadowGeneration
+        +loaded.landscape->shadowGeneration()-secondShadowGeneration;
+    out<<"Texture-only paint shadow invalidations: "<<shadowInvalidations<<"\n";out.flush();
+#ifdef EISHADOW_CANDIDATE
+    if(shadowInvalidations!=0)return 114;
+#endif
     int changed=0;QJsonArray cells;
     QImage canvas(6*128,11*128,QImage::Format_RGBA8888);canvas.fill(Qt::black);QPainter painter(&canvas);
     for(int y=-5;y<=5;++y)for(int x=-3;x<=2;++x) {
@@ -150,6 +189,7 @@ int runNeighborPerformanceCheck()
     const auto firstAfter=payloads(*first),secondAfter=payloads(*second);
     if(firstBefore==firstAfter||secondBefore==secondAfter)return 88;
     const auto firstTextureAfter=textureHash(view.m_pLand),secondTextureAfter=textureHash(loaded.landscape.data());
+    if(shadowPixels(view.m_pLand)!=firstShadowBefore || shadowPixels(loaded.landscape.data())!=secondShadowBefore)return 116;
     if(!view.worldTerrainHistory(false,true)||payloads(*view.m_worldTerrainSession.documents[id])!=firstBefore||payloads(*view.m_worldTerrainSession.documents[otherId])!=secondBefore)return 89;
     if(textureHash(view.m_pLand)!=firstTextureBefore || textureHash(loaded.landscape.data())!=secondTextureBefore)return 94;
     if(!view.worldTerrainHistory(true,true)||payloads(*view.m_worldTerrainSession.documents[id])!=firstAfter||payloads(*view.m_worldTerrainSession.documents[otherId])!=secondAfter)return 90;
@@ -188,6 +228,8 @@ int runNeighborPerformanceCheck()
         for(const auto& sector:d->baseline.sectors())
             if(!land->previewCanonicalSector(sector.sectorX,sector.sectorY,d->terrain.sectorPayload(sector.sectorX,sector.sectorY)))return 104;
     }
+    view.m_pLand->invalidateTerrainShadowField();loaded.landscape->invalidateTerrainShadowField();
+    if(shadowPixels(view.m_pLand)!=firstShadowBefore || shadowPixels(loaded.landscape.data())!=secondShadowBefore)return 117;
     const auto fullFrame=geometryFrame();fullFrame.save(output+"/cross-full-render.png");
     if(fullFrame!=incrementalFrame)return 105;
 #ifdef EIPUB_CANDIDATE
@@ -244,6 +286,6 @@ int runNeighborPerformanceCheck()
     QCryptographicHash canonicalHash(QCryptographicHash::Sha256);
     for(const auto& p:localAfter)canonicalHash.addData(p);
     QFile receipt(output+"/cross-success.json");if(!receipt.open(QIODevice::WriteOnly))return 91;
-    receipt.write(QJsonDocument(QJsonObject{{"result","PASS"},{"maps",2},{"cells",cells},{"undoRedo",true},{"elapsedMs",timer.elapsed()},{"brushMs",brushMs},{"stampMs",stampMs},{"textureFirst",QString::fromLatin1(firstTextureAfter)},{"textureSecond",QString::fromLatin1(secondTextureAfter)},{"localStampMs",localStampMs},{"localPayloadSha256",QString::fromLatin1(canonicalHash.result().toHex())},{"localTexture",QString::fromLatin1(localAtlasAfter)},{"renderFullEquivalent",true}}).toJson());
+    receipt.write(QJsonDocument(QJsonObject{{"result","PASS"},{"maps",2},{"cells",cells},{"undoRedo",true},{"elapsedMs",timer.elapsed()},{"brushMs",brushMs},{"shadowInvalidations",int(shadowInvalidations)},{"stampMs",stampMs},{"textureFirst",QString::fromLatin1(firstTextureAfter)},{"textureSecond",QString::fromLatin1(secondTextureAfter)},{"localStampMs",localStampMs},{"localPayloadSha256",QString::fromLatin1(canonicalHash.result().toHex())},{"localTexture",QString::fromLatin1(localAtlasAfter)},{"renderFullEquivalent",true},{"shadowFullEquivalent",true},{"shadowPixelsFirst",QString::fromLatin1(firstShadowBefore)},{"shadowPixelsSecond",QString::fromLatin1(secondShadowBefore)}}).toJson());
     out<<"PASS two maps with different atlases, "<<changed<<" border cells, exact shared Undo/Redo, "<<timer.elapsed()<<" ms\n";out.flush();return 0;
 }

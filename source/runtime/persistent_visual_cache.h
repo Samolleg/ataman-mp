@@ -51,6 +51,8 @@ bool removeDeprecatedVisualAssemblyCacheForApplication(const QString& applicatio
 QString visualCacheKey(const QByteArray& identity);
 void setVisualCacheLimitMiB(int limitMiB);
 int visualCacheLimitMiB();
+// Maintenance is coalesced off the caller thread; the disk budget is eventual.
+bool visualCacheMaintenancePending();
 // Account for cache files written by a sibling cache format (for example the
 // JSON appearance-plan cache) so the single user-visible disk budget covers
 // the complete character cache tree.

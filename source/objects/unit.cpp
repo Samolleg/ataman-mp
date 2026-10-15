@@ -12,6 +12,7 @@
 #include "property.h"
 #include "profile_database.h"
 #include "profile_visual_provider.h"
+#include "render_stall_trace.h"
 #include "character_bodypart_runtime.h"
 #include "persistent_visual_cache.h"
 #include "render_queue.h"
@@ -307,6 +308,7 @@ bool CUnit::refreshTransientVisual(bool force)
         return true;
     if(!force && !AnimationFrameContext::instance().claimColdVisualResolution())
         return false;
+    CRenderStallTrace timing("unit-visual");
     m_resolvedDatabaseGeneration = generation;
     m_resolvedVisualRevision = m_visualRevision;
     m_visualDiagnostics.clear();
@@ -381,8 +383,9 @@ bool CUnit::refreshTransientVisual(bool force)
     planIdentity.insert("dataSource", int(appearanceRequest.dataSource));
     planIdentity.insert("appearance", appearance);
     const QString visualPlanKey = resolvedVisualPlanKey(planIdentity);
+    timing.mark("appearance");
     bool cachedPlanPending = false;
-    auto applyResolvedPlan = [this, &cachedPlanPending](const QJsonObject& plan,
+    auto applyResolvedPlan = [this, &cachedPlanPending, &timing](const QJsonObject& plan,
                                                        const QVector3D& complexion) -> bool
     {
         const QString resolvedModel = plan.value("model").toString();
@@ -422,6 +425,7 @@ bool CUnit::refreshTransientVisual(bool force)
         applyTransientVisual(resolvedModel, resolvedTexture, resolvedParts, complexion,
                              resolvedComponentTextures, resolvedSecondary,
                              resolvedLayers, resolvedEmissions);
+        timing.mark("cached-model");
         m_resolvedAnimationModel = resolvedModel;
         m_resolvedAnimationWeapons = resolvedWeapons;
         return true;
@@ -570,6 +574,7 @@ bool CUnit::refreshTransientVisual(bool force)
     m_renderedBodyTextureLayers = bodyTextureLayers;
     applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
                          secondaryTexture, bodyTextureLayers, partEmissions);
+    timing.mark("model");
     m_resolvedAnimationModel = model;
     m_resolvedAnimationWeapons = equipmentRequest.weapons;
     QJsonObject cachedPlan;
@@ -694,6 +699,7 @@ void CUnit::refreshAnimationPose()
         + '|' + m_resolvedAnimationWeapons.join(';').toLower();
     if(fingerprint != m_animationFingerprint)
     {
+        CRenderStallTrace timing("unit-animation-init");
         m_animationFingerprint = fingerprint;
         m_idleClip = SAnimationClip();
         m_lastAppliedAnimationFrame = -1.0;

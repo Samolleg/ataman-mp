@@ -39,6 +39,23 @@ QSet<QString> s_cacheRoots;
 QHash<QString, qint64> s_cacheRootBytes;
 int s_visualCacheLimitMiB = 4096;
 bool s_deprecatedAssemblyCacheChecked = false;
+QHash<QString, quint64> s_cacheWriteRevisions;
+QHash<QString, QString> s_pendingMaintenance;
+bool s_maintenanceActive = false;
+bool s_cacheShutdown = false;
+bool s_cacheShutdownHooked = false;
+QThread* s_maintenanceThread = nullptr;
+void requestCacheMaintenance(const QString& categoryPath);
+
+QString cacheRootForCategory(const QString& categoryPath)
+{
+    const QDir parent = QFileInfo(categoryPath).dir();
+    // Standard categories share <application>/cache. An explicit custom cache
+    // directory owns only itself: never enumerate/prune its arbitrary parent
+    // (in particular the system Temp directory used by document tests).
+    return parent.dirName().compare(QStringLiteral("cache"), Qt::CaseInsensitive) == 0
+        ? parent.absolutePath() : QDir::cleanPath(QFileInfo(categoryPath).absoluteFilePath());
+}
 
 qint64 configuredCacheBudget()
 {
@@ -62,6 +79,7 @@ qint64 cacheRootBytes(const QString& rootPath)
     QDirIterator iterator(rootPath, QDir::Files, QDirIterator::Subdirectories);
     while(iterator.hasNext())
     {
+        if(QThread::currentThread()->isInterruptionRequested())return total;
         const QFileInfo entry(iterator.next());
         if(isBudgetedCacheFile(entry))
             total += entry.size();
@@ -75,7 +93,7 @@ void pruneCacheRoot(const QString& categoryPath)
     if(budget <= 0)
         return;
     QMutexLocker pruneLocker(&s_pruneMutex);
-    const QString rootPath = QFileInfo(categoryPath).dir().absolutePath();
+    const QString rootPath = cacheRootForCategory(categoryPath);
     const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
     // Writers may have queued behind another prune. Recheck after taking the
     // prune lock so a single over-budget burst does not rescan the whole tree.
@@ -95,6 +113,7 @@ void pruneCacheRoot(const QString& categoryPath)
     QDirIterator iterator(rootPath, QDir::Files, QDirIterator::Subdirectories);
     while(iterator.hasNext())
     {
+        if(QThread::currentThread()->isInterruptionRequested())return;
         const QFileInfo entry(iterator.next());
         if(isBudgetedCacheFile(entry))
         {
@@ -117,7 +136,8 @@ void pruneCacheRoot(const QString& categoryPath)
     const qint64 target = budget - qMax<qint64>(1, budget / 10);
     for(const CacheEntry& entry : entries)
     {
-        if(total <= target)
+        if(total <= target || configuredCacheBudget() != budget
+                || QThread::currentThread()->isInterruptionRequested())
             break;
         if(QFile::remove(entry.path))
         {
@@ -128,6 +148,81 @@ void pruneCacheRoot(const QString& categoryPath)
         QMutexLocker locker(&s_cacheMutex);
         s_cacheRootBytes.insert(normalizedRoot, total);
     }
+}
+
+// One worker coalesces all roots. GUI callers never enumerate the cache or
+// wait for another writer's prune. A concurrent write invalidates the size
+// snapshot, so the worker recounts before trusting the budget again.
+void requestCacheMaintenance(const QString& categoryPath)
+{
+    if(categoryPath.isEmpty()) return;
+    {
+        QMutexLocker locker(&s_cacheMutex);
+        if(s_cacheShutdown)return;
+        if(!s_cacheShutdownHooked && QCoreApplication::instance())
+        {
+            s_cacheShutdownHooked=true;
+            QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+                QCoreApplication::instance(), []() {
+                    QThread* active=nullptr;
+                    {
+                        QMutexLocker lock(&s_cacheMutex);
+                        s_cacheShutdown=true;s_pendingMaintenance.clear();
+                        active=s_maintenanceThread;
+                        if(active)active->requestInterruption();
+                    }
+                    // The scan/deletion loop checks interruption per file.
+                    // Join before static cache bookkeeping can be destroyed.
+                    if(active)active->wait();
+                }, Qt::DirectConnection);
+        }
+        const QString root = QDir::cleanPath(cacheRootForCategory(categoryPath)).toCaseFolded();
+        s_pendingMaintenance.insert(root, categoryPath);
+        if(s_maintenanceActive) return;
+        s_maintenanceActive = true;
+    }
+    QThread* worker = QThread::create([]() {
+        for(;;)
+        {
+            QString directory, root, normalized;
+            quint64 revision = 0;
+            {
+                QMutexLocker locker(&s_cacheMutex);
+                if(s_cacheShutdown || QThread::currentThread()->isInterruptionRequested()
+                        || s_pendingMaintenance.isEmpty())
+                { s_maintenanceActive=false;s_maintenanceThread=nullptr;return; }
+                const auto pending = s_pendingMaintenance.cbegin();
+                directory = pending.value();
+                s_pendingMaintenance.remove(pending.key());
+                root = cacheRootForCategory(directory);
+                normalized = QDir::cleanPath(root).toCaseFolded();
+                revision = s_cacheWriteRevisions.value(normalized);
+            }
+            const qint64 total = cacheRootBytes(root);
+            {
+                QMutexLocker locker(&s_cacheMutex);
+                if(s_cacheShutdown || QThread::currentThread()->isInterruptionRequested())
+                    continue;
+                if(revision != s_cacheWriteRevisions.value(normalized))
+                { s_pendingMaintenance.insert(normalized, directory); continue; }
+                s_cacheRootBytes.insert(normalized, total);
+            }
+            pruneCacheRoot(directory);
+            {
+                QMutexLocker locker(&s_cacheMutex);
+                if(revision != s_cacheWriteRevisions.value(normalized))
+                {
+                    s_cacheRootBytes.remove(normalized);
+                    s_pendingMaintenance.insert(normalized, directory);
+                }
+            }
+        }
+    });
+    QObject::connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    QMutexLocker lock(&s_cacheMutex);
+    if(s_cacheShutdown){s_maintenanceActive=false;delete worker;return;}
+    s_maintenanceThread=worker;
+    worker->start();
 }
 
 bool prepareDirectory(const QString& path)
@@ -165,30 +260,17 @@ bool prepareDirectory(const QString& path)
         if(!output.commit())
             return false;
     }
-    const QString rootPath = QFileInfo(path).dir().absolutePath();
+    const QString rootPath = cacheRootForCategory(path);
     const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
     bool initializeRootSize = false;
     {
         QMutexLocker locker(&s_cacheMutex);
         s_preparedDirectories.insert(normalized);
-        s_cacheRoots.insert(rootPath);
+        s_cacheRoots.insert(path);
         initializeRootSize = !s_cacheRootBytes.contains(normalizedRoot);
     }
     if(initializeRootSize)
-    {
-        const qint64 total = cacheRootBytes(rootPath);
-        QMutexLocker locker(&s_cacheMutex);
-        s_cacheRootBytes.insert(normalizedRoot, total);
-    }
-    bool overBudget = false;
-    {
-        QMutexLocker locker(&s_cacheMutex);
-        const qint64 budget = s_visualCacheLimitMiB <= 0 ? 0
-            : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
-        overBudget = budget > 0 && s_cacheRootBytes.value(normalizedRoot) > budget;
-    }
-    if(overBudget)
-        pruneCacheRoot(path);
+        requestCacheMaintenance(path);
     return true;
 }
 
@@ -225,7 +307,7 @@ void setVisualCacheLimitMiB(int limitMiB)
         roots = s_cacheRoots.values();
     }
     for(const QString& root : roots)
-        pruneCacheRoot(QDir(root).filePath(QStringLiteral("character-plans")));
+        requestCacheMaintenance(root);
 }
 
 int visualCacheLimitMiB()
@@ -239,13 +321,14 @@ void recordVisualCacheFileWrite(const QString& directory, qint64 previousBytes,
 {
     if(directory.isEmpty())
         return;
-    const QString rootPath = QFileInfo(directory).dir().absolutePath();
+    const QString rootPath = cacheRootForCategory(directory);
     const QString normalizedRoot = QDir::cleanPath(rootPath).toCaseFolded();
     bool initializeRootSize = false;
     bool overBudget = false;
     {
         QMutexLocker locker(&s_cacheMutex);
-        s_cacheRoots.insert(rootPath);
+        s_cacheRoots.insert(directory);
+        ++s_cacheWriteRevisions[normalizedRoot];
         initializeRootSize = !s_cacheRootBytes.contains(normalizedRoot);
         if(!initializeRootSize)
         {
@@ -257,17 +340,14 @@ void recordVisualCacheFileWrite(const QString& directory, qint64 previousBytes,
             overBudget = budget > 0 && updated > budget;
         }
     }
-    if(initializeRootSize)
-    {
-        const qint64 total = cacheRootBytes(rootPath);
-        QMutexLocker locker(&s_cacheMutex);
-        s_cacheRootBytes.insert(normalizedRoot, total);
-        const qint64 budget = s_visualCacheLimitMiB <= 0 ? 0
-            : qint64(s_visualCacheLimitMiB) * 1024ll * 1024ll;
-        overBudget = budget > 0 && total > budget;
-    }
-    if(overBudget)
-        pruneCacheRoot(directory);
+    if(initializeRootSize || overBudget)
+        requestCacheMaintenance(directory);
+}
+
+bool visualCacheMaintenancePending()
+{
+    QMutexLocker locker(&s_cacheMutex);
+    return s_maintenanceActive || !s_pendingMaintenance.isEmpty();
 }
 
 void CVisualCacheLru::touch(const QString& key, qint64 costBytes)

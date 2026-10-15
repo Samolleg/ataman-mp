@@ -13,6 +13,7 @@
 #include "resourcemanager.h"
 #include "resource_name.h"
 #include "render_performance.h"
+#include "render_stall_trace.h"
 #include "render_queue.h"
 #include "settings.h"
 #include "property.h"
@@ -995,8 +996,10 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
     fingerprint += '|' + emissionFingerprint;
     if(fingerprint == m_transientVisualFingerprint)
         return;
+    CRenderStallTrace timing("unit-model");
     m_transientVisualFingerprint = fingerprint;
     m_pFigure = CObjectList::getInstance()->getFigure(modelName);
+    timing.mark("figure");
     // The caller already resolved profile-vs-import precedence. The
     // model-aware lookup normalizes a supplied .mmp suffix and resolves only
     // aliases belonging to that model/profile resource catalog.
@@ -1018,6 +1021,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                     && !m_partTextures.contains(partName.toLower()))
                 m_partTextures.insert(partName.toLower(),
                     CTextureList::getInstance()->texture(textureName, modelName));
+    timing.mark("textures");
     m_bboxDirty = true;
     for(CPart* part : m_aPart)
         delete part;
@@ -1026,9 +1030,11 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
         return;
     m_figureComplexion = complexion;
     const QString cacheScope = meshCacheScope(modelName);
+    timing.mark("cache-scope");
     CPart::setCacheScope(cacheScope);
     buildCachedAssembly(m_pFigure, cacheScope, modelName, visibleParts,
                         complexion, m_aPart, EAssemblyCacheClass::CharacterVisual);
+    timing.mark("assembly");
     for(CPart* part : m_aPart)
     {
         const QString partTexture = ei::usesUnlayeredHumanoidTexture(part->name())
