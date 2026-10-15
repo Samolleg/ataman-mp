@@ -44,3 +44,13 @@ Native185:55 PASS/0 FAIL. В том числе одиночный/группов
 Fresh Release: build-release-185-delete. Папка доказательств: build-delete-185-20261015, comparison.json, build-receipt.json, final-probe-receipt.json. Исходный SHA и hashes финальных EXE/runtime/source files фиксируются перед staging. Новая staging: build-staging-185-delete, передача в постоянную artifacts/EI-Mapper-Ataman-2-first-test по docs/TEST_BUILD_HANDOFF.md. Итог guarded install и сохранности owner files записывается после выполнения.
 
 Ручная приёмка владельцем удаления на привычных картах остаётся отдельной. Интерактивно редактор не запускается; новые ядра переходов не возвращены.
+
+## Итог установки185
+
+Source main7a984ce13f2848e838a45e2e9025380bb9b8bf2a. Установленный редактор был закрыт; fresh process guard, backup, atomic replacement/readback PASS. Fresh stage/finalizer PASS, установлен каждый из129 managed files;6 заменены/1 добавлен/1 прежний managed report удалён (счётчик changed7 включает удаление). Все17067 пользовательских файлов вне manifest побайтно сохранены; owner digest `E27CFCAF385413E6727E8D45337F2A6E0B1C7F2FC08864C7E64C69D53F16D5BF`.
+
+EXE `4d163a8035b0fccc857920338487739909e127c13d0a02275c53abdc956c4a46`, manifest `e38b53ce79a0f77a76b845dc9688911e7f096a748b6f47bcd03c857bc0606adf`. Runtime bridge `bec44c86cd2d4cd4cb9c3376804bbfd3d90e4d480ec588be733df7618df72342`, host `3ec0413e27dcda1d984bdfb06c4e8f1ac7fb83e4d082bfea264f3ead7ca72289`.
+
+Постоянная папка: artifacts/EI-Mapper-Ataman-2-first-test. Резерв184 artifacts/rollback184-to185-delete-20261015 проверен по полному прежнему manifest; прежний точно опознанный резерв183 artifacts/rollback183-to184-edit-20261015 удалён по договору (19579633 bytes). Остальные исторические каталоги сохранены. Receipts: build-delete-185-20261015/{staging-receipt,install-receipt,rollback-retirement}.json.
+
+Финализатор на пользовательской установке не запускался; редактор интерактивно не открывался. После finalization staging не запускалась и не менялась; этот addendum добавлен только в исходный отчёт. GitHub185 не обновлялся. Ручная приёмка владельцем остаётся открытой, общий UI timing limit выше не выдан за PASS.
