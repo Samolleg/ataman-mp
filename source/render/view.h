@@ -160,6 +160,11 @@ struct SMinimapSceneCaptureResult
     int targetTextureSize{256};
     bool targetDxt1{false};
     QString exportProfileDescription;
+    QImage capturedReviewImage;
+    QImage capturedUnlitReviewImage;
+    QImage preparedGameImage;
+    QByteArray preparedMmp;
+    SMinimapGradeSettings preparedGrade;
 };
 namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 
@@ -401,6 +406,8 @@ public:
     QOpenGLShaderProgram& shaderObject() {return m_program;}
     void setDirtyMpr();
     void setDurty(CMob* pMob = nullptr);
+    void beginObjectEditBatch();
+    void endObjectEditBatch();
     void refreshBehaviorOrder(CNode* owner, int logicSlot);
     void resetCamPosition();
     double cameraSpeedMultiplier() const;
@@ -415,7 +422,9 @@ public:
     double effectiveWorldTimeHours() const;
     void refreshSelectContextHelp();
     SMinimapSceneCaptureResult captureMinimapScene(
-        bool includeLoadedStaticGeometry, int targetTextureSize = 256);
+        bool includeLoadedStaticGeometry, int targetTextureSize = 256,
+        bool finishBake = true);
+    static SMinimapSceneCaptureResult finishMinimapSceneCapture(SMinimapSceneCaptureResult capture);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -990,6 +999,9 @@ private:
     CProgressView* m_pProgress;
     QSharedPointer<COperation> m_pOp;
     QMap<CNode*, QVector3D> m_operationBackup;
+    int m_objectEditBatchDepth{0};
+    QSet<CMob*> m_objectEditBatchMobs;
+    bool m_objectEditBatchParameters{false};
     void prepareModelMagnet();
     bool beginPreparedObjectPlacement(const QJsonObject& descriptor,const QPoint& cursor,QString* diagnostic);
     void clearModelMagnet();

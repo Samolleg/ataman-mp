@@ -1,4 +1,11 @@
 # EI Mapper Ataman — roadmap
+## EI-OBJECT-EDIT-FREEZE-20261015 — паузы копирования/вставки/движения
+
+- Поручение: после аудита исправить фризы копирования/вставки/перемещения, сохранить ID checks/качество миникарты/Undo/Redo, проверить и установить. Версия184, база main589573ba946de25aabdb155364049ea89e835920/183. Реализация лично в main, scoped-коммит и guarded установка; игровые оригиналы и чужие изменения сохраняются. Аудит docs/validation/ATAMAN_OBJECT_EDIT_FREEZE_AUDIT_20261015.md основан на сессии182, не приписывается183.
+- BUILT AND CHECKED184: Ctrl+C — один verified parse/alignment на MOB, paste — одно обновление дерева без изменения allocator; групповой transform/root Undo-команда пересчитывают dirty projection и панель один раз. Terrain query использует frustum. Миникарта сохраняет полный GPU capture; bake/grade/encode в worker, pending жесты ожидаются, generation/context/explicit/lock guards защищают публикацию. Embedded mode не требует лишнего capture.
+- На одинаковой собственной карте2000 объектов/1.50MB/24 selected: copy2728→113ms, paste4591→321ms, move871→45ms; Undo/Redo871/869→45/46ms. Exact copy/MOB/hits/lit+unlit images и полный review/encoded MMP PASS; UI capture26ms, worker heartbeat max18ms. Native edit/async quality PASS; ID/atomic insertion/group rotation/connectors/pointer PASS, properties26/0 и selection36/0 PASS. UI-widget FAIL остаётся на прежних порогах gallery/7164-texture selection, функциональные flags прошли. Evidence docs/validation/ATAMAN_OBJECT_EDIT_FREEZE_184_20261015.md и build-edit-184-20261015/comparison.json.
+- Следующий шаг — scoped-коммит, fresh staging/finalizer и guarded установка184. Ручная проверка владельцем исходного набора/миникарты отдельно; новые ядра переходов не возвращались.
+
 ## EI-RECT-SELECTION-REGRESSION-182 — повторное выделение посторонних объектов
 
 - Поручение15.10: снова внедрить прежнюю правку; затем владелец подтвердил повторный дефект182 и передал видео20261015-1202-31.6910125.mp4: рамка по земле ниже частокола выбирает частокол. База main4a6847a7431b8b77ee134f8f6cac6a3649818fac/182. Разрешена реализация лично в main с сохранением181/182, чужих изменений и игровых данных; версия исправления183.

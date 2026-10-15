@@ -483,6 +483,9 @@ private:
     QString m_minimapSourceContextKey;
     bool m_minimapCaptureRunning{false};
     bool m_minimapGenerationLocked{false};
+    quint64 m_minimapGeneration{0};
+    bool m_minimapNeedsRefresh{true};
+    QFutureWatcher<SMinimapSceneCaptureResult>* m_minimapWorker{nullptr};
 };
 
 #endif // MAIN_WINDOW_H

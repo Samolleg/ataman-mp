@@ -1845,6 +1845,8 @@ MainWindow::MainWindow(QWidget* parent) :
             m_pView, &CView::moveCameraToMinimapPoint);
     connect(m_viewportMinimap, &CViewportMinimapWidget::sourceModeChanged,
             this, [this](bool generated) {
+        if(generated && m_minimapNeedsRefresh)
+            scheduleViewportMinimapRefresh(0, true);
         statusBar()->showMessage(generated
             ? tr("Generated minimap preview will be staged automatically for Test Current Map.")
             : tr("Embedded minimap selected; Test Current Map will use the active profile texture."),
@@ -4935,8 +4937,9 @@ void MainWindow::launchCurrentMapTest()
 
 void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
 {
-    Q_UNUSED(force);
-    if(!m_minimapRefreshTimer || m_minimapCaptureRunning)
+    ++m_minimapGeneration;
+    m_minimapNeedsRefresh = true;
+    if(!m_minimapRefreshTimer)
         return;
     if(m_minimapGenerationLocked)
         return;
@@ -4977,6 +4980,14 @@ void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
             m_minimapExportDialog->setUnavailable(
                 tr("Minimaps are not available in briefing zones."));
         return;
+    }
+    if(m_minimapCaptureRunning)
+        return; // The worker completion observes this invalidation and retries.
+    if(!force && m_viewportMinimap && !m_viewportMinimap->usesGeneratedPreview()
+       && !m_embeddedMinimapImage.isNull())
+    {
+        m_minimapRefreshTimer->stop();
+        return; // The embedded preview does not consume a generated image.
     }
     m_minimapRefreshTimer->start(qMax(0, delayMs));
 }
@@ -5091,44 +5102,101 @@ void MainWindow::refreshViewportMinimap()
 {
     if(m_minimapCaptureRunning || !m_pView || !m_viewportMinimap
        || !CLandscape::getInstance()->isMprLoad()
-       || m_mapTestEntry.isBriefing())
+       || m_mapTestEntry.isBriefing() || m_minimapGenerationLocked)
         return;
+    if(m_pView->hasPendingOperation())
+    {
+        m_minimapRefreshTimer->start(250);
+        return;
+    }
     m_minimapCaptureRunning = true;
-    const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
-    SMinimapSceneCaptureResult capture = m_pView->captureMinimapScene(
-        includeLoadedStaticGeometry, m_minimapTargetTextureSize);
+    const quint64 generation = m_minimapGeneration;
+    const QString context = currentMapContextKey();
+    QElapsedTimer elapsed; elapsed.start();
+    auto capture = m_pView->captureMinimapScene(
+        !m_pView->mobs().isEmpty(), m_minimapTargetTextureSize, false);
+    ei::log(eLogInfo, QString("Minimap GUI capture elapsedMs:%1 generation:%2")
+        .arg(elapsed.elapsed()).arg(generation));
     capture.targetDxt1 = m_minimapTargetDxt1;
     capture.exportProfileDescription = m_minimapExportProfileDescription;
-    if(!capture.bake.success)
+    if(capture.capturedReviewImage.isNull())
     {
+        m_minimapCaptureRunning = false;
         m_generatedMinimapMmp.clear();
         m_generatedMinimapContextKey.clear();
         m_viewportMinimap->clearGeneratedPreview(capture.bake.error);
-        m_minimapCaptureRunning = false;
         return;
     }
-    if(m_minimapExportDialog)
-        m_minimapExportDialog->setCapture(capture);
-    const SMinimapGradeSettings activeGrade = m_minimapExportDialog
+    const SMinimapGradeSettings grade = m_minimapExportDialog
         ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
-    if(!applyMinimapCapture(capture, activeGrade))
-    {
+    auto* watcher = new QFutureWatcher<SMinimapSceneCaptureResult>(this);
+    m_minimapWorker = watcher;
+    connect(watcher, &QFutureWatcher<SMinimapSceneCaptureResult>::finished,
+            this, [this, watcher, generation, context]() {
+        const auto capture = watcher->result();
+        watcher->deleteLater();
+        m_minimapWorker = nullptr;
         m_minimapCaptureRunning = false;
-        return;
-    }
-    m_viewportMinimap->show();
-    positionViewportMinimap();
-    m_viewportMinimap->raise();
-    m_minimapCaptureRunning = false;
+        const bool current = generation == m_minimapGeneration
+            && context == currentMapContextKey() && !m_minimapGenerationLocked
+            && m_pView && !m_pView->hasPendingOperation();
+        if(current && capture.bake.success)
+        {
+            m_minimapNeedsRefresh = false;
+            if(m_minimapExportDialog) m_minimapExportDialog->setCapture(capture);
+            const auto activeGrade = m_minimapExportDialog
+                ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+            m_minimapNeedsRefresh = !applyMinimapCapture(capture, activeGrade);
+            m_viewportMinimap->show(); positionViewportMinimap();
+        }
+        else if(current)
+        {
+            m_generatedMinimapMmp.clear();
+            m_generatedMinimapContextKey.clear();
+            m_viewportMinimap->clearGeneratedPreview(capture.bake.error);
+        }
+        if(!current && m_minimapNeedsRefresh && !m_minimapGenerationLocked)
+            m_minimapRefreshTimer->start(250);
+    });
+    watcher->setFuture(QtConcurrent::run([capture, grade]() mutable {
+        QElapsedTimer elapsed; elapsed.start();
+        capture = CView::finishMinimapSceneCapture(capture);
+        if(capture.bake.success)
+        {
+            capture.preparedGameImage = gradeMinimapImage(
+                capture.unlitGameImage, capture.bake.gameImage, grade);
+            QString error;
+            capture.preparedMmp = capture.targetDxt1
+                ? ei::encodeMmpDxt1(capture.preparedGameImage, &error)
+                : ei::encodeMmp8888(capture.preparedGameImage, &error);
+            capture.preparedGrade = grade;
+            if(capture.preparedMmp.isEmpty())
+            {
+                capture.bake.success = false;
+                capture.bake.error = error;
+            }
+        }
+        ei::log(eLogInfo, QString("Minimap image worker elapsedMs:%1")
+            .arg(elapsed.elapsed()));
+        return capture;
+    }));
 }
 
 bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
                                      const SMinimapGradeSettings& grade)
 {
-    const QImage graded = gradeMinimapImage(
+    const auto& prepared = capture.preparedGrade;
+    const bool usePrepared = !capture.preparedMmp.isEmpty()
+        && capture.targetDxt1 == m_minimapTargetDxt1
+        && prepared.shadingPercent == grade.shadingPercent
+        && prepared.saturationPercent == grade.saturationPercent
+        && prepared.contrastPercent == grade.contrastPercent
+        && prepared.brightnessPercent == grade.brightnessPercent
+        && prepared.hueDegrees == grade.hueDegrees;
+    const QImage graded = usePrepared ? capture.preparedGameImage : gradeMinimapImage(
         capture.unlitGameImage, capture.bake.gameImage, grade);
     QString diagnostic;
-    const QByteArray mmp = m_minimapTargetDxt1
+    const QByteArray mmp = usePrepared ? capture.preparedMmp : m_minimapTargetDxt1
         ? ei::encodeMmpDxt1(graded, &diagnostic)
         : ei::encodeMmp8888(graded, &diagnostic);
     if(mmp.isEmpty())
@@ -5159,6 +5227,8 @@ void MainWindow::setMinimapGenerationLocked(bool locked)
                   || !m_viewportMinimap->hasGeneratedPreview()))
         locked = false;
     m_minimapGenerationLocked = locked;
+    ++m_minimapGeneration;
+    if(locked && m_minimapRefreshTimer) m_minimapRefreshTimer->stop();
     if(m_viewportMinimap)
         m_viewportMinimap->setGenerationLocked(locked);
     if(m_minimapExportDialog)
@@ -5173,17 +5243,28 @@ void MainWindow::setMinimapGenerationLocked(bool locked)
 
 bool MainWindow::ensureGeneratedMinimap()
 {
-    if(m_minimapRefreshTimer && m_minimapRefreshTimer->isActive())
-    {
-        m_minimapRefreshTimer->stop();
-        refreshViewportMinimap();
-    }
+    m_minimapRefreshTimer->stop();
     if(!m_generatedMinimapMmp.isEmpty()
-       && m_generatedMinimapContextKey == currentMapContextKey())
+       && m_generatedMinimapContextKey == currentMapContextKey()
+       && (m_minimapGenerationLocked || !m_minimapNeedsRefresh))
         return true;
-    refreshViewportMinimap();
-    return !m_generatedMinimapMmp.isEmpty()
-        && m_generatedMinimapContextKey == currentMapContextKey();
+    // Explicit export/Test Current Map requires a complete current image now.
+    // Any older asynchronous result loses publication authority.
+    ++m_minimapGeneration;
+    auto capture = m_pView->captureMinimapScene(
+        !m_pView->mobs().isEmpty(), m_minimapTargetTextureSize);
+    capture.targetDxt1 = m_minimapTargetDxt1;
+    capture.exportProfileDescription = m_minimapExportProfileDescription;
+    if(!capture.bake.success) return false;
+    const auto grade = m_minimapExportDialog
+        ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+    m_minimapNeedsRefresh = false;
+    if(!applyMinimapCapture(capture, grade))
+    {
+        m_minimapNeedsRefresh = true;
+        return false;
+    }
+    return true;
 }
 
 void MainWindow::positionViewportMinimap()

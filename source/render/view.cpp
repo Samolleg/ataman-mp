@@ -8939,7 +8939,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 }
 
 SMinimapSceneCaptureResult CView::captureMinimapScene(
-    bool includeLoadedStaticGeometry, int targetTextureSize)
+    bool includeLoadedStaticGeometry, int targetTextureSize, bool finishBake)
 {
     SMinimapSceneCaptureResult result;
     result.targetTextureSize = targetTextureSize;
@@ -9102,38 +9102,46 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
         return result;
     }
 
+    result.capturedReviewImage = captured;
+    result.capturedUnlitReviewImage = unlitCaptured;
+    result.staticGeometrySourcePresent = includeLoadedStaticGeometry && !m_aMob.isEmpty();
+    return finishBake ? finishMinimapSceneCapture(result) : result;
+}
+
+SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCaptureResult result)
+{
     QVector<SMinimapBakeLayer> layers;
     layers.append({EMinimapBakeLayerKind::Terrain,
-                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), captured});
-    result.staticGeometrySourcePresent = includeLoadedStaticGeometry
-        && !m_aMob.isEmpty();
+                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), result.capturedReviewImage});
     if(result.staticGeometrySourcePresent)
     {
-        QImage marker(reviewSize, QImage::Format_ARGB32_Premultiplied);
+        QImage marker(result.capturedReviewImage.size(), QImage::Format_ARGB32_Premultiplied);
         marker.fill(Qt::transparent);
         layers.append({EMinimapBakeLayerKind::StaticGeometry,
                        tr("%1 static object(s) from loaded MOB source(s)")
                            .arg(result.staticObjectCount), marker});
     }
     SMinimapBakeOptions bakeOptions;
-    bakeOptions.textureSize = targetTextureSize;
+    bakeOptions.textureSize = result.targetTextureSize;
     result.bake = bakeMinimapLayers(result.sectorWidth, result.sectorHeight,
                                     layers, bakeOptions);
     QVector<SMinimapBakeLayer> unlitLayers = layers;
-    unlitLayers[0].image = unlitCaptured;
+    unlitLayers[0].image = result.capturedUnlitReviewImage;
     const SMinimapBakeResult unlitBake = bakeMinimapLayers(
         result.sectorWidth, result.sectorHeight, unlitLayers, bakeOptions);
     if(unlitBake.success)
         result.unlitGameImage = unlitBake.gameImage;
     if(result.bake.success)
     {
-        result.bake.notes.append(tr("Excluded %1 dynamic unit(s).")
+        result.bake.notes.append(QCoreApplication::translate("CView", "Excluded %1 dynamic unit(s).")
                                  .arg(result.excludedDynamicUnitCount));
-        result.bake.notes.append(tr("Excluded %1 hidden static object(s).")
+        result.bake.notes.append(QCoreApplication::translate("CView", "Excluded %1 hidden static object(s).")
                                  .arg(result.hiddenStaticObjectCount));
         result.bake.notes.append(result.framingDescription);
         result.bake.notes.append(result.orientationDescription);
     }
+    result.capturedReviewImage = QImage();
+    result.capturedUnlitReviewImage = QImage();
     return result;
 }
 
@@ -21475,6 +21483,11 @@ void CView::updateParameter(EObjParam propType)
 
 void CView::viewParameters()
 {
+    if(m_objectEditBatchDepth)
+    {
+        m_objectEditBatchParameters = true;
+        return;
+    }
     refreshSelectContextHelp();
     if(m_aMob.isEmpty())
     {
@@ -24182,11 +24195,12 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    const CViewFrustum frustum(m_projection * camMatrix);
     if(bLand)
-        m_pLand->draw(&m_landProgram);
+        m_pLand->draw(&m_landProgram, &frustum);
     else
     {
-        m_pLand->drawWater(&m_landProgram);
+        m_pLand->drawWater(&m_landProgram, &frustum);
     }
     const int posY (height() - cursorPosY);
     float z;
@@ -24606,6 +24620,7 @@ void CView::operationApply(EOperationAxisType operationType)
     const bool grouped = !committingPaste && !committingBehaviorPaste
             && !m_pendingLogicPlacementMacro
             && m_operationBackup.size() > 1;
+    CObjectEditBatchCommand* batch = nullptr;
     if(grouped)
     {
         QString action = tr("Transform");
@@ -24615,7 +24630,7 @@ void CView::operationApply(EOperationAxisType operationType)
             action = tr("Rotate");
         else if(operationType == EOperationAxisType::eScale)
             action = tr("Scale");
-        m_pUndoStack->beginMacro(tr("%1 objects: %2")
+        batch = new CObjectEditBatchCommand(this, tr("%1 objects: %2")
             .arg(action).arg(m_operationBackup.size()));
     }
     if(!committingBehaviorPaste && !committingPaste)
@@ -24627,8 +24642,9 @@ void CView::operationApply(EOperationAxisType operationType)
         {
             if(m_connectionOrientations.contains(pair.first) && pair.first->rotation()!=m_connectionOrientations.value(pair.first)) {
                 const auto after=pair.first->position();const auto afterRotation=pair.first->rotation();
-                m_pUndoStack->push(new CAlignModelCommand(this,m_activeMob,pair.first,pair.second,
-                    m_connectionOrientations.value(pair.first),after,afterRotation));
+                auto* command = new CAlignModelCommand(this,m_activeMob,pair.first,pair.second,
+                    m_connectionOrientations.value(pair.first),after,afterRotation,batch);
+                if(!batch) m_pUndoStack->push(command);
                 break;
             }
             if(CScene::getInstance()->getMode() == eEditModeLogic)
@@ -24639,57 +24655,57 @@ void CView::operationApply(EOperationAxisType operationType)
                 case eUnit:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
+                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]);
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 case eMagicTrap:
                 {
                     QSharedPointer<IPropertyBase> pos(
                         new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
+                    CChangeProp* pOp = new CChangeProp(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()),
                                      this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]);
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 case ePatrolPoint:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 case eLookPoint:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 case eTrapActZone:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 case eTrapCastPoint:
                 {
                     QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos);
+                    CChangeLogicParam* pOp = new CChangeLogicParam(this, pair.first, pos, batch);
                     QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                     pair.first->updatePos(m_operationBackup[pair.first]); //revert position to start (it will apply in 'push' operation
-                    m_pUndoStack->push(pOp);
+                    if(!batch) m_pUndoStack->push(pOp);
                     break;
                 }
                 default:
@@ -24701,14 +24717,14 @@ void CView::operationApply(EOperationAxisType operationType)
             else
             {
                 QSharedPointer<IPropertyBase> pos (new prop3D(eObjParam_POSITION, pair.first->position()));
-                CChangeProp* pOp = new CChangeProp(this, pair.first, pos);
+                CChangeProp* pOp = new CChangeProp(this, pair.first, pos, batch);
                 QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
                 CUnit* unit = dynamic_cast<CUnit*>(pair.first);
                 if(unit && m_unitMovementBackup.contains(unit))
                     unit->restoreMovementState(m_unitMovementBackup.value(unit));
                 else
                     pair.first->updatePos(m_operationBackup[pair.first]);
-                m_pUndoStack->push(pOp);
+                if(!batch) m_pUndoStack->push(pOp);
             }
 
             break;
@@ -24731,30 +24747,33 @@ void CView::operationApply(EOperationAxisType operationType)
             if(position != pair.first->position())
             {
                 QSharedPointer<IPropertyBase> value(new prop3D(eObjParam_POSITION, position));
-                CChangeProp* move = new CChangeProp(this, pair.first, value);
+                CChangeProp* move = new CChangeProp(this, pair.first, value, batch);
                 QObject::connect(move, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-                m_pUndoStack->push(move);
+                if(!batch) m_pUndoStack->push(move);
             }
             QSharedPointer<IPropertyBase> rotation (new prop3D(eObjParam_ROTATION, rot));
-            CChangeProp* pOp = new CChangeProp(this, pair.first, rotation);
+            CChangeProp* pOp = new CChangeProp(this, pair.first, rotation, batch);
             QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
-            m_pUndoStack->push(pOp);
+            if(!batch) m_pUndoStack->push(pOp);
             break;
         }
         case EOperationAxisType::eScale:
         {
             QSharedPointer<IPropertyBase> complection (new prop3D(eObjParam_COMPLECTION, pair.first->constitution()));
-            CChangeProp* pOp = new CChangeProp(this, pair.first, complection);
+            CChangeProp* pOp = new CChangeProp(this, pair.first, complection, batch);
             QObject::connect(pOp, SIGNAL(updateParam()), this, SLOT(viewParameters()));
             pair.first->setConstitution(m_operationBackup[pair.first]);
-            m_pUndoStack->push(pOp);
+            if(!batch) m_pUndoStack->push(pOp);
             break;
         }
         }
 
     }
-    if(grouped)
-        m_pUndoStack->endMacro();
+    if(batch)
+    {
+        if(batch->childCount()) m_pUndoStack->push(batch);
+        else delete batch;
+    }
     if(m_pendingLogicPlacementMacro)
         m_pUndoStack->endMacro();
     clearModelMagnet();
@@ -25214,8 +25233,26 @@ void CView::selectedObjectToClipboardBuffer()
             return;
         }
     }
+    const QList<CNode*> clipboardNodes = selectedNodes();
+    QHash<CMob*, QList<CNode*>> sourceGroups;
+    for(CNode* node : clipboardNodes)
+        if(node && node->nodeState() == eSelect && node->hasRawObjectProvenance())
+            if(CMob* source = ownerMob(node))
+                sourceGroups[source].append(node);
+    QHash<CNode*, QPair<QByteArray, QByteArray>> rawTemplates;
+    for(auto it = sourceGroups.cbegin(); it != sourceGroups.cend(); ++it)
+    {
+        QHash<CNode*, QPair<QByteArray, QByteArray>> templates;
+        if(!it.key()->rawObjectTemplatesBytes(it.value(), &templates))
+        {
+            emit updateMsg(tr("Copy cancelled: the selected raw object records could not be verified."));
+            return;
+        }
+        for(auto item = templates.cbegin(); item != templates.cend(); ++item)
+            rawTemplates.insert(item.key(), item.value());
+    }
     QJsonArray arrObj;
-    for(CNode* pNode : selectedNodes())
+    for(CNode* pNode : clipboardNodes)
         if (pNode->nodeState() & ENodeState::eSelect)
         {
             QJsonObject nodeData = pNode->toJson();
@@ -25227,15 +25264,13 @@ void CView::selectedObjectToClipboardBuffer()
                 provenance.insert("sourceObjectPath", pNode->rawSourceObjectPath());
                 provenance.insert("sourceSubtreeSha256",
                     QString::fromLatin1(pNode->rawSourceSubtreeSha256().toHex()));
-                QByteArray sourceSubtree;
-                QByteArray cleanSubtree;
-                CMob* sourceMob = ownerMob(pNode);
-                if(sourceMob && sourceMob->rawObjectTemplateBytes(pNode, &sourceSubtree, &cleanSubtree))
+                const auto raw = rawTemplates.constFind(pNode);
+                if(raw != rawTemplates.cend())
                 {
                     provenance.insert("sourceSubtreeBase64",
-                        QString::fromLatin1(sourceSubtree.toBase64()));
+                        QString::fromLatin1(raw.value().first.toBase64()));
                     provenance.insert("cleanSubtreeBase64",
-                        QString::fromLatin1(cleanSubtree.toBase64()));
+                        QString::fromLatin1(raw.value().second.toBase64()));
                 }
                 nodeData.insert("_Endurance raw provenance", provenance);
             }
@@ -25335,13 +25370,13 @@ void CView::clipboradObjectsToScene()
             return;
         }
         previewNodes.append(node);
-        m_pTree->addNodeToTree(node);
     }
     if(previewNodes.isEmpty())
     {
         restoreSelection(originalSelection);
         return;
     }
+    collectObjectTreeData();
     //move copyed nodes to new mouse position
     QVector3D oldMousePos;
     QJsonArray arrPoint = obj["Mouse position"].toArray();
@@ -26107,11 +26142,38 @@ void CView::finishSculptStroke()
     m_sculptStrokeMobHeightState.clear();
 }
 
+void CView::beginObjectEditBatch()
+{
+    ++m_objectEditBatchDepth;
+}
+
+void CView::endObjectEditBatch()
+{
+    Q_ASSERT(m_objectEditBatchDepth > 0);
+    if(--m_objectEditBatchDepth)
+        return;
+    const auto mobs = m_objectEditBatchMobs;
+    m_objectEditBatchMobs.clear();
+    for(CMob* mob : mobs)
+        if(m_aMob.contains(mob))
+            setDurty(mob);
+    const bool parameters = m_objectEditBatchParameters;
+    m_objectEditBatchParameters = false;
+    if(parameters)
+        viewParameters();
+}
+
 void CView::setDurty(CMob* pMob)
 {
     CMob* changedMob = pMob ? pMob : m_activeMob;
     if(!changedMob)
         return;
+
+    if(m_objectEditBatchDepth)
+    {
+        m_objectEditBatchMobs.insert(changedMob);
+        return;
+    }
 
     changedMob->refreshDirtyFromProjection();
     // Undo/redo commands retain their owning MOB. If the user switched the

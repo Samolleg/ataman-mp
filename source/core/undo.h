@@ -18,6 +18,19 @@ class CUnit;
 class CLogic;
 class IPropertyBase;
 
+// A transform group applies its ordinary provenance-preserving child commands,
+// then refreshes the owning documents and property panel once, also on history.
+class CObjectEditBatchCommand : public QUndoCommand
+{
+public:
+    CObjectEditBatchCommand(CView* view, const QString& text)
+        : m_view(view) { setText(text); }
+    void undo() override;
+    void redo() override;
+private:
+    CView* m_view;
+};
+
 class CDeleteNodeCommand: public QObject, public QUndoCommand,
                           public IAiGraphPreviewInvalidatingCommand
 {
@@ -48,7 +61,8 @@ private:
 class CAlignModelCommand : public QUndoCommand, public IAiGraphPreviewInvalidatingCommand {
 public:
     CAlignModelCommand(CView* view,CMob* mob,CNode* node,const QVector3D& before,
-        const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation);
+        const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation,
+        QUndoCommand* parent = nullptr);
     void undo() override;
     void redo() override;
     bool invalidatesAiGraphPreview() const override { return true; }

@@ -14,8 +14,8 @@
 #include <QCoreApplication>
 
 CAlignModelCommand::CAlignModelCommand(CView* view,CMob* mob,CNode* node,const QVector3D& before,
-    const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation):
-    m_view(view),m_mob(mob),m_node(node),m_before(before),m_after(after),m_beforeRotation(beforeRotation),m_afterRotation(afterRotation)
+    const QQuaternion& beforeRotation,const QVector3D& after,const QQuaternion& afterRotation,QUndoCommand* parent):
+    QUndoCommand(parent),m_view(view),m_mob(mob),m_node(node),m_before(before),m_after(after),m_beforeRotation(beforeRotation),m_afterRotation(afterRotation)
 {setText(QString::fromUtf8("Стыковка детали"));}
 void CAlignModelCommand::apply(const QVector3D& position,const QQuaternion& rotation) {
     auto p=position;m_node->setRot(rotation);m_node->updatePos(p);m_view->setDurty(m_mob);m_view->viewParameters();m_view->update();
@@ -1317,6 +1317,20 @@ bool CChangeProp::invalidatesAiGraphPreview() const
     return m_pNode && m_newValue
         && aiGraphObjectPropertyInvalidatesPreview(
             m_pNode->nodeType(), m_newValue->type());
+}
+
+void CObjectEditBatchCommand::undo()
+{
+    m_view->beginObjectEditBatch();
+    QUndoCommand::undo();
+    m_view->endObjectEditBatch();
+}
+
+void CObjectEditBatchCommand::redo()
+{
+    m_view->beginObjectEditBatch();
+    QUndoCommand::redo();
+    m_view->endObjectEditBatch();
 }
 
 void CChangeProp::undo()
