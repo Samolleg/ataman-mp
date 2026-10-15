@@ -780,6 +780,7 @@ private:
     void releaseShadowFramebuffers();
     bool beginEditorQueryFramebuffer();
     void endEditorQueryFramebuffer();
+    bool drawSelectionTerrainDepth(const QMatrix4x4& viewMatrix);
     void applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
                              bool receiveStatic = true,
                              bool receiveDynamic = true);

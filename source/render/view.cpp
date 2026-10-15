@@ -5076,6 +5076,30 @@ void CView::endEditorQueryFramebuffer()
     ei::gl::Viewport(0, 0, m_width, m_height);
 }
 
+bool CView::drawSelectionTerrainDepth(const QMatrix4x4& viewMatrix)
+{
+    if(!m_landscapeVisible || !m_bDrawLand)
+        return true;
+    if(!m_landProgram.bind())
+        return false;
+
+    // The visible ground hides buried model geometry. Reuse that same terrain
+    // and its world transforms in the query target, without giving it an ID.
+    // Transparent overlays are deliberately not opaque selection occluders.
+    m_landProgram.setUniformValue("u_projMmatrix", m_projection);
+    m_landProgram.setUniformValue("u_viewMmatrix", viewMatrix);
+    const CViewFrustum frustum(m_projection * viewMatrix);
+    ei::gl::ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    if(m_neighborLandscapesVisible)
+        for(const SLoadedNeighborLandscape& neighbor : m_neighborLandscapes)
+            if(neighbor.landscape && neighbor.landscape->isMprLoad())
+                neighbor.landscape->draw(&m_landProgram, &frustum);
+    if(m_pLand && m_pLand->isMprLoad())
+        m_pLand->draw(&m_landProgram, &frustum);
+    ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    return true;
+}
+
 bool CView::ensureShadowFramebuffers(int quality)
 {
     GLint maximumTextureSize = 0;
@@ -15773,6 +15797,14 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     const QList<CNode*> selectionBefore = selectionSnapshot();
 
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if(!drawSelectionTerrainDepth(viewMatrix))
+    {
+        endEditorQueryFramebuffer();
+        m_selectFrame->reset();
+        return;
+    }
     if (!m_selectProgram.bind())
     {
         endEditorQueryFramebuffer();
@@ -15780,10 +15812,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         return;
     }
 
-    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -24064,6 +24094,13 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
 {
     if(!beginEditorQueryFramebuffer())
         return nullptr;
+    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
+    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    if(!drawSelectionTerrainDepth(viewMatrix))
+    {
+        endEditorQueryFramebuffer();
+        return nullptr;
+    }
     if (!m_selectProgram.bind())
     {
         endEditorQueryFramebuffer();
@@ -24071,10 +24108,8 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
         return nullptr;
     }
 
-    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
     m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
     m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
-    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
