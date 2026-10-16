@@ -92,3 +92,40 @@ Native-проверки использовали финальные production-�
 Проверить первый ещё не использованный переход, границу карт, Undo/Redo,
 миникарту и Save/reopen. Связанный дефект покраски после HD-перевода199
 ведётся отдельной задачей; его результат не включён в198.
+
+## Идентичность сборки
+
+- Source main `9daeecbf8cbe51039cc9225b198216d52be12bec`.
+- EXE SHA-256 `15CD4BFB8CCF9339CE63D61D33E605173F7350CDC45467F29A063295045398A2`.
+- JmvBridge SHA-256 `7828BDAA8679BDBD947869F709D219030230F9D58A59323F25944420BE990D46`.
+- RuntimeHost SHA-256 `FC3D599598922D0B21A75E586CA4B253D17A1E2126BE33F77D7E26EFC9A8897F`.
+- 274 production objects; hashes и 482 tracked input hashes сохранены приватно.
+- build-receipt.json/final-probe-receipt.json: PASS; код/source и VERSION
+  совпадают с коммитом, make -q release:0.
+
+## Передача
+
+Чистая `build-staging-198-cold-transition` создана заново, raw/staged
+`--version`:198, EXE/runtime совпали с проверенной сборкой. Finalizer и
+встроенный distribution validator: PASS. Manifest SHA-256:
+`94B2AD539D4413839B071320B9E7D262C01C6305DC547A2F1D357EB97770A2C1`.
+Финализированная staging после этого не запускалась и не изменялась.
+
+Владелец подтвердил закрытие маппера; свежая проверка не обнаружила процессов
+из постоянной установки. Выполнена guarded установка198 в
+`artifacts/EI-Mapper-Ataman-2-first-test`. Все130 managed файлов, включая EXE
+и runtime, сверены с новым manifest; VERSION198. Заменено/удалено7 прежних
+managed путей (из них удалён1 старый отчёт), добавлен1 новый отчёт.
+17898 пользовательских файлов вне manifest сохранены: digest до/после
+`17898:BD30ADFC82D3653B9C75234AAB3D11CAE75D2DEFDA60D9F4CF30E736AD568BF4`.
+Сначала проверен резерв197
+`artifacts/rollback197-to198-cold-transition-20261017`, замена атомарная,
+manifest заменён последним. После проверки установки подтверждена полная
+восстановимость197; удалён только идентифицированный резерв196
+`artifacts/rollback196-to197-editor-stalls-20261016` (19825806 bytes).
+`install-receipt.json` и `rollback-retirement.json`: PASS. Скрипты/receipts
+находятся в приватной папке задачи. Установленный редактор не запускался;
+ручная приёмка владельцем остаётся отдельным этапом. GitHub не обновлялся.
+
+Рабочие изменения199 (включая VERSION/Readme/CHANGELOG и source) сохранены
+и не включены в пакет198. Источник пакета — точный коммит198 выше.
