@@ -1,9 +1,10 @@
 ## EI-BASE-HD-CLICK-195 — интерактивное преобразование HD
 
+- DONE/INSTALLED195: source main09195d83dd929ff4a438e5c60b15d8e84cd06de9,649 compiler/resource inputs проверены. Native152 PASS через реальные mouseClick кнопок, успех/Отмена, Undo/Redo/два Save/reopen/GPU. Raw/staged195/finalizer/130 managed PASS;17089 owner-файлов побайтно сохранены. EXE36D36CA607F7D696A9CCC4E6B0E4B971BD038AE346BDC3D36F5D63274F2EE0C0; manifest AA35BD84B1994FFFD52FD5ACF3EB850A63221D5E186A0DB76D4CD3520ECEE2D9. Резерв194 artifacts/rollback194-to195-base-hd-20261016 восстановим; прежний проверенный резерв193 удалён по договору. Evidence docs/validation/ATAMAN_BASE_HD_CLICK_195_20261016.md; receipts build-base-hd-195-20261016. Работа завершена, ручная/игровая приёмка отдельно, GitHub не обновлялся.
+
 - Поручение: исправить подтверждённую ложную отмену, проверить именно кнопку и настоящую отмену, Undo/Redo/Save на копии, собрать и установить. База194 main3eac4f42af273a724020a83254fb0309edb1e03c. Вода/переходы и живые данные сохраняются.
 - BUILT/CHECKED: свежая Release195/runtime. Тот же тест на194 воспроизвёл дефект (настоящая Отмена PASS, успех FAIL); на195 native152 PASS/exit0: mouseClick обеих кнопок, точная отмена atlas/terrain/Undo,38014 замен, GPU, Undo/Redo, два Save/reopen и неизменные исходные страницы. Evidence docs/validation/ATAMAN_BASE_HD_CLICK_195_20261016.md. Следующий шаг — scoped-коммит, staging и guarded установка.
 
-# EI Mapper Ataman — roadmap
 ## EI-ITEM-APPROACH-XY-194 — горизонтальные точки предметов
 
 - INSTALLED194: source main ec85f7f1acebe3e3d9e132ae7e9bfdab410301af; native143 PASS, fresh Release/runtime, raw/staged --version и finalizer PASS.130 managed проверены,16773 пользовательских файла сохранены; резерв193 artifacts/rollback193-to194-item-xy-20261016 восстановим, прежний проверенный резерв192 удалён. EXE2645B8D0006122F170FE795E63F26EB11F8EDA52BEA88B265C1C89FCFF1345FA. Receipts build-item-xy-194/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json. Маппер и руководство переданы; игровая реализация отдельно по решению владельца, ручная приёмка не подменена native-тестом.
@@ -18,6 +19,8 @@
 - Следующий шаг: проследить успешный ApplyScience → callback → grant в фактически установленном addon либо сравнить старые/новые точки на одинаковом запуске. Статическая проверка не доказывает ветку отказа. Живые данные/DLL не изменялись. Evidence: docs/validation/ATAMAN_LEVER68_SCRIPT_AUDIT_20261016.md; приватные данные build-lever68-audit-20261016.
 # EI Mapper Ataman — roadmap
 ## EI-BASE-TILES-HD-COVERAGE-193 — полное сопоставление базовых HD DejaVu
+
+- RESOLVED195: интерактивный дефект close→canceled исправлен в EI-BASE-HD-CLICK-195; новый тест воспроизвёл сбой194 и прошёл152 проверки на установленной195, включая реальные кнопки и сохранение.
 
 - Поручение16.10: исправить общий HD-подбор с готовыми вариантами; последнее уточнение ограничивает проверку41 картой DejaVu. Воду/переходы/анимации/overlay сохранить. Разрешены реализация, копии/UndoRedo/Save/reopen, сборка и установка. Другие профили после уточнения не исследовались и не изменялись; прежнее диагностическое чтение ничего не записывало.
 - DONE/INSTALLED193: устранены ошибочные отказы по пиксельному порогу и физическому классу донора; материал определяется привязанным каталогом, физический класс сохраняется, готовые варианты с одинаковой границей объединяются.41/41 DejaVu,335128 базовых клеток/0 пропусков; zone19 38014, включая прежние18343. Отдельная инвентаризация:0 неизвестных используемых land-слотов на всех41 картах.
