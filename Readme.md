@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **189**: изменение масштаба НПС сохраняет экипированную модель и анимацию, включая оси, мышь, отмену и Undo/Redo. Добавление предметов188 сохранено.
+Версия **190**: отдельная кнопка «Перевести базовые тайлы в HD» использует локальный банк вариантов. Вода и переходы сохраняются; поддержаны Undo/Redo и смешанные страницы128/256.
 
 Изменения187: общая покраска сохраняет готовые тени рельефа при изменении
 только текстур; изменения геометрии и покрытия обновляют поле по-прежнему.
@@ -50,7 +50,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `180`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `190`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

@@ -35,6 +35,19 @@ class LandscapeToolsWidgetTests : public QObject
     QTemporaryDir settingsDirectory;
 
 private slots:
+    void baseHdActionIsIndependent()
+    {
+        CLandscapeTools tools;
+        tools.activateMode(ELandscapeEditMode::TilePaint);
+        auto* button=tools.findChild<QPushButton*>("convertBaseTerrainToHd");
+        QVERIFY(button);
+        QCOMPARE(button->text(),QString::fromUtf8("Перевести базовые тайлы в HD"));
+        QSignalSpy convert(&tools,SIGNAL(convertBaseTerrainToHdRequested()));
+        QSignalSpy resolve(&tools,SIGNAL(resolveMissingBlendsRequested()));
+        button->click();
+        QCOMPARE(convert.size(),1);
+        QCOMPARE(resolve.size(),0);
+    }
     void initTestCase()
     {
         QVERIFY(settingsDirectory.isValid());

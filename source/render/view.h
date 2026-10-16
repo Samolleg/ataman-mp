@@ -516,6 +516,9 @@ public:
         const QSharedPointer<CTerrainWorkingAtlas>& atlasState,
         const STerrainTileCommand& slotRemapCommand, bool forward);
     void onLandscapeToolsShown();
+    bool convertBaseTerrainToHd(const QString& library, quint32 seed,
+                               QString* summary = nullptr, bool interactive = false);
+    void convertBaseTerrainToHdRequested();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);
@@ -589,7 +592,7 @@ private:
         const QVector<QImage>& physicalTiles,
         const QString& terrainArchivePath,
         const STerrainAtlasProfile& expectedProfile,
-        bool requireSemanticMember);
+        bool requireSemanticMember, bool preserveUndo = false);
     bool buildTerrainSemanticFieldMember(
         const QByteArray& candidateMprBytes,
         const QFileInfo& destinationMpr,

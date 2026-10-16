@@ -1984,6 +1984,47 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         }
     }
     //get min texture size
+    // Native MMP pages may differ in size. Preserve their stored payloads;
+    // compose a display-only canvas at the largest resolution so a water page
+    // cannot force every HD page to use its 128px mip.
+    int maximumPage = 0, minimumPage = std::numeric_limits<int>::max();
+    for(const auto& part : aPart) {
+        maximumPage = qMax(maximumPage, int(part.header.m_width));
+        minimumPage = qMin(minimumPage, int(part.header.m_width));
+    }
+    if(maximumPage != minimumPage) {
+        texCount = aPart.size();
+        atlasColumns = CTile::preferredAtlasColumns(texCount);
+        const int rows = (texCount + atlasColumns - 1) / atlasColumns;
+        const auto* context = QOpenGLContext::currentContext();
+        if(!context) return nullptr;
+        GLint limit = 0; context->functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
+        if(maximumPage * atlasColumns > limit || maximumPage * rows > limit) return nullptr;
+        QImage combined(maximumPage * atlasColumns, maximumPage * rows, QImage::Format_RGBA8888);
+        if(combined.isNull()) return nullptr;
+        combined.fill(Qt::transparent);
+        for(int i = 0; i < aPart.size(); ++i) {
+            const auto& part = aPart.at(i);
+            QImage page; QString diagnostic;
+            const int size = part.header.m_width;
+            if(size != int(part.header.m_height)
+               || !ei::decodeDxtImage(part.data.mid(part.header.size(), dxt1MipBytes(size, size)),
+                    size, size, ei::DxtFormat::Dxt1, &page, &diagnostic)) return nullptr;
+            page = page.convertToFormat(QImage::Format_RGBA8888);
+            if(size != maximumPage) page = page.scaled(maximumPage, maximumPage, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+            for(int y = 0; y < maximumPage; ++y)
+                memcpy(combined.scanLine((i / atlasColumns) * maximumPage + y) + (i % atlasColumns) * maximumPage * 4,
+                       page.constScanLine(y), size_t(maximumPage) * 4);
+        }
+        auto* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
+        texture->setData(combined);
+        texture->setMinificationFilter(m_terrainMipmappingEnabled ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
+        texture->setMagnificationFilter(QOpenGLTexture::Nearest);
+        texture->setWrapMode(QOpenGLTexture::Repeat);
+        m_aTexture[cacheKey] = texture;
+        m_terrainTextures.insert(texture); m_terrainTextureUsers.insert(texture, 1);
+        return texture;
+    }
     ei::setCrashContext("mpr/terrain-atlas/combine:" + name);
     int minTexSize(aPart.first().header.m_width);
     for(auto& part: aPart)

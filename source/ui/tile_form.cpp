@@ -406,7 +406,8 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
         {
             for(int row(0); row<m_nTilePerRow; ++row)
             {
-                QImage croppedImage = arrImage[i].copy(row*m_originalTilesize, col*m_originalTilesize, m_originalTilesize, m_originalTilesize);
+                const int nativeSize = arrImage[i].width() / m_nTilePerRow;
+                QImage croppedImage = arrImage[i].copy(row*nativeSize, col*nativeSize, nativeSize, nativeSize);
                 croppedImage = croppedImage.mirrored(false, true);
                 croppedImage = croppedImage.convertToFormat(QImage::Format_RGBA8888);
                 physicalPageTiles.append(croppedImage);
@@ -495,7 +496,7 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
     if(size.width() <= 0 || size.width() != size.height())
         return false;
     for(const QImage& image : images)
-        if(image.isNull() || image.size() != size)
+        if(image.isNull() || image.width() != image.height())
             return false;
     m_tileImages = images;
     m_nTextureAtlas = images.size() / 64;

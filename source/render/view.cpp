@@ -1827,6 +1827,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
         m_lastLandscapeEditMode = int(m_landscapeTools->editMode());
         connect(m_landscapeTools, &CLandscapeTools::importHeightmapRequested,
                 this, &CView::importTerrainHeightmap);
+        connect(m_landscapeTools, &CLandscapeTools::convertBaseTerrainToHdRequested,
+                this, &CView::convertBaseTerrainToHdRequested);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, [this]()
         {
@@ -9992,6 +9994,10 @@ bool CView::modernTerrainPublicationRequired(bool saveAs) const
 
 ETerrainMprSaveRoute CView::currentTerrainMprSaveRoute(bool saveAs) const
 {
+    if(m_workingTerrainAtlas && m_workingTerrainAtlas->preserveNativePages())
+        return (terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land)
+                || terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay) || saveAs)
+            ? ETerrainMprSaveRoute::SaveEditableModernDraft : ETerrainMprSaveRoute::PlainMpr;
     return ::terrainMprSaveRoute(
         m_requestedTerrainIdentityFinalization,
         m_terrainEdit.virtualMaterialFieldActive(ETerrainTileLayer::Land),
@@ -10208,6 +10214,9 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
+    const bool preserveNativeHistory = m_workingTerrainAtlas
+        && m_workingTerrainAtlas->preserveNativePages();
+    allowModernDraft = allowModernDraft || preserveNativeHistory;
     syncWorldTerrainActive();
     if(!m_worldTerrainSession.dirtyPaths().isEmpty())
     {
@@ -10597,7 +10606,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
            && !adoptCompleteTerrainBaseline(
                destination, mprResult.candidateSha256,
                physicalDraftTiles, atlasPath, draftProfile,
-               !semanticFieldMember.name.isEmpty()))
+               !semanticFieldMember.name.isEmpty(), preserveNativeHistory))
         {
             QMessageBox::critical(this, tr("Modern draft saved; reopen required"),
                 tr("The paired MPR and HDPack_Terrain.res were saved, but the "
@@ -12255,6 +12264,9 @@ void CView::rebuildTerrainAutoCatalog()
         workingAtlasMs = catalogDetailTimer.restart();
         m_terrainEdit.enableWorkingAtlasSlots(
             m_workingTerrainAtlas->capacityLimit());
+        for(const QImage& tile : m_authoredTerrainTileImages)
+            if(tile.size() != m_authoredTerrainTileImages.first().size())
+                m_workingTerrainAtlas->setPreserveNativePages(true);
         if(m_landscapeTools)
             m_landscapeTools->setGeneratedAtlasTileCount(0);
         const QVector<STerrainAtlasSlotUsage> currentUsage = terrainAtlasUsage();
@@ -13816,7 +13828,7 @@ bool CView::adoptCompleteTerrainBaseline(
     const QVector<QImage>& physicalTiles,
     const QString& terrainArchivePath,
     const STerrainAtlasProfile& expectedProfile,
-    bool requireSemanticMember)
+    bool requireSemanticMember, bool preserveUndo)
 {
     const auto adoptionFailure = [](const QString& phase,
                                     const QString& detail)
@@ -13959,9 +13971,12 @@ bool CView::adoptCompleteTerrainBaseline(
     m_terrainAtlasProfile = expectedProfile;
     m_authoredTerrainTileImages = physicalTiles;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
-    if(m_pUndoStack)
+    if(m_pUndoStack && !preserveUndo)
         m_pUndoStack->clear();
     rebuildTerrainAutoCatalog();
+    if(preserveUndo && m_workingTerrainAtlas)
+        m_workingTerrainAtlas->setPreserveNativePages(true);
+    if(preserveUndo && m_pUndoStack) m_pUndoStack->setClean();
     m_pLand->setDirty(false);
     emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataMpr,
                                destination.baseName());
@@ -14604,7 +14619,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
         return false;
     }
     for(const QImage& image : activeImages)
-        if(image.isNull() || image.size() != tileSize)
+        if(image.isNull() || image.width() != image.height())
         {
             if(report) report->add("terrain.working_atlas_tile_picker",
                 EValidationSeverity::Error,

@@ -12,6 +12,7 @@
 #include <QOpenGLTextureBlitter>
 
 #include "landscape.h"
+#include "terrain_image_sizes.h"
 #include "map_object_placement_policy.h"
 
 #include <cmath>
@@ -436,6 +437,28 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     if(textureCount <= 0 || tileImages.size() != textureCount * 64
        || !QOpenGLContext::currentContext())
         return false;
+    const int displaySize = terrainMaximumTileSize(tileImages);
+    if(!displaySize) return false;
+    bool mixed = false;
+    for(const auto& image : tileImages) if(image.width() != displaySize) {mixed = true;break;}
+    if(mixed) {
+        const bool cached = m_previewAtlasTexture && m_previewDisplayImages.size() == tileImages.size()
+            && m_previewAtlasImages.size() == tileImages.size()
+            && m_previewDisplayImages.first().width() == displaySize;
+        auto display = cached ? m_previewDisplayImages : terrainDisplayTiles(tileImages);
+        const auto rollback = cached ? m_previewDisplayImages : QVector<QImage>();
+        QSet<int> changed;
+        if(cached) for(int slot=0;slot<tileImages.size();++slot)
+            if(tileImages[slot] != m_previewAtlasImages[slot]) {
+                display[slot] = tileImages[slot].width() == displaySize ? tileImages[slot]
+                    : tileImages[slot].scaled(displaySize,displaySize,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+                changed.insert(slot);
+            }
+        if(cached && changed.isEmpty()) return true;
+        const bool ok = previewTerrainAtlas(display, textureCount, changed, rollback);
+        if(ok) {m_previewAtlasImages = tileImages;m_previewDisplayImages = display;}
+        return ok;
+    }
     const int tileSize = tileImages.front().width();
     if(tileSize <= 0 || tileImages.front().height() != tileSize)
         return false;
@@ -459,6 +482,8 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
     QString route = QStringLiteral("full");
     const bool stableLayout = m_previewAtlasTexture
         && m_previewAtlasTexture->isCreated()
+        && m_previewAtlasTexture->width() == columns * pageSize
+        && m_previewAtlasTexture->height() == rows * pageSize
         && textureCount == m_previewAtlasTextureCount
         && columns == m_previewAtlasColumns && !changedSlots.isEmpty();
     bool installed = false;
@@ -528,12 +553,14 @@ bool CLandscape::previewTerrainAtlasIfChanged(
                                                m_previewAtlasImages);
     if(!installed)
         m_previewAtlasImages.clear(); // A retry must not trust a failed GL rollback.
+        m_previewDisplayImages.clear();
     return installed;
 }
 
 void CLandscape::clearPreviewTerrainAtlas()
 {
     m_previewAtlasImages.clear();
+    m_previewDisplayImages.clear();
     m_texture = m_baseAtlasTexture;
     m_renderTextureCount = qMax(1, int(m_header.nTexture));
     m_renderAtlasColumns = qMax(1, m_baseAtlasColumns);

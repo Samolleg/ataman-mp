@@ -460,6 +460,8 @@ public:
         const QVector<quint16>& pinnedPackedTiles = {},
         CValidationReport* report = nullptr) const;
     int capacityLimit() const { return m_capacityLimit; }
+    bool preserveNativePages() const { return m_preserveNativePages; }
+    void setPreserveNativePages(bool enabled) { m_preserveNativePages = enabled; }
     int authoredSlotCount() const { return m_authoredSlotCount; }
     const QVector<QImage>& authoredTileImages() const { return m_authoredImages; }
     int generatedTileCount() const;
@@ -554,6 +556,7 @@ private:
     QMap<int, STerrainWorkingTileIdentity> m_foreignPhysicalTiles;
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
+    bool m_preserveNativePages{false};
 };
 
 #endif // TERRAIN_VIRTUAL_ATLAS_H

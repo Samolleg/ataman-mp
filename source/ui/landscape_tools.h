@@ -171,6 +171,7 @@ public:
                               bool notify = false);
 
 signals:
+    void convertBaseTerrainToHdRequested();
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();

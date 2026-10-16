@@ -261,7 +261,7 @@ bool STerrainAtlasEmbeddedBindingResult::canReuseDecodedAtlasTiles(
         const QSize tileSize = decodedAtlasTiles.front().size();
         valid = tileSize.width() > 0 && tileSize.width() == tileSize.height();
         for(const QImage& tile : decodedAtlasTiles)
-            if(tile.isNull() || tile.size() != tileSize)
+            if(tile.isNull() || tile.width() != tile.height())
             {
                 valid = false;
                 break;

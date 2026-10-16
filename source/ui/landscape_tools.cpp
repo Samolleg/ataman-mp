@@ -759,6 +759,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     advanced->addWidget(m_modernAutoResolveBlends); advanced->addWidget(m_classicAutoSafe);
     advanced->addWidget(m_randomizeUniformRotation); advanced->addWidget(m_overlayMprMaterials);
     advanced->addWidget(resolveMissing);advanced->addWidget(saveDraft);
+    auto baseHd = new QPushButton(tr("Перевести базовые тайлы в HD"), this);
+    baseHd->setObjectName(QStringLiteral("convertBaseTerrainToHd"));
+    baseHd->setToolTip(tr("Заменить базовые поверхности готовыми HD-вариантами со случайным распределением. Вода и переходы сохраняются. Операцию можно отменить."));
+    advanced->addWidget(baseHd);
+    connect(baseHd, &QPushButton::clicked, this, &CLandscapeTools::convertBaseTerrainToHdRequested);
     auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
     diagnostics->addWidget(m_tilesetStatus);diagnostics->addLayout(atlasRow);
     diagnostics->addWidget(m_showOverlayMaterialSlots);diagnostics->addWidget(exportDiagnostic);diagnostics->addLayout(issueRow);

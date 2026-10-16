@@ -183,6 +183,7 @@ private:
     int m_previewAtlasTextureCount{0};
     int m_previewAtlasColumns{0};
     QVector<QImage> m_previewAtlasImages;
+    QVector<QImage> m_previewDisplayImages;
     QFileInfo m_filePath;
     QString m_innerMapName;
     QByteArray m_originalMprData;

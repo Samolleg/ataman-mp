@@ -14,6 +14,7 @@
 
 #include "endurance_document.h"
 #include "mmp_codec.h"
+#include "terrain_image_sizes.h"
 #include "mpr_document.h"
 #include "res_archive_document.h"
 
@@ -3248,8 +3249,10 @@ QImage CTerrainVirtualAtlas::composePage(const QVector<QImage>& tiles,
         // convention. Slot row zero is the visual top of the 8x8 page, so it
         // belongs in raw page row seven. Mirroring every tile and leaving the
         // page rows in visual order flips the complete atlas at upload time.
-        const QImage source = tiles.at(firstTile + local)
+        QImage source = tiles.at(firstTile + local)
             .convertToFormat(QImage::Format_RGBA8888);
+        if(source.size() != QSize(tileSize, tileSize))
+            source = source.scaled(tileSize, tileSize, Qt::IgnoreAspectRatio, Qt::FastTransformation);
         const int destinationX = (local % 8) * tileSize;
         const int destinationY = (7 - local / 8) * tileSize;
         for(int y = 0; y < tileSize; ++y)
@@ -3265,6 +3268,9 @@ QImage CTerrainVirtualAtlas::composeAtlasGrid(
     if(textureCount <= 0 || tiles.size() != textureCount * 64
        || columns <= 0 || columns > textureCount || tiles.isEmpty())
         return {};
+    const auto display = terrainDisplayTiles(tiles);
+    if(display.isEmpty()) return {};
+    if(display != tiles) return composeAtlasGrid(display, textureCount, columns);
     const int tileSize = tiles.front().width();
     if(tileSize <= 0 || tiles.front().height() != tileSize)
         return {};
@@ -4102,14 +4108,14 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
             "The working terrain atlas would discard authored texture pages.");
         return result;
     }
-    const QSize tileSize = activeTiles.front().size();
+    const QSize tileSize(terrainMaximumTileSize(activeTiles), terrainMaximumTileSize(activeTiles));
     if(tileSize.isEmpty())
     {
         result.error = QStringLiteral("The working terrain tiles have no pixels.");
         return result;
     }
     for(const QImage& tile : activeTiles)
-        if(tile.size() != tileSize || tile.isNull())
+        if(tile.isNull() || tile.width() != tile.height())
         {
             result.error = QStringLiteral(
                 "The working terrain atlas contains a missing or mismatched tile.");
@@ -4237,11 +4243,18 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
        && int(map.tileCount) % 64 != 0)
     {
         const int partialPage = int(map.tileCount) / 64;
-        if(partialPage < authoredPagePayloads.size())
+        bool tailChanged = false;
+        for(int slot = int(map.tileCount); slot < qMin(activeTileTypes.size(), (partialPage + 1) * 64); ++slot) {
+            QImage original; QString error;
+            if(!ei::decodeMmpDxt1AtlasTile(authoredPagePayloads.at(partialPage), slot % 64, &original, &error)
+               || original.convertToFormat(QImage::Format_RGBA8888) != activeTiles.at(slot).convertToFormat(QImage::Format_RGBA8888))
+                tailChanged = true;
+        }
+        if(tailChanged && partialPage < authoredPagePayloads.size())
         {
             QString diagnostic;
             const QImage pixels = composePage(
-                activeTiles, partialPage * 64, tileSize.width());
+                activeTiles, partialPage * 64, activeTiles.at(partialPage * 64).width());
             const QByteArray payload = ei::encodeMmpDxt1(
                 pixels, true, &diagnostic);
             if(payload.isEmpty())
@@ -4274,7 +4287,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
     {
         QString diagnostic;
         const QImage pixels = composePage(activeTiles, page * 64,
-                                          tileSize.width());
+                                          terrainMaximumTileSize(activeTiles.mid(page * 64, 64)));
         const QByteArray payload = ei::encodeMmpDxt1(pixels, true, &diagnostic);
         if(payload.isEmpty())
         {
@@ -4376,7 +4389,7 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     for(int slot = sourceTileTypes.size(); slot < m_workingTileTypes.size(); ++slot)
         m_workingTileTypes[slot] = -1;
     m_resolver.reset(new CTerrainVirtualAtlas(
-        m_authoredCatalog, m_authoredImages, distributionSeed,
+        m_authoredCatalog, terrainDisplayTiles(m_authoredImages), distributionSeed,
         externalMaterialSources, materialBlendStyles, true,
         sourceTileTypes, materialRuntimeTypes));
     for(int slot = 0; slot < m_authoredSlotCount; ++slot)
@@ -4454,6 +4467,7 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_animationCopySources = staged.m_animationCopySources;
     m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
     m_changedSlots = staged.m_changedSlots;
+    m_preserveNativePages = staged.m_preserveNativePages;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
             *staged.m_resolver, m_authoredCatalog));
@@ -5629,7 +5643,8 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
         int sourceSlot,CValidationReport* report,bool preserveAuthoredPages)
 {
     if(pixels.isNull() || runtimeType<0 || runtimeType>=16 || m_authoredImages.isEmpty()
-       || pixels.size()!=m_authoredImages.first().size()) {
+       || pixels.width()!=pixels.height() || (pixels.width()!=128 && pixels.width()!=256
+           && pixels.size()!=m_authoredImages.first().size())) {
         if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
             "The selected physical tile has incompatible pixels or runtime type.");return -1;
     }
@@ -5640,9 +5655,16 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
             bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);
             if(!signature || (known && existing==*signature))return slot;
         }
-    const int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
+    int slot=preserveAuthoredPages?qMax(activeTileCount(),m_authoredImages.size()):activeTileCount();
+    // A native MMP page has one size; append another page when size changes.
+    if(slot % 64 && m_workingImages.at(slot - 1).size() != pixels.size())
+        slot = ((slot + 63) / 64) * 64;
     if(slot>=m_capacityLimit) {
         if(report)report->add("terrain.world.capacity",EValidationSeverity::Error,"The neighboring atlas is full.");return -1;
+    }
+    if(slot % 64 == 0) {
+        QImage blank(pixels.size(), QImage::Format_RGBA8888); blank.fill(Qt::transparent);
+        for(int i=slot;i<qMin(slot+64,m_capacityLimit);++i) m_workingImages[i]=blank;
     }
     m_workingImages[slot]=pixels;m_workingTileTypes[slot]=runtimeType;
     m_workingToVirtual.insert(slot,qMakePair(3,slot));
