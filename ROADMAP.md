@@ -1,3 +1,8 @@
+## EI-BASE-HD-CLICK-195 — интерактивное преобразование HD
+
+- Поручение: исправить подтверждённую ложную отмену, проверить именно кнопку и настоящую отмену, Undo/Redo/Save на копии, собрать и установить. База194 main3eac4f42af273a724020a83254fb0309edb1e03c. Вода/переходы и живые данные сохраняются.
+- BUILT/CHECKED: свежая Release195/runtime. Тот же тест на194 воспроизвёл дефект (настоящая Отмена PASS, успех FAIL); на195 native152 PASS/exit0: mouseClick обеих кнопок, точная отмена atlas/terrain/Undo,38014 замен, GPU, Undo/Redo, два Save/reopen и неизменные исходные страницы. Evidence docs/validation/ATAMAN_BASE_HD_CLICK_195_20261016.md. Следующий шаг — scoped-коммит, staging и guarded установка.
+
 # EI Mapper Ataman — roadmap
 ## EI-ITEM-APPROACH-XY-194 — горизонтальные точки предметов
 

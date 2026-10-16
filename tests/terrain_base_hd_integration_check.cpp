@@ -1,6 +1,7 @@
 // Native integration against production objects; all writes target an owned map copy.
 #include <QtWidgets>
 #include <QtOpenGL>
+#include <QtTest>
 #define private public
 #include "landscape.h"
 #undef private
@@ -41,10 +42,13 @@ int runScenarioLayerCheck()
         view->setAttribute(Qt::WA_DontShowOnScreen);
         view->attach(settings,table,history,new CProgressView,new QLineEdit,new CTreeView,picker);
         view->resize(640,480);view->show();QCoreApplication::processEvents();check(view->isValid(),"hidden desktop OpenGL");
+        QString hdSummary;int hdDialogs=0;
         QTimer dismiss;QObject::connect(&dismiss,&QTimer::timeout,view,[&](){
             for(auto* w:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(w)){
                 out<<"DIALOG "<<box->windowTitle()<<": "<<box->text()<<"\n";out.flush();
-                if(box->windowTitle()=="Replace shared terrain atlas pages?"
+                if(box->windowTitle()==QString::fromUtf8("Базовые тайлы в HD")){
+                    hdSummary=box->text();++hdDialogs;box->accept();
+                }else if(box->windowTitle()=="Replace shared terrain atlas pages?"
                    && QFileInfo(view->m_activeTerrainArchivePath).absoluteFilePath()==QFileInfo(fixture+"/res/HDPack_Terrain.res").absoluteFilePath())
                     box->button(QMessageBox::Yes)->click();
                 else box->reject();}
@@ -108,7 +112,27 @@ int runScenarioLayerCheck()
         const auto before=modelBytes();
         view->grabFrameBuffer().save(results+"/before.png");
         QString summary;
-        const bool converted=view->convertBaseTerrainToHd(library,190,&summary);
+        auto* convertButton=panel->findChild<QPushButton*>("convertBaseTerrainToHd");
+        const auto fingerprint=view->m_workingTerrainAtlas->stateFingerprint();
+        const int undoBefore=history->count();bool cancelClicked=false;
+        QTimer cancelTimer;QObject::connect(&cancelTimer,&QTimer::timeout,view,[&](){
+            for(auto* widget:QApplication::topLevelWidgets())if(auto* progress=qobject_cast<QProgressDialog*>(widget)){
+                if(progress->isVisible()&&!cancelClicked){
+                    if(auto* cancelButton=progress->findChild<QPushButton*>()){
+                        cancelClicked=true;QTest::mouseClick(cancelButton,Qt::LeftButton);
+                    }
+                }
+            }
+        });cancelTimer.start(1);
+        QTest::mouseClick(convertButton,Qt::LeftButton);
+        cancelTimer.stop();
+        check(cancelClicked,"actual Cancel button clicked during interactive conversion");
+        check(modelBytes()==before&&view->m_workingTerrainAtlas->stateFingerprint()==fingerprint,"Cancel preserves terrain and atlas exactly");
+        check(history->count()==undoBefore&&hdDialogs==0,"Cancel creates no Undo entry or success dialog");
+        QTest::mouseClick(convertButton,Qt::LeftButton);
+        summary=hdSummary;
+        const bool converted=hdDialogs==1&&history->count()==undoBefore+1;
+        check(summary.contains(QString::fromUtf8("Заменено клеток: 38014")),"actual conversion button reports complete success");
         out<<summary<<"\n";out.flush();check(converted,"production HD conversion");
         const auto after=modelBytes();check(after!=before,"actual map references changed");
         check(view->m_workingTerrainAtlas->authoredTileImages()==originalImages,"native authored pixels and sizes unchanged");

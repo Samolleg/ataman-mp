@@ -30,6 +30,7 @@ void CView::convertBaseTerrainToHdRequested()
     QString summary;
     const bool ok=convertBaseTerrainToHd(QDir(QCoreApplication::applicationDirPath()).filePath("hd-library"),
         QRandomGenerator::global()->generate(),&summary,true);
+    ei::log(eLogInfo,QStringLiteral("Base HD conversion %1: %2").arg(ok?"completed":"stopped",summary));
     if(ok)QMessageBox::information(this,tr("Базовые тайлы в HD"),summary);
     else if(summary!="Cancelled")QMessageBox::warning(this,tr("Базовые тайлы в HD"),summary);
 }
@@ -52,10 +53,14 @@ bool CView::convertBaseTerrainToHd(const QString& library,quint32 seed,QString* 
         QProgressDialog progress(tr("Подбор базовых HD-текстур и вариантов…"),tr("Отмена"),0,0,this);
         progress.setWindowModality(Qt::ApplicationModal);progress.setMinimumDuration(0);progress.show();
         QFutureWatcher<SBaseHdPlan> watcher;QEventLoop loop;
-        connect(&progress,&QProgressDialog::canceled,[&](){cancelled.store(true);});
+        const auto cancelConnection=connect(&progress,&QProgressDialog::canceled,[&](){cancelled.store(true);});
         connect(&watcher,&QFutureWatcher<SBaseHdPlan>::finished,&loop,&QEventLoop::quit);
         watcher.setFuture(QtConcurrent::run([&](){return prepareBaseTerrainHd(library,*before,terrain,profile,animations,seed,&cancelled);}));
-        loop.exec();plan=watcher.result();progress.close();
+        loop.exec();plan=watcher.result();
+        // close() emits canceled even on successful completion. Only user input
+        // while the worker is active may cancel the prepared transaction.
+        disconnect(cancelConnection);
+        progress.close();
     }else plan=prepareBaseTerrainHd(library,*before,terrain,profile,animations,seed,&cancelled);
     if(cancelled.load())return fail("Cancelled");
     if(!plan.error.isEmpty())return fail(plan.error);

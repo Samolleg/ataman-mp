@@ -1,4 +1,4 @@
-QT += core gui widgets opengl concurrent multimedia network gui-private
+QT += core gui widgets opengl concurrent multimedia network gui-private testlib
 CONFIG += c++11 release
 TEMPLATE = app
 TARGET = terrain_base_hd_integration_check
@@ -13,3 +13,5 @@ for(object, productionObjects) {
     !contains(object, .*scenario_layer_check.*): LIBS += $$quote($$object)
 }
 LIBS += -lglu32 -lopengl32 -ldbghelp -luser32 -lole32 -lshell32
+# The linked production entry point is qMain; QtTest selects console mode.
+win32: LIBS += -lmingw32 $$quote($$[QT_INSTALL_LIBS]/libqtmain.a)
