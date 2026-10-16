@@ -214,9 +214,12 @@ void CWorldObj::loadTexture()
     }
     if(m_standaloneItemFigure)
     {
+        const bool inventoryAtlas = (m_modelName.startsWith("initqi", Qt::CaseInsensitive)
+            || m_modelName.startsWith("initqu", Qt::CaseInsensitive))
+            && !m_primaryTexture.endsWith("map", Qt::CaseInsensitive);
         applyTransientStandaloneVisual(CObjectList::getInstance()->getFigureResource(
             m_modelName.toLower() + ".fig"), m_modelName, {m_primaryTexture},
-            false, m_modelName.startsWith("initqi", Qt::CaseInsensitive));
+            inventoryAtlas, inventoryAtlas || m_modelName.startsWith("initqi", Qt::CaseInsensitive));
         return;
     }
     QString texName(m_primaryTexture);

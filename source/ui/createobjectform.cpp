@@ -1,4 +1,5 @@
 #include <QPointer>
+#include <algorithm>
 #include "window_geometry.h"
 #include "createobjectform.h"
 #include "ui_createobjectform.h"
@@ -632,6 +633,9 @@ void CCreateObjectForm::refreshDatabase()
     const QString weaponsPath = ei::MapWeaponCatalog::pathForDatabase(activeDatabase ? activeDatabase->sourceArchivePath : QString());
     const QFileInfo weaponsFile(weaponsPath);
     token += QString("|%1:%2:%3").arg(weaponsPath).arg(weaponsFile.size()).arg(weaponsFile.lastModified().toMSecsSinceEpoch());
+    const QString inventoryPath = ei::MapInventoryCatalog::pathForDatabase(activeDatabase ? activeDatabase->sourceArchivePath : QString());
+    const QFileInfo inventoryFile(inventoryPath);
+    token += QString("|%1:%2:%3").arg(inventoryPath).arg(inventoryFile.size()).arg(inventoryFile.lastModified().toMSecsSinceEpoch());
     for(const auto& root:resourceRoots) {
         const QFileInfo file(QDir(root).filePath("texts.res"));
         token+=QString("|%1:%2").arg(file.size()).arg(file.lastModified().toMSecsSinceEpoch());
@@ -654,10 +658,22 @@ void CCreateObjectForm::refreshDatabase()
     ei::applyDatabaseMapTexts(&m_databaseEntries,texts.entries);
     m_itemCatalog.applyGameTexts(texts.entries);
     m_weaponCatalog.load(weaponsPath, m_itemCatalog);
-    if(m_weaponCatalog.present()) {
+    m_inventoryCatalog.load(inventoryPath, document.data());
+    if(m_weaponCatalog.present() || m_inventoryCatalog.present()) {
         QVector<ei::SDatabaseMapEntry> filtered;
         for(auto entry : m_databaseEntries) {
             if(entry.category == ei::EDatabaseMapCategory::Item) {
+                if(const auto* inventory = m_inventoryCatalog.find(entry.name)) {
+                    entry.model = inventory->model;
+                    for(const auto& variant : inventory->variants) entry.model += " " + variant.label;
+                    entry.unavailableReason = inventory->unavailableReason;
+                    if(!entry.labelFromTexts && !inventory->label.isEmpty()) entry.label = inventory->label;
+                    filtered.append(entry);
+                    continue;
+                }
+                const auto* item = m_itemCatalog.findItem(entry.name);
+                if(m_inventoryCatalog.present() && (!item || item->category == "Quick Item")) continue;
+                if(!m_weaponCatalog.present()) { filtered.append(entry); continue; }
                 const auto models = m_weaponCatalog.models(entry.name);
                 if(models.isEmpty()) continue;
                 QStringList names;
@@ -878,6 +894,9 @@ void CCreateObjectForm::selectDatabaseEntry()
     m_pPreview->attachNode(nullptr, false);
     delete m_pNode; m_pNode = nullptr;
     ui->buttonCreate->setEnabled(false);
+    const bool itemCategory = m_databaseMode && m_databaseCategory->currentIndex() == 1;
+    m_itemMaterial->setVisible(itemCategory);
+    m_itemModel->setVisible(itemCategory && m_weaponCatalog.present());
     auto* selected = m_databaseList->currentItem();
     if(!selected)
     {
@@ -887,6 +906,8 @@ void CCreateObjectForm::selectDatabaseEntry()
         if(m_databaseCategory->currentIndex() == 1 && m_weaponCatalog.present()
            && !m_weaponCatalog.diagnostic().isEmpty())
             m_databaseDetails->setText(m_weaponCatalog.diagnostic());
+        if(itemCategory && !m_inventoryCatalog.diagnostic().isEmpty())
+            m_databaseDetails->setText(m_databaseDetails->text() + "\n" + m_inventoryCatalog.diagnostic());
         const QSignalBlocker materialBlock(m_itemMaterial), modelBlock(m_itemModel);
         m_itemMaterial->clear(); m_itemModel->clear();
         updateTable(); return;
@@ -894,6 +915,40 @@ void CCreateObjectForm::selectDatabaseEntry()
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
     if(entry.category == ei::EDatabaseMapCategory::Item)
     {
+        if(const auto* inventory = m_inventoryCatalog.find(entry.name)) {
+            const QSignalBlocker materialBlock(m_itemMaterial), modelBlock(m_itemModel);
+            const QString previous = m_itemMaterial->currentData().toString();
+            m_itemMaterial->clear(); m_itemModel->clear();
+            int firstAvailable = -1;
+            for(const auto& variant : inventory->variants) {
+                const bool available = std::any_of(variant.textures.constBegin(), variant.textures.constEnd(), [](const QString& texture) {
+                    return CTextureList::getInstance()->textureList().contains(texture);
+                });
+                m_itemMaterial->addItem(variant.label.isEmpty() ? variant.descriptor : variant.label, variant.material);
+                const int row = m_itemMaterial->count() - 1;
+                if(available && firstAvailable < 0) firstAvailable = row;
+                if(!available) if(auto* choices = qobject_cast<QStandardItemModel*>(m_itemMaterial->model())) choices->item(row)->setEnabled(false);
+            }
+            const int previousIndex = m_itemMaterial->findData(previous);
+            const bool previousAvailable = previousIndex >= 0
+                && (m_itemMaterial->model()->flags(m_itemMaterial->model()->index(previousIndex, 0)) & Qt::ItemIsEnabled);
+            m_itemMaterial->setCurrentIndex(previousAvailable ? previousIndex : firstAvailable);
+            m_itemMaterial->setVisible(!inventory->variants.isEmpty() && !inventory->variants.first().material.isEmpty());
+            m_itemMaterial->setEnabled(m_itemMaterial->count() > 1);
+            m_itemModel->hide();
+            QString diagnostic;
+            m_pNode = m_inventoryCatalog.create(entry.name, &diagnostic, m_itemMaterial->currentData().toString());
+            m_pPreview->attachNode(m_pNode);
+            const QString displayName = m_itemMaterial->currentText().isEmpty() ? entry.label : m_itemMaterial->currentText();
+            m_databaseDetails->setText(m_pNode
+                ? displayName + QString::fromUtf8("\nМодель: ") + inventory->model
+                  + QString::fromUtf8("\nТекстура: ") + m_pNode->textureName()
+                  + QString::fromUtf8("\nРазместите обычный объект на карте. Esc — отмена. Для взаимодействия преобразуйте его в рычаг и назначьте скрипт.")
+                : diagnostic);
+            ui->buttonCreate->setEnabled(m_pNode && m_pView && m_pView->currentMob());
+            updateTable();
+            return;
+        }
         QString itemDiagnostic;
         const auto* item = m_itemCatalog.findItem(entry.name);
         m_itemMaterial->setEnabled(item != nullptr);

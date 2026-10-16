@@ -6,6 +6,34 @@
 
 class CWorldObj;
 namespace ei {
+class DatabaseDocument;
+struct SMapInventoryVariant {
+    QString material, label, descriptor, texture;
+    QStringList textures;
+};
+struct SMapInventoryItem {
+    QString name, label, category, model, texture;
+    QMap<QString, QString> modelResources;
+    QStringList textures;
+    QVector<SMapInventoryVariant> variants;
+    QString unavailableReason;
+};
+
+class MapInventoryCatalog
+{
+public:
+    static QString pathForDatabase(const QString& databasePath);
+    bool load(const QString& path, const DatabaseDocument* database);
+    bool present() const { return m_present; }
+    QString diagnostic() const { return m_diagnostic; }
+    const SMapInventoryItem* find(const QString& name) const;
+    CWorldObj* create(const QString& name, QString* diagnostic, const QString& material = QString()) const;
+private:
+    bool m_present{false};
+    QString m_diagnostic;
+    QMap<QString, SMapInventoryItem> m_items;
+};
+
 struct SMapWeaponModel { QString model, mod, bon; };
 
 // Read-only catalog next to the active database. No MOB discovery or catalog writes.

@@ -546,6 +546,156 @@ int runDatabasePreviewCheck()
         output << "Preview " << name << ": " << colors.size() << " colors\n"; output.flush();
         return colors.size() > 32;
     };
+    if(qEnvironmentVariableIsSet("EI_TEST_MAP_INVENTORY_ONLY"))
+    {
+        const auto document = ei::DatabaseDocument::fromSnapshot(snapshot);
+        ei::MapInventoryCatalog inventory;
+        if(!inventory.load(ei::MapInventoryCatalog::pathForDatabase(archive), document.data())) return fail(inventory.diagnostic());
+        auto* materials = form->findChild<QComboBox*>("databaseItemMaterial");
+        auto* models = form->findChild<QComboBox*>("databaseItemModel");
+        auto* place = form->findChild<QPushButton*>("buttonCreate");
+        category->setCurrentIndex(1); search->clear();
+        if(qEnvironmentVariableIsSet("EI_TEST_MAP_INVENTORY_PROBE")) {
+            for(const QString& name : {QString("wand 1"), QString("awl"), QString("danger sensor")}) {
+                const auto* item = inventory.find(name);
+                if(!item || item->variants.isEmpty()) return fail("probe binding");
+                QString error;
+                QScopedPointer<CWorldObj> node(inventory.create(name, &error, item->variants.last().material));
+                if(!node) return fail(error);
+                const QImage image = CTextureList::getInstance()->textureImage(node->textureName(), node->modelName());
+                image.save(outputDirectory + "/probe-texture-" + item->model + ".png");
+                output << name << " texture=" << node->textureName() << " size=" << image.width() << "x" << image.height() << "\n";
+                for(const auto& uvs : node->renderedBodyPartUvTriangles()) {
+                    float minU=100,maxU=-100,minV=100,maxV=-100;
+                    for(const auto& uv : uvs) { minU=qMin(minU,uv.x()); maxU=qMax(maxU,uv.x()); minV=qMin(minV,uv.y()); maxV=qMax(maxV,uv.y()); }
+                    output << "UV=" << minU << "," << maxU << "," << minV << "," << maxV << "\n";
+                }
+                preview->attachNode(node.data()); capture("probe-" + item->model); preview->attachNode(nullptr, false);
+            }
+            return 0;
+        }
+        int quickCount = 0, questCount = 0, unavailable = 0, created = 0, expected = 0;
+        QSet<QString> identities;
+        for(const QString& key : {QString("items.quickitems"), QString("items.questitems")}) {
+            const auto* table = document->table(key);
+            if(!table) return fail("inventory DB table");
+            for(const auto& row : table->rows) {
+                const QString name = row.values.value("fld.0.0").toString();
+                if(row.deleted || name.isEmpty()) continue;
+                identities.insert(name.toCaseFolded());
+                if(!inventory.find(name)) return fail("missing live inventory binding: " + name);
+            }
+        }
+        expected = identities.size();
+        output << "Inventory diagnostic: " << inventory.diagnostic() << "\n"; output.flush();
+        for(const auto& record : snapshot->items) {
+            const auto* item = inventory.find(record.name);
+            if(!item) continue;
+            if(item->category == "questItems") ++questCount; else ++quickCount;
+            search->setText(record.name);
+            const auto matches = findCode(record.name);
+            if(matches.size() != 1) return fail("inventory picker identity: " + record.name);
+            objects->setCurrentItem(matches.first());
+            if(!models->isHidden()) return fail("inventory has equipment model controls");
+            if(!item->unavailableReason.isEmpty()) {
+                if(place->isEnabled()) return fail("missing geometry permits placement");
+                output << "Unavailable: " << record.name << "\n";
+                ++unavailable; continue;
+            }
+            if(!place->isEnabled()) {
+                for(auto* label : form->findChildren<QLabel*>()) output << label->text() << "\n";
+                return fail("inventory not placeable: " + record.name);
+            }
+            if(record.name == "wand 1") {
+                QSet<QString> chosenTextures;
+                for(int i = 0; i < materials->count(); ++i) {
+                    materials->setCurrentIndex(i);
+                    if(!place->isEnabled()) continue;
+                    QString error;
+                    QScopedPointer<CWorldObj> variant(inventory.create(record.name, &error, materials->currentData().toString()));
+                    if(!variant || !item->textures.contains(variant->textureName())) return fail("inventory material variant: " + error);
+                    chosenTextures.insert(variant->textureName());
+                }
+                if(chosenTextures.size() < 2 || !capture("inventory-wand-material")) return fail("inventory material switching");
+                form->grab().save(outputDirectory + "/inventory-picker.png");
+            }
+            if(created < 2 || record.name == "white wolf hide" || record.name == "awl") {
+                if(!capture("inventory-" + item->model)) return fail("inventory textured preview: " + record.name);
+                const QString localized = matches.first()->text().section(" - ", 1);
+                search->setText(localized);
+                if(findCode(record.name).size() != 1) return fail("inventory Russian search");
+                objects->setCurrentItem(findCode(record.name).first());
+            }
+            QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+            if(!view->isDatabasePlacementPending() || destination->nodes().size() != 1) return fail("inventory pending");
+            if(!view->cancelPendingOperation() || !destination->nodes().isEmpty()) return fail("inventory Escape");
+            form->show();
+            search->setText(record.name); objects->setCurrentItem(findCode(record.name).value(0));
+            QMetaObject::invokeMethod(form,"on_buttonCreate_clicked",Qt::DirectConnection);
+            QMouseEvent click(QEvent::MouseButtonRelease,QPointF(320,240),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+            view->m_pOp->mouseReleaseEvent(&click);
+            if(destination->nodes().size() != 1 || history->count() != 1) return fail("inventory commit");
+            CNode* node = destination->nodes().first();
+            const QString texture = node->textureName();
+            const QString material = materials->currentData().toString();
+            const QString descriptor = material.isEmpty() ? item->name : ei::ItemSpellConstructorCatalog::formatItemCode(item->name, material);
+            if(node->modelName() != item->model || !item->textures.contains(texture)
+               || node->nodeType() != eWorldObject) return fail("inventory model/texture/type: " + record.name + " actual=" + node->modelName() + "/" + texture + " expected=" + item->model);
+            CValidationReport report; QByteArray bytes;
+            if(!destination->buildValidatedCandidate(&bytes, &report)) return fail(report.toText());
+            CMob reopened;
+            if(!reopened.deserialize(bytes) || reopened.nodes().size() != 1) return fail("inventory reopen");
+            auto* restored = reopened.nodes().first();
+            if(restored->mapId() == 0 || restored->modelName() != item->model || restored->textureName() != texture
+               || restored->toJson().value("Base object").toObject().value("Map name").toString() != descriptor
+               || restored->toJson().value("Secondary texture").toString() != texture)
+                return fail("inventory persisted identity");
+            history->undo(); if(!destination->nodes().isEmpty()) return fail("inventory undo");
+            history->redo(); if(destination->nodes().size() != 1) return fail("inventory redo");
+            history->undo(); history->clear(); ++created; form->show();
+        }
+        if(!quickCount || !questCount || !created || quickCount + questCount != expected)
+            return fail(QString("complete inventory categories required: quick=%1 quest=%2 unavailable=%3 created=%4 expected=%5").arg(quickCount).arg(questCount).arg(unavailable).arg(created).arg(expected));
+        const QString invalidPath = temporary.filePath("invalid-items.json");
+        QFile invalid(invalidPath); if(!invalid.open(QIODevice::WriteOnly)) return fail("inventory fixture");
+        invalid.write("{\"schema_version\":99}"); invalid.close();
+        if(inventory.load(invalidPath, document.data()) || !inventory.present() || inventory.diagnostic().isEmpty()
+           || inventory.find("awl")) return fail("inventory invalid catalog clears stale mappings");
+        QFile original(ei::MapInventoryCatalog::pathForDatabase(archive));
+        if(!original.open(QIODevice::ReadOnly)) return fail("inventory semantic fixture");
+        auto root = QJsonDocument::fromJson(original.readAll()).object();
+        const auto baselineModels = root.value("models").toArray();
+        for(bool quest : {false, true}) {
+            for(const QString& field : {QString("model_index"), QString("material_type"), QString("type"),
+                                       quest ? QString("script_id") : QString("quick_item_type")}) {
+                auto rows = baselineModels;
+                QString changedName;
+                for(int i = 0; i < rows.size(); ++i) {
+                    auto row = rows.at(i).toObject();
+                    const QString key = quest ? "db_quest_items" : "db_quick_items";
+                    auto bindings = row.value(key).toArray();
+                    if(bindings.isEmpty()) continue;
+                    auto binding = bindings.first().toObject(); changedName = binding.value("name").toString();
+                    binding.insert(field, field == "type" || field == "material_type" ? QJsonValue("stale-test")
+                        : QJsonValue(binding.value(field).toInt() + 1));
+                    bindings[0] = binding; row.insert(key, bindings); rows[i] = row; break;
+                }
+                root.insert("models", rows);
+                if(!invalid.open(QIODevice::WriteOnly | QIODevice::Truncate)) return fail("inventory write stale fixture");
+                invalid.write(QJsonDocument(root).toJson()); invalid.close();
+                inventory.load(invalidPath, document.data());
+                if(changedName.isEmpty() || inventory.find(changedName)) return fail("stale inventory field accepted: " + field);
+            }
+        }
+        if(inventory.load(temporary.filePath("absent-items.json"), document.data()) || inventory.present()) return fail("inventory absent catalog");
+        // Selecting equipment after an inventory entry must restore material controls.
+        search->setText("cheat dagger");
+        if(findCode("cheat dagger").size() != 1 || materials->isHidden() || models->isHidden() || !place->isEnabled())
+            return fail("inventory to equipment regression");
+        output << "PASS: quick=" << quickCount << ", quest=" << questCount << ", unavailable=" << unavailable
+               << ", preview/Escape/place/save/reopen/Undo/Redo=" << created << "\n";
+        return 0;
+    }
     if(qEnvironmentVariableIsSet("EI_TEST_MAP_WEAPONS_ONLY"))
     {
         auto document = ei::DatabaseDocument::fromSnapshot(snapshot);
@@ -565,7 +715,11 @@ int runDatabasePreviewCheck()
             if(item.category == "Armor") { ++linkedArmor; armorTypes.insert(item.typeId); }
             ++linked;
         }
-        if(linked == 0 || objects->count() != linked) return fail("only catalog-backed equipment listed");
+        ei::MapInventoryCatalog inventory;
+        inventory.load(ei::MapInventoryCatalog::pathForDatabase(archive), document.data());
+        int inventoryCount = 0;
+        for(const auto& record : snapshot->items) if(inventory.find(record.name)) ++inventoryCount;
+        if(linked == 0 || objects->count() != linked + inventoryCount) return fail("only catalog-backed items listed");
         if(linkedArmor == 0 || armorTypes.size() != 7) return fail("all seven armor types linked");
         output << "PASS: catalog-backed equipment identities=" << linked << ", armor=" << linkedArmor << "\n";
         int modelCount = 0, textureChoices = 0, absentTextureChoices = 0;

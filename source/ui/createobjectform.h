@@ -84,6 +84,7 @@ private:
     QComboBox* m_itemMaterial{nullptr};
     QComboBox* m_itemModel{nullptr};
     ei::MapWeaponCatalog m_weaponCatalog;
+    ei::MapInventoryCatalog m_inventoryCatalog;
     ei::ItemSpellConstructorCatalog m_itemCatalog;
     QLineEdit* m_databaseSearch{nullptr};
     QListWidget* m_databaseList{nullptr};

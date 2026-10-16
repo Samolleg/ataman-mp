@@ -1103,7 +1103,7 @@ void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
     if(!figure)return;
     for(CPart* part:m_aPart)
     {
-        if(preserveAuthoredUvs)
+        if(preserveAuthoredUvs && !normalizeAuthoredAtlasCell)
         {
             part->setTextureUvScale(1.0f);
             continue;
@@ -1125,6 +1125,15 @@ void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
                 minU,maxU,minV,maxV);
             if(transform.normalizedAtlasCell)
             {
+                // Inventory FIGs address one cell of a logical 4x4 atlas,
+                // while the MMP is the cell image (including HD variants).
+                // Integer cell offsets disappear under the existing repeat
+                // sampler. Scale in the shader and retain authored vertices.
+                if(preserveAuthoredUvs && transform.scaleU == transform.scaleV)
+                {
+                    part->setTextureUvScale(transform.scaleU);
+                    continue;
+                }
                 for(SVertexData& vertex:part->vertData())
                 {
                     const float u=qBound(0.0f,vertex.texCoord.x()*transform.scaleU

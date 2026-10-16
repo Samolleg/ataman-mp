@@ -2,6 +2,7 @@
 #include "res_archive_index.h"
 #include "resourcemanager.h"
 #include "worldobj.h"
+#include "database_document.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -12,6 +13,181 @@
 #include <algorithm>
 
 namespace ei {
+QString MapInventoryCatalog::pathForDatabase(const QString& databasePath)
+{
+    return databasePath.isEmpty() ? QString() : QFileInfo(databasePath).dir().filePath("mapitems-catalog.json");
+}
+
+bool MapInventoryCatalog::load(const QString& path, const DatabaseDocument* database)
+{
+    m_items.clear(); m_diagnostic.clear();
+    m_present = !path.isEmpty() && QFileInfo::exists(path);
+    if(!m_present) return false;
+    const auto fail = [&](const QString& message) { m_items.clear(); m_diagnostic = message; return false; };
+    QFile file(path);
+    if(!database || !file.open(QIODevice::ReadOnly) || file.size() > 8 * 1024 * 1024)
+        return fail(QString::fromUtf8("Не удалось прочитать каталог квестовых и быстрых предметов."));
+    QJsonParseError parse;
+    const auto root = QJsonDocument::fromJson(file.readAll(), &parse).object();
+    const auto db = root.value("database").toObject();
+    bool quick = false, quest = false;
+    for(const auto& value : db.value("tables").toArray()) {
+        const auto table = value.toObject();
+        if(table.value("table") == "items.quick_items" && table.value("section_id").toInt(-1) == 4
+           && table.value("type_field").toInt(-1) == 21) quick = true;
+        if(table.value("table") == "items.quest_items" && table.value("section_id").toInt(-1) == 5
+           && table.value("script_id_field").toInt(-1) == 21) quest = true;
+    }
+    if(parse.error != QJsonParseError::NoError || root.value("schema_version").toInt() != 2
+       || root.value("path_base") != "catalog_directory" || db.value("resource") != "items.idb"
+       || db.value("identity_field").toInt(-1) != 0 || db.value("model_index_field").toInt(-1) != 5
+       || db.value("material_type_field").toInt(-1) != 3 || !quick || !quest
+       || root.value("model_kind") != "existing_inventory_geometry"
+       || root.value("texture_layout").toObject().value("mode") != "inventory_atlas"
+       || root.value("texture_layout").toObject().value("logical_layer_size").toArray() != QJsonArray({64,64})
+       || root.value("texture_layout").toObject().value("logical_atlas_size").toArray() != QJsonArray({256,256})
+       || root.value("texture_layout").toObject().value("logical_layer_origin").toArray() != QJsonArray({0,192})
+       || !root.value("texture_layout").toObject().value("preserve_source_uv").toBool())
+        return fail(QString::fromUtf8("Некорректный формат mapitems-catalog.json (ожидается версия 2)."));
+    const QDir directory = QFileInfo(path).dir();
+    const auto constructor = ItemSpellConstructorCatalog::fromDocument(*database);
+    QMap<QString, CResArchiveIndex> archives;
+    const QRegularExpression leaf("^[A-Za-z0-9_.-]+$");
+    const auto resourceExists = [&](const QJsonObject& resource, const QString& expected, QString* archivePath) {
+        const QString relative = resource.value("archive").toString();
+        if(relative.isEmpty() || QDir::isAbsolutePath(relative) || relative.contains(':')
+           || !relative.endsWith(".res", Qt::CaseInsensitive) || resource.value("resource").toString() != expected)
+            return false;
+        // Schema paths intentionally include ../../../Base/Res. Resolve from the
+        // catalog directory; these archives are read-only and never copied.
+        *archivePath = QDir::cleanPath(directory.absoluteFilePath(relative));
+        auto it = archives.find(*archivePath);
+        if(it == archives.end()) {
+            CResArchiveIndex index;
+            if(!index.open(*archivePath)) return false;
+            it = archives.insert(*archivePath, index);
+        }
+        return it->memberIndex(expected) >= 0;
+    };
+    int rejected = 0;
+    for(const auto& value : root.value("models").toArray()) {
+        const auto row = value.toObject();
+        const QString model = row.value("model").toString();
+        const QString component = row.value("component").toString();
+        if(!leaf.match(model).hasMatch() || component != model + "item") { ++rejected; continue; }
+        for(bool isQuest : {false, true}) {
+            const auto* table = database->table(isQuest ? "items.questitems" : "items.quickitems");
+            if(!table) continue;
+            for(const auto& bindingValue : row.value(isQuest ? "db_quest_items" : "db_quick_items").toArray()) {
+                const auto binding = bindingValue.toObject();
+                const QString name = binding.value("name").toString();
+                const SDatabaseRow* live = nullptr;
+                for(const auto& candidate : table->rows)
+                    if(!candidate.deleted && !name.isEmpty()
+                       && candidate.values.value("fld.0.0").toString().compare(name, Qt::CaseInsensitive) == 0) { live = &candidate; break; }
+                const auto field = [&](int id) { return live ? live->values.value(QString("fld.%1.0").arg(id)) : QVariant(); };
+                const int modelIndex = field(5).toInt();
+                if(!live || binding.value("model_index").toInt(-1) != modelIndex
+                   || row.value("model_index").toInt(-1) != modelIndex
+                   || model != QString(isQuest ? "initqu%1" : "initqi%1").arg(modelIndex)
+                   || binding.value("material_type").toString().compare(field(3).toString(), Qt::CaseInsensitive) != 0
+                   || binding.value("type").toString().compare(field(1).toString(), Qt::CaseInsensitive) != 0
+                   || binding.value(isQuest ? "script_id" : "quick_item_type").toInt(-1) != field(21).toInt())
+                    { ++rejected; continue; }
+                SMapInventoryItem item;
+                item.name = name; item.label = binding.value("name_ru").toString();
+                item.category = isQuest ? "questItems" : "quickItems"; item.model = component;
+                const auto resources = row.value("resources").toObject();
+                bool geometry = true;
+                for(const auto& key : {QString("lnk"), QString("fig"), QString("figure_bon")}) {
+                    const QString member = key == "lnk" ? model + ".lnk" : component + (key == "fig" ? ".fig" : ".bon");
+                    QString archivePath;
+                    if(!resourceExists(resources.value(key).toObject(), member, &archivePath)) geometry = false;
+                    else item.modelResources.insert(member, archivePath);
+                }
+                item.texture = QString(isQuest ? "quitem%1" : "qitem%1").arg(modelIndex, 4, 10, QChar('0'));
+                const auto addVariant = [&](const QJsonObject& source, const QString& material, const QString& code) {
+                    SMapInventoryVariant choice;
+                    choice.material = material; choice.descriptor = material.isEmpty() ? name : ItemSpellConstructorCatalog::formatItemCode(name, material);
+                    choice.label = source.value("name_ru").toString();
+                    choice.texture = item.texture + (code.isEmpty() ? QString() : "." + code);
+                    const auto texture = source.value("texture").toObject();
+                    if(texture.value("name").toString() != choice.texture) { ++rejected; return; }
+                    for(const auto& variantValue : texture.value("variants").toArray()) {
+                        const auto variant = variantValue.toObject();
+                        const QString member = variant.value("resource").toString();
+                        if(member != choice.texture + ".mmp" && member != choice.texture + ".x2.mmp") continue;
+                        QString archivePath;
+                        if(resourceExists(variant, member, &archivePath)) choice.textures.append(member.left(member.size() - 4));
+                    }
+                    std::sort(choice.textures.begin(), choice.textures.end(), [](const QString& a, const QString& b) { return a.size() > b.size(); });
+                    item.textures.append(choice.textures); item.variants.append(choice);
+                };
+                if(binding.value("texture_selection").toObject().value("mode") == "spell_contents") {
+                    item.unavailableReason = QString::fromUtf8("Текстура этого предмета зависит от вложенного заклинания. Каталог не задаёт готовый вариант для размещения.");
+                } else if(binding.contains("materials")) {
+                    for(const auto& materialValue : binding.value("materials").toArray()) {
+                        const auto materialBinding = materialValue.toObject();
+                        const QString name = materialBinding.value("material").toString();
+                        const auto* material = constructor.findMaterial(name);
+                        if(!material || material->type.compare(field(3).toString(), Qt::CaseInsensitive) != 0
+                           || material->code != materialBinding.value("material_code").toString()) { ++rejected; continue; }
+                        addVariant(materialBinding, name, material->code);
+                    }
+                } else addVariant(binding, QString(), QString());
+                if(item.label.isEmpty() && !item.variants.isEmpty()) item.label = item.variants.first().label;
+                if(!geometry) item.unavailableReason = QString::fromUtf8("Модель предмета отсутствует в архивах каталога: ") + model;
+                else if(item.unavailableReason.isEmpty() && item.textures.isEmpty()) item.unavailableReason = QString::fromUtf8("Текстура предмета отсутствует в архивах каталога: ") + item.texture;
+                const QString key = name.toCaseFolded();
+                if(m_items.contains(key)) { ++rejected; m_items[key].unavailableReason = QString::fromUtf8("Неоднозначная связь предмета в каталоге."); }
+                else m_items.insert(key, item);
+            }
+        }
+    }
+    if(m_items.isEmpty()) return fail(QString::fromUtf8("В каталоге нет подтверждённых предметов активной БД."));
+    if(rejected) m_diagnostic = QString::fromUtf8("Пропущено неподтверждённых связей каталога предметов: %1.").arg(rejected);
+    return true;
+}
+
+const SMapInventoryItem* MapInventoryCatalog::find(const QString& name) const
+{
+    const auto it = m_items.constFind(name.toCaseFolded());
+    return it == m_items.constEnd() ? nullptr : &it.value();
+}
+
+CWorldObj* MapInventoryCatalog::create(const QString& name, QString* diagnostic, const QString& material) const
+{
+    if(diagnostic) diagnostic->clear();
+    const auto fail = [&](const QString& message) -> CWorldObj* { if(diagnostic) *diagnostic = message; return nullptr; };
+    const auto* item = find(name);
+    if(!item) return fail(QString::fromUtf8("Предмет не связан с активной БД в mapitems-catalog.json."));
+    if(!item->unavailableReason.isEmpty()) return fail(item->unavailableReason);
+    const SMapInventoryVariant* selected = nullptr;
+    for(const auto& variant : item->variants) if(variant.material == material) { selected = &variant; break; }
+    if(!selected) return fail(QString::fromUtf8("Выберите подтверждённый материал предмета."));
+    for(auto it = item->modelResources.constBegin(); it != item->modelResources.constEnd(); ++it) {
+        QString source;
+        if(CObjectList::getInstance()->resourceData(it.key(), &source).isEmpty()
+           || QFileInfo(source).canonicalFilePath().compare(QFileInfo(it.value()).canonicalFilePath(), Qt::CaseInsensitive) != 0)
+            return fail(QString::fromUtf8("Ресурс модели недоступен или перекрыт в профиле: ") + it.key());
+    }
+    if(!CObjectList::getInstance()->getFigureResource(item->model + ".fig"))
+        return fail(QString::fromUtf8("Не удалось загрузить модель: ") + item->model);
+    QString texture;
+    for(const auto& candidate : selected->textures)
+        if(CTextureList::getInstance()->textureList().contains(candidate)
+           && CTextureList::getInstance()->hasTexture(candidate, item->model)) { texture = candidate; break; }
+    if(texture.isEmpty()) return fail(QString::fromUtf8("Текстура недоступна в активном профиле: ") + selected->texture);
+    CWorldObj defaults;
+    auto data = defaults.toJson();
+    auto base = data.value("Base object").toObject(); base.insert("Map name", selected->descriptor);
+    data.insert("Base object", base); data.insert("Model name", item->model);
+    data.insert("Primary texture", texture); data.insert("Secondary texture", texture);
+    data.insert("Object parts", QJsonArray());
+    auto* object = new CWorldObj(data); object->loadFigure(); object->loadTexture();
+    return object;
+}
+
 QString MapWeaponCatalog::pathForDatabase(const QString& databasePath)
 {
     return databasePath.isEmpty() ? QString() : QFileInfo(databasePath).dir().filePath("mapweapons-catalog.json");
