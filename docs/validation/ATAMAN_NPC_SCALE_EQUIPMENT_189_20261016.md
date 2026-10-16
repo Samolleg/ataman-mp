@@ -35,3 +35,14 @@ Release189 собрана в новом `build-release-189-npc-scale`, вклю�
 ## Передача
 
 Следующий этап — scoped-коммит, новая staging189/финализатор, проверка процесса и guarded замена188 в `artifacts/EI-Mapper-Ataman-2-first-test`, сохраняя owner-файлы и проверенный резерв188. Ручная оценка в привычном масштабе/камере и игровая приёмка отдельно. Публикация189 на GitHub не поручена.
+
+### Установка189 завершена
+
+- Source main `f7becd712a365948a9f2d9ff48a219a7783c182c`. Raw/staged/installed EXE `792514ceafefc7aacdd1edf12f6ad1f861b9963f86013d62b423f5d547449760`. Runtime bridge `8b962b52374493514347c6bcf3a546879a092ba9ad09d45b12ef2063b72c55b6`, host `2f15efce8ea21b657a012679ca52cb65ee1702551108745a7b8021f7c7183149`.
+- Fresh `build-staging-189-npc-scale`: raw/staged SHA и staged --version189 совпали; finalizer/внутренний distribution validator PASS. После финализации stage не запускалась и не изменялась.
+- Постоянная `artifacts/EI-Mapper-Ataman-2-first-test` обновлена188→189 при закрытом редакторе с повторными process/hash guards, проверенным резервом и атомарной заменой manifest последним. Все129 managed files совпали с manifest `b8a5b8fdbf1108ed8f5a87657dd89d21a31ede31fffdd94068bc72eadbdb9ef4`.7 прежних путей заменены/удалены (включая1 obsolete report),1 текущий report добавлен.
+- Все15262 owner files вне managed manifest сохранены побайтно. Digest до/после `CE1AA00384BBAA366684F49745696A405B9EAB473A209ADA22B311710118504A`. Карты, настройки, логи, сохранения и кэш установки не заменялись программным пакетом.
+- Проверен резерв188 `artifacts/rollback188-to189-npc-scale-20261016` и полная восстановимость188. После проверки удалён только старый точно опознанный `rollback187-to188-inventory-20261016`; прочие исторические папки сохранены.
+- Квитанции: `build-npc-scale-189-20261016/{build-receipt,final-probe-receipt,staging-receipt,install-receipt,rollback-retirement}.json`. Установленная/финализированная managed-копия этого отчёта не менялась после финализации; эта дописка только в исходниках.
+
+Реализация, адресная проверка исходного случая/связанного поведения и установка завершены. Следующий шаг — ручная оценка владельцем в обычной рабочей сессии, затем игровое отображение при необходимости; нативные проверки не заменяют эту приёмку. На GitHub189 не отправлялась.
