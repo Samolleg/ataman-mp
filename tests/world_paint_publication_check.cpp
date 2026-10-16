@@ -1,4 +1,5 @@
 #include "view.h"
+#include "terrain_image_sizes.h"
 #include "camera.h"
 #include <QOpenGLFunctions>
 #include <QOpenGLTexture>
@@ -97,6 +98,27 @@ int runNeighborPerformanceCheck()
     placement.size={second->terrain.tileCountX()*2.0,second->terrain.tileCountY()*2.0};
     view.m_neighborPlacements={placement};view.m_worldTerrainEnabledPaths.insert(otherId);
     const auto payloads=[](const SWorldTerrainDocument& d){QMap<QPair<int,int>,QByteArray> r;for(const auto& sec:d.baseline.sectors())r[qMakePair(int(sec.sectorX),int(sec.sectorY))]=d.terrain.sectorPayload(sec.sectorX,sec.sectorY);return r;};
+    const auto appearance=[](const SWorldTerrainDocument& document) {
+        const auto images=terrainDisplayTiles(document.atlas->activeTileImages());
+        const auto types=document.atlas->activeTileTypes();
+        QMap<quint16,QByteArray> tiles;QCryptographicHash field(QCryptographicHash::Sha256);
+        for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay})
+            for(int y=0;y<document.terrain.tileCountY();++y)for(int x=0;x<document.terrain.tileCountX();++x) {
+                bool valid=false;const auto packed=document.terrain.packedTile(x,y,layer,&valid);
+                if(!valid || (layer==ETerrainTileLayer::Overlay&&packed==0xffff)){field.addData("absent",6);continue;}
+                if(!tiles.contains(packed)) {
+                    const auto decoded=SMprPackedTile::decode(packed);const int slot=decoded.atlasSlot();
+                    if(slot<0||slot>=images.size())return QByteArray();
+                    const auto image=images[slot].transformed(QTransform().rotate(90*decoded.rotation)).convertToFormat(QImage::Format_RGBA8888);
+                    QCryptographicHash pixel(QCryptographicHash::Sha256);
+                    pixel.addData(QByteArray::number(types.value(slot,-1))+":"+QByteArray::number(image.width())+"x"+QByteArray::number(image.height())+"\n");
+                    for(int row=0;row<image.height();++row)pixel.addData(reinterpret_cast<const char*>(image.constScanLine(row)),image.width()*4);
+                    tiles.insert(packed,pixel.result());
+                }
+                field.addData(tiles.value(packed));
+            }
+        return field.result().toHex();
+    };
     const auto firstBefore=payloads(*first),secondBefore=payloads(*second);
     // Load the second renderer as well: document-only neighbors miss the
     // expensive publication path exercised by the real common brush.
@@ -189,6 +211,7 @@ int runNeighborPerformanceCheck()
     const auto firstAfter=payloads(*first),secondAfter=payloads(*second);
     if(firstBefore==firstAfter||secondBefore==secondAfter)return 88;
     const auto firstTextureAfter=textureHash(view.m_pLand),secondTextureAfter=textureHash(loaded.landscape.data());
+    const auto firstAppearance=appearance(*first),secondAppearance=appearance(*second);
     if(shadowPixels(view.m_pLand)!=firstShadowBefore || shadowPixels(loaded.landscape.data())!=secondShadowBefore)return 116;
     if(!view.worldTerrainHistory(false,true)||payloads(*view.m_worldTerrainSession.documents[id])!=firstBefore||payloads(*view.m_worldTerrainSession.documents[otherId])!=secondBefore)return 89;
     if(textureHash(view.m_pLand)!=firstTextureBefore || textureHash(loaded.landscape.data())!=secondTextureBefore)return 94;
@@ -283,9 +306,10 @@ int runNeighborPerformanceCheck()
        ||payloads(*first)!=localAfter||payloads(*second)!=neighborBefore
        ||textureHash(loaded.landscape.data())!=secondTextureAfter)return 113;
 #endif
+    const auto localAppearance=appearance(*first);
     QCryptographicHash canonicalHash(QCryptographicHash::Sha256);
     for(const auto& p:localAfter)canonicalHash.addData(p);
     QFile receipt(output+"/cross-success.json");if(!receipt.open(QIODevice::WriteOnly))return 91;
-    receipt.write(QJsonDocument(QJsonObject{{"result","PASS"},{"maps",2},{"cells",cells},{"undoRedo",true},{"elapsedMs",timer.elapsed()},{"brushMs",brushMs},{"shadowInvalidations",int(shadowInvalidations)},{"stampMs",stampMs},{"textureFirst",QString::fromLatin1(firstTextureAfter)},{"textureSecond",QString::fromLatin1(secondTextureAfter)},{"localStampMs",localStampMs},{"localPayloadSha256",QString::fromLatin1(canonicalHash.result().toHex())},{"localTexture",QString::fromLatin1(localAtlasAfter)},{"renderFullEquivalent",true},{"shadowFullEquivalent",true},{"shadowPixelsFirst",QString::fromLatin1(firstShadowBefore)},{"shadowPixelsSecond",QString::fromLatin1(secondShadowBefore)}}).toJson());
+    receipt.write(QJsonDocument(QJsonObject{{"result","PASS"},{"firstAppearance",QString::fromLatin1(firstAppearance)},{"secondAppearance",QString::fromLatin1(secondAppearance)},{"localAppearance",QString::fromLatin1(localAppearance)},{"maps",2},{"cells",cells},{"undoRedo",true},{"elapsedMs",timer.elapsed()},{"brushMs",brushMs},{"shadowInvalidations",int(shadowInvalidations)},{"stampMs",stampMs},{"textureFirst",QString::fromLatin1(firstTextureAfter)},{"textureSecond",QString::fromLatin1(secondTextureAfter)},{"localStampMs",localStampMs},{"localPayloadSha256",QString::fromLatin1(canonicalHash.result().toHex())},{"localTexture",QString::fromLatin1(localAtlasAfter)},{"renderFullEquivalent",true},{"shadowFullEquivalent",true},{"shadowPixelsFirst",QString::fromLatin1(firstShadowBefore)},{"shadowPixelsSecond",QString::fromLatin1(secondShadowBefore)}}).toJson());
     out<<"PASS two maps with different atlases, "<<changed<<" border cells, exact shared Undo/Redo, "<<timer.elapsed()<<" ms\n";out.flush();return 0;
 }

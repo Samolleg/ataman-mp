@@ -1,3 +1,9 @@
+#if defined(_WIN32) && (!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0601)
+// Request the Windows 7 file metadata declarations from the retained SDK.
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#include "render_stall_trace.h"
 #include "terrain_atlas_archive_binding.h"
 
 #include <QDataStream>
@@ -7,6 +13,9 @@
 #include <QMap>
 #include <QSet>
 #include <QTextCodec>
+#include <QCache>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include "mmp_codec.h"
 #include "endurance_document.h"
@@ -114,6 +123,62 @@ QString normalizedPath(const QString& path)
 {
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath()).toLower();
 }
+
+QByteArray archiveEpoch(const QString& path)
+{
+#ifdef Q_OS_WIN
+    HANDLE file = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if(file == INVALID_HANDLE_VALUE) return {};
+    BY_HANDLE_FILE_INFORMATION identity;
+    FILE_BASIC_INFO basic;
+    const bool ok = GetFileInformationByHandle(file, &identity)
+        && GetFileInformationByHandleEx(file, FileBasicInfo, &basic, sizeof(basic));
+    CloseHandle(file);
+    if(!ok || !basic.ChangeTime.QuadPart) return {};
+    // ChangeTime also invalidates an in-place edit whose writer restores the
+    // original size and LastWriteTime; file ID covers atomic replacement.
+    return QByteArray::number(qulonglong(identity.dwVolumeSerialNumber)) + '/'
+        + QByteArray::number(qulonglong(identity.nFileIndexHigh)) + '/'
+        + QByteArray::number(qulonglong(identity.nFileIndexLow)) + '/'
+        + QByteArray::number(qulonglong(identity.nFileSizeHigh)) + '/'
+        + QByteArray::number(qulonglong(identity.nFileSizeLow)) + '/'
+        + QByteArray::number(basic.LastWriteTime.QuadPart) + '/'
+        + QByteArray::number(basic.ChangeTime.QuadPart);
+#else
+    Q_UNUSED(path);
+    return {}; // No reusable digest without a strong file epoch.
+#endif
+}
+
+struct SExactAtlasDigestCache
+{
+    QMutex mutex;
+    QCache<QString, QByteArray> digests{128};
+    QCache<QString, QByteArray> bindingEpochs{256};
+};
+SExactAtlasDigestCache& exactAtlasDigestCache()
+{
+    static SExactAtlasDigestCache cache;
+    return cache;
+}
+QString bindingEpochKey(const STerrainAtlasArchiveBindingResult& binding)
+{
+    return normalizedPath(binding.archivePath) + '|'
+        + QString::fromLatin1(binding.decodedAtlasPixelSha256.toLower());
+}
+}
+
+bool CTerrainAtlasArchiveBindingResolver::matchesArchiveEpoch(
+    const STerrainAtlasArchiveBindingResult& binding)
+{
+    const auto epoch = archiveEpoch(binding.archivePath);
+    if(epoch.isEmpty()) return true; // Retain the caller's portable stat guard.
+    auto& cache = exactAtlasDigestCache();
+    QMutexLocker lock(&cache.mutex);
+    const auto* verified = cache.bindingEpochs.object(bindingEpochKey(binding));
+    return verified && *verified == epoch;
 }
 
 bool CTerrainAtlasArchiveBindingResolver::readArchiveMembers(
@@ -367,6 +432,7 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
     const QString& preferredArchive,
     QVector<QImage>* decodedTiles)
 {
+    CRenderStallTrace trace("terrain-bind-exact");
     STerrainAtlasArchiveBindingResult result;
     if(decodedTiles)
         decodedTiles->clear();
@@ -394,61 +460,85 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         const qint64 archiveSize = archive.size();
         const qint64 archiveLastModifiedMs =
             archive.lastModified().toMSecsSinceEpoch();
-        QMap<QString, SArchiveMemberLocation> members;
-        if(!archiveIndex(archive.absoluteFilePath(), &members))
-            continue;
-        QVector<QByteArray> pages;
-        QFile file(archive.absoluteFilePath());
-        if(!file.open(QIODevice::ReadOnly))
-            continue;
-        bool complete = true;
-        for(int page = 0; page < textureCount; ++page)
-        {
-            const QString name = QStringLiteral("%1%2.mmp")
-                .arg(mprNamespace.toLower())
-                .arg(page, 3, 10, QLatin1Char('0'));
-            const auto found = members.constFind(name);
-            if(found == members.constEnd())
-            {
-                complete = false;
-                break;
-            }
-            const QByteArray payload = memberPayload(&file, found.value());
-            if(payload.isEmpty())
-            {
-                complete = false;
-                break;
-            }
-            pages.append(payload);
+        const QByteArray epoch = archiveEpoch(archive.absoluteFilePath());
+        const QString digestKey = epoch.isEmpty() ? QString()
+            : normalizedPath(archive.absoluteFilePath()) + '|'
+                + QString::fromLatin1(epoch) + '|' + mprNamespace.toCaseFolded()
+                + '|' + QString::number(textureCount) + '|' + QString::number(atlasSlotCount);
+        QByteArray actual;
+        if(!digestKey.isEmpty()) {
+            auto& cache = exactAtlasDigestCache();
+            QMutexLocker lock(&cache.mutex);
+            if(const auto* digest = cache.digests.object(digestKey)) actual = *digest;
         }
-        if(!complete)
-            continue;
-        result.completeArchives.append(archive.absoluteFilePath());
+        const bool cached = !actual.isEmpty();
         QVector<QImage> tiles;
-        tiles.reserve(atlasSlotCount);
-        QString diagnostic;
-        for(int slot = 0; slot < atlasSlotCount; ++slot)
+        if(!cached || (decodedTiles && actual.toLower() == expectedAtlasPixelSha256.toLower()))
         {
-            QImage tile;
-            if(!ei::decodeMmpDxt1AtlasTile(
-                   pages.at(slot / 64), slot % 64, &tile, &diagnostic))
+            QMap<QString, SArchiveMemberLocation> members;
+            if(!archiveIndex(archive.absoluteFilePath(), &members))
+                continue;
+            QVector<QByteArray> pages;
+            QFile file(archive.absoluteFilePath());
+            if(!file.open(QIODevice::ReadOnly))
+                continue;
+            bool complete = true;
+            for(int page = 0; page < textureCount; ++page)
             {
-                tiles.clear();
-                break;
+                const QString name = QStringLiteral("%1%2.mmp")
+                    .arg(mprNamespace.toLower())
+                    .arg(page, 3, 10, QLatin1Char('0'));
+                const auto found = members.constFind(name);
+                if(found == members.constEnd())
+                {
+                    complete = false;
+                    break;
+                }
+                const QByteArray payload = memberPayload(&file, found.value());
+                if(payload.isEmpty())
+                {
+                    complete = false;
+                    break;
+                }
+                pages.append(payload);
             }
-            tiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+            if(!complete)
+                continue;
+            trace.mark("read-pages");
+            result.completeArchives.append(archive.absoluteFilePath());
+            tiles.reserve(atlasSlotCount);
+            QString diagnostic;
+            for(int slot = 0; slot < atlasSlotCount; ++slot)
+            {
+                QImage tile;
+                if(!ei::decodeMmpDxt1AtlasTile(
+                       pages.at(slot / 64), slot % 64, &tile, &diagnostic))
+                {
+                    tiles.clear();
+                    break;
+                }
+                tiles.append(tile.convertToFormat(QImage::Format_RGBA8888));
+            }
+            if(tiles.size() != atlasSlotCount)
+                continue;
+            trace.mark("decode-atlas");
+            if(!cached) actual = CTerrainAtlasProfileInference::pixelSha256(tiles);
+            trace.mark("hash-atlas");
         }
-        if(tiles.size() != atlasSlotCount)
-            continue;
-        const QByteArray actual =
-            CTerrainAtlasProfileInference::pixelSha256(tiles);
+        else result.completeArchives.append(archive.absoluteFilePath());
         QFileInfo archiveAfterRead(archive.absoluteFilePath());
         archiveAfterRead.refresh();
         if(!archiveAfterRead.isFile()
            || archiveAfterRead.size() != archiveSize
            || archiveAfterRead.lastModified().toMSecsSinceEpoch()
-                != archiveLastModifiedMs)
+                != archiveLastModifiedMs
+           || (!epoch.isEmpty() && archiveEpoch(archive.absoluteFilePath()) != epoch))
             continue;
+        if(!digestKey.isEmpty() && !cached) {
+            auto& cache = exactAtlasDigestCache();
+            QMutexLocker lock(&cache.mutex);
+            cache.digests.insert(digestKey, new QByteArray(actual));
+        }
         result.completeArchivePixelSha256.insert(
             archive.absoluteFilePath(), actual);
         if(actual.toLower() != expectedAtlasPixelSha256.toLower())
@@ -457,6 +547,11 @@ CTerrainAtlasArchiveBindingResolver::findExactArchive(
         result.decodedAtlasPixelSha256 = actual;
         result.archiveSize = archiveSize;
         result.archiveLastModifiedMs = archiveLastModifiedMs;
+        if(!epoch.isEmpty()) {
+            auto& cache = exactAtlasDigestCache();
+            QMutexLocker lock(&cache.mutex);
+            cache.bindingEpochs.insert(bindingEpochKey(result), new QByteArray(epoch));
+        }
         if(decodedTiles)
             *decodedTiles = tiles;
         return result;

@@ -1035,6 +1035,10 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
             changed=changed || !resolution.isEmpty();
         }
         if(report.hasErrors())break;
+        // These are verified source pixels/bindings, not live atlas/history
+        // state. Retain them even for a no-op, and share them with the next map
+        // in this stamp instead of re-hashing the same source for every tuple.
+        retainTerrainSourceCaches(stage);
         ++planned;
         if(!changed)continue;
         change.after.terrain=stage.terrainEdit;change.after.atlas=stage.atlas;

@@ -744,6 +744,7 @@ private:
         qint32 preferredRuntimeType = -1,
         SWorkingTerrainResolveStage* staging = nullptr,
         bool requirePreferredRuntimeType = false);
+    void retainTerrainSourceCaches(const SWorkingTerrainResolveStage& staged);
     bool ensureGlobalTerrainMaterialSources(
         const STerrainTransitionSignature& signature,
         CValidationReport* report,

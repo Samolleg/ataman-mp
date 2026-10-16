@@ -50,6 +50,7 @@ struct STerrainAtlasEmbeddedBindingResult
 class CTerrainAtlasArchiveBindingResolver
 {
 public:
+    static bool matchesArchiveEpoch(const STerrainAtlasArchiveBindingResult& binding);
     // Reads only the RES header, hash table, filename buffer, and requested
     // payloads. Large unrelated atlas pages are never copied or hashed.
     static bool readArchiveMembers(

@@ -634,7 +634,8 @@ bool terrainAtlasBindingStillValid(
     return configured && archive.isFile()
         && archive.size() == binding.archiveSize
         && archive.lastModified().toMSecsSinceEpoch()
-            == binding.archiveLastModifiedMs;
+            == binding.archiveLastModifiedMs
+        && CTerrainAtlasArchiveBindingResolver::matchesArchiveEpoch(binding);
 }
 
 struct STerrainGlobalThumbnailRequest
@@ -762,6 +763,7 @@ QImage loadBoundTerrainAtlasTile(
     QMap<QString, QImage>* decodedTileCache,
     const QStringList* configuredArchivesOverride = nullptr)
 {
+    CRenderStallTrace trace("terrain-source-tile");
     if(!boundAtlasCache || !missingPageCache || !decodedTileCache
        || atlasPixelSha256.size() != 64
        || textureCount <= 0 || atlasSlotCount <= 0
@@ -771,13 +773,11 @@ QImage loadBoundTerrainAtlasTile(
         mprNamespace, atlasPixelSha256, textureCount, atlasSlotCount);
     const QString tileKey = terrainAtlasTileCacheKey(
         bindingKey, slot, requiredSize);
-    const auto cachedTile = decodedTileCache->constFind(tileKey);
-    if(cachedTile != decodedTileCache->constEnd())
-        return cachedTile.value();
     if(!boundAtlasCache->contains(bindingKey)
        && missingPageCache->contains(bindingKey))
         return QImage();
 
+    trace.mark("cache");
     QStringList configuredArchives = configuredArchivesOverride
         ? *configuredArchivesOverride
         : CTextureList::getInstance()->configuredResourceArchivePaths();
@@ -807,6 +807,11 @@ QImage loadBoundTerrainAtlasTile(
         cachedBinding = boundAtlasCache->insert(bindingKey, exact);
         missingPageCache->remove(bindingKey);
     }
+    trace.mark("binding");
+    // Retained pixels are usable only with a still-valid exact archive binding.
+    const auto cachedTile = decodedTileCache->constFind(tileKey);
+    if(cachedTile != decodedTileCache->constEnd())
+        return cachedTile.value();
     const QString pageName = QStringLiteral("%1%2.mmp")
         .arg(mprNamespace.toLower())
         .arg(slot / 64, 3, 10, QLatin1Char('0'));
@@ -816,11 +821,13 @@ QImage loadBoundTerrainAtlasTile(
            cachedBinding->archivePath, {pageName}, &payloads,
            nullptr, &readError))
         return QImage();
+    trace.mark("read-page");
     QImage tile;
     QString diagnostic;
     if(!ei::decodeMmpDxt1AtlasTile(
            payloads.value(pageName), slot % 64, &tile, &diagnostic))
         return QImage();
+    trace.mark("decode-tile");
     tile = tile.convertToFormat(QImage::Format_RGBA8888);
     if(!requiredSize.isEmpty() && tile.size() != requiredSize)
         tile = tile.scaled(requiredSize, Qt::IgnoreAspectRatio,
@@ -14278,6 +14285,25 @@ bool CView::terrainLayerUsesWorkingExtension(ETerrainTileLayer layer) const
     return false;
 }
 
+void CView::retainTerrainSourceCaches(const SWorkingTerrainResolveStage& staged)
+{
+    // Identity/size-keyed caches are shared; per-map material-source choices
+    // stay local so retaining a neighbor's cache cannot change its artwork.
+    for(auto it=staged.boundAtlasCache.cbegin();it!=staged.boundAtlasCache.cend();++it) {
+        const auto old=m_terrainGlobalBoundAtlasCache.constFind(it.key());
+        if(old==m_terrainGlobalBoundAtlasCache.cend() || old->archivePath!=it->archivePath
+           || old->archiveSize!=it->archiveSize || old->archiveLastModifiedMs!=it->archiveLastModifiedMs)
+            m_terrainGlobalBoundAtlasCache.insert(it.key(),it.value());
+        m_terrainGlobalTransitionMissingPages.remove(it.key());
+    }
+    for(const auto& key:staged.missingPages)
+        if(!m_terrainGlobalBoundAtlasCache.contains(key))m_terrainGlobalTransitionMissingPages.insert(key);
+    for(auto it=staged.decodedTileCache.cbegin();it!=staged.decodedTileCache.cend();++it)
+        if(!m_terrainGlobalTransitionTileCache.contains(it.key()))m_terrainGlobalTransitionTileCache.insert(it.key(),it.value());
+    for(auto it=staged.uniformTileCache.cbegin();it!=staged.uniformTileCache.cend();++it)
+        if(!m_terrainGlobalUniformTileCache.contains(it.key()))m_terrainGlobalUniformTileCache.insert(it.key(),it.value());
+}
+
 bool CView::ensureGlobalTerrainMaterialSources(
     const STerrainTransitionSignature& signature,
     CValidationReport* report, SWorkingTerrainResolveStage* staging)
@@ -14386,6 +14412,7 @@ bool CView::realizeWorkingTerrainSignature(
     SWorkingTerrainResolveStage* staging,
     bool requirePreferredRuntimeType)
 {
+    CRenderStallTrace trace("terrain-realize-signature");
     const bool referenceConfigured = !CTextureList::getInstance()
         ->terrainAuthoringArchivePath().isEmpty();
     if(referenceConfigured && CTextureList::getInstance()
@@ -14432,6 +14459,7 @@ bool CView::realizeWorkingTerrainSignature(
         atlas->catalog().selectForPaint(
             signature, cellX, cellY, m_terrainSemanticSeed,
             preferredPaintMaterial, &alreadyExact);
+    trace.mark("current-exact");
     if(!alreadyExact)
     {
         QList<STerrainGlobalTransitionSource> candidates =
@@ -14500,6 +14528,7 @@ bool CView::realizeWorkingTerrainSignature(
                     .arg(label));
             }
         }
+        trace.mark("load-library");
         if(importedAny && !atlas->realizeAuthoredLibraryVariants(
                signature, usage, *protectedSlots,
                &libraryReport, preferredPaintMaterial,
@@ -14520,6 +14549,7 @@ bool CView::realizeWorkingTerrainSignature(
             return false;
         }
     }
+    trace.mark("realize-library");
     const auto appendFindings = [report](const CValidationReport& source) {
         if(!report) return;
         for(const SValidationFinding& finding : source.findings())
@@ -14561,11 +14591,13 @@ bool CView::realizeWorkingTerrainSignature(
             appendFindings(attempt);
             return false;
         }
+        trace.mark("material-sources");
         packed = atlas->resolve(
             signature, cellX, cellY, usage, *protectedSlots,
             generated, &attempt, preferredPaintMaterial,
             preferredRuntimeType, requirePreferredRuntimeType);
     }
+    trace.mark("resolve");
     if(!selectedTypedWorkingVariant && attempt.hasErrors()
        && hasCapacityFinding(attempt) && usage
        && (!staging || staging->allowSlotRecycling))

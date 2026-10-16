@@ -1,6 +1,7 @@
 #include "terrain_atlas_profile.h"
 
 #include "terrain_virtual_atlas.h"
+#include "native_sha256.h"
 
 #include <QCryptographicHash>
 #include <QCoreApplication>
@@ -18,6 +19,7 @@
 #include <QTransform>
 #include <algorithm>
 #include <cmath>
+#include <climits>
 
 #include "endurance_document.h"
 
@@ -1625,19 +1627,46 @@ STerrainAtlasAnalysis STerrainAtlasProfile::usableAnalysis(CValidationReport* re
     return result;
 }
 
-QByteArray CTerrainAtlasProfileInference::pixelSha256(const QVector<QImage>& images)
+namespace {
+template<typename Hash>
+QByteArray atlasPixelDigest(const QVector<QImage>& images, Hash& hash)
 {
-    QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(QByteArray::number(images.size())); hash.addData("\n", 1);
     for(const QImage& source : images)
     {
         const QImage image = source.convertToFormat(QImage::Format_RGBA8888);
         hash.addData(QByteArray::number(image.width())); hash.addData("x", 1);
         hash.addData(QByteArray::number(image.height())); hash.addData("\n", 1);
-        for(int y = 0; y < image.height(); ++y)
+        // RGBA rows are normally contiguous. Preserve the original stream for
+        // external images with padded strides: padding never belongs to it.
+        if(image.bytesPerLine() == image.width() * 4)
+        {
+            qint64 remaining = qint64(image.bytesPerLine()) * image.height();
+            const char* bytes = reinterpret_cast<const char*>(image.constBits());
+            while(remaining > 0)
+            {
+                const int size = int(qMin<qint64>(remaining, INT_MAX));
+                hash.addData(bytes, size);
+                bytes += size; remaining -= size;
+            }
+        }
+        else for(int y = 0; y < image.height(); ++y)
             hash.addData(reinterpret_cast<const char*>(image.constScanLine(y)), image.width() * 4);
     }
-    return hash.result().toHex();
+    return hash.result();
+}
+}
+
+QByteArray CTerrainAtlasProfileInference::pixelSha256(const QVector<QImage>& images)
+{
+    CNativeSha256 native;
+    if(native.isAvailable())
+    {
+        const QByteArray digest = atlasPixelDigest(images, native);
+        if(!digest.isEmpty()) return digest.toHex();
+    }
+    QCryptographicHash portable(QCryptographicHash::Sha256);
+    return atlasPixelDigest(images, portable).toHex();
 }
 
 QString CTerrainAtlasProfileInference::currentProvenance()
