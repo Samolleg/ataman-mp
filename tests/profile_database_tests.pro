@@ -1,10 +1,13 @@
 QT += core testlib gui-private widgets
 CONFIG += testcase console c++11
 TEMPLATE = app
+win32: LIBS += -lole32
 TARGET = profile_database_tests
 
 INCLUDEPATH += ../source/resources ../source/runtime/providers ../source/documents ../source/ui ../source/core
 SOURCES += \
+    ../source/ui/window_geometry.cpp \
+    ../source/core/verified_clipboard.cpp \
     profile_database_tests.cpp \
     ../source/documents/database_document.cpp \
     ../source/documents/database_workbook.cpp \

@@ -417,6 +417,38 @@ bool DatabaseDocument::setValue(const QString&t,const QString&r,const QString&f,
 bool DatabaseDocument::cloneRow(const QString&t,const QString&r,const QString&n,QString*d){SDatabaseRow*s=row(t,r);auto tb=m_tables.find(t);QString k=fold(n);if(!s||tb==m_tables.end()||!tb->structuralEditing){if(d)*d="Row cloning is unavailable for this preservation-only table.";return false;}if(k.isEmpty()||!identityAvailable(t,n)){if(d)*d="New stable name is empty or already exists.";return false;}SDatabaseRow c=*s;auto before=m_tables;tb=m_tables.find(t);c.sourceStableKey=s->sourceStableKey.isEmpty()?s->stableKey:s->sourceStableKey;c.stableKey=tb->physicalTable>=0?k+QString("#new%1").arg(tb->rows.size()):k;const QString identityKey=tb->identityFieldId>=0?QString("fld.%1.0").arg(tb->identityFieldId):QString("name");c.values[identityKey]=n;c.added=true;c.deleted=false;tb->rows<<c;commit(before,{t,c.stableKey,{}, {},n,QString("Cloned %1 as %2").arg(r,n)});return true;}
 bool DatabaseDocument::deleteRow(const QString&t,const QString&r,QString*d){auto tb=m_tables.find(t);auto*x=row(t,r);if(tb==m_tables.end()||!tb->structuralEditing){if(d)*d="Row deletion is unavailable for this preservation-only table.";return false;}if(!x||x->deleted){if(d)*d="Row is unavailable.";return false;}auto before=m_tables;x=row(t,r);x->deleted=true;commit(before,{t,r,{},false,true,QString("Deleted %1").arg(r)});return true;}
 bool DatabaseDocument::undo(){if(m_undo.isEmpty())return false;auto s=m_undo.takeLast();m_redo.append({m_tables,s.change,m_currentStateId});m_tables=s.tables;m_currentStateId=s.stateId;return true;} bool DatabaseDocument::redo(){if(m_redo.isEmpty())return false;auto s=m_redo.takeLast();m_undo.append({m_tables,s.change,m_currentStateId});m_tables=s.tables;m_currentStateId=s.stateId;return true;}
+bool DatabaseDocument::setLeverApproach(const QString& key, const QString& points, int count,
+                                       const QMap<QString, QVariant>& expected, QString* diagnostic)
+{
+    const QString tableKey = QStringLiteral("levers.leverprototypes");
+    auto* current = row(tableKey, key);
+    const auto reject = [&](const QString& message) { if(diagnostic) *diagnostic=message; return false; };
+    if(!current || current->deleted) return reject(QStringLiteral("Lever database row is unavailable."));
+    for(const QString& field : {QStringLiteral("fld.0.0"), QStringLiteral("fld.1.0"),
+                              QStringLiteral("fld.2.0"), QStringLiteral("fld.3.0")})
+        if(!expected.contains(field) || current->values.value(field) != expected.value(field))
+            return reject(QStringLiteral("Lever data changed during point placement. Reopen the tool."));
+    if(!fieldEditable(tableKey,key,"fld.1.0",diagnostic)
+       || !fieldEditable(tableKey,key,"fld.2.0",diagnostic)) return false;
+    const auto array=QJsonDocument::fromJson(points.toUtf8()).array();
+    if(array.size()!=4 || count<1 || count>2) return reject(QStringLiteral("Expected four coordinates and one or two use points."));
+    const auto originalArray=QJsonDocument::fromJson(expected.value("fld.1.0").toString().toUtf8()).array();
+    for(int i=0;i<4;++i)
+        if((i<count*2 && (!array[i].isDouble() || !std::isfinite(float(array[i].toDouble()))))
+           || (i>=count*2 && (originalArray.size()!=4 || array[i]!=originalArray[i])))
+            return reject(QStringLiteral("Use-point coordinates must be finite Float32 values."));
+    if(current->values.value("fld.1.0").toString()==points
+       && current->values.value("fld.2.0").toInt()==count) return true;
+    const auto before=m_tables;
+    current=row(tableKey,key); // detach implicitly shared tables/rows before mutating
+    current->values["fld.1.0"]=points;
+    current->values["fld.2.0"]=count;
+    QString error;
+    if(buildArchive(&error).isEmpty()) { m_tables=before; return reject(error); }
+    commit(before,{tableKey,key,QStringLiteral("approach"),{}, {},QStringLiteral("Changed lever approach points")});
+    return true;
+}
+
 QVector<SDatabaseValidationFinding> DatabaseDocument::validate()const
 {
     QVector<SDatabaseValidationFinding> findings;

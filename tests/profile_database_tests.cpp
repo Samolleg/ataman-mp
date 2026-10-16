@@ -48,6 +48,7 @@
 #include "game_text_catalog.h"
 #include "profile_database_provider_support.h"
 #include "window_lifecycle.h"
+#include "lever_approach.h"
 
 namespace {
 
@@ -187,6 +188,7 @@ class ProfileDatabaseTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void leverApproachGeometryAndTransaction();
     void parsesStableLinksAndCurrentNames();
     void mapPickerIncludesDatabaseLeversWithoutMapObjects();
     void databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupportedEntries();
@@ -2756,6 +2758,65 @@ void ProfileDatabaseTests::gameTextCatalogComposesProfileOverlays()
         {root.filePath("jmv"),root.filePath("base")});
     QCOMPARE(catalog.entries.value("SPELL fireball"),QString("JMV Fireball\r\nDescription"));
     QCOMPARE(catalog.entries.value("MATERIAL Iron"),QString("Base Iron\r\nDescription"));
+}
+
+void ProfileDatabaseTests::leverApproachGeometryAndTransaction()
+{
+    const QVector3D origin(10,20,3);
+    QCOMPARE(ei::leverApproachScale(3,.5f),2.f);
+    QVERIFY((ei::leverApproachWorld(QVector2D(3,4),origin,QQuaternion(),2,.5f)-QVector3D(16.3f,28.4f,3)).length()<.00001f);
+    QCOMPARE(ei::leverApproachWorld(QVector2D(),origin,QQuaternion(),2,.5f),origin);
+    for(const auto& rotation:{QQuaternion(),QQuaternion::fromEulerAngles(20,10,90),QQuaternion(.8f,.2f,.1f,.3f)})
+        for(float reach:{0.f,.5f,1.2f}) {
+            const auto world=ei::leverApproachWorld(QVector2D(-2,1),origin,rotation,2,reach);
+            QVector2D local;
+            QVERIFY(ei::leverApproachLocal(QVector2D(world),origin,rotation,2,reach,&local));
+            QVERIFY((local-QVector2D(-2,1)).length()<.00001f);
+        }
+    QVector2D invalid;
+    QVERIFY(!ei::leverApproachLocal(QVector2D(10.1f,20),origin,QQuaternion(),2,.5f,&invalid));
+    QVERIFY(!ei::leverApproachLocal(QVector2D(15,20),origin,QQuaternion(),0,.5f,&invalid));
+    QTemporaryDir temporary;QVERIFY(temporary.isValid());
+    auto members=relationalMembers();
+    QByteArray coordinates;QDataStream stream(&coordinates,QIODevice::WriteOnly);stream.setByteOrder(QDataStream::LittleEndian);stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+    stream<<float(1)<<float(2)<<float(3)<<float(4);
+    QByteArray scale;QDataStream scaleStream(&scale,QIODevice::WriteOnly);scaleStream.setByteOrder(QDataStream::LittleEndian);scaleStream.setFloatingPointPrecision(QDataStream::SinglePrecision);scaleStream<<float(3);
+    members["levers.ldb"]=database({record(stringField(0,"test_lever")+tag(1,coordinates)+intField(2,1)+tag(3,scale)+stringField(7,"preserve")+tag(99,"opaque"))});
+    const QString source=QDir(temporary.path()).filePath("database.res");write(source,resArchive(members));
+    ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+    request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+    const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+    const auto* table=document->table("levers.leverprototypes");QVERIFY(table);
+    const auto row=table->rows.first();const QByteArray original=document->buildArchive();QString error;
+    QVERIFY2(document->setLeverApproach(row.stableKey,"[-2,1,0,0]",2,row.values,&error),qPrintable(error));
+    const QByteArray changed=document->buildArchive(&error);QVERIFY2(!changed.isEmpty(),qPrintable(error));
+    CResArchiveDocument res;QVERIFY(res.loadBytes(changed));
+    for(auto it=members.constBegin();it!=members.constEnd();++it)if(it.key()!="levers.ldb")QCOMPARE(res.memberPayload(it.key()),it.value());
+    const auto before=ei::LosslessDatabaseMember::parse(members["levers.ldb"]);
+    const auto after=ei::LosslessDatabaseMember::parse(res.memberPayload("levers.ldb"));
+    const auto oldFields=before.fields(0,0),newFields=after.fields(0,0);QCOMPARE(oldFields.size(),newFields.size());
+    for(int i=0;i<oldFields.size();++i)if(oldFields[i].id!=1&&oldFields[i].id!=2)QCOMPARE(oldFields[i].payload,newFields[i].payload);
+    QVERIFY(document->undo());QCOMPARE(document->buildArchive(),original);QVERIFY(!document->canUndo());
+    QCOMPARE(document->table("levers.leverprototypes")->rows.first().values,row.values);
+    QVERIFY(document->redo());QCOMPARE(document->buildArchive(),changed);
+    QVERIFY(!document->setLeverApproach(row.stableKey,"[1,2,3,4]",1,row.values,&error));
+    QVERIFY(document->applyToSource(&error));service.clear();
+    const auto reopened=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(reopened);
+    const auto reopenedRow=reopened->table("levers.leverprototypes")->rows.first();
+    QCOMPARE(reopenedRow.values.value("fld.1.0").toString(),QString("[-2,1,0,0]"));
+    QCOMPARE(reopenedRow.values.value("fld.2.0").toInt(),2);
+    QVERIFY(document->undo());QVERIFY(document->applyToSource(&error));
+    const auto current=document->table("levers.leverprototypes")->rows.first();
+    QVERIFY2(document->setLeverApproach(current.stableKey,"[5,6,3,4]",1,current.values,&error),qPrintable(error));
+    QVERIFY(document->undo());
+    QVERIFY(!document->setLeverApproach(current.stableKey,"[5,6,7,8]",1,current.values,&error));
+    QVERIFY(!document->setLeverApproach(current.stableKey,"[5,6,3,4]",3,current.values,&error));
+    QVERIFY(document->setValue("levers.leverprototypes",current.stableKey,"fld.1.0",QString("[1,2,\"#float:0000c07f\",4]"),&error));
+    const auto inactive=document->table("levers.leverprototypes")->rows.first();
+    QVERIFY(document->setLeverApproach(inactive.stableKey,"[5,6,\"#float:0000c07f\",4]",1,inactive.values,&error));
+    CResArchiveDocument inactiveRes;QVERIFY(inactiveRes.loadBytes(document->buildArchive()));
+    const auto inactiveMember=ei::LosslessDatabaseMember::parse(inactiveRes.memberPayload("levers.ldb"));
+    for(const auto& field:inactiveMember.fields(0,0))if(field.id==1)QCOMPARE(field.payload.mid(8,4).toHex(),QByteArray("0000c07f"));
 }
 
 QTEST_MAIN(ProfileDatabaseTests)

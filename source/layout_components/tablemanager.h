@@ -365,6 +365,7 @@ public:
     void setTrapCollection(CMagicTrap* trap);
     void setLogicZeroContext(bool logicZero);
     void setReadOnly(bool readOnly);
+    void addLeverApproachButton();
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -398,6 +399,7 @@ signals:
     void onTrapActivationAreaAdd(CMagicTrap* trap);
     void onTrapCastTargetAdd(CMagicTrap* trap);
     void openDatabasePrototypeRequested(const QString& prototype);
+    void leverApproachRequested();
     void catalogChanged();
 
 public slots:

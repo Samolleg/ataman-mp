@@ -1,4 +1,5 @@
 #include "window_geometry.h"
+#include "lever_approach_dialog.h"
 #include "ui_theme.h"
 #include "main_window.h"
 #include "travel_document.h"
@@ -1617,6 +1618,26 @@ MainWindow::MainWindow(QWidget* parent) :
         m_pView, &CView::openDatabasePrototypeRequested,
         this, &MainWindow::showDatabaseEditor);
     Q_ASSERT(databasePrototypeNavigation);
+    connect(m_pView,&CView::leverApproachRequested,this,[this]{
+        if(auto* existing=findChild<ei::LeverApproachDialog*>()) { existing->show();existing->raise();existing->activateWindow();return; }
+        const auto snapshot=ei::ProfileDatabaseContext::instance().current();
+        QString error;
+        if(!snapshot)return;
+        if(!m_databaseDocument || m_databaseDocument->sourceArchivePath()!=snapshot->sourceArchivePath
+           || m_databaseDocument->profileId()!=snapshot->profileId)
+            m_databaseDocument=ei::DatabaseDocument::fromSnapshot(snapshot,&error);
+        if(!m_databaseDocument){QMessageBox::warning(this,QString::fromUtf8("Точки подхода"),error);return;}
+        auto* dialog=new ei::LeverApproachDialog(m_databaseDocument,m_pView,this);
+        if(!dialog->initialize(&error)){delete dialog;QMessageBox::warning(this,QString::fromUtf8("Точки подхода"),error);return;}
+        connect(dialog,&ei::LeverApproachDialog::transactionCommitted,this,[this](const QString& row){
+            m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,m_pView,
+                QString::fromUtf8("Точки подхода рычага"),"levers.leverprototypes",row,false));
+            if(m_databaseEditorDialog)m_databaseEditorDialog->refreshFromHistory();
+            else {QString diagnostic;const auto current=m_databaseDocument->currentSnapshot(&diagnostic);
+                if(current)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(current);}
+        });
+        dialog->show();
+    });
     ei::log(databasePrototypeNavigation ? eLogInfo : eLogWarning,
             QString("Database prototype MainWindow route connected=%1 view=%2")
                 .arg(bool(databasePrototypeNavigation))

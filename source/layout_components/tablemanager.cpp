@@ -1796,6 +1796,20 @@ void CTableManager::setNewData(const QList<QSharedPointer<IPropertyBase>>& aProp
     restoreScrollPosition();
 }
 
+void CTableManager::addLeverApproachButton()
+{
+    const int row=m_pTable->rowCount();
+    m_pTable->insertRow(row);
+    auto* label=new QTableWidgetItem(QString::fromUtf8("Взаимодействие"));
+    blockEditWidget(label);
+    m_pTable->setItem(row,0,label);
+    auto* button=new QPushButton(QString::fromUtf8("Точки подхода"),m_pTable);
+    button->setObjectName("leverApproachButton");
+    button->setToolTip(QString::fromUtf8("Изменить общие точки подхода этой модели в БД"));
+    connect(button,&QPushButton::clicked,this,&CTableManager::leverApproachRequested);
+    m_pTable->setCellWidget(row,1,button);
+}
+
 void CColorButtonItem::applyColor()
 {
     QColor initColor(Qt::black);

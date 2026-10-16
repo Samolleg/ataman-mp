@@ -2351,6 +2351,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     QObject::connect(m_tableManager.get(), SIGNAL(onUpdateProperties(const QList<QSharedPointer<IPropertyBase>>&)),
                      this, SLOT(onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>&)));
     connect(m_tableManager.get(),&CTableManager::openDatabasePrototypeRequested,this,&CView::openDatabasePrototypeRequested);
+    connect(m_tableManager.get(),&CTableManager::leverApproachRequested,this,&CView::leverApproachRequested);
     connect(m_tableManager.get(), &CTableManager::onBehaviorPointSelected,
             this, [this](CNode* point)
     {
@@ -6242,7 +6243,7 @@ void CView::drawTestOverlaysOpenGl()
         && !(m_neighborLayoutDragActive && !m_worldMapSnapPreview.seams.isEmpty())
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
-        && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty()
+        && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty() && m_leverApproachLines.isEmpty()
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
        || width() <= 0 || height() <= 0)
         return;
@@ -6375,6 +6376,13 @@ void CView::drawTestOverlaysOpenGl()
         ei::gl::DrawArrays(GL_LINES, 0, lines.size());
     };
     ei::gl::LineWidth(2.0f);
+    if(!m_leverApproachLines.isEmpty()) {
+        ei::gl::Disable(GL_DEPTH_TEST);
+        m_program.setUniformValue("customColor",QVector4D(0.2f,1.f,0.4f,1.f));
+        m_program.setAttributeArray(position,m_leverApproachLines.constData());
+        ei::gl::DrawArrays(GL_LINES,0,m_leverApproachLines.size());
+        ei::gl::Enable(GL_DEPTH_TEST);
+    }
     if(!m_connectionGlyphs.isEmpty()) {
         m_program.setUniformValue("customColor",m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,1.f):QVector4D(0.1f,0.9f,1.f,1.f));
         m_program.setAttributeArray(position,m_connectionGlyphs.constData());
@@ -21587,6 +21595,8 @@ void CView::viewParameters()
     m_tableManager->setNewData(aProp,
                                commonType == eMagicTrap,
                                commonType == eLookPoint);
+    if(selected.size()==1 && selected.first()->nodeType()==eLever && hasEditableSelection())
+        m_tableManager->addLeverApproachButton();
     if(CScene::getInstance()->getMode() == eEditModeLogic)
     {
         if(CUnit* unit = behaviorCollectionOwner(selected))

@@ -308,6 +308,8 @@ public:
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
     bool objectPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    void setLeverApproachOverlay(const QVector<QVector3D>& lines) { m_leverApproachLines=lines; update(); }
+    bool leverApproachScreenPoint(const QVector3D& world, QPointF* screen) const { return connectionScreenPoint(world,screen); }
     bool projectToRegeneratedNavigation(const QPointF& requested,
                                         QVector3D* position,
                                         float maximumDistance = 8.0f) const;
@@ -849,6 +851,7 @@ signals:
     void externalMobScriptImported(CMob* mob, const QString& displayScript);
     void selectionStateChanged(bool hasSelection);
     void openDatabasePrototypeRequested(const QString& prototype);
+    void leverApproachRequested();
     void mobStateChanged();
     void loadedMapStateChanged();
     void mprSaveStateChanged();
@@ -1012,6 +1015,7 @@ private:
     void restoreFreeModelMove();
     bool applyModelConnection(int source,int target);
     bool connectionScreenPoint(const QVector3D& world,QPointF* screen) const;
+    QVector<QVector3D> m_leverApproachLines;
     ei::TechnicalModelCatalog m_connectionCatalog;
     QVector<ei::ModelConnection> m_sourceConnections;
     struct ConnectionTarget {
