@@ -1,6 +1,8 @@
 # EI Mapper Ataman — roadmap
 ## EI-ITEM-APPROACH-XY-194 — горизонтальные точки предметов
 
+- INSTALLED194: source main ec85f7f1acebe3e3d9e132ae7e9bfdab410301af; native143 PASS, fresh Release/runtime, raw/staged --version и finalizer PASS.130 managed проверены,16773 пользовательских файла сохранены; резерв193 artifacts/rollback193-to194-item-xy-20261016 восстановим, прежний проверенный резерв192 удалён. EXE2645B8D0006122F170FE795E63F26EB11F8EDA52BEA88B265C1C89FCFF1345FA. Receipts build-item-xy-194/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json. Маппер и руководство переданы; игровая реализация отдельно по решению владельца, ручная приёмка не подменена native-тестом.
+
 - Поручение: сначала реализовать маппер, затем руководство другому чату. Игру не изменять. База193 main e1424745; номер194. Каталоги четырёх категорий, единый XY для маркера/клика/drag, обычные модели сохраняют вращение. BUILT/CHECKED: свежая Release194/runtime и native143 PASS; все4 категории,3 вращения, клики мыши, исходный базис обычного рычага, GL, Undo/Redo. Далее scoped-коммит и guarded установка. Evidence docs/validation/ATAMAN_ITEM_APPROACH_XY_194_20261016.md. Руководство docs/ITEM_APPROACH_XY_RUNTIME_HANDOFF.md.
 
 ## EI-LEVER68-SCRIPT-20261016 — выдача предмета после взаимодействия
