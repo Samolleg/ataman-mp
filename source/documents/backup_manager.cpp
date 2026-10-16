@@ -130,7 +130,9 @@ SBackupResult CBackupManager::snapshotBeforeSave(const QFileInfo& source) const
 }
 
 SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
-                                               const QByteArray& candidate) const
+                                               const QByteArray& candidate,
+                                               const QByteArray& terrainAtlas,
+                                               const QString& expectedSourceSha256) const
 {
     SBackupResult result;
     if(!source.exists() || !source.isFile() || candidate.isEmpty())
@@ -148,9 +150,22 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
     const QByteArray sourceData = current.readAll();
     const QString sourceHash = QCryptographicHash::hash(sourceData,
         QCryptographicHash::Sha256).toHex();
+    if(!expectedSourceSha256.isEmpty() && sourceHash != expectedSourceSha256)
+    {
+        result.error = QStringLiteral("The source changed while recovery was being prepared; this stale generation was not published.");
+        return result;
+    }
     result.sha256 = QCryptographicHash::hash(candidate,
         QCryptographicHash::Sha256).toHex();
-    if(result.sha256 == sourceHash)
+    const QString atlasHash = terrainAtlas.isEmpty() ? QString()
+        : QString::fromLatin1(QCryptographicHash::hash(terrainAtlas,
+            QCryptographicHash::Sha256).toHex());
+    if(!terrainAtlas.isEmpty() && source.suffix().compare("mpr", Qt::CaseInsensitive) != 0)
+    {
+        result.error = QStringLiteral("A paired terrain atlas requires an MPR document.");
+        return result;
+    }
+    if(result.sha256 == sourceHash && terrainAtlas.isEmpty())
     {
         result.success = true;
         result.skipped = true;
@@ -172,7 +187,10 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
         if(metadataFile.open(QIODevice::ReadOnly))
         {
             const QJsonObject metadata = QJsonDocument::fromJson(metadataFile.readAll()).object();
-            if(metadata.value("candidateSha256").toString() == result.sha256)
+            if(metadata.value("candidateSha256").toString() == result.sha256
+               && metadata.value("sourceSha256").toString() == sourceHash
+               && metadata.value("terrainAtlasSha256").toString() == atlasHash
+               && validateAutosave(QFileInfo(metadata.value("backupPath").toString())))
             {
                 result.success = true;
                 result.skipped = true;
@@ -183,12 +201,22 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
     }
 
     const QString stamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+    const QString generationHash = QCryptographicHash::hash(
+        (result.sha256 + atlasHash).toLatin1(), QCryptographicHash::Sha256).toHex();
     const QString baseName = QString("%1-autosave-%2-%3")
-        .arg(stamp, result.sha256.left(16), sanitizedName(source.fileName()));
+        .arg(stamp, generationHash.left(16), sanitizedName(source.fileName()));
     const QString autosavePath = directory.filePath(baseName);
+    const QString atlasPath = directory.filePath(
+        QFileInfo(autosavePath).completeBaseName() + "-atlas.res");
     QString error;
+    if(!terrainAtlas.isEmpty() && !writeAtomically(atlasPath, terrainAtlas, error))
+    {
+        result.error = QString("Cannot write autosave terrain atlas: %1").arg(error);
+        return result;
+    }
     if(!writeAtomically(autosavePath, candidate, error))
     {
+        if(!terrainAtlas.isEmpty()) QFile::remove(atlasPath);
         result.error = QString("Cannot write autosave: %1").arg(error);
         return result;
     }
@@ -200,6 +228,11 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
     metadata.insert("sourceSha256", sourceHash);
     metadata.insert("candidateSha256", result.sha256);
     metadata.insert("backupPath", autosavePath);
+    if(!terrainAtlas.isEmpty())
+    {
+        metadata.insert("terrainAtlasPath", atlasPath);
+        metadata.insert("terrainAtlasSha256", atlasHash);
+    }
     const QString sessionId = activeSessionId(m_rootPath);
     if(!sessionId.isEmpty())
         metadata.insert("sessionId", sessionId);
@@ -207,27 +240,59 @@ SBackupResult CBackupManager::snapshotAutosave(const QFileInfo& source,
                         QJsonDocument(metadata).toJson(QJsonDocument::Indented), error))
     {
         QFile::remove(autosavePath);
+        if(!terrainAtlas.isEmpty()) QFile::remove(atlasPath);
         result.error = QString("Cannot write autosave metadata: %1").arg(error);
         return result;
     }
     result.success = true;
     result.backupPath = autosavePath;
     const QFileInfoList generations = directory.entryInfoList(
-        QStringList() << "*-autosave-*", QDir::Files, QDir::Time);
-    int retainedPayloads = 0;
-    for(const QFileInfo& generation : generations)
+        QStringList() << "*-autosave-*.json", QDir::Files, QDir::Time);
+    for(int index = m_maxAutosaves; index < generations.size(); ++index)
     {
-        if(generation.fileName().endsWith(".json", Qt::CaseInsensitive))
-            continue;
-        if(++retainedPayloads > m_maxAutosaves)
+        const QString payload = generations.at(index).absoluteFilePath().chopped(5);
+        const QJsonObject old = readJsonObject(generations.at(index).absoluteFilePath());
+        const QString oldAtlas = QFileInfo(payload).dir().filePath(
+            QFileInfo(payload).completeBaseName() + "-atlas.res");
+        // Invalidate the generation before removing either payload.
+        if(QFile::remove(generations.at(index).absoluteFilePath()))
         {
-            QFile::remove(generation.absoluteFilePath());
-            QFile::remove(generation.absoluteFilePath() + ".json");
+            QFile::remove(payload);
+            if(old.value("terrainAtlasPath").toString() == oldAtlas)
+                QFile::remove(oldAtlas);
         }
     }
     ei::log(eLogInfo, QString("Autosave generation created source:%1 candidateSha256:%2 path:%3")
         .arg(source.absoluteFilePath(), result.sha256, autosavePath));
     return result;
+}
+
+bool CBackupManager::validateAutosave(const QFileInfo& payload, QString* error)
+{
+    const auto reject = [error]() {
+        if(error) *error = QStringLiteral("The autosave generation is incomplete or its MPR/atlas checksum does not match. Keep the MPR, matching -atlas.res and .json together.");
+        return false;
+    };
+    const QJsonObject metadata = readJsonObject(payload.absoluteFilePath() + ".json");
+    if(metadata.value("event").toString() != "autosave"
+       || QFileInfo(metadata.value("backupPath").toString()).fileName()
+            != payload.fileName()) return reject();
+    const auto exact = [](const QString& path, const QString& hash) {
+        QFile input(path);
+        return hash.size() == 64 && input.open(QIODevice::ReadOnly)
+            && QCryptographicHash::hash(input.readAll(), QCryptographicHash::Sha256).toHex() == hash;
+    };
+    if(!exact(payload.absoluteFilePath(), metadata.value("candidateSha256").toString()))
+        return reject();
+    const QString atlasPath = metadata.value("terrainAtlasPath").toString();
+    const QString atlasHash = metadata.value("terrainAtlasSha256").toString();
+    if(!atlasPath.isEmpty() || !atlasHash.isEmpty())
+    {
+        const QString expected = payload.dir().filePath(payload.completeBaseName() + "-atlas.res");
+        if(QFileInfo(atlasPath).fileName() != QFileInfo(expected).fileName()
+           || !exact(expected, atlasHash)) return reject();
+    }
+    return true;
 }
 
 QVector<SRecoverableAutosave> CBackupManager::recoverableAutosaves()
@@ -248,7 +313,8 @@ QVector<SRecoverableAutosave> CBackupManager::recoverableAutosavesForRoot() cons
         const QJsonObject metadata = QJsonDocument::fromJson(metadataFile.readAll()).object();
         const QString sourcePath = metadata.value("sourcePath").toString();
         const QString autosavePath = metadata.value("backupPath").toString();
-        if(sourcePath.isEmpty() || autosavePath.isEmpty() || !QFileInfo::exists(autosavePath))
+        if(sourcePath.isEmpty() || autosavePath.isEmpty()
+           || !validateAutosave(QFileInfo(autosavePath)))
             continue;
         QFile source(sourcePath);
         if(!source.open(QIODevice::ReadOnly))
@@ -260,6 +326,7 @@ QVector<SRecoverableAutosave> CBackupManager::recoverableAutosavesForRoot() cons
         SRecoverableAutosave recovery;
         recovery.sourcePath = sourcePath;
         recovery.autosavePath = autosavePath;
+        recovery.terrainAtlasPath = metadata.value("terrainAtlasPath").toString();
         recovery.createdUtc = metadata.value("createdUtc").toString();
         recovery.candidateSha256 = metadata.value("candidateSha256").toString();
         recovery.sessionId = metadata.value("sessionId").toString();

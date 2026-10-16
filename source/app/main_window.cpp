@@ -1,3 +1,4 @@
+#include <functional>
 #include "window_geometry.h"
 #include "lever_approach_dialog.h"
 #include "ui_theme.h"
@@ -258,21 +259,24 @@ public:
     CDatabaseHistoryCommand(const QSharedPointer<ei::DatabaseDocument>& document,
                             ei::DatabaseEditorDialog* dialog, CView* view,
                             const QString& description,const QString& tableKey,
-                            const QString& rowKey,bool affectsVisuals)
-        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey),m_affectsVisuals(affectsVisuals) {}
+                            const QString& rowKey,bool affectsVisuals,
+                            const std::function<void()>& historyChanged)
+        : QUndoCommand(description), m_document(document), m_dialog(dialog),m_view(view),m_tableKey(tableKey),m_rowKey(rowKey),m_affectsVisuals(affectsVisuals),m_historyChanged(historyChanged) {}
     void undo() override { if(m_document->undo()) refresh(); }
-    void redo() override { if(m_initialRedo){m_initialRedo=false;return;} if(m_document->redo()) refresh(); }
+    void redo() override { if(m_initialRedo){m_initialRedo=false;m_historyChanged();return;} if(m_document->redo()) refresh(); }
 private:
     void refresh()
     {
         if(m_dialog)m_dialog->refreshFromHistory();else{QString diagnostic;const auto snapshot=m_document->currentSnapshot(&diagnostic);if(snapshot)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(snapshot);}
         if(m_view&&m_affectsVisuals)m_view->refreshDatabaseVisuals(m_tableKey,m_rowKey);
+        m_historyChanged();
     }
     QSharedPointer<ei::DatabaseDocument> m_document;
     QPointer<ei::DatabaseEditorDialog> m_dialog;
     QPointer<CView> m_view;
     QString m_tableKey,m_rowKey;
     bool m_affectsVisuals{true};
+    std::function<void()> m_historyChanged;
     bool m_initialRedo{true};
 };
 
@@ -688,7 +692,8 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
             const bool affectsVisuals=fieldKey.isEmpty()||!fieldKey.startsWith(QStringLiteral("jmv."));
             m_undoStack->push(new CDatabaseHistoryCommand(
                 m_databaseDocument, m_databaseEditorDialog, m_pView,
-                description, tableKey, rowKey, affectsVisuals));
+                description, tableKey, rowKey, affectsVisuals,
+                [this]() { scheduleMobFamilyValidation(180); }));
             if(affectsVisuals)m_pView->refreshDatabaseVisuals(tableKey, rowKey);
         });
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
@@ -1545,9 +1550,8 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_undoStack = new QUndoStack(this);
-    connect(m_undoStack,&QUndoStack::indexChanged,this,[this](){
-        if(m_databaseDocument)scheduleMobFamilyValidation(180);
-    });
+    // Database commands explicitly request validation, including Undo/Redo and
+    // pushes at the history limit. Ordinary scene history leaves it alone.
     int undoHistoryLimit = 512;
     if(COptInt* configuredLimit = dynamic_cast<COptInt*>(m_settings->opt(eOptSetGeneral, "undoHistoryLimit")))
         undoHistoryLimit = qBound(1, configuredLimit->value(), 1000000);
@@ -1631,7 +1635,8 @@ MainWindow::MainWindow(QWidget* parent) :
         if(!dialog->initialize(&error)){delete dialog;QMessageBox::warning(this,QString::fromUtf8("Точки подхода"),error);return;}
         connect(dialog,&ei::LeverApproachDialog::transactionCommitted,this,[this](const QString& row){
             m_undoStack->push(new CDatabaseHistoryCommand(m_databaseDocument,m_databaseEditorDialog,m_pView,
-                QString::fromUtf8("Точки подхода рычага"),"levers.leverprototypes",row,false));
+                QString::fromUtf8("Точки подхода рычага"),"levers.leverprototypes",row,false,
+                [this]() { scheduleMobFamilyValidation(180); }));
             if(m_databaseEditorDialog)m_databaseEditorDialog->refreshFromHistory();
             else {QString diagnostic;const auto current=m_databaseDocument->currentSnapshot(&diagnostic);
                 if(current)ei::ProfileDatabaseContext::instance().publishEditedSnapshot(current);}
@@ -6070,8 +6075,18 @@ void MainWindow::updateMobFamilyValidationPanel()
     m_validationTree->clear();
     if(m_validationShowMore)
         m_validationShowMore->hide();
+    // Only the panel cache is reused. Database save/import/ID validation keeps
+    // running against its current candidate, including uncommitted candidates.
+    if(m_databaseDocument
+       && (m_validatedDatabaseDocument.toStrongRef() != m_databaseDocument
+           || m_validatedDatabaseRevision != m_databaseDocument->stateRevision()))
+    {
+        m_databaseValidationFindings = m_databaseDocument->validate();
+        m_validatedDatabaseDocument = m_databaseDocument;
+        m_validatedDatabaseRevision = m_databaseDocument->stateRevision();
+    }
     const QVector<ei::SDatabaseValidationFinding> databaseFindings =
-        m_databaseDocument ? m_databaseDocument->validate()
+        m_databaseDocument ? m_databaseValidationFindings
                            : QVector<ei::SDatabaseValidationFinding>();
     if(m_familyValidation.members.isEmpty() && databaseFindings.isEmpty())
     {
@@ -8281,40 +8296,53 @@ void MainWindow::performAutosave()
         }
     }
     CLandscape* landscape = CLandscape::getInstance();
-    if(landscape->isMprLoad() && landscape->isDirty())
+    int queued=0;
+    if(landscape->isMprLoad() && landscape->isDirty()
+       && !m_mprAutosaveWatcher)
     {
-        QByteArray candidate;
+        const QFileInfo source=landscape->filePath();
+        QFile input(source.absoluteFilePath());
+        const bool readable=input.open(QIODevice::ReadOnly);
+        const QString sourceHash=readable ? QString::fromLatin1(QCryptographicHash::hash(
+            input.readAll(),QCryptographicHash::Sha256).toHex()) : QString();
+        input.close();
         CValidationReport report;
-        if(!m_pView->buildValidatedLandscapeCandidate(&candidate, &report))
+        const auto task=readable ? m_pView->prepareLandscapeRecoveryTask(&report)
+                                 : std::function<STerrainRecoveryCandidate()>();
+        if(!task)
         {
             ++failed;
-            ei::log(eLogWarning, QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
-                .arg(landscape->filePath().absoluteFilePath(),
-                     report.toText().trimmed()));
+            ei::log(eLogWarning,QString("Recovery autosave skipped unsafe MPR path:%1 findings:%2")
+                .arg(source.absoluteFilePath(),report.toText().trimmed()));
         }
         else
         {
-            const SBackupResult result = manager.snapshotAutosave(
-                landscape->filePath(), candidate);
-            if(result.success)
-            {
-                written += result.skipped ? 0 : 1;
-                ei::log(eLogInfo, QString("Recovery autosave MPR path:%1 sha256:%2 skipped:%3")
-                    .arg(landscape->filePath().absoluteFilePath(),
-                         result.sha256).arg(result.skipped));
-            }
-            else
-            {
-                ++failed;
-                ei::log(eLogWarning, QString("Recovery autosave failed MPR path:%1 error:%2")
-                    .arg(landscape->filePath().absoluteFilePath(), result.error));
-            }
+            auto* watcher=new QFutureWatcher<SBackupResult>(this);
+            m_mprAutosaveWatcher=watcher;
+            connect(watcher,&QFutureWatcher<SBackupResult>::finished,this,[this,watcher,source]() {
+                const auto result=watcher->result();
+                m_mprAutosaveWatcher=nullptr;
+                watcher->deleteLater();
+                ei::log(result.success?eLogInfo:eLogWarning,
+                    QString("Recovery autosave MPR background complete path:%1 success:%2 skipped:%3 sha256:%4 error:%5")
+                    .arg(source.absoluteFilePath()).arg(result.success).arg(result.skipped).arg(result.sha256,result.error));
+                if(result.success&&!result.skipped&&!m_shutdownInProgress)
+                    statusBar()->showMessage(tr("Recovery autosave created 1 new generation(s)."),4000);
+            });
+            watcher->setFuture(QtConcurrent::run([task,source,sourceHash]() {
+                const auto candidate=task();
+                if(!candidate.success) {
+                    SBackupResult failure;failure.error=candidate.report.toText();return failure;
+                }
+                return CBackupManager().snapshotAutosave(source,candidate.mprBytes,candidate.atlasBytes,sourceHash);
+            }));
+            queued=1;
         }
     }
     if(written > 0)
         statusBar()->showMessage(tr("Recovery autosave created %1 new generation(s).").arg(written), 4000);
     ei::log(failed > 0 ? eLogWarning : eLogInfo,
-            QString("Recovery autosave pass complete written:%1 failed:%2").arg(written).arg(failed));
+            QString("Recovery autosave pass complete written:%1 failed:%2 queuedMpr:%3").arg(written).arg(failed).arg(queued));
 }
 
 void MainWindow::showRecoverableAutosaves()
@@ -8326,7 +8354,8 @@ void MainWindow::showRecoverableAutosaves()
             .arg(m_recoverableAutosaveNoticeCount));
     showTransientResultNotification(
         tr("%1 recoverable editor autosave generation(s) are available.\n"
-           "Their source maps are unchanged; open the backup folder to inspect or copy them.")
+           "Their source maps are unchanged; open the backup folder to inspect or copy them. "
+           "Keep each MPR with its matching -atlas.res and .json files.")
             .arg(m_recoverableAutosaveNoticeCount),
         false, true, tr("Open Backup Folder"),
         ETransientNotificationAction::OpenBackupFolder, 7000);

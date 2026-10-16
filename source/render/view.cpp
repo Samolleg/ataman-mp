@@ -39,6 +39,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "backup_manager.h"
 #include "verified_clipboard.h"
 #include "selection_region.h"
 #include "neighbor_visual_preparation.h"
@@ -9173,6 +9174,16 @@ SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCapture
 
 void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
 {
+    const bool recoveryAutosave = filePath.fileName().contains(QStringLiteral("-autosave-"));
+    if(recoveryAutosave)
+    {
+        QString error;
+        if(!CBackupManager::validateAutosave(filePath, &error))
+        {
+            QMessageBox::critical(this, tr("Terrain autosave recovery failed"), error);
+            return;
+        }
+    }
     const QString recovery=filePath.absoluteFilePath()+QStringLiteral(".world-sculpt.json");
     if(QFileInfo::exists(recovery))
     {
@@ -9227,8 +9238,12 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
                 otherConfiguredArchives.append(archivePath);
         }
         if(QFileInfo(mapLocalAtlas).isFile())
-            embeddedCandidates.append(
-                QFileInfo(mapLocalAtlas).absoluteFilePath());
+        {
+            if(recoveryAutosave)
+                embeddedCandidates.prepend(QFileInfo(mapLocalAtlas).absoluteFilePath());
+            else
+                embeddedCandidates.append(QFileInfo(mapLocalAtlas).absoluteFilePath());
+        }
         embeddedCandidates.append(otherConfiguredArchives);
         const QString preferredHDPack = embeddedCandidates.isEmpty()
             || !terrainPublicationIsHDPackArchive(embeddedCandidates.first())
@@ -9241,7 +9256,7 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
         // A finalized sidecar mirrors the publication, but subsequent ordinary
         // saves update semantic state in the recorded runtime archive. Prefer
         // that exact bound archive; keep the sidecar as a portable fallback.
-        if(embedded.success()
+        if(!recoveryAutosave && embedded.success()
            && !embedded.profile.resourceArchiveHint.isEmpty()) {
             const QString publishedPath = filePath.dir().absoluteFilePath(
                 embedded.profile.resourceArchiveHint);
@@ -10067,7 +10082,8 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
                                               CValidationReport* report,
                                               QByteArray* terrainAtlasResource,
                                               int* terrainAtlasPages,
-                                              int* terrainAtlasSlots)
+                                              int* terrainAtlasSlots,
+                                              std::function<STerrainRecoveryCandidate()>* recoveryTask)
 {
     if(!ensureTerrainAutoCatalogReady())
         return false;
@@ -10103,7 +10119,7 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay),
         workingAtlasAvailable ? m_workingTerrainAtlas->activeTextureCount() : 0,
         int(m_mprDocument.mapInfo().textureCount));
-    if(stageWorkingAtlas && !terrainAtlasResource)
+    if(stageWorkingAtlas && !terrainAtlasResource && !recoveryTask)
     {
         if(report)
             report->add(QStringLiteral("mpr.test.atlas.destination"),
@@ -10151,7 +10167,7 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         return false;
     }
     *data = validation.candidateBytes;
-    if(terrainAtlasResource && stageWorkingAtlas)
+    if((terrainAtlasResource || recoveryTask) && stageWorkingAtlas)
     {
         CMprDocument stagedDocument;
         CValidationReport stagedReport;
@@ -10185,6 +10201,92 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
             }
             authoredPages.append(payload);
         }
+        if(recoveryTask)
+        {
+            const auto atlas=m_workingTerrainAtlas->createStagingCopy();
+            const auto terrain=m_terrainEdit;
+            const auto sourceProfile=m_terrainAtlasProfile;
+            const auto families=m_terrainGlobalFamilies;
+            const auto materials=m_mprMaterials;
+            const auto animations=m_mprAnimatedTiles;
+            // No QObject, renderer, settings or mutable document is retained.
+            *recoveryTask=[stagedDocument,atlas,terrain,sourceProfile,families,materials,animations,authoredPages]() {
+                STerrainRecoveryCandidate result;
+                auto* report=&result.report;
+                const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(
+                    stagedDocument,atlas->activeTileImages(),atlas->activeTileTypes(),
+                    authoredPages,materials,animations,report,atlas->preservedDxtTiles());
+                if(!package.success){report->add("mpr.recovery.package",EValidationSeverity::Error,package.error);return result;}
+                result.mprBytes=package.mprBytes;result.atlasBytes=package.resourceArchiveBytes;
+                auto* data=&result.mprBytes;auto* terrainAtlasResource=&result.atlasBytes;
+                // Recovery must preserve editor semantics as well as game-visible pages.
+                // Bind the actual encoded pixels, including native SD pages and preserved
+                // HD DXT blocks, rather than the pre-encoding working image fingerprint.
+                CResArchiveDocument archive;
+                QStringList errors;
+                if(!archive.loadBytes(*terrainAtlasResource, QStringLiteral("recovery-atlas.res"), &errors))
+                    return result;
+                const QString nameSpace = stagedDocument.mapInfo().innerNamespace;
+                const int pages = atlas->activeTextureCount();
+                QVector<QImage> physicalTiles;
+                for(const QString& name : ei::terrainTextureResourceNames(nameSpace, pages))
+                    for(int slot = 0; slot < 64; ++slot)
+                    {
+                        QImage image; QString error;
+                        if(!ei::decodeMmpDxt1AtlasTile(archive.memberPayload(name), slot, &image, &error))
+                        {
+                            if(report) report->add("mpr.recovery.atlas.decode", EValidationSeverity::Error, error);
+                            return result;
+                        }
+                        physicalTiles.append(image.convertToFormat(QImage::Format_RGBA8888));
+                    }
+                STerrainAtlasProfile profile = CTerrainAtlasProfileStore::workingAtlasProfile(
+                    nameSpace, physicalTiles, atlas->catalog(),
+                    sourceProfile, families, report);
+                profile.textureCount = pages;
+                profile.resourceArchiveHint.clear(); // The sibling RES owns this generation.
+                if(profile.assignedSlotCount() <= 0 || (report && report->hasErrors()))
+                    return result;
+                SResArchiveNewMember profileMember;
+                profileMember.name = CTerrainAtlasProfileStore::embeddedMemberName(nameSpace);
+                profileMember.payload = profile.toBytes();
+                SResArchiveNewMember semanticMember;
+                STerrainSemanticFieldDocument semantics;
+                CMprDocument recoveryDocument;
+                if(!recoveryDocument.loadBytes(*data, QStringLiteral("recovery.mpr"), report)) return result;
+                semantics.mprNamespace=nameSpace;
+                semantics.terrainTilesSha256=STerrainSemanticFieldDocument::tileBindingSha256(recoveryDocument);
+                semantics.atlasPixelSha256=profile.atlasPixelSha256.size()==64 ? QByteArray::fromHex(profile.atlasPixelSha256) : profile.atlasPixelSha256;
+                semantics.profileSha256=QCryptographicHash::hash(profileMember.payload,QCryptographicHash::Sha256);
+                semantics.vertexWidth=terrain.tileCountX()+1;semantics.vertexHeight=terrain.tileCountY()+1;
+                QVector<qint32> ignored;
+                terrain.copyVirtualMaterialFieldState(ETerrainTileLayer::Land,&semantics.land,&ignored);
+                terrain.copyVirtualMaterialFieldState(ETerrainTileLayer::Overlay,&semantics.overlay,&ignored);
+                const int fieldSize=semantics.vertexWidth*semantics.vertexHeight;
+                if(semantics.land.size()!=fieldSize)semantics.land.clear();
+                if(semantics.overlay.size()!=fieldSize)semantics.overlay.clear();
+                if(!semantics.land.isEmpty()||!semantics.overlay.isEmpty()) {
+                    semanticMember.name=STerrainSemanticFieldDocument::embeddedMemberName();
+                    semanticMember.payload=semantics.toBytes(report);
+                    QByteArray embedded;
+                    if(semanticMember.payload.isEmpty()||!STerrainSemanticFieldDocument::embedInMpr(*data,semanticMember.payload,&embedded,report))return result;
+                    *data=embedded;
+                }
+                QVector<SResArchiveNewMember> metadata{profileMember};
+                if(!semanticMember.name.isEmpty()) metadata.append(semanticMember);
+                QByteArray pairedArchive;
+                if(!archive.buildWithPublishedMembers(metadata, true, &pairedArchive, &errors))
+                {
+                    if(report) report->add("mpr.recovery.atlas.metadata", EValidationSeverity::Error,
+                                           errors.join(QStringLiteral("\n")));
+                    return result;
+                }
+                *terrainAtlasResource = pairedArchive;
+
+                result.success=true;return result;
+            };
+            return true;
+        }
         const STerrainPortableAtlasPackage package =
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, m_workingTerrainAtlas->activeTileImages(),
@@ -10217,6 +10319,15 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
         .arg(validation.semanticDiff.isEmpty() ? QStringLiteral("(none)")
                                                : validation.semanticDiff));
     return true;
+}
+
+std::function<STerrainRecoveryCandidate()> CView::prepareLandscapeRecoveryTask(CValidationReport* report)
+{
+    QByteArray candidate;
+    std::function<STerrainRecoveryCandidate()> task;
+    if(!buildValidatedLandscapeCandidate(&candidate, report, nullptr, nullptr, nullptr, &task)) return {};
+    if(!task) task=[candidate]() { STerrainRecoveryCandidate result;result.mprBytes=candidate;result.success=true;return result; };
+    return task;
 }
 
 bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,

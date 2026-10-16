@@ -519,6 +519,9 @@ bool CLandscape::previewTerrainAtlas(const QVector<QImage>& tileImages,
                 if(sector) sector->setTerrainAtlasLayout(textureCount, columns);
     }
     m_previewAtlasImages = tileImages;
+    // Uniform uploads also replace the normalized snapshot. Otherwise a
+    // mixed -> uniform -> mixed sequence could reuse stale display pixels.
+    m_previewDisplayImages = tileImages;
     ei::log(eLogInfo, QString(
         "Working terrain atlas uploaded: route:%1 changedSlots:%2 slots:%3 pages:%4 grid:%5x%6 elapsedMs:%7")
         .arg(route).arg(changedSlots.size()).arg(tileImages.size())
@@ -552,8 +555,10 @@ bool CLandscape::previewTerrainAtlasIfChanged(
     const bool installed = previewTerrainAtlas(tileImages, textureCount, changed,
                                                m_previewAtlasImages);
     if(!installed)
+    {
         m_previewAtlasImages.clear(); // A retry must not trust a failed GL rollback.
         m_previewDisplayImages.clear();
+    }
     return installed;
 }
 

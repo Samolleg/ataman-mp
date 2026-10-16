@@ -23,6 +23,7 @@
 #include "mob_family_validation.h"
 #include "minimap_bake.h"
 #include "world_map_layout_document.h"
+#include "database_document.h"
 
 namespace Ui {
 class MainWindow;
@@ -63,6 +64,7 @@ class QScrollArea;
 class QListWidget;
 class QSlider;
 class QDoubleSpinBox;
+struct SBackupResult;
 class QSettings;
 class CViewportMinimapWidget;
 class CCameraTelephotoControls;
@@ -385,6 +387,7 @@ private:
     QTimer* m_mapTestResultTimer{nullptr};
     QProgressDialog* m_hotReloadProgress{nullptr};
     QTimer* m_autosaveTimer{nullptr};
+    QFutureWatcher<SBackupResult>* m_mprAutosaveWatcher{nullptr};
     QTimer* m_autosaveCountdownTimer{nullptr};
     QTimer* m_cameraSpeedPersistTimer{nullptr};
     QFrame* m_autosaveNotification{nullptr};
@@ -466,6 +469,9 @@ private:
     QPointer<CViewportMinimapWidget> m_viewportMinimap;
     QPointer<CMinimapExportDialog> m_minimapExportDialog;
     QSharedPointer<ei::DatabaseDocument> m_databaseDocument;
+    QWeakPointer<ei::DatabaseDocument> m_validatedDatabaseDocument;
+    quint64 m_validatedDatabaseRevision{0};
+    QVector<ei::SDatabaseValidationFinding> m_databaseValidationFindings;
     QPointer<ei::DatabaseEditorDialog> m_databaseEditorDialog;
     QPointer<ei::ItemSpellConstructorDialog> m_itemSpellConstructorDialog;
     QTimer* m_minimapRefreshTimer{nullptr};

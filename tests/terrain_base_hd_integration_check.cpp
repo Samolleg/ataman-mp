@@ -19,6 +19,8 @@
 #include "res_archive_index.h"
 #include "mmp_codec.h"
 #include "endurance_document.h"
+#include "backup_manager.h"
+#include <QtConcurrent>
 
 int runScenarioLayerCheck()
 {
@@ -205,6 +207,29 @@ int runScenarioLayerCheck()
         view->makeCurrent();view->grabFrameBuffer().save(results+"/after.png");
         check(view->currentTerrainMprSaveRoute(false)==ETerrainMprSaveRoute::SaveEditableModernDraft,"save uses native-page preservation");
         check(QFileInfo(view->m_activeTerrainArchivePath).absoluteFilePath()==QFileInfo(resourcePath).absoluteFilePath(),"save destination is the private archive");
+        QByteArray recoveryMpr,recoveryRes;CValidationReport recoveryReport;
+        const auto recoveryHistoryIndex=history->index();
+        const auto recoveryAtlasFingerprint=view->m_workingTerrainAtlas->stateFingerprint();
+        QElapsedTimer recoveryTimer;recoveryTimer.start();
+        const auto recoveryTask=view->prepareLandscapeRecoveryTask(&recoveryReport);
+        check(bool(recoveryTask),"real unsaved working MPR snapshots paired recovery task");
+        const auto snapshotMs=recoveryTimer.elapsed();
+        QElapsedTimer heartbeat;heartbeat.start();qint64 last=0,maxGap=0;int pulses=0;
+        QTimer pulse;QObject::connect(&pulse,&QTimer::timeout,[&](){const auto now=heartbeat.elapsed();maxGap=qMax(maxGap,now-last);last=now;++pulses;});pulse.start(10);
+        auto future=QtConcurrent::run(recoveryTask);
+        while(!future.isFinished()){QApplication::processEvents();QThread::msleep(1);}
+        pulse.stop();const auto recoveryCandidate=future.result();
+        recoveryMpr=recoveryCandidate.mprBytes;recoveryRes=recoveryCandidate.atlasBytes;recoveryReport=recoveryCandidate.report;
+        check(recoveryCandidate.success,"background working MPR/RES candidate succeeds");
+        out<<"TIME recoverySnapshot "<<snapshotMs<<" ms worker "<<heartbeat.elapsed()<<" ms heartbeat "<<pulses<<" maxGap "<<maxGap<<" ms\n";out.flush();
+        check(pulses>5 && maxGap<180,"UI heartbeat continues during exact MPR/RES preparation");
+        check(!recoveryMpr.isEmpty()&&!recoveryRes.isEmpty()&&!recoveryReport.hasErrors(),"recovery retains working atlas destination");
+        out<<"TIME recoveryCandidate "<<recoveryTimer.elapsed()<<" ms\n";out.flush();
+        check(history->index()==recoveryHistoryIndex && view->m_workingTerrainAtlas->stateFingerprint()==recoveryAtlasFingerprint && modelBytes()==after,"recovery staging preserves current terrain, atlas and history");
+        CBackupManager recoveryManager(scratch.filePath("recovery"));
+        const auto recovery=recoveryManager.snapshotAutosave(mapPath,recoveryMpr,recoveryRes);
+        check(recovery.success&&!recovery.skipped,"real working MPR/RES autosave committed");
+        check(CBackupManager::validateAutosave(QFileInfo(recovery.backupPath)),"real recovery pair readback hashes");
         check(view->saveChangedLandscapeDocument(mapPath,true),"production Save and baseline adoption");
         CResArchiveIndex saved;check(saved.open(resourcePath,&error),"reopen saved private archive");
         for(int page=0;page<oldPages.size();++page)
@@ -225,6 +250,14 @@ int runScenarioLayerCheck()
         for(int page=0;page<oldPages.size();++page)
             check(twice.readMember(QStringLiteral("%1%2.mmp").arg(originalDocument.mapInfo().innerNamespace).arg(page,3,10,QLatin1Char('0')),&error)==oldPages[page],"native page remains byte-identical after second Save");
         view->grabFrameBuffer().save(results+"/reopened.png");
+        view->unloadLand(false);view->makeCurrent();view->loadLandscape(QFileInfo(recovery.backupPath),false);view->makeCurrent();
+        check(view->ensureTerrainAutoCatalogReady(),"recover autosaved MPR with local paired atlas");
+        check(modelBytes()==after,"recovery opens exact painted/HD cell layout");
+        const auto recovered=view->m_workingTerrainAtlas->activeTileImages();
+        verifyRims(recovered);gpuCheck(recovered);
+        check(recovered==reopened,"recovery and ordinary Save reopen identical native atlas pixels");
+        view->unloadLand(false);
+
         QJsonObject receipt{{"passes",passes},{"changedCells",changed},{"distinctOutputs",outputs.size()},{"summary",summary},{"ownerVisualAcceptance",false}};
         QFile output(results+"/receipt.json");check(output.open(QIODevice::WriteOnly),"write receipt");output.write(QJsonDocument(receipt).toJson());
         out<<"PASS base HD native integration "<<passes<<" checks\n";return 0;

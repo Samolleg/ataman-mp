@@ -1,3 +1,15 @@
+#include <QtWidgets>
+#include <QtOpenGL>
+#define private public
+#include "landscape.h"
+#include "tile_form.h"
+#undef private
+#include "ui_tile_form.h"
+#include "resource_profile.h"
+#include "terrain_image_sizes.h"
+#include "profile_database.h"
+#include "database_document.h"
+#include "database_editor_dialog.h"
 #include "main_window.h"
 #include "view.h"
 #include "mob.h"
@@ -25,6 +37,7 @@
 #include <QSettings>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QThread>
 #include <QTextStream>
 #include <QFile>
 #include <QJsonDocument>
@@ -74,6 +87,64 @@ int runAssemblyCatalogCheck()
     mob->adoptCommittedBytes(initial);mob->attach(view,nullptr);view->m_aMob<<mob;view->m_activeMob=mob;
     view->m_clipboard_buffer_file.setFileName(scratch.filePath("clipboard.json"));
     out<<"FIXTURE nodes "<<mob->nodes().size()<<" bytes "<<initial.size()<<"\n";out.flush();
+    // Use the ordinary validation scheduler with a real, retained database.
+    // The old workspace smoke flag masked this entire performance path.
+    QSharedPointer<const ei::SProfileDatabaseSnapshot> databaseSnapshot;
+    for(const auto& profile : loadResourceProfiles()) if(profile.id == "deja-vu") {
+        const auto evaluated=evaluateResourceProfile("C:/GOG Games/PZ",profile);
+        if(!evaluated.valid)return 21;
+        ei::SProfileDatabaseLoadRequest request;const auto provider=evaluated.providers.value("database");
+        request.providerId=provider.id;request.providerInterfaceVersion=provider.interfaceVersion;
+        request.profileId=evaluated.profileId;request.runtimeManifestId=evaluated.runtimeManifestId;
+        request.resourceDirectories=evaluated.resourceDirectories;
+        ei::ProfileDatabaseService service;databaseSnapshot=service.snapshot(request);
+    }
+    QString databaseError;
+    window.m_databaseDocument=ei::DatabaseDocument::fromSnapshot(databaseSnapshot,&databaseError);
+    check(!window.m_databaseDocument.isNull(),"ordinary session retains actual DejaVu database");
+    if(window.m_databaseDocument.isNull())return 22;
+    ei::ProfileDatabaseContext::instance().activate(databaseSnapshot);
+    qApp->setProperty("workspaceLoadSmoke",false);
+    window.m_validationTimer->stop();window.m_autosaveTimer->stop();
+    QElapsedTimer panelTimer;panelTimer.start();window.updateMobFamilyValidationPanel();
+    out<<"TIME databasePanelCold "<<panelTimer.elapsed()<<" ms\n";
+    panelTimer.restart();for(int i=0;i<3;++i)window.updateMobFamilyValidationPanel();
+    out<<"TIME databasePanelWarm3 "<<panelTimer.elapsed()<<" ms\n";out.flush();
+    check(panelTimer.elapsed()<180,"unchanged database panel avoids repeated full validation");
+    for(int i=0;i<8;++i)window.m_undoStack->push(new CSelectionCommand(view,{}, {mob->nodes()[i]},"selection"));
+    check(!window.m_validationTimer->isActive(),"selection history does not schedule family validation with database open");
+    window.m_undoStack->setIndex(0);
+    check(!window.m_validationTimer->isActive(),"multi-step selection Undo does not schedule family validation");
+    window.m_undoStack->clear();view->clearObjectSelection();
+#ifndef EI_EDIT_BASELINE
+    // A real database transaction, followed by native history Undo/Redo, must
+    // still schedule family validation and invalidate only the panel revision.
+    window.showDatabaseEditor();window.m_databaseEditorDialog->hide();
+    const auto* monsters=window.m_databaseDocument->table("monsters");
+    check(monsters && !monsters->rows.isEmpty(),"database edit fixture");
+    const QString row=monsters->rows.first().stableKey;
+    const auto beforeRevision=window.m_databaseDocument->stateRevision();
+    const double value=monsters->rows.first().values.value("complexionX").toDouble();
+    check(window.m_databaseDocument->setValue("monsters",row,"complexionX",value+.01,&databaseError),"actual database edit accepted");
+    window.m_databaseEditorDialog->transactionCommitted("test complexion","monsters",row);
+    check(window.m_validationTimer->isActive(),"database history push retains validation trigger");window.m_validationTimer->stop();
+    window.updateMobFamilyValidationPanel();
+    check(window.m_validatedDatabaseRevision!=beforeRevision,"database panel invalidates on actual edit");
+    window.m_undoStack->undo();check(window.m_validationTimer->isActive(),"database Undo retains validation trigger");window.m_validationTimer->stop();
+    window.updateMobFamilyValidationPanel();check(window.m_validatedDatabaseRevision==beforeRevision,"database Undo refreshes panel revision");
+    window.m_undoStack->redo();check(window.m_validationTimer->isActive(),"database Redo retains validation trigger");window.m_validationTimer->stop();
+    window.updateMobFamilyValidationPanel();check(window.m_validatedDatabaseRevision==window.m_databaseDocument->stateRevision(),"database Redo refreshes panel revision");
+    window.m_undoStack->undo();window.m_undoStack->clear();window.m_validationTimer->stop();
+    window.m_undoStack->setUndoLimit(2);
+    window.m_undoStack->push(new CSelectionCommand(view,{}, {},"selection1"));
+    window.m_undoStack->push(new CSelectionCommand(view,{}, {},"selection2"));
+    check(window.m_databaseDocument->setValue("monsters",row,"complexionX",value+.02,&databaseError),"database edit at history limit");
+    window.m_databaseEditorDialog->transactionCommitted("limit edit","monsters",row);
+    check(window.m_undoStack->count()==2 && window.m_validationTimer->isActive(),"database push at fixed full history index requests validation");window.m_validationTimer->stop();
+    window.m_undoStack->setIndex(0);check(window.m_validationTimer->isActive(),"multi-step Undo crossing database command requests validation");window.m_validationTimer->stop();
+    window.m_undoStack->setIndex(2);check(window.m_validationTimer->isActive(),"multi-step Redo crossing database command requests validation");window.m_validationTimer->stop();
+    window.m_undoStack->undo();window.m_undoStack->clear();window.m_undoStack->setUndoLimit(512);window.m_validationTimer->stop();
+#endif
     // Exercise the actual Delete entrypoint and native tree, including
     // non-adjacent indices: reverse Undo must restore the exact original order.
     const auto originalNodes=mob->nodes();
@@ -89,6 +160,12 @@ int runAssemblyCatalogCheck()
     auto treeChanged=QObject::connect(view->m_pTree,&CTreeView::filterMatchCountChanged,[&](int,int){++treePublications;});
     QElapsedTimer deletionTimer;deletionTimer.start();view->deleteSelectedNodes();
     out<<"TIME delete24 "<<deletionTimer.elapsed()<<" ms\n";
+    const auto generation=window.m_validationGeneration;
+    int validationTimeouts=0;auto validationConnection=QObject::connect(window.m_validationTimer,&QTimer::timeout,[&](){++validationTimeouts;});
+    QElapsedTimer ordinaryWait;ordinaryWait.start();while(ordinaryWait.elapsed()<550){QApplication::processEvents();QThread::msleep(1);}
+    check(validationTimeouts==0 && window.m_validationGeneration==generation,"dirty Delete remains responsive after normal validation debounce");
+    QObject::disconnect(validationConnection);
+
     out<<"PUBLICATIONS delete "<<publications<<" tree "<<treePublications<<"\n";out.flush();
     check(mob->nodes()==remainingNodes && view->m_pUndoStack->count()==1,"group Delete removes exactly selected nodes in one history action");
     bool missingRows=true;for(auto* n:deletedNodes)missingRows &= !view->m_pTree->rowForNode(n);
@@ -219,6 +296,52 @@ int runAssemblyCatalogCheck()
     timer.restart();view->m_pUndoStack->redo();out<<"TIME moveRedo24 "<<timer.elapsed()<<" ms\n";out.flush();
     QByteArray redone;mob->serializeMob(redone,false);check(redone==afterMove,"move Redo restores exact entire MOB projection");
     out<<"MOVE "<<QCryptographicHash::hash(redone,QCryptographicHash::Sha256).toHex()<<"\n";
+    // Mixed native-size cache: repeated changes, no-op, Undo and Redo must
+    // retain GL publication while matching a fresh full upload at every mip.
+    view->makeCurrent();auto atlas=CLandscape::createReadOnlyBackground();
+    QImage sd(128,128,QImage::Format_RGBA8888);sd.fill(QColor(30,90,50));
+    QImage hd(256,256,QImage::Format_RGBA8888);hd.fill(QColor(120,100,80));
+    QVector<QImage> mixed(128,sd);for(int i=64;i<128;++i)mixed[i]=hd;
+    check(atlas->previewTerrainAtlasIfChanged(mixed,2),"mixed SD/HD initial publication");
+    const auto textureId=atlas->m_previewAtlasTexture->textureId();
+    CTileForm picker;picker.setAttribute(Qt::WA_DontShowOnScreen);picker.resize(400,600);picker.show();
+    QVector<qint32> types(128,0);check(picker.adoptTileImages(mixed,types),"mixed inspector initial publication");
+    picker.selectTile(3);auto* item=picker.ui->tableTile->item(0,3);
+    const auto delegates=picker.findChildren<QAbstractItemDelegate*>().size();
+    const auto iconKey=item->icon().cacheKey();
+    auto changedMixed=mixed;changedMixed[65]=hd.copy();changedMixed[65].fill(QColor(180,80,20));
+    qint64 changedTotal=0;
+    for(const auto& images:{changedMixed,mixed,changedMixed}) {
+        timer.restart();check(atlas->previewTerrainAtlasIfChanged(images,2),"mixed change / Undo / Redo publishes");changedTotal+=timer.elapsed();
+        check(atlas->m_previewAtlasTexture->textureId()==textureId && atlas->m_previewDisplayImages.size()==128,"mixed publication retains GL and normalized cache");
+        const auto actual=atlas->m_previewAtlasTexture->textureId();auto fresh=CLandscape::createReadOnlyBackground();
+        check(fresh->previewTerrainAtlasIfChanged(images,2),"fresh comparison atlas");
+        auto pixels=[&](GLuint id,int level){auto* gl=QOpenGLContext::currentContext()->functions();gl->glBindTexture(GL_TEXTURE_2D,id);GLint w=0,h=0;glGetTexLevelParameteriv(GL_TEXTURE_2D,level,GL_TEXTURE_WIDTH,&w);glGetTexLevelParameteriv(GL_TEXTURE_2D,level,GL_TEXTURE_HEIGHT,&h);QByteArray data(w*h*4,0);glGetTexImage(GL_TEXTURE_2D,level,GL_RGBA,GL_UNSIGNED_BYTE,data.data());return data;};
+        bool exact=true;for(int level=0;level<atlas->m_previewAtlasTexture->mipLevels();++level)exact&=pixels(actual,level)==pixels(fresh->m_previewAtlasTexture->textureId(),level);
+        check(exact,"mixed incremental GPU pixels equal fresh full atlas at all mip levels");
+        check(picker.adoptTileImages(images,types) && picker.ui->tableTile->item(0,3)==item && item->icon().cacheKey()==iconKey,"inspector preserves unchanged icon and selected item");
+    }
+    out<<"TIME mixedPublications3 "<<changedTotal<<" ms\n";
+    check(picker.findChildren<QAbstractItemDelegate*>().size()==delegates,"inspector delegate count remains bounded");
+    check(atlas->previewTerrainAtlasIfChanged(changedMixed,2) && atlas->m_previewAtlasTexture->textureId()==textureId,"mixed no-op retains publication");
+    check(picker.ui->tableTile->currentRow()==0 && picker.ui->tableTile->currentColumn()==3,"inspector preserves selection through publication");
+    QVector<QImage> uniform(128,hd);uniform[7]=hd.copy();uniform[7].fill(QColor(50,25,100));
+    check(atlas->previewTerrainAtlasIfChanged(uniform,2),"mixed to uniform atlas publication");
+    auto mixedAgain=uniform;mixedAgain[0]=sd;
+    check(atlas->previewTerrainAtlasIfChanged(mixedAgain,2),"uniform to mixed atlas publication");
+    const auto expectedMixed=terrainDisplayTiles(mixedAgain);
+    check(atlas->m_previewDisplayImages==expectedMixed,"uniform roundtrip cannot reuse stale normalized pixels");
+    const auto expectedGrid=CTerrainVirtualAtlas::composeAtlasGrid(expectedMixed,2,atlas->m_previewAtlasColumns);
+    QImage mixedPixels(expectedGrid.size(),QImage::Format_RGBA8888);atlas->m_previewAtlasTexture->bind();
+    glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,mixedPixels.bits());
+    check(mixedPixels==expectedGrid,"uniform roundtrip GPU pixels match current native images");
+    const auto retainedImages=atlas->m_previewAtlasImages;const auto retainedDisplay=atlas->m_previewDisplayImages;
+    auto invalid=mixedAgain;invalid[1]=QImage();
+    check(!atlas->previewTerrainAtlasIfChanged(invalid,2) && atlas->m_previewAtlasImages==retainedImages && atlas->m_previewDisplayImages==retainedDisplay,"invalid candidate retains previous valid publication");
+    atlas->clearPreviewTerrainAtlas();check(atlas->m_previewAtlasImages.isEmpty() && atlas->m_previewDisplayImages.isEmpty(),"atlas reset invalidates both snapshots");
+    auto grown=mixed;grown+=mixed;check(atlas->previewTerrainAtlasIfChanged(grown,4),"layout growth rebuilds valid mixed atlas");
+    check(atlas->previewTerrainAtlasIfChanged(mixed,2),"layout shrink rebuilds valid mixed atlas");
+    atlas->clearPreviewTerrainAtlas();atlas.clear();
     CMprDocument source;CValidationReport report;QByteArray map;
     SMprCreationRequest request;request.innerNamespace="edit184";request.maxZ=100;
     request.flatRawHeight=0;request.sectorCountX=24;request.sectorCountY=24;

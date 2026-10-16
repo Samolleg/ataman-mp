@@ -36,6 +36,7 @@ public:
     QString sourceTablesLuaPath() const;
     QStringList tableKeys() const; const SDatabaseTable* table(const QString&) const;
     bool isDirty() const; bool canUndo() const; bool canRedo() const; QVector<SDatabaseChange> changes() const;
+    quint64 stateRevision() const { return m_currentStateId; }
     bool hasUnappliedChanges(QString* = nullptr) const;
     bool identityAvailable(const QString& tableKey, const QString& identity,
                            const QString& exceptRowKey = QString()) const;

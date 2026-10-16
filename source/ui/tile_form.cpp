@@ -16,6 +16,44 @@
 
 #include "layout_components/tablemanager.h"
 
+class IconDelegate : public QStyledItemDelegate
+{
+public:
+    ~IconDelegate()
+    {
+    }
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    // Переопределяем метод для рисования иконки
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+        QRect icoRect;
+        icoRect.setTopLeft(option.rect.topLeft());
+        icoRect.setRight(option.rect.right());
+        icoRect.setHeight(option.rect.width());
+        if (!icon.isNull()) {
+            // Получаем размер ячейки и рисуем иконку во всю ее область
+
+            QPixmap pixmap = icon.pixmap(icoRect.size());
+            painter->drawPixmap(icoRect, pixmap);
+        }
+        if (option.state & QStyle::State_Selected) {
+            // Настройка кисти и пера для рисования рамки
+            QPen pen(Qt::green, 2);  // Зеленая рамка толщиной 4 пикселя
+            painter->setPen(pen);
+            painter->drawRect(icoRect);
+        }
+        if((index.row()+1)%8==0)
+        {
+            int size = (option.rect.height() - option.rect.width())*2-2;
+            QPen pen(QColor(63, 63, 63), size);  // Зеленая рамка толщиной 4 пикселя
+            painter->setPen(pen);
+            painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
+        }
+    }
+};
+
 CTileForm::CTileForm(QWidget *parent) :
     QWidget(parent, Qt::Window)
    ,ui(new Ui::CTileForm)
@@ -78,6 +116,11 @@ CTileForm::CTileForm(QWidget *parent) :
     ui->tableQuick->horizontalHeader()->setStretchLastSection(true);
     ui->tableQuick->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui->tableQuick->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    for(int column = 0; column < m_nTilePerRow; ++column)
+    {
+        ui->tableTile->setItemDelegateForColumn(column, new IconDelegate(ui->tableTile));
+        ui->tableQuick->setItemDelegateForColumn(column, new IconDelegate(ui->tableQuick));
+    }
 
     QSharedPointer<IPropertyBase> prop;
     prop.reset(new prop3D(EObjParam::eObjParamUnknow));
@@ -318,48 +361,7 @@ void CTileForm::onAddAnimTileFromTable()
     addAnimTileData(aInd.first(), aInd.size());
 }
 
-// Кастомный делегат для отображения иконки во всю ячейку
-class IconDelegate : public QStyledItemDelegate
-{
-public:
-    ~IconDelegate()
-    {
-    }
-public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-
-    // Переопределяем метод для рисования иконки
-    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
-        QRect icoRect;
-        icoRect.setTopLeft(option.rect.topLeft());
-        icoRect.setRight(option.rect.right());
-        icoRect.setHeight(option.rect.width());
-        if (!icon.isNull()) {
-            // Получаем размер ячейки и рисуем иконку во всю ее область
-
-            QPixmap pixmap = icon.pixmap(icoRect.size());
-            painter->drawPixmap(icoRect, pixmap);
-        }
-        if (option.state & QStyle::State_Selected) {
-            // Настройка кисти и пера для рисования рамки
-            QPen pen(Qt::green, 2);  // Зеленая рамка толщиной 4 пикселя
-            painter->setPen(pen);
-            painter->drawRect(icoRect);
-        }
-        if((index.row()+1)%8==0)
-        {
-            int size = (option.rect.height() - option.rect.width())*2-2;
-            QPen pen(QColor(63, 63, 63), size);  // Зеленая рамка толщиной 4 пикселя
-            painter->setPen(pen);
-            painter->drawLine(option.rect.left(), option.rect.bottom(), option.rect.right(), option.rect.bottom());
-        }
-    }
-};
-
-// map name (-> generate texture name)
-// texture number (zone1000->zone1007)
-// tile number per atlas -> calc tile size
+// Read native page tiles; icons are materialized lazily.
 void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
 {
     m_tileImages.clear();
@@ -428,12 +430,6 @@ void CTileForm::fillTable(QString mapName, int textureAtlasNumber)
     // when the inspector was never opened. Visible rows are materialized by
     // ensureVisibleTileIcons(), and arbitrary empty cells remain selectable.
 
-    // set custom icon delegate
-    for(int i(0); i<m_nTilePerRow; ++i)
-    {
-        ui->tableTile->setItemDelegateForColumn(i, new IconDelegate(ui->tableTile));
-        ui->tableQuick->setItemDelegateForColumn(i, new IconDelegate(ui->tableQuick)); // table of quick items
-    }
     for(int i(0); i<m_arrQuickTile.size(); ++i)
     {
         m_arrQuickTile[i] = i;
@@ -498,24 +494,33 @@ bool CTileForm::adoptTileImages(const QVector<QImage>& images,
     for(const QImage& image : images)
         if(image.isNull() || image.width() != image.height())
             return false;
+    const bool sameLayout = m_tileImages.size() == images.size()
+        && m_icoList.size() == images.size();
+    QSet<int> changed;
+    if(sameLayout)
+        for(int slot = 0; slot < images.size(); ++slot)
+            if(m_tileImages.at(slot) != images.at(slot))
+                changed.insert(slot);
     m_tileImages = images;
     m_nTextureAtlas = images.size() / 64;
     m_originalTilesize = size.width();
     m_tileTypes.clear();
     for(qint32 type : tileTypes)
         m_tileTypes.append(ETileType(type));
-    m_icoList.clear();
-    for(int slot = 0; slot < images.size(); ++slot)
-        m_icoList.append(QIcon());
-    ui->tableTile->clearContents();
-    ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
-    ui->tableTile->setColumnCount(m_nTilePerRow);
-    for(int column = 0; column < m_nTilePerRow; ++column)
+    if(!sameLayout)
     {
-        ui->tableTile->setItemDelegateForColumn(
-            column, new IconDelegate(ui->tableTile));
-        ui->tableQuick->setItemDelegateForColumn(
-            column, new IconDelegate(ui->tableQuick));
+        m_icoList.clear();
+        for(int slot = 0; slot < images.size(); ++slot)
+            m_icoList.append(QIcon());
+        ui->tableTile->clearContents();
+        ui->tableTile->setRowCount(m_nTextureAtlas * m_nTilePerRow);
+        ui->tableTile->setColumnCount(m_nTilePerRow);
+    }
+    else for(int slot : changed)
+    {
+        m_icoList[slot] = QIcon();
+        if(auto* item = ui->tableTile->item(slot / m_nTilePerRow, slot % m_nTilePerRow))
+            item->setIcon(QIcon());
     }
     for(int& slot : m_arrQuickTile)
         if(slot < 0 || slot >= images.size())

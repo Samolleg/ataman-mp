@@ -3,6 +3,7 @@
 #include "travel_area_geometry.h"
 #include "map_save_batch.h"
 #include "technical_model_catalog.h"
+#include "endurance_document.h"
 
 #include <QGLWidget>
 #include <QOpenGLShader>
@@ -172,6 +173,13 @@ namespace ei { struct SRenderEnvironment; struct SScenePointLight; }
 /// \brief The CView class is the main class for managing and editing 3D scene contents. It is also a link between read out *.mob files and their editing. It also controls the camera and current operations.
 /// \todo Separate "core" functionality from rendering so that you can use the editor without using the UI
 ///
+struct STerrainRecoveryCandidate
+{
+    bool success{false};
+    QByteArray mprBytes, atlasBytes;
+    CValidationReport report;
+};
+
 class CView : public QGLWidget
 {
     Q_OBJECT
@@ -228,7 +236,9 @@ public:
                                           CValidationReport* report = nullptr,
                                           QByteArray* terrainAtlasResource = nullptr,
                                           int* terrainAtlasPages = nullptr,
-                                          int* terrainAtlasSlots = nullptr);
+                                          int* terrainAtlasSlots = nullptr,
+                                          std::function<STerrainRecoveryCandidate()>* recoveryTask = nullptr);
+    std::function<STerrainRecoveryCandidate()> prepareLandscapeRecoveryTask(CValidationReport* report);
     QString activeTerrainArchivePath() const
     {
         return m_activeTerrainArchivePath;

@@ -10,6 +10,7 @@ struct SRecoverableAutosave
 {
     QString sourcePath;
     QString autosavePath;
+    QString terrainAtlasPath;
     QString createdUtc;
     QString candidateSha256;
     QString sessionId;
@@ -32,7 +33,12 @@ public:
 
     SBackupResult snapshotOnOpen(const QFileInfo& source) const;
     SBackupResult snapshotBeforeSave(const QFileInfo& source) const;
-    SBackupResult snapshotAutosave(const QFileInfo& source, const QByteArray& candidate) const;
+    SBackupResult snapshotAutosave(const QFileInfo& source, const QByteArray& candidate,
+                                  const QByteArray& terrainAtlas = QByteArray(),
+                                  const QString& expectedSourceSha256 = QString()) const;
+    // The JSON commit record is published last; an incomplete pair is never
+    // advertised or opened as a recoverable MPR.
+    static bool validateAutosave(const QFileInfo& payload, QString* error = nullptr);
 
     QString rootPath() const { return m_rootPath; }
     static QString defaultRootPath();
