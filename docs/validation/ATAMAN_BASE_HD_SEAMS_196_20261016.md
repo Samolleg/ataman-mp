@@ -17,7 +17,7 @@ Checks use the renderer's1/16 UV inset, packed cell orientation and bilinear sam
 - Synthetic checker distinguishes unused gutters from the visible edge and rejects a rotated stripe that introduces a seam.
 - Full41-map DejaVu corpus:41/41 PASS,335128 converted cells,0 unmatched and0 seam-rejected. Checks include every changed rim and all neighboring edges in preview and decoded saved MMP pages, unchanged overlays/water materials/animations/types, Undo/Redo and MPR/RES reopen. Private receipts: build-base-hd-196-20261016/hybrid-corpus-results/audit.json.
 
-Fresh Release196 and both runtime components are built on accepted195. Moving the shared DXT helper into resources left the tested executable hash identical. Installation pending. Live maps/resources are read-only and all writes target owned private copies.
+Fresh Release196 and both runtime components are built on accepted195. Moving the shared DXT helper into resources left the tested executable hash identical. Installed196: source main87fa08254f2b3fc02c518eb0632f90e3994fa607;651 compiler/resource inputs verified. Raw/staged --version196, finalizer and130 installed managed files PASS. All17384 owner files preserved byte-for-byte. EXE084800E9A8CFF6AC31995A11ADCF7EDFC141A382EDB0B44DC74435C33FE5F232; manifest23FBE8D8BFB49868948FE576F85EB8CD43412F55773FBEEB52D1E2CA1BC6FC86. Retained rollback195-to196-base-hd-20261016 is reconstructable; only the previous identified194 backup retired. Receipts: build-base-hd-196-20261016/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json. No GitHub push. Live maps/resources are read-only and all writes target owned private copies.
 | DejaVu map | Converted | Rim/neighbor/Save checks |
 |---|---:|---|
 | basegipat.mpr | 2227 | PASS |
