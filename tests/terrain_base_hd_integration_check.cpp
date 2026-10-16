@@ -14,6 +14,7 @@
 #include "landscape.h"
 #include "landscape_tools.h"
 #include "terrain_base_hd.h"
+#include "terrain_base_hd_seams.h"
 #include "terrain_image_sizes.h"
 #include "res_archive_index.h"
 #include "mmp_codec.h"
@@ -66,8 +67,11 @@ int runScenarioLayerCheck()
         const auto originalCatalog=view->m_workingTerrainAtlas->catalog();
         const auto originalTypes=view->m_workingTerrainAtlas->activeTileTypes();
         const auto originalAnimations=view->m_mprAnimatedTiles;
+        QVector<QByteArray> sourcePages;
+        for(int page=0;page<int(originalDocument.mapInfo().textureCount);++page){QByteArray bytes;QString sourcePath;
+            check(CTextureList::getInstance()->terrainMmpPayload(QStringLiteral("%1%2.mmp").arg(originalDocument.mapInfo().innerNamespace).arg(page,3,10,QLatin1Char('0')),&bytes,&sourcePath),"source page for border preservation");sourcePages.append(bytes);}
         if(!qEnvironmentVariableIsSet("EI_HD_GUARDS_ONLY")){
-            const auto coverage=prepareBaseTerrainHd(library,*view->m_workingTerrainAtlas,originalModel,view->m_terrainAtlasProfile,originalAnimations,193);
+            const auto coverage=prepareBaseTerrainHd(library,*view->m_workingTerrainAtlas,originalModel,view->m_terrainAtlasProfile,originalAnimations,193,nullptr,sourcePages);
             check(coverage.error.isEmpty()&&coverage.unmatchedCells==0,"all recognized base materials have HD replacements");
             check(coverage.eligibleCells==38014&&coverage.command.deltas.size()==38014,"DejaVu zone19 includes all former 18343 skipped cells");
         }
@@ -96,7 +100,7 @@ int runScenarioLayerCheck()
             check(initial.mapInfo().materials==view->m_mprMaterials&&initial.mapInfo().animatedTiles==view->m_mprAnimatedTiles,"saved materials and animations exact");
             CTerrainEditModel originalTerrain;check(originalTerrain.load(initial,&report),"original terrain for coverage audit");
             originalTerrain.enableWorkingAtlasSlots(view->m_workingTerrainAtlas->capacityLimit());
-            const auto audit=prepareBaseTerrainHd(library,*view->m_workingTerrainAtlas,originalTerrain,view->m_terrainAtlasProfile,originalAnimations,190);
+            const auto audit=prepareBaseTerrainHd(library,*view->m_workingTerrainAtlas,originalTerrain,view->m_terrainAtlasProfile,originalAnimations,190,nullptr,sourcePages);
             check(audit.error.isEmpty(),"read-only coverage audit");
             QFile coverage(results+"/coverage.txt");check(coverage.open(QIODevice::WriteOnly),"coverage output");
             coverage.write(audit.unmatchedSources.join('\n').toUtf8());
@@ -137,6 +141,12 @@ int runScenarioLayerCheck()
         const auto after=modelBytes();check(after!=before,"actual map references changed");
         check(view->m_workingTerrainAtlas->authoredTileImages()==originalImages,"native authored pixels and sizes unchanged");
         const auto active=view->m_workingTerrainAtlas->activeTileImages();
+        const auto verifyRims=[&](const QVector<QImage>& tiles){CBaseHdSeams seams(originalImages,tiles);
+            for(int y=0;y<originalModel.tileCountY();++y)for(int x=0;x<originalModel.tileCountX();++x){
+                const auto a=originalModel.packedTile(x,y,ETerrainTileLayer::Land),b=view->m_terrainEdit.packedTile(x,y,ETerrainTileLayer::Land);
+                if(a!=b)for(int side=0;side<4;++side)if(!seams.boundarySafe(a,b,side))throw QString("visible rim changed");
+            }check(true,"every converted visible rim exact");};
+        verifyRims(active);
         const auto types=view->m_workingTerrainAtlas->activeTileTypes();
         int changed=0;QSet<int> outputs;QSet<int> protectedSlots;QMap<int,QSet<int>> distribution;
         QPoint example(-1,-1);
@@ -207,6 +217,7 @@ int runScenarioLayerCheck()
         check(view->ensureTerrainAutoCatalogReady(),"fresh map reopen");
         check(modelBytes()==after,"reopened exact cell layout");
         const auto reopened=view->m_workingTerrainAtlas->activeTileImages();
+        verifyRims(reopened);
         check(reopened.mid(0,originalImages.size())==originalImages,"reopened native water/transition images and dimensions exact");
         gpuCheck(reopened);
         for(int slot:outputs)check(reopened.at(slot).size()==QSize(256,256),"reopened HD tile remains256");

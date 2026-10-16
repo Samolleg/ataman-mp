@@ -10,6 +10,7 @@ struct SBaseHdPlan {
     STerrainTileCommand command;
     int eligibleCells{0};
     int unmatchedCells{0};
+    int seamRejectedCells{0};
     int importedVariants{0};
     int changedSources{0};
     QStringList unmatchedSources;
@@ -18,5 +19,6 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
     const CTerrainWorkingAtlas& atlas, const CTerrainEditModel& terrain,
     const STerrainAtlasProfile& profile,
     const QVector<SMprAnimatedTileRecord>& animations, quint32 seed,
-    const std::atomic_bool* cancelled = nullptr);
+    const std::atomic_bool* cancelled = nullptr,
+    const QVector<QByteArray>& sourcePages = {});
 #endif

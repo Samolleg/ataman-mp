@@ -10189,7 +10189,8 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, m_workingTerrainAtlas->activeTileImages(),
                 m_workingTerrainAtlas->activeTileTypes(),
-                authoredPages, m_mprMaterials, m_mprAnimatedTiles, report);
+                authoredPages, m_mprMaterials, m_mprAnimatedTiles, report,
+                m_workingTerrainAtlas->preservedDxtTiles());
         if(!package.success)
         {
             if(report)
@@ -10361,7 +10362,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             CTerrainVirtualAtlas::buildWorkingPreviewPackage(
                 stagedDocument, activeTiles, activeTypes,
                 authoredPages, m_mprMaterials, m_mprAnimatedTiles,
-                &draftReport);
+                &draftReport,m_workingTerrainAtlas->preservedDxtTiles());
         if(!draft.success)
         {
             QMessageBox::critical(this, tr("Modern draft save refused"),

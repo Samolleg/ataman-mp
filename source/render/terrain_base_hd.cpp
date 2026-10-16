@@ -1,4 +1,6 @@
 #include "terrain_base_hd.h"
+#include "terrain_base_hd_seams.h"
+#include "terrain_base_hd_native.h"
 #include "mpr_document.h"
 #include "endurance_document.h"
 #include "mmp_codec.h"
@@ -52,7 +54,7 @@ bool pure(const STerrainTransitionSignature& s){return s.northWest&&s.northWest=
 SBaseHdPlan prepareBaseTerrainHd(const QString& library,
     const CTerrainWorkingAtlas& original,const CTerrainEditModel& terrain,
     const STerrainAtlasProfile& profile,const QVector<SMprAnimatedTileRecord>& animations,
-    quint32 seed,const std::atomic_bool* cancelled)
+    quint32 seed,const std::atomic_bool* cancelled,const QVector<QByteArray>& sourcePages)
 {
     SBaseHdPlan result;
     const auto fail=[&](const QString& error){result.error=error;result.atlas.clear();return result;};
@@ -217,13 +219,24 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
                 pool.append(candidate);
                 for(const auto& variant:source.variants)pool.append(rotate(variant,turn));
             }
-        const auto anchor=rotate(selected.hd,selectedTurn);
-        for(int turn=0;turn<4;++turn)
-            if(mse(rotate(anchor,turn),anchor,true)<0.01)replacement.rotations.append(turn);
-        for(const auto& image:pool) {
-            const int imported=result.atlas->importPhysicalTile(rotate(image,selectedTurn),type,&sig,
-                "base-hd:"+selected.id,-1,&report,true);
+        QByteArray oldBlocks;
+        if(slot/64<sourcePages.size())oldBlocks=baseHdNativeBlocks(sourcePages[slot/64],slot%64);
+        if(oldBlocks.isEmpty())oldBlocks=original.preservedDxtTiles().value(slot);
+        if(oldBlocks.isEmpty())oldBlocks=ei::encodeMmpDxt1(images[slot].scaled(256,256,Qt::IgnoreAspectRatio,Qt::FastTransformation),false,&error).mid(76,32768);
+        if(oldBlocks.size()!=32768)return fail("Original compressed terrain page unavailable for HD border preservation");
+        QSet<QByteArray> unique,inputsSeen;
+        for(const auto& image:pool)for(int turn=0;turn<4;++turn) {
+            if(stop())return fail("Cancelled");
+            const auto oriented=rotate(image,(selectedTurn+turn)%4);
+            const auto inputKey=pixelHash(oriented);if(inputsSeen.contains(inputKey))continue;inputsSeen.insert(inputKey);
+            QByteArray blocks;
+            const auto hybrid=baseHdWithOriginalRim(oriented,images[slot],oldBlocks,&blocks,&error);
+            if(hybrid.isNull())return fail(error);
+            const auto key=pixelHash(hybrid);if(unique.contains(key))continue;unique.insert(key);
+            const int imported=result.atlas->importPhysicalTile(hybrid,type,&sig,
+                "base-hd-rim:"+selected.id+":"+QString::number(slot),-1,&report,true);
             if(imported<0||report.hasErrors())return fail(report.toText());
+            result.atlas->preserveDxtTile(imported,blocks);
             if(!replacement.physicalSlots.contains(imported))replacement.physicalSlots.append(imported);
         }
         result.importedVariants+=replacement.physicalSlots.size();++result.changedSources;
@@ -241,6 +254,48 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
         if(!r.rotations.isEmpty())packed.rotation=quint8((packed.rotation+r.rotations.at(int(randomAt(seed,y,x,source+1)%quint32(r.rotations.size()))))%4);
         if(packed.encode()!=before){STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.before=before;delta.after=packed.encode();result.command.deltas.append(delta);}
     }
+    // Validate both the preview and the actual DXT1 pixels written by Save.
+    // DXT blocks are independent and tile/page boundaries are block aligned.
+    const auto active=result.atlas->activeTileImages();auto saved=active;
+    for(int slot=images.size();slot<saved.size();++slot){
+        if(stop())return fail("Cancelled");
+        const auto& image=active[slot];
+        auto blocks=result.atlas->preservedDxtTiles().value(slot);
+        if(blocks.isEmpty())blocks=ei::encodeMmpDxt1(image,false,&error).mid(76);
+        if(blocks.isEmpty()||!ei::decodeDxtImage(blocks,image.width(),image.height(),ei::DxtFormat::Dxt1,&saved[slot],&error))return fail(error);
+    }
+    CBaseHdSeams previewSeams(images,active),savedSeams(images,saved);
+    const int width=terrain.tileCountX(),height=terrain.tileCountY();
+    QVector<quint16> old(width*height),chosenCells(width*height);QVector<bool> valid(width*height),changed(width*height,false);
+    QVector<int> queue;
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x){bool ok=false;const int cell=y*width+x;
+        old[cell]=chosenCells[cell]=terrain.packedTile(x,y,ETerrainTileLayer::Land,&ok);valid[cell]=ok;}
+    for(const auto& delta:result.command.deltas){const int cell=delta.globalY*width+delta.globalX;
+        chosenCells[cell]=delta.after;changed[cell]=true;queue.append(cell);}
+    const int dx[4]={0,1,0,-1},dy[4]={-1,0,1,0};
+    const auto reject=[&](int cell){if(cell>=0&&changed[cell]){changed[cell]=false;chosenCells[cell]=old[cell];++result.seamRejectedCells;
+        for(int side=0;side<4;++side){int x=cell%width+dx[side],y=cell/width+dy[side];
+            if(x>=0&&y>=0&&x<width&&y<height&&changed[y*width+x])queue.append(y*width+x);}}};
+    // Removing an unsafe replacement can expose another edge. Revisit its
+    // neighbors until stable; at most one removal per cell is possible.
+    for(int index=0;index<queue.size();++index){
+        if(stop())return fail("Cancelled");const int cell=queue[index];if(!changed[cell])continue;
+        for(int side=0;side<4&&changed[cell];++side){
+            const int x=cell%width+dx[side],y=cell/width+dy[side];
+            const int neighbor=x>=0&&y>=0&&x<width&&y<height?y*width+x:-1;
+            bool safe=false;
+            if(neighbor<0||!valid[neighbor])
+                safe=previewSeams.boundarySafe(old[cell],chosenCells[cell],side)&&savedSeams.boundarySafe(old[cell],chosenCells[cell],side);
+            else safe=previewSeams.safe(old[cell],old[neighbor],chosenCells[cell],chosenCells[neighbor],side)
+                &&savedSeams.safe(old[cell],old[neighbor],chosenCells[cell],chosenCells[neighbor],side);
+            safe=safe&&previewSeams.boundarySafe(old[cell],chosenCells[cell],side)
+                &&savedSeams.boundarySafe(old[cell],chosenCells[cell],side);
+            if(!safe){reject(cell);if(neighbor>=0)reject(neighbor);}
+        }
+    }
+    QVector<STerrainTileDelta> accepted;
+    for(const auto& delta:result.command.deltas)if(changed[delta.globalY*width+delta.globalX])accepted.append(delta);
+    result.command.deltas=accepted;
     result.atlas->setPreserveNativePages(true);
     return result;
 }

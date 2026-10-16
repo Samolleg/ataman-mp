@@ -1,4 +1,5 @@
 #include "terrain_virtual_atlas.h"
+#include "terrain_base_hd_native.h"
 
 #include <QCryptographicHash>
 #include <QDataStream>
@@ -4085,7 +4086,7 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
     const QVector<QByteArray>& authoredPagePayloads,
     const QVector<SMprMaterialRecord>& materials,
     const QVector<SMprAnimatedTileRecord>& animations,
-    CValidationReport* report)
+    CValidationReport* report,const QMap<int,QByteArray>& preservedDxtTiles)
 {
     STerrainPortableAtlasPackage result;
     const SMprMapInfo& map = source.mapInfo();
@@ -4288,13 +4289,23 @@ STerrainPortableAtlasPackage CTerrainVirtualAtlas::buildWorkingPreviewPackage(
         QString diagnostic;
         const QImage pixels = composePage(activeTiles, page * 64,
                                           terrainMaximumTileSize(activeTiles.mid(page * 64, 64)));
-        const QByteArray payload = ei::encodeMmpDxt1(pixels, true, &diagnostic);
+        QByteArray payload = ei::encodeMmpDxt1(pixels, true, &diagnostic);
         if(payload.isEmpty())
         {
             result.error = QStringLiteral(
                 "Could not encode working atlas page %1: %2")
                 .arg(page).arg(diagnostic);
             return result;
+        }
+        for(int local=0;local<64;++local){const int slot=page*64+local;
+            auto found=preservedDxtTiles.constFind(slot);if(found==preservedDxtTiles.cend())continue;
+            QImage decoded;
+            if(!ei::decodeDxtImage(found.value(),activeTiles[slot].width(),activeTiles[slot].height(),ei::DxtFormat::Dxt1,&decoded,&diagnostic)){
+                result.error=diagnostic;return result;
+            }
+            // An intentional later pixel edit invalidates the cached encoding.
+            if(decoded.convertToFormat(QImage::Format_RGBA8888)!=activeTiles[slot].convertToFormat(QImage::Format_RGBA8888))continue;
+            if(!baseHdWriteBlocks(&payload,local,found.value())){result.error="Invalid preserved HD blocks";return result;}
         }
         pagePayloads.append(payload);
     }
@@ -4468,6 +4479,7 @@ bool CTerrainWorkingAtlas::commitStaging(
     m_foreignPhysicalTiles = staged.m_foreignPhysicalTiles;
     m_changedSlots = staged.m_changedSlots;
     m_preserveNativePages = staged.m_preserveNativePages;
+    m_preservedDxtTiles = staged.m_preservedDxtTiles;
     if(staged.m_resolver)
         m_resolver.reset(new CTerrainVirtualAtlas(
             *staged.m_resolver, m_authoredCatalog));
@@ -4688,6 +4700,8 @@ QByteArray CTerrainWorkingAtlas::stateFingerprint() const
     };
 
     hash.addData("terrain-working-atlas-state-v1");
+    addInt(m_preservedDxtTiles.size());
+    for(auto it=m_preservedDxtTiles.cbegin();it!=m_preservedDxtTiles.cend();++it){addInt(it.key());addBytes(it.value());}
     addInt(m_capacityLimit);
     addInt(m_authoredSlotCount);
     addInt(m_workingCatalog.size());

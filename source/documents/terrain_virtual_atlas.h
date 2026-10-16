@@ -351,7 +351,8 @@ public:
         const QVector<QByteArray>& authoredPagePayloads,
         const QVector<SMprMaterialRecord>& materials,
         const QVector<SMprAnimatedTileRecord>& animations,
-        CValidationReport* report = nullptr);
+        CValidationReport* report = nullptr,
+        const QMap<int,QByteArray>& preservedDxtTiles = {});
 
 private:
     CTerrainVirtualAtlas(const CTerrainVirtualAtlas& other,
@@ -462,6 +463,8 @@ public:
     int capacityLimit() const { return m_capacityLimit; }
     bool preserveNativePages() const { return m_preserveNativePages; }
     void setPreserveNativePages(bool enabled) { m_preserveNativePages = enabled; }
+    const QMap<int,QByteArray>& preservedDxtTiles() const { return m_preservedDxtTiles; }
+    void preserveDxtTile(int slot,const QByteArray& bytes) { m_preservedDxtTiles.insert(slot,bytes); }
     int authoredSlotCount() const { return m_authoredSlotCount; }
     const QVector<QImage>& authoredTileImages() const { return m_authoredImages; }
     int generatedTileCount() const;
@@ -557,6 +560,7 @@ private:
     QSet<int> m_changedSlots;
     int m_capacityLimit{0};
     bool m_preserveNativePages{false};
+    QMap<int,QByteArray> m_preservedDxtTiles;
 };
 
 #endif // TERRAIN_VIRTUAL_ATLAS_H

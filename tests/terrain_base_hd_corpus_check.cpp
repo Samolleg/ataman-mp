@@ -8,10 +8,22 @@
 #include "endurance_document.h"
 #include "terrain_base_hd.h"
 #include "mmp_codec.h"
+#include "terrain_base_hd_seams.h"
 
 int runScenarioLayerCheck()
 {
     QTextStream out(stdout);out.setCodec("UTF-8");
+    {
+        QImage black(256,256,QImage::Format_RGBA8888);black.fill(Qt::black);
+        QImage gutter=black;for(int y=0;y<8;++y)for(int x=0;x<256;++x)gutter.setPixelColor(x,y,Qt::white);
+        QImage stripe=black;for(int y=64;y<192;++y)for(int x=15;x<=16;++x)stripe.setPixelColor(x,y,Qt::white);
+        CBaseHdSeams check({black,black},{black,gutter,stripe});
+        SMprPackedTile rotated;rotated.tileIndex=2;rotated.rotation=1;
+        if(!check.safe(0,0,0,1,0)||!check.boundarySafe(0,rotated.encode(),0))return 3;
+        rotated.rotation=3;
+        if(check.boundarySafe(0,rotated.encode(),0)||check.safe(0,0,rotated.encode(),0,0))return 4;
+        out<<"PASS synthetic gutter, visible inset, rotation and local discontinuity\n";
+    }
     const QString output=qEnvironmentVariable("EI_HD_AUDIT_OUTPUT");QDir().mkpath(output);
     QTemporaryDir scratch;QDir::setCurrent(scratch.path());
     QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,scratch.path());
@@ -72,15 +84,28 @@ int runScenarioLayerCheck()
             CTerrainWorkingAtlas atlas(analysis.overlayCatalogWithLandFamilies(),images,192,16384,{}, {},info.tileTypes);
             terrain.enableWorkingAtlasSlots(atlas.capacityLimit());
 
-            const auto after=prepareBaseTerrainHd(library,atlas,terrain,profile,info.animatedTiles,192,nullptr);
+            const auto after=prepareBaseTerrainHd(library,atlas,terrain,profile,info.animatedTiles,192,nullptr,originalPages);
             const auto& before=after; row["error"]=after.error;row["eligible"]=after.eligibleCells;
             row["unmatched"]=after.unmatchedCells;
+            row["seamRejected"]=after.seamRejectedCells;
 
             row["unmatchedSources"]=QJsonArray::fromStringList(after.unmatchedSources);
             auto require=[&](bool ok,const QString& what){if(!ok)throw QString(path.fileName()+": "+what+" "+report.toText());};
             require(after.error.isEmpty()&&after.unmatchedCells==0,"complete recognized base coverage");
+            require(after.command.deltas.size()+after.seamRejectedCells==after.eligibleCells,"all eligible cells accounted for");
             auto changed=terrain;
             require(changed.apply(after.command,true,&report),"apply");
+            const auto verifySeams=[&](const QVector<QImage>& candidate){
+                CBaseHdSeams seams(images,candidate);const int dx[4]={0,1,0,-1},dy[4]={-1,0,1,0};
+                for(const auto& delta:after.command.deltas)for(int side=0;side<4;++side){
+                    require(seams.boundarySafe(delta.before,delta.after,side),"old visible rim exactly preserved");
+                    const int x=delta.globalX+dx[side],y=delta.globalY+dy[side];
+                    if(x<0||y<0||x>=terrain.tileCountX()||y>=terrain.tileCountY())
+                        require(seams.boundarySafe(delta.before,delta.after,side),"external map boundary unchanged");
+                    else require(seams.safe(delta.before,terrain.packedTile(x,y,ETerrainTileLayer::Land),delta.after,changed.packedTile(x,y,ETerrainTileLayer::Land),side),"every final neighbor seam nonworsening");
+                }
+            };
+            verifySeams(after.atlas->activeTileImages());
             QSet<int> protectedSlots;
             for(const auto& a:info.animatedTiles)for(int i=0;i<qMax(1,int(a.frameCount));++i)protectedSlots.insert(a.tileIndex+i);
             for(int y=0;y<terrain.tileCountY();++y)for(int x=0;x<terrain.tileCountX();++x){
@@ -93,6 +118,7 @@ int runScenarioLayerCheck()
             for(const auto& delta:after.command.deltas){
                 const int oldSlot=SMprPackedTile::decode(delta.before).atlasSlot();
                 const int newSlot=SMprPackedTile::decode(delta.after).atlasSlot();
+                require(SMprPackedTile::decode(delta.before).rotation==SMprPackedTile::decode(delta.after).rotation,"random rotation never rotates the preserved rim");
                 bool known=false;auto signature=atlas.catalog().gridSignatureForPacked(delta.before,&known);
                 require(known&&signature.northWest&&signature.northWest==signature.northEast&&signature.northWest==signature.southEast&&signature.northWest==signature.southWest&&!protectedSlots.contains(oldSlot),"only pure nonanimated base changed");
                 require(info.tileTypes.value(oldSlot,-1)!=6,"water class unchanged");
@@ -105,7 +131,7 @@ int runScenarioLayerCheck()
             CMprEditTransaction edits;QByteArray editedBytes;
             require(changed.appendSectorEdits(&edits,&report)&&doc.applyTransaction(edits,&editedBytes,&report),"serialize edited sectors");
             CMprDocument edited;require(edited.loadBytes(editedBytes,path.fileName(),&report),"edited document");
-            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(edited,after.atlas->activeTileImages(),after.atlas->activeTileTypes(),originalPages,info.materials,info.animatedTiles,&report);
+            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(edited,after.atlas->activeTileImages(),after.atlas->activeTileTypes(),originalPages,info.materials,info.animatedTiles,&report,after.atlas->preservedDxtTiles());
             require(package.success,"native-page save package");
             CMprDocument reopened;require(reopened.loadBytes(package.mprBytes,path.fileName(),&report),"reopen saved MPR");
             CTerrainEditModel reopenedTerrain;require(reopenedTerrain.load(reopened,&report)&&sectors(reopenedTerrain)==modified,"reopened sectors exact");
@@ -113,6 +139,12 @@ int runScenarioLayerCheck()
             QTemporaryFile res(scratch.path()+"/saved-XXXXXX.res");require(res.open()&&res.write(package.resourceArchiveBytes)==package.resourceArchiveBytes.size()&&res.flush(),"private saved RES");
             CResArchiveIndex saved;QString saveError;require(saved.open(res.fileName(),&saveError),"reopen saved RES");
             for(int page=0;page<originalPages.size();++page)require(saved.readMember(QStringLiteral("%1%2.mmp").arg(info.innerNamespace).arg(page,3,10,QLatin1Char('0')),&saveError)==originalPages[page],"original page byte exact");
+            auto savedImages=after.atlas->activeTileImages();
+            for(int page=originalPages.size();page<savedImages.size()/64;++page){
+                const auto bytes=saved.readMember(QStringLiteral("%1%2.mmp").arg(info.innerNamespace).arg(page,3,10,QLatin1Char('0')),&saveError);
+                for(int local=0;local<64;++local)require(ei::decodeMmpDxt1AtlasTile(bytes,local,&savedImages[page*64+local],&saveError),"decode saved HD tile");
+            }
+            verifySeams(savedImages);row["previewAndSavedSeams"]=true;
             row["invariantsUndoRedoSaveReopen"]=true;row["convertedCells"]=after.command.deltas.size();
             QJsonArray used;QMap<qint32,QString> names;
             for(const auto& f:profile.families)names[f.id]=f.name;
