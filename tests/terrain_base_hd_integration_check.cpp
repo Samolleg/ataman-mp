@@ -62,6 +62,11 @@ int runScenarioLayerCheck()
         const auto originalCatalog=view->m_workingTerrainAtlas->catalog();
         const auto originalTypes=view->m_workingTerrainAtlas->activeTileTypes();
         const auto originalAnimations=view->m_mprAnimatedTiles;
+        if(!qEnvironmentVariableIsSet("EI_HD_GUARDS_ONLY")){
+            const auto coverage=prepareBaseTerrainHd(library,*view->m_workingTerrainAtlas,originalModel,view->m_terrainAtlasProfile,originalAnimations,193);
+            check(coverage.error.isEmpty()&&coverage.unmatchedCells==0,"all recognized base materials have HD replacements");
+            check(coverage.eligibleCells==38014&&coverage.command.deltas.size()==38014,"DejaVu zone19 includes all former 18343 skipped cells");
+        }
         if(qEnvironmentVariableIsSet("EI_HD_GUARDS_ONLY")) {
             const auto fingerprint=view->m_workingTerrainAtlas->stateFingerprint();
             const QDir actual(library);

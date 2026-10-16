@@ -181,9 +181,13 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
         if(!needed.contains(f.name))continue;
         Replacement replacement;
         const int type=original.runtimeTerrainTypeForSlot(slot);
+        // Water remains protected even when an imported profile names it as land.
+        if(type==6)continue;
         double best=1e20,second=1e20;Source selected;int selectedTurn=0;
         QSet<QByteArray> tried;
-        for(const auto& g:groups)if(g.material==f.name&&g.physical==type)
+        // Material identity comes from the bound atlas profile. Physical terrain
+        // properties belong to the destination map, not to a donor texture.
+        for(const auto& g:groups)if(g.material==f.name)
             for(const auto& source:g.sources)for(int turn=0;turn<4;++turn){
                 const QImage oriented=rotate(source.hd,turn);
                 const auto identity=pixelHash(oriented);if(tried.contains(identity))continue;tried.insert(identity);
@@ -194,16 +198,25 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
                 if(score<best){second=best;best=score;selected=source;selectedTurn=turn;}
                 else second=qMin(second,score);
             }
-        // Require an actual visual source match, never just the same material name.
-        // Almost pixel-identical SD matches may have several HD originals;
-        // choosing one within this material/class is exactly the requested
-        // variation. More distant matches still require a clear margin.
-        if(best>64 || (best>1.0&&second<qMax(best*1.8,best+4.0))){
+        // HD detail deliberately differs from SD pixels. Similarity selects the
+        // closest boundary/orientation within the confirmed material; it must
+        // not reject that material merely because its HD detail is different.
+        if(selected.hd.isNull()){
             result.unmatchedSources.append(QStringLiteral("slot:%1 material:%2 type:%3 best:%4 next:%5")
                 .arg(slot).arg(f.name).arg(type).arg(best).arg(second));
             replacements.insert(slot,replacement);continue;
         }
         QVector<QImage> pool={selected.hd};pool+=selected.variants;
+        // Include every ready variant sharing this boundary, including variants
+        // stored under another original or physical-class group. Different
+        // boundaries stay with their nearest original to avoid new seams.
+        for(const auto& group:groups)if(group.material==f.name)
+            for(const auto& source:group.sources)for(int turn=0;turn<4;++turn){
+                const auto candidate=rotate(source.hd,turn);
+                if(mse(candidate,selected.hd,true)!=0)continue;
+                pool.append(candidate);
+                for(const auto& variant:source.variants)pool.append(rotate(variant,turn));
+            }
         const auto anchor=rotate(selected.hd,selectedTurn);
         for(int turn=0;turn<4;++turn)
             if(mse(rotate(anchor,turn),anchor,true)<0.01)replacement.rotations.append(turn);
