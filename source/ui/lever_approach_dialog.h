@@ -44,6 +44,7 @@ private:
     QLabel* m_status;
     bool m_dragging{false};
     bool m_ready{false};
+    bool m_newRecord{false};
 };
 }
 #endif

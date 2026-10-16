@@ -17,6 +17,9 @@
 #include <QLineF>
 #include <QMessageBox>
 #include <QSignalBlocker>
+#include <QSpinBox>
+#include <QLineEdit>
+#include <QGroupBox>
 
 namespace ei {
 LeverApproachDialog::LeverApproachDialog(const QSharedPointer<DatabaseDocument>& document,
@@ -53,6 +56,7 @@ LeverApproachDialog::LeverApproachDialog(const QSharedPointer<DatabaseDocument>&
     m_status=new QLabel(this);m_status->setWordWrap(true);layout->addRow(m_status);
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Apply|QDialogButtonBox::Cancel,this);
     buttons->button(QDialogButtonBox::Apply)->setText(QString::fromUtf8("Применить"));
+    buttons->button(QDialogButtonBox::Apply)->setObjectName("leverApply");
     buttons->button(QDialogButtonBox::Cancel)->setText(QString::fromUtf8("Отмена"));
     connect(buttons->button(QDialogButtonBox::Apply),&QPushButton::clicked,this,&LeverApproachDialog::apply);
     connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::reject);layout->addRow(buttons);
@@ -79,7 +83,29 @@ bool LeverApproachDialog::initialize(QString* error) {
     for(const auto& row:table->rows)if(!row.deleted&&row.values.value("fld.0.0").toString()==m_model){
         ++matches;m_rowKey=row.stableKey;m_original=row.values;
     }
-    if(matches!=1)return fail(QString::fromUtf8("Для модели %1 нужна ровно одна запись levers.ldb; найдено: %2. Откройте редактор БД.").arg(m_model).arg(matches));
+    if(matches>1)return fail(QString::fromUtf8("Для модели %1 найдено несколько записей БД. Устраните дубликаты в редакторе БД.").arg(m_model));
+    if(matches==0) {
+        m_newRecord=true;
+        m_original={{"fld.0.0",m_model},{"fld.1.0",QString("[0,0,0,0]")},{"fld.2.0",1},
+                    {"fld.3.0",1.f},{"fld.4.0",10},{"fld.5.0",QString("Stone")},
+                    {"fld.6.0",QString()},{"fld.7.0",m_node->mapName()}};
+        auto* group=new QGroupBox(QString::fromUtf8("Новая запись БД: %1").arg(m_model),this);
+        group->setObjectName("newLeverRecord");auto* form=new QFormLayout(group);
+        auto* notice=new QLabel(QString::fromUtf8("Запись будет создана вместе с точками при применении. Отмена ничего не добавляет."),group);
+        notice->setWordWrap(true);form->addRow(notice);
+        auto* scale=new QDoubleSpinBox(group);scale->setObjectName("newLeverScale");scale->setDecimals(6);scale->setRange(.000001,1000000);scale->setValue(1);
+        form->addRow(QString::fromUtf8("Масштаб подхода БД"),scale);
+        connect(scale,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,[this](double value){m_original["fld.3.0"]=float(value);m_scale=leverApproachScale(float(value),m_complexion.z());preview();});
+        auto* time=new QSpinBox(group);time->setObjectName("newLeverSwitchTime");time->setRange(0,2147483647);time->setValue(10);
+        form->addRow(QString::fromUtf8("Время переключения"),time);
+        connect(time,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int value){m_original["fld.4.0"]=value;});
+        const QStringList labels={QString::fromUtf8("Материал"),QString::fromUtf8("Звук переключения"),QString::fromUtf8("Описание")};
+        for(int id=5;id<8;++id){const QString field=QString("fld.%1.0").arg(id);auto* edit=new QLineEdit(m_original.value(field).toString(),group);
+            edit->setObjectName(QString("newLeverField%1").arg(id));form->addRow(labels[id-5],edit);
+            connect(edit,&QLineEdit::textChanged,this,[this,field](const QString& value){m_original[field]=value;});}
+        qobject_cast<QFormLayout*>(layout())->insertRow(1,group);
+        findChild<QPushButton*>("leverApply")->setText(QString::fromUtf8("Создать в БД и применить"));
+    }
     const auto array=QJsonDocument::fromJson(m_original.value("fld.1.0").toString().toUtf8()).array();
     if(array.size()!=4)return fail(QString::fromUtf8("Запись должна содержать ровно четыре координаты."));
     const int count=m_original.value("fld.2.0").toInt();
@@ -91,8 +117,8 @@ bool LeverApproachDialog::initialize(QString* error) {
         QSignalBlocker blocker(m_coordinates[i]);m_coordinates[i]->setValue(value);
         if(i%2)m_points[i/2].setY(value);else m_points[i/2].setX(value);
     }
-    if(!m_document->fieldEditable(table->key,m_rowKey,"fld.1.0",error)
-       ||!m_document->fieldEditable(table->key,m_rowKey,"fld.2.0",error))return false;
+    if(!m_newRecord && (!m_document->fieldEditable(table->key,m_rowKey,"fld.1.0",error)
+       ||!m_document->fieldEditable(table->key,m_rowKey,"fld.2.0",error)))return false;
     m_scale=leverApproachScale(m_original.value("fld.3.0").toFloat(),m_complexion.z());
     if(!std::isfinite(m_scale)||m_scale<=0)return fail(QString::fromUtf8("Масштаб подхода должен быть положительным; проверьте масштаб БД и рост рычага."));
     m_count->setCurrentIndex(count==2?1:0);m_active->setEnabled(count==2);
@@ -162,10 +188,14 @@ void LeverApproachDialog::apply() {
     QJsonArray array=QJsonDocument::fromJson(m_original.value("fld.1.0").toString().toUtf8()).array();
     for(int i=0;i<count;++i){array[i*2]=double(m_points[i].x());array[i*2+1]=double(m_points[i].y());}
     const QString points=QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
-    if(QJsonDocument::fromJson(m_original.value("fld.1.0").toString().toUtf8()).array()==array
+    if(!m_newRecord && QJsonDocument::fromJson(m_original.value("fld.1.0").toString().toUtf8()).array()==array
        &&m_original.value("fld.2.0").toInt()==count){accept();return;}
     QString error;
-    if(!m_document->setLeverApproach(m_rowKey,points,count,m_original,&error)){
+    bool applied=false;
+    if(m_newRecord){auto values=m_original;values["fld.1.0"]=points;values["fld.2.0"]=count;
+        applied=m_document->createLeverApproach(values,&m_rowKey,&error);
+    } else applied=m_document->setLeverApproach(m_rowKey,points,count,m_original,&error);
+    if(!applied){
         QMessageBox::warning(this,windowTitle(),error);return;
     }
     emit transactionCommitted(m_rowKey);accept();

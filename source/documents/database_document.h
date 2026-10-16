@@ -45,6 +45,8 @@ public:
     bool setValue(const QString&, const QString&, const QString&, const QVariant&, QString* = nullptr);
     bool setLeverApproach(const QString& rowKey, const QString& points, int count,
                           const QMap<QString, QVariant>& expected, QString* diagnostic = nullptr);
+    bool createLeverApproach(const QMap<QString, QVariant>& values, QString* rowKey,
+                             QString* diagnostic = nullptr);
     bool cloneRow(const QString&, const QString&, const QString&, QString* = nullptr);
     bool deleteRow(const QString&, const QString&, QString* = nullptr);
     bool undo(); bool redo(); QVector<SDatabaseValidationFinding> validate() const;

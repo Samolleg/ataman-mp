@@ -444,8 +444,61 @@ bool DatabaseDocument::setLeverApproach(const QString& key, const QString& point
     current->values["fld.1.0"]=points;
     current->values["fld.2.0"]=count;
     QString error;
-    if(buildArchive(&error).isEmpty()) { m_tables=before; return reject(error); }
+    m_buildingReplacementCandidate=true;
+    const QByteArray candidate=buildArchive(&error);
+    m_buildingReplacementCandidate=false;
+    if(candidate.isEmpty()) { m_tables=before; return reject(error); }
     commit(before,{tableKey,key,QStringLiteral("approach"),{}, {},QStringLiteral("Changed lever approach points")});
+    return true;
+}
+
+bool DatabaseDocument::createLeverApproach(const QMap<QString,QVariant>& values,
+                                          QString* rowKey, QString* diagnostic)
+{
+    const QString key=QStringLiteral("levers.leverprototypes");
+    const auto reject=[&](const QString& message){if(diagnostic)*diagnostic=message;return false;};
+    const auto* target=table(key);
+    if(!target || target->physicalTable<0 || !target->structuralEditing)
+        return reject(QStringLiteral("Lever prototype table is unavailable for creation."));
+    const QString name=values.value("fld.0.0").toString();
+    if(name.isEmpty() || name!=name.trimmed() || name.contains(QChar(0)))
+        return reject(QStringLiteral("A lever with this model already exists or the model name is invalid."));
+    for(const auto& existing:target->rows)
+        if(!existing.deleted && existing.values.value("fld.0.0").toString()==name)
+            return reject(QStringLiteral("A lever with this model already exists. Reopen the tool."));
+    auto* codec=QTextCodec::codecForName("CP1251");
+    for(int id=0;id<8;++id) {
+        const QString field=QString("fld.%1.0").arg(id);
+        if(!values.contains(field))return reject(QStringLiteral("Incomplete lever prototype."));
+        bool writable=false;for(const auto& schema:target->fields)if(schema.key==field)writable=schema.writable;
+        if(!writable)return reject(QStringLiteral("Lever field is not writable."));
+        if(id==0 || id>=5) {
+            const auto text=values.value(field).toString();
+            if(text.contains(QChar(0)) || codec->toUnicode(codec->fromUnicode(text))!=text)
+                return reject(QStringLiteral("Lever text cannot be represented in the database encoding."));
+        }
+    }
+    const auto points=QJsonDocument::fromJson(values.value("fld.1.0").toString().toUtf8()).array();
+    if(points.size()!=4)return reject(QStringLiteral("Expected four lever coordinates."));
+    for(const auto& value:points)if(!value.isDouble()||!std::isfinite(float(value.toDouble())))
+        return reject(QStringLiteral("Lever coordinates must be finite."));
+    const int count=values.value("fld.2.0").toInt();
+    const float scale=values.value("fld.3.0").toFloat();
+    if(count<1||count>2||!std::isfinite(scale)||scale<=0||values.value("fld.4.0").toLongLong()<0
+       ||values.value("fld.4.0").toLongLong()>2147483647)
+        return reject(QStringLiteral("Invalid point count, scale or switch time."));
+    const auto before=m_tables;
+    SDatabaseRow created;created.added=true;
+    created.stableKey=fold(name)+QString("#new%1").arg(target->rows.size());
+    for(int id=0;id<8;++id){const QString field=QString("fld.%1.0").arg(id);created.values[field]=values.value(field);}
+    m_tables[key].rows.append(created);
+    QString error;
+    m_buildingReplacementCandidate=true;
+    const QByteArray candidate=buildArchive(&error);
+    m_buildingReplacementCandidate=false;
+    if(candidate.isEmpty()){m_tables=before;return reject(error);}
+    commit(before,{key,created.stableKey,QStringLiteral("approach"),{},name,QStringLiteral("Created lever and approach points")});
+    if(rowKey)*rowKey=created.stableKey;
     return true;
 }
 
@@ -572,7 +625,9 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
     // The immutable baseline is the authoritative no-op representation. This
     // is the byte-identity gate and avoids ever normalizing an untouched RES.
     // Workbook replacement validation opts into candidate serialization below.
-    if(!isDirty()&&!m_buildingReplacementCandidate)return archiveBytes;
+    // A saved edited state is clean relative to disk, but is not the immutable
+    // original baseline. Undo to that saved state must still serialize its rows.
+    if(m_currentStateId==0&&!m_buildingReplacementCandidate)return archiveBytes;
     bool anyStateChange=false;
     for(auto tableIt=m_tables.constBegin();tableIt!=m_tables.constEnd()&&!anyStateChange;++tableIt)
     {
@@ -611,7 +666,25 @@ QByteArray DatabaseDocument::buildArchive(QString* diagnostic)const
                 return true;
             };
             for(const auto& row:table.rows)if(!row.deleted&&!row.added){const int index=baselineRowIndex(row);if(index<0){if(diagnostic)*diagnostic="Stable source record is missing.";return {};}const SDatabaseRow& base=baseline.rows.at(index);if(!publishFields(index,row,&base))return {};}
-            for(const auto& row:table.rows)if(row.added&&!row.deleted){const int source=baselineRowIndex(row);if(source<0){if(diagnostic)*diagnostic="Clone source record is missing.";return {};}QString error;if(!member.cloneRecord(table.physicalTable,source,&error)){if(diagnostic)*diagnostic=error;return {};}if(!publishFields(member.recordCount(table.physicalTable)-1,row,nullptr))return {};}
+            for(const auto& row:table.rows)if(row.added&&!row.deleted){
+                QString error;
+                if(table.key=="levers.leverprototypes" && row.sourceRecordIndex<0 && row.sourceStableKey.isEmpty()) {
+                    QVector<SLosslessDatabaseField> fields;
+                    for(int id=0;id<8;++id) {
+                        const auto* storage=schema.field(table.schemaFamily,table.blockId,id);
+                        const QString key=QString("fld.%1.0").arg(id);
+                        if(!storage||!row.values.contains(key)){if(diagnostic)*diagnostic="Incomplete new lever schema.";return {};}
+                        const auto payload=DatabaseValueCodec::encode(row.values.value(key),{},*storage,schema,table.schemaFamily,&error);
+                        if(!error.isEmpty()){if(diagnostic)*diagnostic=error;return {};}
+                        fields.append({id,0,payload,{}});
+                    }
+                    if(!member.appendRecord(table.physicalTable,fields,&error)){if(diagnostic)*diagnostic=error;return {};}
+                } else {
+                    const int source=baselineRowIndex(row);if(source<0){if(diagnostic)*diagnostic="Clone source record is missing.";return {};}
+                    if(!member.cloneRecord(table.physicalTable,source,&error)){if(diagnostic)*diagnostic=error;return {};}
+                    if(!publishFields(member.recordCount(table.physicalTable)-1,row,nullptr))return {};
+                }
+            }
             QVector<int> deleted;for(const auto& row:table.rows)if(row.deleted&&!row.added){const int index=baselineRowIndex(row);if(index>=0)deleted.append(index);}std::sort(deleted.begin(),deleted.end(),std::greater<int>());for(int index:deleted){QString error;if(!member.removeRecord(table.physicalTable,index,&error)){if(diagnostic)*diagnostic=error;return {};}}
             members.insert(table.sourceMember,member);continue;
         }

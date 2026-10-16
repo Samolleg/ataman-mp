@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **191**: кнопка «Точки подхода» в свойствах рычага позволяет выставить одну/две точки мышью и изменить общую запись БД с Undo/Redo. Учитываются поворот, рост и дистанция взаимодействия для предпросмотра. Сохранены преобразование базовых тайлов в HD версии190, вода, переходы и смешанные страницы128/256.
+Версия **192**: «Точки подхода» создаёт отсутствующую запись рычага прямо из свойств объекта. Параметры новой записи и точки применяются одним шагом Undo/Redo; отмена не оставляет строк в БД. Исправлен возврат к сохранённому состоянию БД через Undo. Сохранены возможности191 и преобразование базовых тайлов в HD версии190.
 
 Изменения187: общая покраска сохраняет готовые тени рельефа при изменении
 только текстур; изменения геометрии и покрытия обновляют поле по-прежнему.
@@ -50,7 +50,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `190`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `192`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

@@ -9,6 +9,7 @@
 #include "progressview.h"
 #include "tree_view.h"
 #include "tile_form.h"
+#include "landscape_tools.h"
 #include "camera.h"
 #include "database_document.h"
 #include "lever_approach.h"
@@ -34,6 +35,7 @@ int runScenarioLayerCheck()
         auto* history=new QUndoStack;auto* table=new QTableWidget;table->setColumnCount(2);
         auto* view=new CView(nullptr,nullptr);view->setAttribute(Qt::WA_DontShowOnScreen);
         view->attach(settings,table,history,new CProgressView,new QLineEdit,new CTreeView,new CTileForm);
+        view->attachLandscapeTools(new CLandscapeTools);
         view->resize(800,600);view->show();QApplication::processEvents();check(view->isValid(),"hidden OpenGL");
         view->makeCurrent();CTextureList::getInstance()->initResource();
         const QString map=scratch.filePath("test.mpr");check(QFile::copy(qEnvironmentVariable("EI_LEVER_MAP"),map),"isolated map copy");
@@ -106,6 +108,40 @@ int runScenarioLayerCheck()
         check(committed==1&&document->isDirty(),"Apply commits once");check(document->undo()&&document->buildArchive()==before,"single Undo restores all points");
         check(document->redo(),"Redo");delete dialog;
         lever->setState(eDraw);view->viewParameters();check(table->rowCount()==0,"no button without selection");
+        const auto createBefore=document->buildArchive();
+        world["Model name"]=QString("uhwbw02");data["World object"]=world;
+        auto* missing=new CLever(data);missing->setMapId(741);missing->setState(eSelect);
+        missing->setPos(pos);missing->updatePos(pos);
+        missing->setRot(QQuaternion::fromEulerAngles(-33.7688f,81.9705f,-110.359f));
+        mob->nodes().append(missing);view->viewParameters();
+        view->m_cam->setLocation(QVector3D(32,32,45),QVector3D(32,32,0),QVector3D());
+        view->resizeGL(800,600);view->updateGL();
+        dialog=new ei::LeverApproachDialog(document,view,nullptr);dialog->setAttribute(Qt::WA_DontShowOnScreen);
+        const bool createOpened=dialog->initialize(&error);check(createOpened,"missing uhwbw02 opens: "+error);
+        check(dialog->m_newRecord&&dialog->findChild<QGroupBox*>("newLeverRecord"),"new-record fields visible");
+        if(!qEnvironmentVariable("EI_LEVER_OUTPUT").isEmpty()) {
+            QPointer<ei::LeverApproachDialog> guard(dialog);dialog->show();QApplication::processEvents();
+            check(bool(guard),"new-record dialog survives queued context updates");
+            check(dialog->grab().save(QDir(qEnvironmentVariable("EI_LEVER_OUTPUT")).filePath("create-panel.png")),"new-record panel capture");
+        }
+        check(document->buildArchive()==createBefore,"opening absent record creates nothing");
+        dialog->reject();check(document->buildArchive()==createBefore,"cancel absent record creates nothing");delete dialog;
+        dialog=new ei::LeverApproachDialog(document,view,nullptr);dialog->setAttribute(Qt::WA_DontShowOnScreen);check(dialog->initialize(&error),"reopen missing lever");
+        dialog->m_count->setCurrentIndex(1);dialog->m_reach->setValue(0);
+        bool newHit=false;QPoint newPointer;QVector3D newGround;
+        for(int y=170;y<450&&!newHit;y+=25)for(int x=180;x<650&&!newHit;x+=25){QVector2D offset;
+            if(view->terrainPositionAt(QPoint(x,y),&newGround)&&ei::leverApproachLocal(QVector2D(newGround),missing->drawPosition(),missing->rotation(),1,0,&offset)){
+                newHit=true;newPointer=QPoint(x,y);}}
+        check(newHit,"new lever terrain hit");
+        for(int index=0;index<2;++index){dialog->m_active->setCurrentIndex(index);
+            QMouseEvent down(QEvent::MouseButtonPress,newPointer+QPoint(index*10,0),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(view,&down);
+            QMouseEvent up(QEvent::MouseButtonRelease,newPointer+QPoint(index*10,0),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(view,&up);}
+        check(document->buildArchive()==createBefore,"new lever mouse draft creates nothing");
+        int created=0;QObject::connect(dialog,&ei::LeverApproachDialog::transactionCommitted,view,[&]{++created;});
+        dialog->apply();check(created==1,"new lever commits once");delete dialog;
+        const auto newSnapshot=document->currentSnapshot(&error);check(newSnapshot&&newSnapshot->levers.contains("uhwbw02"),"new record available to runtime catalog");
+        check(document->undo()&&document->buildArchive()==createBefore,"one Undo removes created lever and points");
+        check(document->redo(),"Redo restores created lever");
         out<<"PASS total="<<passes<<"\n";out.flush();return 0;
     }catch(const QString& error){out<<"FAILED "<<error<<"\n";out.flush();return 1;}
 }

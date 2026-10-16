@@ -37,6 +37,8 @@ public:
     int findRecordByEncodedFields(int tableIndex,
                                   const QVector<SLosslessDatabaseField>& fields) const;
     bool cloneRecord(int tableIndex, int recordIndex, QString* diagnostic = nullptr);
+    bool appendRecord(int tableIndex, const QVector<SLosslessDatabaseField>& fields,
+                      QString* diagnostic = nullptr);
     bool removeRecord(int tableIndex, int recordIndex, QString* diagnostic = nullptr);
     bool cloneRecordByFieldPayload(int tableIndex, int fieldId, const QByteArray& sourcePayload,
                                    const QByteArray& newPayload, QString* diagnostic = nullptr);

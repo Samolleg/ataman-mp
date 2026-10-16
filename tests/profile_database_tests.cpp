@@ -189,6 +189,7 @@ class ProfileDatabaseTests : public QObject
     Q_OBJECT
 private slots:
     void leverApproachGeometryAndTransaction();
+    void leverApproachCreationIsAtomic();
     void parsesStableLinksAndCurrentNames();
     void mapPickerIncludesDatabaseLeversWithoutMapObjects();
     void databaseMapSelectionUsesFreshDefaultsAndRejectsUnsupportedEntries();
@@ -2817,6 +2818,48 @@ void ProfileDatabaseTests::leverApproachGeometryAndTransaction()
     CResArchiveDocument inactiveRes;QVERIFY(inactiveRes.loadBytes(document->buildArchive()));
     const auto inactiveMember=ei::LosslessDatabaseMember::parse(inactiveRes.memberPayload("levers.ldb"));
     for(const auto& field:inactiveMember.fields(0,0))if(field.id==1)QCOMPARE(field.payload.mid(8,4).toHex(),QByteArray("0000c07f"));
+}
+
+void ProfileDatabaseTests::leverApproachCreationIsAtomic()
+{
+    for(bool empty:{false,true}) {
+        QTemporaryDir temporary;QVERIFY(temporary.isValid());
+        auto members=relationalMembers();
+        const QByteArray oldRecord=record(stringField(0,"preserved")+tag(99,"unknown-original"));
+        members["levers.ldb"]=database({empty?QByteArray():oldRecord});
+        const QString path=QDir(temporary.path()).filePath("database.res");write(path,resArchive(members));
+        ei::ProfileDatabaseService service;ei::SProfileDatabaseLoadRequest request;
+        request.providerId="base.standard.v1";request.profileId="base";request.resourceDirectories<<temporary.path();
+        const auto document=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(document);
+        const auto original=document->buildArchive();QString key,error;
+        QMap<QString,QVariant> values={{"fld.0.0",QString("uhwbw02")},{"fld.1.0",QString("[1.25,-2,3,4]")},
+            {"fld.2.0",2},{"fld.3.0",1.f},{"fld.4.0",10},{"fld.5.0",QString("Stone")},
+            {"fld.6.0",QString()},{"fld.7.0",QString("new lever")}};
+        QVERIFY2(document->createLeverApproach(values,&key,&error),qPrintable(error));
+        QCOMPARE(document->changes().size(),1);
+        const auto created=document->buildArchive(&error);QVERIFY(!created.isEmpty());
+        CResArchiveDocument archive;QVERIFY(archive.loadBytes(created));
+        for(auto it=members.constBegin();it!=members.constEnd();++it)if(it.key()!="levers.ldb")QCOMPARE(archive.memberPayload(it.key()),it.value());
+        const auto parsed=ei::LosslessDatabaseMember::parse(archive.memberPayload("levers.ldb"));
+        QCOMPARE(parsed.recordCount(0),empty?1:2);
+        if(!empty){const auto before=ei::LosslessDatabaseMember::parse(members["levers.ldb"]);QByteArray a,b;
+            for(const auto& field:before.fields(0,0))a+=field.encoded;for(const auto& field:parsed.fields(0,0))b+=field.encoded;QCOMPARE(a,b);}
+        QCOMPARE(parsed.fields(0,empty?0:1).size(),8);
+        QVERIFY(!document->createLeverApproach(values,nullptr,&error));QCOMPARE(document->changes().size(),1);
+        QVERIFY(document->undo());QCOMPARE(document->buildArchive(),original);
+        QCOMPARE(document->table("levers.leverprototypes")->rows.size(),empty?0:1);
+        QVERIFY(!document->canUndo());QVERIFY(document->redo());QCOMPARE(document->buildArchive(),created);
+        QVERIFY2(document->applyToSource(&error),qPrintable(error));service.clear();
+        const auto reopened=ei::DatabaseDocument::fromSnapshot(service.snapshot(request));QVERIFY(reopened);
+        const auto rows=reopened->table("levers.leverprototypes")->rows;QCOMPARE(rows.last().values,values);
+        const auto saved=document->table("levers.leverprototypes")->rows.last();
+        QVERIFY(document->setLeverApproach(key,"[-1,-2,3,4]",1,saved.values,&error));
+        QVERIFY(document->undo());QCOMPARE(document->buildArchive(),created);
+        QVERIFY(document->undo());QCOMPARE(document->buildArchive(),original);
+        QVERIFY(document->applyToSource(&error));service.clear();
+        QCOMPARE(ei::DatabaseDocument::fromSnapshot(service.snapshot(request))->buildArchive(),original);
+        values["fld.0.0"]=QString();QVERIFY(!document->createLeverApproach(values,nullptr,&error));
+    }
 }
 
 QTEST_MAIN(ProfileDatabaseTests)

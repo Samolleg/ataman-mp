@@ -103,6 +103,26 @@ bool LosslessDatabaseMember::cloneRecord(int tableIndex,int recordIndex,QString*
     if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size()||recordIndex<0||recordIndex>=m_root.children[tableIndex].children.size()){if(diagnostic)*diagnostic="Clone source record is unavailable.";return false;}
     Node& table=m_root.children[tableIndex];table.children.append(table.children.at(recordIndex));table.dirty=true;m_root.dirty=true;return true;
 }
+bool LosslessDatabaseMember::appendRecord(int tableIndex, const QVector<SLosslessDatabaseField>& fields,
+                                           QString* diagnostic)
+{
+    if(!m_valid || tableIndex<0 || tableIndex>=m_root.children.size() || fields.isEmpty()) {
+        if(diagnostic)*diagnostic="New record requires an existing table and fields.";return false;
+    }
+    Node record;record.id=1;record.container=true;record.dirty=true;
+    for(const auto& field:fields) {
+        if(field.id<0 || field.id>255 || field.occurrence!=0) {
+            if(diagnostic)*diagnostic="Invalid field in new record.";return false;
+        }
+        for(const auto& existing:record.children)if(existing.id==field.id) {
+            if(diagnostic)*diagnostic="Duplicate field in new record.";return false;
+        }
+        Node value;value.id=field.id;value.payload=field.payload;value.dirty=true;
+        record.children.append(value);
+    }
+    auto& table=m_root.children[tableIndex];table.children.append(record);
+    table.dirty=true;m_root.dirty=true;return true;
+}
 bool LosslessDatabaseMember::removeRecord(int tableIndex,int recordIndex,QString* diagnostic)
 {
     if(!m_valid||tableIndex<0||tableIndex>=m_root.children.size()||recordIndex<0||recordIndex>=m_root.children[tableIndex].children.size()){if(diagnostic)*diagnostic="Deleted record is unavailable.";return false;}
