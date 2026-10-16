@@ -36,7 +36,7 @@ private:
     QString m_rowKey, m_model, m_profile;
     QMap<QString,QVariant> m_original;
     QVector3D m_origin, m_position, m_complexion;
-    QQuaternion m_rotation;
+    QQuaternion m_rotation, m_approachRotation;
     float m_scale{1};
     QVector2D m_points[2];
     QComboBox *m_count, *m_active;

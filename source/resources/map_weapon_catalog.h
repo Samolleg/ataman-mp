@@ -24,6 +24,7 @@ class MapInventoryCatalog
 public:
     static QString pathForDatabase(const QString& databasePath);
     bool load(const QString& path, const DatabaseDocument* database);
+    bool containsModel(const QString& model) const;
     bool present() const { return m_present; }
     QString diagnostic() const { return m_diagnostic; }
     const SMapInventoryItem* find(const QString& name) const;
@@ -44,6 +45,7 @@ public:
     static QString textureName(const SConstructorItem& item, const SConstructorMaterial* material,
                                bool highResolution);
     bool load(const QString& path, const ItemSpellConstructorCatalog& database);
+    bool containsModel(const QString& model) const;
     bool present() const { return m_present; }
     QString diagnostic() const { return m_diagnostic; }
     QString archivePath() const { return m_archive; }

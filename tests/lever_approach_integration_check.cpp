@@ -108,8 +108,38 @@ int runScenarioLayerCheck()
         check(committed==1&&document->isDirty(),"Apply commits once");check(document->undo()&&document->buildArchive()==before,"single Undo restores all points");
         check(document->redo(),"Redo");delete dialog;
         lever->setState(eDraw);view->viewParameters();check(table->rowCount()==0,"no button without selection");
-        const auto createBefore=document->buildArchive();
-        world["Model name"]=QString("uhwbw02");data["World object"]=world;
+                const auto createBefore=document->buildArchive();
+        // Exercise the reported bow and dagger with the active, validated item catalogs.
+        for(const QString& itemModel : {QString("uhwbw02"),QString("uhwdg03r"),QString("uhahl01"),QString("initqi2item"),QString("initqu2item")}) {
+            auto itemWorld=world;itemWorld["Model name"]=itemModel;auto itemData=data;itemData["World object"]=itemWorld;
+            auto* item=new CLever(itemData);item->setPos(pos);item->updatePos(pos);mob->nodes().append(item);
+            QVector3D expected;
+            for(int tilt=0;tilt<3;++tilt) {
+                item->setState(eSelect);
+                item->setRot(QQuaternion::fromEulerAngles(tilt==0?0.f:90.f,tilt==2?83.f:0.f,tilt*117.f));
+                auto* probe=new ei::LeverApproachDialog(document,view,nullptr);
+                check(probe->initialize(&error),"item tool "+itemModel);
+                check(probe->m_approachRotation.isIdentity(),"validated item uses world XY "+itemModel);
+                const auto point=ei::leverApproachWorld(QVector2D(2,-1),item->drawPosition(),probe->m_approachRotation,1,.5);
+                check(qAbs(point.z()-item->drawPosition().z())<.00001,"horizontal plane "+itemModel);
+                if(tilt==0)expected=point;else check((point-expected).length()<.00001,"rotation independent "+itemModel);
+                QVector2D inverse;
+                check(ei::leverApproachLocal(QVector2D(point),item->drawPosition(),probe->m_approachRotation,1,.5,&inverse)
+                      &&(inverse-QVector2D(2,-1)).length()<.0001,"vertical item inverse "+itemModel);
+                QVector3D clickGround;
+                check(view->terrainPositionAt(pointer,&clickGround),"item mouse terrain hit "+itemModel);
+                QMouseEvent itemDown(QEvent::MouseButtonPress,pointer,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+                QApplication::sendEvent(view,&itemDown);
+                QMouseEvent itemUp(QEvent::MouseButtonRelease,pointer,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(view,&itemUp);
+                const auto mousePoint=ei::leverApproachWorld(probe->m_points[0],item->drawPosition(),probe->m_approachRotation,probe->m_scale,.5);
+                check((QVector2D(mousePoint)-QVector2D(clickGround)).length()<.001,"item mouse world XY "+itemModel);
+                if(tilt==1&&itemModel=="uhwbw02"&&!qEnvironmentVariable("EI_LEVER_OUTPUT").isEmpty())
+                    check(probe->grab().save(QDir(qEnvironmentVariable("EI_LEVER_OUTPUT")).filePath("bow-xy-panel.png")),"item panel capture");
+                delete probe;item->setState(eDraw);
+            }
+        }
+        world["Model name"]=QString("ei_test_missing_lever");data["World object"]=world;
         auto* missing=new CLever(data);missing->setMapId(741);missing->setState(eSelect);
         missing->setPos(pos);missing->updatePos(pos);
         missing->setRot(QQuaternion::fromEulerAngles(-33.7688f,81.9705f,-110.359f));
@@ -119,6 +149,7 @@ int runScenarioLayerCheck()
         dialog=new ei::LeverApproachDialog(document,view,nullptr);dialog->setAttribute(Qt::WA_DontShowOnScreen);
         const bool createOpened=dialog->initialize(&error);check(createOpened,"missing uhwbw02 opens: "+error);
         check(dialog->m_newRecord&&dialog->findChild<QGroupBox*>("newLeverRecord"),"new-record fields visible");
+        check(dialog->m_approachRotation==missing->rotation(),"unknown tilted lever retains original axes");
         if(!qEnvironmentVariable("EI_LEVER_OUTPUT").isEmpty()) {
             QPointer<ei::LeverApproachDialog> guard(dialog);dialog->show();QApplication::processEvents();
             check(bool(guard),"new-record dialog survives queued context updates");
@@ -139,7 +170,7 @@ int runScenarioLayerCheck()
         check(document->buildArchive()==createBefore,"new lever mouse draft creates nothing");
         int created=0;QObject::connect(dialog,&ei::LeverApproachDialog::transactionCommitted,view,[&]{++created;});
         dialog->apply();check(created==1,"new lever commits once");delete dialog;
-        const auto newSnapshot=document->currentSnapshot(&error);check(newSnapshot&&newSnapshot->levers.contains("uhwbw02"),"new record available to runtime catalog");
+        const auto newSnapshot=document->currentSnapshot(&error);check(newSnapshot&&newSnapshot->levers.contains("ei_test_missing_lever"),"new record available to runtime catalog");
         check(document->undo()&&document->buildArchive()==createBefore,"one Undo removes created lever and points");
         check(document->redo(),"Redo restores created lever");
         out<<"PASS total="<<passes<<"\n";out.flush();return 0;

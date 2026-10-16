@@ -13,6 +13,17 @@
 #include <algorithm>
 
 namespace ei {
+bool MapInventoryCatalog::containsModel(const QString& model) const
+{
+    for(const auto& item : m_items) if(item.model == model) return true;
+    return false;
+}
+bool MapWeaponCatalog::containsModel(const QString& model) const
+{
+    for(const auto& variants : m_models)
+        for(const auto& item : variants) if(item.model == model) return true;
+    return false;
+}
 QString MapInventoryCatalog::pathForDatabase(const QString& databasePath)
 {
     return databasePath.isEmpty() ? QString() : QFileInfo(databasePath).dir().filePath("mapitems-catalog.json");

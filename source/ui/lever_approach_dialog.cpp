@@ -1,6 +1,7 @@
 #include "lever_approach_dialog.h"
 #include "database_document.h"
 #include "lever_approach.h"
+#include "map_weapon_catalog.h"
 #include "view.h"
 #include "node.h"
 #include <QComboBox>
@@ -77,6 +78,18 @@ bool LeverApproachDialog::initialize(QString* error) {
     m_node=selection.first();m_model=m_node->modelName();m_origin=m_node->drawPosition();
     m_position=m_node->position();m_complexion=m_node->constitution();m_rotation=m_node->rotation();
     m_profile=m_document->profileId();
+    MapWeaponCatalog equipment;
+    equipment.load(MapWeaponCatalog::pathForDatabase(m_document->sourceArchivePath()),
+                   ItemSpellConstructorCatalog::fromDocument(*m_document));
+    MapInventoryCatalog inventory;
+    inventory.load(MapInventoryCatalog::pathForDatabase(m_document->sourceArchivePath()),m_document.data());
+    const bool horizontal=equipment.containsModel(m_model)||inventory.containsModel(m_model);
+    m_approachRotation=horizontal?QQuaternion():m_rotation;
+    auto* mode=new QLabel(horizontal
+        ? QString::fromUtf8("Предмет: точки в мировых XY от центра объекта, независимо от вращения.\nДля такого подхода в игре требуется обновление addon/Rebuild.")
+        : QString::fromUtf8("Обычный рычаг или модель не подтверждена каталогом предметов: точки вращаются вместе с моделью."),this);
+    mode->setObjectName("leverApproachMode");mode->setWordWrap(true);
+    qobject_cast<QFormLayout*>(layout())->insertRow(1,mode);
     const auto* table=m_document->table("levers.leverprototypes");
     if(!table)return fail(QString::fromUtf8("В активной БД нет таблицы рычагов."));
     int matches=0;
@@ -138,7 +151,7 @@ void LeverApproachDialog::preview() {
     if(!m_ready||!m_view)return;
     QVector<QVector3D> lines;
     for(int i=0;i<=m_count->currentIndex();++i){
-        const auto p=leverApproachWorld(m_points[i],m_origin,m_rotation,m_scale,float(m_reach->value()));
+        const auto p=leverApproachWorld(m_points[i],m_origin,m_approachRotation,m_scale,float(m_reach->value()));
         lines<<m_origin<<p;
         for(int s=0;s<24;++s){const float a=s*6.2831853f/24,b=(s+1)*6.2831853f/24;
             lines<<p+QVector3D(.3f*std::cos(a),.3f*std::sin(a),.08f)<<p+QVector3D(.3f*std::cos(b),.3f*std::sin(b),.08f);}
@@ -154,7 +167,7 @@ void LeverApproachDialog::place(const QPoint& position) {
     if(!contextValid()){reject();return;}
     QVector3D world;QVector2D local;
     if(!m_view->terrainPositionAt(position,&world))return;
-    if(!leverApproachLocal(QVector2D(world),m_origin,m_rotation,m_scale,float(m_reach->value()),&local)){
+    if(!leverApproachLocal(QVector2D(world),m_origin,m_approachRotation,m_scale,float(m_reach->value()),&local)){
         m_status->setText(QString::fromUtf8("Точка слишком близко для этой дистанции персонажа либо поворот не позволяет определить X/Y. Выберите другое место или уменьшите дистанцию предпросмотра."));return;
     }
     const int index=qMin(m_active->currentIndex(),m_count->currentIndex());m_points[index]=local;
@@ -173,7 +186,7 @@ bool LeverApproachDialog::eventFilter(QObject* object,QEvent* event) {
         if(!contextValid()){reject();return true;}
         bool hit=false;
         for(int i=0;i<=m_count->currentIndex();++i){QPointF screen;
-            if(m_view->leverApproachScreenPoint(leverApproachWorld(m_points[i],m_origin,m_rotation,m_scale,float(m_reach->value())),&screen)
+            if(m_view->leverApproachScreenPoint(leverApproachWorld(m_points[i],m_origin,m_approachRotation,m_scale,float(m_reach->value())),&screen)
                &&QLineF(screen,mouse->pos()).length()<16){m_active->setCurrentIndex(i);hit=true;break;}}
         m_dragging=true;if(!hit)place(mouse->pos());return true;
     }
