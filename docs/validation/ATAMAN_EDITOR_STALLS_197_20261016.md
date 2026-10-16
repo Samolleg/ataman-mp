@@ -27,3 +27,15 @@ EI-EDITOR-STALLS-197, 16–17.10.2026. База196/main b1e132f6538733a539c728f2
 В cross-map synthetic cold-start первые два resolve заняли3638/2207ms (resolve3275/2185ms); это остающийся первый расчёт/гидратация нового перехода. Этот результат не выдается за исправление всех возможных холодных задержек. Повторные паузы из журнала413–637ms DB UI и542–750ms каждого mixed stamp адресованы отдельно и воспроизведены тестами. Первое открытие/проверка БД и подготовка GUI-снимка autosave имеют конечную цену, указанную выше. Автосохранение здесь проверено для активной MPR; мировой Save cohort не изменялся.
 
 Native hidden windows/GL и файловые readback не заменяют визуальную приёмку владельцем на рабочей карте или игровой прогон. Live desktop editor не запускался. Общий clipboard UI smoke не запускался: адресные тесты не меняли системный буфер. Source originals MPR/RES в live-inputs.json перепроверены; тесты писали только частные копии.
+
+## Идентичность сборки
+
+Source main `024c5d28587ecaf4b8ef5fc0b2686427103ab007`; 274 production objects и 459 source input hashes записаны в private receipts. make -q release подтвердил актуальность. EXE `0cbbf20455aa408bf67997ae975b9393e03f91d3fddb45a27eccf1aae68f26a1`. Runtime-компоненты собраны wrapper этой версии.
+
+## Установка17.10.2026
+
+- Постоянная artifacts/EI-Mapper-Ataman-2-first-test обновлена до197 после проверки отсутствия процессов из неё. Fresh staging/raw version197, одинаковые EXE/runtime, штатный finalizer PASS; после finalizer пакет не запускался.
+- Все130 managed совпали с manifest `B4D2F2D4228D32DD4550C65BF46D859198758FD6C97C99E61BFA68AFA5492654`. EXE `0CBBF20455AA408BF67997AE975B9393E03F91D3FDDB45A27ECCF1AAE68F26A1`; source main `024c5d28587ecaf4b8ef5fc0b2686427103ab007`.
+- Все16915 owner-файлов вне manifest побайтно сохранены, digest `16915:1B5BC80CCCE8E6A2DD12B567E02292931B569B98BD8CDD328090CFFFD62D7057`. Настройки, карты, сохранения, кэш и HD-банк установки не очищались.
+- Резерв196: artifacts/rollback196-to197-editor-stalls-20261016. Его реконструкция по старому manifest проверена перед удалением только прежнего проверенного rollback195-to196-base-hd-20261016. Другие архивы/установки не менялись.
+- Квитанции: build-receipt.json, staging-receipt.json, final-probe-receipt.json, install-receipt.json, rollback-retirement.json в private task folder. Реализация и установка адресных исправлений завершены; ограничения холодного resolve и приёмки владельцем указаны выше. GitHub этим поручением не обновлялся.

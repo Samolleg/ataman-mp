@@ -2,7 +2,7 @@
 
 - Поручение16.10: исправить выделение/удаление/перемещение/покраску, убрать лишнюю валидацию и сброс SD/HD; сохранить проверки ID, качество переходов/мини­карты и Undo/Redo; исправить MPR recovery, проверить и установить. База196 main b1e132f6538733a539c728f2f9a77eea4d599e6b. Аудит ниже — зависимость, сторонние пункты сохранены.
 - BUILT/CHECKED197: native100 PASS с настоящей БД и обычными таймерами; native HD/recovery363 PASS, Qt backup11 PASS; cross-map16 cells PASS с полными renderer/mip/shadow сравнениями. DB panel warm3:1294→0ms, mixed3:48→4ms. ID/мини­карта/UndoRedo/Save сохранены. MPR188ms GUI snapshot/1649ms worker, heartbeat max30ms; полный recovery reopen точен. Первые холодные cross-map resolve3638/2207ms остаются отдельной границей, повторные14–40ms; универсальная гарантия отсутствия пауз не заявляется.
-- Evidence docs/validation/ATAMAN_EDITOR_STALLS_197_20261016.md; receipts build-editor-stalls-197-20261016. Следующий шаг — scoped-коммит, final staging и guarded установка197 с сохранностью owner-файлов.
+- INSTALLED197: source main 024c5d28587ecaf4b8ef5fc0b2686427103ab007; fresh Release/runtime, raw/staged version и finalizer PASS;130 managed и16915 owner-файлов проверены. EXE0CBBF20455AA408BF67997AE975B9393E03F91D3FDDB45A27ECCF1AAE68F26A1. Резерв196 artifacts/rollback196-to197-editor-stalls-20261016 восстановим; удалён только прежний проверенный резерв195. Evidence docs/validation/ATAMAN_EDITOR_STALLS_197_20261016.md, receipts build-editor-stalls-197-20261016. Адресные исправления и установка завершены; холодный первый resolve2–4s/ручная приёмка остаются явными границами. GitHub не обновлялся.
 
 ## EI-EDITOR-STALL-AUDIT-196-20261016 — тормозят выделение, удаление, перемещение и покраска
 
