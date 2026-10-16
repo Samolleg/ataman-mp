@@ -1056,8 +1056,43 @@ void CUnit::getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType)
     }
 }
 
+void CUnit::setConstitution(QVector3D& value)
+{
+    if(m_complection == value)
+        return;
+    m_complection = value;
+    invalidateDatabaseVisual();
+    // Keep the last complete equipped visual until the render context can
+    // rebuild it. The generic recalcFigure() replaces it with the MOB mask
+    // and loses database equipment. Mouse previews/revert use this setter too.
+    // New CPart wrappers must receive the pose even at the same logical frame;
+    // the animation clip and clock themselves remain unchanged.
+    m_lastAppliedAnimationFrame = -1.0;
+    m_animationPoseIsStatic = false;
+}
+
 void CUnit::applyParam(const QSharedPointer<IPropertyBase>& prop)
 {
+    QVector3D constitution = m_complection;
+    switch(prop->type())
+    {
+    case eObjParam_COMPLECTION:
+        constitution = dynamic_cast<prop3D*>(prop.get())->value(); break;
+    case eObjParam_COMPLECTION_X:
+        constitution.setX(dynamic_cast<propFloat*>(prop.get())->value()); break;
+    case eObjParam_COMPLECTION_Y:
+        constitution.setY(dynamic_cast<propFloat*>(prop.get())->value()); break;
+    case eObjParam_COMPLECTION_Z:
+        constitution.setZ(dynamic_cast<propFloat*>(prop.get())->value()); break;
+    default:
+        break;
+    }
+    if(prop->type() == eObjParam_COMPLECTION || prop->type() == eObjParam_COMPLECTION_X
+            || prop->type() == eObjParam_COMPLECTION_Y || prop->type() == eObjParam_COMPLECTION_Z)
+    {
+        setConstitution(constitution);
+        return;
+    }
     // Pose, IDs, logic and inventory do not own the derived DB appearance.
     if(ei::unitPropertyAffectsVisual(prop->type()))
         invalidateDatabaseVisual();

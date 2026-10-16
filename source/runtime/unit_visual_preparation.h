@@ -20,6 +20,9 @@ inline bool unitPropertyAffectsVisual(EObjParam type)
     case eObjParam_PRIM_TXTR:
     case eObjParam_SEC_TXTR:
     case eObjParam_COMPLECTION:
+    case eObjParam_COMPLECTION_X:
+    case eObjParam_COMPLECTION_Y:
+    case eObjParam_COMPLECTION_Z:
     case eObjParam_BODYPARTS:
     case eObjParam_UNIT_NEED_IMPORT:
     case eObjParam_UNIT_PROTOTYPE:

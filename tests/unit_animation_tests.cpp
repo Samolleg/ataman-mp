@@ -419,6 +419,9 @@ void UnitAnimationTests::transformsDoNotInvalidateDatabaseAppearance()
     QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_UNIT_WEAPONS));
     QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_BODYPARTS));
     QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_COMPLECTION));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_COMPLECTION_X));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_COMPLECTION_Y));
+    QVERIFY(ei::unitPropertyAffectsVisual(eObjParam_COMPLECTION_Z));
 }
 
 void UnitAnimationTests::carriesUnaffectedResolvedVisualAcrossDatabaseGeneration()

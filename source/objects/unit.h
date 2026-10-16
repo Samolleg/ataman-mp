@@ -202,6 +202,7 @@ public:
     void collectlogicParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENodeType paramType) override;
     void getParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override;
     void applyParam(const QSharedPointer<IPropertyBase>& prop) override;
+    void setConstitution(QVector3D& value) override;
     void getLogicParam(QSharedPointer<IPropertyBase>& prop, EObjParam propType) override;
     void applyLogicParam(const QSharedPointer<IPropertyBase>& prop) override final;
     const QString& databaseName() const {return m_prototypeName;}
