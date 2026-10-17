@@ -5,6 +5,8 @@
 
 - BUILT/CHECKED202: fresh Release/runtime; native62 PASS на копии zone3obr (Cancel, Save/Undo/Redo, сохранение Undo, Redo-ветвь/новая ветвь, чистое состояние, повторное открытие и нетронутые пиксели); QtTest3 PASS на общем рельефе двух синтетических карт. Исходные игровые MPR/RES SHA неизменны. Evidence docs/validation/ATAMAN_WORLD_HISTORY_202_20261017.md; private build-world-history-202-20261017. Далее scoped-коммит, staging и guarded установка.
 
+- DONE/INSTALLED202: main 0104c41d4a33d45c218d20913ad1d9f03136ac3e;654 inputs, native62 + QtTest3, raw/staged202/finalizer/130 managed PASS. 17042 пользовательских файлов сохранены, игровые оригиналы не менялись. Резерв201 восстановим; прежний проверенный200 удалён. Receipts build-world-history-202-20261017. История сохраняется через Save в текущей сессии; перезапуск начинает новую историю. GitHub не обновлялся.
+
 ## EI-WORLD-SAVE-201 — сохранение текущей работы и атласа общей кисти
 
 - Поручение17.10: сначала сохранить текущие изменения без потерь, исправить DXT1 matching complete MMP headers при Save, проверить именно общий Save на копии DejaVu с Undo/Redo/reopen, собрать/установить. База199;200 занята патрулями, резерв201. Живую сессию не закрывать до проверенного спасения, чужую работу200 сохранить.

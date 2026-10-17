@@ -22,4 +22,12 @@ Private directory `build-world-history-202-20261017`:
 
 ## Handoff
 
-Native and unit gates passed. Pending scoped source commit, snapshot identity, clean staging and guarded installation over201. Preserve owner settings/data and retain verified previous program rollback.
+Native and unit gates passed; scoped commit, source identity, clean staging and guarded installation over201 completed. Preserve owner settings/data and retain verified previous program rollback.
+
+## Verified installation
+
+- Source main `0104c41d4a33d45c218d20913ad1d9f03136ac3e`;654 compiler/resource inputs match the built snapshot. Raw/staged202 and package finalizer PASS.
+- 130 managed files verified; owner files unchanged: `17042:4A7D8DE0FF77540A8F7C84390D5D4AEADC71B47F01E35E9B48A0717268FC33EB`.
+- EXE `EB6EFF126E35A8B5100CF3D771B9E1666D22E5ED0D3A9098D4194DB51E2A9E22`; manifest `9F941F4731D5A8841146321F8BE0AC439E88F2DFD198D043BC144F901562F4FC`.
+- Verified reconstructable201 rollback retained at `artifacts/rollback201-to202-world-history-20261017`; only previous verified200 program rollback retired. Map recovery backups retained separately.
+- Receipts: private `build-world-history-202-20261017/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json`. No GitHub publication.
