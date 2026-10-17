@@ -23,4 +23,13 @@ Task EI-SEMANTIC-SAVE-206,2026-10-17. Base main541f0604 /205. Scope: preserve cu
 
 ## Handoff
 
-Fresh Release206/runtime and final native checks passed. Scoped source commit, input identity, clean staging and guarded install are pending. Owner UI/game acceptance remains separate. No GitHub publication.
+Fresh Release206/runtime and final native checks passed. Scoped source commit, input identity, clean staging and guarded install completed. Owner UI/game acceptance remains separate. No GitHub publication.
+
+## Verified installation
+
+- Owner confirmed no edits after22:54 and closed the editor. Guard retained205 until the process finished shutdown; no process was killed.
+- Source main `5fca601f20d0a3b26edc790c6e364072a0671b49`; 658 compiler/resource inputs match the built/committed sources. Raw/staged206 and finalizer PASS.
+- 130 installed managed files verified; owner files unchanged: `16205:733C676EE4601BD71E73A77BABED6D2B5BE6B03C81EA3578BB0C398EC10ACA72`. The five live zone1/zone2 MPR/MOB/shared RES files also still match the pinned pre-work rescue hashes (`live-preservation.json`); no game data was rewritten by this fix.
+- EXE `F93EC3625CC326F1D405283324921B10865670C73FEBFA78202387374BF3E5B4`; manifest `A3EAC8AEC34F6D2289B6372F5D4C3187FD1EDC7A3C63E57374DB22075E87EB59`.
+- Reconstructable205 program rollback retained at `artifacts/rollback205-to206-semantic-save-20261017`; only previous verified204 program backup retired. All map rescue data retained.
+- Receipts: private `build-semantic-save-206-20261017/{build-receipt,staging-receipt,install-receipt,rollback-retirement,rescue-validation,live-preservation}.json`.

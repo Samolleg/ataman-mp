@@ -6,6 +6,8 @@
 
 - BUILT/CHECKED206:205 воспроизвела тот же post-save semantic-stage через настоящий пункт меню. Fresh206/runtime; native1251 PASS/exit0: копии zone1/zone2, Cancel, две dirty-карты, пустая/непустая семантика, recovery, Undo/Redo, Save Undo/Redo, reopen, все исходные MMP побайтно. Current22:49 zone2 recovery == disk и22 MMP exact. Далее scoped-коммит/staging/guarded install. Evidence docs/validation/ATAMAN_SEMANTIC_SAVE_206_20261017.md.
 
+- DONE/INSTALLED206: main 5fca601f20d0a3b26edc790c6e364072a0671b49; native1251 PASS (включая побайтные MMP),658 source inputs, raw/staged206/finalizer/130 installed PASS. 16205 пользовательских файлов сохранены. Владелец подтвердил отсутствие новых правок и закрыл редактор; пять live MPR/MOB/RES совпали с закреплённым rescue. Резерв205 восстановим, прежний проверенный204 удалён. Автоматических изменений игровых файлов не было. История через Save сохраняется в текущей сессии, запуск новой сессии не восстанавливает историю старой. Evidence docs/validation/ATAMAN_SEMANTIC_SAVE_206_20261017.md; receipts build-semantic-save-206-20261017. GitHub не обновлялся.
+
 ## EI-CANVAS-INPLACE-205 — холст текущей MPR с MOB и навигацией
 
 - Поручение17.10: применять размер холста к текущей MPR без изменения имени/пути, сохранить рельеф и покрытия, согласованно обработать MOB/навигацию, проверить, собрать и установить. База main0b6a35970016ca4ed84a6eccdbdbeca1eabe780d/204; резерв205. Работа лично в main, чужие изменения ROADMAP сохраняются. Игровые данные — только приватные копии; само изменение живого холста пользователь выполняет новой командой, текущую gipat1 автоматически не обрезать.
