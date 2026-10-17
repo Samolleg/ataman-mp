@@ -1259,6 +1259,13 @@ ETerrainPaintPaletteMode CLandscapeTools::paintPaletteMode() const
     return static_cast<ETerrainPaintPaletteMode>(
         qBound(0, m_paintModeTabs ? m_paintModeTabs->currentIndex() : 0, 2));
 }
+void CLandscapeTools::showAllPaintMaterials()
+{
+    m_paintFilter->clear();
+    m_usedMaterialsOnly->setChecked(false);
+    setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
+}
+
 void CLandscapeTools::setPaintPaletteMode(ETerrainPaintPaletteMode mode)
 {
     if(!m_paintModeTabs)

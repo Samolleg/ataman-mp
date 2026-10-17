@@ -9585,6 +9585,12 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
     QElapsedTimer phaseTimer;
     phaseTimer.start();
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
+    // A document transition releases the old map with doneCurrent(). Modal
+    // creation/open dialogs also leave no guarantee about the current GL
+    // context. Sector construction creates and fills GPU buffers immediately;
+    // doing it before makeCurrent() leaves missing index buffers and the first
+    // viewport/minimap draw can dereference a null client-side index pointer.
+    makeCurrent();
     m_pLand->readMap(filePath,createRecoverySnapshot);
     const qint64 rendererLoadMs = phaseTimer.elapsed();
     if(!m_pLand->isMprLoad())

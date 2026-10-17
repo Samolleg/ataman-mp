@@ -1150,12 +1150,15 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
     }
     for(const STerrainGlobalMaterialFamily& global : globalFamilies)
     {
+        const bool knownFamily = families.contains(global.id);
         STerrainAtlasProfileFamily family = families.value(global.id);
         family.id = global.id;
         family.name = global.name;
         family.layer = global.layer;
-        family.landAllowed = global.layer == ETerrainAtlasLayer::Land;
-        family.overlayAllowed = global.layer == ETerrainAtlasLayer::Overlay;
+        family.landAllowed = (knownFamily && family.landAllowed)
+            || global.layer == ETerrainAtlasLayer::Land;
+        family.overlayAllowed = (knownFamily && family.overlayAllowed)
+            || global.layer == ETerrainAtlasLayer::Overlay;
         family.paintSelectable = true;
         family.tileType = global.runtimeTerrainType;
         family.memberSlots.clear();
@@ -1216,6 +1219,31 @@ STerrainAtlasProfile CTerrainAtlasProfileStore::workingAtlasProfile(
                 }
             }
         profile.slotDefinitions.append(definition);
+    }
+    // The working catalog also contains overlay transitions on a ground
+    // support (for example a lava edge against stone). Persist that actual
+    // compatibility for the participating ground materials. Replacing their
+    // permissions with the global palette's primary layer alone makes the
+    // saved mixed slot invalidate the entire profile on the next reopen.
+    for(const STerrainAtlasProfileSlot& definition : profile.slotDefinitions)
+    {
+        if(!definition.assigned) continue;
+        const qint32 ids[] = {definition.signature.northWest,
+                             definition.signature.northEast,
+                             definition.signature.southEast,
+                             definition.signature.southWest};
+        bool overlayTransition = false;
+        const bool landTransition = definition.routeOwnerMaterial > 0
+            && families.contains(definition.routeOwnerMaterial)
+            && families.value(definition.routeOwnerMaterial).layer == ETerrainAtlasLayer::Land;
+        for(qint32 id : ids)
+            overlayTransition |= families.value(id).layer == ETerrainAtlasLayer::Overlay;
+        if(overlayTransition || landTransition)
+            for(qint32 id : ids)
+            {
+                families[id].overlayAllowed |= overlayTransition;
+                families[id].landAllowed |= landTransition;
+            }
     }
     if(!usedMaterials.isEmpty())
     {

@@ -110,6 +110,7 @@ public:
     bool classicAutoPaintingEnabled() const;
     ETerrainPaintPaletteMode paintPaletteMode() const;
     void setPaintPaletteMode(ETerrainPaintPaletteMode mode);
+    void showAllPaintMaterials();
     ETerrainPaintTargetMode paintTargetMode() const;
     bool classicAutoSafeMode() const;
     bool modernAutoResolveBlends() const;

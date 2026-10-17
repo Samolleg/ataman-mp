@@ -121,6 +121,7 @@
 #include "terrain_edit_model.h"
 #include "staged_save_validator.h"
 #include "landscape_tools.h"
+#include "new_terrain_canvas.h"
 #include "collection_document.h"
 #include "world_map_layout_document.h"
 #include "terrain_save_flow_policy.h"
@@ -8410,15 +8411,17 @@ void MainWindow::on_actionNew_MPR_triggered()
     scroll->setWidget(scrollContent);
     root->addWidget(scroll, 1);
     QLabel* explanation = new QLabel(tr(
-        "A new landscape reuses the exact atlas, material, and animation metadata from a proven template MPR. "
-        "Endurance creates fresh MP/SEC members and does not invent a MOB or map.txt registration. "
-        "If you change the namespace, matching atlas textures must already exist in the active resource profile."), &dialog);
+        "Новая карта получает рельеф и отдельный атлас из выбранного шаблона. "
+        "Весь каталог земли и покрытий доступен для рисования сразу после создания. "
+        "Рядом с MPR сохраняется файл <имя>-atlas.res; переносите их вместе. "
+        "MOB и регистрация в map.txt создаются отдельно."), &dialog);
     explanation->setWordWrap(true);
     contentRoot->addWidget(explanation);
     QFormLayout* form = new QFormLayout;
     contentRoot->addLayout(form);
 
     QLineEdit* templatePath = new QLineEdit(&dialog);
+    templatePath->setObjectName(QStringLiteral("newMprTemplatePath"));
     templatePath->setToolTip(tr(
         "A proven MPR whose atlas namespace, tile metadata, liquid materials, animations, and other MP settings will be copied. The template itself is never modified."));
     QPushButton* browseTemplate = new QPushButton(tr("Browse..."), &dialog);
@@ -8430,11 +8433,14 @@ void MainWindow::on_actionNew_MPR_triggered()
     form->addRow(tr("Terrain template MPR"), templateRow);
 
     QLineEdit* nameSpace = new QLineEdit(&dialog);
+    nameSpace->setObjectName(QStringLiteral("newMprNamespace"));
     nameSpace->setToolTip(tr(
-        "Internal MP/SEC resource-name stem for the new archive. Keep the template namespace unless matching atlas textures already exist under a different namespace."));
+        "Внутреннее имя новой карты. Текстуры шаблона автоматически копируются под этим именем в отдельный атлас."));
     form->addRow(tr("MPR namespace"), nameSpace);
     QSpinBox* sectorsX = new QSpinBox(&dialog);
     QSpinBox* sectorsY = new QSpinBox(&dialog);
+    sectorsX->setObjectName(QStringLiteral("newMprSectorsX"));
+    sectorsY->setObjectName(QStringLiteral("newMprSectorsY"));
     sectorsX->setRange(1, 32);
     sectorsY->setRange(1, 32);
     sectorsX->setValue(4);
@@ -8787,14 +8793,16 @@ void MainWindow::on_actionNew_MPR_triggered()
         if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
             destinationPath += QStringLiteral(".mpr");
         const QFileInfo destination(destinationPath);
-        if(destination.exists()
+        const QFileInfo atlasDestination(destination.dir().filePath(
+            destination.completeBaseName() + QStringLiteral("-atlas.res")));
+        if((destination.exists() || atlasDestination.exists())
            && QMessageBox::question(&dialog, tr("Replace MPR"),
-                tr("%1 already exists. Back it up and replace it?")
+                tr("Карта %1 или её атлас уже существуют. Сохранить резерв и заменить комплект?")
                     .arg(destination.fileName())) != QMessageBox::Yes)
             return;
-        SMprSaveCommitRequest commit;
-        commit.destination = destination;
-        const SMprSaveCommitResult result = commitGeneratedMpr(candidate, commit);
+        const SMapSaveBatchResult result = commitNewTerrainCanvas(
+            templateFile, candidate, destination,
+            CTextureList::getInstance()->configuredResourceArchivePaths());
         if(!result.success)
         {
             QMessageBox::critical(&dialog, tr("Create New MPR"),
@@ -8812,6 +8820,7 @@ void MainWindow::on_actionNew_MPR_triggered()
             dialog.accept();
             return;
         }
+        m_landscapeTools->showAllPaintMaterials();
         statusBar()->showMessage(tr("Created and opened %1")
             .arg(destination.fileName()), 5000);
         dialog.accept();
