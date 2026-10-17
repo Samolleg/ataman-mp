@@ -10300,7 +10300,8 @@ bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
                 const int fieldSize=semantics.vertexWidth*semantics.vertexHeight;
                 if(semantics.land.size()!=fieldSize)semantics.land.clear();
                 if(semantics.overlay.size()!=fieldSize)semantics.overlay.clear();
-                if(!semantics.land.isEmpty()||!semantics.overlay.isEmpty()) {
+                // Recovery uses the same explicit empty-field binding as Save.
+                {
                     semanticMember.name=STerrainSemanticFieldDocument::embeddedMemberName();
                     semanticMember.payload=semantics.toBytes(report);
                     QByteArray embedded;
@@ -14153,7 +14154,7 @@ bool CView::buildTerrainSemanticFieldMember(
         rawAtlasHash = QByteArray::fromHex(rawAtlasHash);
     if(candidateMprBytes.isEmpty() || rawAtlasHash.size() != 32
        || profileBytes.isEmpty()
-       || !m_terrainEditAvailable)
+       || (!terrainEdit && !m_terrainEditAvailable))
         return true;
     const CTerrainEditModel& semanticTerrain = terrainEdit
         ? *terrainEdit : m_terrainEdit;
@@ -14182,8 +14183,8 @@ bool CView::buildTerrainSemanticFieldMember(
         ETerrainTileLayer::Overlay, &document.overlay, &ignored);
     if(document.overlay.size() != count)
         document.overlay.clear();
-    if(document.land.isEmpty() && document.overlay.isEmpty())
-        return true;
+    // Empty is authoritative too: shadow any legacy RES field bound to older
+    // terrain or artwork instead of letting it reappear during Save adoption.
     member->name = STerrainSemanticFieldDocument::memberName(
         document.mprNamespace, destinationMpr);
     member->payload = document.toBytes(report);

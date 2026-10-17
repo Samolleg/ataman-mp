@@ -14,6 +14,7 @@
 #include "staged_save_validator.h"
 #include "res_archive_document.h"
 #include "terrain_save_flow_policy.h"
+#include "terrain_semantic_field_store.h"
 #include <QtWidgets>
 #include <QCryptographicHash>
 #include <cmath>
@@ -335,9 +336,16 @@ bool CView::saveWorldTerrainMaps()
     QMap<QString,STerrainAtlasProfile> profiles;
     QMap<QString,QVector<QImage>> physical;
     QMap<QString,CMprDocument> reopened;
-    CValidationReport report;QString error;
+    CValidationReport report;QString error;bool diskCommitted=false;
     auto refuse=[&](const QString& detail) {
-        QMessageBox::warning(this,tr("Карты не сохранены"),detail+(report.findings().isEmpty()?QString():"\n"+report.toText()));return false;
+        CValidationReport failures;
+        for(const auto& finding:report.findings())
+            if(finding.severity!=EValidationSeverity::Info)
+                failures.add(finding.code,finding.severity,finding.message,finding.location);
+        const QString diagnostics=failures.toText().trimmed();
+        const QString message=detail==report.toText() ? diagnostics : detail;
+        QMessageBox::warning(this,diskCommitted?tr("Файлы сохранены; предпросмотр не обновлён"):tr("Карты не сохранены"),
+            message+(diagnostics.isEmpty()||message.contains(diagnostics)?QString():"\n"+diagnostics));return false;
     };
     for(const auto& path:paths) {
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];
@@ -412,6 +420,16 @@ bool CView::saveWorldTerrainMaps()
                     profile.mprNamespace,profile.atlasPixelSha256,profile.toBytes(),
                     &semantic,&report,&doc->terrain,&candidate)) return refuse(report.toText());
             if(!reopened[id].loadBytes(candidate,path,&report))return refuse(report.toText());
+            // Validate the exact embedded field before publishing any file.
+            // In particular, an empty current field must suppress stale RES metadata.
+            STerrainSemanticFieldDocument semantics;
+            const QByteArray embedded=reopened[id].memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
+            if(!STerrainSemanticFieldDocument::fromBytes(embedded,&semantics,&report,path)
+               || !semantics.validateBinding(reopened[id].mapInfo().innerNamespace,QByteArray(),
+                    QByteArray::fromHex(profile.atlasPixelSha256),
+                    QCryptographicHash::hash(profile.toBytes(),QCryptographicHash::Sha256),
+                    doc->terrain.tileCountX()+1,doc->terrain.tileCountY()+1,&report,
+                    STerrainSemanticFieldDocument::tileBindingSha256(reopened[id])))return refuse(report.toText());
             if(publishAtlas) {
                 const QString archiveId=CWorldTerrainSession::key(source.archive);
                 const QString name=CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace);
@@ -465,6 +483,7 @@ bool CView::saveWorldTerrainMaps()
     if(m_mapCohortActive)m_mapCohortCommitted=saved.success;
     for(const auto& destination:destinations)emit terrainPublicationFinished(destination,saved.success);
     if(!saved.success)return refuse(saved.error);
+    diskCommitted=true;
     // Adopt disk bindings without discarding the already validated history.
     for(const auto& path:paths) {
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];

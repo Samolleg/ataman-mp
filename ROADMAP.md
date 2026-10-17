@@ -1,3 +1,11 @@
+## EI-SEMANTIC-SAVE-206 — сохранение zone1/zone2 после публикации атласа
+
+- Поручение17.10: сначала закрепить текущие изменения без потерь; исправить post-save semantic-stage; настоящий Save MPR через меню на копиях zone1/zone2, Undo/Redo и повторное открытие, затем build/install. База main541f0604/205; работа лично в main, чужие изменения сохраняются. Разрешён необходимый guarded rescue текущих zone1/zone2; тесты приватные, воду/переходы не перерисовывать.
+- DIAGNOSED:22:45:19 disk batch прошёл, adoption отклонил внешний semantic member zone2: terrain.semantic_field_binding. Общий refuse ошибочно пишет «Карты не сохранены» и весь INFO report. Гипотеза: при пустом текущем corner field новый semantic member не создаётся, после нового atlas profile читается старый RES member. Следующий шаг — native воспроизведение/сверка текущего rescue, затем исправление до disk commit.
+- RESCUE:84 файла live/backup закреплены с SHA-readback в build-semantic-save-206-20261017/rescue; предупреждение закрыто без закрытия карты. Автосохранение22:49:23 текущей zone2 с парным atlas закреплено отдельно (fc0f058c...). Сессия остаётся открытой; Undo/Redo не затрагивались. Далее exact candidate/readback и проверка сохранности zone1.
+
+- BUILT/CHECKED206:205 воспроизвела тот же post-save semantic-stage через настоящий пункт меню. Fresh206/runtime; native1251 PASS/exit0: копии zone1/zone2, Cancel, две dirty-карты, пустая/непустая семантика, recovery, Undo/Redo, Save Undo/Redo, reopen, все исходные MMP побайтно. Current22:49 zone2 recovery == disk и22 MMP exact. Далее scoped-коммит/staging/guarded install. Evidence docs/validation/ATAMAN_SEMANTIC_SAVE_206_20261017.md.
+
 ## EI-CANVAS-INPLACE-205 — холст текущей MPR с MOB и навигацией
 
 - Поручение17.10: применять размер холста к текущей MPR без изменения имени/пути, сохранить рельеф и покрытия, согласованно обработать MOB/навигацию, проверить, собрать и установить. База main0b6a35970016ca4ed84a6eccdbdbeca1eabe780d/204; резерв205. Работа лично в main, чужие изменения ROADMAP сохраняются. Игровые данные — только приватные копии; само изменение живого холста пользователь выполняет новой командой, текущую gipat1 автоматически не обрезать.
