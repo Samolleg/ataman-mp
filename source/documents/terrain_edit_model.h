@@ -573,6 +573,7 @@ public:
     float maxZ() const { return m_maxZ; }
     STerrainHeightRange heightRange() const;
     bool hasSeamConflicts() const;
+    bool rebaseSavedBaseline(const CTerrainEditModel& disk, const CTerrainEditModel& savedState);
     bool isDirty() const;
     bool usesUnsavedAtlasArtwork(const CTerrainWorkingAtlas& atlas) const;
     void extendMaterialTable(int count) { if(count>=m_materialCount && count<=32767)m_materialCount=count; }

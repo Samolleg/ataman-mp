@@ -319,7 +319,7 @@ bool CView::saveWorldTerrainMaps()
     const QStringList paths=m_worldTerrainSession.dirtyPaths();
     if(paths.isEmpty())return true;
     if(QMessageBox::question(this,tr("Сохранение общего ландшафта"),
-        tr("Сохранить перечисленные карты и их атласы с резервными копиями?\n\n%1\n\nПосле сохранения история общей кисти будет очищена.").arg(paths.join('\n')),
+        tr("Сохранить перечисленные карты и их атласы с резервными копиями?\n\n%1\n\nИстория Undo/Redo общей кисти сохранится.").arg(paths.join('\n')),
         QMessageBox::Save|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Save)return false;
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
     QVector<SMapSaveFile> files;
@@ -350,14 +350,15 @@ bool CView::saveWorldTerrainMaps()
             if(!archive.loadBytes(archives[archiveId],source.archive,&errors))return refuse(errors.join('\n'));
             const auto names=ei::terrainTextureResourceNames(staged.mapInfo().innerNamespace,int(staged.mapInfo().textureCount));
             if(names.size()!=source.pages.size())return refuse(tr("Размер исходного атласа изменился."));
-            auto pages=source.pages;const auto images=doc->atlas->activeTileImages();
+            auto pages=source.pages;auto images=doc->atlas->activeTileImages();auto types=doc->atlas->activeTileTypes();
+            while(types.size()<staged.mapInfo().tileTypes.size())types.append(staged.mapInfo().tileTypes[types.size()]);
             for(int page=0;page<names.size();++page) {
                 if(archive.memberPayload(names[page])!=source.pages[page])return refuse(tr("Текстуры изменены другой программой: %1").arg(names[page]));
                 QSet<int> changed;
                 for(int slot=0;slot<64;++slot) {
                     QImage old;
                     if(!ei::decodeMmpDxt1AtlasTile(pages[page],slot,&old,&error))return refuse(error);
-                    if(page*64+slot>=images.size())return refuse(tr("Рабочий атлас потерял исходные страницы."));
+                    if(page*64+slot>=images.size())images.append(old); // Unused saved tail remains available after Undo.
                     if(old.convertToFormat(QImage::Format_RGBA8888)!=images[page*64+slot].convertToFormat(QImage::Format_RGBA8888))changed.insert(slot);
                 }
                 if(!changed.isEmpty()) {
@@ -368,7 +369,7 @@ bool CView::saveWorldTerrainMaps()
                 }
             }
             const auto animations=id==active?m_mprAnimatedTiles:doc->baseline.mapInfo().animatedTiles;
-            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(staged,images,doc->atlas->activeTileTypes(),pages,doc->materials,animations,&report,doc->atlas->preservedDxtTiles());
+            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(staged,images,types,pages,doc->materials,animations,&report,doc->atlas->preservedDxtTiles());
             if(!package.success)return refuse(package.error);
             if(!staged.loadBytes(package.mprBytes,path,&report))return refuse(report.toText());
             CResArchiveDocument encoded;
@@ -442,6 +443,10 @@ bool CView::saveWorldTerrainMaps()
         }
         if(!duplicate)files.append(companion);
     }
+    // Rebase a detached history before any disk publication. Slot numbers are
+    // retained by shared Save; snapshots keep their artwork and current state.
+    auto rebased=m_worldTerrainSession;
+    for(const auto& path:paths)if(!rebased.rebaseSavedDocument(CWorldTerrainSession::key(path),reopened[CWorldTerrainSession::key(path)],&error))return refuse(error);
     QStringList prepared;
     for(const auto& destination:destinations) {
         bool ready=false;emit terrainPublicationPreflightRequested(destination,&ready);
@@ -454,29 +459,34 @@ bool CView::saveWorldTerrainMaps()
     if(m_mapCohortActive)m_mapCohortCommitted=saved.success;
     for(const auto& destination:destinations)emit terrainPublicationFinished(destination,saved.success);
     if(!saved.success)return refuse(saved.error);
-    // A successful multi-map save is a history checkpoint, like atlas publication.
-    // No old snapshot may retain hashes or slot tables from the former baseline.
-    m_worldTerrainSession.clearHistory();
+    // Adopt disk bindings without discarding the already validated history.
     for(const auto& path:paths) {
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];
         if(id==active) {
             const QString hash=QString::fromLatin1(QCryptographicHash::hash(reopened[id].originalBytes(),QCryptographicHash::Sha256).toHex());
             if(profiles.contains(id)) {
-                if(!adoptCompleteTerrainBaseline(QFileInfo(path),hash,physical[id],m_worldTerrainAtlasSources[id].archive,profiles[id],false))
+                if(!adoptCompleteTerrainBaseline(QFileInfo(path),hash,physical[id],m_worldTerrainAtlasSources[id].archive,profiles[id],false,true))
                     return refuse(tr("Файлы сохранены, но предпросмотр требует повторного открытия карты."));
             } else {
                 SMprSaveCommitResult commit;commit.candidateSha256=hash;
                 if(!adoptCommittedLandscapeBaseline(QFileInfo(path),commit))return refuse(tr("Файлы сохранены; откройте карту заново."));
             }
         }
-        doc->baseline=reopened[id];doc->terrain.load(doc->baseline,&report);
-        doc->materials=doc->baseline.mapInfo().materials;doc->atlas.clear();m_worldTerrainAtlasSources.remove(id);
+    }
+    m_worldTerrainSession=rebased;
+    for(const auto& path:paths) {
+        const auto id=CWorldTerrainSession::key(path);
         if(profiles.contains(id)) {
-            if(!ensureWorldTerrainAtlas(id,&report) || !previewWorldPaintState(id))return refuse(tr("Файлы сохранены; откройте карту заново."));
+            auto& source=m_worldTerrainAtlasSources[id];source.profile=profiles[id];source.pages.clear();
+            const auto names=ei::terrainTextureResourceNames(reopened[id].mapInfo().innerNamespace,int(reopened[id].mapInfo().textureCount));
+            for(const auto& name:names)source.pages.append(published[CWorldTerrainSession::key(source.archive)].value(name));
         }
+        if(m_worldTerrainSession.documents[id]->atlas) {
+            if(!previewWorldPaintState(id))return refuse(tr("Файлы сохранены; откройте карту заново."));
+        } else if(id==active)restoreWorldTerrainActive();
     }
     refreshWorldTerrainNeighbors();updateWorldTerrainStatus();
-    emit updateMsg(tr("Сохранено карт: %1. Атласы проверены, резервные копии сохранены. История общей кисти очищена.").arg(paths.size()));
+    emit updateMsg(tr("Сохранено карт: %1. Атласы проверены, резервные копии сохранены. История Undo/Redo сохранена.").arg(paths.size()));
     return true;
 }
 

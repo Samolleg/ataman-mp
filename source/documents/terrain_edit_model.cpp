@@ -1547,6 +1547,24 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
     return range;
 }
 
+bool CTerrainEditModel::rebaseSavedBaseline(const CTerrainEditModel& disk, const CTerrainEditModel& savedState)
+{
+    if(disk.m_vertexCountX!=m_vertexCountX
+       || disk.m_vertexCountY!=m_vertexCountY || disk.m_sectors.size()!=m_sectors.size())return false;
+    for(const auto& sector:m_sectors)
+        if(!disk.m_sectorLookup.contains(qMakePair(sector.source.sectorX,sector.source.sectorY)))return false;
+    for(auto& sector:m_sectors) {
+        const auto& baseline=disk.m_sectors[disk.m_sectorLookup.value(qMakePair(sector.source.sectorX,sector.source.sectorY))].source;
+        // Current layout/offsets belong to the historical payload, not to disk.
+        sector.source.payload=baseline.payload;sector.source.expectedPayloadSha256=baseline.expectedPayloadSha256;
+        sector.source.memberName=baseline.memberName;sector.dirty=sector.currentPayload!=baseline.payload;
+    }
+    m_originalMaxZ=disk.m_maxZ;m_originalHeights=disk.m_heights;
+    m_originalVirtualLandMaterials=savedState.m_virtualLandMaterials;
+    m_originalVirtualOverlayMaterials=savedState.m_virtualOverlayMaterials;
+    return true;
+}
+
 bool CTerrainEditModel::isDirty() const
 {
     if(m_maxZ != m_originalMaxZ || m_virtualLandMaterials!=m_originalVirtualLandMaterials

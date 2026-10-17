@@ -19,6 +19,7 @@ public:
     static QString key(const QString& path);
     bool load(const QString& path, QString* error);
     bool apply(const SWorldTerrainStroke& stroke, bool forward, QString* error);
+    bool rebaseSavedDocument(const QString& id, const CMprDocument& baseline, QString* error);
     QStringList dirtyPaths() const;
     void record(const SWorldTerrainStroke& stroke);
     bool undo(QString* error);

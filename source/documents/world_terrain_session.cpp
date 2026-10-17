@@ -85,6 +85,24 @@ bool CWorldTerrainSession::apply(const SWorldTerrainStroke& stroke,bool forward,
     }
     return true;
 }
+bool CWorldTerrainSession::rebaseSavedDocument(const QString& id,const CMprDocument& baseline,QString* error)
+{
+    if(!documents.contains(id)){*error="Missing saved world document.";return false;}
+    QSharedPointer<SWorldTerrainDocument> doc(new SWorldTerrainDocument(*documents[id]));
+    const auto saved=doc->terrain;auto history=m_history;
+    CTerrainEditModel disk;CValidationReport report;
+    if(!disk.load(baseline,&report)){*error=report.toText();return false;}
+    if(!doc->terrain.rebaseSavedBaseline(disk,saved)){*error="Saved terrain layout changed.";return false;}
+    for(auto& stroke:history)if(stroke.paint.contains(id)) {
+        auto& paint=stroke.paint[id];
+        if(!paint.before.terrain.rebaseSavedBaseline(disk,saved)
+           || !paint.after.terrain.rebaseSavedBaseline(disk,saved)){
+            *error="World history cannot adopt the saved terrain layout.";return false;
+        }
+    }
+    doc->baseline=baseline;documents[id]=doc;m_history=history;return true;
+}
+
 QStringList CWorldTerrainSession::dirtyPaths() const
 {
     QStringList result;

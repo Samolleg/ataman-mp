@@ -58,6 +58,27 @@ class WorldTerrainTests : public QObject
         return std::numeric_limits<double>::quiet_NaN();
     }
 private slots:
+    void historySurvivesSavedBaselineAcrossTwoMaps()
+    {
+        CWorldTerrainSession s;add(s,"a");add(s,"b");QString error;CValidationReport report;
+        for(auto doc:s.documents)doc->materials=doc->baseline.mapInfo().materials;
+        const auto beforeA=s.documents["a"]->terrain.sectorPayload(0,0),beforeB=s.documents["b"]->terrain.sectorPayload(0,0);
+        auto targets=QVector<SWorldTerrainTarget>{target(s,"a",{0,0}),target(s,"b",{32,0})};
+        STerrainBrush brush;brush.centerX=32;brush.centerY=16;brush.radius=4;
+        const auto stroke=makeWorldTerrainStamp(targets,brush,EWorldSculptMode::Raise,2,0,1);
+        QVERIFY(s.apply(stroke,true,&error));s.record(stroke);
+        const auto afterA=s.documents["a"]->terrain.sectorPayload(0,0),afterB=s.documents["b"]->terrain.sectorPayload(0,0);
+        for(const auto id:{QString("a"),QString("b")}) {
+            auto doc=s.documents[id];CMprEditTransaction tx("save");QByteArray bytes;
+            QVERIFY(doc->terrain.appendSectorEdits(&tx,&report));QVERIFY(doc->baseline.applyTransaction(tx,&bytes,&report));
+            CMprDocument saved;QVERIFY(saved.loadBytes(bytes,id,&report));QVERIFY(s.rebaseSavedDocument(id,saved,&error));
+        }
+        QVERIFY(s.dirtyPaths().isEmpty());QVERIFY(s.canUndo());QVERIFY(s.undo(&error));
+        QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),beforeA);QCOMPARE(s.documents["b"]->terrain.sectorPayload(0,0),beforeB);
+        QCOMPARE(s.dirtyPaths().size(),2);QVERIFY(s.redo(&error));
+        QCOMPARE(s.documents["a"]->terrain.sectorPayload(0,0),afterA);QCOMPARE(s.documents["b"]->terrain.sectorPayload(0,0),afterB);QVERIFY(s.dirtyPaths().isEmpty());
+    }
+
     void overlaySeamsRespectSparsePresenceAndSlotZero()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");CValidationReport report;
@@ -708,6 +729,7 @@ private slots:
     void paintingSnapshotsAreAtomicAndUndoable()
     {
         CWorldTerrainSession s;add(s,"a");add(s,"b");QString error;CValidationReport report;
+        for(auto doc:s.documents)doc->materials=doc->baseline.mapInfo().materials;
         SWorldTerrainStroke stroke;
         for(const QString& id:QStringList{"a","b"}) {
             auto doc=s.documents[id];doc->materials=doc->baseline.mapInfo().materials;
