@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include <QtGlobal>
 #include <QtEndian>
 #include <algorithm>
@@ -1385,25 +1386,25 @@ void CSector::draw(QOpenGLShaderProgram* program)
     if (m_arrLandVrtData.count() == 0)
         return;
 
-    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), m_modelMatrix);
 
     int offset = 0;
     m_vertexBuf.bind();
-    int vertLoc = program->attributeLocation("a_position");
+    int vertLoc = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertLoc);
     program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(STerrainVertexData)));
 
     offset += int(sizeof(QVector3D));
-    int normLoc = program->attributeLocation("a_normal");
+    int normLoc = ei::attributeLocation(program, "a_normal");
     program->enableAttributeArray(normLoc);
     program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(STerrainVertexData)));
 
     offset+=int(sizeof(QVector3D)); // size of normal
-    int textureLocation = program->attributeLocation("a_texture");
+    int textureLocation = ei::attributeLocation(program, "a_texture");
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(STerrainVertexData)));
     offset += int(sizeof(QVector2D));
-    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    const int emissionLocation = ei::attributeLocation(program, "a_materialEmission");
     if(emissionLocation >= 0)
     {
         program->enableAttributeArray(emissionLocation);
@@ -1411,26 +1412,26 @@ void CSector::draw(QOpenGLShaderProgram* program)
                                     int(sizeof(STerrainVertexData)));
     }
     offset += int(sizeof(QVector3D));
-    const int opacityLocation = program->attributeLocation("a_materialOpacity");
+    const int opacityLocation = ei::attributeLocation(program, "a_materialOpacity");
     if(opacityLocation >= 0)
     {
         program->enableAttributeArray(opacityLocation);
         program->setAttributeBuffer(opacityLocation, GL_FLOAT, offset, 1,
                                     int(sizeof(STerrainVertexData)));
     }
-    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    const int animationLocation = ei::attributeLocation(program, "a_overlayAnimation");
     if(animationLocation >= 0)
     {
         program->disableAttributeArray(animationLocation);
         program->setAttributeValue(animationLocation, QVector4D());
     }
-    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    const int tileAnimationLocation = ei::attributeLocation(program, "a_overlayTileAnimation");
     if(tileAnimationLocation >= 0)
     {
         program->disableAttributeArray(tileAnimationLocation);
         program->setAttributeValue(tileAnimationLocation, QVector4D());
     }
-    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    const int gridLocation = ei::attributeLocation(program, "a_overlayGrid");
     if(gridLocation >= 0)
     {
         program->disableAttributeArray(gridLocation);
@@ -1473,26 +1474,26 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     if (m_arrWaterVrtData.count() == 0 || m_waterIndexCount == 0)
         return;
 
-    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), m_modelMatrix);
 
     int offset = 0;
     m_waterVertexBuf.bind();
-    int vertLoc = program->attributeLocation("a_position");
+    int vertLoc = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertLoc);
     program->setAttributeBuffer(vertLoc, GL_FLOAT, offset, 3, int(sizeof(SWaterVertexData)));
 
     offset += int(sizeof(QVector3D));
-    int normLoc = program->attributeLocation("a_normal");
+    int normLoc = ei::attributeLocation(program, "a_normal");
     program->enableAttributeArray(normLoc);
     program->setAttributeBuffer(normLoc, GL_FLOAT, offset, 3, int(sizeof(SWaterVertexData)));
 
     offset+=int(sizeof(QVector3D)); // size of normal
-    int textureLocation = program->attributeLocation("a_texture");
+    int textureLocation = ei::attributeLocation(program, "a_texture");
     program->enableAttributeArray(textureLocation);
     program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SWaterVertexData)));
 
     offset += int(sizeof(QVector2D));
-    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    const int animationLocation = ei::attributeLocation(program, "a_overlayAnimation");
     if(animationLocation >= 0)
     {
         program->enableAttributeArray(animationLocation);
@@ -1500,7 +1501,7 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
                                     int(sizeof(SWaterVertexData)));
     }
     offset += int(sizeof(QVector4D));
-    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    const int tileAnimationLocation = ei::attributeLocation(program, "a_overlayTileAnimation");
     if(tileAnimationLocation >= 0)
     {
         program->enableAttributeArray(tileAnimationLocation);
@@ -1508,7 +1509,7 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
                                     int(sizeof(SWaterVertexData)));
     }
     offset += int(sizeof(QVector4D));
-    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    const int gridLocation = ei::attributeLocation(program, "a_overlayGrid");
     if(gridLocation >= 0)
     {
         program->enableAttributeArray(gridLocation);
@@ -1516,7 +1517,7 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
                                     int(sizeof(SWaterVertexData)));
     }
     offset += int(sizeof(QVector2D));
-    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    const int emissionLocation = ei::attributeLocation(program, "a_materialEmission");
     if(emissionLocation >= 0)
     {
         program->enableAttributeArray(emissionLocation);
@@ -1524,7 +1525,7 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
                                     int(sizeof(SWaterVertexData)));
     }
     offset += int(sizeof(QVector3D));
-    const int opacityLocation = program->attributeLocation("a_materialOpacity");
+    const int opacityLocation = ei::attributeLocation(program, "a_materialOpacity");
     if(opacityLocation >= 0)
     {
         program->enableAttributeArray(opacityLocation);
@@ -1552,18 +1553,18 @@ void CSector::drawTileGrid(QOpenGLShaderProgram* program)
 {
     if(m_arrLandVrtData.isEmpty())
         return;
-    program->setUniformValue("u_modelMmatrix", m_modelMatrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), m_modelMatrix);
     m_vertexBuf.bind();
     int offset = 0;
-    const int position = program->attributeLocation("a_position");
+    const int position = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(position);
     program->setAttributeBuffer(position, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
     offset += int(sizeof(QVector3D));
-    const int normal = program->attributeLocation("a_normal");
+    const int normal = ei::attributeLocation(program, "a_normal");
     program->enableAttributeArray(normal);
     program->setAttributeBuffer(normal, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
     offset += int(sizeof(QVector3D));
-    const int texture = program->attributeLocation("a_texture");
+    const int texture = ei::attributeLocation(program, "a_texture");
     program->enableAttributeArray(texture);
     program->setAttributeBuffer(texture, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
     m_gridIndexBuf.bind();

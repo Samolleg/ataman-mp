@@ -414,6 +414,9 @@ void CChangeLogicParam::undo()
     else
         m_pNode->applyLogicParam(m_oldValue);
 
+    if(m_unitOwner && !m_beforePatrolMovement.isEmpty())
+        m_unitOwner->restoreMovementState(m_beforePatrolMovement);
+
     if(m_resetsPatrol) m_pMob->logicNodesUpdate();
     emit updateParam();
     if(m_newValue && (m_newValue->type() == eObjParam_LOGIC_USE
@@ -432,6 +435,12 @@ void CChangeLogicParam::redo()
     }
     if(!m_oldValueCaptured)
     {
+        if(m_unitOwner && m_nodeType == ePatrolPoint
+           && (m_newValue->type() == eObjParam_POSITION
+               || m_newValue->type() == eObjParam_POSITION_X
+               || m_newValue->type() == eObjParam_POSITION_Y
+               || m_newValue->type() == eObjParam_POSITION_Z))
+            m_beforePatrolMovement = m_unitOwner->movementState();
         if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
             unit->getLogicParamAt(m_logicSlot, m_oldValue, m_newValue->type());
         else
@@ -449,6 +458,14 @@ void CChangeLogicParam::redo()
         unit->applyLogicParamAt(m_logicSlot, m_newValue);
     else
         m_pNode->applyLogicParam(m_newValue);
+
+    if(m_unitOwner && !m_beforePatrolMovement.isEmpty())
+    {
+        if(m_afterPatrolMovement.isEmpty())
+            m_afterPatrolMovement = m_unitOwner->movementState();
+        else
+            m_unitOwner->restoreMovementState(m_afterPatrolMovement);
+    }
 
     if(m_resetsPatrol) m_pMob->logicNodesUpdate();
     emit updateParam();

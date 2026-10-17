@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include "render_queue.h"
 #include "gl_dispatch.h"
 
@@ -46,13 +47,13 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program,
     m_collecting = program != nullptr;
     m_selectionPass = false;
     m_shadowOnlyCollection = false;
-    m_modelMatrixLocation = program ? program->uniformLocation("u_modelMmatrix") : -1;
-    m_colorLocation = program ? program->uniformLocation("u_color") : -1;
-    m_instancedLocation = program ? program->uniformLocation("u_instanced") : -1;
-    m_partAnimatedLocation = program ? program->uniformLocation("u_partAnimated") : -1;
-    m_highlightLocation = program ? program->uniformLocation("u_highlight") : -1;
+    m_modelMatrixLocation = program ? ei::uniformLocation(program, "u_modelMmatrix") : -1;
+    m_colorLocation = program ? ei::uniformLocation(program, "u_color") : -1;
+    m_instancedLocation = program ? ei::uniformLocation(program, "u_instanced") : -1;
+    m_partAnimatedLocation = program ? ei::uniformLocation(program, "u_partAnimated") : -1;
+    m_highlightLocation = program ? ei::uniformLocation(program, "u_highlight") : -1;
     m_materialEmissionLocation = program
-        ? program->uniformLocation("u_materialEmission") : -1;
+        ? ei::uniformLocation(program, "u_materialEmission") : -1;
     QOpenGLContext* context = QOpenGLContext::currentContext();
     const QSurfaceFormat format = context ? context->format() : QSurfaceFormat();
     m_instancingEnabled = context && supportsInstancedRenderPath(
@@ -348,10 +349,10 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
     sortRenderItems(shadowItems);
     if(collectPerformance)
         performance.counters().shadowItems += quint64(shadowItems.size());
-    const int modelLocation = shadowProgram->uniformLocation("u_modelMmatrix");
-    const int instancedLocation = shadowProgram->uniformLocation("u_instanced");
-    const int partAnimatedLocation = shadowProgram->uniformLocation("u_partAnimated");
-    const int alphaTestLocation = shadowProgram->uniformLocation("u_shadowAlphaTest");
+    const int modelLocation = ei::uniformLocation(shadowProgram, "u_modelMmatrix");
+    const int instancedLocation = ei::uniformLocation(shadowProgram, "u_instanced");
+    const int partAnimatedLocation = ei::uniformLocation(shadowProgram, "u_partAnimated");
+    const int alphaTestLocation = ei::uniformLocation(shadowProgram, "u_shadowAlphaTest");
     QOpenGLTexture* boundTexture = nullptr;
     for(int itemIndex = 0; itemIndex < shadowItems.size(); )
     {
@@ -429,7 +430,7 @@ void RenderQueueContext::flush()
 
     if(m_selectionPass)
     {
-        m_program->setUniformValue("qt_Texture0", 0);
+        m_program->setUniformValue(ei::uniformLocation(m_program, "qt_Texture0"), 0);
         QOpenGLTexture* boundTexture = nullptr;
         for(int itemIndex = 0; itemIndex < colorItems.size(); )
         {
@@ -501,7 +502,7 @@ void RenderQueueContext::flush()
     bool haveBatch = false;
     bool activeHighlight = false;
     m_program->setUniformValue(m_highlightLocation, false);
-    m_program->setUniformValue("u_receiveDynamicShadow", true);
+    m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), true);
     for(int itemIndex = 0; itemIndex < colorItems.size(); )
     {
         const SRenderItem& item = colorItems.at(itemIndex);
@@ -563,9 +564,9 @@ void RenderQueueContext::flush()
         if(localShadowSkip != activeLocalShadowSkip)
         {
             activeLocalShadowSkip = localShadowSkip;
-            m_program->setUniformValue("u_localShadowSkipIndex", localShadowSkip);
+            m_program->setUniformValue(ei::uniformLocation(m_program, "u_localShadowSkipIndex"), localShadowSkip);
         }
-        m_program->setUniformValue("u_receiveDynamicShadow", !item.dynamicShadow);
+        m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), !item.dynamicShadow);
         m_program->setUniformValue(m_materialEmissionLocation, item.materialEmission);
         if(item.highlighted != activeHighlight)
         {
@@ -593,8 +594,8 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_instancedLocation, false);
     m_program->setUniformValue(m_partAnimatedLocation, false);
     m_program->setUniformValue(m_highlightLocation, false);
-    m_program->setUniformValue("u_receiveDynamicShadow", true);
-    m_program->setUniformValue("u_localShadowSkipIndex", -1);
+    m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), true);
+    m_program->setUniformValue(ei::uniformLocation(m_program, "u_localShadowSkipIndex"), -1);
     m_program->setUniformValue(m_materialEmissionLocation, QVector3D());
     if(supportsFixedFunctionAlphaTest())
         ei::gl::Enable(GL_ALPHA_TEST);

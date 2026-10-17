@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include <QJsonArray>
 #include "magictrap.h"
 #include "gl_dispatch.h"
@@ -119,22 +120,22 @@ void CMagicTrap::drawLogicVisual(bool isActive, QOpenGLShaderProgram* program)
     ei::gl::Disable(GL_DEPTH_TEST);
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", matrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
 
-    program->setUniformValue("customColor", QVector4D(0.2f, 1.0f, 0.2f, 1.0f));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.2f, 1.0f, 0.2f, 1.0f));
     int offset(0);
     // Tell OpenGL which VBOs to use
 
     m_vertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
 
     for(auto& actZone : m_aActZone)
     {
@@ -858,14 +859,14 @@ void CActivationZone::draw(bool isActive, QOpenGLShaderProgram *program)
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", matrix);
-    program->setUniformValue("customColor", QVector4D(0.2f, 1.0f, 0.2f, 1.0f));
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.2f, 1.0f, 0.2f, 1.0f));
 
     int offset(0);
     // Tell OpenGL which VBOs to use
     m_vertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
@@ -875,7 +876,7 @@ void CActivationZone::draw(bool isActive, QOpenGLShaderProgram *program)
 
     ei::gl::DrawElements(GL_LINE_STRIP, m_aDrawPoint.count(), GL_UNSIGNED_SHORT, nullptr);
 
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
 
     ei::gl::Enable(GL_DEPTH_TEST);
 }

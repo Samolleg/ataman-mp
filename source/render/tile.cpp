@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include "log.h"
 #include "tile.h"
 #include "gl_dispatch.h"
@@ -439,14 +440,14 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     if(!uploadPendingGeometry() || !hasCurrentCompatibleGpuContext())
         return;
 
-    program->setUniformValue("u_modelMmatrix", m_stagedModelMatrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), m_stagedModelMatrix);
 
     int offset = 0;
     QOpenGLFunctions* functions = QOpenGLContext::currentContext()->functions();
     if(!functions)
         return;
     functions->glBindBuffer(GL_ARRAY_BUFFER, m_vertexBuffer);
-    int vertLoc = program->attributeLocation("a_position");
+    int vertLoc = ei::attributeLocation(program, "a_position");
     if(vertLoc >= 0)
     {
         program->enableAttributeArray(vertLoc);
@@ -455,7 +456,7 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     }
 
     offset += int(sizeof(QVector3D));
-    int normLoc = program->attributeLocation("a_normal");
+    int normLoc = ei::attributeLocation(program, "a_normal");
     if(normLoc >= 0)
     {
         program->enableAttributeArray(normLoc);
@@ -464,32 +465,32 @@ void CPreviewTile::draw(QOpenGLShaderProgram* program)
     }
 
     offset+=int(sizeof(QVector3D)); // size of normal
-    int textureLocation = program->attributeLocation("a_texture");
+    int textureLocation = ei::attributeLocation(program, "a_texture");
     if(textureLocation >= 0)
     {
         program->enableAttributeArray(textureLocation);
         program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2,
                                     int(sizeof(SVertexData)));
     }
-    const int animationLocation = program->attributeLocation("a_overlayAnimation");
+    const int animationLocation = ei::attributeLocation(program, "a_overlayAnimation");
     if(animationLocation >= 0)
     {
         program->disableAttributeArray(animationLocation);
         program->setAttributeValue(animationLocation, QVector4D());
     }
-    const int tileAnimationLocation = program->attributeLocation("a_overlayTileAnimation");
+    const int tileAnimationLocation = ei::attributeLocation(program, "a_overlayTileAnimation");
     if(tileAnimationLocation >= 0)
     {
         program->disableAttributeArray(tileAnimationLocation);
         program->setAttributeValue(tileAnimationLocation, QVector3D());
     }
-    const int gridLocation = program->attributeLocation("a_overlayGrid");
+    const int gridLocation = ei::attributeLocation(program, "a_overlayGrid");
     if(gridLocation >= 0)
     {
         program->disableAttributeArray(gridLocation);
         program->setAttributeValue(gridLocation, QVector2D());
     }
-    const int emissionLocation = program->attributeLocation("a_materialEmission");
+    const int emissionLocation = ei::attributeLocation(program, "a_materialEmission");
     if(emissionLocation >= 0)
     {
         program->disableAttributeArray(emissionLocation);

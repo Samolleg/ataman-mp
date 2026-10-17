@@ -1,3 +1,15 @@
+## EI-PATROL-STALLS-200 — отзывчивое выставление патрулей
+
+- Поручение17.10: найти блокирующий вызов, убрать лишнюю работу рендера, сохранить линии/маркеры, Undo/Redo и сохранение; проверить связанные сценарии и установить. База199 main12baa4eb4badfa8c2a5fc43baae6972f7275c0e0; installed199 CED102421B026319B2DEAEBCB7B963DC53851FBFF69A6674B9ABB66205C4E0CB. Работа в main, чужие изменения сохранены; номер200 свободен по VERSION/CHANGELOG.
+- BUILT/CHECKED200:24 живых стека подтвердили glGetUniformLocation внутри NVIDIA из Qt name setters; linker map .text совпал с installed199. Кэш locations с relink/destruction, подготовка первого патруля, отбор projected helpers/маркеров; 1792 повторных queries/helper-frame →0, тот же SHA всех пикселей, полная warm сцена тоже0 queries. Связанный native199 выявил неточное Undo дочерних координат;200 восстанавливает snapshots. Fresh Release/runtime, shader19/native patrol44/object+миникарта100/mouse selection36 PASS. Evidence docs/validation/ATAMAN_PATROL_STALLS_200_20261017.md; private build-patrol-stalls-200-20261017.
+- Далее scoped-коммит, staging/finalizer и guarded установка. Незавершённая world-save201 сохранена отдельно и исключена из200 через точный HEAD compilation unit; перед закрытием живой сессии требуется актуальный резерв из-за отдельной проблемы Save201. Ручная приёмка владельцем отдельно.
+
+## EI-PATROL-STALL-AUDIT-199-20261017 — паузы при выставлении патрулей
+
+- Поручение17.10: проверить журнал; только диагностика, без исправления/установки. Current main12baa4eb4badfa8c2a5fc43baae6972f7275c0e0, installed199/EXECED102421B026319B2DEAEBCB7B963DC53851FBFF69A6674B9ABB66205C4E0CB сверены; чужие изменения сохранены.
+- DIAGNOSED: snapshot10:27:28–10:30:58 содержит130 slow render, median627,61ms/max11950,42ms,80,46% wall в helpers.10:29:11 helpers4338,96ms/CPU0;10:29:25 helpers10814,89ms/CPU15,63. Фаза включает подсветку, линии/маркеры и flush; shader/driver wait либо вытеснение — гипотеза, конкретный GL-вызов не установлен. Shadows0, исходные выбросы вне autosave.
+- Source: helper-проход посещает2026 узлов без пространственного отбора; линии рисуются отдельными GL-вызовами. Это подтверждённая лишняя работа, но её вклад в многосекундное ожидание отдельно не измерен. Evidence docs/validation/ATAMAN_PATROL_STALL_AUDIT_199_20261017.md, private build-patrol-stall-audit-199-20261017. Аудит завершён; следующий шаг при поручении исправления — адресные таймеры/воспроизведение на копии, затем устранение подтверждённой причины с регрессом патрулей/UndoRedo/Save. Программа, установка и живые карты не менялись.
+
 ## EI-MIXED-PAINT-199 — покраска после HD-перевода
 
 - Сообщение владельца17.10: покраска197 zone3obr после HD-перевода отказывает с terrain.authored_library_pixels (zone9 slot65). Причина подтверждена: resolver256, загрузчики переходов/материалов ошибочно используют первый native128. Цель: восстановить обычную покраску, Undo/Redo/Save на копии; сохранить HD, воду, переходы и принятую198; собрать/установить.

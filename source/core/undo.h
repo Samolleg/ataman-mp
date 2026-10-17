@@ -216,6 +216,8 @@ protected:
     int m_logicSlot;
     bool m_oldValueCaptured;
     bool m_reusePatrol;
+    QVector<QVector3D> m_beforePatrolMovement;
+    QVector<QVector3D> m_afterPatrolMovement;
     bool m_resetsPatrol{false};
     QVector<CPatrolPoint*> m_savedPatrol;
 };

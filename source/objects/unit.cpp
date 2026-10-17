@@ -1,3 +1,5 @@
+#include "helper_visibility.h"
+#include "shader_locations.h"
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1461,6 +1463,25 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     if(!effectivelyEnabled && !disabledAuthoringPreview)
         return;
 
+    if(ei::helperFrustum())
+    {
+        ei::CHelperBounds bounds;
+        bounds.add(m_aDrawPoint);
+        COptBool* help = dynamic_cast<COptBool*>(CObjectList::getInstance()->settings()->opt("drawHelp"));
+        if(m_parent->nodeState() == ENodeState::eSelect || (help && help->value()))
+            bounds.add(m_aHelpPoint);
+        for(auto* patrol : m_aPatrolPt)
+        {
+            auto box = patrol->getBBox();
+            bounds.add(patrol->drawPosition() + (box.isInit() ? box.center() : QVector3D()), box.isInit() ? box.radius() : 4.0f);
+            for(auto* look : patrol->lookPoint())
+            {
+                auto lookBox = look->getBBox();
+                bounds.add(look->drawPosition() + (lookBox.isInit() ? lookBox.center() : QVector3D()), lookBox.isInit() ? lookBox.radius() : 4.0f);
+            }
+        }
+        if(!bounds.visible()) return;
+    }
     drawHelp(isActive, program);
     if(m_aDrawPoint.empty())
             return;
@@ -1494,30 +1515,30 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", matrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
     const QVector4D disabledLogicColor(0.46f, 0.46f, 0.46f, 0.82f);
     if(disabledAuthoringPreview)
-        program->setUniformValue("customColor", disabledLogicColor);
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), disabledLogicColor);
     else if (m_behaviour == EBehaviourType::eRadius)
-        program->setUniformValue("customColor", QVector4D(0.9f, 0.4f, 0.1f, 1.0f));
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.9f, 0.4f, 0.1f, 1.0f));
     else
-        program->setUniformValue("customColor", QVector4D(0.8f, 0.8f, 0.2f, 1.0f));
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.8f, 0.8f, 0.2f, 1.0f));
 
     int offset(0);
     // Tell OpenGL which VBOs to use
     m_vertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
 //    offset+=int(sizeof(QVector3D)); // size of vertex position
-//    int normLocation = program->attributeLocation("a_normal");
+//    int normLocation = ei::attributeLocation(program, "a_normal");
 //    program->enableAttributeArray(normLocation);
 //    program->setAttributeBuffer(normLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
 //    offset+=int(sizeof(QVector3D)); // size of normal
-//    int textureLocation = program->attributeLocation("a_texture");
+//    int textureLocation = ei::attributeLocation(program, "a_texture");
 //    program->enableAttributeArray(textureLocation);
 //    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
@@ -1535,7 +1556,7 @@ void CLogic::draw(bool isActive, QOpenGLShaderProgram* program)
     if(bDottedLines)
         ei::gl::Disable(GL_LINE_STIPPLE);
 
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
 
     if(m_behaviour == EBehaviourType::ePath)
     {
@@ -1831,21 +1852,21 @@ void CLogic::drawHelp(bool isActive, QOpenGLShaderProgram *program)
     //todo: draw help radius
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", matrix);
-    program->setUniformValue("customColor", QVector4D(0.8f, 0.0f, 1.0f, 1.0f));
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.8f, 0.0f, 1.0f, 1.0f));
 
     int offset(0);
     // Tell OpenGL which VBOs to use
     m_helpVertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
     m_helpIndexBuf.bind();
     ei::gl::LineWidth(2);
     ei::gl::DrawElements(GL_LINE_STRIP, m_aHelpPoint.count(), GL_UNSIGNED_SHORT, nullptr);
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
 
     ei::gl::Enable(GL_DEPTH_TEST);
 }
@@ -2476,12 +2497,12 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program, bool muted
 
     const QVector4D disabledLogicColor(0.46f, 0.46f, 0.46f, 0.82f);
     if(muted)
-        program->setUniformValue("customColor", disabledLogicColor);
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), disabledLogicColor);
     CObjectBase::draw(isActive, program);
     if(muted)
     {
         RenderQueueContext::instance().flush();
-        program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
     }
 
     if(m_aDrawingLine.size() == 0) // do not draw looking point if absent
@@ -2489,55 +2510,55 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program, bool muted
 
     QMatrix4x4 matrix;
     matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", matrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
 
-    program->setUniformValue("customColor", muted
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), muted
         ? disabledLogicColor : QVector4D(0.12f, 0.4f, 0.8f, 1.0f));
     int offset(0);
     // Tell OpenGL which VBOs to use
 
     m_vertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
 //    offset+=int(sizeof(QVector3D)); // size of vertex position
-//    int normLocation = program->attributeLocation("a_normal");
+//    int normLocation = ei::attributeLocation(program, "a_normal");
 //    program->enableAttributeArray(normLocation);
 //    program->setAttributeBuffer(normLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
 //    offset+=int(sizeof(QVector3D)); // size of normal
-//    int textureLocation = program->attributeLocation("a_texture");
+//    int textureLocation = ei::attributeLocation(program, "a_texture");
 //    program->enableAttributeArray(textureLocation);
 //    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_LINES, (m_aDrawingLine.count()-1)*2, GL_UNSIGNED_SHORT, nullptr);
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
     for(auto& look: m_aLookPt)
         if(look->nodeState() != ENodeState::eSelect)
         {
             if(muted)
-                program->setUniformValue("customColor", disabledLogicColor);
+                program->setUniformValue(ei::uniformLocation(program, "customColor"), disabledLogicColor);
             look->draw(isActive, program);
             if(muted)
             {
                 RenderQueueContext::instance().flush();
-                program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+                program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
             }
         }
     for(auto& look: m_aLookPt)
         if(look->nodeState() == ENodeState::eSelect)
         {
             if(muted)
-                program->setUniformValue("customColor", disabledLogicColor);
+                program->setUniformValue(ei::uniformLocation(program, "customColor"), disabledLogicColor);
             look->draw(isActive, program);
             if(muted)
             {
                 RenderQueueContext::instance().flush();
-                program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+                program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
             }
         }
 
@@ -2546,12 +2567,12 @@ void CPatrolPoint::draw(bool isActive, QOpenGLShaderProgram* program, bool muted
     if(nodeState() == ENodeState::eSelect)
     {
         if(muted)
-            program->setUniformValue("customColor", disabledLogicColor);
+            program->setUniformValue(ei::uniformLocation(program, "customColor"), disabledLogicColor);
         CObjectBase::draw(isActive, program);
         if(muted)
         {
             RenderQueueContext::instance().flush();
-            program->setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+            program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
         }
     }
 }

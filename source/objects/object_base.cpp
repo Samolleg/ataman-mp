@@ -1,3 +1,5 @@
+#include "helper_visibility.h"
+#include "shader_locations.h"
 #include "objects\object_base.h"
 #include <QJsonArray>
 #include <QCache>
@@ -362,6 +364,17 @@ void CObjectBase::setTexture(QOpenGLTexture* texture)
 
 void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
 {
+    if(ei::helperFrustum() && (nodeType() == ENodeType::ePatrolPoint || nodeType() == ENodeType::eLookPoint))
+    {
+        auto box = getBBox();
+        if(box.isInit())
+        {
+            ei::CHelperBounds bounds;
+            bounds.add(drawPosition() + box.center(), box.radius());
+            if(!bounds.visible()) return;
+        }
+    }
+
     Q_UNUSED(isActive);
     if(isMarkDeleted())
         return;
@@ -393,13 +406,13 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     RenderQueueContext& queue = RenderQueueContext::instance();
     const bool queued = queue.collecting();
     if(!queued)
-        program->setUniformValue("u_modelMmatrix", matrix);
+        program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
 
     if (!queued && m_state == ENodeState::eSelect)
-        program->setUniformValue("u_highlight", true);
+        program->setUniformValue(ei::uniformLocation(program, "u_highlight"), true);
 
     if(!queued)
-        program->setUniformValue("qt_Texture0", 0);
+        program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
     QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
     {
@@ -417,7 +430,7 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
                          quintptr(this));
             continue;
         }
-        program->setUniformValue("u_materialEmission",
+        program->setUniformValue(ei::uniformLocation(program, "u_materialEmission"),
                                  m_partEmissions.value(part->name().toLower()));
         if(texture != boundTexture)
         {
@@ -431,9 +444,9 @@ void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
     }
     if(!queued)
     {
-        program->setUniformValue("u_partAnimated", false);
-        program->setUniformValue("u_highlight", false);
-        program->setUniformValue("u_materialEmission", QVector3D());
+        program->setUniformValue(ei::uniformLocation(program, "u_partAnimated"), false);
+        program->setUniformValue(ei::uniformLocation(program, "u_highlight"), false);
+        program->setUniformValue(ei::uniformLocation(program, "u_materialEmission"), QVector3D());
     }
 }
 
@@ -472,12 +485,12 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
             }
             return;
         }
-        program->setUniformValue("u_modelMmatrix", matrix);
-        program->setUniformValue("u_color", m_pickingColor.toVec4());
+        program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), matrix);
+        program->setUniformValue(ei::uniformLocation(program, "u_color"), m_pickingColor.toVec4());
     }
 
-    program->setUniformValue("qt_Texture0", 0);
-    program->setUniformValue("u_instanced", false);
+    program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
+    program->setUniformValue(ei::uniformLocation(program, "u_instanced"), false);
     QOpenGLTexture* boundTexture = nullptr;
     for(auto& part: m_aPart)
     {
@@ -494,7 +507,7 @@ void CObjectBase::drawSelect(QOpenGLShaderProgram* program)
         }
         part->drawSelect(program);
     }
-    program->setUniformValue("u_partAnimated", false);
+    program->setUniformValue(ei::uniformLocation(program, "u_partAnimated"), false);
 }
 
 QMap<QString, QVector<QVector2D>> CObjectBase::renderedBodyPartUvTriangles() const

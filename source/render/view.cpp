@@ -1,3 +1,5 @@
+#include "helper_visibility.h"
+#include "shader_locations.h"
 #include "window_geometry.h"
 #include "ui_theme.h"
 #include <QtWidgets>
@@ -4711,7 +4713,7 @@ void CView::initShaders()
     }
 
     // Link shader pipeline
-    if (!m_program.link())
+    if (!ei::linkShaderProgram(m_program))
     {
         reportShaderFailure("object link", m_program);
         close();
@@ -4720,8 +4722,12 @@ void CView::initShaders()
     logShaderProgramDiagnostics(QStringLiteral("object"), m_program, true);
 
     m_program.bind();
-    m_program.setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
-    m_program.setUniformValue("u_instanced", false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_instanced"), false);
+    // Resolve the two remaining helper inputs at shader initialization, so
+    // adding the first patrol does not introduce a new synchronous query.
+    ei::uniformLocation(&m_program, "u_modelMmatrix");
+    ei::attributeLocation(&m_program, "a_position");
     //release shader program?
 
     // Compile land shader
@@ -4737,7 +4743,7 @@ void CView::initShaders()
         close();
         return;
     }
-    if (!m_landProgram.link())
+    if (!ei::linkShaderProgram(m_landProgram))
     {
         reportShaderFailure("terrain link", m_landProgram);
         close();
@@ -4746,22 +4752,22 @@ void CView::initShaders()
     logShaderProgramDiagnostics(QStringLiteral("terrain"), m_landProgram, true);
 
     m_landProgram.bind();
-    m_landProgram.setUniformValue("u_instanced", false);
-    m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
-    m_landProgram.setUniformValue("u_lightPower", 5.0f);
-    m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
-    m_landProgram.setUniformValue("u_highlight", false);
-    m_landProgram.setUniformValue("u_solidColorEnabled", false);
-    m_landProgram.setUniformValue("u_overlayMotionEnabled", false);
-    m_landProgram.setUniformValue("u_overlayTimeSeconds", 0.0f);
-    m_landProgram.setUniformValue("u_overlayWindDirection", QVector3D());
-    m_landProgram.setUniformValue("u_overlayWindStrength", 0.0f);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_instanced"), false);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightPosition"), QVector4D(0.0, 0.0, 2.0, 1.0));
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightPower"), 5.0f);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightColor"), QVector4D(1.0, 1.0, 1.0, 1.0));
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_highlight"), false);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_solidColorEnabled"), false);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayMotionEnabled"), false);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayTimeSeconds"), 0.0f);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayWindDirection"), QVector3D());
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayWindStrength"), 0.0f);
 
     bool skySuccess = m_skyProgram.addShaderFromSourceFile(
         QOpenGLShader::Vertex, ":/skybox.vsh");
     skySuccess = skySuccess && m_skyProgram.addShaderFromSourceFile(
         QOpenGLShader::Fragment, ":/skybox.fsh");
-    skySuccess = skySuccess && m_skyProgram.link();
+    skySuccess = skySuccess && ei::linkShaderProgram(m_skyProgram);
     logShaderProgramDiagnostics(QStringLiteral("sky"), m_skyProgram, skySuccess);
     if(!skySuccess)
     {
@@ -4769,7 +4775,7 @@ void CView::initShaders()
         return;
     }
     m_skyProgram.bind();
-    m_skyProgram.setUniformValue("qt_Texture0", 0);
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "qt_Texture0"), 0);
 
     // Keep the particle subsystem out of this isolation build. A failed or
     // incomplete auxiliary program must not poison an otherwise valid
@@ -4779,7 +4785,7 @@ void CView::initShaders()
         QOpenGLShader::Vertex, ":/vshader.vsh");
     shadowSuccess = shadowSuccess && m_shadowProgram.addShaderFromSourceFile(
         QOpenGLShader::Fragment, ":/shadow.fsh");
-    shadowSuccess = shadowSuccess && m_shadowProgram.link();
+    shadowSuccess = shadowSuccess && ei::linkShaderProgram(m_shadowProgram);
     logShaderProgramDiagnostics(QStringLiteral("shadow"), m_shadowProgram,
                                 shadowSuccess);
     if(!shadowSuccess)
@@ -4788,8 +4794,8 @@ void CView::initShaders()
         return;
     }
     m_shadowProgram.bind();
-    m_shadowProgram.setUniformValue("qt_Texture0", 0);
-    m_shadowProgram.setUniformValue("u_shadowAlphaTest", false);
+    m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "qt_Texture0"), 0);
+    m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_shadowAlphaTest"), false);
 
 
     // Compile select shader
@@ -4797,7 +4803,7 @@ void CView::initShaders()
         QOpenGLShader::Vertex, ":/vshader.vsh");
     selectSuccess = selectSuccess && m_selectProgram.addShaderFromSourceFile(
         QOpenGLShader::Fragment, ":/select.fsh");
-    selectSuccess = selectSuccess && m_selectProgram.link();
+    selectSuccess = selectSuccess && ei::linkShaderProgram(m_selectProgram);
     logShaderProgramDiagnostics(QStringLiteral("selection"), m_selectProgram,
                                 selectSuccess);
     if(!selectSuccess)
@@ -4806,7 +4812,7 @@ void CView::initShaders()
         return;
     }
     m_selectProgram.bind();
-    m_selectProgram.setUniformValue("u_instanced", false);
+    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_instanced"), false);
 
 }
 
@@ -4952,13 +4958,13 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     // lower two rings are blended into the map fog in skybox.fsh.
     skyView.translate(0.0f, 0.0f, -6.95752f);
     skyView.rotate(environment.skyRotationDegrees, 0.0f, 0.0f, 1.0f);
-    m_skyProgram.setUniformValue("u_viewMmatrix", skyView);
-    m_skyProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_skyProgram.setUniformValue("u_tint", environment.skyColor);
-    m_skyProgram.setUniformValue("u_fogColor", environment.fogColor);
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "u_viewMmatrix"), skyView);
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "u_projMmatrix"), m_projection);
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "u_tint"), environment.skyColor);
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "u_fogColor"), environment.fogColor);
     const COptBool* fogOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("renderFog")) : nullptr;
-    m_skyProgram.setUniformValue("u_fogEnabled", !fogOption || fogOption->value());
+    m_skyProgram.setUniformValue(ei::uniformLocation(&m_skyProgram, "u_fogEnabled"), !fogOption || fogOption->value());
 
     ei::gl::DepthMask(GL_FALSE);
     ei::gl::DepthFunc(GL_LEQUAL);
@@ -4967,8 +4973,8 @@ void CView::drawSkybox(const QMatrix4x4& cameraMatrix,
     if(skyContext && !skyContext->isOpenGLES())
         ei::gl::Disable(GL_ALPHA_TEST);
     m_skyBuffer.bind();
-    const int position = m_skyProgram.attributeLocation("a_position");
-    const int texture = m_skyProgram.attributeLocation("a_texture");
+    const int position = ei::attributeLocation(&m_skyProgram, "a_position");
+    const int texture = ei::attributeLocation(&m_skyProgram, "a_texture");
     m_skyProgram.enableAttributeArray(position);
     m_skyProgram.setAttributeBuffer(position, GL_FLOAT,
         int(offsetof(SSkyVertex, position)), 3, int(sizeof(SSkyVertex)));
@@ -4991,22 +4997,22 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
                                      int lightingMode, bool fogEnabled)
 {
     const bool enabled = lightingMode != 0;
-    program.setUniformValue("u_environmentEnabled", enabled);
-    program.setUniformValue("u_lightingMode", lightingMode);
-    program.setUniformValue("u_fogEnabled", lightingMode == 2 && fogEnabled);
-    program.setUniformValue("u_ambientStrength", environment.ambientStrength);
-    program.setUniformValue("u_sunStrength", environment.sunStrength);
-    program.setUniformValue("u_sunDirection", environment.sunDirection);
-    program.setUniformValue("u_sunColor", environment.sunColor);
-    program.setUniformValue("u_ambientColor", environment.ambientColor);
-    program.setUniformValue("u_fogColor", environment.fogColor);
-    program.setUniformValue("u_fogStart", environment.fogStart);
-    program.setUniformValue("u_fogEnd", environment.fogEnd);
+    program.setUniformValue(ei::uniformLocation(&program, "u_environmentEnabled"), enabled);
+    program.setUniformValue(ei::uniformLocation(&program, "u_lightingMode"), lightingMode);
+    program.setUniformValue(ei::uniformLocation(&program, "u_fogEnabled"), lightingMode == 2 && fogEnabled);
+    program.setUniformValue(ei::uniformLocation(&program, "u_ambientStrength"), environment.ambientStrength);
+    program.setUniformValue(ei::uniformLocation(&program, "u_sunStrength"), environment.sunStrength);
+    program.setUniformValue(ei::uniformLocation(&program, "u_sunDirection"), environment.sunDirection);
+    program.setUniformValue(ei::uniformLocation(&program, "u_sunColor"), environment.sunColor);
+    program.setUniformValue(ei::uniformLocation(&program, "u_ambientColor"), environment.ambientColor);
+    program.setUniformValue(ei::uniformLocation(&program, "u_fogColor"), environment.fogColor);
+    program.setUniformValue(ei::uniformLocation(&program, "u_fogStart"), environment.fogStart);
+    program.setUniformValue(ei::uniformLocation(&program, "u_fogEnd"), environment.fogEnd);
     const QVector3D mapFog = m_pLand && m_pLand->isMprLoad()
         ? QVector3D(float(m_pLand->widthInWorldUnits()),
                     float(m_pLand->heightInWorldUnits()), 4.0f)
         : QVector3D();
-    program.setUniformValue("u_mapFog", mapFog);
+    program.setUniformValue(ei::uniformLocation(&program, "u_mapFog"), mapFog);
 
     QVector4D positionRange[ei::kMaxScenePointLights];
     QVector3D colors[ei::kMaxScenePointLights];
@@ -5021,11 +5027,11 @@ void CView::applyEnvironmentUniforms(QOpenGLShaderProgram& program,
             color /= 255.0f;
         colors[index] = color;
     }
-    program.setUniformValue("u_pointLightCount", lightingMode == 2 ? count : 0);
+    program.setUniformValue(ei::uniformLocation(&program, "u_pointLightCount"), lightingMode == 2 ? count : 0);
     if(count > 0)
     {
-        program.setUniformValueArray("u_pointLightPositionRange", positionRange, count);
-        program.setUniformValueArray("u_pointLightColor", colors, count);
+        program.setUniformValueArray(ei::uniformLocation(&program, "u_pointLightPositionRange"), positionRange, count);
+        program.setUniformValueArray(ei::uniformLocation(&program, "u_pointLightColor"), colors, count);
     }
 }
 
@@ -5105,8 +5111,8 @@ bool CView::drawSelectionTerrainDepth(const QMatrix4x4& viewMatrix)
     // The visible ground hides buried model geometry. Reuse that same terrain
     // and its world transforms in the query target, without giving it an ID.
     // Transparent overlays are deliberately not opaque selection occluders.
-    m_landProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_landProgram.setUniformValue("u_viewMmatrix", viewMatrix);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_projMmatrix"), m_projection);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), viewMatrix);
     const CViewFrustum frustum(m_projection * viewMatrix);
     ei::gl::ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     if(m_neighborLandscapesVisible)
@@ -5480,9 +5486,9 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         m_shadowProgram.bind();
-        m_shadowProgram.setUniformValue("u_projMmatrix", projection);
-        m_shadowProgram.setUniformValue("u_viewMmatrix", lightView);
-        m_shadowProgram.setUniformValue("u_instanced", false);
+        m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_projMmatrix"), projection);
+        m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_viewMmatrix"), lightView);
+        m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_instanced"), false);
     };
     const auto endTarget = [&](QOpenGLFramebufferObject*,
                                EShadowFramebufferPass pass)
@@ -5557,7 +5563,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
         ei::gl::ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         m_shadowProgram.bind();
-        m_shadowProgram.setUniformValue("u_instanced", false);
+        m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_instanced"), false);
         for(int index = 0; index < localCascades.size(); ++index)
         {
             const SLocalCascade& local = localCascades.at(index);
@@ -5565,8 +5571,8 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
             const int row = index / localColumns;
             ei::gl::Viewport(column * tileWidth, row * tileHeight,
                              tileWidth, tileHeight);
-            m_shadowProgram.setUniformValue("u_projMmatrix", local.projection);
-            m_shadowProgram.setUniformValue("u_viewMmatrix", local.view);
+            m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_projMmatrix"), local.projection);
+            m_shadowProgram.setUniformValue(ei::uniformLocation(&m_shadowProgram, "u_viewMmatrix"), local.view);
             queue.flushShadow(&m_shadowProgram, safeMaximumDistance,
                               local.matrix, false, false, nullptr, local.owner);
         }
@@ -5851,34 +5857,34 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
         && m_farShadowFbo->isValid() && m_farDynamicShadowFbo->isValid()
         && m_localShadowFbo->isValid()
         && m_shadowInitialized;
-    program.setUniformValue("u_shadowsEnabled", available);
-    program.setUniformValue("u_staticLightSpaceMatrix", m_staticLightSpaceMatrix);
-    program.setUniformValue("u_dynamicLightSpaceMatrix", m_dynamicLightSpaceMatrix);
-    program.setUniformValue("u_farStaticLightSpaceMatrix", m_farStaticLightSpaceMatrix);
-    program.setUniformValue("u_farDynamicLightSpaceMatrix", m_farDynamicLightSpaceMatrix);
-    program.setUniformValue("u_nearShadowSplit", m_nearShadowSplit);
-    program.setUniformValue("u_shadowCascadeDebug", m_shadowCascadeDiagnostic);
-    program.setUniformValue("u_receiveStaticShadow", receiveStatic);
-    program.setUniformValue("u_receiveDynamicShadow", receiveDynamic);
-    program.setUniformValue("u_staticShadowMap", 1);
-    program.setUniformValue("u_dynamicShadowMap", 2);
-    program.setUniformValue("u_farStaticShadowMap", 3);
-    program.setUniformValue("u_farDynamicShadowMap", 4);
-    program.setUniformValue("u_localShadowMap", 5);
+    program.setUniformValue(ei::uniformLocation(&program, "u_shadowsEnabled"), available);
+    program.setUniformValue(ei::uniformLocation(&program, "u_staticLightSpaceMatrix"), m_staticLightSpaceMatrix);
+    program.setUniformValue(ei::uniformLocation(&program, "u_dynamicLightSpaceMatrix"), m_dynamicLightSpaceMatrix);
+    program.setUniformValue(ei::uniformLocation(&program, "u_farStaticLightSpaceMatrix"), m_farStaticLightSpaceMatrix);
+    program.setUniformValue(ei::uniformLocation(&program, "u_farDynamicLightSpaceMatrix"), m_farDynamicLightSpaceMatrix);
+    program.setUniformValue(ei::uniformLocation(&program, "u_nearShadowSplit"), m_nearShadowSplit);
+    program.setUniformValue(ei::uniformLocation(&program, "u_shadowCascadeDebug"), m_shadowCascadeDiagnostic);
+    program.setUniformValue(ei::uniformLocation(&program, "u_receiveStaticShadow"), receiveStatic);
+    program.setUniformValue(ei::uniformLocation(&program, "u_receiveDynamicShadow"), receiveDynamic);
+    program.setUniformValue(ei::uniformLocation(&program, "u_staticShadowMap"), 1);
+    program.setUniformValue(ei::uniformLocation(&program, "u_dynamicShadowMap"), 2);
+    program.setUniformValue(ei::uniformLocation(&program, "u_farStaticShadowMap"), 3);
+    program.setUniformValue(ei::uniformLocation(&program, "u_farDynamicShadowMap"), 4);
+    program.setUniformValue(ei::uniformLocation(&program, "u_localShadowMap"), 5);
     const int localCount = available
         ? qMin(ei::kMaxLocalShadowCasters, m_localShadowMatrices.size()) : 0;
-    program.setUniformValue("u_localShadowCount", localCount);
-    program.setUniformValue("u_localShadowSkipIndex", -1);
+    program.setUniformValue(ei::uniformLocation(&program, "u_localShadowCount"), localCount);
+    program.setUniformValue(ei::uniformLocation(&program, "u_localShadowSkipIndex"), -1);
     if(localCount > 0)
     {
-        program.setUniformValueArray("u_localShadowMatrices",
+        program.setUniformValueArray(ei::uniformLocation(&program, "u_localShadowMatrices"),
                                      m_localShadowMatrices.constData(), localCount);
-        program.setUniformValueArray("u_localShadowAtlasRects",
+        program.setUniformValueArray(ei::uniformLocation(&program, "u_localShadowAtlasRects"),
                                      m_localShadowAtlasRects.constData(), localCount);
     }
     const float localTexel = m_localShadowFbo
         ? 1.0f / float(m_localShadowFbo->width()) : 0.0f;
-    program.setUniformValue("u_localShadowTexelSize",
+    program.setUniformValue(ei::uniformLocation(&program, "u_localShadowTexelSize"),
                             QVector2D(localTexel, localTexel));
     const float staticTexel = m_shadowFbo
         ? 1.0f / float(m_shadowFbo->width()) : 0.0f;
@@ -5888,13 +5894,13 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
         ? 1.0f / float(m_farShadowFbo->width()) : 0.0f;
     const float farDynamicTexel = m_farDynamicShadowFbo
         ? 1.0f / float(m_farDynamicShadowFbo->width()) : 0.0f;
-    program.setUniformValue("u_staticShadowTexelSize",
+    program.setUniformValue(ei::uniformLocation(&program, "u_staticShadowTexelSize"),
                             QVector2D(staticTexel, staticTexel));
-    program.setUniformValue("u_dynamicShadowTexelSize",
+    program.setUniformValue(ei::uniformLocation(&program, "u_dynamicShadowTexelSize"),
                             QVector2D(dynamicTexel, dynamicTexel));
-    program.setUniformValue("u_farStaticShadowTexelSize",
+    program.setUniformValue(ei::uniformLocation(&program, "u_farStaticShadowTexelSize"),
                             QVector2D(farStaticTexel, farStaticTexel));
-    program.setUniformValue("u_farDynamicShadowTexelSize",
+    program.setUniformValue(ei::uniformLocation(&program, "u_farDynamicShadowTexelSize"),
                             QVector2D(farDynamicTexel, farDynamicTexel));
     if(available)
     {
@@ -6292,25 +6298,25 @@ void CView::drawTestOverlaysOpenGl()
     }
     QOpenGLBuffer::release(QOpenGLBuffer::VertexBuffer);
     QOpenGLBuffer::release(QOpenGLBuffer::IndexBuffer);
-    const int position = m_program.attributeLocation("a_position");
+    const int position = ei::attributeLocation(&m_program, "a_position");
     if(position < 0)
         return;
 
     m_program.enableAttributeArray(position);
     QMatrix4x4 identity;
     identity.setToIdentity();
-    m_program.setUniformValue("u_modelMmatrix", identity);
-    m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
-    m_program.setUniformValue("u_projMmatrix", m_projection);
-    m_program.setUniformValue("u_highlight", false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_modelMmatrix"), identity);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), m_cam->viewMatrix());
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), m_projection);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlight"), false);
     // Editor overlays are authored colors/textures. They must remain readable
     // regardless of the map clock, fog, scene lights, or shadow maps.
-    m_program.setUniformValue("u_environmentEnabled", false);
-    m_program.setUniformValue("u_fogEnabled", false);
-    m_program.setUniformValue("u_shadowsEnabled", false);
-    m_program.setUniformValue("u_pointLightCount", 0);
-    m_program.setUniformValue("u_instanced", false);
-    m_program.setUniformValue("u_partAnimated", false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_environmentEnabled"), false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_fogEnabled"), false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_shadowsEnabled"), false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_pointLightCount"), 0);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_instanced"), false);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_partAnimated"), false);
 
     ei::gl::Enable(GL_BLEND);
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -6325,11 +6331,11 @@ void CView::drawTestOverlaysOpenGl()
         QVector<QVector3D> corners{{x,y,z},{x+w,y,z},{x+w,y+h,z},{x,y+h,z}};
         QVector<QVector3D> fill{corners[0],corners[1],corners[2],corners[0],corners[2],corners[3]};
         ei::gl::Disable(GL_DEPTH_TEST);
-        m_program.setUniformValue("customColor", m_worldPlacementOverlaps
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), m_worldPlacementOverlaps
             ? QVector4D(1.f,0.5f,0.1f,0.25f) : QVector4D(0.1f,0.9f,1.f,0.25f));
         m_program.setAttributeArray(position, fill.constData());
         ei::gl::DrawArrays(GL_TRIANGLES, 0, fill.size());
-        m_program.setUniformValue("customColor", QVector4D(0.1f,0.9f,1.f,1.f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.1f,0.9f,1.f,1.f));
         m_program.setAttributeArray(position, corners.constData());
         ei::gl::DrawArrays(GL_LINE_LOOP, 0, corners.size());
         ei::gl::Enable(GL_DEPTH_TEST);
@@ -6358,7 +6364,7 @@ void CView::drawTestOverlaysOpenGl()
         }
         ei::gl::Disable(GL_DEPTH_TEST);
         ei::gl::LineWidth(3.0f);
-        m_program.setUniformValue("customColor",QVector4D(0.2f,1.0f,0.35f,1.0f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),QVector4D(0.2f,1.0f,0.35f,1.0f));
         m_program.setAttributeArray(position,lines.constData());
         ei::gl::DrawArrays(GL_LINES,0,lines.size());
         ei::gl::LineWidth(1.0f);
@@ -6380,37 +6386,37 @@ void CView::drawTestOverlaysOpenGl()
             if(diamond) lines << center << center + QVector3D(0,0,1.8f);
         }
         if(lines.isEmpty()) return;
-        m_program.setUniformValue("customColor", color);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), color);
         m_program.setAttributeArray(position, lines.constData());
         ei::gl::DrawArrays(GL_LINES, 0, lines.size());
     };
     ei::gl::LineWidth(2.0f);
     if(!m_leverApproachLines.isEmpty()) {
         ei::gl::Disable(GL_DEPTH_TEST);
-        m_program.setUniformValue("customColor",QVector4D(0.2f,1.f,0.4f,1.f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),QVector4D(0.2f,1.f,0.4f,1.f));
         m_program.setAttributeArray(position,m_leverApproachLines.constData());
         ei::gl::DrawArrays(GL_LINES,0,m_leverApproachLines.size());
         ei::gl::Enable(GL_DEPTH_TEST);
     }
     if(!m_connectionGlyphs.isEmpty()) {
-        m_program.setUniformValue("customColor",m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,1.f):QVector4D(0.1f,0.9f,1.f,1.f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,1.f):QVector4D(0.1f,0.9f,1.f,1.f));
         m_program.setAttributeArray(position,m_connectionGlyphs.constData());
         ei::gl::DrawArrays(GL_LINES,0,m_connectionGlyphs.size());
     }
     if(m_connectionGhostNode && !m_connectionGhostVertices.isEmpty()) {
         QMatrix4x4 preview;preview.translate(m_connectionGhostNode->drawPosition());preview.rotate(m_connectionGhostNode->rotation());
-        m_program.setUniformValue("u_modelMmatrix",preview);
-        m_program.setUniformValue("customColor",m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,0.4f):QVector4D(0.1f,0.9f,1.f,0.4f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_modelMmatrix"),preview);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),m_modelMagnetApplied?QVector4D(1.f,0.8f,0.2f,0.4f):QVector4D(0.1f,0.9f,1.f,0.4f));
         ei::gl::DepthMask(GL_FALSE);ei::gl::Enable(GL_BLEND);ei::gl::BlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
         m_program.setAttributeArray(position,m_connectionGhostVertices.constData());
         ei::gl::DrawArrays(GL_TRIANGLES,0,m_connectionGhostVertices.size());
-        m_program.setUniformValue("u_modelMmatrix",identity);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_modelMmatrix"),identity);
     }
     scenarioGlyphs(m_scenarioParticipants, QVector4D(0.1f,0.9f,1.f,1.f), false);
     scenarioGlyphs(m_scenarioSpawns, QVector4D(0.9f,0.35f,1.f,1.f), true);
     scenarioGlyphs(m_scenarioDestinations, QVector4D(1.f,0.75f,0.15f,1.f), true);
     if(!m_scenarioLinks.isEmpty()) {
-        m_program.setUniformValue("customColor", QVector4D(1.f,0.8f,0.3f,0.9f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(1.f,0.8f,0.3f,0.9f));
         m_program.setAttributeArray(position, m_scenarioLinks.constData());
         ei::gl::DrawArrays(GL_LINES, 0, m_scenarioLinks.size());
     }
@@ -6423,21 +6429,21 @@ void CView::drawTestOverlaysOpenGl()
         if(!m_aiGraphOpenLinks.isEmpty())
         {
             const int layer = m_aiGraphLayerSlider ? m_aiGraphLayerSlider->value() : 3;
-            m_program.setUniformValue("customColor", aiGraphLayerColor(layer));
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), aiGraphLayerColor(layer));
             ei::gl::LineWidth(1.5f);
             m_program.setAttributeArray(position, m_aiGraphOpenLinks.constData());
             ei::gl::DrawArrays(GL_LINES, 0, m_aiGraphOpenLinks.size());
         }
         if(!m_aiGraphNodes.isEmpty())
         {
-            m_program.setUniformValue("customColor", QVector4D(0.95f, 0.82f, 0.20f, 0.88f));
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.95f, 0.82f, 0.20f, 0.88f));
             glPointSize(3.0f);
             m_program.setAttributeArray(position, m_aiGraphNodes.constData());
             ei::gl::DrawArrays(GL_POINTS, 0, m_aiGraphNodes.size());
         }
         if(!m_aiGraphIsolatedNodes.isEmpty())
         {
-            m_program.setUniformValue("customColor", QVector4D(1.0f, 0.16f, 0.12f, 1.0f));
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(1.0f, 0.16f, 0.12f, 1.0f));
             glPointSize(6.0f);
             m_program.setAttributeArray(position, m_aiGraphIsolatedNodes.constData());
             ei::gl::DrawArrays(GL_POINTS, 0, m_aiGraphIsolatedNodes.size());
@@ -6468,7 +6474,7 @@ void CView::drawTestOverlaysOpenGl()
             continue;
 
         const bool selected = index == m_selectedTestEntrance;
-        m_program.setUniformValue("customColor",
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),
             index<m_displayTravelAreas.size()
                 ? (m_displayTravelAreas[index].remove ? QVector4D(1.0f,0.48f,0.1f,selected?0.4f:0.22f)
                                               : QVector4D(0.12f,0.55f,1.0f,selected?0.4f:0.22f))
@@ -6477,7 +6483,7 @@ void CView::drawTestOverlaysOpenGl()
         m_program.setAttributeArray(position, vertices.constData());
         ei::gl::DrawArrays(GL_TRIANGLE_FAN, 0, vertices.size());
 
-        m_program.setUniformValue("customColor",
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),
             index<m_displayTravelAreas.size()
                 ? (m_displayTravelAreas[index].remove?QVector4D(1,0.48f,0.1f,0.95f):QVector4D(0.12f,0.55f,1,0.95f))
                 : (selected ? QVector4D(0.38f, 1.0f, 0.50f, 0.95f)
@@ -6491,7 +6497,7 @@ void CView::drawTestOverlaysOpenGl()
                 if(projectTravelOverlay(index,v)) {v.setZ(v.z()+0.2f);handles.append(v);}
             }
             if(!handles.isEmpty()) {
-                m_program.setUniformValue("customColor",QVector4D(1,1,1,1));
+                m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),QVector4D(1,1,1,1));
                 m_program.setAttributeArray(position,handles.constData());
                 glPointSize(9);ei::gl::DrawArrays(GL_POINTS,0,handles.size());glPointSize(1);
             }
@@ -6513,14 +6519,14 @@ void CView::drawTestOverlaysOpenGl()
 
     // Labels are painted once into off-screen images and then composited as
     // ordinary OpenGL textures. QPainter never touches QGLWidget's framebuffer.
-    const int texture = m_program.attributeLocation("a_texture");
+    const int texture = ei::attributeLocation(&m_program, "a_texture");
     if(texture >= 0 && !m_testEntranceLabelTextures.isEmpty())
     {
         m_program.enableAttributeArray(texture);
-        m_program.setUniformValue("u_viewMmatrix", identity);
-        m_program.setUniformValue("u_projMmatrix", identity);
-        m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
-        m_program.setUniformValue("qt_Texture0", 0);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), identity);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), identity);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
         ei::gl::Disable(GL_DEPTH_TEST);
         const QRect viewport(0, 0, width(), height());
         const QVector<QVector2D> textureCoordinates = {
@@ -6580,10 +6586,10 @@ void CView::drawTestOverlaysOpenGl()
         if(texture >= 0 && !m_overlayMaterialSlotLabelTextures.isEmpty())
         {
             m_program.enableAttributeArray(texture);
-            m_program.setUniformValue("u_viewMmatrix", identity);
-            m_program.setUniformValue("u_projMmatrix", identity);
-            m_program.setUniformValue("customColor", QVector4D(0, 0, 0, 0));
-            m_program.setUniformValue("qt_Texture0", 0);
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), identity);
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), identity);
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0, 0, 0, 0));
+            m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
             ei::gl::Disable(GL_DEPTH_TEST);
             const QRect viewport(0, 0, width(), height());
             const CViewFrustum frustum(m_projection * m_cam->viewMatrix());
@@ -6628,9 +6634,9 @@ void CView::drawTestOverlaysOpenGl()
 
     if(m_testSpawnMarkerValid)
     {
-        m_program.setUniformValue("u_viewMmatrix", m_cam->viewMatrix());
-        m_program.setUniformValue("u_projMmatrix", m_projection);
-        m_program.setUniformValue("customColor",
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), m_cam->viewMatrix());
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), m_projection);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"),
             m_testSpawnMarkerSelected ? QVector4D(0.92f, 1.0f, 0.32f, 1.0f)
             : m_testSpawnMarkerAdjusted ? QVector4D(1.0f, 0.67f, 0.18f, 0.82f)
                                         : QVector4D(0.31f, 1.0f, 0.47f, 0.72f));
@@ -6671,7 +6677,7 @@ void CView::drawTestOverlaysOpenGl()
     }
 
     m_program.disableAttributeArray(position);
-    m_program.setUniformValue("customColor", QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
     ei::gl::LineWidth(1.0f);
     ei::gl::DepthMask(GL_TRUE);
     ei::gl::Enable(GL_DEPTH_TEST);
@@ -6727,7 +6733,7 @@ bool CView::ensureParticleRendererInitialized()
     if(!m_particleProgram.addShaderFromSourceFile(
             QOpenGLShader::Fragment, ":/particle.fsh"))
         return fail(QStringLiteral("fragment shader"));
-    if(!m_particleProgram.link())
+    if(!ei::linkShaderProgram(m_particleProgram))
         return fail(QStringLiteral("program link"));
 
     if(!m_particleBuffer.create())
@@ -6899,8 +6905,8 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
 
     if(!m_particleProgram.bind())
         return;
-    m_particleProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_particleProgram.setUniformValue("u_viewMmatrix", cameraMatrix);
+    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_projMmatrix"), m_projection);
+    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_viewMmatrix"), cameraMatrix);
 
     // Scene parts are submitted through cached VAOs. Never configure the
     // dynamic particle stream while the last part VAO is still bound: doing so
@@ -8170,10 +8176,10 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     }
 
-    const int worldLocation = m_particleProgram.attributeLocation("a_worldPosition");
-    const int textureLocation = m_particleProgram.attributeLocation("a_texture");
-    const int localTextureLocation = m_particleProgram.attributeLocation("a_localTexture");
-    const int tintLocation = m_particleProgram.attributeLocation("a_tint");
+    const int worldLocation = ei::attributeLocation(&m_particleProgram, "a_worldPosition");
+    const int textureLocation = ei::attributeLocation(&m_particleProgram, "a_texture");
+    const int localTextureLocation = ei::attributeLocation(&m_particleProgram, "a_localTexture");
+    const int tintLocation = ei::attributeLocation(&m_particleProgram, "a_tint");
     const bool validAttributes = worldLocation >= 0 && textureLocation >= 0
         && localTextureLocation >= 0 && tintLocation >= 0;
     if(!particleVertices.isEmpty() && validAttributes && m_particleBuffer.bind())
@@ -8214,9 +8220,9 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
                     batch.additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
                 additiveBlend = batch.additive;
             }
-            m_particleProgram.setUniformValue("u_useTexture", batch.texture != nullptr);
-            m_particleProgram.setUniformValue("u_radialMask", batch.radialMask);
-            m_particleProgram.setUniformValue("u_softness", batch.softness);
+            m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_useTexture"), batch.texture != nullptr);
+            m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_radialMask"), batch.radialMask);
+            m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_softness"), batch.softness);
             ei::gl::DrawArrays(GL_TRIANGLES, batch.first, batch.count);
             if(performance.collecting())
             {
@@ -8563,26 +8569,26 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         close();
 
     // Set modelview-projection matrix
-    //m_landProgram.setUniformValue("u_watcherPos", m_cam->pos());
-    m_landProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+    //m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_watcherPos"), m_cam->pos());
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_projMmatrix"), m_projection);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), camMatrix);
     applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                              lightingMode, fogEnabled);
-//    m_landProgram.setUniformValue("u_color", QVector4D(0.0, 1.0, 0.0, 1.0));
-//    m_landProgram.setUniformValue("u_lightPosition", QVector4D(0.0, 0.0, 2.0, 1.0));
-//    m_landProgram.setUniformValue("u_lightPower", 5.0f);
-//    m_landProgram.setUniformValue("u_lightColor", QVector4D(1.0, 1.0, 1.0, 1.0));
-//    m_landProgram.setUniformValue("u_highlight", false);
+//    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_color"), QVector4D(0.0, 1.0, 0.0, 1.0));
+//    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightPosition"), QVector4D(0.0, 0.0, 2.0, 1.0));
+//    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightPower"), 5.0f);
+//    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_lightColor"), QVector4D(1.0, 1.0, 1.0, 1.0));
+//    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_highlight"), false);
     // Bind shader pipeline for use
     if (!m_program.bind())
         close();
 
-    m_program.setUniformValue("u_projMmatrix", m_projection);
-    m_program.setUniformValue("u_viewMmatrix", camMatrix);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), m_projection);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), camMatrix);
     const QVector4D activeHighlight(0.05f, 0.78f, 0.93f, 0.0f);
     const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
-    m_program.setUniformValue("u_highlightColor", activeHighlight);
-    m_program.setUniformValue("qt_Texture0", 0);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"), activeHighlight);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
     applyEnvironmentUniforms(m_program, environment, sceneLights,
                              lightingMode, fogEnabled);
     applyShadowUniforms(m_program, false);
@@ -8600,8 +8606,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         }
         if(!m_landProgram.bind())
             close();
-        m_landProgram.setUniformValue("u_projMmatrix", m_projection);
-        m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_projMmatrix"), m_projection);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), camMatrix);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, withShadows, true, true);
@@ -8611,8 +8617,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                && m_neighborLandscapesVisible
                && !m_neighborLandscapes.isEmpty() && m_bDrawLand)
             {
-                m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
-                m_landProgram.setUniformValue("u_mapFog", QVector3D());
+                m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_readOnlyBackground"), 0.0f);
+                m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_mapFog"), QVector3D());
                 for(const SLoadedNeighborLandscape& neighbor
                     : m_neighborLandscapes)
                     if(neighbor.landscape && neighbor.landscape->isMprLoad())
@@ -8626,7 +8632,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                                          sceneLights, lightingMode, fogEnabled);
                 applyShadowUniforms(m_landProgram, withShadows, true, true);
             }
-            m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_readOnlyBackground"), 0.0f);
             m_pLand->applyTerrainShadowUniforms(
                 &m_landProgram, terrainShadowsEnabled);
         }
@@ -8637,8 +8643,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad()
            && m_bDrawLand && m_tileGridVisible)
         {
-            m_landProgram.setUniformValue("u_solidColorEnabled", true);
-            m_landProgram.setUniformValue("u_solidColor",
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_solidColorEnabled"), true);
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_solidColor"),
                                           QVector4D(0.05f, 0.9f, 1.0f, 1.0f));
             glDepthFunc(GL_LEQUAL);
             glEnable(GL_POLYGON_OFFSET_LINE);
@@ -8648,14 +8654,14 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             glLineWidth(1.0f);
             glDisable(GL_POLYGON_OFFSET_LINE);
             glDepthFunc(GL_LESS);
-            m_landProgram.setUniformValue("u_solidColorEnabled", false);
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_solidColorEnabled"), false);
         }
         logOpenGlErrors(QStringLiteral("draw/terrain"));
         terrainDrawn = true;
         m_program.bind();
-        m_program.setUniformValue("u_projMmatrix", m_projection);
-        m_program.setUniformValue("u_viewMmatrix", camMatrix);
-        m_program.setUniformValue("qt_Texture0", 0);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), m_projection);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), camMatrix);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
         applyEnvironmentUniforms(m_program, environment, sceneLights,
                                  lightingMode, fogEnabled);
         // Stock projected shadows use selected receivers. Ordinary static
@@ -8832,7 +8838,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                         if(node==m_connectionGhostNode && !m_connectionGhostVertices.isEmpty())continue;
                         if(!isObjectVisualVisible(node))
                             continue;
-                        m_program.setUniformValue("u_highlightColor",
+                        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"),
                             mob == m_activeMob ? activeHighlight : lockedHighlight);
                         node->drawObjectVisual(mob == m_activeMob, &m_program);
                         renderQueue.flush();
@@ -8841,12 +8847,13 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                             ++performance.counters().nodesSubmitted;
                         }
                     }
-        m_program.setUniformValue("u_highlightColor", activeHighlight);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"), activeHighlight);
         renderQueue.flush();
         const auto drawBehaviorHelpers = [&]()
         {
             if(m_minimapCaptureActive)
                 return;
+            ei::CHelperVisibilityScope helperVisibility(cullingEnabled ? &frustum : nullptr);
             for(CMob* mob : m_aMob)
             {
                 if(!isMobVisible(mob))
@@ -8854,6 +8861,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                 for(CNode* node : mob->nodes())
                 {
                     if(!traverseHelpers && node->nodeState() != ENodeState::eSelect)
+                        continue;
+                    if(node->nodeType() != ENodeType::eUnit && node->nodeType() != ENodeType::eMagicTrap)
                         continue;
                     node->drawLogicVisual(mob == m_activeMob, &m_program);
                     if(performance.collecting())
@@ -8866,6 +8875,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             // helpers.
             renderQueue.flush();
         };
+        stallTrace.mark("selection-highlight");
         drawBehaviorHelpers();
         ei::gl::DepthFunc(GL_LESS);
     }
@@ -8902,7 +8912,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 
         // Overlay opacity is authored per material and carried in the sector
         // vertex payload. Do not apply the inherited global 0.3 subtraction.
-        m_landProgram.setUniformValue("transparency", 0.0f);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "transparency"), 0.0f);
         const CWorldSet* overlayWorldSet = m_environmentMob
             ? &m_environmentMob->worldSet() : nullptr;
         const QVector3D overlayWindDirection = overlayWorldSet
@@ -8912,13 +8922,13 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             ? overlayWorldSet->data(eWsTypeWindStr).toFloat() : 0.0f;
         const bool landscapeEditing = m_landscapeTools
             && m_landscapeTools->editingEnabled();
-        m_landProgram.setUniformValue("u_overlayMotionEnabled",
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayMotionEnabled"),
             !m_minimapCaptureActive && !landscapeEditing);
-        m_landProgram.setUniformValue("u_overlayTimeSeconds",
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayTimeSeconds"),
             !m_minimapCaptureActive && m_overlayAnimationTimer.isValid()
                 ? float(m_overlayAnimationTimer.elapsed()) / 1000.0f : 0.0f);
-        m_landProgram.setUniformValue("u_overlayWindDirection", overlayWindDirection);
-        m_landProgram.setUniformValue("u_overlayWindStrength", overlayWindStrength);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayWindDirection"), overlayWindDirection);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayWindStrength"), overlayWindStrength);
         applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                                  lightingMode, fogEnabled);
         applyShadowUniforms(m_landProgram, environmentEnabled && shadowsEnabled,
@@ -8926,8 +8936,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         if(!m_minimapCaptureActive && !m_neighborLandscapes.isEmpty()
            && m_neighborLandscapesVisible)
         {
-            m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
-            m_landProgram.setUniformValue("u_mapFog", QVector3D());
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_readOnlyBackground"), 0.0f);
+            m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_mapFog"), QVector3D());
             for(const SLoadedNeighborLandscape& neighbor
                 : m_neighborLandscapes)
                 if(neighbor.landscape && neighbor.landscape->isMprLoad())
@@ -8942,12 +8952,12 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             applyShadowUniforms(m_landProgram,
                 environmentEnabled && shadowsEnabled, true, true);
         }
-        m_landProgram.setUniformValue("u_readOnlyBackground", 0.0f);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_readOnlyBackground"), 0.0f);
         m_pLand->applyTerrainShadowUniforms(&m_landProgram, terrainShadowsEnabled);
         m_pLand->drawWater(&m_landProgram, cullingEnabled ? &frustum : nullptr);
         logOpenGlErrors(QStringLiteral("draw/water"));
-        m_landProgram.setUniformValue("u_overlayMotionEnabled", false);
-        m_landProgram.setUniformValue("transparency", 0.0f);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_overlayMotionEnabled"), false);
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "transparency"), 0.0f);
     }
 
     stallTrace.mark("water");
@@ -8967,8 +8977,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     {
         QMatrix4x4 mtrx;
         mtrx.setToIdentity();
-        m_program.setUniformValue("u_projMmatrix", mtrx);
-        m_program.setUniformValue("u_viewMmatrix", mtrx);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), mtrx);
+        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), mtrx);
         m_selectFrame->draw(&m_program);
     }
 }
@@ -11687,7 +11697,7 @@ void CView::drawTilePreview(QOpenGLShaderProgram* program)
         return;
 
     m_pLand->glTexture()->bind(0); // todo: update preview tile texture after mpr loaded
-    program->setUniformValue("qt_Texture0", 0);
+    program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
     m_pPreviewTile->uploadPendingGeometry();
     m_pPreviewTile->draw(program);
 }
@@ -11708,7 +11718,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     if(!m_landscapeTools || !m_pLand || !m_pLand->isMprLoad()
        || !m_landscapeTools->editingEnabled() || m_landscapeInteractionSuspended)
         return;
-    const int position = program->attributeLocation("a_position");
+    const int position = ei::attributeLocation(program, "a_position");
     if(position < 0)
         return;
     if(m_landscapeTools->paintIssueMarkingEnabled())
@@ -11737,12 +11747,12 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             const bool selected = m_paintIssueSelectedCells.contains(cell);
             if(selected)
             {
-                program->setUniformValue("customColor",
+                program->setUniformValue(ei::uniformLocation(program, "customColor"),
                                          QVector4D(1.0f, 0.05f, 0.05f, 0.20f));
                 program->setAttributeArray(position, boundary.constData());
                 glDrawArrays(GL_TRIANGLE_FAN, 0, boundary.size());
             }
-            program->setUniformValue("customColor",
+            program->setUniformValue(ei::uniformLocation(program, "customColor"),
                                      QVector4D(1.0f, 0.12f, 0.12f, 0.98f));
             program->setAttributeArray(position, boundary.constData());
             glLineWidth(selected ? 3.0f : 2.0f);
@@ -11789,7 +11799,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
             }
             m_sculptOutlineGeometryDirty = false;
         }
-        program->setUniformValue("customColor", landSculpt
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), landSculpt
             ? QVector4D(1.0f, 0.72f, 0.08f, 0.95f)
             : QVector4D(0.10f, 0.82f, 1.0f, 0.95f));
         program->setAttributeArray(position, m_sculptOutlineVertices.constData());
@@ -11844,7 +11854,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     {
         glDepthFunc(GL_ALWAYS);
         glLineWidth(2.5f);
-        program->setUniformValue("customColor", outlineColor);
+        program->setUniformValue(ei::uniformLocation(program, "customColor"), outlineColor);
         int minX = m_terrainPaintFootprint.anchor.x() - radius;
         int maxX = m_terrainPaintFootprint.anchor.x() + radius;
         int minY = m_terrainPaintFootprint.anchor.y() - radius;
@@ -11930,7 +11940,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
     }
     if(boundary.isEmpty() && vertices.isEmpty())
         return;
-    program->setUniformValue("customColor", outlineColor);
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), outlineColor);
     glDepthFunc(GL_ALWAYS);
     if(boundary.size() >= 3)
     {
@@ -16000,8 +16010,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         return;
     }
 
-    m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
+    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_projMmatrix"), m_projection);
+    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_viewMmatrix"), viewMatrix);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -24308,8 +24318,8 @@ CNode* CView::pickObject(QList<CNode*>& aNode, int x, int y)
         return nullptr;
     }
 
-    m_selectProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_selectProgram.setUniformValue("u_viewMmatrix", viewMatrix);
+    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_projMmatrix"), m_projection);
+    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_viewMmatrix"), viewMatrix);
 
     const COptBool* cullingOption = m_pSettings
         ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
@@ -24378,8 +24388,8 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     }
 
     // Set modelview-projection matrix
-    m_landProgram.setUniformValue("u_projMmatrix", m_projection);
-    m_landProgram.setUniformValue("u_viewMmatrix", camMatrix);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_projMmatrix"), m_projection);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), camMatrix);
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const CViewFrustum frustum(m_projection * camMatrix);

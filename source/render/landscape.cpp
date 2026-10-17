@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QRandomGenerator>
@@ -1005,10 +1006,10 @@ void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum
 {
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
-    program->setUniformValue("qt_Texture0", 0);
+    program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
     const int atlasRows = qMax(1, (m_renderTextureCount
         + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
-    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+    program->setUniformValue(ei::uniformLocation(program, "u_overlayAtlasGrid"), QVector3D(
         float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)
@@ -1147,10 +1148,10 @@ void CLandscape::applyTerrainShadowUniforms(QOpenGLShaderProgram* program,
     const bool available = enabled
         && m_terrainShadowTexture && m_terrainShadowTexture->isCreated()
         && m_terrainShadowTextureWidth > 1 && m_terrainShadowTextureHeight > 1;
-    program->setUniformValue("u_terrainShadowEnabled", available);
-    program->setUniformValue("u_terrainShadowMap", 6);
-    program->setUniformValue("u_terrainShadowOrigin", m_worldOffset.toVector2D());
-    program->setUniformValue("u_terrainShadowTextureSize",
+    program->setUniformValue(ei::uniformLocation(program, "u_terrainShadowEnabled"), available);
+    program->setUniformValue(ei::uniformLocation(program, "u_terrainShadowMap"), 6);
+    program->setUniformValue(ei::uniformLocation(program, "u_terrainShadowOrigin"), m_worldOffset.toVector2D());
+    program->setUniformValue(ei::uniformLocation(program, "u_terrainShadowTextureSize"),
         QVector2D(float(qMax(1, m_terrainShadowTextureWidth)),
                   float(qMax(1, m_terrainShadowTextureHeight))));
     if(available)
@@ -1266,10 +1267,10 @@ void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* fr
 {
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
-    program->setUniformValue("qt_Texture0", 0);
+    program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
     const int atlasRows = qMax(1, (m_renderTextureCount
         + m_renderAtlasColumns - 1) / m_renderAtlasColumns);
-    program->setUniformValue("u_overlayAtlasGrid", QVector3D(
+    program->setUniformValue(ei::uniformLocation(program, "u_overlayAtlasGrid"), QVector3D(
         float(m_renderAtlasColumns), float(atlasRows), 8.0f));
     for (auto& xSec: m_aSector)
         for(auto& ySec: xSec)

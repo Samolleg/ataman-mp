@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include "ogl_utils.h"
 #include "gl_dispatch.h"
 
@@ -22,33 +23,33 @@ void CSelectFrame::draw(QOpenGLShaderProgram *program)
 
     ei::gl::Disable(GL_DEPTH_TEST);
     //matrix.setToIdentity();
-    program->setUniformValue("u_modelMmatrix", m_matrix);
+    program->setUniformValue(ei::uniformLocation(program, "u_modelMmatrix"), m_matrix);
 
-    program->setUniformValue("u_bUseColor", true);
-    program->setUniformValue("customColor", QVector4D(0.05, 0.78, 0.93, 0.3));
+    program->setUniformValue(ei::uniformLocation(program, "u_bUseColor"), true);
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.05, 0.78, 0.93, 0.3));
     int offset(0);
     // Tell OpenGL which VBOs to use
 
     m_vertexBuf.bind();
     // Tell OpenGL programmable pipeline how to locate vertex position data
-    int vertexLocation = program->attributeLocation("a_position");
+    int vertexLocation = ei::attributeLocation(program, "a_position");
     program->enableAttributeArray(vertexLocation);
     program->setAttributeBuffer(vertexLocation, GL_FLOAT, offset, 3, int(sizeof(QVector3D)));
 
 //    offset+=int(sizeof(QVector3D)); // size of vertex position
-//    int normLocation = program->attributeLocation("a_normal");
+//    int normLocation = ei::attributeLocation(program, "a_normal");
 //    program->enableAttributeArray(normLocation);
 //    program->setAttributeBuffer(normLocation, GL_FLOAT, offset, 3, int(sizeof(SVertexData)));
 
 //    offset+=int(sizeof(QVector3D)); // size of normal
-//    int textureLocation = program->attributeLocation("a_texture");
+//    int textureLocation = ei::attributeLocation(program, "a_texture");
 //    program->enableAttributeArray(textureLocation);
 //    program->setAttributeBuffer(textureLocation, GL_FLOAT, offset, 2, int(sizeof(SVertexData)));
 
     // Draw cube geometry using indices from VBO 1
     m_indexBuf.bind();
     ei::gl::DrawElements(GL_TRIANGLES, m_indexBuf.size(), GL_UNSIGNED_SHORT, nullptr);
-    program->setUniformValue("customColor", QVector4D(0.0, 0.0, 0.0, 0.0));
+    program->setUniformValue(ei::uniformLocation(program, "customColor"), QVector4D(0.0, 0.0, 0.0, 0.0));
     ei::gl::Enable(GL_DEPTH_TEST);
 }
 

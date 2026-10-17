@@ -1,3 +1,4 @@
+#include "shader_locations.h"
 #include "preview.h"
 #include "gl_dispatch.h"
 #include "view.h"
@@ -56,7 +57,7 @@ void CPreview::initializeGL()
     m_program.removeAllShaders();
     if(!m_program.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/vshader.vsh")
        || !m_program.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/fshader.fsh")
-       || !m_program.link())
+       || !ei::linkShaderProgram(m_program))
         ei::log(eLogWarning, "Preview shader failure: " + m_program.log());
     qglClearColor(Qt::darkGray);
     //ei::gl::Enable(GL_EXT_texture_filter_anisotropic);
@@ -153,15 +154,15 @@ void CPreview::draw()
     QOpenGLShaderProgram* pProgram = &m_program;
     if(!pProgram->bind()) return;
 
-    pProgram->setUniformValue("customColor", QVector4D());
-    pProgram->setUniformValue("u_instanced", false);
-    pProgram->setUniformValue("u_partAnimated", false);
-    pProgram->setUniformValue("u_highlight", false);
-    pProgram->setUniformValue("u_shadowCascadeDebug", false);
-    pProgram->setUniformValue("u_environmentEnabled", false);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "customColor"), QVector4D());
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_instanced"), false);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_partAnimated"), false);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_highlight"), false);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_shadowCascadeDebug"), false);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_environmentEnabled"), false);
 
-    pProgram->setUniformValue("u_projMmatrix", m_projection);
-    pProgram->setUniformValue("u_viewMmatrix", camMatrix);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_projMmatrix"), m_projection);
+    pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_viewMmatrix"), camMatrix);
 
     if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
         unit->drawObjectVisual(true, pProgram);
