@@ -27,10 +27,19 @@ Private directory `build-save-recovery-201-20261017`:
 
 Version201 reserved; concurrent200 patrol work is outside this fix. Fresh snapshot build initially based on accepted199 plus this fix; no uncommitted patrol edits silently included. Final source identity and installation receipt to be recorded after checks. Installed editor remains open until rescue completeness is established and owner closes it under the handoff contract.
 
-User physically stopped Computer Use with Escape during a later window inventory. No further UI input in this turn; no installation or live restoration performed. Latest disk MOB already equals pinned recovery335e122d (normal Save10:53); MPR remains original83eb85ec. Private recovery-publication preparation is separate from applying it.
+User physically stopped Computer Use with Escape during a later window inventory. No further UI input was issued in that turn; installation and live restoration had not yet been performed. Latest disk MOB already equals pinned recovery335e122d (normal Save10:53); MPR remains original83eb85ec. Private recovery-publication preparation is separate from applying it.
 
 ## Live rescue completed
 
 Owner confirmed only zone3obr had edits. After the editor was closed, commitMapSaveBatch published the prepared MPR/RES pair with backups and exact source/readback SHA checks. Existing MOB already equalled the pinned335e122d generation and was not rewritten.1237 unrelated RES members remained exact;36 recovery members published. Receipt `build-save-recovery-201-20261017/live-restore-receipt.json` has success=true/readbackExact=true/changedFiles=2. Before images and backup files retained.
 
 Accepted patrol200 source76c2498f is included in final201; integrated fresh Release201/runtime completed; integrated.out43 PASS/exit0. verify-live.out7 PASS/exit0 confirms the restored actual game MPR and atlas resolve and match the pinned rescue exactly (read-only hidden native reopen).
+
+## Verified installation201
+
+- main code cbcb8d7e8aad9880f2855f01865d53341e926f29;654 compiler/resource inputs verified against the tested source snapshot. Includes accepted20076c2498f8e21cc93cb3d394dd24cf4490cf2f731.
+- Raw/staged --version201, finalizer and130 installed managed files PASS. Owner files unchanged: `17042:4A7D8DE0FF77540A8F7C84390D5D4AEADC71B47F01E35E9B48A0717268FC33EB`.
+- EXE SHA256 `510637FA8D8DB66515413C72165F85E6D59B5ED564F2D158456C1CF82D0B45F6`; manifest `1F3129D197EF200F7EBC6F32E803FD7C942156EB6D7021785A21EFD1D22758D4`.
+- Verified200 rollback retained at `artifacts/rollback200-to201-world-save-20261017`; previous verified199 rollback retired. Live map recovery backups are separate and retained.
+- Evidence receipts: private `build-save-recovery-201-20261017/{build-receipt,staging-receipt,install-receipt,rollback-retirement,live-restore-receipt}.json`.
+- Requested repair, current-zone rescue, checks and installation completed. Owner visual/game acceptance remains separate; no GitHub publication.
