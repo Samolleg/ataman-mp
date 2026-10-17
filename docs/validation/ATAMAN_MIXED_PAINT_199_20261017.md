@@ -29,4 +29,13 @@ Recovery source pair in owner backup folder `f0d5ce006828673d2b134144039306a2bef
 
 ## Handoff
 
-Native final3 completed successfully, including exact reopened terrain, second material mouse stroke, its Undo/Redo and second Save. Pending scoped commit, fresh staging and guarded installation over198. Permanent target: `artifacts/EI-Mapper-Ataman-2-first-test`. Preserve every unmanaged owner file and verify managed manifest; keep verified198 rollback. No GitHub publication.
+Native final3 completed successfully, including exact reopened terrain, second material mouse stroke, its Undo/Redo and second Save. Scoped implementation committed and guarded installation completed over198. Permanent target: `artifacts/EI-Mapper-Ataman-2-first-test`. Preserve every unmanaged owner file and verify managed manifest; keep verified198 rollback. No GitHub publication.
+
+## Verified installation
+
+- main source `de55f5e4c4f984a8c22e1e6908bd04c275f30c96`; 652 compiler/resource inputs match the built snapshot (line-ending-only differences allowed).
+- Raw/staged version199, finalizer PASS; 130 managed files verified. Owner digest unchanged: `17898:97BAF43E6EB2AAE46753828050B600E288C5193C2DC5F5162E4C4D85642C27BD`.
+- EXE SHA256 `CED102421B026319B2DEAEBCB7B963DC53851FBFF69A6674B9ABB66205C4E0CB`; manifest `C78FEA83EB0CEB76F069E40D4D56137884C7F6BD09FDBA3CB2CC97D6E1F7A08B`.
+- Verified reconstructable198 rollback: `artifacts/rollback198-to199-mixed-paint-20261017`; only previous verified197 rollback retired.
+- Receipts: private `build-mixed-paint-199-20261017/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json`.
+- Installed program updated; owner visual/game acceptance remains separate.
