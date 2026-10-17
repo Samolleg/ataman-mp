@@ -105,3 +105,37 @@ Native `patrol_render_check` на приватных zone3obr.mpr/.mob: **44 PAS
 «Поведение» без движения мыши, первый новый патруль, точки взгляда,
 перемещение/Undo/Redo и Save/reopen. Установка — после резервного сохранения
 текущей сессии и подтверждённого закрытия по TEST_BUILD_HANDOFF.md.
+
+## Идентичность сборки
+
+- Source main `76c2498f8e21cc93cb3d394dd24cf4490cf2f731`.
+- EXE SHA-256 `4A5F61EC915619FDE0907F2739EBE1557CF55BEF8006C9F7CC8FE0716A46ECAA`.
+- Bridge SHA-256 `7AF32B28642F8E2F572A8E5D3D7C7A7FD1E2291F314B6B9065653EA3D3120C52`.
+- RuntimeHost SHA-256 `E14D27896F1EA17356D82C54BE82BF1A2491E75C3626A59F917566CA621D8F4E`.
+- 652 compiler/resource inputs сверены с source commit (432 только EOL);
+  274 production object hashes сохранены. make -q release:0.
+- build-receipt.json/final-probe-receipt.json: PASS.
+
+## Установка
+
+`build-staging-200-patrol-stalls` создана заново; raw/staged --version200,
+совпадение EXE/runtime с проверенной сборкой и finalizer/distribution validator:
+PASS. Manifest SHA-256:
+`B546C7392911AF72170F55B1221A74910921A6F5E8BDB77685402E00F4C24625`.
+После finalizer staging не запускалась и не изменялась.
+
+Свежая CIM-проверка показала, что установленный редактор уже закрыт.
+Выполнена атомарная guarded замена в
+`artifacts/EI-Mapper-Ataman-2-first-test`:130 managed проверены, VERSION200,
+EXE/runtime совпали с staging. Заменено/удалено7 старых managed путей
+(в том числе удалён1 старый отчёт), добавлен1 новый отчёт; manifest последним.
+Все17042 пользовательских файла вне manifest сохранились, digest до/после:
+`17042:1A17B8236D41B136099EB4CFDC326BCE15A8E7901E7203459C050A01210E4D66`.
+
+Резерв199 `artifacts/rollback199-to200-patrol-stalls-20261017` проверен
+на полную восстановимость. Только после проверки установки и этого резерва
+удалён прежний идентифицированный резерв198
+`artifacts/rollback198-to199-mixed-paint-20261017` (19867622 bytes).
+`install-receipt.json` и `rollback-retirement.json`: PASS. Редактор после
+установки не запускался; ручная приёмка владельцем отдельно. Параллельные
+исходники/данные восстановления201 сохранены; GitHub не обновлялся.
