@@ -1,3 +1,11 @@
+## EI-MENU-SAVE-203 — единая команда Сохранить MPR
+
+- Поручение: команда меню сохраняет все изменённые MPR с атласами, сохраняя Undo/Redo; проверить именно меню на копии zone3obr и нескольких изменённых картах, собрать/установить. База202 1c386688. Только приватные копии DejaVu, оригиналы не менять.
+- IN PROGRESS: saveLand исключал единственную активную dirty-карту из world Save, затем saveChangedLandscapeDocument блокировал её. После многокартового Save выполнялась лишняя публикация активной карты. Команда теперь направляется в единую пачку для любого непустого dirty-набора и завершается после неё; активные обычные изменения включаются в пачку, материалы синхронизируются независимо от наличия рабочего атласа.
+- Далее native MainWindow/QMenu mouseClick: одна карта, две изменённые, активная чистая/соседняя dirty, Cancel, Undo/Redo, дисковые карты/атласы и reopen. Затем fresh203 и guarded установка.
+
+- BUILT/CHECKED203: baseline202 воспроизвёл точное предупреждение реальным меню. Final native79 PASS/exit0: MainWindow/QMenu mouseClick, Cancel, одна/две dirty-карты (zone3obr/zone9), чистая активная zone1, Undo/Redo, companion checkpoint, MPR/atlas readback/reopen. Доступность меню учитывает dirty других карт, уведомление только при смене общего pending-флага. Fresh Release/runtime готовы. Далее scoped-коммит, staging и guarded установка. Evidence docs/validation/ATAMAN_MENU_SAVE_203_20261017.md.
+
 ## EI-WORLD-HISTORY-202 — Undo/Redo после сохранения общей кисти
 
 - Поручение: сохранять Undo/Redo после Save, проверить копию zone3obr и установить. База201 b123e5bd. Только копии данных; чужие изменения сохраняются.

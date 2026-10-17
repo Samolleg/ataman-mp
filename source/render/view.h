@@ -272,6 +272,7 @@ public:
                              const QString& commandText);
     void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
+    bool hasDirtyWorldTerrain() const { return !m_worldTerrainSession.dirtyPaths().isEmpty(); }
     bool hasPendingTerrainPublication() const
     {
         return modernTerrainPublicationRequired(true);
@@ -1120,6 +1121,7 @@ private:
     QSet<QString> m_worldTerrainEnabledPaths;
     QSet<QString> m_worldTerrainExcludedPaths;
     bool m_worldTerrainEnabled{true};
+    bool m_worldTerrainSavePendingNotified{false};
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QByteArray m_neighborContextKey;
     QPointF m_activeMapWorldOrigin;

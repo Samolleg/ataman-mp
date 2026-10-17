@@ -7609,7 +7609,8 @@ void MainWindow::updateDocumentActionAvailability()
     m_ui->actionSave->setEnabled(idle && (hasActiveMob || hasMpr || hasTravelChanges()));
     m_ui->actionSave_as->setEnabled(idle && hasActiveMob);
     m_ui->actionSave_all_MOB_s->setEnabled(idle && hasAnyMob);
-    m_ui->actionSave_landscape_MPR->setEnabled(idle && (dirtyMpr || hasTravelChanges()));
+    m_ui->actionSave_landscape_MPR->setEnabled(idle && (dirtyMpr
+        || (m_pView && m_pView->hasDirtyWorldTerrain()) || hasTravelChanges()));
     m_ui->actionSave_landscape_MPR_as->setEnabled(idle && hasMpr);
     m_ui->actionMap_parameters->setEnabled(idle);
     m_ui->actionClose_all->setEnabled(idle && (hasAnyMob || hasMpr));

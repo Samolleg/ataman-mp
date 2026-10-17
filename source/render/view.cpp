@@ -9906,23 +9906,21 @@ void CView::unloadLand(bool promptForSave)
 
 void CView::saveLand()
 {
-    syncWorldTerrainActive();
-    const auto dirtyWorld = m_worldTerrainSession.dirtyPaths();
-    if(!dirtyWorld.isEmpty()
-       && (dirtyWorld.size()!=1 || CWorldTerrainSession::key(dirtyWorld.first())
-           != CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())))
+    finishSculptStroke();endTileBrushGroup();syncWorldTerrainActive();
+    if(!m_worldTerrainSession.dirtyPaths().isEmpty())
     {
-        if(!saveWorldTerrainMaps()) {
-            if(m_mapCohortActive)m_mapCohortCommitted=false;
-            return;
+        // Include active non-world edits in the same checked publication.
+        if(m_pLand->isMprLoad() && m_pLand->isDirty()) {
+            QString error;const auto path=m_pLand->filePath().absoluteFilePath();
+            if(!m_worldTerrainSession.load(path,&error)) {
+                QMessageBox::warning(this,tr("MPR save failed"),error);return;
+            }
+            syncWorldTerrainActive();
         }
-        // Travel companions were already committed by the world batch. A
-        // subsequent atlas publication must compare against that new baseline.
-        if(m_mapCohortActive && m_mapCohortCommitted)
-            for(auto& file : m_mapCompanions) { file.before=file.after; file.existed=true; }
-        // The world checkpoint is durable, but it is not success of the next
-        // publication. Cancellation/preflight failure must still return false.
-        if(m_mapCohortActive)m_mapCohortCommitted=false;
+        if(!saveWorldTerrainMaps() && m_mapCohortActive)m_mapCohortCommitted=false;
+        // The batch owns MPRs, atlases and any staged travel companions.
+        // A second active-map publication would replace its history/baseline.
+        return;
     }
     if(m_pLand->isMprLoad())
     {

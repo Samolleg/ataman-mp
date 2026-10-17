@@ -28,6 +28,11 @@ void CView::updateWorldTerrainStatus()
         .arg(m_worldTerrainEnabledPaths.size()).arg(names.isEmpty()?tr("none"):names.join(", "));
     m_landscapeTools->setWorldTerrainStatus(status,m_worldTerrainSession.canUndo(),
         m_worldTerrainSession.canRedo(),!names.isEmpty(),m_worldTerrainEnabled,m_worldTerrainEnabledPaths.size());
+    const bool pending=!names.isEmpty();
+    if(pending!=m_worldTerrainSavePendingNotified) {
+        m_worldTerrainSavePendingNotified=pending;
+        emit mprSaveStateChanged();
+    }
 }
 
 void CView::syncWorldTerrainActive()
@@ -38,7 +43,8 @@ void CView::syncWorldTerrainActive()
     auto doc=m_worldTerrainSession.documents[id];
     doc->baseline=m_mprDocument;
     doc->terrain=m_terrainEdit;
-    if(doc->atlas){doc->atlas=m_workingTerrainAtlas;doc->materials=m_mprMaterials;}
+    doc->materials=m_mprMaterials;
+    if(doc->atlas)doc->atlas=m_workingTerrainAtlas;
 }
 
 void CView::restoreWorldTerrainActive()
