@@ -4411,6 +4411,12 @@ CTerrainWorkingAtlas::CTerrainWorkingAtlas(
     }
 }
 
+QSize CTerrainWorkingAtlas::synthesisTileSize() const
+{
+    return m_resolver && !m_resolver->m_authoredTiles.isEmpty()
+        ? m_resolver->m_authoredTiles.front().size() : QSize();
+}
+
 bool CTerrainWorkingAtlas::isValid() const
 {
     return m_capacityLimit > 0 && m_resolver && m_resolver->isValid();

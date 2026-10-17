@@ -57,6 +57,7 @@
 #include "mob\mob.h"
 #include "resourcemanager.h"
 #include "mmp_codec.h"
+#include "terrain_image_sizes.h"
 #include "resource_name.h"
 #include "node.h"
 #include "landscape.h"
@@ -12268,7 +12269,7 @@ void CView::rebuildTerrainAutoCatalog()
                     family, mprNamespace,
                     m_authoredTerrainTileImages.isEmpty()
                         ? QSize()
-                        : m_authoredTerrainTileImages.front().size(),
+                        : QSize(terrainMaximumTileSize(m_authoredTerrainTileImages),terrainMaximumTileSize(m_authoredTerrainTileImages)),
                     m_terrainGlobalUniformTileCache, &selectedSource);
             if(!source.isNull())
             {
@@ -12452,8 +12453,7 @@ void CView::rebuildTerrainAutoCatalog()
         .arg(familyUsageMs).arg(paletteCommitMs));
     if(m_terrainAtlasAnalysis.usable)
     {
-        const QSize tileSize = m_authoredTerrainTileImages.isEmpty()
-            ? QSize() : m_authoredTerrainTileImages.front().size();
+        const QSize tileSize = m_workingTerrainAtlas ? m_workingTerrainAtlas->synthesisTileSize() : QSize();
         startDeferredGlobalTerrainPaletteHydration(
             mprNamespace, tileSize, hydrationGeneration);
     }
@@ -12842,8 +12842,7 @@ void CView::prewarmModernTerrainFamily(qint32 terrainType,
         preferNativeTerrainBank(&authoredCandidates, m_mprDocument.mapInfo().innerNamespace);
     const QStringList configuredArchives = CTextureList::getInstance()
         ->configuredResourceArchivePaths();
-    const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-        ? QSize() : m_authoredTerrainTileImages.front().size();
+    const QSize requiredSize = staged->atlas->synthesisTileSize();
     const quint32 semanticSeed = m_terrainSemanticSeed;
     const qint64 guiMilliseconds = guiTimer.elapsed();
     auto* watcher = new QFutureWatcher<STerrainFamilyPrewarmResult>(this);
@@ -14327,13 +14326,12 @@ bool CView::ensureGlobalTerrainMaterialSources(
     QSet<qint32> required;
     required << signature.northWest << signature.northEast
              << signature.southEast << signature.southWest;
-    const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-        ? QSize() : m_authoredTerrainTileImages.front().size();
+    const QSize requiredSize = atlas->synthesisTileSize();
     for(qint32 material : required)
     {
         if(atlas->hasMaterialSource(material))
             continue;
-        if(materialSources->contains(material))
+        if(materialSources->contains(material) && materialSources->value(material).size() == requiredSize)
         {
             if(!atlas->addExternalMaterialSource(
                    material, materialSources->value(material)))
@@ -14478,8 +14476,7 @@ bool CView::realizeWorkingTerrainSignature(
         });
         if(referenceConfigured)
             preferNativeTerrainBank(&candidates, m_mprDocument.mapInfo().innerNamespace);
-        const QSize requiredSize = m_authoredTerrainTileImages.isEmpty()
-            ? QSize() : m_authoredTerrainTileImages.front().size();
+        const QSize requiredSize = atlas->synthesisTileSize();
         QSet<QByteArray> importedPhysical;
         QSet<QByteArray> importedPixels;
         CValidationReport libraryReport;

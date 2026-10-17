@@ -3973,6 +3973,10 @@ void TerrainVirtualAtlasTests::mixedNativePagesPreserveStorageAndHdDisplay()
     CTerrainWorkingAtlas reopened(fixture.catalog,mixed,190,448,{}, {},atlas.activeTileTypes(),{{1,0},{2,0},{3,0},{4,0}});
     QVERIFY2(reopened.isValid(),qPrintable(reopened.error()));
     QCOMPARE(reopened.authoredTileImages(),mixed);
+    QCOMPARE(atlas.synthesisTileSize(),QSize(128,128));
+    QCOMPARE(reopened.synthesisTileSize(),QSize(256,256));
+    CValidationReport transitionReport;
+    QVERIFY2(reopened.addAuthoredLibraryTransition(signature(1,2,2,1),hd,"mixed-size loaded transition",&transitionReport),qPrintable(transitionReport.toText()));
 }
 
 void TerrainVirtualAtlasTests::workingPreviewPackagePreservesAuthoredPagesAndAppendsExtensions()
