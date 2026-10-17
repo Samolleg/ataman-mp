@@ -7,6 +7,10 @@
 
 - BUILT/CHECKED205: native155 PASS/exit0; настоящие Apply/Cancel, несохранённый мазок, точные MMP/SEC/семантика, нечётные смещения expand/crop, три MOB/все5logic/traps/grouping/активный MOB, старые графы точны, отдельные recalc/Bake и стойкая отметка, race/rollback/Save As. Fresh205/runtime готовы; evidence docs/validation/ATAMAN_CANVAS_205_20261017.md. Далее scoped-коммит и guarded staging/установка.
 
+- READY/WAITING_CLOSE205: source main98e779995f95bf8c96840ff2e6f3bbdd8fafd898; raw/staged205, 470 source inputs и finalizer PASS, staging `build-staging-205-canvas`. Установка не началась: guard обнаружил установленный EIMapperEndurance.exe PID31320. Владелец уведомлён сохранить работу и закрыть редактор по docs/TEST_BUILD_HANDOFF.md; затем повторить только guarded install, функциональные проверки неизменного205 не повторять.
+
+- DONE/INSTALLED205: source main98e779995f95bf8c96840ff2e6f3bbdd8fafd898; 155 native PASS, raw/staged205 и finalizer PASS, 130 installed managed проверены. Все 17362 пользовательских файлов сохранены побайтно. Резерв204 восстановим, прежний проверенный203→204 удалён; остальные исторические резервы сохранены. Evidence docs/validation/ATAMAN_CANVAS_205_INSTALL_20261017.md; receipts build-canvas-205-20261017. Размер живой gipat1 автоматически не менялся; ручная/игровая приёмка отдельно. GitHub не обновлялся.
+
 ## EI-NEW-MAP-204 — создание карт с полным каталогом и восстановление gipat1
 
 - Поручение17.10: исправить создание новых карт, сразу доступны вся земля и покрытия; восстановить gipat1 без потери рельефа, проверить, собрать и установить. База main994c420b04f3b39be1bc2d0d63b920a4cfb4defa/203; следующая204. Лично в main; чужие правки ROADMAP сохраняются. Разрешено восстановить gipat1 и обновить постоянную установку; другие игровые карты/RES не изменять.
