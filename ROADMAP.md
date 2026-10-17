@@ -8,6 +8,7 @@
 
 - BUILT/CHECKED204: native412 PASS/exit0, настоящий New MPR с неплоским рельефом, все81+7 ID и88 реальных источников, аппаратная lit/unlit mini-map, мышью земля/добавление покрытия, Undo/Redo, два Save/reopen и дальнейшее рисование. Исправлены связанные отсутствие GL-контекста при загрузке и потеря совместимости рабочего профиля. gipat1 имеет точный19-page кандидат, весь MPR/высоты неизменны. Evidence docs/validation/ATAMAN_NEW_MAP_204_20261017.md. Далее scoped-коммит, staging, guarded live-sidecar и установка.
 
+- DONE/INSTALLED204: source maina0d52328d3b40e8ddd83863492b7771d67ab21c8;412 native PASS, raw/staged204, finalizer и130 installed managed PASS. Все16852 пользовательских файла побайтно сохранены. gipat1 восстановлена новым atlas.res, весь MPR SHA9adf9cff неизменен; рельеф сохранён. Резерв203 восстановим, прежний проверенный202→203 удалён. Receipts build-new-map-204-20261017; evidence docs/validation/ATAMAN_NEW_MAP_204_INSTALL_20261017.md. Ручная/игровая приёмка отдельно; GitHub не обновлялся.
 
 ## EI-MENU-SAVE-203 — единая команда Сохранить MPR
 
