@@ -18,4 +18,12 @@ Private work: `build-menu-save-203-20261017`.
 
 ## Build and handoff
 
-Fresh Release203 and both runtime components built, including final menu availability changes. Pending scoped commit, source-byte verification, clean staging and guarded installation over202. Preserve all owner files, retain verified202 program rollback. No GitHub publication.
+Fresh Release203 and both runtime components built, including final menu availability changes. Scoped commit, source-byte verification, clean staging and guarded installation over202 completed. Preserve all owner files, retain verified202 program rollback. No GitHub publication.
+
+## Verified installation
+
+- Source main `0be2fc26dcadbec45133114095cc222551ae0599`; 654 compiler/resource inputs match built snapshot. Raw/staged203 and finalizer PASS.
+- 130 managed files verified; owner files unchanged: `17518:7478EB280D43014375958AE3B7CD1A16B34ADD4403DE1729A8813FEED1DCC78E`.
+- EXE `1EF8F779F4038C16A7A9B23EDC9BEE1E4EA346F18639017503BFA91BB67FCBE2`; manifest `35B1A48BFE57829E3D9CBEC5F9789220149F4D011D384B9D9605E1CB02C381E7`.
+- Reconstructable202 rollback retained at `artifacts/rollback202-to203-menu-save-20261017`; previous verified201 program backup retired.
+- Receipts: private `build-menu-save-203-20261017/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json`.

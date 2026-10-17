@@ -6,6 +6,8 @@
 
 - BUILT/CHECKED203: baseline202 воспроизвёл точное предупреждение реальным меню. Final native79 PASS/exit0: MainWindow/QMenu mouseClick, Cancel, одна/две dirty-карты (zone3obr/zone9), чистая активная zone1, Undo/Redo, companion checkpoint, MPR/atlas readback/reopen. Доступность меню учитывает dirty других карт, уведомление только при смене общего pending-флага. Fresh Release/runtime готовы. Далее scoped-коммит, staging и guarded установка. Evidence docs/validation/ATAMAN_MENU_SAVE_203_20261017.md.
 
+- DONE/INSTALLED203: main 0be2fc26dcadbec45133114095cc222551ae0599; native menu79, 654 inputs, raw/staged203/finalizer/130 managed PASS. 17518 пользовательских файлов сохранены. Резерв202 восстановим; прежний проверенный201 удалён. Undo/Redo сохраняются через Save в текущей сессии. Receipts build-menu-save-203-20261017; GitHub не обновлялся.
+
 ## EI-WORLD-HISTORY-202 — Undo/Redo после сохранения общей кисти
 
 - Поручение: сохранять Undo/Redo после Save, проверить копию zone3obr и установить. База201 b123e5bd. Только копии данных; чужие изменения сохраняются.
