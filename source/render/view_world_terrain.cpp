@@ -331,7 +331,7 @@ bool CView::saveWorldTerrainMaps()
     QMap<QString,CMprDocument> reopened;
     CValidationReport report;QString error;
     auto refuse=[&](const QString& detail) {
-        QMessageBox::warning(this,tr("Карты не сохранены"),detail+"\n"+report.toText());return false;
+        QMessageBox::warning(this,tr("Карты не сохранены"),detail+(report.findings().isEmpty()?QString():"\n"+report.toText()));return false;
     };
     for(const auto& path:paths) {
         const QString id=CWorldTerrainSession::key(path);const auto doc=m_worldTerrainSession.documents[id];
@@ -361,14 +361,14 @@ bool CView::saveWorldTerrainMaps()
                     if(old.convertToFormat(QImage::Format_RGBA8888)!=images[page*64+slot].convertToFormat(QImage::Format_RGBA8888))changed.insert(slot);
                 }
                 if(!changed.isEmpty()) {
-                    const auto encoded=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,images.first().width()),true,&error);
+                    const auto encoded=ei::encodeMmpDxt1(CTerrainVirtualAtlas::composePage(images,page*64,images.at(page*64).width()),true,&error);
                     if(encoded.isEmpty())return refuse(error);
                     pages[page]=ei::patchMmpDxt1AtlasTiles(pages[page],encoded,changed,&error);
-                    if(pages[page].isEmpty())return refuse(error);
+                    if(pages[page].isEmpty())return refuse(tr("Не удалось сохранить страницу атласа %1: %2").arg(names[page],error));
                 }
             }
             const auto animations=id==active?m_mprAnimatedTiles:doc->baseline.mapInfo().animatedTiles;
-            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(staged,images,doc->atlas->activeTileTypes(),pages,doc->materials,animations,&report);
+            const auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(staged,images,doc->atlas->activeTileTypes(),pages,doc->materials,animations,&report,doc->atlas->preservedDxtTiles());
             if(!package.success)return refuse(package.error);
             if(!staged.loadBytes(package.mprBytes,path,&report))return refuse(report.toText());
             CResArchiveDocument encoded;
