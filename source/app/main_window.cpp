@@ -1617,6 +1617,13 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_pView, &CView::addWorldMapRequested, this, &MainWindow::addMapToWorld);
     connect(m_pView, &CView::manageWorldMapsRequested, this, &MainWindow::manageWorldMaps);
     connect(m_pView,&CView::worldMapAlignmentRequested,this,&MainWindow::alignWorldMapTiles);
+    connect(m_pView,&CView::canvasResizeMobPathsRequested,this,[this](QStringList* paths) {
+        if(!paths) return;
+        const QString current=QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
+        for(const auto& entry:m_mapCatalog.entries)
+            if(QFileInfo(entry.mprPath).absoluteFilePath().compare(current,Qt::CaseInsensitive)==0
+               && !entry.mobPath.isEmpty()) paths->append(entry.mobPath);
+    });
     connect(m_pView, &CView::worldMapPlacementConfirmed, this, &MainWindow::commitWorldMapPlacement);
     connect(m_pView, &CView::worldMapPlacementCancelled, this, [this]() { m_pendingWorldMaps.clear(); });
     const QMetaObject::Connection databasePrototypeNavigation = connect(
@@ -5380,6 +5387,9 @@ void MainWindow::persistAiGraph()
         tr("Bake into Primary MOB"), QMessageBox::ActionRole);
     QPushButton* switchButton = prompt.addButton(
         tr("Switch MOB to External .grp"), QMessageBox::ActionRole);
+    exportButton->setObjectName("aiGraphExportRuntime");
+    bakeButton->setObjectName("aiGraphBakePrimary");
+    switchButton->setObjectName("aiGraphSwitchExternal");
     prompt.addButton(QMessageBox::Cancel);
     prompt.exec();
     QAbstractButton* selected = prompt.clickedButton();
@@ -5449,6 +5459,11 @@ void MainWindow::persistAiGraph()
         if(!selectedGraphParsed)
             failureText = tr("The selected graph dimensions could not be established. Nothing was changed.\n\n%1")
                 .arg(selectedGraphError);
+        else if(m_pView->canvasNavigationStale() && [&]() {
+            QFile existing(externalPath);
+            return !existing.open(QIODevice::ReadOnly) || existing.readAll()!=graphBytes;
+        }())
+            failureText = tr("Существующий .grp устарел после изменения холста. Сначала экспортируйте пересчитанный граф.");
         else if(!validateExistingAiGraphFile(
                     QFileInfo(externalPath), selectedGraph.width(),
                     selectedGraph.height(), &ownershipWarnings, &graphError))
@@ -5478,6 +5493,14 @@ void MainWindow::persistAiGraph()
     {
         QMessageBox::critical(this, tr("Bake / Export AI Graph"), failureText);
         return;
+    }
+    if(m_pView->canvasNavigationStale()) {
+        // Only the graph that now owns runtime navigation may retire the
+        // marker. Exporting a GRP still shadowed by an old MOB is insufficient.
+        const auto selectedGraph=selectAiGraphPreviewSource(primaryMob->aiGraphData(),
+            primaryMob->filePath().fileName(), activeMpr);
+        if(selectedGraph.bytes==graphBytes && !m_pView->clearCanvasNavigationStale(&graphError))
+            QMessageBox::warning(this,tr("Навигация"),graphError);
     }
     m_pView->refreshAiGraphOwnership();
     if(primaryMob == m_pView->currentMob())

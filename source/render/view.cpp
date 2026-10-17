@@ -1,5 +1,6 @@
 #include "helper_visibility.h"
 #include "shader_locations.h"
+#include "canvas_navigation_state.h"
 #include "window_geometry.h"
 #include "ui_theme.h"
 #include <QtWidgets>
@@ -3986,6 +3987,11 @@ void CView::syncAiGraphPreviewWidget()
         ? tr("%1\n%2 x %3")
               .arg(m_aiGraphSource).arg(m_aiGraphDocument.width()).arg(m_aiGraphDocument.height())
         : tr("No graph source loaded"));
+    if(m_canvasNavigationStale)
+        m_aiGraphSourceLabel->setText(m_aiGraphSourceLabel->text()
+            + (!m_aiGraphPreviewUsesLoadedSource && m_aiGraphRegeneratedFresh
+                ? tr("\nПересчитан предварительный граф. Запишите его, чтобы обновить навигацию карты.")
+                : tr("\nГраф устарел после изменения холста. Нажмите «Обновить граф».")));
     if(!m_aiGraphPreviewUsesLoadedSource && !m_aiGraphRegeneratedFresh
        && m_aiGraphRegeneratedDocument.isValid()
        && !(m_aiGraphBuildWatcher && m_aiGraphBuildWatcher->isRunning())
@@ -4037,6 +4043,8 @@ void CView::syncAiGraphPreviewWidget()
 
 void CView::refreshAiGraphPreviewSource()
 {
+    m_canvasNavigationStale = m_pLand && m_pLand->isMprLoad()
+        && canvasNavigationIsStale(m_pLand->filePath());
     cancelPendingAiGraphPreviewRegeneration();
     m_aiGraphDocument.clear();
     m_aiGraphLoadedDocument.clear();
@@ -4106,10 +4114,10 @@ bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
         return false;
     }
 
-    input->graphWidth = m_aiGraphLoadedDocument.isValid()
+    input->graphWidth = m_aiGraphLoadedDocument.isValid() && !m_canvasNavigationStale
         ? m_aiGraphLoadedDocument.width()
         : qCeil(float(m_terrainEdit.vertexCountX() - 1) / 4.0f);
-    input->graphHeight = m_aiGraphLoadedDocument.isValid()
+    input->graphHeight = m_aiGraphLoadedDocument.isValid() && !m_canvasNavigationStale
         ? m_aiGraphLoadedDocument.height()
         : qCeil(float(m_terrainEdit.vertexCountY() - 1) / 4.0f);
     input->maximumTerrainHeight = m_terrainEdit.maxZ();
@@ -4268,6 +4276,11 @@ bool CView::buildGeneratedAiGraphCandidate(QByteArray* data, QString* error,
     }
     const int expectedWidth = (m_terrainEdit.vertexCountX() - 1) / 4;
     const int expectedHeight = (m_terrainEdit.vertexCountY() - 1) / 4;
+    if(m_canvasNavigationStale && (m_aiGraphPreviewUsesLoadedSource || !m_aiGraphRegeneratedFresh))
+    {
+        if(error) *error = tr("Граф устарел после изменения холста. Сначала пересчитайте его отдельной кнопкой «Обновить граф».");
+        return false;
+    }
     CAiGraphDocument generated;
     QByteArray candidate;
     const bool preserveLoadedGraph = !forceRegeneration
@@ -18065,6 +18078,8 @@ void CView::openMapParameters()
     QFormLayout* canvasForm = new QFormLayout;
     QSpinBox* canvasWidth = new QSpinBox(canvasPage);
     QSpinBox* canvasHeight = new QSpinBox(canvasPage);
+    canvasWidth->setObjectName(QStringLiteral("mprCanvasWidth"));
+    canvasHeight->setObjectName(QStringLiteral("mprCanvasHeight"));
     canvasWidth->setRange(1, 32);
     canvasHeight->setRange(1, 32);
     QSpinBox* canvasOffsetX = new QSpinBox(canvasPage);
@@ -18090,22 +18105,18 @@ void CView::openMapParameters()
         tr("Create a translated companion MOB beside the resized MPR"), canvasPage);
     QCheckBox* removeOutsideMobObjects = new QCheckBox(
         tr("Remove objects whose origin lies outside the new canvas"), canvasPage);
-    removeOutsideMobObjects->setEnabled(false);
+    removeOutsideMobObjects->setObjectName(QStringLiteral("mprCanvasRemoveOutsideObjects"));
     canvasForm->addRow(createCompanionMob);
     canvasForm->addRow(removeOutsideMobObjects);
     canvasLayout->addLayout(canvasForm);
     QLabel* canvasExplanation = new QLabel(tr(
-        "Crop/expand is a structural Save As operation. Position the original map "
-        "directly on the resulting tile grid; right-drag the map in the preview or "
-        "enter its left/top tile offsets. Sector-aligned retained SEC payloads "
-        "stay byte-identical; other offsets are re-tiled and freshly validated. "
-        "Expansion projects the nearest land boundary and does not invent overlays. "
-        "Closed edges are explicitly lossy and deactivate overlays in the taper band. "
-        "The preview uses generated MPR terrain only; embedded minimaps and MOB geometry "
-        "are excluded. A companion MOB is always a new file; its objects are shifted "
-        "with the map, optionally clipped by object origin, and its stale embedded AI graph "
-        "is omitted. The 32 x 32 ceiling corresponds to the runtime's 256 x 256 "
-        "navigation-grid limit."), canvasPage);
+        "«Применить к текущей MPR» сохраняет имя и путь карты и переносит связанные MOB. "
+        "MPR, рельеф, покрытия и атлас записываются вместе с резервом. "
+        "Граф помечается устаревшим; пересчитайте его отдельной кнопкой. После записи начинается новая история Undo/Redo. "
+        "Расположите исходную карту в сетке предпросмотра или задайте смещения в тайлах. "
+        "При расширении продолжается ближайшая кромка земли, новые покрытия не добавляются. "
+        "Закрытие краёв меняет высоты и убирает покрытия в краевой полосе. "
+        "Для обрезки объектов явно включите удаление. «Сохранить как» создаёт отдельную копию."), canvasPage);
     canvasExplanation->setWordWrap(true);
     canvasLayout->addWidget(canvasExplanation);
     CCanvasResizePreview* canvasPreview = new CCanvasResizePreview(canvasPage);
@@ -18116,7 +18127,13 @@ void CView::openMapParameters()
     canvasLayout->addWidget(canvasSummary);
     QPushButton* saveResizedCanvas = new QPushButton(
         tr("Resize canvas and Save As..."), canvasPage);
-    canvasLayout->addWidget(saveResizedCanvas, 0, Qt::AlignRight);
+    QPushButton* applyCurrentCanvas = new QPushButton(tr("Применить к текущей MPR"), canvasPage);
+    applyCurrentCanvas->setObjectName(QStringLiteral("applyCurrentMprCanvas"));
+    QHBoxLayout* canvasActions = new QHBoxLayout;
+    canvasActions->addWidget(applyCurrentCanvas);
+    canvasActions->addStretch();
+    canvasActions->addWidget(saveResizedCanvas);
+    canvasLayout->addLayout(canvasActions);
     tabs->addTab(canvasPage, tr("Canvas resize"));
 
     QSharedPointer<QImage> canvasSourcePreview(new QImage);
@@ -18140,7 +18157,7 @@ void CView::openMapParameters()
     const auto refreshCanvasPreview = [this, canvasWidth, canvasHeight,
                                        canvasOffsetX, canvasOffsetY,
                                        canvasPreview, canvasSummary,
-                                       saveResizedCanvas, canvasSourcePreview,
+                                       saveResizedCanvas, applyCurrentCanvas, canvasSourcePreview,
                                        canvasRequest]() {
         if(!m_pLand->isMprLoad() || !m_mprDocument.mapInfo().valid)
             return;
@@ -18166,7 +18183,7 @@ void CView::openMapParameters()
         const int retained = retainedX * retainedY;
         canvasSummary->setText(tr(
             "Original map offset: X %1, Y %2 tiles. Retain %3 x %4 (%5) source tile(s). "
-            "World bounds become %6 x %7 units.%8 Output is a new MPR; the source is not overwritten.")
+            "World bounds become %6 x %7 units.%8")
             .arg(visualOffsetX).arg(visualOffsetY)
             .arg(retainedX).arg(retainedY).arg(retained)
             .arg(canvasWidth->value() * 32).arg(canvasHeight->value() * 32)
@@ -18180,6 +18197,7 @@ void CView::openMapParameters()
                  && request.oldTileOffsetX == 0
                  && request.oldTileOffsetY == 0
                  && !request.closeEdges));
+        applyCurrentCanvas->setEnabled(saveResizedCanvas->isEnabled());
 
         if(canvasSourcePreview->isNull())
         {
@@ -18250,7 +18268,14 @@ void CView::openMapParameters()
             [refreshCanvasPreview](int) { refreshCanvasPreview(); });
     connect(createCompanionMob, &QCheckBox::toggled, dock,
             [removeOutsideMobObjects](bool checked) {
-        removeOutsideMobObjects->setEnabled(checked);
+        Q_UNUSED(checked);
+        removeOutsideMobObjects->setEnabled(true);
+    });
+    connect(applyCurrentCanvas, &QPushButton::clicked, dock,
+            [this, dock, canvasRequest, removeOutsideMobObjects]() {
+        QString error;
+        if(!applyCanvasResizeToCurrent(canvasRequest(), removeOutsideMobObjects->isChecked(), &error))
+            QMessageBox::warning(dock,tr("Размер холста не применён"),error);
     });
     connect(saveResizedCanvas, &QPushButton::clicked, dock,
             [this, dock, canvasRequest, canvasSummary, createCompanionMob,
@@ -18724,7 +18749,6 @@ void CView::openMapParameters()
         if(!m_activeMob)
         {
             createCompanionMob->setChecked(false);
-            removeOutsideMobObjects->setChecked(false);
         }
         if(canvasWidth->value() < 1 || canvasHeight->value() < 1
            || canvasWidth->property("sourceWidth").toUInt()

@@ -248,6 +248,10 @@ public:
                                         QString* sourceDescription = nullptr,
                                         bool forceRegeneration = false);
     void refreshAiGraphOwnership();
+    bool canvasNavigationStale() const { return m_canvasNavigationStale; }
+    bool clearCanvasNavigationStale(QString* error = nullptr);
+    bool applyCanvasResizeToCurrent(const SMprCanvasResizeRequest& resize,
+                                    bool removeOutsideObjects, QString* error = nullptr);
     bool loadMob(QFileInfo& filePath);
     void saveMobAs();
     void saveActiveMob();
@@ -843,6 +847,7 @@ public slots:
     void exportTerrainPaintDiagnostic();
 
 signals:
+    void canvasResizeMobPathsRequested(QStringList* paths);
     void modelConnectionSourcesChanged(const QStringList& labels,const QStringList& ids);
     void modelConnectionStatusChanged(const QString& status);
     void modelConnectionTargetsChanged(int availablePairs);
@@ -1413,6 +1418,7 @@ private:
     bool m_aiGraphRegenerationPending{false};
     bool m_aiGraphRegeneratedFresh{false};
     bool m_aiGraphPreviewUsesLoadedSource{true};
+    bool m_canvasNavigationStale{false};
     bool m_aiGraphPreviewVisible{false};
     bool m_aiGraphOverlayDirty{true};
     QVector<QVector3D> m_aiGraphOpenLinks;

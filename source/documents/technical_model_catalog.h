@@ -17,6 +17,7 @@ public:
                      const QString& profile, QString* error = nullptr);
     static QString pathForDatabase(const QString& databasePath);
     bool save(QString* error = nullptr);
+    QByteArray stagedBytes() const;
     QString path() const { return m_path; }
     bool writable() const { return m_valid; }
     quint64 revision() const { return m_revision; }

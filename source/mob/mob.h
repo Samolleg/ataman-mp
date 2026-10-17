@@ -60,7 +60,7 @@ public:
     static bool validateEditableProjection(const QByteArray& data,
                                            const QFileInfo& source,
                                            QString* error = nullptr);
-    int readMob(QFileInfo& path);
+    int readMob(QFileInfo& path, bool createRecoverySnapshot = true);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
@@ -74,7 +74,8 @@ public:
                                   float resultWidth, float resultHeight,
                                   bool removeOutside, float closedEdgeWidth,
                                   QByteArray* data, SCanvasCropResult* result,
-                                  CValidationReport* report = nullptr);
+                                  CValidationReport* report = nullptr,
+                                  bool preserveEmbeddedGraph = false);
     bool persistAiGraph(const QByteArray* graph, QString* error = nullptr,
                         const SaveProgress& progress = SaveProgress());
     void serializeJson(const QFileInfo& file);

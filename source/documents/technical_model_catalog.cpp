@@ -136,6 +136,16 @@ bool TechnicalModelCatalog::load(const QString& path, QString* error)
     }
     refreshPortableBindings(); m_valid = true; return true;
 }
+QByteArray TechnicalModelCatalog::stagedBytes() const
+{
+    if(!m_valid) return {};
+    auto document = m_document;
+    if(!m_portableBindings.isEmpty() || document.contains("modelTextures"))
+        document.insert("modelTextures", m_portableBindings);
+    const auto bytes = QJsonDocument(document).toJson(QJsonDocument::Indented);
+    return bytes.size() <= 32*1024*1024 ? bytes : QByteArray();
+}
+
 bool TechnicalModelCatalog::save(QString* error)
 {
     if(!m_valid) return false;

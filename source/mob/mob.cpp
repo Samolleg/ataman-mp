@@ -1103,7 +1103,7 @@ CNode *CMob::undo_deleteNode(uint mapId, int restoreIndex)
     return nullptr;
 }
 
-int CMob::readMob(QFileInfo &path)
+int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
 {
     if (!path.exists())
         return 1;
@@ -1163,8 +1163,9 @@ int CMob::readMob(QFileInfo &path)
                     "Fix the affected object before testing this map.")
                     .arg(criticalValidationMessages.join("\n\n")));
         }
-        const SBackupResult openBackup = CBackupManager().snapshotOnOpen(m_filePath);
-        if(!openBackup.success)
+        const SBackupResult openBackup = createRecoverySnapshot
+            ? CBackupManager().snapshotOnOpen(m_filePath) : SBackupResult();
+        if(createRecoverySnapshot && !openBackup.success)
         {
             ei::log(eLogWarning, QString("MOB opened without recovery snapshot:%1 error:%2")
                 .arg(m_filePath.absoluteFilePath(), openBackup.error));
@@ -2228,7 +2229,8 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
                                     bool removeOutside, float closedEdgeWidth,
                                     QByteArray* data,
                                     SCanvasCropResult* result,
-                                    CValidationReport* report)
+                                    CValidationReport* report,
+                                    bool preserveEmbeddedGraph)
 {
     if(!data || !result || resultWidth <= 0.0f || resultHeight <= 0.0f
        || closedEdgeWidth < 0.0f)
@@ -2249,6 +2251,7 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         CNode* node{nullptr};
         int index{-1};
         QVector3D position;
+        QVector<QVector3D> unitMovement;
         bool removed{false};
     };
     QVector<Snapshot> snapshots;
@@ -2259,6 +2262,8 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         snapshot.node = m_aNode.at(index);
         snapshot.index = index;
         snapshot.position = snapshot.node->position();
+        if(auto* unit = dynamic_cast<CUnit*>(snapshot.node))
+            snapshot.unitMovement = unit->movementState();
         snapshots.append(snapshot);
     }
     const bool wasDirty = m_bDirty;
@@ -2269,7 +2274,10 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         for(Snapshot& snapshot : snapshots)
         {
             QVector3D original = snapshot.position;
-            snapshot.node->updatePos(original);
+            if(auto* unit = dynamic_cast<CUnit*>(snapshot.node))
+                unit->restoreMovementState(snapshot.unitMovement);
+            else
+                snapshot.node->updatePos(original);
             snapshot.node->setPos(original);
         }
         m_bDirty = wasDirty;
@@ -2281,7 +2289,14 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         QVector3D translated = snapshot.position;
         translated.setX(translated.x() + offsetX);
         translated.setY(translated.y() + offsetY);
-        snapshot.node->updatePos(translated);
+        if(auto* unit = dynamic_cast<CUnit*>(snapshot.node))
+        {
+            auto movement = snapshot.unitMovement;
+            for(auto& point : movement) point += QVector3D(offsetX, offsetY, 0);
+            unit->restoreMovementState(movement);
+        }
+        else
+            snapshot.node->updatePos(translated);
         translated.setZ(snapshot.position.z());
         snapshot.node->setPos(translated);
         ++result->translatedObjects;
@@ -2319,8 +2334,9 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
         restore();
         return false;
     }
-    result->removedEmbeddedAiGraph = document.hasEmbeddedAiGraph();
-    const bool stripped = document.removeEmbeddedAiGraph(data, report);
+    result->removedEmbeddedAiGraph = !preserveEmbeddedGraph && document.hasEmbeddedAiGraph();
+    if(preserveEmbeddedGraph) *data = candidate;
+    const bool stripped = preserveEmbeddedGraph || document.removeEmbeddedAiGraph(data, report);
     restore();
     if(!stripped)
         return false;
