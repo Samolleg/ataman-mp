@@ -36,6 +36,7 @@
 #include "endurance_document.h"
 #include "ai_graph_document.h"
 #include "terrain_edit_model.h"
+#include "script_reference_analyzer.h"
 
 CMob::CMob():
     m_view(nullptr)
@@ -1399,9 +1400,32 @@ void CMob::writeData(QJsonObject& mob, const QFileInfo& file, const QString key,
     mob.insert(key, fileRelPath);
 }
 
+void CMob::setScript(const QString& script)
+{
+    // The first allocation can follow a script edit, so reserve the previous
+    // text before replacing it as well as the new text.
+    scriptReferencedMapIds();
+    m_script=script;
+    scriptReferencedMapIds();
+}
+
+const QSet<quint32>& CMob::scriptReferencedMapIds() const
+{
+    // Batch creation consults this for every object. Parse only when text changes,
+    // including unsaved edits and Undo/Redo of the script itself.
+    if(m_idReservationScript != m_script) {
+        // Keep references from earlier text too: script Undo/Redo may restore
+        // them after objects have been created in the meantime.
+        for(const auto& reference:CScriptReferenceAnalyzer::findObjectIds(m_script))
+            m_scriptReferencedIds.insert(reference.objectId);
+        m_idReservationScript=m_script;
+    }
+    return m_scriptReferencedIds;
+}
+
 bool CMob::isFreeMapId(uint id)
 {
-    if(id == 0 || m_auxiliaryIds.contains(id))
+    if(id == 0 || m_auxiliaryIds.contains(id) || scriptReferencedMapIds().contains(id))
         return false;
     CNode* pNode = nullptr;
     foreach(pNode, m_aNode)

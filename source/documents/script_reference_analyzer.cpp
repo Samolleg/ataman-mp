@@ -138,15 +138,11 @@ SMobScriptReference makeReference(const QString& script, uint objectId, int idPo
 }
 
 QVector<SMobScriptReference> CScriptReferenceAnalyzer::findObjectIds(
-    const QString& script, const QVector<uint>& objectIds)
+    const QString& script)
 {
     QVector<SMobScriptReference> references;
-    if(script.isEmpty() || objectIds.isEmpty())
+    if(script.isEmpty())
         return references;
-
-    QSet<uint> requestedIds;
-    for(uint id : objectIds)
-        requestedIds.insert(id);
 
     int position = 0;
     while(position < script.size())
@@ -183,8 +179,7 @@ QVector<SMobScriptReference> CScriptReferenceAnalyzer::findObjectIds(
         int afterCall = position;
         if(parseLookup(script, position, getObjectById, &objectId, &idPosition, &afterCall))
         {
-            if(requestedIds.contains(objectId))
-                references.append(makeReference(script, objectId, idPosition));
+            references.append(makeReference(script, objectId, idPosition));
             position = afterCall;
         }
     }
@@ -198,4 +193,16 @@ QVector<SMobScriptReference> CScriptReferenceAnalyzer::findObjectIds(
             return left.column < right.column;
         });
     return references;
+}
+
+QVector<SMobScriptReference> CScriptReferenceAnalyzer::findObjectIds(
+    const QString& script, const QVector<uint>& objectIds)
+{
+    if(objectIds.isEmpty()) return {};
+    QSet<uint> requested;
+    for(uint id:objectIds) requested.insert(id);
+    QVector<SMobScriptReference> result;
+    for(const auto& reference:findObjectIds(script))
+        if(requested.contains(reference.objectId)) result.append(reference);
+    return result;
 }

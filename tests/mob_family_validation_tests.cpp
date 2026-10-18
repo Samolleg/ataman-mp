@@ -303,6 +303,7 @@ private slots:
     void failedAllocationClearsLocalFallback();
     void missingDependencyAllowsAvailableFamilyIds();
     void allocationSkipsVisualResourceValidation();
+    void allocationReservesScriptReferences();
     void authoredZeroNidIsCriticalAndBlocksRuntimePreflight();
     void positiveNidWithNoParentSentinelIsClean();
     void authoringPolicyAndReplacementSuggestionsRejectZero();
@@ -768,6 +769,28 @@ void MobFamilyValidationTests::missingDependencyAllowsAvailableFamilyIds()
     report.findings.clear();
     QVERIFY(report.suggestReplacementNid(owner.path,&id,nullptr,{1}));
     QCOMPARE(id,quint32(2)); // Inclusive maximum and occupied live ID.
+}
+
+void MobFamilyValidationTests::allocationReservesScriptReferences()
+{
+    QTemporaryDir directory;
+    auto ownerBytes=section(0xA000, section(0xC000)
+        + section(0xFF01,section(0xFF02,section(0xFF05,u32(1804))+section(0xFF06,u32(1807))))
+        + encryptedScript("LoneWolf=GetObjectByID(\"1804\"); AddMob(\"script-only.mob\");"));
+    const auto path=writeMob(directory.path(),"owner.mob",ownerBytes);
+    writeMob(directory.path(),"script-only.mob",mobWithScript("GetObject(1805); // GetObject(1806)"));
+    SMobFamilyValidationRequest request;request.seedMobPaths<<path;
+    request.explicitComposition=true;request.includeProfileWideMobs=false;request.validateVisualResources=false;
+    auto report=CMobFamilyValidator::validate(request);quint32 suggestion=0;
+    QVERIFY(report.scriptReferencedNids.contains(1804));QVERIFY(report.scriptReferencedNids.contains(1805));
+    QVERIFY(!report.scriptReferencedNids.contains(1806));
+    QVERIFY(report.suggestReplacementNid(path,&suggestion));QCOMPARE(suggestion,quint32(1806));
+    QVERIFY(report.suggestReplacementNid(path,&suggestion,nullptr,{1806}));QCOMPARE(suggestion,quint32(1807));
+    QVERIFY(!report.suggestReplacementNid(path,&suggestion,nullptr,{1806,1807}));QCOMPARE(suggestion,quint32(0));
+    const auto dependent=QDir::cleanPath(directory.filePath("script-only.mob")).toLower();
+    request.inMemoryMobData[dependent]=mobWithScript("GetObject(1806);GetObjectByID(\"1807\");");
+    report=CMobFamilyValidator::validate(request);
+    QVERIFY(report.suggestReplacementNid(path,&suggestion));QCOMPARE(suggestion,quint32(1805));
 }
 
 void MobFamilyValidationTests::allocationSkipsVisualResourceValidation()

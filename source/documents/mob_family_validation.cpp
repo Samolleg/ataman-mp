@@ -813,6 +813,7 @@ bool CMobFamilyValidationReport::suggestReplacementNid(const QString& owningMobP
             {
                 const quint32 candidate = quint32(value);
                 if(candidate == 0 || nidOwners.contains(candidate)
+                   || scriptReferencedNids.contains(candidate)
                    || additionallyOccupied.contains(candidate))
                     continue;
                 if(!permitShared && isCoveredByOtherMob(candidate))
@@ -1059,6 +1060,8 @@ CMobFamilyValidationReport CMobFamilyValidator::validate(
         member.sourceSha256 = QCryptographicHash::hash(document.originalBytes(),
                                                         QCryptographicHash::Sha256);
         document.embeddedScript(&member.script, nullptr);
+        for(const auto& reference:CScriptReferenceAnalyzer::findObjectIds(member.script))
+            report.scriptReferencedNids.insert(reference.objectId);
         report.members.append(member);
         const int memberIndex = report.members.size() - 1;
 

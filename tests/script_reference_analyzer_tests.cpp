@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <climits>
 
 #include "script_reference_analyzer.h"
 
@@ -7,11 +8,24 @@ class ScriptReferenceAnalyzerTests : public QObject
     Q_OBJECT
 
 private slots:
+    void findsAllLiteralReferences();
     void findsTypedObjectLookups();
     void ignoresPartialNumbers();
     void ignoresUnrelatedZeroValues();
     void ignoresCommentedAndQuotedLookups();
 };
+
+void ScriptReferenceAnalyzerTests::findsAllLiteralReferences()
+{
+    const QString script="LoneWolf=GetObjectByID(\"1804\"); GetObject /* note */ (1805.00); "
+        "GetObjectByID('4294967295'); GetObject(4294967296); GetObject(1806+1); "
+        "GetObjectByID(prefix); SetWind(1807,0,0); // GetObject(1808)\n"
+        "text=\"GetObject(1809)\"; /* GetObject(1810) */";
+    const auto refs=CScriptReferenceAnalyzer::findObjectIds(script);
+    QCOMPARE(refs.size(),3);QCOMPARE(refs[0].objectId,uint(1804));
+    QCOMPARE(refs[1].objectId,uint(1805));QCOMPARE(refs[2].objectId,UINT_MAX);
+    QVERIFY(CScriptReferenceAnalyzer::findObjectIds(script,{}).isEmpty());
+}
 
 void ScriptReferenceAnalyzerTests::findsTypedObjectLookups()
 {

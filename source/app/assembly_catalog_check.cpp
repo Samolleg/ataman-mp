@@ -1,5 +1,6 @@
 #include "assembly_catalog_check.h"
 #include "view.h"
+#include "undo.h"
 #include "mob.h"
 #include "worldobj.h"
 #include "light.h"
@@ -344,6 +345,37 @@ int runAssemblyCatalogCheck() {
         check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())==0,"unreadable existing dependency still refuses allocation");
         other->setScript(QString());other->refreshDirtyFromProjection();
         check(window.allocateFamilyNid(bulk->filePath().absoluteFilePath())!=0,"removing unreadable dependency rebuilds allocation snapshot");
+        auto* scripted=addMob("scripted-owner.mob",1804,1850,1800);
+        scripted->setScript("LoneWolf=GetObjectByID(\"1804\");AddMob(\"script-only.mob\");");scripted->refreshDirtyFromProjection();
+        other->setScript("GetObject(1806);");other->refreshDirtyFromProjection();
+        {CMob dependent;dependent.setScript("GetObject(1805);");QByteArray bytes;dependent.serializeMob(bytes,false);
+         QFile file(scratch.filePath("script-only.mob"));file.open(QIODevice::WriteOnly);file.write(bytes);}
+        familyView->m_activeMob=scripted;
+        auto* created=scripted->createNode(assembly.parts[0].object,false);
+        check(created&&created->mapId()==1807,"new object avoids1804 and live/disk family script references");
+        const QString scriptBefore=scripted->script(),scriptAfter=scriptBefore+"GetObject(1808);";
+        scripted->setScript(scriptAfter);scripted->refreshDirtyFromProjection();
+        QUndoStack scriptHistory;scriptHistory.push(new CChangeMobScriptCommand(familyView,scripted,scriptBefore,scriptAfter,"script"));
+        check(scripted->scriptReferencedMapIds().contains(1808),"unsaved script immediately reserves new literal ID");
+        scriptHistory.undo();check(scripted->scriptReferencedMapIds().contains(1808),"script Undo keeps references reserved for future Redo");
+        auto* between=scripted->createNode(assembly.parts[0].object,false);
+        check(between&&between->mapId()==1809,"creation between script Undo and Redo cannot steal1808");
+        scriptHistory.redo();check(scripted->scriptReferencedMapIds().contains(1808),"script Redo refreshes reservation cache");
+        scripted->createNode(scripted->nodes().first());
+        check(scripted->nodes().size()==4&&scripted->nodes().last()->mapId()==1810,"clone avoids live unsaved script IDs");
+        error.clear();const bool scriptBatch=familyView->beginPreparedAssemblyPlacement(assembly,{300,200},anchor,&error,false);
+        const auto scriptNodes=familyView->m_pendingPasteNodes;QSet<uint> scriptIds;
+        for(auto* node:scriptNodes)scriptIds.insert(node->mapId());
+        check(scriptBatch&&scriptNodes.size()==2&&scriptIds.size()==2&&!scriptIds.contains(1804)&&!scriptIds.contains(1808),"assembly paste avoids script-reserved IDs");
+        if(scriptBatch){familyView->m_pOp->keyPress(eKey_Enter);familyView->m_pUndoStack->undo();
+            check(!scriptIds.contains(window.allocateFamilyNid(scripted->filePath().absoluteFilePath())),"Undo keeps batch IDs held");
+            familyView->m_pUndoStack->redo();bool exact=true;for(auto* node:scriptNodes)exact&=scriptIds.contains(node->mapId());check(exact,"Redo retains batch IDs");}
+        CMob detached;detached.setRanges(true,{SRange(1804,1807)});detached.setScript("GetObjectByID(\"1804\");");
+        check(detached.freeMapId()==1805,"standalone allocation reserves own script reference");
+        detached.setScript("GetObject(1805);");
+        check(detached.freeMapId()==1806,"standalone script replacement retains old references for Undo");
+        detached.setScript(QString());check(detached.freeMapId()==1806,"clearing script does not free Undo-reachable references");
+
     }
     out<<"assembly-catalog-check: "<<failures<<" failures\n";return failures?1:0;
 }

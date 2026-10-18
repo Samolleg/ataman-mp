@@ -120,7 +120,7 @@ public:
     QVector<QVector<uint>>& diplomacyField() {return m_diplomacyFoF;}
     void setDiplomacyField(const QVector<QVector<uint>>& df) {m_diplomacyFoF = df;}
     const QString& script() {return m_script;}
-    void setScript(const QString& script) {m_script = script;}
+    void setScript(const QString& script);
     void setQuestMob(bool bQuest = true) {m_mobType = bQuest ? eEMobTypeQuest : eEMobTypeBase;}
     void ensureObjectSection() { m_hasObjectSection = true; }
     bool isQuestMob() {return m_mobType == EMobType::eEMobTypeQuest;}
@@ -142,6 +142,7 @@ public:
     SMobParameterState parameterState();
     void applyParameterState(const SMobParameterState& state);
     uint freeMapId();
+    const QSet<quint32>& scriptReferencedMapIds() const;
     const QByteArray& aiGraphData() const { return m_aiGraph; }
 
     //functions for logic processing
@@ -193,6 +194,8 @@ private:
     QFileInfo m_filePath;
     uint m_scriptKey;
     QString m_script;
+    mutable QString m_idReservationScript;
+    mutable QSet<quint32> m_scriptReferencedIds;
     QString m_textOld;
     QVector<SRange> m_aMainRange;
     QVector<SRange> m_aSecRange;

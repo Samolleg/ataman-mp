@@ -5870,6 +5870,7 @@ quint32 MainWindow::allocateFamilyNid(const QString& mobPath, bool* shared)
     if(digest != m_nidAllocationContextDigest)
     {
         m_nidAllocationValidation = CMobFamilyValidator::validate(mobFamilyValidationRequest(true));
+        m_sessionAllocatedNids.unite(m_nidAllocationValidation.scriptReferencedNids);
         m_nidAllocationContextDigest = nidAllocationContextDigest();
         // Missing dependencies are warnings, cached through their search-path
         // metadata. Invalid existing records must retry after live field edits.
@@ -5887,8 +5888,10 @@ quint32 MainWindow::allocateFamilyNid(const QString& mobPath, bool* shared)
     // Current IDs are intentionally outside the structural digest: they are read
     // cheaply for every allocation, including unsaved edits and preceding batch nodes.
     QSet<quint32> occupied = m_sessionAllocatedNids;
-    if(m_pView) for(CMob* mob : m_pView->mobs()) if(mob)
+    if(m_pView) for(CMob* mob : m_pView->mobs()) if(mob) {
         occupied.unite(mob->occupiedMapIds());
+        occupied.unite(mob->scriptReferencedMapIds());
+    }
     quint32 suggestion = 0;
     if(!m_nidAllocationValidation.suggestReplacementNid(mobPath, &suggestion, shared, occupied))
         return 0;

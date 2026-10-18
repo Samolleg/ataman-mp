@@ -108,6 +108,7 @@ public:
     QVector<SMobFamilyMember> members;
     QVector<SMobFamilyFinding> findings;
     QMap<quint32, QVector<SMobNidOwner>> nidOwners;
+    QSet<quint32> scriptReferencedNids;
 
     int criticalCount() const;
     int warningCount() const;

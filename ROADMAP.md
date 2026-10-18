@@ -1,3 +1,11 @@
+## EI-SCRIPT-NIDS-207 — номера новых объектов с учётом сценариев
+
+- Поручение18.10: при выдаче новых ID учитывать скрипты; исходный случай206 выдала1804 новому объекту, хотя сценарий zone1 содержит LoneWolf=GetObjectByID("1804"). База main2da18d2c/206; лично в main. Чужие изменения сохраняются, существующие ID/скрипты/игровые данные не менять. Управление пользовательским редактором запрещено владельцем.
+- Результат: создание/клон/вставка не используют literal GetObject(number)/GetObjectByID("number") из загруженных и дисковых MOB семейства, включая несохранённые скрипты; комментарии/строки/координаты не резервируют случайные числа. Парсер повторно используется, кэш по тексту не сканирует сценарий для каждого объекта пакета. Вычисляемые выражения не угадывать.
+- Критерии:1804, другой/дисковый MOB, unsaved script+Undo/Redo, пакет/исчерпание диапазона, comments/numeric bounds, native creation/clone/paste+Undo/Redo. Далее тесты, build207 и передача по договору.
+
+- BUILT/CHECKED207: parser7 + family37 QtTest PASS, final native103 PASS/0 failures/exit0; literal1804, live/disk/unsaved scripts, creation/clone/paste,143-object batch, range exhaustion, script Undo→new object→Redo and batch Undo/Redo. Fresh207/runtime готовы. Ранее встреченные ссылки удерживаются до конца сессии, чтобы Undo сценария не вернул конфликт. Далее scoped-коммит/staging/guarded передача. Evidence docs/validation/ATAMAN_SCRIPT_NIDS_207_20261018.md.
+
 ## EI-SEMANTIC-SAVE-206 — сохранение zone1/zone2 после публикации атласа
 
 - Поручение17.10: сначала закрепить текущие изменения без потерь; исправить post-save semantic-stage; настоящий Save MPR через меню на копиях zone1/zone2, Undo/Redo и повторное открытие, затем build/install. База main541f0604/205; работа лично в main, чужие изменения сохраняются. Разрешён необходимый guarded rescue текущих zone1/zone2; тесты приватные, воду/переходы не перерисовывать.

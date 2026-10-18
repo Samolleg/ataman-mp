@@ -19,6 +19,7 @@ public:
     // GetObjectByID("number"). Comments, quoted prose, coordinates, flags, and
     // unrelated numeric arguments are excluded. Endurance never rewrites script
     // text here; dynamic lookup expressions remain a manual script-review case.
+    static QVector<SMobScriptReference> findObjectIds(const QString& script);
     static QVector<SMobScriptReference> findObjectIds(const QString& script,
                                                       const QVector<uint>& objectIds);
 };
