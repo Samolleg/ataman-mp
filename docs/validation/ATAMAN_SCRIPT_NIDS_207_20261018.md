@@ -19,4 +19,12 @@ Task EI-SCRIPT-NIDS-207,2026-10-18. Base main2da18d2c / installed206. Scope: pro
 
 ## Handoff
 
-Fresh207 Release/runtime and final native check passed. Scoped commit, source identity, clean staging and permanent installation pending. User's existing session is preserved; no editor will be killed or loaded binary replaced. No GitHub publication.
+Fresh207 Release/runtime and final native check passed. Scoped commit, source identity, clean staging and permanent installation completed. User's existing session is preserved; no editor will be killed or loaded binary replaced. No GitHub publication.
+
+## Verified installation
+
+- Source main `7f95ffb3de7589191889a80b237f143784ca7ea9`;658 compiler/resource inputs match built/committed source. Parser7 + family37 QtTest, final native103 PASS/exit0. Raw/staged207/finalizer PASS.
+- 130 installed managed files verified. Owner files unchanged: `16745:2D49E105FC9DE58C6AED0FC8D841D4568D7D6D7DA28399E3B0F523C8B9BE676D`.
+- EXE `AB69936840CBE39FA991ECEBE991FB6436A6A2425CDEBA87AAF388C7FA9FFE00`; manifest `A31F53AF7BBE1583D1419B8B2FA6089AACD07F4B9FACFA0DC9684B888A36DE0C`.
+- Verified reconstructable206 program rollback: `artifacts/rollback206-to207-script-nids-20261018`. Only previous identified205 program backup retired; unrelated/rescue backups retained.
+- Private receipts `build-script-nids-207-20261018/{build-receipt,staging-receipt,install-receipt,rollback-retirement}.json`. No owner UI control or live MOB renumbering; existing1804 unchanged. No GitHub publication.

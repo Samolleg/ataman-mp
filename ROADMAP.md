@@ -6,6 +6,10 @@
 
 - BUILT/CHECKED207: parser7 + family37 QtTest PASS, final native103 PASS/0 failures/exit0; literal1804, live/disk/unsaved scripts, creation/clone/paste,143-object batch, range exhaustion, script Undo→new object→Redo and batch Undo/Redo. Fresh207/runtime готовы. Ранее встреченные ссылки удерживаются до конца сессии, чтобы Undo сценария не вернул конфликт. Далее scoped-коммит/staging/guarded передача. Evidence docs/validation/ATAMAN_SCRIPT_NIDS_207_20261018.md.
 
+- READY/WAITING_CLOSE207: source7f95ffb3de7589191889a80b237f143784ca7ea9;658 inputs/raw/staged207/finalizer PASS, комплект build-staging-207-script-nids. Guard обнаружил owner PID27344; пользователь получил просьбу сохранить нужные правки и закрыть редактор по docs/TEST_BUILD_HANDOFF.md. Установка не началась; повторить только guarded install после закрытия, неизменные функциональные тесты не повторять.
+
+- DONE/INSTALLED207: source main 7f95ffb3de7589191889a80b237f143784ca7ea9; parser7/family37/native103,658 inputs, raw/staged207/finalizer/130 installed PASS. 16745 пользовательских файлов сохранены. Резерв206 восстановим, прежний проверенный205 удалён. Существующие игровые ID/скрипты не менялись; вычисляемые ссылки не интерпретируются. Evidence docs/validation/ATAMAN_SCRIPT_NIDS_207_20261018.md; receipts build-script-nids-207-20261018. GitHub не обновлялся.
+
 ## EI-SEMANTIC-SAVE-206 — сохранение zone1/zone2 после публикации атласа
 
 - Поручение17.10: сначала закрепить текущие изменения без потерь; исправить post-save semantic-stage; настоящий Save MPR через меню на копиях zone1/zone2, Undo/Redo и повторное открытие, затем build/install. База main541f0604/205; работа лично в main, чужие изменения сохраняются. Разрешён необходимый guarded rescue текущих zone1/zone2; тесты приватные, воду/переходы не перерисовывать.
