@@ -459,6 +459,12 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     QByteArray original;
     if(existed && !readFile(destination, &original, &result.error))
         return result;
+    if(!request.expectedSourceBytes.isEmpty() && original != request.expectedSourceBytes)
+    {
+        result.phase = QStringLiteral("source-check");
+        result.error = QStringLiteral("The RES changed since candidate preparation.");
+        return result;
+    }
     if(existed && original == request.candidateBytes)
     {
         result.phase = QStringLiteral("no-op");

@@ -1841,6 +1841,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::importTerrainHeightmap);
         connect(m_landscapeTools, &CLandscapeTools::convertBaseTerrainToHdRequested,
                 this, &CView::convertBaseTerrainToHdRequested);
+        connect(m_landscapeTools, &CLandscapeTools::compactTerrainAtlasRequested,
+                this, &CView::compactTerrainAtlasRequested);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, [this]()
         {

@@ -63,6 +63,7 @@ struct SResArchiveBytesSaveRequest
 {
     QFileInfo destination;
     QByteArray candidateBytes;
+    QByteArray expectedSourceBytes;
     bool createBackup{true};
     QString backupRootOverride;
 #ifdef QT_TESTLIB_LIB

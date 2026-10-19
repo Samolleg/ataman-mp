@@ -173,6 +173,7 @@ public:
 
 signals:
     void convertBaseTerrainToHdRequested();
+    void compactTerrainAtlasRequested();
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();

@@ -536,6 +536,7 @@ public:
     bool convertBaseTerrainToHd(const QString& library, quint32 seed,
                                QString* summary = nullptr, bool interactive = false);
     void convertBaseTerrainToHdRequested();
+    void compactTerrainAtlasRequested();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);

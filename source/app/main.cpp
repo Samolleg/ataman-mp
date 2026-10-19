@@ -792,6 +792,27 @@ int runHeadlessCommand(QApplication& app)
             }
         } hiddenWidgetFilter;
         app.installEventFilter(&hiddenWidgetFilter);
+        // Focused, clipboard-free check for atlas compaction. Keep this before
+        // ClipboardRestoreGuard: even capturing the native clipboard is outside
+        // this check's contract. The ordinary full check remains available.
+        if(qEnvironmentVariable("EI_UI_WIDGET_SCOPE") == QStringLiteral("atlas-compact"))
+        {
+            QTemporaryDir settings;
+            if(!settings.isValid())return 2;
+            QSettings::setDefaultFormat(QSettings::IniFormat);
+            QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
+            CLandscapeTools tools;
+            auto* compact=tools.findChild<QPushButton*>(QStringLiteral("compactTerrainAtlas"));
+            auto* hd=tools.findChild<QPushButton*>(QStringLiteral("convertBaseTerrainToHd"));
+            int requests=0;
+            QObject::connect(&tools,&CLandscapeTools::compactTerrainAtlasRequested,[&](){++requests;});
+            if(compact){for(QWidget* w=compact;w;w=w->parentWidget())w->setEnabled(true);compact->click();}
+            const bool ok=compact&&hd&&compact->parentWidget()==hd->parentWidget()
+                &&compact->text()==QString::fromUtf8("Сжать атлас карты")&&requests==1;
+            QTextStream(ok?stdout:stderr)<<(ok?"PASS":"FAIL")
+                <<": atlas compact action beside HD; request count="<<requests<<" nativeAttempts=0\n";
+            return ok?0:1;
+        }
         // Native-platform checks must restore the user's clipboard afterwards.
         ei::ClipboardRestoreGuard clipboardRestore;
         if(!clipboardRestore.captured()) {

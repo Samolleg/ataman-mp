@@ -764,6 +764,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     baseHd->setToolTip(tr("Заменить базовые поверхности готовыми HD-вариантами со случайным распределением. Вода и переходы сохраняются. Операцию можно отменить."));
     advanced->addWidget(baseHd);
     connect(baseHd, &QPushButton::clicked, this, &CLandscapeTools::convertBaseTerrainToHdRequested);
+    auto compactAtlas = new QPushButton(tr("Сжать атлас карты"), this);
+    compactAtlas->setObjectName(QStringLiteral("compactTerrainAtlas"));
+    compactAtlas->setToolTip(tr("Удалить неиспользуемые слоты опубликованного атласа, сохранив тайлы карты, анимации и палитру. Перед записью показан расчёт размера."));
+    advanced->addWidget(compactAtlas);
+    connect(compactAtlas, &QPushButton::clicked, this, &CLandscapeTools::compactTerrainAtlasRequested);
     auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
     diagnostics->addWidget(m_tilesetStatus);diagnostics->addLayout(atlasRow);
     diagnostics->addWidget(m_showOverlayMaterialSlots);diagnostics->addWidget(exportDiagnostic);diagnostics->addLayout(issueRow);
