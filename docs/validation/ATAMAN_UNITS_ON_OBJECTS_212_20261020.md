@@ -159,3 +159,45 @@ Finalizer и его distribution validator: **PASS,130 manifest-файлов**.
 **Граница результата:** редакторское размещение/отображение и сохранность MOB
 проверены; окончательное runtime-правило высоты и поведение нового NPC/маршрута
 в игре не подтверждены. Установка211 сохранена; установка212 и push не выполнены.
+
+
+## Установка212 по решению владельца,2026-10-20
+
+После принятия212 владелец явно поручил «ставь». Установлен готовый проверенный
+staging `build-units-on-objects-212/build-staging-212-units-on-objects-verified`
+из source main `96038591109d4a1dc3ed3da98be1834ffba5428f`, без пересборки.
+Ранние разделы фиксируют состояние до этого разрешения.
+
+Постоянная установка: `artifacts/EI-Mapper-Ataman-2-first-test`, **211→212**.
+Перед резервированием и непосредственно перед заменой `EIMapperEndurance.exe`
+и компоненты из целевой папки отсутствовали среди запущенных процессов.
+Пользовательские процессы не останавливались.
+
+Проверенный откат: `artifacts/rollback211-to212-units-on-objects-20261020`.
+Сохранены все130 managed-файлов211 и прежний manifest, `rollback-state.json`
+и `rollback.ps1`. SHA резервов и manifest совпали с211; синтаксис скрипта
+прошёл parser, его `-VerifyOnly` вернул `ROLLBACK_VERIFIED_211` до первой замены.
+Сам откат не выполнялся: обычный запуск скрипта восстанавливает211 после
+проверки отсутствия редактора и неизменности установленных managed-файлов212.
+
+Заменены только7 managed-файлов: `BUILD_INFO.txt`, `CHANGELOG.md`,
+`EIMapperEndurance.exe`, `Readme.md`, `VERSION`,
+`runtime/EIMapperEnduranceJmvBridge.plg`,
+`runtime/EIMapperEnduranceRuntimeHost.exe`. Добавлений/удалений нет.
+Каждая замена выполнена через проверенный временный файл, manifest заменён
+последним. Все130 installed managed SHA совпали со staging.
+
+Единственный запуск установленной программы — `--version`, со скрытым окном,
+изолированными cwd/TEMP/AppData/backup roots:
+`EI Mapper Endurance Edition 212`, exit0. EXE SHA256:
+`5f06fe1b01f5148ac4b575cd13da7e6e460841e165584ca506e049ed1e7c9734`.
+Набор и SHA всех15238 пользовательских файлов вне manifest совпали до и после
+установки и version-check: настройки, карты, журналы, сохранения, кэши и прочие
+данные сохранены. Финализатор на установке не запускался.
+
+Новых функциональных/игровых проверок не проводилось; интерактивный редактор,
+игра и старые сборки не запускались. Staging не менялся, push не выполнялся.
+Чужая правка ROADMAP сохранена вне scoped-коммита установки.
+Квитанции: `build-units-on-objects-212/install-receipt.json`,
+`rollback-verified.json`, `rollback-verification.txt`,
+`install-user-before.json`, `installed-version.txt`.
