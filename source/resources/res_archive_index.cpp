@@ -1,4 +1,5 @@
 #include "res_archive_index.h"
+#include "native_sha256.h"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -6,6 +7,7 @@
 #include <QSaveFile>
 #include <QTemporaryFile>
 #include <QTextCodec>
+#include <QSet>
 #include <QtEndian>
 
 #include <limits>
@@ -230,9 +232,12 @@ QByteArray CResArchiveIndex::readMemberPrefix(int index, qint64 maximumBytes,
 
 QByteArray CResArchiveIndex::memberSha256(int index, QString* error) const
 {
-    const QByteArray payload = readMember(index, error);
-    if(payload.isNull()) return QByteArray();
-    return sha(payload);
+    if(index<0||index>=m_members.size()||!sourceIsCurrent(error))return {};
+    QFile f(m_path);const auto& m=m_members[index];
+    if(!f.open(QIODevice::ReadOnly)||!f.seek(m.dataOffset))return {};
+    QCryptographicHash h(QCryptographicHash::Sha256);qint64 remaining=m.dataSize;
+    while(remaining){auto b=f.read(qMin(remaining,qint64(4*1024*1024)));if(b.isEmpty())return {};h.addData(b);remaining-=b.size();}
+    return h.result().toHex();
 }
 
 QByteArray CResArchiveIndex::memberSha256(const QString& name, QString* error) const
@@ -357,75 +362,46 @@ bool CResArchiveTransaction::remove(const QString& name, QString* error)
     return true;
 }
 
-bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QString* error) const
+bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QString* error,
+    const std::function<bool()>& beforeCommit, QByteArray* candidateSha256) const
 {
     if(!m_source.sourceIsCurrent(error)) return false;
     QFile source(m_source.path());
-    if(!source.open(QIODevice::ReadOnly))
-    {
-        setError(error, "Could not reopen the transaction source archive.");
-        return false;
+    QTemporaryFile staged(QFileInfo(destinationPath).absolutePath()+"/.mapper-res-XXXXXX");
+    if(!source.open(QIODevice::ReadOnly) || !staged.open()) {
+        setError(error,"Cannot open RES source/staging file."); return false;
     }
-    QByteArray staged = source.readAll();
-    if(staged.size() != m_source.sourceSize())
-    {
-        setError(error, "Could not retain the complete transaction source archive.");
-        return false;
-    }
-    // QSaveFile cannot atomically replace an open source on Windows.
-    source.close();
-
-    struct OutputMember { QByteArray name; quint32 size; quint32 offset; quint32 time; };
+    const auto write=[&](const QByteArray& b){return staged.write(b)==b.size();};
+    const auto align=[&](){return write(QByteArray((16-staged.pos()%16)%16,'\0'));};
+    if(!write(QByteArray(16,'\0')))return false;
+    struct OutputMember { QByteArray name; quint32 size; quint32 offset; quint32 time; int sourceIndex; QByteArray payload; bool changed; };
     QVector<OutputMember> outputMembers;
-    for(const SResIndexedMember& member : m_source.members())
-    {
-        if(isDeleted(member.name)) continue;
-        OutputMember output{encodedCp1251(finalNameFor(member.name)), member.dataSize,
-                            member.dataOffset, member.lastWriteTime};
-        for(const Change& change : m_changes)
-        {
-            if(change.kind != Change::Replace
-               || change.originalName.compare(member.name, Qt::CaseInsensitive) != 0) continue;
-            staged.append(QByteArray((16 - staged.size() % 16) % 16, '\0'));
-            if(quint64(staged.size()) > std::numeric_limits<quint32>::max()
-               || quint64(change.payload.size()) > std::numeric_limits<quint32>::max())
-            {
-                setError(error, "The RES transaction exceeds 32-bit offset or size limits.");
-                return false;
-            }
-            output.offset = quint32(staged.size());
-            output.size = quint32(change.payload.size());
-            staged.append(change.payload);
+    for(const auto& member:m_source.members()) {
+        if(isDeleted(member.name))continue;
+        const auto finalName=finalNameFor(member.name);
+        OutputMember out{finalName==member.name?member.encodedName:encodedCp1251(finalName),member.dataSize,0,member.lastWriteTime,member.tableIndex,{},false};
+        for(const auto& c:m_changes)if(c.kind==Change::Replace && c.originalName.compare(member.name,Qt::CaseInsensitive)==0){
+            out.payload=c.payload;out.size=c.payload.size();out.changed=true;
         }
-        outputMembers.append(output);
+        outputMembers<<out;
     }
-    for(const Change& change : m_changes)
-    {
-        if(change.kind != Change::Add) continue;
-        staged.append(QByteArray((16 - staged.size() % 16) % 16, '\0'));
-        if(quint64(staged.size()) > std::numeric_limits<quint32>::max()
-           || quint64(change.payload.size()) > std::numeric_limits<quint32>::max())
-        {
-            setError(error, "The RES transaction exceeds 32-bit offset or size limits.");
-            return false;
+    for(const auto& c:m_changes)if(c.kind==Change::Add)
+        outputMembers<<OutputMember{encodedCp1251(c.finalName),quint32(c.payload.size()),0,c.lastWriteTime,-1,c.payload,true};
+    if(outputMembers.isEmpty()){setError(error,"Cannot delete every RES member.");return false;}
+    for(auto& out:outputMembers){
+        if(!align() || quint64(staged.pos())+out.size>std::numeric_limits<quint32>::max()
+           || out.name.size()>65535){setError(error,"RES offset/name limit or write error.");return false;}
+        out.offset=quint32(staged.pos());
+        if(out.changed){if(!write(out.payload))return false;}
+        else {
+            if(!source.seek(m_source.member(out.sourceIndex).dataOffset))return false;
+            qint64 remaining=out.size;
+            while(remaining){auto b=source.read(qMin(remaining,qint64(4*1024*1024)));
+                if(b.isEmpty()||!write(b)){setError(error,"RES streaming copy failed.");return false;}remaining-=b.size();}
         }
-        OutputMember output{encodedCp1251(change.finalName), quint32(change.payload.size()),
-                            quint32(staged.size()), change.lastWriteTime};
-        staged.append(change.payload);
-        outputMembers.append(output);
     }
-    if(outputMembers.isEmpty())
-    {
-        setError(error, "A RES transaction cannot delete every member.");
-        return false;
-    }
-    staged.append(QByteArray((16 - staged.size() % 16) % 16, '\0'));
-    if(quint64(staged.size()) > std::numeric_limits<quint32>::max())
-    {
-        setError(error, "The RES transaction table exceeds the 32-bit offset limit.");
-        return false;
-    }
-    const quint32 tableOffset = quint32(staged.size());
+    if(!align())return false;
+    const quint32 tableOffset=quint32(staged.pos());
     const quint32 count = quint32(outputMembers.size());
     QVector<int> hashSlots(int(count), -1);
     QVector<quint32> next(int(count), quint32(-1));
@@ -448,6 +424,16 @@ bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QStr
         hashSlots[slot] = memberIndex;
     }
     QByteArray names;
+    // The game walks these chains from the name's hash bucket. A table that
+    // merely enumerates all names is insufficient evidence of readability.
+    for(int memberIndex=0;memberIndex<outputMembers.size();++memberIndex){
+        int slot=int(nameHash(outputMembers[memberIndex].name,count));QSet<int> visited;bool found=false;
+        while(slot>=0&&slot<hashSlots.size()&&!visited.contains(slot)){
+            visited.insert(slot);if(hashSlots[slot]==memberIndex){found=true;break;}
+            slot=next[slot]==quint32(-1)?-1:int(next[slot]);
+        }
+        if(!found){setError(error,"RES member is unreachable through the game hash chain.");return false;}
+    }
     QByteArray table(int(quint64(count) * kEntrySize), '\0');
     for(int slot = 0; slot < hashSlots.size(); ++slot)
     {
@@ -466,56 +452,61 @@ bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QStr
         put32(&table, offset + 18, quint32(names.size()));
         names.append(member.name);
     }
-    staged.append(table);
-    staged.append(names);
-    put32(&staged, 0, kSignature);
-    put32(&staged, 4, count);
-    put32(&staged, 8, tableOffset);
-    put32(&staged, 12, quint32(names.size()));
-
-    QTemporaryFile validationFile(QFileInfo(destinationPath).absolutePath()
-        + QStringLiteral("/.endurance-res-candidate-XXXXXX.res"));
-    validationFile.setAutoRemove(true);
-    if(!validationFile.open() || validationFile.write(staged) != staged.size()
-       || !validationFile.flush())
-    {
-        setError(error, "Could not stage the RES transaction candidate.");
-        return false;
+    QByteArray header(16,'\0');
+    put32(&header,0,kSignature);put32(&header,4,count);
+    put32(&header,8,tableOffset);put32(&header,12,quint32(names.size()));
+    if(!write(table)||!write(names)||!staged.seek(0)||!write(header)||!staged.flush()) {
+        setError(error,"Cannot finish RES staging file.");return false;
     }
-    const QString validationPath = validationFile.fileName();
-    validationFile.close();
     CResArchiveIndex reopened;
-    if(!reopened.open(validationPath, error) || reopened.memberCount() != outputMembers.size())
-    {
-        setError(error, "The staged RES transaction failed semantic reopen validation.");
-        return false;
-    }
-    QTextCodec* codec = QTextCodec::codecForName("CP1251");
-    for(const OutputMember& member : outputMembers)
-        if(reopened.memberIndex(codec ? codec->toUnicode(member.name)
-                                     : QString::fromLatin1(member.name)) < 0)
-        {
-            setError(error, "The staged RES transaction lost a member name.");
-            return false;
+    if(!reopened.open(staged.fileName(),error)||reopened.memberCount()!=outputMembers.size())return false;
+    // Exact changed bytes; stream-compare every unchanged payload and timestamp.
+    QFile check(staged.fileName());if(!check.open(QIODevice::ReadOnly))return false;
+    QTextCodec* codec=QTextCodec::codecForName("CP1251");
+    for(const auto& out:outputMembers){
+        const int i=reopened.memberIndex(codec->toUnicode(out.name));
+        if(i<0||reopened.member(i).dataSize!=out.size||reopened.member(i).lastWriteTime!=out.time)return false;
+        if(out.changed){if(reopened.readMember(i,error)!=out.payload)return false;}
+        else {
+            if(!check.seek(reopened.member(i).dataOffset)||!source.seek(m_source.member(out.sourceIndex).dataOffset))return false;
+            qint64 remaining=out.size;
+            while(remaining){qint64 n=qMin(remaining,qint64(4*1024*1024));
+                auto b=source.read(n);if(b.size()!=n||check.read(n)!=b){setError(error,"Unchanged RES member differs.");return false;}remaining-=n;}
         }
-    if(!m_source.sourceIsCurrent(error)) return false;
-
-    QSaveFile destination(destinationPath);
-    if(!destination.open(QIODevice::WriteOnly) || destination.write(staged) != staged.size())
-    {
-        destination.cancelWriting();
-        setError(error, "Could not stage the validated RES transaction for publication.");
-        return false;
     }
-    if(!m_source.sourceIsCurrent(error))
-    {
-        destination.cancelWriting();
-        return false;
-    }
-    if(!destination.commit())
-    {
-        setError(error, "Could not atomically publish the RES transaction candidate.");
-        return false;
-    }
+    check.close();source.close();
+    if(!m_source.sourceIsCurrent(error))return false;
+    const auto expected=resFileSha256(staged.fileName(),error);
+    if(expected.isEmpty())return false;
+    if(candidateSha256)*candidateSha256=expected;
+    // QSaveFile has direct-write fallback disabled: interruption keeps the old file.
+    QSaveFile destination(destinationPath);destination.setDirectWriteFallback(false);
+    if(!destination.open(QIODevice::WriteOnly)||!staged.seek(0))return false;
+    while(!staged.atEnd()){auto b=staged.read(4*1024*1024);
+        if(b.isEmpty()||destination.write(b)!=b.size()){setError(error,"Cannot copy staged RES.");return false;}}
+    if(!destination.flush()||!m_source.sourceIsCurrent(error)||(beforeCommit&&!beforeCommit()))return false;
+    if(!destination.commit()){setError(error,destination.errorString());return false;}
+    if(resFileSha256(destinationPath,error)!=expected){setError(error,"Committed RES differs from the validated staging file.");return false;}
     return true;
+}
+
+QByteArray resFileSha256(const QString& path, QString* error)
+{
+    QFile f(path);if(!f.open(QIODevice::ReadOnly)){setError(error,f.errorString());return {};}
+    CNativeSha256 native;const bool system=native.isAvailable();QCryptographicHash portable(QCryptographicHash::Sha256);
+    while(!f.atEnd()){auto b=f.read(4*1024*1024);if(b.isEmpty()){setError(error,f.errorString());return {};}
+        if(system)native.addData(b);else portable.addData(b);}
+    auto digest=system?native.result():portable.result();
+    if(digest.isEmpty()&&system){f.close();if(!f.open(QIODevice::ReadOnly)||!portable.addData(&f))return {};digest=portable.result();}
+    return digest.toHex();
+}
+
+bool replaceResFromFile(const QString& destination,const QString& candidate,const QByteArray& expected,QString* error)
+{
+    const auto wanted=resFileSha256(candidate,error);if(wanted.isEmpty())return false;
+    QFile input(candidate);QSaveFile output(destination);output.setDirectWriteFallback(false);
+    if(!input.open(QIODevice::ReadOnly)||!output.open(QIODevice::WriteOnly))return false;
+    while(!input.atEnd()){auto b=input.read(4*1024*1024);if(b.isEmpty()||output.write(b)!=b.size())return false;}
+    if(resFileSha256(destination,error)!=expected){setError(error,"RES changed before atomic replacement.");return false;}
+    return output.commit()&&resFileSha256(destination,error)==wanted;
 }

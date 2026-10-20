@@ -8,6 +8,7 @@
 #include <QVector>
 
 #include "res_archive_document.h"
+#include "res_archive_index.h"
 
 class CResArchiveDocument;
 
@@ -93,5 +94,12 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
 
 SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     const SResArchiveBytesSaveRequest& request);
+
+// File-backed publication/removal. Only changed member payloads are retained.
+SResPublishedMembersSaveResult commitStreamedResMembers(
+    const CResArchiveIndex& source,
+    const SResPublishedMembersSaveRequest& request,
+    const QStringList& removed = {}, const QByteArray& expectedSourceSha256 = {},
+    const std::function<bool()>& inventoryGuard = {});
 
 #endif // RES_SAVE_COORDINATOR_H

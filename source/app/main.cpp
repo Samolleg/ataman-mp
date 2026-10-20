@@ -84,6 +84,7 @@
 
 #include "endurance_document.h"
 #include "log.h"
+#include "terrain_atlas_recovery_store.h"
 #include "resource_profile.h"
 #include "resourcemanager.h"
 #include "layout_components/tablemanager.h"
@@ -4238,6 +4239,7 @@ int main(int argc, char *argv[])
     ei::applyUiScalePercent(ei::persistedUiScalePercent());
 
 
+    CTerrainAtlasRecoveryStore().scheduleCleanup();
     CStartupSplash splash;
     splash.showCentered();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);

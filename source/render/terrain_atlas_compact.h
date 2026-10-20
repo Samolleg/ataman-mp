@@ -4,6 +4,7 @@
 #include "terrain_atlas_profile.h"
 #include "res_archive_document.h"
 #include <atomic>
+class CResArchiveIndex;
 
 bool terrainAtlasPageLimit(int pages, QString* error);
 bool terrainAtlasHasHash(const QString& name);
@@ -41,10 +42,17 @@ struct STerrainAtlasCompactPlan {
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& pages,
     const QByteArray& semanticBytes, const QFileInfo& mpr,
-    const std::atomic_bool* cancelled = nullptr, bool forcePublication = false);
+    const std::atomic_bool* cancelled = nullptr, bool forcePublication = false,
+    const QVector<QImage>* decodedSource = nullptr);
 bool compactTerrainPublication(QByteArray* mprBytes, STerrainAtlasProfile* profile,
     QVector<SResArchiveNewMember>* members, QVector<QImage>* images,
     const QFileInfo& map, QString* error);
+// Reuse the published identity only when all page bytes, profile meaning and
+// semantic fields match. Rebind the candidate MPR to that exact publication.
+bool reuseTerrainPublication(const CResArchiveIndex& archive,
+    const STerrainAtlasProfile& previous, QByteArray* mprBytes,
+    STerrainAtlasProfile* profile, QVector<SResArchiveNewMember>* members,
+    const QFileInfo& map);
 // Rebuild only explicitly named owned members; prove all other payloads/times.
 bool buildTerrainArchiveWithout(const CResArchiveDocument& source,
     const QStringList& names, QByteArray* output, QString* error);

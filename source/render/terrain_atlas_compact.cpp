@@ -16,6 +16,8 @@
 #include <cstring>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include "res_archive_index.h"
 
 namespace {
 QByteArray hash(const QByteArray& b){return QCryptographicHash::hash(b,QCryptographicHash::Sha256).toHex();}
@@ -23,7 +25,7 @@ QByteArray read(const QString& p){QFile f(p);return f.open(QIODevice::ReadOnly)?
 int u32(const QByteArray& b,int o){return int(qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(b.constData()+o)));}
 void put(QByteArray& b,int o,int n){qToLittleEndian<quint32>(quint32(n),reinterpret_cast<uchar*>(b.data()+o));}
 QString pageName(const QString& ns,int p){return QString("%1%2.mmp").arg(ns).arg(p,3,10,QLatin1Char('0'));}
-bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByteArray>* out){
+bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByteArray>* out,QMap<QString,QString>* namespaces=nullptr){
     out->clear();if(dirs.isEmpty())return false;
     for(const auto& d:dirs){QDir dir(d);if(!dir.exists()||!QFileInfo(d).isReadable())return false;
         const auto files=dir.entryInfoList(QDir::Files|QDir::Hidden|QDir::System);
@@ -32,14 +34,16 @@ bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByte
             if(f.absoluteFilePath().compare(QFileInfo(current).absoluteFilePath(),Qt::CaseInsensitive)==0)continue;
             const auto b=read(f.absoluteFilePath());CMprDocument doc;CValidationReport r;
             if(b.isEmpty()||!doc.loadBytes(b,f.fileName(),&r)||r.hasErrors())return false;
-            out->insert(f.absoluteFilePath(),hash(b));}}
+            out->insert(f.absoluteFilePath(),hash(b));
+            if(namespaces)namespaces->insert(f.absoluteFilePath(),doc.mapInfo().innerNamespace);}}
     return true;
 }
 }
 
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& input,const QVector<QByteArray>& pages,
-    const QByteArray& semanticBytes,const QFileInfo& mpr,const std::atomic_bool* cancelled,bool forcePublication)
+    const QByteArray& semanticBytes,const QFileInfo& mpr,const std::atomic_bool* cancelled,bool forcePublication,
+    const QVector<QImage>* decodedSource)
 {
     STerrainAtlasCompactPlan p;CValidationReport report;const auto m=source.mapInfo();
     const auto fail=[&](const QString& s){p.error=s;return p;};
@@ -154,7 +158,13 @@ STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
         std::memcpy(b.data()+offset,tail.constData()+76,tail.size()-76);
         for(int dst=0;dst<64;++dst){QImage image;
             if(!ei::decodeMmpDxt1AtlasTile(b,dst,&image,&error))return fail(error);
-            p.images<<image;types<< (pageSlots[dst]?m.tileTypes.value(pageSlots[dst]-1):0);}
+            const int old=pageSlots[dst]-1;
+            // Keep exact decoded verification, but share an existing equal
+            // image instead of retaining a second complete RGBA atlas.
+            if(decodedSource&&old>=0&&old<decodedSource->size()
+               &&image==decodedSource->at(old))p.images<<decodedSource->at(old);
+            else p.images<<image;
+            types<< (pageSlots[dst]?m.tileTypes.value(old):0);}
         content.addData(hash(b));p.pages<<b;p.newDxt+=b.size();p.newRgba+=qint64(w)*w*4;
     }
     const QString ns=CTerrainVirtualAtlas::contentResourceIdentity(mpr.baseName(),content.result().toHex());
@@ -233,22 +243,33 @@ QStringList terrainCompactRetiredMembers(const CResArchiveDocument& archive,cons
            &&QJsonDocument::fromJson(m.payload).object().value("mprNamespace").toString().compare(ns,Qt::CaseInsensitive)==0))names<<m.name;
     *reason="Unreferenced owned namespace can be removed after successful map publication.";return names;
 }
+QStringList terrainCompactRetiredMembers(const CResArchiveIndex& archive,const STerrainAtlasProfile& profile,const QString& current,const QStringList& dirs,QMap<QString,QByteArray>* snapshots,QString* reason){
+    const auto ns=profile.mprNamespace;
+    if(!terrainAtlasHasHash(ns)){*reason="Original or unowned atlas retained.";return {};}
+    if(!inventory(dirs,current,snapshots)){*reason="Incomplete readable MPR inventory; old atlas retained.";return {};}
+    for(auto it=snapshots->cbegin();it!=snapshots->cend();++it){CMprDocument doc;doc.loadBytes(read(it.key()),it.key());
+        if(doc.mapInfo().innerNamespace.compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
+    QStringList names;QRegularExpression pages("^"+QRegularExpression::escape(ns)+"[0-9]{3}\\.mmp$",QRegularExpression::CaseInsensitiveOption);
+    const QString semantic=STerrainSemanticFieldDocument::memberName(ns,QFileInfo(current));
+    for(const auto& m:archive.members())if(pages.match(m.name).hasMatch()||m.name==CTerrainAtlasProfileStore::embeddedMemberName(ns)||m.name==semantic
+        ||(m.name.startsWith("ei_")&&m.name.endsWith(".json")
+           &&QJsonDocument::fromJson(archive.readMember(m.tableIndex)).object().value("mprNamespace").toString().compare(ns,Qt::CaseInsensitive)==0))names<<m.name;
+    *reason="Unreferenced owned namespace can be removed after successful map publication.";return names;
+}
 bool terrainCompactInventoryUnchanged(const QMap<QString,QByteArray>& previous,const QStringList& dirs,const QString& current){QMap<QString,QByteArray> now;return inventory(dirs,current,&now)&&now==previous;}
 
 bool estimateTerrainCompactPublication(STerrainAtlasCompactPlan* plan,const STerrainAtlasProfile& oldProfile,
     const QString& mapPath,const QString& archivePath,const QStringList& dirs)
 {
-    CResArchiveDocument archive;QStringList errors;const auto bytes=read(archivePath);
-    if(!archive.loadBytes(bytes,archivePath,&errors)){plan->error=errors.join('\n');return false;}
+    CResArchiveIndex archive;QString error;
+    if(!archive.open(archivePath,&error)){plan->error=error;return false;}
     QMap<QString,QByteArray> snapshots;
     const auto retired=terrainCompactRetiredMembers(archive,oldProfile,mapPath,dirs,&snapshots,&plan->retirementReason);
-    // Size projection includes profile/semantic payload, table/name overhead
-    // and per-member alignment. Retirement remains conditional at commit.
-    qint64 total=bytes.size();
-    for(const auto& member:plan->members)if(archive.uniqueMemberIndex(member.name)<0)
+    qint64 total=archive.sourceSize();
+    for(const auto& member:plan->members)if(archive.memberIndex(member.name)<0)
         total+=member.payload.size()+member.name.toLocal8Bit().size()+22+15;
-    for(const auto& name:retired){int i=archive.uniqueMemberIndex(name);if(i>=0){const auto& member=archive.members()[i];total-=member.payload.size()+member.encodedName.size()+22;}}
-    plan->archiveBefore=bytes.size();plan->archiveEstimatedAfter=total;return true;
+    for(const auto& name:retired){int i=archive.memberIndex(name);if(i>=0){const auto& member=archive.member(i);total-=member.dataSize+member.encodedName.size()+22;}}
+    plan->archiveBefore=archive.sourceSize();plan->archiveEstimatedAfter=total;return true;
 }
 
 STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,const STerrainAtlasProfile& oldProfile,
@@ -258,17 +279,17 @@ STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,
     STerrainAtlasCompactCommit result;
     if(!plan.error.isEmpty()){result.error=plan.error;return result;}
     if(plan.noOp){result.success=true;result.cleanup="Already compact; no files written.";return result;}
-    const auto original=read(archivePath);CResArchiveDocument archive;QStringList errors;
-    result.archiveBefore=original.size();
-    if(read(mapPath)!=source.originalBytes()||!archive.loadBytes(original,archivePath,&errors)){
-        result.error="Map changed or RES cannot be reopened: "+errors.join('\n');return result;}
+    CResArchiveIndex archive;QString error;
+    result.archiveBefore=QFileInfo(archivePath).size();
+    if(read(mapPath)!=source.originalBytes()||!archive.open(archivePath,&error)){
+        result.error="Map changed or RES cannot be reopened: "+error;return result;}
     // Exact source pages/profile are rechecked at the write boundary.
-    if(archive.memberPayload(CTerrainAtlasProfileStore::embeddedMemberName(oldProfile.mprNamespace))!=oldProfile.toBytes()){
+    if(archive.readMember(CTerrainAtlasProfileStore::embeddedMemberName(oldProfile.mprNamespace))!=oldProfile.toBytes()){
         result.error="Published source profile changed.";return result;}
     // Every remapped pixel is validated against the current archive, so even a
     // same-size external MMP replacement cannot be published from stale inputs.
     for(auto it=plan.remap.cbegin();it!=plan.remap.cend();++it){QImage image;QString e;
-        if(!ei::decodeMmpDxt1AtlasTile(archive.memberPayload(pageName(oldProfile.mprNamespace,it.key()/64)),it.key()%64,&image,&e)
+        if(!ei::decodeMmpDxt1AtlasTile(archive.readMember(pageName(oldProfile.mprNamespace,it.key()/64)),it.key()%64,&image,&e)
            ||image!=plan.images[it.value()]){result.error="Source atlas pixels changed: "+e;return result;}}
     QMap<QString,QByteArray> snapshots;QString reason;
     const auto retired=terrainCompactRetiredMembers(archive,oldProfile,mapPath,dirs,&snapshots,&reason);result.cleanup=reason;
@@ -284,18 +305,8 @@ STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,
     if(!recovery.success){result.error=recovery.error;return result;}
     SResPublishedMembersSaveRequest resRequest;resRequest.source=QFileInfo(archivePath);resRequest.destination=resRequest.source;
     resRequest.published=plan.members;resRequest.backupRootOverride=backupRoot;
-    const auto published=commitStagedResPublishedMembers(archive,resRequest);
-    if(!published.success){
-        result.error=published.error;
-        if(published.phase=="post-commit-validation"){
-            const auto current=read(archivePath);QString rollback;
-            const bool restored=hash(current)==published.candidateSha256.toLatin1()
-                &&atomicallyReplaceVerifiedFile(QFileInfo(archivePath),current,original,&rollback);
-            result.error+="; RES rollback: "+(restored?QString("complete"):QString("manual recovery required: ")+published.backupPath);
-        }
-        return result;
-    }
-    const auto publishedBytes=read(archivePath);
+    const auto published=commitStreamedResMembers(archive,resRequest);
+    if(!published.success){result.error=published.error;return result;}
     SMprBytesSaveCommitRequest mapRequest;mapRequest.source=QFileInfo(mapPath);mapRequest.destination=mapRequest.source;
     mapRequest.expectedSourceBytes=source.originalBytes();mapRequest.candidateBytes=plan.mprBytes;mapRequest.backupRootOverride=backupRoot;
     const auto saved=commitValidatedMprBytes(mapRequest);
@@ -305,23 +316,21 @@ STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,
             &&atomicallyReplaceVerifiedFile(QFileInfo(mapPath),plan.mprBytes,source.originalBytes(),&mapError));
         // If an external writer changed the map, keep both atlas identities in
         // RES rather than guessing which one that new map needs.
-        const bool resRestored=mapRestored&&atomicallyReplaceVerifiedFile(QFileInfo(archivePath),publishedBytes,original,&resError);
+        const bool resRestored=mapRestored&&!published.backupPath.isEmpty()
+            &&replaceResFromFile(archivePath,published.backupPath,published.candidateSha256.toLatin1(),&resError);
         result.error=saved.error+"; MPR rollback: "+(mapRestored?QString("complete"):QString("external change; retained"))
             +"; RES rollback: "+(resRestored?QString("complete"):QString("both namespaces retained; ")+resError);return result;
     }
-    result.success=true;result.archiveAfter=publishedBytes.size();
-    // Retirement is a separate recoverable operation after the new pair exists.
+    result.success=true;result.archiveAfter=QFileInfo(archivePath).size();
+    CTerrainAtlasRecoveryStore(recoveryRoot).markSaved(mapPath,hash(plan.mprBytes));
     if(!retired.isEmpty()){
-        if(!terrainCompactInventoryUnchanged(snapshots,dirs,mapPath)||read(mapPath)!=plan.mprBytes){result.cleanup="Inventory changed; previous namespace retained.";return result;}
-        CResArchiveDocument current;QByteArray clean;QString error;
-        if(!current.loadBytes(publishedBytes,archivePath,&errors)||!buildTerrainArchiveWithout(current,retired,&clean,&error)){
-            result.cleanup="Previous namespace retained: "+error;return result;}
-        if(!terrainCompactInventoryUnchanged(snapshots,dirs,mapPath)||read(mapPath)!=plan.mprBytes){result.cleanup="Inventory changed; previous namespace retained.";return result;}
-        SResArchiveBytesSaveRequest cleanup;cleanup.destination=QFileInfo(archivePath);cleanup.candidateBytes=clean;
-        cleanup.expectedSourceBytes=publishedBytes;cleanup.backupRootOverride=backupRoot;
-        const auto removed=commitValidatedResArchiveBytes(cleanup);
-        if(removed.success){result.cleanup=QString("Removed %1 unreferenced namespace members.").arg(retired.size());result.archiveAfter=clean.size();}
-        else result.cleanup="Previous namespace retained: "+removed.error;
+        CResArchiveIndex current;QString e;
+        if(!current.open(archivePath,&e)){result.cleanup=e;return result;}
+        SResPublishedMembersSaveRequest cleanup;cleanup.source=cleanup.destination=QFileInfo(archivePath);cleanup.backupRootOverride=backupRoot;
+        const auto guard=[&](){return terrainCompactInventoryUnchanged(snapshots,dirs,mapPath)&&read(mapPath)==plan.mprBytes;};
+        const auto removed=commitStreamedResMembers(current,cleanup,retired,published.candidateSha256.toLatin1(),guard);
+        result.cleanup=removed.success?QString("Removed %1 unreferenced namespace members.").arg(retired.size()):"Previous namespace retained: "+removed.error;
+        result.archiveAfter=QFileInfo(archivePath).size();
     }
     return result;
 }
@@ -349,25 +358,23 @@ void terrainAtlasCopySourceIdentities(STerrainAtlasProfile* profile,const CTerra
 }
 STerrainPackCleanupPlan prepareTerrainPackCleanup(const QString& path,const QStringList& dirs){
     STerrainPackCleanupPlan p;
-    if(dirs.size()<2||!inventory(dirs,QString(),&p.inventory)){p.error=QString::fromUtf8("Нужен полный читаемый инвентарь MPR Dejavu и Base. Очистка запрещена.");return p;}
+    QMap<QString,QString> namespaces;
+    if(dirs.size()<2||!inventory(dirs,QString(),&p.inventory,&namespaces)){p.error=QString::fromUtf8("Нужен полный читаемый инвентарь MPR Dejavu и Base. Очистка запрещена.");return p;}
     QMap<QString,QStringList> refs;
-    for(auto it=p.inventory.cbegin();it!=p.inventory.cend();++it){CMprDocument d;CValidationReport r;
-        if(!d.loadBytes(read(it.key()),it.key(),&r)||r.hasErrors()){p.error="MPR inventory changed";return p;}
-        refs[d.mapInfo().innerNamespace.toCaseFolded()]<<it.key();}
-    if(!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){p.error="MPR inventory changed";return p;}
-    const auto bytes=read(path);p.before=bytes.size();p.archiveSha256=hash(bytes);
-    CResArchiveDocument archive;QStringList errors;
-    if(!archive.loadBytes(bytes,path,&errors)){p.error=errors.join('\n');return p;}
+    for(auto it=namespaces.cbegin();it!=namespaces.cend();++it)refs[it.value().toCaseFolded()]<<it.key();
+    CResArchiveIndex archive;
+    if(!archive.open(path,&p.error))return p;
+    p.before=archive.sourceSize();
     QMap<QString,STerrainPackCleanupRow> rows;QMap<QString,QStringList> members;
     const QRegularExpression page("^(.+)([0-9]{3})\\.mmp$",QRegularExpression::CaseInsensitiveOption);
     for(const auto& m:archive.members()){
         QString ns;auto match=page.match(m.name);
         if(match.hasMatch())ns=match.captured(1).toCaseFolded();
         else if(m.name.startsWith("ei_")&&m.name.endsWith(".json")){
-            ns=QJsonDocument::fromJson(m.payload).object().value("mprNamespace").toString().toCaseFolded();
+            ns=QJsonDocument::fromJson(archive.readMember(m.tableIndex)).object().value("mprNamespace").toString().toCaseFolded();
         }
         if(ns.isEmpty())continue;
-        auto& row=rows[ns];row.name=ns;row.bytes+=m.payload.size();if(match.hasMatch())++row.pages;
+        auto& row=rows[ns];row.name=ns;row.bytes+=m.dataSize;if(match.hasMatch())++row.pages;
         members[ns]<<m.name;
     }
     for(auto it=rows.begin();it!=rows.end();++it){auto row=it.value();const auto uses=refs.value(it.key());
@@ -382,31 +389,34 @@ STerrainPackCleanupPlan prepareTerrainPackCleanup(const QString& path,const QStr
              (baseOnly?QString::fromUtf8("Используются только картами Base: "):QString())+labels.join(", "));
         p.rows<<row;if(row.removable)p.members+=members[it.key()];
     }
-    QByteArray clean;QString e;
-    if(!buildTerrainArchiveWithout(archive,p.members,&clean,&e)){p.error=e;return p;}
-    p.after=clean.size();return p;
+    p.after=p.before;
+    if(p.members.isEmpty())return p; // inventory-only no-op: no hashing/rebuild/RES validation
+    p.archiveSha256=resFileSha256(path,&p.error);if(p.archiveSha256.isEmpty())return p;
+    QSet<QString> remove;for(const auto& n:p.members)remove.insert(n.toCaseFolded());
+    qint64 size=16,names=0,count=0;
+    for(const auto& m:archive.members())if(!remove.contains(m.name.toCaseFolded())){
+        size+=(16-size%16)%16+m.dataSize;names+=m.encodedName.size();++count;}
+    p.after=size+(16-size%16)%16+count*22+names;return p;
 }
 bool commitTerrainPackCleanup(const QString& path,const QStringList& dirs,const STerrainPackCleanupPlan& p,QString* error,const QString& backup){
     if(!p.error.isEmpty()){*error=p.error;return false;}
-    const auto before=read(path);if(hash(before)!=p.archiveSha256||!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){*error="Archive or MPR inventory changed; prepare cleanup again.";return false;}
     if(p.members.isEmpty())return true;
-    CResArchiveDocument source;QStringList errors;QByteArray clean;
-    if(!source.loadBytes(before,path,&errors)||!buildTerrainArchiveWithout(source,p.members,&clean,error))return false;
-    if(clean.size()!=p.after||!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){*error="MPR inventory changed; cleanup cancelled.";return false;}
-    SResArchiveBytesSaveRequest request;request.destination=QFileInfo(path);request.candidateBytes=clean;request.expectedSourceBytes=before;request.backupRootOverride=backup;
-    const auto saved=commitValidatedResArchiveBytes(request);if(!saved.success)*error=saved.error;return saved.success;
+    CResArchiveIndex source;if(!source.open(path,error))return false;
+    SResPublishedMembersSaveRequest r;r.source=r.destination=QFileInfo(path);r.backupRootOverride=backup;
+    const auto saved=commitStreamedResMembers(source,r,p.members,p.archiveSha256,[&](){return terrainCompactInventoryUnchanged(p.inventory,dirs,QString());});
+    if(!saved.success)*error=saved.error;return saved.success;
 }
 QString retireTerrainAtlasAfterSave(const QString& path,const STerrainAtlasProfile& profile,const QString& map,const QStringList& dirs,const QString& backup){
     if(!terrainAtlasHasHash(profile.mprNamespace))return "Original namespace retained.";
-    const auto before=read(path);CResArchiveDocument archive;QStringList errors;QString reason;QMap<QString,QByteArray> snapshots;
-    if(dirs.size()<2||!archive.loadBytes(before,path,&errors))return "Incomplete inventory or archive; previous namespace retained.";
+    CResArchiveIndex archive;QString error,reason;QMap<QString,QByteArray> snapshots;
+    if(dirs.size()<2||!archive.open(path,&error))return "Incomplete inventory or archive; previous namespace retained.";
     const auto names=terrainCompactRetiredMembers(archive,profile,map,dirs,&snapshots,&reason);
     if(names.isEmpty())return reason;
     CMprDocument current;if(!current.loadBytes(read(map),map)||current.mapInfo().innerNamespace.compare(profile.mprNamespace,Qt::CaseInsensitive)==0)return "Current map still uses namespace; retained.";
-    const auto mapHash=hash(read(map));QByteArray clean;QString error;
-    if(!buildTerrainArchiveWithout(archive,names,&clean,&error)||!terrainCompactInventoryUnchanged(snapshots,dirs,map)||hash(read(map))!=mapHash)return "Inventory changed; previous namespace retained.";
-    SResArchiveBytesSaveRequest request;request.destination=QFileInfo(path);request.expectedSourceBytes=before;request.candidateBytes=clean;request.backupRootOverride=backup;
-    auto result=commitValidatedResArchiveBytes(request);return result.success?QString("Removed previous namespace %1 (%2 members)").arg(profile.mprNamespace).arg(names.size()):"Previous namespace retained: "+result.error;
+    const auto mapHash=hash(read(map));
+    SResPublishedMembersSaveRequest r;r.source=r.destination=QFileInfo(path);r.backupRootOverride=backup;
+    auto result=commitStreamedResMembers(archive,r,names,{},[&](){return terrainCompactInventoryUnchanged(snapshots,dirs,map)&&hash(read(map))==mapHash;});
+    return result.success?QString("Removed previous namespace %1 (%2 members)").arg(profile.mprNamespace).arg(names.size()):"Previous namespace retained: "+result.error;
 }
 
 bool compactTerrainPublication(QByteArray* bytes,STerrainAtlasProfile* profile,QVector<SResArchiveNewMember>* members,QVector<QImage>* images,const QFileInfo& map,QString* error){
@@ -416,7 +426,41 @@ bool compactTerrainPublication(QByteArray* bytes,STerrainAtlasProfile* profile,Q
     for(int i=0;i<int(doc.mapInfo().textureCount);++i){QByteArray page;
         for(const auto& m:*members)if(m.name.compare(pageName(doc.mapInfo().innerNamespace,i),Qt::CaseInsensitive)==0)page=m.payload;
         if(page.isEmpty()){*error="Missing publication page";return false;}pages<<page;}
-    auto plan=prepareTerrainAtlasCompact(doc,*profile,pages,doc.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),map,nullptr,true);
+    auto plan=prepareTerrainAtlasCompact(doc,*profile,pages,doc.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),map,nullptr,true,images);
     if(!plan.error.isEmpty()){*error=plan.error;return false;}
     *bytes=plan.mprBytes;*profile=plan.profile;*members=plan.members;*images=plan.images;return true;
+}
+
+namespace {
+QByteArray publicationMeaning(const QByteArray& bytes, bool semantic=false){
+    auto j=QJsonDocument::fromJson(bytes).object();
+    j.remove("mprNamespace");
+    if(semantic){j.remove("mprSha256");j.remove("terrainTilesSha256");j.remove("profileSha256");j.remove("version");}
+    return QJsonDocument(j).toJson(QJsonDocument::Compact);
+}
+}
+bool reuseTerrainPublication(const CResArchiveIndex& archive,const STerrainAtlasProfile& previous,
+    QByteArray* bytes,STerrainAtlasProfile* profile,QVector<SResArchiveNewMember>* members,const QFileInfo& map){
+    if(!terrainAtlasHasHash(previous.mprNamespace)||previous.textureCount!=profile->textureCount)return false;
+    if(publicationMeaning(previous.toBytes())!=publicationMeaning(profile->toBytes()))return false;
+    for(int i=0;i<profile->textureCount;++i){QByteArray candidate;
+        for(const auto& m:*members)if(m.name==pageName(profile->mprNamespace,i))candidate=m.payload;
+        if(candidate.isEmpty()||archive.readMember(pageName(previous.mprNamespace,i))!=candidate)return false;}
+    QByteArray newSemantic;
+    for(const auto& m:*members)if(m.name.endsWith(".json")&&m.name!=CTerrainAtlasProfileStore::embeddedMemberName(profile->mprNamespace))newSemantic=m.payload;
+    const auto oldSemantic=archive.readMember(STerrainSemanticFieldDocument::memberName(previous.mprNamespace,map));
+    if(newSemantic.isEmpty()!=oldSemantic.isEmpty()||(!newSemantic.isEmpty()&&publicationMeaning(newSemantic,true)!=publicationMeaning(oldSemantic,true)))return false;
+    CMprDocument d;CValidationReport r;CMprEditTransaction tx("Reuse unchanged terrain publication");QByteArray renamed;
+    if(!d.loadBytes(*bytes,map.fileName(),&r)||!d.applyIsolatedNamespaceTransaction(tx,previous.mprNamespace,&renamed,&r))return false;
+    if(!oldSemantic.isEmpty()){
+        // Version 2 binds tile references. If those changed, rebind the embedded
+        // field only; the external publication remains the exact old bytes.
+        STerrainSemanticFieldDocument field;CMprDocument candidate;
+        if(!STerrainSemanticFieldDocument::fromBytes(oldSemantic,&field,&r)||!candidate.loadBytes(renamed,map.fileName(),&r))return false;
+        field.schemaVersion=2;field.mprNamespace=previous.mprNamespace;
+        field.terrainTilesSha256=STerrainSemanticFieldDocument::tileBindingSha256(candidate);
+        field.profileSha256=QByteArray::fromHex(hash(previous.toBytes()));
+        if(!STerrainSemanticFieldDocument::embedInMpr(renamed,field.toBytes(&r),bytes,&r))return false;
+    }else *bytes=renamed;
+    *profile=previous;members->clear();return true;
 }

@@ -11,6 +11,8 @@ struct SMapSaveFile
     QByteArray before;
     QByteArray after;
     bool existed{true};
+    QString afterFile; // validated file-backed RES candidate
+    QByteArray beforeSha256, afterSha256;
 };
 struct SMapSaveBatchResult
 {

@@ -48,6 +48,8 @@ void CLogger::log(ELogMessageType type, const QString msg)
         QString txt = QString("[%1] ").arg(entry.timestamp.toString("dd.MM.yyyy hh:mm:ss"));
 
         QTextStream textStream(&log_file);
+        textStream.setCodec("UTF-8");
+        textStream.setGenerateByteOrderMark(log_file.size() == 0);
         switch (type)
         {
         case eLogInfo: txt += QString("{INFO} \t %1").arg(msg); break;
@@ -110,7 +112,16 @@ CLogger::CLogger()
 
     rotateLog(logDir.filePath("workflow.log"));
     rotateLog(current.filePath("workflow.log")); // migrate the legacy root-level log once
-    log_file.setFileName(logDir.filePath("workflow.log"));
+    QString currentPath=logDir.filePath("workflow.log");
+    if(QFileInfo(currentPath).size()>0){
+        // A locked legacy log may not rotate. Start a separate UTF-8 file
+        // instead of mixing encodings in that existing journal.
+        int suffix=0;
+        do {currentPath=logDir.filePath(QString("workflow-utf8-%1-%2.log")
+            .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz")).arg(suffix++));}
+        while(QFileInfo::exists(currentPath));
+    }
+    log_file.setFileName(currentPath);
     log(eLogInit, "Log started");
 }
 

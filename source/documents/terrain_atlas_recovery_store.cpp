@@ -11,6 +11,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QLockFile>
 #include <QtEndian>
 
 #include "backup_manager.h"
@@ -145,6 +146,9 @@ STerrainAtlasRecoveryResult CTerrainAtlasRecoveryStore::saveSnapshot(
     const STerrainAtlasRecoverySnapshot& snapshot) const
 {
     STerrainAtlasRecoveryResult result;
+    QDir().mkpath(m_rootPath);
+    QLockFile lock(QDir(m_rootPath).filePath("store.lock"));
+    if(!lock.tryLock(5000)){result.error="Terrain recovery store is busy.";return result;}
     if(snapshot.resourceIdentity.trimmed().isEmpty()
        || !validSha256(snapshot.atlasPixelSha256)
        || !validSha256(snapshot.mprSha256)

@@ -6,6 +6,12 @@
 #include <QHash>
 #include <QString>
 #include <QVector>
+#include <functional>
+
+// Bounded-memory hashing and atomic file copy; empty digest means I/O failure.
+QByteArray resFileSha256(const QString& path, QString* error = nullptr);
+bool replaceResFromFile(const QString& destination, const QString& candidate,
+                        const QByteArray& expectedDestination, QString* error);
 
 struct SResIndexedMember
 {
@@ -69,7 +75,9 @@ public:
              QString* error = nullptr);
     bool rename(const QString& name, const QString& newName, QString* error = nullptr);
     bool remove(const QString& name, QString* error = nullptr);
-    bool writeCandidate(const QString& destinationPath, QString* error = nullptr) const;
+    bool writeCandidate(const QString& destinationPath, QString* error = nullptr,
+                        const std::function<bool()>& beforeCommit = {},
+                        QByteArray* candidateSha256 = nullptr) const;
 
 private:
     struct Change

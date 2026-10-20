@@ -566,6 +566,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+    bool stageMapCompanionFile(const QString& path,const QString& candidate,const QByteArray& expected,QString* error);
     bool stageMapCompanion(const QString& path, const QByteArray& bytes, QString* error, const QByteArray* expected = nullptr);
     bool commitMapCohortMpr(const QFileInfo& destination, const QByteArray& bytes, QString* error);
     bool m_mapCohortActive{false};
@@ -611,7 +612,8 @@ private:
         const QVector<QImage>& physicalTiles,
         const QString& terrainArchivePath,
         const STerrainAtlasProfile& expectedProfile,
-        bool requireSemanticMember, bool preserveUndo = false);
+        bool requireSemanticMember, bool preserveUndo = false,
+        const QVector<SResArchiveNewMember>* verifiedPublication = nullptr);
     bool buildTerrainSemanticFieldMember(
         const QByteArray& candidateMprBytes,
         const QFileInfo& destinationMpr,

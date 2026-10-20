@@ -2,6 +2,7 @@
 #include "endurance_document.h"
 #include "map_save_batch.h"
 #include "backup_manager.h"
+#include "res_archive_index.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -20,6 +21,7 @@ namespace {
 bool matches(const SMapSaveFile& file, const QByteArray& bytes, bool existed)
 {
     if(!existed) return !QFileInfo::exists(file.path);
+    if(!file.afterFile.isEmpty())return resFileSha256(file.path)==((&bytes==&file.before)?file.beforeSha256:file.afterSha256);
     QFile disk(file.path);
     return disk.open(QIODevice::ReadOnly) && disk.readAll()==bytes
         && disk.error()==QFileDevice::NoError;
@@ -46,7 +48,7 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         if(!matches(file,file.before,file.existed)) {
             result.error="File changed outside the editor: "+file.path;return result;
         }
-        if(!file.existed || file.before!=file.after) files.append(file);
+        if(!file.existed || (!file.afterFile.isEmpty()?file.beforeSha256!=file.afterSha256:file.before!=file.after)) files.append(file);
     }
     std::vector<std::unique_ptr<QLockFile>> locks;
     std::vector<std::unique_ptr<QSaveFile>> staged;
@@ -56,8 +58,12 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         locks.push_back(std::move(lock));
         std::unique_ptr<QSaveFile> stage(new QSaveFile(file.path));
         stage->setDirectWriteFallback(false);
-        if(!stage->open(QIODevice::WriteOnly) || stage->write(file.after)!=file.after.size()
-           || !stage->flush()) {result.error="Cannot stage: "+file.path+"\n"+stage->errorString();return result;}
+        bool stagedOk=stage->open(QIODevice::WriteOnly);
+        if(stagedOk && !file.afterFile.isEmpty()){
+            QFile input(file.afterFile);stagedOk=input.open(QIODevice::ReadOnly)&&resFileSha256(file.afterFile)==file.afterSha256;
+            while(stagedOk&&!input.atEnd()){auto b=input.read(4*1024*1024);stagedOk=!b.isEmpty()&&stage->write(b)==b.size();}
+        }else if(stagedOk)stagedOk=stage->write(file.after)==file.after.size();
+        if(!stagedOk || !stage->flush()) {result.error="Cannot stage: "+file.path+"\n"+stage->errorString();return result;}
         staged.push_back(std::move(stage));
     }
     CBackupManager manager(backupRoot);
@@ -71,15 +77,15 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
             const auto backup=manager.snapshotBeforeSave(QFileInfo(file.path));
             if(!backup.success) {result.error=backup.error;return result;}
             QFile saved(backup.backupPath);
-            if(!saved.open(QIODevice::ReadOnly) || saved.readAll()!=file.before) {
+            if((!file.afterFile.isEmpty()?resFileSha256(backup.backupPath)!=file.beforeSha256:(!saved.open(QIODevice::ReadOnly)||saved.readAll()!=file.before))) {
                 result.error="Backup verification failed: "+file.path;return result;
             }
             result.backups.append(backup.backupPath);
             backupPath=backup.backupPath;
         }
         recoveryFiles.append(QJsonObject{{"path",file.path},{"existed",file.existed},{"backup",backupPath},
-            {"beforeSha256",QString::fromLatin1(QCryptographicHash::hash(file.before,QCryptographicHash::Sha256).toHex())},
-            {"afterSha256",QString::fromLatin1(QCryptographicHash::hash(file.after,QCryptographicHash::Sha256).toHex())}});
+            {"beforeSha256",QString::fromLatin1((file.afterFile.isEmpty()?QCryptographicHash::hash(file.before,QCryptographicHash::Sha256).toHex():file.beforeSha256))},
+            {"afterSha256",QString::fromLatin1((file.afterFile.isEmpty()?QCryptographicHash::hash(file.after,QCryptographicHash::Sha256).toHex():file.afterSha256))}});
     }
     if(files.isEmpty()){result.success=true;if(onCommitted)onCommitted();return result;}
     const QString recoveryDir=QDir(manager.rootPath()).filePath("map-save-recovery");
@@ -112,6 +118,10 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         bool restored=false;
         if(matches(file,file.after,true)) {
             if(!file.existed) restored=QFile::remove(file.path);
+            else if(!file.afterFile.isEmpty()){
+                const auto entry=recoveryFiles[i].toObject();QString error;
+                restored=replaceResFromFile(file.path,entry.value("backup").toString(),file.afterSha256,&error);
+            }
             else {
                 QSaveFile restore(file.path);
                 restore.setDirectWriteFallback(false);

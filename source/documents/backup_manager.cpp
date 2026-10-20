@@ -17,6 +17,7 @@
 #include <QUuid>
 
 #include "log.h"
+#include "res_archive_index.h"
 
 namespace {
 QString sanitizedName(const QString& name)
@@ -105,6 +106,8 @@ CBackupManager::CBackupManager(const QString& rootOverride)
 
 QString CBackupManager::defaultRootPath()
 {
+    const QString isolated=qEnvironmentVariable("EI_MAPPER_BACKUP_ROOT");
+    if(!isolated.isEmpty()&&QDir::isAbsolutePath(isolated))return QDir::cleanPath(isolated);
     return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
         .filePath("EI Mapper Endurance/backups");
 }
@@ -495,17 +498,10 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
         result.error = QString("Cannot read backup source: %1").arg(input.errorString());
         return result;
     }
-    QCryptographicHash sourceHash(QCryptographicHash::Sha256);
+    QString hashError;
+    result.sha256=QString::fromLatin1(resFileSha256(source.absoluteFilePath(),&hashError));
+    if(result.sha256.isEmpty()){result.error="Cannot hash backup source: "+hashError;return result;}
     QByteArray chunk;
-    while(!(chunk = input.read(4 * 1024 * 1024)).isEmpty())
-        sourceHash.addData(chunk);
-    if(input.error() != QFile::NoError)
-    {
-        result.error = QString("Cannot finish reading backup source: %1").arg(input.errorString());
-        return result;
-    }
-
-    result.sha256 = sourceHash.result().toHex();
     const QString directoryPath = sourceDirectory(source);
     if(!QDir().mkpath(directoryPath))
     {

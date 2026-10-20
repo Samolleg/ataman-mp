@@ -7,6 +7,7 @@
 #include <QTemporaryFile>
 
 #include "backup_manager.h"
+#include <QLockFile>
 #include "res_archive_document.h"
 
 namespace {
@@ -522,4 +523,63 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     result.phase = QStringLiteral("complete");
     result.success = true;
     return result;
+}
+SResPublishedMembersSaveResult commitStreamedResMembers(
+    const CResArchiveIndex& source, const SResPublishedMembersSaveRequest& request,
+    const QStringList& removed, const QByteArray& expectedSourceSha256,
+    const std::function<bool()>& inventoryGuard)
+{
+    SResPublishedMembersSaveResult r;r.phase="prepare";
+    const QString path=request.destination.absoluteFilePath();
+    QLockFile lock(path+".mapper-save.lock");
+    if(!lock.tryLock(0)){r.error="Another save owns this RES.";return r;}
+    if(!source.sourceIsCurrent(&r.error))return r;
+    CResArchiveTransaction tx(source);bool changed=!removed.isEmpty();
+    for(const auto& name:removed)if(!tx.remove(name,&r.error))return r;
+    for(const auto& m:request.published){
+        const int i=source.memberIndex(m.name);
+        if(i==-2){r.error="Ambiguous publication member.";return r;}
+        if(i>=0){
+            if(source.readMember(i,&r.error)==m.payload)continue;
+            if(!request.allowReplaceExisting){r.error="Published RES member collision: "+m.name;return r;}
+            if(!tx.replace(m.name,{},m.payload,&r.error))return r;
+        }else if(!tx.add(m.name,m.payload,m.lastWriteTime,&r.error))return r;
+        changed=true;
+    }
+    if(!changed){r.success=r.noOp=true;r.phase="no-op";return r;}
+    const auto before=resFileSha256(source.path(),&r.error);
+    if(before.isEmpty()||(!expectedSourceSha256.isEmpty()&&before!=expectedSourceSha256)){
+        r.error="RES changed since preparation.";return r;
+    }
+    if(QFileInfo(source.path())!=QFileInfo(path)){r.error="Streamed save requires the indexed destination.";return r;}
+    r.phase="staging";
+    const auto guard=[&](){
+        r.phase="backup";
+        if(request.createBackup){const auto b=CBackupManager(request.backupRootOverride).snapshotBeforeSave(QFileInfo(path));
+            if(!b.success){r.error=b.error;return false;}
+            r.backupPath=b.backupPath;
+            if(b.sha256.toLatin1()!=before||resFileSha256(b.backupPath,&r.error)!=before){r.error="RES backup differs.";return false;}}
+        r.phase="race-check";
+        if(resFileSha256(path,&r.error)!=before||(inventoryGuard&&!inventoryGuard())){r.error="RES or map inventory changed.";return false;}
+#ifdef QT_TESTLIB_LIB
+        if(request.simulateAtomicCommitFailure){r.error="Simulated atomic replacement failure.";return false;}
+#endif
+        r.phase="atomic-replacement";return true;
+    };
+    QByteArray candidateHash;
+    if(!tx.writeCandidate(path,&r.error,guard,&candidateHash)){
+        r.candidateSha256=QString::fromLatin1(candidateHash);
+        if(r.phase=="atomic-replacement"&&!r.backupPath.isEmpty()){
+            QString restoreError;const auto current=resFileSha256(path,&restoreError);
+            if(current==candidateHash)replaceResFromFile(path,r.backupPath,current,&restoreError);
+        }
+        return r;
+    }
+    r.phase="post-commit-validation";
+    CResArchiveIndex reopened;
+    if(!reopened.open(path,&r.error))return r;
+    for(const auto& m:request.published)if(reopened.readMember(m.name,&r.error)!=m.payload){r.error="Published RES payload differs.";return r;}
+    for(const auto& name:removed)if(reopened.memberIndex(name)!=-1){r.error="Removed RES member remains.";return r;}
+    r.candidateSha256=QString::fromLatin1(candidateHash);
+    r.success=!r.candidateSha256.isEmpty();r.phase="complete";return r;
 }

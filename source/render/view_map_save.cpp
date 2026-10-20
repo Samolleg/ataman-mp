@@ -1,6 +1,7 @@
 #include "view.h"
 #include "landscape.h"
 #include <QFile>
+#include "res_archive_index.h"
 
 void CView::acceptMapCompanionsCheckpoint()
 {
@@ -43,4 +44,11 @@ bool CView::saveMapCompanions(const QVector<SMapSaveFile>& files,QString* error,
     m_mapCompanionsCheckpoint={};
     if(!saved && error && error->isEmpty())*error=tr("Общее сохранение карты не завершено.");
     return saved;
+}
+
+bool CView::stageMapCompanionFile(const QString& path,const QString& candidate,const QByteArray& expected,QString* error){
+    SMapSaveFile item;item.path=path;item.afterFile=candidate;item.beforeSha256=expected;
+    item.afterSha256=resFileSha256(candidate,error);item.existed=QFileInfo::exists(path);
+    if(item.afterSha256.isEmpty()||resFileSha256(path,error)!=expected)return false;
+    m_mapCompanions.append(item);return true;
 }

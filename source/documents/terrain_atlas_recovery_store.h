@@ -35,6 +35,11 @@ struct STerrainAtlasRecoveryResult
     QString error;
 };
 
+struct STerrainAtlasRecoveryCleanup {
+    bool success{false}; QString error;
+    qint64 bytes{0}; int manifests{0}, objects{0};
+};
+
 // Durable, editor-private recovery storage for published semantic atlases.
 // Large MMP payloads and the exact profile bytes are content-addressed, so
 // repeated saves create tiny manifests rather than copying whole atlases.
@@ -45,6 +50,12 @@ public:
 
     QString rootPath() const { return m_rootPath; }
     QString objectDirectory() const;
+    // Retention is per normalized MPR path, across atlas namespaces.
+    STerrainAtlasRecoveryCleanup collectGarbage(int generations = 5, bool dryRun = false) const;
+    void setOpenDocument(const QString& map, const QByteArray& hash) const;
+    void closeDocument(const QString& map) const;
+    void markSaved(const QString& map, const QByteArray& hash) const;
+    void scheduleCleanup() const;
     STerrainAtlasRecoveryResult saveSnapshot(
         const STerrainAtlasRecoverySnapshot& snapshot) const;
     bool findExact(const QString& resourceIdentity,
