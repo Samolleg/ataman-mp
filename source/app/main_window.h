@@ -102,6 +102,7 @@ public:
     friend int runDiplomacyCheck();
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
+    bool shutdownPending() const { return m_closeWaiting || m_closeReady; }
     bool openDocument(const QFileInfo& fileName);
     bool replaceLoadedLandscape(const QFileInfo& fileName);
     bool loadMobWithProgress(QFileInfo fileName);
@@ -315,7 +316,9 @@ private slots:
 
 protected:
     bool event(QEvent* event) override;
-    void closeEvent(QCloseEvent* e);
+    void closeEvent(QCloseEvent* e) override;
+    bool m_closeWaiting{false};
+    bool m_closeReady{false};
     void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 

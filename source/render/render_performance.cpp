@@ -1,6 +1,7 @@
 #include "render_performance.h"
 
 #include "log.h"
+#include "log_rotation.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -118,7 +119,7 @@ void RenderPerformanceContext::endFrame()
     m_collecting = false;
 
     const qint64 elapsedMs = m_windowTimer.elapsed();
-    if(elapsedMs < 2000 || m_frames == 0)
+    if(elapsedMs < (m_metadata.benchmarkMode ? 2000 : 30000) || m_frames == 0)
         return;
     const double frames = double(m_frames);
     const double fps = frames * 1000.0 / double(elapsedMs);
@@ -199,7 +200,8 @@ void RenderPerformanceContext::endFrame()
     QDir current = QDir::current();
     current.mkpath("logs");
     QFile performanceLog(current.filePath("logs/render-performance.log"));
-    if(performanceLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    if(ei::rotateLog(performanceLog.fileName(),report.toUtf8().size()+80)
+       && performanceLog.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
     {
         QTextStream stream(&performanceLog);
         stream << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)

@@ -1,3 +1,5 @@
+#include "shutdown_deadline.h"
+#include "backup_manager.h"
 #include "main_window.h"
 #include "database_creation_check.h"
 #include "terrain_mob_height_check.h"
@@ -4169,6 +4171,8 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    // Construct before Qt pools/singletons so the deadline outlives their joins.
+    CShutdownDeadline::instance();
 #ifdef Q_OS_WIN
     // Automated smoke runs must never leave a modal Windows crash dialog on
     // the operator's desktop. The normal unhandled-exception logger still
@@ -4240,6 +4244,7 @@ int main(int argc, char *argv[])
 
 
     CTerrainAtlasRecoveryStore().scheduleCleanup();
+    CBackupManager().scheduleCleanup();
     CStartupSplash splash;
     splash.showCentered();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -4530,7 +4535,7 @@ int main(int argc, char *argv[])
                     QString("Workspace shutdown smoke mode:%1 closed:%2 viewDeleted:%3")
                     .arg(dockMode.isEmpty()?QStringLiteral("default"):dockMode)
                     .arg(closed).arg(!window.view()));
-                if(!closed || window.view())QCoreApplication::exit(10);
+                if(!window.shutdownPending() && (!closed || window.view()))QCoreApplication::exit(10);
             }
         });
     }
@@ -4553,7 +4558,7 @@ int main(int argc, char *argv[])
             ei::log(closed && !window.view()?eLogInfo:eLogWarning,
                 QString("Workspace shutdown smoke empty mode:%1 closed:%2 viewDeleted:%3")
                 .arg(mode).arg(closed).arg(!window.view()));
-            if(!closed || window.view())QCoreApplication::exit(10);
+            if(!window.shutdownPending() && (!closed || window.view()))QCoreApplication::exit(10);
         });
     return app.exec();
 }

@@ -1,3 +1,4 @@
+#include "file_write_activity.h"
 #include "terrain_atlas_compact.h"
 #include "helper_visibility.h"
 #include "shader_locations.h"
@@ -43,6 +44,8 @@
 #include <algorithm>
 
 #include "view.h"
+#include <QHideEvent>
+#include <QShowEvent>
 #include "backup_manager.h"
 #include "verified_clipboard.h"
 #include "selection_region.h"
@@ -3253,6 +3256,7 @@ void CView::clearNeighborLandscapes()
 
 void CView::loadNeighborLandscapes()
 {
+    if(m_applicationShutdown)return;
     clearNeighborLandscapes();
     if(!m_neighborLandscapesVisible || m_neighborPlacements.isEmpty()
        || !m_pLand || !m_pLand->isMprLoad() || !isValid())
@@ -4619,9 +4623,23 @@ void CView::refreshAfterResourceSetup()
     ei::log(eLogInfo, "Viewport and resource lists refreshed after game/mod setup");
 }
 
+void CView::hideEvent(QHideEvent* event)
+{
+    if(m_timer)m_timer->stop();
+    if(m_sculptRepeatTimer)m_sculptRepeatTimer->stop();
+    if(m_overlayPointerTimer)m_overlayPointerTimer->stop();
+    QGLWidget::hideEvent(event);
+}
+
+void CView::showEvent(QShowEvent* event)
+{
+    QGLWidget::showEvent(event);
+    if(!m_applicationShutdown && m_timer)m_timer->start();
+}
+
 void CView::updateWindow()
 {
-    updateGL();
+    if(!m_applicationShutdown && isVisible() && !window()->isMinimized())updateGL();
 }
 
 void CView::rebuildSpatialIndices()
@@ -5940,6 +5958,7 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 
 void CView::paintGL()
 {
+    if(m_applicationShutdown || !isVisible() || window()->isMinimized())return;
     makeCurrent();
     SFramePresentationTelemetry frameTelemetry;
     const bool traceSceneFrame = m_sceneFrameTelemetryHistory.isArmed();
@@ -6085,8 +6104,29 @@ void CView::paintGL()
     //doneCurrent();
 }
 
+void CView::stopForApplicationShutdown()
+{
+    m_applicationShutdown=true;
+    ++(*m_neighborSceneGeneration);
+    ++m_terrainGlobalHydrationGeneration;
+    m_neighborScenePool->clear();
+    m_terrainGlobalHydrationPool->clear();
+    m_sceneFrameTelemetryHistory.disarm();
+    if(m_timer)m_timer->stop();
+    if(m_mprModifyTimer)m_mprModifyTimer->stop();
+    m_sculptRepeatTimer->stop();m_overlayPointerTimer->stop();
+    cancelPendingAiGraphPreviewRegeneration();
+}
+
+bool CView::shutdownWorkersFinished() const
+{
+    return m_neighborScenePool->activeThreadCount()==0
+        && m_terrainGlobalHydrationPool->activeThreadCount()==0;
+}
+
 bool CView::prepareForApplicationShutdown()
 {
+    stopForApplicationShutdown();
     m_sceneFrameTelemetryHistory.disarm();
     if(m_timer)
         m_timer->stop();
@@ -10353,6 +10393,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
+    CFileWriteActivity writing;
     allowModernDraft = allowModernDraft || bool(m_workingTerrainAtlas);
     syncWorldTerrainActive();
     if(!m_worldTerrainSession.dirtyPaths().isEmpty())
@@ -12521,6 +12562,7 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
     const QString& currentNamespace, const QSize& requiredSize,
     quint64 generation)
 {
+    if(m_applicationShutdown)return;
     if(generation != m_terrainGlobalHydrationGeneration
        || !m_terrainGlobalHydrationPool
        || !m_terrainAtlasAnalysis.usable)

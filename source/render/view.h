@@ -214,6 +214,10 @@ public:
     explicit CView(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
     ~CView();
     bool prepareForApplicationShutdown();
+    void stopForApplicationShutdown();
+    void suspendRendering() { if(m_timer)m_timer->stop(); }
+    void resumeRendering() { if(!m_applicationShutdown && isVisible() && m_timer)m_timer->start(); }
+    bool shutdownWorkersFinished() const;
     QSize activeTerrainSectorSize() const {
         return QSize(m_mprDocument.mapInfo().sectorCountX,m_mprDocument.mapInfo().sectorCountY);
     }
@@ -553,6 +557,8 @@ protected:
     bool event(QEvent* event) override;
     void initializeGL() override;
     void paintGL() override;
+    void hideEvent(QHideEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     void resizeGL(int width, int height) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
@@ -1018,6 +1024,7 @@ private:
     QString m_weatherRegion{QStringLiteral("gipat")};
     QSet<CMob*> m_hiddenMobs;
     QTimer* m_timer;
+    bool m_applicationShutdown{false};
     CSettings* m_pSettings;
     QVector<bool> m_aReadState;
     QSharedPointer<CTableManager> m_tableManager;

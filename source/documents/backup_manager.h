@@ -5,6 +5,8 @@
 #include <QString>
 #include <QStringList>
 #include <QVector>
+#include <memory>
+#include <QSet>
 
 struct SRecoverableAutosave
 {
@@ -24,6 +26,7 @@ struct SBackupResult
     QString backupPath;
     QString sha256;
     QString error;
+    std::shared_ptr<void> lease; // held through the complete save transaction
 };
 
 class CBackupManager
@@ -42,6 +45,8 @@ public:
 
     QString rootPath() const { return m_rootPath; }
     static QString defaultRootPath();
+    qint64 collectBackups(bool dryRun = false) const;
+    void scheduleCleanup() const;
     static bool openBackupFolder(QString* error = nullptr);
     static QVector<SRecoverableAutosave> recoverableAutosaves();
     bool beginEditorSession(QVector<SRecoverableAutosave>* recoveries,
@@ -54,11 +59,12 @@ private:
     SBackupResult createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const;
     QString sourceDirectory(const QFileInfo& source) const;
     QVector<SRecoverableAutosave> recoverableAutosavesForRoot() const;
-    void enforceRetention(const QString& directoryPath) const;
+    qint64 enforceRetention(const QString& directoryPath, const QSet<QString>& pins, bool dryRun) const;
 
 private:
     QString m_rootPath;
-    int m_maxTimestampedBackups{50};
+    int m_maxTimestampedBackups{3};
+    int m_minimumAgeDays{3};
     int m_maxAutosaves{20};
 };
 

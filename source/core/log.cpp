@@ -1,4 +1,5 @@
 #include "log.h"
+#include "log_rotation.h"
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -17,9 +18,8 @@ CLogger* CLogger::m_pLogger = nullptr;
 
 CLogger *CLogger::getInstance()
 {
-    if(nullptr == m_pLogger)
-        m_pLogger = new CLogger();
-    return m_pLogger;
+    static CLogger* instance = new CLogger();
+    return instance;
 }
 
 void CLogger::log(ELogMessageType type, const char *msg)
@@ -32,14 +32,9 @@ void CLogger::log(ELogMessageType type, const QString msg)
     SLogMessage entry;
     {
         QMutexLocker locker(&m_mutex);
-        if(m_loglvl<type)
+        // Lifecycle receipts must survive a user's warning-only log level.
+        if(m_loglvl<type && !msg.startsWith(QStringLiteral("Shutdown ")))
             return;
-
-        if(!log_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
-        {
-            qWarning() << "Cannot open workflow log:" << log_file.fileName() << log_file.errorString();
-            return;
-        }
 
         entry.sequence = m_nextSequence++;
         entry.type = type;
@@ -47,9 +42,6 @@ void CLogger::log(ELogMessageType type, const QString msg)
         entry.message = msg;
         QString txt = QString("[%1] ").arg(entry.timestamp.toString("dd.MM.yyyy hh:mm:ss"));
 
-        QTextStream textStream(&log_file);
-        textStream.setCodec("UTF-8");
-        textStream.setGenerateByteOrderMark(log_file.size() == 0);
         switch (type)
         {
         case eLogInfo: txt += QString("{INFO} \t %1").arg(msg); break;
@@ -60,12 +52,18 @@ void CLogger::log(ELogMessageType type, const QString msg)
             txt = QString("[   %1\t  %2  ] {%3} \t %4").arg("DATE", "TIME", "TYPE", "MESSAGE"); break;
         }
 
+        if(!ei::rotateLog(log_file.fileName(), txt.toUtf8().size()+8)
+           || !log_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) return;
+        QTextStream textStream(&log_file);
+        textStream.setCodec("UTF-8");
+        textStream.setGenerateByteOrderMark(log_file.size()==0);
         entry.formatted = txt;
         textStream << txt << endl;
         textStream.flush();
         log_file.flush();
         log_file.close();
         m_sessionMessages.append(entry);
+        if(m_sessionMessages.size()>4000)m_sessionMessages.remove(0,m_sessionMessages.size()-4000);
     }
 
     emit messageLogged(entry);
@@ -108,6 +106,10 @@ CLogger::CLogger()
 
         if(!QFile::rename(source.absoluteFilePath(), destination))
             qWarning() << "Cannot rotate workflow log" << source.absoluteFilePath() << "to" << destination;
+        else for(int i=1;i<5;++i) {
+            const auto suffix="."+QString::number(i);
+            if(QFile::exists(source.absoluteFilePath()+suffix))QFile::rename(source.absoluteFilePath()+suffix,destination+suffix);
+        }
     };
 
     rotateLog(logDir.filePath("workflow.log"));
@@ -121,6 +123,7 @@ CLogger::CLogger()
             .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz")).arg(suffix++));}
         while(QFileInfo::exists(currentPath));
     }
+    ei::pruneWorkflowLogs(logDir);
     log_file.setFileName(currentPath);
     log(eLogInit, "Log started");
 }

@@ -45,8 +45,9 @@ inline void closeSecondaryWindows(QWidget* primaryWindow)
     // Every top-level widget in this process belongs to Endurance. Closing the
     // complete snapshot covers correctly parented tool windows as well as future
     // dialogs that are accidentally constructed without an owner.
-    const QWidgetList windows = QApplication::topLevelWidgets();
-    for(QWidget* window : windows)
+    QList<QPointer<QWidget>> windows;
+    for(auto* window:QApplication::topLevelWidgets())windows.append(window);
+    for(const auto& window : windows)
     {
         if(!window || window == primaryWindow)
             continue;

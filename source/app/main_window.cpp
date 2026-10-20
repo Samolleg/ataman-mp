@@ -105,6 +105,10 @@
 #include "log.h"
 #include "scene.h"
 #include "backup_manager.h"
+#include "file_write_activity.h"
+#include "shutdown_deadline.h"
+#include <cstdlib>
+#include <QThreadPool>
 #include "resource_setup_dialog.h"
 #include "mob_diff_dialog.h"
 #include "window_lifecycle.h"
@@ -8358,6 +8362,7 @@ void MainWindow::performAutosave()
                     statusBar()->showMessage(tr("Recovery autosave created 1 new generation(s)."),4000);
             });
             watcher->setFuture(QtConcurrent::run([task,source,sourceHash]() {
+                CFileWriteActivity writing;
                 const auto candidate=task();
                 if(!candidate.success) {
                     SBackupResult failure;failure.error=candidate.report.toText();return failure;
@@ -9422,6 +9427,32 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if(m_closeWaiting) { e->ignore(); return; }
+    if(!m_closeReady && (CFileWriteActivity::active()>0
+       || (m_mprAutosaveWatcher && m_mprAutosaveWatcher->isRunning()))) {
+        e->ignore();m_closeWaiting=true;
+        ei::log(eLogInfo,"Shutdown waiting for active save/recovery write timeoutMs:120000");
+        if(m_pView)m_pView->suspendRendering();
+        auto* progress=new QProgressDialog(tr("Waiting for background save to finish..."),QString(),0,0,this);
+        progress->setObjectName("shutdownWriteProgress");progress->setCancelButton(nullptr);
+        progress->setWindowModality(Qt::WindowModal);progress->setMinimumDuration(0);progress->show();
+        auto elapsed=std::make_shared<QElapsedTimer>();elapsed->start();
+        auto* poll=new QTimer(progress);poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,progress,poll,elapsed]() {
+            if(CFileWriteActivity::active()==0 && (!m_mprAutosaveWatcher || !m_mprAutosaveWatcher->isRunning())) {
+                poll->stop();progress->deleteLater();m_closeWaiting=false;
+                ei::log(eLogInfo,QString("Shutdown active write finished elapsedMs:%1").arg(elapsed->elapsed()));
+                if(m_pView)m_pView->resumeRendering();
+                close();
+            } else if(elapsed->elapsed()>=120000) {
+                poll->stop();progress->deleteLater();m_closeWaiting=false;
+                if(m_pView)m_pView->resumeRendering();
+                ei::log(eLogWarning,"Shutdown write timeout; close cancelled, editor and recovery retained");
+                QMessageBox::warning(this,tr("Save is still running"),tr("The background save has not finished within two minutes. The editor remains open to protect the save. Retry closing after it completes."));
+            }
+        });poll->start();return;
+    }
+    ei::log(eLogInfo,"Shutdown close requested");
     if(m_mapTestLauncher && m_mapTestLauncher->isRunning())
     {
         const QMessageBox::StandardButton answer = QMessageBox::question(this,
@@ -9438,12 +9469,41 @@ void MainWindow::closeEvent(QCloseEvent *e)
         e->ignore();
         return;
     }
-    if(!isExitAllowed())
+    if(!m_closeReady && !isExitAllowed())
     {
         e->ignore();
         return;
     }
 
+    if(!m_closeReady) {
+        e->ignore();m_closeWaiting=true;m_shutdownInProgress=true;
+        ei::log(eLogInfo,"Shutdown started timeoutMs:120000");
+        if(m_autosaveTimer)m_autosaveTimer->stop();
+        if(m_autosaveCountdownTimer)m_autosaveCountdownTimer->stop();
+        if(m_validationTimer)m_validationTimer->stop();
+        if(m_minimapRefreshTimer)m_minimapRefreshTimer->stop();
+        if(m_minimapCameraTimer)m_minimapCameraTimer->stop();
+        m_pView->stopForApplicationShutdown();
+        auto* progress=new QProgressDialog(tr("Finishing background tasks..."),QString(),0,0,this);
+        progress->setObjectName("shutdownTasksProgress");progress->setCancelButton(nullptr);
+        progress->setWindowModality(Qt::WindowModal);progress->setMinimumDuration(0);progress->show();
+        auto elapsed=std::make_shared<QElapsedTimer>();elapsed->start();
+        auto* poll=new QTimer(progress);poll->setInterval(50);
+        connect(poll,&QTimer::timeout,this,[this,progress,poll,elapsed]() {
+            if(m_pView->shutdownWorkersFinished() && QThreadPool::globalInstance()->activeThreadCount()==0
+               && CFileWriteActivity::active()==0) {
+                poll->stop();progress->deleteLater();m_closeWaiting=false;m_closeReady=true;
+                ei::log(eLogInfo,QString("Shutdown background tasks complete elapsedMs:%1").arg(elapsed->elapsed()));
+                close();
+            } else if(elapsed->elapsed()>=120000) {
+                // These tasks operate on snapshots; atomic save/recovery journals
+                // stay unclean. Do not run destructors that would join forever.
+                ei::log(eLogFatal,"Shutdown complete status:timeout exitCode:2 recovery:unclean");
+                std::_Exit(2);
+            }
+        });poll->start();return;
+    }
+    CShutdownDeadline::instance().arm(CLogger::getInstance()->logFilePath());
     // Persist ordinary dock visibility before secondary-window cleanup closes
     // docks. Landscape Tools is intentionally normalized to closed by
     // saveUiState(); editing mode never resumes implicitly next session.
@@ -9533,6 +9593,9 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // null viewport. Child destruction is synchronous from this point.
     QCoreApplication::removePostedEvents(this);
     e->accept();
+    ei::log(eLogInfo,"Shutdown complete status:clean; requesting application quit");
+    // Floating Qt windows and tool dialogs must not govern editor lifetime.
+    QTimer::singleShot(0,qApp,&QCoreApplication::quit);
 }
 
 void MainWindow::on_actionOpen_recent_triggered()

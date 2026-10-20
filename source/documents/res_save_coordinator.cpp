@@ -7,6 +7,7 @@
 #include <QTemporaryFile>
 
 #include "backup_manager.h"
+#include "file_write_activity.h"
 #include <QLockFile>
 #include "res_archive_document.h"
 
@@ -61,6 +62,8 @@ bool destinationMatches(const QFileInfo& destination, bool existed,
 SResMemberSaveResult commitStagedResMemberReplacement(
     const CResArchiveDocument& baseline, const SResMemberSaveRequest& request)
 {
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
     SResMemberSaveResult result;
     result.phase = "source-check";
     if(request.source.absoluteFilePath().isEmpty() ||
@@ -169,6 +172,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
             return result;
         }
         result.backupPath = backup.backupPath;
+        backupLeases.append(backup);
     }
 
     result.phase = "pre-commit-race-check";
@@ -209,6 +213,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
     }
     result.success = true;
     result.phase = "complete";
+    CBackupManager(request.backupRootOverride).scheduleCleanup();
     return result;
 }
 
@@ -216,6 +221,8 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     const CResArchiveDocument& baseline,
     const SResPublishedMembersSaveRequest& request)
 {
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
     SResPublishedMembersSaveResult result;
     result.phase = QStringLiteral("source-check");
     if(request.source.absoluteFilePath().isEmpty()
@@ -348,6 +355,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
             return result;
         }
         result.backupPath = backup.backupPath;
+        backupLeases.append(backup);
     }
 
     result.phase = QStringLiteral("pre-commit-race-check");
@@ -423,12 +431,15 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
 
     result.phase = QStringLiteral("complete");
     result.success = true;
+    CBackupManager(request.backupRootOverride).scheduleCleanup();
     return result;
 }
 
 SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     const SResArchiveBytesSaveRequest& request)
 {
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
     SResArchiveBytesSaveResult result;
     result.phase = QStringLiteral("validation");
     if(request.destination.absoluteFilePath().isEmpty()
@@ -483,6 +494,7 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
             return result;
         }
         result.backupPath = backup.backupPath;
+        backupLeases.append(backup);
     }
     if(!destinationMatches(destination, existed, original, &result.error))
     {
@@ -522,6 +534,7 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     }
     result.phase = QStringLiteral("complete");
     result.success = true;
+    CBackupManager(request.backupRootOverride).scheduleCleanup();
     return result;
 }
 SResPublishedMembersSaveResult commitStreamedResMembers(
@@ -529,6 +542,8 @@ SResPublishedMembersSaveResult commitStreamedResMembers(
     const QStringList& removed, const QByteArray& expectedSourceSha256,
     const std::function<bool()>& inventoryGuard)
 {
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
     SResPublishedMembersSaveResult r;r.phase="prepare";
     const QString path=request.destination.absoluteFilePath();
     QLockFile lock(path+".mapper-save.lock");
@@ -557,7 +572,7 @@ SResPublishedMembersSaveResult commitStreamedResMembers(
         r.phase="backup";
         if(request.createBackup){const auto b=CBackupManager(request.backupRootOverride).snapshotBeforeSave(QFileInfo(path));
             if(!b.success){r.error=b.error;return false;}
-            r.backupPath=b.backupPath;
+            r.backupPath=b.backupPath;backupLeases.append(b);
             if(b.sha256.toLatin1()!=before||resFileSha256(b.backupPath,&r.error)!=before){r.error="RES backup differs.";return false;}}
         r.phase="race-check";
         if(resFileSha256(path,&r.error)!=before||(inventoryGuard&&!inventoryGuard())){r.error="RES or map inventory changed.";return false;}
@@ -581,5 +596,5 @@ SResPublishedMembersSaveResult commitStreamedResMembers(
     for(const auto& m:request.published)if(reopened.readMember(m.name,&r.error)!=m.payload){r.error="Published RES payload differs.";return r;}
     for(const auto& name:removed)if(reopened.memberIndex(name)!=-1){r.error="Removed RES member remains.";return r;}
     r.candidateSha256=QString::fromLatin1(candidateHash);
-    r.success=!r.candidateSha256.isEmpty();r.phase="complete";return r;
+    r.success=!r.candidateSha256.isEmpty();r.phase="complete";if(r.success)CBackupManager(request.backupRootOverride).scheduleCleanup();return r;
 }

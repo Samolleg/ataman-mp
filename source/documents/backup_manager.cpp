@@ -15,6 +15,13 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
+#include <QLockFile>
+#include <QMutex>
+#include <QMutexLocker>
+#include <map>
+#include <QSettings>
+#include <QtConcurrent>
+#include "file_write_activity.h"
 
 #include "log.h"
 #include "res_archive_index.h"
@@ -102,6 +109,8 @@ QString activeSessionId(const QString& root)
 CBackupManager::CBackupManager(const QString& rootOverride)
     : m_rootPath(rootOverride.isEmpty() ? defaultRootPath() : QDir::cleanPath(rootOverride))
 {
+    m_maxTimestampedBackups = qMax(1, QSettings().value("backups/generations", 3).toInt());
+    m_minimumAgeDays = qMax(3, QSettings().value("backups/minimumAgeDays", 3).toInt());
 }
 
 QString CBackupManager::defaultRootPath()
@@ -492,6 +501,11 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
         return result;
     }
 
+    CFileWriteActivity writing;
+    const QString directoryPath = sourceDirectory(source);
+    if(!QDir().mkpath(directoryPath)) { result.error="Cannot create backup directory."; return result; }
+    QLockFile directoryLock(QDir(directoryPath).filePath("snapshots.lock"));
+    if(!directoryLock.tryLock(5000)) { result.error="Another backup operation owns this source."; return result; }
     QFile input(source.absoluteFilePath());
     if(!input.open(QIODevice::ReadOnly))
     {
@@ -502,13 +516,35 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
     result.sha256=QString::fromLatin1(resFileSha256(source.absoluteFilePath(),&hashError));
     if(result.sha256.isEmpty()){result.error="Cannot hash backup source: "+hashError;return result;}
     QByteArray chunk;
-    const QString directoryPath = sourceDirectory(source);
-    if(!QDir().mkpath(directoryPath))
-    {
-        result.error = QString("Cannot create backup directory: %1").arg(directoryPath);
-        return result;
-    }
 
+
+    const auto pin = [&result](const QString& path) {
+        static QMutex mutex;
+        static std::map<QString,std::weak_ptr<QLockFile>> leases;
+        QMutexLocker guard(&mutex);
+        auto lease=leases[path].lock();
+        if(!lease) {
+            lease=std::make_shared<QLockFile>(path+".in-use");
+            if(!lease->tryLock(0))return false;
+            leases[path]=lease;
+        }
+        result.lease = lease;
+        return true;
+    };
+    if(event == "pre-save" && source.suffix().compare("res",Qt::CaseInsensitive)==0
+       && source.size()>200LL*1024*1024) {
+        const auto previous=QDir(directoryPath).entryInfoList({"*.backup"},QDir::Files|QDir::NoSymLinks,QDir::Name|QDir::Reversed);
+        for(const auto& file:previous) {
+            const auto metadata=readJsonObject(file.absoluteFilePath()+".json");
+            if(metadata.value("sourceSha256").toString()!=result.sha256
+               || metadata.value("sourceSize").toDouble()!=double(source.size())) continue;
+            if(!pin(file.absoluteFilePath())) continue;
+            if(resFileSha256(file.absoluteFilePath())!=result.sha256.toLatin1()) { result.lease.reset();continue; }
+            result.success=result.skipped=true;result.backupPath=file.absoluteFilePath();
+            ei::log(eLogInfo,"Unchanged large RES backup reused: "+result.backupPath);
+            return result;
+        }
+    }
     const QString safeName = sanitizedName(source.fileName());
     QString baseName;
     if(deduplicate)
@@ -520,6 +556,7 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
     QString backupPath = QDir(directoryPath).filePath(baseName + ".backup");
     if(deduplicate && QFileInfo::exists(backupPath))
     {
+        if(!pin(backupPath)) {result.error="Another editor is using the open snapshot.";return result;}
         result.success = true;
         result.skipped = true;
         result.backupPath = backupPath;
@@ -574,6 +611,7 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
     metadata.insert("createdUtc", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     metadata.insert("sourcePath", source.absoluteFilePath());
     metadata.insert("sourceSize", double(source.size()));
+    metadata.insert("sourceMtimeMs", double(source.lastModified().toMSecsSinceEpoch()));
     metadata.insert("sourceSha256", result.sha256);
     metadata.insert("backupFile", QFileInfo(backupPath).fileName());
     const QString metadataPath = backupPath + ".json";
@@ -588,24 +626,64 @@ SBackupResult CBackupManager::createSnapshot(const QFileInfo& source, const QStr
     result.backupPath = backupPath;
     ei::log(eLogInfo, QString("Backup created event:%1 source:%2 size:%3 sha256:%4 path:%5")
         .arg(event, source.absoluteFilePath()).arg(source.size()).arg(result.sha256, backupPath));
-    if(!deduplicate)
-        enforceRetention(directoryPath);
+    if(!pin(backupPath)) { result.success=false; result.error="Cannot protect the operation backup."; }
     return result;
 }
 
-void CBackupManager::enforceRetention(const QString& directoryPath) const
+qint64 CBackupManager::enforceRetention(const QString& directoryPath, const QSet<QString>& pins, bool dryRun) const
 {
-    QDir directory(directoryPath);
-    const QFileInfoList timestamped = directory.entryInfoList(
-        QStringList() << "*-pre-save-*.backup", QDir::Files, QDir::Time);
-    for(int index = m_maxTimestampedBackups; index < timestamped.size(); ++index)
-    {
-        const QString backupPath = timestamped.at(index).absoluteFilePath();
-        if(QFile::remove(backupPath))
-            QFile::remove(backupPath + ".json");
-        else
-            ei::log(eLogWarning, QString("Cannot prune old backup:%1").arg(backupPath));
+    QLockFile lock(QDir(directoryPath).filePath("snapshots.lock"));
+    if(!lock.tryLock(0)) return 0;
+    const auto files=QDir(directoryPath).entryInfoList({"*.backup"},QDir::Files|QDir::NoSymLinks,QDir::Time);
+    const auto cutoff=QDateTime::currentDateTimeUtc().addDays(-m_minimumAgeDays);
+    qint64 freed=0;
+    // Unknown/incomplete metadata is preserved. Autosaves and terrain recovery
+    // live outside this file set and retain their existing recovery contracts.
+    for(int i=m_maxTimestampedBackups;i<files.size();++i) {
+        const auto& file=files[i];const auto path=file.absoluteFilePath();
+        if(file.lastModified().toUTC()>cutoff || pins.contains(QDir::cleanPath(path).toCaseFolded())) continue;
+        const auto metadata=readJsonObject(path+".json");
+        const QString event=metadata.value("event").toString();
+        if((event!="pre-save"&&event!="open") || metadata.value("backupFile").toString()!=file.fileName()) continue;
+        if(sourceDirectory(QFileInfo(metadata.value("sourcePath").toString()))!=directoryPath) continue;
+        QLockFile operation(path+".in-use");
+        if(!operation.tryLock(0)) continue;
+        if(dryRun || QFile::remove(path)) {
+            freed+=file.size();if(!dryRun)QFile::remove(path+".json");
+        }
     }
+    return freed;
+}
+
+qint64 CBackupManager::collectBackups(bool dryRun) const
+{
+    QSet<QString> pins;
+    QDir journals(QDir(m_rootPath).filePath("map-save-recovery"));
+    for(const auto& file:journals.entryInfoList({"*.json"},QDir::Files)) {
+        const auto journal=readJsonObject(file.absoluteFilePath());
+        if(!journal.value("files").isArray()) return 0; // fail closed on unknown recovery
+        for(const auto& value:journal.value("files").toArray()) {
+            if(!value.isObject())return 0;
+            const QString path=value.toObject().value("backup").toString();
+            if(value.toObject().value("existed").toBool() && path.isEmpty())return 0;
+            if(!path.isEmpty())pins.insert(QDir::cleanPath(path).toCaseFolded());
+        }
+    }
+    qint64 freed=0;
+    for(const auto& directory:QDir(m_rootPath).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot|QDir::NoSymLinks))
+        if(QRegExp("[0-9a-f]{64}").exactMatch(directory.fileName()))
+            freed+=enforceRetention(directory.absoluteFilePath(),pins,dryRun);
+    return freed;
+}
+
+void CBackupManager::scheduleCleanup() const
+{
+    const auto manager=*this;
+    QtConcurrent::run([manager]() {
+        const auto bytes=manager.collectBackups();
+        ei::log(eLogInfo,QString("Backup retention complete generations:%1 minimumAgeDays:%2 freedBytes:%3")
+                .arg(manager.m_maxTimestampedBackups).arg(manager.m_minimumAgeDays).arg(bytes));
+    });
 }
 
 bool CBackupManager::openBackupFolder(QString* error)

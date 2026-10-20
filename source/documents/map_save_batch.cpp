@@ -2,6 +2,7 @@
 #include "endurance_document.h"
 #include "map_save_batch.h"
 #include "backup_manager.h"
+#include "file_write_activity.h"
 #include "res_archive_index.h"
 #include <QFile>
 #include <QFileInfo>
@@ -31,6 +32,8 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
                                      const QString& backupRoot, int failCommitForTest,
                                      const std::function<void()>& onCommitted)
 {
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
     SMapSaveBatchResult result;
     QVector<SMapSaveFile> files;
     QSet<QString> paths;
@@ -80,6 +83,7 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
             if((!file.afterFile.isEmpty()?resFileSha256(backup.backupPath)!=file.beforeSha256:(!saved.open(QIODevice::ReadOnly)||saved.readAll()!=file.before))) {
                 result.error="Backup verification failed: "+file.path;return result;
             }
+            backupLeases.append(backup);
             result.backups.append(backup.backupPath);
             backupPath=backup.backupPath;
         }
@@ -111,7 +115,7 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
             result.error="Saved file verification failed: "+files[i].path;break;
         }
     }
-    if(result.error.isEmpty()) {QFile::remove(recoveryPath);result.success=true;
+    if(result.error.isEmpty()) {QFile::remove(recoveryPath);result.success=true;manager.scheduleCleanup();
         if(onCommitted)onCommitted();return result;}
     for(int i=committed-1;i>=0;--i) {
         const auto& file=files[i];
