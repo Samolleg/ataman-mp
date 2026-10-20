@@ -278,14 +278,27 @@ CObjectBase::CObjectBase(CNode* node):
 {
 }
 
+namespace { quint64 supportRevision = 1; }
+quint64 CObjectBase::supportGeometryRevision() { return supportRevision; }
+void CObjectBase::markSupportGeometryChanged()
+{
+    if(ei::contributesStaticNavigationCollision(nodeType())) ++supportRevision;
+}
+void CObjectBase::setDrawPosition(QVector3D pos)
+{
+    if(pos != m_drawPosition) markSupportGeometryChanged();
+    CNode::setDrawPosition(pos);
+}
 CObjectBase::~CObjectBase()
 {
+    ++supportRevision;
     for(auto& part: m_aPart)
         delete part;
 }
 
 void CObjectBase::updateFigure(ei::CFigure* fig)
 {
+    markSupportGeometryChanged();
     m_bboxDirty = true;
     if(!fig)
     {
@@ -816,6 +829,7 @@ CBox CObjectBase::getBBox()
 
 void CObjectBase::setRot(const QQuaternion& quat)
 {
+    if(quat != rotation()) markSupportGeometryChanged();
     CNode::setRot(quat);
     m_bboxDirty = true;
     recalcMinPos();
@@ -957,6 +971,7 @@ void CObjectBase::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
 
 void CObjectBase::recalcFigure()
 {
+    markSupportGeometryChanged();
     m_bboxDirty = true;
     for(auto& part: m_aPart)
         delete part;

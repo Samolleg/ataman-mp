@@ -47,6 +47,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "terrain_atlas_profile.h"
 #include "landscape_tools.h"
 #include "spatial_grid.h"
+#include "unit_support_surface.h"
 #include "particle_animation.h"
 #include "ai_graph_document.h"
 #include "ai_graph_preview_builder.h"
@@ -327,6 +328,13 @@ public:
     bool terrainPositionAt(const QPoint& viewportPosition, QVector3D* position,
                            bool land = true);
     bool objectPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    bool unitPlacementPositionAt(const QPoint& viewportPosition, QVector3D* position);
+    QVector3D movementPointerPosition(const QPoint& viewportPosition);
+    void moveAlongUnitSurface(QVector3D direction);
+    void ensureUnitSupportSurface();
+    CUnitSupportSurface m_unitSupportSurface;
+    quint64 m_unitSupportRevision{0};
+    QVector<CMob*> m_unitSupportMobs;
     void setLeverApproachOverlay(const QVector<QVector3D>& lines) { m_leverApproachLines=lines; update(); }
     bool leverApproachScreenPoint(const QVector3D& world, QPointF* screen) const { return connectionScreenPoint(world,screen); }
     bool projectToRegeneratedNavigation(const QPointF& requested,

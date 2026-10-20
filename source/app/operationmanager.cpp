@@ -276,7 +276,7 @@ CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
     qDebug()<< "CMoveAxis init with: " << ax;
     axis = ax;
     m_lastPos = m_pView->operationAnchor();
-    lastLandPos = m_pView->getTerrainPos(m_lastPos.x(), m_lastPos.y());
+    lastLandPos = m_pView->movementPointerPosition(m_lastPos);
     pView->operationSetBackup(EOperationAxisType::eMove);
     CStatusConnector::getInstance()->updateStatus("move.ico", "shift+Z(x,y) = exclude Z(x,y,) axis, X(y,z) - move X(y,z), Esc - Cancel, LMB - apply");
     CButtonConnector::getInstance()->pressButton(EButtonOpMove);
@@ -493,7 +493,7 @@ void CMoveAxis::mouseReleaseEvent(COperation *pOp, QMouseEvent *pEvent)
 void CMoveAxis::synchronizePointerAfterCameraNavigation(const QPoint& position)
 {
     m_lastPos = position;
-    lastLandPos = m_pView->getTerrainPos(position.x(), position.y());
+    lastLandPos = m_pView->movementPointerPosition(position);
 }
 
 void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
@@ -508,7 +508,7 @@ void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
         m_pView->updateDatabasePlacementPointer(pEvent->pos());
         return;
     }
-    QVector3D newPos = m_pView->getTerrainPos(pEvent->x(), pEvent->y());
+    QVector3D newPos = m_pView->movementPointerPosition(pEvent->pos());
     QVector3D moveDir = newPos - lastLandPos;
     switch (axis) {
     case EOperateAxisX:
@@ -540,7 +540,9 @@ void CMoveAxis::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
     case EOperateAxisYZ:
         moveDir.setX(0.0f); break;
     }
-    m_pView->moveTo(moveDir);
+    if(axis==EOperateAxisXY || axis==EOperateAxisX || axis==EOperateAxisY)
+        m_pView->moveAlongUnitSurface(moveDir);
+    else m_pView->moveTo(moveDir);
     m_pView->updateModelMagnet(pEvent->pos());
     //m_pView->viewParameters();
     lastLandPos = newPos;

@@ -1764,6 +1764,9 @@ CView::CView(QWidget *parent, const QGLWidget *pShareWidget) : QGLWidget(parent,
     QString lang = a.languageToString(a.language());
     a.setDefault(QLocale::English);
     m_pLand = CLandscape::getInstance();
+    m_pLand->unitSupportResolver=[this](QVector3D* point) {
+        ensureUnitSupportSurface(); m_unitSupportSurface.height(point);
+    };
     m_scriptWorkspaces.reset(new CExternalScriptWorkspaceManager(this, this));
     connect(m_scriptWorkspaces.get(), &CExternalScriptWorkspaceManager::scriptImportAccepted,
             this, &CView::importExternalMobScript);
@@ -2210,6 +2213,7 @@ void CView::updateReadState(EReadState state)
 
 CView::~CView()
 {
+    m_pLand->unitSupportResolver={};
     ++(*m_neighborSceneGeneration);
     // Workers may own CPU-only CPart wrappers. Join before process-exit GPU
     // cleanup changes the shared CPart destruction policy.
@@ -4644,6 +4648,13 @@ void CView::updateWindow()
 
 void CView::rebuildSpatialIndices()
 {
+    if(m_unitSupportRevision!=CObjectBase::supportGeometryRevision() || m_unitSupportMobs!=m_aMob) {
+        ensureUnitSupportSurface();
+        for(CMob* mob:m_aMob) for(CNode* node:mob->nodes())
+            if(auto* unit=dynamic_cast<CUnit*>(node)) {
+                m_pLand->projectPosition(unit);unit->refreshLogicProjection();
+            }
+    }
     m_spatialIndices.clear();
     m_spatialOverflowNodes.clear();
     for(CMob* mob : m_aMob)
@@ -16360,6 +16371,11 @@ bool CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Deferred visual resource resolution for %1 units until visible")
             .arg(unitCount));
     m_aMob.append(pMob);
+    ensureUnitSupportSurface();
+    for(CMob* loaded:m_aMob) for(CNode* node:loaded->nodes())
+        if(auto* unit=dynamic_cast<CUnit*>(node)) {
+            m_pLand->projectPosition(unit); unit->refreshLogicProjection();
+        }
     armOpenGlDiagnostics(QStringLiteral("MOB loaded: %1")
         .arg(filePath.fileName()), 6);
     if(!m_environmentMob)
@@ -23902,8 +23918,13 @@ bool CView::beginDatabasePlacement(CNode* prototype, QString* diagnostic)
     else if(prototype->nodeType() == eLever) seed.reset(new CLever(descriptor));
     else if(prototype->nodeType() == eWorldObject) seed.reset(new CWorldObj(descriptor));
     else return false;
+    if(prototype->nodeType()==eUnit) unitPlacementPositionAt(cursor,&point);
     point.setZ(0);
     seed->updatePos(point);
+    if(auto* unit=dynamic_cast<CUnit*>(seed.data())) {
+        unit->logicAt(0)->setGuardPlacement(m_pLand->unitSurfacePosition(point));
+        unit->refreshLogicProjection();
+    }
     CLandscape::getInstance()->projectPosition(seed.data());
     QJsonObject data;
     CValidationReport report;
@@ -23939,7 +23960,9 @@ bool CView::beginPreparedObjectPlacement(const QJsonObject& data,const QPoint& c
     CNode* node = m_activeMob->createNode(data);
     if(node) {
         QVector3D initial;
-        if(objectPlacementPositionAt(cursor,&initial)) {initial.setZ(node->position().z());node->updatePos(initial);}
+        const bool picked=node->nodeType()==eUnit ? unitPlacementPositionAt(cursor,&initial)
+            : objectPlacementPositionAt(cursor,&initial);
+        if(picked) {initial.setZ(node->position().z());node->updatePos(initial);}
     }
     QByteArray candidate; CValidationReport report;
     if(!node || !m_activeMob->buildValidatedCandidate(&candidate, &report))
@@ -23977,7 +24000,8 @@ bool CView::updateDatabasePlacementPointer(const QPoint& position)
     if(!m_pendingDatabasePlacement || m_pendingPasteMob != m_activeMob
        || m_pendingPasteNodes.size() != 1) return false;
     QVector3D point;
-    if(!objectPlacementPositionAt(position, &point)) return false;
+    if(!(m_pendingPasteNodes.first()->nodeType()==eUnit
+        ? unitPlacementPositionAt(position,&point) : objectPlacementPositionAt(position,&point))) return false;
     restoreFreeModelMove();
     point.setZ(m_pendingPasteNodes.first()->position().z());
     m_pendingPasteNodes.first()->updatePos(point);
@@ -23990,7 +24014,7 @@ bool CView::updateLogicPlacementPointer(const QPoint& position)
 {
     if(!m_pendingLogicPlacementMacro || m_operationBackup.isEmpty()) return false;
     QVector3D point;
-    if(!objectPlacementPositionAt(position, &point)) return false;
+    if(!unitPlacementPositionAt(position, &point)) return false;
     // New points belong under the pointer, not at an offset from their owner.
     // Each selected creature receives its own point at the clicked location.
     for(CNode* node : m_operationBackup.keys())

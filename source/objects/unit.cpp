@@ -1158,6 +1158,7 @@ void CUnit::applyLogicParam(const QSharedPointer<IPropertyBase>& prop)
 
 bool CUnit::updatePos(QVector3D &pos)
 {
+    const QVector3D previousPosition=m_position;
     QVector3D offset = pos - m_position;
     CObjectBase::updatePos(pos);
     Q_ASSERT(!m_aLogic.isEmpty());
@@ -1166,14 +1167,19 @@ bool CUnit::updatePos(QVector3D &pos)
     if(CScene::getInstance()->getMode() == eEditModeLogic)
     {
         // logic placement can be change separately from unit position, but by default it changes sinchroniously
-        QVector3D pos = m_position;
-        pos.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(pos);
+        QVector3D pos = CLandscape::getInstance()->unitSurfacePosition(m_position);
         pLogic->setGuardPlacement(pos);
         pLogic->updateLogicLines();
     }
-    else
+    else {
+        // NPC Z is a support-relative offset; logic coordinates are world-space.
+        // Carry the change of supporting level as well as the serialized delta.
+        auto* landscape=CLandscape::getInstance();
+        if(landscape->isMprLoad())
+            offset.setZ(offset.z()+landscape->unitSurfacePosition(m_position).z()
+                        -landscape->unitSurfacePosition(previousPosition).z());
         m_aLogic.front()->updatePos(offset);
+    }
 
     return true;
 }
@@ -1235,8 +1241,7 @@ bool CUnit::isChild(CPatrolPoint *pPointIn)
 
 void CUnit::addFirstPatrolPoint()
 {
-    QVector3D pos(m_position);
-    CLandscape::getInstance()->projectPt(pos);
+    QVector3D pos=CLandscape::getInstance()->unitSurfacePosition(m_position);
     editorLogic()->addFirstPoint(pos);
 }
 
@@ -1598,38 +1603,46 @@ void CLogic::createLogicLines()
 {
     m_aDrawPoint.clear();
     m_aHelpPoint.clear();
+    const auto projectCircle=[this](QVector<QVector3D>& points) {
+        auto* landscape=CLandscape::getInstance();
+        const auto surface=landscape->unitSurfacePosition(m_guardPlacement);
+        QVector3D ground(m_guardPlacement.x(),m_guardPlacement.y(),0);
+        landscape->projectPt(ground);
+        const bool onObject=surface.z()>ground.z()+0.001f;
+        for(auto& point:points) {
+            if(onObject) point.setZ(qMax(surface.z(),m_guardPlacement.z()));
+            else {
+                // Preserve the original terrain-following circle on the ground.
+                point.setZ(0);landscape->projectPt(point);
+            }
+        }
+    };
     switch (m_behaviour) {
     case EBehaviourType::eRadius:
     {
         QVector3D centr(m_guardPlacement);
-        centr.setZ(.0f);
+        centr=CLandscape::getInstance()->logicDisplayPosition(centr);
         util::getCirclePoint(m_aDrawPoint, centr, double(m_guardRadius), 40);
-        CLandscape::getInstance()->projectPt(m_aDrawPoint);
+        projectCircle(m_aDrawPoint);
         generateVisibleLogicVBO();
         break;
     }
     case EBehaviourType::ePath:
     {
         Q_ASSERT(m_parent);
-        QVector3D pos(m_parent->position());
-        pos.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(pos);
+        QVector3D pos=CLandscape::getInstance()->unitSurfacePosition(m_parent->position());
         m_aDrawPoint.append(pos);
         for (auto& pt: m_aPatrolPt)
         {
             if(pt->isMarkDeleted())
                 continue;
 
-            pos = pt->position();
-            pos.setZ(0.0f);
-            CLandscape::getInstance()->projectPt(pos);
+            pos=CLandscape::getInstance()->logicDisplayPosition(pt->position());
             pt->setDrawPosition(pos);
             m_aDrawPoint.append(pos);
             for (auto& look : pt->lookPoint())
             {
-                pos = look->position();
-                pos.setZ(0.0f);
-                CLandscape::getInstance()->projectPt(pos);
+                pos=CLandscape::getInstance()->logicDisplayPosition(look->position());
                 look->setDrawPosition(pos);
             }
             pt->update();
@@ -1659,9 +1672,9 @@ void CLogic::createLogicLines()
 
     //get circle for help radius
     QVector3D centr(m_guardPlacement);
-    centr.setZ(.0f);
+    centr=CLandscape::getInstance()->logicDisplayPosition(centr);
     util::getCirclePoint(m_aHelpPoint, centr, double(m_help), 40);
-    CLandscape::getInstance()->projectPt(m_aHelpPoint);
+    projectCircle(m_aHelpPoint);
     // Generate VBOs for help radius
     m_helpVertexBuf.create();
     m_helpVertexBuf.bind();
@@ -1680,118 +1693,13 @@ void CLogic::createLogicLines()
 
 void CLogic::updateLogicLines()
 {
-    m_aDrawPoint.clear();
-    m_aHelpPoint.clear();
-    switch (m_behaviour) {
-    case EBehaviourType::eRadius:
-    {
-        QVector3D centr(m_guardPlacement);
-        centr.setZ(.0f);
-        util::getCirclePoint(m_aDrawPoint, centr, double(m_guardRadius), 40);
-        CLandscape::getInstance()->projectPt(m_aDrawPoint);
-        generateVisibleLogicVBO();
-        break;
-    }
-    case EBehaviourType::ePath:
-    {
-        Q_ASSERT(m_parent);
-        QVector3D pos(m_parent->position());
-        pos.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(pos);
-        m_aDrawPoint.append(pos);
-        for (auto& pt: m_aPatrolPt)
-        {
-            if(pt->isMarkDeleted())
-                continue;
-
-            pos = pt->position();
-            m_aDrawPoint.append(pos);
-        }
-        util::splitByLen(m_aDrawPoint, 2.0f);
-        generateVisibleLogicVBO();
-        break;
-    }
-    case EBehaviourType::ePlace:
-    {
-        //todo: draw custom symbol? star may be
-        break; // no need to update draw elements. just exit func
-    }
-    case EBehaviourType::eBriffing:
-    {
-        //todo: draw custom symbol for briffing? face may be
-        break;
-    }
-    case EBehaviourType::eIdle:
-    case EBehaviourType::eGuardAlaram:
-    {
-        //idk what does is mean
-        //Q_ASSERT("We found it, master" && false);
-        ei::log(eLogDebug, "We found it, master");
-        break;
-    }
-    default:
-        Q_ASSERT("unknown behaviour type" && false);
-        break;
-    }
-
-    //get circle for help radius
-    QVector3D centr(m_guardPlacement);
-    centr.setZ(.0f);
-    util::getCirclePoint(m_aHelpPoint, centr, double(m_help), 40);
-    CLandscape::getInstance()->projectPt(m_aHelpPoint);
-    // Generate VBOs for help radius
-    m_helpVertexBuf.create();
-    m_helpVertexBuf.bind();
-    m_helpVertexBuf.allocate(m_aHelpPoint.data(), m_aHelpPoint.count() * int(sizeof(QVector3D)));
-    m_helpVertexBuf.release();
-
-    QVector<ushort> aInd;
-    for (ushort i(0); i<m_aHelpPoint.size(); ++i)
-        aInd.append(i);
-
-    m_helpIndexBuf.create();
-    m_helpIndexBuf.bind();
-    m_helpIndexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
-    m_helpIndexBuf.release();
+    createLogicLines();
 }
 
 void CLogic::recalcPatrolPath()
 {
-    Q_ASSERT(m_behaviour == EBehaviourType::ePath);
-    Q_ASSERT(m_parent);
-    m_aDrawPoint.clear();
-
-    QVector3D pos(m_parent->position());
-    pos.setZ(0.0f);
-    CLandscape::getInstance()->projectPt(pos);
-    m_aDrawPoint.append(pos);
-    for (auto& pt: m_aPatrolPt)
-    {
-        if(pt->isMarkDeleted()) continue;
-        pos = pt->position();
-        pos.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(pos);
-        pt->setPos(pos);
-        pt->setDrawPosition(pos);
-        m_aDrawPoint.append(pos);
-        pt->update();
-    }
-    util::splitByLen(m_aDrawPoint, 2.0f);
-
-    // Generate VBOs and transfer data
-    m_vertexBuf.create();
-    m_vertexBuf.bind();
-    m_vertexBuf.allocate(m_aDrawPoint.data(), m_aDrawPoint.count() * int(sizeof(QVector3D)));
-    m_vertexBuf.release();
-
-    QVector<ushort> aInd;
-    for (ushort i(0); i<m_aDrawPoint.size(); ++i)
-        aInd.append(i);
-
-    m_indexBuf.create();
-    m_indexBuf.bind();
-    m_indexBuf.allocate(aInd.data(), aInd.count() * int(sizeof(ushort)));
-    m_indexBuf.release();
+    // A visual refresh must never reproject serialized positions.
+    createLogicLines();
 }
 
 void CLogic::addNewPatrolPoint(CPatrolPoint *base, CPatrolPoint *created)
@@ -2206,7 +2114,8 @@ void CLogic::createPatrolByIndex(int index)
     }
     else
     {
-        pPoint->updatePos(m_guardPlacement);
+        QVector3D first=CLandscape::getInstance()->unitSurfacePosition(m_parent->position());
+        pPoint->updatePos(first);
     }
     m_aPatrolPt.insert(index+1, pPoint); //check first and final points
     pPoint->setState(ENodeState::eSelect);
@@ -2863,11 +2772,7 @@ bool CPatrolPoint::updatePos(QVector3D &pos)
     }
     m_position = pos;
     QVector3D displayPosition = pos;
-    if(CLandscape::getInstance()->isMprLoad())
-    {
-        displayPosition.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(displayPosition);
-    }
+    displayPosition=CLandscape::getInstance()->logicDisplayPosition(pos);
     setDrawPosition(displayPosition);
     emit patrolChanges();
     return true;
@@ -3187,11 +3092,7 @@ bool CLookPoint::updatePos(QVector3D &pos)
 {
     m_position = pos;
     QVector3D displayPosition = pos;
-    if(CLandscape::getInstance()->isMprLoad())
-    {
-        displayPosition.setZ(0.0f);
-        CLandscape::getInstance()->projectPt(displayPosition);
-    }
+    displayPosition=CLandscape::getInstance()->logicDisplayPosition(pos);
     setDrawPosition(displayPosition);
     emit lookPointChanges();
     return true;

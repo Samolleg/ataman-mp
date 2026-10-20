@@ -93,6 +93,10 @@ public:
     void drawWater(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
     void drawTilePreview(QOpenGLShaderProgram* program);
     bool projectPt(QVector3D& point, bool land = true);
+    // Support queries are display/explicit-placement only; never rewrite MOB.
+    std::function<void(QVector3D*)> unitSupportResolver;
+    QVector3D unitSurfacePosition(const QVector3D& position);
+    QVector3D logicDisplayPosition(const QVector3D& position);
     bool projectPt(QVector<QVector3D>& aPoint);
     void projectPositions(QList<CNode*>& aNode);
     void projectPosition(CNode* pNode);

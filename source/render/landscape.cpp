@@ -1319,6 +1319,25 @@ bool CLandscape::projectPt(QVector<QVector3D>& aPoint)
     return projectedPt == aPoint.size();
 }
 
+QVector3D CLandscape::unitSurfacePosition(const QVector3D& position)
+{
+    if(!isMprLoad()) return position;
+    QVector3D surface(position.x(),position.y(),0);
+    if(isMprLoad()) {
+        projectPt(surface);
+        if(unitSupportResolver) unitSupportResolver(&surface);
+    }
+    return surface;
+}
+QVector3D CLandscape::logicDisplayPosition(const QVector3D& position)
+{
+    if(!isMprLoad()) return position;
+    // Legacy maps contain both zero placeholders and absolute world-space
+    // logic heights. Resolve placeholders without mutating the stored triple.
+    auto surface=unitSurfacePosition(position);
+    surface.setZ(qMax(surface.z(),position.z()));
+    return surface;
+}
 void CLandscape::projectPosition(CNode* pNode)
 {
     if(!isMprLoad())
@@ -1330,7 +1349,8 @@ void CLandscape::projectPosition(CNode* pNode)
 
     if(pNode->nodeType() == eParticle || pNode->nodeType() == eLight || pNode->nodeType() == eSound || pNode->nodeType() == ePatrolPoint || pNode->nodeType() == eLookPoint)
     {
-        pNode->setDrawPosition(pNode->position());
+        pNode->setDrawPosition(pNode->nodeType()==ePatrolPoint || pNode->nodeType()==eLookPoint
+            ? logicDisplayPosition(pNode->position()) : pNode->position());
         return;
     }
     QVector3D landPos(pNode->position());
@@ -1353,9 +1373,11 @@ void CLandscape::projectPosition(CNode* pNode)
     }
     else
     {
-        if(pNode->nodeType() == eUnit)
+        if(pNode->nodeType() == eUnit) {
             landPos -= pNode->minPosition();
-        projectPt(landPos);
+            const auto surface=unitSurfacePosition(landPos);
+            landPos.setZ(landPos.z()+surface.z());
+        } else projectPt(landPos);
     }
     pNode->setDrawPosition(landPos);
 }

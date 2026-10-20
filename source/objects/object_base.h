@@ -90,11 +90,14 @@ public:
     void setConstitution(QVector3D& vec) override;
     QJsonObject toJson() override;
     CBox getBBox() override final;
-    void markAsDeleted(bool bDeleted = true) override {m_bDeleted = bDeleted;}
+    void markAsDeleted(bool bDeleted = true) override {if(m_bDeleted!=bDeleted)markSupportGeometryChanged();m_bDeleted = bDeleted;}
     bool isMarkDeleted() override {return m_bDeleted;}
     bool isOperationAxisAllow(EOperationAxisType type) override {Q_UNUSED(type); return true;};
     QMap<QString, QVector<QVector2D>> renderedBodyPartUvTriangles() const;
     QVector<SNavigationCollisionProxy> navigationCollisionProxies() const;
+    static quint64 supportGeometryRevision();
+    void setDrawPosition(QVector3D pos) override;
+    void markSupportGeometryChanged();
     void installPreparedStaticParts(const QVector<SPreparedStaticPart>& parts);
     QVector<SRenderItem> staticRenderItems(const QVector<QSharedPointer<CPart>>& alternate = {}) const;
     QVector<QVector3D> connectionPreviewVertices() const;
