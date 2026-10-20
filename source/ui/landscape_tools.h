@@ -174,6 +174,7 @@ public:
 signals:
     void convertBaseTerrainToHdRequested();
     void compactTerrainAtlasRequested();
+    void cleanTerrainPackRequested();
     void worldSculptSelectionRequested();
     void worldSculptUndoRequested();
     void worldSculptRedoRequested();

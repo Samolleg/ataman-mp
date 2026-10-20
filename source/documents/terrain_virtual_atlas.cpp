@@ -5668,8 +5668,13 @@ int CTerrainWorkingAtlas::importPhysicalTile(const QImage& pixels,qint32 runtime
         if(report)report->add("terrain.world.physical",EValidationSeverity::Error,
             "The selected physical tile has incompatible pixels or runtime type.");return -1;
     }
+    if(sourceNamespace.startsWith("base-hd")) {
+        for(auto it=m_foreignPhysicalTiles.cbegin();it!=m_foreignPhysicalTiles.cend();++it)
+            if(it->sourceNamespace==sourceNamespace&&it->sourceSlot==sourceSlot
+               &&it->runtimeTerrainType==runtimeType)return it.key();
+    }
     for(int slot=0;slot<activeTileCount();++slot)
-        if(m_workingToVirtual.contains(slot) && m_workingTileTypes.value(slot)==runtimeType
+        if(!sourceNamespace.startsWith("base-hd") && m_workingToVirtual.contains(slot) && m_workingTileTypes.value(slot)==runtimeType
            && m_workingImages.at(slot)==pixels) {
             SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
             bool known=false;const auto existing=m_workingCatalog.gridSignatureForPacked(packed.encode(),&known);

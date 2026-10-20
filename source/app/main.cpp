@@ -804,10 +804,14 @@ int runHeadlessCommand(QApplication& app)
             CLandscapeTools tools;
             auto* compact=tools.findChild<QPushButton*>(QStringLiteral("compactTerrainAtlas"));
             auto* hd=tools.findChild<QPushButton*>(QStringLiteral("convertBaseTerrainToHd"));
+            auto* clean=tools.findChild<QPushButton*>(QStringLiteral("cleanTerrainPack"));
+            int cleanRequests=0;
+            QObject::connect(&tools,&CLandscapeTools::cleanTerrainPackRequested,[&](){++cleanRequests;});
+            if(clean){for(QWidget* w=clean;w;w=w->parentWidget())w->setEnabled(true);clean->click();}
             int requests=0;
             QObject::connect(&tools,&CLandscapeTools::compactTerrainAtlasRequested,[&](){++requests;});
             if(compact){for(QWidget* w=compact;w;w=w->parentWidget())w->setEnabled(true);compact->click();}
-            const bool ok=compact&&hd&&compact->parentWidget()==hd->parentWidget()
+            const bool ok=clean&&cleanRequests==1&&compact&&hd&&compact->parentWidget()==hd->parentWidget()
                 &&compact->text()==QString::fromUtf8("Сжать атлас карты")&&requests==1;
             QTextStream(ok?stdout:stderr)<<(ok?"PASS":"FAIL")
                 <<": atlas compact action beside HD; request count="<<requests<<" nativeAttempts=0\n";

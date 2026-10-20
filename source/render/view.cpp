@@ -1,3 +1,4 @@
+#include "terrain_atlas_compact.h"
 #include "helper_visibility.h"
 #include "shader_locations.h"
 #include "canvas_navigation_state.h"
@@ -1843,6 +1844,8 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
                 this, &CView::convertBaseTerrainToHdRequested);
         connect(m_landscapeTools, &CLandscapeTools::compactTerrainAtlasRequested,
                 this, &CView::compactTerrainAtlasRequested);
+        connect(m_landscapeTools, &CLandscapeTools::cleanTerrainPackRequested,
+                this, &CView::cleanTerrainPackRequested);
         connect(m_landscapeTools, &CLandscapeTools::resolveMissingBlendsRequested,
                 this, [this]()
         {
@@ -9960,7 +9963,7 @@ void CView::saveLand()
                      : (route == ETerrainMprSaveRoute::PublishModernAtlas
                             ? QStringLiteral("publish-current-target")
                             : QStringLiteral("plain-mpr"))));
-        if(route == ETerrainMprSaveRoute::PublishModernAtlas)
+        if(route == ETerrainMprSaveRoute::PublishModernAtlas && !m_workingTerrainAtlas)
         {
             m_requestedTerrainMprDestination = m_pLand->filePath();
             finalizeVirtualTerrainAtlas();
@@ -9995,14 +9998,14 @@ void CView::saveLandAs()
              QDir::toNativeSeparators(fileName.absoluteFilePath()),
              publishModern ? QStringLiteral("publish-selected-target")
                            : QStringLiteral("plain-mpr-copy")));
-    if(publishModern)
+    if(publishModern && !m_workingTerrainAtlas)
     {
         m_requestedTerrainMprDestination = fileName;
         finalizeVirtualTerrainAtlas();
         return;
     }
 
-    if(m_pLand->isDirty())
+    if(m_pLand->isDirty() || m_workingTerrainAtlas)
     {
         // Save As follows normal document semantics: after the candidate is
         // staged, committed, freshly reopened, and verified, the destination
@@ -10085,34 +10088,9 @@ bool CView::persistedModernDraftRequiresPublication() const
 
 bool CView::saveLandscapeDocument(const QFileInfo& destination)
 {
-    if(!ensureTerrainAutoCatalogReady())
-        return false;
-    if(m_pLand->isDirty())
-    {
-        const QString sourcePath = QDir::cleanPath(m_pLand->filePath().absoluteFilePath());
-        const QString destinationPath = QDir::cleanPath(destination.absoluteFilePath());
-        const bool samePath = QString::compare(sourcePath, destinationPath,
-                                               Qt::CaseInsensitive) == 0;
-        return saveChangedLandscapeDocument(destination, samePath);
-    }
-
-    QProgressDialog progress(tr("Preparing safe MPR save..."), QString(), 0, 4, this);
-    progress.setWindowTitle(tr("Saving MPR"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(250);
-    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
-                             & ~Qt::WindowCloseButtonHint);
-    const auto updateProgress = [&progress](const QString& label, int value, int maximum)
-    {
-        progress.setMaximum(maximum);
-        progress.setLabelText(label);
-        progress.setValue(value);
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    };
-    const bool saved = m_pLand->saveMapAs(destination, updateProgress);
-    progress.setValue(progress.maximum());
-    return saved;
+    if(!ensureTerrainAutoCatalogReady())return false;
+    const auto samePath=m_pLand->filePath().absoluteFilePath().compare(destination.absoluteFilePath(),Qt::CaseInsensitive)==0;
+    return saveChangedLandscapeDocument(destination,samePath);
 }
 
 bool CView::buildValidatedLandscapeCandidate(QByteArray* data,
@@ -10372,9 +10350,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
-    const bool preserveNativeHistory = m_workingTerrainAtlas
-        && m_workingTerrainAtlas->preserveNativePages();
-    allowModernDraft = allowModernDraft || preserveNativeHistory;
+    allowModernDraft = allowModernDraft || bool(m_workingTerrainAtlas);
     syncWorldTerrainActive();
     if(!m_worldTerrainSession.dirtyPaths().isEmpty())
     {
@@ -10391,16 +10367,17 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         return false;
     }
 
-    const bool landWorkingExtension =
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Land);
-    const bool overlayWorkingExtension =
-        terrainLayerUsesWorkingExtension(ETerrainTileLayer::Overlay);
     const bool workingAtlasAvailable =
         m_workingTerrainAtlas && m_workingTerrainAtlas->isValid();
-    const bool workingExtension =
-        terrainChangedSaveNeedsWorkingAtlasPackage(
-            allowModernDraft, workingAtlasAvailable,
-            landWorkingExtension, overlayWorkingExtension);
+    if(!workingAtlasAvailable){
+        QMessageBox::critical(this,tr("Сохранение карты отменено"),
+            tr("Нет доступного рабочего атласа и подтверждённого каталога. Нельзя безопасно сжать атлас с сохранением палитры. Откройте карту заново или восстановите привязку атласа. Файлы не изменены."));
+        return false;
+    }
+    const bool workingExtension = workingAtlasAvailable;
+    const STerrainAtlasProfile previousProfile=m_terrainAtlasProfile;
+    const auto inventoryDirs=terrainAtlasMapDirectories(destination.absoluteFilePath(),
+        CTextureList::getInstance()->configuredResourceArchivePaths());
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
                              0, workingExtension ? 8 : 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
@@ -10596,6 +10573,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                     .arg(draftReport.toText().trimmed()));
             return false;
         }
+        terrainAtlasCopySourceIdentities(&draftProfile,*m_workingTerrainAtlas);
         SResArchiveNewMember embeddedProfileMember;
         embeddedProfileMember.name =
             CTerrainAtlasProfileStore::embeddedMemberName(
@@ -10627,6 +10605,16 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
             hdPackDraftMembers.append(pageMember);
         }
         hdPackDraftMembers += embeddedDraftMembers;
+        QString hygieneError;
+        if(!compactTerrainPublication(&draft.mprBytes,&draftProfile,&hdPackDraftMembers,
+                &physicalDraftTiles,destination,&hygieneError)){
+            QMessageBox::critical(this,tr("Сохранение карты отменено"),hygieneError);return false;}
+        if(draftProfile.textureCount>=100 && QMessageBox::warning(this,tr("Большой атлас"),
+            tr("Атлас содержит %1 страниц. Предел игры —126. Сократите число используемых вариантов, если карта продолжит расти. Сохранить?").arg(draftProfile.textureCount),
+            QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return false;
+        embeddedProfileMember.name=CTerrainAtlasProfileStore::embeddedMemberName(draftProfile.mprNamespace);
+        embeddedProfileMember.payload=draftProfile.toBytes();semanticFieldMember=SResArchiveNewMember();
+        for(const auto& member:hdPackDraftMembers)if(member.name.endsWith(".json")&&member.name!=embeddedProfileMember.name)semanticFieldMember=member;
         QFile hdPackFile(atlasPath);
         CResArchiveDocument hdPackArchive;
         QByteArray previousHdPackBytes;
@@ -10668,17 +10656,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                     .arg(draftArchiveErrors.join(QStringLiteral("\n"))));
             return false;
         }
-        QVector<SResArchiveNewMember> recoveryMembers;
-        for(const QString& memberName : draft.resourceMembers)
-        {
-            SResArchiveNewMember pageMember;
-            pageMember.name = memberName;
-            pageMember.payload = draftArchive.memberPayload(memberName);
-            recoveryMembers.append(pageMember);
-        }
-        recoveryMembers.append(embeddedProfileMember);
-        if(!semanticFieldMember.name.isEmpty())
-            recoveryMembers.append(semanticFieldMember);
+        const QVector<SResArchiveNewMember> recoveryMembers=hdPackDraftMembers;
         CMprDocument recoveryDocument;
         CValidationReport recoveryDocumentReport;
         if(!recoveryDocument.loadBytes(
@@ -10710,6 +10688,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
         atlasRequest.destination = QFileInfo(atlasPath);
         atlasRequest.candidateBytes = hdPackDraftBytes;
         atlasRequest.createBackup = true;
+        atlasRequest.expectedSourceBytes = previousHdPackBytes;
         SResArchiveBytesSaveResult atlasResult;
         if(m_mapCohortActive) {
             atlasResult.success=stageMapCompanion(atlasPath,hdPackDraftBytes,&atlasResult.error);
@@ -10760,11 +10739,12 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                          mprResult.phase, mprResult.error));
             return false;
         }
+        if(sourcePath.compare(destinationPath,Qt::CaseInsensitive)==0)ei::log(eLogInfo,retireTerrainAtlasAfterSave(atlasPath,previousProfile,destination.absoluteFilePath(),inventoryDirs));
         if(adoptAsOpenBaseline
            && !adoptCompleteTerrainBaseline(
                destination, mprResult.candidateSha256,
                physicalDraftTiles, atlasPath, draftProfile,
-               !semanticFieldMember.name.isEmpty(), preserveNativeHistory))
+               !semanticFieldMember.name.isEmpty(), false))
         {
             QMessageBox::critical(this, tr("Modern draft saved; reopen required"),
                 tr("The paired MPR and HDPack_Terrain.res were saved, but the "
@@ -15428,7 +15408,7 @@ void CView::finalizeVirtualTerrainAtlas()
                               identityErrorText);
         return;
     }
-    finalized.isolatedNamespace = selectedIdentity;
+    finalized.isolatedNamespace = CTerrainVirtualAtlas::contentResourceIdentity(selectedIdentity,finalized.stableSha256);
 
     STerrainPortableAtlasPackage package=CTerrainVirtualAtlas::buildPortablePackage(
         m_mprDocument,publicationTerrain,m_mprMaterials,finalized,layer,&report);
@@ -15629,6 +15609,16 @@ void CView::finalizeVirtualTerrainAtlas()
     }
     if(!semanticFieldMember.name.isEmpty())
         pages.append(semanticFieldMember);
+    const auto previousPublishedProfile=m_terrainAtlasProfile;
+    QString hygieneError;
+    if(!compactTerrainPublication(&package.mprBytes,&portableProfile,&pages,&physicalTiles,mprDestination,&hygieneError)){
+        QMessageBox::critical(this,tr("Сохранение карты отменено"),hygieneError);return;}
+    embeddedProfileMember.name=CTerrainAtlasProfileStore::embeddedMemberName(portableProfile.mprNamespace);
+    embeddedProfileMember.payload=portableProfile.toBytes();semanticFieldMember=SResArchiveNewMember();
+    for(const auto& member:pages)if(member.name.endsWith(".json")&&member.name!=embeddedProfileMember.name)semanticFieldMember=member;
+    if(portableProfile.textureCount>=100 && QMessageBox::warning(this,tr("Большой атлас"),
+        tr("Атлас содержит %1 страниц; предел игры126. Сохранить?").arg(portableProfile.textureCount),
+        QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return;
     const bool mprDestinationExisted = mprDestination.exists();
     QByteArray previousMprBytes;
     if(mprDestinationExisted)
@@ -15864,6 +15854,8 @@ void CView::finalizeVirtualTerrainAtlas()
                      mprResult.phase, mprResult.error));
         return;
     }
+    if(mprDestination.absoluteFilePath().compare(m_pLand->filePath().absoluteFilePath(),Qt::CaseInsensitive)==0)ei::log(eLogInfo,retireTerrainAtlasAfterSave(texturesPath,previousPublishedProfile,mprDestination.absoluteFilePath(),
+        terrainAtlasMapDirectories(mprDestination.absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths())));
     publishProgress.setLabelText(tr("Adopting the saved map in this session..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!adoptCompleteTerrainBaseline(

@@ -14,6 +14,7 @@ struct SBaseHdPlan {
     int importedVariants{0};
     int changedSources{0};
     QStringList unmatchedSources;
+    int forecastPages{0}; qint64 forecastDxt{0},forecastRgba{0};
 };
 SBaseHdPlan prepareBaseTerrainHd(const QString& library,
     const CTerrainWorkingAtlas& atlas, const CTerrainEditModel& terrain,

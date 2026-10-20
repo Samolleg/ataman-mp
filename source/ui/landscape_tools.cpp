@@ -770,6 +770,11 @@ CLandscapeTools::CLandscapeTools(QWidget* parent)
     advanced->addWidget(compactAtlas);
     connect(compactAtlas, &QPushButton::clicked, this, &CLandscapeTools::compactTerrainAtlasRequested);
     auto diagnostics = landscapeFold(paintLayout,tr("Диагностика и атлас"),QStringLiteral("landscapeDiagnostics"),8);
+    auto cleanPack=new QPushButton(tr("Очистить пак"),this);
+    cleanPack->setObjectName(QStringLiteral("cleanTerrainPack"));
+    cleanPack->setToolTip(tr("Показать неиспользуемые публикации HDPack по всем картам Dejavu и Base. Удаление — после подтверждения, с резервной копией. Исходные namespace сохраняются."));
+    diagnostics->addWidget(cleanPack);
+    connect(cleanPack,&QPushButton::clicked,this,&CLandscapeTools::cleanTerrainPackRequested);
     diagnostics->addWidget(m_tilesetStatus);diagnostics->addLayout(atlasRow);
     diagnostics->addWidget(m_showOverlayMaterialSlots);diagnostics->addWidget(exportDiagnostic);diagnostics->addLayout(issueRow);
     QWidget* sculptExtra = new QWidget(m_sculptControls);

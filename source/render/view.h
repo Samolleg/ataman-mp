@@ -537,6 +537,7 @@ public:
                                QString* summary = nullptr, bool interactive = false);
     void convertBaseTerrainToHdRequested();
     void compactTerrainAtlasRequested();
+    void cleanTerrainPackRequested();
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);

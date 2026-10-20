@@ -107,7 +107,8 @@ SExistingFileComparison compareExistingFile(const QFileInfo& file,
                                              const QByteArray& expectedBytes);
 
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
-                                         const QFileInfo& destination);
+                                         const QFileInfo& destination,
+                                         bool enforceMprPageLimit = true);
 
 // Replaces an existing file only when its bytes still match the caller's
 // baseline. The race-check handle is closed before QSaveFile commits so the

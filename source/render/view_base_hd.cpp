@@ -1,3 +1,5 @@
+#include "terrain_atlas_compact.h"
+#include "mmp_codec.h"
 #include "view.h"
 #include "terrain_base_hd.h"
 #include "landscape.h"
@@ -57,6 +59,28 @@ bool CView::convertBaseTerrainToHd(const QString& library,quint32 seed,QString* 
         sourcePages.append(bytes);
     }
     std::atomic_bool cancelled(false);
+    const auto sourceDocument=m_mprDocument;const auto materials=m_mprMaterials;const auto globals=m_terrainGlobalFamilies;
+    const auto prepare=[&](){
+        auto p=prepareBaseTerrainHd(library,*before,terrain,profile,animations,seed,&cancelled,sourcePages);
+        if(!p.error.isEmpty()||p.command.isEmpty()||cancelled.load())return p;
+        CValidationReport report;auto edited=terrain;
+        CMprEditTransaction tx("HD atlas forecast");QByteArray bytes;CMprDocument doc;
+        if(!edited.apply(p.command,true,&report)||!edited.appendSectorEdits(&tx,&report)
+           ||!sourceDocument.appendMaxZEdit(edited.maxZ(),&tx,&report)||!sourceDocument.applyTransaction(tx,&bytes,&report)
+           ||!doc.loadBytes(bytes,"hd-forecast.mpr",&report)){p.error=report.toText();return p;}
+        auto package=CTerrainVirtualAtlas::buildWorkingPreviewPackage(doc,p.atlas->activeTileImages(),p.atlas->activeTileTypes(),
+            sourcePages,materials,animations,&report,p.atlas->preservedDxtTiles());
+        CResArchiveDocument archive;QStringList errors;
+        if(!package.success||!doc.loadBytes(package.mprBytes,"hd-forecast.mpr",&report)
+           ||!archive.loadBytes(package.resourceArchiveBytes,"hd-forecast.res",&errors)){p.error=package.error+report.toText()+errors.join('\n');return p;}
+        QVector<QByteArray> pages;QVector<QImage> images;QString error;
+        for(const auto& name:package.resourceMembers){auto page=archive.memberPayload(name);pages<<page;
+            for(int i=0;i<64;++i){QImage image;if(!ei::decodeMmpDxt1AtlasTile(page,i,&image,&error)){p.error=error;return p;}images<<image;}}
+        auto binding=CTerrainAtlasProfileStore::workingAtlasProfile(doc.mapInfo().innerNamespace,images,p.atlas->catalog(),profile,globals,&report);
+        const auto compact=prepareTerrainAtlasCompact(doc,binding,pages,QByteArray(),QFileInfo("hd-forecast.mpr"),&cancelled);
+        if(!compact.error.isEmpty()){p.error=compact.error;return p;}
+        p.forecastPages=compact.pages.size();p.forecastDxt=compact.newDxt;p.forecastRgba=compact.newRgba;return p;
+    };
     SBaseHdPlan plan;
     if(interactive){
         QProgressDialog progress(tr("Подбор базовых HD-текстур и вариантов…"),tr("Отмена"),0,0,this);
@@ -64,17 +88,22 @@ bool CView::convertBaseTerrainToHd(const QString& library,quint32 seed,QString* 
         QFutureWatcher<SBaseHdPlan> watcher;QEventLoop loop;
         const auto cancelConnection=connect(&progress,&QProgressDialog::canceled,[&](){cancelled.store(true);});
         connect(&watcher,&QFutureWatcher<SBaseHdPlan>::finished,&loop,&QEventLoop::quit);
-        watcher.setFuture(QtConcurrent::run([&](){return prepareBaseTerrainHd(library,*before,terrain,profile,animations,seed,&cancelled,sourcePages);}));
+        watcher.setFuture(QtConcurrent::run([&](){return prepare();}));
         loop.exec();plan=watcher.result();
         // close() emits canceled even on successful completion. Only user input
         // while the worker is active may cancel the prepared transaction.
         disconnect(cancelConnection);
         progress.close();
-    }else plan=prepareBaseTerrainHd(library,*before,terrain,profile,animations,seed,&cancelled,sourcePages);
+    }else plan=prepare();
     if(cancelled.load())return fail("Cancelled");
     if(!plan.error.isEmpty())return fail(plan.error);
     for(const auto& detail:plan.unmatchedSources)ei::log(eLogInfo,"Base HD unmatched: "+detail);
     if(plan.command.isEmpty())return fail(tr("Безопасных замен нет. Без HD-соответствия: %1 клеток. Сохранены исходными ради стыков: %2 клеток.").arg(plan.unmatchedCells).arg(plan.seamRejectedCells));
+    if(interactive&&QMessageBox::question(this,tr("Перевести базовые тайлы в HD"),
+        tr("После сохранения: %1 → %2 страниц. DXT1 с mip: %3 МиБ; RGBA базовых уровней: %4 МиБ.\nЗамен: %5; импортируется используемых вариантов: %6. Применить?")
+            .arg(sourceDocument.mapInfo().textureCount).arg(plan.forecastPages).arg(plan.forecastDxt/1048576.0,0,'f',2)
+            .arg(plan.forecastRgba/1048576.0,0,'f',2).arg(plan.command.deltas.size()).arg(plan.importedVariants),
+        QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return fail("Cancelled");
     CValidationReport report;
     if(!m_workingTerrainAtlas->commitStaging(*plan.atlas)||!syncWorkingTerrainAtlas(&report)) {
         m_workingTerrainAtlas->commitStaging(*before);syncWorkingTerrainAtlas(&report);
@@ -85,7 +114,7 @@ bool CView::convertBaseTerrainToHd(const QString& library,quint32 seed,QString* 
         return fail(tr("Не удалось применить замену тайлов."));
     }
     m_pUndoStack->push(new CBaseHdCommand(this,plan.command));
-    if(summary)*summary=tr("Заменено клеток: %1. Исходных тайлов: %2. HD-вариантов в наборах: %3.\nБез надёжного соответствия: %4 клеток.\nСохранены исходными ради стыков: %5 клеток.\n\nВода и переходы сохранены. Изменение можно отменить; для записи на диск сохраните карту.")
+    if(summary)*summary=tr("Заменено клеток: %1. Исходных тайлов: %2. Используемых HD-вариантов: %3.\nБез надёжного соответствия: %4 клеток.\nСохранены исходными ради стыков: %5 клеток.\n\nВода и переходы сохранены. Изменение можно отменить; для записи на диск сохраните карту.")
         .arg(plan.command.deltas.size()).arg(plan.changedSources).arg(plan.importedVariants).arg(plan.unmatchedCells).arg(plan.seamRejectedCells);
     return true;
 }

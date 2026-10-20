@@ -163,7 +163,7 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
         }
         groups.append(group);
     }
-    struct Replacement {QVector<int> physicalSlots;QVector<int> rotations;};
+    struct Replacement {QVector<QImage> pool; QString identity; int turn{0},type{0}; STerrainTransitionSignature signature; QByteArray rim;};
     QMap<int,Replacement> replacements;
     const auto images=original.activeTileImages();
     result.atlas=original.createStagingCopy();
@@ -176,6 +176,9 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
     for(int slot:used) {
         if(stop())return fail("Cancelled");
         if(protectedSlots.contains(slot)||slot<0||slot>=images.size())continue;
+        STerrainWorkingTileIdentity prior;
+        if((original.tileIdentityForSlot(slot,&prior)&&prior.sourceNamespace.startsWith("base-hd"))
+           || images[slot].width()==256)continue; // Native HD and our persisted results are already HD.
         SMprPackedTile packed;packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);
         bool known=false;const auto sig=original.catalog().gridSignatureForPacked(packed.encode(),&known);
         if(!known||!pure(sig)||!families.contains(sig.northWest))continue;
@@ -208,50 +211,55 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
                 .arg(slot).arg(f.name).arg(type).arg(best).arg(second));
             replacements.insert(slot,replacement);continue;
         }
-        QVector<QImage> pool={selected.hd};pool+=selected.variants;
-        // Include every ready variant sharing this boundary, including variants
-        // stored under another original or physical-class group. Different
-        // boundaries stay with their nearest original to avoid new seams.
-        for(const auto& group:groups)if(group.material==f.name)
-            for(const auto& source:group.sources)for(int turn=0;turn<4;++turn){
-                const auto candidate=rotate(source.hd,turn);
-                if(mse(candidate,selected.hd,true)!=0)continue;
-                pool.append(candidate);
-                for(const auto& variant:source.variants)pool.append(rotate(variant,turn));
-            }
+        replacement.pool={selected.hd};replacement.pool+=selected.variants;
+        replacement.turn=selectedTurn;replacement.type=type;replacement.signature=sig;
         QByteArray oldBlocks;
         if(slot/64<sourcePages.size())oldBlocks=baseHdNativeBlocks(sourcePages[slot/64],slot%64);
         if(oldBlocks.isEmpty())oldBlocks=original.preservedDxtTiles().value(slot);
         if(oldBlocks.isEmpty())oldBlocks=ei::encodeMmpDxt1(images[slot].scaled(256,256,Qt::IgnoreAspectRatio,Qt::FastTransformation),false,&error).mid(76,32768);
         if(oldBlocks.size()!=32768)return fail("Original compressed terrain page unavailable for HD border preservation");
-        QSet<QByteArray> unique,inputsSeen;
-        for(const auto& image:pool)for(int turn=0;turn<4;++turn) {
-            if(stop())return fail("Cancelled");
-            const auto oriented=rotate(image,(selectedTurn+turn)%4);
-            const auto inputKey=pixelHash(oriented);if(inputsSeen.contains(inputKey))continue;inputsSeen.insert(inputKey);
-            QByteArray blocks;
-            const auto hybrid=baseHdWithOriginalRim(oriented,images[slot],oldBlocks,&blocks,&error);
-            if(hybrid.isNull())return fail(error);
-            const auto key=pixelHash(hybrid);if(unique.contains(key))continue;unique.insert(key);
-            const int imported=result.atlas->importPhysicalTile(hybrid,type,&sig,
-                "base-hd-rim:"+selected.id+":"+QString::number(slot),-1,&report,true);
-            if(imported<0||report.hasErrors())return fail(report.toText());
-            result.atlas->preserveDxtTile(imported,blocks);
-            if(!replacement.physicalSlots.contains(imported))replacement.physicalSlots.append(imported);
-        }
-        result.importedVariants+=replacement.physicalSlots.size();++result.changedSources;
+        replacement.rim=baseHdRotateBlocks(oldBlocks,-selectedTurn);
+        // Source identity, including the canonical compressed rim and destination
+        // semantics, survives slot remapping; it is not pixel deduplication.
+        replacement.identity="base-hd-209:"+id+":"+selected.id+":"+QString::fromLatin1(hash([&](){QByteArray edge;for(int y=0;y<64;++y)for(int x=0;x<64;++x)if(x<12||y<12||x>=52||y>=52)edge+=replacement.rim.mid((y*64+x)*8,8);return edge;}()))
+            +":"+QString::number(type)+":"+QString::number(sig.northWest);
+        ++result.changedSources;
         replacements.insert(slot,replacement);
     }
+    QMap<QString,int> imports;
+    for(int i=0;i<original.activeTileCount();++i){STerrainWorkingTileIdentity existing;
+        if(original.tileIdentityForSlot(i,&existing)&&existing.sourceNamespace.startsWith("base-hd"))imports[existing.sourceNamespace]=i;}
     result.command.description=QString::fromUtf8("Перевести базовые тайлы в HD");
     for(int y=0;y<terrain.tileCountY();++y)for(int x=0;x<terrain.tileCountX();++x){
         bool ok=false;const auto before=terrain.packedTile(x,y,ETerrainTileLayer::Land,&ok);if(!ok)continue;
         auto packed=SMprPackedTile::decode(before);const int source=packed.atlasSlot();
         if(!replacements.contains(source))continue;
         ++result.eligibleCells;const auto& r=replacements[source];
-        if(r.physicalSlots.isEmpty()){++result.unmatchedCells;continue;}
-        int chosen=r.physicalSlots.at(int(randomAt(seed,x,y,source)%quint32(r.physicalSlots.size())));
+        if(r.pool.isEmpty()){++result.unmatchedCells;continue;}
+        const int variant=int(randomAt(seed,x,y,source)%quint32(r.pool.size()));
+        const QString identity=r.identity+":"+QString::number(variant);
+        int chosen=imports.value(identity,-1);
+        if(chosen<0){
+            // First try the bank artwork unchanged. A canonical rim is needed
+            // only when it fails the exact old visible-boundary test.
+            auto image=r.pool[variant];QByteArray blocks=ei::encodeMmpDxt1(image,false,&error).mid(76,32768);
+            QImage saved;ei::decodeDxtImage(blocks,256,256,ei::DxtFormat::Dxt1,&saved,&error);
+            QVector<QImage> test=images;test<<saved;
+            CBaseHdSeams seams(images,test);auto candidate=packed;
+            candidate.atlasIndex=quint8(images.size()/64);candidate.tileIndex=quint8(images.size()%64);
+            candidate.rotation=quint8((packed.rotation+r.turn)%4);
+            bool exact=true;for(int side=0;side<4;++side)exact&=seams.boundarySafe(before,candidate.encode(),side);
+            if(!exact){QImage canonical;
+                if(!ei::decodeDxtImage(r.rim,256,256,ei::DxtFormat::Dxt1,&canonical,&error))return fail(error);
+                image=baseHdWithOriginalRim(image,canonical,r.rim,&blocks,&error);
+            }else image=saved;
+            if(image.isNull())return fail(error);
+            chosen=result.atlas->importPhysicalTile(image,r.type,&r.signature,identity,variant,&report,true);
+            if(chosen<0||report.hasErrors())return fail(report.toText());
+            result.atlas->preserveDxtTile(chosen,blocks);imports[identity]=chosen;
+        }
         packed.atlasIndex=quint8(chosen/64);packed.tileIndex=quint8(chosen%64);
-        if(!r.rotations.isEmpty())packed.rotation=quint8((packed.rotation+r.rotations.at(int(randomAt(seed,y,x,source+1)%quint32(r.rotations.size()))))%4);
+        packed.rotation=quint8((packed.rotation+r.turn)%4);
         if(packed.encode()!=before){STerrainTileDelta delta;delta.globalX=x;delta.globalY=y;delta.before=before;delta.after=packed.encode();result.command.deltas.append(delta);}
     }
     // Validate both the preview and the actual DXT1 pixels written by Save.
@@ -296,6 +304,18 @@ SBaseHdPlan prepareBaseTerrainHd(const QString& library,
     QVector<STerrainTileDelta> accepted;
     for(const auto& delta:result.command.deltas)if(changed[delta.globalY*width+delta.globalX])accepted.append(delta);
     result.command.deltas=accepted;
+    // Discard the speculative atlas, then import only accepted source identities.
+    const auto speculative=result.atlas;result.atlas=original.createStagingCopy();
+    QMap<int,int> retained;
+    for(auto& delta:result.command.deltas){auto packed=SMprPackedTile::decode(delta.after);int old=packed.atlasSlot();
+        if(!retained.contains(old)){STerrainWorkingTileIdentity identity;
+            if(!speculative->tileIdentityForSlot(old,&identity))return fail("Missing HD source identity");
+            int slot=result.atlas->importPhysicalTile(active[old],identity.runtimeTerrainType,&identity.canonicalSignature,
+                identity.sourceNamespace,identity.sourceSlot,&report,true);
+            if(slot<0||report.hasErrors())return fail(report.toText());
+            result.atlas->preserveDxtTile(slot,speculative->preservedDxtTiles().value(old));retained[old]=slot;}
+        int slot=retained[old];packed.atlasIndex=quint8(slot/64);packed.tileIndex=quint8(slot%64);delta.after=packed.encode();}
+    result.importedVariants=retained.size();
     result.atlas->setPreserveNativePages(true);
     return result;
 }

@@ -1,3 +1,5 @@
+#include "mpr_document.h"
+#include "endurance_document.h"
 #include "map_save_batch.h"
 #include "backup_manager.h"
 #include <QFile>
@@ -32,6 +34,12 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
     QSet<QString> paths;
     for(auto file:input) {
         file.path=QFileInfo(file.path).absoluteFilePath();
+        if(QFileInfo(file.path).suffix().compare("mpr",Qt::CaseInsensitive)==0){
+            CMprDocument map;CValidationReport report;
+            if(!map.loadBytes(file.after,file.path,&report)||report.hasErrors()){
+                result.error=report.toText();return result;}
+            if(map.mapInfo().textureCount>126){result.error=QString::fromUtf8("%1: атлас %2 страниц, предел126. Сожмите атлас или сократите используемые варианты/материалы. Файлы не изменены.")
+                .arg(file.path).arg(map.mapInfo().textureCount);return result;}}
         const QString key=file.path.toCaseFolded();
         if(paths.contains(key)) {result.error="Duplicate save destination: "+file.path;return result;}
         paths.insert(key);

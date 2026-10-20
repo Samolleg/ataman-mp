@@ -4,6 +4,24 @@
 #include <QtEndian>
 #include <cstring>
 
+// Rotate BC1 palettes/selectors without requantizing the protected source rim.
+inline QByteArray baseHdRotateBlocks(const QByteArray& input,int turn,int size=256){
+    turn=(turn%4+4)%4;if(!turn)return input;
+    if(input.size()!=size*size/2)return {};
+    QByteArray out(input.size(),'\0');const int n=size/4;
+    for(int by=0;by<n;++by)for(int bx=0;bx<n;++bx){
+        int sx=bx,sy=by;
+        for(int t=0;t<turn;++t){int old=sx;sx=sy;sy=n-1-old;}
+        const auto* src=reinterpret_cast<const uchar*>(input.constData()+(sy*n+sx)*8);
+        auto* dst=reinterpret_cast<uchar*>(out.data()+(by*n+bx)*8);
+        std::memcpy(dst,src,4);quint32 bits=qFromLittleEndian<quint32>(src+4),rotated=0;
+        for(int y=0;y<4;++y)for(int x=0;x<4;++x){int xx=x,yy=y;
+            for(int t=0;t<turn;++t){int old=xx;xx=yy;yy=3-old;}
+            rotated|=((bits>>(2*(yy*4+xx)))&3u)<<(2*(y*4+x));}
+        qToLittleEndian<quint32>(rotated,dst+4);
+    }return out;
+}
+
 // Copy/nearest-upscale DXT indices, retaining the original 565 palette exactly.
 // Re-encoding decoded SD colors cannot provide this guarantee.
 inline QByteArray baseHdNativeBlocks(const QByteArray& page,int local,int outputSize=256){

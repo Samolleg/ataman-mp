@@ -5,6 +5,24 @@
 #include "res_archive_document.h"
 #include <atomic>
 
+bool terrainAtlasPageLimit(int pages, QString* error);
+bool terrainAtlasHasHash(const QString& name);
+QStringList terrainAtlasMapDirectories(const QString& map, const QStringList& archives);
+struct STerrainPackCleanupRow {
+    QString name; int pages{0}; qint64 bytes{0}; bool removable{false}; QString usage;
+};
+struct STerrainPackCleanupPlan {
+    QString error; QVector<STerrainPackCleanupRow> rows; QStringList members;
+    QMap<QString,QByteArray> inventory; QByteArray archiveSha256;
+    qint64 before{0},after{0};
+};
+STerrainPackCleanupPlan prepareTerrainPackCleanup(const QString& archive, const QStringList& directories);
+bool commitTerrainPackCleanup(const QString& archive, const QStringList& directories,
+    const STerrainPackCleanupPlan& plan, QString* error, const QString& backupRoot = QString());
+QString retireTerrainAtlasAfterSave(const QString& archive, const STerrainAtlasProfile& oldProfile,
+    const QString& map, const QStringList& directories, const QString& backupRoot = QString());
+void terrainAtlasCopySourceIdentities(STerrainAtlasProfile* profile, const class CTerrainWorkingAtlas& atlas);
+
 struct STerrainAtlasCompactPlan {
     QString error;
     bool noOp{false};
@@ -23,7 +41,10 @@ struct STerrainAtlasCompactPlan {
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& pages,
     const QByteArray& semanticBytes, const QFileInfo& mpr,
-    const std::atomic_bool* cancelled = nullptr);
+    const std::atomic_bool* cancelled = nullptr, bool forcePublication = false);
+bool compactTerrainPublication(QByteArray* mprBytes, STerrainAtlasProfile* profile,
+    QVector<SResArchiveNewMember>* members, QVector<QImage>* images,
+    const QFileInfo& map, QString* error);
 // Rebuild only explicitly named owned members; prove all other payloads/times.
 bool buildTerrainArchiveWithout(const CResArchiveDocument& source,
     const QStringList& names, QByteArray* output, QString* error);

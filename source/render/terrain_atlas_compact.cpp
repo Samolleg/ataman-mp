@@ -14,6 +14,8 @@
 #include <QtEndian>
 #include <algorithm>
 #include <cstring>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace {
 QByteArray hash(const QByteArray& b){return QCryptographicHash::hash(b,QCryptographicHash::Sha256).toHex();}
@@ -37,7 +39,7 @@ bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByte
 
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& input,const QVector<QByteArray>& pages,
-    const QByteArray& semanticBytes,const QFileInfo& mpr,const std::atomic_bool* cancelled)
+    const QByteArray& semanticBytes,const QFileInfo& mpr,const std::atomic_bool* cancelled,bool forcePublication)
 {
     STerrainAtlasCompactPlan p;CValidationReport report;const auto m=source.mapInfo();
     const auto fail=[&](const QString& s){p.error=s;return p;};
@@ -114,15 +116,16 @@ STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
             if(page.size()+block.size()>64){page.resize(64);layout<<page;page.clear();}
             for(int slot:block)page<<slot+1; // zero denotes padding
         }if(!page.isEmpty()){page.resize(64);layout<<page;}}
-    if(layout.size()>256||layout.isEmpty())return fail("Packed atlas capacity exceeded.");
+    QString limitError;
+    if(!terrainAtlasPageLimit(layout.size(),&limitError))return fail(limitError);
     for(int page=0;page<layout.size();++page)for(int i=0;i<64;++i)if(layout[page][i])p.remap[layout[page][i]-1]=page*64+i;
     p.retainedSlots=keep.size();bool identity=layout.size()==pages.size();
     for(auto it=p.remap.cbegin();it!=p.remap.cend();++it)identity&=it.key()==it.value();
     const int maximumTileSize=groups.lastKey();
     identity&=int(m.textureSize)==maximumTileSize*8&&int(m.tileSize)==maximumTileSize;
     // Sparse tails already form a normal page; avoid namespace/padding churn.
-    if(identity){p.noOp=true;p.mprBytes=source.originalBytes();p.profile=input;p.pages=pages;p.newDxt=p.oldDxt;p.newRgba=p.oldRgba;return p;}
-    QCryptographicHash content(QCryptographicHash::Sha256);content.addData("atlas-compact-208\n");
+    if(identity&&terrainAtlasHasHash(m.innerNamespace)&&!forcePublication){p.noOp=true;p.mprBytes=source.originalBytes();p.profile=input;p.pages=pages;p.newDxt=p.oldDxt;p.newRgba=p.oldRgba;return p;}
+    QCryptographicHash content(QCryptographicHash::Sha256);content.addData("atlas-compact-209\n");content.addData(mpr.fileName().toCaseFolded().toUtf8());
     content.addData(input.toBytes());content.addData(hash(semanticBytes));
     content.addData(hash(source.memberPayload(m.memberName)));
     QVector<qint32> types;
@@ -154,7 +157,7 @@ STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
             p.images<<image;types<< (pageSlots[dst]?m.tileTypes.value(pageSlots[dst]-1):0);}
         content.addData(hash(b));p.pages<<b;p.newDxt+=b.size();p.newRgba+=qint64(w)*w*4;
     }
-    const QString ns=CTerrainVirtualAtlas::contentResourceIdentity(m.innerNamespace,content.result().toHex());
+    const QString ns=CTerrainVirtualAtlas::contentResourceIdentity(mpr.baseName(),content.result().toHex());
     auto profile=input;profile.mprNamespace=ns;profile.atlasSlotCount=layout.size()*64;profile.textureCount=layout.size();
     profile.atlasPixelSha256=CTerrainAtlasProfileInference::pixelSha256(p.images);profile.slotDefinitions.clear();
     for(auto s:input.slotDefinitions)if(p.remap.contains(s.slot)){s.slot=p.remap[s.slot];profile.slotDefinitions<<s;}
@@ -210,18 +213,24 @@ bool buildTerrainArchiveWithout(const CResArchiveDocument& source,const QStringL
     if(!target.loadBytes(empty,"empty",&errors))return false;QSet<QString> remove;for(const auto& n:names)remove.insert(n.toCaseFolded());
     QVector<SResArchiveNewMember> members;for(const auto& m:source.members())if(!remove.contains(m.name.toCaseFolded())){SResArchiveNewMember n;n.name=m.name;n.payload=m.payload;n.lastWriteTime=m.lastWriteTime;members<<n;}
     if(members.isEmpty()){*output=empty;return true;}
-    if(!target.buildWithAppendedMembers(members,output,&errors)){*error=errors.join('\n');return false;}return true;
+    if(!target.buildWithAppendedMembers(members,output,&errors)){*error=errors.join('\n');return false;}
+    CResArchiveDocument check;if(!check.loadBytes(*output,"cleanup-readback",&errors)){*error=errors.join('\n');return false;}
+    for(const auto& m:source.members())if(!remove.contains(m.name.toCaseFolded())){
+        int i=check.uniqueMemberIndex(m.name);
+        if(i<0||check.members()[i].payload!=m.payload||check.members()[i].lastWriteTime!=m.lastWriteTime){*error="Unrelated RES member changed";return false;}}
+    return true;
 }
 QStringList terrainCompactRetiredMembers(const CResArchiveDocument& archive,const STerrainAtlasProfile& profile,const QString& current,const QStringList& dirs,QMap<QString,QByteArray>* snapshots,QString* reason){
     const auto ns=profile.mprNamespace;
-    if(!profile.approved||!QRegularExpression("_[a-f0-9]{12}$").match(ns).hasMatch()
-       ||!(profile.provenance.startsWith("portable-working")||profile.provenance.startsWith("portable-finalized"))){*reason="Original or unowned atlas retained.";return {};}
+    if(!terrainAtlasHasHash(ns)){*reason="Original or unowned atlas retained.";return {};}
     if(!inventory(dirs,current,snapshots)){*reason="Incomplete readable MPR inventory; old atlas retained.";return {};}
     for(auto it=snapshots->cbegin();it!=snapshots->cend();++it){CMprDocument doc;doc.loadBytes(read(it.key()),it.key());
         if(doc.mapInfo().innerNamespace.compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
     QStringList names;QRegularExpression pages("^"+QRegularExpression::escape(ns)+"[0-9]{3}\\.mmp$",QRegularExpression::CaseInsensitiveOption);
     const QString semantic=STerrainSemanticFieldDocument::memberName(ns,QFileInfo(current));
-    for(const auto& m:archive.members())if(pages.match(m.name).hasMatch()||m.name==CTerrainAtlasProfileStore::embeddedMemberName(ns)||m.name==semantic)names<<m.name;
+    for(const auto& m:archive.members())if(pages.match(m.name).hasMatch()||m.name==CTerrainAtlasProfileStore::embeddedMemberName(ns)||m.name==semantic
+        ||(m.name.startsWith("ei_")&&m.name.endsWith(".json")
+           &&QJsonDocument::fromJson(m.payload).object().value("mprNamespace").toString().compare(ns,Qt::CaseInsensitive)==0))names<<m.name;
     *reason="Unreferenced owned namespace can be removed after successful map publication.";return names;
 }
 bool terrainCompactInventoryUnchanged(const QMap<QString,QByteArray>& previous,const QStringList& dirs,const QString& current){QMap<QString,QByteArray> now;return inventory(dirs,current,&now)&&now==previous;}
@@ -315,4 +324,99 @@ STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,
         else result.cleanup="Previous namespace retained: "+removed.error;
     }
     return result;
+}
+
+
+bool terrainAtlasHasHash(const QString& ns){return QRegularExpression("_[a-f0-9]{12}$",QRegularExpression::CaseInsensitiveOption).match(ns).hasMatch();}
+bool terrainAtlasPageLimit(int pages,QString* error){
+    if(pages>0&&pages<=126)return true;
+    if(error)*error=QString::fromUtf8("Атлас: %1 страниц; предел игры — 126. Сохранение отменено. Сожмите атлас или сократите число используемых вариантов/материалов.").arg(pages);
+    return false;
+}
+QStringList terrainAtlasMapDirectories(const QString& map,const QStringList& archives){
+    QStringList dirs;const QFileInfo m(map);dirs<<m.absolutePath();
+    QDir root=m.dir();root.cdUp();QDir mods=root;mods.cdUp();
+    if(mods.dirName().compare("MODS",Qt::CaseInsensitive)==0){mods.cdUp();
+        const auto base=mods.filePath("Base/Maps");
+        dirs<<(QDir(base).exists()?base:mods.filePath("Maps"));}
+    for(const auto& a:archives){QDir d=QFileInfo(a).dir();for(int i=0;i<2;++i){if(QDir(d.filePath("Maps")).exists())dirs<<QFileInfo(d.filePath("Maps")).absoluteFilePath();d.cdUp();}}
+    dirs.removeDuplicates();return dirs;
+}
+void terrainAtlasCopySourceIdentities(STerrainAtlasProfile* profile,const CTerrainWorkingAtlas& atlas){
+    for(auto& slot:profile->slotDefinitions){STerrainWorkingTileIdentity id;
+        if(atlas.tileIdentityForSlot(slot.slot,&id)&&id.sourceNamespace.startsWith("base-hd")&&id.sourceSlot>=0){
+            slot.sourceNamespace=id.sourceNamespace;slot.sourceSlotAliases={id.sourceSlot};slot.sourcePixelSha256=id.physicalPixelSha256;}}
+}
+STerrainPackCleanupPlan prepareTerrainPackCleanup(const QString& path,const QStringList& dirs){
+    STerrainPackCleanupPlan p;
+    if(dirs.size()<2||!inventory(dirs,QString(),&p.inventory)){p.error=QString::fromUtf8("Нужен полный читаемый инвентарь MPR Dejavu и Base. Очистка запрещена.");return p;}
+    QMap<QString,QStringList> refs;
+    for(auto it=p.inventory.cbegin();it!=p.inventory.cend();++it){CMprDocument d;CValidationReport r;
+        if(!d.loadBytes(read(it.key()),it.key(),&r)||r.hasErrors()){p.error="MPR inventory changed";return p;}
+        refs[d.mapInfo().innerNamespace.toCaseFolded()]<<it.key();}
+    if(!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){p.error="MPR inventory changed";return p;}
+    const auto bytes=read(path);p.before=bytes.size();p.archiveSha256=hash(bytes);
+    CResArchiveDocument archive;QStringList errors;
+    if(!archive.loadBytes(bytes,path,&errors)){p.error=errors.join('\n');return p;}
+    QMap<QString,STerrainPackCleanupRow> rows;QMap<QString,QStringList> members;
+    const QRegularExpression page("^(.+)([0-9]{3})\\.mmp$",QRegularExpression::CaseInsensitiveOption);
+    for(const auto& m:archive.members()){
+        QString ns;auto match=page.match(m.name);
+        if(match.hasMatch())ns=match.captured(1).toCaseFolded();
+        else if(m.name.startsWith("ei_")&&m.name.endsWith(".json")){
+            ns=QJsonDocument::fromJson(m.payload).object().value("mprNamespace").toString().toCaseFolded();
+        }
+        if(ns.isEmpty())continue;
+        auto& row=rows[ns];row.name=ns;row.bytes+=m.payload.size();if(match.hasMatch())++row.pages;
+        members[ns]<<m.name;
+    }
+    for(auto it=rows.begin();it!=rows.end();++it){auto row=it.value();const auto uses=refs.value(it.key());
+        row.removable=terrainAtlasHasHash(row.name)&&uses.isEmpty();
+        QStringList labels;bool baseOnly=!uses.isEmpty();
+        for(const auto& use:uses){const auto dir=QDir::fromNativeSeparators(QFileInfo(use).absolutePath()).toCaseFolded();
+            const bool base=dir.endsWith("/basemaps")||dir.endsWith("/base/maps");baseOnly&=base;
+            const auto label=base?QString("Base"):(dir==QDir::fromNativeSeparators(QFileInfo(dirs.first()).absoluteFilePath()).toCaseFolded()?QString("Dejavu"):QFileInfo(dir).dir().dirName());
+            labels<<label+"/"+QFileInfo(use).fileName();}
+        row.usage=row.removable?QString::fromUtf8("Удалить: ссылок нет"):
+            (uses.isEmpty()?QString::fromUtf8("Исходник, MPR-ссылок нет; сохранить"):
+             (baseOnly?QString::fromUtf8("Используются только картами Base: "):QString())+labels.join(", "));
+        p.rows<<row;if(row.removable)p.members+=members[it.key()];
+    }
+    QByteArray clean;QString e;
+    if(!buildTerrainArchiveWithout(archive,p.members,&clean,&e)){p.error=e;return p;}
+    p.after=clean.size();return p;
+}
+bool commitTerrainPackCleanup(const QString& path,const QStringList& dirs,const STerrainPackCleanupPlan& p,QString* error,const QString& backup){
+    if(!p.error.isEmpty()){*error=p.error;return false;}
+    const auto before=read(path);if(hash(before)!=p.archiveSha256||!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){*error="Archive or MPR inventory changed; prepare cleanup again.";return false;}
+    if(p.members.isEmpty())return true;
+    CResArchiveDocument source;QStringList errors;QByteArray clean;
+    if(!source.loadBytes(before,path,&errors)||!buildTerrainArchiveWithout(source,p.members,&clean,error))return false;
+    if(clean.size()!=p.after||!terrainCompactInventoryUnchanged(p.inventory,dirs,QString())){*error="MPR inventory changed; cleanup cancelled.";return false;}
+    SResArchiveBytesSaveRequest request;request.destination=QFileInfo(path);request.candidateBytes=clean;request.expectedSourceBytes=before;request.backupRootOverride=backup;
+    const auto saved=commitValidatedResArchiveBytes(request);if(!saved.success)*error=saved.error;return saved.success;
+}
+QString retireTerrainAtlasAfterSave(const QString& path,const STerrainAtlasProfile& profile,const QString& map,const QStringList& dirs,const QString& backup){
+    if(!terrainAtlasHasHash(profile.mprNamespace))return "Original namespace retained.";
+    const auto before=read(path);CResArchiveDocument archive;QStringList errors;QString reason;QMap<QString,QByteArray> snapshots;
+    if(dirs.size()<2||!archive.loadBytes(before,path,&errors))return "Incomplete inventory or archive; previous namespace retained.";
+    const auto names=terrainCompactRetiredMembers(archive,profile,map,dirs,&snapshots,&reason);
+    if(names.isEmpty())return reason;
+    CMprDocument current;if(!current.loadBytes(read(map),map)||current.mapInfo().innerNamespace.compare(profile.mprNamespace,Qt::CaseInsensitive)==0)return "Current map still uses namespace; retained.";
+    const auto mapHash=hash(read(map));QByteArray clean;QString error;
+    if(!buildTerrainArchiveWithout(archive,names,&clean,&error)||!terrainCompactInventoryUnchanged(snapshots,dirs,map)||hash(read(map))!=mapHash)return "Inventory changed; previous namespace retained.";
+    SResArchiveBytesSaveRequest request;request.destination=QFileInfo(path);request.expectedSourceBytes=before;request.candidateBytes=clean;request.backupRootOverride=backup;
+    auto result=commitValidatedResArchiveBytes(request);return result.success?QString("Removed previous namespace %1 (%2 members)").arg(profile.mprNamespace).arg(names.size()):"Previous namespace retained: "+result.error;
+}
+
+bool compactTerrainPublication(QByteArray* bytes,STerrainAtlasProfile* profile,QVector<SResArchiveNewMember>* members,QVector<QImage>* images,const QFileInfo& map,QString* error){
+    CMprDocument doc;CValidationReport report;
+    if(!doc.loadBytes(*bytes,map.fileName(),&report)||report.hasErrors()){*error=report.toText();return false;}
+    QVector<QByteArray> pages;
+    for(int i=0;i<int(doc.mapInfo().textureCount);++i){QByteArray page;
+        for(const auto& m:*members)if(m.name.compare(pageName(doc.mapInfo().innerNamespace,i),Qt::CaseInsensitive)==0)page=m.payload;
+        if(page.isEmpty()){*error="Missing publication page";return false;}pages<<page;}
+    auto plan=prepareTerrainAtlasCompact(doc,*profile,pages,doc.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName()),map,nullptr,true);
+    if(!plan.error.isEmpty()){*error=plan.error;return false;}
+    *bytes=plan.mprBytes;*profile=plan.profile;*members=plan.members;*images=plan.images;return true;
 }

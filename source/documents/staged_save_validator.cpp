@@ -13,6 +13,13 @@
 #include "terrain_edit_model.h"
 
 namespace {
+bool mprSaveAtlasLimit(const QByteArray& bytes,const QString& name,QString* error){
+    CMprDocument document;CValidationReport report;
+    if(!document.loadBytes(bytes,name,&report)||report.hasErrors()){*error=report.toText();return false;}
+    const auto pages=document.mapInfo().textureCount;
+    if(pages<=126)return true;
+    *error=QString::fromUtf8("Атлас содержит %1 страниц; предел игры —126. Сохранение отменено. Сожмите атлас или сократите используемые варианты/материалы.").arg(pages);return false;
+}
 bool readFileBytes(const QFileInfo& info, QByteArray* bytes, QString* error)
 {
     if(bytes)
@@ -92,7 +99,7 @@ SExistingFileComparison compareExistingFile(const QFileInfo& file,
 }
 
 SStagedSaveValidation validateStagedSave(const QByteArray& data,
-                                         const QFileInfo& destination)
+                                         const QFileInfo& destination,bool enforceMprPageLimit)
 {
     SStagedSaveValidation result;
     result.size = data.size();
@@ -106,6 +113,7 @@ SStagedSaveValidation validateStagedSave(const QByteArray& data,
         return result;
     }
 
+    if(suffix=="mpr"&&enforceMprPageLimit&&!mprSaveAtlasLimit(data,destination.fileName(),&result.error))return result;
     const QDir destinationDir(destination.absolutePath());
     if(!destinationDir.exists())
     {
@@ -179,7 +187,7 @@ SStagedMprTransactionValidation validateStagedMprTransaction(
     }
 
     const SStagedSaveValidation staged =
-        validateStagedSave(result.candidateBytes, destination);
+        validateStagedSave(result.candidateBytes, destination, false);
     result.sha256 = staged.sha256;
     result.size = staged.size;
     if(!staged.success)
@@ -310,6 +318,8 @@ SMprSaveCommitResult commitStagedMprTransaction(
         return result;
     }
 
+    if(!mprSaveAtlasLimit(staged.candidateBytes,request.destination.fileName(),&result.error)){
+        result.phase=QStringLiteral("atlas-limit");return result;}
     result.phase = QStringLiteral("pre-backup-race-check");
     QByteArray currentSource;
     if(!readFileBytes(request.source, &currentSource, &result.error)
@@ -879,6 +889,13 @@ SMprBytesSaveCommitResult commitValidatedMprBytes(
     const SMprBytesSaveCommitRequest& request)
 {
     SMprBytesSaveCommitResult result;
+    result.phase = QStringLiteral("atlas-limit");
+    CMprDocument pageLimitCandidate;CValidationReport pageLimitReport;
+    if(!pageLimitCandidate.loadBytes(request.candidateBytes,request.destination.fileName(),&pageLimitReport)
+       ||pageLimitReport.hasErrors()){result.error=pageLimitReport.toText();return result;}
+    if(pageLimitCandidate.mapInfo().textureCount>126){
+        result.error=QString::fromUtf8("Атлас содержит %1 страниц; предел игры —126. Сохранение отменено. Сожмите атлас или сократите используемые варианты/материалы.")
+            .arg(pageLimitCandidate.mapInfo().textureCount);return result;}
     result.phase = QStringLiteral("source-check");
     if(request.source.absoluteFilePath().isEmpty()
        || request.destination.absoluteFilePath().isEmpty()

@@ -36,15 +36,7 @@ void CView::compactTerrainAtlasRequested()
     QVector<QByteArray> pages;for(int i=0;i<int(source.mapInfo().textureCount);++i)pages<<payloads.value(names[i]);
     QByteArray semantic=source.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
     if(semantic.isEmpty())semantic=payloads.value(STerrainSemanticFieldDocument::memberName(ns,map));
-    QStringList dirs{map.absolutePath()};
-    // In the standard mod layout the Base Maps inventory is mandatory even
-    // when only the mod's HDPack appears in the configured texture archives.
-    QDir modRoot=map.dir();modRoot.cdUp();QDir modsRoot=modRoot;modsRoot.cdUp();
-    if(modsRoot.dirName().compare(QStringLiteral("MODS"),Qt::CaseInsensitive)==0){
-        modsRoot.cdUp();dirs<<modsRoot.filePath(QStringLiteral("Maps"));}
-    for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths()){
-        QDir d=QFileInfo(path).dir();for(int level=0;level<2;++level){const auto maps=d.filePath("Maps");if(QDir(maps).exists())dirs<<QFileInfo(maps).absoluteFilePath();d.cdUp();}}
-    dirs.removeDuplicates();
+    const auto dirs=terrainAtlasMapDirectories(map.absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths());
     std::atomic_bool cancelled(false);STerrainAtlasCompactPlan plan;
     {
         QProgressDialog progress(tr("Подготовка компактного атласа…"),tr("Отмена"),0,0,this);
@@ -85,4 +77,56 @@ void CView::compactTerrainAtlasRequested()
     if(!adopted){warn(tr("Карта и атлас сохранены. Для продолжения редактирования откройте карту заново."));return;}
     QMessageBox::information(this,tr("Сжать атлас карты"),tr("Готово: %1 → %2 страниц. HDPack: %3 → %4 МиБ.\n%5")
         .arg(plan.oldPages).arg(plan.pages.size()).arg(result.archiveBefore/1048576.0,0,'f',2).arg(result.archiveAfter/1048576.0,0,'f',2).arg(result.cleanup));
+}
+
+
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QDialogButtonBox>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QLabel>
+#include <QPushButton>
+#include <QTabWidget>
+void CView::cleanTerrainPackRequested(){
+    const auto warn=[&](const QString& e){QMessageBox::warning(this,tr("Очистить пак"),e);};
+    if(!m_pLand||!m_pLand->isMprLoad()||m_activeTerrainArchivePath.isEmpty()){warn(tr("Сначала откройте карту из Dejavu с HDPack_Terrain.res."));return;}
+    const auto path=m_activeTerrainArchivePath;
+    if(QFileInfo(path).fileName().compare("HDPack_Terrain.res",Qt::CaseInsensitive)){warn(tr("Очистка предназначена для HDPack_Terrain.res."));return;}
+    const auto dirs=terrainAtlasMapDirectories(m_pLand->filePath().absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths());
+    STerrainPackCleanupPlan plan;
+    {QProgressDialog progress(tr("Проверка всех карт Dejavu и Base…"),QString(),0,0,this);
+        progress.setCancelButton(nullptr);progress.setWindowModality(Qt::ApplicationModal);progress.show();
+        QFutureWatcher<STerrainPackCleanupPlan> watcher;QEventLoop loop;
+        connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);
+        watcher.setFuture(QtConcurrent::run([=](){return prepareTerrainPackCleanup(path,dirs);}));
+        loop.exec(QEventLoop::ExcludeUserInputEvents);plan=watcher.result();}
+    if(!plan.error.isEmpty()){warn(plan.error);return;}
+    QDialog dialog(this);dialog.setWindowTitle(tr("Очистить пак — предварительный расчёт"));dialog.resize(980,650);
+    auto* layout=new QVBoxLayout(&dialog);
+    auto* heading=new QLabel(tr("HDPack: %1 → %2 МиБ (−%3 МиБ). Проверено карт: %4.\nУдаляются только namespace с hash без ссылок. Исходники всегда сохраняются. Перед заменой создаётся резервная копия.")
+        .arg(plan.before/1048576.0,0,'f',3).arg(plan.after/1048576.0,0,'f',3).arg((plan.before-plan.after)/1048576.0,0,'f',3).arg(plan.inventory.size()),&dialog);
+    heading->setWordWrap(true);layout->addWidget(heading);auto* tabs=new QTabWidget(&dialog);layout->addWidget(tabs);
+    for(int group=0;group<2;++group){auto* table=new QTableWidget(0,4,tabs);
+        table->setHorizontalHeaderLabels({tr("Namespace"),tr("Страниц"),tr("МиБ"),tr("Использование")});
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);table->horizontalHeader()->setStretchLastSection(true);
+        for(const auto& row:plan.rows)if(row.removable==(group==0)){int i=table->rowCount();table->insertRow(i);
+            const QStringList values={row.name,QString::number(row.pages),QString::number(row.bytes/1048576.0,'f',3),row.usage};
+            for(int c=0;c<values.size();++c)table->setItem(i,c,new QTableWidgetItem(values[c]));}
+        table->resizeColumnsToContents();tabs->addTab(table,group==0?tr("Будут удалены"):tr("Сохраняются (справочно)"));}
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Yes|QDialogButtonBox::Cancel,&dialog);layout->addWidget(buttons);
+    buttons->button(QDialogButtonBox::Yes)->setText(tr("Удалить перечисленное"));buttons->button(QDialogButtonBox::Yes)->setEnabled(!plan.members.isEmpty());
+    buttons->button(QDialogButtonBox::Cancel)->setDefault(true);
+    connect(buttons->button(QDialogButtonBox::Yes),&QPushButton::clicked,&dialog,&QDialog::accept);
+    connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    if(dialog.exec()!=QDialog::Accepted)return;
+    bool ready=true;emit terrainPublicationPreflightRequested(path,&ready);if(!ready)return;
+    bool success=false;QString error;
+    {QProgressDialog progress(tr("Резервная копия и безопасная очистка пака…"),QString(),0,0,this);
+        progress.setCancelButton(nullptr);progress.setWindowModality(Qt::ApplicationModal);progress.show();
+        QFutureWatcher<bool> watcher;QEventLoop loop;connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);
+        watcher.setFuture(QtConcurrent::run([&](){return commitTerrainPackCleanup(path,dirs,plan,&error);}));loop.exec(QEventLoop::ExcludeUserInputEvents);success=watcher.result();}
+    emit terrainPublicationFinished(path,true);
+    if(!success){warn(error);return;}
+    QMessageBox::information(this,tr("Очистить пак"),tr("Готово. HDPack: %1 → %2 МиБ.").arg(plan.before/1048576.0,0,'f',3).arg(plan.after/1048576.0,0,'f',3));
 }
