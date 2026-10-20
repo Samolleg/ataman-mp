@@ -1,3 +1,7 @@
+## EI-PUBLISH-212-20261020 — очищенная публикация212
+
+- DONE/PUBLISHED20.10: поручение владельца выполнено;3 коммита 07738771→cdb1de15, marks211. GitHub main 24f2e72d3daa3ead724645b8fb509026777e1afe→b4dd9b4a2ed2fdbb7b8a8675f709d876797d3fcc, один fast-forward push точного SHA. Деревья/метаданные, исключения/недостижимость blob, приватный код, fsck/QRC/секреты/100 МиБ PASS. Evidence docs/validation/ATAMAN_GITHUB_212_20261020.md; receipts build-github-ataman212-20261020. Программа/установка/игра/мод не менялись; чужой diff ROADMAP вне коммита. Локальный коммит отчёта не публикуется; задача завершена.
+
 ## EI-UNITS-ON-OBJECTS-212 — NPC и логика на мостах/стенах
 
 - Поручение владельца20.10: main1a62dbf22646cfd8861cd5863f6e02640e65e034/211 →212, база131. NPC, patrol/look/guard на опорных объектах; корректные высоты, lossless исходных Z. RecipeBaker/MixedEdge не возвращать. Живые карты только читать, тестовые копии build-units-on-objects-212. Scoped-коммит main и Release из git archive; СТОП перед установкой, без push/буфера/старых запусков/смены приоритета.
