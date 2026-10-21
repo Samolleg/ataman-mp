@@ -62,3 +62,43 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\GOG Games\maped\ei-m
 - Все330 зафиксированных файлов: живые Maps/sidecar/navigation marker/HDPack и managed установка212/manifest/options сохранили SHA, расхождений0 (`preservation-result.json`). Живые резервы только читались. Установленный212 владельца работал независимо, не закрывался; правила финализатора к нему не применялись.
 - ROADMAP: в scoped-коммит входит только собственный новый пункт213, исходный незакоммиченный хвост владельца сохранён отдельно и побайтно в рабочем файле. Staging, source/archive/build logs, native stdout/process receipts, recovery plan/apply/backup и оба проверенных PNG сохранены в `build-new-map-213`.
 - **СТОП ПЕРЕД УСТАНОВКОЙ.** Итог main213 локально; установка212, живой gipat2/его RES/HDPack остаются прежними. Push отсутствует. Решение об установке213 и запуск исправления живого gipat2 принадлежат владельцу.
+
+
+## Установка213 по решению владельца,2026-10-21
+
+После принятия213 владелец явно поручил «ставь». Готовый проверенный staging
+`build-new-map-213/build-staging-213-new-map-atlas` исходного main
+`546fbc96aca87035051a330c1df715c1fc6dcf33` установлен без пересборки в
+`artifacts/EI-Mapper-Ataman-2-first-test`, **212→213**. Предыдущие разделы
+фиксируют состояние подготовки до этого нового разрешения.
+
+Перед резервированием и непосредственно перед первой заменой EIMapperEndurance
+и компоненты из целевой папки не были запущены. Пользовательские процессы
+не останавливались. Откат создан до первой замены:
+`artifacts/rollback212-to213-new-map-atlas-20261021` — все130 managed-файлов212,
+старый manifest, rollback-state.json и rollback.ps1. SHA резервных программных
+файлов и manifest совпали; синтаксис rollback.ps1 проверен, его `-VerifyOnly`
+вернул `ROLLBACK_VERIFIED_212`. Сам откат не выполнялся. Обычный запуск скрипта
+проверяет отсутствие редактора/runtime и неизменность установленных файлов213,
+восстанавливает212 и удаляет только два добавленных управляемых инструмента.
+
+Заменены7 существующих managed-файлов: BUILD_INFO.txt,CHANGELOG.md,
+EIMapperEndurance.exe,Readme.md,VERSION и два runtime-компонента.
+Добавлены tools/publish_map_local_atlas.py и tools/Restore-Gipat2Atlas.ps1;
+удалённых файлов нет. Каждая замена выполнена через проверенный временный файл,
+manifest заменён последним. Все132 installed managed SHA совпали со staging.
+
+Единственный запуск установленной программы — `--version` с изолированными
+cwd/TEMP/AppData/backup roots: `EI Mapper Endurance Edition 213`,exit0.
+EXE SHA256 `097a7b79a3d6eff4e1d51fcef0cb27f25992acadf3dfdb7ae525a8c5788b034d`.
+Набор и SHA всех16595 пользовательских файлов вне manifest совпали до и после
+установки/version-check. Настройки, карты, журналы, сохранения, кэши и прочие
+пользовательские файлы сохранены. Финализатор на установке не запускался.
+
+Иных проверок, интерактивного запуска маппера, игры, пересборки или push
+не выполнялось. Восстановление живого gipat2 этим поручением не запускалось;
+готовый инструмент только установлен. Старые откаты не очищались.
+В scoped-коммит включены только эта запись и собственный пункт213 ROADMAP;
+незакоммиченные правки владельца сохранены вне коммита.
+Квитанции: build-new-map-213/install-receipt.json,rollback-verified.json,
+rollback-verification.txt,install-user-before.json,installed-version.txt.
