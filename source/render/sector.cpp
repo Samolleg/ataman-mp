@@ -5,6 +5,18 @@
 #include <cstring>
 
 #include "sector.h"
+
+quint64 CSector::residentBytes() const
+{
+    return quint64(m_arrLandVrtData.capacity())*sizeof(SVertexData)
+        + quint64(m_arrLitLandVrtData.capacity())*sizeof(STerrainVertexData)
+        + quint64(m_arrWaterVrtData.capacity())*sizeof(SVertexData)
+        + quint64(m_arrAnimatedWaterVrtData.capacity())*sizeof(SWaterVertexData)
+        + quint64(qMax(0,m_vertexBuf.size())+qMax(0,m_indexBuf.size())+qMax(0,m_gridIndexBuf.size())
+            +qMax(0,m_waterVertexBuf.size())+qMax(0,m_waterIndexBuf.size()))
+        + 2ull*32*32*sizeof(CTile);
+}
+
 #include "gl_dispatch.h"
 #include "render_performance.h"
 #include "landscape.h"

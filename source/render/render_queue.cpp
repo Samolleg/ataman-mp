@@ -501,6 +501,9 @@ void RenderQueueContext::flush()
     float previousUvScale = 0.0f;
     bool haveBatch = false;
     bool activeHighlight = false;
+    bool activeBackground = false;
+    const int backgroundLocation=ei::uniformLocation(m_program,"u_backgroundScenery");
+    m_program->setUniformValue(backgroundLocation,false);
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), true);
     for(int itemIndex = 0; itemIndex < colorItems.size(); )
@@ -568,6 +571,10 @@ void RenderQueueContext::flush()
         }
         m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), !item.dynamicShadow);
         m_program->setUniformValue(m_materialEmissionLocation, item.materialEmission);
+        if(activeBackground!=item.backgroundScenery) {
+            activeBackground=item.backgroundScenery;
+            m_program->setUniformValue(backgroundLocation,activeBackground);
+        }
         if(item.highlighted != activeHighlight)
         {
             activeHighlight = item.highlighted;
@@ -596,6 +603,7 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(m_highlightLocation, false);
     m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), true);
     m_program->setUniformValue(ei::uniformLocation(m_program, "u_localShadowSkipIndex"), -1);
+    m_program->setUniformValue(backgroundLocation,false);
     m_program->setUniformValue(m_materialEmissionLocation, QVector3D());
     if(supportsFixedFunctionAlphaTest())
         ei::gl::Enable(GL_ALPHA_TEST);

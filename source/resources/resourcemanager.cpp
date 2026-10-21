@@ -1,4 +1,5 @@
 #include "resourcemanager.h"
+#include "neighbor_scene_data.h"
 #include <QtConcurrent>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
@@ -121,6 +122,7 @@ struct SCachedArchiveIndex
 {
     qint64 size{-1};
     QDateTime modified;
+    QByteArray content;
     QMap<QString, SResFileEntry> entries;
 };
 
@@ -129,12 +131,14 @@ const SCachedArchiveIndex& archiveIndex(const QString& path)
     static QMap<QString, SCachedArchiveIndex> cache;
     const QFileInfo info(path);
     SCachedArchiveIndex& cached = cache[path];
-    if(cached.size == info.size() && cached.modified == info.lastModified())
+    const auto content=neighborContentFingerprint(path);
+    if(cached.content==content && cached.size == info.size() && cached.modified == info.lastModified())
         return cached;
 
     cached = SCachedArchiveIndex();
     cached.size = info.size();
     cached.modified = info.lastModified();
+    cached.content=content;
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly))
         return cached;
@@ -1901,6 +1905,27 @@ QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLeve
 }
 }
 
+QByteArray CTextureList::terrainAtlasContentFingerprint(const QString& name,int pages,const QString& boundArchive) const
+{
+    QVector<QString> sources=configuredResourceSources(m_pSettings);
+    if(!boundArchive.isEmpty())sources.prepend(boundArchive);
+    QCryptographicHash revision(QCryptographicHash::Sha256);
+    for(const auto& path:sources)revision.addData(neighborContentFingerprint(path));
+    const auto key=revision.result()+name.toCaseFolded().toUtf8()+QByteArray::number(pages);
+    static QMap<QByteArray,QByteArray> cache;
+    if(cache.contains(key))return cache[key];
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const auto& member:ei::terrainTextureResourceNames(name,pages)) {
+        QByteArray payload;QString source;
+        hash.addData(member.toUtf8());
+        if(readIndexedResource(sources,member,payload,&source)) {
+            hash.addData(source.toCaseFolded().toUtf8());hash.addData(payload);
+        } else hash.addData("missing");
+    }
+    if(cache.size()>=128)cache.clear();
+    const auto result=hash.result();cache.insert(key,result);return result;
+}
+
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                                            int expectedTexCount,
                                            int& texCount,
@@ -1918,8 +1943,9 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
             .arg(archive.size())
             .arg(archive.lastModified().toMSecsSinceEpoch());
     }
-    const QString cacheKey = QStringLiteral("terrain|%1|%2%3")
-        .arg(name.toLower()).arg(expectedTexCount).arg(archiveFingerprint);
+    const QString cacheKey = QStringLiteral("terrain|%1|%2%3|%4")
+        .arg(name.toLower()).arg(expectedTexCount).arg(archiveFingerprint)
+        .arg(QString::fromLatin1(terrainAtlasContentFingerprint(name,expectedTexCount,localArchive).toHex()));
     if(m_aTexture.contains(cacheKey))
     {
         texCount = qMax(1, expectedTexCount);
@@ -2245,11 +2271,26 @@ bool CTextureList::layeredTextureRefreshLifetimeRegressionCheck()
     return !m_aTexture.contains(key);
 }
 
+QSharedPointer<QOpenGLTexture> CTextureList::retainSceneTexture(QOpenGLTexture* texture)
+{
+    if(!texture)return {};
+    ++m_sceneTextureUsers[texture];
+    return QSharedPointer<QOpenGLTexture>(texture,[this](QOpenGLTexture* held){
+        auto it=m_sceneTextureUsers.find(held);
+        if(it!=m_sceneTextureUsers.end() && --it.value()==0)m_sceneTextureUsers.erase(it);
+    });
+}
+
 void CTextureList::trimTransientVisualCache()
 {
     const QStringList textureEvictions = m_layeredTextureLru.trim(kLayeredTextureSessionBudget);
     for(const QString& key : textureEvictions)
     {
+        if(m_sceneTextureUsers.contains(m_aTexture.value(key))) {
+            const auto* held=m_aTexture.value(key);
+            m_layeredTextureLru.touch(key,qint64(held->width())*held->height()*4*4/3);
+            continue;
+        }
         QOpenGLTexture* texture = m_aTexture.take(key);
         if(!texture)
             continue;
@@ -2279,6 +2320,7 @@ void CTextureList::clearTransientVisualCache()
             ++it;
             continue;
         }
+        if(m_sceneTextureUsers.contains(it.value())) { ++it;continue; }
         QOpenGLTexture* texture = it.value();
         it = m_aTexture.erase(it);
         if(texture)

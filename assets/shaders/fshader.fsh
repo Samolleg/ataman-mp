@@ -23,6 +23,7 @@ uniform vec3 u_fogColor;
 uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform vec3 u_mapFog;
+uniform bool u_backgroundScenery;
 uniform int u_pointLightCount;
 uniform vec4 u_pointLightPositionRange[64];
 uniform vec3 u_pointLightColor[64];
@@ -62,6 +63,7 @@ float unpackShadowDepth(vec4 encodedDepth)
 
 float borderFog(vec3 world)
 {
+  if(u_backgroundScenery) return 0.0;
   float border = u_mapFog.z;
   if (border <= 0.0)
     return 0.0;

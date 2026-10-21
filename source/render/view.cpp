@@ -944,19 +944,17 @@ QImage cachedGlobalUniformSource(
     const QMap<QString, QImage>& decodedTileCache,
     STerrainGlobalMaterialSource* selectedSource = nullptr)
 {
+    if(decodedTileCache.isEmpty())return QImage();
     const QString preferredSourceNamespace = CTextureList::getInstance()
         ->terrainAuthoringArchivePath().isEmpty() ? preferredNamespace
         : terrainNativeSourceNamespace(preferredNamespace);
     QVector<STerrainGlobalMaterialSource> sources;
-    const auto appendUnique = [&sources](
-        const STerrainGlobalMaterialSource& source) {
-        for(const STerrainGlobalMaterialSource& existing : sources)
-            if(existing.mprNamespace.compare(
-                   source.mprNamespace, Qt::CaseInsensitive) == 0
-               && existing.uniformSlot == source.uniformSlot
-               && existing.atlasPixelSha256 == source.atlasPixelSha256)
-                return;
-        sources.append(source);
+    QSet<QString> seen;
+    const auto appendUnique = [&sources,&seen](const STerrainGlobalMaterialSource& source) {
+        const auto key=source.mprNamespace.toCaseFolded()+'|'+QString::number(source.uniformSlot)
+            +'|'+QString::fromLatin1(source.atlasPixelSha256);
+        if(seen.contains(key))return;
+        seen.insert(key);sources.append(source);
     };
     const auto appendMatching = [&] (
         const QVector<STerrainGlobalMaterialSource>& candidates,
@@ -2276,6 +2274,8 @@ CView::~CView()
     if(isValid())
         makeCurrent();
     clearNeighborLandscapes();
+    if(isValid())makeCurrent();
+    m_neighborRenderCache.clear();
     if(isValid())
         makeCurrent();
     if(!m_pPreviewTile.isNull())
@@ -3179,10 +3179,10 @@ void CView::setNeighborMapContext(
     stream << profileId << activeAllodId << activeZoneId << layoutWarning
             << layout.activeWorldOrigin << layout.componentAnchorZoneId << layout.hasActiveWorldOrigin
             << layout.tileGridAnchor << layout.hasTileGridAnchor
-           << isValid() << m_neighborLandscapesVisible;
+           << isValid() << m_neighborLandscapesVisible << activeTerrainSectorSize();
     const auto resourceRevision=[&stream](const QString& path) {
         const QFileInfo info(path);
-        stream << path << info.canonicalFilePath() << info.size() << info.lastModified();
+        stream << path << info.canonicalFilePath() << neighborContentFingerprint(path);
     };
     for(const auto& placement : placements) {
         stream << placement.zoneId << placement.origin << placement.worldOrigin << placement.size << placement.fixedAnchor;
@@ -3193,6 +3193,9 @@ void CView::setNeighborMapContext(
     clearNeighborLandscapes();
     m_activeMapWorldOrigin = QPointF();
     m_neighborActiveZoneId=activeZoneId;
+    m_neighborActiveMobPath.clear();
+    for(const auto& entry:topology)
+        if(entry.zoneId==activeZoneId && entry.allodId==activeAllodId)m_neighborActiveMobPath=entry.mobPath;
     m_worldTileGridAnchor=layout.tileGridAnchor;
     m_hasWorldTileGridAnchor=layout.hasTileGridAnchor;
     m_neighborMapAnchorZoneId.clear();
@@ -3239,6 +3242,155 @@ void CView::setNeighborMapContext(
     m_neighborContextKey = contextKey;
 }
 
+QByteArray CView::neighborResourceFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())
+        hash.addData(neighborContentFingerprint(path));
+    return hash.result();
+}
+
+QByteArray CView::neighborTerrainFingerprint(const QString& path,const QByteArray& resources) const
+{
+    const QFileInfo info(path);
+    Q_UNUSED(resources);
+    const auto content=neighborContentFingerprint(path);
+    struct Metadata { QString name;int pages; };
+    static QMap<QByteArray,Metadata> metadata;
+    if(!metadata.contains(content)) {
+        CMprDocument doc;CValidationReport report;
+        if(!doc.load(info,&report)||report.hasErrors())return {};
+        if(metadata.size()>64)metadata.clear();
+        metadata.insert(content,{doc.mapInfo().innerNamespace,int(doc.mapInfo().textureCount)});
+    }
+    const auto map=metadata[content];
+    const QString sidecar=info.dir().filePath(info.completeBaseName()+"-atlas.res");
+    // Same resolution order as readPreparedBackground: the legacy sidecar is
+    // searched first only when configured archives do not contain the page.
+    QString configured;
+    const auto names=ei::terrainTextureResourceNames(map.name,map.pages);
+    const bool shared=!names.isEmpty()&&CTextureList::getInstance()->terrainMmpSourceArchive(names.first(),&configured)
+        &&QFileInfo(configured).absoluteFilePath().compare(sidecar,Qt::CaseInsensitive)!=0;
+    return content+CTextureList::getInstance()->terrainAtlasContentFingerprint(map.name,map.pages,
+        !shared&&QFileInfo::exists(sidecar)?sidecar:QString());
+}
+
+QByteArray CView::neighborObjectResourceFingerprint() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())
+        if(!terrainPublicationIsHDPackArchive(path))hash.addData(neighborContentFingerprint(path));
+    return hash.result();
+}
+
+void CView::trimNeighborRenderCache()
+{
+    if(m_neighborCacheTransition)return; // old maps are temporarily unpinned during rebase
+    const auto bytes=[](const SLoadedNeighborLandscape& n) {
+        // Meshes/textures are shared, but charge them to each holder conservatively.
+        quint64 b=n.landscape?n.landscape->residentBytes():0;
+        b+=quint64(n.staticObjects.size())*65536;
+        b+=quint64(n.pendingObjects.size())*131072;
+        QSet<QOpenGLTexture*> textures;
+        for(const auto& lease:n.textureLeases)if(lease)textures.insert(lease.data());
+        for(const auto* texture:textures)b+=quint64(texture->width())*texture->height()*4*4/3;
+        return b;
+    };
+    quint64 total=0;for(const auto& n:m_neighborLandscapes)total+=bytes(n);
+    for(const auto& n:m_neighborRenderCache)total+=bytes(n);
+    // Visible maps are pinned. Eviction cannot make the current world disappear.
+    while(!m_neighborRenderCache.isEmpty() && total>m_neighborCacheBudget) {
+        int oldest=0;
+        for(int i=1;i<m_neighborRenderCache.size();++i)
+            if(m_neighborRenderCache[i].lastUse<m_neighborRenderCache[oldest].lastUse)oldest=i;
+        total-=bytes(m_neighborRenderCache[oldest]);
+        m_neighborRenderCache.remove(oldest);++m_neighborCacheEvictions;
+    }
+    ei::log(eLogInfo,QString("Neighbor cache visible:%1 retained:%2 chargedMiB:%3 budgetMiB:%4 evictions:%5")
+        .arg(m_neighborLandscapes.size()).arg(m_neighborRenderCache.size()).arg(total/1048576)
+        .arg(m_neighborCacheBudget/1048576).arg(m_neighborCacheEvictions));
+}
+
+void CView::setNeighborCacheTransition(bool active)
+{
+    m_neighborCacheTransition=active;
+    if(!active && isValid()) {makeCurrent();trimNeighborRenderCache();doneCurrent();}
+}
+
+void CView::retainActiveLandscape()
+{
+    if(!isValid() || !m_pLand->isMprLoad() || m_applicationShutdown)return;
+    const QString path=m_pLand->filePath().absoluteFilePath();
+    if(m_pLand->isDirty() && !m_worldTerrainSession.documents.contains(CWorldTerrainSession::key(path)))return;
+    // An external replacement of the active file must never be blessed as the
+    // version displayed by this renderer. Canonical Save updates the baseline.
+    QFile disk(path);QCryptographicHash digest(QCryptographicHash::Sha256);
+    if(!disk.open(QIODevice::ReadOnly)||!digest.addData(&disk)
+       ||digest.result()!=m_pLand->baselineSha256())return;
+    const auto resources=neighborResourceFingerprint();
+    if(neighborTerrainFingerprint(path,resources)!=m_activeRenderResources)return;
+    makeCurrent();
+    int index=-1;const auto key=CWorldTerrainSession::key(path);
+    for(int i=0;i<m_neighborRenderCache.size();++i)
+        if(CWorldTerrainSession::key(m_neighborRenderCache[i].placement.mprPath)==key){index=i;break;}
+    SLoadedNeighborLandscape retained;
+    if(index>=0)retained=m_neighborRenderCache.takeAt(index);
+    retained.placement.mprPath=path;
+    retained.terrainFingerprint=neighborTerrainFingerprint(path,resources);
+    if(!retained.landscape)retained.landscape=CLandscape::createReadOnlyBackground();
+    if(!m_terrainEditAvailable || !m_terrainEdit.isDirty())m_pLand->releaseCleanEditorPreview();
+    m_pLand->setCanonicalTerrainModel(nullptr);
+    m_pLand->swapRenderState(*retained.landscape);
+    retained.lastUse=++m_neighborCacheClock;
+    retained.drawCacheDirty=true;
+    m_neighborRenderCache.append(retained);
+    trimNeighborRenderCache();
+    ei::log(eLogInfo,"Active terrain retained for neighbor reuse: "+path);
+}
+
+void CView::retainActiveNeighborObjects(CMob* mob)
+{
+    if(!mob || !m_pLand->isMprLoad() || m_applicationShutdown || !isValid())return;
+    if(mob->isDirty())return; // the MOB close prompt may have explicitly discarded local edits
+    // Only the registered primary MOB of this map can become its background.
+    const QString path=m_pLand->filePath().absoluteFilePath();
+    QString expected;
+    // The active world context contains the registered pair, including custom
+    // MOB basenames; store it when the topology is accepted.
+    expected=m_neighborActiveMobPath;
+    if(expected.isEmpty() || CWorldTerrainSession::key(expected)!=CWorldTerrainSession::key(mob->filePath().absoluteFilePath()))return;
+    QFile source(expected);QCryptographicHash sourceHash(QCryptographicHash::Sha256);
+    if(!source.open(QIODevice::ReadOnly)||!sourceHash.addData(&source))return;
+    for(const auto* node:mob->nodes())if(node->rawSourceDocumentSha256().size()==32) {
+        if(node->rawSourceDocumentSha256()!=sourceHash.result())return;
+        break;
+    }
+    makeCurrent();
+    const auto key=CWorldTerrainSession::key(path);int index=-1;
+    for(int i=0;i<m_neighborRenderCache.size();++i)
+        if(CWorldTerrainSession::key(m_neighborRenderCache[i].placement.mprPath)==key){index=i;break;}
+    SLoadedNeighborLandscape retained;
+    if(index>=0)retained=m_neighborRenderCache.takeAt(index);
+    retained.placement.mprPath=path;retained.placement.mobPath=expected;
+    retained.objectFingerprint=neighborContentFingerprint(expected)+neighborObjectResourceFingerprint();
+    retained.staticObjects.clear();retained.textureLeases.clear();retained.staticLocalPositions.clear();retained.distantParts.clear();
+    retained.pendingObjects.clear();retained.pendingVisuals.clear();retained.nextObject=0;
+    retained.drawRecords.clear();retained.spatialGroups.clear();
+    for(auto* node:mob->nodes()) {
+        if(node->nodeType()!=ENodeType::eWorldObject || node->isMarkDeleted())continue;
+        QSharedPointer<CWorldObj> object(new CWorldObj(*static_cast<CWorldObj*>(node)));
+        object->setParent(nullptr);object->setState(ENodeState::eDraw);
+        retained.staticLocalPositions.append(object->drawPosition());
+        retained.staticObjects.append(object);retained.distantParts.append(QVector<QSharedPointer<CPart>>());
+        for(const auto& item:object->staticRenderItems())
+            retained.textureLeases.append(CTextureList::getInstance()->retainSceneTexture(item.texture));
+    }
+    retained.objectsPrepared=true;retained.drawCacheDirty=true;retained.lastUse=++m_neighborCacheClock;
+    m_neighborRenderCache.append(retained);
+    ei::log(eLogInfo,QString("Active neighbor objects retained without disk/GPU reload: %1 count:%2")
+        .arg(expected).arg(retained.staticObjects.size()));
+}
+
 void CView::clearNeighborLandscapes()
 {
     m_neighborContextKey.clear();
@@ -3252,10 +3404,18 @@ void CView::clearNeighborLandscapes()
         makeCurrent();
     // Each landscape owns a lease on its base atlas and its own preview.
     // glTexture() may be a preview, so it cannot identify base-atlas owners.
+    for(auto& n:m_neighborLandscapes) {
+        if(n.landscape)n.landscape->setCanonicalTerrainModel(nullptr);
+        n.lastUse=++m_neighborCacheClock;
+        // Preserve local positions; world matrices are rebuilt on rebase.
+        n.drawCacheDirty=true;
+        m_neighborRenderCache.append(n);
+    }
     m_neighborLandscapes.clear();
+    trimNeighborRenderCache();
     if(isValid())
         doneCurrent();
-    ei::log(eLogInfo, "Neighbor render backgrounds released; retained terrain documents preserved");
+    ei::log(eLogInfo, "Neighbor render backgrounds retained; terrain/atlas/objects/sun preserved");
 }
 
 void CView::loadNeighborLandscapes()
@@ -3268,15 +3428,41 @@ void CView::loadNeighborLandscapes()
     const quint64 generation = m_neighborSceneGeneration->load();
     const auto epoch = m_neighborSceneGeneration;
     const QStringList archives=CTextureList::getInstance()->configuredResourceArchivePaths();
+    const auto resources=neighborResourceFingerprint();
     const QSizeF activeSize(m_pLand->widthInWorldUnits(),
                             m_pLand->heightInWorldUnits());
     for(const SNeighborMapPlacement& placement : m_neighborPlacements)
     {
         const bool loadStaticObjects = CNeighborMapLayout::touchesActiveMap(
             activeSize, placement);
+        const auto terrainFingerprint=neighborTerrainFingerprint(placement.mprPath,resources);
+        const auto objectFingerprint=neighborContentFingerprint(placement.mobPath)+neighborObjectResourceFingerprint();
+        int cachedIndex=-1;
+        for(int i=m_neighborRenderCache.size()-1;i>=0;--i) {
+            auto& cached=m_neighborRenderCache[i];
+            if(CWorldTerrainSession::key(cached.placement.mprPath)!=CWorldTerrainSession::key(placement.mprPath))continue;
+            if(cached.terrainFingerprint!=terrainFingerprint || !cached.landscape || !cached.landscape->isMprLoad()) {
+                makeCurrent();m_neighborRenderCache.remove(i);doneCurrent();continue;
+            }
+            cachedIndex=i;break;
+        }
+        if(cachedIndex>=0) {
+            auto cached=m_neighborRenderCache.takeAt(cachedIndex);
+            cached.placement=placement;cached.showObjects=loadStaticObjects;
+            cached.lastUse=++m_neighborCacheClock;cached.drawCacheDirty=true;
+            makeCurrent();cached.landscape->setWorldOffset(QVector3D(placement.origin.x(),placement.origin.y(),0));
+            if(cached.objectFingerprint!=objectFingerprint) {
+                cached.staticObjects.clear();cached.textureLeases.clear();cached.staticLocalPositions.clear();cached.distantParts.clear();
+                cached.pendingObjects.clear();cached.pendingVisuals.clear();cached.nextObject=0;
+                cached.drawRecords.clear();cached.spatialGroups.clear();cached.objectsPrepared=false;
+            }
+            doneCurrent();m_neighborLandscapes.append(cached);
+            ei::log(eLogInfo,"Neighbor render cache hit/rebase zone:"+placement.zoneId);
+            if(!loadStaticObjects || cached.objectsPrepared)continue;
+        }
         auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
         connect(watcher, &QFutureWatcher<SNeighborSceneData>::finished, this,
-                [this, watcher, generation]() {
+                [this, watcher, generation, terrainFingerprint, objectFingerprint, resources, loadStaticObjects]() {
             const SNeighborSceneData result = watcher->result();
             watcher->deleteLater();
             if(generation != m_neighborSceneGeneration->load()
@@ -3284,6 +3470,11 @@ void CView::loadNeighborLandscapes()
             for(const QString& diagnostic : result.diagnostics)
                 ei::log(eLogWarning, diagnostic);
             if(!result.valid) return;
+            // Do not accept a worker snapshot across an external or in-session Save.
+            if(neighborTerrainFingerprint(result.placement.mprPath,neighborResourceFingerprint())!=terrainFingerprint
+               || neighborContentFingerprint(result.placement.mobPath)+neighborObjectResourceFingerprint()!=objectFingerprint) {
+                QTimer::singleShot(0,this,[this](){loadNeighborLandscapes();});return;
+            }
             // GPU resources are created only by their owning render context.
             // CPU workers return immutable values, never GL handles or nodes.
             makeCurrent();
@@ -3292,8 +3483,13 @@ void CView::loadNeighborLandscapes()
             // A drag may have updated the placement while CPU work was pending.
             for(const auto& current : m_neighborPlacements)
                 if(current.zoneId == loaded.placement.zoneId) loaded.placement = current;
-            loaded.landscape = CLandscape::createReadOnlyBackground();
-            if(!loaded.landscape->readPreparedBackground(
+            for(int i=0;i<m_neighborLandscapes.size();++i)
+                if(m_neighborLandscapes[i].placement.mprPath==loaded.placement.mprPath) {
+                    loaded=m_neighborLandscapes.takeAt(i);break;
+                }
+            const bool reuseTerrain=bool(loaded.landscape);
+            if(!reuseTerrain)loaded.landscape = CLandscape::createReadOnlyBackground();
+            if(!reuseTerrain && !loaded.landscape->readPreparedBackground(
                     QFileInfo(loaded.placement.mprPath), result.terrainMembers))
             {
                 loaded.landscape.clear();
@@ -3302,9 +3498,15 @@ void CView::loadNeighborLandscapes()
             }
             loaded.landscape->setWorldOffset(QVector3D(
                 float(loaded.placement.origin.x()), float(loaded.placement.origin.y()), 0));
+            loaded.terrainFingerprint=terrainFingerprint;
+            loaded.objectFingerprint=objectFingerprint;
+            loaded.objectsPrepared=loadStaticObjects;
+            loaded.showObjects=loadStaticObjects;
+            loaded.lastUse=++m_neighborCacheClock;
             loaded.pendingObjects = result.staticObjects;
             loaded.pendingVisuals = result.visuals;
             m_neighborLandscapes.append(loaded);
+            trimNeighborRenderCache();
             doneCurrent();
             ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3")
                     .arg(loaded.placement.zoneId).arg(result.staticObjects.size()).arg(generation));
@@ -3316,15 +3518,23 @@ void CView::loadNeighborLandscapes()
             }
             update();
         });
-        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, epoch, generation, archives]() {
+        const bool terrainNeeded=cachedIndex<0;
+        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, epoch, generation, archives, terrainNeeded]() {
             if(epoch->load() != generation) return SNeighborSceneData();
-            auto scene=prepareNeighborScene(placement, loadStaticObjects);
+            auto scene=prepareNeighborScene(placement, loadStaticObjects, terrainNeeded);
             if(scene.valid && !scene.staticObjects.isEmpty()) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
                 return epoch->load()==generation;
             });
             return scene;
         }));
     }
+    refreshWorldTerrainNeighbors();
+    if(!m_neighborObjectUploadScheduled) {
+        m_neighborObjectUploadScheduled=true;
+        QTimer::singleShot(0,this,[this,generation](){populateNeighborObjects(generation);});
+    }
+    makeCurrent();trimNeighborRenderCache();doneCurrent();
+    update();
 }
 
 void CView::populateNeighborObjects(quint64 generation)
@@ -3370,6 +3580,8 @@ void CView::populateNeighborObjects(quint64 generation)
             neighbor.landscape->projectPosition(node.data());
             neighbor.staticLocalPositions.append(node->drawPosition());
             neighbor.staticObjects.append(node);
+            for(const auto& item:object->staticRenderItems())
+                neighbor.textureLeases.append(CTextureList::getInstance()->retainSceneTexture(item.texture));
             neighbor.distantParts.append(distant);
             ++added;
         }
@@ -3407,6 +3619,8 @@ void CView::refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor)
         SNeighborDrawRecord record;
         record.full=object->staticRenderItems();
         record.distant=object->staticRenderItems(neighbor.distantParts[i]);
+        for(auto& item:record.full)item.backgroundScenery=true;
+        for(auto& item:record.distant)item.backgroundScenery=true;
         CBox bounds=object->getBBox();
         record.center=bounds.center()+object->drawPosition(); record.radius=bounds.radius();
         neighbor.drawRecords.append(record);
@@ -4607,10 +4821,12 @@ void CView::refreshAfterResourceSetup()
     // Texture source refresh may destroy profile-scoped OpenGL resources.
     makeCurrent();
     clearNeighborLandscapes();
-    makeCurrent();
+    makeCurrent();m_neighborRenderCache.clear();
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources(!m_aMob.isEmpty());
     m_terrainGlobalUniformTileCache.clear();
+    m_globalPaletteReuseCache.clear();
+    m_globalPaletteReuseKey.clear();
     m_terrainGlobalBoundAtlasCache.clear();
     m_terrainGlobalTransitionMissingPages.clear();
     m_terrainGlobalTransitionTileCache.clear();
@@ -8740,12 +8956,14 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         applyShadowUniforms(m_program, withShadows, false, true);
     };
 
-    if(m_activeMob != nullptr)
+    // Neighbor scenery belongs to the world, including active MPRs without MOB.
+    if(m_activeMob != nullptr || !m_neighborLandscapes.isEmpty())
     {
         QSet<CNode*> colorSubmittedNodes;
         if(!m_minimapCaptureActive && m_neighborLandscapesVisible && m_staticObjectsVisible)
             for(auto& neighbor : m_neighborLandscapes)
             {
+                if(!neighbor.showObjects)continue;
                 refreshNeighborRenderCache(neighbor);
                 const float shadowDistance=qMin(maximumShadowDistance,128.0f);
                 const bool shadows=environmentEnabled && shadowsEnabled;
@@ -8814,7 +9032,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 
         // Draw the active MOB in two passes so a selected duplicate remains
         // visible when it occupies exactly the same depth as its source.
-        const QVector<CNode*> activeCandidates = visibleNodes(m_activeMob);
+        const QVector<CNode*> activeCandidates = m_activeMob
+            ? visibleNodes(m_activeMob) : QVector<CNode*>();
         for(CNode* node : activeCandidates)
         {
             if((m_minimapCaptureActive || isMobVisible(m_activeMob))
@@ -9662,7 +9881,22 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
     // doing it before makeCurrent() leaves missing index buffers and the first
     // viewport/minimap draw can dereference a null client-side index pointer.
     makeCurrent();
-    m_pLand->readMap(filePath,createRecoverySnapshot);
+    const auto resources=neighborResourceFingerprint();
+    const auto fingerprint=neighborTerrainFingerprint(filePath.absoluteFilePath(),resources);
+    bool promoted=false;
+    for(auto& cached:m_neighborRenderCache) {
+        if(cached.terrainFingerprint!=fingerprint || !cached.landscape || !cached.landscape->isMprLoad())continue;
+        if(createRecoverySnapshot)CBackupManager().snapshotOnOpen(filePath);
+        m_pLand->setCanonicalTerrainModel(nullptr);
+        cached.landscape->setCanonicalTerrainModel(nullptr);
+        m_pLand->swapRenderState(*cached.landscape);
+        m_pLand->setWorldOffset({0,0,0});
+        cached.lastUse=++m_neighborCacheClock;promoted=true;
+        ei::log(eLogInfo,"Neighbor terrain promoted to active without GPU upload: "+filePath.fileName());
+        break;
+    }
+    if(!promoted)m_pLand->readMap(filePath,createRecoverySnapshot);
+    m_activeRenderResources=fingerprint;
     const qint64 rendererLoadMs = phaseTimer.elapsed();
     if(!m_pLand->isMprLoad())
     {
@@ -9931,6 +10165,7 @@ void CView::unloadLand(bool promptForSave)
     m_neighborPlacements.clear();
     m_activeMapWorldOrigin = QPointF();
     m_hasActiveMapWorldOrigin = false;
+    retainActiveLandscape();
     m_mprModifyTimer->stop();
     m_overlayAnimationTimer.invalidate();
     m_pLand->setCanonicalTerrainModel(nullptr);
@@ -10996,6 +11231,7 @@ bool CView::adoptCommittedLandscapeBaseline(const QFileInfo& destination,
         STerrainAtlasEmbeddedBindingResult();
     m_prevalidatedTerrainTilesAdopted = false;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
+    m_activeRenderResources=neighborTerrainFingerprint(destination.absoluteFilePath(),neighborResourceFingerprint());
     rebuildTerrainAutoCatalog();
     restoreTerrainSemanticFieldFromArchive(
         destination, m_activeTerrainArchivePath, false);
@@ -12071,6 +12307,13 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainGlobalHydrationBestRanks.clear();
     m_terrainGlobalHydrationBestThumbnails.clear();
     m_terrainGlobalHydrationBestSources.clear();
+    const auto referenceArchive=CTextureList::getInstance()->terrainAuthoringArchivePath();
+    const auto materialEpoch=referenceArchive.isEmpty()?neighborResourceFingerprint():neighborContentFingerprint(referenceArchive);
+    if(!m_globalPaletteReuseKey.isEmpty() && m_globalPaletteReuseKey.left(32)!=materialEpoch) {
+        m_terrainGlobalUniformTileCache.clear();
+        m_terrainGlobalBoundAtlasCache.clear();
+        m_globalPaletteReuseCache.clear();
+    }
     // Modern, Classic Auto, and used-family data are derived in separate
     // passes below. They describe one atomic palette state: rebuilding all
     // six widget grids after every pass made MPR open synchronously create and
@@ -12586,6 +12829,20 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
         configuredArchives.append(referenceArchive);
     const QString preferredSourceNamespace = referenceArchive.isEmpty()
         ? currentNamespace : terrainNativeSourceNamespace(currentNamespace);
+    // With a reviewed reference, these global brushes consume its pixels.
+    // Publishing a map-local atlas into HDPack does not change that catalog.
+    m_globalPaletteReuseKey=(referenceArchive.isEmpty()?neighborResourceFingerprint():neighborContentFingerprint(referenceArchive))
+        +preferredSourceNamespace.toUtf8()+'|'+QByteArray::number(requiredSize.width())+'x'+QByteArray::number(requiredSize.height());
+    if(referenceArchive.isEmpty())m_globalPaletteReuseKey+='|'+currentNamespace.toUtf8()+'|'+m_terrainAtlasProfile.atlasPixelSha256;
+    if(m_globalPaletteReuseCache.contains(m_globalPaletteReuseKey)) {
+        const auto cached=m_globalPaletteReuseCache[m_globalPaletteReuseKey];
+        m_terrainGlobalHydrationBestThumbnails=cached.sources;
+        m_terrainGlobalHydrationBestSources=cached.identities;
+        m_terrainGlobalHydrationPendingJobs=0;
+        applyDeferredGlobalTerrainPaletteHydration(generation);
+        ei::log(eLogInfo,"Game-wide material palette reused from unchanged atlas contents");
+        return;
+    }
     QMap<QString, STerrainGlobalBindingHydrationTask> tasks;
     const auto ensureTask = [&](const QString& sourceNamespace,
                                 const QByteArray& pixelSha256,
@@ -12637,16 +12894,12 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
         if(m_terrainGlobalMaterialSources.contains(family.id))
             continue;
         QVector<STerrainGlobalMaterialSource> ordered;
-        const auto appendUnique = [&ordered](
-            const STerrainGlobalMaterialSource& source) {
-            for(const STerrainGlobalMaterialSource& existing : ordered)
-                if(existing.mprNamespace.compare(
-                       source.mprNamespace, Qt::CaseInsensitive) == 0
-                   && existing.atlasPixelSha256
-                        == source.atlasPixelSha256
-                   && existing.uniformSlot == source.uniformSlot)
-                    return;
-            ordered.append(source);
+        QSet<QString> seen;
+        const auto appendUnique = [&ordered,&seen](const STerrainGlobalMaterialSource& source) {
+            const auto key=source.mprNamespace.toCaseFolded()+'|'+QString::number(source.uniformSlot)
+                +'|'+QString::fromLatin1(source.atlasPixelSha256);
+            if(seen.contains(key))return;
+            seen.insert(key);ordered.append(source);
         };
         const auto appendMatching = [&](const QVector<
                                              STerrainGlobalMaterialSource>& sources,
@@ -12848,6 +13101,30 @@ void CView::applyDeferredGlobalTerrainPaletteHydration(quint64 generation)
             .arg(m_terrainGlobalBoundAtlasCache.size())
             .arg(m_terrainGlobalHydrationBestThumbnails.size())
             .arg(m_terrainGlobalMaterialSources.size()));
+        if(!m_globalPaletteReuseKey.isEmpty()) {
+            SGlobalPaletteReuse reused;
+            reused.sources=m_terrainGlobalMaterialSources;reused.identities=m_terrainGlobalMaterialSourceIdentities;
+            m_globalPaletteReuseCache.insert(m_globalPaletteReuseKey,reused);
+            // QImage copies share pixels already owned by the uniform-source
+            // cache. Charge each additional allocation once, not once per map.
+            QSet<qint64> sharedPixels;
+            for(const auto& image:m_terrainGlobalUniformTileCache)sharedPixels.insert(image.cacheKey());
+            const auto chargedBytes=[&]() {
+                auto seen=sharedPixels;quint64 bytes=0;
+                for(const auto& entry:m_globalPaletteReuseCache) {
+                    bytes+=512+quint64(entry.sources.size())*256;
+                    for(const auto& image:entry.sources)if(!seen.contains(image.cacheKey())) {
+                        seen.insert(image.cacheKey());bytes+=image.sizeInBytes();
+                    }
+                }
+                return bytes;
+            };
+            while(m_globalPaletteReuseCache.size()>8 || chargedBytes()>64ull*1024*1024) {
+                auto victim=m_globalPaletteReuseCache.begin();
+                if(victim.key()==m_globalPaletteReuseKey && m_globalPaletteReuseCache.size()>1)++victim;
+                m_globalPaletteReuseCache.erase(victim);
+            }
+        }
         if(m_landscapeTools)
         {
             bool selected = false;
@@ -14229,6 +14506,7 @@ bool CView::adoptCompleteTerrainBaseline(
     m_terrainAtlasProfile = expectedProfile;
     m_authoredTerrainTileImages = physicalTiles;
     m_lastModifiedLand = QFileInfo(destination.absoluteFilePath()).lastModified();
+    m_activeRenderResources=neighborTerrainFingerprint(destination.absoluteFilePath(),neighborResourceFingerprint());
     if(m_pUndoStack && !preserveUndo)
         m_pUndoStack->clear();
     rebuildTerrainAutoCatalog();
@@ -17179,6 +17457,7 @@ void CView::unloadMob(QString mobName)
         {
             m_hiddenMobs.remove(pMob);
             m_scriptWorkspaces->unregisterMob(pMob);
+            retainActiveNeighborObjects(pMob);
             emit unloadMob(pMob);
             delete pMob;
         }
@@ -17198,6 +17477,7 @@ void CView::unloadMob(QString mobName)
             {
                 const bool removedEnvironment = pMob == m_environmentMob;
                 m_scriptWorkspaces->unregisterMob(pMob);
+                retainActiveNeighborObjects(pMob);
                 m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
                 m_aMob.removeOne(pMob);

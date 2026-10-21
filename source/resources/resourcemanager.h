@@ -147,6 +147,9 @@ public:
                                  int& texCount, int& atlasColumns,
                                  const QString& boundArchive = QString());
     void releaseTerrainTexture(QOpenGLTexture* texture);
+    QSharedPointer<QOpenGLTexture> retainSceneTexture(QOpenGLTexture* texture);
+    QByteArray terrainAtlasContentFingerprint(const QString& name, int pages,
+                                              const QString& boundArchive = QString()) const;
     // Terrain atlases have an authored DXT mip chain. This only changes the
     // terrain sampler; character/equipment atlases deliberately remain on
     // their conservative non-mipmapped path because their small islands can
@@ -219,6 +222,7 @@ private:
     QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
     QSet<QOpenGLTexture*> m_terrainTextures;
     QHash<QOpenGLTexture*, int> m_terrainTextureUsers;
+    QHash<QOpenGLTexture*, int> m_sceneTextureUsers;
     bool m_terrainMipmappingEnabled{true};
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;

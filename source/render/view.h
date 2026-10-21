@@ -384,6 +384,7 @@ public:
         const QString& profileId, const QString& activeAllodId,
         const QString& activeZoneId,
         const QString& layoutWarning = QString());
+    void setNeighborCacheTransition(bool active);
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void setWorldTravelAreas(const QVector<STravelArea>& areas);
     bool projectTravelOverlay(int index, QVector3D& point) const;
@@ -1119,6 +1120,10 @@ private:
     struct SLoadedNeighborLandscape
     {
         SNeighborMapPlacement placement;
+        QByteArray terrainFingerprint, objectFingerprint;
+        bool objectsPrepared{false};
+        bool showObjects{false};
+        quint64 lastUse{0};
         QSharedPointer<CLandscape> landscape;
         QMap<QPair<int,int>,QByteArray> terrainPreviewPayloads;
         QSharedPointer<CTerrainWorkingAtlas> terrainPreviewAtlas;
@@ -1126,6 +1131,7 @@ private:
         QVector<QSharedPointer<const SPreparedStaticVisual>> pendingVisuals;
         int nextObject{0};
         QVector<QSharedPointer<CNode>> staticObjects;
+        QVector<QSharedPointer<QOpenGLTexture>> textureLeases;
         QVector<QVector3D> staticLocalPositions;
         QVector<QVector<QSharedPointer<CPart>>> distantParts;
         QVector<SNeighborDrawRecord> drawRecords;
@@ -1135,6 +1141,25 @@ private:
     };
     void refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor);
     QVector<SLoadedNeighborLandscape> m_neighborLandscapes;
+    QVector<SLoadedNeighborLandscape> m_neighborRenderCache;
+    quint64 m_neighborCacheClock{0};
+    quint64 m_neighborCacheBudget{1536ull*1024*1024}; // combined CPU + conservative GPU accounting
+    quint64 m_neighborCacheEvictions{0};
+    bool m_neighborCacheTransition{false};
+    QByteArray m_activeRenderResources;
+    struct SGlobalPaletteReuse {
+        QMap<qint32,QImage> sources;
+        QMap<qint32,STerrainGlobalMaterialSource> identities;
+    };
+    QMap<QByteArray,SGlobalPaletteReuse> m_globalPaletteReuseCache;
+    QByteArray m_globalPaletteReuseKey;
+    QString m_neighborActiveMobPath;
+    QByteArray neighborResourceFingerprint() const;
+    QByteArray neighborObjectResourceFingerprint() const;
+    QByteArray neighborTerrainFingerprint(const QString& path, const QByteArray& resources) const;
+    void trimNeighborRenderCache();
+    void retainActiveLandscape();
+    void retainActiveNeighborObjects(CMob* mob);
     QThreadPool* m_neighborScenePool{nullptr};
     bool m_neighborObjectUploadScheduled{false};
     QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{

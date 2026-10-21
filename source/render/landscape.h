@@ -86,6 +86,9 @@ public:
     bool readPreparedBackground(const QFileInfo& path,
                                 const QMap<QString,QByteArray>& members);
     void setWorldOffset(const QVector3D& offset);
+    void swapRenderState(CLandscape& other);
+    quint64 residentBytes() const;
+    QByteArray baselineSha256() const;
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     void draw(QOpenGLShaderProgram* program, const class CViewFrustum* frustum = nullptr);
@@ -133,6 +136,7 @@ public:
         const QSet<int>& changedSlots = QSet<int>(),
         const QVector<QImage>& rollbackTileImages = QVector<QImage>());
     void clearPreviewTerrainAtlas();
+    void releaseCleanEditorPreview();
     // Compare with the last successful publication, including after Undo/Redo.
     bool previewTerrainAtlasIfChanged(const QVector<QImage>& tileImages,
                                       int textureCount);
@@ -147,6 +151,7 @@ public:
         const QVector<SMprAnimatedTileRecord>& animatedTiles);
     const QString& mapName() const {return m_innerMapName;}
     quint64 shadowGeneration() const { return m_shadowGeneration; }
+    bool shadowPreparationPending() const { return m_terrainShadowFutureActive; }
     void invalidateTerrainShadowField();
     void updateTerrainShadowVisibility(const QVector3D& sunDirection,
                                        bool allowRebuild = true);
@@ -183,6 +188,7 @@ private:
     QOpenGLTexture* m_texture;
     QOpenGLTexture* m_baseAtlasTexture{nullptr};
     int m_baseAtlasColumns{1};
+    bool m_baseAtlasMatchesBaseline{false};
     QOpenGLTexture* m_previewAtlasTexture{nullptr};
     int m_previewAtlasTextureCount{0};
     int m_previewAtlasColumns{0};
@@ -208,6 +214,13 @@ private:
     QVector3D m_terrainShadowDesiredDirection;
     quint64 m_terrainShadowFutureGeneration{0};
     QVector3D m_terrainShadowFutureDirection;
+    struct SCachedSunField {
+        STerrainShadowFieldResult field;
+        QVector3D direction;
+        quint64 generation{0};
+    };
+    QVector<SCachedSunField> m_terrainSunCache;
+    QByteArray m_terrainShadowGeometryDigest;
 };
 
 

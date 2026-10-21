@@ -118,6 +118,8 @@ qint32 CTerrainAtlasPresetCatalog::globalMaterialId(
 QVector<STerrainGlobalMaterialFamily>
 CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
 {
+    static QVector<STerrainGlobalMaterialFamily> cached;
+    if(!cached.isEmpty()) return cached;
     QMap<QString, STerrainGlobalMaterialFamily> grouped;
     QMap<qint32, QString> identityKeys;
     for(const QJsonValue& value : presetArray(report))
@@ -283,6 +285,7 @@ CTerrainAtlasPresetCatalog::globalUniformFamilies(CValidationReport* report)
         if(themeOrder != 0) return themeOrder < 0;
         return left.name.localeAwareCompare(right.name) < 0;
     });
+    cached=result;
     return result;
 }
 
@@ -471,6 +474,8 @@ QImage CTerrainAtlasPresetCatalog::loadGlobalTransitionSource(
 QVector<STerrainGlobalTransitionSource>
 CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
 {
+    static QVector<STerrainGlobalTransitionSource> cached;
+    if(!cached.isEmpty()) return cached;
     QVector<STerrainGlobalTransitionSource> result;
     for(const QJsonValue& value : presetArray(report))
     {
@@ -559,6 +564,7 @@ CTerrainAtlasPresetCatalog::globalAuthoredTransitions(CValidationReport* report)
                 break;
             }
     }
+    cached=result;
     return result;
 }
 

@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "resource_profile.h"
 #include "mpr_document.h"
+#include "neighbor_scene_data.h"
 #include "endurance_document.h"
 #include "mob.h"
 #include <QDialog>
@@ -42,8 +43,8 @@ QString pathKey(const QString& path)
 }
 QString metadataKey(const QFileInfo& info)
 {
-    return pathKey(info.absoluteFilePath()) + "|" + QString::number(info.size())
-        + "|" + QString::number(info.lastModified().toMSecsSinceEpoch());
+    return pathKey(info.absoluteFilePath()) + "|"
+        + QString::fromLatin1(neighborContentFingerprint(info.absoluteFilePath()).toHex());
 }
 }
 

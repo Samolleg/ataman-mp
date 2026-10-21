@@ -35,7 +35,82 @@
 #include "terrain_virtual_atlas.h"
 #include "terrain_atlas_shape_policy.h"
 
+#include <QCryptographicHash>
+#include <QCache>
+
+namespace {
+QCache<QByteArray,STerrainShadowFieldResult>& retainedSunFields()
+{ static QCache<QByteArray,STerrainShadowFieldResult> cache(128*1024);return cache; }
+QByteArray sunFieldKey(const QByteArray& geometry,const QVector3D& direction)
+{
+    QByteArray key=geometry;QDataStream stream(&key,QIODevice::Append);stream<<direction;return key;
+}
+}
+
 CLandscape* CLandscape::m_pLand = nullptr;
+
+QByteArray CLandscape::baselineSha256() const
+{ return QCryptographicHash::hash(m_originalMprData,QCryptographicHash::Sha256); }
+
+quint64 CLandscape::residentBytes() const
+{
+    quint64 bytes=m_originalMprData.capacity();
+    for(const auto& row:m_aSector)for(const auto* sector:row)if(sector)bytes+=sector->residentBytes();
+    const QOpenGLTexture* textures[]={m_baseAtlasTexture,m_previewAtlasTexture,m_terrainShadowTexture};
+    for(const auto* texture:textures)if(texture)bytes+=quint64(texture->width())*texture->height()*4*4/3;
+    for(const auto& image:m_previewAtlasImages)bytes+=quint64(image.sizeInBytes());
+    for(const auto& image:m_previewDisplayImages)bytes+=quint64(image.sizeInBytes());
+    for(const auto& cached:m_terrainSunCache)bytes+=quint64(cached.field.visibility.capacity())*sizeof(float);
+    return bytes;
+}
+
+void CLandscape::swapRenderState(CLandscape& other)
+{
+    Q_ASSERT(!m_canonicalTerrain && !other.m_canonicalTerrain);
+    using std::swap;
+    swap(m_worldOffset,other.m_worldOffset);
+    swap(m_header,other.m_header);
+    swap(m_aMaterial,other.m_aMaterial);
+    swap(m_aTileTypes,other.m_aTileTypes);
+    swap(m_aAnimTile,other.m_aAnimTile);
+    swap(m_renderTextureCount,other.m_renderTextureCount);
+    swap(m_renderAtlasColumns,other.m_renderAtlasColumns);
+    swap(m_aSector,other.m_aSector);
+    swap(m_texture,other.m_texture);
+    swap(m_baseAtlasTexture,other.m_baseAtlasTexture);
+    swap(m_baseAtlasColumns,other.m_baseAtlasColumns);
+    swap(m_baseAtlasMatchesBaseline,other.m_baseAtlasMatchesBaseline);
+    swap(m_previewAtlasTexture,other.m_previewAtlasTexture);
+    swap(m_previewAtlasTextureCount,other.m_previewAtlasTextureCount);
+    swap(m_previewAtlasColumns,other.m_previewAtlasColumns);
+    swap(m_previewAtlasImages,other.m_previewAtlasImages);
+    swap(m_previewDisplayImages,other.m_previewDisplayImages);
+    swap(m_filePath,other.m_filePath);
+    swap(m_innerMapName,other.m_innerMapName);
+    swap(m_originalMprData,other.m_originalMprData);
+    swap(m_arrIncorectTiles,other.m_arrIncorectTiles);
+    swap(m_bDirty,other.m_bDirty);
+    swap(m_materialDrawDataDirty,other.m_materialDrawDataDirty);
+    swap(m_shadowGeneration,other.m_shadowGeneration);
+    swap(m_terrainShadowFieldGeneration,other.m_terrainShadowFieldGeneration);
+    swap(m_terrainShadowSunDirection,other.m_terrainShadowSunDirection);
+    swap(m_terrainShadowTexture,other.m_terrainShadowTexture);
+    swap(m_terrainShadowTextureWidth,other.m_terrainShadowTextureWidth);
+    swap(m_terrainShadowTextureHeight,other.m_terrainShadowTextureHeight);
+    swap(m_terrainShadowFuture,other.m_terrainShadowFuture);
+    swap(m_terrainShadowFutureActive,other.m_terrainShadowFutureActive);
+    swap(m_terrainShadowDesiredGeneration,other.m_terrainShadowDesiredGeneration);
+    swap(m_terrainShadowDesiredDirection,other.m_terrainShadowDesiredDirection);
+    swap(m_terrainShadowFutureGeneration,other.m_terrainShadowFutureGeneration);
+    swap(m_terrainShadowFutureDirection,other.m_terrainShadowFutureDirection);
+    swap(m_terrainSunCache,other.m_terrainSunCache);
+    swap(m_terrainShadowGeometryDigest,other.m_terrainShadowGeometryDigest);
+
+    for(auto* owner:{this,&other})
+        for(auto& row:owner->m_aSector)for(auto* sector:row)if(sector)
+            sector->rebindMaterials(&owner->m_aMaterial,&owner->m_aAnimTile);
+}
+
 
 CLandscape* CLandscape::getInstance()
 {
@@ -56,6 +131,7 @@ void CLandscape::unloadMpr()
     CTextureList::getInstance()->releaseTerrainTexture(m_baseAtlasTexture);
     m_baseAtlasTexture = nullptr;
     m_baseAtlasColumns = 1;
+    m_baseAtlasMatchesBaseline = false;
     m_texture = nullptr;
     for (auto& xSec: m_aSector)
     {
@@ -78,6 +154,8 @@ void CLandscape::unloadMpr()
     m_terrainShadowDesiredGeneration = 0;
     m_terrainShadowDesiredDirection = QVector3D();
     m_terrainShadowFutureActive = false;
+    m_terrainSunCache.clear();
+    m_terrainShadowGeometryDigest.clear();
     ++m_shadowGeneration;
     m_materialDrawDataDirty = false;
 }
@@ -565,6 +643,18 @@ bool CLandscape::previewTerrainAtlasIfChanged(
     return installed;
 }
 
+void CLandscape::releaseCleanEditorPreview()
+{
+    // A clean editor preview may be an uncompressed copy of the complete
+    // authored atlas. Backgrounds can retain the already uploaded base atlas.
+    // A compacting Save changes the baseline without replacing that base:
+    // its matching preview must stay alive until a fresh load replaces it.
+    if(!m_bDirty && m_baseAtlasMatchesBaseline && m_previewAtlasTexture) {
+        clearPreviewTerrainAtlas();
+        ei::log(eLogInfo,"Released clean editor-only terrain preview; retained authored atlas");
+    }
+}
+
 void CLandscape::clearPreviewTerrainAtlas()
 {
     m_previewAtlasImages.clear();
@@ -739,7 +829,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
     m_filePath = path;
 
     QFile source(path.filePath());
-    if(!prepared && source.open(QIODevice::ReadOnly))
+    if(source.open(QIODevice::ReadOnly))
         m_originalMprData = source.readAll();
 
     if(createRecoverySnapshot)
@@ -810,6 +900,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
     m_baseAtlasColumns = atlasColumns;
+    m_baseAtlasMatchesBaseline = true;
     m_renderAtlasColumns = qMax(1, atlasColumns);
     ei::log(eLogInfo, QString("MPR terrain atlas complete file:%1 textureCount:%2")
             .arg(path.fileName()).arg(texCount));
@@ -1000,6 +1091,7 @@ bool CLandscape::adoptCanonicalTerrainSave(
        || !adoptCanonicalSave(path, bytes))
         return false;
     m_innerMapName = innerNamespace;
+    m_baseAtlasMatchesBaseline = false;
     m_header.nTexture = textureCount;
     m_header.textureSize = textureSize;
     m_header.nTile = tileCount;
@@ -1205,6 +1297,14 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
                 return;
             m_terrainShadowFieldGeneration = m_terrainShadowFutureGeneration;
             m_terrainShadowSunDirection = m_terrainShadowFutureDirection;
+            SCachedSunField snapshot;
+            snapshot.field=result;snapshot.direction=m_terrainShadowFutureDirection;
+            snapshot.generation=m_shadowGeneration;
+            m_terrainSunCache.append(snapshot);
+            if(m_terrainSunCache.size()>8)m_terrainSunCache.removeFirst();
+            if(!m_terrainShadowGeometryDigest.isEmpty())retainedSunFields().insert(
+                sunFieldKey(m_terrainShadowGeometryDigest,m_terrainShadowFutureDirection),
+                new STerrainShadowFieldResult(result),qMax(1,result.visibility.size()*int(sizeof(float))/1024));
             RenderPerformanceContext& performance = RenderPerformanceContext::instance();
             if(performance.collecting())
             {
@@ -1231,6 +1331,21 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
     if(!allowRebuild)
         return;
 
+    // Active MOBs can request different sun directions. A roundtrip can reuse
+    // a complete field instead of tracing the same relief and direction again.
+    for(int i=0;i<m_terrainSunCache.size();++i) {
+        const auto& cached=m_terrainSunCache[i];
+        if(cached.generation!=m_shadowGeneration
+           ||QVector3D::dotProduct(normalized,cached.direction)<=0.99999f)continue;
+        if(uploadTerrainShadowTexture(cached.field)) {
+            m_terrainShadowFieldGeneration=m_shadowGeneration;
+            m_terrainShadowSunDirection=cached.direction;
+            m_terrainSunCache.move(i,m_terrainSunCache.size()-1);
+            ei::log(eLogInfo,"Terrain sun visibility reused for unchanged relief/direction");
+        }
+        return;
+    }
+
     // Slider changes coalesce behind the one immutable worker. The last complete
     // field remains displayed until the newest requested direction is ready.
     if(m_terrainShadowFutureActive)
@@ -1242,6 +1357,23 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
         for(CSector* sector : row)
             if(sector)
                 sector->collectTerrainHeights(heights, present, gridWidth, gridHeight);
+
+    if(m_terrainShadowGeometryDigest.isEmpty()) {
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        hash.addData(QByteArray::number(gridWidth)+'x'+QByteArray::number(gridHeight));
+        hash.addData(reinterpret_cast<const char*>(heights.constData()),heights.size()*int(sizeof(float)));
+        hash.addData(reinterpret_cast<const char*>(present.constData()),present.size());
+        m_terrainShadowGeometryDigest=hash.result();
+    }
+    if(const auto* cached=retainedSunFields().object(sunFieldKey(m_terrainShadowGeometryDigest,normalized))) {
+        if(uploadTerrainShadowTexture(*cached)) {
+            m_terrainShadowFieldGeneration=m_shadowGeneration;m_terrainShadowSunDirection=normalized;
+            SCachedSunField snapshot;snapshot.field=*cached;snapshot.direction=normalized;snapshot.generation=m_shadowGeneration;
+            m_terrainSunCache.append(snapshot);if(m_terrainSunCache.size()>8)m_terrainSunCache.removeFirst();
+            ei::log(eLogInfo,"Terrain sun visibility reused by relief content fingerprint");
+        }
+        return;
+    }
 
     m_terrainShadowFutureGeneration = m_shadowGeneration;
     m_terrainShadowFutureDirection = normalized;
@@ -1463,6 +1595,8 @@ void CLandscape::updateSectorDrawData(int xSec, int ySec)
 void CLandscape::invalidateTerrainShadowField()
 {
     ++m_shadowGeneration;
+    m_terrainSunCache.clear();
+    m_terrainShadowGeometryDigest.clear();
 }
 
 void CLandscape::drawTileGrid(QOpenGLShaderProgram* program)

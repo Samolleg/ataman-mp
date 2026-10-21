@@ -1,3 +1,6 @@
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #include "neighbor_scene_data.h"
 #include "endurance_document.h"
 #include "mpr_document.h"
@@ -7,6 +10,53 @@
 #include <QtEndian>
 #include <cmath>
 #include <cstring>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QMutex>
+#include <QDateTime>
+#include <QMutexLocker>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
+QByteArray neighborContentFingerprint(const QString& path)
+{
+    if(path.isEmpty()) return {};
+    const QFileInfo info(path);
+    QByteArray revision=(info.absoluteFilePath().toCaseFolded()+QString::number(info.size())
+        +info.lastModified().toString(Qt::ISODateWithMs)).toUtf8();
+    bool memoizable=false;
+#ifdef Q_OS_WIN
+    HANDLE handle=CreateFileW(reinterpret_cast<LPCWSTR>(info.absoluteFilePath().utf16()),
+        FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,
+        OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(handle!=INVALID_HANDLE_VALUE) {
+        FILE_BASIC_INFO basic{}; BY_HANDLE_FILE_INFORMATION identity{};
+        if(GetFileInformationByHandleEx(handle,FileBasicInfo,&basic,sizeof(basic))
+           && GetFileInformationByHandle(handle,&identity)) {
+            revision+=QByteArray::number(basic.ChangeTime.QuadPart)+":"
+                +QByteArray::number(quint64(identity.dwVolumeSerialNumber))+":"
+                +QByteArray::number(quint64(identity.nFileIndexHigh))+":"+QByteArray::number(quint64(identity.nFileIndexLow));
+            memoizable=true;
+        }
+        CloseHandle(handle);
+    }
+#endif
+    struct Entry { QByteArray revision,hash; };
+    static QMutex mutex; QMutexLocker lock(&mutex);
+    static QMap<QString,Entry> cache;
+    const auto key=info.absoluteFilePath().toCaseFolded();
+    if(memoizable && cache.contains(key) && cache[key].revision==revision) return cache[key].hash;
+    QFile file(path); QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(key.toUtf8());
+    if(file.open(QIODevice::ReadOnly)) {
+        if(!hash.addData(&file)) return {}; // unreadable input must not match a prior rendering
+    } else hash.addData("missing-or-unreadable");
+    const auto result=hash.result();
+    if(cache.size()>=512)cache.clear();
+    if(memoizable)cache.insert(key,{revision,result});
+    return result;
+}
 
 namespace {
 void indexSections(const QVector<SMobSection>& sections,
@@ -83,9 +133,10 @@ QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document)
 }
 
 SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
-                                        bool loadStaticObjects)
+                                        bool loadStaticObjects, bool loadTerrain)
 {
     SNeighborSceneData result; result.placement=placement;
+    if(loadTerrain) {
     CMprDocument terrain; CValidationReport report;
     if(!terrain.load(QFileInfo(placement.mprPath),&report) || report.hasErrors()
        || int(terrain.mapInfo().sectorCountX)*32 != qRound(placement.size.width())
@@ -96,6 +147,7 @@ SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
     }
     for(const auto& member : terrain.members())
         result.terrainMembers.insert(member.name,member.payload);
+    }
     result.valid=true;
     if(loadStaticObjects && !placement.mobPath.isEmpty())
     {

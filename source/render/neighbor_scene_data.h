@@ -7,6 +7,8 @@
 #include <QSharedPointer>
 #include "neighbor_map_layout.h"
 class CMobDocument;
+// Content SHA, memoized only while native file identity and change time match.
+QByteArray neighborContentFingerprint(const QString& path);
 struct SPreparedStaticVisual;
 struct SNeighborSceneData
 {
@@ -20,5 +22,5 @@ struct SNeighborSceneData
 // Pure CPU snapshots: no QObject, singleton resource cache or GL access.
 QVector<QJsonObject> neighborStaticObjects(const CMobDocument& document);
 SNeighborSceneData prepareNeighborScene(const SNeighborMapPlacement& placement,
-                                        bool loadStaticObjects = true);
+                                        bool loadStaticObjects = true, bool loadTerrain = true);
 #endif

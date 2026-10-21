@@ -36,6 +36,7 @@ struct SRenderItem
     quint64 sequence{0};
     bool castsShadow{false};
     bool dynamicShadow{false};
+    bool backgroundScenery{false};
     bool colorVisible{true};
     QVector3D shadowBoundsCenter;
     float shadowBoundsRadius{0.0f};
@@ -112,6 +113,7 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.materialClass != ERenderMaterialClass::Conservative
         && left.materialClass == right.materialClass
         && left.dynamicShadow == right.dynamicShadow
+        && left.backgroundScenery == right.backgroundScenery
         && left.shadowOwner == right.shadowOwner
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity

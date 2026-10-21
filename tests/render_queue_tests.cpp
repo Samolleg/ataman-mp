@@ -116,6 +116,9 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     QVERIFY(!shareInstanceBatch(first, highlighted));
     QVERIFY(!shareInstanceBatch(first, dynamicCaster));
     QVERIFY(!shareInstanceBatch(first, emissive));
+    SRenderItem neighbor = first;
+    neighbor.backgroundScenery = true;
+    QVERIFY(!shareInstanceBatch(first, neighbor)); // the border-fog uniform differs
 }
 
 void RenderQueueTests::filtersShadowCastersByDistance()

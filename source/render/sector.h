@@ -51,6 +51,9 @@ public:
                                int gridWidth, int gridHeight) const;
     bool intersectsFrustum(const class CViewFrustum& frustum) const;
     void setIndex(UI2& index) {m_index = index; updatePosition(); }
+    void rebindMaterials(const QVector<SMaterial>* materials, const QVector<SAnimTile>* animations)
+    { m_materials=materials; m_animatedTiles=animations; }
+    quint64 residentBytes() const;
     void setWorldOffset(const QVector3D& offset)
     { m_worldOffset = offset; updatePosition(); }
     const UI2& index() {return m_index;}

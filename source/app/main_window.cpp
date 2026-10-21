@@ -7279,6 +7279,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     }
     if(!beginWorkspaceLoad(tr("map %1").arg(zoneId)))
         return;
+    m_pView->setNeighborCacheTransition(true);
     QVector3D sourceCameraPosition;
     QVector3D sourceCameraPivot;
     QVector3D sourceCameraRotation;
@@ -7346,6 +7347,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     endWorkspaceLoad();
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
+    m_pView->setNeighborCacheTransition(false);
     rebuildWindowTitle();
     QTimer::singleShot(0, this, [this]()
     {

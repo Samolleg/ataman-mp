@@ -69,16 +69,17 @@ void CView::restoreWorldTerrainActive()
         if(!previewWorldPaintState(id)){m_terrainEditAvailable=false;return;}
         updateWorldTerrainStatus();return;
     }
+    bool changed=false;
     for(const auto& sector:doc->baseline.sectors())
     {
         const auto before=m_terrainEdit.sectorPayload(sector.sectorX,sector.sectorY);
         const auto after=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
-        if(before!=after) m_pLand->previewCanonicalSector(sector.sectorX,sector.sectorY,after);
+        if(before!=after) {m_pLand->previewCanonicalSector(sector.sectorX,sector.sectorY,after);changed=true;}
     }
     m_terrainEdit=doc->terrain;
     m_pLand->setCanonicalTerrainModel(&m_terrainEdit);
     m_pLand->setDirty(m_terrainEdit.isDirty());
-    m_pLand->invalidateTerrainShadowField();
+    if(changed)m_pLand->invalidateTerrainShadowField();
     updateWorldTerrainStatus();
 }
 
@@ -90,7 +91,20 @@ void CView::refreshWorldTerrainNeighbors()
         const QString id=CWorldTerrainSession::key(loaded.placement.mprPath);
         if(!m_worldTerrainSession.documents.contains(id)) continue;
         auto doc=m_worldTerrainSession.documents[id];
+        if(QCryptographicHash::hash(doc->baseline.originalBytes(),QCryptographicHash::Sha256)
+           !=loaded.landscape->baselineSha256()) {
+            // A newer disk snapshot must not be projected/painted through the
+            // old retained model. Keep that session available for explicit
+            // conflict resolution, while rendering the newly read map.
+            loaded.landscape->setCanonicalTerrainModel(nullptr);
+            ei::log(eLogWarning,"Retained world model differs from the current neighbor; displaying disk snapshot: "+loaded.placement.mprPath);
+            continue;
+        }
         loaded.landscape->setCanonicalTerrainModel(&doc->terrain);
+        const bool retainedDirty=doc->terrain.isDirty() || doc->materials!=doc->baseline.mapInfo().materials;
+        // Clean atlas snapshots are already represented by the disk renderer.
+        // Reapplying one would hide an external atlas publication.
+        if(!retainedDirty)continue;
         if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
             if(!previewWorldPaintState(id)){emit updateMsg(tr("Не удалось обновить атлас соседней карты."));continue;}
         }
@@ -598,6 +612,13 @@ bool CView::resolveWorldTerrainClose(bool retain)
         if(choice==QMessageBox::Save && !saveWorldTerrainMaps()) return false;
         if(choice==QMessageBox::Discard)
         {
+            // Render-cache snapshots of unsaved artwork must not outlive an
+            // explicit world-session discard, including currently invisible maps.
+            QSet<QString> discarded;
+            for(const auto& path:paths)discarded.insert(CWorldTerrainSession::key(path));
+            for(auto& cached:m_neighborRenderCache)if(discarded.contains(CWorldTerrainSession::key(cached.placement.mprPath)))cached.terrainFingerprint.clear();
+            for(auto& loaded:m_neighborLandscapes)if(discarded.contains(CWorldTerrainSession::key(loaded.placement.mprPath)))loaded.terrainFingerprint.clear();
+            if(m_pLand->isMprLoad() && discarded.contains(CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath())))m_activeRenderResources.clear();
             // Explicit discard resets all retained models before detaching views.
             for(auto doc:m_worldTerrainSession.documents)
             { CValidationReport report;doc->terrain.load(doc->baseline,&report);doc->atlas.clear();doc->materials=doc->baseline.mapInfo().materials; }
