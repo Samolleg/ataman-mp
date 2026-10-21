@@ -1,3 +1,7 @@
+## EI-PUBLISH-216-20261021 — очищенная публикация216
+
+- DONE/PUBLISHED21.10: поручение владельца выполнено;9 коммитов cdb1de15→c77fa0ab, marks212. GitHub main b4dd9b4a2ed2fdbb7b8a8675f709d876797d3fcc→6d35880cee2bb6cc11bd21729c4537a56e9a2825, один fast-forward push точного SHA. Деревья/метаданные, исключения/недостижимость blob, приватный код, fsck/QRC/секреты/100 МиБ PASS. Evidence docs/validation/ATAMAN_GITHUB_216_20261021.md; receipts build-github-ataman216-20261021. Программа/установка/игра/мод не менялись; чужой diff ROADMAP вне коммита. Локальный коммит отчёта не публикуется; задача завершена.
+
 ## EI-STARTUP-216 — запуск и каталог материалов
 
 - Поручение владельца21.10: main d6a81ad1b41c0eee94169339467523862bced794/215 →216; найти измерением тихие16–35с, постоянные Startup phases, готовое окно ≤3с, ускорить materialCatalogMs zone1 без устаревшего атласа. Сохранить209–215/базу131; RecipeBaker/MixedEdge не возвращать. Только изолированные копии ресурсов/QSettings/AppData, без буфера/старых сборок/смены приоритета/push. Scoped-коммит main с заданным авторством, Release из git archive и свежий staging. СТОП ПЕРЕД УСТАНОВКОЙ; чужая правка ROADMAP вне коммита.
