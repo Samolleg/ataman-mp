@@ -682,6 +682,10 @@ private:
     bool resolveWorldTerrainClose(bool retain);
     bool ensureWorldTerrainAtlas(const QString& id,CValidationReport* report);
     bool paintWorldTerrainAt(const QVector3D& position,bool land);
+    bool worldTerrainTile(QVector3D& position, bool land, CTile*& tile,
+                          STileLocation& location, CLandscape** landscape = nullptr,
+                          QPointF* origin = nullptr) const;
+    bool projectWorldTerrainPoint(QVector3D* point, bool land) const;
     bool previewWorldPaintState(const QString& id,
                                const CTerrainEditModel* previousTerrain = nullptr);
     bool eraseWorldOverlayAt(const QVector3D& position);
@@ -1302,6 +1306,7 @@ private:
     bool m_terrainSampleGestureActive{false};
     bool m_terrainSampleKeyValid{false};
     QPoint m_lastTerrainSamplePoint;
+    QString m_lastTerrainSampleMap;
     int m_lastTerrainSampleLayer{-1};
     int m_lastTerrainSampleMode{-1};
     bool m_paintIssueDragActive{false};

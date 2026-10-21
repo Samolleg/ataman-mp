@@ -12167,8 +12167,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
                                              QVector3D* result)
     {
         QVector3D point(x, y, 0.0f);
-        if(!m_pLand->projectPt(point, landLayer)
-           && (landLayer || !m_pLand->projectPt(point, true)))
+        if(!projectWorldTerrainPoint(&point, landLayer))
             return false;
         point.setZ(point.z() + 0.12f);
         *result = point;
@@ -16510,6 +16509,20 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
         SNeighborMapPlacement placement;QVector3D point;
         if(neighborMapAtViewport(QPoint(cursorPosX,cursorPosY),&placement,&point,false,!overlay || adding)
            && m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(placement.mprPath))) {
+            bool projectionLand = !overlay || adding;
+            if(adding)
+                for(const auto& neighbor : m_neighborLandscapes)
+                    if(CWorldTerrainSession::key(neighbor.placement.mprPath)
+                       == CWorldTerrainSession::key(placement.mprPath))
+                    {
+                        QVector3D surface = point - QVector3D(placement.origin.x(), placement.origin.y(), 0);
+                        if(neighbor.landscape->projectPt(surface, false))
+                        { point.setZ(surface.z()); projectionLand = false; }
+                        break;
+                    }
+            if(m_terrainPaintProjectionLand != projectionLand)
+                m_terrainPaintOutlineGeometryDirty = true;
+            m_terrainPaintProjectionLand = projectionLand;
             if(hit)*hit=true;return point;
         }
     }
@@ -19203,9 +19216,41 @@ bool CView::pickTile(QVector3D posOnLand, bool bLand)
 
     CTile* pTile = nullptr;
     STileLocation tileLoc;
+    const QVector3D viewportPosition = posOnLand;
+    CLandscape* sampledLandscape = nullptr;
     const bool pickLand = bLand || (!bLand && m_terrainPaintProjectionLand);
-    if(!m_pLand->pickTile(posOnLand, pTile, tileLoc, pickLand))
+    if(!worldTerrainTile(posOnLand, pickLand, pTile, tileLoc, &sampledLandscape))
         return false;
+
+    const QString sampledMap = CWorldTerrainSession::key(
+        sampledLandscape->filePath().absoluteFilePath());
+    const bool neighbor = sampledLandscape != m_pLand;
+    const CTerrainEditModel* sampledTerrain = &m_terrainEdit;
+    QSharedPointer<CTerrainWorkingAtlas> sampledAtlas = m_workingTerrainAtlas;
+    if(neighbor)
+    {
+        QString error; CValidationReport report;
+        if(!m_worldTerrainSession.load(sampledLandscape->filePath().absoluteFilePath(), &error)
+           || !ensureWorldTerrainAtlas(sampledMap, &report))
+        {
+            emit updateMsg(tr("Не удалось взять материал соседней карты: %1 %2")
+                .arg(error, report.toText()));
+            return false;
+        }
+        const auto document = m_worldTerrainSession.documents.value(sampledMap);
+        bool publishedHere = false;
+        for(const auto& loaded : m_neighborLandscapes)
+            if(loaded.landscape.data() == sampledLandscape)
+                publishedHere = loaded.terrainPreviewAtlas == document->atlas;
+        if(QCryptographicHash::hash(document->baseline.originalBytes(), QCryptographicHash::Sha256)
+           != sampledLandscape->baselineSha256() && !publishedHere)
+        {
+            emit updateMsg(tr("Соседняя карта изменилась на диске. Сначала сохраните или закройте удержанную сессию общей кисти."));
+            return false;
+        }
+        sampledTerrain = &document->terrain;
+        sampledAtlas = document->atlas;
+    }
 
     const int globalX = tileLoc.xSec * 16 + tileLoc.col;
     const int globalY = tileLoc.ySec * 16 + tileLoc.row;
@@ -19222,30 +19267,61 @@ bool CView::pickTile(QVector3D posOnLand, bool bLand)
                      + qBound(0, qRound(posOnLand.y() / 2.0f), 16));
     const int sampleLayer = bLand ? 0 : 1;
     if(m_terrainSampleGestureActive
+       && m_lastTerrainSampleMap == sampledMap
        && !terrainContinuousSampleShouldUpdate(
               m_terrainSampleKeyValid, m_lastTerrainSamplePoint,
               m_lastTerrainSampleLayer, m_lastTerrainSampleMode,
               samplePoint, sampleLayer, paletteMode))
         return false;
-    if(m_terrainSampleGestureActive)
+    int sampledOverlayMaterial = -1;
+    if(!bLand)
     {
-        m_terrainSampleKeyValid = true;
-        m_lastTerrainSamplePoint = samplePoint;
-        m_lastTerrainSampleLayer = sampleLayer;
-        m_lastTerrainSampleMode = paletteMode;
+        sampledOverlayMaterial = pTile->materialIndex();
+        if(neighbor)
+        {
+            const auto records = m_worldTerrainSession.documents.value(sampledMap)->materials;
+            sampledOverlayMaterial = sampledOverlayMaterial >= 0 && sampledOverlayMaterial < records.size()
+                ? m_mprMaterials.indexOf(records[sampledOverlayMaterial]) : -1;
+        }
+        if(sampledOverlayMaterial < 0 || sampledOverlayMaterial >= m_mprMaterials.size())
+        {
+            emit updateMsg(tr("Материал покрытия карты %1 отсутствует в таблице покрытий активной карты. Выбор кисти сохранён.")
+                .arg(QFileInfo(sampledMap).fileName()));
+            return false;
+        }
     }
 
     // Imported and generated working-atlas slots are valid semantic paint
     // results but do not exist in the authored atlas inspector.  The semantic
     // sampler below owns those slots; update the legacy manual selection only
     // when the physical index belongs to its bounded authored table.
-    if(m_pTileForm->selectTile(pTile->tileIndex()))
+    int manualSlot = pTile->tileIndex();
+    if(neighbor && manualMode)
+    {
+        // Physical slots are map-local, even when both maps have slot 0.
+        // Match pixels and runtime type, never reuse a neighbor's index.
+        const auto sourceImages = sampledAtlas->activeTileImages();
+        const auto activeImages = m_workingTerrainAtlas->activeTileImages();
+        manualSlot = -1;
+        if(pTile->tileIndex() < sourceImages.size())
+            for(int slot = 0; slot < activeImages.size(); ++slot)
+                if(activeImages[slot] == sourceImages[pTile->tileIndex()]
+                   && m_workingTerrainAtlas->runtimeTerrainTypeForSlot(slot)
+                       == sampledAtlas->runtimeTerrainTypeForSlot(pTile->tileIndex()))
+                { manualSlot = slot; break; }
+        if(manualSlot < 0)
+        {
+            emit updateMsg(tr("Тайл соседней карты отсутствует в ручной палитре активной карты. Выберите режим материалов для пипетки."));
+            return false;
+        }
+    }
+    if((!neighbor || manualMode) && m_pTileForm->selectTile(manualSlot))
         m_pTileForm->setTileRotation(pTile->tileRotation());
     if(m_landscapeTools
        && m_landscapeTools->paintPaletteMode()
             == ETerrainPaintPaletteMode::Manual)
     {
-        m_landscapeTools->selectManualAtlasTile(pTile->tileIndex());
+        m_landscapeTools->selectManualAtlasTile(manualSlot);
         // Selecting the list row emits the same signal as a click and resets
         // rotation to zero. Restore the packed rotation sampled from the map.
         m_pTileForm->setTileRotation(pTile->tileRotation());
@@ -19253,19 +19329,19 @@ bool CView::pickTile(QVector3D posOnLand, bool bLand)
     if(m_landscapeTools && m_terrainEditAvailable)
     {
         bool found = false;
-        const quint16 packed = m_terrainEdit.packedTile(globalX, globalY,
+        const quint16 packed = sampledTerrain->packedTile(globalX, globalY,
             bLand ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay, &found);
         const ETerrainTileLayer layer = bLand
             ? ETerrainTileLayer::Land : ETerrainTileLayer::Overlay;
-        const CTerrainTransitionCatalog& catalog = m_workingTerrainAtlas
-            ? m_workingTerrainAtlas->catalog()
+        const CTerrainTransitionCatalog& catalog = sampledAtlas
+            ? sampledAtlas->catalog()
             : (!bLand ? m_terrainAtlasAnalysis.overlayCatalogWithLandFamilies()
                       : m_terrainAtlasAnalysis.catalog(layer));
         const int vertexX = tileLoc.xSec * 16
             + qBound(0, qRound(posOnLand.x() / 2.0f), 16);
         const int vertexY = tileLoc.ySec * 16
             + qBound(0, qRound(posOnLand.y() / 2.0f), 16);
-        qint32 sampledMaterial = m_terrainEdit.virtualMaterialAt(
+        qint32 sampledMaterial = sampledTerrain->virtualMaterialAt(
             layer, vertexX, vertexY, &found);
         if(!found)
         {
@@ -19288,14 +19364,36 @@ bool CView::pickTile(QVector3D posOnLand, bool bLand)
             if(m_landscapeTools->selectPaintTerrainType(sampledMaterial))
                 emit updateMsg(tr("Sampled nearest terrain vertex material %1.")
                                    .arg(sampledMaterial));
-            else
-                emit updateMsg(tr("The nearest vertex material is contextual and has no brush in this palette."));
+            else {
+                emit updateMsg(tr("Материал %1 карты %2 отсутствует в текущей палитре. Выбор кисти сохранён.")
+                    .arg(sampledMaterial).arg(QFileInfo(sampledMap).fileName()));
+                return false;
+            }
+        }
+        else if(!found && !manualMode)
+        {
+            emit updateMsg(tr("Не удалось сопоставить материал карты %1 с общей палитрой.")
+                .arg(QFileInfo(sampledMap).fileName()));
+            return false;
         }
     }
     if(!bLand)
-        m_pTileForm->setActiveMatIndex(pTile->materialIndex());
+    {
+        m_pTileForm->setActiveMatIndex(sampledOverlayMaterial);
+        if(m_landscapeTools)
+            if(auto* choice = m_landscapeTools->findChild<QComboBox*>("overlaySurfaceMaterial"))
+                choice->setCurrentIndex(sampledOverlayMaterial);
+    }
+    if(m_terrainSampleGestureActive)
+    {
+        m_terrainSampleKeyValid = true;
+        m_lastTerrainSamplePoint = samplePoint;
+        m_lastTerrainSampleMap = sampledMap;
+        m_lastTerrainSampleLayer = sampleLayer;
+        m_lastTerrainSampleMode = paletteMode;
+    }
 
-    m_pPreviewTile->updateTile(*pTile, pTile->tileIndex(), pTile->tileRotation(), pTile->materialIndex(), tileLoc.xSec, tileLoc.ySec);
+    updatePreviewTile(viewportPosition, bLand);
     return true;
 }
 
@@ -19322,12 +19420,14 @@ bool CView::resolveTerrainPaintFootprint(
 
     const bool pickLand = terrainPaintPickUsesLandLayer(
         land, m_terrainPaintProjectionLand);
-    if(!m_pLand->pickTile(position, *tile, *location, pickLand))
+    QPointF origin;
+    if(!worldTerrainTile(position, pickLand, *tile, *location, nullptr, &origin))
         return false;
 
-    const QPoint cellAnchor(location->xSec * 16 + location->col,
-                            location->ySec * 16 + location->row);
-    *detailVertex = QPoint(
+    const QPoint offset(qRound(origin.x() / 2), qRound(origin.y() / 2));
+    const QPoint cellAnchor = offset + QPoint(location->xSec * 16 + location->col,
+                                              location->ySec * 16 + location->row);
+    *detailVertex = offset + QPoint(
         location->xSec * 16 + qBound(0, qRound(position.x() / 2.0f), 16),
         location->ySec * 16 + qBound(0, qRound(position.y() / 2.0f), 16));
     const bool cellCentered = manualTilePaintingEnabled()
@@ -20557,6 +20657,8 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     {
         m_terrainPaintFootprintValid = false;
         m_terrainPaintOutlineValid = false;
+        setPreviewTile(false);
+        update();
         return;
     }
     m_terrainPaintFootprint = freshFootprint;
@@ -20601,7 +20703,16 @@ void CView::updatePreviewTile(QVector3D posOnLand, bool bLand)
     int matIndex;
 
     matIndex = m_pTileForm->activeMaterialindex();
-    m_pPreviewTile->updateTile(*pTile, index, rotNum, matIndex, tileLoc.xSec, tileLoc.ySec);
+    CTile previewTile = *pTile;
+    const int textures = m_workingTerrainAtlas
+        ? m_workingTerrainAtlas->activeTextureCount() : int(m_pLand->textureNum());
+    previewTile.setAtlasLayout(textures, CTile::preferredAtlasColumns(textures));
+    // The footprint is expressed in active-map cells; the source geometry is
+    // sector-local to whichever map is below the cursor.
+    const QVector3D offset((freshFootprint.anchor.x() - tileLoc.xSec * 16 - tileLoc.col) * 2,
+                           (freshFootprint.anchor.y() - tileLoc.ySec * 16 - tileLoc.row) * 2, 0);
+    m_pPreviewTile->updateTile(previewTile, index, rotNum, matIndex,
+                               tileLoc.xSec, tileLoc.ySec, offset);
     setPreviewTile(true);
     // Palette clicks occur outside the GL widget and do not necessarily
     // produce another viewport mouse event. Request the redraw here so the

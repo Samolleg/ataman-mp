@@ -265,7 +265,8 @@ CPreviewTile::~CPreviewTile()
     releaseGpuResources();
 }
 
-void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector)
+void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector,
+                              const QVector3D& worldOffset)
 {
     // Palette buttons and cursor input are not OpenGL ownership boundaries.
     // Build a private CPU generation only; paintGL/draw uploads it later.
@@ -281,7 +282,7 @@ void CPreviewTile::updateTile(const CTile& tile, int tIndex, int rotation, int m
                              + terrainTilePreviewElevation());
     QMatrix4x4 modelMatrix;
     modelMatrix.setToIdentity();
-    modelMatrix.translate(QVector3D(xSector*32.0f, ySector*32.0f, .0f));
+    modelMatrix.translate(QVector3D(xSector*32.0f, ySector*32.0f, .0f) + worldOffset);
 
     m_stagedVertexData = vertexData;
     m_stagedIndexData.resize(int(sizeof(kPreviewTileIndices)

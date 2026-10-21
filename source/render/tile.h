@@ -128,7 +128,8 @@ public:
     // This deliberately only builds a value-owned CPU snapshot. It is called
     // from palette and mouse input paths, where a QGLWidget context is not
     // guaranteed to be current.
-    void updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector);
+    void updateTile(const CTile& tile, int tIndex, int rotation, int mIndex, int xSector, int ySector,
+                    const QVector3D& worldOffset = QVector3D());
 
     // Upload the latest CPU snapshot while a compatible OpenGL context is
     // current. CView should call this from a renderer-owned context boundary;

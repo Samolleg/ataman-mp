@@ -222,6 +222,56 @@ bool CView::worldTerrainPosition(const QPoint& viewport,QVector3D* position)
     return terrainPositionAt(viewport,position,land);
 }
 
+bool CView::worldTerrainTile(QVector3D& position, bool land, CTile*& tile,
+                              STileLocation& location, CLandscape** landscape,
+                              QPointF* origin) const
+{
+    // Input is always in active-map coordinates. pickTile converts it to
+    // sector-local coordinates; never feed a neighbor's XY to the active map
+    // (small negative coordinates otherwise truncate into its first sector).
+    const auto pick = [&](CLandscape* candidate, const QPointF& offset) {
+        QVector3D local = position - QVector3D(offset.x(), offset.y(), 0);
+        if(!candidate || local.x() < 0 || local.y() < 0
+           || local.x() >= candidate->widthInWorldUnits()
+           || local.y() >= candidate->heightInWorldUnits()
+           || !candidate->pickTile(local, tile, location, land))
+            return false;
+        position = local;
+        if(landscape) *landscape = candidate;
+        if(origin) *origin = offset;
+        return true;
+    };
+    if(pick(m_pLand, QPointF())) return true;
+    if(m_worldTerrainEnabled && m_hasActiveMapWorldOrigin && m_neighborLandscapesVisible)
+        for(const auto& neighbor : m_neighborLandscapes)
+            if(m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(neighbor.placement.mprPath))
+               && pick(neighbor.landscape.data(), neighbor.placement.origin))
+                return true;
+    return false;
+}
+
+bool CView::projectWorldTerrainPoint(QVector3D* point, bool land) const
+{
+    const auto project = [&](CLandscape* candidate, const QPointF& offset) {
+        QVector3D local = *point - QVector3D(offset.x(), offset.y(), 0);
+        if(!candidate || local.x() < 0 || local.y() < 0
+           || local.x() > candidate->widthInWorldUnits()
+           || local.y() > candidate->heightInWorldUnits()
+           || (!candidate->projectPt(local, land)
+               && (land || !candidate->projectPt(local, true))))
+            return false;
+        point->setZ(local.z());
+        return true;
+    };
+    if(project(m_pLand, QPointF())) return true;
+    if(m_worldTerrainEnabled && m_hasActiveMapWorldOrigin && m_neighborLandscapesVisible)
+        for(const auto& neighbor : m_neighborLandscapes)
+            if(m_worldTerrainEnabledPaths.contains(CWorldTerrainSession::key(neighbor.placement.mprPath))
+               && project(neighbor.landscape.data(), neighbor.placement.origin))
+                return true;
+    return false;
+}
+
 bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
 {
     if(!m_worldTerrainEnabled || !m_landscapeTools) return false;
