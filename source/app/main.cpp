@@ -1,4 +1,5 @@
 #include "shutdown_deadline.h"
+#include "startup_phases.h"
 #include "backup_manager.h"
 #include "main_window.h"
 #include "database_creation_check.h"
@@ -258,8 +259,11 @@ public:
     void setStatus(const QString& status)
     {
         m_status = status;
-        update();
-        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        // The main window is complete but not shown yet. Pumping every dock's
+        // queued events here lays it out twice, once at the hidden geometry
+        // and again in show(). Only repaint the splash; drain editor events
+        // after show(), when the real dock geometry is established.
+        repaint();
     }
 
 protected:
@@ -4171,6 +4175,7 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    QElapsedTimer startupClock; startupClock.start();
     // Construct before Qt pools/singletons so the deadline outlives their joins.
     CShutdownDeadline::instance();
 #ifdef Q_OS_WIN
@@ -4195,6 +4200,7 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    app.setProperty("startupReferenceMs",startupClock.msecsSinceReference());
     g_previousQtMessageHandler = qInstallMessageHandler(
         enduranceQtMessageHandler);
     app.setWindowIcon(QIcon(":/endurance_gate.png"));
@@ -4243,11 +4249,11 @@ int main(int argc, char *argv[])
     ei::applyUiScalePercent(ei::persistedUiScalePercent());
 
 
-    CTerrainAtlasRecoveryStore().scheduleCleanup();
-    CBackupManager().scheduleCleanup();
+    QElapsedTimer startupPhase;startupPhase.start();
     CStartupSplash splash;
     splash.showCentered();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    const qint64 preparationMs=startupClock.elapsed();
 
     QTimer smokeSetupDriver;
     if(qApp->property("workspaceLoadSmoke").toBool()) {
@@ -4259,6 +4265,8 @@ int main(int argc, char *argv[])
         smokeSetupDriver.start(1);
     }
     MainWindow window;
+    const qint64 constructorMs=startupPhase.elapsed();
+    startupPhase.restart();
     smokeSetupDriver.stop();
     window.setWindowTitle(QString("EI Mapper: Endurance Edition %1").arg(QCoreApplication::applicationVersion()));
     //window.resize(window.sizeHint());
@@ -4270,6 +4278,12 @@ int main(int argc, char *argv[])
     qApp->setProperty("enduranceStartupScreenGeometry", QVariant());
     window.raise();
     window.activateWindow();
+    QTimer::singleShot(1000,&window,[]() {
+        CTerrainAtlasRecoveryStore().scheduleCleanup();
+        CBackupManager().scheduleCleanup();
+    });
+    ei::log(eLogInfo, QString("Startup phases readyWindow preparationMs:%1 constructorAndSplashMs:%2 showAndEventsMs:%3 totalMs:%4")
+        .arg(preparationMs).arg(constructorMs).arg(startupPhase.elapsed()).arg(startupClock.elapsed()));
     const QString visualSequence = qApp->property("workspaceVisualSequence").toString();
     if(!visualSequence.isEmpty())
     {

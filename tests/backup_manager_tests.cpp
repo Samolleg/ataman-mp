@@ -14,14 +14,40 @@ class BackupManagerTests : public QObject
 private slots:
     void openSnapshotIsHashAddressedAndDeduplicated();
     void preSaveSnapshotsAreTimestampedAndExact();
-    void retentionKeepsNewestFiftyPreSaveRevisions();
+    void retentionPreservesRecentPreSaveRevisions();
     void failureIsReportedWithoutChangingSource();
     void autosavesAreVersionedAndDeduplicated();
     void uncleanSessionNotifiesEachRecoveryOnlyOnce();
     void cleanSessionDoesNotNotifyAndKeepsRecovery();
     void pairedMprAutosavesAreCompleteAndVerified();
     void pairedMprRetentionRemovesWholeGenerations();
+    void deferredRecoverySurvivesEarlyCloseAndRejectsStaleCompletion();
 };
+
+void BackupManagerTests::deferredRecoverySurvivesEarlyCloseAndRejectsStaleCompletion()
+{
+    QTemporaryDir temporary;const auto path=temporary.filePath("zone.mpr");
+    QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write("baseline");file.close();
+    CBackupManager manager(temporary.filePath("backups"));
+    QVector<SRecoverableAutosave> found;QString error;
+    QVERIFY(manager.beginEditorSession(&found,&error));
+    const auto autosave=manager.snapshotAutosave(QFileInfo(path),"changed","atlas");
+    QVERIFY2(autosave.success,qPrintable(autosave.error));
+    QJsonObject firstScan;QVERIFY(manager.beginEditorSession(&found,&error,&firstScan));
+    QVERIFY(found.isEmpty()); // startup has performed no payload validation
+    std::atomic_bool cancelled(true);
+    QVERIFY(manager.discoverSessionRecoveries(firstScan,&cancelled).isEmpty());
+    QCOMPARE(manager.discoverSessionRecoveries(firstScan).size(),1);
+    QVERIFY(manager.finishEditorSession(&error)); // close before worker publication
+    QJsonObject nextScan;QVERIFY(manager.beginEditorSession(&found,&error,&nextScan));
+    found=manager.discoverSessionRecoveries(nextScan);QCOMPARE(found.size(),1);
+    QVERIFY(!manager.completeRecoveryScan(firstScan,{found.first().notificationKey},&error));
+    QVERIFY(manager.completeRecoveryScan(nextScan,{found.first().notificationKey},&error));
+    QVERIFY(manager.acknowledgeRecoveries({found.first().notificationKey},&error));
+    QJsonObject third;QVERIFY(manager.beginEditorSession(&found,&error,&third));
+    QVERIFY(manager.discoverSessionRecoveries(third).isEmpty());
+    QVERIFY(CBackupManager::validateAutosave(QFileInfo(autosave.backupPath)));
+}
 
 void BackupManagerTests::pairedMprAutosavesAreCompleteAndVerified()
 {
@@ -285,7 +311,7 @@ void BackupManagerTests::failureIsReportedWithoutChangingSource()
     QCOMPARE(source.readAll(), QByteArray("protected"));
 }
 
-void BackupManagerTests::retentionKeepsNewestFiftyPreSaveRevisions()
+void BackupManagerTests::retentionPreservesRecentPreSaveRevisions()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
@@ -302,7 +328,9 @@ void BackupManagerTests::retentionKeepsNewestFiftyPreSaveRevisions()
         QVERIFY2(manager.snapshotBeforeSave(QFileInfo(sourcePath)).success, "pre-save snapshot failed");
 
     QDir backupDirectory(QFileInfo(openSnapshot.backupPath).absolutePath());
-    QCOMPARE(backupDirectory.entryList(QStringList() << "*-pre-save-*.backup", QDir::Files).size(), 50);
+    // 211's three-day minimum protects every newly created generation,
+    // regardless of the configured count limit. Cleanup is asynchronous.
+    QCOMPARE(backupDirectory.entryList(QStringList() << "*-pre-save-*.backup", QDir::Files).size(), 52);
     QVERIFY(QFileInfo::exists(openSnapshot.backupPath));
 }
 

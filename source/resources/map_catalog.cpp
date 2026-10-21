@@ -6,7 +6,7 @@
 #include <QTextCodec>
 #include <stdexcept>
 
-#include "res_file.h"
+#include "res_archive_index.h"
 
 namespace {
 QString findNamedFile(const QString& directory, const QString& fileName)
@@ -21,28 +21,13 @@ QString findNamedFile(const QString& directory, const QString& fileName)
     return QString();
 }
 
-QString resolvedMapPath(const QVector<QString>& roots, QString name, const QString& extension)
+QString resolvedMapPath(const QMap<QString,QString>& paths, QString name, const QString& extension)
 {
     if(name.isEmpty())
         return QString();
     if(!name.endsWith(extension, Qt::CaseInsensitive))
         name += extension;
-    for(const QString& root : roots)
-    {
-        const QString path = findNamedFile(root, name);
-        if(!path.isEmpty())
-            return path;
-    }
-    return QString();
-}
-
-QByteArray caseInsensitiveMember(const QMap<QString, QByteArray>& members,
-                                 const QString& requested)
-{
-    for(auto it = members.constBegin(); it != members.constEnd(); ++it)
-        if(it.key().compare(requested, Qt::CaseInsensitive) == 0)
-            return it.value();
-    return QByteArray();
+    return paths.value(name.toCaseFolded());
 }
 }
 
@@ -63,25 +48,12 @@ SMapCatalogResult CMapCatalog::load(const QVector<QString>& resourceRoots,
         return result;
     }
 
-    QByteArray mapBytes;
-    try
-    {
-        CResFile archive(textsArchive);
-        mapBytes = caseInsensitiveMember(archive.bufferOfFiles(), "map.txt");
-    }
-    catch(std::exception* error)
-    {
-        result.messages.append(QString("Could not read %1: %2")
-            .arg(textsArchive, QString::fromLocal8Bit(error ? error->what() : "unknown RES error")));
-        delete error;
+    CResArchiveIndex archive;QString error;
+    if(!archive.open(textsArchive,&error)) {
+        result.messages.append(QString("Could not read %1: %2").arg(textsArchive,error));
         return result;
     }
-    catch(const std::exception& error)
-    {
-        result.messages.append(QString("Could not read %1: %2")
-            .arg(textsArchive, QString::fromLocal8Bit(error.what())));
-        return result;
-    }
+    const QByteArray mapBytes=archive.readMember("map.txt",&error);
     if(mapBytes.isEmpty())
     {
         result.messages.append("The selected texts.res does not contain map.txt.");
@@ -91,10 +63,15 @@ SMapCatalogResult CMapCatalog::load(const QVector<QString>& resourceRoots,
     result.sourceArchive = textsArchive;
     result.topologyEntries = parseMapTopology(
         cp1251->toUnicode(mapBytes), textsArchive);
+    QMap<QString,QString> paths;
+    for(const auto& root:mapRoots)
+        for(const auto& file:QDir(root).entryInfoList(QDir::Files|QDir::Readable,QDir::Name))
+            if(!paths.contains(file.fileName().toCaseFolded()))
+                paths.insert(file.fileName().toCaseFolded(),file.absoluteFilePath());
     for(SMapCatalogEntry& entry : result.topologyEntries)
     {
-        entry.mprPath = resolvedMapPath(mapRoots, entry.mprName, ".mpr");
-        entry.mobPath = resolvedMapPath(mapRoots, entry.mobName, ".mob");
+        entry.mprPath = resolvedMapPath(paths, entry.mprName, ".mpr");
+        entry.mobPath = resolvedMapPath(paths, entry.mobName, ".mob");
         if(!entry.mprName.isEmpty() && !entry.mobName.isEmpty())
             result.entries.append(entry);
         if(!entry.mprName.isEmpty() && !entry.mobName.isEmpty()

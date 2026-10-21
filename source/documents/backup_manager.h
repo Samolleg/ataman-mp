@@ -7,6 +7,8 @@
 #include <QVector>
 #include <memory>
 #include <QSet>
+#include <QJsonObject>
+#include <atomic>
 
 struct SRecoverableAutosave
 {
@@ -50,7 +52,12 @@ public:
     static bool openBackupFolder(QString* error = nullptr);
     static QVector<SRecoverableAutosave> recoverableAutosaves();
     bool beginEditorSession(QVector<SRecoverableAutosave>* recoveries,
-                            QString* error = nullptr) const;
+                            QString* error = nullptr,
+                            QJsonObject* deferredScan = nullptr) const;
+    QVector<SRecoverableAutosave> discoverSessionRecoveries(const QJsonObject& previous,
+        const std::atomic_bool* cancelled = nullptr) const;
+    bool completeRecoveryScan(const QJsonObject& scan, const QStringList& keys,
+                              QString* error = nullptr) const;
     bool acknowledgeRecoveries(const QStringList& notificationKeys,
                                QString* error = nullptr) const;
     bool finishEditorSession(QString* error = nullptr) const;
@@ -58,7 +65,7 @@ public:
 private:
     SBackupResult createSnapshot(const QFileInfo& source, const QString& event, bool deduplicate) const;
     QString sourceDirectory(const QFileInfo& source) const;
-    QVector<SRecoverableAutosave> recoverableAutosavesForRoot() const;
+    QVector<SRecoverableAutosave> recoverableAutosavesForRoot(const std::atomic_bool* cancelled = nullptr) const;
     qint64 enforceRetention(const QString& directoryPath, const QSet<QString>& pins, bool dryRun) const;
 
 private:

@@ -14,6 +14,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
+#include <QElapsedTimer>
 #include <QtConcurrent>
 #include <algorithm>
 #include <map>
@@ -51,9 +52,10 @@ void CTerrainAtlasRecoveryStore::scheduleCleanup() const {
     const int count=qMax(1,QSettings().value("recovery/terrainAtlasGenerations",5).toInt());
     const QString root=m_rootPath;
     QtConcurrent::run([root,count](){
+        QElapsedTimer timer;timer.start();
         const auto r=CTerrainAtlasRecoveryStore(root).collectGarbage(count);
-        if(r.success)ei::log(eLogInfo,QString("Terrain recovery cleanup: generations=%1 manifests=%2 objects=%3 freedBytes=%4")
-            .arg(count).arg(r.manifests).arg(r.objects).arg(r.bytes));
+        if(r.success)ei::log(eLogInfo,QString("Terrain recovery cleanup: generations=%1 manifests=%2 objects=%3 freedBytes=%4 elapsedMs:%5")
+            .arg(count).arg(r.manifests).arg(r.objects).arg(r.bytes).arg(timer.elapsed()));
         else ei::log(eLogWarning,"Terrain recovery cleanup deferred: "+r.error);
     });
 }

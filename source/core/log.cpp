@@ -33,7 +33,8 @@ void CLogger::log(ELogMessageType type, const QString msg)
     {
         QMutexLocker locker(&m_mutex);
         // Lifecycle receipts must survive a user's warning-only log level.
-        if(m_loglvl<type && !msg.startsWith(QStringLiteral("Shutdown ")))
+        if(m_loglvl<type && !msg.startsWith(QStringLiteral("Shutdown "))
+           && !msg.startsWith(QStringLiteral("Startup phases ")))
             return;
 
         entry.sequence = m_nextSequence++;

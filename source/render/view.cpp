@@ -4,6 +4,7 @@
 #include "shader_locations.h"
 #include "canvas_navigation_state.h"
 #include "window_geometry.h"
+#include "startup_phases.h"
 #include "ui_theme.h"
 #include <QtWidgets>
 #include "terrain_preview_context.h"
@@ -556,16 +557,18 @@ QVector<QPoint> terrainVertexBrushPoints(const STerrainTileBrush& brush,
 
 QString terrainAtlasBindingKey(
     const QString& mprNamespace, const QByteArray& atlasPixelSha256,
-    int textureCount, int atlasSlotCount)
+    int textureCount, int atlasSlotCount,
+    const QByteArray* referenceFingerprint = nullptr)
 {
     QString key = QStringLiteral("%1|%2|%3|%4")
         .arg(mprNamespace.toCaseFolded())
         .arg(textureCount).arg(atlasSlotCount)
         .arg(QString::fromLatin1(atlasPixelSha256.toLower()));
     const auto* textures = CTextureList::getInstance();
-    if(!textures->terrainAuthoringArchivePath().isEmpty())
+    if(referenceFingerprint || !textures->terrainAuthoringArchivePath().isEmpty())
         key += QStringLiteral("|reference:")
-            + QString::fromLatin1(textures->terrainAuthoringReferenceSha256());
+            + QString::fromLatin1(referenceFingerprint ? *referenceFingerprint
+                : textures->terrainAuthoringReferenceSha256());
     return key;
 }
 
@@ -3182,13 +3185,23 @@ void CView::setNeighborMapContext(
            << isValid() << m_neighborLandscapesVisible << activeTerrainSectorSize();
     const auto resourceRevision=[&stream](const QString& path) {
         const QFileInfo info(path);
-        stream << path << info.canonicalFilePath() << neighborContentFingerprint(path);
+        const auto revision=neighborFileRevision(path);
+        stream << path << info.canonicalFilePath()
+               << (revision.isEmpty()?neighborContentFingerprint(path):revision);
     };
     for(const auto& placement : placements) {
         stream << placement.zoneId << placement.origin << placement.worldOrigin << placement.size << placement.fixedAnchor;
         resourceRevision(placement.mprPath);resourceRevision(placement.mobPath);
     }
-    for(const auto& archive:CTextureList::getInstance()->configuredResourceArchivePaths()) resourceRevision(archive);
+    QElapsedTimer resourceTimer; resourceTimer.start();
+    qint64 resourceBytes=0; int resourceCount=0;
+    // An empty workspace has no resource-dependent neighbor renderers.
+    const QStringList contextArchives=placements.isEmpty()?QStringList():CTextureList::getInstance()->configuredResourceArchivePaths();
+    for(const auto& archive:contextArchives) {
+        resourceBytes+=QFileInfo(archive).size(); ++resourceCount; resourceRevision(archive);
+    }
+    ei::log(eLogInfo,QString("Neighbor context resource validation archives:%1 bytes:%2 elapsedMs:%3 placements:%4")
+        .arg(resourceCount).arg(resourceBytes).arg(resourceTimer.elapsed()).arg(placements.size()));
     if(contextKey == m_neighborContextKey) return;
     clearNeighborLandscapes();
     m_activeMapWorldOrigin = QPointF();
@@ -3246,7 +3259,10 @@ QByteArray CView::neighborResourceFingerprint() const
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())
-        hash.addData(neighborContentFingerprint(path));
+    {
+        const auto revision=neighborFileRevision(path);
+        hash.addData(revision.isEmpty()?neighborContentFingerprint(path):revision);
+    }
     return hash.result();
 }
 
@@ -3279,7 +3295,10 @@ QByteArray CView::neighborObjectResourceFingerprint() const
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())
-        if(!terrainPublicationIsHDPackArchive(path))hash.addData(neighborContentFingerprint(path));
+        if(!terrainPublicationIsHDPackArchive(path)) {
+            const auto revision=neighborFileRevision(path);
+            hash.addData(revision.isEmpty()?neighborContentFingerprint(path):revision);
+        }
     return hash.result();
 }
 
@@ -5082,6 +5101,7 @@ void CView::initShaders()
 
 void CView::initializeGL()
 {
+    CStartupPhases startup("OpenGL");
     ei::setCrashContext("opengl/initialize");
     makeCurrent();
     armOpenGlDiagnostics(QStringLiteral("OpenGL initialization"), 2);
@@ -5104,6 +5124,7 @@ void CView::initializeGL()
     ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     logOpenGlErrors(QStringLiteral("initialize/fixed-state"));
     initShaders();
+    startup.mark("shaders");
     logOpenGlDiagnosticState(QStringLiteral("initialize/shaders"));
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
@@ -5143,7 +5164,9 @@ void CView::initializeGL()
     logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
 
     CTextureList::getInstance()->initResource();
+    startup.mark("skyShadowsTextures");
     CObjectList::getInstance()->initResource();
+    startup.mark("objects");
     // Qt 5.12's ANGLE backend does not implement QOpenGLTimerQuery. Calling
     // create() there emits "Not supported on OpenGL ES" and corrupts the
     // platform query object's teardown state (observed as c0000374 in
@@ -6186,6 +6209,7 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 void CView::paintGL()
 {
     if(m_applicationShutdown || !isVisible() || window()->isMinimized())return;
+    CStartupFrameReceipt startupFrame;
     makeCurrent();
     SFramePresentationTelemetry frameTelemetry;
     const bool traceSceneFrame = m_sceneFrameTelemetryHistory.isArmed();
@@ -12296,6 +12320,7 @@ void CView::drawTerrainPaintOutline(QOpenGLShaderProgram* program)
 
 void CView::rebuildTerrainAutoCatalog()
 {
+    QElapsedTimer wholeCatalogTimer; wholeCatalogTimer.start();
     const quint64 hydrationGeneration =
         ++m_terrainGlobalHydrationGeneration;
     ++m_terrainFamilyPrewarmGeneration;
@@ -12308,6 +12333,7 @@ void CView::rebuildTerrainAutoCatalog()
     m_terrainGlobalHydrationBestSources.clear();
     const auto referenceArchive=CTextureList::getInstance()->terrainAuthoringArchivePath();
     const auto materialEpoch=referenceArchive.isEmpty()?neighborResourceFingerprint():neighborContentFingerprint(referenceArchive);
+    const qint64 materialEpochMs=wholeCatalogTimer.elapsed();
     if(!m_globalPaletteReuseKey.isEmpty() && m_globalPaletteReuseKey.left(32)!=materialEpoch) {
         m_terrainGlobalUniformTileCache.clear();
         m_terrainGlobalBoundAtlasCache.clear();
@@ -12792,7 +12818,7 @@ void CView::rebuildTerrainAutoCatalog()
         "globalFamiliesMs:%5 globalizeCatalogsMs:%6 authoredTransitionsMs:%7 "
         "sourceHydrationMs:%8 modernPaletteDataMs:%9 workingAtlasMs:%10 "
         "classicPaletteDataMs:%11 manualPaletteMs:%12 familyUsageMs:%13 "
-        "paletteCommitMs:%14")
+        "paletteCommitMs:%14 materialEpochMs:%15 measuredTotalMs:%16")
         .arg(atlasHashMs).arg(embeddedProfileLookupMs)
         .arg(prevalidatedBindingReused ? QStringLiteral("true")
                                        : QStringLiteral("false"))
@@ -12802,7 +12828,7 @@ void CView::rebuildTerrainAutoCatalog()
         .arg(authoredTransitionsMs).arg(sourceHydrationMs)
         .arg(modernPaletteDataMs).arg(workingAtlasMs)
         .arg(classicPaletteDataMs).arg(manualPaletteMs)
-        .arg(familyUsageMs).arg(paletteCommitMs));
+        .arg(familyUsageMs).arg(paletteCommitMs).arg(materialEpochMs).arg(wholeCatalogTimer.elapsed()));
     if(m_terrainAtlasAnalysis.usable)
     {
         const QSize tileSize = m_workingTerrainAtlas ? m_workingTerrainAtlas->synthesisTileSize() : QSize();
@@ -12815,6 +12841,7 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
     const QString& currentNamespace, const QSize& requiredSize,
     quint64 generation)
 {
+    QElapsedTimer queueTimer;queueTimer.start();
     if(m_applicationShutdown)return;
     if(generation != m_terrainGlobalHydrationGeneration
        || !m_terrainGlobalHydrationPool
@@ -12824,6 +12851,11 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
     QStringList configuredArchives = CTextureList::getInstance()
         ->configuredResourceArchivePaths();
     const QString referenceArchive = CTextureList::getInstance()->terrainAuthoringArchivePath();
+    // One revision-checked reference per immutable queue generation, rather
+    // than reopening its native attributes for every candidate family source.
+    const QByteArray referenceFingerprint=referenceArchive.isEmpty()?QByteArray():
+        CTextureList::getInstance()->terrainAuthoringReferenceSha256();
+    int bindingKeyRequests=0;
     if(!referenceArchive.isEmpty())
         configuredArchives.append(referenceArchive);
     const QString preferredSourceNamespace = referenceArchive.isEmpty()
@@ -12861,7 +12893,9 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
            && atlasSlotCount == m_authoredTerrainTileImages.size())
             return nullptr;
         const QString key = terrainAtlasBindingKey(
-            sourceNamespace, pixelSha256, textureCount, atlasSlotCount);
+            sourceNamespace, pixelSha256, textureCount, atlasSlotCount,
+            referenceArchive.isEmpty()?nullptr:&referenceFingerprint);
+        ++bindingKeyRequests;
         STerrainGlobalBindingHydrationTask& task = tasks[key];
         if(task.bindingKey.isEmpty())
         {
@@ -12943,9 +12977,10 @@ void CView::startDeferredGlobalTerrainPaletteHydration(
     });
     m_terrainGlobalHydrationPendingJobs = orderedTasks.size();
     ei::log(eLogInfo, QString(
-        "Deferred reviewed-HD terrain hydration queued bindings:%1 threads:%2")
+        "Deferred reviewed-HD terrain hydration queued bindings:%1 threads:%2 keyRequests:%3 queueMs:%4")
         .arg(orderedTasks.size())
-        .arg(m_terrainGlobalHydrationPool->maxThreadCount()));
+        .arg(m_terrainGlobalHydrationPool->maxThreadCount())
+        .arg(bindingKeyRequests).arg(queueTimer.elapsed()));
     if(orderedTasks.isEmpty())
     {
         applyDeferredGlobalTerrainPaletteHydration(generation);

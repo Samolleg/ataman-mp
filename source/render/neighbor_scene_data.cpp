@@ -4,6 +4,7 @@
 #include "neighbor_scene_data.h"
 #include "endurance_document.h"
 #include "mpr_document.h"
+#include "native_sha256.h"
 #include <QHash>
 #include <QJsonArray>
 #include <QTextCodec>
@@ -15,11 +16,14 @@
 #include <QMutex>
 #include <QDateTime>
 #include <QMutexLocker>
+#include <QCoreApplication>
+#include <QDir>
+#include <QSettings>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
 
-QByteArray neighborContentFingerprint(const QString& path)
+QByteArray neighborFileRevision(const QString& path)
 {
     if(path.isEmpty()) return {};
     const QFileInfo info(path);
@@ -35,6 +39,7 @@ QByteArray neighborContentFingerprint(const QString& path)
         if(GetFileInformationByHandleEx(handle,FileBasicInfo,&basic,sizeof(basic))
            && GetFileInformationByHandle(handle,&identity)) {
             revision+=QByteArray::number(basic.ChangeTime.QuadPart)+":"
+                +QByteArray::number(basic.CreationTime.QuadPart)+":"
                 +QByteArray::number(quint64(identity.dwVolumeSerialNumber))+":"
                 +QByteArray::number(quint64(identity.nFileIndexHigh))+":"+QByteArray::number(quint64(identity.nFileIndexLow));
             memoizable=true;
@@ -42,20 +47,59 @@ QByteArray neighborContentFingerprint(const QString& path)
         CloseHandle(handle);
     }
 #endif
+    return memoizable ? revision : QByteArray();
+}
+
+QByteArray neighborFileSha256(const QString& path)
+{
+    if(path.isEmpty())return {};
+    const QFileInfo info(path);
+    const auto revision=neighborFileRevision(path);
+    const bool memoizable=!revision.isEmpty();
     struct Entry { QByteArray revision,hash; };
     static QMutex mutex; QMutexLocker lock(&mutex);
     static QMap<QString,Entry> cache;
     const auto key=info.absoluteFilePath().toCaseFolded();
     if(memoizable && cache.contains(key) && cache[key].revision==revision) return cache[key].hash;
-    QFile file(path); QCryptographicHash hash(QCryptographicHash::Sha256);
-    hash.addData(key.toUtf8());
-    if(file.open(QIODevice::ReadOnly)) {
-        if(!hash.addData(&file)) return {}; // unreadable input must not match a prior rendering
-    } else hash.addData("missing-or-unreadable");
-    const auto result=hash.result();
+    const QString cachePath=QDir(QCoreApplication::applicationDirPath()).filePath(
+        "cache/resource-sha256-v1/"+QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(),QCryptographicHash::Sha256).toHex())+".ini");
+    QSettings disk(cachePath,QSettings::IniFormat);
+    if(memoizable && disk.value("revision").toByteArray()==revision) {
+        const auto digest=disk.value("sha256").toByteArray();
+        if(digest.size()==32){cache.insert(key,{revision,digest});return digest;}
+    }
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))return {};
+    CNativeSha256 native;
+    QByteArray result;
+    if(native.isAvailable()) {
+        while(!file.atEnd()) {
+            const auto bytes=file.read(1024*1024);
+            if(bytes.isEmpty() && file.error()!=QFileDevice::NoError)return {};
+            native.addData(bytes);
+        }
+        result=native.result();
+    }
+    if(result.isEmpty()) {
+        QCryptographicHash portable(QCryptographicHash::Sha256);
+        if(!file.seek(0)||!portable.addData(&file))return {};
+        result=portable.result();
+    }
+    // Neither an in-process nor a persisted entry may bless a concurrent Save.
+    if(memoizable && neighborFileRevision(path)!=revision)return {};
     if(cache.size()>=512)cache.clear();
-    if(memoizable)cache.insert(key,{revision,result});
+    if(memoizable){
+        cache.insert(key,{revision,result});
+        disk.setValue("revision",revision);disk.setValue("sha256",result);disk.sync();
+    }
     return result;
+}
+
+QByteArray neighborContentFingerprint(const QString& path)
+{
+    const auto digest=neighborFileSha256(path);
+    if(digest.isEmpty())return {};
+    return QCryptographicHash::hash(QFileInfo(path).absoluteFilePath().toCaseFolded().toUtf8()+digest,QCryptographicHash::Sha256);
 }
 
 namespace {

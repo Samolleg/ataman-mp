@@ -1,4 +1,7 @@
 #include <QtTest>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QDataStream>
 
 #include "map_catalog.h"
 
@@ -14,7 +17,33 @@ private slots:
     void parsesCompleteMapsIdentityAndRepeatedRoutes();
     void topologyRetainsTravelOnlyZones();
     void identifiesBriefingZonesFromCatalogMetadata();
+    void loadsIndexedMapWithCaseAndRootPriority();
 };
+
+void MapCatalogTests::loadsIndexedMapWithCaseAndRootPriority()
+{
+    QTemporaryDir dir;QVERIFY(dir.isValid());
+    const auto first=dir.filePath("first"),second=dir.filePath("second");
+    QVERIFY(QDir().mkpath(first));QVERIFY(QDir().mkpath(second));
+    const QByteArray map="#zone gz1g gipat game\n#res\nzone1 zone1\n";
+    QByteArray bytes(16,'\0');bytes+=map;
+    const auto offset=quint32(bytes.size());
+    QDataStream table(&bytes,QIODevice::Append);table.setByteOrder(QDataStream::LittleEndian);
+    const QByteArray name="MAP.TXT";
+    table<<quint32(-1)<<quint32(map.size())<<quint32(16)<<quint32(0)<<quint16(name.size())<<quint32(0);
+    bytes+=name;QDataStream header(&bytes,QIODevice::WriteOnly);header.setByteOrder(QDataStream::LittleEndian);
+    header<<quint32(0x019CE23C)<<quint32(1)<<offset<<quint32(name.size());
+    QFile archive(dir.filePath("TeXtS.ReS"));QVERIFY(archive.open(QIODevice::WriteOnly));archive.write(bytes);archive.close();
+    for(const auto& root:{first,second})for(const auto& filename:{"ZONE1.MPR","Zone1.Mob"}) {
+        QFile file(QDir(root).filePath(filename));QVERIFY(file.open(QIODevice::WriteOnly));file.write("fixture");
+    }
+    const auto result=CMapCatalog::load({dir.path()},{first,second});
+    QCOMPARE(result.entries.size(),1);QVERIFY(result.entries.first().isComplete());
+    QCOMPARE(result.entries.first().mprPath,QDir(first).filePath("ZONE1.MPR"));
+    QCOMPARE(result.entries.first().mobPath,QDir(first).filePath("Zone1.Mob"));
+    QVERIFY(QFile::remove(QDir(first).filePath("ZONE1.MPR")));
+    QCOMPARE(CMapCatalog::load({dir.path()},{first,second}).entries.first().mprPath,QDir(second).filePath("ZONE1.MPR"));
+}
 
 void MapCatalogTests::parsesResourcePairsOnly()
 {

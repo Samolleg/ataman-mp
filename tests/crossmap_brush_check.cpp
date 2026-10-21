@@ -62,6 +62,13 @@ int runAssemblyCatalogCheck()
         tools.activateMode(ELandscapeEditMode::TilePaint,true);tools.setPaintPaletteMode(ETerrainPaintPaletteMode::Modern);
         check(!view.m_terrainGlobalFamilies.isEmpty(),"shared material palette available");
         out<<"PALETTE families="<<view.m_terrainGlobalFamilies.size()<<"\n";
+        if(qEnvironmentVariableIsSet("EI_CROSSMAP_CATALOG_ONLY")) {
+            QElapsedTimer hydration;hydration.start();
+            while(view.m_terrainGlobalHydrationPendingJobs && hydration.elapsed()<60000)QTest::qWait(20);
+            check(view.m_terrainGlobalHydrationPendingJobs==0,"catalog hydration completed");
+            check(view.m_terrainGlobalMaterialSources.size()==88,"all 88 material sources are available");
+            out<<"PASS fresh catalog "<<passes<<" checks\n";out.flush();return 0;
+        }
         if(auto* radius=tools.findChild<QSlider*>("terrainPaintRadius"))radius->setValue(3);
         if(auto* b=tools.findChild<QToolButton*>("vertexPaintTarget"))b->click();
         // Hidden-window front buffers are driver-dependent. Use an owned FBO

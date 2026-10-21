@@ -1,5 +1,6 @@
 #include "window_geometry.h"
 #include "resource_browser.h"
+#include "startup_phases.h"
 
 #include "mmp_inspector.h"
 #include "backup_manager.h"
@@ -865,6 +866,7 @@ void CResourceBrowser::finishInternalPublication(
 void CResourceBrowser::finishLoad()
 {
     const SResourceBrowserLoadResult result = m_loadWatcher->result();
+    CStartupPhases phases(QString("resourceBrowserCatalog entries:%1").arg(result.catalog.entries().size()));
     m_catalog = result.catalog;
     auto* allArchives = new QTreeWidgetItem(m_archives,
         {tr("All archives"), QString::number(m_catalog.entries().size()), QString()});
@@ -880,7 +882,10 @@ void CResourceBrowser::finishLoad()
         item->setData(0, ArchivePathRole, archive->path());
     }
     m_archives->setCurrentItem(allArchives);
-    rebuildList();
+    // Selecting the new root emits itemSelectionChanged, whose handler resets
+    // the old preview and builds the list. Rebuilding here again used to
+    // destroy and recreate every row (tens of thousands) during first show.
+    if(m_archives->signalsBlocked())rebuildList();
     m_summary->setText(tr("%1 members from %2 archive(s)%3")
         .arg(m_catalog.entries().size()).arg(qMax(0, m_archives->topLevelItemCount() - 1))
         .arg(result.errors.isEmpty() ? QString() : tr("; %1 archive(s) rejected").arg(result.errors.size())));
@@ -890,6 +895,7 @@ void CResourceBrowser::finishLoad()
         m_pendingReference.clear();
         applyResourceReferenceSelection(pending);
     }
+    phases.mark("publish");
 }
 
 void CResourceBrowser::rebuildList()

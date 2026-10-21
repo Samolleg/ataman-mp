@@ -1,4 +1,5 @@
 #include "window_geometry.h"
+#include "startup_phases.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -301,6 +302,7 @@ QString CSettings::configuredGameRoot() const
 
 void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
 {
+    CStartupPhases startup("profileDatabase");
     if(!profile.valid)
         return;
     ei::SProfileDatabaseLoadRequest databaseRequest;
@@ -313,6 +315,7 @@ void CSettings::applyResourceProfile(const SResourceProfileEvaluation& profile)
     static ei::ProfileDatabaseService databaseService;
     const QSharedPointer<const ei::SProfileDatabaseSnapshot> database =
         databaseService.snapshot(databaseRequest);
+    startup.mark("snapshot");
     if(COptString* root = dynamic_cast<COptString*>(opt(eOptSetGeneral, "gameRoot")))
         root->setValue(profile.gameRoot);
     if(COptString* id = dynamic_cast<COptString*>(opt(eOptSetResource, "resourceProfile")))

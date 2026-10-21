@@ -131,7 +131,8 @@ const SCachedArchiveIndex& archiveIndex(const QString& path)
     static QMap<QString, SCachedArchiveIndex> cache;
     const QFileInfo info(path);
     SCachedArchiveIndex& cached = cache[path];
-    const auto content=neighborContentFingerprint(path);
+    const auto revision=neighborFileRevision(path);
+    const auto content=revision.isEmpty()?neighborContentFingerprint(path):revision;
     if(cached.content==content && cached.size == info.size() && cached.modified == info.lastModified())
         return cached;
 
@@ -1805,31 +1806,9 @@ QString CTextureList::terrainAuthoringArchivePath() const
 
 QByteArray CTextureList::terrainAuthoringReferenceSha256() const
 {
-    const QString path = terrainAuthoringArchivePath();
-    const QFileInfo before(path);
-    if(path.isEmpty() || !before.isFile())
-        return {};
-    // A reference is read-only. Hash it once per physical file revision, not
-    // per stamp, and never accept a file changed while it was being hashed.
-    static QMutex mutex;
-    static QHash<QString, QByteArray> hashes;
-    const QString key = before.absoluteFilePath() + QLatin1Char('|')
-        + QString::number(before.size()) + QLatin1Char('|')
-        + QString::number(before.lastModified().toMSecsSinceEpoch());
-    QMutexLocker lock(&mutex);
-    if(hashes.contains(key))
-        return hashes.value(key);
-    QFile file(path);
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    if(!file.open(QIODevice::ReadOnly) || !hash.addData(&file))
-        return {};
-    const QFileInfo after(path);
-    if(after.size() != before.size()
-       || after.lastModified() != before.lastModified())
-        return {};
-    const QByteArray fingerprint = hash.result().toHex();
-    hashes.insert(key, fingerprint);
-    return fingerprint;
+    // Share the atlas epoch digest, including across sessions. Native change
+    // time catches edits that preserve length and last-write time.
+    return neighborFileSha256(terrainAuthoringArchivePath()).toHex();
 }
 
 void CTextureList::setMapLocalTerrainArchive(const QString& path)

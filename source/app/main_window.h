@@ -17,6 +17,8 @@
 #include <QImage>
 #include <QPointer>
 #include <QPointF>
+#include <atomic>
+#include <memory>
 #include "types.h"
 #include "map_catalog.h"
 #include "map_spawn_planner.h"
@@ -400,6 +402,7 @@ private:
     int m_recoverableAutosaveNoticeCount{0};
     QStringList m_recoverableAutosaveNoticeKeys;
     bool m_backupSessionStarted{false};
+    std::shared_ptr<std::atomic_bool> m_startupRecoveryCancel{new std::atomic_bool(false)};
     QSlider* m_cameraSpeedSlider{nullptr};
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     CCameraTelephotoControls* m_cameraTelephotoControls{nullptr};

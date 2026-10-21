@@ -143,6 +143,7 @@
 #include "resource_browser.h"
 #include "resource_name.h"
 #include "view.h"
+#include "startup_phases.h"
 
 namespace
 {
@@ -800,18 +801,22 @@ MainWindow::MainWindow(QWidget* parent) :
     m_borrowedMapIdentity(false),
     m_pickSpawnPending(false)
 {
+    CStartupPhases startup("MainWindow");
 #ifdef QT_DEBUG
     testFunc();
 #endif
     CIconManager::getInstance()->init();
+    startup.mark("icons");
 
     m_settings.reset(new CSettings(this));
+    startup.mark("settings");
     m_selector.reset(new CSelectForm(this));
     m_createDialog.reset(new CCreateObjectForm(this));
     m_randomizeForm.reset(new CRandomizeForm(this));
     m_pTileForm.reset(new CTileForm(this));
     m_settings->attachMainWindow(this);
     m_ui->setupUi(this); //init CView core also
+    startup.mark("dialogsAndUi");
     setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks |
                    QMainWindow::AllowNestedDocks | QMainWindow::GroupedDragging);
     QWidget* outlinerContainer = new QWidget(this);
@@ -1603,6 +1608,7 @@ MainWindow::MainWindow(QWidget* parent) :
     }
 
     m_pView = new CView(m_ui->centralWidget, m_createDialog.get()->viewWidget());
+    startup.mark("docksProfileAndView");
     connect(m_pView, &CView::neighborMapOpenRequested,
             this, &MainWindow::openNeighborMapPair);
     connect(m_pView, &CView::neighborMapOriginChangeRequested, this,
@@ -1813,6 +1819,7 @@ MainWindow::MainWindow(QWidget* parent) :
         updateMapTestAction();
     });
     m_mapTestLauncher->refreshInterruptedRecovery();
+    startup.mark("testRecovery");
     QString interruptedTest;
     if(CJmvMapTestLauncher::hasActiveInterruptedRun(&interruptedTest))
     {
@@ -1925,6 +1932,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connectUiButtons();
     m_pView->attach(m_settings.get(), m_ui->tableWidget, m_undoStack, m_ui->progressBar, m_ui->mousePosText, m_ui->treeWidget, m_pTileForm.get());
     m_pView->attachLandscapeTools(m_landscapeTools);
+    startup.mark("viewAttach");
     m_scenarioPanel = new CScenarioPanel(m_pView, this);
     QDockWidget* scenarioDock = new QDockWidget(tr("Map Scenario"), this);
     scenarioDock->setObjectName("mapScenarioDock");
@@ -2243,18 +2251,21 @@ MainWindow::MainWindow(QWidget* parent) :
     CObjectList::getInstance()->attachSettings(m_settings.get());
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
+    startup.mark("actionsAndResources");
     refreshActiveCatalog(false);
+    startup.mark("mapCatalogAndContext");
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();
     QVector<SRecoverableAutosave> recoveries;
     QString backupSessionError;
     CBackupManager backupManager;
+    QJsonObject deferredRecoveryScan;
     const bool workspaceSmoke = qApp->property("workspaceLoadSmoke").toBool()
         || qApp->property("workspaceVisualSmoke").toBool()
         || qApp->property("workspaceVisualSequence").isValid();
     m_backupSessionStarted = workspaceSmoke ? false : backupManager.beginEditorSession(
-        &recoveries, &backupSessionError);
+        &recoveries, &backupSessionError, &deferredRecoveryScan);
     if(workspaceSmoke)
         ei::log(eLogInfo, "Automated workspace smoke: backup session notifications disabled");
     else if(!m_backupSessionStarted)
@@ -2262,13 +2273,37 @@ MainWindow::MainWindow(QWidget* parent) :
                 + backupSessionError);
     else
     {
-        m_recoverableAutosaveNoticeCount = recoveries.size();
-        for(const SRecoverableAutosave& recovery : recoveries)
-            m_recoverableAutosaveNoticeKeys.append(recovery.notificationKey);
-        if(m_recoverableAutosaveNoticeCount > 0)
-            QTimer::singleShot(0, this, &MainWindow::showRecoverableAutosaves);
+        // Only the session receipt is synchronous. Discovery validates large
+        // autosave/atlas payloads after the first window frame. An interrupted
+        // scan remains in the journal even if this window closes immediately.
+        QTimer::singleShot(250,this,[this,backupManager,deferredRecoveryScan]() {
+            if(!m_pView || m_shutdownInProgress)return;
+            auto* watcher=new QFutureWatcher<QVector<SRecoverableAutosave>>(this);
+            connect(watcher,&QFutureWatcher<QVector<SRecoverableAutosave>>::finished,this,
+                [this,watcher,backupManager,deferredRecoveryScan]() {
+                    const auto found=watcher->result();watcher->deleteLater();
+                    if(!m_pView || m_shutdownInProgress)return;
+                    QStringList keys;for(const auto& item:found)keys.append(item.notificationKey);
+                    QString error;
+                    if(!backupManager.completeRecoveryScan(deferredRecoveryScan,keys,&error)) {
+                        ei::log(eLogWarning,"Recovery discovery receipt deferred: "+error);return;
+                    }
+                    m_recoverableAutosaveNoticeCount=found.size();
+                    m_recoverableAutosaveNoticeKeys=keys;
+                    showRecoverableAutosaves();
+                });
+            const auto cancel=m_startupRecoveryCancel;
+            watcher->setFuture(QtConcurrent::run([backupManager,deferredRecoveryScan,cancel]() {
+                QElapsedTimer timer;timer.start();
+                const auto result=backupManager.discoverSessionRecoveries(deferredRecoveryScan,cancel.get());
+                ei::log(eLogInfo,QString("Startup phases recoveryDiscovery candidates:%1 elapsedMs:%2 cancelled:%3")
+                    .arg(result.size()).arg(timer.elapsed()).arg(cancel->load()));
+                return result;
+            }));
+        });
     }
     bool hasStartupDocument = false;
+    startup.mark("backupSession");
     for(int index = 1; index < QCoreApplication::arguments().size(); ++index)
     {
         const QFileInfo candidate(QCoreApplication::arguments().at(index));
@@ -2317,12 +2352,14 @@ MainWindow::MainWindow(QWidget* parent) :
     }
     hideLandscapeTools();
     QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
+    startup.mark("restoreDocks");
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
 
 MainWindow::~MainWindow()
 {
+    m_startupRecoveryCancel->store(true);
     saveUiState();
     delete m_itemSpellConstructorDialog;
     m_itemSpellConstructorDialog=nullptr;
@@ -5660,6 +5697,7 @@ void MainWindow::refreshMapsBrowser()
 
 void MainWindow::refreshActiveCatalog(bool preserveWorkspaceState)
 {
+    CStartupPhases phases("mapCatalog");
     QVector<QString> resources;
     QVector<QString> maps;
     if(COptStringList* option = dynamic_cast<COptStringList*>(
@@ -5671,9 +5709,11 @@ void MainWindow::refreshActiveCatalog(bool preserveWorkspaceState)
 
     const SMapCatalogEntry previousEntry = m_mapTestEntry;
     m_mapCatalog = CMapCatalog::load(resources, maps);
+    phases.mark("load");
     QDir().mkpath(CCollectionDocument::defaultDirectory());
     if(m_mapsBrowser)
         m_mapsBrowser->refresh(m_mapCatalog, CCollectionDocument::defaultDirectory());
+    phases.mark("browser");
 
     if(!preserveWorkspaceState || !CLandscape::getInstance()->isMprLoad())
     {
@@ -9477,6 +9517,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
 
     if(!m_closeReady) {
         e->ignore();m_closeWaiting=true;m_shutdownInProgress=true;
+          m_startupRecoveryCancel->store(true);
         ei::log(eLogInfo,"Shutdown started timeoutMs:120000");
         if(m_autosaveTimer)m_autosaveTimer->stop();
         if(m_autosaveCountdownTimer)m_autosaveCountdownTimer->stop();

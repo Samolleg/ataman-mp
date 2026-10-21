@@ -9,6 +9,9 @@
 class CMobDocument;
 // Content SHA, memoized only while native file identity and change time match.
 QByteArray neighborContentFingerprint(const QString& path);
+// Strong physical revision on Windows; empty means callers must hash instead.
+QByteArray neighborFileRevision(const QString& path);
+QByteArray neighborFileSha256(const QString& path);
 struct SPreparedStaticVisual;
 struct SNeighborSceneData
 {
