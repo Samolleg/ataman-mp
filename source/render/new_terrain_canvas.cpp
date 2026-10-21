@@ -7,6 +7,11 @@
 #include "mmp_codec.h"
 #include "res_file.h"
 #include "res_archive_document.h"
+#include "res_archive_index.h"
+#include "terrain_atlas_compact.h"
+#include "terrain_virtual_atlas.h"
+#include "terrain_save_flow_policy.h"
+#include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
 
@@ -123,25 +128,72 @@ SMapSaveBatchResult commitNewTerrainCanvas(const QFileInfo& terrainTemplate,
     if(terrainTemplate.absoluteFilePath().compare(destination.absoluteFilePath(),
                                                  Qt::CaseInsensitive) == 0)
     { result.error = "The new map must not replace its template."; return result; }
+    QString publicationPath;
+    for(const auto& path : resourceArchives)
+        if(terrainPublicationIsHDPackArchive(path) && QFileInfo(path).isFile())
+        { publicationPath = QFileInfo(path).absoluteFilePath(); break; }
+    if(publicationPath.isEmpty())
+    { result.error = "Configure HDPack_Terrain.res before creating a new map."; return result; }
     QByteArray atlas;
     if(!buildNewTerrainAtlas(terrainTemplate, candidateMpr, resourceArchives,
                              &atlas, &result.error)) return result;
-    QVector<SMapSaveFile> files;
-    for(int i = 0; i < 2; ++i)
-    {
-        SMapSaveFile file;
-        file.path = i == 0 ? destination.absoluteFilePath()
-            : destination.dir().filePath(destination.completeBaseName() + "-atlas.res");
-        file.after = i == 0 ? candidateMpr : atlas;
-        file.existed = QFileInfo::exists(file.path);
-        if(file.existed)
-        {
-            QFile input(file.path);
-            if(!input.open(QIODevice::ReadOnly))
-            { result.error = "An existing destination could not be read."; return result; }
-            file.before = input.readAll();
+    CMprDocument map; CValidationReport report;
+    CResArchiveDocument local;
+    if(!map.loadBytes(candidateMpr, destination.fileName(), &report)
+       || !local.loadBytes(atlas))
+    { result.error = "Cannot reopen the generated map/atlas."; return result; }
+    STerrainAtlasProfile profile;
+    if(!STerrainAtlasProfile::fromBytes(local.memberPayload(
+            CTerrainAtlasProfileStore::embeddedMemberName(map.mapInfo().innerNamespace)),
+            &profile, &report))
+    { result.error = report.toText(); return result; }
+    QVector<QByteArray> pages;
+    for(const auto& name : ei::terrainTextureResourceNames(
+            map.mapInfo().innerNamespace, int(map.mapInfo().textureCount)))
+        pages.append(local.memberPayload(name));
+    const auto plan = prepareTerrainAtlasCompact(map, profile, pages, {}, destination,
+                                                 nullptr, true);
+    if(!plan.error.isEmpty()) { result.error = plan.error; return result; }
+    CResArchiveIndex pack;
+    if(!pack.open(publicationPath, &result.error))
+    { result.error.prepend("Open HDPack " + publicationPath + ": "); return result; }
+    const auto beforeHash = resFileSha256(publicationPath, &result.error);
+    if(beforeHash.isEmpty())
+    { result.error.prepend("Hash HDPack " + publicationPath + ": "); return result; }
+    CResArchiveTransaction transaction(pack);
+    for(const auto& member : plan.members) {
+        const int index = pack.memberIndex(member.name);
+        if(index >= 0 && pack.readMember(index) == member.payload) continue;
+        // Hash identity collisions must never overwrite another map's artwork.
+        if(index != -1 || !transaction.add(member.name, member.payload,
+                                           member.lastWriteTime, &result.error)) {
+            if(result.error.isEmpty()) result.error = "Terrain identity collision: " + member.name;
+            return result;
         }
-        files.append(file);
     }
-    return commitMapSaveBatch(files, backupRoot);
+    QTemporaryDir staging(QDir::tempPath()+"/new-map-atlas-XXXXXX");
+    if(!staging.isValid()) { result.error = "Cannot create atlas staging directory."; return result; }
+    const auto stagedPath = staging.filePath("candidate.res");
+    QByteArray afterHash;
+    if(!transaction.writeCandidate(stagedPath, &result.error, {}, &afterHash))
+    { result.error.prepend("Stage HDPack " + stagedPath + ": "); return result; }
+    const auto binding = CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
+        {stagedPath}, plan.profile.mprNamespace);
+    if(!binding.success() || binding.profile.toBytes() != plan.profile.toBytes())
+    { result.error = "The published atlas candidate failed fresh binding validation."; return result; }
+    SMapSaveFile resource;
+    resource.path = publicationPath; resource.afterFile = stagedPath;
+    resource.beforeSha256 = beforeHash; resource.afterSha256 = afterHash;
+    SMapSaveFile mpr;
+    mpr.path = destination.absoluteFilePath(); mpr.after = plan.mprBytes;
+    mpr.existed = destination.exists();
+    if(mpr.existed) {
+        QFile input(mpr.path);
+        if(!input.open(QIODevice::ReadOnly))
+        { result.error = "Read destination " + mpr.path + ": " + input.errorString(); return result; }
+        mpr.before = input.readAll();
+    }
+    // Publish the pages before the map becomes visible. A failed map commit
+    // restores this cohort's pack; existing user documents remain untouched.
+    return commitMapSaveBatch({resource, mpr}, backupRoot);
 }

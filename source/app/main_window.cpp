@@ -8442,9 +8442,9 @@ void MainWindow::on_actionNew_MPR_triggered()
     scroll->setWidget(scrollContent);
     root->addWidget(scroll, 1);
     QLabel* explanation = new QLabel(tr(
-        "Новая карта получает рельеф и отдельный атлас из выбранного шаблона. "
+        "Новая карта получает рельеф и атлас из выбранного шаблона. "
         "Весь каталог земли и покрытий доступен для рисования сразу после создания. "
-        "Рядом с MPR сохраняется файл <имя>-atlas.res; переносите их вместе. "
+        "Атлас публикуется в настроенный HDPack_Terrain.res под хеш-именем карты. "
         "MOB и регистрация в map.txt создаются отдельно."), &dialog);
     explanation->setWordWrap(true);
     contentRoot->addWidget(explanation);
@@ -8824,11 +8824,9 @@ void MainWindow::on_actionNew_MPR_triggered()
         if(!destinationPath.endsWith(".mpr", Qt::CaseInsensitive))
             destinationPath += QStringLiteral(".mpr");
         const QFileInfo destination(destinationPath);
-        const QFileInfo atlasDestination(destination.dir().filePath(
-            destination.completeBaseName() + QStringLiteral("-atlas.res")));
-        if((destination.exists() || atlasDestination.exists())
+        if(destination.exists()
            && QMessageBox::question(&dialog, tr("Replace MPR"),
-                tr("Карта %1 или её атлас уже существуют. Сохранить резерв и заменить комплект?")
+                tr("Карта %1 уже существует. Сохранить резерв и заменить карту?")
                     .arg(destination.fileName())) != QMessageBox::Yes)
             return;
         const SMapSaveBatchResult result = commitNewTerrainCanvas(

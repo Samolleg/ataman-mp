@@ -334,6 +334,7 @@ bool CView::saveWorldTerrainMaps()
     QVector<SMapSaveFile> files;
     QMap<QString,QByteArray> archives;
     QMap<QString,QString> archivePaths;
+    QMap<QString,QString> publicationArchives;
     QMap<QString,QMap<QString,QByteArray>> published;
     QMap<QString,STerrainAtlasProfile> profiles;
     QMap<QString,QVector<QImage>> physical;
@@ -358,19 +359,26 @@ bool CView::saveWorldTerrainMaps()
         if(publishAtlas) {
             const auto source=m_worldTerrainAtlasSources.value(id);
             if(source.archive.isEmpty())return refuse(tr("Не определён архив текстур карты %1.").arg(path));
-            const QString archiveId=CWorldTerrainSession::key(source.archive);
+            QString target;
+            for(const auto& configured:CTextureList::getInstance()->configuredResourceArchivePaths())
+                if(terrainPublicationIsHDPackArchive(configured)&&QFileInfo(configured).isFile())
+                {target=configured;break;}
+            if(target.isEmpty())return refuse(tr("Настройте HDPack_Terrain.res перед сохранением атласа."));
+            publicationArchives[id]=target;
+            const QString archiveId=CWorldTerrainSession::key(target);
             if(!archives.contains(archiveId)) {
-                QFile f(source.archive);if(!f.open(QIODevice::ReadOnly))return refuse(f.errorString());
-                archives[archiveId]=f.readAll();archivePaths[archiveId]=source.archive;
+                QFile f(target);if(!f.open(QIODevice::ReadOnly))return refuse(f.errorString());
+                archives[archiveId]=f.readAll();archivePaths[archiveId]=target;
             }
-            CResArchiveDocument archive;QStringList errors;
-            if(!archive.loadBytes(archives[archiveId],source.archive,&errors))return refuse(errors.join('\n'));
+            QMap<QString,QByteArray> originalPages;QStringList errors;
             const auto names=ei::terrainTextureResourceNames(staged.mapInfo().innerNamespace,int(staged.mapInfo().textureCount));
+            if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(source.archive,names,&originalPages))
+                return refuse(tr("Не удалось перечитать исходный атлас."));
             if(names.size()!=source.pages.size())return refuse(tr("Размер исходного атласа изменился."));
             auto pages=source.pages;auto images=doc->atlas->activeTileImages();auto types=doc->atlas->activeTileTypes();
             while(types.size()<staged.mapInfo().tileTypes.size())types.append(staged.mapInfo().tileTypes[types.size()]);
             for(int page=0;page<names.size();++page) {
-                if(archive.memberPayload(names[page])!=source.pages[page])return refuse(tr("Текстуры изменены другой программой: %1").arg(names[page]));
+                if(originalPages.value(names[page].toLower())!=source.pages[page])return refuse(tr("Текстуры изменены другой программой: %1").arg(names[page]));
                 QSet<int> changed;
                 for(int slot=0;slot<64;++slot) {
                     QImage old;
@@ -403,7 +411,7 @@ bool CView::saveWorldTerrainMaps()
             }
             profiles[id]=CTerrainAtlasProfileStore::workingAtlasProfile(staged.mapInfo().innerNamespace,physical[id],doc->atlas->catalog(),source.profile,m_terrainGlobalFamilies,&report);
             profiles[id].textureCount=package.resourceMembers.size();
-            profiles[id].resourceArchiveHint=QFileInfo(source.archive).fileName();
+            profiles[id].resourceArchiveHint=QFileInfo(target).fileName();
             if(report.hasErrors())return refuse(report.toText());
         }
         CMprEditTransaction transaction(QStringLiteral("World terrain and materials"));
@@ -435,7 +443,7 @@ bool CView::saveWorldTerrainMaps()
                     doc->terrain.tileCountX()+1,doc->terrain.tileCountY()+1,&report,
                     STerrainSemanticFieldDocument::tileBindingSha256(reopened[id])))return refuse(report.toText());
             if(publishAtlas) {
-                const QString archiveId=CWorldTerrainSession::key(source.archive);
+                const QString archiveId=CWorldTerrainSession::key(publicationArchives[id]);
                 const QString name=CTerrainAtlasProfileStore::embeddedMemberName(profile.mprNamespace);
                 if(published[archiveId].contains(name) && published[archiveId][name]!=profile.toBytes())
                     return refuse(tr("Несовместимые профили общего атласа."));
@@ -452,7 +460,7 @@ bool CView::saveWorldTerrainMaps()
             if(profiles[id].textureCount>=100&&QMessageBox::warning(this,tr("Большой атлас"),
                 tr("%1: %2 страниц, предел126. Сохранить?").arg(path).arg(profiles[id].textureCount),
                 QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return false;
-            const auto archiveId=CWorldTerrainSession::key(m_worldTerrainAtlasSources[id].archive);
+            const auto archiveId=CWorldTerrainSession::key(publicationArchives[id]);
             for(const auto& member:mapMembers)published[archiveId][member.name]=member.payload;
             if(!reopened[id].loadBytes(candidate,path,&report))return refuse(report.toText());
         }
@@ -523,7 +531,7 @@ bool CView::saveWorldTerrainMaps()
         if(id==active) {
             const QString hash=QString::fromLatin1(QCryptographicHash::hash(reopened[id].originalBytes(),QCryptographicHash::Sha256).toHex());
             if(profiles.contains(id)) {
-                if(!adoptCompleteTerrainBaseline(QFileInfo(path),hash,physical[id],m_worldTerrainAtlasSources[id].archive,profiles[id],false,false))
+                if(!adoptCompleteTerrainBaseline(QFileInfo(path),hash,physical[id],publicationArchives[id],profiles[id],false,false))
                     return refuse(tr("Файлы сохранены, но предпросмотр требует повторного открытия карты."));
             } else {
                 SMprSaveCommitResult commit;commit.candidateSha256=hash;
@@ -535,7 +543,7 @@ bool CView::saveWorldTerrainMaps()
     for(const auto& path:paths) {
         const auto id=CWorldTerrainSession::key(path);
         if(profiles.contains(id)) {
-            auto& source=m_worldTerrainAtlasSources[id];source.profile=profiles[id];source.pages.clear();
+            auto& source=m_worldTerrainAtlasSources[id];source.archive=publicationArchives[id];source.profile=profiles[id];source.pages.clear();
             const auto names=ei::terrainTextureResourceNames(reopened[id].mapInfo().innerNamespace,int(reopened[id].mapInfo().textureCount));
             for(const auto& name:names)source.pages.append(published[CWorldTerrainSession::key(source.archive)].value(name));
         }

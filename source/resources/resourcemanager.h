@@ -144,7 +144,8 @@ public:
                                QString* diagnostic = nullptr);
     // Acquires one landscape lease, including cache hits. Release on unload.
     QOpenGLTexture* buildLandTex(const QString& name, int expectedTexCount,
-                                 int& texCount, int& atlasColumns);
+                                 int& texCount, int& atlasColumns,
+                                 const QString& boundArchive = QString());
     void releaseTerrainTexture(QOpenGLTexture* texture);
     // Terrain atlases have an authored DXT mip chain. This only changes the
     // terrain sampler; character/equipment atlases deliberately remain on

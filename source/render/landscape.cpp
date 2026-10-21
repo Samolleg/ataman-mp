@@ -23,6 +23,8 @@
 #include "res_file.h"
 #include "utils.h"
 #include "resourcemanager.h"
+#include "terrain_atlas_archive_binding.h"
+#include "terrain_save_flow_policy.h"
 #include "node.h"
 #include "sector.h"
 #include "backup_manager.h"
@@ -787,8 +789,24 @@ void CLandscape::readMapInternal(const QFileInfo& path,
     int texCount;
     int atlasColumns = 1;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
+    QString backgroundArchive;
+    if(prepared) {
+        // Background loads bypass CView::loadLandscape's active-map binding.
+        // Bind each legacy sidecar to its own map without changing the global
+        // active-map resource source (or its texture cache identity).
+        const QString sidecar = path.dir().filePath(path.completeBaseName()+"-atlas.res");
+        const QString adjacent = path.dir().filePath("textures.res");
+        if(QFileInfo(sidecar).isFile() || QFileInfo(adjacent).isFile()) {
+            QStringList candidates;
+            for(const auto& archive:CTextureList::getInstance()->configuredResourceArchivePaths())
+                if(terrainPublicationIsHDPackArchive(archive)) candidates.append(archive);
+            candidates << sidecar << adjacent;
+            const auto binding=CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(candidates,innerMapName);
+            if(binding.success()) backgroundArchive=binding.archivePath;
+        }
+    }
     m_texture = CTextureList::getInstance()->buildLandTex(
-        innerMapName, int(m_header.nTexture), texCount, atlasColumns);
+        innerMapName, int(m_header.nTexture), texCount, atlasColumns, backgroundArchive);
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
     m_baseAtlasColumns = atlasColumns;

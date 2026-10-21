@@ -1904,15 +1904,17 @@ QByteArray combineTerrainMip(const QVector<STexSpecified>& parts, int outputLeve
 QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                                            int expectedTexCount,
                                            int& texCount,
-                                           int& atlasColumns)
+                                           int& atlasColumns,
+                                           const QString& boundArchive)
 {
     ei::setCrashContext("mpr/terrain-atlas/cache:" + name);
+    const QString localArchive = boundArchive.isEmpty() ? m_mapLocalTerrainArchive : boundArchive;
     QString archiveFingerprint;
-    if(!m_mapLocalTerrainArchive.isEmpty())
+    if(!localArchive.isEmpty())
     {
-        const QFileInfo archive(m_mapLocalTerrainArchive);
+        const QFileInfo archive(localArchive);
         archiveFingerprint = QStringLiteral("|%1|%2|%3")
-            .arg(archive.absoluteFilePath())
+            .arg(archive.absoluteFilePath().toCaseFolded())
             .arg(archive.size())
             .arg(archive.lastModified().toMSecsSinceEpoch());
     }
@@ -1928,8 +1930,8 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
 
     QVector<STexSpecified> aPart;
     QVector<QString> sources = configuredResourceSources(m_pSettings);
-    if(!m_mapLocalTerrainArchive.isEmpty())
-        sources.prepend(m_mapLocalTerrainArchive);
+    if(!localArchive.isEmpty())
+        sources.prepend(localArchive);
     if(sources.isEmpty())
     {
         ei::log(eLogWarning, "Cannot build terrain textures because no resources are configured. Use Settings > Game and Mod Setup.");
