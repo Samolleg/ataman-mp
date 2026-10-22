@@ -68,6 +68,69 @@ void CMob::attach(CView *view, CProgressView *pProgress)
     m_pProgress = pProgress;
 }
 
+bool CMob::readTemplateParameters(const QFileInfo& source,
+                                  SMobParameterState* state, QString* error)
+{
+    if(!state)
+        return false;
+    QFile file(source.absoluteFilePath());
+    if(!file.open(QIODevice::ReadOnly))
+    {
+        if(error) *error = file.errorString();
+        return false;
+    }
+    const QByteArray bytes = file.readAll();
+    const QFileDevice::FileError readError = file.error();
+    const QString readErrorText = file.errorString();
+    file.close(); // No file handle survives parsing or the creation dialog.
+    if(readError != QFileDevice::NoError)
+    {
+        if(error) *error = readErrorText;
+        return false;
+    }
+    CMobDocument document;
+    CValidationReport report;
+    if(!document.loadBytes(bytes, source.absoluteFilePath(), &report)
+       || report.hasErrors())
+    {
+        if(error) *error = report.toText();
+        return false;
+    }
+    // Project only the metadata understood by the existing MOB controls.
+    // Never instantiate source objects, resolve resources, load sidecars or
+    // create recovery snapshots merely to use a file as a template.
+    QByteArray metadata;
+    for(const SMobSection& section : document.sections().front().children)
+    {
+        switch(section.type)
+        {
+        case 0xC000: case 0xD000: // Primary / supplemental marker.
+        case 0xFF01: case 0xFF00: // Main / secondary ID ranges.
+        case 2899242187u:         // SS_TEXT.
+        case 3722304977u:         // DIPLOMATION (table and names).
+        case 43984u:             // WORLD_SET.
+            metadata += section.rawBytes;
+            break;
+        default: break;
+        }
+    }
+    QByteArray projection;
+    QDataStream stream(&projection, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream << quint32(0xA000) << quint32(metadata.size() + 8);
+    stream.writeRawData(metadata.constData(), metadata.size());
+    CMob temporary;
+    temporary.m_filePath = source;
+    if(!temporary.deserialize(projection))
+    {
+        if(error) *error = QCoreApplication::translate(
+            "CMob", "The MOB template settings could not be read.");
+        return false;
+    }
+    *state = temporary.parameterState();
+    return true;
+}
+
 bool CMob::validateEditableProjection(const QByteArray& data,
                                       const QFileInfo& source,
                                       QString* error)

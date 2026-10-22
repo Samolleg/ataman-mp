@@ -8933,6 +8933,7 @@ void MainWindow::on_actionNew_MOB_triggered()
 
     QFormLayout* form = new QFormLayout;
     QComboBox* role = new QComboBox(&dialog);
+    role->setObjectName(QStringLiteral("newMobRole"));
     role->addItem(tr("Primary map MOB (SC_OBJECT_DB_FILE)"));
     role->addItem(tr("Supplemental / AutoZone MOB (PR_OBJECT_DB_FILE)"));
     role->setCurrentIndex(1);
@@ -8942,7 +8943,13 @@ void MainWindow::on_actionNew_MOB_triggered()
     form->addRow(tr("MOB role"), role);
 
     QComboBox* templateMob = new QComboBox(&dialog);
-    templateMob->addItem(tr("Do not copy from a loaded MOB"), qulonglong(0));
+    templateMob->setObjectName(QStringLiteral("templateMob"));
+    templateMob->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    templateMob->setMinimumContentsLength(18);
+    templateMob->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    templateMob->setMaxVisibleItems(12);
+    templateMob->setStyleSheet(QStringLiteral("QComboBox { combobox-popup: 0; }"));
+    templateMob->addItem(tr("Do not copy settings"), qulonglong(0));
     if(m_pView)
     {
         for(CMob* mob : m_pView->mobs())
@@ -8952,6 +8959,33 @@ void MainWindow::on_actionNew_MOB_triggered()
                                      qulonglong(reinterpret_cast<quintptr>(mob)));
         }
     }
+    const int filePathRole = Qt::UserRole + 1;
+    const int chooseFileRole = Qt::UserRole + 2;
+    QSet<QString> listedPaths;
+    const auto appendFile = [&](const QString& path, const QString& label) {
+        const QFileInfo file(path);
+        const QString key = file.canonicalFilePath().toCaseFolded();
+        if(key.isEmpty() || listedPaths.contains(key))
+            return;
+        listedPaths.insert(key);
+        templateMob->addItem(label, qulonglong(0));
+        const int index = templateMob->count() - 1;
+        templateMob->setItemData(index, file.absoluteFilePath(), filePathRole);
+        templateMob->setItemData(index, file.absoluteFilePath(), Qt::ToolTipRole);
+    };
+    for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+        if(!entry.mobPath.isEmpty())
+            appendFile(entry.mobPath, tr("%1 / %2 (%3)")
+                .arg(entry.zoneId, entry.mprName, QFileInfo(entry.mobPath).fileName()));
+    // Include unregistered and supplemental MOBs in the active map folders too.
+    for(const QString& rootPath : activeMapRoots())
+        for(const QFileInfo& file : QDir(rootPath).entryInfoList(
+                QDir::Files | QDir::Readable, QDir::Name))
+            if(file.suffix().compare(QStringLiteral("mob"), Qt::CaseInsensitive) == 0)
+                appendFile(file.absoluteFilePath(), tr("%1 — %2")
+                    .arg(file.fileName(), QDir(rootPath).dirName()));
+    templateMob->addItem(tr("Choose file..."), qulonglong(0));
+    templateMob->setItemData(templateMob->count() - 1, true, chooseFileRole);
     templateMob->setToolTip(tr(
         "Only explicitly selected fields are copied. Objects, graphs, VSS, and "
         "editor metadata are always omitted."));
@@ -8961,6 +8995,10 @@ void MainWindow::on_actionNew_MOB_triggered()
     QCheckBox* copyScript = new QCheckBox(tr("Copy normal script (SS_TEXT)"), &dialog);
     QCheckBox* copyDiplomacy = new QCheckBox(tr("Copy diplomacy table and player names"), &dialog);
     QCheckBox* copyWorld = new QCheckBox(tr("Copy primary world settings"), &dialog);
+    copyRanges->setObjectName(QStringLiteral("copyMobRanges"));
+    copyScript->setObjectName(QStringLiteral("copyMobScript"));
+    copyDiplomacy->setObjectName(QStringLiteral("copyMobDiplomacy"));
+    copyWorld->setObjectName(QStringLiteral("copyMobWorld"));
     for(QCheckBox* box : {copyRanges, copyScript, copyDiplomacy, copyWorld})
         box->setEnabled(false);
     form->addRow(QString(), copyRanges);
@@ -9022,15 +9060,23 @@ void MainWindow::on_actionNew_MOB_triggered()
 
     QCheckBox* openParameters = new QCheckBox(
         tr("Open MOB Parameters after creation"), &dialog);
+    openParameters->setObjectName(QStringLiteral("newMobOpenParameters"));
     openParameters->setChecked(true);
     contentRoot->addWidget(openParameters);
 
+    CMob diskTemplate;
+    int selectedTemplateIndex = 0;
     const auto selectedTemplate = [&]() -> CMob* {
+        if(!templateMob->currentData(filePathRole).toString().isEmpty())
+            return &diskTemplate;
         return reinterpret_cast<CMob*>(quintptr(templateMob->currentData().toULongLong()));
     };
     const auto refreshControls = [&]() {
         const bool hasTemplate = selectedTemplate() != nullptr;
         const bool primary = role->currentIndex() == 0;
+        if(!hasTemplate)
+            for(QCheckBox* box : {copyRanges, copyScript, copyDiplomacy, copyWorld})
+                box->setChecked(false);
         copyRanges->setEnabled(hasTemplate);
         copyScript->setEnabled(hasTemplate);
         copyDiplomacy->setEnabled(hasTemplate);
@@ -9044,7 +9090,51 @@ void MainWindow::on_actionNew_MOB_triggered()
         createDiplomacy->setEnabled(!copyDiplomacy->isChecked());
     };
     connect(templateMob, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            &dialog, [&](int) { refreshControls(); });
+            &dialog, [&](int index) {
+        QString path = templateMob->itemData(index, filePathRole).toString();
+        const bool chooseFile = templateMob->itemData(index, chooseFileRole).toBool();
+        if(chooseFile)
+        {
+            const QString start = activeMapRoots().isEmpty() ? QDir::currentPath()
+                : activeMapRoots().first();
+            path = QFileDialog::getOpenFileName(&dialog, tr("Choose MOB template"),
+                                               start, tr("MOB (*.mob)"));
+        }
+        SMobParameterState state;
+        QString error;
+        if((chooseFile && path.isEmpty())
+           || (!path.isEmpty()
+               && !CMob::readTemplateParameters(QFileInfo(path), &state, &error)))
+        {
+            QSignalBlocker blocker(templateMob);
+            templateMob->setCurrentIndex(selectedTemplateIndex);
+            if(!path.isEmpty())
+                QMessageBox::warning(&dialog, tr("Choose MOB template"),
+                    tr("Could not read settings from %1.\n\n%2\n\nChoose another source or create a MOB without copying settings.")
+                        .arg(QFileInfo(path).fileName(), error));
+            return;
+        }
+        if(!path.isEmpty())
+        {
+            diskTemplate.applyParameterState(state);
+            if(chooseFile)
+            {
+                QSignalBlocker blocker(templateMob);
+                appendFile(path, QFileInfo(path).fileName());
+                for(int i = 0; i < templateMob->count(); ++i)
+                    if(QFileInfo(templateMob->itemData(i, filePathRole).toString())
+                       .canonicalFilePath().compare(QFileInfo(path).canonicalFilePath(),
+                                                 Qt::CaseInsensitive) == 0)
+                    {
+                        index = i;
+                        templateMob->setCurrentIndex(i);
+                        break;
+                    }
+            }
+        }
+        selectedTemplateIndex = index;
+        refreshControls();
+    });
     connect(role, QOverload<int>::of(&QComboBox::currentIndexChanged),
             &dialog, [&](int) { refreshControls(); });
     connect(copyRanges, &QCheckBox::toggled, &dialog,
@@ -9160,6 +9250,15 @@ void MainWindow::on_actionNew_MOB_triggered()
         if(!destinationPath.endsWith(QStringLiteral(".mob"), Qt::CaseInsensitive))
             destinationPath += QStringLiteral(".mob");
         const QFileInfo destination(destinationPath);
+        const QFileInfo templateFile(templateMob->currentData(filePathRole).toString());
+        if(!templateFile.filePath().isEmpty() && destination.exists()
+           && destination.canonicalFilePath().compare(templateFile.canonicalFilePath(),
+                                                      Qt::CaseInsensitive) == 0)
+        {
+            QMessageBox::warning(&dialog, tr("Create New MOB"),
+                tr("The template MOB is read-only. Choose a different destination."));
+            return;
+        }
         if(m_pView)
         {
             for(CMob* loaded : m_pView->mobs())

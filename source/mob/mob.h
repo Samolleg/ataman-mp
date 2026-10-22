@@ -56,6 +56,9 @@ public:
     using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
+    static bool readTemplateParameters(const QFileInfo& source,
+                                       SMobParameterState* state,
+                                       QString* error = nullptr);
     void attach(CView* view, CProgressView* pProgress);
     static bool validateEditableProjection(const QByteArray& data,
                                            const QFileInfo& source,

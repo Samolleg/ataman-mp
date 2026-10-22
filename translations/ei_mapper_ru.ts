@@ -2418,7 +2418,12 @@ Do not edit or save this file until the backup location is writable.</source>
             <source>The MOB is structurally valid, but the current editor projection could not interpret it completely. No editable document was opened; details are in logs/workflow.log.</source>
             <translation>Структура MOB допустима, но редактор не смог полностью представить все данные. Документ не открыт для редактирования; подробности — в logs/workflow.log.</translation>
         </message>
-    </context>
+
+    <message>
+        <source>The MOB template settings could not be read.</source>
+        <translation>Не удалось прочитать настройки MOB-шаблона.</translation>
+    </message>
+</context>
     <context>
         <name>CMobDiffDialog</name>
         <message>
@@ -14919,6 +14924,49 @@ It could not be opened automatically.</source>
 
     <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
     <message><source>NPC diplomacy groups in connected MOBs and scripts</source><translation>Группы дипломатии НПС в подключённых MOB и скриптах</translation></message>
+
+    <message>
+        <source>Do not copy settings</source>
+        <translation>Не копировать настройки</translation>
+    </message>
+
+    <message>
+        <source>Choose file...</source>
+        <translation>Выбрать файл…</translation>
+    </message>
+
+    <message>
+        <source>Choose MOB template</source>
+        <translation>Выбрать MOB для копирования настроек</translation>
+    </message>
+
+    <message>
+        <source>%1 / %2 (%3)</source>
+        <translation>%1 / %2 (%3)</translation>
+    </message>
+
+    <message>
+        <source>%1 — %2</source>
+        <translation>%1 — %2</translation>
+    </message>
+
+    <message>
+        <source>Could not read settings from %1.
+
+%2
+
+Choose another source or create a MOB without copying settings.</source>
+        <translation>Не удалось прочитать настройки из %1.
+
+%2
+
+Выберите другой источник или создайте MOB без копирования настроек.</translation>
+    </message>
+
+    <message>
+        <source>The template MOB is read-only. Choose a different destination.</source>
+        <translation>MOB-шаблон используется только для чтения. Выберите другой файл для сохранения.</translation>
+    </message>
 </context>
     <context>
         <name>MobDiffTerms</name>
