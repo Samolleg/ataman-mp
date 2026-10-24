@@ -31,14 +31,14 @@ async def main():
             async with ClientSession(streams[0], streams[1]) as client:
                 hello = await (client.discover() if era == "modern" else client.initialize())
                 tools = await client.list_tools()
-                assert len(tools.tools) == 14
+                assert len(tools.tools) == 22
                 for tool in tools.tools:
                     schema = tool.model_dump(by_alias=True)["inputSchema"]
                     Draft202012Validator.check_schema(schema)
                 resources = await client.list_resources()
                 assert len(resources.resources) == 2
                 catalog = await client.read_resource("ataman://tools")
-                assert len(json.loads(catalog.contents[0].text)["tools"]) == 14
+                assert len(json.loads(catalog.contents[0].text)["tools"]) == 22
                 listed = await client.call_tool("list_instances", {})
                 assert not listed.is_error
                 assert json.loads(listed.content[0].text)["instances"] == []

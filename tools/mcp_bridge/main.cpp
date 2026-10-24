@@ -10,7 +10,7 @@
 namespace {
 const QJsonArray versions{"2026-07-28","2025-11-25","2025-06-18","2024-11-05"};
 const QJsonObject capabilities{{"tools",QJsonObject{}},{"resources",QJsonObject{}}};
-const QString instructions="Read-only Ataman. list_instances then connect_instance. The user must enable read-only in the open editor. Never launch an editor or enable editing. read_terrain, list_profile_maps and read_profile_map return an operation ID: poll operation_status; cancel_operation discards it. No save or mutation tools.";
+const QString instructions="Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Every edit is one Undo; revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218.";
 QJsonObject serverInfo(){return {{"name","ei-mapper-ataman"},{"version",ENDURANCE_VERSION}};}
 QJsonObject rpcError(int code,const QString& message,QJsonObject data={})
 {
@@ -33,8 +33,9 @@ class Bridge {
     QByteArray buffer;
     quint64 sequence{0};
     bool legacyInitialized{false};
+    QMap<QString,qint64> editJobs;
 public:
-    void detach(){socket.abort();secret.clear();buffer.clear();}
+    void detach(){socket.abort();secret.clear();buffer.clear();editJobs.clear();}
     QJsonObject local(const QString& method,const QJsonObject& args,int timeout=2000)
     {
         if(socket.state()!=QLocalSocket::ConnectedState||secret.isEmpty())return ai::error("Not connected. Enable read-only in the editor and connect_instance.");
@@ -83,7 +84,21 @@ public:
             if(!socket.waitForConnected(1000)){detach();return ai::error("Editor is not running or read mode disabled");}
             return local("get_context",{});
         }
-        return local(name,args);
+        const auto now=QDateTime::currentMSecsSinceEpoch();
+        for(auto it=editJobs.begin();it!=editJobs.end();)if(it.value()<now)it=editJobs.erase(it);else ++it;
+        // Only new219 edit IDs get the normal serializer's bounded commit
+        // allowance.218 reads and all ordinary calls retain the2s deadline,
+        // ID correlation and stream discard on timeout.
+        const bool editPoll=(name=="operation_status"||name=="cancel_operation")&&editJobs.contains(args["operation"].toString());
+        const auto value=local(name,args,editPoll?30000:2000);
+        const QSet<QString> edits{"create_map","sculpt","paint","preview","apply","save"};
+        if(edits.contains(name)&&value["operation"].isString()) {
+            if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
+            editJobs[value["operation"].toString()]=now+60000;
+            if(name=="apply")editJobs.remove(args["operation"].toString());
+        }
+        if(name=="cancel_operation"&&value["status"]=="cancelled")editJobs.remove(args["operation"].toString());
+        return value;
     }
     QJsonObject handle(const QJsonObject& request)
     {
@@ -112,10 +127,17 @@ public:
             result={{"tools",ai::toolDefinitions()}};
         } else if(method=="tools/call") {
             if(!params["name"].isString()||(params.contains("arguments")&&!params["arguments"].isObject()))return rpcError(-32602,"Expected tool name and object arguments");
-            const auto value=tool(params["name"].toString(),params["arguments"].toObject());
+            auto value=tool(params["name"].toString(),params["arguments"].toObject());
             QJsonArray content;
             if(value["mimeType"]=="image/png"&&value.contains("data"))content.append(QJsonObject{{"type","image"},{"mimeType","image/png"},{"data",value["data"]}});
             else content.append(QJsonObject{{"type","text"},{"text",QString::fromUtf8(QJsonDocument(value).toJson(QJsonDocument::Compact))}});
+            const auto appendImages=[&](const QJsonObject& o) {
+                for(const auto& key:{QString("preview"),QString("snapshot")}) {
+                    const auto png=o[key].toObject();if(png["mimeType"]=="image/png"&&png["data"].isString())
+                        content.append(QJsonObject{{"type","image"},{"mimeType","image/png"},{"data",png["data"]}});
+                }
+            };
+            appendImages(value);appendImages(value["result"].toObject());
             result={{"content",content},{"isError",value.contains("error")}};
         } else if(method=="resources/list")result={{"resources",QJsonArray{
             QJsonObject{{"uri","ataman://context"},{"name","Open editor context"},{"mimeType","application/json"}},

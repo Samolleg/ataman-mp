@@ -184,6 +184,9 @@ struct STerrainRecoveryCandidate
 class CView : public QGLWidget
 {
     friend class CAiReadAdapter;
+    friend class CAiEditAdapter;
+    friend class CAiAgentCommand;
+    friend class CAiAgentServer;
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
@@ -643,12 +646,12 @@ private:
     bool restoreTerrainSemanticFieldFromArchive(
         const QFileInfo& mprFile, const QString& terrainArchivePath,
         bool requireMember = false);
-    bool restoreTerrainSemanticFieldFromArchive(
+    static bool restoreTerrainSemanticFieldFromArchive(
         const CMprDocument& document,
         const STerrainAtlasProfile& profile,
         CTerrainEditModel* terrain,
         const QFileInfo& mprFile, const QString& terrainArchivePath,
-        bool requireMember) const;
+        bool requireMember);
     void refreshMobDirtyStates();
     void initShaders();
     void draw(SFramePresentationTelemetry* frameTelemetry = nullptr);
@@ -1175,6 +1178,7 @@ private:
     QSet<QString> m_worldTerrainEnabledPaths;
     QSet<QString> m_worldTerrainExcludedPaths;
     bool m_worldTerrainEnabled{true};
+    bool m_agentSaveAuthorized{false};
     bool m_worldTerrainSavePendingNotified{false};
     QVector<SNeighborMapPlacement> m_neighborPlacements;
     QByteArray m_neighborContextKey;

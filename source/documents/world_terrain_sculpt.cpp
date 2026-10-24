@@ -364,7 +364,9 @@ void SWorldTerrainStroke::append(const SWorldTerrainStroke& stamp)
 static SWorldTerrainStroke sculptPreparedWorld(
     const QVector<SWorldTerrainTarget>& targets, const STerrainBrush& brush,
     EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed,
-    const RimKeys& rimKeys)
+    const RimKeys& rimKeys,
+    const std::function<double(double,double)>& influence,
+    const std::function<double(double,double,double)>& transform)
 {
     SWorldTerrainStroke result;
     if(!std::isfinite(brush.centerX) || !std::isfinite(brush.centerY)
@@ -412,6 +414,7 @@ static SWorldTerrainStroke sculptPreparedWorld(
             weight=qBound(0.0,1.0-distance/brush.radius,1.0);
             if(brush.falloff==ETerrainBrushFalloff::Smooth) weight=weight*weight*(3-2*weight);
         }
+        if(influence) weight=influence(p.first,p.second);
         QVector<double> initial;
         double limit=std::numeric_limits<double>::max();
         for(const auto& v:group)
@@ -424,7 +427,8 @@ static SWorldTerrainStroke sculptPreparedWorld(
         if(distance>brush.radius || weight<=0) continue;
         affected[groupIndex]=true;
         double after=before;
-        if(mode==EWorldSculptMode::Raise || mode==EWorldSculptMode::Lower)
+        if(transform)after+=(transform(p.first,p.second,before)-before)*weight*qBound(0.0,strength,1.0);
+        else if(mode==EWorldSculptMode::Raise || mode==EWorldSculptMode::Lower)
             after+= (mode==EWorldSculptMode::Raise ? 1 : -1)*worldDelta*weight*strength;
         else if(mode==EWorldSculptMode::Noise) {
             quint32 hash=noiseSeed ^ quint32(qRound64(p.first*1024))*73856093u ^ quint32(qRound64(p.second*1024))*19349663u;
@@ -484,7 +488,8 @@ namespace {
 // stores signed XY offsets: knitting existing knots avoids the old global
 // affine flattening and leaves sector count, triangles and tile IDs intact.
 SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
-                                 const STerrainBrush& brush,RimKeys* rimKeys)
+                                 const STerrainBrush& brush,RimKeys* rimKeys,
+                                 const std::function<double(double,double)>& influence)
 {
     SWorldTerrainStroke result;
     QMap<XY,QVector<Vertex>> knots;
@@ -562,6 +567,7 @@ SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
                     result.error=QString::fromUtf8("Положение соседних карт не позволяет совместить вершины в пределах точности MPR. Выровняйте карты по сетке размещения; мазок не применён.");
                     return result;
                 }
+                if(influence && influence(xy.first,xy.second)<=0)continue;
                 auto& group=knots[xy];
                 for(const auto& v:{va,vb}) {
                     bool found=false;for(const auto& existing:group)
@@ -621,13 +627,15 @@ SWorldTerrainStroke knitLocalRims(const QVector<SWorldTerrainTarget>& targets,
 
 SWorldTerrainStroke makeWorldTerrainStamp(const QVector<SWorldTerrainTarget>& targets,
     const STerrainBrush& brush,EWorldSculptMode mode,double worldDelta,double worldFlatten,
-    double strength,quint32 noiseSeed)
+    double strength,quint32 noiseSeed,
+    const std::function<double(double,double)>& influence,
+    const std::function<double(double,double,double)>& transform)
 {
     if(!std::isfinite(brush.centerX) || !std::isfinite(brush.centerY)
        || !std::isfinite(brush.radius) || brush.radius<0 || !std::isfinite(strength) || strength<=0
        || !std::isfinite(worldDelta) || !std::isfinite(worldFlatten)) return {};
     RimKeys rimKeys;
-    auto result=knitLocalRims(targets,brush,&rimKeys);
+    auto result=knitLocalRims(targets,brush,&rimKeys,influence);
     if(!result.error.isEmpty()) return result;
     QVector<CTerrainEditModel> models(targets.size());auto prepared=targets;
     for(int i=0;i<targets.size();++i) if(result.maps.contains(targets[i].id)) {
@@ -637,7 +645,7 @@ SWorldTerrainStroke makeWorldTerrainStamp(const QVector<SWorldTerrainTarget>& ta
         }
         prepared[i].model=&models[i];
     }
-    result.append(sculptPreparedWorld(prepared,brush,mode,worldDelta,worldFlatten,strength,noiseSeed,rimKeys));
+    result.append(sculptPreparedWorld(prepared,brush,mode,worldDelta,worldFlatten,strength,noiseSeed,rimKeys,influence,transform));
     // Stable order is independent of map loading order and preparatory deltas.
     for(auto it=result.maps.begin();it!=result.maps.end();++it)
         std::sort(it->deltas.begin(),it->deltas.end(),[](const STerrainHeightDelta& a,const STerrainHeightDelta& b){

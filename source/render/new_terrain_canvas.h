@@ -16,4 +16,5 @@ SMapSaveBatchResult commitNewTerrainCanvas(const QFileInfo& terrainTemplate,
                                           const QByteArray& candidateMpr,
                                           const QFileInfo& destination,
                                           const QStringList& resourceArchives,
-                                          const QString& backupRoot = QString());
+                                          const QString& backupRoot = QString(),
+                                          bool createOnly = false);

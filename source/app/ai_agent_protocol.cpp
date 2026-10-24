@@ -58,6 +58,10 @@ bool takeFrame(QByteArray& buffer, QJsonObject* value, QString* error)
 }
 static QJsonObject integer(int lo, int hi) { return {{"type","integer"},{"minimum",lo},{"maximum",hi}}; }
 static QJsonObject string() { return {{"type","string"},{"maxLength",256}}; }
+static QJsonObject number(double lo,double hi) { return {{"type","number"},{"minimum",lo},{"maximum",hi}}; }
+static QJsonObject choice(QJsonArray values) { return {{"type","string"},{"enum",values},{"maxLength",64}}; }
+static QJsonObject object(QJsonObject props,QJsonArray required={}) { return {{"type","object"},{"properties",props},{"required",required},{"additionalProperties",false}}; }
+static QJsonObject array(QJsonObject items,int lo,int hi) { return {{"type","array"},{"items",items},{"minItems",lo},{"maxItems",hi}}; }
 QJsonArray toolDefinitions()
 {
     QJsonArray tools;
@@ -88,26 +92,77 @@ QJsonArray toolDefinitions()
     add("operation_status","Poll bounded operation; results expire after 60 seconds. Running operations have a 30 second deadline.",{{"operation",string()}},{"operation"});
     add("cancel_operation","Cancel a read operation and discard its result.",{{"operation",string()}},{"operation"});
     add("window_snapshot","PNG of editor window, scaled to at most 1024x768 and 384 KiB.");
+    add("get_revision","Exact document revision token. Every edit must supply this token; conflicts refuse without changing the map.");
+    const auto area=object({{"shape",choice({"circle","rectangle","line"})},{"x",number(-32768,32768)},
+        {"y",number(-32768,32768)},{"radius",number(0.5,1024)},{"width",number(1,2048)},
+        {"height",number(1,2048)},{"points",array(array(number(-32768,32768),2,2),2,128)},
+        {"falloff",number(0,1)},{"maskWidth",integer(1,64)},{"maskHeight",integer(1,64)},
+        {"mask",array(number(0,1),1,MaxSamples)}},{"shape"});
+    QJsonObject edit{{"revision",string()},{"area",area},{"preview",QJsonObject{{"type","boolean"}}},
+        {"snapshot",QJsonObject{{"type","boolean"}}},{"seed",integer(0,2147483647)}};
+    auto sculpt=edit;sculpt.insert("action",choice({"raise","lower","flatten","smooth","noise","hills","heightmap"}));
+    sculpt.insert("amount",number(0,10000));sculpt.insert("height",number(0,10000));sculpt.insert("strength",number(0,1));
+    sculpt.insert("grid",object({{"width",integer(2,64)},{"height",integer(2,64)},
+        {"values",array(number(0,10000),4,MaxSamples)}},{"width","height","values"}));
+    add("sculpt","Edit terrain in world metres: raise/lower, flatten, smooth, seeded noise/hills or bilinear heightmap. Detached async candidate; one Undo. preview=true prepares without applying.",sculpt,{"revision","action","area"});
+    auto paint=edit;paint.insert("material",integer(1,2147483647));paint.insert("materialName",string());
+    paint.insert("layer",choice({"land","overlay"}));paint.insert("shuffle",QJsonObject{{"type","boolean"}});
+    paint.insert("minimumSlope",number(0,90));paint.insert("maximumSlope",number(0,90));
+    add("paint","Paint palette material by ID or exact name over area/mask/polyline width in metres. Modern131 automatic transitions; optional existing overlay and seeded variant shuffle. Async, one Undo.",paint,{"revision","area"});
+    add("preview","Prepare sculpt/paint without applying; returns region overlay PNG and operation ID for apply.",
+        {{"tool",choice({"sculpt","paint"})},{"arguments",QJsonObject{{"oneOf",QJsonArray{object(sculpt,{"revision","action","area"}),object(paint,{"revision","area"})}}}}},{"tool","arguments"});
+    // preview.arguments is validated against the selected tool below, not an open object.
+    add("apply","Apply a completed preview only at its captured revision, one Undo.",{{"operation",string()},{"revision",string()},{"snapshot",QJsonObject{{"type","boolean"}}}},{"operation","revision"});
+    add("create_map","Create and open a new MPR using the current clean map as terrain template and New MPR213. Name only, never overwrite, active profile map root only; publishes initial atlas to HDPack. This explicit creation writes the initial file even when later Save is disabled.",
+        {{"revision",string()},{"name",string()},{"sectorsX",integer(1,16)},{"sectorsY",integer(1,16)},
+         {"height",number(0,10000)},{"maxZ",number(1,10000)},{"material",integer(1,2147483647)},
+         {"materialName",string()},{"root",integer(0,15)}},{"revision","name","sectorsX","sectorsY"});
+    add("undo_last_agent_operation","Undo only the top agent command. Refuses if human/world history intervened. Does not undo somebody else's work.",{{"revision",string()}},{"revision"});
+    add("save","Use normal map Save209–216 only when the human enabled Allow agent to save. Async status; backups, atlas publication and 126-page limit remain authoritative.",{{"revision",string()}},{"revision"});
+    const QSet<QString> mutations{"sculpt","paint","preview","apply","create_map","undo_last_agent_operation","save"};
+    for(int i=0;i<tools.size();++i) {
+        auto tool=tools[i].toObject();if(!mutations.contains(tool["name"].toString()))continue;
+        tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",true},{"openWorldHint",false}};tools[i]=tool;
+    }
     return tools;
+}
+static bool validValue(const QJsonValue& value,const QJsonObject& schema,QString* diagnostic,QString path,int depth=0)
+{
+    if(depth>10){*diagnostic="Argument nesting limit";return false;}
+    const auto type=schema["type"].toString();bool valid=true;
+    if(type=="integer"||type=="number")valid=value.isDouble()&&std::isfinite(value.toDouble())
+        &&(type!="integer"||std::floor(value.toDouble())==value.toDouble())
+        &&value.toDouble()>=schema["minimum"].toDouble()&&value.toDouble()<=schema["maximum"].toDouble();
+    else if(type=="string")valid=value.isString()&&value.toString().size()<=schema["maxLength"].toInt(256);
+    else if(type=="boolean")valid=value.isBool();
+    else if(type=="array") {
+        valid=value.isArray()&&value.toArray().size()>=schema["minItems"].toInt()&&value.toArray().size()<=schema["maxItems"].toInt();
+        if(valid)for(const auto& entry:value.toArray())if(!validValue(entry,schema["items"].toObject(),diagnostic,path+"[]",depth+1))return false;
+    } else if(type=="object") {
+        valid=value.isObject();if(valid) {
+            const auto args=value.toObject(),props=schema["properties"].toObject();
+            for(const auto& r:schema["required"].toArray())if(!args.contains(r.toString())){*diagnostic="Missing argument: "+path+"."+r.toString();return false;}
+            for(auto it=args.begin();it!=args.end();++it) {
+                if(!props.contains(it.key())){*diagnostic="Unknown argument: "+path+"."+it.key();return false;}
+                if(!validValue(*it,props[it.key()].toObject(),diagnostic,path+"."+it.key(),depth+1))return false;
+            }
+        }
+    }
+    if(schema.contains("enum"))valid=valid&&schema["enum"].toArray().contains(value);
+    if(!valid)*diagnostic="Invalid argument: "+path;return valid;
 }
 bool validateArguments(const QString& name, const QJsonObject& args, QString* diagnostic)
 {
+    diagnostic->clear();
+    if(name=="preview") {
+        if(args.keys()!=QStringList{"arguments","tool"}||!args["arguments"].isObject()
+           ||(args["tool"]!="sculpt"&&args["tool"]!="paint")){*diagnostic="preview expects tool sculpt/paint and its arguments";return false;}
+        return validateArguments(args["tool"].toString(),args["arguments"].toObject(),diagnostic);
+    }
     for(const auto& v : toolDefinitions()) {
         const auto tool = v.toObject(); if(tool["name"].toString()!=name) continue;
-        const auto schema = tool["inputSchema"].toObject(), props = schema["properties"].toObject();
-        for(const auto& r : schema["required"].toArray())
-            if(!args.contains(r.toString())) { *diagnostic="Missing argument: "+r.toString(); return false; }
-        for(auto it=args.begin();it!=args.end();++it) {
-            if(!props.contains(it.key())) { *diagnostic="Unknown argument: "+it.key(); return false; }
-            const auto p=props[it.key()].toObject();const auto type=p["type"].toString();bool valid=true;
-            if(type=="integer") valid=it->isDouble() && std::isfinite(it->toDouble())
-                && std::floor(it->toDouble())==it->toDouble() && it->toDouble()>=p["minimum"].toInt() && it->toDouble()<=p["maximum"].toInt();
-            if(type=="string") valid=it->isString() && it->toString().size()<=p["maxLength"].toInt(256);
-            if(type=="boolean") valid=it->isBool();
-            if(p.contains("enum")) valid=valid && p["enum"].toArray().contains(*it);
-            if(!valid) { *diagnostic="Invalid argument: "+it.key(); return false; }
-        }
-        return true;
+        const auto schema = tool["inputSchema"].toObject();
+        return validValue(args,schema,diagnostic,name);
     }
     *diagnostic="Unknown read tool";return false;
 }

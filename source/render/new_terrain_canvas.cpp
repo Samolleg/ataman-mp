@@ -122,7 +122,7 @@ SMapSaveBatchResult commitNewTerrainCanvas(const QFileInfo& terrainTemplate,
                                           const QByteArray& candidateMpr,
                                           const QFileInfo& destination,
                                           const QStringList& resourceArchives,
-                                          const QString& backupRoot)
+                                          const QString& backupRoot, bool createOnly)
 {
     SMapSaveBatchResult result;
     if(terrainTemplate.absoluteFilePath().compare(destination.absoluteFilePath(),
@@ -187,6 +187,7 @@ SMapSaveBatchResult commitNewTerrainCanvas(const QFileInfo& terrainTemplate,
     SMapSaveFile mpr;
     mpr.path = destination.absoluteFilePath(); mpr.after = plan.mprBytes;
     mpr.existed = destination.exists();
+    if(createOnly && mpr.existed) { result.error = "Map already exists; creation never overwrites"; return result; }
     if(mpr.existed) {
         QFile input(mpr.path);
         if(!input.open(QIODevice::ReadOnly))

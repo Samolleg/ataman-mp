@@ -9572,6 +9572,10 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if(property("aiCommitBusy").toBool()) {
+        e->ignore();QTimer::singleShot(50,this,[this](){close();});return;
+    }
+
     if(m_closeWaiting) { e->ignore(); return; }
     if(!m_closeReady && (CFileWriteActivity::active()>0
        || (m_mprAutosaveWatcher && m_mprAutosaveWatcher->isRunning()))) {

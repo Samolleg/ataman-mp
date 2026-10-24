@@ -391,7 +391,7 @@ bool CView::saveWorldTerrainMaps()
     finishSculptStroke();endTileBrushGroup();syncWorldTerrainActive();
     const QStringList paths=m_worldTerrainSession.dirtyPaths();
     if(paths.isEmpty())return true;
-    if(QMessageBox::question(this,tr("Сохранение общего ландшафта"),
+    if(!m_agentSaveAuthorized && QMessageBox::question(this,tr("Сохранение общего ландшафта"),
         tr("Сохранить перечисленные карты и их атласы с резервными копиями?\n\n%1\n\nПосле перепаковки атласа история Undo/Redo начнётся заново.").arg(paths.join('\n')),
         QMessageBox::Save|QMessageBox::Cancel,QMessageBox::Cancel)!=QMessageBox::Save)return false;
     const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());

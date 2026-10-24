@@ -1,6 +1,7 @@
 #ifndef WORLD_TERRAIN_SCULPT_H
 #define WORLD_TERRAIN_SCULPT_H
 #include <QPointF>
+#include <functional>
 #include <QSharedPointer>
 #include "mpr_document.h"
 #include "terrain_edit_model.h"
@@ -43,5 +44,7 @@ struct SWorldTerrainStroke
 // not raw uint16 samples from one arbitrary map's height scale.
 SWorldTerrainStroke makeWorldTerrainStamp(
     const QVector<SWorldTerrainTarget>& targets, const STerrainBrush& worldBrush,
-    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed=0);
+    EWorldSculptMode mode, double worldDelta, double worldFlatten, double strength, quint32 noiseSeed=0,
+    const std::function<double(double,double)>& influence = {},
+    const std::function<double(double,double,double)>& transform = {});
 #endif
