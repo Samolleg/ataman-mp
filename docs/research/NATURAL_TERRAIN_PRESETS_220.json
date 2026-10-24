@@ -1885,7 +1885,7 @@
     }
 ],"presets":[
     {
-        "computeMs": 234,
+        "computeMs": 238,
         "heightP10": 7.17505254784275,
         "heightP90": 16.23648722141639,
         "max": 22.400183783617038,
@@ -1967,6 +1967,22 @@
             "isolatedPeaksPerKm2": 15.2587890625,
             "isolatedProminentPeaks": 1,
             "leastChangeDirectionDegrees": 120,
+            "localAnisotropy16m": 1.1013784362423735,
+            "localDirectionalEnergy16m": {
+                "0": 3.9526656249390713,
+                "105": 3.9348407508394714,
+                "120": 3.962209909015793,
+                "135": 3.9740526861775085,
+                "15": 4.075354460243592,
+                "150": 4.04242456069227,
+                "165": 3.925251843631089,
+                "30": 4.3231877373959025,
+                "45": 4.314890668806918,
+                "60": 4.2666723493509116,
+                "75": 4.065615149992225,
+                "90": 4.005471577835293
+            },
+            "localLeastChangeDirectionDegrees": 165,
             "narrowProtrusionAreaFraction": 0.002227783203125,
             "sharpOneVertexPeaks": 14,
             "sharpPeaksPerKm2": 213.623046875,
@@ -1982,7 +1998,7 @@
         "steepFraction": 0.24310649750096117
     },
     {
-        "computeMs": 242,
+        "computeMs": 245,
         "heightP10": 12.658082858612254,
         "heightP90": 26.64205264504519,
         "max": 37.47567724365339,
@@ -2064,6 +2080,22 @@
             "isolatedPeaksPerKm2": 259.3994140625,
             "isolatedProminentPeaks": 17,
             "leastChangeDirectionDegrees": 120,
+            "localAnisotropy16m": 1.1398677684704013,
+            "localDirectionalEnergy16m": {
+                "0": 11.444679490359942,
+                "105": 11.115502339893942,
+                "120": 10.876754330450925,
+                "135": 10.925278784147679,
+                "15": 11.70775660788176,
+                "150": 11.441226250361392,
+                "165": 11.35255461554851,
+                "30": 12.360322964107526,
+                "45": 12.351380816156244,
+                "60": 12.39806168685187,
+                "75": 12.037113565525521,
+                "90": 11.788233811987935
+            },
+            "localLeastChangeDirectionDegrees": 120,
             "narrowProtrusionAreaFraction": 0.01116943359375,
             "sharpOneVertexPeaks": 57,
             "sharpPeaksPerKm2": 869.7509765625,
@@ -2079,11 +2111,11 @@
         "steepFraction": 0.36879661668589003
     },
     {
-        "computeMs": 321,
-        "heightP10": 9.538422227072088,
-        "heightP90": 32.72528621450879,
-        "max": 46.188239146867325,
-        "mean": 19.170025399712557,
+        "computeMs": 333,
+        "heightP10": 10.401964770758582,
+        "heightP90": 37.282852177468854,
+        "max": 46.198532243593185,
+        "mean": 23.632993595013087,
         "min": 0,
         "parameters": {
             "amplitude": 48,
@@ -2117,66 +2149,82 @@
         "preset": "mountains",
         "scalesMetres": {
             "16": {
-                "heightDifferenceEnergy": 79.56351803035383,
-                "highPassEnergy": 34.008240798380164,
-                "rmsSlope": 0.5574899033220868
+                "heightDifferenceEnergy": 70.62550162857386,
+                "highPassEnergy": 25.18977974051009,
+                "rmsSlope": 0.525243625127061
             },
             "2": {
-                "heightDifferenceEnergy": 4.977092805827616,
-                "highPassEnergy": 0.7126409679091981,
-                "rmsSlope": 1.1154699464606403
+                "heightDifferenceEnergy": 4.142622948481658,
+                "highPassEnergy": 0.6243153156094349,
+                "rmsSlope": 1.0176717236517945
             },
             "32": {
-                "heightDifferenceEnergy": 128.05967073017516,
-                "highPassEnergy": 68.69625612942768,
-                "rmsSlope": 0.3536357903230903
+                "heightDifferenceEnergy": 135.12028401600259,
+                "highPassEnergy": 59.68640656991831,
+                "rmsSlope": 0.36325390893888193
             },
             "4": {
-                "heightDifferenceEnergy": 15.46534686789927,
-                "highPassEnergy": 3.751142390894044,
-                "rmsSlope": 0.9831501305719815
+                "heightDifferenceEnergy": 12.723815440922257,
+                "highPassEnergy": 3.140063659766986,
+                "rmsSlope": 0.8917614395440302
             },
             "8": {
-                "heightDifferenceEnergy": 39.122921702492654,
-                "highPassEnergy": 12.938902418008789,
-                "rmsSlope": 0.7818539835554
+                "heightDifferenceEnergy": 32.11090064679867,
+                "highPassEnergy": 9.73393419659774,
+                "rmsSlope": 0.708331012031966
             }
         },
         "shape": {
-            "anisotropy32m": 1.4234097605162805,
+            "anisotropy32m": 1.6894574816990613,
             "directionalEnergy32m": {
-                "0": 139.55378796735556,
-                "105": 117.38782296692732,
-                "120": 130.26152473192803,
-                "135": 130.76693378696714,
-                "15": 140.7849984348127,
-                "150": 128.78859863389272,
-                "165": 132.6574616793774,
-                "30": 136.34610406424676,
-                "45": 129.12187241851564,
-                "60": 116.68813251909431,
-                "75": 98.9068659918062,
-                "90": 100.3327752291359
+                "0": 95.93334307112272,
+                "105": 162.0753041959111,
+                "120": 154.33843794061946,
+                "135": 137.73914832642149,
+                "15": 103.7648873867017,
+                "150": 113.9470393067368,
+                "165": 97.67087483765008,
+                "30": 121.10388691891451,
+                "45": 140.44846018936593,
+                "60": 151.58685078803228,
+                "75": 156.04839026826568,
+                "90": 161.1390153959075
             },
-            "isolatedPeaksPerKm2": 534.0576171875,
-            "isolatedProminentPeaks": 35,
-            "leastChangeDirectionDegrees": 75,
-            "narrowProtrusionAreaFraction": 0.063385009765625,
-            "sharpOneVertexPeaks": 45,
-            "sharpPeaksPerKm2": 686.6455078125,
-            "smallNarrowProtrusions": 75,
-            "smallNarrowProtrusionsPerKm2": 1144.4091796875,
-            "upper30LargestComponentFraction": 0.23376230128690387,
-            "upper30PrincipalSpanP90m": 166.67694116610784,
-            "upper30TinyComponentFraction": 0.0012112036336109008
+            "isolatedPeaksPerKm2": 442.5048828125,
+            "isolatedProminentPeaks": 29,
+            "leastChangeDirectionDegrees": 0,
+            "localAnisotropy16m": 1.6366863552790822,
+            "localDirectionalEnergy16m": {
+                "0": 35.2590112684958,
+                "105": 24.359072914291154,
+                "120": 29.338893732682926,
+                "135": 32.52418956284744,
+                "15": 35.59713834086326,
+                "150": 34.810083060408424,
+                "165": 35.163569223993576,
+                "30": 35.76756978922669,
+                "45": 33.07035044011507,
+                "60": 28.3624644164217,
+                "75": 22.885847676888403,
+                "90": 21.853649401951376
+            },
+            "localLeastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.0448760986328125,
+            "sharpOneVertexPeaks": 38,
+            "sharpPeaksPerKm2": 579.833984375,
+            "smallNarrowProtrusions": 71,
+            "smallNarrowProtrusionsPerKm2": 1083.3740234375,
+            "upper30LargestComponentFraction": 0.7872823618470856,
+            "upper30PrincipalSpanP90m": 108.08415896944423,
+            "upper30TinyComponentFraction": 0
         },
-        "slopeP50": 39.79259741647461,
-        "slopeP90": 71.19496118719186,
-        "slopeP99": 74.56865473426231,
-        "steepFraction": 0.597524029219531
+        "slopeP50": 37.83640717914337,
+        "slopeP90": 68.65538765744306,
+        "slopeP99": 74.3495777043451,
+        "steepFraction": 0.5775470972702806
     },
     {
-        "computeMs": 269,
+        "computeMs": 294,
         "heightP10": 2.221389431859471,
         "heightP90": 18.595667761757625,
         "max": 26.961290130377595,
@@ -2258,6 +2306,22 @@
             "isolatedPeaksPerKm2": 0,
             "isolatedProminentPeaks": 0,
             "leastChangeDirectionDegrees": 75,
+            "localAnisotropy16m": 1.5908308844564794,
+            "localDirectionalEnergy16m": {
+                "0": 1.336596110590162,
+                "105": 0.986957879064226,
+                "120": 1.2470420569822545,
+                "135": 1.3882862051659735,
+                "15": 1.3320874687122453,
+                "150": 1.4144150575704575,
+                "165": 1.3782006322070224,
+                "30": 1.3334509724190835,
+                "45": 1.265956517814162,
+                "60": 1.1290723519574886,
+                "75": 0.9445258552755282,
+                "90": 0.8891046002376954
+            },
+            "localLeastChangeDirectionDegrees": 90,
             "narrowProtrusionAreaFraction": 0.0025177001953125,
             "sharpOneVertexPeaks": 0,
             "sharpPeaksPerKm2": 0,
@@ -2273,7 +2337,7 @@
         "steepFraction": 0.05039600153787005
     },
     {
-        "computeMs": 242,
+        "computeMs": 259,
         "heightP10": 3.3205636157366434,
         "heightP90": 7.778895979961094,
         "max": 12.774905465712143,
@@ -2355,6 +2419,22 @@
             "isolatedPeaksPerKm2": 198.3642578125,
             "isolatedProminentPeaks": 13,
             "leastChangeDirectionDegrees": 120,
+            "localAnisotropy16m": 1.1314072697584279,
+            "localDirectionalEnergy16m": {
+                "0": 1.378766452365845,
+                "105": 1.2689457333162235,
+                "120": 1.2923107454940292,
+                "135": 1.3369711911213593,
+                "15": 1.3848456335257802,
+                "150": 1.367989394263832,
+                "165": 1.3709294996985948,
+                "30": 1.422189652506511,
+                "45": 1.4227175114681456,
+                "60": 1.4356944276029147,
+                "75": 1.380981886469816,
+                "90": 1.3271096220157894
+            },
+            "localLeastChangeDirectionDegrees": 105,
             "narrowProtrusionAreaFraction": 0.0035552978515625,
             "sharpOneVertexPeaks": 36,
             "sharpPeaksPerKm2": 549.31640625,
@@ -2370,7 +2450,7 @@
         "steepFraction": 0.24692041522491348
     },
     {
-        "computeMs": 256,
+        "computeMs": 273,
         "heightP10": 7.4821455715443665,
         "heightP90": 20.76412119822115,
         "max": 31.486220204088152,
@@ -2452,6 +2532,22 @@
             "isolatedPeaksPerKm2": 244.140625,
             "isolatedProminentPeaks": 16,
             "leastChangeDirectionDegrees": 90,
+            "localAnisotropy16m": 1.6542724569400222,
+            "localDirectionalEnergy16m": {
+                "0": 7.805152725291473,
+                "105": 5.294629380512883,
+                "120": 6.598459223469208,
+                "135": 7.481715570964093,
+                "15": 7.873380857348056,
+                "150": 7.97014020975444,
+                "165": 7.879299900464626,
+                "30": 7.925216153510921,
+                "45": 7.370831153617933,
+                "60": 6.528255270143765,
+                "75": 5.277952854046881,
+                "90": 4.81791265780798
+            },
+            "localLeastChangeDirectionDegrees": 90,
             "narrowProtrusionAreaFraction": 0.0064849853515625,
             "sharpOneVertexPeaks": 34,
             "sharpPeaksPerKm2": 518.798828125,

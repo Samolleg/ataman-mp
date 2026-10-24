@@ -184,6 +184,7 @@ int runAssemblyCatalogCheck()
             check(pending["status"]=="preview"&&fingerprint()==before,"natural preview leaves live document unchanged");
             client.finish(client.tool("apply",{{"operation",pending["operation"]},{"revision",pending["revision"]}}));undo->trigger();check(fingerprint()==before,"preview/apply is one reversible operation");
             auto gen=perform("generate_terrain",{{"preset",preset},{"seed",220+scenario},{"parameters",params}},true);
+            check(gen["terrainMetrics"].toObject()["shape"].isObject(),"MCP generation returns form metrics");
             QJsonArray passLine;
             if(scenario==1){
                 // A human/controller supplies a line following the generated
@@ -199,8 +200,8 @@ int runAssemblyCatalogCheck()
                 for(int y=0;y<steps;y+=2)passLine.append(QJsonArray{path[y]*8,y*8});
                 write(root+"/mountain-valley-route.json",QJsonDocument(passLine).toJson());
             }
-            if(scenario<2){const QJsonArray line=scenario==0?QJsonArray{QJsonArray{20,0},QJsonArray{40,25},QJsonArray{90,45},QJsonArray{110,80},QJsonArray{80,110},QJsonArray{95,150},QJsonArray{160,170},QJsonArray{200,185},QJsonArray{210,225},QJsonArray{240,256}}:passLine;
-                perform("carve_river",{{"points",line},{"width",scenario==0?7:6},{"depth",3},{"level",scenario==0?1:10},{"floodplain",scenario==0?24:12},{"seed",220+scenario}},true);}
+            if(scenario==0){const QJsonArray line{QJsonArray{20,0},QJsonArray{40,25},QJsonArray{90,45},QJsonArray{110,80},QJsonArray{80,110},QJsonArray{95,150},QJsonArray{160,170},QJsonArray{200,185},QJsonArray{210,225},QJsonArray{240,256}};
+                perform("carve_river",{{"points",line},{"width",7},{"depth",3},{"level",1},{"floodplain",24},{"seed",220}},true);}
             QJsonObject paint{{"preset",preset},{"seed",220+scenario},{"parameters",params},
                 {"road",QJsonObject{{"shape","line"},{"points",QJsonArray{QJsonArray{15,40},QJsonArray{65,67},QJsonArray{130,108},QJsonArray{200,133},QJsonArray{250,155}}},{"width",4},{"falloff",0.5}}}};
             if(scenario!=1)paint["water"]=QJsonObject{{"material",scenario==2?coastWater:water},{"liquid",scenario==2?coastLiquid:liquid},{"level",params["waterLevel"]}};
@@ -214,6 +215,10 @@ int runAssemblyCatalogCheck()
             if(scenario<2)check(m["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()<previous["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()*0.6,"R3 narrow teeth area reduced by at least40% from R2");
             if(scenario==1){check(m["slopeP90"].toDouble()<reference["slopeP90"].toDouble()+2,"mountain P90 near zone2 and below old78deg");
                 const double ratio=m["shape"].toObject()["anisotropy32m"].toDouble()/reference["shape"].toObject()["anisotropy32m"].toDouble();check(ratio>0.7&&ratio<2,"directed ridge anisotropy remains comparable to zone2");
+                const auto shape=m["shape"].toObject(),refShape=reference["shape"].toObject(),oldShape=previous["shape"].toObject();
+                const double delta=std::abs(shape["localLeastChangeDirectionDegrees"].toDouble()-refShape["localLeastChangeDirectionDegrees"].toDouble());
+                check(qMin(delta,180-delta)<=30,"local ridge direction follows reference orientation");
+                check(std::abs(shape["upper30LargestComponentFraction"].toDouble()-refShape["upper30LargestComponentFraction"].toDouble())<std::abs(oldShape["upper30LargestComponentFraction"].toDouble()-refShape["upper30LargestComponentFraction"].toDouble()),"connected upper terrain approaches reference more closely than R2");
                 check(m["materialFractions"].toObject()["Ground / Gravel"].toDouble()>0.001,"dry valley has a painted road below the unused waterLevel");}
             if(scenario==2)check(m["dryIslands"].toObject()["islandsBelow64m2"].toInt()<=2,"coast removes isolated dry pixel islands");
             m["name"]=name;m["generate"]=gen;m["paint"]=painting;generatedMetrics.append(m);
@@ -232,7 +237,7 @@ int runAssemblyCatalogCheck()
         client.finish(client.tool("create_map",{{"revision",revision()},{"name","seam220"},{"sectorsX",8},{"sectorsY",8},{"height",8},{"maxZ",64},{"material",grass}}));undo->trigger();
         view.m_worldTerrainEnabled=true;view.m_hasActiveMapWorldOrigin=true;view.m_activeMapWorldOrigin={0,0};view.m_neighborLayoutStorageWritable=true;
         const auto other=maps+"/seam220.mpr",id=CWorldTerrainSession::key(other);SNeighborMapPlacement n;n.zoneId="seam220";n.mprPath=other;n.worldOrigin={256,0};n.origin={256,0};n.size={256,256};view.m_neighborPlacements={n};view.m_worldTerrainEnabledPaths={id};
-        auto seam=perform("generate_terrain",{{"preset","hills"},{"seed",220},{"area",QJsonObject{{"shape","rectangle"},{"x",0},{"y",0},{"width",512},{"height",256},{"falloff",0}}}},true);
+        auto seam=perform("generate_terrain",{{"preset","mountains"},{"seed",220},{"area",QJsonObject{{"shape","rectangle"},{"x",0},{"y",0},{"width",512},{"height",256},{"falloff",0}}}},true);
         auto neighbor=view.m_worldTerrainSession.documents.value(id);check(bool(neighbor),"native neighbour in world session");double maximum=0;
         for(int y=0;y<=256;++y)maximum=qMax(maximum,std::abs(view.m_terrainEdit.height(256,y)*view.m_terrainEdit.maxZ()/65535.0-neighbor->terrain.height(0,y)*neighbor->terrain.maxZ()/65535.0));
         check(maximum<0.001,"entire shared edge matches within raw-height quantum");write(root+"/seam.json",QJsonDocument(QJsonObject{{"maxWorldHeightDifference",maximum},{"result",seam}}).toJson());

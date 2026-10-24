@@ -376,7 +376,9 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
         if(cancel->load())return fail("Cancelled; live map unchanged");
         plan.summary={{"changed",changed},{"maps",plan.stroke.maps.size()+plan.stroke.paint.size()},{"revision",plan.revision}};
         plan.summary["computeMs"]=int(computation.elapsed());
-        if(naturalHeight)plan.summary["terrainMetrics"]=natural::metrics(generated);
+        if(naturalHeight){auto metrics=natural::metrics(generated);
+            if(plan.method=="generate_terrain")metrics["shape"]=natural::shapeMetrics(generated);
+            plan.summary["terrainMetrics"]=metrics;}
         plan.summary.insert("preview",planImage(plan,b));return plan;
     } catch(const std::exception& e) {return fail(QString::fromUtf8(e.what()));}
     catch(...) {return fail("Preparation failed; live map unchanged");}

@@ -90,16 +90,21 @@ QJsonObject natural::shapeMetrics(const Grid& g)
         largest=qMax(largest,queue.size());if(queue.size()<25){tinyCells+=queue.size();continue;}const double n=queue.size(),a=sxx/n-sx*sx/n/n,b=syy/n-sy*sy/n/n,c=sxy/n-sx*sy/n/n;
         lengths.append(std::sqrt(qMax(0.0,(a+b+std::sqrt((a-b)*(a-b)+4*c*c))/2)*12));
     }
-    std::sort(lengths.begin(),lengths.end());QJsonObject directions;double smallest=1e20,biggest=0;int direction=0;
+    std::sort(lengths.begin(),lengths.end());QJsonObject directions,localDirections;double smallest=1e20,biggest=0,localSmallest=1e20,localBiggest=0;int direction=0,localDirection=0;
+    const auto regional=blurred(smoothHeights,w,h,16);QVector<double> local(smoothHeights.size());for(int i=0;i<local.size();++i)local[i]=smoothHeights[i]-regional[i];
     for(int degrees=0;degrees<180;degrees+=15){const int dx=qRound(32*std::cos(degrees*pi/180)),dy=qRound(32*std::sin(degrees*pi/180));double sum=0;int pairs=0;
         for(int y=qMax(0,-dy);y<qMin(h,h-dy);++y)for(int x=qMax(0,-dx);x<qMin(w,w-dx);++x){const double difference=smoothHeights[(y+dy)*w+x+dx]-smoothHeights[y*w+x];sum+=difference*difference;++pairs;}
         const double energy=sum/qMax(1,pairs);directions[QString::number(degrees)]=energy;if(energy<smallest){smallest=energy;direction=degrees;}biggest=qMax(biggest,energy);
+        const int lx=qRound(16*std::cos(degrees*pi/180)),ly=qRound(16*std::sin(degrees*pi/180));sum=0;pairs=0;
+        for(int y=qMax(0,-ly);y<qMin(h,h-ly);++y)for(int x=qMax(0,-lx);x<qMin(w,w-lx);++x){const double difference=local[(y+ly)*w+x+lx]-local[y*w+x];sum+=difference*difference;++pairs;}
+        const double localEnergy=sum/qMax(1,pairs);localDirections[QString::number(degrees)]=localEnergy;if(localEnergy<localSmallest){localSmallest=localEnergy;localDirection=degrees;}localBiggest=qMax(localBiggest,localEnergy);
     }
     return {{"sharpOneVertexPeaks",needles},{"sharpPeaksPerKm2",needles*1e6/area},{"isolatedProminentPeaks",isolated},{"isolatedPeaksPerKm2",isolated*1e6/area},
         {"narrowProtrusionAreaFraction",protrusionCells/area},{"smallNarrowProtrusions",smallProtrusions},{"smallNarrowProtrusionsPerKm2",smallProtrusions*1e6/area},
         {"upper30TinyComponentFraction",double(tinyCells)/qMax(1,highCells)},{"upper30LargestComponentFraction",double(largest)/qMax(1,highCells)},
         {"upper30PrincipalSpanP90m",lengths.isEmpty()?0:lengths[int((lengths.size()-1)*0.9)]},{"anisotropy32m",smallest>1e-12?biggest/smallest:1},
-        {"leastChangeDirectionDegrees",direction},{"directionalEnergy32m",directions}};
+        {"leastChangeDirectionDegrees",direction},{"directionalEnergy32m",directions},
+        {"localAnisotropy16m",localSmallest>1e-12?localBiggest/localSmallest:1},{"localLeastChangeDirectionDegrees",localDirection},{"localDirectionalEnergy16m",localDirections}};
 }
 namespace {
 void limitTerrainSlope(natural::Grid& g,double degrees,const std::function<bool()>& cancelled)
@@ -191,6 +196,15 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
             const double tributary=std::pow(1-std::abs(noise((across+bend*0.5)/(spacing*0.22),along/(spacing*elongation*0.3),seed^7219)),2);
             const double weight=(0.4+0.4*p["ridge"].toDouble(0.82))*0.92;
             h=p["baseHeight"].toDouble()+amplitude*(weight*primary+(0.95-weight)*secondary+0.05*tributary)*(0.88+0.12*noise(along/90,across/90,seed^5813));
+            // A warped transverse watershed joins the longitudinal fingers.
+            // Independent parallel ridges lack the shared head massif seen in
+            // zone2. Valleys emerge from its sides and accumulate tributaries.
+            const double minimumAlong=g.origin.x()*std::cos(angle)+g.origin.y()*std::sin(angle)
+                +qMin(0.0,(g.width-1)*std::cos(angle))+qMin(0.0,(g.height-1)*std::sin(angle));
+            const double span=std::abs((g.width-1)*std::cos(angle))+std::abs((g.height-1)*std::sin(angle));
+            const double head=minimumAlong+span*0.78+spacing*0.4*noise(across/70,13,seed^6619);
+            const double watershed=p["baseHeight"].toDouble()+amplitude*(0.82+0.05*noise(across/90,17,seed^1853))*std::exp(-std::pow((along-head)/(spacing*1.3),2));
+            const double join=qMax(0.0,4-std::abs(h-watershed));h=qMax(h,watershed)+join*join/16;
         }else if(name=="coast"){
             const double coast=g.origin.x()+g.width*0.58+g.width*0.22*fbm(wy/90,12,seed^7123,3);
             // Curving bay, a broad shelf, then a steeper inland escarpment.
