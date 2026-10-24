@@ -95,6 +95,74 @@ int runAssemblyCatalogCheck()
         check(mode&&allow&&mode->currentIndex()==0&&!allow->isChecked(),"fresh human authority Off and Save disabled");
         check(!view.m_pLand->isMprLoad(),"scenario starts without any open map");
         check(window.activeResourceProfile().valid,"isolated profile valid with synthetic non-launchable runtime marker");
+        auto* logServer=window.m_aiAgent;
+        logServer->event("validation alpha");logServer->event("validation beta");logServer->event("validation beta");logServer->event("validation beta");logServer->event("validation gamma");
+        const auto history=logServer->m_events->toPlainText();
+        check(history.contains("validation alpha\n")&&history.contains(QString::fromUtf8("validation beta (×3)\n"))&&history.endsWith("validation gamma"),"coalescing preserves prior different event rows and repeat count");
+        if(!qEnvironmentVariable("EI_MCP_CHURN").isEmpty()) {
+            auto* server=window.m_aiAgent;
+            mode->setCurrentIndex(2);allow->setChecked(true);
+            int accepts=0,events=0,peak=0;
+            auto acceptConnection=QObject::connect(&server->m_server,&QLocalServer::newConnection,&window,[&](){
+                ++accepts;if(accepts<=20){QJsonArray states;for(auto* s:server->m_clients.keys())states.append(QJsonObject{{"state",int(s->state())},{"auth",s->property("authenticated").toBool()}});
+                    out<<"ACCEPT "<<accepts<<" "<<QJsonDocument(states).toJson(QJsonDocument::Compact)<<"\n";out.flush();}});
+            auto logConnection=QObject::connect(server->m_events,&QPlainTextEdit::textChanged,&window,[&](){++events;});
+            auto sample=[&](QString phase,int ms) {
+                const int a=accepts,e=events;QElapsedTimer timer;timer.start();
+                while(timer.elapsed()<ms){QTest::qWait(10);peak=qMax(peak,server->m_clients.size());}
+                int authenticated=0,disconnected=0;for(auto* s:server->m_clients.keys()){
+                    authenticated+=s->property("authenticated").toBool();disconnected+=s->state()!=QLocalSocket::ConnectedState;}
+                QJsonObject result{{"phase",phase},{"milliseconds",double(timer.elapsed())},{"accepts",accepts-a},{"events",events-e},
+                    {"clients",server->m_clients.size()},{"authenticated",authenticated},{"disconnectedSlots",disconnected},{"peak",peak}};
+                out<<"CHURN "<<QJsonDocument(result).toJson(QJsonDocument::Compact)<<"\n";out.flush();
+                write(root+"/churn-"+phase+".json",QJsonDocument(result).toJson());return result;
+            };
+            {
+                Client a(qEnvironmentVariable("EI_MCP_TEST_BRIDGE")),b(qEnvironmentVariable("EI_MCP_TEST_BRIDGE")),c(qEnvironmentVariable("EI_MCP_TEST_BRIDGE"));
+                const auto idle=sample("idle",60000);
+                if(qEnvironmentVariable("EI_MCP_CHURN")=="baseline") {
+                    write(root+"/churn-dock.txt",server->m_events->toPlainText().toUtf8());
+                    Client fourth(qEnvironmentVariable("EI_MCP_TEST_BRIDGE"));sample("fourth",60000);
+                    write(root+"/churn-fourth-dock.txt",server->m_events->toPlainText().toUtf8());
+                } else {
+                    check(idle["accepts"].toInt()==3&&idle["events"].toInt()<=3&&idle["authenticated"].toInt()==3&&idle["clients"].toInt()==3,"three silent bridges keep exactly three authenticated streams for60s");
+                    auto connectAll=[&](){for(auto* client:{&a,&b,&c}){
+                        client->call("initialize",{{"protocolVersion","2025-11-25"}});
+                        for(int i=0;i<5;++i)check(client->tool("list_instances")["instances"].toArray().size()==1,"explicit instance listing opens no probe stream");
+                        check(!client->tool("connect_instance",{{"instance",server->m_id}}).contains("error"),"each bridge selects instance");
+                        check(!client->tool("get_context").contains("error"),"each bridge reads empty context");
+                    }};connectAll();
+                    const auto selected=sample("selected",5000);check(selected["accepts"].toInt()==0&&selected["clients"].toInt()==3,"selection reuses metadata streams");
+                    if(qEnvironmentVariable("EI_MCP_CHURN")!="final") {
+                    {Client fourth(qEnvironmentVariable("EI_MCP_TEST_BRIDGE"));const auto added=sample("fourth",60000);
+                        check(added["accepts"].toInt()==1&&added["authenticated"].toInt()==4&&added["events"].toInt()==1,"fourth bridge does not self-starve in last client slot");}
+                    sample("fourth-closed",1000);
+                    const int beforeNoise=events;
+                    for(int i=0;i<20;++i){QLocalSocket probe;probe.connectToServer(server->m_server.serverName());check(probe.waitForConnected(),"legacy probe connects");QTest::qWait(10);probe.abort();QTest::qWait(10);}
+                    check(events==beforeNoise&&server->m_clients.size()==3,"unauthenticated legacy probes are silent and release slots");
+                    {QLocalSocket unauthenticated;unauthenticated.connectToServer(server->m_server.serverName());check(unauthenticated.waitForConnected(),"unauthenticated timeout fixture connects");
+                        QTest::qWait(5500);check(unauthenticated.state()==QLocalSocket::UnconnectedState&&events==beforeNoise,"5s authentication expiry is silent");}
+                    mode->setCurrentIndex(0);sample("off",3000);
+                    {
+                        QLocalServer broken;const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);const auto pipe="ei-ataman-"+id;
+                        check(broken.listen(pipe),"failing endpoint starts in private discovery");int attempts=0;
+                        QObject::connect(&broken,&QLocalServer::newConnection,&window,[&](){while(broken.hasPendingConnections()){++attempts;auto* s=broken.nextPendingConnection();s->abort();s->deleteLater();}});
+                        const auto path=QDir(ai::discoveryDirectory()).filePath(id+".json");
+                        write(path,QJsonDocument(QJsonObject{{"instance",id},{"pipe",pipe},{"secret",QString(72,'s')}}).toJson());
+                        sample("backoff",60000);check(attempts>=9&&attempts<=21,"three failing streams retry exponentially, at most7 attempts each in60s");
+                        write(root+"/churn-backoff-attempts.json",QJsonDocument(QJsonObject{{"attempts",attempts},{"bridges",3},{"seconds",60}}).toJson());QFile::remove(path);
+                    }
+                    } else {mode->setCurrentIndex(0);sample("off",3000);}
+                    mode->setCurrentIndex(2);allow->setChecked(true);
+                    const auto restored=sample("restored",60000);
+                    check(restored["accepts"].toInt()==3&&restored["events"].toInt()<=3&&restored["authenticated"].toInt()==3,"Off to Edit restores three streams without churn");connectAll();
+                    write(root+"/churn-dock.txt",server->m_events->toPlainText().toUtf8());
+                }
+            }
+            sample("closed",1000);QObject::disconnect(logConnection);QObject::disconnect(acceptConnection);mode->setCurrentIndex(0);
+            if(qEnvironmentVariable("EI_MCP_CHURN")=="baseline") {out<<"RESULT baseline recorded\n";out.flush();return 0;}
+            if(qEnvironmentVariable("EI_MCP_CHURN")=="final"&&qEnvironmentVariable("EI_MCP_FINAL_SMOKE")!="1") {window.close();out<<"RESULT "<<checks<<" PASS, 0 FAIL\n";out.flush();return 0;}
+        }
         mode->setCurrentIndex(1);
         Client client(qEnvironmentVariable("EI_MCP_TEST_BRIDGE"));
         client.call("initialize",{{"protocolVersion","2025-11-25"},{"capabilities",QJsonObject{}},{"clientInfo",QJsonObject{{"name","221-e2e"},{"version","1"}}}});
@@ -122,6 +190,19 @@ int runAssemblyCatalogCheck()
                 if(!cache.contains(packed)){auto tile=SMprPackedTile::decode(packed);if(tile.atlasSlot()>=images.size())throw QString("Unresolved packed tile after reopen");
                     auto image=images[tile.atlasSlot()].transformed(QTransform().rotate(90*tile.rotation)).convertToFormat(QImage::Format_RGBA8888);QCryptographicHash pixels(QCryptographicHash::Sha256);
                     for(int row=0;row<image.height();++row)pixels.addData(reinterpret_cast<const char*>(image.constScanLine(row)),image.width()*4);cache[packed]=pixels.result();}h.addData(cache[packed]);}check(true,"all land/overlay tiles resolve into current atlas");return h.result().toHex();};
+        if(qEnvironmentVariable("EI_MCP_FINAL_SMOKE")=="1") {
+            mode->setCurrentIndex(2);allow->setChecked(true);
+            list=client.tool("list_instances")["instances"].toArray();
+            check(!client.tool("connect_instance",{{"instance",list[0].toObject()["instance"]}}).contains("error"),"final bridge connects production editor");
+            check(!client.tool("get_context").contains("error"),"final bridge reads context");
+            run("create_map",{{"name","final223"},{"sectorsX",1},{"sectorsY",1},{"height",8},{"maxZ",64},{"template","0/gipat2.mpr"}});idle();
+            const auto original=heights();
+            run("sculpt",{{"action","raise"},{"amount",1},{"area",QJsonObject{{"shape","circle"},{"x",16},{"y",16},{"radius",8}}}});
+            check(heights()!=original,"final bridge applies short terrain edit");
+            run("undo_last_agent_operation");check(heights()==original,"final bridge Undo restores exact sector bytes");
+            run("close_map");check(!view.m_pLand->isMprLoad(),"final bridge closes clean map");
+            mode->setCurrentIndex(0);window.close();out<<"RESULT "<<checks<<" PASS, 0 FAIL\n";out.flush();return 0;
+        }
         rejected("open_map",{{"map","gipat2"}});mode->setCurrentIndex(2);
         list=client.tool("list_instances")["instances"].toArray();check(list.size()==1,"mode transition publishes one fresh isolated descriptor");
         check(client.tool("connect_instance",{{"instance",list[0].toObject()["instance"]}})["mode"]=="edit","reconnect after human changes mode");

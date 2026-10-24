@@ -27,8 +27,17 @@ CAiAgentServer::CAiAgentServer(MainWindow* w):QObject(w),m_window(w),m_view(w->v
 CAiAgentServer::~CAiAgentServer(){stop();}
 void CAiAgentServer::event(const QString& text)
 {
-    m_events->appendPlainText(QTime::currentTime().toString("HH:mm:ss")+" "+text);
-    m_status->setText(enabled()?QString::fromUtf8("%1; подключений: %2").arg(m_mode->currentIndex()==2?QString::fromUtf8("Правка"):QString::fromUtf8("Только чтение")).arg(m_clients.size()):QString::fromUtf8("Отключено"));
+    updateStatus();
+    const auto line=QTime::currentTime().toString("HH:mm:ss")+" "+text;
+    if(m_lastEvent==text) {
+        ++m_eventRepeats;QTextCursor cursor(m_events->document());cursor.movePosition(QTextCursor::End);cursor.movePosition(QTextCursor::StartOfBlock,QTextCursor::KeepAnchor);
+        cursor.insertText(line+QString::fromUtf8(" (×%1)").arg(m_eventRepeats));
+    } else {m_lastEvent=text;m_eventRepeats=1;m_events->appendPlainText(line);}
+}
+void CAiAgentServer::updateStatus()
+{
+    int authenticated=0;for(auto* s:m_clients.keys())authenticated+=s->property("authenticated").toBool();
+    m_status->setText(enabled()?QString::fromUtf8("%1; подключений: %2").arg(m_mode->currentIndex()==2?QString::fromUtf8("Правка"):QString::fromUtf8("Только чтение")).arg(authenticated):QString::fromUtf8("Отключено"));
 }
 void CAiAgentServer::cancelJob(Job& job)
 {
@@ -79,15 +88,22 @@ void CAiAgentServer::accept()
 {
     while(m_server.hasPendingConnections()) {
         auto* s=m_server.nextPendingConnection();
-        if(m_clients.size()>=4){s->abort();s->deleteLater();continue;}
+        int pending=0;for(auto* client:m_clients.keys())pending+=!client->property("authenticated").toBool();
+        // Independent budgets: old bridge probes cannot consume authenticated
+        // agent slots. Never evict an established client for a new arrival.
+        if(s->state()!=QLocalSocket::ConnectedState||pending>=16){s->abort();s->deleteLater();continue;}
         s->setReadBufferSize(ai::MaxFrame+1);m_clients.insert(s,{});
         s->setProperty("authenticated",false);
         connect(s,&QLocalSocket::readyRead,this,[this,s](){receive(s);});
         connect(s,&QLocalSocket::disconnected,this,[this,s](){
-            for(auto it=m_jobs.begin();it!=m_jobs.end();)if(it->owner==s){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
-            if(m_writer==s)m_writer.clear();m_clients.remove(s);s->deleteLater();event(QString::fromUtf8("Агент отключён; его незавершённые операции отброшены"));});
+            const bool authenticated=s->property("authenticated").toBool();bool discarded=false;
+            for(auto it=m_jobs.begin();it!=m_jobs.end();)if(it->owner==s){discarded|=!it->complete||bool(it->plan);cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+            if(m_writer==s)m_writer.clear();m_clients.remove(s);s->deleteLater();updateStatus();
+            if(authenticated)event(discarded?QString::fromUtf8("Агент отключён; его незавершённые операции отброшены"):QString::fromUtf8("Агент отключён"));});
         QTimer::singleShot(5000,s,[s](){if(!s->property("authenticated").toBool())s->abort();});
-        event(QString::fromUtf8("Локальное подключение; ожидается проверка"));
+        // Data/disconnect can arrive before nextPendingConnection is consumed.
+        // Do not wait for a readyRead signal that has already been delivered.
+        if(s->bytesAvailable())receive(s);
     }
 }
 void CAiAgentServer::receive(QLocalSocket* s)
@@ -102,7 +118,11 @@ void CAiAgentServer::receive(QLocalSocket* s)
            ||request["secret"].toString()!=m_secret||m_secret.isEmpty()) {
             event(QString::fromUtf8("Подключение отклонено"));s->abort();return;
         }
-        s->setProperty("authenticated",true);
+        if(!s->property("authenticated").toBool()) {
+            int authenticated=0;for(auto* client:m_clients.keys())authenticated+=client->property("authenticated").toBool();
+            if(authenticated>=16){s->abort();return;}
+            s->setProperty("authenticated",true);event(QString::fromUtf8("Агент подключён; проверка пройдена"));
+        }
         const auto method=request["method"].toString();const auto args=request["arguments"].toObject();
         QJsonObject result;
         if(request.contains("protocolMajor")&&request["protocolMajor"]!=ai::LocalProtocolMajor)

@@ -33,6 +33,7 @@ private:
     };
     void setEnabled(int mode);
     void event(const QString& message);
+    void updateStatus();
     void accept();
     void receive(QLocalSocket* socket);
     QJsonObject dispatch(const QString& method, const QJsonObject& args);
@@ -57,6 +58,7 @@ private:
     std::shared_ptr<std::atomic_int> m_editWorkers{std::make_shared<std::atomic_int>(0)};
     QLabel* m_status;
     QPlainTextEdit* m_events;
+    QString m_lastEvent;int m_eventRepeats{0};
     QTimer m_expiry;
 };
 #endif

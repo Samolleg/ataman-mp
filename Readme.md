@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **222**: MCP-мост получает каталог инструментов, ресурсов и инструкции у маппера и уведомляет клиентов об изменениях. Установщик и откат допускают работающие мосты: занятые файлы сохраняются под временными именами. [Обновление при запущенных агентах](docs/AI_AGENT_MCP.md), [проверки222](docs/validation/ATAMAN_MCP_BRIDGE_HOTSWAP_222_20261024.md). Рельеф220 и база131 сохранены. СТОП перед установкой: установлена221, без push.
+Версия **223**: простаивающие MCP-мосты сохраняют соединение; обнаружение не открывает пробных клиентов, сбои получают задержку1–60с. Док показывает проверенных агентов и схлопывает повторения. Совместимость218–222, list_changed и горячая замена сохранены. [Проверки223](docs/validation/ATAMAN_MCP_BRIDGE_CHURN_223_20261024.md). Рельеф220 и база131 сохранены. СТОП перед установкой: установлена222, без push.
 
 Изменения187: общая покраска сохраняет готовые тени рельефа при изменении
 только текстур; изменения геометрии и покрытия обновляют поле по-прежнему.
@@ -50,7 +50,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `220`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `223`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

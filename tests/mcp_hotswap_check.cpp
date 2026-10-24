@@ -86,6 +86,7 @@ int main(int argc,char** argv) {
     try {
         const auto args=app.arguments();check(args.size()==6,"explicit isolated target/package/scripts/backups/probe arguments");
         const QString target=args[1],package=args[2],scripts=args[3],backups=args[4],probe=args[5];
+        QFile versionFile(package+"/VERSION");check(versionFile.open(QIODevice::ReadOnly),"package version readable");const auto expectedVersion=versionFile.readAll().trimmed();
         Mapper mapper;
         {
             Client old(target+"/EIMapperMcp.exe");const auto pid=old.pid();
@@ -99,7 +100,7 @@ int main(int argc,char** argv) {
             check(old.pid()==pid&&old.call("ping").contains("result"),"same running bridge survives installation");
             check(!QDir(target).entryList({"EIMapperMcp.exe.old-ataman-*"},QDir::Files).isEmpty(),"occupied exe renamed aside");
             check(!QDir(target).entryList({"Qt5Core.dll.old-ataman-*"},QDir::Files).isEmpty(),"occupied Qt DLL renamed aside");
-            QProcess version;version.start(target+"/EIMapperMcp.exe",{"--version"});check(version.waitForFinished()&&version.readAllStandardOutput().trimmed()=="EIMapperMcp 222","new canonical bridge version222");
+            QProcess version;version.start(target+"/EIMapperMcp.exe",{"--version"});check(version.waitForFinished()&&version.readAllStandardOutput().trimmed()=="EIMapperMcp "+expectedVersion,"new canonical bridge matches package version");
             mapper.generation=2;old.waitNotification();check(hasTool(old.call("tools/list"),"future_tool_2"),"same bridge receives changed mapper tools");
             check(!hasTool(old.call("tools/list"),"future_tool_1"),"retired tool removed from list");
             {Client fresh(target+"/EIMapperMcp.exe");check(hasTool(fresh.call("tools/list"),"future_tool_2"),"plain reconnect sees current catalog before selecting editor");

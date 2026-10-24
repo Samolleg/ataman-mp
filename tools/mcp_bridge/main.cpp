@@ -6,6 +6,7 @@
 #ifdef Q_OS_WIN
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #endif
 
 namespace {
@@ -27,6 +28,18 @@ QJsonObject readDescriptor(const QString& id)
         ||value["secret"].toString().size()!=72)return {};
     return value;
 }
+bool available(const QJsonObject& descriptor)
+{
+    // Inspect the named pipe without opening a client handle. A connect/abort
+    // probe is a real pending client on Windows and races other bridges.
+#ifdef Q_OS_WIN
+    const auto pipe=QString("\\\\.\\pipe\\")+descriptor["pipe"].toString();
+    if(WaitNamedPipeW(reinterpret_cast<LPCWSTR>(pipe.utf16()),1))return true;
+    const auto error=GetLastError();return error==ERROR_SEM_TIMEOUT||error==ERROR_PIPE_BUSY;
+#else
+    return QFileInfo::exists(QDir::temp().filePath(descriptor["pipe"].toString()));
+#endif
+}
 class Bridge {
     QLocalSocket socket;
     QString secret;
@@ -40,31 +53,41 @@ class Bridge {
     bool selected{false}, discoverMetadata{true};
     bool legacyCatalog{false};
     QString catalogError;
+    QElapsedTimer clock;
+    qint64 retryAt{0};int retryDelay{1000};QString attemptedPipe;
+    void connectionFailed() {
+        detach();retryAt=clock.elapsed()+retryDelay;retryDelay=qMin(60000,retryDelay*2);
+    }
+    void connectionHealthy(){retryAt=0;retryDelay=1000;}
     void useCatalog(const QJsonObject& value,bool remote) {
         if(catalog!=value||remoteCatalog!=remote)changed=true;
         catalog=value;remoteCatalog=remote;
     }
 public:
+    Bridge(){clock.start();}
     void detach(){socket.abort();selected=false;legacyCatalog=false;secret.clear();buffer.clear();editJobs.clear();activeJobs.clear();catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
     void initialized(){ready=true;}
     bool takeChanged(){if(!ready||!changed)return false;changed=false;return true;}
     void refreshCatalog() {
         if(socket.state()!=QLocalSocket::ConnectedState) {
-            detach();if(!discoverMetadata)return;
+            if(!secret.isEmpty())connectionFailed();if(!discoverMetadata)return;
             // A client that ignores list_changed must still see the current
             // catalog on a plain MCP reconnect, before connect_instance runs.
-            // Probe metadata only when there is one unambiguous enabled editor.
+            // Fetch metadata only when there is one unambiguous enabled editor.
             // This does NOT select a workspace or authorize any tool calls.
             QJsonObject candidate;int scanned=0;
             for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
                 if(++scanned>100)break;
                 const auto d=readDescriptor(file.completeBaseName());if(d.isEmpty())continue;
-                QLocalSocket probe;probe.connectToServer(d["pipe"].toString());if(!probe.waitForConnected(50))continue;
-                probe.abort();if(!candidate.isEmpty())return;candidate=d;
+                if(!available(d))continue;
+                if(!candidate.isEmpty())return;candidate=d;
             }
             if(candidate.isEmpty())return;
+            const auto pipe=candidate["pipe"].toString();
+            if(attemptedPipe!=pipe){attemptedPipe=pipe;connectionHealthy();}
+            if(clock.elapsed()<retryAt)return;
             secret=candidate["secret"].toString();socket.connectToServer(candidate["pipe"].toString());
-            if(!socket.waitForConnected(250)){detach();return;}
+            if(!socket.waitForConnected(250)){connectionFailed();return;}
         }
         if(legacyCatalog)return;
         // Never let a background metadata probe's short read deadline destroy
@@ -77,7 +100,7 @@ public:
             if(socket.state()!=QLocalSocket::ConnectedState){catalogError.clear();return;}
             // 218-221 return this exact error for an unknown method. Do not
             // hide a malformed/incompatible new protocol behind stale tools.
-            if(value["error"]=="Unknown read tool") {legacyCatalog=true;catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
+            if(value["error"]=="Unknown read tool") {connectionHealthy();legacyCatalog=true;catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
             else catalogError=value["error"].toString();
             return;
         }
@@ -95,32 +118,32 @@ public:
             bool found=false;for(const auto& t:tools)if(t.toObject()["name"]==name)found=true;
             if(!found)tools.prepend(item);
         }
-        current["tools"]=tools;catalogError.clear();useCatalog(current,true);
+        current["tools"]=tools;connectionHealthy();catalogError.clear();useCatalog(current,true);
     }
     QJsonObject local(const QString& method,const QJsonObject& args,int timeout=2000)
     {
         if(socket.state()!=QLocalSocket::ConnectedState||secret.isEmpty())return ai::error("Not connected. Enable read-only in the editor and connect_instance.");
         const QString id=QString::number(++sequence);
         const QByteArray payload=QJsonDocument(QJsonObject{{"id",id},{"secret",secret},{"protocolMajor",ai::LocalProtocolMajor},{"method",method},{"arguments",args}}).toJson(QJsonDocument::Compact)+'\n';
-        if(socket.write(payload)!=payload.size()){detach();return ai::error("Local write failed; reconnect");}
+        if(socket.write(payload)!=payload.size()){connectionFailed();return ai::error("Local write failed; reconnect");}
         QElapsedTimer elapsed;elapsed.start();
         while(elapsed.elapsed()<timeout) {
             buffer+=socket.readAll();
             while(buffer.contains('\n')) {
                 QJsonObject response;QString error;
-                if(!ai::takeFrame(buffer,&response,&error)){detach();return ai::error("Invalid local frame; reconnect");}
+                if(!ai::takeFrame(buffer,&response,&error)){connectionFailed();return ai::error("Invalid local frame; reconnect");}
                 // Correlate on our own ID, never on the client's reused/request ID.
                 // Late responses are ignored, and timeout destroys the stream.
                 if(response["id"].toString()==id) {
-                    if(!response["result"].isObject()){detach();return ai::error("Invalid local result");}
+                    if(!response["result"].isObject()){connectionFailed();return ai::error("Invalid local result");}
                     return response["result"].toObject();
                 }
             }
-            if(buffer.size()>ai::MaxFrame){detach();return ai::error("Local frame limit");}
-            if(socket.state()!=QLocalSocket::ConnectedState){detach();return ai::error("Editor disconnected or read mode disabled");}
+            if(buffer.size()>ai::MaxFrame){connectionFailed();return ai::error("Local frame limit");}
+            if(socket.state()!=QLocalSocket::ConnectedState){connectionFailed();return ai::error("Editor disconnected or read mode disabled");}
             socket.waitForReadyRead(qMax(1,timeout-int(elapsed.elapsed())));
         }
-        detach();return ai::error("Local request timeout; connection discarded. Reconnect before retrying.");
+        connectionFailed();return ai::error("Local request timeout; connection discarded. Reconnect before retrying.");
     }
     QJsonObject tool(const QString& name,const QJsonObject& args)
     {
@@ -135,19 +158,22 @@ public:
             for(const auto& file:dir.entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
                 if(++scanned>100||list.size()>=32)break;
                 auto d=readDescriptor(file.completeBaseName());if(d.isEmpty())continue;
-                QLocalSocket probe;probe.connectToServer(d["pipe"].toString());
-                if(!probe.waitForConnected(50))continue;probe.abort();
+                if(!available(d))continue;
                 d.remove("secret");d.remove("pipe");list.append(d);
             }
             return {{"instances",list},{"limit",32},{"scanLimit",100}};
         }
         if(name=="disconnect_instance"){discoverMetadata=false;detach();return {{"status","disconnected"}};}
         if(name=="connect_instance") {
-            detach();discoverMetadata=true;const auto d=readDescriptor(args["instance"].toString());
-            if(d.isEmpty())return ai::error("Instance not available; user must enable read-only");
-            secret=d["secret"].toString();socket.connectToServer(d["pipe"].toString());
-            if(!socket.waitForConnected(1000)){detach();return ai::error("Editor is not running or read mode disabled");}
-            selected=true;
+            discoverMetadata=true;const auto d=readDescriptor(args["instance"].toString());
+            if(d.isEmpty()){detach();return ai::error("Instance not available; user must enable read-only");}
+            if(socket.state()!=QLocalSocket::ConnectedState||socket.serverName()!=d["pipe"].toString()||secret!=d["secret"].toString()) {
+                detach();attemptedPipe=d["pipe"].toString();secret=d["secret"].toString();socket.connectToServer(attemptedPipe);
+                if(!socket.waitForConnected(1000)){connectionFailed();return ai::error("Editor is not running or read mode disabled");}
+            }
+            // An explicit selection must re-negotiate a former legacy catalog,
+            // even when its healthy transport can be retained.
+            legacyCatalog=false;catalogError.clear();selected=true;
             const auto context=local("get_context",{});refreshCatalog();changed=true;
             return catalogError.isEmpty()?context:ai::error(catalogError);
         }
