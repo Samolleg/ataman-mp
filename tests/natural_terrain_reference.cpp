@@ -11,6 +11,15 @@ float f32(const QByteArray& b,int p){auto u=u32(b,p);float v;memcpy(&v,&u,4);ret
 QByteArray read(QString path){QFile f(path);if(!f.open(QIODevice::ReadOnly))throw std::runtime_error("Cannot read input");return f.readAll();}
 QJsonObject distribution(QVector<double> a){if(a.isEmpty())return {};std::sort(a.begin(),a.end());double sum=0;for(double v:a)sum+=v;
     return {{"count",a.size()},{"mean",sum/a.size()},{"p10",a[int((a.size()-1)*0.1)]},{"p50",a[int((a.size()-1)*0.5)]},{"p90",a[int((a.size()-1)*0.9)]},{"max",a.last()}};}
+QJsonObject archivedSemantics(const QString& ns){
+    QFile archive(qEnvironmentVariable("EI_NATURAL_READ_ARCHIVE"));if(!archive.open(QIODevice::ReadOnly))return {};
+    const auto header=archive.read(16);if(header.size()!=16||u32(header,0)!=0x019ce23c)return {};
+    const int count=u32(header,4),offset=u32(header,8),namesLength=u32(header,12);if(count<1||count>100000||namesLength>16000000)return {};
+    archive.seek(offset);const auto table=archive.read(count*22+namesLength);
+    for(int i=0;i<count;++i){const int p=i*22;const auto name=table.mid(count*22+u32(table,p+18),u16(table,p+16));if(!name.startsWith("ei_terrain_semantics_"))continue;
+        archive.seek(u32(table,p+8));const auto object=QJsonDocument::fromJson(archive.read(u32(table,p+4))).object();if(object["mprNamespace"].toString().compare(ns,Qt::CaseInsensitive)==0)return object;}
+    return {};
+}
 QJsonObject measure(QString path){
     const auto bytes=read(path);if(bytes.size()<16||u32(bytes,0)!=0x019ce23c)throw std::runtime_error("Invalid MPR");
     const int count=u32(bytes,4),table=u32(bytes,8),names=table+count*22;QMap<QString,QByteArray> members;
@@ -27,14 +36,22 @@ QJsonObject measure(QString path){
             if(overlay&&qint16(u16(b,offset+1024+local*2))!=-1){water[i]=1;waterSum+=u16(b,5+1089*8+((y*2)*33+x*2)*8+2)*maxZ/65535;++waterCount;}}
     }
     auto result=natural::metrics(g);result["map"]=QFileInfo(path).fileName();result["sha256"]=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
-    const auto semantics=QJsonDocument::fromJson(members.value("ei_mapper_terrain_semantics.json")).object();
-    if(!semantics.isEmpty()){
+    auto semantics=QJsonDocument::fromJson(members.value("ei_mapper_terrain_semantics.json")).object();if(semantics.isEmpty())semantics=archivedSemantics(ns);
+    if(!semantics.isEmpty()&&semantics["land"].toObject()["count"].toInt()>0){
         const auto field=semantics["land"].toObject();const auto raw=qUncompress(QByteArray::fromBase64(field["qcompressBase64"].toString().toLatin1()));
         const int vw=semantics["vertexWidth"].toInt(),vh=semantics["vertexHeight"].toInt();
         if(raw.size()!=vw*vh*4||QCryptographicHash::hash(raw,QCryptographicHash::Sha256).toHex()!=field["sha256"].toString().toLatin1())throw std::runtime_error("Invalid stored semantic field");
         QJsonObject counts;int total=0;for(int y=1;y<vh-1;++y)for(int x=1;x<vw-1;++x){const auto id=QString::number(qint32(u32(raw,(y*vw+x)*4)));counts[id]=counts[id].toInt()+1;++total;}
         QJsonObject fractions;for(auto it=counts.begin();it!=counts.end();++it)fractions[it.key()]=it.value().toInt()/double(qMax(1,total));
         result["semanticFractionsById"]=fractions;
+        QVector<bool> seen(vw*vh,false);QVector<double> patchAreas;int transitions=0;
+        const auto id=[&](int i){return qint32(u32(raw,i*4));};
+        for(int i=0;i<vw*vh;++i){const int x=i%vw,y=i/vw;
+            if(x+1<vw&&y+1<vh)transitions+=id(i)!=id(i+1)||id(i)!=id(i+vw)||id(i)!=id(i+vw+1);
+            if(seen[i])continue;QVector<int> queue{i};seen[i]=true;
+            for(int k=0;k<queue.size();++k){const int a=queue[k];for(int d:{-1,1,-vw,vw}){const int b=a+d;if(b<0||b>=seen.size()||std::abs(b%vw-a%vw)+std::abs(b/vw-a/vw)!=1||seen[b]||id(b)!=id(i))continue;seen[b]=true;queue.append(b);}}
+            patchAreas.append(queue.size()*4.0);}
+        result["semanticPatchesSquareMetres"]=distribution(patchAreas);result["semanticTransitionFraction"]=double(transitions)/((vw-1)*(vh-1));
     }
     result["maxZ"]=maxZ;result["sectorsX"]=(g.width-1)/32;result["sectorsY"]=(g.height-1)/32;result["overlayFraction"]=double(waterCount)/(tw*th);if(waterCount)result["meanOverlayHeight"]=waterSum/waterCount;
     int boundary=0;for(int y=0;y<th;++y)for(int x=0;x<tw;++x){const int i=y*tw+x;if(x+1<tw)boundary+=water[i]!=water[i+1];if(y+1<th)boundary+=water[i]!=water[i+tw];}result["overlayBoundaryMetres"]=boundary*2;

@@ -436,7 +436,7 @@ ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const Q
             auto palette=args["palette"].toObject();
             const auto choose=[&](const QString& role,const QStringList& terms){if(palette.contains(role))return;
                 for(const auto& term:terms)for(const auto& family:v->m_terrainGlobalFamilies)
-                    if(family.layer==ETerrainAtlasLayer::Land&&family.name.contains(term,Qt::CaseInsensitive)){palette[role]=family.id;return;}};
+                    if(family.layer==ETerrainAtlasLayer::Land&&family.name.startsWith(term,Qt::CaseInsensitive)){palette[role]=family.id;return;}};
             choose("grass",{"Grass / Common","Grass","трава"});choose("dark",{"Grass / Dark","Grass / Common"});
             choose("light",{"Grass / Fresh","Grass / Sparse light","Grass / Common"});choose("forest",{"Ground / Dead","Grass / Irregular","Grass / Dark"});
             choose("rock",args["preset"]=="coast"?QStringList{"Stone / Light","Stone / Lime","Stone"}:QStringList{"Stone / Lime","Stone","Rock","камень"});
