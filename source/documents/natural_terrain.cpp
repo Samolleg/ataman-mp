@@ -118,6 +118,8 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
             g.heights[i]=qBound(surface[low],surface[i]+offset,surface[high]);
         }}
     }
+    if(name=="coast")for(double& height:g.heights)
+        height=qMax(0.0,p["waterLevel"].toDouble()+(height-p["waterLevel"].toDouble())*1.12);
 }
 void natural::erode(Grid& g,const QJsonObject& p,const std::function<bool()>& cancelled)
 {
