@@ -24,10 +24,13 @@ public static class NaturalCoast220 {
       if(m.Success){sectors.Add(I(b,p+8));sx.Add(int.Parse(m.Groups[1].Value));sy.Add(int.Parse(m.Groups[2].Value));}
     }
     if(mp<0)throw new Exception("Missing MP");int w=I(b,mp+8)*16,h=I(b,mp+12)*16;float max=BitConverter.ToSingle(b,mp+4);
-    var dry=new bool[w*h];for(int i=0;i<dry.Length;i++)dry[i]=true;
-    for(int s=0;s<sectors.Count;s++){int start=sectors[s];if(b[start+4]!=3)continue;int tiles=start+5+1089*8*2;
-      for(int y=0;y<16;y++)for(int x=0;x<16;x++)if(BitConverter.ToInt16(b,tiles+1024+(y*16+x)*2)!=-1){int vertex=(y*2+1)*33+x*2+1;
-        dry[(sy[s]*16+y)*w+sx[s]*16+x]=Nav(b,start+5,vertex,max)>=Nav(b,start+5+1089*8,vertex,max)+0.05;
+    var dry=new bool[w*h];var slopes=new double[w*h];for(int i=0;i<dry.Length;i++)dry[i]=true;
+    for(int s=0;s<sectors.Count;s++){int start=sectors[s];bool overlay=b[start+4]==3;int tiles=start+5+1089*8*2;
+      for(int y=0;y<16;y++)for(int x=0;x<16;x++){int vertex=(y*2+1)*33+x*2+1,index=(sy[s]*16+y)*w+sx[s]*16+x;
+        double dx=((int)BitConverter.ToUInt16(b,start+5+(vertex+1)*8+2)-BitConverter.ToUInt16(b,start+5+(vertex-1)*8+2))*max/65535.0/2;
+        double dy=((int)BitConverter.ToUInt16(b,start+5+(vertex+33)*8+2)-BitConverter.ToUInt16(b,start+5+(vertex-33)*8+2))*max/65535.0/2;
+        slopes[index]=Math.Atan(Math.Sqrt(dx*dx+dy*dy))*180/Math.PI;
+        if(overlay&&BitConverter.ToInt16(b,tiles+1024+(y*16+x)*2)!=-1)dry[index]=Nav(b,start+5,vertex,max)>=Nav(b,start+5+1089*8,vertex,max)+0.05;
       }
     }
     var seen=new bool[dry.Length];int cells=0,components=0,small=0,edges=0;double compact=0;
@@ -39,7 +42,9 @@ public static class NaturalCoast220 {
       }
       if(!boundary){components++;if(queue.Count*4<64)small++;compact+=(double)perimeter*perimeter/(4*Math.PI*queue.Count);}
     }
-    return new Dictionary<string,double>{{"interiorComponents",components},{"islandsBelow64m2",small},{"meanIslandPerimeterCompactness",components>0?compact/components:0},{"boundaryMetres",edges*2},{"areaM2",cells*4}};
+    var landSlopes=new List<double>();for(int i=0;i<dry.Length;i++)if(dry[i])landSlopes.Add(slopes[i]);landSlopes.Sort();
+    return new Dictionary<string,double>{{"interiorComponents",components},{"islandsBelow64m2",small},{"meanIslandPerimeterCompactness",components>0?compact/components:0},{"boundaryMetres",edges*2},{"areaM2",cells*4},
+      {"drySlopeP50",landSlopes.Count>0?landSlopes[(int)((landSlopes.Count-1)*0.5)]:0},{"drySlopeP90",landSlopes.Count>0?landSlopes[(int)((landSlopes.Count-1)*0.9)]:0}};
   }
 }
 '@
