@@ -124,9 +124,10 @@ Update procedure:
    Retain the previous installation if the build or package-integrity checks fail.
    Functional test failures remain explicit limitations under section 1; never
    label them PASS or silently claim a complete fix.
-2. Resolve the exact permanent target and verify that no editor or runtime
-   component from it is running. If it is running, ask the user to close it;
-   do not kill a user's session or replace loaded binaries.
+2. Resolve the exact permanent target and verify that its editor and game runtime
+   host are closed. If running, ask the user to close them. EIMapperMcp.exe,
+   Codex and Claude Code may remain running; do not stop them. Loaded bridge
+   files are replaced using the rename procedure below.
 3. Use the old and new manifests to identify managed program files. Preserve all
    settings, logs, caches, maps, saves, resources added by the user and unlisted
    files. Do not mirror, recursively clear, or overwrite the entire directory.
@@ -148,6 +149,36 @@ Update procedure:
    Report installed version and the same permanent folder link. Keep at most one
    completed rollback generation: after successful verification of the next
    update, remove only an older, positively identified owned rollback generation.
+
+Since222 use the shared guarded installer instead of ad hoc file copies or
+exclusive-write preflight over all DLLs. An explicit STOP BEFORE INSTALLATION
+still forbids running this against the permanent target. Example after installation
+has been authorized (absolute paths, fresh rollback directory):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\install_program.ps1 `
+  -PackageRoot '<finalized staging>' `
+  -TargetRoot '<checkout>\artifacts\EI-Mapper-Ataman-2-first-test' `
+  -RollbackRoot '<checkout>\artifacts\rollback221-to222-<unique-label>'
+# Created backup contains its own helpers and exact target; verify/restore:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<rollback>\rollback.ps1' -VerifyOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<rollback>\rollback.ps1'
+```
+
+The installer verifies both manifests, refuses changed managed files/unmanaged
+collisions, verifies the complete backup, and replaces the manifest last. Failed
+replacement probes whether the current file is busy. Unlocked files use atomic
+File.Replace; busy files use rename directly. If replacement races with a new
+loader and Windows reports a sharing/access
+error, the old file is renamed to `<path>.old-ataman-<guid>` and the verified new
+file takes its canonical name. Existing bridge processes continue using their
+mapped images; new launches use the canonical files. No bridge process is killed.
+If rename is also denied, the update reports the error and attempts verified
+rollback; it never silently bypasses that failure. Rollback uses the same method.
+The next installation or rollback cleans only entries recorded in
+`.ataman-retired.json`, with matching SHA and an exclusive-write check proving
+they are no longer mapped. Unknown files and changed retired files are preserved.
+No wildcard cleanup of `.old-*`, user data or old rollback generations is allowed.
 
 Older reports describe immutable per-version delivery as history. This owner
 choice supersedes that workflow for the named Ataman installation only. Game

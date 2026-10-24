@@ -12,6 +12,10 @@ QString discoveryDirectory();
 bool secureDirectory(const QString& path);
 QJsonObject error(const QString& message);
 QJsonArray toolDefinitions();
+// Local wire major 1 is additive to the unversioned 218-221 envelope.
+constexpr int LocalProtocolMajor = 1;
+QString agentInstructions();
+QJsonObject mcpCatalog();
 bool validateArguments(const QString& name, const QJsonObject& args, QString* error);
 // Newline-delimited UTF-8 JSON, on both stdio and the private local pipe.
 // A partial frame is retained; oversized input is rejected before parsing.

@@ -32,9 +32,10 @@ struct Hidden:QObject{bool eventFilter(QObject* o,QEvent* e)override{if(e->type(
 class Client {
     QProcess process;QByteArray buffer;int serial=0;
 public:
+    int notifications{0};
     explicit Client(const QString& exe){process.start(exe,QStringList{});check(process.waitForStarted(10000),"stdio bridge starts independently");}
     ~Client(){process.closeWriteChannel();if(!process.waitForFinished(2000)){process.kill();process.waitForFinished(2000);}}
-    QJsonObject raw(QByteArray payload){process.write(payload);if(!until([&](){buffer+=process.readAllStandardOutput();return buffer.contains('\n');},35000))throw QString("stdio response deadline");QJsonObject value;QString error;if(!ai::takeFrame(buffer,&value,&error))throw error;return value;}
+    QJsonObject raw(QByteArray payload){process.write(payload);while(true){if(!until([&](){buffer+=process.readAllStandardOutput();return buffer.contains('\n');},35000))throw QString("stdio response deadline");QJsonObject value;QString error;if(!ai::takeFrame(buffer,&value,&error))throw error;if(value["method"]=="notifications/tools/list_changed"){++notifications;continue;}return value;}}
     QJsonObject call(QString method,QJsonObject params={},bool modern=false){
         if(modern)params.insert("_meta",QJsonObject{{"io.modelcontextprotocol/protocolVersion","2026-07-28"},
             {"io.modelcontextprotocol/clientInfo",QJsonObject{{"name","Ataman native test"},{"version","1"}}},{"io.modelcontextprotocol/clientCapabilities",QJsonObject{}}});
@@ -51,7 +52,7 @@ public:
     }
     QJsonObject finish(QJsonObject start) {
         if(!start.contains("operation"))throw QString::fromUtf8(QJsonDocument(start).toJson());
-        QJsonObject status;check(until([&](){status=tool("operation_status",{{"operation",start["operation"]}});return status["status"]=="complete";},140000),"background operation completes");
+        QJsonObject status;check(until([&](){status=tool("operation_status",{{"operation",start["operation"]}});if(status.contains("error")&&!status["error"].toString().startsWith("Normal map commit in progress"))throw status["error"].toString();return status["status"]=="complete";},140000),"background operation completes");
         const auto result=status["result"].toObject();if(result["status"]!="preview")tool("cancel_operation",{{"operation",start["operation"]}});if(result.contains("error"))throw result["error"].toString();return result;
     }
 };
@@ -97,8 +98,18 @@ int runAssemblyCatalogCheck()
         mode->setCurrentIndex(1);
         Client client(qEnvironmentVariable("EI_MCP_TEST_BRIDGE"));
         client.call("initialize",{{"protocolVersion","2025-11-25"},{"capabilities",QJsonObject{}},{"clientInfo",QJsonObject{{"name","221-e2e"},{"version","1"}}}});
+        client.raw("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":\"ready-ping\",\"method\":\"ping\"}\n");
         auto list=client.tool("list_instances")["instances"].toArray();check(list.size()==1,"only isolated mapper is discoverable");
-        check(client.tool("connect_instance",{{"instance",list[0].toObject()["instance"]}})["version"]=="221","current isolated221 stdio bridge connects");
+        check(client.tool("connect_instance",{{"instance",list[0].toObject()["instance"]}})["version"]==ai::mcpCatalog()["version"],"current isolated stdio bridge connects");
+        check(client.call("tools/list")["result"].toObject()["tools"]==ai::toolDefinitions()&&client.notifications>0,"production mapper catalog and list_changed reach MCP client");
+        {
+            QFile descriptor(QDir(ai::discoveryDirectory()).filePath(list[0].toObject()["instance"].toString()+".json"));check(descriptor.open(QIODevice::ReadOnly),"isolated descriptor readable");
+            const auto d=QJsonDocument::fromJson(descriptor.readAll()).object();QLocalSocket legacy;legacy.connectToServer(d["pipe"].toString());check(legacy.waitForConnected(),"legacy local client connects to new mapper");
+            auto local=[&](bool incompatible){QJsonObject r{{"id","legacy"},{"secret",d["secret"]},{"method","get_context"},{"arguments",QJsonObject{}}};if(incompatible)r["protocolMajor"]=99;
+                legacy.write(QJsonDocument(r).toJson(QJsonDocument::Compact)+'\n');QByteArray b;check(until([&](){b+=legacy.readAll();return b.contains('\n');}),"legacy wire reply");return QJsonDocument::fromJson(b).object()["result"].toObject();};
+            check(local(false)["version"]==ai::mcpCatalog()["version"],"unversioned218-221 wire accepted by new mapper");
+            check(local(true)["error"].toString().contains("Incompatible local protocol"),"new mapper rejects incompatible wire major clearly");
+        }
         auto revision=[&](){return client.tool("get_revision")["revision"].toString();};
         auto run=[&](QString method,QJsonObject args=QJsonObject{}){args["revision"]=revision();auto start=client.tool(method,args);if(start.contains("operation"))return client.finish(start);if(start.contains("error"))throw start["error"].toString();return start;};
         auto rejected=[&](QString method,QJsonObject args=QJsonObject{}){args["revision"]=revision();auto result=client.tool(method,args);if(result.contains("operation")){

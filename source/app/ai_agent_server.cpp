@@ -105,7 +105,16 @@ void CAiAgentServer::receive(QLocalSocket* s)
         s->setProperty("authenticated",true);
         const auto method=request["method"].toString();const auto args=request["arguments"].toObject();
         QJsonObject result;
-        if(!ai::validateArguments(method,args,&diagnostic))result=ai::error(diagnostic);
+        if(request.contains("protocolMajor")&&request["protocolMajor"]!=ai::LocalProtocolMajor)
+            result=ai::error("Incompatible local protocol; supported protocolMajor=1. Update the MCP bridge.");
+        else if(method=="mcp_catalog"&&args.isEmpty())result=ai::mcpCatalog();
+        else if(method=="mcp_resource_read"&&args.keys()==QStringList{"uri"}) {
+            const auto uri=args["uri"].toString();
+            if(uri=="ataman://tools")result=ai::mcpCatalog();
+            else if(uri=="ataman://context")result=dispatch("get_context",{});
+            else result=ai::error("Resource not found");
+        }
+        else if(!ai::validateArguments(method,args,&diagnostic))result=ai::error(diagnostic);
         else {m_currentClient=s;result=dispatch(method,args);m_currentClient.clear();}
         QByteArray out=QJsonDocument(QJsonObject{{"id",id},{"result",result}}).toJson(QJsonDocument::Compact);
         if(out.size()>ai::MaxResult)out=QJsonDocument(QJsonObject{{"id",id},{"result",ai::error("Response limit; use a smaller region/page")}}).toJson(QJsonDocument::Compact);
@@ -115,7 +124,7 @@ void CAiAgentServer::receive(QLocalSocket* s)
         // enter its atomic section on the next GUI turn.
         s->flush();
         // Only validated tool names. Never arguments, secrets or document content.
-        event(QString::fromUtf8("Чтение: ")+ (diagnostic.isEmpty()?method:QString("invalid request")));
+        if(method!="mcp_catalog")event(QString::fromUtf8("Чтение: ")+ (diagnostic.isEmpty()?method:QString("invalid request")));
     }
     if(buffer.size()>ai::MaxFrame)s->abort();
 }

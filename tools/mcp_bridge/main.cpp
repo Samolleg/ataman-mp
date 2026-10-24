@@ -2,6 +2,7 @@
 #include <QLocalSocket>
 #include <cstdio>
 #include <cmath>
+#include <thread>
 #ifdef Q_OS_WIN
 #include <fcntl.h>
 #include <io.h>
@@ -9,8 +10,7 @@
 
 namespace {
 const QJsonArray versions{"2026-07-28","2025-11-25","2025-06-18","2024-11-05"};
-const QJsonObject capabilities{{"tools",QJsonObject{}},{"resources",QJsonObject{}}};
-const QString instructions="Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218.";
+const QJsonObject capabilities{{"tools",QJsonObject{{"listChanged",true}}},{"resources",QJsonObject{}}};
 QJsonObject serverInfo(){return {{"name","ei-mapper-ataman"},{"version",ENDURANCE_VERSION}};}
 QJsonObject rpcError(int code,const QString& message,QJsonObject data={})
 {
@@ -34,13 +34,74 @@ class Bridge {
     quint64 sequence{0};
     bool legacyInitialized{false};
     QMap<QString,qint64> editJobs;
+    QMap<QString,qint64> activeJobs;
+    QJsonObject catalog{ai::mcpCatalog()};
+    bool remoteCatalog{false}, changed{false}, ready{false};
+    bool selected{false}, discoverMetadata{true};
+    bool legacyCatalog{false};
+    QString catalogError;
+    void useCatalog(const QJsonObject& value,bool remote) {
+        if(catalog!=value||remoteCatalog!=remote)changed=true;
+        catalog=value;remoteCatalog=remote;
+    }
 public:
-    void detach(){socket.abort();secret.clear();buffer.clear();editJobs.clear();}
+    void detach(){socket.abort();selected=false;legacyCatalog=false;secret.clear();buffer.clear();editJobs.clear();activeJobs.clear();catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
+    void initialized(){ready=true;}
+    bool takeChanged(){if(!ready||!changed)return false;changed=false;return true;}
+    void refreshCatalog() {
+        if(socket.state()!=QLocalSocket::ConnectedState) {
+            detach();if(!discoverMetadata)return;
+            // A client that ignores list_changed must still see the current
+            // catalog on a plain MCP reconnect, before connect_instance runs.
+            // Probe metadata only when there is one unambiguous enabled editor.
+            // This does NOT select a workspace or authorize any tool calls.
+            QJsonObject candidate;int scanned=0;
+            for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
+                if(++scanned>100)break;
+                const auto d=readDescriptor(file.completeBaseName());if(d.isEmpty())continue;
+                QLocalSocket probe;probe.connectToServer(d["pipe"].toString());if(!probe.waitForConnected(50))continue;
+                probe.abort();if(!candidate.isEmpty())return;candidate=d;
+            }
+            if(candidate.isEmpty())return;
+            secret=candidate["secret"].toString();socket.connectToServer(candidate["pipe"].toString());
+            if(!socket.waitForConnected(250)){detach();return;}
+        }
+        if(legacyCatalog)return;
+        // Never let a background metadata probe's short read deadline destroy
+        // a stream while a normal asynchronous edit is committing on the GUI.
+        const auto now=QDateTime::currentMSecsSinceEpoch();
+        for(auto it=activeJobs.begin();it!=activeJobs.end();)if(it.value()<now)it=activeJobs.erase(it);else ++it;
+        if(!activeJobs.isEmpty())return;
+        const auto value=local("mcp_catalog",{});
+        if(value.contains("error")) {
+            if(socket.state()!=QLocalSocket::ConnectedState){catalogError.clear();return;}
+            // 218-221 return this exact error for an unknown method. Do not
+            // hide a malformed/incompatible new protocol behind stale tools.
+            if(value["error"]=="Unknown read tool") {legacyCatalog=true;catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
+            else catalogError=value["error"].toString();
+            return;
+        }
+        if(value["protocolMajor"]!=ai::LocalProtocolMajor||value["catalogVersion"]!=1
+            ||!value["tools"].isArray()||!value["resources"].isArray()
+            ||!value["resourceTemplates"].isArray()||!value["instructions"].isString()) {
+            catalogError="Incompatible mapper catalog/protocol. Update the MCP bridge or reconnect to a compatible editor.";return;
+        }
+        // The three discovery/connection tools belong to the transport. Always
+        // keep these available even if a future editor omits them from its list.
+        auto current=value;auto tools=value["tools"].toArray();
+        for(const auto& item:ai::toolDefinitions()) {
+            const auto name=item.toObject()["name"].toString();
+            if(name!="list_instances"&&name!="connect_instance"&&name!="disconnect_instance")continue;
+            bool found=false;for(const auto& t:tools)if(t.toObject()["name"]==name)found=true;
+            if(!found)tools.prepend(item);
+        }
+        current["tools"]=tools;catalogError.clear();useCatalog(current,true);
+    }
     QJsonObject local(const QString& method,const QJsonObject& args,int timeout=2000)
     {
         if(socket.state()!=QLocalSocket::ConnectedState||secret.isEmpty())return ai::error("Not connected. Enable read-only in the editor and connect_instance.");
         const QString id=QString::number(++sequence);
-        const QByteArray payload=QJsonDocument(QJsonObject{{"id",id},{"secret",secret},{"method",method},{"arguments",args}}).toJson(QJsonDocument::Compact)+'\n';
+        const QByteArray payload=QJsonDocument(QJsonObject{{"id",id},{"secret",secret},{"protocolMajor",ai::LocalProtocolMajor},{"method",method},{"arguments",args}}).toJson(QJsonDocument::Compact)+'\n';
         if(socket.write(payload)!=payload.size()){detach();return ai::error("Local write failed; reconnect");}
         QElapsedTimer elapsed;elapsed.start();
         while(elapsed.elapsed()<timeout) {
@@ -63,7 +124,11 @@ public:
     }
     QJsonObject tool(const QString& name,const QJsonObject& args)
     {
-        QString error;if(!ai::validateArguments(name,args,&error))return ai::error(error);
+        // Mapper owns validation of forwarded tools. An old bridge must not
+        // reject a new tool just because its compiled fallback predates it.
+        if(name=="list_instances"||name=="connect_instance"||name=="disconnect_instance") {
+            QString error;if(!ai::validateArguments(name,args,&error))return ai::error(error);
+        }
         if(name=="list_instances") {
             QJsonArray list;int scanned=0;
             const QDir dir(ai::discoveryDirectory());
@@ -76,14 +141,18 @@ public:
             }
             return {{"instances",list},{"limit",32},{"scanLimit",100}};
         }
-        if(name=="disconnect_instance"){detach();return {{"status","disconnected"}};}
+        if(name=="disconnect_instance"){discoverMetadata=false;detach();return {{"status","disconnected"}};}
         if(name=="connect_instance") {
-            detach();const auto d=readDescriptor(args["instance"].toString());
+            detach();discoverMetadata=true;const auto d=readDescriptor(args["instance"].toString());
             if(d.isEmpty())return ai::error("Instance not available; user must enable read-only");
             secret=d["secret"].toString();socket.connectToServer(d["pipe"].toString());
             if(!socket.waitForConnected(1000)){detach();return ai::error("Editor is not running or read mode disabled");}
-            return local("get_context",{});
+            selected=true;
+            const auto context=local("get_context",{});refreshCatalog();changed=true;
+            return catalogError.isEmpty()?context:ai::error(catalogError);
         }
+        if(!selected)return ai::error("No editor selected. Use list_instances and connect_instance before reading or editing.");
+        if(!catalogError.isEmpty())return ai::error(catalogError);
         const auto now=QDateTime::currentMSecsSinceEpoch();
         for(auto it=editJobs.begin();it!=editJobs.end();)if(it.value()<now)it=editJobs.erase(it);else ++it;
         // Only new219 edit IDs get the normal serializer's bounded commit
@@ -91,6 +160,8 @@ public:
         // ID correlation and stream discard on timeout.
         const bool editPoll=(name=="operation_status"||name=="cancel_operation")&&editJobs.contains(args["operation"].toString());
         const auto value=local(name,args,editPoll?30000:2000);
+        if(value["operation"].isString())activeJobs[value["operation"].toString()]=now+180000;
+        if(name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value.contains("error"))))activeJobs.remove(args["operation"].toString());
         const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
@@ -112,19 +183,23 @@ public:
         if(modern&&(!meta["io.modelcontextprotocol/clientInfo"].isObject()||!meta["io.modelcontextprotocol/clientCapabilities"].isObject()))
             return rpcError(-32602,"Modern requests require clientInfo and clientCapabilities metadata");
         if(method=="initialize") {
+            refreshCatalog();
             const auto offered=params["protocolVersion"].toString();
             legacyInitialized=true;
             return {{"result",QJsonObject{{"protocolVersion",versions.contains(offered)&&offered!="2026-07-28"?offered:QString("2025-11-25")},
-                {"capabilities",capabilities},{"serverInfo",serverInfo()},{"instructions",instructions}}}};
+                {"capabilities",capabilities},{"serverInfo",serverInfo()},{"instructions",catalog["instructions"]}}}};
         }
+        if(modern)ready=true;
+        if(method=="tools/list"||method.startsWith("resources/")||method=="server/discover")refreshCatalog();
+        if(!catalogError.isEmpty()&&(method=="tools/list"||method.startsWith("resources/")))return rpcError(-32000,catalogError);
         QJsonObject result;
         if(method=="server/discover")result={{"supportedVersions",versions},{"capabilities",capabilities},
-            {"_meta",QJsonObject{{"io.modelcontextprotocol/serverInfo",serverInfo()}}},{"instructions",instructions}};
+            {"_meta",QJsonObject{{"io.modelcontextprotocol/serverInfo",serverInfo()}}},{"instructions",catalog["instructions"]}};
         else if(method=="ping") result={};
         else if(!modern&&!legacyInitialized)return rpcError(-32000,"Initialize the MCP session first");
         else if(method=="tools/list") {
             if(params.contains("cursor"))return rpcError(-32602,"No pagination cursor for tools");
-            result={{"tools",ai::toolDefinitions()}};
+            result={{"tools",catalog["tools"]}};
         } else if(method=="tools/call") {
             if(!params["name"].isString()||(params.contains("arguments")&&!params["arguments"].isObject()))return rpcError(-32602,"Expected tool name and object arguments");
             auto value=tool(params["name"].toString(),params["arguments"].toObject());
@@ -139,14 +214,14 @@ public:
             };
             appendImages(value);appendImages(value["result"].toObject());
             result={{"content",content},{"isError",value.contains("error")}};
-        } else if(method=="resources/list")result={{"resources",QJsonArray{
-            QJsonObject{{"uri","ataman://context"},{"name","Open editor context"},{"mimeType","application/json"}},
-            QJsonObject{{"uri","ataman://tools"},{"name","Read tool catalog and limits"},{"mimeType","application/json"}}}}};
-        else if(method=="resources/templates/list")result={{"resourceTemplates",QJsonArray{}}};
+        } else if(method=="resources/list")result={{"resources",catalog["resources"]}};
+        else if(method=="resources/templates/list")result={{"resourceTemplates",catalog["resourceTemplates"]}};
         else if(method=="resources/read") {
             const auto uri=params["uri"].toString();QJsonObject value;
-            if(uri=="ataman://context")value=local("get_context",{});
-            else if(uri=="ataman://tools")value={{"tools",ai::toolDefinitions()},{"instructions",instructions}};
+            if(!selected&&uri!="ataman://tools")return rpcError(-32000,"Select an editor with connect_instance before reading resources");
+            if(remoteCatalog)value=local("mcp_resource_read",{{"uri",uri}});
+            else if(uri=="ataman://context")value=local("get_context",{});
+            else if(uri=="ataman://tools")value=catalog;
             else return rpcError(-32002,"Resource not found");
             if(value.contains("error"))return rpcError(-32000,value["error"].toString());
             result={{"contents",QJsonArray{QJsonObject{{"uri",uri},{"mimeType","application/json"},
@@ -169,23 +244,44 @@ int main(int argc,char** argv)
     _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif
     if(app.arguments().contains("--version")){printf("EIMapperMcp %s\n",ENDURANCE_VERSION);return 0;}
-    Bridge bridge;QByteArray line;
+    Bridge bridge;
     const auto send=[](QJsonObject response,QJsonValue id) {
         response.insert("jsonrpc","2.0");response.insert("id",id);
         auto bytes=QJsonDocument(response).toJson(QJsonDocument::Compact);
         if(bytes.size()>ai::MaxFrame)bytes=QJsonDocument(QJsonObject{{"jsonrpc","2.0"},{"id",id},{"error",QJsonObject{{"code",-32603},{"message","Response limit"}}}}).toJson(QJsonDocument::Compact);
         fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);fputc('\n',stdout);fflush(stdout);
     };
-    while(true) {
-        const int c=fgetc(stdin);if(c==EOF)break;
-        line.append(char(c));
-        if(line.size()>ai::MaxFrame){send(rpcError(-32700,"Frame limit exceeded"),QJsonValue::Null);return 2;}
-        if(c!='\n')continue;
-        QJsonObject request;QString error;
-        if(!ai::takeFrame(line,&request,&error)){send(rpcError(-32700,error),QJsonValue::Null);continue;}
-        if(!request.contains("id")&&request["method"].toString().startsWith("notifications/"))continue;
-        const auto result=bridge.handle(request);
-        if(request.contains("id")||result.contains("error"))send(result,request.value("id").isUndefined()?QJsonValue(QJsonValue::Null):request["id"]);
-    }
-    return 0;
+    const auto notify=[&bridge]() {
+        if(!bridge.takeChanged())return;
+        const QByteArray bytes="{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n";
+        fwrite(bytes.constData(),1,size_t(bytes.size()),stdout);fflush(stdout);
+    };
+    // stdin may stay silent for hours. Keep the Qt/socket timer alive so catalog
+    // changes are announced without requiring a client request. Only this Qt
+    // thread owns the socket, Bridge and stdout. Blocking delivery bounds input.
+    QTimer poll;QObject::connect(&poll,&QTimer::timeout,&app,[&](){bridge.refreshCatalog();notify();});poll.start(1000);
+    std::thread([&]() {
+        QByteArray line;
+        while(true) {
+            const int c=fgetc(stdin);if(c==EOF)break;line.append(char(c));
+            const bool oversized=line.size()>ai::MaxFrame;
+            if(c!='\n'&&!oversized)continue;
+            const QByteArray frame=line;line.clear();
+            QMetaObject::invokeMethod(&app,[&,frame,oversized]() {
+                if(oversized){send(rpcError(-32700,"Frame limit exceeded"),QJsonValue::Null);app.exit(2);return;}
+                auto bytes=frame;QJsonObject request;QString error;
+                if(!ai::takeFrame(bytes,&request,&error)){send(rpcError(-32700,error),QJsonValue::Null);return;}
+                if(!request.contains("id")&&request["method"].toString().startsWith("notifications/")) {
+                    if(request["method"]=="notifications/initialized")bridge.initialized();
+                    notify();return;
+                }
+                const auto result=bridge.handle(request);
+                if(request.contains("id")||result.contains("error"))send(result,request.value("id").isUndefined()?QJsonValue(QJsonValue::Null):request["id"]);
+                notify();
+            },Qt::BlockingQueuedConnection);
+            if(oversized)return;
+        }
+        QMetaObject::invokeMethod(&app,"quit",Qt::QueuedConnection);
+    }).detach();
+    return app.exec();
 }

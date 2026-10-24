@@ -39,6 +39,19 @@ bool secureDirectory(const QString& path)
 #endif
 }
 QJsonObject error(const QString& message) { return {{"error", message}}; }
+QString agentInstructions()
+{
+    return "Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218. After editor restart or mode change list_instances and connect_instance again. ataman://tools contains the current editor instructions and catalog.";
+}
+QJsonObject mcpCatalog()
+{
+    return {{"protocolMajor",LocalProtocolMajor},{"catalogVersion",1},{"version",ENDURANCE_VERSION},
+        {"tools",toolDefinitions()},{"instructions",agentInstructions()},
+        {"resources",QJsonArray{
+            QJsonObject{{"uri","ataman://context"},{"name","Open editor context"},{"mimeType","application/json"}},
+            QJsonObject{{"uri","ataman://tools"},{"name","Current editor tools and instructions"},{"mimeType","application/json"}}}},
+        {"resourceTemplates",QJsonArray{}}};
+}
 bool takeFrame(QByteArray& buffer, QJsonObject* value, QString* error)
 {
     const int newline = buffer.indexOf('\n');

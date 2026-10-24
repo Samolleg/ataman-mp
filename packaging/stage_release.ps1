@@ -45,4 +45,8 @@ $next=$notes.IndexOf('## Ataman ', $start+$heading.Length)
 if($next -lt 0){throw 'Current changelog boundary missing.'}
 [IO.File]::WriteAllText((Join-Path $stage 'CHANGELOG.md'),$notes.Substring($start,$next-$start),[Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath (Join-Path $repo 'docs/AI_AGENT_MCP.md') -Destination (Join-Path $stage 'docs') -Force
+New-Item -ItemType Directory -Path (Join-Path $stage 'tools') -Force|Out-Null
+foreach($name in @('install_program.ps1','program_files.ps1','rollback.ps1')) {
+    Copy-Item -LiteralPath (Join-Path $repo ('packaging/'+$name)) -Destination (Join-Path $stage 'tools') -Force
+}
 Write-Output "Prepared staging; validate versions/hashes and finalize with -PreviousPackageRoot $previous"
