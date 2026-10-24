@@ -189,3 +189,41 @@ QProcess либо проверенным PID с exe внутри изолиро�
 не разрешает менять его документ: после освобождения карт можно явно включить
 includeNeighbors либо согласовать только свою границу по прочитанному состоянию.
 Ручная визуальная/игровая приёмка владельцем отдельно; native/build evidence её не заменяют.
+
+
+## Установка225 по принятому решению владельца, 2026-10-25
+
+Владелец принял225 (включая224) и поручил «ставь»; прежний STOP снят этим
+поручением. Принятый main `c17f78c53d6260bf331986efea5baf017abd1c01`.
+Без пересборки установлен готовый `build-mcp-headless-225/build-staging-225-mcp-headless`
+каноническим `packaging/install_program.ps1` по обновлённому TEST_BUILD_HANDOFF.
+Цель: `artifacts/EI-Mapper-Ataman-2-first-test`.
+
+- Перед заменой любой EIMapperEndurance (включая headless) и игра отсутствовали.
+  Процессы владельца не завершались. Исходные EIMapperMcp PID:
+  **14248,38412,64504,69304,26856,83528,16080**. После установки все семь живы
+  с прежними PID и временем создания.
+- **164 managed SHA и manifest совпали со staging**;9 замен,2 добавления,0 удалений.
+  Установленные `EIMapperEndurance.exe --version` и `EIMapperMcp.exe --version`
+  сообщили **225**, exit0. Канонический bridge SHA256
+  `BA378992AF5A09919B6E6A0A983AF16CC3151E6EBCB879BA29473CD4CD85A174`.
+- **17899 пользовательских файлов**: прежний набор, SHA256, размер и время записи
+  неизменны. Управляемые служебные retired-записи учитывались отдельно.
+- Откат `artifacts/rollback223-to225-mcp-headless-20261025` создан установщиком:
+  прежние162 managed-файла223, manifest, rollback-state.json и собственные helpers.
+  `rollback.ps1 -VerifyOnly`: **ROLLBACK_VERIFIED**; восстановление не запускалось.
+- Занят только заменяемый `EIMapperMcp.exe`: rename в
+  `EIMapperMcp.exe.old-ataman-20dee36fd53d4b738fa2775c529aa331`;
+  SHA256 прежнего223 `73B3B1417CF16D0EEF4513569B0EDBEF27F287C167322C66CF65B3FA854FBE04`.
+  Прежний `EIMapperMcp.exe.old-ataman-4d50a1a25e2d4a31ac7aab84133b6347`
+  сохранён (installer cleanup: removed0/retained1). Других отодвинутых файлов нет.
+
+[Установочная квитанция](../../build-mcp-headless-225/install-receipt.json),
+[исходный снимок](../../build-mcp-headless-225/install-before.json),
+[вывод установщика](../../build-mcp-headless-225/install-output.txt),
+[проверка отката](../../build-mcp-headless-225/rollback-verify.txt).
+Настройки/карты/журналы/сохранения сохранены; регистрацию .mcp.json и Codex config,
+чужие файлы и прежние откаты не меняли. Финализатор на установке, интерактивный
+маппер, игра и push не запускались. Выполнены только порученные проверки установки.
+Установка завершена; старые живые мосты продолжают работать со своими mapped images,
+для загрузки нового225 потребуется штатный reconnect владельца.
