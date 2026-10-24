@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **217**: при создании нового MOB настройки можно взять из загруженного документа, MOB карт активного профиля или любого файла `.mob` с диска. Источник только читается; копируются лишь выбранные диапазоны ID, обычный скрипт, дипломатия/имена игроков и основные настройки мира. Объекты, граф ИИ, VSS и служебные данные не переносятся. [Проверка217](docs/validation/ATAMAN_MOB_TEMPLATE_217_20261022.md).
+Версия **218**: док «ИИ-агент» и отдельный MCP stdio-мост для Codex/Claude Code. Пользователь включает чтение открытого маппера: контекст, рельеф/покраска, объекты/выделение, БД, карты профиля и PNG. Локальный канал текущего пользователя, секрет сессии, отменяемые фоновые чтения; правка пока недоступна. [Подключение и ограничения](docs/AI_AGENT_MCP.md), [проверка218](docs/validation/ATAMAN_MCP_READ_218_20261024.md). Подготовлено без установки; установленная217 сохранена.
 
 Изменения187: общая покраска сохраняет готовые тени рельефа при изменении
 только текстур; изменения геометрии и покрытия обновляют поле по-прежнему.
@@ -50,7 +50,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `192`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `218`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

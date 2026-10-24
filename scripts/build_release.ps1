@@ -166,6 +166,19 @@ try {
         & $make "-j$Jobs" release
     }
     if ($LASTEXITCODE -ne 0) { throw "Release build failed with exit code $LASTEXITCODE." }
+
+    # Same toolchain and ASCII mapping as the editor, including Unicode checkouts.
+    $mcpBuild = Join-Path $executionBuildPath 'mcp-bridge'
+    New-Item -ItemType Directory -Force -Path $mcpBuild | Out-Null
+    Push-Location $mcpBuild
+    try {
+        $mcpProject = Resolve-Path -Relative (Join-Path $executionRoot 'tools\mcp_bridge\mcp_bridge.pro')
+        & $qmake $mcpProject 'CONFIG+=release'
+        if ($LASTEXITCODE -ne 0) { throw 'MCP bridge qmake failed.' }
+        if ($Msvc) { & $make /NOLOGO release } else { & $make "-j$Jobs" release }
+        if ($LASTEXITCODE -ne 0) { throw 'MCP bridge build failed.' }
+        Copy-Item -LiteralPath (Join-Path $mcpBuild 'release\EIMapperMcp.exe') -Destination (Join-Path $executionBuildPath 'release\EIMapperMcp.exe')
+    } finally { Pop-Location }
 } finally {
     Pop-Location
     if ($temporaryDrive) {

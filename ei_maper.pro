@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui opengl concurrent multimedia gui-private
+QT       += core gui opengl concurrent multimedia gui-private network
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -46,7 +46,7 @@ SOURCES -= $$PWD/source/runtime/base_runtime_host/base_runtime_host.cpp
 HEADERS += $$files($$PWD/source/*.h, true)
 FORMS += $$files($$PWD/source/*.ui, true)
 LIBS += -lglu32 -lopengl32 -ldbghelp -luser32
-win32: LIBS += -lole32
+win32: LIBS += -lole32 -ladvapi32
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

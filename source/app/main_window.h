@@ -35,6 +35,7 @@ class CSettings;
 class CSelectForm;
 class CCreateObjectForm;
 class CView;
+class CAiAgentServer;
 class CMob;
 class CRandomizeForm;
 class CTileForm;
@@ -95,6 +96,7 @@ struct SWindowTitle
 
 class MainWindow : public QMainWindow
 {
+    friend class CAiReadAdapter;
     Q_OBJECT
 
 public:
@@ -334,6 +336,7 @@ private:
     QUndoStack* m_undoStack;
     QUndoView* m_undoView;
     CView* m_pView;
+    CAiAgentServer* m_aiAgent{nullptr};
     SWindowTitle m_sWindowTitle;
     QTableWidget* m_testTable;
     QMenu* m_recentFilesMenu;

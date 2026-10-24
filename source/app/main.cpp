@@ -1,4 +1,5 @@
 #include "shutdown_deadline.h"
+#include "ai_agent_read.h"
 #include "startup_phases.h"
 #include "backup_manager.h"
 #include "main_window.h"
@@ -4175,6 +4176,8 @@ int runHeadlessCommand(QApplication& app)
 
 int main(int argc, char *argv[])
 {
+    for(int i=1;i<argc;++i)
+        if(std::strcmp(argv[i],"--ai-read-worker")==0)return ai::readWorkerMain(argc,argv);
     QElapsedTimer startupClock; startupClock.start();
     // Construct before Qt pools/singletons so the deadline outlives their joins.
     CShutdownDeadline::instance();

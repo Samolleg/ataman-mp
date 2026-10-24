@@ -3,6 +3,7 @@
 #include "lever_approach_dialog.h"
 #include "ui_theme.h"
 #include "main_window.h"
+#include "ai_agent_server.h"
 #include "travel_document.h"
 #include "loaded_map_panel_policy.h"
 #include "ui/graphite_caption.h"
@@ -2338,6 +2339,10 @@ MainWindow::MainWindow(QWidget* parent) :
                 m_landscapeTools->setEditingEnabled(false, false);
         });
     }
+    m_aiAgent=new CAiAgentServer(this);
+    addDockWidget(Qt::RightDockWidgetArea,m_aiAgent->dock());
+    viewMenu->addAction(m_aiAgent->dock()->toggleViewAction());
+    m_aiAgent->dock()->hide();
     // Restore only after every dock, resource manager and visibility handler
     // has its live dependencies. Restoring earlier loses late docks and can
     // deliver visibilityChanged into a partially initialized editor.
@@ -2359,6 +2364,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
 MainWindow::~MainWindow()
 {
+    if(m_aiAgent)m_aiAgent->stop();
     m_startupRecoveryCancel->store(true);
     saveUiState();
     delete m_itemSpellConstructorDialog;
@@ -9708,6 +9714,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     // Windows: Qt has already released the surface even though CView::isValid()
     // may still report true, and GPU-resource cleanup then dereferences a null
     // QOpenGLContext surface.
+    if(m_aiAgent)m_aiAgent->stop();
     ei::setCrashContext("shutdown/delete-live-view");
     QElapsedTimer shutdownTimer;
     shutdownTimer.start();

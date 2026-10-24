@@ -183,6 +183,7 @@ struct STerrainRecoveryCandidate
 
 class CView : public QGLWidget
 {
+    friend class CAiReadAdapter;
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
