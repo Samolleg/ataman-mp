@@ -15,6 +15,7 @@
 #include "terrain_mob_height_state.h"
 #include "natural_terrain.h"
 #include "ai_graph_preview_invalidation.h"
+#include "res_archive_index.h"
 #include <QtWidgets>
 #include <cmath>
 #include <algorithm>
@@ -93,6 +94,11 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
     const auto fail=[&](QString error){plan.error=error;plan.stroke={};plan.newMap.clear();return plan;};
     try {
         if(cancel->load())return fail("Cancelled; live map unchanged");
+        if(CAiEditAdapter::lifecycle(plan.method))return CAiEditAdapter::prepareLifecycle(plan,cancel);
+        if(plan.method=="create_map") {
+            plan=CAiEditAdapter::prepareLifecycle(plan,cancel);
+            if(!plan.error.isEmpty())return plan;
+        }
         if(!CAiEditAdapter::hydrate(&plan,cancel))return fail(plan.error);
         if(plan.method=="create_map") {
             const int initialMaterial=plan.args["material"].toInt();
@@ -103,6 +109,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                     return found&&SMprPackedTile::decode(packed).atlasSlot()<int(map.baseline.mapInfo().textureCount)*64;
                 };
                 if(!hasUniform(plan.maps[0])) {
+                    if(plan.args.contains("template"))return fail("Initial material has no authored uniform tile in the explicit template; omit material and paint after creation");
                     // The palette source owns a real authoring template too.
                     // Select it only inside the already authorized profile roots;
                     // New MPR213 still generates and commits the complete pair.
@@ -118,7 +125,8 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                             if(canonical.isEmpty()||base.isEmpty()||!canonical.startsWith(base+"/",Qt::CaseInsensitive)||file.size()>MaxMapBytes)continue;
                             EditPlan sourcePlan;sourcePlan.sources=plan.sources;EditMap source;source.id=CWorldTerrainSession::key(canonical);source.path=canonical;sourcePlan.maps.append(source);
                             if(!CAiEditAdapter::hydrate(&sourcePlan,cancel)||!hasUniform(sourcePlan.maps[0]))continue;
-                            plan.maps=sourcePlan.maps;plan.templatePath=canonical;found=true;break;
+                            plan.maps=sourcePlan.maps;plan.templatePath=canonical;
+                            plan.fileHashes[canonical]=QCryptographicHash::hash(plan.maps[0].baseline.originalBytes(),QCryptographicHash::Sha256);found=true;break;
                         }
                     }
                     if(!found)return fail("The selected palette material has no available authored MPR template inside the active profile roots");
@@ -392,10 +400,13 @@ public:
     bool invalidatesAiGraphPreview()const override{return true;}
     bool switchMap(const QString& path,const QStringList& mobs) {
         auto* v=window->view();if(!v)return false;
+        QScopedValueRollback<QUndoStack*> history(v->m_pUndoStack,nullptr);
         v->unloadMob("");v->unloadLand(false);v->m_worldTerrainSession.clear();v->m_worldTerrainAtlasSources.clear();
-        v->prepareDocumentTransition();v->loadLandscape(QFileInfo(path));if(!v->m_pLand->isMprLoad()||!v->ensureTerrainAutoCatalogReady())return false;
+        v->prepareDocumentTransition();
+        if(path.isEmpty()){window->setWorkspaceIdentity(QString(),QString(),QString(),QString());window->updateDocumentActionAvailability();window->refreshEditorWorld();return true;}
+        v->loadLandscape(QFileInfo(path));if(!v->m_pLand->isMprLoad()||!v->ensureTerrainAutoCatalogReady())return false;
         for(const auto& mob:mobs){QFileInfo file(mob);v->loadMob(file);}
-        window->updateDocumentActionAvailability();return true;
+        window->updateDocumentActionAvailability();window->refreshMapTestContext(false,false);window->refreshEditorWorld();return true;
     }
     void undo()override{if(!window||!window->view())return;if(!newPath.isEmpty()){switchMap(previousPath,previousMobs);return;}QString error;if(!CAiEditAdapter::replay(window,stroke,false,&error))emit window->view()->updateMsg(error);}
     void redo()override{if(first){first=false;return;}if(!window||!window->view())return;if(!newPath.isEmpty()){switchMap(newPath,{});return;}QString error;if(!CAiEditAdapter::replay(window,stroke,true,&error))emit window->view()->updateMsg(error);}
@@ -434,14 +445,18 @@ QString CAiEditAdapter::revision(MainWindow* w)
     for(const auto& n:v->m_neighborPlacements){epoch(n.mprPath);add(n.mprPath.toUtf8()+':'+QByteArray::number(n.worldOrigin.x(),'g',16)+','+QByteArray::number(n.worldOrigin.y(),'g',16));}
     for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths()){QFileInfo file(path);add(file.absoluteFilePath().toUtf8()+':'+QByteArray::number(file.size())+':'+QByteArray::number(file.lastModified().toMSecsSinceEpoch()));}
     add(CTextureList::getInstance()->terrainAuthoringReferenceSha256());
+    add(QByteArray::number(dirty(w)));
+    const auto layoutPath=w->m_worldMapLayoutDocument.path();
+    add(layoutPath.toUtf8());QFile layout(layoutPath);if(layout.open(QIODevice::ReadOnly))add(layout.readAll());
     return QString::fromLatin1(hash.result().toHex());
 }
 ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const QJsonObject& args)
 {
+    if(lifecycle(method)||method=="create_map")return captureLifecycle(w,method,args);
     ai::EditPlan plan;plan.method=method;plan.args=args;plan.description=QString::fromUtf8("ИИ: ")+(method=="sculpt"?QString::fromUtf8("Рельеф / ")+args["action"].toString():method=="paint"?QString::fromUtf8("Покраска"):method=="generate_terrain"?QString::fromUtf8("Природный рельеф / ")+args["preset"].toString():method=="erode"?QString::fromUtf8("Эрозия"):method=="carve_river"?QString::fromUtf8("Русло реки"):method=="auto_paint"?QString::fromUtf8("Автопокраска"):QString::fromUtf8("Новая карта"));
     auto* v=w->view();const auto fail=[&](QString error){plan.error=error;return plan;};
     if(busy(w))return fail("Editor gesture/load/modal interaction in progress; retry after it finishes");
-    if(!v->m_terrainEditAvailable||!v->m_pLand->isMprLoad())return fail("Open a terrain map first (used as the New MPR template)");
+    if(!v->m_terrainEditAvailable||!v->m_pLand->isMprLoad())return fail("Open a terrain map first");
     if(args["revision"].toString()!=revision(w))return fail("Document revision conflict; call get_revision and prepare again");
     if(v->m_terrainAutoCatalogPending||!v->m_workingTerrainAtlas)return fail("Terrain material palette is initializing; retry after it is ready");
     const bool naturalTool=QStringList{"generate_terrain","erode","carve_river","auto_paint"}.contains(method);
@@ -476,27 +491,16 @@ ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const Q
                 if(args["road"].toObject()["shape"]!="line")return fail("Road must use line geometry");}
         }
     }
-    QString error;const QRectF area=method=="create_map"?QRectF():bounds(plan.args["area"].toObject(),&error);if(!error.isEmpty())return fail(error);
+    QString error;const QRectF area=bounds(plan.args["area"].toObject(),&error);if(!error.isEmpty())return fail(error);
     const auto materialName=args["materialName"].toString();int material=args["material"].toInt();
-    if(method=="paint"||method=="create_map") {
+    if(method=="paint") {
         if(!materialName.isEmpty()) {int matches=0;for(const auto& family:v->m_terrainGlobalFamilies)if(family.name.compare(materialName,Qt::CaseInsensitive)==0){if(material>0&&material!=family.id)return fail("Material ID and name disagree");material=family.id;++matches;}if(matches!=1)return fail("Material name is absent or ambiguous; use material_palette ID");}
         if(material>0){bool known=false;for(const auto& family:v->m_terrainGlobalFamilies)known|=family.id==material;if(!known)return fail("Unknown palette material ID");}
         if(method=="paint"&&material<=0)return fail("paint requires material ID or exact materialName");
         plan.args["material"]=material;
     }
     const auto active=idFor(v);QVector<QPair<QString,QPointF>> targets{{active,v->m_activeMapWorldOrigin}};
-    if(method=="create_map") {
-        if(v->m_pLand->isDirty()||v->hasDirtyWorldTerrain()||w->hasTravelChanges())return fail("Save or discard the current map before creating another map");
-        for(auto* mob:v->m_aMob)if(mob->isDirty())return fail("Save the edited MOB before creating another map");
-        QString name=args["name"].toString();if(!QRegularExpression("^[A-Za-z][A-Za-z0-9_]{0,39}$").match(name).hasMatch()
-            ||QRegularExpression("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$",QRegularExpression::CaseInsensitiveOption).match(name).hasMatch())return fail("Map name must be 1..40 ASCII letters/digits/underscore, starting with a letter; no paths/device names");
-        const auto roots=w->activeMapRoots();const int root=args["root"].toInt();if(root<0||root>=roots.size())return fail("Active profile map root unavailable");
-        const QFileInfo directory(roots[root]);if(!directory.isDir()||directory.isSymLink())return fail("Map root must be an existing real directory");
-        plan.destination=QDir(directory.canonicalFilePath()).filePath(name+".mpr");
-        if(QFileInfo::exists(plan.destination)||QFileInfo(plan.destination).isSymLink())return fail("Map already exists; create_map never overwrites");
-        plan.templatePath=v->m_pLand->filePath().absoluteFilePath();
-        if(!plan.args.contains("maxZ"))plan.args["maxZ"]=v->m_terrainEdit.maxZ();
-    } else if(v->m_worldTerrainEnabled&&v->m_hasActiveMapWorldOrigin&&v->m_neighborLayoutStorageWritable) {
+    if(v->m_worldTerrainEnabled&&v->m_hasActiveMapWorldOrigin&&v->m_neighborLayoutStorageWritable) {
         for(const auto& n:v->m_neighborPlacements){const auto id=CWorldTerrainSession::key(n.mprPath);if(id==active||!v->m_worldTerrainEnabledPaths.contains(id))continue;
             if(!QRectF(n.worldOrigin-v->m_activeMapWorldOrigin,n.size).adjusted(-2,-2,2,2).intersects(area))continue;
             bool seen=false;for(const auto& t:targets)seen|=t.first==id;if(!seen)targets.append({id,n.worldOrigin});}
@@ -542,20 +546,39 @@ QJsonObject CAiEditAdapter::apply(MainWindow* w,const ai::EditPlan& plan)
     if(busy(w))return ai::error("Editor gesture/load/modal interaction in progress; retry");
     if(revision(w)!=plan.revision)return ai::error("Document revision conflict; candidate discarded, prepare again");
     auto* v=w->view();
+    if(lifecycle(plan.method))return applyLifecycle(w,plan);
     if(plan.method=="create_map") {
         if(QFileInfo::exists(plan.destination))return ai::error("Map already exists; creation refused");
         const QFileInfo parent(QFileInfo(plan.destination).absolutePath());bool inProfile=false;
         for(const auto& root:w->activeMapRoots())inProfile|=QFileInfo(root).canonicalFilePath().compare(parent.canonicalFilePath(),Qt::CaseInsensitive)==0;
         if(!inProfile||parent.isSymLink()||parent.canonicalFilePath().compare(parent.absoluteFilePath(),Qt::CaseInsensitive)!=0)return ai::error("Profile map root changed; creation refused");
-        const QString previous=v->m_pLand->filePath().absoluteFilePath();QStringList mobs;for(auto* mob:v->m_aMob)mobs.append(mob->filePath().absoluteFilePath());
+        for(auto it=plan.fileHashes.begin();it!=plan.fileHashes.end();++it){QFile f(it.key());QCryptographicHash hash(QCryptographicHash::Sha256);
+            if(!f.open(QIODevice::ReadOnly)||!hash.addData(&f)||hash.result()!=it.value())return ai::error("Template changed; prepare again");}
+        if(dirty(w))return ai::error("Unsaved changes: save first; creation refused");
+        const QString previous=v->m_pLand->isMprLoad()?v->m_pLand->filePath().absoluteFilePath():QString();QStringList mobs;for(auto* mob:v->m_aMob)mobs.append(mob->filePath().absoluteFilePath());
         QString publication;for(const auto& path:plan.sources.archives)if(terrainPublicationIsHDPackArchive(path)){publication=path;break;}
         bool ready=false;emit v->terrainPublicationPreflightRequested(publication,&ready);
         if(!ready)return ai::error("HDPack is not available for normal publication");
         const auto saved=commitNewTerrainCanvas(QFileInfo(plan.templatePath),plan.newMap,QFileInfo(plan.destination),plan.sources.archives,QString(),true);
         emit v->terrainPublicationFinished(publication,saved.success);
         if(!saved.success)return ai::error(saved.error);
-        if(!w->replaceLoadedLandscape(QFileInfo(plan.destination)))return ai::error("New map committed but opening was refused; file retained: "+plan.destination);
-        if(!v->ensureTerrainAutoCatalogReady())return ai::error("New map created and opened; terrain palette initialization failed");
+        const auto publishedHash=resFileSha256(publication);
+        QFile newFile(plan.destination);QByteArray committedMap;if(newFile.open(QIODevice::ReadOnly)){committedMap=newFile.readAll();newFile.close();}
+        if(!w->replaceLoadedLandscape(QFileInfo(plan.destination))||!v->ensureTerrainAutoCatalogReady()) {
+            // The serializer's cohort is committed, but the document must also
+            // be usable. Restore only bytes still owned by this operation.
+            bool restored=saved.backups.isEmpty();
+            if(!saved.backups.isEmpty()){
+                SMapSaveFile resource;resource.path=publication;resource.beforeSha256=publishedHash;
+                resource.afterFile=saved.backups.first();resource.afterSha256=resFileSha256(resource.afterFile);
+                restored=commitMapSaveBatch({resource}).success;
+            }
+            QFile current(plan.destination);const bool owned=current.open(QIODevice::ReadOnly)&&current.readAll()==committedMap;current.close();
+            if(owned)restored=QFile::remove(plan.destination)&&restored;else restored=false;
+            emit v->terrainPublicationFinished(publication,true);
+            CAiAgentCommand previousWorkspace(w,QString());const bool workspaceRestored=previousWorkspace.switchMap(previous,mobs);
+            return ai::error(restored&&workspaceRestored?"Creation could not open; MPR/atlas and previous workspace rolled back":"Creation could not open; rollback incomplete, retain backups and inspect "+plan.destination);
+        }
         auto* command=new CAiAgentCommand(w,plan.description+": "+QFileInfo(plan.destination).completeBaseName());
         command->newPath=plan.destination;command->previousPath=previous;command->previousMobs=mobs;w->m_undoStack->push(command);
         return {{"status","applied"},{"path",plan.destination},{"revision",revision(w)},{"undo",command->text()}};
@@ -583,10 +606,13 @@ QJsonObject CAiEditAdapter::apply(MainWindow* w,const ai::EditPlan& plan)
 QJsonObject CAiEditAdapter::undo(MainWindow* w)
 {
     auto* v=w->view();if(busy(w))return ai::error("Editor is busy");
-    const auto* command=w->m_undoStack->index()>0?dynamic_cast<const CAiAgentCommand*>(w->m_undoStack->command(w->m_undoStack->index()-1)):nullptr;
+    const auto* top=w->m_undoStack->index()>0?w->m_undoStack->command(w->m_undoStack->index()-1):nullptr;
+    const bool command=dynamic_cast<const CAiAgentCommand*>(top)||lifecycleCommand(top);
     const auto* world=v->m_worldTerrainSession.nextCommand(false);
     if(!command||(world&&world->localUndoIndex==w->m_undoStack->index()))return ai::error("The last operation belongs to human/world history; no agent operation undone");
+    w->setProperty("aiLifecycleHistoryError",QString());
     const int index=w->m_undoStack->index();w->on_actionUndo_triggered();
+    const auto lifecycleError=w->property("aiLifecycleHistoryError").toString();if(!lifecycleError.isEmpty())return ai::error(lifecycleError);
     if(w->m_undoStack->index()!=index-1)return ai::error("Active interaction prevented Undo; no agent command undone");
     return {{"status","undone"},{"revision",revision(w)}};
 }
@@ -595,10 +621,12 @@ QJsonObject CAiEditAdapter::save(MainWindow* w)
     if(busy(w))return ai::error("Editor is busy");
     auto* v=w->view();QScopedValueRollback<bool> permission(v->m_agentSaveAuthorized,true);
     w->on_actionSave_landscape_MPR_triggered();
+    if(!v->m_pLand->isDirty()&&!v->hasDirtyWorldTerrain()&&!w->hasTravelChanges())v->saveAllMob();
     if(v->m_pLand->isDirty()||v->hasDirtyWorldTerrain()||w->hasTravelChanges())return ai::error("Normal Save did not complete; changes remain in memory");
+    for(auto* mob:v->m_aMob)if(mob->isDirty())return ai::error("Normal MOB save did not complete; changes remain in memory");
     // World publication rebases physical identities. Retire snapshot commands
     // with that same normal save boundary, never replay old slots after save.
-    bool agentHistory=false;for(int i=0;i<w->m_undoStack->count();++i)agentHistory|=dynamic_cast<const CAiAgentCommand*>(w->m_undoStack->command(i))!=nullptr;
+    bool agentHistory=false;for(int i=0;i<w->m_undoStack->count();++i)agentHistory|=dynamic_cast<const CAiAgentCommand*>(w->m_undoStack->command(i))!=nullptr||lifecycleCommand(w->m_undoStack->command(i));
     if(agentHistory)w->m_undoStack->clear();
     return {{"status","saved"},{"revision",revision(w)}};
 }

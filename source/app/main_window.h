@@ -99,6 +99,7 @@ class MainWindow : public QMainWindow
     friend class CAiReadAdapter;
     friend class CAiEditAdapter;
     friend class CAiAgentCommand;
+    friend class CAiLifecycleCommand;
     friend class CAiAgentServer;
     Q_OBJECT
 

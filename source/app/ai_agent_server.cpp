@@ -179,12 +179,13 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
 {
     if(m_committing)return ai::error("Normal map commit in progress; retry after operation_status");
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_allowSave->isChecked()}};
-    const QSet<QString> mutations{"create_map","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
         if(m_mode->currentIndex()!=2)return ai::error("Read-only mode: only the human can enable Правка in the dock");
         if(m_writer&&m_writer!=m_currentClient)return ai::error("Another agent owns the writer session; disconnect it before switching writer");
         if(!m_currentClient)return ai::error("No writer connection");
         if(!m_writer)m_writer=m_currentClient;
+        if(QStringList{"create_map","place_map_in_world","set_world_position","create_mob"}.contains(method)&&!m_allowSave->isChecked())return ai::error("Persistence disabled: human must enable Allow agent to save before writing MPR/MOB/world layout");
         if(method=="save"&&!m_allowSave->isChecked())return ai::error("Save disabled: human must check Разрешить агенту сохранять; changes remain in memory");
         if(method=="apply") {
             const auto id=args["operation"].toString();
@@ -195,6 +196,8 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         }
         if(method=="undo_last_agent_operation") {
             if(args["revision"].toString()!=CAiEditAdapter::revision(m_window))return ai::error("Document revision conflict; get_revision first");
+            const auto* stack=m_window->m_undoStack;
+            if(stack->index()>0&&CAiEditAdapter::lifecycleWrites(stack->command(stack->index()-1))&&!m_allowSave->isChecked())return ai::error("Undo writes world layout; human must enable Allow agent to save");
             return CAiEditAdapter::undo(m_window);
         }
         return startEdit(method,args);
@@ -218,9 +221,12 @@ class AgentCommitDialogs : public QObject {
 public:
     QString error;
     bool eventFilter(QObject* object,QEvent* event) override {
-        if(event->type()==QEvent::Show)if(auto* box=qobject_cast<QMessageBox*>(object)) {
-            error=box->text();QPointer<QMessageBox> safe=box;
-            QTimer::singleShot(0,box,[safe](){if(safe)safe->done(QMessageBox::Cancel);});
+        if(event->type()==QEvent::Show)if(auto* box=qobject_cast<QDialog*>(object)) {
+            if(qobject_cast<QProgressDialog*>(object))return false;
+            box->setAttribute(Qt::WA_DontShowOnScreen);
+            auto* message=qobject_cast<QMessageBox*>(object);
+            error=message?message->text():"Interactive dialog required: "+box->windowTitle();QPointer<QDialog> safe=box;
+            QTimer::singleShot(0,box,[safe](){if(safe)safe->reject();});
         }
         return false;
     }
@@ -246,7 +252,8 @@ void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::Edi
             if(!m_allowSave->isChecked())result=ai::error("Save permission revoked; changes remain in memory");
             else if(plan->revision!=CAiEditAdapter::revision(m_window))result=ai::error("Document revision conflict before Save");
             else result=CAiEditAdapter::save(m_window);
-        } else result=CAiEditAdapter::apply(m_window,*plan);
+        } else if(QStringList{"create_map","place_map_in_world","set_world_position","create_mob"}.contains(plan->method)&&!m_allowSave->isChecked())result=ai::error("Save permission revoked; operation unchanged");
+        else result=CAiEditAdapter::apply(m_window,*plan);
         qApp->removeEventFilter(&dialogs);
         if(!dialogs.error.isEmpty())result=ai::error(dialogs.error);
         if(snapshot&&!result.contains("error")&&m_window&&m_view)result["snapshot"]=CAiReadAdapter::read(m_window,"window_snapshot",{});

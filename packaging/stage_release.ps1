@@ -37,8 +37,12 @@ if($LASTEXITCODE -ne 0){throw 'Qt deployment failed.'}
 foreach($name in @('Qt5Concurrent.dll','Qt5Network.dll')){Copy-Item -LiteralPath (Join-Path $QtBin $name) -Destination $stage -Force}
 foreach($name in @('libgcc_s_seh-1.dll','libstdc++-6.dll','libwinpthread-1.dll')){Copy-Item -LiteralPath (Join-Path $MinGwBin $name) -Destination $stage -Force}
 $notes=[IO.File]::ReadAllText((Join-Path $repo 'CHANGELOG.md'))
-$next=$notes.IndexOf('## Ataman 219')
+$currentVersion=[IO.File]::ReadAllText((Join-Path $repo 'VERSION')).Trim()
+$heading='## Ataman '+$currentVersion+' '
+$start=$notes.IndexOf($heading)
+if($start -lt 0){throw 'Current changelog entry missing.'}
+$next=$notes.IndexOf('## Ataman ', $start+$heading.Length)
 if($next -lt 0){throw 'Current changelog boundary missing.'}
-[IO.File]::WriteAllText((Join-Path $stage 'CHANGELOG.md'),$notes.Substring(0,$next),[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $stage 'CHANGELOG.md'),$notes.Substring($start,$next-$start),[Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath (Join-Path $repo 'docs/AI_AGENT_MCP.md') -Destination (Join-Path $stage 'docs') -Force
 Write-Output "Prepared staging; validate versions/hashes and finalize with -PreviousPackageRoot $previous"

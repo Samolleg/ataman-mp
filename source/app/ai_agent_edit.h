@@ -5,7 +5,9 @@
 #include "terrain_atlas_profile.h"
 #include "terrain_atlas_archive_binding.h"
 #include "terrain_virtual_atlas.h"
+#include "world_map_layout_document.h"
 class MainWindow;
+class QUndoCommand;
 class CAiAgentCommand;
 namespace ai {
 // Detached values only. Workers never own a QWidget, a renderer or live document.
@@ -42,6 +44,13 @@ struct EditPlan {
     SWorldTerrainStroke stroke;
     QByteArray newMap;
     QString templatePath,destination;
+    QStringList mapRoots;
+    QMap<QString,QString> mapAliases;
+    CWorldMapLayoutDocument worldDocument;
+    QString profileId, activePath, mobPath;
+    QByteArray mobBytes;
+    QVector<SWorldMapLayoutChange> layoutChanges;
+    QMap<QString,QByteArray> fileHashes;
     QJsonObject summary;
 };
 EditPlan prepareEdit(EditPlan plan,const Cancellation& cancel);
@@ -56,6 +65,13 @@ public:
     static QJsonObject undo(MainWindow* window);
     static QJsonObject save(MainWindow* window);
     static bool hydrate(ai::EditPlan* plan,const ai::Cancellation& cancel);
+    static bool lifecycle(const QString& method);
+    static ai::EditPlan captureLifecycle(MainWindow*,const QString&,const QJsonObject&);
+    static ai::EditPlan prepareLifecycle(ai::EditPlan,const ai::Cancellation&);
+    static QJsonObject applyLifecycle(MainWindow*,const ai::EditPlan&);
+    static bool dirty(MainWindow*);
+    static bool lifecycleCommand(const QUndoCommand*);
+    static bool lifecycleWrites(const QUndoCommand*);
 private:
     static bool replay(MainWindow* window,const SWorldTerrainStroke& stroke,bool forward,QString* error);
 };

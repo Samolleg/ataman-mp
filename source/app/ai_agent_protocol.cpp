@@ -56,7 +56,7 @@ bool takeFrame(QByteArray& buffer, QJsonObject* value, QString* error)
     }
     *value = doc.object(); return true;
 }
-static QJsonObject integer(int lo, int hi) { return {{"type","integer"},{"minimum",lo},{"maximum",hi}}; }
+static QJsonObject integer(double lo, double hi) { return {{"type","integer"},{"minimum",lo},{"maximum",hi}}; }
 static QJsonObject string() { return {{"type","string"},{"maxLength",256}}; }
 static QJsonObject number(double lo,double hi) { return {{"type","number"},{"minimum",lo},{"maximum",hi}}; }
 static QJsonObject choice(QJsonArray values) { return {{"type","string"},{"enum",values},{"maxLength",64}}; }
@@ -144,13 +144,24 @@ QJsonArray toolDefinitions()
     // Schemas overlap (e.g. generate/auto-paint); anyOf keeps client validation
     // correct. The server strictly validates the selected tool below.
     add("apply","Apply a completed preview only at its captured revision, one Undo.",{{"operation",string()},{"revision",string()},{"snapshot",QJsonObject{{"type","boolean"}}}},{"operation","revision"});
-    add("create_map","Create and open a new MPR using the current clean map as terrain template and New MPR213. Name only, never overwrite, active profile map root only; publishes initial atlas to HDPack. This explicit creation writes the initial file even when later Save is disabled.",
+    add("create_map","Create and open a new MPR via New MPR213, including an empty editor. Optional profile template key/name; otherwise current clean map or deterministic profile template. Never overwrite. Requires human Allow agent to save for initial MPR/atlas publication.",
         {{"revision",string()},{"name",string()},{"sectorsX",integer(1,16)},{"sectorsY",integer(1,16)},
          {"height",number(0,10000)},{"maxZ",number(1,10000)},{"material",integer(1,2147483647)},
-         {"materialName",string()},{"root",integer(0,15)}},{"revision","name","sectorsX","sectorsY"});
+         {"materialName",string()},{"root",integer(0,15)},{"template",string()}},{"revision","name","sectorsX","sectorsY"});
+    add("open_map","Open a profile MPR by catalog key, filename or zone name, with matching primary MOB and world neighbours. Refuses all unsaved changes; no save/discard dialogs. Async navigation, clears old document Undo history.",
+        {{"revision",string()},{"map",string()}},{"revision","map"});
+    add("close_map","Close clean documents only. Refuses unsaved terrain, neighbour, MOB, travel or database edits; never discards. Async navigation.",{{"revision",string()}},{"revision"});
+    const QJsonObject placement{{"revision",string()},{"map",string()},{"x",number(-10000000,10000000)},{"y",number(-10000000,10000000)},
+        {"world",string()},{"relativeTo",string()},{"side",choice({"N","S","E","W"})}};
+    add("place_map_in_world","Place active or selected profile map. Either x/y (new map also world) or relativeTo/side. N=+Y, S=-Y; E/W align lower Y, N/S align left X. Rejects overlaps. Same atomic world JSON persistence as manual placement; requires Allow agent to save, one Undo.",placement,{"revision"});
+    add("set_world_position","Alias of place_map_in_world with identical validation, persistence and Undo.",placement,{"revision"});
+    add("create_mob","Create and load an empty primary MOB beside the active MPR, never overwrite. Optional profile MOB template and explicit copy flags use217 parameter reader; no objects/AI/VSS copied. Requires Allow agent to save; one Undo unloads, retains initial file.",
+        {{"revision",string()},{"template",string()},{"copyRanges",QJsonObject{{"type","boolean"}}},{"copyScript",QJsonObject{{"type","boolean"}}},
+        {"copyDiplomacy",QJsonObject{{"type","boolean"}}},{"copyWorld",QJsonObject{{"type","boolean"}}},{"defaultDiplomacy",QJsonObject{{"type","boolean"}}},
+        {"rangeMinimum",integer(1,4294967295.0)},{"rangeMaximum",integer(1,4294967295.0)},{"time",number(-1000000,1000000)}},{"revision"});
     add("undo_last_agent_operation","Undo only the top agent command. Refuses if human/world history intervened. Does not undo somebody else's work.",{{"revision",string()}},{"revision"});
     add("save","Use normal map Save209–216 only when the human enabled Allow agent to save. Async status; backups, atlas publication and 126-page limit remain authoritative.",{{"revision",string()}},{"revision"});
-    const QSet<QString> mutations{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","undo_last_agent_operation","save"};
     for(int i=0;i<tools.size();++i) {
         auto tool=tools[i].toObject();if(!mutations.contains(tool["name"].toString()))continue;
         tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",true},{"openWorldHint",false}};tools[i]=tool;

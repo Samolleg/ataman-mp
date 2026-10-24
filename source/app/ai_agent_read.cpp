@@ -195,7 +195,7 @@ QJsonObject CAiReadAdapter::context(MainWindow* w)
     }
     const auto* profileOption=dynamic_cast<COptString*>(w->m_settings->opt(eOptSetResource,"resourceProfile"));
     return {{"version",ENDURANCE_VERSION},{"mode","read-only"},{"profile",profileOption?profileOption->value():(profile?profile->profileId:QString())},
-        {"mpr",CLandscape::getInstance()->filePath().absoluteFilePath()},{"mobs",mobs},
+        {"mpr",CLandscape::getInstance()->isMprLoad()?CLandscape::getInstance()->filePath().absoluteFilePath():QString()},{"mobs",mobs},
         {"terrainDirty",model.isDirty()},{"worldTerrainDirty",v->hasDirtyWorldTerrain()},
         {"travelDirty",w->hasTravelChanges()},{"verticesX",model.vertexCountX()},{"verticesY",model.vertexCountY()},
         {"sizeWorld",QJsonArray{qMax(0,model.vertexCountX()-1),qMax(0,model.vertexCountY()-1)}},

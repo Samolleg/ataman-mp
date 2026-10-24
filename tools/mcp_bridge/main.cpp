@@ -10,7 +10,7 @@
 namespace {
 const QJsonArray versions{"2026-07-28","2025-11-25","2025-06-18","2024-11-05"};
 const QJsonObject capabilities{{"tools",QJsonObject{}},{"resources",QJsonObject{}}};
-const QString instructions="Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Every edit is one Undo; revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218.";
+const QString instructions="Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218.";
 QJsonObject serverInfo(){return {{"name","ei-mapper-ataman"},{"version",ENDURANCE_VERSION}};}
 QJsonObject rpcError(int code,const QString& message,QJsonObject data={})
 {
@@ -91,7 +91,7 @@ public:
         // ID correlation and stream discard on timeout.
         const bool editPoll=(name=="operation_status"||name=="cancel_operation")&&editJobs.contains(args["operation"].toString());
         const auto value=local(name,args,editPoll?30000:2000);
-        const QSet<QString> edits{"create_map","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
+        const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
             editJobs[value["operation"].toString()]=now+60000;
