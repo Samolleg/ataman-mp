@@ -213,7 +213,8 @@ int runAssemblyCatalogCheck()
             const auto previous=QJsonDocument::fromJson(read(root+"/r2-shape-before.json")).array()[scenario+3].toObject();
             if(scenario<2)check(m["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()<previous["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()*0.6,"R3 narrow teeth area reduced by at least40% from R2");
             if(scenario==1){check(m["slopeP90"].toDouble()<reference["slopeP90"].toDouble()+2,"mountain P90 near zone2 and below old78deg");
-                const double ratio=m["shape"].toObject()["anisotropy32m"].toDouble()/reference["shape"].toObject()["anisotropy32m"].toDouble();check(ratio>0.7&&ratio<2,"directed ridge anisotropy remains comparable to zone2");}
+                const double ratio=m["shape"].toObject()["anisotropy32m"].toDouble()/reference["shape"].toObject()["anisotropy32m"].toDouble();check(ratio>0.7&&ratio<2,"directed ridge anisotropy remains comparable to zone2");
+                check(m["materialFractions"].toObject()["Ground / Gravel"].toDouble()>0.001,"dry valley has a painted road below the unused waterLevel");}
             if(scenario==2)check(m["dryIslands"].toObject()["islandsBelow64m2"].toInt()<=2,"coast removes isolated dry pixel islands");
             m["name"]=name;m["generate"]=gen;m["paint"]=painting;generatedMetrics.append(m);
             // Explicit cancellation before commit, including bounded eroder.

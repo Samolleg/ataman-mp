@@ -208,7 +208,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                 const auto requestedMaterial=plan.args["material"].toInt();auto atlas=map.state.atlas->createStagingCopy();
                 auto terrain=model;atlas->setDistributionSeed(seed);
                 if(!terrain.initializeVirtualMaterialField(layer,atlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically))return fail(report.toText());
-                natural::Grid drainage;QVector<double> waterDistance;QVector<quint8> rockMask,beachMask;double rockCut=32;
+                natural::Grid drainage;QVector<double> waterDistance;QVector<quint8> rockMask,beachMask,sandyExposure;double rockCut=32;
                 if(automatic){drainage.width=terrain.vertexCountX();drainage.height=terrain.vertexCountY();drainage.origin=offset;
                     drainage.heights.resize(drainage.width*drainage.height);
                     for(int y=0;y<drainage.height;++y)for(int x=0;x<drainage.width;++x)drainage.heights[y*drainage.width+x]=z(terrain,x,y);
@@ -229,11 +229,15 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                         scores.append(rockScores[y*vw+x]);}
                     std::sort(scores.begin(),scores.end());
                     if(!scores.isEmpty())rockCut=qMax(parameters["rockSlope"].toDouble(32),scores[qBound(0,int((1-parameters["rockFraction"].toDouble(0.1))*(scores.size()-1)),scores.size()-1)]);
-                    rockMask.resize(vw*vh);beachMask.fill(0,vw*vh);
+                    rockMask.resize(vw*vh);beachMask.fill(0,vw*vh);sandyExposure.fill(0,vw*vh);
                     for(int y=0;y<vh;++y)for(int x=0;x<vw;++x){const int i=y*vw+x;rockMask[i]=rockScores[i]>=rockCut;
-                        if(plan.args["preset"]=="coast"&&waterDistance[i]>0&&waterDistance[i]<parameters["shoreWidth"].toDouble(10)&&z(terrain,x*2,y*2)<level+2.2){
-                            const double slope=std::atan(std::hypot((z(terrain,x*2+3,y*2)-z(terrain,x*2-3,y*2))/6,(z(terrain,x*2,y*2+3)-z(terrain,x*2,y*2-3))/6))*180/3.141592653589793;
-                            beachMask[i]=slope<parameters["beachSlope"].toDouble(18)&&natural::noise((x*2+offset.x())/65,(y*2+offset.y())/80,seed^3391)>-0.15;}}
+                        if(plan.args["preset"]=="coast"){
+                            const double sx=(z(terrain,x*2+6,y*2)-z(terrain,x*2-6,y*2))/12,sy=(z(terrain,x*2,y*2+6)-z(terrain,x*2,y*2-6))/12;
+                            const double angle=parameters["beachDirection"].toDouble(180)*3.141592653589793/180;
+                            const double facing=(-sx*std::cos(angle)-sy*std::sin(angle))/qMax(0.001,std::hypot(sx,sy));
+                            sandyExposure[i]=facing>0.15&&natural::noise((x*2+offset.x())/65,(y*2+offset.y())/80,seed^3391)>-0.15;
+                            const double slope=std::atan(std::hypot(sx,sy))*180/3.141592653589793;
+                            beachMask[i]=sandyExposure[i]&&waterDistance[i]>0&&waterDistance[i]<parameters["shoreWidth"].toDouble(10)&&z(terrain,x*2,y*2)<level+2.2&&slope<parameters["beachSlope"].toDouble(18);}}
                     natural::coherentMask(rockMask,vw,vh,0,8,false,[&](){return cancel->load();});
                     if(plan.args["preset"]=="coast")natural::coherentMask(beachMask,vw,vh,1,12,true,[&](){return cancel->load();});
                 }
@@ -263,7 +267,8 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                             if(wet>0.8&&distance<5&&height>water-0.2&&(plan.args["preset"]!="coast"||drainage.wetness.value(vy*drainage.width+vx)>0.6))material=palette["mud"].toInt(material);
                             if(plan.args["preset"]=="coast"&&height<water){
                                 const double seabed=natural::noise(p.x()/38,p.y()/52,seed^7753);
-                                material=water-height>2.5&&seabed>-0.15?palette["underwaterRock"].toInt(material):palette["underwaterSand"].toInt(material);
+                                material=sandyExposure[y*(nx+1)+x]&&water-height<1.2?palette["underwaterSand"].toInt(material):
+                                    seabed>-0.15?palette["underwaterRock"].toInt(material):palette["dark"].toInt(material);
                             }
                             if(plan.args["preset"]=="coast"){
                                 if(beachMask[y*(nx+1)+x])material=palette["shore"].toInt(material);
@@ -271,9 +276,9 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                             if(rockMask[y*(nx+1)+x]&&!(distance<12&&height<water+2)){
                                 material=palette["rock"].toInt(material);
                                 const double angle=parameters["ridgeDirection"].toDouble(90)*3.141592653589793/180;
-                                const double variant=natural::noise((p.x()*std::cos(angle)+p.y()*std::sin(angle))/55,(-p.x()*std::sin(angle)+p.y()*std::cos(angle))/15,seed^382);
-                                if(variant>0.28)material=palette["rock2"].toInt(material);
-                                else if(variant< -0.35)material=palette["rock3"].toInt(material);
+                                const double variant=natural::noise((p.x()*std::cos(angle)+p.y()*std::sin(angle))/35,(-p.x()*std::sin(angle)+p.y()*std::cos(angle))/12,seed^382);
+                                if(variant>0.5)material=palette["rock2"].toInt(material);
+                                else if(variant< -0.45)material=palette["rock3"].toInt(material);
                             }
                             // Explicit ordered rules override the derived palette. Coherent
                             // spatial noise perturbs thresholds, never independent tile speckle.
@@ -285,7 +290,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                             const auto road=plan.args["road"].toObject();if(!road.isEmpty()){
                                 QString roadError;const auto roadBounds=bounds(road,&roadError);const double perturb=1+0.14*natural::noise(p.x()/15,p.y()/15,seed^671);
                                 auto varied=road;varied["width"]=road["width"].toDouble()*perturb;
-                                if(height>water+0.4&&slope<45&&weight(varied,roadBounds.adjusted(-4,-4,4,4),p.x(),p.y())>0.3)material=palette["road"].toInt(material);}
+                                if((!plan.args.value("water").isObject()||height>water+0.4)&&slope<45&&weight(varied,roadBounds.adjusted(-4,-4,4,4),p.x(),p.y())>0.3)material=palette["road"].toInt(material);}
                             if(material<=0)return fail(QString("Automatic material unavailable at %1,%2: %3").arg(x).arg(y).arg(QString::fromUtf8(QJsonDocument(palette).toJson(QJsonDocument::Compact))));
                         }
                         // Stable dither preserves the mask/falloff without inventing blended material IDs.

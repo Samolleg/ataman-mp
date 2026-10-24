@@ -163,7 +163,7 @@ QJsonObject natural::preset(const QString& name)
         {"erosion",0.12},{"waterLevel",name=="coast"||name=="swamp"?6:3},{"rockSlope",32},{"rockFraction",name=="mountains"?0.19:name=="coast"?0.10:0.09},
         {"patchScale",name=="coast"?14:9},{"shoreWidth",name=="coast"?10:1.5},{"boundaryNoise",1.5},
         {"ridgeDirection",90},{"ridgeSpacing",30},{"anisotropy",3.0},{"maximumTerrainSlope",name=="mountains"?74:name=="coast"?60:66},
-        {"streamPower",name=="mountains"?0.18:0.0},{"islandMinArea",100},{"beachSlope",18}};
+        {"streamPower",name=="mountains"?0.18:0.0},{"islandMinArea",100},{"beachSlope",18},{"beachDirection",180}};
 }
 double natural::Grid::sample(double x,double y) const
 {
@@ -188,8 +188,9 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
             const double bend=warp*(0.65*noise(along/85,across/110,seed^553)+0.25*noise(along/35,across/70,seed^719));
             const double primary=std::pow(1-std::abs(noise((across+bend)/spacing,along/(spacing*elongation),seed^3741)),2.2);
             const double secondary=std::pow(1-std::abs(noise((across+bend*0.7)/ (spacing*0.48),along/(spacing*elongation*0.55),seed^891)),2);
-            const double weight=0.4+0.4*p["ridge"].toDouble(0.82);
-            h=p["baseHeight"].toDouble()+amplitude*(weight*primary+(1-weight)*secondary)*(0.88+0.12*noise(along/90,across/90,seed^5813));
+            const double tributary=std::pow(1-std::abs(noise((across+bend*0.5)/(spacing*0.22),along/(spacing*elongation*0.3),seed^7219)),2);
+            const double weight=(0.4+0.4*p["ridge"].toDouble(0.82))*0.92;
+            h=p["baseHeight"].toDouble()+amplitude*(weight*primary+(0.95-weight)*secondary+0.05*tributary)*(0.88+0.12*noise(along/90,across/90,seed^5813));
         }else if(name=="coast"){
             const double coast=g.origin.x()+g.width*0.58+g.width*0.22*fbm(wy/90,12,seed^7123,3);
             // Curving bay, a broad shelf, then a steeper inland escarpment.
@@ -202,19 +203,20 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
             if(inland<12)for(int iy=gy-1;iy<=gy+1;++iy)for(int ix=gx-1;ix<=gx+1;++ix){const quint32 key=hash(ix,iy,seed^7753);if(key%3)continue;
                 const double cx=(ix+0.5)*64+int((key>>8)%25)-12,cy=(iy+0.5)*64+int((key>>16)%25)-12;
                 const double rx=12+(key>>3)%13,ry=12+(key>>11)%17;
-                const double a=wx-cx+2*noise(wx/30,wy/40,seed^8107),b=wy-cy+2*noise(wx/40,wy/30,seed^4133);
+                const double a=wx-cx+8*noise(wx/18,wy/24,seed^8107),b=wy-cy+6*noise(wx/24,wy/18,seed^4133);
                 shore=qMax(shore,(1-std::hypot(a/rx,b/ry))*qMin(rx,ry));}
             h=p["waterLevel"].toDouble()+shore*0.12+qMax(0.0,inland-20)*0.025;
             h+=3*fbm(wx/30,wy/45,seed^1711,3)*smooth((inland-12)/20);
-            const double folds=1-std::abs(noise((wx+8*noise(wy/90,7,seed^1987))/20,wy/65,seed^4133));
-            h+=8*(std::pow(folds,3)-0.35)*smooth((inland-12)/20);
+            const double folds=1-std::abs(noise((wx+10*noise(wy/60,7,seed^1987))/18,wy/35,seed^4133));
+            const double exposure=smooth((noise(wx/60,wy/60,seed^1711)+0.1)/0.6);
+            h+=8*(std::pow(folds,3)-0.35)*(0.4+0.6*exposure)*smooth((inland-12)/20);
         }else if(name=="river_valley"){
             const double centre=g.origin.x()+g.width*0.5+22*fbm(wy/95,7,seed^1987,3);
             h=p["waterLevel"].toDouble()+1+(h-p["waterLevel"].toDouble())*smooth(std::abs(wx-centre)/55);
         }
         // EI references have broad walkable shelves separated by irregular
         // steep outcrops. Continuous warped terraces preserve both populations.
-        const double step=qMax(2.0,amplitude*0.32),floor=std::floor(h/step),fraction=h/step-floor;
+        const double step=qMax(2.0,amplitude*(name=="mountains"?0.23:0.32)),floor=std::floor(h/step),fraction=h/step-floor;
         const double transition=name=="mountains"?0.45:0.22;
         const double shelf=step*(floor+smooth((fraction-(0.5-transition/2))/transition));
         const double terraceFade=name=="coast"?smooth((h-p["waterLevel"].toDouble()-3)/6):1;

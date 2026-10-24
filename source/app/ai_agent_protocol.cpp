@@ -116,7 +116,7 @@ QJsonArray toolDefinitions()
         {"waterLevel",number(0,10000)},{"rockSlope",number(0,90)},{"rockFraction",number(0,1)},{"patchScale",number(1,64)},{"shoreWidth",number(0,32)},
         {"boundaryNoise",number(0,8)},{"cliffX",number(-32768,32768)},
         {"ridgeDirection",number(0,180)},{"ridgeSpacing",number(8,256)},{"anisotropy",number(1,8)},
-        {"maximumTerrainSlope",number(15,85)},{"streamPower",number(0,1)},{"islandMinArea",integer(0,4096)},{"beachSlope",number(0,45)},
+        {"maximumTerrainSlope",number(15,85)},{"streamPower",number(0,1)},{"islandMinArea",integer(0,4096)},{"beachSlope",number(0,45)},{"beachDirection",number(0,360)},
         {"cliffHeight",number(0,1000)},{"cliffWidth",number(0.5,64)}});
     auto generate=edit;generate.insert("preset",choice({"plain","hills","mountains","coast","swamp","river_valley"}));generate.insert("parameters",parameters);
     add("generate_terrain","Generate natural terrain in metres: seeded fBm, ridged noise, domain warp, bounded thermal/hydraulic erosion. Omit area for whole active map; shared enabled neighbours use the131 seam solver. Detached async, preview/apply, one Undo.",generate,{"revision","preset","seed"});
