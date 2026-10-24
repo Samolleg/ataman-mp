@@ -110,7 +110,7 @@ QJsonArray toolDefinitions()
     paint.insert("minimumSlope",number(0,90));paint.insert("maximumSlope",number(0,90));
     add("paint","Paint palette material by ID or exact name over area/mask/polyline width in metres. Modern131 automatic transitions; optional existing overlay and seeded variant shuffle. Async, one Undo.",paint,{"revision","area"});
     const auto parameters=object({{"baseHeight",number(0,10000)},{"amplitude",number(0,10000)},
-        {"scale",number(4,2048)},{"ridge",number(0,1)},{"warp",number(0,512)},{"terrace",number(0,1)},{"detail",number(0,32)},
+        {"scale",number(4,2048)},{"ridge",number(0,1)},{"warp",number(0,512)},{"terrace",number(0,1)},{"detail",number(0,32)},{"detailThreshold",number(0,1)},
         {"thermalIterations",integer(0,64)},{"hydraulicIterations",integer(0,64)},
         {"talus",number(0.01,8)},{"rain",number(0,1)},{"erosion",number(0,1)},
         {"waterLevel",number(0,10000)},{"rockSlope",number(0,90)},{"rockFraction",number(0,1)},{"patchScale",number(1,64)},{"shoreWidth",number(0,32)},
