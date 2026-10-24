@@ -43,6 +43,10 @@ private:
     void finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot);
     void cancelJob(Job& job);
     void prune();
+    QJsonObject shutdownHeadless(bool automatic=false);
+    qint64 m_lastActivity{QDateTime::currentMSecsSinceEpoch()},m_noClientsSince{0};
+    bool m_hadAgent{false},m_shutdownWarned{false};
+    bool m_shutdownScheduled{false};
     void configureClient();
     QPointer<MainWindow> m_window;
     QPointer<CView> m_view;

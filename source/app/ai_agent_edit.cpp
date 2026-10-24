@@ -500,7 +500,8 @@ ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const Q
         plan.args["material"]=material;
     }
     const auto active=idFor(v);QVector<QPair<QString,QPointF>> targets{{active,v->m_activeMapWorldOrigin}};
-    if(v->m_worldTerrainEnabled&&v->m_hasActiveMapWorldOrigin&&v->m_neighborLayoutStorageWritable) {
+    const bool includeNeighbors=args["includeNeighbors"].toBool(!qApp->property("agentHeadless").toBool());
+    if(includeNeighbors&&v->m_worldTerrainEnabled&&v->m_hasActiveMapWorldOrigin&&v->m_neighborLayoutStorageWritable) {
         for(const auto& n:v->m_neighborPlacements){const auto id=CWorldTerrainSession::key(n.mprPath);if(id==active||!v->m_worldTerrainEnabledPaths.contains(id))continue;
             if(!QRectF(n.worldOrigin-v->m_activeMapWorldOrigin,n.size).adjusted(-2,-2,2,2).intersects(area))continue;
             bool seen=false;for(const auto& t:targets)seen|=t.first==id;if(!seen)targets.append({id,n.worldOrigin});}
@@ -509,6 +510,7 @@ ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const Q
     for(const auto& target:targets) {
         if(plan.maps.size()>=4)return fail("At most four maps per agent operation");
         ai::EditMap map;map.id=target.first;map.path=target.first;map.origin=target.second;
+        map.editLease=CProcessEditLock::acquire(map.path,&plan.error);if(!map.editLease)return plan;
         if(target.first==active) {
             map.baseline=v->m_mprDocument;map.state.terrain=v->m_terrainEdit;map.state.materials=v->m_mprMaterials;map.state.atlas=v->m_workingTerrainAtlas->createStagingCopy();
             map.profile=v->m_terrainAtlasProfile;map.archive=v->m_activeTerrainArchivePath;
@@ -548,6 +550,8 @@ QJsonObject CAiEditAdapter::apply(MainWindow* w,const ai::EditPlan& plan)
     auto* v=w->view();
     if(lifecycle(plan.method))return applyLifecycle(w,plan);
     if(plan.method=="create_map") {
+        QString leaseError;auto destinationLease=CProcessEditLock::acquire(plan.destination,&leaseError);
+        if(!destinationLease)return ai::error(leaseError);
         if(QFileInfo::exists(plan.destination))return ai::error("Map already exists; creation refused");
         const QFileInfo parent(QFileInfo(plan.destination).absolutePath());bool inProfile=false;
         for(const auto& root:w->activeMapRoots())inProfile|=QFileInfo(root).canonicalFilePath().compare(parent.canonicalFilePath(),Qt::CaseInsensitive)==0;

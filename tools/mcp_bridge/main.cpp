@@ -55,6 +55,36 @@ class Bridge {
     QString catalogError;
     QElapsedTimer clock;
     qint64 retryAt{0};int retryDelay{1000};QString attemptedPipe;
+    QString targetPreference{"auto"};
+    QJsonObject startBackground() {
+        QSettings settings;settings.sync();const int mode=settings.value("ui/aiAgentMode",0).toInt();
+        if(mode<1||mode>2)return ai::error(QString::fromUtf8("Владелец выключил доступ агентов в доке"));
+        if(!ai::secureDirectory(ai::discoveryDirectory()))return ai::error("Cannot protect automation directory");
+        const auto find=[](){
+            for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
+                const auto d=readDescriptor(file.completeBaseName());if(d["background"].toBool()&&available(d))return d;
+            }return QJsonObject{};
+        };
+        QLockFile startLock(QDir(ai::discoveryDirectory()).filePath("headless-start.lock"));startLock.setStaleLockTime(0);
+        if(!startLock.tryLock(45000))return ai::error("Timed out waiting for another bridge to start the background mapper");
+        auto d=find();if(!d.isEmpty())return d;
+        const auto exe=QDir(QCoreApplication::applicationDirPath()).filePath("EIMapperEndurance.exe");
+        if(!QFileInfo(exe).isFile())return ai::error("Background mapper executable missing in this MCP bridge installation: "+exe);
+        const auto log=QDir(ai::discoveryDirectory()).filePath("headless-start-"+QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QProcess child;child.setProgram(exe);child.setArguments({"--agent-headless"});child.setWorkingDirectory(QCoreApplication::applicationDirPath());
+        child.setStandardOutputFile(log+".stdout");child.setStandardErrorFile(log+".stderr");
+#ifdef Q_OS_WIN
+        child.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* a){a->flags|=CREATE_NO_WINDOW;});
+#endif
+        qint64 pid=0;if(!child.startDetached(&pid))return ai::error("Could not launch headless mapper: "+child.errorString());
+        QElapsedTimer wait;wait.start();
+        while(wait.elapsed()<45000) {
+            d=find();if(!d.isEmpty())return d;
+            QFile error(log+".stderr");if(error.open(QIODevice::ReadOnly)){const auto message=QString::fromUtf8(error.read(16384));if(message.contains(QString::fromUtf8("Владелец выключил")))return ai::error(message.trimmed());}
+            QThread::msleep(50);
+        }
+        return ai::error("Headless mapper readiness timeout (45s), pid="+QString::number(pid)+". Inspect "+log+".stderr and logs/headless-<pid>/logs/workflow.log; no request was replayed.");
+    }
     void connectionFailed() {
         detach();retryAt=clock.elapsed()+retryDelay;retryDelay=qMin(60000,retryDelay*2);
     }
@@ -162,23 +192,30 @@ public:
                 if(!available(d))continue;
                 d.remove("secret");d.remove("pipe");list.append(d);
             }
-            return {{"instances",list},{"limit",32},{"scanLimit",100}};
+            return {{"instances",list},{"limit",32},{"scanLimit",100},{"onDemand","Background mapper starts on first mapper tool/connect_instance, under saved dock permissions"}};
         }
         if(name=="disconnect_instance"){discoverMetadata=false;detach();return {{"status","disconnected"}};}
         if(name=="connect_instance") {
+            const auto requested=args["target"].toString("auto");
+            if(args.contains("instance")&&requested=="background")return ai::error("Choose explicit instance OR target=background");
+            targetPreference=requested;
             discoverMetadata=true;QJsonObject d;
             if(args.contains("instance"))d=readDescriptor(args["instance"].toString());
             else {
-                int scanned=0;
+                int scanned=0;QJsonObject background;
                 for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
                     if(++scanned>100)break;
                     const auto candidate=readDescriptor(file.completeBaseName());
                     if(candidate.isEmpty()||!available(candidate))continue;
+                    if(candidate["background"].toBool()){background=candidate;continue;}
+                    if(requested=="background")continue;
                     if(!d.isEmpty()){detach();return ai::error("Multiple enabled mappers. Use list_instances and connect_instance with an explicit instance ID.");}
                     d=candidate;
                 }
+                if(requested=="background"||(d.isEmpty()&&requested=="auto"))d=background.isEmpty()?startBackground():background;
+                if(d.contains("error"))return d;
             }
-            if(d.isEmpty()){detach();return ai::error("No available mapper. The human must start the mapper and choose Read-only or Edit once in the AI-agent dock.");}
+            if(d.isEmpty()){detach();return ai::error("No available selected mapper. target=background starts one under saved dock permissions.");}
             if(socket.state()!=QLocalSocket::ConnectedState||socket.serverName()!=d["pipe"].toString()||secret!=d["secret"].toString()) {
                 detach();attemptedPipe=d["pipe"].toString();secret=d["secret"].toString();socket.connectToServer(attemptedPipe);
                 if(!socket.waitForConnected(1000)){connectionFailed();return ai::error("Editor is not running or read mode disabled");}
@@ -187,6 +224,8 @@ public:
             // even when its healthy transport can be retained.
             legacyCatalog=false;catalogError.clear();selected=true;
             const auto context=local("get_context",{});refreshCatalog();changed=true;
+            if(!args.contains("instance")&&requested=="auto"&&!d["background"].toBool()&&context["dirty"].toBool())
+                return tool("connect_instance",{{"target","background"}});
             return catalogError.isEmpty()?context:ai::error(catalogError);
         }
         const auto selection=ensureSelected();if(selection.contains("error"))return selection;
@@ -214,7 +253,7 @@ public:
         if(socket.state()!=QLocalSocket::ConnectedState&&!secret.isEmpty())connectionFailed();
         if(selected)return {};
         if(!discoverMetadata)return ai::error("Bridge explicitly disconnected. Use connect_instance to attach again.");
-        const auto context=tool("connect_instance",{});
+        const auto context=tool("connect_instance",{{"target",targetPreference}});
         return context.contains("error")?context:QJsonObject{};
     }
     QJsonObject handle(const QJsonObject& request)
@@ -289,6 +328,10 @@ public:
 int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
+    QCoreApplication::setOrganizationName("EI Mapper Endurance");
+    QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
+    const auto settingsDir=qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR");
+    if(!settingsDir.isEmpty()){QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDir);}
 #ifdef Q_OS_WIN
     _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif

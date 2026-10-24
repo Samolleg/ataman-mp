@@ -490,9 +490,9 @@ bool CWorldMapLayoutDocument::ensureLoaded()
 }
 
 bool CWorldMapLayoutDocument::save(
-    const QVector<SWorldMapZoneOrigin>& zones, QString* error) const
+    QVector<SWorldMapZoneOrigin>& zones, QString* error) const
 {
-    if(m_path.isEmpty() || (!m_hasPersistentFile && QFileInfo::exists(m_path)))
+    if(m_path.isEmpty())
     {
         if(error) *error = QStringLiteral(
             "World-map storage is unavailable or a destination appeared after loading. Reload the profile; the existing file was left unchanged.");
@@ -519,7 +519,39 @@ bool CWorldMapLayoutDocument::save(
         if(error) *error = QStringLiteral("Another editor is updating this world. Retry after it finishes.");
         return false;
     }
-    if(m_hasPersistentFile)
+    QByteArray disk;
+    if(QFileInfo::exists(m_path)) {
+        QFile current(m_path);
+        if(!current.open(QIODevice::ReadOnly)){if(error)*error=current.errorString();return false;}
+        disk=current.readAll();
+    }
+    auto merged=zones;
+    if(disk!=m_diskBytes) {
+        QVector<SWorldMapZoneOrigin> base,latest;
+        if((!m_diskBytes.isEmpty()&&!parse(m_diskBytes,&base,error))||(!disk.isEmpty()&&!parse(disk,&latest,error)))return false;
+        const auto id=[](const SWorldMapZoneOrigin& z){return zoneKey(z.profileId,z.allodId,z.zoneId);};
+        QMap<QString,SWorldMapZoneOrigin> old,wanted,live;
+        for(const auto& z:base)old[id(z)]=z;
+        for(const auto& z:zones)wanted[id(z)]=z;
+        for(const auto& z:latest)live[id(z)]=z;
+        const auto same=[&](const QMap<QString,SWorldMapZoneOrigin>& a,const QMap<QString,SWorldMapZoneOrigin>& b,const QString& k){
+            return a.contains(k)==b.contains(k)&&(!a.contains(k)||serialize({a[k]},nullptr)==serialize({b[k]},nullptr));};
+        QSet<QString> ids;for(const auto& k:old.keys())ids.insert(k);for(const auto& k:wanted.keys())ids.insert(k);
+        QSet<QString> changed;
+        for(const auto& k:ids)if(!same(old,wanted,k)) {
+            if(!same(old,live,k)&&!same(wanted,live,k)){if(error)*error="World map changed in another mapper; reload before retrying: "+k;return false;}
+            if(wanted.contains(k))live[k]=wanted[k];else live.remove(k);changed.insert(k);
+        }
+        merged=live.values().toVector();
+        for(const auto& a:merged)if(changed.contains(id(a)))for(const auto& b:merged)
+            if(id(a)!=id(b)&&a.profileId==b.profileId&&a.allodId==b.allodId) {
+                const auto overlap=QRectF(a.origin,QSizeF(a.sectorWidth*32,a.sectorHeight*32)).intersected(QRectF(b.origin,QSizeF(b.sectorWidth*32,b.sectorHeight*32)));
+                if(overlap.width()>1e-6&&overlap.height()>1e-6){if(error)*error="Concurrent world placement overlaps "+b.zoneId;return false;}
+            }
+        bytes=preserveDocumentProperties(disk,serialize(merged,error));
+        QVector<SWorldMapZoneOrigin> checked;if(bytes.isEmpty()||!parse(bytes,&checked,error))return false;
+    }
+    if(m_hasPersistentFile && disk==m_diskBytes)
     {
         QFile current(m_path);
         if(!current.open(QIODevice::ReadOnly) || current.readAll() != m_diskBytes)
@@ -546,11 +578,6 @@ bool CWorldMapLayoutDocument::save(
             }
         }
     }
-    else if(QFileInfo::exists(m_path))
-    {
-        if(error) *error = QStringLiteral("A world file appeared after loading. Reload before saving.");
-        return false;
-    }
     QSaveFile file(m_path);
     file.setDirectWriteFallback(false);
     if(!file.open(QIODevice::WriteOnly))
@@ -569,7 +596,7 @@ bool CWorldMapLayoutDocument::save(
         if(error) *error = file.errorString();
         return false;
     }
-    m_diskBytes = bytes;
+    m_diskBytes = bytes;zones=merged;
     if(error) error->clear();
     return true;
 }

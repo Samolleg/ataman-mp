@@ -115,6 +115,9 @@ ai::EditPlan CAiEditAdapter::prepareLifecycle(ai::EditPlan p,const ai::Cancellat
     CMprDocument doc;if(!readMpr(path,&doc,&error))return fail(error);
     p.destination=path;p.fileHashes[path]=digest(path);
     if(p.method=="open_map") {
+        QString leaseError;auto mapLease=CProcessEditLock::acquire(p.destination,&leaseError);
+        auto mobLease=p.mobPath.isEmpty()?mapLease:CProcessEditLock::acquire(p.mobPath,&leaseError);
+        if(!mapLease||!mobLease)return fail(leaseError);
         p.mobPath=QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName()+".mob");
         const auto layout=p.worldDocument.loadEditorWorld(p.profileId,p.mapRoots);
         if(layout.storageBlocked)return fail(layout.warning);
@@ -241,8 +244,13 @@ QJsonObject CAiEditAdapter::applyLifecycle(MainWindow* w,const ai::EditPlan& p) 
     if((p.method=="open_map"||p.method=="close_map")&&dirty(w))return ai::error("Unsaved changes: save first; workspace unchanged");
     for(auto it=p.fileHashes.begin();it!=p.fileHashes.end();++it)if(digest(it.key())!=it.value())return ai::error("Profile file changed during preparation; retry: "+it.key());
     if(p.method=="close_map") {w->closeAll();if(v->m_pLand->isMprLoad()||!v->m_aMob.isEmpty())return ai::error("Workspace close refused; documents retained");return {{"status","closed"},{"revision",revision(w)}};}
+    QString targetError;auto targetLease=CProcessEditLock::acquire(p.destination,&targetError);
+    if(!targetLease)return ai::error(targetError);
     if(p.method=="open_map") {
         const auto previous=v->m_pLand->isMprLoad()?v->m_pLand->filePath().absoluteFilePath():QString();QStringList mobs;for(auto* m:v->m_aMob)mobs.append(m->filePath().absoluteFilePath());
+        QString leaseError;auto mapLease=CProcessEditLock::acquire(p.destination,&leaseError);
+        auto mobLease=p.mobPath.isEmpty()?mapLease:CProcessEditLock::acquire(p.mobPath,&leaseError);
+        if(!mapLease||!mobLease)return ai::error(leaseError);
         if(p.mobPath.isEmpty())w->openNeighborMapPair(p.destination,QString(),QFileInfo(p.destination).completeBaseName(),QPointF(),QPointF());
         else w->openMapPair(p.destination,p.mobPath,QFileInfo(p.destination).completeBaseName());
         if(!v->m_pLand->isMprLoad()||key(v->m_pLand->filePath().absoluteFilePath())!=key(p.destination)||!v->ensureTerrainAutoCatalogReady()) {

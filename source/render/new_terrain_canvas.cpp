@@ -1,4 +1,5 @@
 #include "new_terrain_canvas.h"
+#include "process_edit_lock.h"
 #include "mpr_document.h"
 #include "endurance_document.h"
 #include "terrain_atlas_archive_binding.h"
@@ -134,6 +135,9 @@ SMapSaveBatchResult commitNewTerrainCanvas(const QFileInfo& terrainTemplate,
         { publicationPath = QFileInfo(path).absoluteFilePath(); break; }
     if(publicationPath.isEmpty())
     { result.error = "Configure HDPack_Terrain.res before creating a new map."; return result; }
+    auto resourceLease=CProcessEditLock::acquire(publicationPath,&result.error,false);
+    auto mapLease=CProcessEditLock::acquire(destination.absoluteFilePath(),&result.error);
+    if(!resourceLease||!mapLease)return result;
     QByteArray atlas;
     if(!buildNewTerrainAtlas(terrainTemplate, candidateMpr, resourceArchives,
                              &atlas, &result.error)) return result;

@@ -41,7 +41,7 @@ bool secureDirectory(const QString& path)
 QJsonObject error(const QString& message) { return {{"error", message}}; }
 QString agentInstructions()
 {
-    return "Ataman MCP. Tools automatically select the sole human-enabled mapper; connect_instance also accepts no instance when exactly one is available. With multiple mappers use list_instances and an explicit instance ID. Never launch an editor or enable modes. Only the human can choose Read-only/Edit and Allow agent to save in the dock; these preferences persist until the human changes them. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218. Bridges reconnect after editor restart; repeat the request and re-read context/revision, expired operation IDs cannot resume. ataman://tools contains the current editor instructions and catalog.";
+    return "Ataman MCP. Tools automatically select the sole human-enabled mapper; connect_instance also accepts no instance when exactly one is available. With multiple mappers use list_instances and an explicit instance ID. The bridge may launch an invisible mapper on demand (owner decision2026-10-24), using saved dock authority. connect_instance target=background isolates work from the owner; target=editor selects the window. Auto selects background when the owner has unsaved changes. Never enable modes. shutdown_headless refuses dirty/busy state; save or undo first. Only the human can choose Read-only/Edit and Allow agent to save in the dock; these preferences persist until the human changes them. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218. Bridges reconnect after editor restart; repeat the request and re-read context/revision, expired operation IDs cannot resume. ataman://tools contains the current editor instructions and catalog.";
 }
 QJsonObject mcpCatalog()
 {
@@ -86,9 +86,10 @@ QJsonArray toolDefinitions()
     QJsonObject region{{"x",integer(0,32768)},{"y",integer(0,32768)},
         {"width",integer(1,64)},{"height",integer(1,64)},{"step",integer(1,1024)}};
     QJsonObject page{{"offset",integer(0,1000000)},{"limit",integer(1,MaxPage)},{"query",string()}};
-    add("list_instances","List human-enabled running Ataman instances. Never starts an editor.");
-    add("connect_instance","Attach to an already open instance enabled by its user. Omit instance when exactly one mapper is available.",{{"instance",string()}});
+    add("list_instances","List enabled instances; when absent a background mapper starts on demand under saved owner permissions.");
+    add("connect_instance","Select target=background for independent work, editor for the owner's window, auto otherwise. Starts headless on demand; never enables access. Re-read revision after switching.",{{"instance",string()},{"target",choice({"auto","background","editor"})}});
     add("disconnect_instance","Detach this bridge from the editor.");
+    add("shutdown_headless","Close the background mapper only if clean and no operations/previews are pending. Refuses owner windows and unsaved changes; save or undo first.");
     add("get_context","Current profile, MPR/MOB, dirty state and world-layout neighbours.");
     add("read_terrain","Start asynchronous live terrain snapshot: full height statistics and bounded grid. Poll operation_status. Grid vertices are 1 world unit apart; raw * maxZ/65535 gives world height.",region);
     region.insert("layer",QJsonObject{{"type","string"},{"enum",QJsonArray{"land","overlay"}}});
@@ -113,6 +114,7 @@ QJsonArray toolDefinitions()
         {"mask",array(number(0,1),1,MaxSamples)}},{"shape"});
     QJsonObject edit{{"revision",string()},{"area",area},{"preview",QJsonObject{{"type","boolean"}}},
         {"snapshot",QJsonObject{{"type","boolean"}}},{"seed",integer(0,2147483647)}};
+    edit.insert("includeNeighbors",QJsonObject{{"type","boolean"},{"description","Background defaults to active map only; editor keeps enabled world neighbours. true requires ownership of every affected neighbour; a locked map refuses the whole operation."}});
     auto sculpt=edit;sculpt.insert("action",choice({"raise","lower","flatten","smooth","noise","hills","heightmap"}));
     sculpt.insert("amount",number(0,10000));sculpt.insert("height",number(0,10000));sculpt.insert("strength",number(0,1));
     sculpt.insert("grid",object({{"width",integer(2,64)},{"height",integer(2,64)},
@@ -174,7 +176,7 @@ QJsonArray toolDefinitions()
         {"rangeMinimum",integer(1,4294967295.0)},{"rangeMaximum",integer(1,4294967295.0)},{"time",number(-1000000,1000000)}},{"revision"});
     add("undo_last_agent_operation","Undo only the top agent command. Refuses if human/world history intervened. Does not undo somebody else's work.",{{"revision",string()}},{"revision"});
     add("save","Use normal map Save209–216 only when the human enabled Allow agent to save. Async status; backups, atlas publication and 126-page limit remain authoritative.",{{"revision",string()}},{"revision"});
-    const QSet<QString> mutations{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"shutdown_headless","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","undo_last_agent_operation","save"};
     for(int i=0;i<tools.size();++i) {
         auto tool=tools[i].toObject();if(!mutations.contains(tool["name"].toString()))continue;
         tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",true},{"openWorldHint",false}};tools[i]=tool;

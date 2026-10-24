@@ -1,4 +1,5 @@
 #include "res_save_coordinator.h"
+#include "process_edit_lock.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -65,6 +66,7 @@ SResMemberSaveResult commitStagedResMemberReplacement(
     CFileWriteActivity writing;
     QVector<SBackupResult> backupLeases;
     SResMemberSaveResult result;
+    auto resourceLease=CProcessEditLock::acquire(request.destination.absoluteFilePath(),&result.error,false);if(!resourceLease)return result;
     result.phase = "source-check";
     if(request.source.absoluteFilePath().isEmpty() ||
        request.destination.absoluteFilePath().isEmpty() || request.memberName.isEmpty())
@@ -77,7 +79,11 @@ SResMemberSaveResult commitStagedResMemberReplacement(
         return result;
     if(sourceBytes != baseline.originalBytes())
     {
-        result.error = "The source RES changed on disk. Reopen it before saving.";
+        CResArchiveDocument fresh;
+        if(fresh.loadBytes(sourceBytes,request.source.absoluteFilePath())
+           &&fresh.memberPayload(request.memberName)==baseline.memberPayload(request.memberName))
+            return commitStagedResMemberReplacement(fresh,request);
+        result.error = "The source RES member changed on disk. Reopen it before saving.";
         return result;
     }
 
@@ -224,6 +230,7 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
     CFileWriteActivity writing;
     QVector<SBackupResult> backupLeases;
     SResPublishedMembersSaveResult result;
+    auto resourceLease=CProcessEditLock::acquire(request.destination.absoluteFilePath(),&result.error,false);if(!resourceLease)return result;
     result.phase = QStringLiteral("source-check");
     if(request.source.absoluteFilePath().isEmpty()
        || request.destination.absoluteFilePath().isEmpty()
@@ -239,8 +246,11 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
         return result;
     if(sourceBytes != baseline.originalBytes())
     {
-        result.error = QStringLiteral(
-            "The source RES changed on disk. Reopen it before publishing.");
+        CResArchiveDocument fresh;bool compatible=fresh.loadBytes(sourceBytes,request.source.absoluteFilePath());
+        for(const auto& member:request.published)compatible &= (fresh.uniqueMemberIndex(member.name)>=0)==(baseline.uniqueMemberIndex(member.name)>=0)
+            &&fresh.memberPayload(member.name)==baseline.memberPayload(member.name);
+        if(compatible)return commitStagedResPublishedMembers(fresh,request);
+        result.error = QStringLiteral("The source RES members changed on disk. Reopen before publishing.");
         return result;
     }
 
@@ -441,6 +451,7 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     CFileWriteActivity writing;
     QVector<SBackupResult> backupLeases;
     SResArchiveBytesSaveResult result;
+    auto resourceLease=CProcessEditLock::acquire(request.destination.absoluteFilePath(),&result.error,false);if(!resourceLease)return result;
     result.phase = QStringLiteral("validation");
     if(request.destination.absoluteFilePath().isEmpty()
        || request.candidateBytes.isEmpty())
@@ -545,6 +556,7 @@ SResPublishedMembersSaveResult commitStreamedResMembers(
     CFileWriteActivity writing;
     QVector<SBackupResult> backupLeases;
     SResPublishedMembersSaveResult r;r.phase="prepare";
+    auto resourceLease=CProcessEditLock::acquire(request.destination.absoluteFilePath(),&r.error,false);if(!resourceLease)return r;
     const QString path=request.destination.absoluteFilePath();
     QLockFile lock(path+".mapper-save.lock");
     if(!lock.tryLock(0)){r.error="Another save owns this RES.";return r;}

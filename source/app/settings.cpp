@@ -725,6 +725,7 @@ void CSettings::readOptions()
 
 void CSettings::saveOptions()
 {
+    if(qApp->property("agentHeadless").toBool())return;
     QJsonObject aOpt;
 
     auto optToObj = [&aOpt, this](QString tabName, EOptSet optSet)

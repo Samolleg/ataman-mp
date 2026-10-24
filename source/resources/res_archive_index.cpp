@@ -1,3 +1,4 @@
+#include "process_edit_lock.h"
 #include "res_archive_index.h"
 #include "native_sha256.h"
 
@@ -503,6 +504,7 @@ QByteArray resFileSha256(const QString& path, QString* error)
 
 bool replaceResFromFile(const QString& destination,const QString& candidate,const QByteArray& expected,QString* error)
 {
+    auto lease=CProcessEditLock::acquire(destination,error,false);if(!lease)return false;
     const auto wanted=resFileSha256(candidate,error);if(wanted.isEmpty())return false;
     QFile input(candidate);QSaveFile output(destination);output.setDirectWriteFallback(false);
     if(!input.open(QIODevice::ReadOnly)||!output.open(QIODevice::WriteOnly))return false;

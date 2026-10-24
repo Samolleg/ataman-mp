@@ -9509,6 +9509,9 @@ SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCapture
 
 void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
 {
+    QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
+    if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return;}
+    setProperty("documentLockError",QString());
     CTerrainAtlasRecoveryStore().setOpenDocument(filePath.absoluteFilePath(),resFileSha256(filePath.absoluteFilePath()));
     const bool recoveryAutosave = filePath.fileName().contains(QStringLiteral("-autosave-"));
     if(recoveryAutosave)
@@ -9936,6 +9939,7 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
         ei::log(eLogWarning, "Landscape failed to load: " + filePath.absoluteFilePath());
         return;
     }
+    m_landEditLease=lease;
     m_landscapeVisible = true;
     m_overlayAnimationTimer.restart();
     armOpenGlDiagnostics(QStringLiteral("landscape loaded: %1")
@@ -10189,6 +10193,7 @@ void CView::unloadLand(bool promptForSave)
     }
 
     CTerrainAtlasRecoveryStore().closeDocument(m_pLand->filePath().absoluteFilePath());
+    m_landEditLease.clear();
     clearNeighborLandscapes();
     m_neighborPlacements.clear();
     m_activeMapWorldOrigin = QPointF();
@@ -10667,6 +10672,12 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
                                          bool adoptAsOpenBaseline,
                                          bool allowModernDraft)
 {
+    QString leaseError;auto mapLease=CProcessEditLock::acquire(destination.absoluteFilePath(),&leaseError);
+    QVector<QSharedPointer<CProcessEditLock>> resourceLeases;
+    for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())if(terrainPublicationIsHDPackArchive(path)) {
+        auto lease=CProcessEditLock::acquire(path,&leaseError,false);if(!lease){emit updateMsg(leaseError);return false;}resourceLeases.append(lease);
+    }
+    if(!mapLease){emit updateMsg(leaseError);return false;}
     CFileWriteActivity writing;
     allowModernDraft = allowModernDraft || bool(m_workingTerrainAtlas);
     syncWorldTerrainActive();
@@ -16648,6 +16659,8 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
 
 bool CView::loadMob(QFileInfo &filePath)
 {
+    QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
+    if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return false;}
     QElapsedTimer loadTimer;
     loadTimer.start();
     const auto normalizedPath = [](const QFileInfo& info)
@@ -16701,6 +16714,7 @@ bool CView::loadMob(QFileInfo &filePath)
     ei::log(eLogInfo, QString("Deferred visual resource resolution for %1 units until visible")
             .arg(unitCount));
     m_aMob.append(pMob);
+    m_mobEditLeases[CProcessEditLock::identity(filePath.absoluteFilePath())]=lease;
     ensureUnitSupportSurface();
     for(CMob* loaded:m_aMob) for(CNode* node:loaded->nodes())
         if(auto* unit=dynamic_cast<CUnit*>(node)) {
@@ -17099,6 +17113,8 @@ void CView::saveAllMob()
 
 bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
 {
+    QString leaseError;auto lease=CProcessEditLock::acquire(destination.absoluteFilePath(),&leaseError);
+    if(!lease){emit updateMsg(leaseError);return false;}
     if(!mob)
         return false;
     QProgressDialog progress(tr("Preparing safe MOB save..."), QString(), 0, 5, this);
@@ -17511,6 +17527,7 @@ void CView::unloadMob(QString mobName)
             m_scriptWorkspaces->unregisterMob(pMob);
             retainActiveNeighborObjects(pMob);
             emit unloadMob(pMob);
+            m_mobEditLeases.remove(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()));
             delete pMob;
         }
         m_aMob.clear();
@@ -17533,6 +17550,7 @@ void CView::unloadMob(QString mobName)
                 m_hiddenMobs.remove(pMob);
                 emit unloadMob(pMob);
                 m_aMob.removeOne(pMob);
+                m_mobEditLeases.remove(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()));
                 delete pMob;
                 if(removedEnvironment)
                     m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();

@@ -77,7 +77,7 @@ private:
     enum class ELoadState { NotLoaded, Ready, Blocked };
 
     bool ensureLoaded();
-    bool save(const QVector<SWorldMapZoneOrigin>& zones,
+    bool save(QVector<SWorldMapZoneOrigin>& zones,
               QString* error = nullptr) const;
     QVector<SWorldMapZoneOrigin> profileZones(
         const QVector<SWorldMapZoneOrigin>& zones,

@@ -117,9 +117,19 @@ CBackupManager::CBackupManager(const QString& rootOverride)
 QString CBackupManager::defaultRootPath()
 {
     const QString isolated=qEnvironmentVariable("EI_MAPPER_BACKUP_ROOT");
-    if(!isolated.isEmpty()&&QDir::isAbsolutePath(isolated))return QDir::cleanPath(isolated);
-    return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
-        .filePath("EI Mapper Endurance/backups");
+    const auto root=!isolated.isEmpty()&&QDir::isAbsolutePath(isolated)?QDir::cleanPath(isolated)
+        :QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups");
+    // Reusable slots preserve crash recovery across restarts, while a live
+    // editor's session journal and retention are never owned by another process.
+    static QMutex mutex;static QMap<QString,QSharedPointer<QLockFile>> leases;static QMap<QString,QString> processSlots;
+    QMutexLocker guard(&mutex);if(processSlots.contains(root))return processSlots[root];
+    QDir().mkpath(root);
+    for(int i=0;i<1024;++i) {
+        const auto slot=QString::number(i);auto lock=QSharedPointer<QLockFile>::create(root+"/process-"+slot+".lock");lock->setStaleLockTime(0);
+        if(!lock->tryLock(0))continue;
+        const auto path=root+"/processes/"+slot;QDir().mkpath(path);leases[root]=lock;processSlots[root]=path;return path;
+    }
+    return root+"/unavailable-"+QString::number(QCoreApplication::applicationPid());
 }
 
 QString CBackupManager::sourceDirectory(const QFileInfo& source) const

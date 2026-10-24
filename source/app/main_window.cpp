@@ -78,6 +78,7 @@
 #include <QRegularExpressionValidator>
 #include <QRegularExpression>
 #include <QtConcurrent/QtConcurrentRun>
+#include "neighbor_scene_data.h"
 
 #include <cmath>
 #include <limits>
@@ -1540,7 +1541,7 @@ MainWindow::MainWindow(QWidget* parent) :
     const bool firstRunSetup = !m_settings->hasConfiguredResources();
     // Complete first-run setup before constructing the OpenGL view. Opening the
     // wizard later allowed initializeGL() to run against empty legacy settings.
-    if(firstRunSetup)
+    if(firstRunSetup && !qApp->property("agentHeadless").toBool())
         showGameAndModSetup();
 
     if(m_resourceBrowser)
@@ -2315,7 +2316,7 @@ MainWindow::MainWindow(QWidget* parent) :
             break;
         }
     }
-    if(!firstRunSetup && !hasStartupDocument)
+    if(!firstRunSetup && !hasStartupDocument && !qApp->property("agentHeadless").toBool())
     {
         COptBool* openLastSession = dynamic_cast<COptBool*>(
             m_settings->opt(eOptSetGeneral, "openLastSessionOnStartup"));
@@ -2358,6 +2359,36 @@ MainWindow::MainWindow(QWidget* parent) :
     hideLandscapeTools();
     QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
     startup.mark("restoreDocks");
+    if(!qApp->property("agentHeadless").toBool()) {
+        // Native file revisions are cheap and detect atomic replacements. Hash
+        // changed sources on a worker BEFORE214's cache reconciliation enters
+        // the GUI; never reset the active landscape or its Undo/documents.
+        struct ExternalWorldState {QMap<QString,QByteArray> revisions;bool pending=false;};
+        const auto external=QSharedPointer<ExternalWorldState>::create();
+        auto* poll=new QTimer(this);poll->setObjectName("externalWorldRefresh");poll->setInterval(1000);
+        const auto revision=[](const QString& path){const auto native=neighborFileRevision(path);if(!native.isEmpty())return native;QFileInfo f(path);return (path+":"+QString::number(f.size())+":"+f.lastModified().toString(Qt::ISODateWithMs)).toUtf8();};
+        connect(poll,&QTimer::timeout,this,[this,external,revision](){
+            if(external->pending||m_shutdownInProgress||!m_pView||m_workspaceLoadInProgress||m_worldMetadataWatcher||m_worldAlignmentPreviewActive
+               ||property("aiCommitBusy").toBool()||QApplication::activeModalWidget()||m_pView->hasPendingOperation())return;
+            QStringList paths;if(!m_worldMapLayoutDocument.path().isEmpty())paths.append(m_worldMapLayoutDocument.path());
+            for(const auto& n:m_editorWorldMaps)if(n.zoneId!=m_editorActiveMap.zoneId&&n.allodId==m_editorActiveMap.allodId){const auto mpr=m_worldMapLayoutDocument.absoluteResourcePath(n.mprPath);paths.append(mpr);if(!n.mobPath.isEmpty())paths.append(m_worldMapLayoutDocument.absoluteResourcePath(n.mobPath));QFileInfo f(mpr);paths.append(f.dir().filePath(f.completeBaseName()+"-atlas.res"));}
+            if(m_editorWorldMaps.size()>1)paths.append(CTextureList::getInstance()->configuredResourceArchivePaths());
+            paths.removeDuplicates();QMap<QString,QByteArray> observed;QStringList changed;
+            for(const auto& path:paths)if(!path.isEmpty()){observed[path]=revision(path);if(observed[path]!=external->revisions.value(path)&&QFileInfo(path).isFile())changed.append(path);}
+            if(observed==external->revisions)return;
+            external->pending=true;const auto world=m_worldMapLayoutDocument.path();
+            auto* ready=new QFutureWatcher<bool>(this);
+            connect(ready,&QFutureWatcher<bool>::finished,this,[this,external,observed,world,revision,ready](){
+                ready->deleteLater();external->pending=false;
+                if(m_shutdownInProgress||!m_pView||world!=m_worldMapLayoutDocument.path()||m_workspaceLoadInProgress
+                   ||m_worldMetadataWatcher||m_worldAlignmentPreviewActive||property("aiCommitBusy").toBool()||QApplication::activeModalWidget()||m_pView->hasPendingOperation())return;
+                for(auto it=observed.cbegin();it!=observed.cend();++it)if(revision(it.key())!=it.value())return;
+                external->revisions=observed;refreshEditorWorld();
+                ei::log(eLogInfo,"External world/neighbor revisions reconciled; active map and unsaved edits retained");
+            });
+            ready->setFuture(QtConcurrent::run([changed](){for(const auto& path:changed)neighborFileSha256(path);return true;}));
+        });poll->start();
+    }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -7239,6 +7270,9 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     const bool terrainOnly = !ordinaryMapOpen && mobPath.isEmpty();
     QFileInfo targetMpr(mprPath);
     QFileInfo targetMob(mobPath);
+    QString leaseError;auto mapLease=CProcessEditLock::acquire(mprPath,&leaseError);
+    auto mobLease=mobPath.isEmpty()?mapLease:CProcessEditLock::acquire(mobPath,&leaseError);
+    if(!mapLease||!mobLease){m_pView->setProperty("documentLockError",leaseError);statusBar()->showMessage(leaseError,15000);ei::log(eLogWarning,leaseError);return;}
     const auto missingPairComponents = [&]() {
         QStringList missing;
         if(mprPath.isEmpty() || !targetMpr.isFile())
@@ -7818,6 +7852,7 @@ void MainWindow::handleEscapeShortcut()
 
 void MainWindow::saveUiState()
 {
+    if(qApp->property("agentHeadless").toBool())return;
     if(m_uiStateSaved || !m_ui)
         return;
     if(m_landscapeToolsDock)
@@ -8163,6 +8198,8 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
 
 bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
 {
+    QString leaseError;auto lease=CProcessEditLock::acquire(fileName.absoluteFilePath(),&leaseError);
+    if(!lease){m_pView->setProperty("documentLockError",leaseError);statusBar()->showMessage(leaseError,15000);ei::log(eLogWarning,leaseError);return false;}
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad())
     {
@@ -8877,6 +8914,8 @@ void MainWindow::on_actionNew_MPR_triggered()
                 tr("Карта %1 уже существует. Сохранить резерв и заменить карту?")
                     .arg(destination.fileName())) != QMessageBox::Yes)
             return;
+        QString leaseError;auto destinationLease=CProcessEditLock::acquire(destination.absoluteFilePath(),&leaseError);
+        if(!destinationLease){statusBar()->showMessage(leaseError,15000);return;}
         const SMapSaveBatchResult result = commitNewTerrainCanvas(
             templateFile, candidate, destination,
             CTextureList::getInstance()->configuredResourceArchivePaths());

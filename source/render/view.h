@@ -181,6 +181,7 @@ struct STerrainRecoveryCandidate
     CValidationReport report;
 };
 
+#include "process_edit_lock.h"
 class CView : public QGLWidget
 {
     friend class CAiReadAdapter;
@@ -188,6 +189,8 @@ class CView : public QGLWidget
     friend class CAiAgentCommand;
     friend class CAiLifecycleCommand;
     friend class CAiAgentServer;
+    QSharedPointer<CProcessEditLock> m_landEditLease;
+    QMap<QString,QSharedPointer<CProcessEditLock>> m_mobEditLeases;
     Q_OBJECT
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();

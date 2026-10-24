@@ -3,10 +3,12 @@
 #include <QSharedPointer>
 #include "mpr_document.h"
 #include "world_terrain_sculpt.h"
+#include "process_edit_lock.h"
 
 struct SWorldTerrainDocument
 {
     QString path;
+    QSharedPointer<CProcessEditLock> editLease;
     CMprDocument baseline;
     CTerrainEditModel terrain;
     QSharedPointer<CTerrainWorkingAtlas> atlas;

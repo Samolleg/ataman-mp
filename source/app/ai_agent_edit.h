@@ -6,6 +6,7 @@
 #include "terrain_atlas_archive_binding.h"
 #include "terrain_virtual_atlas.h"
 #include "world_map_layout_document.h"
+#include "process_edit_lock.h"
 class MainWindow;
 class QUndoCommand;
 class CAiAgentCommand;
@@ -28,6 +29,7 @@ bool realizeAgentPaintSignature(PaintSources& sources, CTerrainWorkingAtlas& atl
     int x,int y,quint32 seed,qint32 material,QMap<int,quint64>* usage,
     const QSet<int>& protectedSlots,CValidationReport* report);
 struct EditMap {
+    QSharedPointer<CProcessEditLock> editLease;
     QString id,path;
     QPointF origin;
     CMprDocument baseline;

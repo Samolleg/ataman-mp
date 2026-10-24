@@ -806,6 +806,15 @@ void CResourceBrowser::indexedArchiveChanged(const QString& archivePath)
     if(m_internalPublications.remove(normalized)) return;
     const QString label = m_activeProfileMode ? m_activeProfileName
         : QFileInfo(m_loadedSources.value(0)).fileName();
+    const auto name=QFileInfo(archivePath).fileName().toLower();
+    if(qApp->property("agentHeadless").toBool()||name=="hdpack_terrain.res"||name.endsWith("-atlas.res")) {
+        // Independent map publication must neither prompt in the owner's
+        // window nor reset that window's live atlas/dirty scene.214 refreshes
+        // neighbor snapshots separately; only the browser index is rebuilt.
+        beginLoad(m_loadedSources,m_activeProfileMode,label);
+        ei::log(eLogInfo,"Shared terrain archive changed; asynchronous browser index refreshed without changing the active map: "+archivePath);
+        return;
+    }
     const auto answer = QMessageBox::question(this, tr("RES archive changed"),
         tr("A loaded archive changed on disk:\n%1\n\nRefresh the Resource Browser and live resource lists now?")
             .arg(archivePath), QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);

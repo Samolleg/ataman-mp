@@ -23,6 +23,7 @@ bool CWorldTerrainSession::load(const QString& path, QString* error)
     if(QFileInfo::exists(path+".world-sculpt.json"))
     { *error=QStringLiteral("Interrupted terrain save requires recovery: ")+path+".world-sculpt.json"; return false; }
     QSharedPointer<SWorldTerrainDocument> doc(new SWorldTerrainDocument);
+    doc->editLease=CProcessEditLock::acquire(path,error);if(!doc->editLease)return false;
     doc->path=QFileInfo(path).absoluteFilePath();
     CValidationReport report;
     if(!doc->baseline.load(QFileInfo(path),&report) || report.hasErrors()

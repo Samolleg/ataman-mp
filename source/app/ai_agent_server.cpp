@@ -1,7 +1,20 @@
 #include "ai_agent_server.h"
 #include "main_window.h"
 #include "view.h"
+#include "landscape.h"
 #include <QtConcurrent>
+#include "log.h"
+#include "log_rotation.h"
+#include "file_write_activity.h"
+
+namespace {
+QString agentHistoryPath(){return QDir(QCoreApplication::applicationDirPath()).filePath("logs/agent-workflow.log");}
+QJsonObject headlessAuthority() {
+    if(!qApp->property("agentHeadless").toBool())return {};
+    QSettings source(qApp->property("agentAuthorityFile").toString(),QSettings::Format(qApp->property("agentAuthorityFormat").toInt()));source.sync();
+    return {{"mode",source.value("ui/aiAgentMode",0).toInt()},{"allowSave",source.value("ui/aiAgentAllowSave",false).toBool()}};
+}
+}
 
 CAiAgentServer::CAiAgentServer(MainWindow* w):QObject(w),m_window(w),m_view(w->view())
 {
@@ -15,6 +28,8 @@ CAiAgentServer::CAiAgentServer(MainWindow* w):QObject(w),m_window(w),m_view(w->v
     w->statusBar()->addPermanentWidget(m_statusBar);
     m_allowSave=new QCheckBox(QString::fromUtf8("Разрешить агенту сохранять"),body);m_allowSave->setObjectName("aiAgentAllowSave");m_allowSave->setChecked(false);layout->addWidget(m_allowSave);
     m_events=new QPlainTextEdit(body);m_events->setReadOnly(true);m_events->setMaximumBlockCount(200);layout->addWidget(m_events);
+    m_events->setObjectName("aiAgentEvents");
+    {QFile history(agentHistoryPath());if(history.open(QIODevice::ReadOnly)){history.seek(qMax(qint64(0),history.size()-65536));m_events->setPlainText(QString::fromUtf8(history.readAll()));}}
     auto* setup=new QPushButton(QString::fromUtf8("Подключить Codex/Claude Code"),body);layout->addWidget(setup);
     auto* off=new QPushButton(QString::fromUtf8("Отключить"),body);off->setObjectName("aiAgentDisconnect");layout->addWidget(off);
     m_dock->setWidget(body);
@@ -41,6 +56,14 @@ CAiAgentServer::~CAiAgentServer(){stop();}
 void CAiAgentServer::event(const QString& text)
 {
     updateStatus();
+    if(qApp->property("agentHeadless").toBool()&&!text.startsWith(QString::fromUtf8("Чтение: operation_status"))) {
+        ei::log(eLogInfo,"AI background: "+text);
+        const auto path=agentHistoryPath();QDir().mkpath(QFileInfo(path).absolutePath());QLockFile lock(path+".lock");
+        if(lock.tryLock(0)) {
+            ei::rotateLog(path,text.toUtf8().size()+128);
+            QFile history(path);if(history.open(QIODevice::WriteOnly|QIODevice::Append))history.write((QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)+" pid="+QString::number(QCoreApplication::applicationPid())+" "+text+"\n").toUtf8());
+        }else ei::log(eLogWarning,"AI history busy; full event retained in process workflow.log");
+    }
     const auto line=QTime::currentTime().toString("HH:mm:ss")+" "+text;
     if(m_lastEvent==text) {
         ++m_eventRepeats;QTextCursor cursor(m_events->document());cursor.movePosition(QTextCursor::End);cursor.movePosition(QTextCursor::StartOfBlock,QTextCursor::KeepAnchor);
@@ -93,6 +116,7 @@ void CAiAgentServer::setEnabled(int mode)
     QSaveFile file(m_descriptor);
     QJsonObject descriptor{{"instance",m_id},{"pipe",m_server.serverName()},{"secret",m_secret},
         {"pid",double(QCoreApplication::applicationPid())},{"version",ENDURANCE_VERSION},
+        {"background",qApp->property("agentHeadless").toBool()},{"installation",QCoreApplication::applicationDirPath()},
         {"mode",mode==2?"edit":"read-only"},{"started",QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}};
     if(!file.open(QIODevice::WriteOnly)||file.write(QJsonDocument(descriptor).toJson(QJsonDocument::Compact))<0||!file.commit()) {
         stop();event(QString::fromUtf8("Не удалось записать обнаружение"));return;
@@ -140,6 +164,8 @@ void CAiAgentServer::receive(QLocalSocket* s)
             s->setProperty("authenticated",true);event(QString::fromUtf8("Агент подключён; проверка пройдена"));
         }
         const auto method=request["method"].toString();const auto args=request["arguments"].toObject();
+        m_hadAgent=true;m_noClientsSince=0;
+        if(method!="mcp_catalog"){m_lastActivity=QDateTime::currentMSecsSinceEpoch();m_shutdownWarned=false;}
         QJsonObject result;
         if(request.contains("protocolMajor")&&request["protocolMajor"]!=ai::LocalProtocolMajor)
             result=ai::error("Incompatible local protocol; supported protocolMajor=1. Update the MCP bridge.");
@@ -172,6 +198,39 @@ void CAiAgentServer::prune()
         if(!it->complete&&age>it->deadlineMs){cancelJob(*it);it->complete=true;it->result=ai::error("Operation deadline exceeded");}
         if(age>it->deadlineMs+30000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
     }
+    if(!qApp->property("agentHeadless").toBool())return;
+    QSettings authority(qApp->property("agentAuthorityFile").toString(),QSettings::Format(qApp->property("agentAuthorityFormat").toInt()));authority.sync();
+    const int mode=authority.value("ui/aiAgentMode",0).toInt();
+    const int effective=mode>=1&&mode<=2?mode:0;
+    if((enabled()?m_mode->currentIndex():0)!=effective)setEnabled(effective);
+    {QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(authority.value("ui/aiAgentAllowSave",false).toBool());}
+    const auto ms=QDateTime::currentMSecsSinceEpoch();
+    if(m_clients.isEmpty()){if(!m_noClientsSince)m_noClientsSince=ms;}else m_noClientsSince=0;
+    bool valid=false;const int override=qEnvironmentVariableIntValue("EI_MAPPER_HEADLESS_IDLE_MS",&valid);
+    const auto idle=valid?qBound(1000,override,600000):600000;
+    if(m_committing||m_editWorkers->load())m_lastActivity=ms;
+    for(const auto& job:m_jobs)if(!job.complete)m_lastActivity=ms;
+    if(ms-m_lastActivity>=idle||(m_hadAgent&&m_noClientsSince&&ms-m_noClientsSince>=1500)||!effective)shutdownHeadless(true);
+}
+QJsonObject CAiAgentServer::shutdownHeadless(bool automatic)
+{
+    if(!qApp->property("agentHeadless").toBool())return ai::error("Only a background mapper can be shut down by an agent; owner editor retained");
+    if(m_committing||m_editWorkers->load()||CFileWriteActivity::active())return ai::error("Background operation is running; wait before shutdown");
+    for(const auto& job:m_jobs)if(!job.complete||job.plan)return ai::error("Background operation or preview is pending; complete or cancel it before shutdown");
+    if(CAiEditAdapter::dirty(m_window)) {
+        if(!m_shutdownWarned){event(QString::fromUtf8("Не закрыт: есть несохранённые правки. Агент должен сохранить их с разрешением владельца или явно отменить свои операции."));m_shutdownWarned=true;}
+        return ai::error("Unsaved changes: background mapper retained. Save with owner permission or undo changes before shutdown.");
+    }
+    if(m_shutdownScheduled)return {{"status","shutting_down"}};
+    m_shutdownScheduled=true;const auto activity=m_lastActivity;
+    QTimer::singleShot(100,m_window,[this,automatic,activity](){
+        m_shutdownScheduled=false;
+        if(!m_window||(automatic&&m_lastActivity!=activity)||m_committing||m_editWorkers->load()||CFileWriteActivity::active()||CAiEditAdapter::dirty(m_window))return;
+        for(const auto& job:m_jobs)if(!job.complete||job.plan)return;
+        event(QString::fromUtf8("Фоновый маппер завершает работу; все документы сохранены"));
+        qApp->setProperty("agentHeadlessClosing",true);if(m_window->close())qApp->quit();
+    });
+    return {{"status","shutting_down"}};
 }
 QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& args)
 {
@@ -184,7 +243,7 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
         const auto db=ei::ProfileDatabaseContext::instance().current();const auto cancel=m_jobs[id].cancel;
         auto* watcher=new QFutureWatcher<QJsonObject>(this);m_jobs[id].watcher=watcher;
         connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher](){
-            if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].complete=true;m_jobs[id].watcher=nullptr;}
+            if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].complete=true;m_jobs[id].watcher=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();}
             watcher->deleteLater();
         });
         watcher->setFuture(QtConcurrent::run([model,db,method,args,cancel](){
@@ -210,7 +269,7 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
             if(m_jobs.contains(id)) {
                 auto result=QJsonDocument::fromJson(process->property("output").toByteArray()+process->readAllStandardOutput()).object();
                 if(status!=QProcess::NormalExit||code!=0||result.isEmpty())result=ai::error("Read worker failed or exceeded limits");
-                m_jobs[id].result=result;m_jobs[id].complete=true;m_jobs[id].process=nullptr;
+                m_jobs[id].result=result;m_jobs[id].complete=true;m_jobs[id].process=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();
             }
             process->deleteLater();
         });
@@ -222,6 +281,14 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
 }
 QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& args)
 {
+    if(qApp->property("agentHeadlessClosing").toBool())return ai::error("Background mapper is shutting down; reconnect on demand");
+    const auto authority=headlessAuthority();
+    if(!authority.isEmpty()) {
+        if(authority["mode"].toInt()==0)return ai::error(QString::fromUtf8("Владелец выключил доступ агентов в доке"));
+        if(authority["mode"].toInt()!=m_mode->currentIndex())return ai::error("Owner changed access mode; wait for automatic reconnect and re-read context");
+        QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(authority["allowSave"].toBool());
+    }
+    if(method=="shutdown_headless")return shutdownHeadless();
     if(m_committing)return ai::error("Normal map commit in progress; retry after operation_status");
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
     const QSet<QString> mutations{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
@@ -258,7 +325,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         if(job.complete)out.insert("result",job.result);return out;
     }
     auto result=CAiReadAdapter::read(m_window,method,args);
-    if(method=="get_context"){result["mode"]=m_mode->currentIndex()==2?"edit":"read-only";result["allowSave"]=m_allowSave->isChecked();}
+    if(method=="get_context"){result["mode"]=m_mode->currentIndex()==2?"edit":"read-only";result["allowSave"]=m_mode->currentIndex()==2&&m_allowSave->isChecked();result["background"]=qApp->property("agentHeadless").toBool();result["dirty"]=CAiEditAdapter::dirty(m_window);}
     return result;
 }
 namespace {
@@ -288,8 +355,16 @@ QJsonObject CAiAgentServer::startCommit(const QSharedPointer<ai::EditPlan>& plan
 void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot)
 {
     if(!m_jobs.contains(id)||m_jobs[id].cancel->load()||!m_jobs[id].owner||!m_view||!m_window)return;
+    QStringList targets;
+    if(plan->method=="save")targets=m_view->m_worldTerrainSession.dirtyPaths();
+    else if(plan->method!="create_map")for(const auto& map:plan->maps)targets.append(map.path);
+    if(!plan->destination.isEmpty())targets.append(plan->destination);
+    if(m_view->m_pLand->isMprLoad())targets.append(m_view->m_pLand->filePath().absoluteFilePath());
+    targets.removeDuplicates();
     auto result=ai::error("Edit authority revoked");
-    if(m_mode->currentIndex()==2) {
+    const auto authority=headlessAuthority();
+    if(!authority.isEmpty()){QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(authority["allowSave"].toBool());}
+    if(m_mode->currentIndex()==2&&(authority.isEmpty()||authority["mode"].toInt()==2)) {
         QScopedValueRollback<bool> lock(m_committing,true);
         m_window->setProperty("aiCommitBusy",true);
         AgentCommitDialogs dialogs;qApp->installEventFilter(&dialogs);
@@ -305,6 +380,9 @@ void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::Edi
         if(m_window)m_window->setProperty("aiCommitBusy",false);
     }
     if(m_jobs.contains(id)){m_jobs[id].result=result;m_jobs[id].complete=true;}
+    m_lastActivity=QDateTime::currentMSecsSinceEpoch();
+    const auto context=CAiReadAdapter::context(m_window);
+    event(QString::fromUtf8("Операция %1: %2; MPR=%3; MOB=%4; цели=%5").arg(plan->method,result.contains("error")?result["error"].toString():result["status"].toString(),context["mpr"].toString(),QString::fromUtf8(QJsonDocument(context["mobs"].toArray()).toJson(QJsonDocument::Compact)),targets.join(";")));
 }
 QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject& original)
 {
@@ -354,7 +432,7 @@ void CAiAgentServer::configureClient()
     const QString exe=QDir(QCoreApplication::applicationDirPath()).filePath("EIMapperMcp.exe");
     const auto refresh=[=](){
         const bool codex=client->currentIndex()==0;
-        text->setPlainText(codex?QString::fromUtf8("Будет выполнено после подтверждения:\ncodex mcp add ataman -- \"%1\"\n\nИзменится ~/.codex/config.toml. Маппер не запускается мостом.\n").arg(exe)
+        text->setPlainText(codex?QString::fromUtf8("Будет выполнено после подтверждения:\ncodex mcp add ataman -- \"%1\"\n\nИзменится ~/.codex/config.toml. Мост запускает фоновый маппер по сохранённым разрешениям дока.\n").arg(exe)
             :QString::fromUtf8("После выбора файла и подтверждения в выбранном .mcp.json будет добавлен сервер ataman. Другие серверы сохраняются. Claude Code запросит доверие проекту.\n\n")
                 +QString::fromUtf8(QJsonDocument(ai::registration("Claude Code",exe)).toJson()));
     };connect(client,QOverload<int>::of(&QComboBox::currentIndexChanged),&dialog,[=](int){refresh();});refresh();

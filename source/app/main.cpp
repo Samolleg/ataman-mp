@@ -541,6 +541,7 @@ int runHeadlessCommand(QApplication& app)
     QCommandLineOption versionOption(QStringList() << "v" << "version",
                                      "Print the application version without opening a window.");
     parser.addOption(versionOption);
+    parser.addOption(QCommandLineOption("agent-headless","Run the mapper invisibly for MCP under saved owner permissions."));
     QCommandLineOption validateOption("validate", "Validate a MOB or MPR without changing it.", "file");
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
@@ -4174,8 +4175,11 @@ int runHeadlessCommand(QApplication& app)
 }
 }
 
+#include "agent_headless.h"
 int main(int argc, char *argv[])
 {
+    bool agentHeadless=false;
+    for(int i=1;i<argc;++i)agentHeadless|=std::strcmp(argv[i],"--agent-headless")==0;
     for(int i=1;i<argc;++i)
         if(std::strcmp(argv[i],"--ai-read-worker")==0)return ai::readWorkerMain(argc,argv);
     QElapsedTimer startupClock; startupClock.start();
@@ -4203,6 +4207,8 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    app.setProperty("agentHeadless",agentHeadless);
+    if(agentHeadless)app.setQuitOnLastWindowClosed(false);
     app.setProperty("startupReferenceMs",startupClock.msecsSinceReference());
     g_previousQtMessageHandler = qInstallMessageHandler(
         enduranceQtMessageHandler);
@@ -4227,6 +4233,47 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("EI Mapper Endurance Edition");
     // Version is independent from upstream EI Mapper releases.
     QCoreApplication::setApplicationVersion(ENDURANCE_VERSION);
+    const auto settingsDir=qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR");
+    if(!settingsDir.isEmpty()) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDir);
+    }
+    QTemporaryDir privateSettings;
+    std::unique_ptr<QLockFile> headlessLock;
+#ifdef Q_OS_WIN
+    std::unique_ptr<void,decltype(&CloseHandle)> headlessMutex(nullptr,CloseHandle);
+#endif
+    CAgentHeadlessWindows hiddenWindows;
+    if(agentHeadless) {
+#ifdef Q_OS_WIN
+        SetErrorMode(SetErrorMode(0)|SEM_NOGPFAULTERRORBOX|SEM_FAILCRITICALERRORS);
+#endif
+        QSettings owner;
+        const int mode=owner.value("ui/aiAgentMode",0).toInt();
+        if(mode<1||mode>2) {
+            const auto message=QString::fromUtf8("Владелец выключил доступ агентов в доке");
+            std::fprintf(stderr,"%s\n",message.toUtf8().constData());return 23;
+        }
+        if(!ai::secureDirectory(ai::discoveryDirectory()))return 24;
+#ifdef Q_OS_WIN
+        const auto mutexName=QString("Local\\EIMapperAtamanHeadless-")+QString::fromLatin1(QCryptographicHash::hash(ai::discoveryDirectory().toCaseFolded().toUtf8(),QCryptographicHash::Sha256).toHex());
+        headlessMutex.reset(CreateMutexW(nullptr,TRUE,reinterpret_cast<LPCWSTR>(mutexName.utf16())));
+        if(!headlessMutex||GetLastError()==ERROR_ALREADY_EXISTS)return 25;
+#endif
+        headlessLock.reset(new QLockFile(QDir(ai::discoveryDirectory()).filePath("headless.lock")));
+        headlessLock->setStaleLockTime(0);if(!headlessLock->tryLock(0))return 25;
+        if(!privateSettings.isValid())return 24;
+        app.setProperty("agentAuthorityFile",owner.fileName());
+        app.setProperty("agentAuthorityFormat",int(owner.format()));
+        QSettings snapshot(privateSettings.filePath("snapshot.ini"),QSettings::IniFormat);
+        for(const auto& key:owner.allKeys())snapshot.setValue(key,owner.value(key));
+        snapshot.sync();
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,privateSettings.path());
+        QSettings local;for(const auto& key:owner.allKeys())local.setValue(key,owner.value(key));local.sync();
+        QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+        app.installEventFilter(&hiddenWindows);
+    }
     ei::log(eLogInfo, QString("Runtime version:%1 qt:%2 architecture:%3 OpenGL-request:%4 presentation:%5")
             .arg(QCoreApplication::applicationVersion(), QT_VERSION_STR,
                  QString::number(sizeof(void*) * 8), QString::fromLatin1(openGlBackend),
@@ -4254,7 +4301,7 @@ int main(int argc, char *argv[])
 
     QElapsedTimer startupPhase;startupPhase.start();
     CStartupSplash splash;
-    splash.showCentered();
+    if(!agentHeadless)splash.showCentered();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     const qint64 preparationMs=startupClock.elapsed();
 
@@ -4268,6 +4315,14 @@ int main(int argc, char *argv[])
         smokeSetupDriver.start(1);
     }
     MainWindow window;
+    if(agentHeadless) {
+        window.setAttribute(Qt::WA_DontShowOnScreen);
+        window.show();window.view()->makeCurrent();
+        QTimer lifetime;
+        QObject::connect(&lifetime,&QTimer::timeout,&app,[&](){if(app.property("agentHeadlessClosing").toBool()&&!window.isVisible())app.quit();});lifetime.start(100);
+        ei::log(eLogInfo,"AI headless ready; no visible windows");
+        return app.exec();
+    }
     const qint64 constructorMs=startupPhase.elapsed();
     startupPhase.restart();
     smokeSetupDriver.stop();

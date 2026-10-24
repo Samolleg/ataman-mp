@@ -1,6 +1,7 @@
 #include "mpr_document.h"
 #include "endurance_document.h"
 #include "map_save_batch.h"
+#include "process_edit_lock.h"
 #include "backup_manager.h"
 #include "file_write_activity.h"
 #include "res_archive_index.h"
@@ -35,6 +36,14 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
     CFileWriteActivity writing;
     QVector<SBackupResult> backupLeases;
     SMapSaveBatchResult result;
+    QVector<QSharedPointer<CProcessEditLock>> editLeases;
+    for(const auto& file:input) {
+        const auto suffix=QFileInfo(file.path).suffix().toLower();
+        if(suffix=="mpr"||suffix=="mob"||suffix=="res") {
+            auto lease=CProcessEditLock::acquire(file.path,&result.error,suffix!="res");
+            if(!lease)return result;editLeases.append(lease);
+        }
+    }
     QVector<SMapSaveFile> files;
     QSet<QString> paths;
     for(auto file:input) {

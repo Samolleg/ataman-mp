@@ -92,6 +92,10 @@ CLogger::CLogger()
     QDir current = QDir::current();
     current.mkpath("logs");
     QDir logDir(current.filePath("logs"));
+    if(qApp && qApp->property("agentHeadless").toBool()) {
+        const auto path=logDir.filePath("headless-"+QString::number(QCoreApplication::applicationPid()));
+        QDir().mkpath(path);logDir=QDir(path);
+    }
 
     auto rotateLog = [&logDir](const QString& sourcePath)
     {
