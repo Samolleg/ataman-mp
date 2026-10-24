@@ -44,7 +44,7 @@ try {
     $timer=[Diagnostics.Stopwatch]::StartNew()
     $p=Start-Process -FilePath (Join-Path $run 'app/natural_terrain_check.exe') -ArgumentList '--assembly-catalog-check' -WorkingDirectory (Join-Path $run 'app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.txt') -RedirectStandardError (Join-Path $run 'stderr.txt')
     $null=$p.Handle
-    if(-not $p.WaitForExit(360000)){Stop-Process -Id $p.Id;throw 'Owned test process timeout'}
+    if(-not $p.WaitForExit(600000)){Stop-Process -Id $p.Id;throw 'Owned test process timeout'}
     $p.WaitForExit();$code=$p.ExitCode
     if($null -eq $code){throw 'Native exit code unavailable; not a PASS'}
     @{exitCode=$code;wallSeconds=$timer.Elapsed.TotalSeconds;pid=$p.Id;exe=(Get-FileHash (Join-Path $run 'app/natural_terrain_check.exe')).Hash}|ConvertTo-Json|Set-Content (Join-Path $run 'process.json')

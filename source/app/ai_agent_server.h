@@ -28,6 +28,7 @@ private:
         bool edit{false};
         QJsonObject result;
         QDateTime created{QDateTime::currentDateTimeUtc()};
+        int deadlineMs{30000};
         bool complete{false};
     };
     void setEnabled(int mode);

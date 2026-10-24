@@ -1,4 +1,4 @@
-{"schemaVersion":1,"measurementDate":"2026-10-24","units":"metres and degrees","method":"1m central differences; P25/P75 connected components with covariance principal spans; bound Modern131 material field; overlay proximity includes swamp surfaces","references":[
+{"schemaVersion":2,"measurementDate":"2026-10-24","units":"metres and degrees","method":"1m central differences; P25/P75 connected components with covariance principal spans; bound Modern131 material field; overlay proximity includes swamp surfaces","references":[
     {
         "featureRunProxies": {
             "highP75RunsMetres": {
@@ -672,7 +672,7 @@
         }
     }
 ]
-,"presets":[
+,"rejected220Presets":[
     {
         "computeMs": 249,
         "heightP10": 7.375569174301264,
@@ -1516,4 +1516,371 @@
         "steepFraction": 0.21636842137550688
     }
 ]
-}
+,"presets":[
+    {
+        "computeMs": 281,
+        "heightP10": 7.147788192494676,
+        "heightP90": 16.84097879136755,
+        "max": 23.635781661308986,
+        "mean": 12.640626947588773,
+        "min": 0,
+        "parameters": {
+            "amplitude": 22,
+            "baseHeight": 4,
+            "boundaryNoise": 1.5,
+            "detail": 9,
+            "detailThreshold": 0.32,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0.1,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 55,
+            "shoreWidth": 1.5,
+            "talus": 0.65,
+            "terrace": 0.85,
+            "thermalIterations": 2,
+            "warp": 30,
+            "waterLevel": 3
+        },
+        "preset": "plain",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 11.579383016175328,
+                "highPassEnergy": 5.450746254140074,
+                "rmsSlope": 0.2126780781061717
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.8540459595443242,
+                "highPassEnergy": 0.6574236438398374,
+                "rmsSlope": 0.6808167814368863
+            },
+            "32": {
+                "heightDifferenceEnergy": 19.22837234815083,
+                "highPassEnergy": 10.067451117924099,
+                "rmsSlope": 0.137031775042291
+            },
+            "4": {
+                "heightDifferenceEnergy": 3.8815044496474718,
+                "highPassEnergy": 1.7091662462841453,
+                "rmsSlope": 0.49253835191075934
+            },
+            "8": {
+                "heightDifferenceEnergy": 6.76890813469817,
+                "highPassEnergy": 3.1240215483171636,
+                "rmsSlope": 0.32521406735358005
+            }
+        },
+        "slopeP50": 7.432808643915965,
+        "slopeP90": 59.14090932517587,
+        "slopeP99": 72.78826206074534,
+        "steepFraction": 0.33059592464436754
+    },
+    {
+        "computeMs": 279,
+        "heightP10": 12.658082858612254,
+        "heightP90": 26.64205264504519,
+        "max": 37.47567724365339,
+        "mean": 18.497521135630922,
+        "min": 0.48893556041466485,
+        "parameters": {
+            "amplitude": 42,
+            "baseHeight": 2,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0.35,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 70,
+            "shoreWidth": 1.5,
+            "talus": 0.65,
+            "terrace": 0.55,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "hills",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 27.96196253529459,
+                "highPassEnergy": 12.606847146782448,
+                "rmsSlope": 0.330494199878749
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.7880068540012295,
+                "highPassEnergy": 0.3900667935192286,
+                "rmsSlope": 0.6685818674629962
+            },
+            "32": {
+                "heightDifferenceEnergy": 51.000982586971304,
+                "highPassEnergy": 28.160524517372703,
+                "rmsSlope": 0.22317178822061978
+            },
+            "4": {
+                "heightDifferenceEnergy": 5.038518379311841,
+                "highPassEnergy": 1.446042482883401,
+                "rmsSlope": 0.5611661061637544
+            },
+            "8": {
+                "heightDifferenceEnergy": 12.668912403364741,
+                "highPassEnergy": 4.60994782691772,
+                "rmsSlope": 0.4449176960995978
+            }
+        },
+        "slopeP50": 22.718809960224714,
+        "slopeP90": 57.31025597271125,
+        "slopeP99": 72.2257858823136,
+        "steepFraction": 0.36879661668589003
+    },
+    {
+        "computeMs": 313,
+        "heightP10": 0.8110739296782582,
+        "heightP90": 27.173181541951294,
+        "max": 47.663350701922234,
+        "mean": 15.97027502426282,
+        "min": 0,
+        "parameters": {
+            "amplitude": 40,
+            "baseHeight": 3,
+            "boundaryNoise": 1.5,
+            "detail": 28,
+            "detailThreshold": 0.16,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0.82,
+            "rockFraction": 0.19,
+            "rockSlope": 32,
+            "scale": 105,
+            "shoreWidth": 1.5,
+            "talus": 0.65,
+            "terrace": 0.85,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "mountains",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 77.81951567962217,
+                "highPassEnergy": 34.827337163900665,
+                "rmsSlope": 0.5513460647574481
+            },
+            "2": {
+                "heightDifferenceEnergy": 16.67839844755585,
+                "highPassEnergy": 7.336620468982832,
+                "rmsSlope": 2.0419597478620783
+            },
+            "32": {
+                "heightDifferenceEnergy": 136.64557928919453,
+                "highPassEnergy": 62.8480418120465,
+                "rmsSlope": 0.36529843761588143
+            },
+            "4": {
+                "heightDifferenceEnergy": 29.0646060029188,
+                "highPassEnergy": 13.549150932685542,
+                "rmsSlope": 1.3477899966917788
+            },
+            "8": {
+                "heightDifferenceEnergy": 47.67991297073158,
+                "highPassEnergy": 22.815203400242257,
+                "rmsSlope": 0.8631330373515319
+            }
+        },
+        "slopeP50": 29.67572228948369,
+        "slopeP90": 79.30292482801876,
+        "slopeP99": 83.75053538482223,
+        "steepFraction": 0.4921030372933487
+    },
+    {
+        "computeMs": 288,
+        "heightP10": 0,
+        "heightP90": 20.055474164212033,
+        "max": 27.735112253474465,
+        "mean": 8.703015511117762,
+        "min": 0,
+        "parameters": {
+            "amplitude": 20,
+            "baseHeight": 4,
+            "boundaryNoise": 1.5,
+            "detail": 5.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0.18,
+            "rockFraction": 0.1,
+            "rockSlope": 32,
+            "scale": 90,
+            "shoreWidth": 0.8,
+            "talus": 0.65,
+            "terrace": 0.65,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 6
+        },
+        "preset": "coast",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 12.296618753825934,
+                "highPassEnergy": 5.243923171989794,
+                "rmsSlope": 0.2191658436142196
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.1471813365281591,
+                "highPassEnergy": 0.323052300308488,
+                "rmsSlope": 0.5355327572913162
+            },
+            "32": {
+                "heightDifferenceEnergy": 23.220446378374525,
+                "highPassEnergy": 11.260604322690078,
+                "rmsSlope": 0.15058624494415607
+            },
+            "4": {
+                "heightDifferenceEnergy": 2.8283920522867665,
+                "highPassEnergy": 1.0056745133034137,
+                "rmsSlope": 0.42044560084263327
+            },
+            "8": {
+                "heightDifferenceEnergy": 6.056787703472474,
+                "highPassEnergy": 2.304752960948499,
+                "rmsSlope": 0.30763177317493945
+            }
+        },
+        "slopeP50": 11.669032359201212,
+        "slopeP90": 52.842230379668244,
+        "slopeP99": 68.54919133870757,
+        "steepFraction": 0.272079969242599
+    },
+    {
+        "computeMs": 274,
+        "heightP10": 3.3205636157366434,
+        "heightP90": 7.778895979961094,
+        "max": 12.774905465712143,
+        "mean": 5.733719189609909,
+        "min": 0,
+        "parameters": {
+            "amplitude": 8,
+            "baseHeight": 3,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 35,
+            "shoreWidth": 1.5,
+            "talus": 0.65,
+            "terrace": 0.75,
+            "thermalIterations": 2,
+            "warp": 24,
+            "waterLevel": 6
+        },
+        "preset": "swamp",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 3.1968440040201718,
+                "highPassEnergy": 1.563179353883881,
+                "rmsSlope": 0.11174825229373297
+            },
+            "2": {
+                "heightDifferenceEnergy": 0.6161908695849977,
+                "highPassEnergy": 0.22937309892871816,
+                "rmsSlope": 0.39248913029057175
+            },
+            "32": {
+                "heightDifferenceEnergy": 4.945745658815863,
+                "highPassEnergy": 2.696236015581878,
+                "rmsSlope": 0.06949697651651736
+            },
+            "4": {
+                "heightDifferenceEnergy": 1.2245891086368994,
+                "highPassEnergy": 0.5802756405533933,
+                "rmsSlope": 0.27665288592350923
+            },
+            "8": {
+                "heightDifferenceEnergy": 1.9464866630498838,
+                "highPassEnergy": 0.9207487519044245,
+                "rmsSlope": 0.17439568260181912
+            }
+        },
+        "slopeP50": 13.146413780321765,
+        "slopeP90": 43.50301739080528,
+        "slopeP99": 58.28761233251711,
+        "steepFraction": 0.24692041522491348
+    },
+    {
+        "computeMs": 290,
+        "heightP10": 7.4821455715443665,
+        "heightP90": 20.76412119822115,
+        "max": 31.486220204088152,
+        "mean": 14.570012201606847,
+        "min": 0,
+        "parameters": {
+            "amplitude": 32,
+            "baseHeight": 4,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "patchScale": 7,
+            "rain": 0.04,
+            "ridge": 0.25,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 75,
+            "shoreWidth": 1.5,
+            "talus": 0.65,
+            "terrace": 0.7,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "river_valley",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 17.46591281016627,
+                "highPassEnergy": 6.102507137553012,
+                "rmsSlope": 0.2612014967696625
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.2125059968623073,
+                "highPassEnergy": 0.29928062740445993,
+                "rmsSlope": 0.5505692501543987
+            },
+            "32": {
+                "heightDifferenceEnergy": 37.34947943181207,
+                "highPassEnergy": 15.545868086300873,
+                "rmsSlope": 0.19098193895661697
+            },
+            "4": {
+                "heightDifferenceEnergy": 3.2034031010183224,
+                "highPassEnergy": 0.941365260377822,
+                "rmsSlope": 0.4474513312234585
+            },
+            "8": {
+                "heightDifferenceEnergy": 7.720243201227222,
+                "highPassEnergy": 2.412564883510043,
+                "rmsSlope": 0.347316570320472
+            }
+        },
+        "slopeP50": 17.938584679839558,
+        "slopeP90": 52.444711623994415,
+        "slopeP99": 67.86090591451442,
+        "steepFraction": 0.34066897347174163
+    }
+]}

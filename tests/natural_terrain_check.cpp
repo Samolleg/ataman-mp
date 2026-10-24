@@ -50,7 +50,7 @@ public:
     }
     QJsonObject finish(QJsonObject start) {
         if(!start.contains("operation"))throw QString::fromUtf8(QJsonDocument(start).toJson());
-        QJsonObject status;check(until([&](){status=tool("operation_status",{{"operation",start["operation"]}});return status["status"]=="complete";},35000),"background operation completes");
+        QJsonObject status;check(until([&](){status=tool("operation_status",{{"operation",start["operation"]}});return status["status"]=="complete";},140000),"background operation completes");
         const auto result=status["result"].toObject();if(result["status"]!="preview")tool("cancel_operation",{{"operation",start["operation"]}});if(result.contains("error"))throw result["error"].toString();return result;
     }
 };
@@ -191,10 +191,20 @@ int runAssemblyCatalogCheck()
             auto painting=perform("auto_paint",paint,true);frame(name+"-top",true);frame(name+"-angle",false);
             auto m=statistics();if(scenario==1)check(m["overlayCells"].toInt()==0,"auto_paint without water does not create an implicit material0 overlay");
             if(scenario==2)check(m["overlayCells"].toInt()>0,"coast has a real emerald water surface");
+            const auto reference=references[scenario==0?0:scenario==1?1:4].toObject();
+            for(const auto scale:{"2","4","8","16","32"}){
+                const double expected=reference["scalesMetres"].toObject()[scale].toObject()["heightDifferenceEnergy"].toDouble();
+                const double actual=m["scalesMetres"].toObject()[scale].toObject()["heightDifferenceEnergy"].toDouble();
+                check(expected>0&&std::abs(actual/expected-1)<=0.25,QString("%1 energy at %2m within25% of Dejavu reference").arg(preset,scale));
+            }
+            for(const auto percentile:{"slopeP50","slopeP90"})
+                check(std::abs(m[percentile].toDouble()-reference[percentile].toDouble())<=8,QString("%1 %2 within8 degrees of Dejavu reference").arg(preset,percentile));
             m["name"]=name;m["generate"]=gen;m["erode"]=erosion;m["paint"]=painting;generatedMetrics.append(m);
             // Explicit cancellation before commit, including bounded eroder.
             const auto unchanged=fingerprint();auto start=client.tool("erode",{{"revision",revision()},{"parameters",QJsonObject{{"thermalIterations",64},{"hydraulicIterations",64}}}});
             client.tool("cancel_operation",{{"operation",start["operation"]}});check(until([&](){return window.m_aiAgent->m_editWorkers->load()==0;}),"cancelled eroder releases worker");check(fingerprint()==unchanged,"cancelled eroder leaves complete map unchanged");
+            auto cancelledPaint=paint;cancelledPaint["revision"]=revision();start=client.tool("auto_paint",cancelledPaint);
+            client.tool("cancel_operation",{{"operation",start["operation"]}});check(until([&](){return window.m_aiAgent->m_editWorkers->load()==0;}),"cancelled auto painter releases worker");check(fingerprint()==unchanged,"cancelled auto painter leaves complete map unchanged");
             allow->setChecked(true);const auto heights=heightPrint(),overlay=overlayGeometry(),pixels=appearance();check(client.finish(client.tool("save",{{"revision",revision()}}))["status"]=="saved","normal Save pipeline");
             check(window.replaceLoadedLandscape(QFileInfo(maps+"/"+name+".mpr")),"reopen saved natural map");view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"reopened palette ready");check(heightPrint()==heights,"all raw heights survive save/reopen");connect();
             check(overlayGeometry()==overlay,"overlay geometry survives save/reopen");check(appearance()==pixels,"land/overlay pixels and runtime types survive save/reopen");

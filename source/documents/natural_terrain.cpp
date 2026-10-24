@@ -29,7 +29,7 @@ QJsonObject natural::preset(const QString& name)
     // Calibrated world-scale rules, not copies of a reference height field.
     double base=4,amplitude=22,scale=55,ridge=0.1,warp=30,terrace=0.85,detail=name=="plain"?9:4.5;
     if(name=="hills"){base=2;amplitude=42;scale=70;ridge=0.35;warp=32;terrace=0.55;}
-    else if(name=="mountains"){base=3;amplitude=42;scale=105;ridge=0.82;warp=32;terrace=0.85;detail=28;}
+    else if(name=="mountains"){base=3;amplitude=40;scale=105;ridge=0.82;warp=32;terrace=0.85;detail=28;}
     else if(name=="coast"){base=4;amplitude=20;scale=90;ridge=0.18;warp=32;terrace=0.65;detail=5.5;}
     else if(name=="swamp"){base=3;amplitude=8;scale=35;ridge=0;warp=24;terrace=0.75;}
     else if(name=="river_valley"){base=4;amplitude=32;scale=75;ridge=0.25;warp=32;terrace=0.7;}
@@ -52,9 +52,9 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
     g.heights.resize(g.width*g.height);g.wetness.fill(0,g.heights.size());
     for(int y=0;y<g.height;++y){cancellation(cancelled);for(int x=0;x<g.width;++x){
         const double wx=x+g.origin.x(),wy=y+g.origin.y();
-        const double foldGate=smooth((noise(wx/10.5,wy/15.5,seed^1791)-p["detailThreshold"].toDouble(0.12))/0.1);
-        const double foldX=name=="mountains"?p["detail"].toDouble()*(0.65*noise(wx/3.1,wy/4.3,seed^553)+0.4*noise(wx/1.1,wy/1.4,seed^719))*foldGate:0;
-        const double foldY=name=="mountains"?p["detail"].toDouble()*(0.65*noise(wx/4.1,wy/3.7,seed^1853)+0.4*noise(wx/1.4,wy/1.1,seed^891))*foldGate:0;
+        const double foldGate=smooth((noise(wx/10.5,wy/15.5,seed^1791)-p["detailThreshold"].toDouble(0.12))/(name=="mountains"?0.3:0.1));
+        const double foldX=name=="mountains"?p["detail"].toDouble()*(0.65*noise(wx/7.1,wy/9.3,seed^553)+0.2*noise(wx/2.1,wy/2.4,seed^719))*foldGate:0;
+        const double foldY=name=="mountains"?p["detail"].toDouble()*(0.65*noise(wx/9.1,wy/7.7,seed^1853)+0.2*noise(wx/2.4,wy/2.1,seed^891))*foldGate:0;
         const double u=(wx+warp*fbm(wx/scale*0.7,wy/scale*0.7,seed^9137,3)+foldX)/scale;
         const double v=(wy+warp*fbm(wx/scale*0.7+23,wy/scale*0.7-19,seed^5813,3)+foldY)/scale;
         const double broad=fbm(u,v,seed),r=1-std::abs(fbm(u*0.85+41,v*0.85-11,seed^3741,4));
@@ -84,11 +84,11 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
         const double shelf=step*(floor+smooth((fraction-(0.5-transition/2))/transition));
         h+=(shelf-h)*p["terrace"].toDouble(0);
         const double dx=wx+3*noise(wx/19,wy/21,seed^3151),dy=wy+3*noise(wx/21,wy/19,seed^8191);
-        const double fine=0.62*noise(dx/2.4,dy/3.3,seed^8273)+(name=="mountains"?0.58:0.32)*noise(dx/1.05,dy/1.3,seed^5297)
+        const double fine=0.62*noise(dx/2.4,dy/3.3,seed^8273)+(name=="mountains"?1.6:0.32)*noise(dx/1.05,dy/1.3,seed^5297)
             +0.45*(std::pow(1-std::abs(noise(dx/6.5,dy/9,seed^7219)),4)-0.4);
         const double detailGate=smooth((noise(dx/10.5,dy/15.5,seed^1791)-p["detailThreshold"].toDouble(name=="mountains"?0.38:0.18))/0.10);
         const double shoreDetail=name=="coast"?smooth((h-p["waterLevel"].toDouble()+1.5)/3):1;
-        h+=(name=="mountains"?qMin(3.0,p["detail"].toDouble()):p["detail"].toDouble(2.4))*fine*detailGate*shoreDetail;
+        h+=(name=="mountains"?qMin(7.0,p["detail"].toDouble()):p["detail"].toDouble(2.4))*fine*detailGate*shoreDetail;
         if(name=="mountains"){const double cap=p["baseHeight"].toDouble()+amplitude*1.1;if(h>cap)h=cap+(h-cap)*0.35;}
         if(name=="plain"){const double cap=p["baseHeight"].toDouble()+amplitude*0.8;if(h>cap)h=cap+(h-cap)*0.3;}
         // Optional cliff band in world X, with a warped trace and rounded lip.
@@ -108,14 +108,21 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
         g.heights[i]=qMax(0.0,before[i]-incision);g.wetness[i]=qMax(g.wetness[i],channel*0.6);
     }}
     if(name=="mountains"){
-        // Fold the interiors of steep faces within their existing height range;
-        // broad plateau tops and global peaks do not turn into vertical needles.
-        const auto surface=g.heights;
-        for(int y=1;y<g.height-1;++y){cancellation(cancelled);for(int x=1;x<g.width-1;++x){const int i=y*g.width+x;int low=i;
-            int high=i;for(int d:{-1,1,-g.width,g.width}){if(surface[i+d]<surface[low])low=i+d;if(surface[i+d]>surface[high])high=i+d;}
-            if(surface[high]-surface[low]<4)continue;const double room=qMin(surface[i]-surface[low],surface[high]-surface[i]);if(room<0.5)continue;
-            const double offset=qMin(7.0,room)*2.8*noise((x+g.origin.x())/1.2,(y+g.origin.y())/1.4,seed^6619);
-            g.heights[i]=qBound(surface[low],surface[i]+offset,surface[high]);
+        // Remove one-vertex spires and holes without averaging across a cliff.
+        // Rank filtering retains connected escarpments and walkable shelves;
+        // independent face jitter made narrow vertical columns in the renderer.
+        for(int pass=0;pass<1;++pass){const auto surface=g.heights;
+        for(int y=1;y<g.height-1;++y){cancellation(cancelled);for(int x=1;x<g.width-1;++x){
+            double heights[9];int k=0;for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)heights[k++]=surface[(y+dy)*g.width+x+dx];
+            std::sort(heights,heights+9);const int i=y*g.width+x;
+            g.heights[i]=qBound(heights[2],surface[i],heights[6]);
+        }}
+        }
+        const auto connected=g.heights;
+        for(int y=1;y<g.height-1;++y){cancellation(cancelled);for(int x=1;x<g.width-1;++x){
+            const int i=y*g.width+x;double mean=0,low=connected[i],high=connected[i];
+            for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){const double a=connected[(y+dy)*g.width+x+dx];mean+=a;low=qMin(low,a);high=qMax(high,a);}
+            g.heights[i]=qBound(low,connected[i]+(connected[i]-mean/9)*2,high);
         }}
     }
     if(name=="coast")for(double& height:g.heights)

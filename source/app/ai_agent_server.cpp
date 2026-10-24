@@ -124,8 +124,8 @@ void CAiAgentServer::prune()
     const auto now=QDateTime::currentDateTimeUtc();
     for(auto it=m_jobs.begin();it!=m_jobs.end();) {
         const auto age=it->created.msecsTo(now);
-        if(!it->complete&&age>30000){cancelJob(*it);it->complete=true;it->result=ai::error("Operation deadline exceeded");}
-        if(age>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+        if(!it->complete&&age>it->deadlineMs){cancelJob(*it);it->complete=true;it->result=ai::error("Operation deadline exceeded");}
+        if(age>it->deadlineMs+30000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
     }
 }
 QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& args)
@@ -268,7 +268,12 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
     if(requested=="preview")args["preview"]=true;
     const auto candidate=CAiEditAdapter::capture(m_window,method,args);
     if(!candidate.error.isEmpty())return ai::error(candidate.error);
-    const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);Job job;job.edit=true;job.owner=m_currentClient;m_jobs[id]=job;
+    const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);Job job;job.edit=true;job.owner=m_currentClient;
+    // A rich Modern131 coast palette may need more than30s to resolve its
+    // transition artwork. Keep this detached, cancellable job bounded, while
+    // retaining the219 deadline for every existing operation.
+    if(method=="auto_paint")job.deadlineMs=120000;
+    m_jobs[id]=job;
     const auto cancel=job.cancel;auto* watcher=new QFutureWatcher<ai::EditPlan>(this);m_jobs[id].editWatcher=watcher;
     connect(watcher,&QFutureWatcher<ai::EditPlan>::finished,this,[this,id,watcher,args](){
         if(!m_jobs.contains(id)){watcher->deleteLater();return;}
