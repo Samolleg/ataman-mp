@@ -57,6 +57,7 @@ private:
     bool m_committing{false};
     std::shared_ptr<std::atomic_int> m_editWorkers{std::make_shared<std::atomic_int>(0)};
     QLabel* m_status;
+    QPointer<QLabel> m_statusBar;
     QPlainTextEdit* m_events;
     QString m_lastEvent;int m_eventRepeats{0};
     QTimer m_expiry;

@@ -10,19 +10,32 @@ CAiAgentServer::CAiAgentServer(MainWindow* w):QObject(w),m_window(w),m_view(w->v
     m_mode=new QComboBox(body);m_mode->setObjectName("aiAgentMode");
     m_mode->addItems({QString::fromUtf8("Выкл"),QString::fromUtf8("Только чтение"),QString::fromUtf8("Правка")});
     layout->addWidget(m_mode);m_status=new QLabel(QString::fromUtf8("Отключено"),body);layout->addWidget(m_status);
+    m_status->setObjectName("aiAgentStatus");
+    m_statusBar=new QLabel(w);m_statusBar->setObjectName("aiAgentStatusBar");
+    w->statusBar()->addPermanentWidget(m_statusBar);
     m_allowSave=new QCheckBox(QString::fromUtf8("Разрешить агенту сохранять"),body);m_allowSave->setObjectName("aiAgentAllowSave");m_allowSave->setChecked(false);layout->addWidget(m_allowSave);
     m_events=new QPlainTextEdit(body);m_events->setReadOnly(true);m_events->setMaximumBlockCount(200);layout->addWidget(m_events);
     auto* setup=new QPushButton(QString::fromUtf8("Подключить Codex/Claude Code"),body);layout->addWidget(setup);
     auto* off=new QPushButton(QString::fromUtf8("Отключить"),body);off->setObjectName("aiAgentDisconnect");layout->addWidget(off);
     m_dock->setWidget(body);
-    connect(m_mode,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int n){setEnabled(n);});
-    connect(off,&QPushButton::clicked,this,&CAiAgentServer::stop);
+    connect(m_mode,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int n){
+        QSettings settings;settings.setValue("ui/aiAgentMode",n);settings.sync();setEnabled(n);});
+    connect(m_allowSave,&QCheckBox::toggled,this,[](bool checked){
+        QSettings settings;settings.setValue("ui/aiAgentAllowSave",checked);settings.sync();});
+    connect(off,&QPushButton::clicked,this,[this](){
+        QSettings settings;settings.setValue("ui/aiAgentMode",0);settings.sync();setEnabled(0);});
     connect(setup,&QPushButton::clicked,this,&CAiAgentServer::configureClient);
     connect(&m_server,&QLocalServer::newConnection,this,&CAiAgentServer::accept);
     connect(&m_expiry,&QTimer::timeout,this,&CAiAgentServer::prune);m_expiry.start(1000);
     // QPointer also protects the fallback destructor path. Normal shutdown explicitly
     // stops automation BEFORE deleting CView, while its native surface is alive.
     connect(w->view(),&QObject::destroyed,this,&CAiAgentServer::stop);
+    // Restore human authority before startup can open a map. Shutdown only
+    // closes transport; it must never overwrite the user's saved preference.
+    QSettings settings;
+    {QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(settings.value("ui/aiAgentAllowSave",false).toBool());}
+    bool valid=false;const int mode=settings.value("ui/aiAgentMode",0).toInt(&valid);
+    setEnabled(valid&&mode>=0&&mode<=2?mode:0);
 }
 CAiAgentServer::~CAiAgentServer(){stop();}
 void CAiAgentServer::event(const QString& text)
@@ -37,7 +50,10 @@ void CAiAgentServer::event(const QString& text)
 void CAiAgentServer::updateStatus()
 {
     int authenticated=0;for(auto* s:m_clients.keys())authenticated+=s->property("authenticated").toBool();
-    m_status->setText(enabled()?QString::fromUtf8("%1; подключений: %2").arg(m_mode->currentIndex()==2?QString::fromUtf8("Правка"):QString::fromUtf8("Только чтение")).arg(authenticated):QString::fromUtf8("Отключено"));
+    const auto mode=enabled()?m_mode->currentText():QString::fromUtf8("Выкл");
+    const auto text=QString::fromUtf8("ИИ-агент: %1; агентов: %2").arg(mode).arg(authenticated);
+    m_status->setText(text);if(m_statusBar)m_statusBar->setText(text);
+    m_allowSave->setEnabled(enabled()&&m_mode->currentIndex()==2);
 }
 void CAiAgentServer::cancelJob(Job& job)
 {
@@ -56,7 +72,7 @@ void CAiAgentServer::cancelJob(Job& job)
 }
 void CAiAgentServer::stop()
 {
-    m_server.close();m_writer.clear();m_allowSave->setChecked(false);
+    m_server.close();m_writer.clear();
     const auto sockets=m_clients.keys();m_clients.clear();
     for(auto* socket:sockets){socket->disconnect(this);socket->abort();socket->deleteLater();}
     for(auto& job:m_jobs)cancelJob(job);m_jobs.clear();
@@ -82,7 +98,7 @@ void CAiAgentServer::setEnabled(int mode)
         stop();event(QString::fromUtf8("Не удалось записать обнаружение"));return;
     }
     {QSignalBlocker blocker(m_mode);m_mode->setCurrentIndex(mode);}
-    event(mode==2?QString::fromUtf8("Правка разрешена пользователем; сохранение выключено"):QString::fromUtf8("Чтение разрешено пользователем"));
+    event(mode==2?(m_allowSave->isChecked()?QString::fromUtf8("Правка и сохранение разрешены пользователем"):QString::fromUtf8("Правка разрешена пользователем; сохранение выключено")):QString::fromUtf8("Чтение разрешено пользователем"));
 }
 void CAiAgentServer::accept()
 {
@@ -207,7 +223,7 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
 QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& args)
 {
     if(m_committing)return ai::error("Normal map commit in progress; retry after operation_status");
-    if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_allowSave->isChecked()}};
+    if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
     const QSet<QString> mutations{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
         if(m_mode->currentIndex()!=2)return ai::error("Read-only mode: only the human can enable Правка in the dock");

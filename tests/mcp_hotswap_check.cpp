@@ -84,7 +84,24 @@ bool hasTool(QJsonObject response,const QString& name){for(const auto& v:respons
 int main(int argc,char** argv) {
     QCoreApplication app(argc,argv);out.setCodec("UTF-8");
     try {
-        const auto args=app.arguments();check(args.size()==6,"explicit isolated target/package/scripts/backups/probe arguments");
+        const auto args=app.arguments();
+        if(args.size()==3&&args[1]=="--catalog-only") {
+            Mapper mapper;Client bridge(args[2]);const auto pid=bridge.pid();
+            check(bridge.tool("connect_instance")["version"]=="future-1","sole mapper connects without ID");bridge.waitNotification();
+            check(hasTool(bridge.call("tools/list"),"future_tool_1"),"initial mapper tools visible");
+            mapper.generation=2;bridge.waitNotification();
+            check(bridge.pid()==pid&&hasTool(bridge.call("tools/list"),"future_tool_2")&&!hasTool(bridge.call("tools/list"),"future_tool_1"),"same bridge hot-swaps catalog and retires old tool");
+            check(bridge.tool("future_tool_2")["forwarded"]==true,"new tool absent from fallback is forwarded");
+            check(bridge.call("resources/templates/list")["result"].toObject()["resourceTemplates"].toArray().size()==1,"new resource templates visible");
+            check(bridge.call("resources/read",{{"uri","ataman://future"}})["result"].toObject()["contents"].toArray()[0].toObject()["text"].toString().contains("mapper-owned-instructions-2"),"resources and instructions update without bridge restart");
+            mapper.legacy=true;check(!bridge.tool("connect_instance",{{"instance",mapper.id}}).contains("error"),"218-221 fallback still connects");
+            check(!hasTool(bridge.call("tools/list"),"future_tool_2")&&bridge.tool("get_context")["version"]=="future-2","legacy fallback preserves context");
+            mapper.legacy=false;mapper.incompatible=true;
+            check(bridge.tool("connect_instance",{{"instance",mapper.id}}).contains("error")&&bridge.call("tools/list").contains("error"),"incompatible catalog rejected clearly");
+            mapper.incompatible=false;check(hasTool(bridge.call("tools/list"),"future_tool_2"),"catalog recovers after compatibility restored");
+            bridge.close();out<<"RESULT "<<checks<<" PASS, 0 FAIL\n";out.flush();return 0;
+        }
+        check(args.size()==6,"explicit isolated target/package/scripts/backups/probe arguments");
         const QString target=args[1],package=args[2],scripts=args[3],backups=args[4],probe=args[5];
         QFile versionFile(package+"/VERSION");check(versionFile.open(QIODevice::ReadOnly),"package version readable");const auto expectedVersion=versionFile.readAll().trimmed();
         Mapper mapper;
@@ -104,7 +121,7 @@ int main(int argc,char** argv) {
             mapper.generation=2;old.waitNotification();check(hasTool(old.call("tools/list"),"future_tool_2"),"same bridge receives changed mapper tools");
             check(!hasTool(old.call("tools/list"),"future_tool_1"),"retired tool removed from list");
             {Client fresh(target+"/EIMapperMcp.exe");check(hasTool(fresh.call("tools/list"),"future_tool_2"),"plain reconnect sees current catalog before selecting editor");
-                check(fresh.tool("get_context").contains("error"),"metadata discovery does not select or authorize workspace");
+                check(fresh.tool("get_context")["version"]=="future-2","first tool automatically selects the sole human-enabled mapper");
                 check(fresh.tool("connect_instance",{{"instance",mapper.id}})["version"]=="future-2","new bridge connects");fresh.waitNotification();
                 script(backups+"/first/rollback.ps1",{"-VerifyOnly"});
                 script(backups+"/first/rollback.ps1",{});

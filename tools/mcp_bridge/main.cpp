@@ -74,7 +74,8 @@ public:
             // A client that ignores list_changed must still see the current
             // catalog on a plain MCP reconnect, before connect_instance runs.
             // Fetch metadata only when there is one unambiguous enabled editor.
-            // This does NOT select a workspace or authorize any tool calls.
+            // Tool calls select this sole editor separately; metadata alone
+            // does not choose between multiple workspaces.
             QJsonObject candidate;int scanned=0;
             for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
                 if(++scanned>100)break;
@@ -165,8 +166,19 @@ public:
         }
         if(name=="disconnect_instance"){discoverMetadata=false;detach();return {{"status","disconnected"}};}
         if(name=="connect_instance") {
-            discoverMetadata=true;const auto d=readDescriptor(args["instance"].toString());
-            if(d.isEmpty()){detach();return ai::error("Instance not available; user must enable read-only");}
+            discoverMetadata=true;QJsonObject d;
+            if(args.contains("instance"))d=readDescriptor(args["instance"].toString());
+            else {
+                int scanned=0;
+                for(const auto& file:QDir(ai::discoveryDirectory()).entryInfoList({"*.json"},QDir::Files,QDir::Name)) {
+                    if(++scanned>100)break;
+                    const auto candidate=readDescriptor(file.completeBaseName());
+                    if(candidate.isEmpty()||!available(candidate))continue;
+                    if(!d.isEmpty()){detach();return ai::error("Multiple enabled mappers. Use list_instances and connect_instance with an explicit instance ID.");}
+                    d=candidate;
+                }
+            }
+            if(d.isEmpty()){detach();return ai::error("No available mapper. The human must start the mapper and choose Read-only or Edit once in the AI-agent dock.");}
             if(socket.state()!=QLocalSocket::ConnectedState||socket.serverName()!=d["pipe"].toString()||secret!=d["secret"].toString()) {
                 detach();attemptedPipe=d["pipe"].toString();secret=d["secret"].toString();socket.connectToServer(attemptedPipe);
                 if(!socket.waitForConnected(1000)){connectionFailed();return ai::error("Editor is not running or read mode disabled");}
@@ -177,7 +189,7 @@ public:
             const auto context=local("get_context",{});refreshCatalog();changed=true;
             return catalogError.isEmpty()?context:ai::error(catalogError);
         }
-        if(!selected)return ai::error("No editor selected. Use list_instances and connect_instance before reading or editing.");
+        const auto selection=ensureSelected();if(selection.contains("error"))return selection;
         if(!catalogError.isEmpty())return ai::error(catalogError);
         const auto now=QDateTime::currentMSecsSinceEpoch();
         for(auto it=editJobs.begin();it!=editJobs.end();)if(it.value()<now)it=editJobs.erase(it);else ++it;
@@ -196,6 +208,14 @@ public:
         }
         if(name=="cancel_operation"&&value["status"]=="cancelled")editJobs.remove(args["operation"].toString());
         return value;
+    }
+    QJsonObject ensureSelected()
+    {
+        if(socket.state()!=QLocalSocket::ConnectedState&&!secret.isEmpty())connectionFailed();
+        if(selected)return {};
+        if(!discoverMetadata)return ai::error("Bridge explicitly disconnected. Use connect_instance to attach again.");
+        const auto context=tool("connect_instance",{});
+        return context.contains("error")?context:QJsonObject{};
     }
     QJsonObject handle(const QJsonObject& request)
     {
@@ -244,7 +264,10 @@ public:
         else if(method=="resources/templates/list")result={{"resourceTemplates",catalog["resourceTemplates"]}};
         else if(method=="resources/read") {
             const auto uri=params["uri"].toString();QJsonObject value;
-            if(!selected&&uri!="ataman://tools")return rpcError(-32000,"Select an editor with connect_instance before reading resources");
+            if(uri!="ataman://tools") {
+                const auto selection=ensureSelected();
+                if(selection.contains("error"))return rpcError(-32000,selection["error"].toString());
+            }
             if(remoteCatalog)value=local("mcp_resource_read",{{"uri",uri}});
             else if(uri=="ataman://context")value=local("get_context",{});
             else if(uri=="ataman://tools")value=catalog;

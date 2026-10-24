@@ -41,7 +41,7 @@ bool secureDirectory(const QString& path)
 QJsonObject error(const QString& message) { return {{"error", message}}; }
 QString agentInstructions()
 {
-    return "Ataman MCP. list_instances then connect_instance. Never launch an editor or enable modes. Only the human can enable Read-only/Edit and Allow agent to save in the dock. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218. After editor restart or mode change list_instances and connect_instance again. ataman://tools contains the current editor instructions and catalog.";
+    return "Ataman MCP. Tools automatically select the sole human-enabled mapper; connect_instance also accepts no instance when exactly one is available. With multiple mappers use list_instances and an explicit instance ID. Never launch an editor or enable modes. Only the human can choose Read-only/Edit and Allow agent to save in the dock; these preferences persist until the human changes them. get_revision before edits; preview or direct sculpt/paint/create_map return an operation ID, poll operation_status; cancel_operation discards pending work without changing live terrain. Terrain edits and placement are one Undo; open/close are clean navigation. Revision conflicts require re-reading. Save uses the normal map pipeline only with human permission. Read tools and their protocol remain compatible with218. Bridges reconnect after editor restart; repeat the request and re-read context/revision, expired operation IDs cannot resume. ataman://tools contains the current editor instructions and catalog.";
 }
 QJsonObject mcpCatalog()
 {
@@ -87,7 +87,7 @@ QJsonArray toolDefinitions()
         {"width",integer(1,64)},{"height",integer(1,64)},{"step",integer(1,1024)}};
     QJsonObject page{{"offset",integer(0,1000000)},{"limit",integer(1,MaxPage)},{"query",string()}};
     add("list_instances","List human-enabled running Ataman instances. Never starts an editor.");
-    add("connect_instance","Attach to an already open instance, enabled by its user.",{{"instance",string()}},{"instance"});
+    add("connect_instance","Attach to an already open instance enabled by its user. Omit instance when exactly one mapper is available.",{{"instance",string()}});
     add("disconnect_instance","Detach this bridge from the editor.");
     add("get_context","Current profile, MPR/MOB, dirty state and world-layout neighbours.");
     add("read_terrain","Start asynchronous live terrain snapshot: full height statistics and bounded grid. Poll operation_status. Grid vertices are 1 world unit apart; raw * maxZ/65535 gives world height.",region);
