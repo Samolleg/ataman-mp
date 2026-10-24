@@ -16,8 +16,10 @@ foreach($relative in @('translations/qt_ru.qm','tools/Restore-Gipat2Atlas.ps1'))
     $target=[IO.Path]::GetFullPath((Join-Path $root $relative))
     if(-not $target.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Invalid deletion target.'}
     [IO.File]::Delete($target)
+    $ErrorActionPreference='Continue'
     $output=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $finalizer $root -PreviousPackageRoot $accepted 2>&1
-    if($LASTEXITCODE -eq 0 -or ($output|Out-String) -notmatch [regex]::Escape("Managed program file would be lost: $relative")){throw "Missing-file regression did not fail: $relative"}
+    $exitCode=$LASTEXITCODE;$ErrorActionPreference='Stop'
+    if($exitCode -eq 0 -or ($output|Out-String) -notmatch [regex]::Escape("Managed program file would be lost: $relative")){throw "Missing-file regression did not fail: $relative"}
     $output|Out-String|Set-Content (Join-Path $root (($relative -replace '[^A-Za-z0-9]','_')+'.failure.txt'))
     Copy-Item -LiteralPath (Join-Path $accepted $relative) -Destination $target
     Write-Output "PASS: finalizer rejects missing $relative before cleanup"

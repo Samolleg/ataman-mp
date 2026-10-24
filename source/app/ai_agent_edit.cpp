@@ -274,6 +274,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                                 QString roadError;const auto roadBounds=bounds(road,&roadError);const double perturb=1+0.14*natural::noise(p.x()/15,p.y()/15,seed^671);
                                 auto varied=road;varied["width"]=road["width"].toDouble()*perturb;
                                 if(height>water+0.4&&slope<45&&weight(varied,roadBounds.adjusted(-4,-4,4,4),p.x(),p.y())>0.3)material=palette["road"].toInt(material);}
+                            if(material<=0)return fail(QString("Automatic material unavailable at %1,%2: %3").arg(x).arg(y).arg(QString::fromUtf8(QJsonDocument(palette).toJson(QJsonDocument::Compact))));
                         }
                         // Stable dither preserves the mask/falloff without inventing blended material IDs.
                         const quint32 hash=(quint32(qRound(p.x()))*73856093u)^(quint32(qRound(p.y()))*19349663u)^(seed*83492791u);
@@ -301,7 +302,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                     // Each automatic cell has its actual shared-corner signature;
                     // route selection stays in the existing131 resolver.
                     const int material=automatic?signature.northWest:requestedMaterial;
-                    if(found&&!realizeAgentPaintSignature(plan.sources,*atlas,terrain,signature,x,y,seed,material,&usage,protectedSlots,&report))return fail(report.toText());
+                    if(found&&!realizeAgentPaintSignature(plan.sources,*atlas,terrain,signature,x,y,seed,material,&usage,protectedSlots,&report))return fail(QString("Paint cell %1,%2 signature %3/%4/%5/%6: %7").arg(x).arg(y).arg(signature.northWest).arg(signature.northEast).arg(signature.southEast).arg(signature.southWest).arg(report.toText().right(4000)));
                 }
                 const auto resolution=atlas->joinAuthoredTransitionEdges(terrain,terrain.makeVirtualStrokeResolution(semantic,atlas->catalog(),seed,&report,true,requestedMaterial),&report);
                 if(report.hasErrors()||!terrain.apply(resolution,true,&report))return fail(report.toText());

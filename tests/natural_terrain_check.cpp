@@ -185,6 +185,7 @@ int runAssemblyCatalogCheck()
             QJsonObject paint{{"preset",preset},{"seed",220+scenario},{"parameters",params},
                 {"road",QJsonObject{{"shape","line"},{"points",QJsonArray{QJsonArray{15,40},QJsonArray{65,67},QJsonArray{130,108},QJsonArray{200,133},QJsonArray{250,155}}},{"width",4},{"falloff",0.5}}}};
             if(scenario!=1)paint["water"]=QJsonObject{{"material",scenario==2?coastWater:water},{"liquid",scenario==2?coastLiquid:liquid},{"level",params["waterLevel"]}};
+            auto debugArgs=paint;debugArgs["revision"]=revision();write(root+"/"+name+"-resolved.json",QJsonDocument(CAiEditAdapter::capture(&window,"auto_paint",debugArgs).args).toJson());
             auto painting=perform("auto_paint",paint,true);frame(name+"-top",true);frame(name+"-angle",false);
             auto m=statistics();m["name"]=name;m["generate"]=gen;m["erode"]=erosion;m["paint"]=painting;generatedMetrics.append(m);
             // Explicit cancellation before commit, including bounded eroder.
