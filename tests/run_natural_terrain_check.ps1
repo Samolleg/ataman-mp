@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$RunRoot,[Parameter(Mandatory=$true)][string]$TestExe,[Parameter(Mandatory=$true)][string]$ReleaseRoot)
+param([Parameter(Mandatory=$true)][string]$RunRoot,[Parameter(Mandatory=$true)][string]$TestExe,[Parameter(Mandatory=$true)][string]$ReleaseRoot,[ValidateSet('plain','mountains','coast')][string]$Scene)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 if(Test-Path -LiteralPath $RunRoot){throw 'RunRoot must be new'}
@@ -21,7 +21,9 @@ try {
         $receipts+=@{path=$path;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}
     }
     foreach($input in $inputs){Copy-Item -LiteralPath $input.source -Destination $input.target}
-    Copy-Item -LiteralPath (Join-Path $repo 'docs/research/NATURAL_TERRAIN_SHAPE_BASELINE_220.json') -Destination (Join-Path $run 'r2-shape-before.json')
+    $numericBaseline=Join-Path $repo 'docs/research/NATURAL_TERRAIN_SHAPE_BASELINE_220.json'
+    if(-not [IO.File]::ReadAllText($numericBaseline).TrimStart().StartsWith('[')){throw 'Measured baseline must be a JSON array, not a PowerShell collection wrapper'}
+    Copy-Item -LiteralPath $numericBaseline -Destination (Join-Path $run 'r2-shape-before.json')
     Copy-Item -LiteralPath $TestExe -Destination (Join-Path $run 'app/natural_terrain_check.exe')
     Copy-Item -LiteralPath (Join-Path $ReleaseRoot 'EIMapperMcp.exe') -Destination (Join-Path $run 'app/EIMapperMcp.exe')
     # Runtime data come from tracked sources, not an older executable package.
@@ -37,6 +39,7 @@ try {
     $env:APPDATA=Join-Path $run 'AppData';$env:LOCALAPPDATA=Join-Path $run 'LocalAppData';$env:USERPROFILE=Join-Path $run 'User'
     $env:TEMP=Join-Path $run 'Temp';$env:TMP=$env:TEMP;$env:CODEX_HOME=Join-Path $run 'codex';$env:CLAUDE_CONFIG_DIR=Join-Path $run 'claude'
     $env:EI_MCP_TEST_ROOT=$run;$env:EI_MCP_TEST_MAPS=Join-Path $run 'Maps';$env:EI_MCP_TEST_BRIDGE=Join-Path $run 'app/EIMapperMcp.exe'
+    $env:EI_NATURAL_SCENE=$Scene
     $env:EI_MCP_TEST_RESOURCE_ROOTS=Join-Path $run 'res';$env:EI_MCP_PRIVATE_RES=$env:EI_MCP_TEST_RESOURCE_ROOTS
     $env:EI_MAPPER_AUTOMATION_DIR=Join-Path $run 'automation'
     $env:PATH="$env:EI_MAPPER_QT_BIN;$env:EI_MAPPER_MINGW_BIN;$env:PATH"

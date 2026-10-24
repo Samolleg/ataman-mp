@@ -175,8 +175,11 @@ int runAssemblyCatalogCheck()
                 args["revision"]=revision();client.finish(client.tool(tool,args));check(fingerprint()==after,"deterministic repeated "+tool);}
             auto r=result;r["wallMs"]=int(timer.elapsed());return r;};
         QJsonArray generatedMetrics;
+        const auto r2Baseline=QJsonDocument::fromJson(read(root+"/r2-shape-before.json")).array();
+        check(r2Baseline.size()==6,"R2/reference baseline is an array of six measured maps");
         for(int scenario=0;scenario<3;++scenario){const QString name=scenario==0?"forest_river220":scenario==1?"mountain_pass220":"coast_bay220";
             const QString preset=scenario==0?"plain":scenario==1?"mountains":"coast";
+            if(!qEnvironmentVariable("EI_NATURAL_SCENE").isEmpty()&&qEnvironmentVariable("EI_NATURAL_SCENE")!=preset)continue;
             if(scenario==2){check(window.replaceLoadedLandscape(QFileInfo(maps+"/zone7.mpr")),"coast uses real zone7 template material/animation records");view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"zone7 template ready");connect();}
             client.finish(client.tool("create_map",{{"revision",revision()},{"name",name},{"sectorsX",8},{"sectorsY",8},{"height",8},{"maxZ",64},{"material",grass}}));
             auto params=natural::preset(preset);const int cleanMapIndex=window.m_undoStack->index();
@@ -211,7 +214,7 @@ int runAssemblyCatalogCheck()
             auto m=statistics();if(scenario==1)check(m["overlayCells"].toInt()==0,"auto_paint without water does not create an implicit material0 overlay");
             if(scenario==2)check(m["overlayCells"].toInt()>0,"coast has a real emerald water surface");
             const auto reference=references[scenario].toObject();
-            const auto previous=QJsonDocument::fromJson(read(root+"/r2-shape-before.json")).array()[scenario+3].toObject();
+            const auto previous=r2Baseline[scenario+3].toObject();
             if(scenario<2)check(m["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()<previous["shape"].toObject()["narrowProtrusionAreaFraction"].toDouble()*0.6,"R3 narrow teeth area reduced by at least40% from R2");
             if(scenario==1){check(m["slopeP90"].toDouble()<reference["slopeP90"].toDouble()+2,"mountain P90 near zone2 and below old78deg");
                 const double ratio=m["shape"].toObject()["anisotropy32m"].toDouble()/reference["shape"].toObject()["anisotropy32m"].toDouble();check(ratio>0.7&&ratio<2,"directed ridge anisotropy remains comparable to zone2");
@@ -234,6 +237,7 @@ int runAssemblyCatalogCheck()
         }
         write(root+"/generated-metrics.json",QJsonDocument(generatedMetrics).toJson());
         // Generate across two real8x8 maps in one operation: one257x513 grid.
+        if(qEnvironmentVariable("EI_NATURAL_SCENE").isEmpty()){
         client.finish(client.tool("create_map",{{"revision",revision()},{"name","seam220"},{"sectorsX",8},{"sectorsY",8},{"height",8},{"maxZ",64},{"material",grass}}));undo->trigger();
         view.m_worldTerrainEnabled=true;view.m_hasActiveMapWorldOrigin=true;view.m_activeMapWorldOrigin={0,0};view.m_neighborLayoutStorageWritable=true;
         const auto other=maps+"/seam220.mpr",id=CWorldTerrainSession::key(other);SNeighborMapPlacement n;n.zoneId="seam220";n.mprPath=other;n.worldOrigin={256,0};n.origin={256,0};n.size={256,256};view.m_neighborPlacements={n};view.m_worldTerrainEnabledPaths={id};
@@ -242,6 +246,7 @@ int runAssemblyCatalogCheck()
         for(int y=0;y<=256;++y)maximum=qMax(maximum,std::abs(view.m_terrainEdit.height(256,y)*view.m_terrainEdit.maxZ()/65535.0-neighbor->terrain.height(0,y)*neighbor->terrain.maxZ()/65535.0));
         check(maximum<0.001,"entire shared edge matches within raw-height quantum");write(root+"/seam.json",QJsonDocument(QJsonObject{{"maxWorldHeightDifference",maximum},{"result",seam}}).toJson());
         undo->trigger();check(!view.m_pLand->isDirty()&&!view.hasDirtyWorldTerrain(),"common generation Undo restores both clean maps");
+        }
         mode->setCurrentIndex(0);
         QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,[](){for(auto* w:QApplication::topLevelWidgets())if(auto* box=qobject_cast<QMessageBox*>(w)){if(auto* no=box->button(QMessageBox::No))no->click();else box->reject();}});dialogs.start(10);
         QPointer<CView> guarded=window.view();QTimer::singleShot(0,&window,[&](){window.close();});QTimer watchdog;watchdog.setSingleShot(true);QObject::connect(&watchdog,&QTimer::timeout,[](){std::_Exit(124);});watchdog.start(30000);qApp->exec();watchdog.stop();

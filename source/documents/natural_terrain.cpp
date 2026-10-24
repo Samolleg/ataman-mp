@@ -219,11 +219,15 @@ void natural::generate(Grid& g,const QString& name,const QJsonObject& p,quint32 
                 const double rx=12+(key>>3)%13,ry=12+(key>>11)%17;
                 const double a=wx-cx+8*noise(wx/18,wy/24,seed^8107),b=wy-cy+6*noise(wx/24,wy/18,seed^4133);
                 shore=qMax(shore,(1-std::hypot(a/rx,b/ry))*qMin(rx,ry));}
-            h=p["waterLevel"].toDouble()+shore*0.12+qMax(0.0,inland-20)*0.025;
-            h+=3*fbm(wx/30,wy/45,seed^1711,3)*smooth((inland-12)/20);
-            const double folds=1-std::abs(noise((wx+10*noise(wy/60,7,seed^1987))/18,wy/35,seed^4133));
-            const double exposure=smooth((noise(wx/60,wy/60,seed^1711)+0.1)/0.6);
-            h+=8*(std::pow(folds,3)-0.35)*(0.4+0.6*exposure)*smooth((inland-12)/20);
+            const double shoreHeight=p["waterLevel"].toDouble()+shore*0.12;
+            // Keep shoreline regularization local. Flattening the whole coast
+            // also removed its inland folds; retain warped shelves/outcrops
+            // behind the beach while the separate signed-distance band stays calm.
+            double inlandHeight=p["waterLevel"].toDouble()+inland*0.065+amplitude*0.25*broad*smooth((inland+8)/45);
+            inlandHeight+=2.5*fbm(wx/23,wy/23,seed^8107,4)*smooth((inland+5)/15);
+            inlandHeight+=4*smooth((inland-18+8*noise(wy/45,10,seed^1711))/8);
+            inlandHeight+=5*smooth((fbm(wx/24,wy/35,seed^4133,3)-0.12)/0.12)*smooth(inland/16);
+            h=shoreHeight+(inlandHeight-shoreHeight)*smooth((inland-12)/22);
         }else if(name=="river_valley"){
             const double centre=g.origin.x()+g.width*0.5+22*fbm(wy/95,7,seed^1987,3);
             h=p["waterLevel"].toDouble()+1+(h-p["waterLevel"].toDouble())*smooth(std::abs(wx-centre)/55);

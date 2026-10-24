@@ -33,9 +33,13 @@ QJsonObject measure(QString path){
         for(int y=0;y<33;++y)for(int x=0;x<33;++x)g.heights[(sy*32+y)*g.width+sx*32+x]=u16(b,7+(y*33+x)*8)*maxZ/65535;
         const int offset=5+1089*8*(overlay?2:1);
         for(int y=0;y<16;++y)for(int x=0;x<16;++x){const int local=y*16+x,i=(sy*16+y)*tw+sx*16+x;tiles[i]=u16(b,offset+local*2)&0x3fff;
-            if(overlay&&qint16(u16(b,offset+1024+local*2))!=-1){water[i]=1;waterSurface[i]=u16(b,5+1089*8+((y*2+1)*33+x*2+1)*8+2)*maxZ/65535;waterSum+=waterSurface[i];++waterCount;}}
+            if(overlay&&qint16(u16(b,offset+1024+local*2))!=-1){water[i]=1;const int vertex=(y*2+1)*33+x*2+1;
+                const auto sample=[&](int a){return u16(b,5+1089*8+a*8+2)*maxZ/65534;};
+                waterSurface[i]=sample(vertex)*0.5+sample(vertex+1)*0.25+sample(vertex+33)*0.25;waterSum+=waterSurface[i];++waterCount;}}
     }
-    auto result=natural::metrics(g);result["shape"]=natural::shapeMetrics(g);QVector<quint8> dry(water.size());for(int i=0;i<water.size();++i)dry[i]=!water[i]||g.heights[((i/tw)*2+1)*g.width+(i%tw)*2+1]>=waterSurface[i]+0.05;result["dryIslands"]=natural::maskMetrics(dry,tw,th,2);
+    auto result=natural::metrics(g);result["shape"]=natural::shapeMetrics(g);QVector<quint8> dry(water.size());for(int i=0;i<water.size();++i){const int vertex=((i/tw)*2+1)*g.width+(i%tw)*2+1;
+        const double land=(g.heights[vertex]*0.5+g.heights[vertex+1]*0.25+g.heights[vertex+g.width]*0.25)*65535/65534;
+        dry[i]=!water[i]||land>=waterSurface[i]+0.05;}result["dryIslands"]=natural::maskMetrics(dry,tw,th,2);
     result["map"]=QFileInfo(path).fileName();result["sha256"]=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
     auto semantics=QJsonDocument::fromJson(members.value("ei_mapper_terrain_semantics.json")).object();if(semantics.isEmpty())semantics=archivedSemantics(ns);
     if(!semantics.isEmpty()&&semantics["land"].toObject()["count"].toInt()>0){
