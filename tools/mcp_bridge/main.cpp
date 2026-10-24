@@ -91,7 +91,7 @@ public:
         // ID correlation and stream discard on timeout.
         const bool editPoll=(name=="operation_status"||name=="cancel_operation")&&editJobs.contains(args["operation"].toString());
         const auto value=local(name,args,editPoll?30000:2000);
-        const QSet<QString> edits{"create_map","sculpt","paint","preview","apply","save"};
+        const QSet<QString> edits{"create_map","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
             editJobs[value["operation"].toString()]=now+60000;

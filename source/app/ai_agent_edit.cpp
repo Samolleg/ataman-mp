@@ -13,6 +13,7 @@
 #include "resourcemanager.h"
 #include "terrain_preview_context.h"
 #include "terrain_mob_height_state.h"
+#include "natural_terrain.h"
 #include "ai_graph_preview_invalidation.h"
 #include <QtWidgets>
 #include <cmath>
@@ -145,9 +146,32 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
         if(action=="flatten"&&!plan.args.contains("height"))return fail("Flatten requires height in metres");
         const quint32 seed=quint32(plan.args["seed"].toInt());const double strength=plan.args["strength"].toDouble(1);
         const auto layer=plan.args["layer"]=="overlay"?ETerrainTileLayer::Overlay:ETerrainTileLayer::Land;
+        QElapsedTimer computation;computation.start();
         int changed=0;QMap<QString,STerrainTileCommand> joinAreas;
         const QPointF activeOrigin=plan.maps.first().origin;
-        if(plan.method=="sculpt") {
+        const bool naturalHeight=plan.method=="generate_terrain"||plan.method=="erode"||plan.method=="carve_river";
+        natural::Grid generated;
+        if(naturalHeight) {
+            QRectF extent;
+            for(const auto& map:plan.maps){QRectF r(map.origin-activeOrigin,QSizeF(map.state.terrain.vertexCountX()-1,map.state.terrain.vertexCountY()-1));extent=extent.isNull()?r:extent.united(r);}
+            generated.origin={std::floor(extent.left()),std::floor(extent.top())};
+            generated.width=int(std::ceil(extent.right())-generated.origin.x())+1;
+            generated.height=int(std::ceil(extent.bottom())-generated.origin.y())+1;
+            if(qint64(generated.width)*generated.height>1100000)return fail("Natural terrain working grid exceeds 1100000 samples; reduce participating map span");
+            generated.heights.resize(generated.width*generated.height);generated.wetness.fill(0,generated.heights.size());
+            for(int y=0;y<generated.height;++y){if(cancel->load())return fail("Cancelled; live map unchanged");for(int x=0;x<generated.width;++x){
+                const auto p=generated.origin+QPointF(x,y);double nearest=1e30,value=0;
+                for(const auto& map:plan.maps){const auto q=p-(map.origin-activeOrigin);const auto& m=map.state.terrain;
+                    const double cx=qBound(0.0,q.x(),double(m.vertexCountX()-1)),cy=qBound(0.0,q.y(),double(m.vertexCountY()-1));
+                    const double distance=std::hypot(q.x()-cx,q.y()-cy);if(distance<nearest){nearest=distance;value=z(m,qRound(cx),qRound(cy));}}
+                generated.heights[y*generated.width+x]=value;
+            }}
+            const auto cancelled=[&](){return cancel->load();};
+            if(plan.method=="generate_terrain")natural::generate(generated,plan.args["preset"].toString(),plan.args["parameters"].toObject(),seed,cancelled);
+            else if(plan.method=="erode")natural::erode(generated,plan.args["parameters"].toObject(),cancelled);
+            else natural::river(generated,plan.args,seed,cancelled);
+        }
+        if(plan.method=="sculpt"||naturalHeight) {
             QVector<SWorldTerrainTarget> targets;
             for(const auto& m:plan.maps){SWorldTerrainTarget t;t.id=m.id;t.origin=m.origin-activeOrigin;t.model=&m.state.terrain;t.editable=true;targets.append(t);}
             STerrainBrush brush;brush.centerX=b.center().x();brush.centerY=b.center().y();brush.radius=std::hypot(b.width(),b.height())/2+1;brush.falloff=ETerrainBrushFalloff::Constant;
@@ -155,7 +179,8 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
             const auto influence=[&](double x,double y){if(cancel->load())throw std::runtime_error("Cancelled; live map unchanged");return weight(area,b,x,y);};
             const auto transform=[&](double x,double y,double before) {
                 double target=before,amount=plan.args["amount"].toDouble();
-                if(action=="raise")target+=amount;
+                if(naturalHeight)target=generated.sample(x,y);
+                else if(action=="raise")target+=amount;
                 else if(action=="lower")target-=amount;
                 else if(action=="flatten")target=plan.args["height"].toDouble();
                 else if(action=="noise"||action=="hills") {
@@ -163,11 +188,14 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                     const double wave=(std::sin(x*0.13+phase)*std::cos(y*0.11-phase)+0.5*std::sin((x+y)*0.071+phase*2))/1.5;
                     target+=amount*(action=="hills"?(wave+1)/2:wave);
                 } else if(action=="heightmap")target=interpolate(grid["values"].toArray(),grid["width"].toInt(),grid["height"].toInt(),(x-b.x())/b.width(),(y-b.y())/b.height());
-                outside|=target<0;return target;
+                outside|=target<0;
+                if(naturalHeight)for(const auto& map:plan.maps){const auto p=QPointF(x,y)-(map.origin-activeOrigin);
+                    if(p.x()>=-0.51&&p.y()>=-0.51&&p.x()<=map.state.terrain.vertexCountX()-0.49&&p.y()<=map.state.terrain.vertexCountY()-0.49)outside|=target>map.state.terrain.maxZ();}
+                return target;
             };
-            const auto mode=action=="smooth"?EWorldSculptMode::Smooth:EWorldSculptMode::Flatten;
+            const auto mode=action=="smooth"&&!naturalHeight?EWorldSculptMode::Smooth:EWorldSculptMode::Flatten;
             plan.stroke=makeWorldTerrainStamp(targets,brush,mode,0,0,strength,seed,influence,
-                action=="smooth"?std::function<double(double,double,double)>():transform);
+                action=="smooth"&&!naturalHeight?std::function<double(double,double,double)>():transform);
             if(outside)return fail("Height outside 0..maxZ; adjust amount or map scale");
             if(!plan.stroke.error.isEmpty())return fail(plan.stroke.error);
             for(const auto& command:plan.stroke.maps)changed+=command.deltas.size();
@@ -175,12 +203,18 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
         for(auto& map:plan.maps) {
             if(cancel->load())return fail("Cancelled; live map unchanged");
             const QPointF offset=map.origin-activeOrigin;auto& model=map.state.terrain;CValidationReport report;
-            if(plan.method=="paint") {
-                const auto material=plan.args["material"].toInt();auto atlas=map.state.atlas->createStagingCopy();
+            if(plan.method=="paint"||plan.method=="auto_paint") {
+                const bool automatic=plan.method=="auto_paint";
+                const auto requestedMaterial=plan.args["material"].toInt();auto atlas=map.state.atlas->createStagingCopy();
                 auto terrain=model;atlas->setDistributionSeed(seed);
                 if(!terrain.initializeVirtualMaterialField(layer,atlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically))return fail(report.toText());
+                natural::Grid drainage;
+                if(automatic){drainage.width=terrain.vertexCountX();drainage.height=terrain.vertexCountY();drainage.origin=offset;
+                    drainage.heights.resize(drainage.width*drainage.height);
+                    for(int y=0;y<drainage.height;++y)for(int x=0;x<drainage.width;++x)drainage.heights[y*drainage.width+x]=z(terrain,x,y);
+                    natural::erode(drainage,{{"thermalIterations",0},{"hydraulicIterations",12},{"erosion",0}},[&](){return cancel->load();});}
                 STerrainTileCommand semantic;semantic.description=plan.description;semantic.semanticAudit.valid=true;
-                semantic.semanticAudit.layer=layer;semantic.semanticAudit.requestedMaterialId=material;
+                semantic.semanticAudit.layer=layer;semantic.semanticAudit.requestedMaterialId=requestedMaterial;
                 const int nx=terrain.tileCountX(),ny=terrain.tileCountY();QSet<int> affected;
                 for(int y=0;y<=ny;++y) {
                     if(cancel->load())return fail("Cancelled; live map unchanged");
@@ -189,6 +223,28 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                         const int vx=qMin(x*2,terrain.vertexCountX()-1),vy=qMin(y*2,terrain.vertexCountY()-1);
                         const double slope=std::atan(std::hypot((z(terrain,vx+1,vy)-z(terrain,vx-1,vy))/2,(z(terrain,vx,vy+1)-z(terrain,vx,vy-1))/2))*180/3.141592653589793;
                         if(slope<plan.args["minimumSlope"].toDouble(0)||slope>plan.args["maximumSlope"].toDouble(90))continue;
+                        int material=requestedMaterial;
+                        if(automatic){
+                            const auto parameters=plan.args["parameters"].toObject();const double height=z(terrain,vx,vy),water=parameters["waterLevel"].toDouble(6);
+                            const double curve=z(terrain,vx+2,vy)+z(terrain,vx-2,vy)+z(terrain,vx,vy+2)+z(terrain,vx,vy-2)-4*height;
+                            const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/18,p.y()/18,seed^1801,3);
+                            const double wet=qBound(0.0,1-std::abs(height-water)/6+qMax(0.0,curve)*0.1+drainage.wetness.value(vy*drainage.width+vx),1.0);
+                            const auto palette=plan.args["palette"].toObject();material=palette["grass"].toInt();
+                            if(wet>0.65+jitter*0.08)material=palette["mud"].toInt(material);
+                            if(height<water+parameters["shoreWidth"].toDouble(2.5)+jitter)material=palette["shore"].toInt(material);
+                            if(slope+jitter*2>parameters["rockSlope"].toDouble(32))material=palette["rock"].toInt(material);
+                            // Explicit ordered rules override the derived palette. Coherent
+                            // spatial noise perturbs thresholds, never independent tile speckle.
+                            for(const auto& entry:plan.args["rules"].toArray()){const auto r=entry.toObject();
+                                if(height+jitter>=r["minimumHeight"].toDouble(-10000)&&height+jitter<=r["maximumHeight"].toDouble(10000)
+                                   &&slope+jitter>=r["minimumSlope"].toDouble(0)&&slope+jitter<=r["maximumSlope"].toDouble(90)
+                                   &&curve>=r["minimumCurvature"].toDouble(-10000)&&curve<=r["maximumCurvature"].toDouble(10000)
+                                   &&wet>=r["minimumWetness"].toDouble(0)&&wet<=r["maximumWetness"].toDouble(1))material=r["material"].toInt();}
+                            const auto road=plan.args["road"].toObject();if(!road.isEmpty()){
+                                QString roadError;const auto roadBounds=bounds(road,&roadError);const double perturb=1+0.14*natural::noise(p.x()/15,p.y()/15,seed^671);
+                                auto varied=road;varied["width"]=road["width"].toDouble()*perturb;
+                                if(height>water+0.4&&slope<45&&weight(varied,roadBounds.adjusted(-4,-4,4,4),p.x(),p.y())>0.3)material=palette["road"].toInt(material);}
+                        }
                         // Stable dither preserves the mask/falloff without inventing blended material IDs.
                         const quint32 hash=(quint32(qRound(p.x()))*73856093u)^(quint32(qRound(p.y()))*19349663u)^(seed*83492791u);
                         if(double(hash%65536)/65535.0>w)continue;
@@ -212,17 +268,38 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                 for(int cell:ordered) {
                     if(cancel->load())return fail("Cancelled; live map unchanged");
                     const int x=cell%nx,y=cell/nx;bool found=false;const auto signature=field.cellSignature(x,y,&found);
+                    // Each automatic cell has its actual shared-corner signature;
+                    // route selection stays in the existing131 resolver.
+                    const int material=automatic?signature.northWest:requestedMaterial;
                     if(found&&!realizeAgentPaintSignature(plan.sources,*atlas,terrain,signature,x,y,seed,material,&usage,protectedSlots,&report))return fail(report.toText());
                 }
-                const auto resolution=atlas->joinAuthoredTransitionEdges(terrain,terrain.makeVirtualStrokeResolution(semantic,atlas->catalog(),seed,&report,true,material),&report);
+                const auto resolution=atlas->joinAuthoredTransitionEdges(terrain,terrain.makeVirtualStrokeResolution(semantic,atlas->catalog(),seed,&report,true,requestedMaterial),&report);
                 if(report.hasErrors()||!terrain.apply(resolution,true,&report))return fail(report.toText());
+                if(automatic&&plan.args.contains("water")) {
+                    const auto water=plan.args["water"].toObject();const int id=water["material"].toInt(),liquid=water["liquid"].toInt();
+                    const double level=water["level"].toDouble();
+                    if(liquid>=map.state.materials.size()||level>terrain.maxZ())return fail("Water requires an existing liquid record and level within map maxZ");
+                    STerrainTransitionSignature pure;pure.northWest=pure.northEast=pure.southEast=pure.southWest=id;
+                    if(!realizeAgentPaintSignature(plan.sources,*atlas,terrain,pure,0,0,seed,id,&usage,protectedSlots,&report))return fail(report.toText());
+                    terrain.enableWorkingAtlasSlots(atlas->capacityLimit());terrain.installWorkingAtlasSlotTypes(atlas->activeTileTypes());
+                    for(int y=0;y<ny;++y){if(cancel->load())return fail("Cancelled; live map unchanged");for(int x=0;x<nx;++x){
+                        const auto p=offset+QPointF(x*2+1,y*2+1);if(weight(area,b,p.x(),p.y())<=0||z(terrain,x*2+1,y*2+1)>=level)continue;
+                        bool found=false;const auto packed=SMprPackedTile::decode(atlas->catalog().selectForPaint(pure,x,y,seed,&found));
+                        if(!found)return fail("Water uniform tile unavailable");STerrainTileBrush tile;tile.centerX=x;tile.centerY=y;tile.radius=0;
+                        const auto activation=terrain.makeOverlayActivation(tile,qint16(liquid),packed.atlasIndex,packed.tileIndex,packed.rotation,&report);
+                        if(!terrain.apply(activation,true,&report))return fail(report.toText());
+                        STerrainBrush flatten;flatten.centerX=x*2+1;flatten.centerY=y*2+1;flatten.radius=1.5;flatten.falloff=ETerrainBrushFalloff::Constant;
+                        const auto surface=terrain.makeOverlayFlatten(flatten,quint16(qRound(level*65535/terrain.maxZ())),1,&report);
+                        if(!terrain.apply(surface,true,&report)||report.hasErrors())return fail(report.toText());
+                    }}
+                }
                 SWorldTerrainPaintChange change;change.before=map.state;change.after=map.state;change.after.terrain=terrain;change.after.atlas=atlas;
                 plan.stroke.paint[map.id]=change;joinAreas[map.id]=resolution;changed+=affected.size();
             }
         }
         // Same cross-map edge matching as the manual common brush. Packed IDs
         // are local: compare the neighbour's actual pixels and rotation.
-        if(plan.method=="paint")for(int pass=0;pass<4;++pass) {
+        if(plan.method=="paint"||plan.method=="auto_paint")for(int pass=0;pass<4;++pass) {
             bool adjusted=false;
             for(auto& map:plan.maps) {
                 if(cancel->load())return fail("Cancelled; live map unchanged");
@@ -245,8 +322,13 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
             }
             if(!adjusted)break;
         }
+        if(plan.method=="auto_paint")for(auto it=plan.stroke.paint.begin();it!=plan.stroke.paint.end();++it){CValidationReport report;
+            if(!it.value().after.atlas->canonicalizeChangedTilesForPersistence(&report,[&](){return cancel->load();}))
+                return fail(cancel->load()?QString("Cancelled; live map unchanged"):report.toText());}
         if(cancel->load())return fail("Cancelled; live map unchanged");
         plan.summary={{"changed",changed},{"maps",plan.stroke.maps.size()+plan.stroke.paint.size()},{"revision",plan.revision}};
+        plan.summary["computeMs"]=int(computation.elapsed());
+        if(naturalHeight)plan.summary["terrainMetrics"]=natural::metrics(generated);
         plan.summary.insert("preview",planImage(plan,b));return plan;
     } catch(const std::exception& e) {return fail(QString::fromUtf8(e.what()));}
     catch(...) {return fail("Preparation failed; live map unchanged");}
@@ -306,13 +388,41 @@ QString CAiEditAdapter::revision(MainWindow* w)
 }
 ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const QJsonObject& args)
 {
-    ai::EditPlan plan;plan.method=method;plan.args=args;plan.description=QString::fromUtf8("ИИ: ")+(method=="sculpt"?QString::fromUtf8("Рельеф / ")+args["action"].toString():method=="paint"?QString::fromUtf8("Покраска"):QString::fromUtf8("Новая карта"));
+    ai::EditPlan plan;plan.method=method;plan.args=args;plan.description=QString::fromUtf8("ИИ: ")+(method=="sculpt"?QString::fromUtf8("Рельеф / ")+args["action"].toString():method=="paint"?QString::fromUtf8("Покраска"):method=="generate_terrain"?QString::fromUtf8("Природный рельеф / ")+args["preset"].toString():method=="erode"?QString::fromUtf8("Эрозия"):method=="carve_river"?QString::fromUtf8("Русло реки"):method=="auto_paint"?QString::fromUtf8("Автопокраска"):QString::fromUtf8("Новая карта"));
     auto* v=w->view();const auto fail=[&](QString error){plan.error=error;return plan;};
     if(busy(w))return fail("Editor gesture/load/modal interaction in progress; retry after it finishes");
     if(!v->m_terrainEditAvailable||!v->m_pLand->isMprLoad())return fail("Open a terrain map first (used as the New MPR template)");
     if(args["revision"].toString()!=revision(w))return fail("Document revision conflict; call get_revision and prepare again");
     if(v->m_terrainAutoCatalogPending||!v->m_workingTerrainAtlas)return fail("Terrain material palette is initializing; retry after it is ready");
-    QString error;const QRectF area=method=="create_map"?QRectF():bounds(args["area"].toObject(),&error);if(!error.isEmpty())return fail(error);
+    const bool naturalTool=QStringList{"generate_terrain","erode","carve_river","auto_paint"}.contains(method);
+    if(naturalTool) {
+        if(!args.contains("area"))plan.args["area"]=QJsonObject{{"shape","rectangle"},{"x",0},{"y",0},
+            {"width",v->m_terrainEdit.vertexCountX()-1},{"height",v->m_terrainEdit.vertexCountY()-1},{"falloff",0}};
+        try {auto parameters=natural::preset(args["preset"].toString("plain"));const auto overrides=args["parameters"].toObject();
+            for(auto it=overrides.begin();it!=overrides.end();++it)parameters[it.key()]=it.value();plan.args["parameters"]=parameters;
+        }catch(const std::exception& e){return fail(QString::fromUtf8(e.what()));}
+        if(method=="auto_paint") {
+            auto palette=args["palette"].toObject();
+            const auto choose=[&](const QString& role,const QStringList& terms){if(palette.contains(role))return;
+                for(const auto& term:terms)for(const auto& family:v->m_terrainGlobalFamilies)
+                    if(family.layer==ETerrainAtlasLayer::Land&&family.name.contains(term,Qt::CaseInsensitive)){palette[role]=family.id;return;}};
+            choose("grass",{"Grass / Common","Grass","трава"});choose("rock",{"Stone","Rock","камень"});
+            choose("shore",args["preset"]=="coast"?QStringList{"Sand","Ground / Common","Ground","песок"}:QStringList{"Ground / Common","Ground","Sand","грязь"});choose("mud",{"Ground / Common","Ground","грязь"});
+            choose("road",{"Gravel","Ground","гравий"});
+            if(!palette.contains("grass")||!palette.contains("rock")||!palette.contains("shore")||!palette.contains("mud"))return fail("Active palette lacks grass/rock/shore/mud; supply explicit palette IDs");
+            QJsonArray ids;for(auto it=palette.begin();it!=palette.end();++it)ids.append(it.value());
+            for(const auto& rule:args["rules"].toArray())ids.append(rule.toObject()["material"]);
+            for(const auto& id:ids){bool known=false;for(const auto& family:v->m_terrainGlobalFamilies)known|=family.id==id.toInt()&&family.layer==ETerrainAtlasLayer::Land;
+                if(!known)return fail("auto_paint material must be an active land palette ID");}
+            if(args.contains("water")){bool known=false;const int id=args["water"].toObject()["material"].toInt();
+                for(const auto& family:v->m_terrainGlobalFamilies)known|=family.id==id&&family.layer==ETerrainAtlasLayer::Overlay;
+                if(!known)return fail("Water material must be an active overlay palette ID");}
+            plan.args["palette"]=palette;plan.args["shuffle"]=true;
+            if(args.contains("road")){QString roadError;bounds(args["road"].toObject(),&roadError);if(!roadError.isEmpty())return fail(roadError);
+                if(args["road"].toObject()["shape"]!="line")return fail("Road must use line geometry");}
+        }
+    }
+    QString error;const QRectF area=method=="create_map"?QRectF():bounds(plan.args["area"].toObject(),&error);if(!error.isEmpty())return fail(error);
     const auto materialName=args["materialName"].toString();int material=args["material"].toInt();
     if(method=="paint"||method=="create_map") {
         if(!materialName.isEmpty()) {int matches=0;for(const auto& family:v->m_terrainGlobalFamilies)if(family.name.compare(materialName,Qt::CaseInsensitive)==0){if(material>0&&material!=family.id)return fail("Material ID and name disagree");material=family.id;++matches;}if(matches!=1)return fail("Material name is absent or ambiguous; use material_palette ID");}

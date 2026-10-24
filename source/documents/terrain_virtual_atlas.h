@@ -465,6 +465,10 @@ public:
     void setPreserveNativePages(bool enabled) { m_preserveNativePages = enabled; }
     const QMap<int,QByteArray>& preservedDxtTiles() const { return m_preservedDxtTiles; }
     void preserveDxtTile(int slot,const QByteArray& bytes) { m_preservedDxtTiles.insert(slot,bytes); }
+    // Quantize detached new artwork once, then retain its exact DXT blocks.
+    // Preview and normal publication consequently show identical pixels.
+    bool canonicalizeChangedTilesForPersistence(CValidationReport* report,
+        const std::function<bool()>& cancelled);
     QSize synthesisTileSize() const;
     int authoredSlotCount() const { return m_authoredSlotCount; }
     const QVector<QImage>& authoredTileImages() const { return m_authoredImages; }

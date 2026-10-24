@@ -179,7 +179,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
 {
     if(m_committing)return ai::error("Normal map commit in progress; retry after operation_status");
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_allowSave->isChecked()}};
-    const QSet<QString> mutations{"create_map","sculpt","paint","preview","apply","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"create_map","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
         if(m_mode->currentIndex()!=2)return ai::error("Read-only mode: only the human can enable Правка in the dock");
         if(m_writer&&m_writer!=m_currentClient)return ai::error("Another agent owns the writer session; disconnect it before switching writer");

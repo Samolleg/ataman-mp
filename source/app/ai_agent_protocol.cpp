@@ -109,9 +109,35 @@ QJsonArray toolDefinitions()
     paint.insert("layer",choice({"land","overlay"}));paint.insert("shuffle",QJsonObject{{"type","boolean"}});
     paint.insert("minimumSlope",number(0,90));paint.insert("maximumSlope",number(0,90));
     add("paint","Paint palette material by ID or exact name over area/mask/polyline width in metres. Modern131 automatic transitions; optional existing overlay and seeded variant shuffle. Async, one Undo.",paint,{"revision","area"});
-    add("preview","Prepare sculpt/paint without applying; returns region overlay PNG and operation ID for apply.",
-        {{"tool",choice({"sculpt","paint"})},{"arguments",QJsonObject{{"oneOf",QJsonArray{object(sculpt,{"revision","action","area"}),object(paint,{"revision","area"})}}}}},{"tool","arguments"});
-    // preview.arguments is validated against the selected tool below, not an open object.
+    const auto parameters=object({{"baseHeight",number(0,10000)},{"amplitude",number(0,10000)},
+        {"scale",number(4,2048)},{"ridge",number(0,1)},{"warp",number(0,512)},{"terrace",number(0,1)},
+        {"thermalIterations",integer(0,64)},{"hydraulicIterations",integer(0,64)},
+        {"talus",number(0.01,8)},{"rain",number(0,1)},{"erosion",number(0,1)},
+        {"waterLevel",number(0,10000)},{"rockSlope",number(0,90)},{"shoreWidth",number(0,32)},
+        {"boundaryNoise",number(0,8)},{"cliffX",number(-32768,32768)},
+        {"cliffHeight",number(0,1000)},{"cliffWidth",number(0.5,64)}});
+    auto generate=edit;generate.insert("preset",choice({"plain","hills","mountains","coast","swamp","river_valley"}));generate.insert("parameters",parameters);
+    add("generate_terrain","Generate natural terrain in metres: seeded fBm, ridged noise, domain warp, bounded thermal/hydraulic erosion. Omit area for whole active map; shared enabled neighbours use the131 seam solver. Detached async, preview/apply, one Undo.",generate,{"revision","preset","seed"});
+    auto erosion=edit;erosion.insert("parameters",parameters);
+    add("erode","Bounded thermal/hydraulic erosion of existing heights, with sediment transport and deposition. 0..64 iterations each; detached async, one Undo.",erosion,{"revision"});
+    auto river=edit;river.insert("points",array(array(number(-32768,32768),2,2),2,128));
+    river.insert("width",number(1,128));river.insert("depth",number(0.01,100));river.insert("floodplain",number(0,128));river.insert("level",number(0,10000));
+    add("carve_river","Carve a downstream polyline with varying channel width, rounded banks and floodplain. Optional level is upstream bed height. No overlay/water creation. One reversible async operation.",river,{"revision","points","width","depth"});
+    auto automatic=generate;automatic.insert("palette",object({{"grass",integer(1,2147483647)},{"rock",integer(1,2147483647)},
+        {"shore",integer(1,2147483647)},{"mud",integer(1,2147483647)},{"road",integer(1,2147483647)}}));
+    automatic.insert("rules",array(object({{"material",integer(1,2147483647)},
+        {"minimumHeight",number(0,10000)},{"maximumHeight",number(0,10000)},
+        {"minimumSlope",number(0,90)},{"maximumSlope",number(0,90)},
+        {"minimumCurvature",number(-10000,10000)},{"maximumCurvature",number(-10000,10000)},
+        {"minimumWetness",number(0,1)},{"maximumWetness",number(0,1)}},{"material"}),1,32));
+    automatic.insert("road",area);
+    automatic.insert("water",object({{"material",integer(1,2147483647)},{"liquid",integer(0,32766)},
+        {"level",number(0,10000)}},{"material","liquid","level"}));
+    add("auto_paint","Modern131 palette painting by height/slope/curvature/drainage and water level, coherent noisy thresholds and seeded variants. Optional ordered rules and road line. Palette defaults are resolved by active profile material names, IDs can override. One async Undo.",automatic,{"revision","preset"});
+    add("preview","Prepare an edit without applying; returns region overlay PNG and operation ID for apply.",
+        {{"tool",choice({"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"})},{"arguments",QJsonObject{{"anyOf",QJsonArray{object(sculpt,{"revision","action","area"}),object(paint,{"revision","area"}),object(generate,{"revision","preset","seed"}),object(erosion,{"revision"}),object(river,{"revision","points","width","depth"}),object(automatic,{"revision","preset"})}}}}},{"tool","arguments"});
+    // Schemas overlap (e.g. generate/auto-paint); anyOf keeps client validation
+    // correct. The server strictly validates the selected tool below.
     add("apply","Apply a completed preview only at its captured revision, one Undo.",{{"operation",string()},{"revision",string()},{"snapshot",QJsonObject{{"type","boolean"}}}},{"operation","revision"});
     add("create_map","Create and open a new MPR using the current clean map as terrain template and New MPR213. Name only, never overwrite, active profile map root only; publishes initial atlas to HDPack. This explicit creation writes the initial file even when later Save is disabled.",
         {{"revision",string()},{"name",string()},{"sectorsX",integer(1,16)},{"sectorsY",integer(1,16)},
@@ -119,7 +145,7 @@ QJsonArray toolDefinitions()
          {"materialName",string()},{"root",integer(0,15)}},{"revision","name","sectorsX","sectorsY"});
     add("undo_last_agent_operation","Undo only the top agent command. Refuses if human/world history intervened. Does not undo somebody else's work.",{{"revision",string()}},{"revision"});
     add("save","Use normal map Save209–216 only when the human enabled Allow agent to save. Async status; backups, atlas publication and 126-page limit remain authoritative.",{{"revision",string()}},{"revision"});
-    const QSet<QString> mutations{"sculpt","paint","preview","apply","create_map","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","undo_last_agent_operation","save"};
     for(int i=0;i<tools.size();++i) {
         auto tool=tools[i].toObject();if(!mutations.contains(tool["name"].toString()))continue;
         tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",true},{"openWorldHint",false}};tools[i]=tool;
@@ -156,7 +182,7 @@ bool validateArguments(const QString& name, const QJsonObject& args, QString* di
     diagnostic->clear();
     if(name=="preview") {
         if(args.keys()!=QStringList{"arguments","tool"}||!args["arguments"].isObject()
-           ||(args["tool"]!="sculpt"&&args["tool"]!="paint")){*diagnostic="preview expects tool sculpt/paint and its arguments";return false;}
+           ||!QStringList{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"}.contains(args["tool"].toString())){*diagnostic="preview expects an editable terrain tool and its arguments";return false;}
         return validateArguments(args["tool"].toString(),args["arguments"].toObject(),diagnostic);
     }
     for(const auto& v : toolDefinitions()) {

@@ -1,0 +1,188 @@
+[
+    {
+        "erode":  {
+                      "changed":  31983,
+                      "computeMs":  384,
+                      "maps":  1,
+                      "revision":  "b120fe78e7a2dab46bfb84c23a4425e3f0e98078a18260a1f580e335aca3e37c",
+                      "status":  "applied",
+                      "terrainMetrics":  {
+                                             "heightP10":  5.873920392847649,
+                                             "heightP90":  16.784548873353906,
+                                             "max":  19.796629863634053,
+                                             "mean":  11.14945778913074,
+                                             "min":  1.001862173079467,
+                                             "slopeP50":  5.911568418664772,
+                                             "slopeP90":  42.25850358121532,
+                                             "slopeP99":  61.084710289759855,
+                                             "steepFraction":  0.21814686658977317
+                                         },
+                      "undo":  "РР: Р­СЂРѕР·РёСЏ",
+                      "wallMs":  1309
+                  },
+        "generate":  {
+                         "changed":  66049,
+                         "computeMs":  1364,
+                         "maps":  1,
+                         "revision":  "dac9687e1b2a448252685a7403c44cf9a6a0f9fdf309fbd98dffbaaa77ca43c8",
+                         "status":  "applied",
+                         "terrainMetrics":  {
+                                                "heightP10":  7.375569174301264,
+                                                "heightP90":  16.86456386431298,
+                                                "max":  21.046402610885547,
+                                                "mean":  12.092704071439545,
+                                                "min":  5.272300945136864,
+                                                "slopeP50":  4.752995505480816,
+                                                "slopeP90":  36.49125938845976,
+                                                "slopeP99":  47.92008132502059,
+                                                "steepFraction":  0.13480968858131487
+                                            },
+                         "undo":  "РР: РџСЂРёСЂРѕРґРЅС‹Р№ СЂРµР»СЊРµС„ / plain",
+                         "wallMs":  3253
+                     },
+        "heightP10":  5.874113069352254,
+        "heightP90":  16.78443579766537,
+        "max":  19.796200503547723,
+        "maxZ":  64,
+        "mean":  11.149455719139853,
+        "min":  1.0019684138246738,
+        "name":  "forest_river220",
+        "paint":  {
+                      "changed":  16384,
+                      "computeMs":  1079,
+                      "maps":  1,
+                      "revision":  "3843d6c3835b1cdbd83a0a07be2878e1703802b105c86abfd3dc06f2d42e1caf",
+                      "status":  "applied",
+                      "undo":  "РР: РђРІС‚РѕРїРѕРєСЂР°СЃРєР°",
+                      "wallMs":  2915
+                  },
+        "slopeP50":  5.916573252726121,
+        "slopeP90":  42.25820876101218,
+        "slopeP99":  61.08626647850132,
+        "steepFraction":  0.21811610918877355
+    },
+    {
+        "erode":  {
+                      "changed":  57613,
+                      "computeMs":  1312,
+                      "maps":  1,
+                      "revision":  "78933706b456526f1320bd69aadd108bb70b155102e85d401ac520d1ea4cb541",
+                      "status":  "applied",
+                      "terrainMetrics":  {
+                                             "heightP10":  2.5521734266528404,
+                                             "heightP90":  32.70247631972064,
+                                             "max":  43.59441519798581,
+                                             "mean":  15.825982099062054,
+                                             "min":  0.0009878409726026389,
+                                             "slopeP50":  37.91576424609818,
+                                             "slopeP90":  61.97741657805854,
+                                             "slopeP99":  70.95796608701951,
+                                             "steepFraction":  0.5920953479430988
+                                         },
+                      "undo":  "РР: Р­СЂРѕР·РёСЏ",
+                      "wallMs":  2814
+                  },
+        "generate":  {
+                         "changed":  66049,
+                         "computeMs":  1341,
+                         "maps":  1,
+                         "revision":  "0218a09b0412f62225916608c7960c7d88a1bfffea5afd9639c8a1675c539676",
+                         "status":  "applied",
+                         "terrainMetrics":  {
+                                                "heightP10":  2.872599299366256,
+                                                "heightP90":  33.305206281773614,
+                                                "max":  43.594226221882884,
+                                                "mean":  17.073069769935035,
+                                                "min":  0.3757275965716684,
+                                                "slopeP50":  37.78973388336834,
+                                                "slopeP90":  63.42514457165664,
+                                                "slopeP99":  71.89662953040954,
+                                                "steepFraction":  0.5924644367550942
+                                            },
+                         "undo":  "РР: РџСЂРёСЂРѕРґРЅС‹Р№ СЂРµР»СЊРµС„ / mountains",
+                         "wallMs":  3259
+                     },
+        "heightP10":  2.551796749828336,
+        "heightP90":  32.702647440299074,
+        "max":  43.59441519798581,
+        "maxZ":  64,
+        "mean":  15.825978639220182,
+        "min":  0.000976577401388571,
+        "name":  "mountain_pass220",
+        "paint":  {
+                      "changed":  16384,
+                      "computeMs":  891,
+                      "maps":  1,
+                      "revision":  "a3dd73986ca1390692217f0866fc43fcf95376e470f2babd4c8f05395822ab67",
+                      "status":  "applied",
+                      "undo":  "РР: РђРІС‚РѕРїРѕРєСЂР°СЃРєР°",
+                      "wallMs":  2417
+                  },
+        "slopeP50":  37.914366876103664,
+        "slopeP90":  61.97635292969866,
+        "slopeP99":  70.95802855855138,
+        "steepFraction":  0.592079969242599
+    },
+    {
+        "erode":  {
+                      "changed":  24986,
+                      "computeMs":  284,
+                      "maps":  1,
+                      "revision":  "8481d9dca8b35aa8b1c8e24b9a8c88c65ded3fe3a862a9d6dfdfd906e71a4bcb",
+                      "status":  "applied",
+                      "terrainMetrics":  {
+                                             "heightP10":  0.617196673455185,
+                                             "heightP90":  20.079355797331186,
+                                             "max":  27.031662470435645,
+                                             "mean":  10.353338389263351,
+                                             "min":  0,
+                                             "slopeP50":  5.637858619519796,
+                                             "slopeP90":  35.847044799560315,
+                                             "slopeP99":  50.716577497658434,
+                                             "steepFraction":  0.11769319492502883
+                                         },
+                      "undo":  "РР: Р­СЂРѕР·РёСЏ",
+                      "wallMs":  1093
+                  },
+        "generate":  {
+                         "changed":  66049,
+                         "computeMs":  1326,
+                         "maps":  1,
+                         "revision":  "9bef6f516c8f65f04f46c934a33a388558eff51003a6340eab6324f50e35775e",
+                         "status":  "applied",
+                         "terrainMetrics":  {
+                                                "heightP10":  0.6169956777165766,
+                                                "heightP90":  20.078705058789673,
+                                                "max":  27.032065768757455,
+                                                "mean":  10.353338073611617,
+                                                "min":  0,
+                                                "slopeP50":  5.594143091925341,
+                                                "slopeP90":  34.95205339208298,
+                                                "slopeP99":  53.31196790041353,
+                                                "steepFraction":  0.11217224144559784
+                                            },
+                         "undo":  "РР: РџСЂРёСЂРѕРґРЅС‹Р№ СЂРµР»СЊРµС„ / coast",
+                         "wallMs":  3261
+                     },
+        "heightP10":  0.6171969176775769,
+        "heightP90":  20.079407949950408,
+        "max":  27.031662470435645,
+        "maxZ":  64,
+        "mean":  10.353334485851557,
+        "min":  0,
+        "name":  "coast_bay220",
+        "paint":  {
+                      "changed":  16384,
+                      "computeMs":  1144,
+                      "maps":  1,
+                      "revision":  "c4eaed1335d64e05cfbdc23be861a189eb5e6254a3e1d529617535b71e4c2adc",
+                      "status":  "applied",
+                      "undo":  "РР: РђРІС‚РѕРїРѕРєСЂР°СЃРєР°",
+                      "wallMs":  2998
+                  },
+        "slopeP50":  5.6386619718902775,
+        "slopeP90":  35.84113998407979,
+        "slopeP99":  50.71838691738809,
+        "steepFraction":  0.11772395232602845
+    }
+]

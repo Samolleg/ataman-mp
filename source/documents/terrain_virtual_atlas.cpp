@@ -4494,6 +4494,25 @@ bool CTerrainWorkingAtlas::commitStaging(
     return true;
 }
 
+bool CTerrainWorkingAtlas::canonicalizeChangedTilesForPersistence(
+    CValidationReport* report,const std::function<bool()>& cancelled)
+{
+    auto orderedSlots=m_changedSlots.values();std::sort(orderedSlots.begin(),orderedSlots.end());
+    for(int slot:orderedSlots){
+        if(cancelled())return false;
+        if(slot<0||slot>=m_workingImages.size()||m_workingImages[slot].isNull())continue;
+        const auto& image=m_workingImages[slot];QImage decoded;QString error;
+        const auto old=m_preservedDxtTiles.value(slot);
+        if(!old.isEmpty()&&ei::decodeDxtImage(old,image.width(),image.height(),ei::DxtFormat::Dxt1,&decoded,&error)
+           &&decoded.convertToFormat(QImage::Format_RGBA8888)==image.convertToFormat(QImage::Format_RGBA8888))continue;
+        const auto payload=ei::encodeMmpDxt1(image,false,&error);const auto blocks=payload.mid(76);
+        if(payload.isEmpty()||!ei::decodeDxtImage(blocks,image.width(),image.height(),ei::DxtFormat::Dxt1,&decoded,&error)){
+            if(report)report->add("terrain.persisted_preview",EValidationSeverity::Error,error);return false;}
+        m_workingImages[slot]=decoded.convertToFormat(QImage::Format_RGBA8888);m_preservedDxtTiles[slot]=blocks;
+    }
+    return true;
+}
+
 bool CTerrainWorkingAtlas::normalizeAnimationRanges(
     const QVector<SMprAnimatedTileRecord>& animations,
     QVector<SMprAnimatedTileRecord>* normalizedAnimations,

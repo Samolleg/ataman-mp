@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **219**: режим «Правка» в доке «ИИ-агент» для создания карт через MCP: новая MPR, рельеф, покраска, предпросмотр и применение, ревизия, одна Undo на операцию. Человек отдельно разрешает сохранение; без галочки правки остаются в памяти. Подготовка операций в фоне, один агент-писатель, штатные стыки/переходы131 и Save209–216. [Инструменты и примеры](docs/AI_AGENT_MCP.md), [проверка219](docs/validation/ATAMAN_MCP_EDIT_219_20261024.md). СТОП перед установкой: постоянная218 сохранена, push отсутствует.
+Версия **220**: природный рельеф через MCP: шесть пресетов, fBm/ridged/domain warp, ограниченная эрозия, русло с поймой и автопокраска по форме поверхности. Предпросмотр, одна Undo и штатные стыки/переходы131. [Инструменты и примеры](docs/AI_AGENT_MCP.md), [проверка220](docs/validation/ATAMAN_NATURAL_TERRAIN_220_20261024.md). СТОП перед установкой: постоянная219 сохранена, push отсутствует.
 
 Изменения187: общая покраска сохраняет готовые тени рельефа при изменении
 только текстур; изменения геометрии и покрытия обновляют поле по-прежнему.
@@ -50,7 +50,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `218`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `220`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).
