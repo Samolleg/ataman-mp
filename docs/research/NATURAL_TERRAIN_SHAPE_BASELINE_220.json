@@ -1,0 +1,1001 @@
+[
+    {
+        "dryIslands": {
+            "areaM2": 78572,
+            "boundaryMetres": 3584,
+            "interiorComponents": 32,
+            "islandsBelow64m2": 29,
+            "meanIslandPerimeterCompactness": 1.816841881390086
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 1433,
+                "max": 195,
+                "mean": 35.356594556873695,
+                "p10": 5,
+                "p50": 27,
+                "p90": 79
+            },
+            "lowP25RunsMetres": {
+                "count": 1597,
+                "max": 353,
+                "mean": 30.668127739511583,
+                "p10": 3,
+                "p50": 17,
+                "p90": 55
+            }
+        },
+        "heightP10": 0.08345308834258411,
+        "heightP90": 16.419069142777087,
+        "map": "zone1.mpr",
+        "max": 21.363664627075195,
+        "maxZ": 21.363664627075195,
+        "mean": 7.4877939456580735,
+        "meanOverlayHeight": 3.9139911686556332,
+        "min": 0,
+        "overlayBoundaryMetres": 2254,
+        "overlayFraction": 0.3891256313131313,
+        "physicalSlotEdgeFraction": 0.9540581321473952,
+        "physicalSlotPatchSquareMetres": {
+            "count": 23086,
+            "max": 68,
+            "mean": 4.391232781772503,
+            "p10": 4,
+            "p50": 4,
+            "p90": 4
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 14.079116791474265,
+                "highPassEnergy": 5.494150209095336,
+                "rmsSlope": 0.2345134323801013
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.6201201308843982,
+                "highPassEnergy": 0.35217265873284553,
+                "rmsSlope": 0.636419698564634
+            },
+            "32": {
+                "heightDifferenceEnergy": 26.67704430308634,
+                "highPassEnergy": 10.148396024241249,
+                "rmsSlope": 0.16140570336029875
+            },
+            "4": {
+                "heightDifferenceEnergy": 3.491948880510349,
+                "highPassEnergy": 1.1043147035426557,
+                "rmsSlope": 0.4671689255846292
+            },
+            "8": {
+                "heightDifferenceEnergy": 6.97791936805377,
+                "highPassEnergy": 2.466483060852874,
+                "rmsSlope": 0.33019689599667673
+            }
+        },
+        "sectorsX": 11,
+        "sectorsY": 9,
+        "semanticFractionsById": {
+            "1205054705": 0.00043956043956043956,
+            "1275679089": 3.996003996003996e-05,
+            "1328004620": 0.00015984015984015984,
+            "1406899604": 0.013506493506493506,
+            "1421619167": 0.002837162837162837,
+            "1421916103": 0.01138861138861139,
+            "1439171908": 0.014745254745254746,
+            "1463645718": 0.002117882117882118,
+            "1545972741": 0.0001998001998001998,
+            "1557947799": 3.996003996003996e-05,
+            "1612376901": 3.996003996003996e-05,
+            "1712759006": 0.005794205794205794,
+            "1791160775": 0.00035964035964035964,
+            "1974896831": 0.1888111888111888,
+            "1999753121": 0.16043956043956045,
+            "2013464699": 0.006033966033966034,
+            "2024815995": 0.08467532467532468,
+            "2049590246": 0.0037162837162837163,
+            "2133892491": 0.0033566433566433566,
+            "2142727678": 0.5012987012987012
+        },
+        "semanticPatchesSquareMetres": {
+            "count": 1118,
+            "max": 19768,
+            "mean": 91.82468694096602,
+            "p10": 4,
+            "p50": 8,
+            "p90": 60
+        },
+        "semanticTransitionFraction": 0.4346590909090909,
+        "sha256": "3f7613f4f552e7b2e4718e15f9e1b20e6fb09513bf81327da89c4fb2ea7b4586",
+        "shape": {
+            "anisotropy32m": 1.5776074077354483,
+            "directionalEnergy32m": {
+                "0": 29.960892818029837,
+                "105": 19.85072930272141,
+                "120": 21.770306340537395,
+                "135": 24.440143152129817,
+                "15": 30.426398222532285,
+                "150": 27.166673943846952,
+                "165": 29.57020460575745,
+                "30": 30.22181664336028,
+                "45": 28.5134413506532,
+                "60": 24.86463876686994,
+                "75": 21.17115673953557,
+                "90": 19.286419468711408
+            },
+            "isolatedPeaksPerKm2": 19.728535353535353,
+            "isolatedProminentPeaks": 2,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.008887705176767676,
+            "sharpOneVertexPeaks": 15,
+            "sharpPeaksPerKm2": 147.96401515151516,
+            "smallNarrowProtrusions": 102,
+            "smallNarrowProtrusionsPerKm2": 1006.155303030303,
+            "upper30LargestComponentFraction": 0.730958993628492,
+            "upper30PrincipalSpanP90m": 146.59827673445335,
+            "upper30TinyComponentFraction": 0.0002613951968632576
+        },
+        "slopeP50": 8.588746219478718,
+        "slopeP90": 50.19096712983971,
+        "slopeP99": 75.3258441866305,
+        "steepFraction": 0.20984345374589278,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 10,
+                    "max": 187.3540991594278,
+                    "mean": 60.337273806292934,
+                    "p10": 6.198104414674243,
+                    "p50": 31.164047655808584,
+                    "p90": 138.26307950759647
+                },
+                "principalWidthMetres": {
+                    "count": 10,
+                    "max": 73.3099232603045,
+                    "mean": 23.243265796119438,
+                    "p10": 2.6520249545574197,
+                    "p50": 6.537686499652091,
+                    "p90": 64.13944086874628
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 13,
+                    "max": 327.5716697694224,
+                    "mean": 59.54082295724257,
+                    "p10": 10.35798527488722,
+                    "p50": 22.668044381619787,
+                    "p90": 77.02066577435518
+                },
+                "principalWidthMetres": {
+                    "count": 13,
+                    "max": 163.4322188802574,
+                    "mean": 27.955533948031267,
+                    "p10": 3.2835506910681467,
+                    "p50": 9.604022977096934,
+                    "p90": 52.59696790192699
+                }
+            }
+        }
+    },
+    {
+        "dryIslands": {
+            "areaM2": 30544,
+            "boundaryMetres": 204,
+            "interiorComponents": 2,
+            "islandsBelow64m2": 2,
+            "meanIslandPerimeterCompactness": 1.2732395447351628
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 886,
+                "max": 187,
+                "mean": 16.974040632054177,
+                "p10": 3,
+                "p50": 11,
+                "p90": 33
+            },
+            "lowP25RunsMetres": {
+                "count": 583,
+                "max": 193,
+                "mean": 24.555746140651802,
+                "p10": 6,
+                "p50": 18,
+                "p90": 49
+            }
+        },
+        "heightP10": 1.265624717688537,
+        "heightP90": 27.13490947840679,
+        "map": "zone2.mpr",
+        "max": 46.129838848164944,
+        "maxZ": 46.13054275512695,
+        "mean": 13.270655335126346,
+        "meanOverlayHeight": 1.1163964417430619,
+        "min": 0,
+        "overlayBoundaryMetres": 148,
+        "overlayFraction": 0.029166666666666667,
+        "physicalSlotEdgeFraction": 0.9570600632244468,
+        "physicalSlotPatchSquareMetres": {
+            "count": 7035,
+            "max": 32,
+            "mean": 4.366737739872068,
+            "p10": 4,
+            "p50": 4,
+            "p90": 4
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 64.94227211719438,
+                "highPassEnergy": 20.45956015778199,
+                "rmsSlope": 0.5036673013585362
+            },
+            "2": {
+                "heightDifferenceEnergy": 16.75778945386647,
+                "highPassEnergy": 3.07601525855514,
+                "rmsSlope": 2.046813954287643
+            },
+            "32": {
+                "heightDifferenceEnergy": 123.90528434402593,
+                "highPassEnergy": 48.357162551956804,
+                "rmsSlope": 0.3478523454602726
+            },
+            "4": {
+                "heightDifferenceEnergy": 24.09744183449154,
+                "highPassEnergy": 6.278737118967149,
+                "rmsSlope": 1.227228631778008
+            },
+            "8": {
+                "heightDifferenceEnergy": 37.31369158882886,
+                "highPassEnergy": 11.026284582779668,
+                "rmsSlope": 0.7635616747031316
+            }
+        },
+        "sectorsX": 5,
+        "sectorsY": 6,
+        "sha256": "dbecfb74a97558690572ff0a86c4ddb137eb5ff2b56cea378816977c68eb1f6d",
+        "shape": {
+            "anisotropy32m": 1.406941892907166,
+            "directionalEnergy32m": {
+                "0": 116.54940416366131,
+                "105": 110.82121300598213,
+                "120": 112.6136844308366,
+                "135": 119.37897164557883,
+                "15": 127.69853897872287,
+                "150": 119.72547497871787,
+                "165": 122.16315856815656,
+                "30": 138.33469905287862,
+                "45": 148.41862620892374,
+                "60": 142.81309052504633,
+                "75": 127.74744861427328,
+                "90": 105.49023165572683
+            },
+            "isolatedPeaksPerKm2": 325.5208333333333,
+            "isolatedProminentPeaks": 10,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.04309895833333333,
+            "sharpOneVertexPeaks": 39,
+            "sharpPeaksPerKm2": 1269.53125,
+            "smallNarrowProtrusions": 199,
+            "smallNarrowProtrusionsPerKm2": 6477.864583333333,
+            "upper30LargestComponentFraction": 0.969944182052383,
+            "upper30PrincipalSpanP90m": 14.143543474437823,
+            "upper30TinyComponentFraction": 0.0037569772434521255
+        },
+        "slopeP50": 32.34053117805086,
+        "slopeP90": 72.4700397436746,
+        "slopeP99": 85.86731136296594,
+        "steepFraction": 0.504461786690375,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 13,
+                    "max": 234.65925156034385,
+                    "mean": 31.17056947418885,
+                    "p10": 5.915373695676326,
+                    "p50": 8.457494263271872,
+                    "p90": 15.582506794224908
+                },
+                "principalWidthMetres": {
+                    "count": 13,
+                    "max": 120.98164167836917,
+                    "mean": 15.865870195485675,
+                    "p10": 2.424856265761753,
+                    "p50": 4.020745112831587,
+                    "p90": 10.576245903226582
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 2,
+                    "max": 259.1783101646782,
+                    "mean": 199.0652755257442,
+                    "p10": 138.95224088681024,
+                    "p50": 138.95224088681024,
+                    "p90": 138.95224088681024
+                },
+                "principalWidthMetres": {
+                    "count": 2,
+                    "max": 163.29762320457542,
+                    "mean": 128.04122956213814,
+                    "p10": 92.78483591970085,
+                    "p50": 92.78483591970085,
+                    "p90": 92.78483591970085
+                }
+            }
+        }
+    },
+    {
+        "dryIslands": {
+            "areaM2": 104120,
+            "boundaryMetres": 7242,
+            "interiorComponents": 49,
+            "islandsBelow64m2": 21,
+            "meanIslandPerimeterCompactness": 2.511278902678067
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 4065,
+                "max": 298,
+                "mean": 19.769987699877,
+                "p10": 4,
+                "p50": 13,
+                "p90": 45
+            },
+            "lowP25RunsMetres": {
+                "count": 4004,
+                "max": 513,
+                "mean": 19.43256743256743,
+                "p10": 4,
+                "p50": 10,
+                "p90": 47
+            }
+        },
+        "heightP10": 1.139938195000763,
+        "heightP90": 11.513375769507705,
+        "map": "zone7.mpr",
+        "max": 29.068423972519454,
+        "maxZ": 29.18197250366211,
+        "mean": 6.808751054972579,
+        "meanOverlayHeight": 5.092737413739316,
+        "min": 0,
+        "overlayBoundaryMetres": 1606,
+        "overlayFraction": 0.620849609375,
+        "physicalSlotEdgeFraction": 0.710480467216333,
+        "physicalSlotPatchSquareMetres": {
+            "count": 25891,
+            "max": 35580,
+            "mean": 6.328067668301727,
+            "p10": 4,
+            "p50": 4,
+            "p90": 8
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 13.15550119385741,
+                "highPassEnergy": 6.603875647250534,
+                "rmsSlope": 0.22669070677578626
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.2054240468029667,
+                "highPassEnergy": 0.3194301356270349,
+                "rmsSlope": 0.5489590255207958
+            },
+            "32": {
+                "heightDifferenceEnergy": 21.60208288404686,
+                "highPassEnergy": 13.191142320567339,
+                "rmsSlope": 0.14524387789663293
+            },
+            "4": {
+                "heightDifferenceEnergy": 2.8796388796978656,
+                "highPassEnergy": 0.932279793611239,
+                "rmsSlope": 0.42423746885573016
+            },
+            "8": {
+                "heightDifferenceEnergy": 6.525368437792665,
+                "highPassEnergy": 2.5755591502561628,
+                "rmsSlope": 0.31931000898892975
+            }
+        },
+        "sectorsX": 16,
+        "sectorsY": 10,
+        "semanticFractionsById": {
+            "1205054705": 0.0072018744604760146,
+            "1231626465": 0.00012331976815883587,
+            "1328004620": 0.002145763965963744,
+            "1364320201": 0.006683931434208904,
+            "1377718890": 0.02789493155752867,
+            "1406899604": 0.02286348501664817,
+            "1421619167": 0.0002713034899494389,
+            "1542990624": 0.01368849426563078,
+            "1684316616": 0.02207423850043162,
+            "1703457374": 0.03277839437661857,
+            "1715508247": 0.03489949438895055,
+            "1739831863": 0.25887285731902826,
+            "1974896831": 0.2099149093599704,
+            "1999753121": 0.0012331976815883586,
+            "2013464699": 0.014699716364533235,
+            "2020223877": 0.00014798372179060303,
+            "2049590246": 0.07515106671599457,
+            "2118435409": 0.004464175607349858,
+            "2124059537": 0.0014058453570107289,
+            "2142727678": 0.2634850166481687
+        },
+        "semanticPatchesSquareMetres": {
+            "count": 2844,
+            "max": 41588,
+            "mean": 58.19549929676512,
+            "p10": 4,
+            "p50": 8,
+            "p90": 48
+        },
+        "semanticTransitionFraction": 0.504248046875,
+        "sha256": "d91717981684360ac22f244b701ace2a1729599634235cc5cb2d516a11273966",
+        "shape": {
+            "anisotropy32m": 1.179431569799068,
+            "directionalEnergy32m": {
+                "0": 18.948956256038027,
+                "105": 21.21698932003614,
+                "120": 21.212523256179757,
+                "135": 21.273715609276916,
+                "15": 18.101195090012943,
+                "150": 21.349120940253147,
+                "165": 20.56849551927006,
+                "30": 18.139404594534863,
+                "45": 19.23743464372501,
+                "60": 20.23698205226734,
+                "75": 20.8513000423675,
+                "90": 20.85619965283198
+            },
+            "isolatedPeaksPerKm2": 12.20703125,
+            "isolatedProminentPeaks": 2,
+            "leastChangeDirectionDegrees": 15,
+            "narrowProtrusionAreaFraction": 0.00721435546875,
+            "sharpOneVertexPeaks": 20,
+            "sharpPeaksPerKm2": 122.0703125,
+            "smallNarrowProtrusions": 179,
+            "smallNarrowProtrusionsPerKm2": 1092.529296875,
+            "upper30LargestComponentFraction": 0.5739882169538194,
+            "upper30PrincipalSpanP90m": 49.30791617984004,
+            "upper30TinyComponentFraction": 0.004292106168890328
+        },
+        "slopeP50": 11.104217389031996,
+        "slopeP90": 48.917800014428,
+        "slopeP99": 73.11505851059587,
+        "steepFraction": 0.21636842137550688,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 65,
+                    "max": 218.82049892191213,
+                    "mean": 28.15277991588402,
+                    "p10": 7.6461011445434055,
+                    "p50": 20.041299915594983,
+                    "p90": 50.170664466293445
+                },
+                "principalWidthMetres": {
+                    "count": 65,
+                    "max": 117.74666967929467,
+                    "mean": 13.936207923324123,
+                    "p10": 3.3556871209410994,
+                    "p50": 9.102861874799096,
+                    "p90": 21.758517222038826
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 12,
+                    "max": 533.862576592565,
+                    "mean": 64.20779271831151,
+                    "p10": 5.05743638586471,
+                    "p50": 10.46680772841373,
+                    "p90": 56.92486944954416
+                },
+                "principalWidthMetres": {
+                    "count": 12,
+                    "max": 236.59605110313055,
+                    "mean": 30.645538717709176,
+                    "p10": 2.8695121614392627,
+                    "p50": 3.787991274938603,
+                    "p90": 32.827658403766804
+                }
+            }
+        }
+    },
+    {
+        "dryIslands": {
+            "areaM2": 63068,
+            "boundaryMetres": 1268,
+            "interiorComponents": 1,
+            "islandsBelow64m2": 1,
+            "meanIslandPerimeterCompactness": 1.2732395447351628
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 1905,
+                "max": 125,
+                "mean": 16.746456692913387,
+                "p10": 3,
+                "p50": 8,
+                "p90": 43
+            },
+            "lowP25RunsMetres": {
+                "count": 1063,
+                "max": 147,
+                "mean": 30.517403574788336,
+                "p10": 3,
+                "p50": 30,
+                "p90": 73
+            }
+        },
+        "heightP10": 3.73833829251545,
+        "heightP90": 15.216052491035324,
+        "map": "forest_river220.mpr",
+        "max": 23.636102845807585,
+        "maxZ": 64,
+        "mean": 10.323213366530554,
+        "meanOverlayHeight": 3.0000457770656803,
+        "min": 0,
+        "overlayBoundaryMetres": 1268,
+        "overlayFraction": 0.03765869140625,
+        "physicalSlotEdgeFraction": 0.8568836122047244,
+        "physicalSlotPatchSquareMetres": {
+            "count": 12678,
+            "max": 536,
+            "mean": 5.16926960088342,
+            "p10": 4,
+            "p50": 4,
+            "p90": 4
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 14.38639983097648,
+                "highPassEnergy": 6.0101402772719466,
+                "rmsSlope": 0.23705879932993812
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.5421022706612597,
+                "highPassEnergy": 0.49018987812200016,
+                "rmsSlope": 0.6209070523559181
+            },
+            "32": {
+                "heightDifferenceEnergy": 28.25612831221826,
+                "highPassEnergy": 16.25374748991747,
+                "rmsSlope": 0.16611404306951488
+            },
+            "4": {
+                "heightDifferenceEnergy": 3.502686170472178,
+                "highPassEnergy": 1.345419748842449,
+                "rmsSlope": 0.46788661623785643
+            },
+            "8": {
+                "heightDifferenceEnergy": 7.02996404287594,
+                "highPassEnergy": 2.7517592391638948,
+                "rmsSlope": 0.3314259919951007
+            }
+        },
+        "sectorsX": 8,
+        "sectorsY": 8,
+        "semanticFractionsById": {
+            "1205054705": 0.19424638849277698,
+            "1272292166": 0.10713621427242855,
+            "1421619167": 0.01178002356004712,
+            "1439171908": 0.030814061628123255,
+            "1463645718": 0.02232004464008928,
+            "1791160775": 0.024862049724099448,
+            "1974896831": 0.2384524769049538,
+            "2024815995": 0.041726083452166905,
+            "2142727678": 0.32866265732531463
+        },
+        "semanticPatchesSquareMetres": {
+            "count": 3383,
+            "max": 844,
+            "mean": 19.676027194797516,
+            "p10": 4,
+            "p50": 4,
+            "p90": 40
+        },
+        "semanticTransitionFraction": 0.7578125,
+        "sha256": "a1048322acf549e02a38ef8f838926ce5466827cabc8f526c520986b61dabe02",
+        "shape": {
+            "anisotropy32m": 1.7130128665166144,
+            "directionalEnergy32m": {
+                "0": 27.36412561020005,
+                "105": 28.555708916137323,
+                "120": 31.78119125605809,
+                "135": 33.79612662299306,
+                "15": 23.26697502716134,
+                "150": 33.709144413840264,
+                "165": 31.281701265284696,
+                "30": 20.53830172246962,
+                "45": 19.72905591288229,
+                "60": 20.26566773873743,
+                "75": 22.25016577010271,
+                "90": 24.973493677647202
+            },
+            "isolatedPeaksPerKm2": 1434.326171875,
+            "isolatedProminentPeaks": 94,
+            "leastChangeDirectionDegrees": 45,
+            "narrowProtrusionAreaFraction": 0.0220489501953125,
+            "sharpOneVertexPeaks": 125,
+            "sharpPeaksPerKm2": 1907.3486328125,
+            "smallNarrowProtrusions": 242,
+            "smallNarrowProtrusionsPerKm2": 3692.626953125,
+            "upper30LargestComponentFraction": 0.7208680292707544,
+            "upper30PrincipalSpanP90m": 52.28116188305275,
+            "upper30TinyComponentFraction": 0.0051476154428463285
+        },
+        "slopeP50": 13.946112235548043,
+        "slopeP90": 55.77063616047352,
+        "slopeP99": 71.23276371161921,
+        "steepFraction": 0.34908112264513647,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 35,
+                    "max": 144.93292230599343,
+                    "mean": 18.042037143595596,
+                    "p10": 5.053762269352201,
+                    "p50": 8.338669543238353,
+                    "p90": 31.646877754806745
+                },
+                "principalWidthMetres": {
+                    "count": 35,
+                    "max": 133.4309308682394,
+                    "mean": 10.70440333590065,
+                    "p10": 3.044449432757894,
+                    "p50": 4.775590289897012,
+                    "p90": 16.588032664735607
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 25,
+                    "max": 322.52643033630164,
+                    "mean": 22.051378389747224,
+                    "p10": 5.830951894841766,
+                    "p50": 8.236330542912794,
+                    "p90": 14.556515924370109
+                },
+                "principalWidthMetres": {
+                    "count": 25,
+                    "max": 78.24265240058531,
+                    "mean": 7.906319528040362,
+                    "p10": 3.0361462800985533,
+                    "p50": 4.0327014872171,
+                    "p90": 7.493428212206485
+                }
+            }
+        }
+    },
+    {
+        "dryIslands": {
+            "areaM2": 65536,
+            "boundaryMetres": 0,
+            "interiorComponents": 0,
+            "islandsBelow64m2": 0,
+            "meanIslandPerimeterCompactness": 0
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 2098,
+                "max": 89,
+                "mean": 14.791229742612012,
+                "p10": 3,
+                "p50": 9,
+                "p90": 33
+            },
+            "lowP25RunsMetres": {
+                "count": 1117,
+                "max": 184,
+                "mean": 29.01521933751119,
+                "p10": 3,
+                "p50": 23,
+                "p90": 58
+            }
+        },
+        "heightP10": 0.7754024567025254,
+        "heightP90": 26.624429694056612,
+        "map": "mountain_pass220.mpr",
+        "max": 47.663813229571986,
+        "maxZ": 64,
+        "mean": 14.628337390740517,
+        "min": 0,
+        "overlayBoundaryMetres": 0,
+        "overlayFraction": 0,
+        "physicalSlotEdgeFraction": 0.8593134842519685,
+        "physicalSlotPatchSquareMetres": {
+            "count": 12628,
+            "max": 384,
+            "mean": 5.189737092176117,
+            "p10": 4,
+            "p50": 4,
+            "p90": 8
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 80.005348844189,
+                "highPassEnergy": 34.44865250145987,
+                "rmsSlope": 0.5590356821550958
+            },
+            "2": {
+                "heightDifferenceEnergy": 15.441457329646157,
+                "highPassEnergy": 6.684714935019534,
+                "rmsSlope": 1.9647809884085146
+            },
+            "32": {
+                "heightDifferenceEnergy": 143.55747529607027,
+                "highPassEnergy": 67.07342916667595,
+                "rmsSlope": 0.3744233525954526
+            },
+            "4": {
+                "heightDifferenceEnergy": 27.434764409087652,
+                "highPassEnergy": 12.419954812317314,
+                "rmsSlope": 1.3094551445421787
+            },
+            "8": {
+                "heightDifferenceEnergy": 46.421014811456025,
+                "highPassEnergy": 20.972235872669174,
+                "rmsSlope": 0.8516621140035527
+            }
+        },
+        "sectorsX": 8,
+        "sectorsY": 8,
+        "semanticFractionsById": {
+            "1205054705": 0.18476036952073904,
+            "1272292166": 0.038502077004154006,
+            "1421619167": 0.003596007192014384,
+            "1463645718": 0.052948105896211795,
+            "1791160775": 0.046314092628185255,
+            "1974896831": 0.23101246202492404,
+            "2024815995": 0.0897761795523591,
+            "2142727678": 0.35309070618141236
+        },
+        "semanticPatchesSquareMetres": {
+            "count": 3403,
+            "max": 1696,
+            "mean": 19.560387893035557,
+            "p10": 4,
+            "p50": 4,
+            "p90": 36
+        },
+        "semanticTransitionFraction": 0.75616455078125,
+        "sha256": "58bd5371aee0cf15267494641de0111b7e0603eb4a1bfb9cffa534c7f1346d2c",
+        "shape": {
+            "anisotropy32m": 1.5902870499521786,
+            "directionalEnergy32m": {
+                "0": 102.76773813548103,
+                "105": 140.67634726589216,
+                "120": 128.1958509908116,
+                "135": 115.14927104647616,
+                "15": 116.84943224576814,
+                "150": 100.78407572048464,
+                "165": 96.22957600079218,
+                "30": 133.08529921142792,
+                "45": 147.28674148561578,
+                "60": 153.03264853644876,
+                "75": 152.36808772401096,
+                "90": 148.4242151673286
+            },
+            "isolatedPeaksPerKm2": 76.2939453125,
+            "isolatedProminentPeaks": 5,
+            "leastChangeDirectionDegrees": 165,
+            "narrowProtrusionAreaFraction": 0.1559295654296875,
+            "sharpOneVertexPeaks": 87,
+            "sharpPeaksPerKm2": 1327.5146484375,
+            "smallNarrowProtrusions": 712,
+            "smallNarrowProtrusionsPerKm2": 10864.2578125,
+            "upper30LargestComponentFraction": 0.5660358314408277,
+            "upper30PrincipalSpanP90m": 131.19933843543498,
+            "upper30TinyComponentFraction": 0.00116073681554378
+        },
+        "slopeP50": 34.32944796391285,
+        "slopeP90": 78.78512827985148,
+        "slopeP99": 83.66360457813012,
+        "steepFraction": 0.5101114955786236,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 19,
+                    "max": 125.53679428864089,
+                    "mean": 32.2852071136758,
+                    "p10": 6.9134025905640195,
+                    "p50": 9.499843771071207,
+                    "p90": 82.13925071046876
+                },
+                "principalWidthMetres": {
+                    "count": 19,
+                    "max": 69.12358571497876,
+                    "mean": 17.354152213529336,
+                    "p10": 2.9407614519218126,
+                    "p50": 5.992596274618491,
+                    "p90": 45.747351557610514
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 14,
+                    "max": 238.916084911259,
+                    "mean": 30.617623104899163,
+                    "p10": 4.911299126530073,
+                    "p50": 7.2789972494537425,
+                    "p90": 41.513744086128696
+                },
+                "principalWidthMetres": {
+                    "count": 14,
+                    "max": 98.17804594109252,
+                    "mean": 14.465510296739486,
+                    "p10": 3.5931423048334827,
+                    "p50": 5.085012386965959,
+                    "p90": 21.975052814949173
+                }
+            }
+        }
+    },
+    {
+        "dryIslands": {
+            "areaM2": 39004,
+            "boundaryMetres": 4082,
+            "interiorComponents": 54,
+            "islandsBelow64m2": 50,
+            "meanIslandPerimeterCompactness": 1.9238631601245435
+        },
+        "featureRunProxies": {
+            "highP75RunsMetres": {
+                "count": 1008,
+                "max": 123,
+                "mean": 32.30357142857143,
+                "p10": 3,
+                "p50": 15,
+                "p90": 90
+            },
+            "lowP25RunsMetres": {
+                "count": 987,
+                "max": 179,
+                "mean": 32.723404255319146,
+                "p10": 4,
+                "p50": 22,
+                "p90": 77
+            }
+        },
+        "heightP10": 0,
+        "heightP90": 20.054993514915694,
+        "map": "coast_bay220.mpr",
+        "max": 27.734798199435417,
+        "maxZ": 64,
+        "mean": 8.703016100153317,
+        "meanOverlayHeight": 6.00009155413136,
+        "min": 0,
+        "overlayBoundaryMetres": 4082,
+        "overlayFraction": 0.40484619140625,
+        "physicalSlotEdgeFraction": 0.8283095472440944,
+        "physicalSlotPatchSquareMetres": {
+            "count": 12319,
+            "max": 3012,
+            "mean": 5.319912330546311,
+            "p10": 4,
+            "p50": 4,
+            "p90": 4
+        },
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 12.296617851997173,
+                "highPassEnergy": 5.243921689611758,
+                "rmsSlope": 0.2191658355774548
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.1471837476412805,
+                "highPassEnergy": 0.323053166273294,
+                "rmsSlope": 0.5355333200747832
+            },
+            "32": {
+                "heightDifferenceEnergy": 23.220454030765055,
+                "highPassEnergy": 11.260609930316535,
+                "rmsSlope": 0.15058626975730224
+            },
+            "4": {
+                "heightDifferenceEnergy": 2.8283932410320682,
+                "highPassEnergy": 1.0056759906763146,
+                "rmsSlope": 0.42044568919719494
+            },
+            "8": {
+                "heightDifferenceEnergy": 6.056786361266505,
+                "highPassEnergy": 2.3047516440407265,
+                "rmsSlope": 0.30763173908878316
+            }
+        },
+        "sectorsX": 8,
+        "sectorsY": 8,
+        "semanticFractionsById": {
+            "1205054705": 0.09151218302436605,
+            "1272292166": 0.0511501023002046,
+            "1377718890": 0.028148056296112594,
+            "1421619167": 0.003472006944013888,
+            "1439171908": 0.0635501271002542,
+            "1463645718": 0.023622047244094488,
+            "1703457374": 0.04085808171616343,
+            "1739831863": 0.21321842643685288,
+            "1791160775": 0.026226052452104905,
+            "1974896831": 0.16225432450864902,
+            "2049590246": 0.050344100688201374,
+            "2142727678": 0.24564449128898258
+        },
+        "semanticPatchesSquareMetres": {
+            "count": 3711,
+            "max": 4556,
+            "mean": 17.936944219886822,
+            "p10": 4,
+            "p50": 4,
+            "p90": 32
+        },
+        "semanticTransitionFraction": 0.75030517578125,
+        "sha256": "e3ff481c008d2ad23df0d2c729ba5e0834d3ee62e44095fc7a40451d20c76966",
+        "shape": {
+            "anisotropy32m": 1.2410417478262776,
+            "directionalEnergy32m": {
+                "0": 23.8218048594433,
+                "105": 19.695526900996615,
+                "120": 20.467273735492117,
+                "135": 21.81502201980632,
+                "15": 22.82081664628664,
+                "150": 23.174418659530666,
+                "165": 24.063095550114454,
+                "30": 22.13809533314637,
+                "45": 21.444284849825856,
+                "60": 20.386821051822587,
+                "75": 19.521513615108685,
+                "90": 19.389432782790504
+            },
+            "isolatedPeaksPerKm2": 427.24609375,
+            "isolatedProminentPeaks": 28,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.0085601806640625,
+            "sharpOneVertexPeaks": 60,
+            "sharpPeaksPerKm2": 915.52734375,
+            "smallNarrowProtrusions": 150,
+            "smallNarrowProtrusionsPerKm2": 2288.818359375,
+            "upper30LargestComponentFraction": 0.9819824366609468,
+            "upper30PrincipalSpanP90m": 17.261714263631724,
+            "upper30TinyComponentFraction": 0.0013626728575754517
+        },
+        "slopeP50": 11.670621245526167,
+        "slopeP90": 52.84124595832357,
+        "slopeP99": 68.54730822918893,
+        "steepFraction": 0.272079969242599,
+        "thresholdComponents": {
+            "highP75": {
+                "principalLengthMetres": {
+                    "count": 9,
+                    "max": 114.0241913564058,
+                    "mean": 31.032881379109863,
+                    "p10": 5.284805111899067,
+                    "p50": 9.413607215671902,
+                    "p90": 99.90799961838724
+                },
+                "principalWidthMetres": {
+                    "count": 9,
+                    "max": 96.65142364343096,
+                    "mean": 23.456746826795765,
+                    "p10": 2.90975550400573,
+                    "p50": 3.7211001451664463,
+                    "p90": 78.40249040945424
+                }
+            },
+            "lowP25": {
+                "principalLengthMetres": {
+                    "count": 12,
+                    "max": 137.91086582667893,
+                    "mean": 32.603268081783646,
+                    "p10": 5.963197932042877,
+                    "p50": 8.598509640530162,
+                    "p90": 72.81338902316915
+                },
+                "principalWidthMetres": {
+                    "count": 12,
+                    "max": 93.74894956731112,
+                    "mean": 19.850491264537826,
+                    "p10": 3.2887245419257956,
+                    "p50": 4.50455793778657,
+                    "p90": 32.38633373503021
+                }
+            }
+        }
+    }
+]

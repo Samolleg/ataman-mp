@@ -208,7 +208,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                 const auto requestedMaterial=plan.args["material"].toInt();auto atlas=map.state.atlas->createStagingCopy();
                 auto terrain=model;atlas->setDistributionSeed(seed);
                 if(!terrain.initializeVirtualMaterialField(layer,atlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically))return fail(report.toText());
-                natural::Grid drainage;QVector<double> waterDistance;double rockCut=32;
+                natural::Grid drainage;QVector<double> waterDistance;QVector<quint8> rockMask,beachMask;double rockCut=32;
                 if(automatic){drainage.width=terrain.vertexCountX();drainage.height=terrain.vertexCountY();drainage.origin=offset;
                     drainage.heights.resize(drainage.width*drainage.height);
                     for(int y=0;y<drainage.height;++y)for(int x=0;x<drainage.width;++x)drainage.heights[y*drainage.width+x]=z(terrain,x,y);
@@ -219,13 +219,23 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                     for(int head=0;head<queue.size();++head){const int i=queue[head];for(int d:{-1,1,-vw,vw}){const int j=i+d;
                         if(j<0||j>=waterDistance.size()||std::abs(j%vw-i%vw)+std::abs(j/vw-i/vw)!=1)continue;
                         if(waterDistance[j]>waterDistance[i]+2){waterDistance[j]=waterDistance[i]+2;queue.append(j);}}}
-                    QVector<double> scores;const auto parameters=plan.args["parameters"].toObject();
+                    QVector<double> scores,rockScores(vw*vh);const auto parameters=plan.args["parameters"].toObject();
                     for(int y=0;y<vh;++y)for(int x=0;x<vw;++x){const auto p=offset+QPointF(x*2,y*2);if(weight(area,b,p.x(),p.y())<=0)continue;
-                        const double height=z(terrain,x*2,y*2),slope=std::atan(std::hypot((z(terrain,x*2+1,y*2)-z(terrain,x*2-1,y*2))/2,(z(terrain,x*2,y*2+1)-z(terrain,x*2,y*2-1))/2))*180/3.141592653589793;
-                        const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/6,p.y()/8,seed^1801,3);
-                        scores.append((waterDistance[y*vw+x]<12&&height<level+2)?-1000:slope+jitter*4);}
+                        const double height=z(terrain,x*2,y*2),slope=std::atan(std::hypot((z(terrain,x*2+3,y*2)-z(terrain,x*2-3,y*2))/6,(z(terrain,x*2,y*2+3)-z(terrain,x*2,y*2-3))/6))*180/3.141592653589793;
+                        rockScores[y*vw+x]=(waterDistance[y*vw+x]<12&&height<level+2)?-1000:slope;}
+                    rockScores=natural::blurred(rockScores,vw,vh,1);
+                    for(int y=0;y<vh;++y)for(int x=0;x<vw;++x){const auto p=offset+QPointF(x*2,y*2);if(weight(area,b,p.x(),p.y())<=0)continue;
+                        rockScores[y*vw+x]+=parameters["boundaryNoise"].toDouble(1.5)*natural::noise(p.x()/22,p.y()/35,seed^1801);
+                        scores.append(rockScores[y*vw+x]);}
                     std::sort(scores.begin(),scores.end());
                     if(!scores.isEmpty())rockCut=qMax(parameters["rockSlope"].toDouble(32),scores[qBound(0,int((1-parameters["rockFraction"].toDouble(0.1))*(scores.size()-1)),scores.size()-1)]);
+                    rockMask.resize(vw*vh);beachMask.fill(0,vw*vh);
+                    for(int y=0;y<vh;++y)for(int x=0;x<vw;++x){const int i=y*vw+x;rockMask[i]=rockScores[i]>=rockCut;
+                        if(plan.args["preset"]=="coast"&&waterDistance[i]>0&&waterDistance[i]<parameters["shoreWidth"].toDouble(10)&&z(terrain,x*2,y*2)<level+2.2){
+                            const double slope=std::atan(std::hypot((z(terrain,x*2+3,y*2)-z(terrain,x*2-3,y*2))/6,(z(terrain,x*2,y*2+3)-z(terrain,x*2,y*2-3))/6))*180/3.141592653589793;
+                            beachMask[i]=slope<parameters["beachSlope"].toDouble(18)&&natural::noise((x*2+offset.x())/65,(y*2+offset.y())/80,seed^3391)>-0.15;}}
+                    natural::coherentMask(rockMask,vw,vh,0,8,false,[&](){return cancel->load();});
+                    if(plan.args["preset"]=="coast")natural::coherentMask(beachMask,vw,vh,1,12,true,[&](){return cancel->load();});
                 }
                 STerrainTileCommand semantic;semantic.description=plan.description;semantic.semanticAudit.valid=true;
                 semantic.semanticAudit.layer=layer;semantic.semanticAudit.requestedMaterialId=requestedMaterial;
@@ -250,16 +260,18 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                             if(patch< -0.18)material=palette["dark"].toInt(material);
                             else if(patch>0.23)material=palette["light"].toInt(material);
                             else if(patch>0.09&&patch<(plan.args["preset"]=="mountains"?0.13:0.19))material=palette["forest"].toInt(material);
-                            if(wet>0.8&&distance<5&&height>water-0.2)material=palette["mud"].toInt(material);
+                            if(wet>0.8&&distance<5&&height>water-0.2&&(plan.args["preset"]!="coast"||drainage.wetness.value(vy*drainage.width+vx)>0.6))material=palette["mud"].toInt(material);
                             if(plan.args["preset"]=="coast"&&height<water){
-                                if(patch>0.02)material=palette["underwaterRock"].toInt(material);
-                                else if(patch< -0.34)material=palette["underwaterSand"].toInt(material);
+                                const double seabed=natural::noise(p.x()/38,p.y()/52,seed^7753);
+                                material=water-height>2.5&&seabed>-0.15?palette["underwaterRock"].toInt(material):palette["underwaterSand"].toInt(material);
                             }
-                            if(distance>0&&distance<parameters["shoreWidth"].toDouble(1.5)+1+jitter&&height<water+1.8)
-                                material=plan.args["preset"]=="coast"?palette["shore"].toInt(material):palette["mud"].toInt(material);
-                            if(slope+jitter*4>=rockCut&&!(distance<12&&height<water+2)){
+                            if(plan.args["preset"]=="coast"){
+                                if(beachMask[y*(nx+1)+x])material=palette["shore"].toInt(material);
+                            }else if(distance>0&&distance<parameters["shoreWidth"].toDouble(1.5)+1+jitter&&height<water+1.8)material=palette["mud"].toInt(material);
+                            if(rockMask[y*(nx+1)+x]&&!(distance<12&&height<water+2)){
                                 material=palette["rock"].toInt(material);
-                                const double variant=natural::noise(p.x()/7,p.y()/9,seed^382);
+                                const double angle=parameters["ridgeDirection"].toDouble(90)*3.141592653589793/180;
+                                const double variant=natural::noise((p.x()*std::cos(angle)+p.y()*std::sin(angle))/55,(-p.x()*std::sin(angle)+p.y()*std::cos(angle))/15,seed^382);
                                 if(variant>0.28)material=palette["rock2"].toInt(material);
                                 else if(variant< -0.35)material=palette["rock3"].toInt(material);
                             }

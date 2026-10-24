@@ -1,4 +1,4 @@
-{"schemaVersion":2,"measurementDate":"2026-10-24","units":"metres and degrees","method":"1m central differences; P25/P75 connected components with covariance principal spans; bound Modern131 material field; overlay proximity includes swamp surfaces","references":[
+{"schemaVersion":3,"measurementDate":"2026-10-24","units":"metres and degrees","method":"1m central differences; P25/P75 connected components with covariance principal spans; bound Modern131 material field; overlay proximity includes swamp surfaces","references":[
     {
         "featureRunProxies": {
             "highP75RunsMetres": {
@@ -1516,7 +1516,7 @@
         "steepFraction": 0.21636842137550688
     }
 ]
-,"presets":[
+,"r2Presets":[
     {
         "computeMs": 281,
         "heightP10": 7.147788192494676,
@@ -1877,6 +1877,583 @@
                 "highPassEnergy": 2.412564883510043,
                 "rmsSlope": 0.347316570320472
             }
+        },
+        "slopeP50": 17.938584679839558,
+        "slopeP90": 52.444711623994415,
+        "slopeP99": 67.86090591451442,
+        "steepFraction": 0.34066897347174163
+    }
+],"presets":[
+    {
+        "computeMs": 229,
+        "heightP10": 7.17505254784275,
+        "heightP90": 16.23648722141639,
+        "max": 22.400183783617038,
+        "mean": 12.74190807890242,
+        "min": 2.0661717532981303,
+        "parameters": {
+            "amplitude": 22,
+            "anisotropy": 3,
+            "baseHeight": 4,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 9,
+            "detailThreshold": 0.32,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 66,
+            "patchScale": 9,
+            "rain": 0.04,
+            "ridge": 0.1,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 55,
+            "shoreWidth": 1.5,
+            "streamPower": 0,
+            "talus": 0.65,
+            "terrace": 0.85,
+            "thermalIterations": 2,
+            "warp": 30,
+            "waterLevel": 3
+        },
+        "preset": "plain",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 9.616038779902798,
+                "highPassEnergy": 4.221064376284332,
+                "rmsSlope": 0.19381086523720828
+            },
+            "2": {
+                "heightDifferenceEnergy": 0.7725564257356418,
+                "highPassEnergy": 0.18243493258080648,
+                "rmsSlope": 0.439475945227848
+            },
+            "32": {
+                "heightDifferenceEnergy": 17.520306779233156,
+                "highPassEnergy": 8.99384023663352,
+                "rmsSlope": 0.13080395479149276
+            },
+            "4": {
+                "heightDifferenceEnergy": 2.0914562670745154,
+                "highPassEnergy": 0.6908475769797152,
+                "rmsSlope": 0.3615467005687608
+            },
+            "8": {
+                "heightDifferenceEnergy": 4.749445924457687,
+                "highPassEnergy": 1.8600472166867354,
+                "rmsSlope": 0.27241529430201117
+            }
+        },
+        "shape": {
+            "anisotropy32m": 1.3605286589423364,
+            "directionalEnergy32m": {
+                "0": 17.62954760403326,
+                "105": 14.335286408899803,
+                "120": 13.974955089445844,
+                "135": 14.74014165362989,
+                "15": 18.44127385989563,
+                "150": 15.828937499452122,
+                "165": 16.93377137656759,
+                "30": 18.980331411202666,
+                "45": 19.013326906623135,
+                "60": 17.973932557956413,
+                "75": 16.55703448681764,
+                "90": 15.088373887481591
+            },
+            "isolatedPeaksPerKm2": 15.2587890625,
+            "isolatedProminentPeaks": 1,
+            "leastChangeDirectionDegrees": 120,
+            "narrowProtrusionAreaFraction": 0.002227783203125,
+            "sharpOneVertexPeaks": 14,
+            "sharpPeaksPerKm2": 213.623046875,
+            "smallNarrowProtrusions": 38,
+            "smallNarrowProtrusionsPerKm2": 579.833984375,
+            "upper30LargestComponentFraction": 0.3796114055008832,
+            "upper30PrincipalSpanP90m": 46.62382772180541,
+            "upper30TinyComponentFraction": 0.014887711329800657
+        },
+        "slopeP50": 5.9535850495068,
+        "slopeP90": 47.99421395112659,
+        "slopeP99": 63.81951149666547,
+        "steepFraction": 0.24310649750096117
+    },
+    {
+        "computeMs": 239,
+        "heightP10": 12.658082858612254,
+        "heightP90": 26.64205264504519,
+        "max": 37.47567724365339,
+        "mean": 18.497521135630922,
+        "min": 0.48893556041466485,
+        "parameters": {
+            "amplitude": 42,
+            "anisotropy": 3,
+            "baseHeight": 2,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 66,
+            "patchScale": 9,
+            "rain": 0.04,
+            "ridge": 0.35,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 70,
+            "shoreWidth": 1.5,
+            "streamPower": 0,
+            "talus": 0.65,
+            "terrace": 0.55,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "hills",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 27.96196253529459,
+                "highPassEnergy": 12.606847146782448,
+                "rmsSlope": 0.330494199878749
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.7880068540012295,
+                "highPassEnergy": 0.3900667935192286,
+                "rmsSlope": 0.6685818674629962
+            },
+            "32": {
+                "heightDifferenceEnergy": 51.000982586971304,
+                "highPassEnergy": 28.160524517372703,
+                "rmsSlope": 0.22317178822061978
+            },
+            "4": {
+                "heightDifferenceEnergy": 5.038518379311841,
+                "highPassEnergy": 1.446042482883401,
+                "rmsSlope": 0.5611661061637544
+            },
+            "8": {
+                "heightDifferenceEnergy": 12.668912403364741,
+                "highPassEnergy": 4.60994782691772,
+                "rmsSlope": 0.4449176960995978
+            }
+        },
+        "shape": {
+            "anisotropy32m": 1.4757990623923554,
+            "directionalEnergy32m": {
+                "0": 50.18439978890827,
+                "105": 41.3512062417214,
+                "120": 38.32300846860398,
+                "135": 38.7138071741158,
+                "15": 53.62325444912922,
+                "150": 42.18672445028544,
+                "165": 46.925313845649036,
+                "30": 56.121510929863895,
+                "45": 56.55705996602005,
+                "60": 54.76584858968767,
+                "75": 50.66636241549529,
+                "90": 46.122328494751194
+            },
+            "isolatedPeaksPerKm2": 259.3994140625,
+            "isolatedProminentPeaks": 17,
+            "leastChangeDirectionDegrees": 120,
+            "narrowProtrusionAreaFraction": 0.01116943359375,
+            "sharpOneVertexPeaks": 57,
+            "sharpPeaksPerKm2": 869.7509765625,
+            "smallNarrowProtrusions": 99,
+            "smallNarrowProtrusionsPerKm2": 1510.6201171875,
+            "upper30LargestComponentFraction": 0.8798889730002524,
+            "upper30PrincipalSpanP90m": 64.54067252709312,
+            "upper30TinyComponentFraction": 0.00116073681554378
+        },
+        "slopeP50": 22.718809960224714,
+        "slopeP90": 57.31025597271125,
+        "slopeP99": 72.2257858823136,
+        "steepFraction": 0.36879661668589003
+    },
+    {
+        "computeMs": 311,
+        "heightP10": 5.9753809689905735,
+        "heightP90": 31.45171354833656,
+        "max": 48.12412859711619,
+        "mean": 18.726489154773926,
+        "min": 0,
+        "parameters": {
+            "amplitude": 48,
+            "anisotropy": 3,
+            "baseHeight": 2,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 2.2,
+            "detailThreshold": 0.16,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 74,
+            "patchScale": 9,
+            "rain": 0.04,
+            "ridge": 0.82,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.19,
+            "rockSlope": 32,
+            "scale": 105,
+            "shoreWidth": 1.5,
+            "streamPower": 0.18,
+            "talus": 0.65,
+            "terrace": 0.9,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "mountains",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 91.45989643722594,
+                "highPassEnergy": 40.157177799358735,
+                "rmsSlope": 0.5977166723941317
+            },
+            "2": {
+                "heightDifferenceEnergy": 5.257358143282791,
+                "highPassEnergy": 0.6095481735219825,
+                "rmsSlope": 1.1464464818824722
+            },
+            "32": {
+                "heightDifferenceEnergy": 147.32497715230684,
+                "highPassEnergy": 79.04613496171575,
+                "rmsSlope": 0.37930469019022117
+            },
+            "4": {
+                "heightDifferenceEnergy": 17.225390514768158,
+                "highPassEnergy": 3.824248377475407,
+                "rmsSlope": 1.0375870600450885
+            },
+            "8": {
+                "heightDifferenceEnergy": 45.51333103213208,
+                "highPassEnergy": 15.50944720002727,
+                "rmsSlope": 0.8432946088865171
+            }
+        },
+        "shape": {
+            "anisotropy32m": 1.4554173048865562,
+            "directionalEnergy32m": {
+                "0": 163.16081935799733,
+                "105": 132.34601412861323,
+                "120": 145.9009134439277,
+                "135": 147.54301788300427,
+                "15": 165.19363518962206,
+                "150": 149.2827047922338,
+                "165": 156.12386095691735,
+                "30": 161.45562736443503,
+                "45": 154.31030864788596,
+                "60": 139.75880111409452,
+                "75": 117.0043939427336,
+                "90": 113.5025910678575
+            },
+            "isolatedPeaksPerKm2": 503.5400390625,
+            "isolatedProminentPeaks": 33,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.0542449951171875,
+            "sharpOneVertexPeaks": 46,
+            "sharpPeaksPerKm2": 701.904296875,
+            "smallNarrowProtrusions": 60,
+            "smallNarrowProtrusionsPerKm2": 915.52734375,
+            "upper30LargestComponentFraction": 0.2413827908150391,
+            "upper30PrincipalSpanP90m": 159.10940452759004,
+            "upper30TinyComponentFraction": 0
+        },
+        "slopeP50": 35.92068927109591,
+        "slopeP90": 72.5397366875046,
+        "slopeP99": 74.7404701414686,
+        "steepFraction": 0.5468665897731642
+    },
+    {
+        "computeMs": 263,
+        "heightP10": 2.226267949407112,
+        "heightP90": 18.77106540373771,
+        "max": 29.082845812498356,
+        "mean": 8.173080724567132,
+        "min": 0,
+        "parameters": {
+            "amplitude": 20,
+            "anisotropy": 3,
+            "baseHeight": 4,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 5.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 60,
+            "patchScale": 14,
+            "rain": 0.04,
+            "ridge": 0.18,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.1,
+            "rockSlope": 32,
+            "scale": 90,
+            "shoreWidth": 10,
+            "streamPower": 0,
+            "talus": 0.65,
+            "terrace": 0.65,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 6
+        },
+        "preset": "coast",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 4.4499755936598335,
+                "highPassEnergy": 1.0819395140864956,
+                "rmsSlope": 0.13184353288172204
+            },
+            "2": {
+                "heightDifferenceEnergy": 0.2623827306120402,
+                "highPassEnergy": 0.03556165402079789,
+                "rmsSlope": 0.2561165411546276
+            },
+            "32": {
+                "heightDifferenceEnergy": 11.001107238129073,
+                "highPassEnergy": 2.7881759067141028,
+                "rmsSlope": 0.10364974089323824
+            },
+            "4": {
+                "heightDifferenceEnergy": 0.8107379695630346,
+                "highPassEnergy": 0.1740427489391082,
+                "rmsSlope": 0.22510247243797582
+            },
+            "8": {
+                "heightDifferenceEnergy": 2.0625778006558755,
+                "highPassEnergy": 0.5589363545287,
+                "rmsSlope": 0.1795209685113359
+            }
+        },
+        "shape": {
+            "anisotropy32m": 2.1521168911530126,
+            "directionalEnergy32m": {
+                "0": 14.489540666043188,
+                "105": 7.660138147437364,
+                "120": 9.233684524761236,
+                "135": 11.549056831996884,
+                "15": 13.804721443343366,
+                "150": 13.218687394262053,
+                "165": 14.235599269045114,
+                "30": 12.576786919378794,
+                "45": 10.536278029831008,
+                "60": 8.44459556178674,
+                "75": 7.397840739213521,
+                "90": 6.73269222764211
+            },
+            "isolatedPeaksPerKm2": 0,
+            "isolatedProminentPeaks": 0,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.005218505859375,
+            "sharpOneVertexPeaks": 0,
+            "sharpPeaksPerKm2": 0,
+            "smallNarrowProtrusions": 11,
+            "smallNarrowProtrusionsPerKm2": 167.8466796875,
+            "upper30LargestComponentFraction": 1,
+            "upper30PrincipalSpanP90m": 279.64882922007956,
+            "upper30TinyComponentFraction": 0
+        },
+        "slopeP50": 6.823705425080149,
+        "slopeP90": 26.155083215181126,
+        "slopeP99": 57.11440166088996,
+        "steepFraction": 0.07704728950403691
+    },
+    {
+        "computeMs": 237,
+        "heightP10": 3.3205636157366434,
+        "heightP90": 7.778895979961094,
+        "max": 12.774905465712143,
+        "mean": 5.733719189609909,
+        "min": 0,
+        "parameters": {
+            "amplitude": 8,
+            "anisotropy": 3,
+            "baseHeight": 3,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 66,
+            "patchScale": 9,
+            "rain": 0.04,
+            "ridge": 0,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 35,
+            "shoreWidth": 1.5,
+            "streamPower": 0,
+            "talus": 0.65,
+            "terrace": 0.75,
+            "thermalIterations": 2,
+            "warp": 24,
+            "waterLevel": 6
+        },
+        "preset": "swamp",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 3.1968440040201718,
+                "highPassEnergy": 1.563179353883881,
+                "rmsSlope": 0.11174825229373297
+            },
+            "2": {
+                "heightDifferenceEnergy": 0.6161908695849977,
+                "highPassEnergy": 0.22937309892871816,
+                "rmsSlope": 0.39248913029057175
+            },
+            "32": {
+                "heightDifferenceEnergy": 4.945745658815863,
+                "highPassEnergy": 2.696236015581878,
+                "rmsSlope": 0.06949697651651736
+            },
+            "4": {
+                "heightDifferenceEnergy": 1.2245891086368994,
+                "highPassEnergy": 0.5802756405533933,
+                "rmsSlope": 0.27665288592350923
+            },
+            "8": {
+                "heightDifferenceEnergy": 1.9464866630498838,
+                "highPassEnergy": 0.9207487519044245,
+                "rmsSlope": 0.17439568260181912
+            }
+        },
+        "shape": {
+            "anisotropy32m": 1.2176181344918153,
+            "directionalEnergy32m": {
+                "0": 4.407992083180576,
+                "105": 3.896520728232993,
+                "120": 3.838456612440404,
+                "135": 3.8413082652661186,
+                "15": 4.508231896081482,
+                "150": 3.9720185378575796,
+                "165": 4.210573648954117,
+                "30": 4.65992925031967,
+                "45": 4.673774379767457,
+                "60": 4.391967106113612,
+                "75": 4.103168644590412,
+                "90": 3.9585177161631844
+            },
+            "isolatedPeaksPerKm2": 198.3642578125,
+            "isolatedProminentPeaks": 13,
+            "leastChangeDirectionDegrees": 120,
+            "narrowProtrusionAreaFraction": 0.0035552978515625,
+            "sharpOneVertexPeaks": 36,
+            "sharpPeaksPerKm2": 549.31640625,
+            "smallNarrowProtrusions": 98,
+            "smallNarrowProtrusionsPerKm2": 1495.361328125,
+            "upper30LargestComponentFraction": 0.656775170325511,
+            "upper30PrincipalSpanP90m": 58.0343465774294,
+            "upper30TinyComponentFraction": 0.0025233409033560434
+        },
+        "slopeP50": 13.146413780321765,
+        "slopeP90": 43.50301739080528,
+        "slopeP99": 58.28761233251711,
+        "steepFraction": 0.24692041522491348
+    },
+    {
+        "computeMs": 250,
+        "heightP10": 7.4821455715443665,
+        "heightP90": 20.76412119822115,
+        "max": 31.486220204088152,
+        "mean": 14.570012201606847,
+        "min": 0,
+        "parameters": {
+            "amplitude": 32,
+            "anisotropy": 3,
+            "baseHeight": 4,
+            "beachSlope": 18,
+            "boundaryNoise": 1.5,
+            "detail": 4.5,
+            "detailThreshold": 0.18,
+            "erosion": 0.12,
+            "hydraulicIterations": 16,
+            "islandMinArea": 100,
+            "maximumTerrainSlope": 66,
+            "patchScale": 9,
+            "rain": 0.04,
+            "ridge": 0.25,
+            "ridgeDirection": 90,
+            "ridgeSpacing": 30,
+            "rockFraction": 0.09,
+            "rockSlope": 32,
+            "scale": 75,
+            "shoreWidth": 1.5,
+            "streamPower": 0,
+            "talus": 0.65,
+            "terrace": 0.7,
+            "thermalIterations": 2,
+            "warp": 32,
+            "waterLevel": 3
+        },
+        "preset": "river_valley",
+        "scalesMetres": {
+            "16": {
+                "heightDifferenceEnergy": 17.46591281016627,
+                "highPassEnergy": 6.102507137553012,
+                "rmsSlope": 0.2612014967696625
+            },
+            "2": {
+                "heightDifferenceEnergy": 1.2125059968623073,
+                "highPassEnergy": 0.29928062740445993,
+                "rmsSlope": 0.5505692501543987
+            },
+            "32": {
+                "heightDifferenceEnergy": 37.34947943181207,
+                "highPassEnergy": 15.545868086300873,
+                "rmsSlope": 0.19098193895661697
+            },
+            "4": {
+                "heightDifferenceEnergy": 3.2034031010183224,
+                "highPassEnergy": 0.941365260377822,
+                "rmsSlope": 0.4474513312234585
+            },
+            "8": {
+                "heightDifferenceEnergy": 7.720243201227222,
+                "highPassEnergy": 2.412564883510043,
+                "rmsSlope": 0.347316570320472
+            }
+        },
+        "shape": {
+            "anisotropy32m": 2.9338315401003734,
+            "directionalEnergy32m": {
+                "0": 53.16919621307362,
+                "105": 20.709398711991632,
+                "120": 27.95560321146947,
+                "135": 37.000025219310615,
+                "15": 51.939011255267,
+                "150": 45.498003908970496,
+                "165": 51.391266785573485,
+                "30": 46.41156692364877,
+                "45": 38.419510603416185,
+                "60": 29.529276905464418,
+                "75": 21.669947267914473,
+                "90": 18.122784313394686
+            },
+            "isolatedPeaksPerKm2": 244.140625,
+            "isolatedProminentPeaks": 16,
+            "leastChangeDirectionDegrees": 90,
+            "narrowProtrusionAreaFraction": 0.0064849853515625,
+            "sharpOneVertexPeaks": 34,
+            "sharpPeaksPerKm2": 518.798828125,
+            "smallNarrowProtrusions": 94,
+            "smallNarrowProtrusionsPerKm2": 1434.326171875,
+            "upper30LargestComponentFraction": 0.6211960635881908,
+            "upper30PrincipalSpanP90m": 137.2691893090086,
+            "upper30TinyComponentFraction": 0.0016654049962149886
         },
         "slopeP50": 17.938584679839558,
         "slopeP90": 52.444711623994415,

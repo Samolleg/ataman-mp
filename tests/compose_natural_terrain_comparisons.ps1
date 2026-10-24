@@ -1,14 +1,15 @@
 param(
     [Parameter(Mandatory=$true)][string]$RunRoot,
-    [Parameter(Mandatory=$true)][string]$OutputRoot
+    [Parameter(Mandatory=$true)][string]$OutputRoot,
+    [ValidateSet('R2','R3')][string]$Revision='R2'
 )
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $cases=@(
-    @('plain','zone1','forest_river220','Dejavu zone1 (11x9)','Ataman220 R2: plain / river (8x8)'),
-    @('mountains','zone2','mountain_pass220','Dejavu zone2 (5x6)','Ataman220 R2: mountains / pass (8x8)'),
-    @('coast','zone7','coast_bay220','Dejavu zone7 (16x10)','Ataman220 R2: coast / bay (8x8)')
+    @('plain','zone1','forest_river220','Dejavu zone1 (11x9)',"Ataman220 $($Revision): plain / river (8x8)"),
+    @('mountains','zone2','mountain_pass220','Dejavu zone2 (5x6)',"Ataman220 $($Revision): mountains / pass (8x8)"),
+    @('coast','zone7','coast_bay220','Dejavu zone7 (16x10)',"Ataman220 $($Revision): coast / bay (8x8)")
 )
 foreach($case in $cases){
     $sample=[Drawing.Image]::FromFile((Join-Path $RunRoot ($case[2]+'-top.png')))

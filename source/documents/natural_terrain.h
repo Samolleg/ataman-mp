@@ -21,5 +21,10 @@ void generate(Grid& grid,const QString& name,const QJsonObject& parameters,quint
 void erode(Grid& grid,const QJsonObject& parameters,const std::function<bool()>& cancelled);
 void river(Grid& grid,const QJsonObject& args,quint32 seed,const std::function<bool()>& cancelled);
 QJsonObject metrics(const Grid& grid);
+QVector<double> blurred(const QVector<double>& field,int width,int height,int radius);
+void coherentMask(QVector<quint8>& mask,int width,int height,int radius,int minimumArea,
+                  bool fillHoles,const std::function<bool()>& cancelled);
+QJsonObject shapeMetrics(const Grid& grid);
+QJsonObject maskMetrics(const QVector<quint8>& mask,int width,int height,double spacing);
 }
 #endif
