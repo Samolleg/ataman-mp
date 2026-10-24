@@ -105,12 +105,31 @@ int runAssemblyCatalogCheck()
             write(root+QString("/appearance-%1.json").arg(++appearanceSerial),QJsonDocument(evidence).toJson());return h.result().toHex();};
         const auto statistics=[&](){natural::Grid grid;grid.width=view.m_terrainEdit.vertexCountX();grid.height=view.m_terrainEdit.vertexCountY();
             for(int y=0;y<grid.height;++y)for(int x=0;x<grid.width;++x)grid.heights.append(view.m_terrainEdit.height(x,y)*view.m_terrainEdit.maxZ()/65535.0);
-            auto result=natural::metrics(grid);result["maxZ"]=view.m_terrainEdit.maxZ();return result;};
+            auto result=natural::metrics(grid);result["maxZ"]=view.m_terrainEdit.maxZ();
+            auto terrain=view.m_terrainEdit;CValidationReport report;check(terrain.initializeVirtualMaterialField(ETerrainTileLayer::Land,view.m_workingTerrainAtlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically),"bound material metrics");
+            QMap<int,int> counts;int total=0;for(int y=1;y<terrain.tileCountY();++y)for(int x=1;x<terrain.tileCountX();++x){++counts[terrain.virtualMaterialAt(ETerrainTileLayer::Land,x,y)];++total;}
+            QJsonObject fractions,groups;for(auto it=counts.begin();it!=counts.end();++it){QString name="unknown";for(const auto& f:view.m_terrainGlobalFamilies)if(f.id==it.key())name=f.name;
+                const double fraction=double(it.value())/qMax(1,total);fractions[name]=fraction;const QString group=name.startsWith("Grass")?"grass":name.startsWith("Sand")?"sand":name.startsWith("Stone")||name.startsWith("Rock")?"rock":"soil";groups[group]=groups[group].toDouble()+fraction;}
+            result["materialFractions"]=fractions;result["materialGroups"]=groups;
+            const int w=terrain.tileCountX()+1,h=terrain.tileCountY()+1;QVector<bool> seen(w*h,false);QVector<int> patches;int transition=0;
+            for(int y=0;y<h;++y)for(int x=0;x<w;++x){const int index=y*w+x,id=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x,y);
+                if(x+1<w&&y+1<h)transition+=id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x+1,y)||id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x,y+1)||id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x+1,y+1);
+                if(seen[index])continue;QVector<int> queue{index};seen[index]=true;
+                for(int k=0;k<queue.size();++k){const int a=queue[k];for(int d:{-1,1,-w,w}){const int b=a+d;if(b<0||b>=seen.size()||std::abs(b%w-a%w)+std::abs(b/w-a/w)!=1||seen[b]||terrain.virtualMaterialAt(ETerrainTileLayer::Land,b%w,b/w)!=id)continue;seen[b]=true;queue.append(b);}}patches.append(queue.size()*4);}
+            std::sort(patches.begin(),patches.end());result["patchP50"]=patches[patches.size()/2];result["patchP90"]=patches[int((patches.size()-1)*0.9)];result["transitionFraction"]=double(transition)/(terrain.tileCountX()*terrain.tileCountY());return result;};
         QJsonArray references;
-        int liquid=-1;
+        int liquid=-1,coastLiquid=-1,coastWater=0;
         for(const auto& name:{"zone1","zone2","zone6","zone9","zone7"}){
             const auto file=QFileInfo(maps+"/"+name+".mpr");check(view.m_pLand->isMprLoad()?window.replaceLoadedLandscape(file):window.loadLandscapeWithProgress(file),"read-only private reference "+QString(name));view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"reference palette ready");
             if(QString(name)=="zone1")for(int y=0;y<view.m_terrainEdit.tileCountY()&&liquid<0;++y)for(int x=0;x<view.m_terrainEdit.tileCountX();++x){auto index=view.m_terrainEdit.overlayMaterialIndex(x,y);if(index>=0){liquid=index;break;}}
+            if(QString(name)=="zone7"){
+                for(const auto& family:view.m_terrainGlobalFamilies)if(family.layer==ETerrainAtlasLayer::Overlay&&family.name=="Water / Emerald")coastWater=family.id;
+                QMap<int,int> used;for(int y=0;y<view.m_terrainEdit.tileCountY();++y)for(int x=0;x<view.m_terrainEdit.tileCountX();++x){const int i=view.m_terrainEdit.overlayMaterialIndex(x,y);if(i>=0)++used[i];}
+                int maximum=0;for(auto it=used.begin();it!=used.end();++it)if(it.value()>maximum){coastLiquid=it.key();maximum=it.value();}
+                check(coastWater>0&&coastLiquid>=0,"exact zone7 emerald water and dominant liquid record");
+                QJsonArray records;for(const auto& r:view.m_mprMaterials)records.append(QJsonObject{{"type",r.type},{"opacity",r.opacity},{"waveMultiplier",r.waveMultiplier},{"warpSpeed",r.warpSpeed}});
+                write(root+"/reference-water.json",QJsonDocument(QJsonObject{{"material",coastWater},{"liquid",coastLiquid},{"records",records}}).toJson());
+            }
             auto metric=statistics();metric["map"]=name;QJsonObject materials;auto terrain=view.m_terrainEdit;CValidationReport report;
             check(terrain.initializeVirtualMaterialField(ETerrainTileLayer::Land,view.m_workingTerrainAtlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically),"reference semantics from actual bound catalog");
             struct Values {int count=0;double height=0,slope=0;int nearWater=0;};QMap<int,Values> values;
@@ -152,18 +171,20 @@ int runAssemblyCatalogCheck()
         QJsonArray generatedMetrics;
         for(int scenario=0;scenario<3;++scenario){const QString name=scenario==0?"forest_river220":scenario==1?"mountain_pass220":"coast_bay220";
             const QString preset=scenario==0?"plain":scenario==1?"mountains":"coast";
+            if(scenario==2){check(window.replaceLoadedLandscape(QFileInfo(maps+"/zone7.mpr")),"coast uses real zone7 template material/animation records");view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"zone7 template ready");connect();}
             client.finish(client.tool("create_map",{{"revision",revision()},{"name",name},{"sectorsX",8},{"sectorsY",8},{"height",8},{"maxZ",64},{"material",grass}}));
-            auto params=natural::preset(preset);if(scenario==1){params["amplitude"]=48;params["scale"]=85;}
+            auto params=natural::preset(preset);
             const auto before=fingerprint();auto pending=client.finish(client.tool("preview",{{"tool","generate_terrain"},{"arguments",QJsonObject{{"revision",revision()},{"preset",preset},{"seed",220+scenario},{"parameters",params}}}}));
             check(pending["status"]=="preview"&&fingerprint()==before,"natural preview leaves live document unchanged");
             client.finish(client.tool("apply",{{"operation",pending["operation"]},{"revision",pending["revision"]}}));undo->trigger();check(fingerprint()==before,"preview/apply is one reversible operation");
             auto gen=perform("generate_terrain",{{"preset",preset},{"seed",220+scenario},{"parameters",params}},true);
             if(scenario<2){QJsonArray line=scenario==0?QJsonArray{QJsonArray{20,0},QJsonArray{40,25},QJsonArray{90,45},QJsonArray{110,80},QJsonArray{80,110},QJsonArray{95,150},QJsonArray{160,170},QJsonArray{200,185},QJsonArray{210,225},QJsonArray{240,256}}:QJsonArray{QJsonArray{0,125},QJsonArray{75,110},QJsonArray{135,130},QJsonArray{205,140},QJsonArray{256,120}};
-                perform("carve_river",{{"points",line},{"width",scenario==0?7:14},{"depth",scenario==0?3:12},{"level",scenario==0?1:12},{"floodplain",scenario==0?9:20},{"seed",220+scenario}},true);}
+                perform("carve_river",{{"points",line},{"width",scenario==0?7:6},{"depth",3},{"level",scenario==0?1:10},{"floodplain",scenario==0?24:12},{"seed",220+scenario}},true);}
             auto erosion=perform("erode",{{"parameters",QJsonObject{{"thermalIterations",3},{"hydraulicIterations",6}}}},true);
+            undo->trigger(); // Utility erode verified independently; generate already includes calibrated erosion.
             QJsonObject paint{{"preset",preset},{"seed",220+scenario},{"parameters",params},
                 {"road",QJsonObject{{"shape","line"},{"points",QJsonArray{QJsonArray{15,40},QJsonArray{65,67},QJsonArray{130,108},QJsonArray{200,133},QJsonArray{250,155}}},{"width",4},{"falloff",0.5}}}};
-            if(scenario!=1)paint["water"]=QJsonObject{{"material",water},{"liquid",liquid},{"level",params["waterLevel"]}};
+            if(scenario!=1)paint["water"]=QJsonObject{{"material",scenario==2?coastWater:water},{"liquid",scenario==2?coastLiquid:liquid},{"level",params["waterLevel"]}};
             auto painting=perform("auto_paint",paint,true);frame(name+"-top",true);frame(name+"-angle",false);
             auto m=statistics();m["name"]=name;m["generate"]=gen;m["erode"]=erosion;m["paint"]=painting;generatedMetrics.append(m);
             // Explicit cancellation before commit, including bounded eroder.

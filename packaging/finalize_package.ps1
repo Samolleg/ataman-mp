@@ -2,12 +2,44 @@ param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$PackageRoot,
     [string]$PreviousPackageRoot,
-    [string[]]$AllowedRemovedPath = @()
+    [string[]]$AllowedRemovedPath = @(),
+    [string]$CompositionDecision,
+    [switch]$InitialPackage
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $PackageRoot).Path
 $removed = [System.Collections.Generic.List[string]]::new()
+
+# A complete manifest can still describe an incomplete delivery. Always compare
+# with the accepted installed program manifest, even in a git-archive build.
+if([string]::IsNullOrWhiteSpace($PreviousPackageRoot)) {
+    $installed = Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\EI-Mapper-Ataman-2-first-test'
+    if(Test-Path -LiteralPath (Join-Path $installed 'SHA256SUMS.txt') -PathType Leaf) {
+        $PreviousPackageRoot = $installed
+    } elseif(-not $InitialPackage) {
+        throw 'An accepted program manifest is required. Pass -PreviousPackageRoot; a genuinely initial package needs -InitialPackage and -CompositionDecision.'
+    }
+}
+if(($InitialPackage -or $AllowedRemovedPath.Count -gt 0) -and [string]::IsNullOrWhiteSpace($CompositionDecision)) {
+    throw 'Initial packaging or removal requires an explicit -CompositionDecision and exact -AllowedRemovedPath entries.'
+}
+if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot)) {
+    $previous = (Resolve-Path -LiteralPath $PreviousPackageRoot).Path
+    if($previous -eq $root){throw 'The accepted installation is not a staging folder.'}
+    $manifest = Join-Path $previous 'SHA256SUMS.txt'
+    if(-not(Test-Path -LiteralPath $manifest -PathType Leaf)){throw 'Accepted manifest is missing.'}
+    # Fail before cleanup: a missing managed file must not be hidden by a new
+    # self-consistent manifest. The full validator repeats this after cleanup.
+    foreach($line in Get-Content -LiteralPath $manifest) {
+        if($line -notmatch '^([0-9a-fA-F]{64}) \*(.+)$'){throw 'Malformed accepted manifest.'}
+        $relative=$Matches[2].Replace('\','/')
+        $destination=[IO.Path]::GetFullPath((Join-Path $root $relative))
+        if([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or $relative.Split('/') -contains '..' -or -not $destination.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe accepted manifest path.'}
+        if(-not(Test-Path -LiteralPath $destination -PathType Leaf) -and $relative -notin $AllowedRemovedPath){throw "Managed program file would be lost: $relative"}
+    }
+    Write-Output "Accepted program manifest: $previous"
+}
 
 function Remove-PackageFile([System.IO.FileInfo]$File) {
     $relative = $File.FullName.Substring($root.Length + 1)

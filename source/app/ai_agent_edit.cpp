@@ -208,11 +208,25 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                 const auto requestedMaterial=plan.args["material"].toInt();auto atlas=map.state.atlas->createStagingCopy();
                 auto terrain=model;atlas->setDistributionSeed(seed);
                 if(!terrain.initializeVirtualMaterialField(layer,atlas->catalog(),&report,ETerrainMaterialFieldRecovery::RecoverDeterministically))return fail(report.toText());
-                natural::Grid drainage;
+                natural::Grid drainage;QVector<double> waterDistance;double rockCut=32;
                 if(automatic){drainage.width=terrain.vertexCountX();drainage.height=terrain.vertexCountY();drainage.origin=offset;
                     drainage.heights.resize(drainage.width*drainage.height);
                     for(int y=0;y<drainage.height;++y)for(int x=0;x<drainage.width;++x)drainage.heights[y*drainage.width+x]=z(terrain,x,y);
-                    natural::erode(drainage,{{"thermalIterations",0},{"hydraulicIterations",12},{"erosion",0}},[&](){return cancel->load();});}
+                    natural::erode(drainage,{{"thermalIterations",0},{"hydraulicIterations",12},{"erosion",0}},[&](){return cancel->load();});
+                    const int vw=terrain.tileCountX()+1,vh=terrain.tileCountY()+1;waterDistance.fill(100000,vw*vh);QVector<int> queue;
+                    const double level=plan.args["water"].toObject()["level"].toDouble(plan.args["parameters"].toObject()["waterLevel"].toDouble());
+                    if(plan.args.contains("water"))for(int y=0;y<vh;++y)for(int x=0;x<vw;++x)if(z(terrain,x*2,y*2)<level){waterDistance[y*vw+x]=0;queue.append(y*vw+x);}
+                    for(int head=0;head<queue.size();++head){const int i=queue[head];for(int d:{-1,1,-vw,vw}){const int j=i+d;
+                        if(j<0||j>=waterDistance.size()||std::abs(j%vw-i%vw)+std::abs(j/vw-i/vw)!=1)continue;
+                        if(waterDistance[j]>waterDistance[i]+2){waterDistance[j]=waterDistance[i]+2;queue.append(j);}}}
+                    QVector<double> scores;const auto parameters=plan.args["parameters"].toObject();
+                    for(int y=0;y<vh;++y)for(int x=0;x<vw;++x){const auto p=offset+QPointF(x*2,y*2);if(weight(area,b,p.x(),p.y())<=0)continue;
+                        const double height=z(terrain,x*2,y*2),slope=std::atan(std::hypot((z(terrain,x*2+1,y*2)-z(terrain,x*2-1,y*2))/2,(z(terrain,x*2,y*2+1)-z(terrain,x*2,y*2-1))/2))*180/3.141592653589793;
+                        const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/6,p.y()/8,seed^1801,3);
+                        scores.append((waterDistance[y*vw+x]<12&&height<level+2)?-1000:slope+jitter*4);}
+                    std::sort(scores.begin(),scores.end());
+                    if(!scores.isEmpty())rockCut=qMax(parameters["rockSlope"].toDouble(32),scores[qBound(0,int((1-parameters["rockFraction"].toDouble(0.1))*(scores.size()-1)),scores.size()-1)]);
+                }
                 STerrainTileCommand semantic;semantic.description=plan.description;semantic.semanticAudit.valid=true;
                 semantic.semanticAudit.layer=layer;semantic.semanticAudit.requestedMaterialId=requestedMaterial;
                 const int nx=terrain.tileCountX(),ny=terrain.tileCountY();QSet<int> affected;
@@ -225,14 +239,30 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                         if(slope<plan.args["minimumSlope"].toDouble(0)||slope>plan.args["maximumSlope"].toDouble(90))continue;
                         int material=requestedMaterial;
                         if(automatic){
-                            const auto parameters=plan.args["parameters"].toObject();const double height=z(terrain,vx,vy),water=parameters["waterLevel"].toDouble(6);
+                            const auto parameters=plan.args["parameters"].toObject();const double height=z(terrain,vx,vy),water=plan.args["water"].toObject()["level"].toDouble(parameters["waterLevel"].toDouble(6));
                             const double curve=z(terrain,vx+2,vy)+z(terrain,vx-2,vy)+z(terrain,vx,vy+2)+z(terrain,vx,vy-2)-4*height;
-                            const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/18,p.y()/18,seed^1801,3);
-                            const double wet=qBound(0.0,1-std::abs(height-water)/6+qMax(0.0,curve)*0.1+drainage.wetness.value(vy*drainage.width+vx),1.0);
+                            const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/6,p.y()/8,seed^1801,3);
+                            const double distance=waterDistance[y*(nx+1)+x];
+                            const double wet=qBound(0.0,qMax(1-distance/14,drainage.wetness.value(vy*drainage.width+vx)*0.65)+qMax(0.0,curve)*0.03,1.0);
                             const auto palette=plan.args["palette"].toObject();material=palette["grass"].toInt();
-                            if(wet>0.65+jitter*0.08)material=palette["mud"].toInt(material);
-                            if(height<water+parameters["shoreWidth"].toDouble(2.5)+jitter)material=palette["shore"].toInt(material);
-                            if(slope+jitter*2>parameters["rockSlope"].toDouble(32))material=palette["rock"].toInt(material);
+                            const double scale=parameters["patchScale"].toDouble(5);
+                            const double patch=natural::fbm((p.x()+height*0.7)/scale,(p.y()-height*0.4)/(scale*1.5),seed^7211,3);
+                            if(patch< -0.18)material=palette["dark"].toInt(material);
+                            else if(patch>0.23)material=palette["light"].toInt(material);
+                            else if(patch>0.09&&patch<(plan.args["preset"]=="mountains"?0.13:0.19))material=palette["forest"].toInt(material);
+                            if(wet>0.8&&distance<5&&height>water-0.2)material=palette["mud"].toInt(material);
+                            if(plan.args["preset"]=="coast"&&height<water){
+                                if(patch>0.02)material=palette["underwaterRock"].toInt(material);
+                                else if(patch< -0.34)material=palette["underwaterSand"].toInt(material);
+                            }
+                            if(distance>0&&distance<parameters["shoreWidth"].toDouble(1.5)+1+jitter&&height<water+1.8)
+                                material=plan.args["preset"]=="coast"?palette["shore"].toInt(material):palette["mud"].toInt(material);
+                            if(slope+jitter*4>=rockCut&&!(distance<12&&height<water+2)){
+                                material=palette["rock"].toInt(material);
+                                const double variant=natural::noise(p.x()/7,p.y()/9,seed^382);
+                                if(variant>0.28)material=palette["rock2"].toInt(material);
+                                else if(variant< -0.35)material=palette["rock3"].toInt(material);
+                            }
                             // Explicit ordered rules override the derived palette. Coherent
                             // spatial noise perturbs thresholds, never independent tile speckle.
                             for(const auto& entry:plan.args["rules"].toArray()){const auto r=entry.toObject();
@@ -406,9 +436,13 @@ ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const Q
             const auto choose=[&](const QString& role,const QStringList& terms){if(palette.contains(role))return;
                 for(const auto& term:terms)for(const auto& family:v->m_terrainGlobalFamilies)
                     if(family.layer==ETerrainAtlasLayer::Land&&family.name.contains(term,Qt::CaseInsensitive)){palette[role]=family.id;return;}};
-            choose("grass",{"Grass / Common","Grass","трава"});choose("rock",{"Stone","Rock","камень"});
-            choose("shore",args["preset"]=="coast"?QStringList{"Sand","Ground / Common","Ground","песок"}:QStringList{"Ground / Common","Ground","Sand","грязь"});choose("mud",{"Ground / Common","Ground","грязь"});
-            choose("road",{"Gravel","Ground","гравий"});
+            choose("grass",{"Grass / Common","Grass","трава"});choose("dark",{"Grass / Dark","Grass / Common"});
+            choose("light",{"Grass / Fresh","Grass / Sparse light","Grass / Common"});choose("forest",{"Ground / Dead","Grass / Irregular","Grass / Dark"});
+            choose("rock",args["preset"]=="coast"?QStringList{"Stone / Light","Stone / Lime","Stone"}:QStringList{"Stone / Lime","Stone","Rock","камень"});
+            choose("rock2",{"Stone / Mossy","Stone / Lime","Stone"});choose("rock3",{"Stone / Pink","Stone / Grayish","Stone"});
+            choose("shore",{"Sand / Common","Sand / Grass","Sand"});choose("mud",{"Ground / Brown","Ground / Dark brown","Ground / Dirt","Ground"});
+            choose("road",{"Ground / Gravel","Gravel","Ground / Dirt","Ground"});
+            choose("underwaterRock",{"Rock / Underwater emerald","Ground / Water","Ground"});choose("underwaterSand",{"Sand / Underwater","Sand / Common","Sand"});
             if(!palette.contains("grass")||!palette.contains("rock")||!palette.contains("shore")||!palette.contains("mud"))return fail("Active palette lacks grass/rock/shore/mud; supply explicit palette IDs");
             QJsonArray ids;for(auto it=palette.begin();it!=palette.end();++it)ids.append(it.value());
             for(const auto& rule:args["rules"].toArray())ids.append(rule.toObject()["material"]);

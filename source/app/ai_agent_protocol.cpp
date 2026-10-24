@@ -110,10 +110,10 @@ QJsonArray toolDefinitions()
     paint.insert("minimumSlope",number(0,90));paint.insert("maximumSlope",number(0,90));
     add("paint","Paint palette material by ID or exact name over area/mask/polyline width in metres. Modern131 automatic transitions; optional existing overlay and seeded variant shuffle. Async, one Undo.",paint,{"revision","area"});
     const auto parameters=object({{"baseHeight",number(0,10000)},{"amplitude",number(0,10000)},
-        {"scale",number(4,2048)},{"ridge",number(0,1)},{"warp",number(0,512)},{"terrace",number(0,1)},
+        {"scale",number(4,2048)},{"ridge",number(0,1)},{"warp",number(0,512)},{"terrace",number(0,1)},{"detail",number(0,32)},
         {"thermalIterations",integer(0,64)},{"hydraulicIterations",integer(0,64)},
         {"talus",number(0.01,8)},{"rain",number(0,1)},{"erosion",number(0,1)},
-        {"waterLevel",number(0,10000)},{"rockSlope",number(0,90)},{"shoreWidth",number(0,32)},
+        {"waterLevel",number(0,10000)},{"rockSlope",number(0,90)},{"rockFraction",number(0,1)},{"patchScale",number(1,64)},{"shoreWidth",number(0,32)},
         {"boundaryNoise",number(0,8)},{"cliffX",number(-32768,32768)},
         {"cliffHeight",number(0,1000)},{"cliffWidth",number(0.5,64)}});
     auto generate=edit;generate.insert("preset",choice({"plain","hills","mountains","coast","swamp","river_valley"}));generate.insert("parameters",parameters);
@@ -124,7 +124,10 @@ QJsonArray toolDefinitions()
     river.insert("width",number(1,128));river.insert("depth",number(0.01,100));river.insert("floodplain",number(0,128));river.insert("level",number(0,10000));
     add("carve_river","Carve a downstream polyline with varying channel width, rounded banks and floodplain. Optional level is upstream bed height. No overlay/water creation. One reversible async operation.",river,{"revision","points","width","depth"});
     auto automatic=generate;automatic.insert("palette",object({{"grass",integer(1,2147483647)},{"rock",integer(1,2147483647)},
-        {"shore",integer(1,2147483647)},{"mud",integer(1,2147483647)},{"road",integer(1,2147483647)}}));
+        {"shore",integer(1,2147483647)},{"mud",integer(1,2147483647)},{"road",integer(1,2147483647)},
+        {"dark",integer(1,2147483647)},{"light",integer(1,2147483647)},{"forest",integer(1,2147483647)},
+        {"rock2",integer(1,2147483647)},{"rock3",integer(1,2147483647)},
+        {"underwaterRock",integer(1,2147483647)},{"underwaterSand",integer(1,2147483647)}}));
     automatic.insert("rules",array(object({{"material",integer(1,2147483647)},
         {"minimumHeight",number(0,10000)},{"maximumHeight",number(0,10000)},
         {"minimumSlope",number(0,90)},{"maximumSlope",number(0,90)},

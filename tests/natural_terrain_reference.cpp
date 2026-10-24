@@ -62,8 +62,11 @@ QJsonObject measure(QString path){
 }
 }
 int main(int argc,char** argv){QCoreApplication app(argc,argv);try{QJsonArray measurements;
-    if(app.arguments().contains("--generate"))for(const auto& name:{"plain","hills","mountains","coast","swamp","river_valley"}){
-        natural::Grid g;g.width=g.height=257;QElapsedTimer timer;timer.start();natural::generate(g,name,natural::preset(name),220,[](){return false;});
+    if(app.arguments().contains("--profiles"))for(const auto& entry:QJsonDocument::fromJson(read(app.arguments().value(3))).array()){
+        const auto o=entry.toObject();const auto name=o["preset"].toString();auto p=natural::preset(name);const auto overrides=o["parameters"].toObject();for(auto i=overrides.begin();i!=overrides.end();++i)p[i.key()]=i.value();
+        natural::Grid g;g.width=g.height=257;natural::generate(g,name,p,o["seed"].toInt(221),[](){return false;});auto m=natural::metrics(g);m["parameters"]=p;m["preset"]=name;measurements.append(m);
+    }else if(app.arguments().contains("--generate"))for(const auto& name:{"plain","hills","mountains","coast","swamp","river_valley"}){
+        natural::Grid g;g.width=g.height=257;QElapsedTimer timer;timer.start();natural::generate(g,name,natural::preset(name),QString(name)=="mountains"?221:QString(name)=="coast"?222:220,[](){return false;});
         auto m=natural::metrics(g);m["preset"]=name;m["parameters"]=natural::preset(name);m["computeMs"]=int(timer.elapsed());measurements.append(m);
     }else for(int i=2;i<argc;++i)measurements.append(measure(QString::fromLocal8Bit(argv[i])));
     QFile output(QString::fromLocal8Bit(argv[1]));if(!output.open(QIODevice::WriteOnly))return 2;output.write(QJsonDocument(measurements).toJson());return 0;

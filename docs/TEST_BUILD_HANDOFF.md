@@ -87,6 +87,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   <tester-folder>
 ```
 
+Finalization always compares managed paths with the accepted installed manifest.
+For a git-archive build pass `-PreviousPackageRoot <accepted-installation>`
+explicitly: the archive has no installation directory. Omitting the baseline is
+an error unless this is a genuinely initial package with `-InitialPackage` and
+`-CompositionDecision`. Any removed managed path needs its exact
+`-AllowedRemovedPath` and the owner's explicit decision in `-CompositionDecision`.
+Use `packaging/stage_release.ps1` to stage current binaries and retained program
+assets, including the previous Qt language set and support tools. A checksum
+manifest alone does not prove that the delivery retained its required contents.
+
 Before finalization, resolve the exact absolute target and verify it is that
 new owned staging folder, not the repository root, a game installation or a
 folder already handed to a user. The finalizer deletes settings, logs, saves
