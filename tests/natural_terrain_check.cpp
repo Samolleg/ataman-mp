@@ -111,6 +111,8 @@ int runAssemblyCatalogCheck()
             QJsonObject fractions,groups;for(auto it=counts.begin();it!=counts.end();++it){QString name="unknown";for(const auto& f:view.m_terrainGlobalFamilies)if(f.id==it.key())name=f.name;
                 const double fraction=double(it.value())/qMax(1,total);fractions[name]=fraction;const QString group=name.startsWith("Grass")?"grass":name.startsWith("Sand")?"sand":name.startsWith("Stone")||name.startsWith("Rock")?"rock":"soil";groups[group]=groups[group].toDouble()+fraction;}
             result["materialFractions"]=fractions;result["materialGroups"]=groups;
+            int overlay=0;for(int y=0;y<terrain.tileCountY();++y)for(int x=0;x<terrain.tileCountX();++x)overlay+=terrain.overlayMaterialIndex(x,y)>=0;
+            result["overlayCells"]=overlay;
             const int w=terrain.tileCountX()+1,h=terrain.tileCountY()+1;QVector<bool> seen(w*h,false);QVector<int> patches;int transition=0;
             for(int y=0;y<h;++y)for(int x=0;x<w;++x){const int index=y*w+x,id=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x,y);
                 if(x+1<w&&y+1<h)transition+=id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x+1,y)||id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x,y+1)||id!=terrain.virtualMaterialAt(ETerrainTileLayer::Land,x+1,y+1);
@@ -187,7 +189,9 @@ int runAssemblyCatalogCheck()
             if(scenario!=1)paint["water"]=QJsonObject{{"material",scenario==2?coastWater:water},{"liquid",scenario==2?coastLiquid:liquid},{"level",params["waterLevel"]}};
             auto debugArgs=paint;debugArgs["revision"]=revision();write(root+"/"+name+"-resolved.json",QJsonDocument(CAiEditAdapter::capture(&window,"auto_paint",debugArgs).args).toJson());
             auto painting=perform("auto_paint",paint,true);frame(name+"-top",true);frame(name+"-angle",false);
-            auto m=statistics();m["name"]=name;m["generate"]=gen;m["erode"]=erosion;m["paint"]=painting;generatedMetrics.append(m);
+            auto m=statistics();if(scenario==1)check(m["overlayCells"].toInt()==0,"auto_paint without water does not create an implicit material0 overlay");
+            if(scenario==2)check(m["overlayCells"].toInt()>0,"coast has a real emerald water surface");
+            m["name"]=name;m["generate"]=gen;m["erode"]=erosion;m["paint"]=painting;generatedMetrics.append(m);
             // Explicit cancellation before commit, including bounded eroder.
             const auto unchanged=fingerprint();auto start=client.tool("erode",{{"revision",revision()},{"parameters",QJsonObject{{"thermalIterations",64},{"hydraulicIterations",64}}}});
             client.tool("cancel_operation",{{"operation",start["operation"]}});check(until([&](){return window.m_aiAgent->m_editWorkers->load()==0;}),"cancelled eroder releases worker");check(fingerprint()==unchanged,"cancelled eroder leaves complete map unchanged");

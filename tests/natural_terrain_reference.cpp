@@ -27,6 +27,15 @@ QJsonObject measure(QString path){
             if(overlay&&qint16(u16(b,offset+1024+local*2))!=-1){water[i]=1;waterSum+=u16(b,5+1089*8+((y*2)*33+x*2)*8+2)*maxZ/65535;++waterCount;}}
     }
     auto result=natural::metrics(g);result["map"]=QFileInfo(path).fileName();result["sha256"]=QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
+    const auto semantics=QJsonDocument::fromJson(members.value("ei_mapper_terrain_semantics.json")).object();
+    if(!semantics.isEmpty()){
+        const auto field=semantics["land"].toObject();const auto raw=qUncompress(QByteArray::fromBase64(field["qcompressBase64"].toString().toLatin1()));
+        const int vw=semantics["vertexWidth"].toInt(),vh=semantics["vertexHeight"].toInt();
+        if(raw.size()!=vw*vh*4||QCryptographicHash::hash(raw,QCryptographicHash::Sha256).toHex()!=field["sha256"].toString().toLatin1())throw std::runtime_error("Invalid stored semantic field");
+        QJsonObject counts;int total=0;for(int y=1;y<vh-1;++y)for(int x=1;x<vw-1;++x){const auto id=QString::number(qint32(u32(raw,(y*vw+x)*4)));counts[id]=counts[id].toInt()+1;++total;}
+        QJsonObject fractions;for(auto it=counts.begin();it!=counts.end();++it)fractions[it.key()]=it.value().toInt()/double(qMax(1,total));
+        result["semanticFractionsById"]=fractions;
+    }
     result["maxZ"]=maxZ;result["sectorsX"]=(g.width-1)/32;result["sectorsY"]=(g.height-1)/32;result["overlayFraction"]=double(waterCount)/(tw*th);if(waterCount)result["meanOverlayHeight"]=waterSum/waterCount;
     int boundary=0;for(int y=0;y<th;++y)for(int x=0;x<tw;++x){const int i=y*tw+x;if(x+1<tw)boundary+=water[i]!=water[i+1];if(y+1<th)boundary+=water[i]!=water[i+tw];}result["overlayBoundaryMetres"]=boundary*2;
     // Horizontal/vertical runs above P75 and below P25: reproducible proxies

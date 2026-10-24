@@ -214,8 +214,8 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                     for(int y=0;y<drainage.height;++y)for(int x=0;x<drainage.width;++x)drainage.heights[y*drainage.width+x]=z(terrain,x,y);
                     natural::erode(drainage,{{"thermalIterations",0},{"hydraulicIterations",12},{"erosion",0}},[&](){return cancel->load();});
                     const int vw=terrain.tileCountX()+1,vh=terrain.tileCountY()+1;waterDistance.fill(100000,vw*vh);QVector<int> queue;
-                    const double level=plan.args["water"].toObject()["level"].toDouble(plan.args["parameters"].toObject()["waterLevel"].toDouble());
-                    if(plan.args.contains("water"))for(int y=0;y<vh;++y)for(int x=0;x<vw;++x)if(z(terrain,x*2,y*2)<level){waterDistance[y*vw+x]=0;queue.append(y*vw+x);}
+                    const double level=plan.args.value("water").toObject()["level"].toDouble(plan.args["parameters"].toObject()["waterLevel"].toDouble());
+                    if(plan.args.value("water").isObject())for(int y=0;y<vh;++y)for(int x=0;x<vw;++x)if(z(terrain,x*2,y*2)<level){waterDistance[y*vw+x]=0;queue.append(y*vw+x);}
                     for(int head=0;head<queue.size();++head){const int i=queue[head];for(int d:{-1,1,-vw,vw}){const int j=i+d;
                         if(j<0||j>=waterDistance.size()||std::abs(j%vw-i%vw)+std::abs(j/vw-i/vw)!=1)continue;
                         if(waterDistance[j]>waterDistance[i]+2){waterDistance[j]=waterDistance[i]+2;queue.append(j);}}}
@@ -239,7 +239,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                         if(slope<plan.args["minimumSlope"].toDouble(0)||slope>plan.args["maximumSlope"].toDouble(90))continue;
                         int material=requestedMaterial;
                         if(automatic){
-                            const auto parameters=plan.args["parameters"].toObject();const double height=z(terrain,vx,vy),water=plan.args["water"].toObject()["level"].toDouble(parameters["waterLevel"].toDouble(6));
+                            const auto parameters=plan.args["parameters"].toObject();const double height=z(terrain,vx,vy),water=plan.args.value("water").toObject()["level"].toDouble(parameters["waterLevel"].toDouble(6));
                             const double curve=z(terrain,vx+2,vy)+z(terrain,vx-2,vy)+z(terrain,vx,vy+2)+z(terrain,vx,vy-2)-4*height;
                             const double jitter=parameters["boundaryNoise"].toDouble(1.5)*natural::fbm(p.x()/6,p.y()/8,seed^1801,3);
                             const double distance=waterDistance[y*(nx+1)+x];
@@ -306,7 +306,7 @@ ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
                 }
                 const auto resolution=atlas->joinAuthoredTransitionEdges(terrain,terrain.makeVirtualStrokeResolution(semantic,atlas->catalog(),seed,&report,true,requestedMaterial),&report);
                 if(report.hasErrors()||!terrain.apply(resolution,true,&report))return fail(report.toText());
-                if(automatic&&plan.args.contains("water")) {
+                if(automatic&&plan.args.value("water").isObject()) {
                     const auto water=plan.args["water"].toObject();const int id=water["material"].toInt(),liquid=water["liquid"].toInt();
                     const double level=water["level"].toDouble();
                     if(liquid>=map.state.materials.size()||level>terrain.maxZ())return fail("Water requires an existing liquid record and level within map maxZ");
