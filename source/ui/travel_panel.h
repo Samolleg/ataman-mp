@@ -9,6 +9,7 @@ class QLabel;
 class QPushButton;
 class QSpinBox;
 class QTabWidget;
+class QToolButton;
 class CWorldCoordinateEdit;
 
 class CTravelPanel : public QWidget
@@ -48,15 +49,17 @@ private:
     void fillDestinationEntries(int selected);
     void fillFriendlyDestination();
     void fillFarEntries(int selected);
+    QString destinationChain(const SMapTableExit& entry) const;
     QMap<QString,QString> m_names;
-    QLabel* m_chain;
     QLabel* m_linkStatus;
     QComboBox* m_friendly;
     QWidget* m_routeEditor;
+    QToolButton* m_routeToggle;
     QComboBox* m_farZone;
     QComboBox* m_farEntry;
     QLabel* m_routeWarning;
     QPushButton* m_problem;
+    QPushButton* m_reverse;
     int m_route{-1},m_farEnd{-1};
     bool m_filling{false};
     QVector<SMapTableZone> m_zones;
@@ -71,7 +74,6 @@ private:
     CWorldCoordinateEdit* m_rect[2][4];
     QLabel* m_status;
     QLabel* m_incoming;
-    QLabel* m_directionNote;
     QPushButton* m_repairOrder;
     QComboBox* m_source;
     QPushButton* m_linkIncoming;

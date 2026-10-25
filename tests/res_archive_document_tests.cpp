@@ -924,18 +924,19 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
         entry.destinationExitId=mask==2?0:1;z.exits.append(entry);
     }
     panel.populate({z},0,2,false);
-    QCOMPARE(list->item(0)->text(),QString::fromUtf8("Запись без областей №6 → gz7g, вход №1"));
-    QCOMPARE(list->item(1)->text(),QString::fromUtf8("Появление и переход №7 → gz7g, вход №1"));
-    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 → gz7g, вход не выбран"));
-    QCOMPARE(list->item(3)->text(),QString::fromUtf8("Появление и переход №9 → gz7g, вход №1"));
+    QCOMPARE(list->item(0)->text(),QString::fromUtf8("№6 → назначение не задано"));
+    QCOMPARE(list->item(1)->text(),QString::fromUtf8("№7 → назначение не задано"));
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("№8 → gz7g, вход не выбран"));
+    QCOMPARE(list->item(3)->text(),QString::fromUtf8("№9 → назначение не задано"));
+    QVERIFY(list->item(0)->toolTip().contains(QString::fromUtf8("отсутствует")));
     z.exits[2].destinationZoneId="none";panel.populate({z},0,2,false);
-    QCOMPARE(list->item(2)->text(),QString::fromUtf8("Переход №8 — без перехода"));
+    QCOMPARE(list->item(2)->text(),QString::fromUtf8("№8 — без перехода"));
     QVERIFY(panel.flush());QCOMPARE(edits,1);
     SMapTableZone other;other.zoneId="other";
     auto from=e;from.exitId=17;from.destinationZoneId="TEST";from.destinationExitId=7;other.exits.append(from);
     panel.populate({z,other},0,1,false);
     auto* incoming=panel.findChild<QLabel*>("travelIncoming");QVERIFY(incoming);
-    QVERIFY(incoming->text().contains(QString::fromUtf8("other, запись №17 → сюда")));
+    QVERIFY(incoming->toolTip().contains(QString::fromUtf8("other, запись №17 → сюда")));
     auto* source=panel.findChild<QComboBox*>("travelSource");QVERIFY(source);
     auto* link=panel.findChild<QPushButton*>("travelLinkIncoming");QVERIFY(link);QVERIFY(link->isEnabled());
     int linkedZone=-1,linkedExit=-1;
@@ -960,12 +961,12 @@ void ResArchiveDocumentTests::travelGeometryAndPanel()
     panel.populate({z,other},0,1,false);
     QCOMPARE(entry->currentData().toInt(),17);
     QVERIFY(!(entry->model()->flags(entry->model()->index(entry->currentIndex(),0)) & Qt::ItemIsEnabled));
-    QVERIFY(panel.findChild<QLabel*>("travelDirectionNote")->text().contains(QString::fromUtf8("не готово")));
+    QVERIFY(entry->toolTip().contains(QString::fromUtf8("не готово")));
     int routeRequests=0;QObject::connect(&panel,&CTravelPanel::routeRequested,[&](){++routeRequests;});
     panel.findChild<QPushButton*>("travelDestinationCreate")->click();QCOMPARE(routeRequests,1);
 
     panel.populate({z,other},0,2,false);QVERIFY(!link->isEnabled());
-    QVERIFY(incoming->text().contains(QString::fromUtf8("пока никто")));
+    QCOMPARE(incoming->text(),QString::fromUtf8("Входящих связей нет"));
 }
 void ResArchiveDocumentTests::travelMergeAndLinkValidation()
 {

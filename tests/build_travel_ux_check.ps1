@@ -3,9 +3,10 @@ param([Parameter(Mandatory=$true)][string]$BuildRoot,
       [Parameter(Mandatory=$true)][string]$BaselineRef,
       [Parameter(Mandatory=$true)][string]$QtBin,
       [Parameter(Mandatory=$true)][string]$MinGwBin,
-      [switch]$BaselineKeys)
-# BaselineRef is the accepted225 source in this clone's history. Only the old
-# panel and key handler are used inside a freshly compiled native test host;
+      [switch]$BaselineKeys,
+      [switch]$PanelR2)
+# BaselineRef is accepted225 (baseline keys) or226 R1 (-PanelR2) in this clone.
+# Only the previous panel and key handler are used in a fresh native test host;
 # no old mapper executable is launched.
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
@@ -25,6 +26,7 @@ Copy-Item (Join-Path $fixture 'source/app/view_keybinding.cpp') (Join-Path $fixt
 $env:PATH="$QtBin;$MinGwBin;$env:PATH"
 $qmakeArgs=@((Join-Path $repo 'tests/travel_ux_check.pro'),('BUILD_ROOT='+[IO.Path]::GetFullPath($BuildRoot)),('BASELINE_ROOT='+$fixture))
 if($BaselineKeys){$qmakeArgs+='CONFIG+=baseline_keys'}
+if($PanelR2){$qmakeArgs+='CONFIG+=travel_r2'}
 Push-Location $output
 try {
  $ErrorActionPreference='Continue'

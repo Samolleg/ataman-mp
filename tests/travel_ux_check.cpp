@@ -15,6 +15,7 @@
 #include "landscape_tools.h"
 #include "settings.h"
 #include "endurance_document.h"
+#include "game_text_catalog.h"
 
 namespace {
 QTextStream out(stdout);int checks=0;
@@ -54,8 +55,10 @@ int runAssemblyCatalogCheck()
         const auto e=zones[source].exits[selected];const auto d=travel::resolve(zones,e.destinationZoneId,e.destinationExitId);
         check(d.error.isEmpty() && d.route>=0 && zones[d.route].zoneId=="gz5g_gz9g2" && zones[d.zone].zoneId=="gz9g" && zones[d.zone].exits[d.entry].exitId==4,"actual route chain is gz5g:2 -> route near1 -> gz9g:4");
         CTravelPanel225 before;before.setAttribute(Qt::WA_DontShowOnScreen);before.resize(700,1400);
+#ifndef TRAVEL_UX_R2
         before.populate(zones,source,selected,false);before.revealArea(true);before.show();QApplication::processEvents();
         check(before.grab().save(root+"/panel-before.png"),"before PNG rendered from225 panel source in fresh harness");before.hide();
+#endif
         qApp->setProperty("workspaceLoadSmoke",true);MainWindow window;window.configureAutosaveTimer(false,300000);
         window.resize(1280,950);window.show();window.view()->makeCurrent();window.view()->setMouseTracking(true);
         const bool sceneOnly=qEnvironmentVariableIsSet("EI_TRAVEL_SCENE_ONLY") && qEnvironmentVariable("EI_TRAVEL_SCENE_ONLY")=="1";
@@ -77,6 +80,70 @@ int runAssemblyCatalogCheck()
             check(((pos!=after || pivot!=afterPivot)==expected),QString("camera key %1 receiver %2 expected motion %3").arg(key).arg(receiver->metaObject()->className()).arg(expected));
             check(!view->m_cam->movementInputActive(),"key release stops movement");
         };
+#ifdef TRAVEL_UX_R2
+        {
+        const auto initial=doc->snapshot();
+        window.m_travelDocument=doc;window.m_travelDocuments.insert(archivePath,doc);window.m_travelZone=source;window.m_travelExit=selected;window.refreshTravelEditor();
+        auto* panel=window.m_travelPanel;panel->revealArea(true);
+        QMap<QString,QString> names;const auto texts=ei::loadGameTextCatalog({QFileInfo(archivePath).absolutePath()});
+        for(const auto& z:zones){const auto title=texts.entries.value("zone "+z.zoneId).section('\n',0,0).trimmed();if(!title.isEmpty())names.insert(z.zoneId,title);}
+        before.setMapNames(names);panel->setMapNames(names);
+        const auto screenshot=[&](QWidget* widget,const QString& name){
+            widget->setParent(nullptr);widget->setAttribute(Qt::WA_DontShowOnScreen);widget->resize(560,820);widget->show();QApplication::processEvents();
+            check(widget->grab().save(root+"/"+name+".png"),"native panel screenshot "+name);widget->hide();
+        };
+        for(int state=0;state<3;++state){
+            auto shown=zones;
+            const QString name=state==0?"route":state==1?"no-return":"direct";
+            if(state==1){shown[d.zone].exits[d.entry].destinationZoneId="none";shown[d.zone].exits[d.entry].destinationExitId=0;}
+            if(state==2){shown[source].exits[selected].destinationZoneId="gz7g";shown[source].exits[selected].destinationExitId=1;}
+            before.populate(shown,source,selected,false);before.revealArea(true);screenshot(&before,"r1-"+name);
+            panel->populate(shown,source,selected,false);panel->revealArea(true);screenshot(panel,"r2-"+name);
+            check(!panel->findChild<QWidget*>("travelRouteEditor")->isVisibleTo(panel),"route details collapsed in "+name);
+            auto* routeToggle=panel->findChild<QToolButton*>("travelRouteToggle");
+            check(routeToggle->isHidden()==(state==2),"route section only exists for routed destination: "+name);
+            if(state==0){
+                auto* list=panel->findChild<QListWidget*>("travelExitList");auto* target=panel->findChild<QComboBox*>("travelFinalDestination");
+                check(list->horizontalScrollBarPolicy()==Qt::ScrollBarAlwaysOff && list->textElideMode()==Qt::ElideRight,"list has ellipsis and no horizontal scroll");
+                check(list->item(selected)->text()==QString::fromUtf8("№2 → Мертвый Город, вход 4"),"list shows only destination title and entrance");
+                check(target->currentText()==QString::fromUtf8("Мертвый Город (Zone9), вход 4"),"destination field is compact");
+                check(target->toolTip().contains("gz5g_gz9g2") && target->toolTip().contains("gz9g") && list->item(selected)->toolTip().contains("gz5g_gz9g2"),"full route chain retained in both tooltips");
+                check(panel->findChild<QPushButton*>("travelReverse")->isHidden() && panel->findChild<QPushButton*>("travelProblem")->isHidden(),"healthy link hides repair and reverse actions");
+                const auto* area=panel->findChild<QCheckBox*>("travelPresent1");
+                check(area->mapTo(panel,QPoint()).y()-target->mapTo(panel,QPoint()).y()<180,"default destination controls take fewer than six rows above area");
+                for(auto* label:panel->findChildren<QLabel*>())if(label->isVisibleTo(panel))check(!label->text().contains('\n') && label->text().size()<85,"no visible explanatory paragraph");
+            }
+            if(state==1)check(!panel->findChild<QPushButton*>("travelReverse")->isHidden() && !panel->findChild<QPushButton*>("travelProblem")->isHidden(),"missing reverse exposes focused repair actions");
+            for(int k=0;k<2;++k){
+                auto* x=panel->findChild<QLineEdit*>(QString("travelRect_%1_0").arg(k));auto* y=panel->findChild<QLineEdit*>(QString("travelRect_%1_1").arg(k));
+                check(x->geometry().y()==y->geometry().y() && x->width()<=105 && y->width()<=105,"coordinates compact in both tabs");
+            }
+        }
+        panel->populate(zones,source,selected,false);panel->revealArea(false);screenshot(panel,"r2-deploy");
+        panel->setParent(window.m_travelDock);window.m_travelDock->setWidget(panel);panel->show();panel->revealArea(true);window.refreshTravelEditor();
+        view->setFocus();motion(view,Qt::Key_W,true);auto* coordinate=panel->findChild<QLineEdit*>("travelRect_1_0");const auto oldCoordinate=coordinate->text();
+        coordinate->setFocus();motion(coordinate,Qt::Key_W,false);coordinate->setText(oldCoordinate);
+        auto* add=panel->findChild<QPushButton*>("travelAdd0");add->setFocus();motion(add,Qt::Key_W,true);
+        coordinate->setText(QString::number(oldCoordinate.toDouble()+1,'g',17));emit coordinate->editingFinished();
+        check(doc->snapshot()!=initial,"compact coordinate field still edits area");window.on_actionUndo_triggered();check(doc->snapshot()==initial,"area edit Undo remains exact");
+        int reminders=0;const auto reminderConnection=QObject::connect(window.statusBar(),&QStatusBar::messageChanged,&window,[&](const QString& message){if(message.contains(QString::fromUtf8("перезапустите игру")))++reminders;});
+        auto* targets=panel->findChild<QComboBox*>("travelFinalDestination");int direct=-1;
+        for(int i=0;i<targets->count();++i){const auto pair=targets->itemData(i).toList();if(pair.value(0).toString()=="gz7g" && pair.value(1).toInt()==1)direct=i;}
+        activate(targets,direct);check(window.saveMapWithTravel(root+"/backups"),"compact destination uses normal Save");
+        CTravelDocument reread;check(reread.open(archivePath,&error) && reread.table().zones()[source].exits[selected].destinationZoneId=="gz7g","direct selection persists and rereads");
+        check(reminders==1,"restart reminder shown after first successful Save");window.on_actionUndo_triggered();check(doc->snapshot()==initial && window.saveMapWithTravel(root+"/backups"),"destination Undo and Save restore original");
+        auto* toggle=panel->findChild<QToolButton*>("travelRouteToggle");toggle->click();
+        auto* endpoint=panel->findChild<QComboBox*>("travelFarEntry");check(endpoint->isVisible(),"collapsed route expands to editable endpoint");
+        endpoint->setCurrentIndex(endpoint->findData(2));panel->findChild<QPushButton*>("travelApplyFarEnd")->click();
+        check(doc->table().zones()[d.route].exits[d.farEnd].destinationExitId==2 && window.saveMapWithTravel(root+"/backups"),"expanded route endpoint still saves");
+        check(reread.open(archivePath,&error) && reread.table().zones()[d.route].exits[d.farEnd].destinationExitId==2,"route endpoint freshly rereads");
+        window.on_actionUndo_triggered();check(doc->snapshot()==initial && window.saveMapWithTravel(root+"/backups"),"route endpoint Undo and Save restore original");
+        check(reminders==1,"restart reminder is not repeated on later saves");
+        check(read(archivePath)==original && read(maps+"/zone5_1.mob")==mobBefore && read(maps+"/zone5_1.mpr")==mprBefore,"full copied RES/MOB/MPR exact after round trips");
+        window.m_undoStack->clear();window.m_travelDocuments.clear();window.m_travelDocument.clear();window.m_travelZone=-1;window.m_travelExit=-1;window.refreshTravelEditor();
+        QObject::disconnect(reminderConnection);out<<"RESULT R2 "<<checks<<" PASS, 0 FAIL\n";out.flush();return 0;
+        }
+#endif
 #ifdef TRAVEL_BASELINE_KEYS
         motion(view,Qt::Key_W,false);
         out<<"RESULT baseline225 travel key swallowing reproduced\n";out.flush();return 0;
@@ -85,7 +152,7 @@ int runAssemblyCatalogCheck()
         if(sceneOnly){
             check(window.m_travelDocument && window.m_travelZone==source,"loaded scene selects actual profile catalog gz5g");
             window.m_travelExit=selected;window.refreshTravelEditor();auto* scenePanel=window.m_travelPanel;
-            check(scenePanel->findChild<QLabel*>("travelChain")->text().contains(QString::fromUtf8("Мертвый Город / Zone9 (gz9g), вход №4")),"loaded scene panel resolves profile name and complete final destination");
+            check(scenePanel->findChild<QComboBox*>("travelFinalDestination")->toolTip().contains(QString::fromUtf8("Мертвый Город / Zone9 (gz9g), вход №4")),"loaded scene panel resolves profile name and complete final destination");
             auto* control=scenePanel->findChild<QPushButton*>("travelAdd0");control->setFocus();motion(control,Qt::Key_W,true);
             QMouseEvent press(QEvent::MouseButtonPress,QPointF(5,5),Qt::MiddleButton,Qt::MiddleButton,Qt::NoModifier);QApplication::sendEvent(view,&press);
             QMouseEvent release(QEvent::MouseButtonRelease,QPointF(5,5),Qt::MiddleButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(view,&release);
@@ -95,7 +162,7 @@ int runAssemblyCatalogCheck()
         }
         window.m_travelDocument=doc;window.m_travelDocuments.insert(archivePath,doc);window.m_travelZone=source;window.m_travelExit=selected;window.refreshTravelEditor();
         auto* panel=window.m_travelPanel;panel->revealArea(true);
-        check(panel->findChild<QLabel*>("travelChain")->text().contains("gz9g") && panel->findChild<QLabel*>("travelChain")->text().contains(QString::fromUtf8("вход №4")),"panel shows final Zone9 entry4 rather than route end1");
+        check(panel->findChild<QComboBox*>("travelFinalDestination")->toolTip().contains("gz9g") && panel->findChild<QComboBox*>("travelFinalDestination")->toolTip().contains(QString::fromUtf8("вход №4")),"panel shows final Zone9 entry4 rather than route end1");
         panel->setParent(nullptr);panel->setAttribute(Qt::WA_DontShowOnScreen);panel->resize(700,1450);panel->show();QApplication::processEvents();
         check(panel->grab().save(root+"/panel-after.png"),"after PNG rendered from production226 panel");
         panel->hide();panel->setParent(window.m_travelDock);window.m_travelDock->setWidget(panel);panel->show();

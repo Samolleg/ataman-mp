@@ -17,6 +17,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QMouseEvent>
+#include <QGridLayout>
 #include <cmath>
 
 CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
@@ -25,12 +26,18 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     auto* scroll=new QScrollArea(this);scroll->setWidgetResizable(true);
     auto* body=new QWidget(scroll);auto* layout=new QVBoxLayout(body);
     scroll->setWidget(body);outer->addWidget(scroll);
-    auto* legend=new QLabel(tr("Синий: появление (#deploy) — где игрок окажется, прибыв сюда.\nОранжевый: переход (#remove) — область, которая уводит с этой карты."));
-    legend->setWordWrap(true);legend->setToolTip(legend->text());layout->addWidget(legend);
-    m_chain=new QLabel;m_chain->setObjectName("travelChain");m_chain->setWordWrap(true);
-    m_chain->setTextInteractionFlags(Qt::TextSelectableByMouse);layout->addWidget(m_chain);
-    m_status=new QLabel; m_status->setWordWrap(true);layout->addWidget(m_status);
     m_zoneCombo=new QComboBox;configureTravelCombo(m_zoneCombo);layout->addWidget(m_zoneCombo);
+    m_status=new QLabel;m_status->setObjectName("travelStatus");m_status->setWordWrap(true);m_status->hide();
+    auto* visibility=new QHBoxLayout;
+    for(int k=0;k<2;++k) {
+        m_visible[k]=new QCheckBox(k?tr("Переходы"):tr("Появление"));
+        QPixmap marker(10,10);marker.fill(k?QColor(255,122,26):QColor(31,140,255));m_visible[k]->setIcon(QIcon(marker));
+        m_visible[k]->setToolTip(k?tr("Переход (#remove): оранжевая область уводит игрока с этой карты. Перетащите область или её маркеры; Esc отменяет жест."):
+            tr("Появление (#deploy): синяя область, где игрок окажется, прибыв сюда. Перетащите область или её маркеры; Esc отменяет жест."));
+        m_visible[k]->setChecked(true);visibility->addWidget(m_visible[k]);
+        connect(m_visible[k],&QCheckBox::toggled,this,&CTravelPanel::visibilityChanged);
+    }
+    visibility->addStretch();layout->addLayout(visibility);
     auto* catalogToggle=new QToolButton;catalogToggle->setText(tr("Каталог карт и создание маршрутов"));catalogToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     catalogToggle->setCheckable(true);catalogToggle->setArrowType(Qt::RightArrow);layout->addWidget(catalogToggle);
     auto* catalog=new QWidget;auto* catalogLayout=new QVBoxLayout(catalog);catalogLayout->setContentsMargins(0,0,0,0);catalog->hide();layout->addWidget(catalog);
@@ -43,12 +50,8 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     auto* route=new QPushButton(tr("Создать маршрут между картами…"));
     route->setObjectName("travelCreateRoute");catalogLayout->addWidget(route);
     connect(route,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
-    for(int k=0;k<2;++k) {
-        m_visible[k]=new QCheckBox(k?tr("Показать переходы (оранжевые)"):tr("Показать появление (синие)"));
-        m_visible[k]->setChecked(true);layout->addWidget(m_visible[k]);
-        connect(m_visible[k],&QCheckBox::toggled,this,&CTravelPanel::visibilityChanged);
-    }
     m_exits=new QListWidget; m_exits->setFixedHeight(100);layout->addWidget(m_exits);
+    m_exits->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);m_exits->setTextElideMode(Qt::ElideRight);
     m_exits->setObjectName("travelExitList");
     m_exits->viewport()->installEventFilter(this);
     m_exits->setToolTip(tr("ПКМ по строке — камера к области выбранной вкладки."));
@@ -72,34 +75,41 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
     auto* tabs=new QTabWidget;m_tabs=tabs;props->addWidget(tabs);
     for(int k=0;k<2;++k) {
         auto* page=new QWidget;auto* form=new QFormLayout(page);
+        QToolButton* advanced=nullptr;QWidget* raw=nullptr;
         if(k==0) {
-            form->addRow(new QLabel(tr("Откуда прибывают сюда")));
-            m_incoming=new QLabel;m_incoming->setWordWrap(true);
+            m_incoming=new QLabel;
             m_incoming->setObjectName("travelIncoming");form->addRow(m_incoming);
+            auto* incomingToggle=new QToolButton;incomingToggle->setText(tr("Входящие связи"));incomingToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);incomingToggle->setArrowType(Qt::RightArrow);incomingToggle->setCheckable(true);form->addRow(incomingToggle);
+            auto* incomingBody=new QWidget;auto* incomingForm=new QFormLayout(incomingBody);incomingForm->setContentsMargins(0,0,0,0);incomingBody->hide();form->addRow(incomingBody);
+            connect(incomingToggle,&QToolButton::toggled,incomingBody,[incomingBody,incomingToggle](bool open){incomingBody->setVisible(open);incomingToggle->setArrowType(open?Qt::DownArrow:Qt::RightArrow);});
             m_source=new QComboBox;configureTravelCombo(m_source);m_source->setObjectName("travelSource");
-            form->addRow(tr("Запись на другой карте:"),m_source);
+            incomingForm->addRow(tr("Откуда:"),m_source);
             m_linkIncoming=new QPushButton(tr("Направить выбранную запись сюда"));
-            m_linkIncoming->setObjectName("travelLinkIncoming");form->addRow(m_linkIncoming);
-            auto* note=new QLabel(tr("Команда изменит назначение выбранной записи на другой карте. Её области останутся на месте. Ctrl+S сохранит связь."));
-            note->setWordWrap(true);form->addRow(note);
+            m_linkIncoming->setObjectName("travelLinkIncoming");incomingForm->addRow(m_linkIncoming);
+            m_linkIncoming->setToolTip(tr("Изменяет назначение выбранной записи на другой карте. Её области останутся на месте. Ctrl+S сохранит связь."));
         } else {
-            form->addRow(new QLabel(tr("Куда ведёт переход отсюда")));
             m_friendly=new QComboBox;configureTravelCombo(m_friendly);m_friendly->setObjectName("travelFinalDestination");
             form->addRow(tr("Куда ведёт:"),m_friendly);
-            m_linkStatus=new QLabel;m_linkStatus->setObjectName("travelLinkStatus");m_linkStatus->setWordWrap(true);form->addRow(m_linkStatus);
-            m_problem=new QPushButton(tr("Перейти к проблеме"));m_problem->setObjectName("travelProblem");form->addRow(m_problem);
+            auto* linkRow=new QHBoxLayout;
+            m_linkStatus=new QLabel;m_linkStatus->setObjectName("travelLinkStatus");linkRow->addWidget(m_linkStatus,1);
+            m_problem=new QPushButton(tr("Исправить…"));m_problem->setObjectName("travelProblem");linkRow->addWidget(m_problem);form->addRow(linkRow);
+            m_reverse=new QPushButton(tr("Создать обратный переход…"));m_reverse->setObjectName("travelReverse");form->addRow(m_reverse);
+            connect(m_reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
             connect(m_problem,&QPushButton::clicked,this,[this](){
                 if(!flush() || m_zone<0 || m_exit<0)return;
                 const auto e=m_zones[m_zone].exits[m_exit];const auto d=travel::resolve(m_zones,e.destinationZoneId,e.destinationExitId);
                 if(!e.hasDeployRectangle){emit destinationProblemRequested(m_zone,m_exit);return;}
                 emit destinationProblemRequested(d.zone,d.entry);
             });
-            auto* advanced=new QToolButton;advanced->setText(tr("Расширенные поля: зона и запись"));advanced->setCheckable(true);advanced->setArrowType(Qt::RightArrow);form->addRow(advanced);
+            advanced=new QToolButton;advanced->setText(tr("Расширенные поля: зона и запись"));advanced->setCheckable(true);advanced->setArrowType(Qt::RightArrow);
             advanced->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-            auto* raw=new QWidget;raw->setLayout(target);raw->hide();form->addRow(raw);
+            raw=new QWidget;raw->setLayout(target);raw->hide();
             connect(advanced,&QToolButton::toggled,raw,[raw,advanced](bool open){raw->setVisible(open);advanced->setArrowType(open?Qt::DownArrow:Qt::RightArrow);});
+            m_routeToggle=new QToolButton;m_routeToggle->setObjectName("travelRouteToggle");m_routeToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);m_routeToggle->setCheckable(true);m_routeToggle->setArrowType(Qt::RightArrow);form->addRow(m_routeToggle);
             m_routeEditor=new QWidget;auto* routeForm=new QFormLayout(m_routeEditor);routeForm->setContentsMargins(0,0,0,0);
-            m_routeWarning=new QLabel;m_routeWarning->setWordWrap(true);routeForm->addRow(m_routeWarning);
+            m_routeEditor->setObjectName("travelRouteEditor");m_routeEditor->hide();
+            connect(m_routeToggle,&QToolButton::toggled,m_routeEditor,[this](bool open){m_routeEditor->setVisible(open);m_routeToggle->setArrowType(open?Qt::DownArrow:Qt::RightArrow);});
+            m_routeWarning=new QLabel;routeForm->addRow(m_routeWarning);
             m_farZone=new QComboBox;configureTravelCombo(m_farZone);m_farZone->setObjectName("travelFarZone");routeForm->addRow(tr("Дальний конец → карта:"),m_farZone);
             m_farEntry=new QComboBox;configureTravelCombo(m_farEntry);m_farEntry->setObjectName("travelFarEntry");routeForm->addRow(tr("Вход на этой карте:"),m_farEntry);
             auto* applyFar=new QPushButton(tr("Изменить дальний конец для всех карт"));applyFar->setObjectName("travelApplyFarEnd");routeForm->addRow(applyFar);form->addRow(m_routeEditor);
@@ -116,13 +126,11 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
                 auto e=m_zones[m_zone].exits[m_exit];e.destinationZoneId=pair[0].toString();e.destinationExitId=pair[1].toInt();emit exitEdited(m_exit,e);
             });
             auto* createRoute=new QPushButton(tr("Создать новый маршрут…"));
-            createRoute->setObjectName("travelDestinationCreate");form->addRow(createRoute);
+            createRoute->setObjectName("travelDestinationCreate");routeForm->addRow(createRoute);
             connect(createRoute,&QPushButton::clicked,this,[this](){if(flush())emit routeRequested();});
             auto* globalPosition=new QPushButton(tr("Положение маршрута на глобальной карте…"));
-            globalPosition->setObjectName("travelGlobalPosition");form->addRow(globalPosition);
+            globalPosition->setObjectName("travelGlobalPosition");routeForm->addRow(globalPosition);
             connect(globalPosition,&QPushButton::clicked,this,[this](){if(flush())emit globalPositionRequested();});
-            m_directionNote=new QLabel;m_directionNote->setWordWrap(true);
-            m_directionNote->setObjectName("travelDirectionNote");form->addRow(m_directionNote);
             m_repairOrder=new QPushButton(tr("Восстановить раздельные области"));
             m_repairOrder->setObjectName("travelRepairOrder");form->addRow(m_repairOrder);
             connect(m_repairOrder,&QPushButton::clicked,this,[this](){
@@ -131,15 +139,19 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
                 emit exitEdited(m_exit,e);
             });
         }
-        m_present[k]=new QCheckBox(tr("Область задана"));form->addRow(m_present[k]);
+        auto* areaRow=new QHBoxLayout;
+        m_present[k]=new QCheckBox(tr("Область"));areaRow->addWidget(m_present[k]);areaRow->addStretch();
+        auto* draw=new QPushButton(tr("Нарисовать заново"));draw->setObjectName(QString("travelRedraw%1").arg(k));areaRow->addWidget(draw);form->addRow(areaRow);
+        auto* coordinates=new QGridLayout;coordinates->setColumnStretch(4,1);
         const QStringList labels={tr("X:"),tr("Y:"),tr("Ширина:"),tr("Высота:")};
         for(int c=0;c<4;++c) {
             m_rect[k][c]=new CWorldCoordinateEdit(c<2?0:1,page);
             m_rect[k][c]->setObjectName(QString("travelRect_%1_%2").arg(k).arg(c));
-            form->addRow(labels[c],m_rect[k][c]);
+            m_rect[k][c]->setMaximumWidth(105);m_rect[k][c]->setMinimumWidth(55);
+            coordinates->addWidget(new QLabel(labels[c]),c/2,(c%2)*2);coordinates->addWidget(m_rect[k][c],c/2,(c%2)*2+1);
             connect(m_rect[k][c],&QLineEdit::editingFinished,this,[this](){flush();});
         }
-        auto* draw=new QPushButton(tr("Нарисовать заново"));draw->setObjectName(QString("travelRedraw%1").arg(k));form->addRow(draw);
+        form->addRow(coordinates);
         connect(draw,&QPushButton::clicked,this,[this,k](){if(flush(k))emit drawRequested(k!=0,false);});
         m_present[k]->setObjectName(QString("travelPresent%1").arg(k));
         connect(m_present[k],&QCheckBox::clicked,this,[this,k](bool checked){
@@ -153,10 +165,7 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
             }
             flush();
         });
-        if(k==1) {
-            auto* reverse=new QPushButton(tr("Создать обратный переход…"));form->addRow(reverse);
-            connect(reverse,&QPushButton::clicked,this,[this](){if(flush())emit reverseRequested();});
-        }
+        if(advanced){form->addRow(advanced);form->addRow(raw);}
         tabs->addTab(page,k?tr("Переход"):tr("Появление"));
     }
     tabs->setCurrentIndex(1);
@@ -167,9 +176,10 @@ CTravelPanel::CTravelPanel(QWidget* parent):QWidget(parent)
         const auto pair=m_source->currentData().toList();
         if(pair.size()==2 && flush())emit incomingRequested(pair[0].toInt(),pair[1].toInt());
     });
-    auto* remove=new QPushButton(tr("Удалить запись входа/перехода"));props->addWidget(remove);
+    auto* remove=new QToolButton;remove->setText(tr("Удалить запись входа/перехода"));remove->setAutoRaise(true);props->addWidget(remove,0,Qt::AlignLeft);
+    props->addWidget(m_status);
     layout->addWidget(m_properties);layout->addStretch();
-    connect(remove,&QPushButton::clicked,this,&CTravelPanel::deleteRequested);
+    connect(remove,&QToolButton::clicked,this,&CTravelPanel::deleteRequested);
     connect(m_destination,QOverload<int>::of(&QComboBox::activated),this,[this](){fillDestinationEntries(0);flush();});
     connect(m_destinationExit,QOverload<int>::of(&QComboBox::activated),this,[this](){flush();});
     connect(m_zoneCombo,QOverload<int>::of(&QComboBox::activated),this,[this](int row){
@@ -190,25 +200,20 @@ void CTravelPanel::populate(const QVector<SMapTableZone>& zones,int zoneIndex,in
     m_exits->clear();
     if(zoneIndex>=0 && zoneIndex<zones.size())
         for(const auto& e:zones[zoneIndex].exits) {
-            const bool linked=e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0;
-            const QString kind=e.hasDeployRectangle
-                ? (linked?tr("Появление и переход"):tr("Появление"))
-                : (e.hasRemoveRectangle?tr("Переход"):tr("Запись без областей"));
-            QString label=tr("%1 №%2").arg(kind).arg(e.exitId);
+            QString label=tr("№%1").arg(e.exitId);
             if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)
                 label+=tr(" — без перехода");
             else if(e.destinationExitId==0)
                 label+=tr(" → %1, вход не выбран").arg(e.destinationZoneId);
             else {
                 const auto destination=travel::resolve(zones,e.destinationZoneId,e.destinationExitId);
-                label+=tr(" → %1").arg(travel::targetLabel(zones,destination,m_names));
+                label+=tr(" → %1").arg(travel::compactTarget(zones,destination,m_names));
             }
             auto* item=new QListWidgetItem(label,m_exits);
-            item->setToolTip(label+(e.sourceLabel!=QString::number(e.exitId)?tr("\nМетка в файле: %1; игра использует порядковый номер %2.").arg(e.sourceLabel).arg(e.exitId):QString()));
+            item->setToolTip(destinationChain(e)+tr("\nПКМ — камера к области выбранной вкладки.")+(e.sourceLabel!=QString::number(e.exitId)?tr("\nМетка в файле: %1; игра использует порядковый номер %2.").arg(e.sourceLabel).arg(e.exitId):QString()));
         }
     m_exits->setCurrentRow(exitIndex);
-    m_status->setText(dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
-        tr("Перетащите область или её маркеры. Esc отменяет жест. Координаты локальные."));
+    setStatus(dirty?tr("Изменено · Ctrl+S"):QString());
     m_filling=false;fillExit();
 }
 void CTravelPanel::fillExit()
@@ -216,7 +221,6 @@ void CTravelPanel::fillExit()
     m_filling=true;
     const bool valid=m_zone>=0 && m_zone<m_zones.size() && m_exit>=0 && m_exit<m_zones[m_zone].exits.size();
     m_properties->setEnabled(valid);
-    m_chain->setText(valid?QString():tr("Выберите появление или переход в списке."));
     if(valid) {
         const auto& e=m_zones[m_zone].exits[m_exit];
         QStringList incoming;
@@ -233,18 +237,21 @@ void CTravelPanel::fillExit()
             m_source->addItem(label,QVariantList{z,i});
             m_source->setItemData(m_source->count()-1,label,Qt::ToolTipRole);
         }
-        m_incoming->setText(incoming.isEmpty()?tr("На эту запись пока никто не ссылается."):incoming.join("\n"));
+        m_incoming->setText(incoming.isEmpty()?tr("Входящих связей нет"):tr("Входящих связей: %1").arg(incoming.size()));
+        QString incomingDetails=incoming.join("\n");
         if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)!=0)
-            m_incoming->setText(m_incoming->text()+tr("\nУ этой записи также есть исходящая связь → %1:%2. Она настраивается на вкладке «Переход».")
-                .arg(e.destinationZoneId).arg(e.destinationExitId));
+            incomingDetails+=tr("\nИсходящая связь → %1:%2 настраивается на вкладке «Переход».").arg(e.destinationZoneId).arg(e.destinationExitId);
+        m_incoming->setToolTip(incomingDetails);
         m_linkIncoming->setEnabled(e.hasDeployRectangle);
         const bool overwritten=e.hasDeployRectangle && e.hasRemoveRectangle && !e.removeOverridesDeploy;
         m_repairOrder->setVisible(overwritten);
-        m_directionNote->setText(overwritten
+        const QString areaHint=overwritten
             ?tr("Ошибка порядка: поздний #deploy заменяет область #remove. Оранжевым показан действующий выход, совпадающий с появлением. «Восстановить раздельные области» применит записанную область #remove; затем сохраните карту.")
             :(!e.hasRemoveRectangle && e.hasDeployRectangle
                 ?tr("Отдельная область перехода не задана: игра использует область появления. Для отдельного выхода нарисуйте переход. Для появления без выхода выберите «Без перехода».")
-                :tr("Назначение относится к выходу с текущей карты. Номер входа — порядковый номер записи на целевой карте. После сохранения полностью перезапустите игру.")));
+                :tr("Область перехода (#remove) на текущей карте. Перетащите область или её маркеры. Esc отменяет жест. Координаты локальные."));
+        m_present[1]->setToolTip(areaHint);m_repairOrder->setToolTip(areaHint);
+        m_present[0]->setToolTip(tr("Область появления (#deploy): где игрок окажется, прибыв сюда. Координаты локальные."));
         m_destination->clear();m_destination->addItem(tr("Без перехода"),"none");
         for(const auto& z:m_zones)if(m_destination->findData(z.zoneId)<0)m_destination->addItem(z.zoneId+(z.zoneType=="edge"?tr(" — маршрут"):tr(" — карта")),z.zoneId);
         int row=m_destination->findData(e.destinationZoneId);
@@ -254,7 +261,10 @@ void CTravelPanel::fillExit()
             m_present[k]->setChecked(k?e.hasRemoveRectangle:e.hasDeployRectangle);
             const auto r=k?e.removeRectangle:e.deployRectangle;
             const double values[]={r.x(),r.y(),r.width(),r.height()};
-            for(int c=0;c<4;++c)m_rect[k][c]->setText(QString::number(values[c],'g',17));
+            for(int c=0;c<4;++c){
+                m_rect[k][c]->setText(QString::number(values[c],'g',17));m_rect[k][c]->setCursorPosition(0);
+                m_rect[k][c]->setToolTip(tr("Точное значение: %1").arg(m_rect[k][c]->text()));
+            }
         }
     }
     m_filling=false;
@@ -278,20 +288,31 @@ void CTravelPanel::fillDestinationEntries(int selected)
     if(index<0){m_destinationExit->addItem(tr("№%1 — запись отсутствует").arg(selected),selected);index=m_destinationExit->count()-1;}
     m_destinationExit->setCurrentIndex(index);
     if(id.compare("none",Qt::CaseInsensitive)!=0 && !usable)
-        m_directionNote->setText(tr("Назначение %1:%2 не готово: выберите существующую запись с областью появления. Если нужен новый вход, создайте его на целевой карте или используйте «Создать маршрут между картами…». Сохранение новой неверной связи будет отклонено.").arg(id).arg(selected));
+        m_destinationExit->setToolTip(tr("Назначение %1:%2 не готово: выберите существующую запись с областью появления. Если нужен новый вход, создайте его на целевой карте или используйте «Создать маршрут между картами…». Сохранение новой неверной связи будет отклонено.").arg(id).arg(selected));
+    else m_destinationExit->setToolTip(m_destinationExit->currentData(Qt::ToolTipRole).toString());
+}
+QString CTravelPanel::destinationChain(const SMapTableExit& e) const
+{
+    if(e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0)return tr("Появление №%1 — без перехода").arg(e.exitId);
+    const auto d=travel::resolve(m_zones,e.destinationZoneId,e.destinationExitId);
+    return tr("Переход №%1 → %2%3").arg(e.exitId)
+        .arg(d.route>=0?tr("маршрут %1 (по глобальной карте) → ").arg(m_zones[d.route].zoneId):QString())
+        .arg(d.zone>=0 && d.entry>=0?tr("%1, вход №%2").arg(travel::name(m_zones[d.zone],m_names)).arg(m_zones[d.zone].exits[d.entry].exitId):d.error);
 }
 void CTravelPanel::fillFriendlyDestination()
 {
     const auto& e=m_zones[m_zone].exits[m_exit];
     const auto d=travel::resolve(m_zones,e.destinationZoneId,e.destinationExitId);
     const bool none=e.destinationZoneId.compare("none",Qt::CaseInsensitive)==0;
-    m_chain->setText(none?tr("Появление №%1 — без перехода").arg(e.exitId):tr("Переход №%1 → %2%3")
-        .arg(e.exitId).arg(d.route>=0?tr("маршрут %1 (по глобальной карте) → ").arg(m_zones[d.route].zoneId):QString())
-        .arg(d.zone>=0 && d.entry>=0?tr("%1, вход №%2").arg(travel::name(m_zones[d.zone],m_names)).arg(m_zones[d.zone].exits[d.entry].exitId):d.error));
+    m_friendly->setToolTip(destinationChain(e)+tr("\nНазначение выхода с текущей карты. Номер входа — порядковый номер записи на целевой карте. После сохранения полностью перезапустите игру."));
     const bool back=!none && travel::reciprocal(m_zones,m_zone,e,d);
-    m_linkStatus->setText(none?tr("Связь не задана"):!d.error.isEmpty()?d.error:back?tr("Туда и обратно согласовано"):tr("Нет обратного входа / обратная связь не согласована"));
-    if(!none && !e.hasDeployRectangle)m_linkStatus->setText(tr("Нет обратного входа: у этой записи не задано появление для возвращения."));
+    const QString reason=none?tr("Связь не задана"):!d.error.isEmpty()?d.error:!e.hasDeployRectangle?tr("У этой записи нет появления для возвращения."):tr("Обратный переход отсутствует или ведёт к другой записи.");
+    m_linkStatus->setText(none?tr("— связь не задана"):!d.error.isEmpty()?tr("⚠ вход недоступен"):back?tr("✓ обратный переход есть"):tr("⚠ нет обратного перехода"));
+    m_linkStatus->setToolTip(back?tr("Туда и обратно согласовано"):reason);
+    m_linkStatus->setStyleSheet(QString("font-size:%1px; color:%2;").arg(back || none?13:14).arg(back || none?"#888888":!d.error.isEmpty()?"#d9534f":palette().color(QPalette::Window).lightness()<128?"#e5b45a":"#986000"));
+    m_problem->setToolTip(reason);
     m_problem->setVisible(!none && (!back || !d.error.isEmpty()));
+    m_reverse->setVisible(!none && !back && d.zone>=0 && d.entry>=0);
     m_friendly->clear();m_friendly->addItem(tr("Без перехода"),QVariantList{QString("none"),0});
     int selected=none?0:-1;
     for(int z=0;z<m_zones.size();++z) {
@@ -302,10 +323,9 @@ void CTravelPanel::fillFriendlyDestination()
             if(travel::edge(zone) && entry.destinationZoneId.compare(m_zones[m_zone].zoneId,Qt::CaseInsensitive)!=0)continue;
             if(!travel::edge(zone) && zone.zoneType.compare("game",Qt::CaseInsensitive)!=0)continue;
             const auto candidate=travel::resolve(m_zones,zone.zoneId,entry.exitId);
-            QString label=travel::targetLabel(m_zones,candidate,m_names);
-            if(candidate.route<0)label+=tr(" — напрямую");
+            QString label=travel::compactTarget(m_zones,candidate,m_names,true);
             const int row=m_friendly->count();m_friendly->addItem(label,QVariantList{zone.zoneId,entry.exitId});
-            QString hint=candidate.error;
+            QString hint=travel::targetLabel(m_zones,candidate,m_names)+(candidate.route<0?tr(" — напрямую"):QString())+"\n"+candidate.error;
             if(candidate.zone>=0 && candidate.entry>=0)hint=travel::entryDetails(m_zones[candidate.zone].exits[candidate.entry],
                 candidate.route>=0?m_zones[candidate.route].zoneId:m_zones[m_zone].zoneId,
                 candidate.route>=0 && candidate.farEnd>=0?m_zones[candidate.route].exits[candidate.farEnd].exitId:e.exitId)+"\n"+hint;
@@ -316,11 +336,16 @@ void CTravelPanel::fillFriendlyDestination()
     }
     if(selected<0){selected=m_friendly->count();m_friendly->addItem(tr("Текущая связь %1:%2 — проверьте расширенные поля").arg(e.destinationZoneId).arg(e.destinationExitId));}
     m_friendly->setCurrentIndex(selected);
-    m_route=d.route;m_farEnd=d.farEnd;m_routeEditor->setVisible(m_route>=0 && m_farEnd>=0);
+    if(m_route!=d.route)m_routeToggle->setChecked(false);
+    m_route=d.route;m_farEnd=d.farEnd;
+    m_routeToggle->setVisible(m_route>=0 && m_farEnd>=0);
+    m_routeEditor->setVisible(m_route>=0 && m_farEnd>=0 && m_routeToggle->isChecked());
     if(m_route>=0 && m_farEnd>=0) {
+        m_routeToggle->setText(tr("Маршрут %1").arg(m_zones[m_route].zoneId));
         QStringList users;for(const auto& zone:m_zones)for(const auto& x:zone.exits)
             if(x.destinationZoneId.compare(m_zones[m_route].zoneId,Qt::CaseInsensitive)==0 && !users.contains(zone.zoneId))users<<zone.zoneId;
-        m_routeWarning->setText(tr("Общий маршрут %1. Изменение дальнего конца затронет все использующие его карты: %2. Сохранение каталога map.txt в texts.res — Ctrl+S, с резервной копией. Отмена — Ctrl+Z.")
+        m_routeWarning->setText(tr("Общий маршрут — изменение для всех карт"));
+        m_routeWarning->setToolTip(tr("Общий маршрут %1. Изменение дальнего конца затронет все использующие его карты: %2. Сохранение каталога map.txt в texts.res — Ctrl+S, с резервной копией. Отмена — Ctrl+Z.")
             .arg(m_zones[m_route].zoneId,users.join(", ")));
         const auto& endpoint=m_zones[m_route].exits[m_farEnd];m_farZone->clear();
         for(const auto& zone:m_zones)if(zone.zoneType.compare("game",Qt::CaseInsensitive)==0)m_farZone->addItem(travel::name(zone,m_names),zone.zoneId);
@@ -365,7 +390,7 @@ bool CTravelPanel::flush(int redrawArea)
     if(e!=m_zones[m_zone].exits[m_exit])emit exitEdited(m_exit,e);
     return true;
 }
-void CTravelPanel::setStatus(const QString& text){m_status->setText(text);}
+void CTravelPanel::setStatus(const QString& text){m_status->setText(text);m_status->setVisible(!text.isEmpty());}
 int CTravelPanel::selectedExit() const {return m_exit;}
 bool CTravelPanel::showDeploy() const {return m_visible[0]->isChecked();}
 bool CTravelPanel::showRemove() const {return m_visible[1]->isChecked();}
@@ -376,10 +401,8 @@ void CTravelPanel::setDrawingState(bool active,bool remove,bool newExit)
     Q_UNUSED(newExit);
     if(active){
         revealArea(remove);
-        setStatus((remove?tr("Рисование области перехода. "):tr("Рисование области появления. "))
-            +tr("Зажмите ЛКМ на карте и протяните прямоугольник. Esc или ПКМ — отмена."));
-    } else setStatus(m_dirty?tr("Есть изменения переходов — Ctrl+S для сохранения карты."):
-        tr("Перетащите область или её маркеры. ПКМ по списку — перейти к области."));
+        setStatus(remove?tr("Рисование перехода · Esc — отмена"):tr("Рисование появления · Esc — отмена"));
+    } else setStatus(m_dirty?tr("Изменено · Ctrl+S"):QString());
 }
 void CTravelPanel::revealArea(bool remove)
 {

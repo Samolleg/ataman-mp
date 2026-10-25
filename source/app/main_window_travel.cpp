@@ -12,6 +12,7 @@
 #include "staged_save_validator.h"
 #include "endurance_document.h"
 #include <QLabel>
+#include <QStatusBar>
 #include <QDockWidget>
 #include <QMenu>
 #include <QMessageBox>
@@ -180,6 +181,10 @@ void MainWindow::createTravelEditor(QMenu* menu)
     menu->addAction(m_travelDock->toggleViewAction());
     connect(m_travelDock,&QDockWidget::visibilityChanged,this,[this](bool visible){
         if(m_shutdownInProgress || !m_pView)return;
+        if(visible && !m_pView->travelEditing()){
+            m_pView->setProperty("travelPreviousToolTip",m_pView->toolTip());
+            m_pView->setToolTip(tr("Перетащите область появления/перехода или её маркеры. Esc отменяет жест. Координаты локальные."));
+        } else if(!visible && m_pView->travelEditing())m_pView->setToolTip(m_pView->property("travelPreviousToolTip").toString());
         if(visible){m_pView->prepareDocumentTransition();m_pView->cancelWorldMapPlacement();m_pView->clearObjectSelection();setCustomSpawnPicking(false);}
         if(visible)hideLandscapeTools();
         m_pView->setTravelEditing(visible);
@@ -595,6 +600,10 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         }
         QMessageBox::warning(this,tr("Сохранение карты не завершено"),error);return false;}
     refreshMapsBrowser();refreshTravelEditor();updateLoadedMapPanel();rebuildWindowTitle();
+    if(!property("travelRestartReminderShown").toBool()){
+        statusBar()->showMessage(tr("Переходы сохранены. Полностью перезапустите игру, чтобы применить изменения."),10000);
+        setProperty("travelRestartReminderShown",true);
+    }
     return true;
 }
 

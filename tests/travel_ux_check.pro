@@ -1,5 +1,6 @@
 QT += core gui widgets opengl concurrent multimedia network gui-private testlib
 CONFIG += c++11 release console
+travel_r2: DEFINES += TRAVEL_UX_R2
 TEMPLATE = app
 TARGET = travel_ux_check
 isEmpty(BUILD_ROOT): error(Pass BUILD_ROOT of fresh Release)

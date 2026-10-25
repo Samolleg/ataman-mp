@@ -31,6 +31,18 @@ struct Destination {
     int zone{-1},entry{-1},route{-1},nearEnd{-1},farEnd{-1};
     QString error;
 };
+inline QString compactName(const SMapTableZone& zone,const QMap<QString,QString>& names,bool withFile=false) {
+    QString title=names.value(zone.zoneId);
+    QString file=QFileInfo(zone.mprName).completeBaseName();
+    if(file.startsWith("zone",Qt::CaseInsensitive))file[0]='Z';
+    if(title.isEmpty())return file.isEmpty()?zone.zoneId:file;
+    if(withFile && !file.isEmpty() && title.compare(file,Qt::CaseInsensitive)!=0)title+=" ("+file+")";
+    return title;
+}
+inline QString compactTarget(const QVector<SMapTableZone>& zones,const Destination& d,const QMap<QString,QString>& names,bool withFile=false) {
+    if(d.zone<0 || d.entry<0)return QStringLiteral("назначение не задано");
+    return QStringLiteral("%1, вход %2").arg(compactName(zones[d.zone],names,withFile)).arg(zones[d.zone].exits[d.entry].exitId);
+}
 inline Destination resolve(const QVector<SMapTableZone>& zones,const QString& id,int entry) {
     Destination d;d.zone=zoneIndex(zones,id);
     if(d.zone<0){d.error=QStringLiteral("Целевая зона отсутствует или неоднозначна");return d;}

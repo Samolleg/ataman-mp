@@ -1,4 +1,4 @@
-QT += core gui widgets testlib
+QT += core gui widgets concurrent testlib
 CONFIG += testcase console c++11
 TEMPLATE = app
 TARGET = res_archive_document_tests
@@ -31,6 +31,13 @@ HEADERS += \
     ../source/core/log.h
 
 SOURCES += ../source/documents/travel_document.cpp ../source/documents/map_save_batch.cpp
+# Current save/backup implementations also validate streamed RES and MPR data.
+SOURCES += ../source/resources/res_archive_index.cpp \
+           ../source/documents/endurance_document.cpp \
+           ../source/documents/mpr_document.cpp \
+           ../source/documents/mpr_namespace.cpp \
+           ../source/documents/terrain_edit_model.cpp \
+           ../source/documents/terrain_virtual_atlas.cpp
 
 INCLUDEPATH += ../source/ui
 SOURCES += ../source/ui/travel_panel.cpp
