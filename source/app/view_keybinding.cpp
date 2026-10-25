@@ -3,6 +3,11 @@
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QDir>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QPlainTextEdit>
+#include <QAbstractSpinBox>
+#include <QComboBox>
 
 #include <QClipboard>
 #include <QGuiApplication>
@@ -20,6 +25,28 @@
 
 namespace
 {
+EKeyCode cameraKey(const QKeyEvent* event)
+{
+    const int key=event->nativeVirtualKey()?int(event->nativeVirtualKey()):event->key();
+    switch(key) {
+    case 'W':return eKey_W;case 'A':return eKey_A;case 'S':return eKey_S;case 'D':return eKey_D;
+    case 'Q':return eKey_Q;case 'E':return eKey_E;
+    case 0x26:case Qt::Key_Up:return eKey_UpArrow;
+    case 0x28:case Qt::Key_Down:return eKey_DownArrow;
+    case 0x25:case Qt::Key_Left:return eKey_LeftArrow;
+    case 0x27:case Qt::Key_Right:return eKey_RightArrow;
+    case 0x10:case Qt::Key_Shift:return eKey_Shift;
+    default:return EKeyCode(0);
+    }
+}
+bool textInput(QWidget* widget)
+{
+    for(auto* w=widget;w;w=w->parentWidget()) {
+        if(qobject_cast<QLineEdit*>(w) || qobject_cast<QTextEdit*>(w) || qobject_cast<QPlainTextEdit*>(w) || qobject_cast<QAbstractSpinBox*>(w))return true;
+        if(auto* combo=qobject_cast<QComboBox*>(w))if(combo->isEditable())return true;
+    }
+    return false;
+}
 enum class ELandscapePhysicalShortcut
 {
     None,
@@ -103,7 +130,31 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
 
 bool CView::eventFilter(QObject* watched, QEvent* event)
 {
-    Q_UNUSED(watched);
+    if(m_pOp && (event->type()==QEvent::FocusIn || event->type()==QEvent::WindowDeactivate)) {
+        auto* receiver=qobject_cast<QWidget*>(watched);
+        if(receiver && (receiver==window() || window()->isAncestorOf(receiver))
+           && (event->type()==QEvent::WindowDeactivate || textInput(receiver)))
+            for(auto code:{eKey_W,eKey_A,eKey_S,eKey_D,eKey_Q,eKey_E,eKey_UpArrow,eKey_DownArrow,eKey_LeftArrow,eKey_RightArrow,eKey_Shift})m_pOp->keyManager()->release(code);
+    }
+    // Shared across editing modes. Text editors and open popup menus retain
+    // their keyboard; buttons/list backgrounds can still navigate the scene.
+    if(m_pOp && (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)) {
+        auto* key=static_cast<QKeyEvent*>(event);const auto code=cameraKey(key);
+        auto* receiver=qobject_cast<QWidget*>(watched);
+        QWidget* focus=QApplication::focusWidget();
+        if(!focus)focus=window()->focusWidget();
+        const bool context=receiver && (receiver==this || window()->isAncestorOf(receiver));
+        if(code!=EKeyCode(0) && context && !QApplication::activeModalWidget() && !QApplication::activePopupWidget()
+           && !textInput(receiver) && !textInput(focus) && !(key->modifiers()&(Qt::ControlModifier|Qt::AltModifier|Qt::MetaModifier))) {
+            if(!key->isAutoRepeat()) {
+                if(event->type()==QEvent::KeyPress)m_pOp->keyManager()->press(code);
+                else m_pOp->keyManager()->release(code);
+            }
+            event->accept();return true;
+        }
+        // Focus/modifiers can change between press and release.
+        if(code!=EKeyCode(0) && event->type()==QEvent::KeyRelease && !key->isAutoRepeat())m_pOp->keyManager()->release(code);
+    }
     if((event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease)
        && !QApplication::activeModalWidget() && m_landscapeTools)
     {
@@ -133,6 +184,7 @@ void CView::keyPressEvent(QKeyEvent* event)
     }
     if(m_travelEditing) {
         if(event->key()==Qt::Key_Escape)cancelTravelGesture();
+        else if(cameraKey(event)!=EKeyCode(0) && !(event->modifiers()&(Qt::ControlModifier|Qt::AltModifier|Qt::MetaModifier)))m_pOp->keyManager()->press(cameraKey(event));
         event->accept();return;
     }
 
@@ -151,7 +203,7 @@ void CView::keyPressEvent(QKeyEvent* event)
 
 void CView::keyReleaseEvent(QKeyEvent* event)
 {
-    if(m_travelEditing){event->accept();return;}
+    if(m_travelEditing){if(cameraKey(event)!=EKeyCode(0))m_pOp->keyManager()->release(cameraKey(event));event->accept();return;}
     if(handleLandscapeShortcut(event, false))
     {
         event->accept();

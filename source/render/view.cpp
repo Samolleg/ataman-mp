@@ -23271,6 +23271,7 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 
 void CView::mousePressEvent(QMouseEvent* event)
 {
+    setFocus(Qt::MouseFocusReason);
     if(travelMousePress(event)) return;
     if(m_worldPlacementActive)
     {

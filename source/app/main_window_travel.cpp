@@ -32,6 +32,9 @@
 #include <QMouseEvent>
 #include <QTableWidget>
 #include "travel_combo.h"
+#include "travel_destination.h"
+#include "game_text_catalog.h"
+#include "resource_profile.h"
 #include <QHeaderView>
 #include <QRegularExpression>
 #include <QTimer>
@@ -130,6 +133,30 @@ void MainWindow::createTravelEditor(QMenu* menu)
         dialog.exec();
     });
     connect(m_travelPanel,&CTravelPanel::routeRequested,this,&MainWindow::createPairedTravelRoute);
+    connect(m_travelPanel,&CTravelPanel::routeEndEdited,this,[this](int route,int end,const QString& target,int entry){
+        if(!m_travelDocument)return;
+        const auto zones=m_travelDocument->table().zones();
+        if(route<0 || route>=zones.size() || !travel::edge(zones[route]) || zones[route].exits.size()!=2 || end<0 || end>=2)return;
+        const auto destination=travel::resolve(zones,target,entry);
+        if(!destination.error.isEmpty() || destination.route>=0){m_travelPanel->setStatus(tr("Выберите существующий вход с областью появления на игровой карте."));return;}
+        auto zone=zones[route];zone.exits[end].destinationZoneId=target;zone.exits[end].destinationExitId=entry;
+        changeTravelZone(route,zone,tr("Изменить дальний конец общего маршрута"));
+    });
+    connect(m_travelPanel,&CTravelPanel::destinationProblemRequested,this,[this](int zone,int entry){
+        if(!m_travelDocument)return;const auto zones=m_travelDocument->table().zones();
+        if(zone<0 || zone>=zones.size()){m_travelPanel->setStatus(tr("Целевая зона отсутствует: выберите назначение в «Куда ведёт» или исправьте расширенные поля."));return;}
+        if(zone==m_travelZone){m_travelExit=entry;refreshTravelEditor();m_travelPanel->revealArea(false);m_travelPanel->setStatus(tr("Задайте область появления для возвращения: «+ Появление» и прямоугольник на сцене."));return;}
+        if(hasTravelChanges()){m_travelPanel->setStatus(tr("Перед переходом к другой карте сохраните изменения Ctrl+S или отмените Ctrl+Z."));return;}
+        const auto target=zones[zone];const auto mpr=resolvedResource(activeMapRoots(),target.mprName,".mpr");
+        const auto mob=resolvedResource(activeMapRoots(),target.mobName,".mob");
+        if(mpr.isEmpty()){m_travelPanel->setStatus(tr("Файл целевой карты %1 недоступен в профиле. Проверьте каталог карт.").arg(target.zoneId));return;}
+        openMapPair(mpr,mob,target.zoneId);
+        if(!m_travelDocument || m_travelZone<0 || m_travelDocument->table().zones()[m_travelZone].zoneId!=target.zoneId)return;
+        m_travelExit=entry;refreshTravelEditor();m_travelDock->show();m_travelDock->raise();
+        m_travelPanel->revealArea(false);
+        if(entry>=0)emit m_travelPanel->focusRequested(entry,false);
+        else m_travelPanel->setStatus(tr("Вход не существует. Создайте появление или исправьте номер входа у исходного перехода."));
+    });
     connect(m_travelPanel,&CTravelPanel::globalPositionRequested,this,[this](){
         if(!m_travelDocument||m_travelZone<0)return;
         const auto zones=m_travelDocument->table().zones();
@@ -267,6 +294,17 @@ void MainWindow::refreshTravelContext()
     if(!m_travelPanel)return;
     m_pView->cancelTravelGesture();
     const QString path=m_mapCatalog.sourceArchive;
+    QMap<QString,QString> names;
+    auto nameRoots=activeResourceProfile().resourceDirectories;
+    if(nameRoots.isEmpty() && !path.isEmpty())nameRoots<<QFileInfo(path).absolutePath();
+    const auto texts=ei::loadGameTextCatalog(nameRoots);
+    for(const auto& zone:m_mapCatalog.topologyEntries) {
+        for(const auto& key:QStringList{"zone "+zone.zoneId,zone.zoneId+".txt",zone.mprName+".txt",zone.minimapTexture+".txt"}) {
+            const auto value=texts.entries.value(key).section('\n',0,0).trimmed();
+            if(!value.isEmpty() && value.size()<160 && !value.startsWith('#')){names.insert(zone.zoneId,value);break;}
+        }
+    }
+    m_travelPanel->setMapNames(names);
     const QString key=QFileInfo(path).absoluteFilePath().toCaseFolded();
     m_travelDocument.clear();m_travelZone=-1;m_travelExit=-1;
     QString error;
@@ -359,14 +397,20 @@ void MainWindow::createReverseTravel()
     if(!m_travelDocument || m_travelZone<0 || m_travelExit<0)return;
     const auto source=m_travelDocument->table().zones()[m_travelZone];const auto exit=source.exits[m_travelExit];
     if(!exit.hasDeployRectangle){m_travelPanel->setStatus(tr("Сначала задайте область появления здесь — она нужна для возвращения партии."));return;}
-    const int target=m_travelDocument->uniqueZone(exit.destinationZoneId);
+    const auto zones=m_travelDocument->table().zones();
+    const auto destination=travel::resolve(zones,exit.destinationZoneId,exit.destinationExitId);
+    const int target=destination.zone;
     if(target<0){m_travelPanel->setStatus(tr("Выберите однозначную целевую зону."));return;}
+    if(travel::edge(zones[target])){m_travelPanel->setStatus(destination.error);return;}
+    const int targetEntry=destination.route>=0 && destination.farEnd>=0
+        ?zones[destination.route].exits[destination.farEnd].destinationExitId:exit.destinationExitId;
     auto zone=m_travelDocument->table().zones()[target];int index=-1;
-    for(int i=0;i<zone.exits.size();++i)if(zone.exits[i].exitId==exit.destinationExitId){if(index>=0){m_travelPanel->setStatus(tr("Целевой вход неоднозначен."));return;}index=i;}
-    if(exit.destinationExitId<=0){m_travelPanel->setStatus(tr("Задайте положительный номер целевого входа."));return;}
-    SMapTableExit reverse;if(index>=0)reverse=zone.exits[index];else reverse.exitId=exit.destinationExitId;
+    for(int i=0;i<zone.exits.size();++i)if(zone.exits[i].exitId==targetEntry){if(index>=0){m_travelPanel->setStatus(tr("Целевой вход неоднозначен."));return;}index=i;}
+    if(targetEntry<=0){m_travelPanel->setStatus(tr("Задайте положительный номер целевого входа."));return;}
+    SMapTableExit reverse;if(index>=0)reverse=zone.exits[index];else reverse.exitId=targetEntry;
     QDialog dialog(this);ei::rememberWindowGeometry(&dialog, QStringLiteral("travelReverse"));dialog.setWindowTitle(tr("Обратный переход из %1").arg(zone.zoneId));QFormLayout form(&dialog);
     QLabel note(tr("Локальные координаты целевой карты. Будут заданы обе области; затем их можно независимо изменить на той карте."));note.setWordWrap(true);form.addRow(&note);
+    if(destination.route>=0)note.setText(note.text()+tr("\nВозвращение пройдёт через общий маршрут %1. Его ближний конец будет направлен в текущий вход №%2; это затрагивает все использующие маршрут карты.").arg(zones[destination.route].zoneId).arg(exit.exitId));
     const QRectF r=reverse.hasDeployRectangle?reverse.deployRectangle:QRectF(0,0,1,1);
     CWorldCoordinateEdit x(r.x()),y(r.y()),w(r.width()),h(r.height());form.addRow("X:",&x);form.addRow("Y:",&y);form.addRow(tr("Ширина:"),&w);form.addRow(tr("Высота:"),&h);
     QDialogButtonBox buttons(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);form.addRow(&buttons);connect(&buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(&buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
@@ -374,8 +418,17 @@ void MainWindow::createReverseTravel()
     double a,b,c,d;if(!x.coordinate(&a)||!y.coordinate(&b)||!w.coordinate(&c)||!h.coordinate(&d)||c<=0||d<=0){m_travelPanel->setStatus(tr("Неверный прямоугольник."));return;}
     if(index>=0 && QMessageBox::question(this,tr("Изменить существующий вход"),tr("Перезаписать связь и обе области входа %1 зоны %2?").arg(reverse.exitId).arg(zone.zoneId))!=QMessageBox::Yes)return;
     reverse.destinationZoneId=source.zoneId;reverse.destinationExitId=exit.exitId;reverse.hasDeployRectangle=reverse.hasRemoveRectangle=true;reverse.deployRectangle=reverse.removeRectangle=QRectF(a,b,c,d);
+    if(destination.route>=0){reverse.destinationZoneId=zones[destination.route].zoneId;reverse.destinationExitId=zones[destination.route].exits[destination.farEnd].exitId;}
     if(index<0)zone.exits.append(reverse);else zone.exits[index]=reverse;
-    changeTravelZone(target,zone,tr("Создать обратный переход"));
+    const auto before=m_travelDocument->snapshot();CTravelDocument candidate=*m_travelDocument;QString error;
+    if(!candidate.replaceZone(target,zone,&error)){m_travelPanel->setStatus(error);return;}
+    if(destination.route>=0){
+        auto route=zones[destination.route];auto& nearEnd=route.exits[destination.nearEnd];
+        nearEnd.destinationZoneId=source.zoneId;nearEnd.destinationExitId=exit.exitId;
+        if(!candidate.replaceZone(destination.route,route,&error)){m_travelPanel->setStatus(error);return;}
+    }
+    if(!m_travelDocument->restore(candidate.snapshot(),&error)){m_travelPanel->setStatus(error);return;}
+    recordTravelEdit(before,tr("Создать обратный переход"));
 }
 void MainWindow::createPairedTravelRoute()
 {

@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include "map_table_document.h"
+#include <QMap>
 class QComboBox;
 class QListWidget;
 class QCheckBox;
@@ -23,6 +24,7 @@ public:
     bool showRemove() const;
     void setDrawingState(bool active, bool remove, bool newExit);
     void revealArea(bool remove);
+    void setMapNames(const QMap<QString,QString>& names) {m_names=names;}
 signals:
     void zoneSelected(int index);
     void exitSelected(int index);
@@ -37,11 +39,25 @@ signals:
     void visibilityChanged();
     void focusRequested(int index, bool remove);
     void incomingRequested(int zoneIndex, int exitIndex);
+    void routeEndEdited(int zoneIndex,int exitIndex,const QString& target,int entry);
+    void destinationProblemRequested(int zoneIndex,int exitIndex);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void fillExit();
     void fillDestinationEntries(int selected);
+    void fillFriendlyDestination();
+    void fillFarEntries(int selected);
+    QMap<QString,QString> m_names;
+    QLabel* m_chain;
+    QLabel* m_linkStatus;
+    QComboBox* m_friendly;
+    QWidget* m_routeEditor;
+    QComboBox* m_farZone;
+    QComboBox* m_farEntry;
+    QLabel* m_routeWarning;
+    QPushButton* m_problem;
+    int m_route{-1},m_farEnd{-1};
     bool m_filling{false};
     QVector<SMapTableZone> m_zones;
     int m_zone{-1};

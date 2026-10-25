@@ -3810,6 +3810,7 @@ void MainWindow::setupCompactViewportTools()
         m_travelDock->show();
         m_travelDock->raise();
         if(m_travelDock->isFloating())m_travelDock->activateWindow();
+        m_pView->setFocus(Qt::ShortcutFocusReason);
     });
     auto* scenario=button("scenarioToolbarButton",QString::fromUtf8("Сценарий карты"),3,8);
     auto* scenarioAction=findChild<QDockWidget*>("mapScenarioDock")->toggleViewAction();scenarioAction->setIcon(viewportToolIcon(3));scenario->setDefaultAction(scenarioAction);
