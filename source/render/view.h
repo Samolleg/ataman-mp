@@ -704,7 +704,7 @@ private:
         const QSize& tileSize, QMap<qint32,QImage>* sources, CValidationReport* report);
     bool worldTerrainPosition(const QPoint& viewport, QVector3D* position);
     bool sculptWorldTerrainAt(const QVector3D& position, float fraction);
-    void clearNeighborLandscapes();
+    void clearNeighborLandscapes(bool reloading = false);
     bool neighborMapAtViewport(const QPoint& viewportPosition,
                                SNeighborMapPlacement* placement,
                                QVector3D* hitPoint = nullptr,

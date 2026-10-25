@@ -57,7 +57,7 @@ public:
     void setMorphDeltas(const QVector<QVector3D>& deltas);
     bool isDrawable() const { return m_bShow && !m_aVertData.isEmpty(); }
     bool canInstance() const { return !m_morphApplied; }
-    quintptr meshIdentity() const { return quintptr(m_mesh.data()); }
+    quintptr meshIdentity() { ensureMesh(); return quintptr(m_mesh.data()); }
     const QVector3D& localBoundsCenter() const { return m_localBoundsCenter; }
     float localBoundsRadius() const { return m_localBoundsRadius; }
     void setAuthoredNavigationBounds(const QVector3D& minimum, const QVector3D& maximum)
@@ -82,6 +82,7 @@ public:
     static quint64 sharedMeshBytes();
 
 private:
+    bool ensureMesh();
     void updateLocalBounds(const QVector<SVertexData>& vertices);
     void attachSharedMesh(const QVector<SVertexData>& vertices);
     void attachPrivateMesh(const QVector<SVertexData>& vertices);

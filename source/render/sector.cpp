@@ -8,12 +8,21 @@
 
 quint64 CSector::residentBytes() const
 {
+    // QOpenGLBuffer::size() queries the currently bound buffer of its target,
+    // not this wrapper's buffer. Accounting must neither depend on draw state
+    // nor issue GL_INVALID_OPERATION when no element buffer is bound. Charge
+    // CPU capacities and conservative GPU upload bounds without GL queries.
+    const quint64 gpuBytes=
+        (m_vertexBuf.isCreated()?quint64(m_arrLitLandVrtData.capacity())*sizeof(STerrainVertexData):0)
+        +(m_waterVertexBuf.isCreated()?quint64(m_arrAnimatedWaterVrtData.capacity())*sizeof(SWaterVertexData):0)
+        +(m_indexBuf.isCreated()?256ull*24*sizeof(ushort):0)
+        +(m_gridIndexBuf.isCreated()?256ull*8*sizeof(ushort):0)
+        +(m_waterIndexBuf.isCreated()?256ull*24*sizeof(ushort):0);
     return quint64(m_arrLandVrtData.capacity())*sizeof(SVertexData)
         + quint64(m_arrLitLandVrtData.capacity())*sizeof(STerrainVertexData)
         + quint64(m_arrWaterVrtData.capacity())*sizeof(SVertexData)
         + quint64(m_arrAnimatedWaterVrtData.capacity())*sizeof(SWaterVertexData)
-        + quint64(qMax(0,m_vertexBuf.size())+qMax(0,m_indexBuf.size())+qMax(0,m_gridIndexBuf.size())
-            +qMax(0,m_waterVertexBuf.size())+qMax(0,m_waterIndexBuf.size()))
+        + gpuBytes
         + 2ull*32*32*sizeof(CTile);
 }
 

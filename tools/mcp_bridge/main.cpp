@@ -238,7 +238,12 @@ public:
         const bool editPoll=(name=="operation_status"||name=="cancel_operation")&&editJobs.contains(args["operation"].toString());
         const auto value=local(name,args,editPoll?30000:2000);
         if(value["operation"].isString())activeJobs[value["operation"].toString()]=now+180000;
-        if(name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value.contains("error"))))activeJobs.remove(args["operation"].toString());
+        // A reentrant status/cancel request during a normal GUI commit is
+        // temporarily busy, not terminal. Keep catalog probes suspended until
+        // that same operation finishes; their ordinary 2s deadline is shorter
+        // than opening a full map with neighbors and would discard the stream.
+        const bool commitBusy=value["error"].toString().startsWith("Normal map commit in progress");
+        if(!commitBusy && (name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value.contains("error")))))activeJobs.remove(args["operation"].toString());
         const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());

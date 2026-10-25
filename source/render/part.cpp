@@ -170,6 +170,10 @@ QByteArray meshKey(const QVector<SVertexData>& vertices)
 
 QSharedPointer<CSharedPartMesh> createMesh(const QVector<SVertexData>& vertices)
 {
+    // MOB preflight constructs helper geometry without a render context (also
+    // on the agent worker). Do not publish a GPU holder with bufferId==0.
+    if(!QOpenGLContext::currentContext())
+        return {};
     QSharedPointer<CSharedPartMesh> mesh(new CSharedPartMesh);
     mesh->vertexCount = vertices.size();
     mesh->bytes = quint64(vertices.size()) * sizeof(SVertexData);
@@ -212,7 +216,10 @@ CPart::CPart(const CPart &part)
     if(m_morphApplied)
         attachPrivateMesh(m_aVertData);
     else
+    {
         m_mesh = part.m_mesh;
+        if(!m_mesh)ensureMesh(); // a CPU-only cached assembly can now be uploaded
+    }
 }
 
 CPart::~CPart()
@@ -253,6 +260,12 @@ quint64 CPart::sharedMeshBytes()
 void CPart::attachSharedMesh(const QVector<SVertexData>& vertices)
 {
     updateLocalBounds(vertices);
+    // Keep context-free projection out of the shared GPU cache entirely.
+    if(!QOpenGLContext::currentContext())
+    {
+        m_mesh.clear();
+        return;
+    }
     const QByteArray key = meshKey(vertices);
     m_mesh = s_meshCache.value(key).toStrongRef();
     if(!m_mesh)
@@ -266,6 +279,16 @@ void CPart::attachPrivateMesh(const QVector<SVertexData>& vertices)
 {
     updateLocalBounds(vertices);
     m_mesh = createMesh(vertices);
+}
+
+bool CPart::ensureMesh()
+{
+    if(!m_mesh && QOpenGLContext::currentContext())
+    {
+        if(m_morphApplied)attachPrivateMesh(m_aVertData);
+        else attachSharedMesh(m_aVertData);
+    }
+    return bool(m_mesh);
 }
 
 void CPart::updateLocalBounds(const QVector<SVertexData>& vertices)
@@ -321,7 +344,7 @@ void CPart::setMorphDeltas(const QVector<QVector3D>& deltas)
                 m_aVertData[vertex].position += deltas.at(source);
         }
     }
-    if(canApply && m_morphApplied && m_mesh)
+    if(canApply && m_morphApplied && m_mesh && QOpenGLContext::currentContext())
     {
         updateLocalBounds(m_aVertData);
         m_mesh->buffer.bind();
@@ -342,7 +365,7 @@ void CPart::draw(QOpenGLShaderProgram* program)
 
 void CPart::drawImmediate(QOpenGLShaderProgram* program)
 {
-    if (!isDrawable() || !m_mesh)
+    if (!isDrawable() || !ensureMesh())
         return;
 
     const ProgramLocations& locations = locationsFor(program);
@@ -387,7 +410,7 @@ void CPart::drawImmediate(QOpenGLShaderProgram* program)
 bool CPart::drawInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
                           int instanceBufferOffset, const QVector<QMatrix4x4>& matrices)
 {
-    if(!isDrawable() || !m_mesh || !program || !instanceBuffer || matrices.size() < 2)
+    if(!isDrawable() || !ensureMesh() || !program || !instanceBuffer || matrices.size() < 2)
         return false;
     QOpenGLContext* context = QOpenGLContext::currentContext();
     if(!context || !context->extraFunctions())
@@ -464,7 +487,7 @@ bool CPart::drawInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instance
 
 void CPart::drawSelect(QOpenGLShaderProgram *program)
 {
-    if (!isDrawable() || !m_mesh)
+    if (!isDrawable() || !ensureMesh())
         return;
 
     const ProgramLocations& locations = locationsFor(program);
@@ -500,7 +523,7 @@ bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* in
                                 int instanceBufferOffset,
                                 const QVector<SPartPickingInstance>& instances)
 {
-    if(!isDrawable() || !m_mesh || !program || !instanceBuffer || instances.size() < 2)
+    if(!isDrawable() || !ensureMesh() || !program || !instanceBuffer || instances.size() < 2)
         return false;
     QOpenGLContext* context = QOpenGLContext::currentContext();
     if(!context || !context->extraFunctions())

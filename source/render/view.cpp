@@ -3207,7 +3207,7 @@ void CView::setNeighborMapContext(
     ei::log(eLogInfo,QString("Neighbor context resource validation archives:%1 bytes:%2 elapsedMs:%3 placements:%4")
         .arg(resourceCount).arg(resourceBytes).arg(resourceTimer.elapsed()).arg(placements.size()));
     if(contextKey == m_neighborContextKey) return;
-    clearNeighborLandscapes();
+    clearNeighborLandscapes(m_neighborLandscapesVisible && !placements.isEmpty());
     m_activeMapWorldOrigin = QPointF();
     m_neighborActiveZoneId=activeZoneId;
     m_neighborActiveMobPath.clear();
@@ -3414,7 +3414,7 @@ void CView::retainActiveNeighborObjects(CMob* mob)
         .arg(expected).arg(retained.staticObjects.size()));
 }
 
-void CView::clearNeighborLandscapes()
+void CView::clearNeighborLandscapes(bool reloading)
 {
     m_neighborContextKey.clear();
     ++(*m_neighborSceneGeneration);
@@ -3435,7 +3435,10 @@ void CView::clearNeighborLandscapes()
         m_neighborRenderCache.append(n);
     }
     m_neighborLandscapes.clear();
-    trimNeighborRenderCache();
+    // A reload immediately reclaims matching entries below. They are still
+    // part of the visible working set, not LRU candidates merely because the
+    // list is temporarily empty. Trim after the new visible set is published.
+    if(!reloading)trimNeighborRenderCache();
     if(isValid())
         doneCurrent();
     ei::log(eLogInfo, "Neighbor render backgrounds retained; terrain/atlas/objects/sun preserved");
@@ -3444,9 +3447,10 @@ void CView::clearNeighborLandscapes()
 void CView::loadNeighborLandscapes()
 {
     if(m_applicationShutdown)return;
-    clearNeighborLandscapes();
-    if(!m_neighborLandscapesVisible || m_neighborPlacements.isEmpty()
-       || !m_pLand || !m_pLand->isMprLoad() || !isValid())
+    const bool reloading=m_neighborLandscapesVisible && !m_neighborPlacements.isEmpty()
+        && m_pLand && m_pLand->isMprLoad() && isValid();
+    clearNeighborLandscapes(reloading);
+    if(!reloading)
         return;
     const quint64 generation = m_neighborSceneGeneration->load();
     const auto epoch = m_neighborSceneGeneration;
@@ -11460,12 +11464,12 @@ int CView::select(const SSelect &selectParam, bool bAddToSelect)
 
 CMob *CView::mob(QString mobName)
 {
-    const QString wanted = QDir::cleanPath(mobName).toLower();
+    const QString wanted = CProcessEditLock::identity(mobName);
     for(CMob* pMob : m_aMob)
     {
         if(!pMob)
             continue;
-        if(QDir::cleanPath(pMob->filePath().absoluteFilePath()).toLower() == wanted)
+        if(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()) == wanted)
             return pMob;
 
         if(pMob->mobName().toLower() == mobName.toLower())
@@ -16663,16 +16667,12 @@ bool CView::loadMob(QFileInfo &filePath)
     if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return false;}
     QElapsedTimer loadTimer;
     loadTimer.start();
-    const auto normalizedPath = [](const QFileInfo& info)
-    {
-        const QString canonical = info.canonicalFilePath();
-        return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical)
-            .toCaseFolded();
-    };
-    const QString requestedPath = normalizedPath(filePath);
+    // Registry lookup and edit leases must use the same canonical, case-folded
+    // identity, including when a supplemental MOB is opened through an alias.
+    const QString requestedPath = CProcessEditLock::identity(filePath.absoluteFilePath());
     for(CMob* loaded : m_aMob)
     {
-        if(loaded && normalizedPath(loaded->filePath()) == requestedPath)
+        if(loaded && CProcessEditLock::identity(loaded->filePath().absoluteFilePath()) == requestedPath)
         {
             changeCurrentMob(loaded);
             ei::log(eLogInfo, QString("MOB open reused the already loaded document path:%1")
@@ -17216,10 +17216,15 @@ bool CView::unloadMobDocument(CMob* mob, bool promptForSave)
     m_nukeEmitters.clear();
     m_bansheeCastingEmitters.clear();
     m_aMob.removeAt(removedIndex);
+    // unloadMob is synchronous: observers may inspect currentMob()/mobs().
+    // Publish the new registry before notification and before destroying nodes.
+    if(removedActive)
+        m_activeMob = m_aMob.isEmpty() ? nullptr : m_aMob.at(qMin(removedIndex, m_aMob.size() - 1));
     if(removedEnvironment)
         m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
     m_scriptWorkspaces->unregisterMob(mob);
     emit unloadMob(mob);
+    m_mobEditLeases.remove(CProcessEditLock::identity(mob->filePath().absoluteFilePath()));
     delete mob;
 
     if(removedActive)
@@ -17521,7 +17526,15 @@ void CView::unloadMob(QString mobName)
     CMob* pMob = nullptr;
     if(mobName.isEmpty())
     {
-        foreach(pMob, m_aMob)
+        // Detach the entire closing family first. The scenario-panel unload
+        // callback calls selectedNodes() synchronously; leaving earlier deleted
+        // MOBs in m_aMob made its QList detach read freed storage on the second
+        // member. Retained static visuals own their copies independently.
+        const auto closingMobs = m_aMob;
+        m_aMob.clear();
+        m_activeMob = nullptr;
+        m_environmentMob = nullptr;
+        foreach(pMob, closingMobs)
         {
             m_hiddenMobs.remove(pMob);
             m_scriptWorkspaces->unregisterMob(pMob);
@@ -17530,9 +17543,6 @@ void CView::unloadMob(QString mobName)
             m_mobEditLeases.remove(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()));
             delete pMob;
         }
-        m_aMob.clear();
-        m_activeMob = nullptr;
-        m_environmentMob = nullptr;
         m_caveEnvironment = false;
         m_shadowInitialized = false;
         m_staticShadowFingerprint.clear();
@@ -17542,18 +17552,20 @@ void CView::unloadMob(QString mobName)
     {
         foreach(pMob, m_aMob)
         {
-            if (pMob->mobName().toLower() == mobName.toLower())
+            if (pMob == mob(mobName))
             {
                 const bool removedEnvironment = pMob == m_environmentMob;
                 m_scriptWorkspaces->unregisterMob(pMob);
                 retainActiveNeighborObjects(pMob);
                 m_hiddenMobs.remove(pMob);
-                emit unloadMob(pMob);
                 m_aMob.removeOne(pMob);
-                m_mobEditLeases.remove(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()));
-                delete pMob;
+                if(m_activeMob == pMob)
+                    m_activeMob = m_aMob.isEmpty() ? nullptr : m_aMob.back();
                 if(removedEnvironment)
                     m_environmentMob = m_aMob.isEmpty() ? nullptr : m_aMob.first();
+                emit unloadMob(pMob);
+                m_mobEditLeases.remove(CProcessEditLock::identity(pMob->filePath().absoluteFilePath()));
+                delete pMob;
                 break;
             }
         }
