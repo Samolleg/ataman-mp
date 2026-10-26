@@ -1,5 +1,39 @@
 # EI-CRASH-NEIGHBOR-RETAIN-227
 
+## Установка принятой227 — 2026-10-26
+
+Владелец принял227 и поручил «ставь», отменив прежний СТОП ниже.
+Принятый main: `f6aee7b7ae7ea5d08ec331decf2f1bde56839f9f`.
+Канонический `packaging/install_program.ps1` установил готовый
+`build-crash-neighbor-227/build-staging-227-crash-neighbor-final` в
+`artifacts/EI-Mapper-Ataman-2-first-test` без пересборки и финализатора.
+
+- Перед заменой отсутствовали EIMapperEndurance (обычный и headless) и игра.
+  Мосты PID3776,54324,68320 зафиксированы до установки; после неё все живы
+  с прежним временем создания. Процессы владельца не завершались.
+- `--version`: `EI Mapper Endurance Edition 227`. Все174 управляемых SHA256
+  и манифест совпали со staging;8 замен,0 добавлений,0 удалений.
+- 18463 пользовательских файла сохранили SHA256, размер и mtime.
+  Служебный реестр `.ataman-retired.json` и учтённые в нём старые образы
+  учитывались отдельно от пользовательских файлов.
+- Откат: `artifacts/rollback226-to227-crash-neighbor-20261026`.
+  Создан и проверен установщиком до замены; отдельный
+  `rollback.ps1 -VerifyOnly` вернул `ROLLBACK_VERIFIED`.
+- Занят и отодвинут только `EIMapperMcp.exe`:
+  `EIMapperMcp.exe.old-ataman-fb3802dcc1404baa8b3058a22cabfb86`,
+  SHA256 `8E5838C73A67E29A3BAB07929C735BC9DEA3391F469AB821CE7DF33CFAB23872`.
+  Прежний `EIMapperMcp.exe.old-ataman-e73399bf946f4969a77879f78908abbb`
+  сохранён; установщик сообщил `removed=0 retained=1` до замены.
+- Регистрация мостов (`~/.codex/config.toml`, `.mcp.json`), прежние откаты
+  и чужие изменения сохранены. Интерактивный маппер и игра не запускались;
+  дополнительные функциональные проверки не выполнялись, push отсутствует.
+
+Квитанции относительно `build-crash-neighbor-227/`:
+`install-227-receipt.json`, `install-227-bridges-before.json`,
+`install-227-user-before.json`, `install-227-output.txt`,
+`install-227-rollback-verification.txt`. Установка завершена.
+Ниже сохранена история подготовки и её прежние ограничения.
+
 Поручение владельца 2026-10-25; проверки продолжены после полуночи 2026-10-26.
 Исходные main/VERSION: `e7753b48664006f9aff7fc2507bbc0a5f21d600a`, 226.
 База131 сохранена, RecipeBaker/MixedEdge не возвращались. СТОП ПЕРЕД УСТАНОВКОЙ,
