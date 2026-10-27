@@ -64,9 +64,10 @@ matches that triple against its open MPR/MOB pair and requested profile,
 then checks the fingerprint. Do not infer a map solely from a filename/hash.
 Renaming a file cannot change its embedded identity. The game checks the same
 triple before adding tiles. Older containers/algorithms must be re-baked.
-The container embeds a SHA-256 of normalized geometry, effective MPR header/
-sectors/material registry, raw primary MPR/MOB, effective object model/BON
-payloads, authoring .navsrc bytes (explicitly empty when absent), profile,
+The container embeds a SHA-256 of effective MPR header/sectors/material
+registry, raw primary MPR/MOB, original object model/BON payloads (including
+objects absent from a saved world), authoring .navsrc bytes (explicitly empty
+when absent), object constitution quantization setting, profile,
 coordinate conversion, algorithm/library/container/ABI settings. Script-only
 secondary MOBs do not add geometry. A primary MOB edit requires re-baking.
 No file dates, installation paths, transient IDs or EXE hashes enter the key.
@@ -134,7 +135,7 @@ not a corrupt volume. NaN/infinite geometry still reports its source.
 ## Container 3
 
 Little endian fields, no raw host pointers/structs except pinned Detour tile
-payloads: NAV664 magic (u32 0x3656414e, 0x00003436), container=3, algorithm=7,
+payloads: NAV664 magic (u32 0x3656414e, 0x00003436), container=3, algorithm=9,
 library=0x010600, endian=0x12345678, polyrefBytes=8; four length-prefixed UTF-8
 strings: fingerprint, MPR basename, MOB basename, profile ID. String lengths
 are u32 byte counts without NUL. Then six f32 profile fields (radius, height,
@@ -180,9 +181,10 @@ serialized. Partial paths and bounded-search exhaustion are failures.
 Moving units wait rather than push. Full crowd/queue/terrain costs and robust
 independent floors remain later NAV packages.
 
-Real runtime geometry changes invalidate the snapshot. No runtime builder or
-old graph is used; until NAV05 dynamic tiles are implemented, an unpublished
-changed snapshot is unavailable. Exact campaign gameplay and the zone1
+Runtime object changes retain the published baked snapshot until NAV05.
+No runtime builder or old graph is used. Actual add/remove/update contributions
+are journalled with before/after solid/triangle counts; empty-to-empty events
+do not affect generation or the snapshot. Dynamic tile updates remain NAV05. Exact campaign gameplay and the zone1
 passages (1.3 m opening/ramp, 1.5 m courtyards, 0.8 m door, 6 m giant gates)
 require owner acceptance. samvlrmp01 measured width remains 1.30 m.
 
@@ -212,3 +214,27 @@ PROFILE includes height_outliers=0 only after this check succeeds for the map.
 This is release-data validation, not an alternate reader or test executable.
 Container 3, compression, filenames, command line and exit codes are unchanged;
 algorithm 8 fingerprints require re-baking all profiles.
+## Immutable source fingerprint and runtime changes (r14)
+
+Algorithm 9 fingerprints only original file inputs. At Scene entry the shared
+owned MOB reader enumerates the original model references without creating
+objects or executing scripts/RNG. Packed MOD/BON, or LNK plus its selected
+per-node FIG/BON, are fingerprinted in stable key order. Missing optional
+resources are explicit empty entries. This dependency set never comes from
+objects restored from a save or spawned/removed by gameplay. The derived live
+geometry no longer enters the file key. The normal and staged-save loaders
+use the same source catalog; the baker uses that same Scene path.
+
+Prepare validates and loads all eight profiles once per zone. Party deployment,
+repeat Prepare and queries retain them and their generation after a live
+object change. The frozen ingress-support geometry also remains unchanged
+within that loaded zone. The live contribution inventory is still compared
+and journalled for NAV05; it cannot clear meshes or change the source key.
+A zero contribution before AND after a change is ignored. Actual stale source
+files still fail at zone/save entry. Container 3, CLI and SaveSchema 4 remain;
+algorithm 8 files require a complete re-bake with this executable.
+
+query_failed adds profile, clearance height, max_length and route_length to
+the existing bounded journal event. A short straight-line displacement can
+still exceed max_length when its traversable corridor detours around a wall.
+No path-length/radius/clearance policies or map data are changed in r14.

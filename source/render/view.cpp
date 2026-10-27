@@ -4119,6 +4119,14 @@ void CView::initAiGraphPreviewWidget()
     connect(m_navmeshPanel, &CNavmeshPanel::contentChanged, this, [this]() {
         positionEnvironmentPreviewWidget();
     });
+    connect(m_navmeshPanel, &CNavmeshPanel::comparisonRequested, this, [this]() {
+        SAiGraphPreviewBuildInput input;QString error;
+        if(m_canvasNavigationStale)error=QStringLiteral("Размер карты изменён: обновите старый граф перед сравнением.");
+        else if(!m_aiGraphLoadedDocument.isValid())error=QStringLiteral("Нет сохранённого старого графа для сравнения.");
+        else captureAiGraphPreviewBuildInput(&input,&error);
+        m_navmeshPanel->setComparisonInput(input,error);
+    });
+    connect(m_navmeshPanel, &CNavmeshPanel::regionSelected, this, [this](const QVector3D& point) {moveCameraToPoint(point);update();});
     auto* navTimer = new QTimer(m_navmeshPanel);
     navTimer->setInterval(1000);
     connect(navTimer, &QTimer::timeout, this, &CView::syncNavmeshContext);
@@ -4787,6 +4795,7 @@ void CView::beginAiGraphPreviewRegeneration()
 
 void CView::invalidateAiGraphPreview()
 {
+    if(m_navmeshPanel)m_navmeshPanel->refreshComparison();
     m_aiGraphLoadedSurfaceHeights.clear();
     m_aiGraphLoadedSurfacesResolved = false;
     m_aiGraphOverlayDirty = true;
@@ -6375,6 +6384,7 @@ void CView::paintGL()
         frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
     }
     drawTestOverlaysOpenGl();
+    drawNavmeshLegend();
     if(m_terrainStampRegressionFrameCapture && width() > 0 && height() > 0)
     {
         QImage frame(width(), height(), QImage::Format_RGBA8888);
@@ -23327,6 +23337,7 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 void CView::mousePressEvent(QMouseEvent* event)
 {
     setFocus(Qt::MouseFocusReason);
+    if(event->button()==Qt::LeftButton && navmeshComparisonClick(event->pos())){event->accept();return;}
     if(travelMousePress(event)) return;
     if(m_worldPlacementActive)
     {

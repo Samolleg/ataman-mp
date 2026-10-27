@@ -753,8 +753,13 @@ QVector<float> CAiGraphPreviewBuilder::navigationSurfaceHeights(
     return result.valid ? result.navigationSurfaceHeights : QVector<float>();
 }
 
+SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::passability(const SAiGraphPreviewBuildInput& input,int layer)
+{
+    if(layer<0||layer>=LayerCount){SAiGraphPreviewBuildResult r;r.error=QStringLiteral("Неверный слой старого графа");return r;}
+    return buildInternal(input,false,layer);
+}
 SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::buildInternal(
-    const SAiGraphPreviewBuildInput& input, bool surfacesOnly)
+    const SAiGraphPreviewBuildInput& input, bool surfacesOnly, int maskLayer)
 {
     SAiGraphPreviewBuildResult result;
     QElapsedTimer totalTimer;
@@ -1057,6 +1062,7 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::buildInternal(
     routeTimer.start();
     for(int layerIndex = 0; layerIndex < LayerCount; ++layerIndex)
     {
+        if(maskLayer>=0 && layerIndex!=maskLayer)continue;
         QVector<quint8> rawQuality(aiCount, 0);
         const int unitHeight = qMax(1, quantizedHeight(
             ProfileHeights[layerIndex], input.maximumTerrainHeight,
@@ -1111,6 +1117,7 @@ SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::buildInternal(
                     quality[index] = 0;
             }
         result.layerPassability[layerIndex] = quality;
+        if(maskLayer>=0){result.valid=true;result.buildMilliseconds=totalTimer.elapsed();return result;}
 
         // Edge costs depend only on the current layer's tile qualities and
         // terrain heights. Precompute them once instead of recalculating slope,

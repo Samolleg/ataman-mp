@@ -670,6 +670,8 @@ private:
                                            bool cameraMoving);
     void drawTestOverlaysOpenGl();
     void drawNavmeshOverlay(int position);
+    void drawNavmeshLegend();
+    bool navmeshComparisonClick(const QPoint& point);
     void syncNavmeshContext();
     CNavmeshPanel* m_navmeshPanel{nullptr};
     int m_navmeshDrawnTiles{0};

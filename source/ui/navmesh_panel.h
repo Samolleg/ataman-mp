@@ -4,6 +4,7 @@
 #include <QFutureWatcher>
 #include <QVector>
 #include "nav64_document.h"
+#include "nav64_comparison.h"
 #include "backup_manager.h"
 class QComboBox;
 class QCheckBox;
@@ -13,6 +14,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QProgressBar;
 class QToolButton;
+class QListWidget;
 
 class CNavmeshPanel : public QWidget {
     Q_OBJECT
@@ -37,18 +39,48 @@ public:
     bool lastBakeSucceeded() const {return m_lastSuccess;}
     int lastBakeExitCode() const {return m_lastExit;}
     QString bakeLog() const;
+    bool lossesVisible() const;
+    bool legendVisible() const;
+    QString legendHtml() const;
+    int comparisonLayer() const;
+    void setComparisonInput(const SAiGraphPreviewBuildInput& input, const QString& error=QString());
+    void invalidateComparison();
+    void refreshComparison() { requestComparison(); }
+    const SNav64Comparison& comparison() const {return m_comparison;}
+    int selectedRegion() const {return m_selectedRegion;}
+    void selectRegion(int index);
 signals:
     void geometryChanged();
     void contentChanged();
     void bakeFinished(bool success);
+    void comparisonRequested();
+    void regionSelected(const QVector3D& point);
 private:
     void drain(bool errors);
     void line(const QByteArray& bytes);
     void freshness();
     void controls();
     QString bakerPath() const;
+    void inspectBaker();
+    void algorithmStatus();
+    void requestComparison();
+    void startComparison();
     QComboBox* m_profile;QComboBox* m_fill;
     QCheckBox* m_narrow;QCheckBox* m_islands;
+    QCheckBox* m_legend;
+    QComboBox* m_compareLayer;
+    QLabel* m_compareStatus;QLabel* m_algorithmStatus;
+    QListWidget* m_regions;
+    QPushButton* m_useInstalled;
+    QFutureWatcher<SNav64Comparison>* m_comparing;
+    SAiGraphPreviewBuildInput m_compareInput;
+    SNav64Comparison m_comparison;
+    std::shared_ptr<std::atomic_bool> m_compareCancel;
+    quint64 m_compareGeneration=0,m_runningGeneration=0;
+    int m_selectedRegion=-1;
+    SNav64BakerIdentity m_bakerIdentity;
+    QString m_inspectedBaker,m_lastMismatch;
+    qint64 m_bakerSize=-1,m_bakerMtime=-1;
     QLabel* m_status;QLabel* m_freshness;QLabel* m_heightOutliers;
     QPushButton* m_browse;QPlainTextEdit* m_log;
     QProgressBar* m_progress;

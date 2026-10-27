@@ -21,12 +21,17 @@ struct SNav64RenderTile {
     QVector<SNav64Batch> areas;
     QVector<QVector3D> edges, narrow;
 };
+struct SNav64Triangle {
+    QVector3D a,b,c;
+    quint16 clearance=0;
+};
 // CPU-only, immutable after load; no editor document or MOB ownership.
 struct SNav64Document {
     SNav64Header header;
     QString path, error;
     QStringList warnings;
     QVector<SNav64RenderTile> renderTiles;
+    QVector<SNav64Triangle> triangles;
     QVector3D minimum, maximum;
     QVector<QVector3D> tiles, islands;
     int polygonCount=0, tileCount=0, islandCount=0, narrowCount=0, detailOutlierVertices=0;
@@ -40,3 +45,8 @@ SNav64Header readNav64Header(const QString& path, QString* error);
 QString findNav64ForScene(const QString& directory, const QString& mpr,
                          const QString& mob, const QString& profile, QString* error);
 SNav64Document loadNav64(const QString& path);
+QVector4D nav64AreaColor(int area);
+QString nav64AreaName(int area);
+struct SNav64BakerIdentity { QString release; int algorithm=0; };
+SNav64BakerIdentity nav64BakerIdentity(const QString& path);
+QString nav64AlgorithmMismatch(quint32 meshAlgorithm, int bakerAlgorithm);

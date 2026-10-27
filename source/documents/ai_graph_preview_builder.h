@@ -92,6 +92,8 @@ public:
     static constexpr float AiTileWorldSize = 0.5f;
 
     static SAiGraphPreviewBuildResult build(const SAiGraphPreviewBuildInput& input);
+    // Same legacy 0.5 m classifier, without rebuilding or modifying graph links.
+    static SAiGraphPreviewBuildResult passability(const SAiGraphPreviewBuildInput& input, int layer);
     // Restore display Z for a loaded graph without regenerating its routes.
     static QVector<float> navigationSurfaceHeights(
         const SAiGraphPreviewBuildInput& input, QString* error = nullptr);
@@ -102,7 +104,7 @@ public:
         const QByteArray& registry, QString* error = nullptr);
 private:
     static SAiGraphPreviewBuildResult buildInternal(
-        const SAiGraphPreviewBuildInput& input, bool surfacesOnly);
+        const SAiGraphPreviewBuildInput& input, bool surfacesOnly, int maskLayer = -1);
 };
 
 #endif // AI_GRAPH_PREVIEW_BUILDER_H

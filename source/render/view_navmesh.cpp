@@ -15,6 +15,8 @@
 #include <QLayout>
 #include <QDir>
 #include <QComboBox>
+#include <QPainter>
+#include <QTextDocument>
 
 void CView::createNavmeshMenu(QMenu* menu) {
     // MainWindow creates menus before attach() creates the viewport controls.
@@ -46,8 +48,39 @@ void CView::drawNavmeshOverlay(int position){
     };
     ei::gl::Disable(GL_DEPTH_TEST);
     auto draw=[&](const QVector<QVector3D>& v,const QVector4D& color,GLenum primitive){if(v.isEmpty())return;m_navmeshDrawnVertices+=quint64(v.size());m_program.setUniformValue(ei::uniformLocation(&m_program,"customColor"),color);m_program.setAttributeArray(position,v.constData());ei::gl::DrawArrays(primitive,0,v.size());};
+    if(m_navmeshPanel->lossesVisible()){
+        const auto& comparison=m_navmeshPanel->comparison();
+        for(const auto& tile:comparison.renderTiles){if(tile.areas.isEmpty()||!visible(tile))continue;++m_navmeshDrawnTiles;for(const auto& batch:tile.areas)draw(batch.vertices,batch.color,GL_TRIANGLES);}
+        const int selected=m_navmeshPanel->selectedRegion();
+        if(selected>=0&&selected<comparison.areas.size()){
+            QVector<QVector3D> edges;
+            const QRect b=comparison.areas[selected].bounds;
+            for(int y=b.top();y<=b.bottom();++y)for(int x=b.left();x<=b.right();++x){const int i=y*comparison.width+x;if(comparison.regions[i]!=selected)continue;const float a=x*.5f,c=y*.5f,z=comparison.heights[i]+.24f;const QVector3D p(a,c,z),q(a+.5f,c,z),r(a+.5f,c+.5f,z),s(a,c+.5f,z);edges<<p<<q<<q<<r<<r<<s<<s<<p;}
+            ei::gl::LineWidth(2);draw(edges,{1,1,1,1},GL_LINES);ei::gl::LineWidth(1);
+        }
+        ei::gl::Enable(GL_DEPTH_TEST);return;
+    }
     const bool filled=m_navmeshPanel->fillVisible();
     for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;if(filled)for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,filled?QVector4D(.12f,.16f,.12f,.65f):QVector4D(.22f,.95f,.45f,.8f),GL_LINES);if(m_navmeshPanel->narrowVisible())draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
     ei::gl::LineWidth(2);draw(doc.tiles,{.15f,.9f,1.f,.9f},GL_LINES);
     glPointSize(4);if(m_navmeshPanel->islandsVisible())draw(doc.islands,{1.f,.1f,.15f,1.f},GL_POINTS);glPointSize(1);ei::gl::LineWidth(1);ei::gl::Enable(GL_DEPTH_TEST);
+}
+
+void CView::drawNavmeshLegend(){
+    if(!m_navmeshPanel||!m_navmeshPanel->legendVisible())return;
+    QTextDocument doc;doc.setDefaultFont(QFont(QStringLiteral("Segoe UI"),9));doc.setDefaultStyleSheet("body {color: white;} p {margin: 0;}");
+    doc.setHtml("<body>"+m_navmeshPanel->legendHtml()+"</body>");doc.setTextWidth(qMin(325,qMax(120,width()-24)));
+    const QSizeF size=doc.size();const QPointF origin(width()-size.width()-20,16);
+    QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setPen(QColor(180,190,200,180));painter.setBrush(QColor(18,22,26,200));painter.drawRoundedRect(QRectF(origin-QPointF(6,5),size+QSizeF(12,10)),5,5);painter.translate(origin);doc.drawContents(&painter);
+}
+bool CView::navmeshComparisonClick(const QPoint& point){
+    if(!m_navmeshPanel||!m_navmeshPanel->layerVisible()||!m_navmeshPanel->lossesVisible())return false;
+    const auto& c=m_navmeshPanel->comparison();if(!c.valid)return false;
+    bool invertible=false;const auto inverse=(m_projection*m_cam->viewMatrix()).inverted(&invertible);if(!invertible)return false;
+    const float x=2.f*point.x()/qMax(1,width())-1,y=1-2.f*point.y()/qMax(1,height());
+    auto near4=inverse*QVector4D(x,y,-1,1),far4=inverse*QVector4D(x,y,1,1);const auto a=near4.toVector3DAffine(),b=far4.toVector3DAffine();const auto ray=b-a;if(qAbs(ray.z())<1e-7)return false;
+    // Intersect only difference cells, choose the nearest visible surface.
+    float best=1e30f;int region=-1;
+    for(int i=0;i<c.cells.size();++i)if(c.cells[i]){const float t=(c.heights[i]+.2f-a.z())/ray.z();if(t<0||t>best)continue;const auto p=a+t*ray;const int cx=i%c.width,cy=i/c.width;if(p.x()>=cx*.5f&&p.x()<(cx+1)*.5f&&p.y()>=cy*.5f&&p.y()<(cy+1)*.5f){best=t;region=c.regions[i];}}
+    if(region<0)return false;m_navmeshPanel->selectRegion(region);return true;
 }

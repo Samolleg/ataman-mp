@@ -1,6 +1,7 @@
 #include "navmesh_panel.h"
 #include <QtWidgets>
 #include <QtConcurrent>
+#include <algorithm>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -15,14 +16,22 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     const auto profiles=nav64Profiles();for(int i=0;i<profiles.size();++i)m_profile->addItem(labels[i],profiles[i]);m_profile->setCurrentIndex(2);profileRow->addWidget(m_profile,1);layout->addLayout(profileRow);
     m_status=new QLabel(QStringLiteral("Сетка не запечена"),this);m_status->setObjectName("navmeshStatus");m_status->setTextFormat(Qt::PlainText);m_status->setWordWrap(true);layout->addWidget(m_status);
     m_freshness=new QLabel(this);m_freshness->setObjectName("navmeshFreshness");m_freshness->setTextFormat(Qt::PlainText);m_freshness->setWordWrap(true);layout->addWidget(m_freshness);
+    m_algorithmStatus=new QLabel(this);m_algorithmStatus->setObjectName("navmeshAlgorithmStatus");m_algorithmStatus->setWordWrap(true);m_algorithmStatus->setStyleSheet("color: #ffbd69");m_algorithmStatus->hide();layout->addWidget(m_algorithmStatus);
     m_heightOutliers=new QLabel(this);m_heightOutliers->setTextFormat(Qt::PlainText);m_heightOutliers->setWordWrap(true);m_heightOutliers->hide();layout->addWidget(m_heightOutliers);
     auto* viewRow=new QHBoxLayout;
     viewRow->addWidget(new QLabel(QStringLiteral("Вид:"),this));
-    m_fill=new QComboBox(this);m_fill->setObjectName("navmeshFill");m_fill->addItems({QStringLiteral("Заливка"),QStringLiteral("Контуры")});viewRow->addWidget(m_fill);
-    m_narrow=new QCheckBox(QStringLiteral("Узкие места"),this);m_narrow->setObjectName("navmeshNarrow");m_narrow->setToolTip(QStringLiteral("Приблизительно: соединения короче диаметра профиля в уже эродированной сетке."));viewRow->addWidget(m_narrow);
-    m_islands=new QCheckBox(QStringLiteral("Острова"),this);m_islands->setObjectName("navmeshIslands");viewRow->addWidget(m_islands);viewRow->addStretch();layout->addLayout(viewRow);
+    m_fill=new QComboBox(this);m_fill->setObjectName("navmeshFill");m_fill->addItems({QStringLiteral("Заливка"),QStringLiteral("Контуры"),QStringLiteral("Потери проходимости")});viewRow->addWidget(m_fill,1);layout->addLayout(viewRow);
+    auto* diagnosticsRow=new QHBoxLayout;
+    m_narrow=new QCheckBox(QStringLiteral("Узкие места"),this);m_narrow->setObjectName("navmeshNarrow");m_narrow->setToolTip(QStringLiteral("Приблизительно: соединения короче диаметра профиля в уже эродированной сетке."));diagnosticsRow->addWidget(m_narrow);
+    m_islands=new QCheckBox(QStringLiteral("Острова"),this);m_islands->setObjectName("navmeshIslands");diagnosticsRow->addWidget(m_islands);
+    m_legend=new QCheckBox(QStringLiteral("Легенда"),this);m_legend->setObjectName("navmeshLegend");m_legend->setChecked(QSettings().value("nav64/legend",true).toBool());diagnosticsRow->addWidget(m_legend);diagnosticsRow->addStretch();layout->addLayout(diagnosticsRow);
+    m_compareLayer=new QComboBox(this);m_compareLayer->setObjectName("navmeshCompareLayer");m_compareLayer->addItem(QString(),-1);for(int i=0;i<8;++i)m_compareLayer->addItem(nav64LegacyLayerLabel(i),i);layout->addWidget(m_compareLayer);
+    m_compareStatus=new QLabel(this);m_compareStatus->setObjectName("navmeshCompareStatus");m_compareStatus->setWordWrap(true);layout->addWidget(m_compareStatus);
+    m_regions=new QListWidget(this);m_regions->setObjectName("navmeshRegions");m_regions->setMaximumHeight(100);m_regions->setToolTip(QStringLiteral("Нажмите область для перехода и подсветки; также можно нажать заливку в сцене."));layout->addWidget(m_regions);
     m_bakerPath=QSettings().value("nav64/bakerPath").toString();
     m_browse=new QPushButton(this);m_browse->setObjectName("navmeshBakerBrowse");layout->addWidget(m_browse);
+    m_useInstalled=new QPushButton(QStringLiteral("Использовать установленный запекатель"),this);m_useInstalled->setObjectName("navmeshUseInstalled");layout->addWidget(m_useInstalled);
+    connect(m_useInstalled,&QPushButton::clicked,this,[this](){m_bakerPath.clear();QSettings().remove("nav64/bakerPath");controls();});
     auto* bakeRow=new QHBoxLayout;
     m_this=new QPushButton(QStringLiteral("Запечь эту карту"),this);m_this->setObjectName("navmeshBakeMap");bakeRow->addWidget(m_this);
     m_all=new QPushButton(QStringLiteral("Запечь все карты мода"),this);m_all->setObjectName("navmeshBakeAll");bakeRow->addWidget(m_all);layout->addLayout(bakeRow);
@@ -33,12 +42,25 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_log=new QPlainTextEdit(this);m_log->setObjectName("navmeshBakeLog");m_log->setReadOnly(true);m_log->setMaximumBlockCount(2000);m_log->setFixedHeight(110);m_log->hide();layout->addWidget(m_log);
     connect(m_logToggle,&QToolButton::toggled,this,[this](bool open){m_log->setVisible(open);m_logToggle->setText(open?QStringLiteral("Журнал ▾"):QStringLiteral("Журнал ▸"));emit contentChanged();});
     m_process=new QProcess(this);m_loading=new QFutureWatcher<SNav64Document>(this);
+    m_comparing=new QFutureWatcher<SNav64Comparison>(this);
+    connect(m_comparing,&QFutureWatcher<SNav64Comparison>::finished,this,[this](){
+        if(m_runningGeneration!=m_compareGeneration){if(lossesVisible()&&m_document.valid)startComparison();return;}
+        m_comparison=m_comparing->result();m_regions->clear();
+        if(m_comparison.valid){m_compareStatus->setText(QStringLiteral("потеряно %1 м² / появилось %2 м²\nМаска старого алгоритма, клетка 0,5 м; коллизии %3. Это пересчёт, а не маска из MOB/.grp.").arg(m_comparison.lost*.25,0,'f',2).arg(m_comparison.gained*.25,0,'f',2).arg(m_compareInput.collisionMetadataApproximate?QStringLiteral("приближённые"):QStringLiteral("из метаданных")));
+            QVector<int> order;for(int i=0;i<m_comparison.areas.size();++i)order<<i;std::sort(order.begin(),order.end(),[this](int a,int b){return m_comparison.areas[a].cells>m_comparison.areas[b].cells;});
+            for(int i:order){const auto& a=m_comparison.areas[i];auto* item=new QListWidgetItem(QStringLiteral("%1 %2 м² · %3, %4").arg(a.lost?QStringLiteral("Потеряно"):QStringLiteral("Появилось")).arg(a.cells*.25,0,'f',2).arg(a.center.x(),0,'f',1).arg(a.center.y(),0,'f',1),m_regions);item->setData(Qt::UserRole,i);}
+        }else m_compareStatus->setText(m_comparison.error.isEmpty()?QStringLiteral("Сравнение отменено"):m_comparison.error);
+        controls();emit geometryChanged();emit contentChanged();
+    });
+    connect(m_regions,&QListWidget::itemClicked,this,[this](QListWidgetItem* item){selectRegion(item->data(Qt::UserRole).toInt());});
 #ifdef Q_OS_WIN
     m_process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
 #endif
-    connect(m_fill,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){emit geometryChanged();});
+    connect(m_fill,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){controls();requestComparison();emit geometryChanged();});
+    connect(m_compareLayer,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){QSettings().setValue("nav64/compareLayer/"+m_profile->currentData().toString(),m_compareLayer->currentData());requestComparison();});
+    connect(m_legend,&QCheckBox::toggled,this,[this](bool on){QSettings().setValue("nav64/legend",on);emit geometryChanged();});
     for(auto* check:{m_narrow,m_islands})connect(check,&QCheckBox::toggled,this,[this](){emit geometryChanged();});
-    connect(m_profile,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){reload();});
+    connect(m_profile,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){QSignalBlocker block(m_compareLayer);m_compareLayer->setCurrentIndex(qMax(0,m_compareLayer->findData(QSettings().value("nav64/compareLayer/"+m_profile->currentData().toString(),-1).toInt())));controls();reload();});
     connect(m_browse,&QPushButton::clicked,this,[this](){auto path=QFileDialog::getOpenFileName(this,QStringLiteral("Запекатель Nav64"),bakerPath(),"EIRebuild64NavBake.exe (*.exe)");if(!path.isEmpty()){setBakerPath(path);QSettings().setValue("nav64/bakerPath",path);}});
     connect(m_this,&QPushButton::clicked,this,[this](){startBake(false);});connect(m_all,&QPushButton::clicked,this,[this](){startBake(true);});connect(m_cancel,&QPushButton::clicked,this,&CNavmeshPanel::cancelBake);
     connect(m_process,&QProcess::readyReadStandardOutput,this,[this](){drain(false);});connect(m_process,&QProcess::readyReadStandardError,this,[this](){drain(true);});
@@ -57,12 +79,12 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
             m_document=result;
             m_status->setText(result.valid?QStringLiteral("Сетка: %1, алгоритм %2, запечена %3").arg(QFileInfo(result.path).fileName()).arg(result.header.algorithm).arg(QFileInfo(result.path).lastModified().toString("dd.MM.yyyy HH:mm")):result.error);
             m_status->setToolTip(QStringLiteral("%1\n%2 тайлов, %3 полигонов, %4 островов, %5 узких порталов\n%6").arg(result.path).arg(result.tileCount).arg(result.polygonCount).arg(result.islandCount).arg(result.narrowCount).arg(result.warnings.join("\n")));
-            m_status->setStyleSheet(result.warnings.isEmpty()?QString():QStringLiteral("color: #ffbd69"));freshness();emit contentChanged();emit geometryChanged();
+            m_status->setStyleSheet(result.warnings.isEmpty()?QString():QStringLiteral("color: #ffbd69"));freshness();algorithmStatus();requestComparison();emit contentChanged();emit geometryChanged();
         }else reload();
     });
     controls();
 }
-CNavmeshPanel::~CNavmeshPanel(){if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}m_loading->waitForFinished();}
+CNavmeshPanel::~CNavmeshPanel(){if(m_compareCancel)m_compareCancel->store(true);m_comparing->waitForFinished();if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}m_loading->waitForFinished();}
 bool CNavmeshPanel::layerVisible()const{return m_layerVisible&&m_document.valid;}
 void CNavmeshPanel::setLayerVisible(bool visible){m_layerVisible=visible;emit geometryChanged();}
 bool CNavmeshPanel::fillVisible()const{return m_fill->currentIndex()==0;}
@@ -75,7 +97,15 @@ QString CNavmeshPanel::bakeLog()const{return m_log->toPlainText();}
 void CNavmeshPanel::controls(){
     m_this->setEnabled(!busy()&&!m_mpr.isEmpty()&&!m_mob.isEmpty());m_all->setEnabled(!busy()&&!m_mpr.isEmpty());
     m_cancel->setVisible(busy());m_progress->setVisible(busy());m_browse->setEnabled(!busy());
-    m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("Запекатель найден · Указать…"):QStringLiteral("Запекатель не найден — Указать…"));
+    inspectBaker();
+    const QString installed=QDir(m_gameRoot).filePath("Engine64/EIRebuild64NavBake.exe");
+    const bool isInstalled=QFileInfo(bakerPath()).absoluteFilePath().compare(QFileInfo(installed).absoluteFilePath(),Qt::CaseInsensitive)==0;
+    const QString identity=m_bakerIdentity.algorithm?QStringLiteral(" (%1, алгоритм %2)").arg(m_bakerIdentity.release).arg(m_bakerIdentity.algorithm):QStringLiteral(" (алгоритм неизвестен)");
+    m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("Запекатель: %1%2 · Изменить…").arg(isInstalled?QStringLiteral("установленный"):QStringLiteral("выбранный"),identity):QStringLiteral("Запекатель не найден — Указать…"));
+    m_useInstalled->setVisible(!isInstalled&&QFileInfo(installed).isFile());m_useInstalled->setEnabled(!busy());
+    m_compareLayer->setItemText(0,QStringLiteral("Сравнивается с: %1 (авто)").arg(nav64LegacyLayerLabel(nav64LegacyLayer(m_profile->currentData().toString()))));
+    m_compareLayer->setVisible(lossesVisible());m_compareStatus->setVisible(lossesVisible());m_regions->setVisible(lossesVisible()&&m_comparison.valid);
+    m_narrow->setEnabled(!lossesVisible());m_islands->setEnabled(!lossesVisible());algorithmStatus();
     m_browse->setToolTip(bakerPath());emit contentChanged();
 }
 void CNavmeshPanel::setScene(const QString& mpr,const QString& mob,const QString& gameRoot,const QString& effectiveMapsDirectory){
@@ -86,10 +116,11 @@ void CNavmeshPanel::setScene(const QString& mpr,const QString& mob,const QString
 }
 void CNavmeshPanel::setUnsavedChanges(bool dirty){if(m_unsaved==dirty)return;m_unsaved=dirty;freshness();emit contentChanged();}
 void CNavmeshPanel::reload(){
+    invalidateComparison();
     m_document={};m_loadingPath.clear();emit geometryChanged();
     if(m_mpr.isEmpty()||m_mob.isEmpty()){m_status->setText(QStringLiteral("Откройте карту с первичным MOB"));freshness();return;}
     QString error;const auto path=findNav64ForScene(m_directory,m_mpr,m_mob,m_profile->currentData().toString(),&error);m_loadingPath=path;
-    if(path.isEmpty()){m_status->setText(error);freshness();return;}
+    if(path.isEmpty()){m_status->setText(error);freshness();algorithmStatus();return;}
     if(m_loading->isRunning())return; // finished callback starts the latest request
     m_status->setText(QStringLiteral("Чтение Nav64…"));m_loading->setFuture(QtConcurrent::run([path](){return loadNav64(path);}));
 }
@@ -146,3 +177,63 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     m_process->setWorkingDirectory(m_gameRoot);m_process->start(exe,args);controls();return true;
 }
 void CNavmeshPanel::cancelBake(){if(!busy())return;m_cancelled=true;m_log->appendPlainText(QStringLiteral("Отмена: запекатель остановлен; уже записанные файлы сохранены, прежние версии — в бэкапах."));m_process->terminate();QTimer::singleShot(2000,m_process,[this](){if(m_cancelled&&busy())m_process->kill();});}
+
+void CNavmeshPanel::inspectBaker(){
+    const QFileInfo file(bakerPath());const auto modified=file.lastModified().toMSecsSinceEpoch();
+    if(m_inspectedBaker==file.absoluteFilePath()&&m_bakerSize==file.size()&&m_bakerMtime==modified)return;
+    m_inspectedBaker=file.absoluteFilePath();m_bakerSize=file.size();m_bakerMtime=modified;
+    m_bakerIdentity=nav64BakerIdentity(bakerPath());
+}
+void CNavmeshPanel::algorithmStatus(){
+    quint32 algorithm=m_document.header.algorithm;
+    // Preserve diagnostics even for an unsupported algorithm rejected by the
+    // reader: this fixed prefix does not deserialize any untrusted payload.
+    if(!algorithm&&!m_mpr.isEmpty()){
+        QFile f(QDir(m_directory).filePath(QFileInfo(m_mpr).completeBaseName().toLower()+"--"+QFileInfo(m_mob).completeBaseName().toLower()+"."+m_profile->currentData().toString()+".nav64"));
+        if(f.open(QIODevice::ReadOnly)){const auto b=f.read(16);if(b.size()==16&&b.left(8)==QByteArray::fromHex("4e41563636340000"))algorithm=quint32(uchar(b[12]))|(quint32(uchar(b[13]))<<8)|(quint32(uchar(b[14]))<<16)|(quint32(uchar(b[15]))<<24);}
+    }
+    const auto message=nav64AlgorithmMismatch(algorithm,m_bakerIdentity.algorithm);
+    m_algorithmStatus->setText(message);m_algorithmStatus->setVisible(!message.isEmpty());
+    if(!message.isEmpty()&&message!=m_lastMismatch)m_log->appendPlainText(message);
+    m_lastMismatch=message;
+}
+bool CNavmeshPanel::lossesVisible()const{return m_fill->currentIndex()==2;}
+bool CNavmeshPanel::legendVisible()const{return m_legend->isChecked()&&layerVisible();}
+int CNavmeshPanel::comparisonLayer()const{const int layer=m_compareLayer->currentData().toInt();return layer<0?nav64LegacyLayer(m_profile->currentData().toString()):layer;}
+void CNavmeshPanel::invalidateComparison(){
+    ++m_compareGeneration;if(m_compareCancel)m_compareCancel->store(true);
+    m_comparison={};m_selectedRegion=-1;m_regions->clear();m_regions->hide();m_compareStatus->setText(QStringLiteral("Ожидается сетка для сравнения…"));
+}
+void CNavmeshPanel::requestComparison(){
+    invalidateComparison();
+    if(lossesVisible()&&m_document.valid){m_compareStatus->setText(QStringLiteral("Расчёт потерь в фоне…"));emit comparisonRequested();}
+    emit geometryChanged();emit contentChanged();
+}
+void CNavmeshPanel::setComparisonInput(const SAiGraphPreviewBuildInput& input,const QString& error){
+    m_compareInput=input;
+    if(!error.isEmpty()){m_compareStatus->setText(error);emit contentChanged();return;}
+    if(!m_comparing->isRunning())startComparison();
+}
+void CNavmeshPanel::startComparison(){
+    if(!lossesVisible()||!m_document.valid||m_compareInput.graphWidth<=0)return;
+    m_runningGeneration=m_compareGeneration;m_compareCancel=std::make_shared<std::atomic_bool>(false);
+    const auto input=m_compareInput;const auto mesh=m_document;const int layer=comparisonLayer();const auto cancel=m_compareCancel;
+    m_comparing->setFuture(QtConcurrent::run([mesh,input,layer,cancel](){return compareNav64(mesh,input,layer,cancel);}));
+}
+void CNavmeshPanel::selectRegion(int index){if(index<0||index>=m_comparison.areas.size())return;m_selectedRegion=index;emit regionSelected(m_comparison.areas[index].center);emit geometryChanged();}
+QString CNavmeshPanel::legendHtml()const{
+    if(!legendVisible())return {};
+    auto swatch=[](const QString& color,const QString& text){return QStringLiteral("<span style='color:%1'>■</span> %2<br>").arg(color,text.toHtmlEscaped());};
+    QString html=QStringLiteral("<b>Navmesh · %1</b><br>").arg(m_profile->currentData().toString().toHtmlEscaped());
+    if(lossesVisible())return html+swatch("#ff2629",QStringLiteral("Потеряно: старое проходимо, новое нет"))+swatch("#1aa6ff",QStringLiteral("Появилось: новое проходимо, старое нет"))+QStringLiteral("Клетка 0,5 м · пересчёт старого алгоритма<br>")+nav64LegacyLayerLabel(comparisonLayer()).toHtmlEscaped()+QStringLiteral("<br>Белая рамка — выбранная область");
+    html+=QStringLiteral("Проходимо для профиля %1 (любая поза)<br>Дыры — препятствия / непроходимое<br>").arg(m_profile->currentData().toString().toHtmlEscaped());
+    if(fillVisible()){
+        QSet<int> areas;for(const auto& tile:m_document.renderTiles)for(int i=0;i<tile.areas.size();++i)if(!tile.areas[i].vertices.isEmpty())areas.insert(i);
+        auto sorted=areas.values();std::sort(sorted.begin(),sorted.end());
+        for(int id:sorted){const auto c=nav64AreaColor(id);html+=swatch(QColor::fromRgbF(c.x(),c.y(),c.z()).name(),nav64AreaName(id));}
+    }else html+=swatch("#38f273",QStringLiteral("Контуры проходимых полигонов"));
+    if(!m_document.tiles.isEmpty())html+=swatch("#26e6ff",QStringLiteral("Границы тайлов хранения"));
+    if(narrowVisible()&&m_document.narrowCount)html+=swatch("#ff730d",QStringLiteral("Короткие порталы (< диаметра профиля)"));
+    if(islandsVisible()&&!m_document.islands.isEmpty())html+=swatch("#ff1a26",QStringLiteral("Центры островов кроме крупнейшего"));
+    return html;
+}

@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QSet>
 #include <QColor>
+#include <QCryptographicHash>
 #include <QtEndian>
 #include <windows.h>
 #include <cstring>
@@ -106,7 +107,20 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params,float heightT
 }
 QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
 QVector<quint32> nav64SupportedContainers(){return {3};}
-QVector<quint32> nav64SupportedAlgorithms(){return {8};}
+QVector<quint32> nav64SupportedAlgorithms(){return {8,Navigation::AlgorithmVersion};}
+QVector4D nav64AreaColor(int area){const auto c=QColor::fromHsv((area*43+100)%360,160,235);return {float(c.redF()),float(c.greenF()),float(c.blueF()),.33f};}
+QString nav64AreaName(int area){return QStringLiteral("Область поверхности %1 (area %1)").arg(area);}
+SNav64BakerIdentity nav64BakerIdentity(const QString& path){
+    QFile f(path);if(!f.open(QIODevice::ReadOnly))return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);if(!hash.addData(&f))return {};
+    // Certified executable digests, paired with the producer README at the
+    // pinned source revision. r13/r14 CLI has no version/fingerprint command.
+    const auto digest=hash.result().toHex();
+    if(digest=="aca9ee85105fedb9feefbb80411f167dcdb9723723061540ea614702be3bcdf0")return {"r14",9};
+    if(digest=="85df0ef34432bfc3164cb83067aa9afd1153fdf96ae39e44b61b636ad6dc5ad7")return {"r13",8};
+    return {};
+}
+QString nav64AlgorithmMismatch(quint32 meshAlgorithm,int bakerAlgorithm){return meshAlgorithm&&bakerAlgorithm&&int(meshAlgorithm)!=bakerAlgorithm?QStringLiteral("сетка алгоритма %1, запекатель — %2: перепеките").arg(meshAlgorithm).arg(bakerAlgorithm):QString();}
 SNav64Header readNav64Header(const QString& path,QString* error){if(error)error->clear();try{QFile f(path);if(!f.open(QIODevice::ReadOnly)||f.size()>Limit)throw QStringLiteral("Nav64 недоступен/превышен лимит");Reader r{f.read(65536)};return header(r);}catch(const QString& e){if(error)*error=e;return {};}}
 QString findNav64ForScene(const QString& directory,const QString& mpr,const QString& mob,const QString& profile,QString* error){
     if(error)error->clear();const QString a=QFileInfo(mpr).fileName().toLower(),b=QFileInfo(mob).fileName().toLower();
@@ -138,7 +152,7 @@ SNav64Document loadNav64(const QString& path){
             const auto* h=tile->header;float a[3]={h->bmin[0],h->bmin[1],h->bmin[2]},b[3]={h->bmax[0],h->bmin[1],h->bmin[2]},c[3]={h->bmax[0],h->bmin[1],h->bmax[2]},d[3]={h->bmin[0],h->bmin[1],h->bmax[2]};out.tiles<<world(a)<<world(b)<<world(b)<<world(c)<<world(c)<<world(d)<<world(d)<<world(a);
             SNav64RenderTile render;const auto lo=world(h->bmin),hi=world(h->bmax);
             for(int k=0;k<3;++k){render.minimum[k]=qMin(lo[k],hi[k]);render.maximum[k]=qMax(lo[k],hi[k]);out.minimum[k]=qMin(out.minimum[k],render.minimum[k]);out.maximum[k]=qMax(out.maximum[k],render.maximum[k]);}
-            for(int area=0;area<16;++area){SNav64Batch batch;const QColor color=QColor::fromHsv((area*43+100)%360,160,235);batch.color={float(color.redF()),float(color.greenF()),float(color.blueF()),.33f};render.areas.append(batch);}
+            for(int area=0;area<64;++area){SNav64Batch batch;batch.color=nav64AreaColor(area);render.areas.append(batch);}
             renderIndex.insert(tile,out.renderTiles.size());out.renderTiles.append(render);
         }
         QVector<int> parent(polys.size());for(int i=0;i<parent.size();++i)parent[i]=i;
@@ -146,12 +160,12 @@ SNav64Document loadNav64(const QString& path){
         for(int i=0;i<polys.size();++i){const auto item=polys[i];const auto& p=item.tile->polys[item.index];for(unsigned l=p.firstLink;l!=DT_NULL_LINK;l=item.tile->links[l].next){auto it=indices.constFind(item.tile->links[l].ref);if(it!=indices.cend())parent[root(i)]=root(it.value());}}
         QHash<int,int> sizes;for(int i=0;i<polys.size();++i)++sizes[root(i)];int largest=-1;for(auto it=sizes.cbegin();it!=sizes.cend();++it)if(largest<0||it.value()>sizes[largest])largest=it.key();out.islandCount=sizes.size();
         QHash<int,QVector3D> islandCenters;
-        for(int i=0;i<polys.size();++i){auto item=polys[i];auto* tile=item.tile;auto& render=out.renderTiles[renderIndex.value(tile)];const auto& p=tile->polys[item.index];const auto& d=tile->detailMeshes[item.index];auto& vertices=render.areas[p.getArea()%16].vertices;QVector3D center;
+        for(int i=0;i<polys.size();++i){auto item=polys[i];auto* tile=item.tile;auto& render=out.renderTiles[renderIndex.value(tile)];const auto& p=tile->polys[item.index];const auto& d=tile->detailMeshes[item.index];auto& vertices=render.areas[p.getArea()].vertices;QVector3D center;
             for(int j=0;j<p.vertCount;++j){auto a=world(&tile->verts[p.verts[j]*3]),b=world(&tile->verts[p.verts[(j+1)%p.vertCount]*3]);center+=a;render.edges<<a<<b;
                 // A short open portal is a diagnostic candidate, not raw wall clearance.
                 if(p.neis[j]&&out.header.body.radius>0&&(a-b).length()<2*out.header.body.radius){render.narrow<<a+QVector3D(0,0,.08)<<b+QVector3D(0,0,.08);++out.narrowCount;}
             }center/=p.vertCount;if(root(i)!=largest)islandCenters[root(i)]+=center;
-            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];for(int k=0;k<3;++k){const int v=tri[k];vertices<<world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);}}
+            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];QVector3D points[3];for(int k=0;k<3;++k){const int v=tri[k];points[k]=world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);vertices<<points[k];}out.triangles.append({points[0],points[1],points[2],p.flags});}
         }for(auto it=islandCenters.cbegin();it!=islandCenters.cend();++it)out.islands<<it.value()/sizes[it.key()];
         out.polygonCount=polys.size();out.valid=true;
     }catch(const QString& e){out.error=e;out.renderTiles.clear();out.tiles.clear();out.islands.clear();}catch(const std::bad_alloc&){out.error=QStringLiteral("Недостаточно памяти для Nav64");}
