@@ -30,6 +30,7 @@ SNav64Header header(Reader& r) {
     SNav64Header h;h.container=r.u32();
     if(!nav64SupportedContainers().contains(h.container))throw QStringLiteral("Контейнер Nav64 %1 не поддерживается: перепеките/обновите маппер").arg(h.container);
     h.algorithm=r.u32();
+    if(h.algorithm==7)throw QStringLiteral("Устаревшая сетка: алгоритм 7 игра не примет. Перепеките navmesh запекателем r13 или новее.");
     if(!nav64SupportedAlgorithms().contains(h.algorithm))throw QStringLiteral("Алгоритм Nav64 %1 не поддерживается: перепеките/обновите маппер").arg(h.algorithm);
     if(r.u32()!=0x010600||r.u32()!=0x12345678||r.u32()!=8)throw QStringLiteral("Несовместимый ABI Nav64: нужен Detour 1.6.0 / DT_POLYREF64 / little endian");
     h.fingerprint=r.string();h.mpr=r.string();h.mob=r.string();h.profile=r.string();
@@ -71,7 +72,7 @@ QByteArray unshuffleTile(const QByteArray& packed){
     return plain;
 }
 // Validate the pinned native layout BEFORE Detour can dereference any input.
-int validateTile(const QByteArray& b,const dtNavMeshParams& params) {
+int validateTile(const QByteArray& b,const dtNavMeshParams& params,float heightTolerance) {
     static_assert(sizeof(dtPolyRef)==8&&sizeof(dtLink)==16,"Nav64 ABI");
     if(b.size()<int(sizeof(dtMeshHeader))||b.size()>16*1024*1024)throw QStringLiteral("Неверный размер тайла");
     const auto* h=reinterpret_cast<const dtMeshHeader*>(b.constData());
@@ -90,7 +91,7 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params) {
     for(int i=0;i<h->detailVertCount*3;++i)if(!std::isfinite(dv[i]))throw QStringLiteral("Нечисловая detail-вершина");
     for(int a=0;a<3;++a)if(!std::isfinite(h->bmin[a])||!std::isfinite(h->bmax[a])||h->bmin[a]>h->bmax[a])throw QStringLiteral("Неверные границы тайла");
     int outlierVertices=0;
-    for(int i=0;i<h->detailVertCount;++i)if(dv[i*3+1]<h->bmin[1]-.001f||dv[i*3+1]>h->bmax[1]+.001f)++outlierVertices;
+    for(int i=0;i<h->detailVertCount;++i)if(dv[i*3+1]<h->bmin[1]-heightTolerance||dv[i*3+1]>h->bmax[1]+heightTolerance)++outlierVertices;
     if(!std::isfinite(h->bvQuantFactor)||h->bvQuantFactor<=0||!std::isfinite(h->walkableClimb)||h->walkableClimb<0)throw QStringLiteral("Неверные параметры тайла");
     for(int i=0;i<h->polyCount;++i){
         if(p[i].firstLink!=DT_NULL_LINK)throw QStringLiteral("Контейнер3 содержит служебные firstLink");
@@ -105,7 +106,7 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params) {
 }
 QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
 QVector<quint32> nav64SupportedContainers(){return {3};}
-QVector<quint32> nav64SupportedAlgorithms(){return {7};}
+QVector<quint32> nav64SupportedAlgorithms(){return {8};}
 SNav64Header readNav64Header(const QString& path,QString* error){if(error)error->clear();try{QFile f(path);if(!f.open(QIODevice::ReadOnly)||f.size()>Limit)throw QStringLiteral("Nav64 недоступен/превышен лимит");Reader r{f.read(65536)};return header(r);}catch(const QString& e){if(error)*error=e;return {};}}
 QString findNav64ForScene(const QString& directory,const QString& mpr,const QString& mob,const QString& profile,QString* error){
     if(error)error->clear();const QString a=QFileInfo(mpr).fileName().toLower(),b=QFileInfo(mob).fileName().toLower();
@@ -129,7 +130,7 @@ SNav64Document loadNav64(const QString& path){
             else throw QStringLiteral("Неизвестная секция Nav64");
         }r.end();
         auto mesh=std::shared_ptr<dtNavMesh>(dtAllocNavMesh(),dtFreeNavMesh);if(!mesh||dtStatusFailed(mesh->init(&params)))throw QStringLiteral("Detour init: ошибка");Reader t{tileBytes};const auto count=t.u32();if(count>quint32(params.maxTiles))throw QStringLiteral("Слишком много тайлов");
-        for(quint32 i=0;i<count;++i){auto b=unshuffleTile(t.bytes(t.u32()));out.detailOutlierVertices+=validateTile(b,params);auto* owned=static_cast<unsigned char*>(dtAlloc(b.size(),DT_ALLOC_PERM));if(!owned)throw QStringLiteral("Недостаточно памяти для тайла");std::memcpy(owned,b.constData(),b.size());if(dtStatusFailed(mesh->addTile(owned,b.size(),DT_TILE_FREE_DATA,0,nullptr))){dtFree(owned);throw QStringLiteral("Detour addTile: несовместимые/повторные тайлы");}}t.end();out.tileCount=int(count);
+        for(quint32 i=0;i<count;++i){auto b=unshuffleTile(t.bytes(t.u32()));out.detailOutlierVertices+=validateTile(b,params,2*out.header.body.cellHeight);auto* owned=static_cast<unsigned char*>(dtAlloc(b.size(),DT_ALLOC_PERM));if(!owned)throw QStringLiteral("Недостаточно памяти для тайла");std::memcpy(owned,b.constData(),b.size());if(dtStatusFailed(mesh->addTile(owned,b.size(),DT_TILE_FREE_DATA,0,nullptr))){dtFree(owned);throw QStringLiteral("Detour addTile: несовместимые/повторные тайлы");}}t.end();out.tileCount=int(count);
         if(out.detailOutlierVertices)out.warnings<<QStringLiteral("Предупреждение: %1 detail-вершин выходят за высотные границы тайлов. Слой показывает данные файла без исправления. Нужны исправленный запекатель и повторное запекание.").arg(out.detailOutlierVertices);
         struct Poly {const dtMeshTile* tile;int index;};QVector<Poly> polys;QHash<quint64,int> indices;QHash<const dtMeshTile*,int> renderIndex;
         out.minimum=QVector3D(1e30f,1e30f,1e30f);out.maximum=-out.minimum;
@@ -137,7 +138,7 @@ SNav64Document loadNav64(const QString& path){
             const auto* h=tile->header;float a[3]={h->bmin[0],h->bmin[1],h->bmin[2]},b[3]={h->bmax[0],h->bmin[1],h->bmin[2]},c[3]={h->bmax[0],h->bmin[1],h->bmax[2]},d[3]={h->bmin[0],h->bmin[1],h->bmax[2]};out.tiles<<world(a)<<world(b)<<world(b)<<world(c)<<world(c)<<world(d)<<world(d)<<world(a);
             SNav64RenderTile render;const auto lo=world(h->bmin),hi=world(h->bmax);
             for(int k=0;k<3;++k){render.minimum[k]=qMin(lo[k],hi[k]);render.maximum[k]=qMax(lo[k],hi[k]);out.minimum[k]=qMin(out.minimum[k],render.minimum[k]);out.maximum[k]=qMax(out.maximum[k],render.maximum[k]);}
-            for(int area=0;area<16;++area){SNav64Batch batch;const QColor color=QColor::fromHsv((area*43+100)%360,160,235,125);batch.color={float(color.redF()),float(color.greenF()),float(color.blueF()),.48f};render.areas.append(batch);}
+            for(int area=0;area<16;++area){SNav64Batch batch;const QColor color=QColor::fromHsv((area*43+100)%360,160,235);batch.color={float(color.redF()),float(color.greenF()),float(color.blueF()),.33f};render.areas.append(batch);}
             renderIndex.insert(tile,out.renderTiles.size());out.renderTiles.append(render);
         }
         QVector<int> parent(polys.size());for(int i=0;i<parent.size();++i)parent[i]=i;

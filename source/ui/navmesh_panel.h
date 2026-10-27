@@ -22,6 +22,7 @@ public:
     void setUnsavedChanges(bool dirty);
     void reload();
     bool layerVisible() const;
+    bool fillVisible() const;
     bool busy() const;
     const SNav64Document& document() const {return m_document;}
     // Sole process invocation boundary; UI and isolated checks use this function.
@@ -40,8 +41,8 @@ private:
     void line(const QByteArray& bytes);
     void freshness();
     void controls();
-    QComboBox* m_mode;QComboBox* m_profile;
-    QLabel* m_status;QLabel* m_freshness;
+    QComboBox* m_mode;QComboBox* m_profile;QComboBox* m_fill;
+    QLabel* m_status;QLabel* m_freshness;QLabel* m_heightOutliers;
     QLineEdit* m_baker;QPlainTextEdit* m_log;
     QPushButton* m_this;QPushButton* m_all;QPushButton* m_cancel;
     QProcess* m_process;QFutureWatcher<SNav64Document>* m_loading;

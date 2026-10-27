@@ -44,7 +44,8 @@ void CView::drawNavmeshOverlay(int position){
     };
     ei::gl::Disable(GL_DEPTH_TEST);
     auto draw=[&](const QVector<QVector3D>& v,const QVector4D& color,GLenum primitive){if(v.isEmpty())return;m_navmeshDrawnVertices+=quint64(v.size());m_program.setUniformValue(ei::uniformLocation(&m_program,"customColor"),color);m_program.setAttributeArray(position,v.constData());ei::gl::DrawArrays(primitive,0,v.size());};
-    for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,{.12f,.16f,.12f,.55f},GL_LINES);draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
+    const bool filled=m_navmeshPanel->fillVisible();
+    for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;if(filled)for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,filled?QVector4D(.12f,.16f,.12f,.65f):QVector4D(.22f,.95f,.45f,.8f),GL_LINES);draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
     ei::gl::LineWidth(2);draw(doc.tiles,{.15f,.9f,1.f,.9f},GL_LINES);
     glPointSize(4);draw(doc.islands,{1.f,.1f,.15f,1.f},GL_POINTS);glPointSize(1);ei::gl::LineWidth(1);ei::gl::Enable(GL_DEPTH_TEST);
 }

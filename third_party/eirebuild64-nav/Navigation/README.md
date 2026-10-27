@@ -1,8 +1,8 @@
-# Nav64 offline data contract (X64NAV01 r12)
+# Nav64 offline data contract (X64NAV01 r13)
 
 RecastNavigation v1.6.0 (zlib), unchanged sources; pin/archive digest:
 third_party/recastnavigation.lock.json. Recast and Detour use DT_POLYREF64.
-Algorithm 7, container 3, library 0x010600, SaveSchema 4.
+Algorithm 8, container 3, library 0x010600, SaveSchema 4.
 
 The game ONLY reads Maps/Nav64 in the active mod. No navmesh generation on
 zone entry, no Cache64/Nav reads/writes, no fallback to the legacy graph.
@@ -185,3 +185,30 @@ old graph is used; until NAV05 dynamic tiles are implemented, an unpublished
 changed snapshot is unavailable. Exact campaign gameplay and the zone1
 passages (1.3 m opening/ramp, 1.5 m courtyards, 0.8 m door, 6 m giant gates)
 require owner acceptance. samvlrmp01 measured width remains 1.30 m.
+
+## Detail height sampling and release validation (r13)
+
+The tile border was already max(domain radius / cell size) + 3 cells:
+13 cells for ground and 8 for levitation. Zero-radius profiles have the same
+border as their domain. No border, erosion or passage contour is changed.
+After polygon construction only, maxEdgeError supplied to the detail builder
+is max(compact-field width, height), bounding the search by the WHOLE local
+height patch. Recast v1.6.0 uses ceil(maxEdgeError) as getHeight's search
+radius. A contour sample can fall on an unset cell; the previous one-cell
+search could return RC_UNSET_HEIGHT, later converted into a 3273 m vertex.
+Even two cells were insufficient on zone19/tiny and zone8/levitate_tiny.
+Every clamped sample and every filled height-patch cell is within this bound
+because a polygon's height patch is no larger than the compact field.
+getHeight still stops at the FIRST filled ring of the SAME height patch/layer;
+ordinary samples do not scan the whole field. No polygon, erosion, radius or
+passage contour is changed, and resulting heights are never clamped.
+
+Before writing any profile of a map, the baker checks every polygon and
+stored detail vertex against that tile's vertical bounds, allowing 2 cell
+heights (0.1 m, including the library's +cellHeight detail offset). Nonfinite
+or out-of-bounds heights cause MAP_ERROR code=4; reason includes MPR, MOB,
+profile, tile x/y/layer, vertex kind/index, height, bounds and tolerance.
+PROFILE includes height_outliers=0 only after this check succeeds for the map.
+This is release-data validation, not an alternate reader or test executable.
+Container 3, compression, filenames, command line and exit codes are unchanged;
+algorithm 8 fingerprints require re-baking all profiles.

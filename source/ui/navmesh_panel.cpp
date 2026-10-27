@@ -8,8 +8,10 @@
 CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     setObjectName("navmeshPanel");auto* layout=new QVBoxLayout(this);
     m_mode=new QComboBox(this);m_mode->setObjectName("navmeshMode");m_mode->addItems({QStringLiteral("Слой выключен"),QStringLiteral("Старый AI-граф"),QStringLiteral("Navmesh")});layout->addWidget(m_mode);
+    m_fill=new QComboBox(this);m_fill->setObjectName("navmeshFill");m_fill->addItems({QStringLiteral("Заливка 33% + контуры"),QStringLiteral("Только контуры")});layout->addWidget(m_fill);
     m_profile=new QComboBox(this);m_profile->setObjectName("navmeshProfile");m_profile->addItems(nav64Profiles());m_profile->setCurrentText("human");layout->addWidget(m_profile);
     m_status=new QLabel(QStringLiteral("Откройте карту с первичным MOB"),this);m_status->setTextFormat(Qt::PlainText);m_status->setWordWrap(true);layout->addWidget(m_status);
+    m_heightOutliers=new QLabel(QStringLiteral("PROFILE height_outliers: ещё нет данных"),this);m_heightOutliers->setObjectName("navmeshHeightOutliers");m_heightOutliers->setTextFormat(Qt::PlainText);m_heightOutliers->setWordWrap(true);layout->addWidget(m_heightOutliers);
     m_freshness=new QLabel(this);m_freshness->setTextFormat(Qt::PlainText);m_freshness->setWordWrap(true);layout->addWidget(m_freshness);
     auto* legend=new QLabel(QStringLiteral("Заливка — область материала; контур — полигоны; голубой — тайлы; красные точки — острова вне крупнейшего; оранжевый — кандидаты узких порталов."),this);legend->setWordWrap(true);layout->addWidget(legend);
     auto* hints=new QLabel(QStringLiteral("Узкий портал: ребро соединения короче диаметра профиля. Это приблизительная подсказка по уже эродированной сетке, не измерение исходного прохода. Высотные разрешения объединены."),this);hints->setWordWrap(true);hints->setToolTip(hints->text());layout->addWidget(hints);
@@ -27,6 +29,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
 #endif
     connect(m_mode,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int i){if(i==1)emit oldGraphRequested();emit geometryChanged();if(i==2&&!m_document.valid)reload();});
+    connect(m_fill,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](){emit geometryChanged();});
     connect(m_profile,&QComboBox::currentTextChanged,this,[this](){reload();});connect(refresh,&QPushButton::clicked,this,&CNavmeshPanel::reload);
     connect(browse,&QPushButton::clicked,this,[this](){auto path=QFileDialog::getOpenFileName(this,QStringLiteral("Запекатель Nav64"),m_baker->text(),"EIRebuild64NavBake.exe (*.exe)");if(!path.isEmpty()){m_baker->setText(path);QSettings().setValue("nav64/bakerPath",path);}});
     connect(m_baker,&QLineEdit::editingFinished,this,[this](){QSettings().setValue("nav64/bakerPath",m_baker->text());});
@@ -45,6 +48,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
 }
 CNavmeshPanel::~CNavmeshPanel(){if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}m_loading->waitForFinished();}
 bool CNavmeshPanel::layerVisible()const{return m_mode->currentIndex()==2&&m_document.valid;}
+bool CNavmeshPanel::fillVisible()const{return m_fill->currentIndex()==0;}
 bool CNavmeshPanel::busy()const{return m_process->state()!=QProcess::NotRunning;}
 void CNavmeshPanel::setBakerPath(const QString& path){m_baker->setText(path);}
 QString CNavmeshPanel::bakeLog()const{return m_log->toPlainText();}
@@ -81,7 +85,14 @@ void CNavmeshPanel::line(const QByteArray& bytes){
     if(s.startsWith("MAP_ERROR ")||s.startsWith("BAKE_ERROR ")){m_errors=true;m_status->setText(QStringLiteral("Ошибка запекания: ")+s);}
     if(s.startsWith("MAP_MISSING ")){m_errors=true;m_status->setText(QStringLiteral("Нет исходников MPR/MOB: %1 / %2. Карта пропущена (код 5).").arg(fields.value("mpr"),fields.value("mob")));m_log->appendPlainText(m_status->text());}
     // Keep every PROFILE/MAP_DONE record visible; neither implies overall success.
-    if(s.startsWith("PROFILE "))m_status->setText(QStringLiteral("Запекание: %1, радиус %2 м, тайлов %3, %4 мс").arg(fields.value("type"),fields.value("radius"),fields.value("tiles"),fields.value("ms",fields.value("wall_ms"))));
+    if(s.startsWith("PROFILE ")){
+        m_status->setText(QStringLiteral("Запекание: %1, радиус %2 м, тайлов %3, %4 мс").arg(fields.value("type"),fields.value("radius"),fields.value("tiles"),fields.value("ms",fields.value("wall_ms"))));
+        bool valid=false;const auto count=fields.value("height_outliers").toULongLong(&valid);
+        const bool warning=!valid||count!=0;
+        m_heightOutliers->setText((warning?QStringLiteral("Предупреждение: "):QString())+QStringLiteral("PROFILE %1: height_outliers=%2").arg(fields.value("type"),valid?QString::number(count):QStringLiteral("не сообщён — проверьте версию запекателя")));
+        m_heightOutliers->setStyleSheet(warning?QStringLiteral("color: #ffbd69"):QString());
+        if(warning){m_errors=true;m_log->appendPlainText(m_heightOutliers->text());}
+    }
     if(s.startsWith("MAP_DONE "))m_status->setText(QStringLiteral("Карта готова; ожидается BAKE_DONE: ")+s);
     if(s.startsWith("PROFILE ")||s.startsWith("MAP_DONE ")||s.startsWith("MAP_BEGIN "))m_log->setToolTip(s);
 }
@@ -101,6 +112,7 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     for(const auto& entry:QDir(output).entryInfoList({"*.nav64"},QDir::Files)){if(!all&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
     QStringList args{"--game-root",m_gameRoot,"--mod",mod,"--output-root",m_outputRoot};if(all)args<<"--all";else args<<"--map"<<QFileInfo(m_mpr).completeBaseName()<<"--mob"<<QFileInfo(m_mob).completeBaseName();
     m_stdout.clear();m_stderr.clear();m_done=false;m_errors=false;m_cancelled=false;m_log->appendPlainText(QStringLiteral("Вывод: ")+output);
+    m_heightOutliers->setText(QStringLiteral("PROFILE height_outliers: ожидается ответ запекателя"));m_heightOutliers->setStyleSheet(QString());
     m_process->setWorkingDirectory(m_gameRoot);m_process->start(exe,args);controls();return true;
 }
 void CNavmeshPanel::cancelBake(){if(!busy())return;m_cancelled=true;m_log->appendPlainText(QStringLiteral("Отмена: запекатель остановлен; уже записанные файлы сохранены, прежние версии — в бэкапах."));m_process->terminate();QTimer::singleShot(2000,m_process,[this](){if(m_cancelled&&busy())m_process->kill();});}

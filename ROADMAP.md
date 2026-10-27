@@ -1,5 +1,8 @@
 ## X64NAV03A — Navmesh EIRebuild64, этап 1
 
+- АКТИВНОЕ ПРОДОЛЖЕНИЕ r13: 918cb6ff578bf09de4c28745c1cf17a37530a802 / algorithm8, VERSION227+x64nav.2. Обновлены vendor/lock, запрет7 как непринимаемого игрой, PROFILE height_outliers, заливка33%/контуры. Следующий шаг — архивный Release, zone1/bz19g/zone14 ×8, обе визуализации zone1, реальный r13 bake и свежий staging против227. Ниже сохранено состояние r12; его data-блокер закрывать только после перепроверки.
+
+
 - МАППЕР VERIFIED/PREPARED227+x64nav.1; ДАННЫЕ r12 DATA QUALITY BLOCKER. Ветка rebuild-x64, отдельный ../ei-mapper-ataman-rebuild-x64, база main adfcad6dd64c594fa183b563f9aa6eba1fea14d8. Только локальные коммиты; без установки/push/merge, main227 сохранён.
 - Результат: container3/algorithm7, LZMS+unshuffle,19 immutable vendor-файлов EIRebuild64 e333b482922e47ad5dbf7b3e33a26a91628c07b2, lock/разрешение владельца; read-only слой8 профилей/detail/полигонов/тайлов, тайловое отсечение, AI-граф, подсказки и приблизительная актуальность. Рабочий фоновый baker с журналом/отменой/бэкапами/MAP_MISSING. .navsrc только место в UI, формат открыт.
 - Финальный Release из git archive d2c7d28a496fab91538b7a8223da852f68401137:132 PASS/0 FAIL,70,659с; zone1 у ворот/bz19g/zone14 ×8, реальный bake8 файлов/exit0+BAKE_DONE, реальные exit5/exit4, короткий регресс227,59 бэкапов SHA PASS. Zone1 CPU18–31мс; кадр1100×820 median7,1882мс/p959,7333мс,64/168 тайлов. Staging build-x64nav-final-r2/build-staging-227-x64nav1, финализатор174→176/0 потерь; новые docs/NAVMESH.md и licenses/Detour-zlib.txt. Установка не выполнена;11 приватных fixture trees удалены, квитанции/снимки сохранены.

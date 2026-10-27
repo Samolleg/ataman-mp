@@ -33,18 +33,18 @@ int runAssemblyCatalogCheck(){
             QElapsedTimer loadTimer;loadTimer.start();
             const auto d=loadNav64(nav+"/"+map+"--"+map+"."+profile+".nav64");
             if(!d.error.isEmpty())out<<"READER_ERROR "<<d.error<<"\n";
-            check(d.valid&&d.header.mpr==QString(map)+".mpr"&&d.header.mob==QString(map)+".mob"&&d.header.profile==profile&&d.header.container==3&&d.header.algorithm==7&&d.tileCount>0&&d.polygonCount>0,QString("r12 LZMS/unshuffle/ABI/detail/identity %1 %2").arg(map,profile));
+            check(d.valid&&d.header.mpr==QString(map)+".mpr"&&d.header.mob==QString(map)+".mob"&&d.header.profile==profile&&d.header.container==3&&d.header.algorithm==8&&d.tileCount>0&&d.polygonCount>0,QString("r13 LZMS/unshuffle/ABI/detail/identity %1 %2").arg(map,profile));
             out<<"MESH "<<map<<" "<<profile<<" tiles="<<d.tileCount<<" polys="<<d.polygonCount<<" islands="<<d.islandCount<<" narrow="<<d.narrowCount<<" load_ms="<<loadTimer.elapsed()<<"\n";
             out<<"DETAIL_OUTLIERS "<<map<<" "<<profile<<" count="<<d.detailOutlierVertices<<"\n";
-            if(QString(map)=="zone1"&&profile=="tiny")check(d.detailOutlierVertices==9&&!d.warnings.isEmpty(),"r12 tiny data outliers are diagnosed without repair");
-            if(QString(map)=="zone1"&&profile=="levitate_tiny")check(d.detailOutlierVertices==19&&!d.warnings.isEmpty(),"r12 levitate_tiny data outliers are diagnosed without repair");
-            if(QString(map)=="zone1"&&profile=="human")check(d.detailOutlierVertices==0&&d.warnings.isEmpty(),"r12 human control has no height outliers");
+            bool bounded=true;for(const auto& tile:d.renderTiles)for(const auto& area:tile.areas)for(const auto& v:area.vertices)bounded=bounded&&v.z()>=tile.minimum.z()-2*d.header.body.cellHeight&&v.z()<=tile.maximum.z()+2*d.header.body.cellHeight;
+            check(d.detailOutlierVertices==0&&d.warnings.isEmpty()&&bounded,QString("r13 no height spikes or outliers %1 %2").arg(map,profile));
         }
         QDir().mkpath(root+"/resolver");const auto raw=bytes(nav+"/bz19g--bz19g.human.nav64");write(root+"/resolver/renamed.nav64",raw);QString error;
         check(findNav64ForScene(root+"/resolver","bz19g.mpr","bz19g.mob","human",&error).endsWith("renamed.nav64"),"resolver uses embedded identity after rename");
         check(findNav64ForScene(root+"/resolver","zone14.mpr","zone14.mob","human",&error).isEmpty(),"resolver rejects wrong embedded map");
         {CNavmeshPanel fallback;fallback.setScene(game+"/Base/Maps/bz19g.mpr",maps+"/bz19g.mob",game,maps);check(until([&](){return fallback.document().valid;}),"Base MPR fallback reads active mod Nav64 directory");}
         auto bad=raw;bad[12]=char(99);write(root+"/bad.nav64",bad);check(loadNav64(root+"/bad.nav64").error.contains(QStringLiteral("Алгоритм")),"unknown algorithm gives update/rebake error");
+        bad=raw;bad[12]=char(7);write(root+"/bad.nav64",bad);check(loadNav64(root+"/bad.nav64").error.contains(QStringLiteral("игра не примет")),"algorithm7 explicitly rejected as unplayable stale mesh");
         bad=raw;bad[8]=char(2);write(root+"/bad.nav64",bad);check(loadNav64(root+"/bad.nav64").error.contains(QStringLiteral("Контейнер")),"obsolete container2 requests rebake");
         write(root+"/bad.nav64",raw.left(raw.size()-1));check(!loadNav64(root+"/bad.nav64").valid,"truncated container rejected");
         QStandardPaths::setTestModeEnabled(true);QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);Hidden hidden;qApp->installEventFilter(&hidden);qApp->setProperty("workspaceLoadSmoke",true);
@@ -55,6 +55,7 @@ int runAssemblyCatalogCheck(){
         view.m_neighborLandscapesVisible=false;
         auto* panel=view.navmeshPanel();check(panel!=nullptr,"production Navmesh dock installed beside AI controls");
         auto* mode=panel->findChild<QComboBox*>("navmeshMode");auto* profiles=panel->findChild<QComboBox*>("navmeshProfile");
+        auto* fill=panel->findChild<QComboBox*>("navmeshFill");check(fill&&fill->count()==2&&panel->fillVisible(),"default fill and outline-only selector");
         check(profiles&&profiles->count()==8&&mode,"eight profiles and old graph switch");
         auto open=[&](const QString& map){window.openNeighborMapPair(maps+"/"+map+".mpr",maps+"/"+map+".mob",map,{},{});view.makeCurrent();view.ensureTerrainAutoCatalogReady();check(view.m_pLand->filePath().baseName()==map&&view.m_environmentMob&&view.m_environmentMob->filePath().baseName()==map,"production map pair open: "+map);};
         QDir().mkpath(root+"/screenshots");
@@ -66,7 +67,6 @@ int runAssemblyCatalogCheck(){
                 profiles->setCurrentText(profile);mode->setCurrentIndex(2);panel->reload();
                 check(until([&](){return panel->document().valid&&panel->document().header.profile==profile;}),QString("production layer %1 %2").arg(name,profile));
                 out<<"LAYER "<<name<<" "<<profile<<" ready_ms="<<layerTimer.elapsed()<<"\n";
-                if(QString(name)=="zone1"&&(profile=="tiny"||profile=="levitate_tiny")){bool warning=false;for(auto* label:panel->findChildren<QLabel*>())warning=warning||label->text().contains(QStringLiteral("Предупреждение"));check(warning,"production panel exposes r12 height warning: "+profile);}
                 const auto& doc=panel->document();
                 if(profile=="tiny"){QVector3D target=(doc.minimum+doc.maximum)*.5f;if(QString(name)=="zone1"){target=QVector3D(186.5f,114.f,0);view.m_pLand->projectPt(target,true);}view.moveCameraToPoint(target);view.m_cam->moveAwayOn(QString(name)=="zone1"?65.f:qMax(doc.maximum.x()-doc.minimum.x(),doc.maximum.y()-doc.minimum.y())*1.1f);}
                 view.makeCurrent();view.paintGL();
@@ -78,9 +78,13 @@ int runAssemblyCatalogCheck(){
             mode->setCurrentIndex(1);view.makeCurrent();view.paintGL();auto graphFrame=view.grabFrameBuffer();
             check(view.m_aiGraphDocument.isValid()&&view.m_aiGraphPreviewVisible,"legacy AI graph remains available: "+QString(name));
             check(meshFrame!=graphFrame,"Navmesh changes actual framebuffer: "+QString(name));
-            QImage combined(meshFrame.width()*2,meshFrame.height()+40,QImage::Format_RGB32);combined.fill(QColor(25,25,25));QPainter p(&combined);p.setPen(Qt::white);p.drawText(15,25,QString(name)+" / human / Navmesh r12");p.drawText(meshFrame.width()+15,25,QString(name)+" / legacy AI graph");p.drawImage(0,40,meshFrame);p.drawImage(meshFrame.width(),40,graphFrame);p.end();
+            QImage combined(meshFrame.width()*2,meshFrame.height()+40,QImage::Format_RGB32);combined.fill(QColor(25,25,25));QPainter p(&combined);p.setPen(Qt::white);p.drawText(15,25,QString(name)+" / human / Navmesh r13 / fill 33%");p.drawText(meshFrame.width()+15,25,QString(name)+" / legacy AI graph");p.drawImage(0,40,meshFrame);p.drawImage(meshFrame.width(),40,graphFrame);p.end();
             check(combined.save(root+"/screenshots/"+name+"-navmesh-ai.png"),"side by side production framebuffer: "+QString(name));
             if(QString(name)=="zone1"){
+                mode->setCurrentIndex(2);fill->setCurrentIndex(1);view.makeCurrent();view.paintGL();const auto outlines=view.grabFrameBuffer();
+                check(!panel->fillVisible()&&outlines!=meshFrame,"outline-only mode changes actual framebuffer");
+                QPainter contourPainter(&combined);contourPainter.fillRect(combined.rect(),QColor(25,25,25));contourPainter.setPen(Qt::white);contourPainter.drawText(15,25,"zone1 / human / r13 / contours only");contourPainter.drawText(meshFrame.width()+15,25,"zone1 / legacy AI graph");contourPainter.drawImage(0,40,outlines);contourPainter.drawImage(meshFrame.width(),40,graphFrame);contourPainter.end();
+                check(combined.save(root+"/screenshots/zone1-contours-ai.png"),"zone1 contours beside old AI framebuffer");fill->setCurrentIndex(0);
                 mode->setCurrentIndex(2);QVector<double> times;auto* gl=QOpenGLContext::currentContext()->functions();
                 for(int frame=0;frame<23;++frame){QElapsedTimer timer;timer.start();view.paintGL();gl->glFinish();if(frame>=3)times<<double(timer.nsecsElapsed())/1.e6;}
                 std::sort(times.begin(),times.end());out<<"ZONE1_RENDER viewport="<<view.width()<<"x"<<view.height()<<" tiles="<<view.m_navmeshDrawnTiles<<"/"<<panel->document().tileCount<<" vertices="<<view.m_navmeshDrawnVertices<<" paint_gpu_finish_median_ms="<<times[10]<<" p95_ms="<<times[18]<<"\n";
@@ -91,9 +95,10 @@ int runAssemblyCatalogCheck(){
         }
         open("zone7");check(window.loadMobWithProgress(QFileInfo(maps+"/Autozone7letter.mob")),"227 supplementary MOB loaded");open("zone6");open("zone7");check(view.m_aMob.size()==1,"227 map switching detaches supplementary MOB");
         open("bz19g");panel->setUnsavedChanges(false);panel->setBakerPath(qEnvironmentVariable("EI_NAV64_BAKER"));
-        check(panel->startBake(false,root+"/bake-output"),"production function launches real r12 baker into private output-root");
+        check(panel->startBake(false,root+"/bake-output"),"production function launches real r13 baker into private output-root");
         check(until([&](){return !panel->busy();},300000),"real baker finishes");out<<"REAL_BAKER_LOG\n"<<panel->bakeLog()<<"\n";out.flush();
         check(panel->lastBakeSucceeded()&&panel->lastBakeExitCode()==0&&panel->bakeLog().contains("BAKE_DONE ")&&panel->bakeLog().contains("MAP_DONE ")&&panel->bakeLog().contains("PROFILE "),"real exit0 + BAKE_DONE and progress parser");
+        check(panel->bakeLog().count("height_outliers=0")==8&&panel->findChild<QLabel*>("navmeshHeightOutliers")->text().contains("height_outliers=0"),"all eight actual PROFILE height_outliers=0 parsed and shown");
         check(until([&](){return panel->document().valid&&panel->document().path.startsWith(root+"/bake-output/");}),"layer refreshes from real baked output");
         for(const auto& profile:nav64Profiles())check(loadNav64(root+"/bake-output/Maps/Nav64/bz19g--bz19g."+profile+".nav64").valid,"real baker output profile: "+profile);
         panel->setScene(maps+"/missing.mpr",maps+"/missing.mob",game);
@@ -103,9 +108,10 @@ int runAssemblyCatalogCheck(){
         check(panel->startBake(false,root+"/error-output"),"real corrupt source scenario starts");check(until([&](){return !panel->busy();},60000),"real corrupt source finishes");out<<"REAL_CORRUPT_LOG\n"<<panel->bakeLog()<<"\n";check(!panel->lastBakeSucceeded()&&panel->lastBakeExitCode()==4&&panel->bakeLog().contains("MAP_ERROR"),"real corrupt source: MAP_ERROR + exit4");
         panel->setScene(maps+"/bz19g.mpr",maps+"/bz19g.mob",game);panel->setBakerPath(root+"/not-found.exe");check(!panel->startBake(false,root+"/error-output"),"missing executable gives actionable error");
         panel->setBakerPath(root+"/app/nav64_mock_baker.exe");
-        for(const auto& scenario:{"missing","exit","map_missing","ok","cancel"}){
+        for(const auto& scenario:{"missing","exit","map_missing","outliers","ok","cancel"}){
             qputenv("NAV64_MOCK",scenario);check(panel->startBake(false,root+"/bake-output"),"mock lifecycle launch: "+QString(scenario));if(QString(scenario)=="cancel")panel->cancelBake();
             check(until([&](){return !panel->busy();},10000),"mock finishes: "+QString(scenario));check(panel->lastBakeSucceeded()==(QString(scenario)=="ok"),"exit/BAKE_DONE/cancel acceptance: "+QString(scenario));
+            if(QString(scenario)=="outliers")check(panel->findChild<QLabel*>("navmeshHeightOutliers")->text().contains(QStringLiteral("Предупреждение")),"nonzero PROFILE height_outliers is a visible warning");
         }
         check(panel->bakeLog().contains("BACKUP "),"existing private nav64 backed up before replacement");
         qputenv("NAV64_MOCK","ok");check(panel->startBake(true,root+"/bake-output"),"all maps isolated invocation starts");check(until([&](){return !panel->busy();},10000)&&panel->lastBakeSucceeded()&&panel->bakeLog().contains("--all"),"all maps uses --all through same function and parser");

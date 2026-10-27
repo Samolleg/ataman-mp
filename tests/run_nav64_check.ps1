@@ -10,7 +10,7 @@ $run=[IO.Path]::GetFullPath($RunRoot)
 if(-not $run.StartsWith($repo+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Fixture must stay inside worktree'}
 $handoff=[IO.Path]::GetFullPath($HandoffRoot)
 $baker=Join-Path $handoff 'Engine64/EIRebuild64NavBake.exe'
-if((Get-FileHash -LiteralPath $baker -Algorithm SHA256).Hash -ne '663fcbe929da4281f78d551d6e808d1bcdf4689dc9a8e679ae0d19da06f2e6d2'){throw 'Expected r12 baker SHA256 mismatch'}
+if((Get-FileHash -LiteralPath $baker -Algorithm SHA256).Hash -ne '85df0ef34432bfc3164cb83067aa9afd1153fdf96ae39e44b61b636ad6dc5ad7'){throw 'Expected r13 baker SHA256 mismatch'}
 $install='C:\GOG Games\maped\ei-mapper-ataman\artifacts\EI-Mapper-Ataman-2-first-test'
 $game='C:\GOG Games\PZ'
 $mod='MODS/Dejavu'
