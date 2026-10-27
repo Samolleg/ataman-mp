@@ -1,5 +1,21 @@
 # EI-NAVMESH-AI-PANEL-229 — 2026-10-27
 
+## Установка принятой229 — 2026-10-27
+
+**УСТАНОВЛЕНА229. Разрешение владельца «ставь» снимает прежний STOP.** Принятый main `e432f0e49387acfdca0a91c19977868f092cd718`; Release `086a99a2ccebf1f9840cea73873bd1e552df49f5`. Без пересборки: канонический `packaging/install_program.ps1`, staging `build-ai-panel-229/build-staging-229-ai-panel`. Его копии tools/install_program.ps1, program_files.ps1, rollback.ps1 совпадают с каноническими после нормализации CRLF/LF.
+
+- Постоянная `artifacts/EI-Mapper-Ataman-2-first-test`: `EI Mapper Endurance Edition 229`, exit0. Все176 управляемых SHA-256 и SHA256SUMS.txt совпали со staging:8 замен,0 добавлений/удалений.
+- Откат `artifacts/rollback228-to229-ai-panel-20261027`: проверен созданным установщиком `rollback.ps1 -VerifyOnly`, `ROLLBACK_VERIFIED`; восстановление не запускалось. Чужие/прежние откаты не удалялись.
+- Все18919 пользовательских файлов сохранили набор путей, SHA256, размер и mtime. Служебная .ataman-retired.json учитывается отдельно от пользовательских данных.
+- До замены отсутствовали любые EIMapperEndurance (включая фон/runtime host) и игра. Ни один процесс не завершался. Исходные11 EIMapperMcp живы с теми же PID/creation time:12676,28628,32416,1364,15800,5076,18608,20272,12096,11204,22200.
+- Занят и отодвинут только `EIMapperMcp.exe` → `EIMapperMcp.exe.old-ataman-9a9c5e7c7e8244ff91d63169042eae5c`, старый SHA256 `ECBA463FA755F200F2BD567C14C7C8AF41819B267091CC0BB40FF056F6913662`. Канонический новый EIMapperMcp.exe: `D2F007284ACED2C1F3E823DC9C94F4D229779E3A4B63C58420468E8B8FC4CFE4`.
+- Прежний занятый `EIMapperMcp.exe.old-ataman-5f75a1e653c24df0a8d686beb087a980` сохранён (SHA256 `61ED431F7613FF994B536EE668F9880843B9FFCCE182FD0A32F0F9DB5E703D7F`); очистка установщика:removed0/retained1. Это полный перечень .old-* из служебного реестра после установки.
+- Регистрации ~/.codex/config.toml и .mcp.json не изменялись. Финализатор на установке, computer-use, рабочий стол, видимые окна, интерактивный маппер, игра и push не запускались. Дополнительные функциональные проверки не выполнялись по поручению владельца.
+- Квитанции: `build-ai-panel-229/install-229-receipt.json`, `install-229.log`, `install-229-rollback.log`, `install-229-bridges-before.json`, `install-229-users-before.json`, `installed-229-version.txt`. Установка завершена; текущие мосты продолжают использовать старый mapped image до штатного reconnect владельца.
+
+Ниже сохранена история подготовки до разрешения установки.
+
+
 ## Результат и идентичность
 
 **VERIFIED / PREPARED229. СТОП ПЕРЕД УСТАНОВКОЙ. Push не выполнялся.**
