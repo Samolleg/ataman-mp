@@ -1,3 +1,10 @@
+## EI-NAVMESH-MAIN-228 — совместное ведение старого AI-графа и Navmesh
+
+- Владелец2026-10-27: fast-forward main adfcad6dd64c594fa183b563f9aa6eba1fea14d8 -> 0e033b64e5699d2c36a058f55d0a747bdb3e7017 (X64NAV03A), версия228; локальные scoped-коммиты и обычная установка разрешены, без push. Navmesh далее в main; rebuild-x64/worktree сохранены как нерабочие исторические указатели.
+- Цель: слой чтения .nav64 container3/algorithm8, внешний запекатель, сохранность AI-графа MOB/.grp и регресса227. Vendor19/lock: EIRebuild64 918cb6ff578bf09de4c28745c1cf17a37530a802, собственный код владельца, разрешение2026-10-27; код вендора не править.
+- IN PROGRESS: Release из git archive main, свежий build-navmesh-228, изолированные тесты (слой OFF, две кнопки без baker без записи, один r13, старый граф/пересчёт/сравнение, соседние карты227), lock и состав174 без потерь. Установка только после PASS, закрытых редактора/игры, через install_program.ps1 с проверенным откатом. Сборка/тесты не пишут в постоянную установку; живые данные/AppData/настройки защищены, чужие ROADMAP/.mcp.json вне stage.
+- Доказательства: docs/validation/ATAMAN_NAVMESH_MAIN_228_20261027.md. Следующий шаг — сборка/проверки, затем разрешённая установка и отдельный коммит квитанции. Ручная/игровая приёмка отдельно; .navsrc/точный fingerprint вне этапа1.
+
 ## X64NAV03A — Navmesh EIRebuild64, этап 1
 
 - VERIFIED/PREPARED227+x64nav.2, r13. Только rebuild-x64 в ../ei-mapper-ataman-rebuild-x64, без установки/push/merge; main227 сохранён. Исходник маппера88e74690e14be43d05f83ea8a971fbec6bedb18a, EIRebuild64 918cb6ff578bf09de4c28745c1cf17a37530a802. Vendor19/lock обновлены; container3/algorithm8,7 отвергается как непринимаемый игрой; PROFILE height_outliers и предупреждение, заливка33%/контуры.

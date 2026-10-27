@@ -103,7 +103,7 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     if(m_mpr.isEmpty()||(!all&&m_mob.isEmpty()))return fail(QStringLiteral("Откройте карту с первичным MOB."));
     if(m_unsaved)return fail(QStringLiteral("Сначала сохраните MPR и первичный MOB: запекатель читает файлы с диска."));
     const QString exe=m_baker->text().trimmed().isEmpty()?QDir(m_gameRoot).filePath("Engine64/EIRebuild64NavBake.exe"):m_baker->text().trimmed();
-    if(!QFileInfo(exe).isFile())return fail(QStringLiteral("Запекатель не найден. Укажите путь к EIRebuild64NavBake.exe: ")+exe);
+    if(!QFileInfo(exe).isFile())return fail(QStringLiteral("Запекатель не подключён. Укажите путь к EIRebuild64NavBake.exe: ")+exe);
     QDir maps(m_mapsDirectory);if(maps.dirName().compare("Maps",Qt::CaseInsensitive)!=0)return fail(QStringLiteral("Для запекания задайте каталог Maps активного мода."));maps.cdUp();const QString mod=maps.absolutePath();
     if(m_gameRoot.isEmpty()||!QDir(m_gameRoot).exists())return fail(QStringLiteral("Не задан корректный корень игры."));
     m_outputRoot=outputRootOverride.isEmpty()?mod:QDir(outputRootOverride).absolutePath();const QString output=QDir(m_outputRoot).filePath("Maps/Nav64");
