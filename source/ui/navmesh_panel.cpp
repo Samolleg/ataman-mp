@@ -40,7 +40,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
         m_backups.clear();controls();
         if(m_lastSuccess&&m_requestMpr==m_mpr&&m_requestMob==m_mob){m_directory=QDir(m_outputRoot).filePath("Maps/Nav64");reload();}emit bakeFinished(m_lastSuccess);
     });
-    connect(m_loading,&QFutureWatcher<SNav64Document>::finished,this,[this](){const auto result=m_loading->result();if(m_loadingPath==result.path){m_document=result;m_status->setText(result.valid?QStringLiteral("%1: r=%2 м, h=%3 м\n%4 тайлов, %5 полигонов, %6 островов, %7 узких порталов\n%8").arg(result.header.profile).arg(result.header.body.radius).arg(result.header.body.height).arg(result.tileCount).arg(result.polygonCount).arg(result.islandCount).arg(result.narrowCount).arg(result.path):result.error);freshness();emit geometryChanged();}else reload();});
+    connect(m_loading,&QFutureWatcher<SNav64Document>::finished,this,[this](){const auto result=m_loading->result();if(m_loadingPath==result.path){m_document=result;QString status=result.valid?QStringLiteral("%1: r=%2 м, h=%3 м\n%4 тайлов, %5 полигонов, %6 островов, %7 узких порталов\n%8").arg(result.header.profile).arg(result.header.body.radius).arg(result.header.body.height).arg(result.tileCount).arg(result.polygonCount).arg(result.islandCount).arg(result.narrowCount).arg(result.path):result.error;if(!result.warnings.isEmpty())status+="\n"+result.warnings.join("\n");m_status->setText(status);m_status->setStyleSheet(result.warnings.isEmpty()?QString():QStringLiteral("color: #ffbd69"));freshness();emit geometryChanged();}else reload();});
     controls();
 }
 CNavmeshPanel::~CNavmeshPanel(){if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}m_loading->waitForFinished();}

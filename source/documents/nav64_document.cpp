@@ -71,7 +71,7 @@ QByteArray unshuffleTile(const QByteArray& packed){
     return plain;
 }
 // Validate the pinned native layout BEFORE Detour can dereference any input.
-void validateTile(const QByteArray& b,const dtNavMeshParams& params) {
+int validateTile(const QByteArray& b,const dtNavMeshParams& params) {
     static_assert(sizeof(dtPolyRef)==8&&sizeof(dtLink)==16,"Nav64 ABI");
     if(b.size()<int(sizeof(dtMeshHeader))||b.size()>16*1024*1024)throw QStringLiteral("Неверный размер тайла");
     const auto* h=reinterpret_cast<const dtMeshHeader*>(b.constData());
@@ -89,6 +89,8 @@ void validateTile(const QByteArray& b,const dtNavMeshParams& params) {
     for(int i=0;i<h->vertCount*3;++i)if(!std::isfinite(v[i]))throw QStringLiteral("Нечисловая вершина");
     for(int i=0;i<h->detailVertCount*3;++i)if(!std::isfinite(dv[i]))throw QStringLiteral("Нечисловая detail-вершина");
     for(int a=0;a<3;++a)if(!std::isfinite(h->bmin[a])||!std::isfinite(h->bmax[a])||h->bmin[a]>h->bmax[a])throw QStringLiteral("Неверные границы тайла");
+    int outlierVertices=0;
+    for(int i=0;i<h->detailVertCount;++i)if(dv[i*3+1]<h->bmin[1]-.001f||dv[i*3+1]>h->bmax[1]+.001f)++outlierVertices;
     if(!std::isfinite(h->bvQuantFactor)||h->bvQuantFactor<=0||!std::isfinite(h->walkableClimb)||h->walkableClimb<0)throw QStringLiteral("Неверные параметры тайла");
     for(int i=0;i<h->polyCount;++i){
         if(p[i].firstLink!=DT_NULL_LINK)throw QStringLiteral("Контейнер3 содержит служебные firstLink");
@@ -98,6 +100,7 @@ void validateTile(const QByteArray& b,const dtNavMeshParams& params) {
     }
     for(int i=0;i<h->bvNodeCount;++i)if((bv[i].i>=0&&bv[i].i>=h->offMeshBase)||(bv[i].i<0&&(-qint64(bv[i].i)>h->bvNodeCount-i)))throw QStringLiteral("Неверное BV-дерево");
     for(int i=0;i<h->offMeshConCount;++i){if(off[i].poly<h->offMeshBase||off[i].poly>=h->polyCount||!std::isfinite(off[i].rad)||off[i].rad<0||(off[i].side!=0xff&&off[i].side>7))throw QStringLiteral("Неверная offmesh-связь");for(float x:off[i].pos)if(!std::isfinite(x))throw QStringLiteral("Нечисловая offmesh-связь");}
+    return outlierVertices;
 }
 }
 QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
@@ -126,7 +129,8 @@ SNav64Document loadNav64(const QString& path){
             else throw QStringLiteral("Неизвестная секция Nav64");
         }r.end();
         auto mesh=std::shared_ptr<dtNavMesh>(dtAllocNavMesh(),dtFreeNavMesh);if(!mesh||dtStatusFailed(mesh->init(&params)))throw QStringLiteral("Detour init: ошибка");Reader t{tileBytes};const auto count=t.u32();if(count>quint32(params.maxTiles))throw QStringLiteral("Слишком много тайлов");
-        for(quint32 i=0;i<count;++i){auto b=unshuffleTile(t.bytes(t.u32()));validateTile(b,params);auto* owned=static_cast<unsigned char*>(dtAlloc(b.size(),DT_ALLOC_PERM));if(!owned)throw QStringLiteral("Недостаточно памяти для тайла");std::memcpy(owned,b.constData(),b.size());if(dtStatusFailed(mesh->addTile(owned,b.size(),DT_TILE_FREE_DATA,0,nullptr))){dtFree(owned);throw QStringLiteral("Detour addTile: несовместимые/повторные тайлы");}}t.end();out.tileCount=int(count);
+        for(quint32 i=0;i<count;++i){auto b=unshuffleTile(t.bytes(t.u32()));out.detailOutlierVertices+=validateTile(b,params);auto* owned=static_cast<unsigned char*>(dtAlloc(b.size(),DT_ALLOC_PERM));if(!owned)throw QStringLiteral("Недостаточно памяти для тайла");std::memcpy(owned,b.constData(),b.size());if(dtStatusFailed(mesh->addTile(owned,b.size(),DT_TILE_FREE_DATA,0,nullptr))){dtFree(owned);throw QStringLiteral("Detour addTile: несовместимые/повторные тайлы");}}t.end();out.tileCount=int(count);
+        if(out.detailOutlierVertices)out.warnings<<QStringLiteral("Предупреждение: %1 detail-вершин выходят за высотные границы тайлов. Слой показывает данные файла без исправления. Нужны исправленный запекатель и повторное запекание.").arg(out.detailOutlierVertices);
         struct Poly {const dtMeshTile* tile;int index;};QVector<Poly> polys;QHash<quint64,int> indices;QHash<const dtMeshTile*,int> renderIndex;
         out.minimum=QVector3D(1e30f,1e30f,1e30f);out.maximum=-out.minimum;
         for(int i=0;i<mesh->getMaxTiles();++i){const dtMeshTile* tile=static_cast<const dtNavMesh*>(mesh.get())->getTile(i);if(!tile->header)continue;auto base=mesh->getPolyRefBase(tile);for(int j=0;j<tile->header->offMeshBase;++j)if(tile->polys[j].flags){indices.insert(base|quint64(j),polys.size());polys.append({tile,j});}

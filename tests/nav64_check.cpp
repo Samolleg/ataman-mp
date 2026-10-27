@@ -35,6 +35,10 @@ int runAssemblyCatalogCheck(){
             if(!d.error.isEmpty())out<<"READER_ERROR "<<d.error<<"\n";
             check(d.valid&&d.header.mpr==QString(map)+".mpr"&&d.header.mob==QString(map)+".mob"&&d.header.profile==profile&&d.header.container==3&&d.header.algorithm==7&&d.tileCount>0&&d.polygonCount>0,QString("r12 LZMS/unshuffle/ABI/detail/identity %1 %2").arg(map,profile));
             out<<"MESH "<<map<<" "<<profile<<" tiles="<<d.tileCount<<" polys="<<d.polygonCount<<" islands="<<d.islandCount<<" narrow="<<d.narrowCount<<" load_ms="<<loadTimer.elapsed()<<"\n";
+            out<<"DETAIL_OUTLIERS "<<map<<" "<<profile<<" count="<<d.detailOutlierVertices<<"\n";
+            if(QString(map)=="zone1"&&profile=="tiny")check(d.detailOutlierVertices==9&&!d.warnings.isEmpty(),"r12 tiny data outliers are diagnosed without repair");
+            if(QString(map)=="zone1"&&profile=="levitate_tiny")check(d.detailOutlierVertices==19&&!d.warnings.isEmpty(),"r12 levitate_tiny data outliers are diagnosed without repair");
+            if(QString(map)=="zone1"&&profile=="human")check(d.detailOutlierVertices==0&&d.warnings.isEmpty(),"r12 human control has no height outliers");
         }
         QDir().mkpath(root+"/resolver");const auto raw=bytes(nav+"/bz19g--bz19g.human.nav64");write(root+"/resolver/renamed.nav64",raw);QString error;
         check(findNav64ForScene(root+"/resolver","bz19g.mpr","bz19g.mob","human",&error).endsWith("renamed.nav64"),"resolver uses embedded identity after rename");
@@ -56,16 +60,17 @@ int runAssemblyCatalogCheck(){
         QDir().mkpath(root+"/screenshots");
         for(const auto& name:{"bz19g","zone1","zone14"}){
             open(name);const auto mpr=bytes(maps+"/"+name+".mpr"),mob=bytes(maps+"/"+name+".mob");
-            QImage profilesFrame(2200,1720,QImage::Format_RGB32);profilesFrame.fill(QColor(25,25,25));int profileIndex=0;
+            QImage profilesFrame(2200,900,QImage::Format_RGB32);profilesFrame.fill(QColor(25,25,25));int profileIndex=0;
             for(const auto& profile:nav64Profiles()){
                 QElapsedTimer layerTimer;layerTimer.start();
                 profiles->setCurrentText(profile);mode->setCurrentIndex(2);panel->reload();
                 check(until([&](){return panel->document().valid&&panel->document().header.profile==profile;}),QString("production layer %1 %2").arg(name,profile));
                 out<<"LAYER "<<name<<" "<<profile<<" ready_ms="<<layerTimer.elapsed()<<"\n";
+                if(QString(name)=="zone1"&&(profile=="tiny"||profile=="levitate_tiny")){bool warning=false;for(auto* label:panel->findChildren<QLabel*>())warning=warning||label->text().contains(QStringLiteral("Предупреждение"));check(warning,"production panel exposes r12 height warning: "+profile);}
                 const auto& doc=panel->document();
                 if(profile=="tiny"){QVector3D target=(doc.minimum+doc.maximum)*.5f;if(QString(name)=="zone1"){target=QVector3D(186.5f,114.f,0);view.m_pLand->projectPt(target,true);}view.moveCameraToPoint(target);view.m_cam->moveAwayOn(QString(name)=="zone1"?65.f:qMax(doc.maximum.x()-doc.minimum.x(),doc.maximum.y()-doc.minimum.y())*1.1f);}
                 view.makeCurrent();view.paintGL();
-                QPainter painter(&profilesFrame);const int x=(profileIndex%4)*550,y=(profileIndex/4)*860;painter.setPen(Qt::white);painter.drawText(x+8,y+20,QString(name)+" / "+profile);painter.drawImage(x,y+30,view.grabFrameBuffer().scaled(550,820,Qt::KeepAspectRatio,Qt::SmoothTransformation));++profileIndex;
+                QPainter painter(&profilesFrame);const int x=(profileIndex%4)*550,y=(profileIndex/4)*450;painter.setPen(Qt::white);painter.drawText(x+8,y+20,QString(name)+" / "+profile);painter.drawImage(x,y+30,view.grabFrameBuffer().scaled(550,410,Qt::KeepAspectRatio,Qt::SmoothTransformation));++profileIndex;
             }
             check(profilesFrame.save(root+"/screenshots/"+name+"-eight-profiles.png"),"all eight profiles framebuffer montage: "+QString(name));
             profiles->setCurrentText("human");check(until([&](){return panel->document().valid&&panel->document().header.profile=="human";}),"human ready for frame");

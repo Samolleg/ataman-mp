@@ -25,10 +25,11 @@ struct SNav64RenderTile {
 struct SNav64Document {
     SNav64Header header;
     QString path, error;
+    QStringList warnings;
     QVector<SNav64RenderTile> renderTiles;
     QVector3D minimum, maximum;
     QVector<QVector3D> tiles, islands;
-    int polygonCount=0, tileCount=0, islandCount=0, narrowCount=0;
+    int polygonCount=0, tileCount=0, islandCount=0, narrowCount=0, detailOutlierVertices=0;
     bool valid=false;
 };
 QStringList nav64Profiles();
