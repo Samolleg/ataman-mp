@@ -8,6 +8,7 @@
 #include <QPlainTextEdit>
 #include <QAbstractSpinBox>
 #include <QComboBox>
+#include <QToolButton>
 
 #include <QClipboard>
 #include <QGuiApplication>
@@ -130,6 +131,23 @@ bool CView::handleLandscapeShortcut(QKeyEvent* event, bool pressed)
 
 bool CView::eventFilter(QObject* watched, QEvent* event)
 {
+    // The navigation panel shares one physical H in both source modes. Handle
+    // it before Qt shortcuts and legacy object-hide operations, including a
+    // Cyrillic keyboard layout. Text fields and modal/pop-up UI keep their keys.
+    if(m_aiGraphPreviewToggle && (event->type()==QEvent::ShortcutOverride
+       || event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)) {
+        auto* key=static_cast<QKeyEvent*>(event);
+        auto* receiver=qobject_cast<QWidget*>(watched);
+        const bool navigationKey=(key->nativeScanCode()&0xffu)==0x23u
+            || key->nativeVirtualKey()==0x48u || (!key->nativeVirtualKey()&&key->key()==Qt::Key_H);
+        if(navigationKey && receiver && (receiver==this || isAncestorOf(receiver))
+           && !textInput(receiver) && !textInput(QApplication::focusWidget())
+           && key->modifiers()==Qt::NoModifier && !QApplication::activeModalWidget()
+           && !QApplication::activePopupWidget()) {
+            if(event->type()==QEvent::KeyPress && !key->isAutoRepeat())m_aiGraphPreviewToggle->toggle();
+            event->accept();return true;
+        }
+    }
     if(m_pOp && (event->type()==QEvent::FocusIn || event->type()==QEvent::WindowDeactivate)) {
         auto* receiver=qobject_cast<QWidget*>(watched);
         if(receiver && (receiver==window() || window()->isAncestorOf(receiver))

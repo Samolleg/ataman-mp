@@ -54,7 +54,7 @@ int runAssemblyCatalogCheck(){
         if(view.m_aiGraphPreviewWidget)view.m_aiGraphPreviewWidget->hide();
         view.m_neighborLandscapesVisible=false;
         auto* panel=view.navmeshPanel();check(panel!=nullptr,"production Navmesh dock installed beside AI controls");
-        auto* mode=panel->findChild<QComboBox*>("navmeshMode");auto* profiles=panel->findChild<QComboBox*>("navmeshProfile");
+        auto* mode=view.m_navigationSource;auto* profiles=panel->findChild<QComboBox*>("navmeshProfile");
         auto* fill=panel->findChild<QComboBox*>("navmeshFill");check(fill&&fill->count()==2&&panel->fillVisible(),"default fill and outline-only selector");
         check(profiles&&profiles->count()==8&&mode,"eight profiles and old graph switch");
         auto open=[&](const QString& map){window.openNeighborMapPair(maps+"/"+map+".mpr",maps+"/"+map+".mob",map,{},{});view.makeCurrent();view.ensureTerrainAutoCatalogReady();check(view.m_pLand->filePath().baseName()==map&&view.m_environmentMob&&view.m_environmentMob->filePath().baseName()==map,"production map pair open: "+map);};
@@ -64,7 +64,7 @@ int runAssemblyCatalogCheck(){
             QImage profilesFrame(2200,900,QImage::Format_RGB32);profilesFrame.fill(QColor(25,25,25));int profileIndex=0;
             for(const auto& profile:nav64Profiles()){
                 QElapsedTimer layerTimer;layerTimer.start();
-                profiles->setCurrentText(profile);mode->setCurrentIndex(2);panel->reload();
+                profiles->setCurrentIndex(profiles->findData(profile));mode->setCurrentIndex(1);view.m_aiGraphPreviewToggle->setChecked(true);panel->reload();
                 check(until([&](){return panel->document().valid&&panel->document().header.profile==profile;}),QString("production layer %1 %2").arg(name,profile));
                 out<<"LAYER "<<name<<" "<<profile<<" ready_ms="<<layerTimer.elapsed()<<"\n";
                 const auto& doc=panel->document();
@@ -73,19 +73,19 @@ int runAssemblyCatalogCheck(){
                 QPainter painter(&profilesFrame);const int x=(profileIndex%4)*550,y=(profileIndex/4)*450;painter.setPen(Qt::white);painter.drawText(x+8,y+20,QString(name)+" / "+profile);painter.drawImage(x,y+30,view.grabFrameBuffer().scaled(550,410,Qt::KeepAspectRatio,Qt::SmoothTransformation));++profileIndex;
             }
             check(profilesFrame.save(root+"/screenshots/"+name+"-eight-profiles.png"),"all eight profiles framebuffer montage: "+QString(name));
-            profiles->setCurrentText("human");check(until([&](){return panel->document().valid&&panel->document().header.profile=="human";}),"human ready for frame");
-            mode->setCurrentIndex(2);view.makeCurrent();view.paintGL();auto meshFrame=view.grabFrameBuffer();
-            mode->setCurrentIndex(1);view.makeCurrent();view.paintGL();auto graphFrame=view.grabFrameBuffer();
+            profiles->setCurrentIndex(profiles->findData("human"));check(until([&](){return panel->document().valid&&panel->document().header.profile=="human";}),"human ready for frame");
+            mode->setCurrentIndex(1);view.m_aiGraphPreviewToggle->setChecked(true);view.makeCurrent();view.paintGL();auto meshFrame=view.grabFrameBuffer();
+            mode->setCurrentIndex(0);view.makeCurrent();view.paintGL();auto graphFrame=view.grabFrameBuffer();
             check(view.m_aiGraphDocument.isValid()&&view.m_aiGraphPreviewVisible,"legacy AI graph remains available: "+QString(name));
             check(meshFrame!=graphFrame,"Navmesh changes actual framebuffer: "+QString(name));
             QImage combined(meshFrame.width()*2,meshFrame.height()+40,QImage::Format_RGB32);combined.fill(QColor(25,25,25));QPainter p(&combined);p.setPen(Qt::white);p.drawText(15,25,QString(name)+" / human / Navmesh r13 / fill 33%");p.drawText(meshFrame.width()+15,25,QString(name)+" / legacy AI graph");p.drawImage(0,40,meshFrame);p.drawImage(meshFrame.width(),40,graphFrame);p.end();
             check(combined.save(root+"/screenshots/"+name+"-navmesh-ai.png"),"side by side production framebuffer: "+QString(name));
             if(QString(name)=="zone1"){
-                mode->setCurrentIndex(2);fill->setCurrentIndex(1);view.makeCurrent();view.paintGL();const auto outlines=view.grabFrameBuffer();
+                mode->setCurrentIndex(1);view.m_aiGraphPreviewToggle->setChecked(true);fill->setCurrentIndex(1);view.makeCurrent();view.paintGL();const auto outlines=view.grabFrameBuffer();
                 check(!panel->fillVisible()&&outlines!=meshFrame,"outline-only mode changes actual framebuffer");
                 QPainter contourPainter(&combined);contourPainter.fillRect(combined.rect(),QColor(25,25,25));contourPainter.setPen(Qt::white);contourPainter.drawText(15,25,"zone1 / human / r13 / contours only");contourPainter.drawText(meshFrame.width()+15,25,"zone1 / legacy AI graph");contourPainter.drawImage(0,40,outlines);contourPainter.drawImage(meshFrame.width(),40,graphFrame);contourPainter.end();
                 check(combined.save(root+"/screenshots/zone1-contours-ai.png"),"zone1 contours beside old AI framebuffer");fill->setCurrentIndex(0);
-                mode->setCurrentIndex(2);QVector<double> times;auto* gl=QOpenGLContext::currentContext()->functions();
+                mode->setCurrentIndex(1);view.m_aiGraphPreviewToggle->setChecked(true);QVector<double> times;auto* gl=QOpenGLContext::currentContext()->functions();
                 for(int frame=0;frame<23;++frame){QElapsedTimer timer;timer.start();view.paintGL();gl->glFinish();if(frame>=3)times<<double(timer.nsecsElapsed())/1.e6;}
                 std::sort(times.begin(),times.end());out<<"ZONE1_RENDER viewport="<<view.width()<<"x"<<view.height()<<" tiles="<<view.m_navmeshDrawnTiles<<"/"<<panel->document().tileCount<<" vertices="<<view.m_navmeshDrawnVertices<<" paint_gpu_finish_median_ms="<<times[10]<<" p95_ms="<<times[18]<<"\n";
                 check(view.m_navmeshDrawnTiles>0&&view.m_navmeshDrawnTiles<panel->document().tileCount,"zone1 gate view culls offscreen tile batches");check(gl->glGetError()==GL_NO_ERROR,"zone1 layer has no OpenGL errors");

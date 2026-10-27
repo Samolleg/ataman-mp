@@ -4255,17 +4255,6 @@ void CView::initAiGraphPreviewWidget()
         syncAiGraphPreviewWidget();
         update();
     });
-    QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_H), this);
-    shortcut->setContext(Qt::WidgetWithChildrenShortcut);
-    connect(shortcut, &QShortcut::activated, this, [this]()
-    {
-        if(m_navigationSource->currentIndex() == 0 && !m_aiGraphDocument.isValid())
-        {
-            emit updateMsg(tr("No valid AI graph is available for the loaded map."));
-            return;
-        }
-        m_aiGraphPreviewToggle->toggle();
-    });
     m_aiGraphPreviewWidget->adjustSize();
     m_aiGraphPreviewWidget->show();
     m_aiGraphPreviewWidget->raise();

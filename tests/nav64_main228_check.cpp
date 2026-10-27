@@ -36,7 +36,7 @@ int runAssemblyCatalogCheck(){
         auto& view=*window.view();window.resize(1200,800);window.show();view.setParent(nullptr);view.resize(1100,820);view.show();QCoreApplication::processEvents();view.makeCurrent();
         check(view.isValid(),"hidden production OpenGL context");view.m_neighborLandscapesVisible=false;
         auto* panel=view.navmeshPanel();check(panel!=nullptr,"production Navmesh panel");
-        auto* mode=panel->findChild<QComboBox*>("navmeshMode");
+        auto* mode=view.m_navigationSource;
         check(mode&&mode->currentIndex()==0&&!panel->layerVisible(),"layer is OFF by default");
         auto open=[&](const QString& map){window.openNeighborMapPair(maps+"/"+map+".mpr",maps+"/"+map+".mob",map,{},{});view.makeCurrent();view.ensureTerrainAutoCatalogReady();check(view.m_pLand->filePath().baseName()==map&&view.m_environmentMob&&view.m_environmentMob->filePath().baseName()==map,"production map pair: "+map);};
         open("bz19g");panel->setBakerPath(root+"/absent-baker.exe");
@@ -44,14 +44,14 @@ int runAssemblyCatalogCheck(){
         QSignalSpy spy(panel,SIGNAL(bakeFinished(bool)));
         for(const auto& name:{"navmeshBakeMap","navmeshBakeAll"}){
             auto* button=panel->findChild<QPushButton*>(name);check(button&&button->isEnabled(),QString("bake button available: ")+name);button->click();
-            check(!panel->busy()&&panel->bakeLog().contains(QStringLiteral("Запекатель не подключён")),QString("missing baker explained: ")+name);
+            check(!panel->busy()&&panel->bakeLog().contains(QStringLiteral("Запекатель не найден")),QString("missing baker explained: ")+name);
         }
         check(spy.count()==2&&!QFileInfo(game+"/Engine64").exists()&&QDir(maps+"/Nav64").entryList(QDir::Files)==filesBefore,"both buttons refuse without output");
         check(until([&](){return panel->document().valid;}),"one r13 layer loaded");
         check(panel->document().header.container==3&&panel->document().header.algorithm==8&&panel->document().detailOutlierVertices==0,"container3 algorithm8 no height outliers");
-        mode->setCurrentIndex(2);view.makeCurrent();view.paintGL();const auto navFrame=view.grabFrameBuffer();
+        mode->setCurrentIndex(1);view.m_aiGraphPreviewToggle->setChecked(true);view.makeCurrent();view.paintGL();const auto navFrame=view.grabFrameBuffer();
         check(panel->layerVisible(),"Navmesh enabled explicitly");
-        mode->setCurrentIndex(1);view.makeCurrent();view.paintGL();
+        mode->setCurrentIndex(0);view.makeCurrent();view.paintGL();
         check(view.m_aiGraphDocument.isValid()&&view.m_aiGraphPreviewVisible,"legacy AI graph loaded beside Navmesh");
         check(navFrame!=view.grabFrameBuffer(),"Navmesh and old graph produce distinct frames");
         check(bytes(navPath)==navBefore&&bytes(maps+"/bz19g.mpr")==mprBefore&&bytes(maps+"/bz19g.mob")==mobBefore,"layer and absent baker preserve nav64 MPR MOB bytes");
