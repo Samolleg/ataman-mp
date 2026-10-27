@@ -47,6 +47,14 @@ QString findNav64ForScene(const QString& directory, const QString& mpr,
 SNav64Document loadNav64(const QString& path);
 QVector4D nav64AreaColor(int area);
 QString nav64AreaName(int area);
-struct SNav64BakerIdentity { QString release; int algorithm=0; };
+struct SNav64BakerIdentity { QString sha256; int algorithm=0; };
+// Single discovery hook for any future version command. Today only a recorded
+// BAKE_BEGIN tied to these exact executable bytes is authoritative.
 SNav64BakerIdentity nav64BakerIdentity(const QString& path);
 QString nav64AlgorithmMismatch(quint32 meshAlgorithm, int bakerAlgorithm);
+struct SNav64Bodies {
+    bool exists=false, valid=false;
+    quint32 version=0,algorithm=0,sampleCount=0;
+    QString error;
+};
+SNav64Bodies readNav64Bodies(const QString& path);

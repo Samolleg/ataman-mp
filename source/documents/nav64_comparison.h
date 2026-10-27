@@ -24,3 +24,5 @@ int nav64LegacyLayer(const QString& profile);
 QString nav64LegacyLayerLabel(int layer);
 SNav64Comparison compareNav64(const SNav64Document& mesh,const SAiGraphPreviewBuildInput& input,
                              int layer,const std::shared_ptr<std::atomic_bool>& cancelled);
+bool exportNav64ComparisonCsv(const QString& path,const QString& map,const QString& profile,
+                              const SNav64Comparison& comparison,QString* error=nullptr);

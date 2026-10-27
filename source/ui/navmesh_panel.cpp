@@ -17,6 +17,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_status=new QLabel(QStringLiteral("Сетка не запечена"),this);m_status->setObjectName("navmeshStatus");m_status->setTextFormat(Qt::PlainText);m_status->setWordWrap(true);layout->addWidget(m_status);
     m_freshness=new QLabel(this);m_freshness->setObjectName("navmeshFreshness");m_freshness->setTextFormat(Qt::PlainText);m_freshness->setWordWrap(true);layout->addWidget(m_freshness);
     m_algorithmStatus=new QLabel(this);m_algorithmStatus->setObjectName("navmeshAlgorithmStatus");m_algorithmStatus->setWordWrap(true);m_algorithmStatus->setStyleSheet("color: #ffbd69");m_algorithmStatus->hide();layout->addWidget(m_algorithmStatus);
+    m_bodiesStatus=new QLabel(this);m_bodiesStatus->setObjectName("navmeshBodiesStatus");m_bodiesStatus->setTextFormat(Qt::PlainText);m_bodiesStatus->setWordWrap(true);layout->addWidget(m_bodiesStatus);
     m_heightOutliers=new QLabel(this);m_heightOutliers->setTextFormat(Qt::PlainText);m_heightOutliers->setWordWrap(true);m_heightOutliers->hide();layout->addWidget(m_heightOutliers);
     auto* viewRow=new QHBoxLayout;
     viewRow->addWidget(new QLabel(QStringLiteral("Вид:"),this));
@@ -28,6 +29,8 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_compareLayer=new QComboBox(this);m_compareLayer->setObjectName("navmeshCompareLayer");m_compareLayer->addItem(QString(),-1);for(int i=0;i<8;++i)m_compareLayer->addItem(nav64LegacyLayerLabel(i),i);layout->addWidget(m_compareLayer);
     m_compareStatus=new QLabel(this);m_compareStatus->setObjectName("navmeshCompareStatus");m_compareStatus->setWordWrap(true);layout->addWidget(m_compareStatus);
     m_regions=new QListWidget(this);m_regions->setObjectName("navmeshRegions");m_regions->setMaximumHeight(100);m_regions->setToolTip(QStringLiteral("Нажмите область для перехода и подсветки; также можно нажать заливку в сцене."));layout->addWidget(m_regions);
+    m_exportLosses=new QPushButton(QStringLiteral("Экспорт списка…"),this);m_exportLosses->setObjectName("navmeshExportLosses");layout->addWidget(m_exportLosses);
+    connect(m_exportLosses,&QPushButton::clicked,this,[this](){const auto path=QFileDialog::getSaveFileName(this,QStringLiteral("Экспорт потерь проходимости"),QFileInfo(m_mpr).completeBaseName()+"-"+m_profile->currentData().toString()+"-losses.csv",QStringLiteral("CSV (*.csv)"));if(path.isEmpty())return;QString error;if(!exportLosses(path,&error))m_log->appendPlainText(QStringLiteral("Экспорт: ")+error);else m_log->appendPlainText(QStringLiteral("Экспорт списка: ")+path);});
     m_bakerPath=QSettings().value("nav64/bakerPath").toString();
     m_browse=new QPushButton(this);m_browse->setObjectName("navmeshBakerBrowse");layout->addWidget(m_browse);
     m_useInstalled=new QPushButton(QStringLiteral("Использовать установленный запекатель"),this);m_useInstalled->setObjectName("navmeshUseInstalled");layout->addWidget(m_useInstalled);
@@ -79,7 +82,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
             m_document=result;
             m_status->setText(result.valid?QStringLiteral("Сетка: %1, алгоритм %2, запечена %3").arg(QFileInfo(result.path).fileName()).arg(result.header.algorithm).arg(QFileInfo(result.path).lastModified().toString("dd.MM.yyyy HH:mm")):result.error);
             m_status->setToolTip(QStringLiteral("%1\n%2 тайлов, %3 полигонов, %4 островов, %5 узких порталов\n%6").arg(result.path).arg(result.tileCount).arg(result.polygonCount).arg(result.islandCount).arg(result.narrowCount).arg(result.warnings.join("\n")));
-            m_status->setStyleSheet(result.warnings.isEmpty()?QString():QStringLiteral("color: #ffbd69"));freshness();algorithmStatus();requestComparison();emit contentChanged();emit geometryChanged();
+            m_status->setStyleSheet(result.warnings.isEmpty()?QString():QStringLiteral("color: #ffbd69"));freshness();algorithmStatus();bodiesStatus();requestComparison();emit contentChanged();emit geometryChanged();
         }else reload();
     });
     controls();
@@ -100,24 +103,25 @@ void CNavmeshPanel::controls(){
     inspectBaker();
     const QString installed=QDir(m_gameRoot).filePath("Engine64/EIRebuild64NavBake.exe");
     const bool isInstalled=QFileInfo(bakerPath()).absoluteFilePath().compare(QFileInfo(installed).absoluteFilePath(),Qt::CaseInsensitive)==0;
-    const QString identity=m_bakerIdentity.algorithm?QStringLiteral(" (%1, алгоритм %2)").arg(m_bakerIdentity.release).arg(m_bakerIdentity.algorithm):QStringLiteral(" (алгоритм неизвестен)");
+    const QString identity=m_bakerIdentity.algorithm?QStringLiteral(" (алгоритм %1)").arg(m_bakerIdentity.algorithm):QStringLiteral(" (алгоритм неизвестен)");
     m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("%1%2 · Изменить…").arg(isInstalled?QStringLiteral("Установленный"):QStringLiteral("Выбранный"),identity):QStringLiteral("Запекатель не найден — Указать…"));
     m_useInstalled->setVisible(!isInstalled&&QFileInfo(installed).isFile());m_useInstalled->setEnabled(!busy());
     m_compareLayer->setItemText(0,QStringLiteral("Сравнивается с: %1 (авто)").arg(nav64LegacyLayerLabel(nav64LegacyLayer(m_profile->currentData().toString()))));
     m_compareLayer->setVisible(lossesVisible());m_compareStatus->setVisible(lossesVisible());m_regions->setVisible(lossesVisible()&&m_comparison.valid);
+    m_exportLosses->setVisible(lossesVisible());m_exportLosses->setEnabled(m_comparison.valid&&!m_comparing->isRunning());
     m_narrow->setEnabled(!lossesVisible());m_islands->setEnabled(!lossesVisible());algorithmStatus();
     m_browse->setToolTip(bakerPath());emit contentChanged();
 }
 void CNavmeshPanel::setScene(const QString& mpr,const QString& mob,const QString& gameRoot,const QString& effectiveMapsDirectory){
     const QString maps=effectiveMapsDirectory.isEmpty()?(mpr.isEmpty()?QString():QFileInfo(mpr).absolutePath()):effectiveMapsDirectory;
-    if(mpr==m_mpr&&mob==m_mob&&gameRoot==m_gameRoot&&maps==m_mapsDirectory)return;
+    if(mpr==m_mpr&&mob==m_mob&&gameRoot==m_gameRoot&&maps==m_mapsDirectory){const QFileInfo exe(bakerPath());if(m_inspectedBaker!=exe.absoluteFilePath()||m_bakerSize!=exe.size()||m_bakerMtime!=exe.lastModified().toMSecsSinceEpoch())controls();return;}
     m_mpr=mpr;m_mob=mob;m_gameRoot=gameRoot;m_mapsDirectory=maps;m_directory=maps.isEmpty()?QString():QDir(maps).absoluteFilePath("Nav64");
     controls();reload();
 }
 void CNavmeshPanel::setUnsavedChanges(bool dirty){if(m_unsaved==dirty)return;m_unsaved=dirty;freshness();emit contentChanged();}
 void CNavmeshPanel::reload(){
     invalidateComparison();
-    m_document={};m_loadingPath.clear();emit geometryChanged();
+    m_document={};m_loadingPath.clear();bodiesStatus();emit geometryChanged();
     if(m_mpr.isEmpty()||m_mob.isEmpty()){m_status->setText(QStringLiteral("Откройте карту с первичным MOB"));freshness();return;}
     QString error;const auto path=findNav64ForScene(m_directory,m_mpr,m_mob,m_profile->currentData().toString(),&error);m_loadingPath=path;
     if(path.isEmpty()){m_status->setText(error);freshness();algorithmStatus();return;}
@@ -132,12 +136,19 @@ void CNavmeshPanel::freshness(){
     QString sidecar=m_mpr;sidecar=sidecar.left(sidecar.lastIndexOf('.'))+".navsrc";
     for(const auto& path:{m_mpr,m_mob,sidecar})if(QFileInfo(path).exists()&&QFileInfo(path).lastModified()>baked)newer=true;
     m_freshness->setText(newer?QStringLiteral("Карта изменена после запекания (приблизительно)"):QStringLiteral("По датам карта не изменена (приблизительно)"));
-    m_freshness->setToolTip(QStringLiteral("Mapper не повторяет нормализацию геометрии EIRebuild64. Даты не обнаруживают правки моделей/архивов и изменения с сохранением времени. Fingerprint: ")+m_document.header.fingerprint);
+    m_freshness->setToolTip(QStringLiteral("Даты не обнаруживают правки моделей/архивов и изменения с сохранением времени. Проверка приблизительная; команда --fingerprint не используется."));
 }
 void CNavmeshPanel::line(const QByteArray& bytes){
     const QString s=QString::fromUtf8(bytes).trimmed();if(s.isEmpty())return;m_log->appendPlainText(s);
     QMap<QString,QString> fields;auto matches=QRegularExpression("(?:^|\\s)([A-Za-z0-9_]+)=([^\\s]+)").globalMatch(s);
     while(matches.hasNext()){const auto match=matches.next();fields[match.captured(1)]=match.captured(2);}
+    if(s.startsWith("BAKE_BEGIN ")){
+        bool valid=false;const int algorithm=fields.value("algorithm").toInt(&valid);
+        if(valid&&algorithm>0&&!m_runningBakerSha.isEmpty()){
+            QSettings settings;settings.setValue("nav64/bakerObservedSha256",m_runningBakerSha);settings.setValue("nav64/bakerObservedAlgorithm",algorithm);
+            m_inspectedBaker.clear();controls();bodiesStatus();
+        }
+    }
     if(s.startsWith("BAKE_DONE ")){bool mapsOk=false,completedOk=false;const int maps=fields.value("maps").toInt(&mapsOk),completed=fields.value("completed").toInt(&completedOk);m_done=mapsOk&&completedOk&&maps>0&&completed==maps&&fields.value("errors")=="0"&&fields.value("missing")=="0";if(!m_done)m_errors=true;}
     if(s.startsWith("MAP_ERROR ")||s.startsWith("BAKE_ERROR ")){m_errors=true;m_status->setText(QStringLiteral("Ошибка запекания: ")+s);}
     if(s.startsWith("MAP_MISSING ")){m_errors=true;m_status->setText(QStringLiteral("Нет исходников MPR/MOB: %1 / %2. Карта пропущена (код 5).").arg(fields.value("mpr"),fields.value("mob")));m_log->appendPlainText(m_status->text());}
@@ -165,12 +176,13 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     if(m_unsaved)return fail(QStringLiteral("Сначала сохраните MPR и первичный MOB: запекатель читает файлы с диска."));
     const QString exe=bakerPath();
     if(!QFileInfo(exe).isFile())return fail(QStringLiteral("Запекатель не найден — нажмите «Указать…»."));
+    m_runningBakerSha=nav64BakerIdentity(exe).sha256;
     QDir maps(m_mapsDirectory);if(maps.dirName().compare("Maps",Qt::CaseInsensitive)!=0)return fail(QStringLiteral("Для запекания задайте каталог Maps активного мода."));maps.cdUp();const QString mod=maps.absolutePath();
     if(m_gameRoot.isEmpty()||!QDir(m_gameRoot).exists())return fail(QStringLiteral("Не задан корректный корень игры."));
     m_outputRoot=outputRootOverride.isEmpty()?mod:QDir(outputRootOverride).absolutePath();const QString output=QDir(m_outputRoot).filePath("Maps/Nav64");
     m_requestMpr=m_mpr;m_requestMob=m_mob;m_backups.clear();
     const QString prefix=QFileInfo(m_mpr).completeBaseName().toLower()+"--"+QFileInfo(m_mob).completeBaseName().toLower()+".";
-    for(const auto& entry:QDir(output).entryInfoList({"*.nav64"},QDir::Files)){if(!all&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
+    for(const auto& entry:QDir(output).entryInfoList({"*.nav64","bodies.navbody"},QDir::Files)){if(!all&&entry.fileName()!="bodies.navbody"&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
     QStringList args{"--game-root",m_gameRoot,"--mod",mod,"--output-root",m_outputRoot};if(all)args<<"--all";else args<<"--map"<<QFileInfo(m_mpr).completeBaseName()<<"--mob"<<QFileInfo(m_mob).completeBaseName();
     m_stdout.clear();m_stderr.clear();m_done=false;m_errors=false;m_cancelled=false;m_log->appendPlainText(QStringLiteral("Вывод: ")+output);
     m_completedProfiles=0;m_progress->setRange(0,0);m_status->setText(QStringLiteral("Запекание: подготовка геометрии…"));m_heightOutliers->hide();
@@ -183,6 +195,20 @@ void CNavmeshPanel::inspectBaker(){
     if(m_inspectedBaker==file.absoluteFilePath()&&m_bakerSize==file.size()&&m_bakerMtime==modified)return;
     m_inspectedBaker=file.absoluteFilePath();m_bakerSize=file.size();m_bakerMtime=modified;
     m_bakerIdentity=nav64BakerIdentity(bakerPath());
+}
+void CNavmeshPanel::bodiesStatus(){
+    const auto path=m_directory.isEmpty()?QString():QDir(m_directory).filePath("bodies.navbody");
+    const auto bodies=readNav64Bodies(path);const quint32 expected=m_document.valid?m_document.header.algorithm:(m_bakerIdentity.algorithm?quint32(m_bakerIdentity.algorithm):Navigation::AlgorithmVersion);
+    QString text;
+    if(!bodies.exists)text=QStringLiteral("Таблица тел: нет");
+    else if(bodies.algorithm&&bodies.algorithm!=expected)text=QStringLiteral("Таблица тел: алгоритм не совпадает (%1, ожидается %2)").arg(bodies.algorithm).arg(expected);
+    else if(!bodies.valid)text=QStringLiteral("Таблица тел: ")+bodies.error;
+    else text=QStringLiteral("Таблица тел: %1 образцов, алгоритм %2").arg(bodies.sampleCount).arg(bodies.algorithm);
+    m_bodiesStatus->setText(text);m_bodiesStatus->setToolTip(path);
+    if(text!=m_lastBodiesStatus){m_log->appendPlainText(text);m_lastBodiesStatus=text;}
+}
+bool CNavmeshPanel::exportLosses(const QString& path,QString* error)const{
+    return exportNav64ComparisonCsv(path,QFileInfo(m_mpr).completeBaseName(),m_document.header.profile,m_comparison,error);
 }
 void CNavmeshPanel::algorithmStatus(){
     quint32 algorithm=m_document.header.algorithm;
@@ -202,7 +228,7 @@ bool CNavmeshPanel::legendVisible()const{return m_legend->isChecked()&&layerVisi
 int CNavmeshPanel::comparisonLayer()const{const int layer=m_compareLayer->currentData().toInt();return layer<0?nav64LegacyLayer(m_profile->currentData().toString()):layer;}
 void CNavmeshPanel::invalidateComparison(){
     ++m_compareGeneration;if(m_compareCancel)m_compareCancel->store(true);
-    m_comparison={};m_selectedRegion=-1;m_regions->clear();m_regions->hide();m_compareStatus->setText(QStringLiteral("Ожидается сетка для сравнения…"));
+    m_comparison={};m_selectedRegion=-1;m_regions->clear();m_regions->hide();m_exportLosses->setEnabled(false);m_compareStatus->setText(QStringLiteral("Ожидается сетка для сравнения…"));
 }
 void CNavmeshPanel::requestComparison(){
     invalidateComparison();

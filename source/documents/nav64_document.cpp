@@ -9,6 +9,9 @@
 #include <QSet>
 #include <QColor>
 #include <QCryptographicHash>
+#include <QSettings>
+#include <set>
+#include <tuple>
 #include <QtEndian>
 #include <windows.h>
 #include <cstring>
@@ -108,7 +111,7 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params,float heightT
 }
 QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
 QVector<quint32> nav64SupportedContainers(){return {3};}
-QVector<quint32> nav64SupportedAlgorithms(){return {8,Navigation::AlgorithmVersion};}
+QVector<quint32> nav64SupportedAlgorithms(){return {8,9,Navigation::AlgorithmVersion};}
 QVector4D nav64AreaColor(int area){const auto c=QColor::fromHsv((area*43+100)%360,160,235);return {float(c.redF()),float(c.greenF()),float(c.blueF()),.33f};}
 QString nav64AreaName(int area){
     // Producer aiMap assigns the reduced movement class (dwTerrains nibble),
@@ -122,14 +125,32 @@ QString nav64AreaName(int area){
 SNav64BakerIdentity nav64BakerIdentity(const QString& path){
     QFile f(path);if(!f.open(QIODevice::ReadOnly))return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);if(!hash.addData(&f))return {};
-    // Certified executable digests, paired with the producer README at the
-    // pinned source revision. r13/r14 CLI has no version/fingerprint command.
-    const auto digest=hash.result().toHex();
-    if(digest=="aca9ee85105fedb9feefbb80411f167dcdb9723723061540ea614702be3bcdf0")return {"r14",9};
-    if(digest=="85df0ef34432bfc3164cb83067aa9afd1153fdf96ae39e44b61b636ad6dc5ad7")return {"r13",8};
-    return {};
+    const auto digest=QString::fromLatin1(hash.result().toHex());
+    QSettings settings;const int algorithm=settings.value("nav64/bakerObservedAlgorithm",0).toInt();
+    return {digest,settings.value("nav64/bakerObservedSha256").toString()==digest&&algorithm>0?algorithm:0};
 }
 QString nav64AlgorithmMismatch(quint32 meshAlgorithm,int bakerAlgorithm){return meshAlgorithm&&bakerAlgorithm&&int(meshAlgorithm)!=bakerAlgorithm?QStringLiteral("сетка алгоритма %1, запекатель — %2: перепеките").arg(meshAlgorithm).arg(bakerAlgorithm):QString();}
+SNav64Bodies readNav64Bodies(const QString& path){
+    SNav64Bodies out;if(path.isEmpty())return out;QFile f(path);out.exists=QFileInfo::exists(path);if(!out.exists)return out;
+    try{
+        if(!f.open(QIODevice::ReadOnly)||f.size()>64*1024*1024)throw QStringLiteral("Таблица тел недоступна / превышен лимит");
+        Reader r{f.readAll()};if(r.u32()!=0x59444f42)throw QStringLiteral("Неверная сигнатура таблицы тел");
+        out.version=r.u32();out.algorithm=r.u32();out.sampleCount=r.u32();
+        if(out.version!=1)throw QStringLiteral("Версия таблицы тел %1 не поддерживается").arg(out.version);
+        if(out.algorithm!=Navigation::AlgorithmVersion)throw QStringLiteral("Алгоритм таблицы тел %1 не поддерживается").arg(out.algorithm);
+        if(out.sampleCount>1000000||quint64(out.sampleCount)*40>quint64(r.data.size()-r.at))throw QStringLiteral("Неверное число образцов таблицы тел");
+        using Key=std::tuple<QString,float,float,float>;std::set<Key> keys;Key previous;bool first=true;
+        for(quint32 i=0;i<out.sampleCount;++i){
+            const auto model=r.string();if(model.isEmpty()||model.contains('/')||model.contains('\\')||model=="."||model=="..")throw QStringLiteral("Неверное имя модели таблицы тел");
+            const float a=r.f32(),b=r.f32(),c=r.f32();Key key(model,a,b,c);
+            if(!keys.insert(key).second||(!first&&key<previous))throw QStringLiteral("Повтор / неверный порядок образцов таблицы тел");previous=key;first=false;
+            const auto ground=r.u32(),levitation=r.u32();if(ground>4||levitation<5||levitation>7)throw QStringLiteral("Неверный профиль таблицы тел");
+            if(r.f32()<0)throw QStringLiteral("Отрицательный радиус таблицы тел");
+            for(int pose=0;pose<3;++pose)if(r.f32()<=0)throw QStringLiteral("Неположительный рост таблицы тел");
+        }r.end();out.valid=true;
+    }catch(const QString& e){out.error=e;}catch(const std::bad_alloc&){out.error=QStringLiteral("Недостаточно памяти для таблицы тел");}
+    return out;
+}
 SNav64Header readNav64Header(const QString& path,QString* error){if(error)error->clear();try{QFile f(path);if(!f.open(QIODevice::ReadOnly)||f.size()>Limit)throw QStringLiteral("Nav64 недоступен/превышен лимит");Reader r{f.read(65536)};return header(r);}catch(const QString& e){if(error)*error=e;return {};}}
 QString findNav64ForScene(const QString& directory,const QString& mpr,const QString& mob,const QString& profile,QString* error){
     if(error)error->clear();const QString a=QFileInfo(mpr).fileName().toLower(),b=QFileInfo(mob).fileName().toLower();

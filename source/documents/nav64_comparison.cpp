@@ -2,6 +2,8 @@
 #include <QElapsedTimer>
 #include <QtMath>
 #include <algorithm>
+#include <QSaveFile>
+#include <QFileInfo>
 
 int nav64LegacyLayer(const QString& profile){
     // Legacy radius classes are morphological Star3/5/7, not FIG half-widths.
@@ -70,4 +72,20 @@ SNav64Comparison compareNav64(const SNav64Document& mesh,const SAiGraphPreviewBu
         batch.vertices<<QVector3D(a,b,z)<<QVector3D(a+.5f,b,z)<<QVector3D(a+.5f,b+.5f,z)<<QVector3D(a,b,z)<<QVector3D(a+.5f,b+.5f,z)<<QVector3D(a,b+.5f,z);
     }
     out.valid=true;out.milliseconds=timer.elapsed();return out;
+}
+
+bool exportNav64ComparisonCsv(const QString& path,const QString& map,const QString& profile,const SNav64Comparison& comparison,QString* error){
+    if(error)error->clear();auto fail=[&](const QString& message){if(error)*error=message;return false;};
+    if(!comparison.valid)return fail(QStringLiteral("Сначала дождитесь расчёта потерь."));
+    if(QFileInfo(path).suffix().compare("csv",Qt::CaseInsensitive)!=0)return fail(QStringLiteral("Выберите файл с расширением .csv."));
+    auto quote=[](QString value){value.replace('"',"\"\"");return '"'+value+'"';};
+    QByteArray data=QByteArray::fromHex("efbbbf")+QStringLiteral("карта,профиль,слой_старого_графа,тип,площадь_м2,центр_X,центр_Y,bbox_min_X,bbox_min_Y,bbox_max_X,bbox_max_Y\r\n").toUtf8();
+    auto number=[](double value){return QString::number(value,'f',6);};
+    for(const auto& region:comparison.areas){
+        const auto& b=region.bounds;
+        const QStringList fields={quote(map),quote(profile),QString::number(comparison.layer),quote(region.lost?QStringLiteral("потеряно"):QStringLiteral("появилось")),number(region.cells*.25),number(region.center.x()),number(region.center.y()),number(b.left()*.5),number(b.top()*.5),number((b.right()+1)*.5),number((b.bottom()+1)*.5)};
+        data+=fields.join(',').toUtf8()+"\r\n";
+    }
+    QSaveFile file(path);if(!file.open(QIODevice::WriteOnly)||file.write(data)!=data.size())return fail(file.errorString());
+    if(!file.commit())return fail(file.errorString());return true;
 }

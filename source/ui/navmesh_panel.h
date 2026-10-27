@@ -49,6 +49,7 @@ public:
     const SNav64Comparison& comparison() const {return m_comparison;}
     int selectedRegion() const {return m_selectedRegion;}
     void selectRegion(int index);
+    bool exportLosses(const QString& path,QString* error=nullptr) const;
 signals:
     void geometryChanged();
     void contentChanged();
@@ -63,6 +64,7 @@ private:
     QString bakerPath() const;
     void inspectBaker();
     void algorithmStatus();
+    void bodiesStatus();
     void requestComparison();
     void startComparison();
     QComboBox* m_profile;QComboBox* m_fill;
@@ -80,6 +82,9 @@ private:
     int m_selectedRegion=-1;
     SNav64BakerIdentity m_bakerIdentity;
     QString m_inspectedBaker,m_lastMismatch;
+    QString m_runningBakerSha,m_lastBodiesStatus;
+    QLabel* m_bodiesStatus;
+    QPushButton* m_exportLosses;
     qint64 m_bakerSize=-1,m_bakerMtime=-1;
     QLabel* m_status;QLabel* m_freshness;QLabel* m_heightOutliers;
     QPushButton* m_browse;QPlainTextEdit* m_log;

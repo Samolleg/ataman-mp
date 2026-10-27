@@ -1,12 +1,12 @@
-# Nav64 offline data contract (X64NAV01 r13)
+# Nav64 offline data contract (X64NAV01 r16)
 
 RecastNavigation v1.6.0 (zlib), unchanged sources; pin/archive digest:
 third_party/recastnavigation.lock.json. Recast and Detour use DT_POLYREF64.
-Algorithm 8, container 3, library 0x010600, SaveSchema 4.
+Algorithm 10, container 3, library 0x010600, SaveSchema 4.
 
 The game ONLY reads Maps/Nav64 in the active mod. No navmesh generation on
 zone entry, no Cache64/Nav reads/writes, no fallback to the legacy graph.
-Missing, stale or incompatible data rejects the zone before publication and
+Missing or incompatible data rejects the zone before publication and
 names its MPR/MOB/profile with a request to re-bake in the mapper.
 Old Cache64/Nav files are unused; this task does not remove installed files.
 
@@ -27,7 +27,7 @@ One map:
 
     Engine64/EIRebuild64NavBake.exe --game-root "C:/GOG Games/PZ" --mod MODS/Dejavu --map zone1 --mob zone1 --output-root "D:/nav-release/MODS/Dejavu"
 
---game-root, --mod and --output-root are required. --mod may be relative to the
+--game-root and --mod are required. --output-root is required for baking. --mod may be relative to the
 game root. Output goes to <output-root>/Maps/Nav64. --map and --mob may include
 extensions; --mob defaults to the --map stem. Use either --all or --map.
 --all reads the effective texts.res/map.txt using CGlobalMap::LoadZones, includes
@@ -47,11 +47,11 @@ stdout is flushed after MAP_BEGIN, PROFILE, MAP_DONE and BAKE_DONE records;
 stderr contains MAP_MISSING/MAP_ERROR/BAKE_ERROR. PROFILE gives type, radius, tiles, wall
 ms, raster/polygon CPU ms, bytes and fingerprint. MAP_DONE gives import and
 total wall ms and the sum of eight profile file sizes. BAKE_DONE gives
-counts (completed, missing, errors), total wall ms and total bytes. Every
+counts (completed, missing, errors), total wall ms and total bytes including the body table. Every
 requested pair belongs to exactly one of those three counts. BOUNDS_NORMALIZED records
 MPR/MOB/NID/model/part for every reversed finite solid BV, once per map part.
 Fields are space-separated key=value; names are resource names without spaces,
-reason is the remaining text after reason=. Times are integer milliseconds,
+reason is the remaining text after reason=. Times are integer milliseconds except FINGERPRINT.ms,
 bytes are decimal byte counts. The mapper must check exit code and BAKE_DONE,
 not infer completion from a PROFILE record alone.
 A failed map is not reported as complete. Each nav64 file is written through
@@ -64,15 +64,39 @@ matches that triple against its open MPR/MOB pair and requested profile,
 then checks the fingerprint. Do not infer a map solely from a filename/hash.
 Renaming a file cannot change its embedded identity. The game checks the same
 triple before adding tiles. Older containers/algorithms must be re-baked.
-The container embeds a SHA-256 of effective MPR header/sectors/material
-registry, raw primary MPR/MOB, original object model/BON payloads (including
-objects absent from a saved world), authoring .navsrc bytes (explicitly empty
-when absent), object constitution quantization setting, profile,
-coordinate conversion, algorithm/library/container/ABI settings. Script-only
-secondary MOBs do not add geometry. A primary MOB edit requires re-baking.
-No file dates, installation paths, transient IDs or EXE hashes enter the key.
-.navsrc authoring semantics remain NAV03; this slice fingerprints the sidecar.
-Geometry is assembled in the same stable object order in both executables.
+Freshness is a MAPPER responsibility. The game does not calculate or compare
+fingerprints, enumerate model dependencies, import navigation MPR/MOB geometry,
+or measure bodies. It loads all eight files once at zone/staged-save entry,
+checks container/algorithm/ABI/map/profile and bounded binary structure, then
+hands tiles to Detour. Independent file decoding runs concurrently; queries
+are allocated there too, rather than on the first movement request. Party
+deployment and world changes never repeat preparation or invalidate the mesh.
+
+Mapper freshness command (no output directory and NO baking or writes):
+
+    Engine64/EIRebuild64NavBake.exe --game-root "C:/GOG Games/PZ" --mod MODS/Dejavu --map zone1 --mob zone1 --fingerprint
+
+--fingerprint can also accompany --all. --output-root is required only for an
+ordinary bake. Exit codes remain the same; code 0 means all fingerprints were
+computed. FINGERPRINT gives mpr, mob, algorithm=10, key (64 lowercase SHA-256
+hex characters), and ms (floating point milliseconds for hashing including
+assembly of the canonical input stream). Normal baking emits the SAME record
+and writes this map-wide key into all eight profile headers. The mapper reads
+the embedded map/profile/version, runs this command against current effective
+sources, and compares key with every file. BAKE_DONE with errors=0 and the
+process exit code still determine completion. Fingerprint mode reports
+MAP_DONE profiles=0 bytes=0 and creates no output files.
+
+The key covers actual imported triangles (XYZ, material, water, levitation
+area) and transformed solid corners, all eight profile parameters, fixed
+Recast parameters, container/algorithm/library/ABI, measured body-table bytes
+and .navsrc bytes (empty if absent). Source labels, transient IDs and raw
+MPR/MOB/model files do not enter the key. Model/transform/solid/BASE changes
+matter exactly through their imported geometry. Units, items/loot, traps,
+scripts, triggers, sounds and texts contribute no navigation geometry/key.
+The body table is derived from database prototypes, independently of map
+unit placement. .navsrc authoring semantics remain NAV03; the sidecar is
+fingerprinted. The game never opens it for navigation.
 
 ## Fixed profiles and body/pose selection
 
@@ -135,7 +159,7 @@ not a corrupt volume. NaN/infinite geometry still reports its source.
 ## Container 3
 
 Little endian fields, no raw host pointers/structs except pinned Detour tile
-payloads: NAV664 magic (u32 0x3656414e, 0x00003436), container=3, algorithm=9,
+payloads: NAV664 magic (u32 0x3656414e, 0x00003436), container=3, algorithm=10,
 library=0x010600, endian=0x12345678, polyrefBytes=8; four length-prefixed UTF-8
 strings: fingerprint, MPR basename, MOB basename, profile ID. String lengths
 are u32 byte counts without NUL. Then six f32 profile fields (radius, height,
@@ -166,27 +190,64 @@ no dependency DLL is added to the package. API contract:
 [Compress](https://learn.microsoft.com/en-us/windows/win32/api/compressapi/nf-compressapi-compress),
 [Decompress](https://learn.microsoft.com/en-us/windows/win32/api/compressapi/nf-compressapi-decompress).
 The production reader validates
-versions, SHA, profile, exact lengths, counts, indices and tile ABI before
+versions, map identity, profile, exact lengths, counts, indices and tile ABI before
 addTile. Limits: 4096 tiles, 32768 polygons/tile, 16 MiB/tile, 512 MiB/file.
-Zero walkable tiles is valid. Stale data is rejected, never regenerated.
+Zero walkable tiles is valid. Runtime never validates source freshness or regenerates data.
 
-## Runtime / remaining packages
+## Runtime, body table and performance journal
 
-Prepare reads every fixed profile before publishing NewZone/staged load and
-resolves restored unit addresses. Query entry points still route exclusively
-through NavigationWorld. Preview, exact linear corridor, constrained Detour
-step, bounded source ingress, pose masks and SaveSchema 4 remain as in r8.
+bodies.navbody is one small file next to the profile files, generated before
+map baking from all AVAILABLE models referenced by effective unit database prototypes.
+The original FIG/BON/ADB/ANM torso/shoulder and pose measurement now exists
+only in Game/NavigationBake.cpp. Samples include exact prototype constitutions
+and a 3x3x3 grid (0, 1, 2 on each shape axis) for every model. The game first
+looks up an exact model/constitution and otherwise performs trilinear
+interpolation between surrounding samples. Beyond the grid it extends the
+nearest cell linearly, matching the model system's unbounded morph weights;
+there is no new shape clamp. Results are cached by model/constitution.
+Fixed-profile selection rounds measured radius down; pose clearance retains
+the existing AI-class cap and tier policy. No model files are read by this
+navigation path. A missing body table/model is an explicit re-bake error.
+
+Body table binary contract (little endian): u32 magic=0x59444f42 (BODY),
+u32 version=1, u32 algorithm=10, u32 sampleCount. Each sample is a u32-length
+UTF-8 model basename, three f32 shape coordinates (strength/grace/tall), two
+u32 profile IDs (ground and levitation, in table order above), f32 radius and
+three f32 heights (standing/combat-idle/lying). Samples are sorted by the
+model/shape tuple. Exact byte length, unique keys, finite positive dimensions
+and profile IDs are checked on load. BODIES reports sample count, bytes and
+offline measurement time. BODY_UNAVAILABLE lists historical database models with no effective MOD/LNK (currently unmoli2 and unanwile); no dimensions are invented for them. Corrupt present models remain errors. This table ships together with ALL map profiles.
+
+Query entry points route exclusively through NavigationWorld. Preview,
+linear corridor, constrained Detour step, pose masks and SaveSchema 4 remain.
+The short source-ingress proof uses the baked zero-radius mesh of the same
+ground/levitation domain, via nearest/raycast/height queries. Raw triangle
+and solid scans are removed. It requires available support clearance flags;
+unsupported ingress fails without snapping across an obstacle. Target placement
+continues to use the creature's own full-radius mesh. Giant/tall fringe
+placement and actual passages remain part of owner gameplay acceptance.
 Old x64 saves are rejected without migration; transient polygon refs are not
-serialized. Partial paths and bounded-search exhaustion are failures.
+serialized. Partial paths and bounded-search exhaustion remain failures.
 Moving units wait rather than push. Full crowd/queue/terrain costs and robust
 independent floors remain later NAV packages.
 
-Runtime object changes retain the published baked snapshot until NAV05.
-No runtime builder or old graph is used. Actual add/remove/update contributions
-are journalled with before/after solid/triangle counts; empty-to-empty events
-do not affect generation or the snapshot. Dynamic tile updates remain NAV05. Exact campaign gameplay and the zone1
-passages (1.3 m opening/ramp, 1.5 m courtyards, 0.8 m door, 6 m giant gates)
-require owner acceptance. samvlrmp01 measured width remains 1.30 m.
+Static world changes after loading only emit geometry_deferred, using existing
+BV flags (no vertex import). Empty contributions, units, items and traps are
+ignored. Meshes and generation remain unchanged until zone entry; rebuilding
+dynamic tiles and doors stays NAV05.
+
+Permanent journal, without any toggle or per-frame log formatting:
+- NAV loaded: one record per zone load, mpr/mob, profiles=8, ms and bytes
+  INCLUDING body-table read and concurrent tile decoding/query allocation.
+- NAV query_failed: bounded to 16 events per loaded zone (all reasons share
+  the bound), with unit, profile, requested height, length limit and route length.
+- CORE core_perf, existing five-second window: nav.path (full path request),
+  nav.place, nav.step, nav.restore and nav.total (sum of disjoint public calls).
+  nav.frame measures their actual total per outer CorePerf::Frame, including
+  all server ticks and client preview queries in that frame. Compare
+  nav.path.mean_ms <= 0.5 and nav.frame.max_ms <= 1 in a populated scene;
+  NAV loaded.ms for zone1 must be <= 100. Counters are passive and never alter
+  simulation/RNG. These limits are accepted ONLY from the owner's game journal.
 
 ## Detail height sampling and release validation (r13)
 
@@ -213,28 +274,4 @@ profile, tile x/y/layer, vertex kind/index, height, bounds and tolerance.
 PROFILE includes height_outliers=0 only after this check succeeds for the map.
 This is release-data validation, not an alternate reader or test executable.
 Container 3, compression, filenames, command line and exit codes are unchanged;
-algorithm 8 fingerprints require re-baking all profiles.
-## Immutable source fingerprint and runtime changes (r14)
-
-Algorithm 9 fingerprints only original file inputs. At Scene entry the shared
-owned MOB reader enumerates the original model references without creating
-objects or executing scripts/RNG. Packed MOD/BON, or LNK plus its selected
-per-node FIG/BON, are fingerprinted in stable key order. Missing optional
-resources are explicit empty entries. This dependency set never comes from
-objects restored from a save or spawned/removed by gameplay. The derived live
-geometry no longer enters the file key. The normal and staged-save loaders
-use the same source catalog; the baker uses that same Scene path.
-
-Prepare validates and loads all eight profiles once per zone. Party deployment,
-repeat Prepare and queries retain them and their generation after a live
-object change. The frozen ingress-support geometry also remains unchanged
-within that loaded zone. The live contribution inventory is still compared
-and journalled for NAV05; it cannot clear meshes or change the source key.
-A zero contribution before AND after a change is ignored. Actual stale source
-files still fail at zone/save entry. Container 3, CLI and SaveSchema 4 remain;
-algorithm 8 files require a complete re-bake with this executable.
-
-query_failed adds profile, clearance height, max_length and route_length to
-the existing bounded journal event. A short straight-line displacement can
-still exceed max_length when its traversable corridor detours around a wall.
-No path-length/radius/clearance policies or map data are changed in r14.
+algorithm 10 requires re-baking all profiles and the body table.

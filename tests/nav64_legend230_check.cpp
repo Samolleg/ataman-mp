@@ -107,16 +107,26 @@ int runAssemblyCatalogCheck(){
         const auto filesBefore=QDir(maps).entryList();
         for(const auto& name:{"navmeshBakeMap","navmeshBakeAll"}){panel->findChild<QPushButton*>(name)->click();check(!panel->busy()&&status->text().contains(QStringLiteral("Запекатель не найден")),QString("missing baker button refusal: ")+name);}
         check(QDir(maps).entryList()==filesBefore&&!QDir(nav).exists(),"missing baker creates no output");
-        check(QDir().rename(maps+"/Nav64-held",nav),"restore private r14 meshes");panel->reload();
-        check(until([&](){return panel->document().valid;}),"r14 zone1 human loaded");
+        check(QDir().rename(maps+"/Nav64-held",nav),"restore private r16 meshes");panel->reload();
+        check(until([&](){return panel->document().valid;}),"r16 zone1 human loaded");
         auto* profiles=panel->findChild<QComboBox*>("navmeshProfile");auto* fill=panel->findChild<QComboBox*>("navmeshFill");
         check(profiles->count()==8&&profiles->currentData()=="human"&&profiles->currentText().contains(QStringLiteral("Человек")),"eight readable profiles, human selected");
-        check(panel->document().header.algorithm==9&&panel->document().detailOutlierVertices==0&&panel->layerVisible(),"r14 algorithm8 layer visible, no height outliers");
+        check(panel->document().header.algorithm==10&&panel->document().detailOutlierVertices==0&&panel->layerVisible(),"r16 algorithm10 layer visible, no height outliers");
         panel->setBakerPath(qEnvironmentVariable("EI_NAV64_BAKER"));
-        check(nav64SupportedAlgorithms()==QVector<quint32>({8,9}),"one supported algorithm registry: 8 and 9");
-        check(browse->text().contains("r14")&&browse->text().contains(QStringLiteral("алгоритм 9")),"certified installed r14 algorithm9 caption");
+        check(nav64SupportedAlgorithms()==QVector<quint32>({8,9,10}),"one supported algorithm registry: 8, 9 and 10");
+        check(browse->text().contains(QStringLiteral("неизвестен")),"baker algorithm unknown before any observed BAKE_BEGIN");
+        const auto bodiesPath=nav+"/bodies.navbody";const auto bodyBytes=bytes(bodiesPath);const auto bodies=readNav64Bodies(bodiesPath);
+        check(bodies.valid&&bodies.algorithm==10&&bodies.sampleCount>0,"r16 body table fully validated");
+        auto* bodiesLabel=panel->findChild<QLabel*>("navmeshBodiesStatus");
+        check(visible(bodiesLabel)&&bodiesLabel->text().contains(QString::number(bodies.sampleCount))&&panel->bakeLog().contains(bodiesLabel->text()),"body sample count and algorithm shown in panel and log");
+        QDir().mkpath(root+"/body-cases");write(root+"/body-cases/truncated.navbody",bodyBytes.left(bodyBytes.size()-1));check(!readNav64Bodies(root+"/body-cases/truncated.navbody").valid,"truncated body sample rejected");
+        auto wrongBody=bodyBytes;wrongBody[8]=char(9);write(bodiesPath,wrongBody);panel->reload();check(until([&](){return panel->document().valid;}),"body mismatch case reloads mesh");check(bodiesLabel->text().contains(QStringLiteral("не совпадает")),"body algorithm mismatch visible");
+        check(QFile::rename(bodiesPath,bodiesPath+".held"),"isolate missing body table");panel->reload();check(bodiesLabel->text()==QStringLiteral("Таблица тел: нет"),"missing body table shown without mutation");check(QFile::rename(bodiesPath+".held",bodiesPath),"restore private body table");write(bodiesPath,bodyBytes);panel->reload();check(until([&](){return panel->document().valid;}),"original body and mesh restored");
         const auto humanPath=panel->document().path;const auto humanBytes=bytes(humanPath);
-        for(const auto& id:nav64Profiles()){const auto d=loadNav64(nav+"/zone1--zone1."+id+".nav64");check(d.valid&&d.header.algorithm==9&&d.detailOutlierVertices==0,"live copied algorithm9 profile: "+id);}
+        QDir().mkpath(root+"/identity");write(root+"/identity/renamed.nav64",humanBytes);QString identityError;
+        check(findNav64ForScene(root+"/identity","zone1.mpr","zone1.mob","human",&identityError).endsWith("renamed.nav64"),"algorithm10 file resolved by embedded MPR MOB profile despite renamed file");
+        check(findNav64ForScene(root+"/identity","zone7.mpr","zone7.mob","human",&identityError).isEmpty()&&findNav64ForScene(root+"/identity","zone1.mpr","zone1.mob","tiny",&identityError).isEmpty(),"embedded identity rejects wrong map and profile");
+        for(const auto& id:nav64Profiles()){const auto d=loadNav64(nav+"/zone1--zone1."+id+".nav64");check(d.valid&&d.header.algorithm==10&&d.detailOutlierVertices==0,"live copied algorithm10 profile: "+id);}
         auto* legend=panel->findChild<QCheckBox*>("navmeshLegend");
         check(legend&&legend->isVisible()&&legend->isChecked()&&panel->legendVisible(),"legend default on and visible in production panel");
         panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(true);
@@ -137,6 +147,19 @@ int runAssemblyCatalogCheck(){
         out<<"COMPARISON lost_m2="<<comparison.lost*.25<<" gained_m2="<<comparison.gained*.25<<" regions="<<comparison.areas.size()<<" background_ms="<<comparison.milliseconds<<" snapshot_ms="<<snapshotMs<<"\n";out.flush();
         write(evidence+"/comparison.json",QJsonDocument(QJsonObject{{"lostCells",comparison.lost},{"gainedCells",comparison.gained},{"lostM2",comparison.lost*.25},{"gainedM2",comparison.gained*.25},{"regions",comparison.areas.size()},{"layer",comparison.layer},{"backgroundMs",double(comparison.milliseconds)},{"snapshotMs",double(snapshotMs)},{"source","legacy algorithm recomputed mask, not serialized graph mask"}}).toJson());
         checkpoint("06-passability-losses");
+        auto* exportButton=panel->findChild<QPushButton*>("navmeshExportLosses");check(visible(exportButton)&&exportButton->isEnabled(),"Export list action visible and enabled in losses mode");
+        QString exportError;const auto csvPath=evidence+"/zone1-human-losses.csv";check(panel->exportLosses(csvPath,&exportError),"production CSV export: "+exportError);
+        auto csv=QString::fromUtf8(bytes(csvPath));if(csv.startsWith(QChar(0xfeff)))csv.remove(0,1);const auto rows=csv.trimmed().split("\r\n");double lostArea=0,gainedArea=0;bool csvIdentity=true;
+        for(int row=1;row<rows.size();++row){const auto fields=rows[row].split(',');if(fields.size()!=11){csvIdentity=false;break;}csvIdentity&=fields[0]=="\"zone1\""&&fields[1]=="\"human\""&&fields[2]=="3";if(fields[3]==QStringLiteral("\"потеряно\""))lostArea+=fields[4].toDouble();else if(fields[3]==QStringLiteral("\"появилось\""))gainedArea+=fields[4].toDouble();else csvIdentity=false;}
+        check(csvIdentity&&rows.size()==comparison.areas.size()+1&&qAbs(lostArea-comparison.lost*.25)<.001&&qAbs(gainedArea-comparison.gained*.25)<.001,"CSV identities, row count and both area sums match production counter");
+        QVector3D savedPosition,savedPivot,savedRotation;view.m_cam->getLocation(savedPosition,savedPivot,savedRotation);const auto savedProjection=view.m_normalProjection;
+        int selectedLoss=-1;for(int i=0;i<comparison.areas.size();++i)if(comparison.areas[i].lost&&(selectedLoss<0||comparison.areas[i].cells>comparison.areas[selectedLoss].cells))selectedLoss=i;
+        if(selectedLoss>=0)panel->selectRegion(selectedLoss);
+        window.resize(1600,1600);QTest::qWait(100);
+        const float mapWidth=comparison.width*.5f,mapHeight=comparison.height*.5f,halfHeight=mapHeight*.56f,halfWidth=qMax(mapWidth*.56f,halfHeight*view.width()/view.height());
+        view.m_cam->setTelephotoEnabled(false);view.m_cam->setLocation(QVector3D(mapWidth*.5f,mapHeight*.5f,1000),QVector3D(),QVector3D());view.m_normalProjection.setToIdentity();view.m_normalProjection.ortho(-halfWidth,halfWidth,-halfHeight,halfHeight,1,2000);view.m_projection=view.m_normalProjection;
+        checkpoint("08-losses-top");write(evidence+"/zone1-human-losses.png",bytes(evidence+"/08-losses-top.png"));check(QFileInfo(evidence+"/zone1-human-losses.png").size()>0,"orthographic top view exported with loss fill and selected-region outline");
+        view.m_normalProjection=savedProjection;view.m_projection=savedProjection;view.m_cam->setLocation(savedPosition,savedPivot,savedRotation);window.resize(1500,950);QTest::qWait(100);
         auto* regions=panel->findChild<QListWidget*>("navmeshRegions");check(regions->isVisible()&&regions->count()==comparison.areas.size(),"difference regions navigable in panel");
         const auto oldCamera=view.m_cam->viewMatrix();regions->setCurrentRow(0);QTest::mouseClick(regions->viewport(),Qt::LeftButton,Qt::NoModifier,regions->visualItemRect(regions->item(0)).center());
         check(panel->selectedRegion()>=0&&oldCamera!=view.m_cam->viewMatrix(),"click area selects region and moves production camera");
@@ -144,16 +167,20 @@ int runAssemblyCatalogCheck(){
         layer->setCurrentIndex(layer->findData(1));layer->setCurrentIndex(layer->findData(3));
         check(until([&](){return panel->comparison().valid&&panel->comparison().layer==3;}),"explicit layer override and stale worker result guard");
         mode->setCurrentIndex(0);view.moveCameraToPoint(target);view.m_cam->moveAwayOn(65.f);
+        auto mismatchCheck=[&](){const auto humanPath=panel->document().path;const auto humanBytes=bytes(humanPath);
         auto synthetic=humanBytes;synthetic[12]=char(8);write(humanPath,synthetic);panel->reload();
         check(until([&](){return panel->document().valid&&panel->document().header.algorithm==8;}),"algorithm8 remains readable");
         auto* mismatch=panel->findChild<QLabel*>("navmeshAlgorithmStatus");
-        check(mismatch->isVisible()&&mismatch->text()==QStringLiteral("сетка алгоритма 8, запекатель — 9: перепеките")&&panel->bakeLog().contains(mismatch->text()),"algorithm mismatch visible in panel and log");
+        check(mismatch->isVisible()&&mismatch->text()==QStringLiteral("сетка алгоритма 8, запекатель — 10: перепеките")&&panel->bakeLog().contains(mismatch->text()),"algorithm mismatch visible in panel and log");
         checkpoint("07-algorithm-mismatch");
+        synthetic[12]=char(9);write(humanPath,synthetic);panel->reload();check(until([&](){return panel->document().valid&&panel->document().header.algorithm==9;}),"algorithm9 remains readable");
         synthetic[12]=char(99);write(humanPath,synthetic);panel->reload();
         check(mismatch->isVisible()&&mismatch->text().contains("99"),"unsupported algorithm still reports actual baker mismatch");
-        write(humanPath,humanBytes);panel->reload();check(until([&](){return panel->document().valid&&panel->document().header.algorithm==9;}),"restore private original algorithm9");
+        write(humanPath,humanBytes);panel->reload();check(until([&](){return panel->document().valid&&panel->document().header.algorithm==10;}),"restore private original algorithm10");
         panel->setBakerPath(root+"/work/handoffs/old.exe");check(panel->findChild<QPushButton*>("navmeshUseInstalled")->isVisible(),"manual handoff path offers installed baker without overwrite");
-        panel->findChild<QPushButton*>("navmeshUseInstalled")->click();check(browse->text().contains(QStringLiteral("Установленный"))&&browse->text().contains("r14")&&!QSettings().contains("nav64/bakerPath"),"explicit installed-baker choice clears manual override");
+        panel->findChild<QPushButton*>("navmeshUseInstalled")->click();check(browse->text().contains(QStringLiteral("Установленный"))&&browse->text().contains(QStringLiteral("алгоритм 10"))&&!QSettings().contains("nav64/bakerPath"),"explicit installed-baker choice clears manual override");
+        panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(false);
+        };
         panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(false);
         view.setFocus();QTest::keyClick(&view,Qt::Key_H);check(!panel->layerVisible(),"H hides Navmesh");QTest::keyClick(&view,Qt::Key_H);check(panel->layerVisible(),"H shows Navmesh");
         QKeyEvent russianH(QEvent::KeyPress,0x0420,Qt::NoModifier,0x23,0x48,0,QStringLiteral("р"));QApplication::sendEvent(&view,&russianH);check(!panel->layerVisible(),"physical H works with Russian layout");QApplication::sendEvent(&view,&russianH);check(panel->layerVisible(),"Russian physical H toggles back");
@@ -164,7 +191,7 @@ int runAssemblyCatalogCheck(){
         window.resize(1100,740);QTest::qWait(150);check(bounded()&&visible(profiles)&&visible(panel->findChild<QPushButton*>("navmeshBakeAll")),"smaller MainWindow keeps Navmesh actions inside scene");window.resize(1500,950);QTest::qWait(150);
         panel->setUnsavedChanges(true);check(!panel->startBake(false,root+"/bake-output")&&status->text().contains(QStringLiteral("сохраните")),"dirty disk inputs refused with visible reason");panel->setUnsavedChanges(false);
         panel->setBakerPath(qEnvironmentVariable("EI_NAV64_BAKER"));
-        check(panel->startBake(false,root+"/bake-output"),"real installed r14 baker launched with isolated output-root");
+        check(panel->startBake(false,root+"/bake-output"),"real installed r16 baker launched with isolated output-root");
         check(visible(panel->findChild<QPushButton*>("navmeshBakeCancel"))&&visible(panel->findChild<QProgressBar*>("navmeshBakeProgress")),"live progress and cancel visible inside AI panel");
         checkpoint("04-baking");
         check(until([&](){return !panel->busy();},300000),"real bake finished");
@@ -175,6 +202,12 @@ int runAssemblyCatalogCheck(){
         check(panel->layerVisible()&&QDir(root+"/bake-output/Maps/Nav64").entryList({"*.nav64"},QDir::Files).size()==8,"eight baked profiles and layer visible");
         write(evidence+"/real-baker.log",panel->bakeLog().toUtf8());
         checkpoint("05-baked-updated");
+        check(nav64BakerIdentity(qEnvironmentVariable("EI_NAV64_BAKER")).algorithm==10&&panel->bakeLog().contains("BAKE_BEGIN ")&&panel->bakeLog().contains("algorithm=10"),"baker algorithm10 learned solely from BAKE_BEGIN and persisted with executable SHA");
+        check(panel->findChild<QPushButton*>("navmeshBakerBrowse")->text().contains(QStringLiteral("алгоритм 10")),"baker caption updated after observed BAKE_BEGIN");
+        {CNavmeshPanel remembered;remembered.setBakerPath(qEnvironmentVariable("EI_NAV64_BAKER"));check(remembered.findChild<QPushButton*>("navmeshBakerBrowse")->text().contains(QStringLiteral("алгоритм 10")),"observed algorithm restored by a new panel");}
+        const auto changedExe=root+"/changed-baker.exe";check(QFile::copy(qEnvironmentVariable("EI_NAV64_BAKER"),changedExe),"private changed-executable fixture");{QFile f(changedExe);check(f.open(QIODevice::Append)&&f.write("changed",7)==7,"change only private executable bytes");}check(nav64BakerIdentity(changedExe).algorithm==0,"different executable SHA invalidates learned algorithm");
+        check(bytes(bodiesPath)==bodyBytes,"copied source body table remains byte-identical");
+        mismatchCheck();
         source->setCurrentIndex(0);view.m_aiGraphRegenerateButton->click();
         check(until([&](){return view.m_aiGraphRegeneratedFresh&&view.m_aiGraphBuildWatcher&&!view.m_aiGraphBuildWatcher->isRunning();},120000),"legacy regenerate on actual zone1");
         check(view.m_aiGraphLoadedDocument.compareNavigation(view.m_aiGraphRegeneratedDocument).comparable,"legacy graph comparison remains available");
