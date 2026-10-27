@@ -46,6 +46,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "navmesh_panel.h"
 #include <QHideEvent>
 #include <QShowEvent>
 #include "backup_manager.h"
@@ -4298,6 +4299,7 @@ void CView::syncAiGraphPreviewWidget()
 
 void CView::refreshAiGraphPreviewSource()
 {
+    syncNavmeshContext();
     m_canvasNavigationStale = m_pLand && m_pLand->isMprLoad()
         && canvasNavigationIsStale(m_pLand->filePath());
     cancelPendingAiGraphPreviewRegeneration();
@@ -6577,7 +6579,8 @@ void CView::drawTestOverlaysOpenGl()
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
         && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty() && m_leverApproachLines.isEmpty()
-        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()))
+        && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
+        && !(m_navmeshPanel && m_navmeshPanel->layerVisible()))
        || width() <= 0 || height() <= 0)
         return;
 
@@ -6740,7 +6743,9 @@ void CView::drawTestOverlaysOpenGl()
     }
     ei::gl::LineWidth(1.0f);
 
-    if(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
+    drawNavmeshOverlay(position);
+    if(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()
+       && !(m_navmeshPanel && m_navmeshPanel->layerVisible()))
     {
         if(m_aiGraphOverlayDirty)
             rebuildAiGraphOverlayGeometry();

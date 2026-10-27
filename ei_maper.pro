@@ -25,7 +25,13 @@ DEFINES += ENDURANCE_VERSION=\\\"$${ENDURANCE_VERSION}\\\"
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
-CONFIG += c++11
+CONFIG += c++14
+# C++14 is required by the unmodified Navigation/Types.h aggregates.
+NAV_VENDOR = $$PWD/third_party/eirebuild64-nav
+INCLUDEPATH += $$NAV_VENDOR $$NAV_VENDOR/external/recastnavigation/Detour/Include
+DEFINES += DT_POLYREF64
+SOURCES += $$files($$NAV_VENDOR/external/recastnavigation/Detour/Source/*.cpp)
+!system(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $$shell_quote($$PWD/tools/check_nav_vendor.ps1)): error(Nav vendor lock mismatch)
 
 INCLUDEPATH += \
     $$PWD/source \

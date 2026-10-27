@@ -2,3 +2,5 @@
 * text=auto
 assets/resources/terrain_atlas_presets.json text eol=lf
 patches/*.patch -whitespace
+# Preserve the pinned upstream blobs exactly, including their line endings.
+third_party/eirebuild64-nav/** -text

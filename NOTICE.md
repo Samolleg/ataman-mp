@@ -1,5 +1,13 @@
 # EI Mapper: Endurance Edition
 
+The rebuild-x64 branch includes unmodified Detour from RecastNavigation v1.6.0,
+Copyright (c) 2009 Mikko Mononen, under its zlib license
+(`licenses/Detour-zlib.txt` in the package; the original is in
+`third_party/eirebuild64-nav/external/recastnavigation/License.txt` in source).
+Navigation/Types.h and the format documentation are the owner's original
+EIRebuild64 code/documentation, transferred with permission dated 2026-10-27.
+The exact source pin and file digests are in the vendor source.lock.json.
+
 EI Mapper: Endurance Edition is an independently versioned derivative of
 [konstvest/ei_maper](https://github.com/konstvest/ei_maper), an Evil Islands map
 editor originally authored by konstvest and contributors.

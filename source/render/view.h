@@ -140,6 +140,9 @@ struct SWorldTerrainAtlasSource {
 class CLight;
 class QOpenGLFramebufferObject;
 class RenderQueueContext;
+class CNavmeshPanel;
+class QMainWindow;
+class QMenu;
 class CViewFrustum;
 class CPreviewTile;
 class CLandscape;
@@ -304,6 +307,8 @@ public:
     void setLandscapeInteractionSuspended(bool suspended);
     void closeLandscapeTools();
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
+    void createNavmeshDock(QMainWindow* window, QMenu* menu);
+    CNavmeshPanel* navmeshPanel() const { return m_navmeshPanel; }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);
@@ -663,6 +668,11 @@ private:
                                            const QMatrix4x4& cameraMatrix,
                                            bool cameraMoving);
     void drawTestOverlaysOpenGl();
+    void drawNavmeshOverlay(int position);
+    void syncNavmeshContext();
+    CNavmeshPanel* m_navmeshPanel{nullptr};
+    int m_navmeshDrawnTiles{0};
+    quint64 m_navmeshDrawnVertices{0};
     void rebuildOverlayMaterialSlotLabels();
     CNode* pickObject(QList<CNode*>& aNode, int x, int y);
     void applyParam(SParam& param);

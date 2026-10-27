@@ -182,7 +182,7 @@ else {
             $failures.Add("stale alpha changelist included: $($file.Name)")
         }
     }
-    elseif ($version -match '^[1-9][0-9]*$') {
+    elseif ($version -match '^[1-9][0-9]*(?:\+x64nav\.[1-9][0-9]*)?$') {
         $changelogs = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
             $_.Name -match '(?i)changelog|changelist|^ALPHA[0-9].*\.md$'
         })
@@ -191,7 +191,7 @@ else {
             $failures.Add('integer releases require exactly one root CHANGELOG.md')
         } else {
             $notes = Get-Content -LiteralPath $currentNotes -Raw -Encoding UTF8
-            $headings = [regex]::Matches($notes, '(?m)^#{1,2}\s+(?:Ataman\s+)?([0-9]+)(?=\s|$|[—–-])')
+            $headings = [regex]::Matches($notes, '(?m)^#{1,2}\s+(?:Ataman\s+)?([0-9]+(?:\+x64nav\.[1-9][0-9]*)?)(?=\s|$|[—–-])')
             if ($headings.Count -ne 1 -or $headings[0].Groups[1].Value -ne $version) {
                 $failures.Add("CHANGELOG.md must describe only current version $version")
             }
