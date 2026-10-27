@@ -1903,7 +1903,7 @@ MainWindow::MainWindow(QWidget* parent) :
             this, [this]() { scheduleViewportMinimapRefresh(); });
     connect(m_pView, &CView::aiGraphPersistenceRequested,
             this, &MainWindow::persistAiGraph);
-    m_pView->createNavmeshDock(this, m_ui->menuTools);
+    m_pView->createNavmeshMenu(m_ui->menuTools);
     connect(m_pView, &CView::mobStateChanged,
             this, [this]() { scheduleViewportMinimapRefresh(); });
     connect(m_pView, &CView::updateMainWindowTitle,

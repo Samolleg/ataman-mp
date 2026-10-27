@@ -14,16 +14,18 @@
 #include <QScrollArea>
 #include <QLayout>
 #include <QDir>
+#include <QComboBox>
 
-void CView::createNavmeshDock(QMainWindow* window,QMenu* menu) {
-    auto* dock=new QDockWidget(QStringLiteral("Navmesh — EIRebuild64"),window);dock->setObjectName("navmeshDock");
-    auto* scroll=new QScrollArea(dock);scroll->setWidgetResizable(true);
-    m_navmeshPanel=new CNavmeshPanel(scroll);scroll->setWidget(m_navmeshPanel);dock->setWidget(scroll);dock->setMinimumWidth(290);window->addDockWidget(Qt::RightDockWidgetArea,dock);dock->hide();
-    menu->addAction(dock->toggleViewAction());
-    if(m_aiGraphPreviewWidget){auto* button=new QToolButton(m_aiGraphPreviewWidget);button->setText(QStringLiteral("Navmesh…"));m_aiGraphPreviewWidget->layout()->addWidget(button);connect(button,&QToolButton::clicked,dock,[dock](){dock->show();dock->raise();});}
-    connect(m_navmeshPanel,&CNavmeshPanel::geometryChanged,this,[this](){update();});
-    connect(m_navmeshPanel,&CNavmeshPanel::oldGraphRequested,this,[this](){if(m_aiGraphPreviewToggle)m_aiGraphPreviewToggle->setChecked(true);});
-    auto* timer=new QTimer(m_navmeshPanel);timer->setInterval(1000);connect(timer,&QTimer::timeout,this,[this](){syncNavmeshContext();});timer->start();syncNavmeshContext();
+void CView::createNavmeshMenu(QMenu* menu) {
+    // MainWindow creates menus before attach() creates the viewport controls.
+    // Resolve the panel when invoked; never conditionally append a late button.
+    auto* action=menu->addAction(QStringLiteral("Навигация ИИ — Navmesh"));
+    connect(action,&QAction::triggered,this,[this](){
+        if(!m_navigationSource)return;
+        m_navigationSource->setCurrentIndex(1);
+        if(m_navigationScroll->isHidden())m_aiGraphPreviewCollapse->click();
+        m_aiGraphPreviewWidget->show();m_aiGraphPreviewWidget->raise();
+    });
 }
 void CView::syncNavmeshContext(){
     if(!m_navmeshPanel)return;const bool loaded=m_pLand&&m_pLand->isMprLoad();
@@ -45,7 +47,7 @@ void CView::drawNavmeshOverlay(int position){
     ei::gl::Disable(GL_DEPTH_TEST);
     auto draw=[&](const QVector<QVector3D>& v,const QVector4D& color,GLenum primitive){if(v.isEmpty())return;m_navmeshDrawnVertices+=quint64(v.size());m_program.setUniformValue(ei::uniformLocation(&m_program,"customColor"),color);m_program.setAttributeArray(position,v.constData());ei::gl::DrawArrays(primitive,0,v.size());};
     const bool filled=m_navmeshPanel->fillVisible();
-    for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;if(filled)for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,filled?QVector4D(.12f,.16f,.12f,.65f):QVector4D(.22f,.95f,.45f,.8f),GL_LINES);draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
+    for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;if(filled)for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,filled?QVector4D(.12f,.16f,.12f,.65f):QVector4D(.22f,.95f,.45f,.8f),GL_LINES);if(m_navmeshPanel->narrowVisible())draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
     ei::gl::LineWidth(2);draw(doc.tiles,{.15f,.9f,1.f,.9f},GL_LINES);
-    glPointSize(4);draw(doc.islands,{1.f,.1f,.15f,1.f},GL_POINTS);glPointSize(1);ei::gl::LineWidth(1);ei::gl::Enable(GL_DEPTH_TEST);
+    glPointSize(4);if(m_navmeshPanel->islandsVisible())draw(doc.islands,{1.f,.1f,.15f,1.f},GL_POINTS);glPointSize(1);ei::gl::LineWidth(1);ei::gl::Enable(GL_DEPTH_TEST);
 }

@@ -3992,9 +3992,18 @@ void CView::positionEnvironmentPreviewWidget()
         m_environmentPreviewWidget->move(12, y);
         y += m_environmentPreviewWidget->height() + 8;
     }
-    if(m_aiGraphPreviewWidget)
+    if(m_aiGraphPreviewWidget && m_navigationScroll)
+    {
+        m_aiGraphPreviewWidget->setFixedWidth(qMin(520, qMax(160, width() - 24)));
+        m_navigationContent->layout()->activate();
+        const int contentHeight = m_navigationContent->layout()->heightForWidth(
+            m_aiGraphPreviewWidget->width() - 32);
+        const int wanted = qMax(m_navigationContent->sizeHint().height(), contentHeight);
+        m_navigationScroll->setFixedHeight(qMin(wanted + 2, qMax(30, height() - 78)));
+        m_aiGraphPreviewWidget->adjustSize();
         m_aiGraphPreviewWidget->move(12,
             qMax(12, height() - m_aiGraphPreviewWidget->height() - 12));
+    }
 }
 
 void CView::initAiGraphPreviewWidget()
@@ -4007,19 +4016,21 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphPreviewWidget->setFrameShape(QFrame::StyledPanel);
     m_aiGraphPreviewWidget->setStyleSheet(
         "QFrame#aiGraphPreviewWidget { background-color: rgb(25,25,25); color: white; border: 1px solid #777; }"
-        "QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
+        "QWidget#navigationContent, QWidget#navmeshPanel, QWidget#aiGraphPreviewBody, QLabel { background-color: rgb(25,25,25); color: white; }"
         "QToolButton { color: white; }");
     QVBoxLayout* layout = new QVBoxLayout(m_aiGraphPreviewWidget);
     layout->setContentsMargins(7, 5, 7, 6);
     layout->setSpacing(4);
 
     QHBoxLayout* title = new QHBoxLayout;
-    QLabel* titleLabel = new QLabel(tr("AI navigation graph"), m_aiGraphPreviewWidget);
+    QLabel* titleLabel = new QLabel(QStringLiteral("Навигация ИИ"), m_aiGraphPreviewWidget);
     m_aiGraphPreviewToggle = new QToolButton(m_aiGraphPreviewWidget);
     m_aiGraphPreviewToggle->setCheckable(true);
-    m_aiGraphPreviewToggle->setText(tr("Show (N)"));
+    m_aiGraphPreviewToggle->setObjectName("navigationShow");
+    m_aiGraphPreviewToggle->setText(QStringLiteral("Показать (H)"));
     m_aiGraphPreviewCollapse = new QToolButton(m_aiGraphPreviewWidget);
     m_aiGraphPreviewCollapse->setText(QString::fromUtf8("\xE2\x88\x92"));
+    m_aiGraphPreviewCollapse->setObjectName("navigationCollapse");
     m_aiGraphPreviewCollapse->setToolTip(tr("Minimize AI navigation graph"));
     title->addWidget(titleLabel);
     title->addStretch(1);
@@ -4027,7 +4038,20 @@ void CView::initAiGraphPreviewWidget()
     title->addWidget(m_aiGraphPreviewCollapse);
     layout->addLayout(title);
 
-    m_aiGraphPreviewBody = new QWidget(m_aiGraphPreviewWidget);
+    m_navigationScroll = new QScrollArea(m_aiGraphPreviewWidget);
+    m_navigationScroll->setFrameShape(QFrame::NoFrame);
+    m_navigationScroll->setWidgetResizable(true);
+    m_navigationScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_navigationContent = new QWidget;
+    m_navigationContent->setObjectName("navigationContent");
+    auto* navigation = new QVBoxLayout(m_navigationContent);
+    navigation->setContentsMargins(0,0,0,0);
+    navigation->setSpacing(4);
+    m_navigationSource = new QComboBox(m_navigationContent);
+    m_navigationSource->setObjectName("navigationSource");
+    m_navigationSource->addItems({QStringLiteral("Старый AI-граф"), QStringLiteral("Navmesh")});
+    navigation->addWidget(m_navigationSource);
+    m_aiGraphPreviewBody = new QWidget(m_navigationContent);
     m_aiGraphPreviewBody->setObjectName(QStringLiteral("aiGraphPreviewBody"));
     QVBoxLayout* body = new QVBoxLayout(m_aiGraphPreviewBody);
     body->setContentsMargins(0, 0, 0, 0);
@@ -4035,7 +4059,6 @@ void CView::initAiGraphPreviewWidget()
 
     m_aiGraphLayerLabel = new QLabel(m_aiGraphPreviewBody);
     m_aiGraphLayerLabel->setWordWrap(true);
-    m_aiGraphLayerLabel->setMinimumWidth(480);
     body->addWidget(m_aiGraphLayerLabel);
     m_aiGraphLayerSlider = new QSlider(Qt::Horizontal, m_aiGraphPreviewBody);
     m_aiGraphLayerSlider->setRange(0, CAiGraphDocument::LayerCount - 1);
@@ -4047,7 +4070,6 @@ void CView::initAiGraphPreviewWidget()
     m_aiGraphSourceLabel = new QLabel(tr("No graph source loaded"), m_aiGraphPreviewBody);
     m_aiGraphSourceLabel->setWordWrap(true);
     m_aiGraphSourceLabel->setTextFormat(Qt::PlainText);
-    m_aiGraphSourceLabel->setMinimumWidth(480);
     body->addWidget(m_aiGraphSourceLabel);
 
     QGridLayout* actions = new QGridLayout;
@@ -4084,24 +4106,50 @@ void CView::initAiGraphPreviewWidget()
     actions->addWidget(m_aiGraphCompareButton, 1, 0);
     actions->addWidget(m_aiGraphPersistButton, 1, 1);
     body->addLayout(actions);
-    layout->addWidget(m_aiGraphPreviewBody);
+    navigation->addWidget(m_aiGraphPreviewBody);
+    m_navmeshPanel = new CNavmeshPanel(m_navigationContent);
+    navigation->addWidget(m_navmeshPanel);
+    m_navmeshPanel->hide();
+    navigation->addStretch();
+    m_navigationScroll->setWidget(m_navigationContent);
+    layout->addWidget(m_navigationScroll);
+    connect(m_navmeshPanel, &CNavmeshPanel::geometryChanged, this, [this]() {
+        positionEnvironmentPreviewWidget(); update();
+    });
+    connect(m_navmeshPanel, &CNavmeshPanel::contentChanged, this, [this]() {
+        positionEnvironmentPreviewWidget();
+    });
+    auto* navTimer = new QTimer(m_navmeshPanel);
+    navTimer->setInterval(1000);
+    connect(navTimer, &QTimer::timeout, this, &CView::syncNavmeshContext);
+    navTimer->start();
+    connect(m_navigationSource, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int source) {
+        m_aiGraphPreviewBody->setVisible(source == 0);
+        m_navmeshPanel->setVisible(source == 1);
+        const bool shown = m_aiGraphPreviewToggle->isChecked();
+        m_aiGraphPreviewVisible = source == 0 && shown && m_aiGraphDocument.isValid();
+        m_navmeshPanel->setLayerVisible(source == 1 && shown);
+        syncNavmeshContext(); syncAiGraphPreviewWidget(); update();
+    });
 
     connect(m_aiGraphPreviewToggle, &QToolButton::toggled, this, [this](bool visible)
     {
-        if(visible && !m_aiGraphDocument.isValid())
+        const bool navmesh = m_navigationSource->currentIndex() == 1;
+        if(visible && !navmesh && !m_aiGraphDocument.isValid())
         {
             m_aiGraphPreviewToggle->setChecked(false);
             emit updateMsg(tr("No valid AI graph is available for the loaded map."));
             return;
         }
-        m_aiGraphPreviewVisible = visible;
-        m_aiGraphPreviewToggle->setText(visible ? tr("Hide (N)") : tr("Show (N)"));
+        m_aiGraphPreviewVisible = visible && !navmesh;
+        m_navmeshPanel->setLayerVisible(visible && navmesh);
+        m_aiGraphPreviewToggle->setText(visible ? QStringLiteral("Скрыть (H)") : QStringLiteral("Показать (H)"));
         update();
     });
     connect(m_aiGraphPreviewCollapse, &QToolButton::clicked, this, [this]()
     {
-        const bool show = !m_aiGraphPreviewBody->isVisible();
-        m_aiGraphPreviewBody->setVisible(show);
+        const bool show = m_navigationScroll->isHidden();
+        m_navigationScroll->setVisible(show);
         m_aiGraphPreviewCollapse->setText(show
             ? QString::fromUtf8("\xE2\x88\x92") : "+");
         m_aiGraphPreviewCollapse->setToolTip(show
@@ -4207,11 +4255,11 @@ void CView::initAiGraphPreviewWidget()
         syncAiGraphPreviewWidget();
         update();
     });
-    QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_N), this);
+    QShortcut* shortcut = new QShortcut(QKeySequence(Qt::Key_H), this);
     shortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(shortcut, &QShortcut::activated, this, [this]()
     {
-        if(!m_aiGraphDocument.isValid())
+        if(m_navigationSource->currentIndex() == 0 && !m_aiGraphDocument.isValid())
         {
             emit updateMsg(tr("No valid AI graph is available for the loaded map."));
             return;
@@ -4254,8 +4302,9 @@ void CView::syncAiGraphPreviewWidget()
        && !m_aiGraphRegenerationPending)
         m_aiGraphSourceLabel->setText(m_aiGraphSourceLabel->text() + "\n"
             + tr("Graph is out of date. Click Regenerate preview."));
-    m_aiGraphPreviewToggle->setToolTip(available
-        ? tr("Show or hide the current AI graph layer in the viewport (N).")
+    m_aiGraphPreviewToggle->setToolTip(m_navigationSource->currentIndex() == 1
+        ? QStringLiteral("Показать или скрыть выбранный профиль Navmesh (H).") : available
+        ? QStringLiteral("Показать или скрыть текущий слой старого AI-графа (H).")
         : tr("Load a MOB with an embedded graph or a matching external .grp file."));
     if(m_aiGraphRegenerateButton)
     {
@@ -4349,7 +4398,7 @@ void CView::refreshAiGraphPreviewSource()
             m_aiGraphLoadedSource = m_aiGraphSource;
         }
     }
-    if(!m_aiGraphDocument.isValid())
+    if(!m_aiGraphDocument.isValid() && m_navigationSource->currentIndex() == 0)
     {
         m_aiGraphPreviewVisible = false;
         if(m_aiGraphPreviewToggle)

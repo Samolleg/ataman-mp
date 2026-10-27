@@ -70,6 +70,7 @@ class QLineEdit;
 class QFrame;
 class QLabel;
 class QComboBox;
+class QScrollArea;
 class QSlider;
 class QToolButton;
 class QCheckBox;
@@ -307,7 +308,7 @@ public:
     void setLandscapeInteractionSuspended(bool suspended);
     void closeLandscapeTools();
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
-    void createNavmeshDock(QMainWindow* window, QMenu* menu);
+    void createNavmeshMenu(QMenu* menu);
     CNavmeshPanel* navmeshPanel() const { return m_navmeshPanel; }
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
@@ -1448,6 +1449,9 @@ private:
     QSlider* m_environmentPreviewTime{nullptr};
     QFrame* m_aiGraphPreviewWidget{nullptr};
     QWidget* m_aiGraphPreviewBody{nullptr};
+    QComboBox* m_navigationSource{nullptr};
+    QWidget* m_navigationContent{nullptr};
+    QScrollArea* m_navigationScroll{nullptr};
     QToolButton* m_aiGraphPreviewToggle{nullptr};
     QToolButton* m_aiGraphPreviewCollapse{nullptr};
     QToolButton* m_aiGraphRegenerateButton{nullptr};
