@@ -122,6 +122,8 @@ int runAssemblyCatalogCheck(){
         panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(true);
         check(panel->legendHtml().contains(QStringLiteral("Центры островов"))&&panel->legendHtml().contains(QStringLiteral("Границы тайлов")),"legend describes actual red island centres and storage tiles");
         checkpoint("03-navmesh-human");
+        check(view.rect().contains(view.m_navmeshLegendRect),"legend lies inside production scene");
+        for(auto* child:view.findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))if(child->isVisible())check(!view.m_navmeshLegendRect.intersects(child->geometry()),"legend unobscured by overlay: "+child->objectName());
         view.makeCurrent();view.paintGL();const auto legendOn=view.grabFrameBuffer();legend->setChecked(false);view.paintGL();const auto legendOff=view.grabFrameBuffer();check(legendOn!=legendOff&&!panel->legendVisible(),"legend changes real offscreen scene pixels and toggles off");legend->setChecked(true);
         auto* mode=panel->findChild<QComboBox*>("navmeshFill");
         check(mode->count()==3&&mode->itemText(2)==QStringLiteral("Потери проходимости"),"losses mode available beside Fill and Contours");
@@ -151,16 +153,18 @@ int runAssemblyCatalogCheck(){
         check(mismatch->isVisible()&&mismatch->text().contains("99"),"unsupported algorithm still reports actual baker mismatch");
         write(humanPath,humanBytes);panel->reload();check(until([&](){return panel->document().valid&&panel->document().header.algorithm==9;}),"restore private original algorithm9");
         panel->setBakerPath(root+"/work/handoffs/old.exe");check(panel->findChild<QPushButton*>("navmeshUseInstalled")->isVisible(),"manual handoff path offers installed baker without overwrite");
-        panel->findChild<QPushButton*>("navmeshUseInstalled")->click();check(browse->text().contains(QStringLiteral("установленный"))&&browse->text().contains("r14")&&!QSettings().contains("nav64/bakerPath"),"explicit installed-baker choice clears manual override");
+        panel->findChild<QPushButton*>("navmeshUseInstalled")->click();check(browse->text().contains(QStringLiteral("Установленный"))&&browse->text().contains("r14")&&!QSettings().contains("nav64/bakerPath"),"explicit installed-baker choice clears manual override");
+        panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(false);
         view.setFocus();QTest::keyClick(&view,Qt::Key_H);check(!panel->layerVisible(),"H hides Navmesh");QTest::keyClick(&view,Qt::Key_H);check(panel->layerVisible(),"H shows Navmesh");
         QKeyEvent russianH(QEvent::KeyPress,0x0420,Qt::NoModifier,0x23,0x48,0,QStringLiteral("р"));QApplication::sendEvent(&view,&russianH);check(!panel->layerVisible(),"physical H works with Russian layout");QApplication::sendEvent(&view,&russianH);check(panel->layerVisible(),"Russian physical H toggles back");
         view.makeCurrent();view.paintGL();const auto filled=view.grabFrameBuffer();fill->setCurrentIndex(1);view.makeCurrent();view.paintGL();check(!panel->fillVisible()&&filled!=view.grabFrameBuffer(),"contours change production framebuffer");fill->setCurrentIndex(0);
         for(const auto& name:{"navmeshNarrow","navmeshIslands"}){auto* box=panel->findChild<QCheckBox*>(name);box->click();check(box->isChecked(),QString("overlay option responds: ")+name);box->click();}
-        auto* log=panel->findChild<QToolButton*>("navmeshLogToggle");log->click();QTest::qWait(50);check(visible(panel->findChild<QPlainTextEdit*>("navmeshBakeLog"))&&bounded(),"expanded log contained in real scene");log->click();
+        auto* log=panel->findChild<QToolButton*>("navmeshLogToggle");log->click();QTest::qWait(50);auto* logBody=panel->findChild<QPlainTextEdit*>("navmeshBakeLog");out<<"LOG_LAYOUT outer="<<outer->width()<<"x"<<outer->height()<<" log="<<logBody->mapTo(outer,QPoint()).x()<<","<<logBody->mapTo(outer,QPoint()).y()<<" "<<logBody->width()<<"x"<<logBody->height()<<" visible="<<logBody->isVisible()<<"\n";out.flush();check(visible(logBody)&&bounded(),"expanded log contained in real scene");log->click();
         view.m_aiGraphPreviewCollapse->click();check(view.m_navigationScroll->isHidden()&&bounded(),"minus collapses both source modes");view.m_aiGraphPreviewCollapse->click();check(visible(profiles)&&bounded(),"expand restores Navmesh controls");
         window.resize(1100,740);QTest::qWait(150);check(bounded()&&visible(profiles)&&visible(panel->findChild<QPushButton*>("navmeshBakeAll")),"smaller MainWindow keeps Navmesh actions inside scene");window.resize(1500,950);QTest::qWait(150);
         panel->setUnsavedChanges(true);check(!panel->startBake(false,root+"/bake-output")&&status->text().contains(QStringLiteral("сохраните")),"dirty disk inputs refused with visible reason");panel->setUnsavedChanges(false);
-        check(panel->startBake(false,root+"/bake-output"),"real r14 baker launched with isolated output-root");
+        panel->setBakerPath(qEnvironmentVariable("EI_NAV64_BAKER"));
+        check(panel->startBake(false,root+"/bake-output"),"real installed r14 baker launched with isolated output-root");
         check(visible(panel->findChild<QPushButton*>("navmeshBakeCancel"))&&visible(panel->findChild<QProgressBar*>("navmeshBakeProgress")),"live progress and cancel visible inside AI panel");
         checkpoint("04-baking");
         check(until([&](){return !panel->busy();},300000),"real bake finished");
@@ -179,6 +183,12 @@ int runAssemblyCatalogCheck(){
         SAiGraphPreviewBuildInput flat;flat.graphWidth=4;flat.graphHeight=4;flat.terrainHeights.fill(0,1024);flat.waterDepths.fill(0,1024);flat.terrainTypes.fill(0,1024);
         const auto full=CAiGraphPreviewBuilder::build(flat);check(full.valid,"synthetic full legacy build");
         for(int i=0;i<8;++i){const auto fast=CAiGraphPreviewBuilder::passability(flat,i);check(fast.valid&&fast.layerPassability[i]==full.layerPassability[i],QString("mask-only equals full legacy classifier layer %1").arg(i));}
+        SNav64Document plane;plane.valid=true;plane.triangles={{{0,0,.12f},{16,0,.12f},{16,16,.12f},15},{{0,0,.12f},{16,16,.12f},{0,16,.12f},15}};
+        auto cancel=std::make_shared<std::atomic_bool>(false);const auto coverage=compareNav64(plane,flat,3,cancel);
+        int openCount=0;for(auto q:full.layerPassability[3])openCount+=q!=0;
+        check(coverage.valid&&coverage.lost==0&&coverage.gained==1024-openCount,"triangle raster exact flat-floor coverage, justified zero losses");
+        for(auto& t:plane.triangles){t.a.setZ(2.12f);t.b.setZ(2.12f);t.c.setZ(2.12f);}const auto high=compareNav64(plane,flat,3,cancel);
+        check(high.valid&&high.lost==openCount&&high.gained==0,"different floor never snaps across height gap");cancel->store(true);check(!compareNav64(plane,flat,3,cancel).valid,"cancelled comparison not published");
         out<<"RESULT "<<passes<<" PASS 0 FAIL\n";out.flush();return 0;
     }catch(const QString& e){out<<"ERROR "<<e<<"\nRESULT "<<passes<<" PASS 1 FAIL\n";out.flush();return 1;}
 }

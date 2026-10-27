@@ -1,4 +1,5 @@
 #include "nav64_document.h"
+#include "ai_graph_preview_builder.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -109,7 +110,15 @@ QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levi
 QVector<quint32> nav64SupportedContainers(){return {3};}
 QVector<quint32> nav64SupportedAlgorithms(){return {8,Navigation::AlgorithmVersion};}
 QVector4D nav64AreaColor(int area){const auto c=QColor::fromHsv((area*43+100)%360,160,235);return {float(c.redF()),float(c.greenF()),float(c.blueF()),.33f};}
-QString nav64AreaName(int area){return QStringLiteral("Область поверхности %1 (area %1)").arg(area);}
+QString nav64AreaName(int area){
+    // Producer aiMap assigns the reduced movement class (dwTerrains nibble),
+    // not the original grass/sand/road material enum. The same class may come
+    // from multiple materials. Use the shared legacy route-cost table.
+    const int cost=CAiGraphPreviewBuilder::areaRouteCost(area);
+    if(area==14)return QStringLiteral("Обычная поверхность (area 14)");
+    if(cost>=0)return QStringLiteral("Затраты пути ×%1 (area %2)").arg(cost/1024.,0,'f',2).arg(area);
+    return QStringLiteral("Область поверхности %1").arg(area);
+}
 SNav64BakerIdentity nav64BakerIdentity(const QString& path){
     QFile f(path);if(!f.open(QIODevice::ReadOnly))return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);if(!hash.addData(&f))return {};

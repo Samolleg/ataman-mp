@@ -676,6 +676,7 @@ private:
     CNavmeshPanel* m_navmeshPanel{nullptr};
     QString m_navmeshLegendHtml;
     QSize m_navmeshLegendSize;
+    QRect m_navmeshLegendRect;
     GLuint m_navmeshLegendTexture{0};
     int m_navmeshDrawnTiles{0};
     quint64 m_navmeshDrawnVertices{0};

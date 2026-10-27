@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QTextDocument>
 #include <QtMath>
+#include <algorithm>
 
 void CView::createNavmeshMenu(QMenu* menu) {
     // MainWindow creates menus before attach() creates the viewport controls.
@@ -81,7 +82,15 @@ void CView::drawNavmeshLegend(){
         m_navmeshLegendTexture=bindTexture(image,GL_TEXTURE_2D,GL_RGBA);m_navmeshLegendHtml=html;
     }
     const int position=ei::attributeLocation(&m_program,"a_position"),texture=ei::attributeLocation(&m_program,"a_texture");if(position<0||texture<0)return;
-    const float right=1-24.f/width(),left=right-2.f*m_navmeshLegendSize.width()/width(),top=1-24.f/height(),bottom=top-2.f*m_navmeshLegendSize.height()/height();
+    // Place beside (not under) native overlay widgets such as the minimap.
+    QList<QRect> occupied;QList<int> candidates{width()-m_navmeshLegendSize.width()-12};
+    for(auto* widget:findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))if(widget->isVisible()){
+        occupied<<widget->geometry();candidates<<widget->geometry().left()-m_navmeshLegendSize.width()-12;
+    }
+    std::sort(candidates.begin(),candidates.end(),std::greater<int>());
+    m_navmeshLegendRect=QRect(QPoint(12,12),m_navmeshLegendSize);
+    for(int x:candidates){QRect box(QPoint(x,12),m_navmeshLegendSize);if(!rect().contains(box))continue;bool blocked=false;for(const auto& other:occupied)blocked|=box.intersects(other);if(!blocked){m_navmeshLegendRect=box;break;}}
+    const float right=2.f*(m_navmeshLegendRect.right()+1)/width()-1,left=2.f*m_navmeshLegendRect.left()/width()-1,top=1-2.f*m_navmeshLegendRect.top()/height(),bottom=1-2.f*(m_navmeshLegendRect.bottom()+1)/height();
     const QVector<QVector3D> vertices={{left,bottom,0},{right,bottom,0},{right,top,0},{left,top,0}};
     const QVector<QVector2D> uv={{0,0},{1,0},{1,1},{0,1}};
     QMatrix4x4 identity;m_program.setUniformValue(ei::uniformLocation(&m_program,"u_viewMmatrix"),identity);m_program.setUniformValue(ei::uniformLocation(&m_program,"u_projMmatrix"),identity);m_program.setUniformValue(ei::uniformLocation(&m_program,"customColor"),QVector4D(0,0,0,0));m_program.setUniformValue(ei::uniformLocation(&m_program,"qt_Texture0"),0);

@@ -753,6 +753,7 @@ QVector<float> CAiGraphPreviewBuilder::navigationSurfaceHeights(
     return result.valid ? result.navigationSurfaceHeights : QVector<float>();
 }
 
+int CAiGraphPreviewBuilder::areaRouteCost(int area){return area>=0&&area<16?TerrainRouteCosts[area]:-1;}
 SAiGraphPreviewBuildResult CAiGraphPreviewBuilder::passability(const SAiGraphPreviewBuildInput& input,int layer)
 {
     if(layer<0||layer>=LayerCount){SAiGraphPreviewBuildResult r;r.error=QStringLiteral("Неверный слой старого графа");return r;}

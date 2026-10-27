@@ -40,7 +40,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_cancel=new QPushButton(QStringLiteral("Отмена"),this);m_cancel->setObjectName("navmeshBakeCancel");progressRow->addWidget(m_cancel);layout->addLayout(progressRow);
     m_logToggle=new QToolButton(this);m_logToggle->setObjectName("navmeshLogToggle");m_logToggle->setText(QStringLiteral("Журнал ▸"));m_logToggle->setCheckable(true);layout->addWidget(m_logToggle);
     m_log=new QPlainTextEdit(this);m_log->setObjectName("navmeshBakeLog");m_log->setReadOnly(true);m_log->setMaximumBlockCount(2000);m_log->setFixedHeight(110);m_log->hide();layout->addWidget(m_log);
-    connect(m_logToggle,&QToolButton::toggled,this,[this](bool open){m_log->setVisible(open);m_logToggle->setText(open?QStringLiteral("Журнал ▾"):QStringLiteral("Журнал ▸"));emit contentChanged();});
+    connect(m_logToggle,&QToolButton::toggled,this,[this](bool open){m_log->setVisible(open);m_logToggle->setText(open?QStringLiteral("Журнал ▾"):QStringLiteral("Журнал ▸"));emit contentChanged();if(open)QTimer::singleShot(0,this,[this](){for(QWidget* p=parentWidget();p;p=p->parentWidget())if(auto* scroll=qobject_cast<QScrollArea*>(p)){scroll->ensureWidgetVisible(m_log);break;}});});
     m_process=new QProcess(this);m_loading=new QFutureWatcher<SNav64Document>(this);
     m_comparing=new QFutureWatcher<SNav64Comparison>(this);
     connect(m_comparing,&QFutureWatcher<SNav64Comparison>::finished,this,[this](){
@@ -101,7 +101,7 @@ void CNavmeshPanel::controls(){
     const QString installed=QDir(m_gameRoot).filePath("Engine64/EIRebuild64NavBake.exe");
     const bool isInstalled=QFileInfo(bakerPath()).absoluteFilePath().compare(QFileInfo(installed).absoluteFilePath(),Qt::CaseInsensitive)==0;
     const QString identity=m_bakerIdentity.algorithm?QStringLiteral(" (%1, алгоритм %2)").arg(m_bakerIdentity.release).arg(m_bakerIdentity.algorithm):QStringLiteral(" (алгоритм неизвестен)");
-    m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("Запекатель: %1%2 · Изменить…").arg(isInstalled?QStringLiteral("установленный"):QStringLiteral("выбранный"),identity):QStringLiteral("Запекатель не найден — Указать…"));
+    m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("%1%2 · Изменить…").arg(isInstalled?QStringLiteral("Установленный"):QStringLiteral("Выбранный"),identity):QStringLiteral("Запекатель не найден — Указать…"));
     m_useInstalled->setVisible(!isInstalled&&QFileInfo(installed).isFile());m_useInstalled->setEnabled(!busy());
     m_compareLayer->setItemText(0,QStringLiteral("Сравнивается с: %1 (авто)").arg(nav64LegacyLayerLabel(nav64LegacyLayer(m_profile->currentData().toString()))));
     m_compareLayer->setVisible(lossesVisible());m_compareStatus->setVisible(lossesVisible());m_regions->setVisible(lossesVisible()&&m_comparison.valid);

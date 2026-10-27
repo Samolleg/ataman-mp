@@ -94,6 +94,7 @@ public:
     static SAiGraphPreviewBuildResult build(const SAiGraphPreviewBuildInput& input);
     // Same legacy 0.5 m classifier, without rebuilding or modifying graph links.
     static SAiGraphPreviewBuildResult passability(const SAiGraphPreviewBuildInput& input, int layer);
+    static int areaRouteCost(int area);
     // Restore display Z for a loaded graph without regenerating its routes.
     static QVector<float> navigationSurfaceHeights(
         const SAiGraphPreviewBuildInput& input, QString* error = nullptr);
