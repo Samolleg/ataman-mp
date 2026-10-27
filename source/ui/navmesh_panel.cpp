@@ -27,12 +27,14 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_islands=new QCheckBox(QStringLiteral("Острова"),this);m_islands->setObjectName("navmeshIslands");diagnosticsRow->addWidget(m_islands);
     m_legend=new QCheckBox(QStringLiteral("Легенда"),this);m_legend->setObjectName("navmeshLegend");m_legend->setChecked(QSettings().value("nav64/legend",true).toBool());diagnosticsRow->addWidget(m_legend);diagnosticsRow->addStretch();layout->addLayout(diagnosticsRow);
     m_compareLayer=new QComboBox(this);m_compareLayer->setObjectName("navmeshCompareLayer");m_compareLayer->addItem(QString(),-1);for(int i=0;i<8;++i)m_compareLayer->addItem(nav64LegacyLayerLabel(i),i);layout->addWidget(m_compareLayer);
+    m_compareLayer->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     m_compareStatus=new QLabel(this);m_compareStatus->setObjectName("navmeshCompareStatus");m_compareStatus->setWordWrap(true);layout->addWidget(m_compareStatus);
     m_regions=new QListWidget(this);m_regions->setObjectName("navmeshRegions");m_regions->setMaximumHeight(100);m_regions->setToolTip(QStringLiteral("Нажмите область для перехода и подсветки; также можно нажать заливку в сцене."));layout->addWidget(m_regions);
     m_exportLosses=new QPushButton(QStringLiteral("Экспорт списка…"),this);m_exportLosses->setObjectName("navmeshExportLosses");layout->addWidget(m_exportLosses);
     connect(m_exportLosses,&QPushButton::clicked,this,[this](){const auto path=QFileDialog::getSaveFileName(this,QStringLiteral("Экспорт потерь проходимости"),QFileInfo(m_mpr).completeBaseName()+"-"+m_profile->currentData().toString()+"-losses.csv",QStringLiteral("CSV (*.csv)"));if(path.isEmpty())return;QString error;if(!exportLosses(path,&error))m_log->appendPlainText(QStringLiteral("Экспорт: ")+error);else m_log->appendPlainText(QStringLiteral("Экспорт списка: ")+path);});
     m_bakerPath=QSettings().value("nav64/bakerPath").toString();
     m_browse=new QPushButton(this);m_browse->setObjectName("navmeshBakerBrowse");layout->addWidget(m_browse);
+    m_browse->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
     m_useInstalled=new QPushButton(QStringLiteral("Использовать установленный запекатель"),this);m_useInstalled->setObjectName("navmeshUseInstalled");layout->addWidget(m_useInstalled);
     connect(m_useInstalled,&QPushButton::clicked,this,[this](){m_bakerPath.clear();QSettings().remove("nav64/bakerPath");controls();});
     auto* bakeRow=new QHBoxLayout;
@@ -107,6 +109,7 @@ void CNavmeshPanel::controls(){
     m_browse->setText(QFileInfo(bakerPath()).isFile()?QStringLiteral("%1%2 · Изменить…").arg(isInstalled?QStringLiteral("Установленный"):QStringLiteral("Выбранный"),identity):QStringLiteral("Запекатель не найден — Указать…"));
     m_useInstalled->setVisible(!isInstalled&&QFileInfo(installed).isFile());m_useInstalled->setEnabled(!busy());
     m_compareLayer->setItemText(0,QStringLiteral("Сравнивается с: %1 (авто)").arg(nav64LegacyLayerLabel(nav64LegacyLayer(m_profile->currentData().toString()))));
+    m_compareLayer->setToolTip(m_compareLayer->currentText());
     m_compareLayer->setVisible(lossesVisible());m_compareStatus->setVisible(lossesVisible());m_regions->setVisible(lossesVisible()&&m_comparison.valid);
     m_exportLosses->setVisible(lossesVisible());m_exportLosses->setEnabled(m_comparison.valid&&!m_comparing->isRunning());
     m_narrow->setEnabled(!lossesVisible());m_islands->setEnabled(!lossesVisible());algorithmStatus();
