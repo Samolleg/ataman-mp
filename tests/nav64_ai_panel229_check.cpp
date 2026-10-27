@@ -10,12 +10,24 @@
 #include "resource_setup_dialog.h"
 
 namespace {
+struct OffscreenWindows : QObject {
+    bool eventFilter(QObject* object,QEvent* event) override {
+        if(event->type()==QEvent::Polish || event->type()==QEvent::Show)
+            if(auto* widget=qobject_cast<QWidget*>(object))if(widget->isWindow()) {
+                widget->setAttribute(Qt::WA_DontShowOnScreen);
+                widget->setAttribute(Qt::WA_ShowWithoutActivating);
+            }
+        return false;
+    }
+};
 bool until(const std::function<bool()>& done,int ms=60000){QElapsedTimer t;t.start();while(!done()&&t.elapsed()<ms)QTest::qWait(10);return done();}
 QByteArray bytes(const QString& path){QFile f(path);return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray();}
 void write(const QString& path,const QByteArray& data){QFile f(path);if(!f.open(QIODevice::WriteOnly)||f.write(data)!=data.size())throw QString("write failed: ")+path;}
 }
 // Links the unmodified production MainWindow/CView/renderer objects. The view
-// stays inside MainWindow throughout. Checkpoints allow native-window captures.
+// stays inside MainWindow throughout. All top-levels are prevented from being
+// mapped to the owner's desktop. Captures read only this process's Qt widgets
+// and OpenGL back buffer, never the screen or another process.
 int runAssemblyCatalogCheck(){
     QTextStream out(stdout);out.setCodec("UTF-8");int passes=0;
     auto check=[&](bool ok,const QString& what){out<<(ok?"PASS ":"FAIL ")<<what<<"\n";out.flush();if(!ok)throw what;++passes;};
@@ -26,6 +38,7 @@ int runAssemblyCatalogCheck(){
         const QString game=root+"/game",maps=game+"/MODS/Dejavu/Maps",nav=maps+"/Nav64";
         const auto mprBefore=bytes(maps+"/zone1.mpr"),mobBefore=bytes(maps+"/zone1.mob");
         QStandardPaths::setTestModeEnabled(true);QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+        OffscreenWindows hidden;qApp->installEventFilter(&hidden);
         check(ei::installApplicationTranslator(*qApp,QStringLiteral("ru")),"production Russian translator");
         qApp->setProperty("workspaceLoadSmoke",true);
         QTimer setup;QObject::connect(&setup,&QTimer::timeout,[](){for(auto* w:QApplication::topLevelWidgets())if(auto* d=qobject_cast<CResourceSetupDialog*>(w))d->reject();});setup.start(1);
@@ -38,8 +51,9 @@ int runAssemblyCatalogCheck(){
         window.m_mapsDock->show();window.m_propertiesDock->show();
         window.addDockWidget(Qt::LeftDockWidgetArea,window.m_mapsDock);
         window.addDockWidget(Qt::RightDockWidgetArea,window.m_propertiesDock);
-        auto& view=*window.view();window.resize(1500,950);window.move(10,10);window.show();window.showNormal();window.move(10,10);window.raise();window.activateWindow();QTest::qWait(300);view.makeCurrent();
+        auto& view=*window.view();window.resize(1500,950);window.show();QTest::qWait(300);view.makeCurrent();
         check(view.isValid()&&view.window()==&window,"real MainWindow hosts production OpenGL CView");
+        check(window.testAttribute(Qt::WA_DontShowOnScreen)&&!window.isActiveWindow(),"MainWindow is offscreen and never activated");
         view.m_neighborLandscapesVisible=false;
         auto* panel=view.navmeshPanel();auto* outer=view.m_aiGraphPreviewWidget;
         auto* source=outer->findChild<QComboBox*>("navigationSource");
@@ -52,12 +66,29 @@ int runAssemblyCatalogCheck(){
         auto checkpoint=[&](const QString& phase){
             QTest::qWait(250);view.makeCurrent();view.paintGL();QCoreApplication::processEvents();
             check(bounded(),"panel stays inside production scene: "+phase);
-            QJsonObject request{{"phase",phase},{"windowWidth",window.width()},{"windowHeight",window.height()},
+            check(window.testAttribute(Qt::WA_DontShowOnScreen)&&!window.isActiveWindow(),"capture remains offscreen: "+phase);
+            const QImage scene=view.grabFrameBuffer();
+            check(!scene.isNull()&&scene.width()==view.width()&&scene.height()==view.height(),"hidden OpenGL framebuffer: "+phase);
+            const QPixmap panelGrab=outer->grab();
+            check(panelGrab.save(evidence+"/"+phase+"-panel.png"),"production panel QWidget grab: "+phase);
+            check(scene.save(evidence+"/"+phase+"-scene.png"),"offscreen scene framebuffer saved: "+phase);
+            QImage main=window.grab().toImage();
+            check(main.save(evidence+"/"+phase+"-mainwindow-raw.png"),"raw production MainWindow QWidget grab: "+phase);
+            // QGLWidget is a native GL child. Its back buffer is separate from
+            // QWidget::grab on Windows; place those actual pixels at its real
+            // MainWindow geometry, preserving every visible overlay's Qt grab.
+            const QPoint origin=view.mapTo(&window,QPoint());
+            QRegion sceneClip(QRect(origin,view.size()));
+            for(auto* child:view.findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))
+                if(child->isVisible())sceneClip-=QRect(child->mapTo(&window,QPoint()),child->size());
+            QPainter painter(&main);painter.setClipRegion(sceneClip);painter.drawImage(origin,scene);painter.end();
+            check(main.save(evidence+"/"+phase+"-mainwindow.png"),"MainWindow plus its own GL back buffer: "+phase);
+            check(main.copy(QRect(origin,view.size())).save(evidence+"/"+phase+".png"),"production viewport and panel crop: "+phase);
+            QJsonObject request{{"phase",phase},{"capture","WA_DontShowOnScreen QWidget::grab plus own QGLWidget::grabFrameBuffer"},{"windowWidth",window.width()},{"windowHeight",window.height()},
                 {"panelX",outer->mapTo(&window,QPoint()).x()},{"panelY",outer->mapTo(&window,QPoint()).y()},
                 {"panelWidth",outer->width()},{"panelHeight",outer->height()}};
-            write(evidence+"/capture-request.json",QJsonDocument(request).toJson());
+            write(evidence+"/"+phase+".json",QJsonDocument(request).toJson());
             out<<"CAPTURE "<<phase<<"\n";out.flush();
-            check(until([&](){return QFileInfo(evidence+"/"+phase+".ack").exists();},240000),"native MainWindow capture: "+phase);
         };
         open("zone1");QVector3D target(186.5f,114.f,0);view.m_pLand->projectPt(target,true);view.moveCameraToPoint(target);view.m_cam->moveAwayOn(65.f);
         view.m_aiGraphPreviewToggle->click();
