@@ -674,6 +674,9 @@ private:
     bool navmeshComparisonClick(const QPoint& point);
     void syncNavmeshContext();
     CNavmeshPanel* m_navmeshPanel{nullptr};
+    QString m_navmeshLegendHtml;
+    QSize m_navmeshLegendSize;
+    GLuint m_navmeshLegendTexture{0};
     int m_navmeshDrawnTiles{0};
     quint64 m_navmeshDrawnVertices{0};
     void rebuildOverlayMaterialSlotLabels();

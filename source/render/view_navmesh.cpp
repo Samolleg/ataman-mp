@@ -17,6 +17,7 @@
 #include <QComboBox>
 #include <QPainter>
 #include <QTextDocument>
+#include <QtMath>
 
 void CView::createNavmeshMenu(QMenu* menu) {
     // MainWindow creates menus before attach() creates the viewport controls.
@@ -68,10 +69,23 @@ void CView::drawNavmeshOverlay(int position){
 
 void CView::drawNavmeshLegend(){
     if(!m_navmeshPanel||!m_navmeshPanel->legendVisible())return;
-    QTextDocument doc;doc.setDefaultFont(QFont(QStringLiteral("Segoe UI"),9));doc.setDefaultStyleSheet("body {color: white;} p {margin: 0;}");
-    doc.setHtml("<body>"+m_navmeshPanel->legendHtml()+"</body>");doc.setTextWidth(qMin(325,qMax(120,width()-24)));
-    const QSizeF size=doc.size();const QPointF origin(width()-size.width()-20,16);
-    QPainter painter(this);painter.setRenderHint(QPainter::Antialiasing);painter.setPen(QColor(180,190,200,180));painter.setBrush(QColor(18,22,26,200));painter.drawRoundedRect(QRectF(origin-QPointF(6,5),size+QSizeF(12,10)),5,5);painter.translate(origin);doc.drawContents(&painter);
+    const auto html=m_navmeshPanel->legendHtml();const int wanted=qMin(325,qMax(120,width()-40));
+    if(html!=m_navmeshLegendHtml||m_navmeshLegendSize.width()!=wanted+12||!m_navmeshLegendTexture){
+        // Paint only an owned CPU image. QPainter must never touch QGLWidget's
+        // double-buffered framebuffer (see existing entrance-label renderer).
+        QTextDocument doc;doc.setDefaultFont(QFont(QStringLiteral("Segoe UI"),9));doc.setDefaultStyleSheet("body {color: white;} p {margin: 0;}");doc.setHtml("<body>"+html+"</body>");doc.setTextWidth(wanted);
+        m_navmeshLegendSize=QSize(wanted+12,qCeil(doc.size().height())+10);
+        QImage image(m_navmeshLegendSize,QImage::Format_ARGB32);image.fill(Qt::transparent);
+        QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing);painter.setPen(QColor(180,190,200,180));painter.setBrush(QColor(18,22,26,200));painter.drawRoundedRect(QRectF(image.rect()).adjusted(.5,.5,-.5,-.5),5,5);painter.translate(6,5);doc.drawContents(&painter);painter.end();
+        if(m_navmeshLegendTexture)deleteTexture(m_navmeshLegendTexture);
+        m_navmeshLegendTexture=bindTexture(image,GL_TEXTURE_2D,GL_RGBA);m_navmeshLegendHtml=html;
+    }
+    const int position=ei::attributeLocation(&m_program,"a_position"),texture=ei::attributeLocation(&m_program,"a_texture");if(position<0||texture<0)return;
+    const float right=1-24.f/width(),left=right-2.f*m_navmeshLegendSize.width()/width(),top=1-24.f/height(),bottom=top-2.f*m_navmeshLegendSize.height()/height();
+    const QVector<QVector3D> vertices={{left,bottom,0},{right,bottom,0},{right,top,0},{left,top,0}};
+    const QVector<QVector2D> uv={{0,0},{1,0},{1,1},{0,1}};
+    QMatrix4x4 identity;m_program.setUniformValue(ei::uniformLocation(&m_program,"u_viewMmatrix"),identity);m_program.setUniformValue(ei::uniformLocation(&m_program,"u_projMmatrix"),identity);m_program.setUniformValue(ei::uniformLocation(&m_program,"customColor"),QVector4D(0,0,0,0));m_program.setUniformValue(ei::uniformLocation(&m_program,"qt_Texture0"),0);
+    ei::gl::Disable(GL_DEPTH_TEST);m_program.enableAttributeArray(texture);ei::gl::BindTexture(GL_TEXTURE_2D,m_navmeshLegendTexture);m_program.setAttributeArray(position,vertices.constData());m_program.setAttributeArray(texture,uv.constData());ei::gl::DrawArrays(GL_TRIANGLE_FAN,0,4);ei::gl::BindTexture(GL_TEXTURE_2D,0);m_program.disableAttributeArray(texture);
 }
 bool CView::navmeshComparisonClick(const QPoint& point){
     if(!m_navmeshPanel||!m_navmeshPanel->layerVisible()||!m_navmeshPanel->lossesVisible())return false;

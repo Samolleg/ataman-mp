@@ -2330,6 +2330,7 @@ CView::~CView()
         ei::log(eLogInfo, QString("Shutdown MOB teardown name:%1 nodes:%2 elapsedMs:%3")
                 .arg(mobName).arg(nodeCount).arg(mobTimer.elapsed()));
     }
+    if(isValid() && m_navmeshLegendTexture){makeCurrent();deleteTexture(m_navmeshLegendTexture);m_navmeshLegendTexture=0;}
     if(isValid() && !m_testEntranceLabelTextures.isEmpty())
     {
         makeCurrent();
@@ -6384,7 +6385,6 @@ void CView::paintGL()
         frameTelemetry.terrainSectorsVisible = counters.terrainSectorsVisible;
     }
     drawTestOverlaysOpenGl();
-    drawNavmeshLegend();
     if(m_terrainStampRegressionFrameCapture && width() > 0 && height() > 0)
     {
         QImage frame(width(), height(), QImage::Format_RGBA8888);
@@ -7047,6 +7047,7 @@ void CView::drawTestOverlaysOpenGl()
         ei::gl::DrawArrays(GL_LINE_LOOP, 0, head.size());
     }
 
+    drawNavmeshLegend();
     m_program.disableAttributeArray(position);
     m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(0.0f, 0.0f, 0.0f, 0.0f));
     ei::gl::LineWidth(1.0f);
