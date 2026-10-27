@@ -168,6 +168,8 @@ int runAssemblyCatalogCheck(){
         check(visible(panel->findChild<QPushButton*>("navmeshBakeCancel"))&&visible(panel->findChild<QProgressBar*>("navmeshBakeProgress")),"live progress and cancel visible inside AI panel");
         checkpoint("04-baking");
         check(until([&](){return !panel->busy();},300000),"real bake finished");
+        write(evidence+"/real-baker.log",panel->bakeLog().toUtf8());
+        out<<"BAKER_EXIT "<<panel->lastBakeExitCode()<<"\n"<<panel->bakeLog()<<"\n";out.flush();
         check(panel->lastBakeSucceeded()&&panel->lastBakeExitCode()==0&&panel->bakeLog().contains("BAKE_DONE "),"exit0 BAKE_DONE, all PROFILE diagnostics passed");
         check(until([&](){return panel->document().valid&&panel->document().path.startsWith(root+"/bake-output");}),"displayed layer automatically reloaded from new bake output");
         check(panel->layerVisible()&&QDir(root+"/bake-output/Maps/Nav64").entryList({"*.nav64"},QDir::Files).size()==8,"eight baked profiles and layer visible");
