@@ -76,7 +76,6 @@ void CView::drawNavmeshOverlay(int position){
     }
     const bool filled=m_navmeshPanel->fillVisible();
     for(const auto& tile:doc.renderTiles){if(!visible(tile))continue;++m_navmeshDrawnTiles;if(filled)for(const auto& area:tile.areas)draw(area.vertices,area.color,GL_TRIANGLES);draw(tile.edges,filled?QVector4D(.12f,.16f,.12f,.65f):QVector4D(.22f,.95f,.45f,.8f),GL_LINES);if(m_navmeshPanel->narrowVisible())draw(tile.narrow,{1.f,.45f,.05f,1.f},GL_LINES);}
-    ei::gl::LineWidth(2);draw(doc.tiles,{.15f,.9f,1.f,.9f},GL_LINES);
     glPointSize(4);if(m_navmeshPanel->islandsVisible())draw(doc.islands,{1.f,.1f,.15f,1.f},GL_POINTS);glPointSize(1);ei::gl::LineWidth(1);ei::gl::Enable(GL_DEPTH_TEST);
 }
 

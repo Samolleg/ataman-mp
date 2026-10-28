@@ -325,7 +325,6 @@ QString CNavmeshPanel::legendHtml()const{
         auto sorted=areas.values();std::sort(sorted.begin(),sorted.end());
         for(int id:sorted){const auto c=nav64AreaColor(id);html+=swatch(QColor::fromRgbF(c.x(),c.y(),c.z()).name(),nav64AreaName(id));}
     }else html+=swatch("#38f273",QStringLiteral("Контуры проходимых полигонов"));
-    if(!m_document.tiles.isEmpty())html+=swatch("#26e6ff",QStringLiteral("Границы тайлов хранения"));
     if(narrowVisible()&&m_document.narrowCount)html+=swatch("#ff730d",QStringLiteral("Короткие порталы (< диаметра профиля)"));
     if(islandsVisible()&&!m_document.islands.isEmpty())html+=swatch("#ff1a26",QStringLiteral("Центры островов кроме крупнейшего"));
     return html;

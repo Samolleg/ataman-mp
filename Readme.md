@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **233**, main: автоматическое фоновое перепекание Nav64 после сохранения рельефа/статических объектов, очередь повторных сохранений и отметка свежести по успешному запеканию. Запекатель r8/алгоритм24, прежние форматы и управление в «Навигации ИИ» сохранены. Проверка: docs/validation/ATAMAN_NAVBAKE_AUTOSAVE_233_20261028.md.
+Версия **234**, main: у Navmesh убрана голубая квадратная сетка границ тайлов хранения. Заливка, контуры полигонов, автоматическое перепекание после сохранения рельефа/статики и алгоритм24 сохранены. Проверка: docs/validation/ATAMAN_NAVMESH_NOGRID_234_20261028.md.
 
 Сохранены исправления227: безопасная выгрузка семейства MOB при переключении соседних карт и канонические ключи MOB. Удержание визуалов214 и база131 сохранены.
 
@@ -52,7 +52,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `233`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `234`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

@@ -130,7 +130,7 @@ int runAssemblyCatalogCheck(){
         auto* legend=panel->findChild<QCheckBox*>("navmeshLegend");
         check(legend&&legend->isVisible()&&legend->isChecked()&&panel->legendVisible(),"legend default on and visible in production panel");
         panel->findChild<QCheckBox*>("navmeshIslands")->setChecked(true);
-        check(panel->legendHtml().contains(QStringLiteral("Центры островов"))&&panel->legendHtml().contains(QStringLiteral("Границы тайлов")),"legend describes actual red island centres and storage tiles");
+        check(panel->legendHtml().contains(QStringLiteral("Центры островов"))&&!panel->legendHtml().contains(QStringLiteral("Границы тайлов")),"legend describes red island centres without the removed storage grid");
         checkpoint("03-navmesh-human");
         check(view.rect().contains(view.m_navmeshLegendRect),"legend lies inside production scene");
         for(auto* child:view.findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))if(child->isVisible())check(!view.m_navmeshLegendRect.intersects(child->geometry()),"legend unobscured by overlay: "+child->objectName());
