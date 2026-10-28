@@ -255,9 +255,10 @@ void CSelect::mouseMoveEvent(COperation *pOp, QMouseEvent *pEvent)
         m_pView->drawSelectFrame(rect);
 
     }
-    QVector3D mouseCoord (m_pView->getTerrainPos(pEvent->x(), pEvent->y()));
+    bool terrainHit=false;
+    const QVector3D mouseCoord=m_pView->getTerrainPos(pEvent->x(),pEvent->y(),true,&terrainHit);
     QString text = "not defined";
-    if(mouseCoord.z() > -0.1f && mouseCoord.z() < 100.0f)
+    if(terrainHit && qIsFinite(mouseCoord.x()) && qIsFinite(mouseCoord.y()) && qIsFinite(mouseCoord.z()))
         text = util::makeString(mouseCoord, true);
     pOp->updateMouseCoords(text);
 }

@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **235**, main: исправлены ложные потери Nav24 на ровном рельефе при сравнении со старой проходимостью. Учитывается исходная опора MPR; мосты, позы и алгоритм24 сохраняются. Проверка: docs/validation/ATAMAN_NAVCOMPARE_235_20261028.md.
+Версия **236**, main: обычное выделение возвращает выбор всех объектов из режимов поведения/рельефа; исправлены устаревшие подсказки и координаты на высотах выше100. Функции Navmesh235 сохранены. Проверка: docs/validation/ATAMAN_SELECT_MODES_236_20261028.md.
 
 Сохранены исправления227: безопасная выгрузка семейства MOB при переключении соседних карт и канонические ключи MOB. Удержание визуалов214 и база131 сохранены.
 
@@ -52,7 +52,7 @@ EI Mapper: Endurance Edition is an independently versioned derivative of
 [`konstvest/ei_maper`](https://github.com/konstvest/ei_maper), focused on safe,
 fast Evil Islands and Jamais Vu map editing.
 
-Current Ataman version: `234`, built on the accepted131 source. Each separate fix advances the integer version.
+Current Ataman version: `236`, built on the accepted131 source. Each separate fix advances the integer version.
 Selected architecture parts can be saved as catalog assemblies, placed and copied
 as one rigid group, then disassembled. Definitions and editor membership live in
 the profile model catalog beside database.res. See [assemblies](docs/OBJECT_ASSEMBLIES.md).

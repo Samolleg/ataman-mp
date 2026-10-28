@@ -4152,9 +4152,7 @@ void MainWindow::createViewportToolbars()
                     m_playFromHereButton->setChecked(false);
                     return;
                 }
-                if(!m_pView->cancelPendingOperation())
-                    m_pView->clearObjectSelection();
-                CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+                activateObjectSelection();
             }
             else
                 CButtonConnector::getInstance()->clickButton(operation.type);
@@ -7777,8 +7775,28 @@ void MainWindow::showLandscapeTools()
 
 void MainWindow::hideLandscapeTools()
 {
+    // Dock visibility alone is not the selected tool. Also recover a brush
+    // left active while its dock was hidden or moved between workspaces.
+    if(m_pView)
+        m_pView->setLandscapeEditingEnabled(false);
     if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
         m_landscapeToolsDock->hide();
+}
+
+void MainWindow::activateObjectSelection()
+{
+    if(!m_pView)return;
+    const bool cancelled=m_pView->cancelPendingOperation();
+    hideLandscapeTools();
+    m_pView->setLandscapeInteractionSuspended(false);
+    m_pView->changeOperation(EButtonOpSelect);
+    if(CScene::getInstance()->getMode()!=eEditModeObjects)
+        CScene::getInstance()->changeMode(eEditModeObjects);
+    if(!cancelled)m_pView->clearObjectSelection();
+    CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
+    if(auto* action=m_operationActions.value(EButtonOpSelect,nullptr))action->setChecked(true);
+    m_pView->refreshSelectContextHelp();
+    m_pView->setFocus();
 }
 
 void MainWindow::toggleLandscapeTools()
@@ -7822,6 +7840,11 @@ void MainWindow::handleEscapeShortcut()
     // state (selected spawn marker or Landscape Tools visibility) consumes Esc.
     if(m_pView->cancelPendingOperation())
     {
+        if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        {
+            activateObjectSelection();
+            return;
+        }
         CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
         m_pView->setFocus();
         return;
@@ -7840,16 +7863,15 @@ void MainWindow::handleEscapeShortcut()
         return;
     }
 
-    if(m_landscapeToolsDock && m_landscapeToolsDock->isVisible())
+    if(CScene::getInstance()->getMode()==eEditModeLogic
+       || (m_landscapeTools && m_landscapeTools->editingEnabled())
+       || (m_landscapeToolsDock && m_landscapeToolsDock->isVisible()))
     {
-        hideLandscapeTools();
-        m_pView->setFocus();
+        activateObjectSelection();
         return;
     }
 
-    m_pView->clearObjectSelection();
-    CButtonConnector::getInstance()->pressButton(EButtonOpSelect);
-    m_pView->setFocus();
+    activateObjectSelection();
 }
 
 void MainWindow::saveUiState()
@@ -9588,6 +9610,8 @@ void MainWindow::on_actionReset_cam_position_triggered()
 
 void MainWindow::on_actionChange_mod_e_triggered()
 {
+    hideLandscapeTools();
+    if(m_pView)m_pView->changeOperation(EButtonOpSelect);
     CScene::getInstance()->changeMode(CScene::getInstance()->getMode() == eEditModeObjects ? eEditModeLogic : eEditModeObjects);
 }
 

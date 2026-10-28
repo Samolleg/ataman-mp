@@ -239,6 +239,7 @@ private:
     void hideLandscapeTools();
     void toggleLandscapeTools();
     void handleEscapeShortcut();
+    void activateObjectSelection();
     void keepFloatingHistoryRaised();
     void saveUiState();
     void saveMainDockExtents(QSettings& settings) const;

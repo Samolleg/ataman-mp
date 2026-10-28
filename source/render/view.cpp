@@ -2101,6 +2101,7 @@ void CView::syncLandscapeToolState()
         if(m_pOp && m_pOp->operationMethod() == eOperationMethodTileBrush)
             changeOperation(EButtonOpSelect);
         setPreviewTile(false);
+        refreshSelectContextHelp();
         return;
     }
     if(markingPaintIssue)
@@ -22884,8 +22885,13 @@ void CView::refreshSelectContextHelp()
 {
     if(m_pOp && m_pOp->operationMethod() != eOperationMethodSelect)
         return;
+    if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        return;
 
     QStringList actions;
+    actions << (CScene::getInstance()->getMode()==eEditModeLogic
+        ? QString::fromUtf8("Поведение: выбор существ и логики. Esc — к объектам")
+        : QString::fromUtf8("Выбор объектов"));
     actions << tr("LMB: Select") << tr("Shift+LMB: Add selection")
             << tr("MMB: Rotate camera") << tr("G: Move");
     if(CScene::getInstance()->getMode() != eEditModeLogic)
