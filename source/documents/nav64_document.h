@@ -24,6 +24,7 @@ struct SNav64RenderTile {
 struct SNav64Triangle {
     QVector3D a,b,c;
     quint16 clearance=0;
+    bool terrainOnly=false; // sole declared support is the original MPR surface
 };
 // CPU-only, immutable after load; no editor document or MOB ownership.
 struct SNav64Document {

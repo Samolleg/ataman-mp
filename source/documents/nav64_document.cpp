@@ -182,16 +182,21 @@ SNav64Document loadNav64(const QString& path){
             else throw QStringLiteral("Неизвестная секция Nav64");
         }r.end();if(!seen.contains(1)||!seen.contains(2)||(sections==3&&!seen.contains(3)))throw QStringLiteral("Нет обязательной секции Nav64");
         auto mesh=std::shared_ptr<dtNavMesh>(dtAllocNavMesh(),dtFreeNavMesh);if(!mesh||dtStatusFailed(mesh->init(&params)))throw QStringLiteral("Detour init: ошибка");Reader t{tileBytes};const auto count=t.u32();if(count>quint32(params.maxTiles))throw QStringLiteral("Слишком много тайлов");
+        QHash<const dtMeshTile*,QVector<quint8>> terrainSupports;
         for(quint32 i=0;i<count;++i){
             auto b=unshuffleTile(t.bytes(t.u32()));out.detailOutlierVertices+=validateTile(b,params,2*out.header.body.cellHeight);
+            const auto* tileHeader=reinterpret_cast<const dtMeshHeader*>(b.constData());
+            QVector<quint8> terrainOnly(tileHeader->polyCount,0);
             if(out.header.container!=3){
                 const auto* h=reinterpret_cast<const dtMeshHeader*>(b.constData());
                 const auto supports=t.u32();if(supports!=quint32(h->polyCount))throw QStringLiteral("Число привязок поверхностей не совпадает с полигонами");
                 for(quint32 j=0;j<supports;++j){const auto sources=t.u32();if(!sources||sources>1024||sources>quint32((t.data.size()-t.at)/8))throw QStringLiteral("Неверное число исходных поверхностей полигона");
                     QSet<quint64> ids;for(quint32 k=0;k<sources;++k){const quint64 low=t.u32(),high=t.u32(),id=low|(high<<32);if(!id||ids.contains(id))throw QStringLiteral("Неверная / повторная поверхность полигона");ids.insert(id);}
+                    terrainOnly[int(j)]=ids.size()==1&&ids.contains(1);
                 }
             }
             auto* owned=static_cast<unsigned char*>(dtAlloc(b.size(),DT_ALLOC_PERM));if(!owned)throw QStringLiteral("Недостаточно памяти для тайла");std::memcpy(owned,b.constData(),b.size());if(dtStatusFailed(mesh->addTile(owned,b.size(),DT_TILE_FREE_DATA,0,nullptr))){dtFree(owned);throw QStringLiteral("Detour addTile: несовместимые/повторные тайлы");}
+            terrainSupports.insert(static_cast<const dtNavMesh*>(mesh.get())->getTileAt(tileHeader->x,tileHeader->y,tileHeader->layer),terrainOnly);
         }t.end();out.tileCount=int(count);
         if(out.detailOutlierVertices)out.warnings<<QStringLiteral("Предупреждение: %1 detail-вершин выходят за высотные границы тайлов. Слой показывает данные файла без исправления. Нужны исправленный запекатель и повторное запекание.").arg(out.detailOutlierVertices);
         struct Poly {const dtMeshTile* tile;int index;};QVector<Poly> polys;QHash<quint64,int> indices;QHash<const dtMeshTile*,int> renderIndex;
@@ -213,7 +218,7 @@ SNav64Document loadNav64(const QString& path){
                 // A short open portal is a diagnostic candidate, not raw wall clearance.
                 if(p.neis[j]&&out.header.body.radius>0&&(a-b).length()<2*out.header.body.radius){render.narrow<<a+QVector3D(0,0,.08)<<b+QVector3D(0,0,.08);++out.narrowCount;}
             }center/=p.vertCount;if(root(i)!=largest)islandCenters[root(i)]+=center;
-            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];QVector3D points[3];for(int k=0;k<3;++k){const int v=tri[k];points[k]=world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);vertices<<points[k];}out.triangles.append({points[0],points[1],points[2],p.flags});}
+            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];QVector3D points[3];for(int k=0;k<3;++k){const int v=tri[k];points[k]=world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);vertices<<points[k];}out.triangles.append({points[0],points[1],points[2],p.flags,terrainSupports.value(tile).value(item.index)!=0});}
         }for(auto it=islandCenters.cbegin();it!=islandCenters.cend();++it)out.islands<<it.value()/sizes[it.key()];
         out.polygonCount=polys.size();out.valid=true;
     }catch(const QString& e){out.error=e;out.renderTiles.clear();out.tiles.clear();out.islands.clear();}catch(const std::bad_alloc&){out.error=QStringLiteral("Недостаточно памяти для Nav64");}

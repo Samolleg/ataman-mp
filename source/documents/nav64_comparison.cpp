@@ -45,7 +45,12 @@ SNav64Comparison compareNav64(const SNav64Document& mesh,const SAiGraphPreviewBu
             const float v=((t.c.y()-t.a.y())*(px-t.c.x())+(t.a.x()-t.c.x())*(py-t.c.y()))/denom;
             if(u<-.00001f||v<-.00001f||u+v>1.00001f)continue;
             const int i=y*out.width+x;
-            const float z=u*t.a.z()+v*t.b.z()+(1-u-v)*t.c.z()-.12f;
+            // Modern terrain polygons are connectivity footprints. Their
+            // fan can bridge a shallow hollow by much more than 0.5 m.
+            // Match declared terrain support to the actual MPR floor;
+            // bridge cells retain the separate-floor height comparison.
+            const float z=t.terrainOnly&&!old.bridgeMask.value(i)?input.terrainHeights[i]:
+                u*t.a.z()+v*t.b.z()+(1-u-v)*t.c.z()-.12f;
             if(qAbs(z-out.heights[i])<=qMax(.5f,mesh.header.body.climb+2*mesh.header.body.cellHeight))nav[i]=1;
         }
     }
