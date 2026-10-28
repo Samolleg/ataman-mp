@@ -3,6 +3,8 @@
 Поручение28.10.2026: реализовать приложенное MCP-TOPDOWN-EXPORT-TASK.txt.
 База main `eeef1ea33c9050b3ad79c9bc1f9651d450acb136` /237. Работа в main,
 без push, приватных исходников движка и изменений живых игровых данных.
+Реализация: `6867d6e4b299129844e0dea12d4ce4d83480986a`. После неё только
+квитанция установки;695 production-входов сопоставлены с Git-blob исходников.
 
 ## Реализация
 
@@ -99,9 +101,22 @@ build-topdown-238/staged-identity-final.json,staging-final.log,finalize-final.lo
 изменение texts.res; оно также не откатывалось. Run11 отдельно подтвердил
 неизменность всех89 своих входов. Новые чужие данные не заменяются старыми.
 
-Владелец сообщил, что закрыл оба экземпляра постоянной установки
-(PID33528,19616 на прежнем preflight). Следующий шаг — свежий preflight и
-штатный install_program с новым rollback; MCP bridges не останавливать.
+**INSTALLED238.** После сообщения владельца о закрытии редакторов свежий
+preflight чист. Штатный install_program:186 verified,8 changed,0 added,
+0 removed. Постоянная папка artifacts/EI-Mapper-Ataman-2-first-test;
+installed --version238/exit0. **19281 пользовательский файл сохранил набор,
+SHA/размер/native-mtime;13/13 мостов сохранили PID/creation time.** Retired
+journal:0 удалено,3 загруженных образа сохранены. Новая резервная копия
+artifacts/rollback237-to238-topdown-20261028 проверена штатным VerifyOnly:
+ROLLBACK_VERIFIED. Прежние чужие rollback не изменялись. Квитанции:
+build-topdown-238/install.log,install-user-before.json,install-user-after.json,
+install-bridges-before.json,install-bridges-after.json,rollback-verify.log.
+Финализатор на постоянной папке не запускался. Старый финализированный
+промежуточный staging не изменялся; установлен именно topdown-final.
+
+Для загрузки обновлённого bridge EXE нужен один штатный MCP reconnect клиента;
+работающие мосты намеренно не завершались. Каталог server-side динамический;
+новый метод появляется в ataman://tools после подключения к238.
 
 Физическая проверка видимого окна/другого GPU остаётся владельцу; она запрещена
 разработчику вместо пользователя. Реальный120-секундный timeout не форсировался;
