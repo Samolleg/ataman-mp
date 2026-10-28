@@ -71,6 +71,7 @@ class CNode;
 ///
 class CLandscape
 {
+    friend int runAssemblyCatalogCheck();
     //TODO: change singletone to simple class to provide several landscape loading (in different tabs)
 public:
     using SaveProgress = std::function<void(const QString&, int, int)>;
@@ -109,6 +110,8 @@ public:
     void setTile(const QMap<STileLocation, STileInfo>& arrTileInfo);
     const QFileInfo& filePath() {return m_filePath;}
     QOpenGLTexture* glTexture() const {return m_texture;}
+    QOpenGLTexture* captureSourceAtlas() const {return m_baseAtlasTexture?m_baseAtlasTexture:m_texture;}
+    bool captureUsesPreviewAtlas() const {return m_previewAtlasTexture && m_texture==m_previewAtlasTexture;}
     uint textureNum() const {return m_header.nTexture;}
     uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
     uint heightInWorldUnits() const { return m_header.nYSector * 32u; }

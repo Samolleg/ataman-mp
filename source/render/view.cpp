@@ -8771,7 +8771,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             && m_pLand && m_pLand->isMprLoad())
         m_pLand->updateTerrainShadowVisibility(
             environment.sunDirection, !m_sculptStrokeActive && !m_tilePaintStrokeActive);
-    syncEnvironmentPreviewWidget(environment.timeHours);
+    if(!m_minimapCaptureActive)
+        syncEnvironmentPreviewWidget(environment.timeHours);
     if(!m_minimapCaptureActive && terrainShadowsEnabled && m_neighborLandscapesVisible)
         for(auto& neighbor : m_neighborLandscapes)
             if(neighbor.landscape)
@@ -8900,7 +8901,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             ei::gl::ClearColor(environment.fogColor.x(), environment.fogColor.y(),
                                environment.fogColor.z(), 1.0f);
         else
-            ei::gl::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            ei::gl::ClearColor(0.0f, 0.0f, 0.0f,
+                topdownTransparent(m_topdownPass) ? 0.0f : 1.0f);
         ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if(m_openGlDiagnosticFramesRemaining > 0)
             logOpenGlDiagnosticState(QStringLiteral("frame/visible-clear"), true);
@@ -8948,6 +8950,9 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     //m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_watcherPos"), m_cam->pos());
     m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_projMmatrix"), m_projection);
     m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), camMatrix);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_cartographicPass"),
+        m_topdownPass == ETopdownPass::Relief ? 1 : 0);
+    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_cartographicOverlayFilter"),0);
     applyEnvironmentUniforms(m_landProgram, environment, sceneLights,
                              lightingMode, fogEnabled);
 //    m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_color"), QVector4D(0.0, 1.0, 0.0, 1.0));
@@ -8961,6 +8966,8 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 
     m_program.setUniformValue(ei::uniformLocation(&m_program, "u_projMmatrix"), m_projection);
     m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), camMatrix);
+    m_program.setUniformValue(ei::uniformLocation(&m_program, "u_cartographicPass"),
+        m_topdownPass == ETopdownPass::StructuresMask ? 2 : 0);
     const QVector4D activeHighlight(0.05f, 0.78f, 0.93f, 0.0f);
     const QVector4D lockedHighlight(1.0f, 0.55f, 0.05f, 0.0f);
     m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"), activeHighlight);
@@ -9012,8 +9019,12 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
             m_pLand->applyTerrainShadowUniforms(
                 &m_landProgram, terrainShadowsEnabled);
         }
+        if(topdownTransparent(m_topdownPass))
+            ei::gl::ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bDrawLand)
             m_pLand->draw(&m_landProgram, cullingEnabled ? &frustum : nullptr);
+        if(topdownTransparent(m_topdownPass))
+            ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad() && m_bPreviewTile)
             drawTilePreview(&m_landProgram);
         if(m_landscapeVisible && m_pLand && m_pLand->isMprLoad()
@@ -9047,7 +9058,16 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     };
 
     // Neighbor scenery belongs to the world, including active MPRs without MOB.
-    if(m_activeMob != nullptr || !m_neighborLandscapes.isEmpty())
+    if(m_topdownPass != ETopdownPass::None)
+    {
+        beginVisibleFrame();
+        drawTerrainColor(false);
+        if(m_topdownItems)
+            for(const auto& item : *m_topdownItems)
+                renderQueue.submitPrepared(item, true, false);
+        renderQueue.flush();
+    }
+    else if(m_activeMob != nullptr || !m_neighborLandscapes.isEmpty())
     {
         QSet<CNode*> colorSubmittedNodes;
         if(!m_minimapCaptureActive && m_neighborLandscapesVisible && m_staticObjectsVisible)
@@ -9288,6 +9308,15 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         //turn to landshader again
         if (!m_landProgram.bind())
             close();
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_cartographicPass"),
+            m_topdownPass == ETopdownPass::WaterMask ? 3 : 0);
+        const int overlayFilter=(m_topdownPass==ETopdownPass::Water||m_topdownPass==ETopdownPass::WaterMask)?1:
+            m_topdownPass==ETopdownPass::Terrain?2:m_topdownPass==ETopdownPass::Vegetation?3:m_topdownPass==ETopdownPass::Composite?4:0;
+        m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram,"u_cartographicOverlayFilter"),overlayFilter);
+        if(m_topdownPass != ETopdownPass::None) {
+            ei::gl::Enable(GL_BLEND);
+            ei::gl::DepthMask(GL_TRUE);
+        }
 
         // Overlay opacity is authored per material and carried in the sector
         // vertex payload. Do not apply the inherited global 0.3 subtraction.

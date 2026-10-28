@@ -243,7 +243,8 @@ public:
         // that same operation finishes; their ordinary 2s deadline is shorter
         // than opening a full map with neighbors and would discard the stream.
         const bool commitBusy=value["error"].toString().startsWith("Normal map commit in progress");
-        if(!commitBusy && (name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value.contains("error")))))activeJobs.remove(args["operation"].toString());
+        if(!commitBusy && (name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value["status"]=="failed"||value["status"]=="cancelled"||value.contains("error")))))activeJobs.remove(args["operation"].toString());
+        if(name=="export_map_topdown"&&value["operation"].isString())editJobs[value["operation"].toString()]=now+180000;
         const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
@@ -303,7 +304,7 @@ public:
                 }
             };
             appendImages(value);appendImages(value["result"].toObject());
-            result={{"content",content},{"isError",value.contains("error")}};
+            result={{"content",content},{"isError",value.contains("error")||value["status"]=="failed"||value["status"]=="cancelled"}};
         } else if(method=="resources/list")result={{"resources",catalog["resources"]}};
         else if(method=="resources/templates/list")result={{"resourceTemplates",catalog["resourceTemplates"]}};
         else if(method=="resources/read") {

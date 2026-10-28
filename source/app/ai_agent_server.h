@@ -6,6 +6,7 @@
 #include <QFutureWatcher>
 class MainWindow;
 class CView;
+class CTopdownExport;
 
 // Human-owned authority and lifetime. No transport operation can enable this server.
 class CAiAgentServer : public QObject {
@@ -26,6 +27,8 @@ private:
         QPointer<QLocalSocket> owner;
         QSharedPointer<ai::EditPlan> plan;
         bool edit{false};
+        QSharedPointer<CTopdownExport> topdown;
+        QDateTime finishedAt;
         QJsonObject result;
         QDateTime created{QDateTime::currentDateTimeUtc()};
         int deadlineMs{30000};
@@ -38,6 +41,7 @@ private:
     void receive(QLocalSocket* socket);
     QJsonObject dispatch(const QString& method, const QJsonObject& args);
     QJsonObject startJob(const QString& method, const QJsonObject& args);
+    QJsonObject startTopdownExport(const QJsonObject& args);
     QJsonObject startEdit(const QString& method,const QJsonObject& args);
     QJsonObject startCommit(const QSharedPointer<ai::EditPlan>& plan,bool snapshot);
     void finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot);

@@ -42,6 +42,11 @@ public:
     void setComplex(float str, float dex, float tall);
     //TODO return methods of vertices, uv, normals, vert.indices, uv.indices
     bool readData(QDataStream& stream);
+    bool completeCaptureGeometry() const {
+        if(!m_completeCaptureGeometry)return false;
+        for(auto* child:m_aChild)if(!child->completeCaptureGeometry())return false;
+        return true;
+    }
     void readAssemblyOffset(QDataStream& stream);
     void applyAssemblyOffset(QVector<QVector3D>* offset = nullptr);
 
@@ -94,6 +99,7 @@ private:
     QString m_parentName;
     int m_assemblySourceOrder{-1};
     QList<ei::CFigure*> m_aChild;
+    bool m_completeCaptureGeometry{false};
 
 };
 

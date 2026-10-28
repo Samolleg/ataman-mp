@@ -4,6 +4,7 @@ precision mediump int;
 #endif
 
 uniform sampler2D qt_Texture0;
+uniform int u_cartographicPass;
 varying highp vec2 qt_TexCoord0;
 uniform bool u_highlight;
 uniform vec4 u_highlightColor;
@@ -130,6 +131,9 @@ void main(void)
     // legacy EI cutout threshold in the fragment shader on every backend.
     if (resColor.a <= 0.1)
       discard;
+    if (u_cartographicPass == 2) {
+      gl_FragColor = vec4(1.0); return;
+    }
     vec3 cascadeDebugColor = vec3(0.0);
 
     if (u_environmentEnabled && customColor.w == 0.0)

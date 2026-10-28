@@ -37,6 +37,13 @@ CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
 
 namespace {
+QJsonObject exportResourceIdentity(const QString& member, const QString& source, const QByteArray& bytes)
+{
+    const QFileInfo f(source);
+    return {{"member",member},{"provider",f.canonicalFilePath()},
+        {"providerBytes",double(f.size())},{"providerModifiedMs",double(f.lastModified().toMSecsSinceEpoch())},
+        {"bytes",bytes.size()},{"sha256",QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())}};
+}
 
 QMutex s_compositePreparationMutex;
 QHash<QString, int> s_compositePreparationStates;
@@ -524,6 +531,8 @@ void CObjectList::readFigure(const QByteArray& file, const QString& name)
 void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QString& assemblyRoot)
 {
     const QString normalizedRoot = assemblyRoot.toLower();
+    auto& problems=m_figureProblems[normalizedRoot];
+    problems.clear();
     const QMap<QString, QByteArray> normalizedFiles = normalizedResourceMap(aFile);
     const QByteArray modelData = normalizedFiles.value(normalizedRoot);
     if(modelData.isEmpty())
@@ -588,6 +597,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         SAssemblyLink link;
         if(!readLinkName(link.componentName, false) || !readLinkName(link.parentName, true))
         {
+            problems.append(QString("Invalid link %1").arg(i));
             ei::log(eLogWarning, QString("Invalid assembly link %1 in %2").arg(i).arg(normalizedRoot));
             break;
         }
@@ -595,6 +605,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         const QByteArray componentData = aComponent.value(link.componentName);
         if(componentData.isEmpty())
         {
+            problems.append("Missing component: "+link.componentName);
             ei::log(eLogWarning, QString("Assembly %1 is missing component %2").arg(normalizedRoot, link.componentName));
             continue;
         }
@@ -604,6 +615,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         link.figure = new ei::CFigure;
         if(!link.figure->readData(compStream))
         {
+            problems.append("Invalid FIG: "+link.componentName);
             ei::log(eLogWarning, QString("Assembly %1 has an invalid component %2").arg(normalizedRoot, link.componentName));
             delete link.figure;
             continue;
@@ -635,6 +647,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
             parentFigure->addChild(link.figure);
         else
         {
+            problems.append("Missing parent: "+link.parentName);
             ei::log(eLogWarning, QString("Assembly %1 component %2 references missing parent %3")
                     .arg(normalizedRoot, link.componentName, link.parentName));
             if(rootFigure)
@@ -653,6 +666,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
     QString bonFile(linkName);
     bonFile.append(".bon");
     const QByteArray positionData = normalizedFiles.value(bonFile);
+    if(positionData.isEmpty()) problems.append("Missing BON: "+bonFile);
     if(!positionData.isEmpty())
     {
         CResFile position(positionData);
@@ -661,10 +675,14 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         {
             const QByteArray offsetData = aComponent.value(fig->name().toLower());
             if(offsetData.isEmpty())
+            {
+                problems.append("Missing BON component: "+fig->name());
                 continue;
+            }
             QDataStream bonStream(offsetData);
             util::formatStream(bonStream);
             fig->readAssemblyOffset(bonStream);
+            if(bonStream.status()!=QDataStream::Ok) problems.append("Invalid BON: "+fig->name());
         }
     }
     rootFigure->applyAssemblyOffset();
@@ -693,12 +711,14 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
         if(m_aFigure.contains(fig) || m_missingFigureNames.contains(fig))
             continue;
         QByteArray figureData;
-        if(!readIndexedResource(sources, fig, figureData))
+        QString figureProvider;
+        if(!readIndexedResource(sources, fig, figureData, &figureProvider))
         {
             m_missingFigureNames.insert(fig);
             ei::log(eLogWarning, "Missing figure (negative cached): " + fig);
             continue;
         }
+        m_figureSources[fig]=QJsonArray{exportResourceIdentity(fig,figureProvider,figureData)};
 
         if(fig.endsWith(".mod"))
         {
@@ -706,8 +726,11 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
             QByteArray bonData;
             QMap<QString, QByteArray> assemblyFiles;
             assemblyFiles.insert(fig, figureData);
-            if(readIndexedResource(sources, bonName, bonData))
+            QString bonProvider;
+            if(readIndexedResource(sources, bonName, bonData, &bonProvider)) {
                 assemblyFiles.insert(bonName, bonData);
+                m_figureSources[fig].append(exportResourceIdentity(bonName,bonProvider,bonData));
+            }
             readAssembly(assemblyFiles, fig);
         }
         else if(fig.endsWith(".fig"))
@@ -1236,6 +1259,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
         parse(textureData, cacheKey);
         if(m_aTexture.contains(cacheKey))
         {
+            m_textureSources[m_aTexture.value(cacheKey)]=QJsonArray{exportResourceIdentity(candidate,sourcePath,textureData)};
             if(candidate != name.toLower() + ".mmp")
                 ei::log(eLogInfo, QString("Resolved texture %1 %2 model:%3 -> %4 in %5")
                         .arg(candidateIndex >= 3 ? "fallback" : "alias", name, modelName,
@@ -1258,6 +1282,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
             parse(textureData, cacheKey);
             if(m_aTexture.contains(cacheKey))
             {
+                m_textureSources[m_aTexture.value(cacheKey)]=QJsonArray{exportResourceIdentity(databaseCandidate,textureSource,textureData)};
                 ei::log(eLogInfo, QString("Resolved database unit texture %1 model:%2 -> %3 (database:%4 texture:%5)")
                         .arg(name, modelName, databaseCandidate, databaseSource, textureSource));
                 if(found)*found=true;
@@ -1944,6 +1969,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
 
     const QStringList textureNames = ei::terrainTextureResourceNames(name, expectedTexCount);
     QStringList missingTextures;
+    QJsonArray terrainSources;
     for(const QString& texName : textureNames)
     {
         ei::setCrashContext("mpr/terrain-atlas/resolve:" + texName);
@@ -1967,6 +1993,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
             continue;
         }
         aPart.append(part);
+        terrainSources.append(exportResourceIdentity(texName,sourcePath,textureData));
         ei::log(eLogInfo, QString("Resolved terrain atlas %1 source:%2 size:%3x%4")
                 .arg(texName, sourcePath).arg(part.header.m_width).arg(part.header.m_height));
     }
@@ -2029,6 +2056,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         texture->setMagnificationFilter(QOpenGLTexture::Nearest);
         texture->setWrapMode(QOpenGLTexture::Repeat);
         m_aTexture[cacheKey] = texture;
+        m_textureSources[texture]=missingTextures.isEmpty()?terrainSources:QJsonArray();
         m_terrainTextures.insert(texture); m_terrainTextureUsers.insert(texture, 1);
         return texture;
     }
@@ -2135,6 +2163,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         ei::setCrashContext("mpr/terrain-atlas/opengl-upload-rgba:" + name);
         texture->setData(atlas);
         m_aTexture[cacheKey] = texture;
+        m_textureSources[texture]=missingTextures.isEmpty()?terrainSources:QJsonArray();
         m_terrainTextures.insert(texture);
         m_terrainTextureUsers.insert(texture, 1);
         ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 ANGLE-RGBA")
@@ -2151,6 +2180,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         texture->setCompressedData(level, 0, combinedMips[level].size(),
                                    combinedMips[level].constData());
     m_aTexture[cacheKey] = texture;
+    m_textureSources[texture]=missingTextures.isEmpty()?terrainSources:QJsonArray();
     m_terrainTextures.insert(texture);
     m_terrainTextureUsers.insert(texture, 1);
     ei::log(eLogInfo, QString("Terrain atlas set ready map:%1 expected:%2 loaded:%3 mips:%4")
@@ -2175,6 +2205,7 @@ void CTextureList::releaseTerrainTexture(QOpenGLTexture* texture)
     }
     m_terrainTextures.remove(texture);
     m_textureMaterialClasses.remove(texture);
+    m_textureSources.remove(texture);
     if(texture->isCreated())
         texture->destroy();
     delete texture;
@@ -2274,6 +2305,7 @@ void CTextureList::trimTransientVisualCache()
         if(!texture)
             continue;
         m_textureMaterialClasses.remove(texture);
+        m_textureSources.remove(texture);
         if(texture->isCreated())
             texture->destroy();
         delete texture;
@@ -2305,6 +2337,7 @@ void CTextureList::clearTransientVisualCache()
         if(texture)
         {
             m_textureMaterialClasses.remove(texture);
+            m_textureSources.remove(texture);
             if(texture->isCreated())
                 texture->destroy();
             delete texture;

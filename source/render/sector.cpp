@@ -925,6 +925,7 @@ void CSector::generateWaterVertexData()
                 target.animation = QVector4D(animation.waveMultiplier,
                     animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                     animation.animated ? 1.0f : 0.0f);
+                target.materialType=material?float(material->type):0.0f;
                 target.tileAnimation = QVector4D(float(tileAnimation.startSlot),
                     float(tileAnimation.baseSlot), float(tileAnimation.frameCount),
                     float(tileAnimation.startPhase));
@@ -1118,6 +1119,7 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
             target.animation = QVector4D(animation.waveMultiplier,
                 animation.authoredWarpSpeed, ei::overlayWindNoise(gridX, gridY),
                 animation.animated ? 1.0f : 0.0f);
+            target.materialType=material?float(material->type):0.0f;
             target.tileAnimation = QVector4D(float(tileAnimation.startSlot),
                 float(tileAnimation.baseSlot), float(tileAnimation.frameCount),
                 float(tileAnimation.startPhase));
@@ -1441,6 +1443,8 @@ void CSector::draw(QOpenGLShaderProgram* program)
                                     int(sizeof(STerrainVertexData)));
     }
     const int animationLocation = ei::attributeLocation(program, "a_overlayAnimation");
+    const int materialTypeLocation = ei::attributeLocation(program, "a_overlayMaterialType");
+    if(materialTypeLocation>=0){program->disableAttributeArray(materialTypeLocation);program->setAttributeValue(materialTypeLocation,0.0f);}
     if(animationLocation >= 0)
     {
         program->disableAttributeArray(animationLocation);
@@ -1555,6 +1559,11 @@ void CSector::drawWater(QOpenGLShaderProgram *program)
     }
 
     m_waterIndexBuf.bind();
+    const int materialTypeLocation = ei::attributeLocation(program,"a_overlayMaterialType");
+    if(materialTypeLocation>=0) {
+        program->enableAttributeArray(materialTypeLocation);
+        program->setAttributeBuffer(materialTypeLocation,GL_FLOAT,offset+int(sizeof(float)),1,int(sizeof(SWaterVertexData)));
+    }
     ei::gl::DrawElements(GL_TRIANGLES, m_waterIndexCount, GL_UNSIGNED_SHORT, nullptr);
     RenderPerformanceContext& performance = RenderPerformanceContext::instance();
     if(performance.collecting())

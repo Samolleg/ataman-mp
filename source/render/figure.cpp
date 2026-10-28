@@ -218,6 +218,16 @@ bool ei::CFigure::readData(QDataStream& stream)
     //QVector<US3> aVertComp;
     readVertexComponents(stream, m_aVertComp, header.vertexComponentCount);
 
+    // A native assembly can have an empty transform-only root. Its children
+    // still carry the drawable geometry; zero indices are not a missing mesh.
+    m_completeCaptureGeometry=stream.status()==QDataStream::Ok && m_aInd.size()%3==0
+        && (m_aInd.isEmpty() || (!m_aMorphVertex.isEmpty()&&!m_aMorphVertex[0].isEmpty()));
+    for(auto index:m_aInd) {
+        if(index>=m_aVertComp.size()||m_aMorphVertex.isEmpty()){m_completeCaptureGeometry=false;break;}
+        SVertexData vertex;
+        if(!ei::decodeFigureVertexComponent(m_aVertComp[index],m_aMorphVertex[0],m_aNormal,m_aUvCoord,&vertex))m_completeCaptureGeometry=false;
+    }
+
     return true;
 }
 

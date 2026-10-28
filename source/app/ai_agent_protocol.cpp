@@ -92,6 +92,10 @@ QJsonArray toolDefinitions()
     add("shutdown_headless","Close the background mapper only if clean and no operations/previews are pending. Refuses owner windows and unsaved changes; save or undo first.");
     add("get_context","Current profile, MPR/MOB, dirty state and world-layout neighbours.");
     add("read_terrain","Start asynchronous live terrain snapshot: full height statistics and bounded grid. Poll operation_status. Grid vertices are 1 world unit apart; raw * maxZ/65535 gives world height.",region);
+    add("export_map_topdown","Export active unsaved scene to aligned orthographic PNG layers/manifest in a new workspace directory. Read-only mode allowed; creates files but never saves documents. Poll operation_status (120s deadline), cancel_operation cancels. +X right, +Y up; full MPR bounds.",
+        {{"revision",string()},{"outputDir",QJsonObject{{"type","string"},{"maxLength",4096}}},
+         {"pixelsPerWorldUnit",QJsonObject{{"type","integer"},{"minimum",1},{"maximum",4},{"enum",QJsonArray{1,2,4}},{"default",4}}}},{"revision","outputDir"});
+    {auto tool=tools.last().toObject();tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",false},{"openWorldHint",false}};tools[tools.size()-1]=tool;}
     region.insert("layer",QJsonObject{{"type","string"},{"enum",QJsonArray{"land","overlay"}}});
     add("read_paint","Bounded live tile grid (2 world units per tile), packed physical tile, runtime type, semantic corners when known. No inferred materials.",region);
     add("material_palette","Current terrain atlas material identities, paginated.",page);
@@ -103,7 +107,7 @@ QJsonArray toolDefinitions()
     add("list_profile_maps","Start background catalog of MPR/MOB files inside current profile map roots. Poll operation_status.",page);
     auto map = region;map.insert("map",string());map.insert("offset",integer(0,1000000));map.insert("limit",integer(1,MaxPage));
     add("read_profile_map","Read a profile map without opening it: background MPR heights/tiles/materials and matching MOB objects, or a MOB alone. Use relative catalog key, no arbitrary paths. Poll operation_status.",map,{"map"});
-    add("operation_status","Poll bounded operation; results expire after 60 seconds. Running operations have a 30 second deadline.",{{"operation",string()}},{"operation"});
+    add("operation_status","Poll bounded operation; results expire after 60 seconds. Ordinary reads have a 30 second deadline; export_map_topdown has 120 seconds and resolving_resources/capturing/writing phases. Export terminal results consume the slot; files persist.",{{"operation",string()}},{"operation"});
     add("cancel_operation","Cancel a read operation and discard its result.",{{"operation",string()}},{"operation"});
     add("window_snapshot","PNG of editor window, scaled to at most 1024x768 and 384 KiB.");
     add("get_revision","Exact document revision token. Every edit must supply this token; conflicts refuse without changing the map.");

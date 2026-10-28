@@ -14,6 +14,8 @@ attribute vec4 a_overlayTileAnimation;
 attribute vec2 a_overlayGrid;
 attribute vec3 a_materialEmission;
 attribute float a_materialOpacity;
+attribute float a_overlayMaterialType;
+varying highp float v_overlayMaterialType;
 varying highp vec4 v_position;
 varying highp vec3 v_normal;
 varying highp vec2 v_texture;
@@ -90,4 +92,5 @@ void main(void)
   }
   v_materialEmission = a_materialEmission;
   v_materialOpacity = a_materialOpacity;
+  v_overlayMaterialType = a_overlayMaterialType;
 }

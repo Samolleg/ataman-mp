@@ -53,6 +53,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "ai_graph_preview_builder.h"
 #include "unit_visual_preparation.h"
 #include "minimap_bake.h"
+#include "topdown_capture.h"
 #include "tile_brush_stroke_policy.h"
 #include "shadow_cascade.h"
 #include "frame_presentation_telemetry.h"
@@ -193,6 +194,7 @@ class CView : public QGLWidget
     friend class CAiAgentCommand;
     friend class CAiLifecycleCommand;
     friend class CAiAgentServer;
+    friend class CTopdownExport;
     QSharedPointer<CProcessEditLock> m_landEditLease;
     QMap<QString,QSharedPointer<CProcessEditLock>> m_mobEditLeases;
     Q_OBJECT
@@ -471,6 +473,8 @@ public:
         bool includeLoadedStaticGeometry, int targetTextureSize = 256,
         bool finishBake = true);
     static SMinimapSceneCaptureResult finishMinimapSceneCapture(SMinimapSceneCaptureResult capture);
+    QImage captureTopdownPass(ETopdownPass pass, const QSize& size,
+                             const QVector<SRenderItem>& items, QString* error);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);
@@ -1051,6 +1055,8 @@ private:
     QVector3D m_visualWarmupCameraRotation;
     bool m_visualWarmupCameraValid{false};
     bool m_minimapCaptureActive{false};
+    ETopdownPass m_topdownPass{ETopdownPass::None};
+    const QVector<SRenderItem>* m_topdownItems{nullptr};
     bool m_minimapCaptureUnlitPass{false};
     bool m_minimapCaptureIncludeStaticGeometry{false};
     QMatrix4x4 m_minimapCaptureView;

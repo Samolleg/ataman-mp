@@ -8,6 +8,7 @@
 #include <QOpenGLTexture>
 #include "persistent_visual_cache.h"
 #include <QJsonObject>
+#include <QJsonArray>
 #include "figure.h"
 #include "types.h"
 #include "render_material.h"
@@ -45,6 +46,8 @@ public:
     QStringList figurePartNames(const QString& name);
     QByteArray modelAnimation(const QString& name);
     QByteArray resourceData(const QString& name, QString* sourcePath = nullptr) const;
+    QJsonArray figureSources(const QString& resource) const { return m_figureSources.value(resource); }
+    QStringList figureProblems(const QString& resource) const { return m_figureProblems.value(resource); }
 
     void initResource();
     void refreshConfiguredSources();
@@ -61,6 +64,8 @@ private:
     CSettings* m_pSettings;
     QMap<QString, ei::CFigure*> m_aFigure;
     QSet<QString> m_missingFigureNames;
+    QMap<QString,QJsonArray> m_figureSources;
+    QMap<QString,QStringList> m_figureProblems;
     QMap<QString, QByteArray> m_animationArchives;
     QSet<QString> m_missingAnimationNames;
     QList<QString> m_arrFigureForComboBox; //optimization for cell widget
@@ -155,8 +160,10 @@ public:
     // their conservative non-mipmapped path because their small islands can
     // disappear when filtered.
     void setTerrainMipmappingEnabled(bool enabled);
+    bool terrainMipmappingEnabled() const { return m_terrainMipmappingEnabled; }
     QOpenGLTexture* textureDefault();
     ERenderMaterialClass materialClass(QOpenGLTexture* texture) const;
+    QJsonArray textureSources(QOpenGLTexture* texture) const { return m_textureSources.value(texture); }
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     void initResource();
     void refreshConfiguredSources(bool sceneObjectsRetainTextures = false);
@@ -216,6 +223,7 @@ private:
 private:
     static CTextureList* m_pTextureContainer;
     QMap<QString, QOpenGLTexture*> m_aTexture;
+    QMap<QOpenGLTexture*, QJsonArray> m_textureSources;
     QMap<QString, QImage> m_aTextureImages;
     ei::CVisualCacheLru m_layeredTextureLru;
     ei::CVisualCacheLru m_textureImageLru;

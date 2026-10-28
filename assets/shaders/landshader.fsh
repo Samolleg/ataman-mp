@@ -4,6 +4,9 @@ precision mediump int;
 #endif
 
 uniform sampler2D qt_Texture0;
+uniform int u_cartographicPass;
+uniform int u_cartographicOverlayFilter;
+varying highp float v_overlayMaterialType;
 varying highp vec2 qt_TexCoord0;
 uniform highp vec4 u_lightPosition;
 uniform highp float u_lightPower;
@@ -146,6 +149,21 @@ float localShadowVisibility(vec3 world)
 void main(void)
 {
   vec3 norm = normalize(v_normal);
+  bool liquid = v_overlayMaterialType > 1.5 && v_overlayMaterialType < 3.5;
+  bool grass = v_overlayMaterialType > 3.5 && v_overlayMaterialType < 4.5;
+  if ((u_cartographicOverlayFilter == 1 && !liquid)
+      || (u_cartographicOverlayFilter == 2 && (liquid || grass))
+      || (u_cartographicOverlayFilter == 3 && !grass)
+      || (u_cartographicOverlayFilter == 4 && grass)) discard;
+  // Relief measures the real mesh normals; coverage ignores texture color,
+  // waves and authored opacity. Depth testing still uses native overlay Z.
+  if (u_cartographicPass == 1) {
+    float shade = 0.35 + 0.6 * max(dot(norm, normalize(vec3(0.35, 0.45, 0.82))), 0.0);
+    gl_FragColor = vec4(vec3(shade), 1.0); return;
+  }
+  if (u_cartographicPass == 3) {
+    gl_FragColor = vec4(1.0); return;
+  }
   vec4 texColor = texture2D(qt_Texture0, v_texture);
   if (texColor.a <= 0.1)
     discard;

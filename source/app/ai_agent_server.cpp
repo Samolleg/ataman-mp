@@ -6,6 +6,7 @@
 #include "log.h"
 #include "log_rotation.h"
 #include "file_write_activity.h"
+#include "topdown_export.h"
 
 namespace {
 QString agentHistoryPath(){return QDir(QCoreApplication::applicationDirPath()).filePath("logs/agent-workflow.log");}
@@ -80,6 +81,7 @@ void CAiAgentServer::updateStatus()
 }
 void CAiAgentServer::cancelJob(Job& job)
 {
+    if(job.topdown){job.topdown->finished={};job.topdown->cancel();job.topdown.clear();}
     job.cancel->store(true);job.plan.clear();
     if(job.editWatcher){job.editWatcher->disconnect(this);job.editWatcher->deleteLater();job.editWatcher=nullptr;}
     if(job.watcher){job.watcher->disconnect(this);job.watcher->deleteLater();job.watcher=nullptr;}
@@ -194,6 +196,11 @@ void CAiAgentServer::prune()
 {
     const auto now=QDateTime::currentDateTimeUtc();
     for(auto it=m_jobs.begin();it!=m_jobs.end();) {
+        if(it->topdown) {
+            if(!it->complete && it->created.msecsTo(now)>120000)it->topdown->cancel("EXPORT_TIMEOUT");
+            if(it->complete && it->finishedAt.msecsTo(now)>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+            continue;
+        }
         const auto age=it->created.msecsTo(now);
         if(!it->complete&&age>it->deadlineMs){cancelJob(*it);it->complete=true;it->result=ai::error("Operation deadline exceeded");}
         if(age>it->deadlineMs+30000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
@@ -315,18 +322,45 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         return startEdit(method,args);
     }
     if(QApplication::activeModalWidget()&&method!="operation_status"&&method!="cancel_operation")return ai::error("Editor modal interaction in progress; retry later");
+    if(method=="export_map_topdown")return startTopdownExport(args);
     if(method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
     if(method=="operation_status"||method=="cancel_operation") {
         prune();const auto id=args["operation"].toString();if(!m_jobs.contains(id))return ai::error("Unknown or expired operation");
         auto& job=m_jobs[id];
         if(job.edit && job.owner!=m_currentClient)return ai::error("Operation belongs to another writer");
-        if(method=="cancel_operation"){cancelJob(job);m_jobs.remove(id);return {{"status","cancelled"}};}
+        if(method=="cancel_operation"){
+            QJsonObject out{{"operation",id},{"status","cancelled"}};
+            if(job.topdown && !job.complete){job.topdown->cancel();out["result"]=job.topdown->result();}
+            cancelJob(job);m_jobs.remove(id);return out;
+        }
+        if(job.topdown) {
+            QJsonObject out{{"operation",id},{"status",job.topdown->done()?job.topdown->phase():QString("running")},
+                {"phase",job.topdown->phase()},{"deadlineMs",120000}};
+            if(job.complete){out["result"]=job.result;m_jobs.remove(id);}
+            return out;
+        }
         QJsonObject out{{"operation",id},{"status",job.complete?"complete":"running"}};
         if(job.complete)out.insert("result",job.result);return out;
     }
     auto result=CAiReadAdapter::read(m_window,method,args);
     if(method=="get_context"){result["mode"]=m_mode->currentIndex()==2?"edit":"read-only";result["allowSave"]=m_mode->currentIndex()==2&&m_allowSave->isChecked();result["background"]=qApp->property("agentHeadless").toBool();result["dirty"]=CAiEditAdapter::dirty(m_window);}
     return result;
+}
+QJsonObject CAiAgentServer::startTopdownExport(const QJsonObject& args)
+{
+    prune();if(m_jobs.size()>=8)return ai::error("Operation limit 8; cancel or wait for expiry");
+    int running=0;for(const auto& job:m_jobs){if(!job.complete)++running;if(job.topdown&&!job.complete)return ai::error("A topdown export is already running");}
+    if(running>=2)return ai::error("Two reads already running");
+    const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    Job job;job.deadlineMs=120000;job.topdown=QSharedPointer<CTopdownExport>::create(m_window.data(),args);
+    m_jobs.insert(id,job);
+    job.topdown->finished=[this,id](){
+        if(!m_jobs.contains(id))return;
+        auto& j=m_jobs[id];j.result=j.topdown->result();j.complete=true;j.finishedAt=QDateTime::currentDateTimeUtc();
+        m_lastActivity=QDateTime::currentMSecsSinceEpoch();
+    };
+    job.topdown->begin();
+    return {{"operation",id},{"status","running"},{"phase","resolving_resources"},{"deadlineMs",120000},{"poll","operation_status"}};
 }
 namespace {
 class AgentCommitDialogs : public QObject {

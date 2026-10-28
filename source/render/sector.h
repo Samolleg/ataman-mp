@@ -37,6 +37,7 @@ struct STile //todo: delete
 ///
 class CSector
 {
+    friend int runAssemblyCatalogCheck();
 public:
     CSector();
     CSector(QDataStream& stream, float maxZ, int texCount,
@@ -108,6 +109,7 @@ private:
         QVector2D grid;
         QVector3D emission;
         float opacity{1.0f};
+        float materialType{0.0f};
     };
 
     UI2 m_index;
