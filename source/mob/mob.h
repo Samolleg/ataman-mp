@@ -220,6 +220,7 @@ private:
     bool writeAssemblyInstances(const QString& destination, QString* error);
     QVector<uint> m_duplicateIds;
     QString m_lastSaveError;
+    QSet<QString> m_navigationSavePending;
 
     //todo: include ALL nodes into these lists, for node assemly use children\parents
     QList<CNode*> m_aNode;

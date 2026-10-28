@@ -1,6 +1,7 @@
 #include "mpr_document.h"
 #include "endurance_document.h"
 #include "map_save_batch.h"
+#include "navigation_save_events.h"
 #include "process_edit_lock.h"
 #include "backup_manager.h"
 #include "file_write_activity.h"
@@ -125,7 +126,10 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         }
     }
     if(result.error.isEmpty()) {QFile::remove(recoveryPath);result.success=true;manager.scheduleCleanup();
-        if(onCommitted)onCommitted();return result;}
+        if(onCommitted)onCommitted();
+        for(const auto& file:files)if(file.afterFile.isEmpty())
+            CNavigationSaveEvents::committed(file.path,file.before,file.after);
+        return result;}
     for(int i=committed-1;i>=0;--i) {
         const auto& file=files[i];
         bool restored=false;

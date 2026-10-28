@@ -310,6 +310,7 @@ public:
     void setTileGridVisible(bool visible) { m_tileGridVisible = visible; update(); }
     void createNavmeshMenu(QMenu* menu);
     CNavmeshPanel* navmeshPanel() const { return m_navmeshPanel; }
+    void navigationMapSaved(const QString& path, bool navigationChanged);
     CSettings* settings() {Q_ASSERT(m_pSettings); return m_pSettings;}
     int select(const SSelect& selectParam, bool bAddToSelect = false);
     CMob* mob(QString mobName);

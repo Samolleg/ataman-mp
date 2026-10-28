@@ -15,6 +15,7 @@ class QPushButton;
 class QProgressBar;
 class QToolButton;
 class QListWidget;
+class QTimer;
 
 class CNavmeshPanel : public QWidget {
     Q_OBJECT
@@ -34,6 +35,10 @@ public:
     const SNav64Document& document() const {return m_document;}
     // Sole process invocation boundary; UI and isolated checks use this function.
     bool startBake(bool all,const QString& outputRootOverride=QString());
+    // Reads the successfully saved files, even if newer edits are unsaved.
+    // Multiple saves coalesce; a save during a bake schedules one follow-up.
+    void requestBakeOnSave(const QString& outputRootOverride=QString());
+    void acknowledgeSave(const QString& path);
     void cancelBake();
     void setBakerPath(const QString& path);
     bool lastBakeSucceeded() const {return m_lastSuccess;}
@@ -57,6 +62,19 @@ signals:
     void comparisonRequested();
     void regionSelected(const QVector3D& point);
 private:
+    struct SBakeScene {
+        QString mpr,mob,gameRoot,mapsDirectory,outputRoot;
+        qint64 savedAt=0;
+    };
+    SBakeScene currentBakeScene(const QString& outputRoot=QString()) const;
+    QString saveStateKey(const SBakeScene& scene) const;
+    bool startBakeScene(bool all,const SBakeScene& scene,bool automatic);
+    void startPendingBake();
+    void acceptSuccessfulBake();
+    QVector<SBakeScene> m_pendingBakes;
+    SBakeScene m_runningScene;
+    QTimer* m_autoBakeTimer;
+    bool m_shuttingDown=false;
     void drain(bool errors);
     void line(const QByteArray& bytes);
     void freshness();

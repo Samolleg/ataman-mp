@@ -1,5 +1,6 @@
 #include "view.h"
 #include "navmesh_panel.h"
+#include "navigation_save_events.h"
 #include "landscape.h"
 #include "mob.h"
 #include "camera.h"
@@ -40,6 +41,17 @@ void CView::syncNavmeshContext(){
     }
     m_navmeshPanel->setScene(loaded?m_pLand->filePath().absoluteFilePath():QString(),loaded&&m_environmentMob?m_environmentMob->filePath().absoluteFilePath():QString(),m_pSettings?m_pSettings->configuredGameRoot():QString(),maps);
     m_navmeshPanel->setUnsavedChanges(loaded&&(m_pLand->isDirty()||(m_environmentMob&&m_environmentMob->isDirty())));
+}
+void CView::navigationMapSaved(const QString& path,bool navigationChanged){
+    if(!m_navmeshPanel||!m_pLand||!m_pLand->isMprLoad())return;
+    const auto same=[](const QString& a,const QString& b){return QDir::cleanPath(a).compare(QDir::cleanPath(b),Qt::CaseInsensitive)==0;};
+    const auto mpr=m_pLand->filePath().absoluteFilePath();
+    const auto mob=m_environmentMob?m_environmentMob->filePath().absoluteFilePath():QString();
+    const auto navsrc=QFileInfo(mpr).absolutePath()+"/"+QFileInfo(mpr).completeBaseName()+".navsrc";
+    if(!same(path,mpr)&&!same(path,mob)&&!same(path,navsrc))return;
+    syncNavmeshContext();
+    m_navmeshPanel->acknowledgeSave(path);
+    if(navigationChanged)m_navmeshPanel->requestBakeOnSave();
 }
 void CView::drawNavmeshOverlay(int position){
     m_navmeshDrawnTiles=0;m_navmeshDrawnVertices=0;

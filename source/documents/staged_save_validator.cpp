@@ -1,3 +1,5 @@
+#include "navigation_save_events.h"
+#include "file_write_activity.h"
 #include "staged_save_validator.h"
 
 #include <QCryptographicHash>
@@ -278,6 +280,7 @@ SMprSaveCommitResult commitStagedMprTransaction(
     const CMprDocument& baseline, const CMprEditTransaction& transaction,
     const SMprSaveCommitRequest& request)
 {
+    CFileWriteActivity writing;
     SMprSaveCommitResult result;
     result.phase = QStringLiteral("source-check");
     if(request.source.absoluteFilePath().isEmpty()
@@ -418,6 +421,7 @@ SMprSaveCommitResult commitStagedMprTransaction(
 
     result.phase = QStringLiteral("complete");
     result.success = true;
+    CNavigationSaveEvents::committed(request.destination.absoluteFilePath(),destinationBytes,committedBytes);
     return result;
 }
 
@@ -496,6 +500,7 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
     const SMprCanvasResizeRequest& resize,
     const SMprSaveCommitRequest& request)
 {
+    CFileWriteActivity writing;
     SMprSaveCommitResult result;
     result.phase = QStringLiteral("source-check");
     if(request.source.absoluteFilePath().isEmpty()
@@ -671,6 +676,7 @@ SMprSaveCommitResult commitStagedMprCanvasResize(
     }
     result.phase = QStringLiteral("complete");
     result.success = true;
+    CNavigationSaveEvents::committed(request.destination.absoluteFilePath(),destinationBytes,committedBytes);
     return result;
 }
 
@@ -888,6 +894,7 @@ SMobSaveCommitResult commitGeneratedMob(
 SMprBytesSaveCommitResult commitValidatedMprBytes(
     const SMprBytesSaveCommitRequest& request)
 {
+    CFileWriteActivity writing;
     SMprBytesSaveCommitResult result;
     result.phase = QStringLiteral("atlas-limit");
     CMprDocument pageLimitCandidate;CValidationReport pageLimitReport;
@@ -1038,5 +1045,6 @@ SMprBytesSaveCommitResult commitValidatedMprBytes(
     }
     result.phase = QStringLiteral("complete");
     result.success = true;
+    CNavigationSaveEvents::committed(request.destination.absoluteFilePath(),destinationBytes,committedBytes);
     return result;
 }

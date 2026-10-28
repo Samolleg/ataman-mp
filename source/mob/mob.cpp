@@ -14,6 +14,8 @@
 #include <QCoreApplication>
 
 #include "mob.h"
+#include "navigation_save_events.h"
+#include "file_write_activity.h"
 #include "utils.h"
 #include "objects\lever.h"
 #include "objects\light.h"
@@ -2436,6 +2438,7 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
 
 bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
 {
+    CFileWriteActivity writing;
     const QString filePath = path.filePath();
     m_lastSaveError.clear();
     try
@@ -2496,6 +2499,9 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
                 "Atomic save failed. The source file was not replaced.");
             return false;
         }
+        const auto savePath=QFileInfo(filePath).absoluteFilePath();
+        if(CNavigationSaveEvents::geometryChanged(filePath,m_originalData,data))
+            m_navigationSavePending.insert(savePath);
         m_originalData = data;
         CMobDocument savedDocument;
         CValidationReport savedReport;
@@ -2515,6 +2521,7 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         }
         m_assemblyMetadataPending=false;
         if(progress) progress("MOB save complete.", 5, 5);
+        emit CNavigationSaveEvents::instance()->mapSaved(savePath,m_navigationSavePending.remove(savePath)>0);
         return true;
     }
     catch (const std::exception& ex)

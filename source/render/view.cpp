@@ -46,6 +46,7 @@
 #include <algorithm>
 
 #include "view.h"
+#include "navigation_save_events.h"
 #include "navmesh_panel.h"
 #include <QHideEvent>
 #include <QShowEvent>
@@ -4109,6 +4110,8 @@ void CView::initAiGraphPreviewWidget()
     body->addLayout(actions);
     navigation->addWidget(m_aiGraphPreviewBody);
     m_navmeshPanel = new CNavmeshPanel(m_navigationContent);
+    connect(CNavigationSaveEvents::instance(), &CNavigationSaveEvents::mapSaved,
+            this, &CView::navigationMapSaved);
     navigation->addWidget(m_navmeshPanel);
     m_navmeshPanel->hide();
     navigation->addStretch();
