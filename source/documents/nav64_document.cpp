@@ -22,6 +22,9 @@
 
 namespace {
 const quint32 Limit=512u*1024*1024;
+// Accepted wire pairs, independent of whichever producer is currently vendored.
+const struct NavFormat {quint32 container,algorithm;} Formats[]={{3,8},{3,9},{3,10},{8,21},{9,24}};
+bool supportedFormat(quint32 container,quint32 algorithm){for(const auto& f:Formats)if(f.container==container&&f.algorithm==algorithm)return true;return false;}
 struct Reader {
     QByteArray data; int at=0;
     QByteArray bytes(quint32 n) { if(n>quint32(data.size()-at))throw QStringLiteral("Обрезанный контейнер Nav64"); auto b=data.mid(at,int(n));at+=int(n);return b; }
@@ -38,14 +41,14 @@ SNav64Header header(Reader& r) {
     if(h.algorithm==7)throw QStringLiteral("Устаревшая сетка: алгоритм 7 игра не примет. Перепеките navmesh запекателем r13 или новее.");
     if(!nav64SupportedAlgorithms().contains(h.algorithm))throw QStringLiteral("Алгоритм Nav64 %1 не поддерживается: перепеките/обновите маппер").arg(h.algorithm);
     if(r.u32()!=0x010600||r.u32()!=0x12345678||r.u32()!=8)throw QStringLiteral("Несовместимый ABI Nav64: нужен Detour 1.6.0 / DT_POLYREF64 / little endian");
-    if((h.container==3&&h.algorithm==21)||(h.container==8&&h.algorithm!=21))throw QStringLiteral("Несовместимая пара контейнер/алгоритм Nav64");
+    if(!supportedFormat(h.container,h.algorithm))throw QStringLiteral("Несовместимая пара контейнер/алгоритм Nav64");
     if(h.container==3)h.fingerprint=r.string();
     h.mpr=r.string();h.mob=r.string();h.profile=r.string();
     if((h.container==3&&!QRegularExpression("^[0-9a-f]{64}$").match(h.fingerprint).hasMatch())||
        !QRegularExpression("^[a-z0-9_-]+\\.mpr$").match(h.mpr).hasMatch()||
        !QRegularExpression("^[a-z0-9_-]+\\.mob$").match(h.mob).hasMatch()||!nav64Profiles().contains(h.profile))throw QStringLiteral("Неверная идентичность Nav64");
     auto& p=h.body;p.radius=r.f32();p.height=r.f32();p.slope=r.f32();p.climb=r.f32();p.cellSize=r.f32();p.cellHeight=r.f32();p.tileCells=r.u32();
-    if(h.container==8){p.materialClass=r.u32();if(p.materialClass>7||p.tileCells!=96)throw QStringLiteral("Неверный класс движения / размер тайла Nav64 алгоритма21");}
+    if(h.container!=3){p.materialClass=r.u32();if(p.materialClass>7||p.tileCells!=96)throw QStringLiteral("Неверный класс движения / размер тайла Nav64");}
     if(p.radius<0||p.radius>100||p.height<=0||p.height>100||p.slope<0||p.slope>90||p.climb<0||p.cellSize<=0||p.cellHeight<=0||!p.tileCells||p.tileCells>4096)throw QStringLiteral("Неверный профиль Nav64");
     return h;
 }
@@ -113,8 +116,8 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params,float heightT
 }
 }
 QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
-QVector<quint32> nav64SupportedContainers(){return {3,Navigation::ContainerVersion};}
-QVector<quint32> nav64SupportedAlgorithms(){return {8,9,10,Navigation::AlgorithmVersion};}
+QVector<quint32> nav64SupportedContainers(){QVector<quint32> result;for(const auto& f:Formats)if(!result.contains(f.container))result<<f.container;return result;}
+QVector<quint32> nav64SupportedAlgorithms(){QVector<quint32> result;for(const auto& f:Formats)if(!result.contains(f.algorithm))result<<f.algorithm;return result;}
 QVector4D nav64AreaColor(int area){const auto c=QColor::fromHsv((area*43+100)%360,160,235);return {float(c.redF()),float(c.greenF()),float(c.blueF()),.33f};}
 QString nav64AreaName(int area){
     // Producer aiMap assigns the reduced movement class (dwTerrains nibble),
@@ -140,7 +143,7 @@ SNav64Bodies readNav64Bodies(const QString& path){
         Reader r{f.readAll()};if(r.u32()!=0x59444f42)throw QStringLiteral("Неверная сигнатура таблицы тел");
         out.version=r.u32();out.algorithm=r.u32();out.sampleCount=r.u32();
         if(out.version!=1)throw QStringLiteral("Версия таблицы тел %1 не поддерживается").arg(out.version);
-        if(out.algorithm!=10&&out.algorithm!=Navigation::AlgorithmVersion)throw QStringLiteral("Алгоритм таблицы тел %1 не поддерживается").arg(out.algorithm);
+        if(!nav64SupportedAlgorithms().contains(out.algorithm)||out.algorithm<10)throw QStringLiteral("Алгоритм таблицы тел %1 не поддерживается").arg(out.algorithm);
         if(out.sampleCount>1000000||quint64(out.sampleCount)*40>quint64(r.data.size()-r.at))throw QStringLiteral("Неверное число образцов таблицы тел");
         using Key=std::tuple<QString,float,float,float>;std::set<Key> keys;Key previous;bool first=true;
         for(quint32 i=0;i<out.sampleCount;++i){
@@ -168,22 +171,23 @@ SNav64Document loadNav64(const QString& path){
     try{
         QFile file(path);if(!file.open(QIODevice::ReadOnly)||file.size()>Limit)throw QStringLiteral("Не удалось открыть Nav64 / превышен лимит");Reader r{file.readAll()};out.header=header(r);
         dtNavMeshParams params{};for(float& x:params.orig)x=r.f32();params.tileWidth=r.f32();params.tileHeight=r.f32();params.maxTiles=int(r.u32());params.maxPolys=int(r.u32());
-        const int sections=out.header.container==8?2:3;
-        if(params.tileWidth<=0||params.tileHeight<=0||params.maxTiles<=0||params.maxTiles>16384||params.maxPolys<=0||params.maxPolys>32768||r.u32()!=quint32(sections))throw QStringLiteral("Неверные параметры Detour/секции");
+        const int sections=out.header.container!=3?2:3;
+        if(params.tileWidth<=0||params.tileHeight<=0||params.maxTiles<=0||params.maxTiles>131072||params.maxPolys<=0||params.maxPolys>32768||r.u32()!=quint32(sections))throw QStringLiteral("Неверные параметры Detour/секции");
+        if(out.header.container!=3&&((params.maxTiles&(params.maxTiles-1))||params.maxPolys!=32768||params.tileWidth!=out.header.body.cellSize*out.header.body.tileCells||params.tileHeight!=params.tileWidth))throw QStringLiteral("Несовместимые границы тайлов Nav64");
         QByteArray tileBytes;QSet<quint32> seen;
         for(int i=0;i<sections;++i){const auto type=r.u32();Reader s{r.bytes(r.u32())};if(seen.contains(type))throw QStringLiteral("Повтор секции");seen.insert(type);
             if(type==1){if(s.u32()!=5)throw QStringLiteral("Неподдерживаемый codec Nav64");const auto expanded=s.u32(),compressed=s.u32();auto input=s.bytes(compressed);s.end();tileBytes=expand(input,expanded);}
-            else if(type==2){if(s.u32()!=1||s.u32()!=quint32(out.header.container==8?2:1))throw QStringLiteral("Неверный домен Nav64");s.end();}
+            else if(type==2){if(s.u32()!=1||s.u32()!=quint32(out.header.container!=3?2:1))throw QStringLiteral("Неверный домен Nav64");s.end();}
             else if(type==3&&out.header.container==3){if(s.u32()!=0)throw QStringLiteral("Неизвестный build layer Nav64");s.end();}
             else throw QStringLiteral("Неизвестная секция Nav64");
         }r.end();if(!seen.contains(1)||!seen.contains(2)||(sections==3&&!seen.contains(3)))throw QStringLiteral("Нет обязательной секции Nav64");
         auto mesh=std::shared_ptr<dtNavMesh>(dtAllocNavMesh(),dtFreeNavMesh);if(!mesh||dtStatusFailed(mesh->init(&params)))throw QStringLiteral("Detour init: ошибка");Reader t{tileBytes};const auto count=t.u32();if(count>quint32(params.maxTiles))throw QStringLiteral("Слишком много тайлов");
         for(quint32 i=0;i<count;++i){
             auto b=unshuffleTile(t.bytes(t.u32()));out.detailOutlierVertices+=validateTile(b,params,2*out.header.body.cellHeight);
-            if(out.header.container==8){
+            if(out.header.container!=3){
                 const auto* h=reinterpret_cast<const dtMeshHeader*>(b.constData());
                 const auto supports=t.u32();if(supports!=quint32(h->polyCount))throw QStringLiteral("Число привязок поверхностей не совпадает с полигонами");
-                for(quint32 j=0;j<supports;++j){const auto sources=t.u32();if(!sources||sources>quint32((t.data.size()-t.at)/8))throw QStringLiteral("Неверное число исходных поверхностей полигона");
+                for(quint32 j=0;j<supports;++j){const auto sources=t.u32();if(!sources||sources>1024||sources>quint32((t.data.size()-t.at)/8))throw QStringLiteral("Неверное число исходных поверхностей полигона");
                     QSet<quint64> ids;for(quint32 k=0;k<sources;++k){const quint64 low=t.u32(),high=t.u32(),id=low|(high<<32);if(!id||ids.contains(id))throw QStringLiteral("Неверная / повторная поверхность полигона");ids.insert(id);}
                 }
             }

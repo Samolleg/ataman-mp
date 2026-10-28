@@ -6,8 +6,8 @@
 #include <array>
 
 namespace Navigation {
-constexpr std::uint32_t ContainerVersion = 8;
-constexpr std::uint32_t AlgorithmVersion = 21;
+constexpr std::uint32_t ContainerVersion = 9;
+constexpr std::uint32_t AlgorithmVersion = 24;
 constexpr std::uint32_t LibraryVersion = 0x010600;
 struct Point { float x = 0, y = 0, z = 0; };
 inline bool Finite(Point p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z); }
@@ -50,12 +50,13 @@ struct Location {
 };
 enum class Status { Complete, NoMesh, Invalid, NoStart, NoGoal, NoPath, Limit, TooLong };
 const char* StatusName(Status status);
-// Inflated standing-unit footprint, used only by one synchronous path query.
+// Physical standing-unit footprint, used only by one synchronous path query.
 struct Obstacle { Point position; float radius=0,height=0; int id=0; };
 struct Request {
     Point source, goal;
     const Location* start = nullptr; // transient source polygon; never serialized
     const std::vector<Obstacle>* obstacles = nullptr;
+    unsigned short excludedFlags = 0;
     float goalRadius = 0, maxLength = 1.e6f, height = 0;
     float areaCosts[16] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
 };

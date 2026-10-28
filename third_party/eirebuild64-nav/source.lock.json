@@ -73,13 +73,13 @@
       "path": "Navigation/README.md"
     },
     {
-      "sha256": "a3720984bbf02859ea888e60f1ed75271ef433c15077973a07398ecb6c076828",
+      "sha256": "da7aba8a1b31acc3243f0e4e5339459ab8f87ebdfdda175d68f014b3cafbaa74",
       "path": "Navigation/Types.h"
     }
   ],
   "permission": "собственный код владельца, разрешение на перенос 2026-10-27",
   "license": "Navigation: owner permission; Detour: zlib (external/recastnavigation/License.txt)",
-  "sourceCommit": "d6a8bbfc72692e0df559bc0b20c8d8c68a4385e0",
+  "sourceCommit": "61e3c0af543e234e50ec6459f8ddf8fe42fce96c",
   "recastCommit": "6dc1667f580357e8a2154c28b7867bea7e8ad3a7",
   "recastVersion": "1.6.0",
   "sourceRepository": "Samolleg/EIRebuild64"
