@@ -60,6 +60,13 @@ int runAssemblyCatalogCheck(){
             out<<"REAL_BAKE_NOT_SUCCESSFUL exit="<<panel.lastBakeExitCode()<<"\n";
         }
         check(panel.grab().save(root+"/real-bake-panel.png"),"offscreen real bake panel saved");
+        panel.setScene(liveMaps+"/bz19g.mpr",liveMaps+"/bz19g.mob",live,liveMaps);
+        check(panel.startBake(false,root+"/second-output"),"independent bz19g successful-output scenario starts");
+        check(until([&](){return !panel.busy();},180000),"bz19g baker finishes");
+        write(root+"/bz19g-baker.log",panel.bakeLog().toUtf8());
+        check(panel.lastBakeSucceeded()&&panel.lastBakeExitCode()==0,"bz19g real exit0 and complete BAKE_DONE");
+        for(const auto& profile:nav64Profiles()){const auto d=loadNav64(root+"/second-output/Maps/Nav64/bz19g--bz19g."+profile+".nav64");check(d.valid&&d.header.algorithm==21,"read freshly baked bz19g profile: "+profile);}
+        check(until([&](){return panel.document().valid&&panel.document().header.mpr=="bz19g.mpr";}),"successful bake refreshes actual production layer");
         out<<"RESULT "<<passed<<" PASS 0 FAIL\n";out.flush();return 0;
     }catch(const QString& error){out<<"ERROR "<<error<<"\nRESULT "<<passed<<" PASS 1 FAIL\n";out.flush();return 1;}
 }
