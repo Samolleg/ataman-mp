@@ -83,6 +83,7 @@ private:
     SNav64BakerIdentity m_bakerIdentity;
     QString m_inspectedBaker,m_lastMismatch;
     QString m_runningBakerSha,m_lastBodiesStatus;
+    QString m_reportRoot,m_failureDetail;
     QLabel* m_bodiesStatus;
     QPushButton* m_exportLosses;
     qint64 m_bakerSize=-1,m_bakerMtime=-1;

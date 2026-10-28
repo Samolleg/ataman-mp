@@ -74,7 +74,11 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
         drain(false);drain(true);if(!m_stdout.isEmpty())line(m_stdout);if(!m_stderr.isEmpty())line(m_stderr);m_stdout.clear();m_stderr.clear();
         m_lastExit=code;m_lastSuccess=!m_cancelled&&status==QProcess::NormalExit&&code==0&&m_done&&!m_errors;
         m_log->appendPlainText(m_lastSuccess?QStringLiteral("Запекание завершено: exit=0 и BAKE_DONE errors=0."):QStringLiteral("Запекание не завершено: exit=%1, BAKE_DONE=%2%3").arg(code).arg(m_done).arg(m_cancelled?QStringLiteral(", отменено"):QString()));
-        if(!m_lastSuccess)m_status->setText(m_cancelled?QStringLiteral("Запекание отменено. Подробности в журнале."):QStringLiteral("Запекание не завершено (код %1). Проверьте ошибки в журнале.").arg(code));
+        if(!m_lastSuccess){
+            m_status->setText(m_cancelled?QStringLiteral("Запекание отменено. Подробности в журнале."):QStringLiteral("Запекание не завершено (код %1). %2").arg(code).arg(m_failureDetail.isEmpty()?QStringLiteral("Проверьте ошибки в журнале."):m_failureDetail));
+            m_logToggle->setChecked(true);
+        }
+        if(!m_reportRoot.isEmpty()){QSaveFile log(QDir(m_reportRoot).filePath("bake.log"));if(log.open(QIODevice::WriteOnly)){const auto text=m_log->toPlainText().toUtf8();if(log.write(text)==text.size())log.commit();}}
         m_backups.clear();controls();
         if(m_lastSuccess&&m_requestMpr==m_mpr&&m_requestMob==m_mob){m_directory=QDir(m_outputRoot).filePath("Maps/Nav64");reload();}emit bakeFinished(m_lastSuccess);
     });
@@ -153,7 +157,7 @@ void CNavmeshPanel::line(const QByteArray& bytes){
         }
     }
     if(s.startsWith("BAKE_DONE ")){bool mapsOk=false,completedOk=false;const int maps=fields.value("maps").toInt(&mapsOk),completed=fields.value("completed").toInt(&completedOk);m_done=mapsOk&&completedOk&&maps>0&&completed==maps&&fields.value("errors")=="0"&&fields.value("missing")=="0";if(!m_done)m_errors=true;}
-    if(s.startsWith("MAP_ERROR ")||s.startsWith("BAKE_ERROR ")){m_errors=true;m_status->setText(QStringLiteral("Ошибка запекания: ")+s);}
+    if(s.startsWith("MAP_ERROR ")||s.startsWith("BAKE_ERROR ")){m_errors=true;m_failureDetail=s.contains(" reason=")?s.section(" reason=",1):s;m_status->setText(QStringLiteral("Ошибка запекания: ")+m_failureDetail);}
     if(s.startsWith("MAP_MISSING ")){m_errors=true;m_status->setText(QStringLiteral("Нет исходников MPR/MOB: %1 / %2. Карта пропущена (код 5).").arg(fields.value("mpr"),fields.value("mob")));m_log->appendPlainText(m_status->text());}
     // Keep every PROFILE/MAP_DONE record visible; neither implies overall success.
     if(s.startsWith("PROFILE ")){
@@ -183,10 +187,13 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     QDir maps(m_mapsDirectory);if(maps.dirName().compare("Maps",Qt::CaseInsensitive)!=0)return fail(QStringLiteral("Для запекания задайте каталог Maps активного мода."));maps.cdUp();const QString mod=maps.absolutePath();
     if(m_gameRoot.isEmpty()||!QDir(m_gameRoot).exists())return fail(QStringLiteral("Не задан корректный корень игры."));
     m_outputRoot=outputRootOverride.isEmpty()?mod:QDir(outputRootOverride).absolutePath();const QString output=QDir(m_outputRoot).filePath("Maps/Nav64");
+    m_reportRoot=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("nav64-reports/"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")+"-"+QUuid::createUuid().toString(QUuid::WithoutBraces));
+    if(!QDir().mkpath(m_reportRoot))return fail(QStringLiteral("Не удалось создать приватный каталог отчётов запекания: ")+m_reportRoot);
+    m_failureDetail.clear();m_log->clear();m_log->appendPlainText(QStringLiteral("Отчёты и журнал: ")+m_reportRoot);
     m_requestMpr=m_mpr;m_requestMob=m_mob;m_backups.clear();
     const QString prefix=QFileInfo(m_mpr).completeBaseName().toLower()+"--"+QFileInfo(m_mob).completeBaseName().toLower()+".";
-    for(const auto& entry:QDir(output).entryInfoList({"*.nav64","bodies.navbody"},QDir::Files)){if(!all&&entry.fileName()!="bodies.navbody"&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
-    QStringList args{"--game-root",m_gameRoot,"--mod",mod,"--output-root",m_outputRoot};if(all)args<<"--all";else args<<"--map"<<QFileInfo(m_mpr).completeBaseName()<<"--mob"<<QFileInfo(m_mob).completeBaseName();
+    for(const auto& entry:QDir(output).entryInfoList({"*.nav64","*.navgeom","*.navworld","bodies.navbody"},QDir::Files)){if(!all&&entry.fileName()!="bodies.navbody"&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
+    QStringList args{"--game-root",m_gameRoot,"--mod",mod,"--output-root",m_outputRoot,"--report-root",m_reportRoot};if(all)args<<"--all";else args<<"--map"<<QFileInfo(m_mpr).completeBaseName()<<"--mob"<<QFileInfo(m_mob).completeBaseName();
     m_stdout.clear();m_stderr.clear();m_done=false;m_errors=false;m_cancelled=false;m_log->appendPlainText(QStringLiteral("Вывод: ")+output);
     m_completedProfiles=0;m_progress->setRange(0,0);m_status->setText(QStringLiteral("Запекание: подготовка геометрии…"));m_heightOutliers->hide();
     m_process->setWorkingDirectory(m_gameRoot);m_process->start(exe,args);controls();return true;

@@ -6,8 +6,8 @@
 #include <array>
 
 namespace Navigation {
-constexpr std::uint32_t ContainerVersion = 3;
-constexpr std::uint32_t AlgorithmVersion = 10;
+constexpr std::uint32_t ContainerVersion = 8;
+constexpr std::uint32_t AlgorithmVersion = 21;
 constexpr std::uint32_t LibraryVersion = 0x010600;
 struct Point { float x = 0, y = 0, z = 0; };
 inline bool Finite(Point p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z); }
@@ -20,7 +20,8 @@ inline Point FromNav(Point p) { return {p.x,-p.z,p.y}; }
 struct Profile {
     float radius = .4f, height = 1.6f, slope = 40.f, climb = .35f;
     float cellSize = .1f, cellHeight = .05f;
-    std::uint32_t tileCells = 256;
+    std::uint32_t tileCells = 96;
+    unsigned materialClass = 3;
 };
 // Four nested clearance permissions, independent of material areas. A human
 // uses one mesh in every pose; the query chooses one of these bits.
@@ -49,8 +50,12 @@ struct Location {
 };
 enum class Status { Complete, NoMesh, Invalid, NoStart, NoGoal, NoPath, Limit, TooLong };
 const char* StatusName(Status status);
+// Inflated standing-unit footprint, used only by one synchronous path query.
+struct Obstacle { Point position; float radius=0,height=0; int id=0; };
 struct Request {
     Point source, goal;
+    const Location* start = nullptr; // transient source polygon; never serialized
+    const std::vector<Obstacle>* obstacles = nullptr;
     float goalRadius = 0, maxLength = 1.e6f, height = 0;
     float areaCosts[16] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
 };
