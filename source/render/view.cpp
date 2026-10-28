@@ -17469,6 +17469,12 @@ void CView::notifyMobScriptChanged(CMob* mob)
     emit mobScriptChanged(mob, cp1251->toUnicode(mob->script().toLatin1()));
 }
 
+void CView::malachiteHistoryStep(bool redo)
+{
+    if(!m_pUndoStack) return;
+    if(redo) m_pUndoStack->redo(); else m_pUndoStack->undo();
+}
+
 void CView::importExternalMobScript(CMob* mob, const QString& storedScript,
                                     const QString& displayScript)
 {

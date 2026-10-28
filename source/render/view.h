@@ -291,6 +291,7 @@ public:
                                 const SMobParameterState& after);
     void commitMobScriptEdit(CMob* mob, const QString& storedScript,
                              const QString& commandText);
+    void malachiteHistoryStep(bool redo);
     void notifyMobScriptChanged(CMob* mob);
     bool hasActiveMob() const { return m_activeMob != nullptr; }
     bool hasDirtyWorldTerrain() const { return !m_worldTerrainSession.dirtyPaths().isEmpty(); }

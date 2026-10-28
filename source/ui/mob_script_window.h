@@ -6,6 +6,7 @@
 class CMob;
 class CView;
 class CScriptEditor;
+class CMalachiteBridge;
 class QCloseEvent;
 
 class CMobScriptWindow final : public QWidget
@@ -39,12 +40,14 @@ private:
     static QString canonicalScriptText(QString text);
     bool applyCurrentText();
     bool hasLocalChanges() const;
+    void startMalachite();
 
     CMob* m_mob;
     CView* m_view;
     CScriptEditor* m_editor;
     QString m_committedDisplayScript;
     bool m_closeAccepted;
+    CMalachiteBridge* m_malachite = nullptr;
 };
 
 #endif

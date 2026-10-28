@@ -1,5 +1,6 @@
 #include "window_geometry.h"
 #include "mob_script_window.h"
+#include "malachite_bridge.h"
 
 #include <QCloseEvent>
 #include <QHBoxLayout>
@@ -9,6 +10,11 @@
 #include <QTextCodec>
 #include <QVBoxLayout>
 #include <QTextCursor>
+#include <QFileInfo>
+#include <QLabel>
+#include <QTimer>
+#include <QScreen>
+#include <QGuiApplication>
 #include "scenario_analysis.h"
 
 #include "mob/mob.h"
@@ -55,17 +61,48 @@ CMobScriptWindow::CMobScriptWindow(CMob* mob, CView* view, QWidget* parent)
     connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
     QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, &CMobScriptWindow::applyScript);
+    if(QFileInfo::exists(CMalachiteBridge::executable()))
+        QTimer::singleShot(0,this,&CMobScriptWindow::startMalachite);
+}
+
+void CMobScriptWindow::startMalachite()
+{
+    if(m_malachite) return;
+    // A draft entered before the asynchronous startup belongs to the classic
+    // buffer. Never hide it behind a different snapshot.
+    if(m_editor->toPlainText()!=m_committedDisplayScript) return;
+    m_editor->setReadOnly(true);
+    auto* bridge = new CMalachiteBridge(m_mob,m_view,this);
+    m_malachite=bridge;
+    if(auto* screen=QGuiApplication::primaryScreen()) {
+        const auto available=screen->availableGeometry().size()-QSize(60,80);
+        resize(qMin(qMax(width(),2100),available.width()),qMin(qMax(height(),1250),available.height()));
+    }
+    qobject_cast<QVBoxLayout*>(layout())->insertWidget(0,bridge,1);
+    connect(bridge,&CMalachiteBridge::opened,this,[this](bool){m_editor->hide();setWindowTitle(tr("Malachite — MOB Script: %1").arg(m_mob->filePath().absoluteFilePath()));});
+    connect(bridge,&CMalachiteBridge::draftChanged,this,[this](){emit analysisBufferChanged();});
+    connect(bridge,&CMalachiteBridge::failed,this,[this,bridge](const QString& error){
+        m_editor->setPlainText(bridge->text());m_editor->setReadOnly(false);m_editor->show();bridge->hide();
+        auto* warning=new QLabel(tr("Malachite is unavailable. Script text retained: %1").arg(error),this);
+        warning->setWordWrap(true);qobject_cast<QVBoxLayout*>(layout())->insertWidget(0,warning);
+        m_malachite=nullptr;bridge->deleteLater();emit analysisBufferChanged();
+    });
+    bridge->start(qEnvironmentVariableIntValue("EI_MALACHITE_VERIFY")==1);
 }
 
 QString CMobScriptWindow::analysisText() const
 {
-    return m_editor->toPlainText();
+    return m_malachite ? m_malachite->text() : m_editor->toPlainText();
 }
 
 bool CMobScriptWindow::navigateToSource(const QString& analyzedText, int offset)
 {
-    if(scenario::normalizedText(analyzedText) != m_editor->toPlainText())
+    if(scenario::normalizedText(analyzedText) != analysisText())
         return false;
+    if(m_malachite && m_malachite->ready()) {
+        m_malachite->command("navigate",{{"offset",offset}});
+        show();raise();activateWindow();return true;
+    }
     QTextCursor cursor(m_editor->document());
     cursor.setPosition(qBound(0, offset, m_editor->toPlainText().size()));
     cursor.select(QTextCursor::LineUnderCursor);
@@ -94,14 +131,15 @@ QString CMobScriptWindow::canonicalScriptText(QString text)
 
 bool CMobScriptWindow::hasLocalChanges() const
 {
-    return m_editor->toPlainText() != m_committedDisplayScript;
+    return m_malachite ? m_malachite->hasDraft() : m_editor->toPlainText() != m_committedDisplayScript;
 }
 
 bool CMobScriptWindow::applyCurrentText()
 {
     if(!m_mob || !m_view)
         return false;
-    const QString display = canonicalScriptText(m_editor->toPlainText());
+    if(m_malachite && m_malachite->hasDraft()) return false;
+    const QString display = canonicalScriptText(analysisText());
     const QString currentDisplay = displayScript(m_mob);
     if(display == canonicalScriptText(currentDisplay))
     {
@@ -148,6 +186,11 @@ void CMobScriptWindow::onMobScriptChanged(CMob* mob, const QString& display)
     if(mob != m_mob)
         return;
     const QString normalizedDisplay = canonicalScriptText(display);
+    if(m_malachite) {
+        m_editor->setPlainText(normalizedDisplay);
+        m_committedDisplayScript=normalizedDisplay;
+        return;
+    }
     if(normalizedDisplay == canonicalScriptText(m_editor->toPlainText()))
     {
         m_committedDisplayScript = m_editor->toPlainText();
@@ -216,6 +259,7 @@ void CMobScriptWindow::closeEvent(QCloseEvent* event)
     m_closeAccepted = true;
     // WA_DeleteOnClose is deferred; detach this buffer before a CMob can be
     // destroyed or a replacement editor opened for the same map.
+    delete m_malachite; m_malachite=nullptr;
     m_mob = nullptr;
     emit analysisBufferChanged();
     event->accept();

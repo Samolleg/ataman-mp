@@ -32,6 +32,10 @@ foreach($line in Get-Content -LiteralPath $manifest) {
 }
 Copy-Item -LiteralPath (Join-Path $release 'EIMapperEndurance.exe'),(Join-Path $release 'EIMapperMcp.exe') -Destination $stage -Force
 Copy-Item -LiteralPath (Join-Path $release 'runtime') -Destination $stage -Recurse -Force
+if(Test-Path -LiteralPath (Join-Path $release 'tools/Malachite')) {
+    New-Item -ItemType Directory -Path (Join-Path $stage 'tools') -Force|Out-Null
+    Copy-Item -LiteralPath (Join-Path $release 'tools/Malachite') -Destination (Join-Path $stage 'tools') -Recurse -Force
+}
 & (Join-Path $QtBin 'windeployqt.exe') --release --compiler-runtime (Join-Path $stage 'EIMapperEndurance.exe')
 if($LASTEXITCODE -ne 0){throw 'Qt deployment failed.'}
 foreach($name in @('Qt5Concurrent.dll','Qt5Network.dll')){Copy-Item -LiteralPath (Join-Path $QtBin $name) -Destination $stage -Force}
