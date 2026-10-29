@@ -155,6 +155,8 @@ int runDiplomacyCheck()
     if(!dialog || dialog->result().sources.isEmpty()) { qApp->removeEventFilter(&hidden); return 2; }
     auto* groups=dialog->findChild<QTreeWidget*>("diplomacyGroups");
     auto* npcs=dialog->findChild<QTreeWidget*>("diplomacyNpcs");
+    if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE") && view->m_diplomacyOverlay)
+        view->m_diplomacyOverlay->grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".legend.png");
     check(groups && groups->topLevelItem(12)->text(1)=="1" && groups->topLevelItem(13)->text(2)=="1","initial NPC count separated from SetPlayer calls");
     groups->setCurrentItem(groups->topLevelItem(13));
     check(npcs->topLevelItemCount()==1 && npcs->topLevelItem(0)->text(2)=="11" && npcs->topLevelItem(0)->text(3)=="12","possible group lists NPC with initial group preserved");
@@ -245,6 +247,8 @@ int runDiplomacyCheck()
     QMetaObject::invokeMethod(relations,"cellClicked",Q_ARG(int,14),Q_ARG(int,15));
     auto* relationMenu=dialog->findChild<QMenu*>("diplomacyRelationMenu");
     check(relationMenu && relationMenu->actions().size()==4,"clicking matrix cell opens three-choice relation editor");
+    if(relationMenu && !qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE"))
+        relationMenu->grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".menu.png");
     if(relationMenu && relationMenu->actions().size()==4) relationMenu->actions()[3]->trigger();
     check(mob->diplomacyField()[14][15]==2,"popup action routes selected value to owning MOB");
     if(relationMenu) relationMenu->close();
@@ -375,9 +379,9 @@ int runDiplomacyCheck()
     auto* browseAlly=browser.findChild<QPushButton*>("diplomacySetRelation0");
     browseAlly->click(); relationSources->setCurrentIndex(relationSources->findData(base.key)); browseAlly->click();
     check(editRequests==1 && editedSource==base.key,"direct editing routes only to selected loaded MOB");
-    check(browseMatrix->item(0,0)->background().color()==diplomacy::relationColor(0).darker(220)
-        && browseMatrix->item(1,2)->background().color()==diplomacy::relationColor(2).darker(220)
-        && browseMatrix->item(1,3)->background().color()==diplomacy::relationColor(1).darker(220),"readable relation matrix keeps green/yellow/red meanings");
+    check(browseMatrix->item(0,0)->background().color()==QColor(Qt::darkGreen)
+        && browseMatrix->item(1,2)->background().color()==QColor(Qt::darkRed)
+        && browseMatrix->item(1,3)->background().color()==QColor(Qt::darkYellow),"relation matrix shares mapper green/yellow/red cell colors");
     browsing.sources={readOnly}; browser.invalidate();
     check(waitFor(browser) && relationSources->count()==1 && browseMatrix->item(3,4)->text()=="7" && !editButton->isEnabled(),"removing selected source cannot show or edit stale relations");
     browsing.sources[0].relations.clear(); browser.invalidate();

@@ -45,12 +45,8 @@ void CView::setDiplomacyMapMode(bool enabled)
         auto* panel = new CViewportWidget(this);
         m_diplomacyOverlay = panel;
         panel->setObjectName("diplomacyMapOverlay");
-        panel->setViewportSurfaceColor(QColor("#202a35"));
-        panel->setStyleSheet(
-            "QFrame#diplomacyMapOverlay { border: 1px solid #526d87; border-radius: 6px; }"
-            "QLabel { color: #dfe9f4; background: transparent; border: none; }"
-            "QPushButton { padding: 4px 9px; border: 1px solid #536779; border-radius: 4px; background: #2e4052; color: #e8f1fa; }"
-            "QPushButton:hover { background: #3d5871; }");
+        panel->setFrameShape(QFrame::StyledPanel);
+        panel->setStyleSheet("QPushButton { padding: 4px 9px; }");
         auto* layout = new QVBoxLayout(panel);
         layout->setContentsMargins(12,9,12,9); layout->setSpacing(6);
         auto* top = new QHBoxLayout;

@@ -104,7 +104,7 @@ public:
         QStyledItemDelegate::paint(painter,colored,index);
         if(option.state&QStyle::State_Selected) {
             painter->save(); painter->setBrush(Qt::NoBrush);
-            painter->setPen(QPen(QColor("#c5deed"),2)); painter->drawRect(option.rect.adjusted(1,1,-2,-2)); painter->restore();
+            painter->setPen(QPen(option.palette.color(QPalette::Highlight),2)); painter->drawRect(option.rect.adjusted(1,1,-2,-2)); painter->restore();
         }
     }
 };
@@ -137,21 +137,14 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     setObjectName("diplomacyInspector"); setWindowTitle(tr("Diplomacy"));
     setWindowIcon(sectionIcon(SectionIcon::Groups));
     setAttribute(Qt::WA_QuitOnClose,false); resize(1280,820); setMinimumSize(900,560);
+    // Keep spacing local; colors, selection and controls follow the mapper theme.
     setStyleSheet(
-        "QDialog#diplomacyInspector { background: #1d252f; color: #e1e9f3; }"
-        "QDialog#diplomacyInspector QLabel { color: #dce6f2; background: transparent; }"
-        "QTreeWidget, QTableWidget, QPlainTextEdit { background: #161e27; alternate-background-color: #202c38; color: #dce6f2; border: 1px solid #344658; border-radius: 5px; selection-background-color: #355e82; selection-color: #ffffff; }"
         "QTreeWidget::item { min-height: 29px; padding: 2px 5px; }"
-        "QHeaderView::section { background: #293848; color: #b9cada; border: none; border-right: 1px solid #3a4d60; padding: 6px; }"
-        "QLineEdit, QComboBox { background: #16212d; color: #e2ebf5; border: 1px solid #425970; border-radius: 5px; padding: 7px; }"
-        "QPushButton, QToolButton { background: #2b3d50; color: #e1ecf7; border: 1px solid #445d75; border-radius: 5px; padding: 7px 12px; }"
-        "QPushButton:hover, QToolButton:hover { background: #3a5570; }"
-        "QPushButton:disabled { background: #28313c; color: #8795a5; border-color: #354250; }"
-        "QTabWidget::pane { border: none; }"
-        "QTabBar::tab { background: #263444; color: #bacbdb; padding: 9px 20px; margin-right: 5px; border-radius: 5px; }"
-        "QTabBar::tab:selected { background: #3b6183; color: #ffffff; }"
-        "QCheckBox { color: #cedbea; spacing: 7px; padding: 3px; }"
-        "QSplitter::handle { background: #344658; }");
+        "QHeaderView::section { padding: 6px; }"
+        "QLineEdit, QComboBox { padding: 7px; }"
+        "QPushButton, QToolButton { padding: 7px 12px; }"
+        "QTabBar::tab { padding: 9px 20px; margin-right: 5px; }"
+        "QCheckBox { spacing: 7px; padding: 3px; }");
     ei::rememberWindowGeometry(this,QStringLiteral("diplomacyInspector"));
     auto* layout=new QVBoxLayout(this); layout->setSpacing(10); layout->setContentsMargins(18,16,18,14);
     auto* heading=new QHBoxLayout;
@@ -541,7 +534,6 @@ void CDiplomacyDialog::populateRelations() {
     for(int r=0;r<32;++r) for(int c=0;c<32;++c) {
         const auto value=src->relations[r][c]; auto* item=new QTableWidgetItem(QString::number(value));
         item->setFlags(item->flags() & ~Qt::ItemIsEditable); ei::applyRelationCellColors(item,int(value)); item->setTextAlignment(Qt::AlignCenter);
-        if(value<3) { item->setBackground(diplomacy::relationColor(value).darker(220)); item->setForeground(QColor("#e8f1fa")); }
         const QStringList labels={tr("Ally"),tr("Neutral"),tr("Enemy")};
         item->setToolTip(names[r]+" → "+names[c]+"\n"+(value<3?labels[int(value)]:tr("Unknown relation"))+"\n"+tr("Stored value: %1").arg(value)); m_relations->setItem(r,c,item);
     }
@@ -587,8 +579,10 @@ void CDiplomacyDialog::openRelationMenu(int row,int column) {
     if(m_relationMenu) m_relationMenu->close();
     auto* menu=new QMenu(this); m_relationMenu=menu; menu->setObjectName("diplomacyRelationMenu");
     menu->setAttribute(Qt::WA_DeleteOnClose);
-    menu->setStyleSheet("QMenu { background: #233344; color: #e5eef9; border: 1px solid #58718b; padding: 5px; } QMenu::item { padding: 9px 28px 9px 12px; } QMenu::item:selected { background: #3b6183; }");
-    menu->addSection(tr("Group %1 → group %2").arg(row).arg(column));
+    menu->setStyleSheet("QMenu::item { padding: 9px 28px 9px 12px; }");
+    const QString heading=tr("Group %1 → group %2").arg(row).arg(column);
+    menu->addSection(heading);
+    menu->setMinimumWidth(menu->fontMetrics().horizontalAdvance(heading)+48);
     const QStringList labels={tr("Ally"),tr("Neutral"),tr("Enemy")};
     for(uint value=0;value<3;++value) {
         auto* action=menu->addAction(colorIcon(diplomacy::relationColor(value)),labels[int(value)]);
