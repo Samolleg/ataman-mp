@@ -151,7 +151,9 @@ bool evaluateConstantString(QString expression, QString* output)
     expression = expression.trimmed();
     while(expression.startsWith('(') && expression.endsWith(')'))
         expression = expression.mid(1, expression.size() - 2).trimmed();
-    if(expression.size() >= 2 && expression.startsWith('"') && expression.endsWith('"'))
+    const QRegularExpression literal(QStringLiteral("^\"(?:[^\"\\\\]|\\\\.)*\"$"),
+                                     QRegularExpression::DotMatchesEverythingOption);
+    if(literal.match(expression).hasMatch())
     {
         QString value = expression.mid(1, expression.size() - 2);
         value.replace("\\\"", "\"");
@@ -197,7 +199,19 @@ QVector<ScriptMobReference> addMobReferences(const QString& script)
     QVector<ScriptMobReference> result;
     const QString cleaned = stripScriptComments(script);
     const QRegularExpression call("\\bAddMob\\s*\\(", QRegularExpression::CaseInsensitiveOption);
-    QRegularExpressionMatchIterator iterator = call.globalMatch(cleaned);
+    // Keep offsets, but mask string contents when finding call names. A script
+    // can print text containing AddMob without requesting another document.
+    QString calls = cleaned;
+    bool inString = false, stringEscape = false;
+    for(int i = 0; i < calls.size(); ++i)
+    {
+        const QChar ch = cleaned.at(i);
+        if(inString) calls[i] = QChar(' ');
+        if(inString && ch == '\\' && !stringEscape) { stringEscape = true; continue; }
+        if(ch == '"' && !stringEscape) inString = !inString;
+        stringEscape = false;
+    }
+    QRegularExpressionMatchIterator iterator = call.globalMatch(calls);
     while(iterator.hasNext())
     {
         const QRegularExpressionMatch match = iterator.next();
@@ -226,7 +240,8 @@ QVector<ScriptMobReference> addMobReferences(const QString& script)
         reference.expression = cleaned.mid(expressionStart, qMax(0, cursor - expressionStart - 1)).trimmed();
         reference.line = cleaned.left(match.capturedStart()).count('\n') + 1;
         QString resolved;
-        reference.resolved = evaluateConstantString(reference.expression, &resolved);
+        reference.resolved = depth == 0 && evaluateConstantString(reference.expression, &resolved)
+            && !resolved.trimmed().isEmpty();
         if(reference.resolved)
         {
             reference.fileName = QFileInfo(resolved).fileName();
@@ -864,6 +879,29 @@ QVector<SMobFamilyFinding> CMobFamilyValidationReport::blockingRuntimeFindings()
 bool CMobFamilyValidationReport::hasBlockingRuntimeFindings() const
 {
     return !blockingRuntimeFindings().isEmpty();
+}
+
+QStringList CMobFamilyValidator::addMobPaths(const QString& script, const QString& sourcePath,
+                                            const QStringList& mapRoots, QStringList* warnings)
+{
+    QStringList paths;
+    for(const auto& reference : addMobReferences(script))
+    {
+        const QString location = QString("%1:%2").arg(QFileInfo(sourcePath).fileName()).arg(reference.line);
+        if(!reference.resolved)
+        {
+            if(warnings) warnings->append(QString("%1: AddMob(%2): имя не является константой или вызов неполон")
+                                         .arg(location, reference.expression));
+            continue;
+        }
+        const QString path = resolveMob(reference.fileName, sourcePath, mapRoots);
+        if(path.isEmpty())
+        {
+            if(warnings) warnings->append(QString("%1: AddMob: файл не найден: %2").arg(location, reference.fileName));
+        }
+        else if(!paths.contains(path, Qt::CaseInsensitive)) paths.append(path);
+    }
+    return paths;
 }
 
 bool CMobFamilyValidator::isAuthorableObjectNid(quint32 nid)

@@ -125,6 +125,7 @@ public:
     void testFunc1();
 
 private:
+    bool loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress = nullptr);
     void createTravelEditor(QMenu* menu);
     void refreshTravelContext();
     void refreshTravelEditor();

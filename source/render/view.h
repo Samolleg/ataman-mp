@@ -271,7 +271,7 @@ public:
     bool clearCanvasNavigationStale(QString* error = nullptr);
     bool applyCanvasResizeToCurrent(const SMprCanvasResizeRequest& resize,
                                     bool removeOutsideObjects, QString* error = nullptr);
-    bool loadMob(QFileInfo& filePath);
+    bool loadMob(QFileInfo& filePath, QStringList* nonModalWarnings = nullptr);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();

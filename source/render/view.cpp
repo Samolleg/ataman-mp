@@ -16752,7 +16752,7 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
                          m_terrainPaintProjectionLand, hit);
 }
 
-bool CView::loadMob(QFileInfo &filePath)
+bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
 {
     QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
     if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return false;}
@@ -16782,7 +16782,7 @@ bool CView::loadMob(QFileInfo &filePath)
     // this widget's OpenGL context non-current.
     if(isValid())
         makeCurrent();
-    const int result = pMob->readMob(filePath);
+    const int result = pMob->readMob(filePath, true, nonModalWarnings);
     if(result != 0)
     {
         ei::log(eLogWarning, QString("MOB load was rejected without registering a partial document path:%1 result:%2")

@@ -3136,8 +3136,9 @@ bool CJmvMapTestLauncher::stage(const SJmvMapTestLaunchInput& input, QString* er
     }
     QString godmodeBootstrapPath;
     QStringList supplementalMobNames;
-    for(const QString& path : stagedSupplementalPaths)
-        supplementalMobNames.append(QFileInfo(path).fileName());
+    for(int index = 0; index < stagedSupplementalPaths.size(); ++index)
+        if(input.supplementalMobs.at(index).forceLoad)
+            supplementalMobNames.append(QFileInfo(stagedSupplementalPaths.at(index)).fileName());
     if(isJmv && !prepareGodmodeBootstrap(input.profile.mapDirectories, m_runRoot,
                                          input.spawn, input.spawnZ, input.godmode,
                                          supplementalMobNames,

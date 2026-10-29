@@ -1169,8 +1169,13 @@ CNode *CMob::undo_deleteNode(uint mapId, int restoreIndex)
     return nullptr;
 }
 
-int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
+int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot, QStringList* nonModalWarnings)
 {
+    const auto report = [&](bool critical, const QString& title, const QString& message) {
+        if(nonModalWarnings) nonModalWarnings->append(path.fileName() + ": " + message);
+        else if(critical) QMessageBox::critical(nullptr, title, message);
+        else QMessageBox::warning(nullptr, title, message);
+    };
     if (!path.exists())
         return 1;
 
@@ -1192,7 +1197,7 @@ int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
         {
             ei::log(eLogFatal, QString("Refusing MOB open after strict structural validation failed path:%1 findings:%2")
                 .arg(m_filePath.absoluteFilePath(), structuralReport.toText().trimmed()));
-            QMessageBox::critical(nullptr,
+            report(true,
                 QCoreApplication::translate("CMob", "Invalid MOB structure"),
                 QCoreApplication::translate("CMob",
                     "Endurance could not account for the complete MOB structure. The file was not opened.\n\n%1")
@@ -1222,7 +1227,7 @@ int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
         if(!criticalValidationMessages.isEmpty())
         {
             criticalValidationMessages.removeDuplicates();
-            QMessageBox::warning(nullptr,
+            report(false,
                 QCoreApplication::translate("CMob", "MOB validation warning"),
                 QCoreApplication::translate("CMob",
                     "Validation found an issue that may cause crashes in game.\n\n%1\n\n"
@@ -1235,7 +1240,7 @@ int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
         {
             ei::log(eLogWarning, QString("MOB opened without recovery snapshot:%1 error:%2")
                 .arg(m_filePath.absoluteFilePath(), openBackup.error));
-            QMessageBox::warning(nullptr,
+            report(false,
                 QCoreApplication::translate("CMob", "Endurance backup warning"),
                 QCoreApplication::translate("CMob",
                     "The MOB was opened, but its recovery snapshot could not be created.\n\n%1\n\n"
@@ -1246,7 +1251,7 @@ int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot)
         {
             ei::log(eLogFatal, QString("Legacy MOB projection stopped before completing path:%1")
                 .arg(m_filePath.absoluteFilePath()));
-            QMessageBox::critical(nullptr,
+            report(true,
                 QCoreApplication::translate("CMob", "Unsupported MOB projection"),
                 QCoreApplication::translate("CMob",
                     "The MOB is structurally valid, but the current editor projection could not interpret it completely. "

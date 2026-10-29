@@ -32,6 +32,9 @@ struct SJmvSupplementalMobInput
 {
     QFileInfo sourceMob;
     QByteArray mobData;
+    // Auto-opened script dependencies are staged for redirection, but their
+    // original conditional/nested AddMob calls remain responsible for execution.
+    bool forceLoad = true;
 };
 
 struct SJmvMapTestLaunchInput

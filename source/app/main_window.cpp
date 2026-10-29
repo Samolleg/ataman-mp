@@ -4781,6 +4781,7 @@ void MainWindow::launchCurrentMapTest()
         SJmvSupplementalMobInput staged;
         staged.sourceMob = supplemental->filePath();
         staged.mobData = data;
+        staged.forceLoad = !supplemental->loadedFromAddMob();
         supplementalMobs.append(staged);
     }
 
@@ -6911,7 +6912,7 @@ void MainWindow::openCollection(const QString& path)
         progress.setValue(progressValue++);
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QFileInfo mob(mobPath);
-        m_pView->loadMob(mob);
+        loadMobWithDependencies(mob, &progress);
         rememberRecentFile(mob);
     }
     rememberRecentFile(QFileInfo(resolved.mprPath));
@@ -7399,7 +7400,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
     mapLoadPhase.restart();
-    if(!terrainOnly) m_pView->loadMob(mobFile);
+    if(!terrainOnly) loadMobWithDependencies(mobFile, &progress);
     const qint64 mobMs = mapLoadPhase.elapsed();
     mapLoadPhase.restart();
     rememberRecentFile(QFileInfo(mprPath));
@@ -8255,6 +8256,72 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
     return true;
 }
 
+bool MainWindow::loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress)
+{
+    if(!m_pView->loadMob(fileName)) return false;
+    CMob* primary = m_pView->currentMob();
+    primary->setLoadedFromAddMob(false);
+    QVector<CMob*> pending{primary};
+    QSet<QString> scheduled{CProcessEditLock::identity(primary->filePath().absoluteFilePath())};
+    QSet<QString> visited;
+    QStringList warnings;
+    const QStringList roots = activeMapRoots().toList();
+    // Traverse the scripts of successfully opened documents. Shared dependencies
+    // and cycles use the same canonical identity as the document registry/leases.
+    for(int i = 0; i < pending.size(); ++i)
+    {
+        CMob* source = pending.at(i);
+        const QString identity = CProcessEditLock::identity(source->filePath().absoluteFilePath());
+        if(visited.contains(identity)) continue;
+        visited.insert(identity);
+        const auto paths = CMobFamilyValidator::addMobPaths(
+            m_pView->scenarioScriptText(source), source->filePath().absoluteFilePath(), roots, &warnings);
+        for(const QString& path : paths)
+        {
+            const QString key = CProcessEditLock::identity(path);
+            if(visited.contains(key)) continue;
+            CMob* dependency = nullptr;
+            for(CMob* loaded : m_pView->mobs())
+                if(CProcessEditLock::identity(loaded->filePath().absoluteFilePath()) == key)
+                { dependency = loaded; break; }
+            if(!dependency)
+            {
+                if(progress) progress->setLabelText(tr("Loading MOB: %1").arg(QFileInfo(path).fileName()));
+                // Document projection emits progress and pumps events itself.
+                // Restore the primary before pumping the next dependency's load.
+                QFileInfo next(path);
+                if(m_pView->loadMob(next, &warnings))
+                {
+                    dependency = m_pView->currentMob();
+                    dependency->setLoadedFromAddMob(true);
+                }
+                else
+                {
+                    visited.insert(key);
+                    warnings.append(tr("AddMob: не удалось открыть %1 (см. журнал сообщений)").arg(path));
+                }
+                m_pView->changeCurrentMob(primary);
+            }
+            if(dependency && !scheduled.contains(key))
+            {
+                scheduled.insert(key);
+                pending.append(dependency);
+            }
+        }
+    }
+    m_pView->changeCurrentMob(primary);
+    ei::log(eLogInfo, QString("AddMob workspace traversal primary:%1 visited:%2 warnings:%3")
+            .arg(fileName.absoluteFilePath()).arg(visited.size()).arg(warnings.size()));
+    if(!warnings.isEmpty())
+    {
+        for(const QString& warning : warnings) ei::log(eLogWarning, warning);
+        showTransientResultNotification(
+            tr("Загрузка MOB из AddMob: предупреждения\n%1").arg(warnings.mid(0, 5).join('\n')),
+            false, true, QString(), ETransientNotificationAction::None, 15000);
+    }
+    return true;
+}
+
 bool MainWindow::loadMobWithProgress(QFileInfo fileName)
 {
     if(!beginWorkspaceLoad(tr("MOB %1").arg(fileName.fileName())))
@@ -8266,7 +8333,7 @@ bool MainWindow::loadMobWithProgress(QFileInfo fileName)
     progress.setMinimumDuration(250);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    const bool loaded = m_pView->loadMob(fileName);
+    const bool loaded = loadMobWithDependencies(fileName, &progress);
     progress.close();
     endWorkspaceLoad();
     updateDocumentActionAvailability();

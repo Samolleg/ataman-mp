@@ -129,6 +129,9 @@ class CMobFamilyValidator
 {
 public:
     static bool isAuthorableObjectNid(quint32 nid);
+    // Direct static AddMob edges only; callers own traversal and document loading.
+    static QStringList addMobPaths(const QString& script, const QString& sourcePath,
+                                  const QStringList& mapRoots, QStringList* warnings = nullptr);
     static CMobFamilyValidationReport validate(const SMobFamilyValidationRequest& request);
 };
 

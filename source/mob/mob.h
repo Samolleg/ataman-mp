@@ -56,6 +56,9 @@ public:
     using SaveProgress = std::function<void(const QString&, int, int)>;
     CMob();
     ~CMob();
+    // Workspace provenance only; never serialized into the game document.
+    bool loadedFromAddMob() const { return m_loadedFromAddMob; }
+    void setLoadedFromAddMob(bool value) { m_loadedFromAddMob = value; }
     static bool readTemplateParameters(const QFileInfo& source,
                                        SMobParameterState* state,
                                        QString* error = nullptr);
@@ -63,7 +66,8 @@ public:
     static bool validateEditableProjection(const QByteArray& data,
                                            const QFileInfo& source,
                                            QString* error = nullptr);
-    int readMob(QFileInfo& path, bool createRecoverySnapshot = true);
+    int readMob(QFileInfo& path, bool createRecoverySnapshot = true,
+                QStringList* nonModalWarnings = nullptr);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
@@ -195,6 +199,7 @@ private:
     CView* m_view;
     CProgressView* m_pProgress;
     QFileInfo m_filePath;
+    bool m_loadedFromAddMob{false};
     uint m_scriptKey;
     QString m_script;
     mutable QString m_idReservationScript;
