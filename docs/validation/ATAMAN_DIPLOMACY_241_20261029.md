@@ -92,13 +92,30 @@ PowerShell задан только для процесса, системные �
 `c68d21187b2738b305d0ae354b2086e64719ac51`; `source-match.json` подтверждает
 **719/719** production-входов,0 working drift/0 index mismatch.
 
-**Установка ожидает закрытия редактора владельцем.** Read-only CIM preflight
-обнаружил в постоянной установке EIMapperEndurance.exe PID22336,
-creation29.10.2026 18:01:26. Редактор и мосты не завершались. По договору
-TEST_BUILD_HANDOFF владелец получил просьбу сохранить работу и закрыть окно.
-Пока постоянная папка остаётся240. После закрытия разрешён guarded install
-241 с новым rollback, сохранностью пользовательских файлов и проверкой PID
-мостов; отдельного разрешения на уже порученную замену программы не требуется.
+Первый preflight обнаружил открытый редактор240 PID22336; установка ждала
+его закрытия. Владелец ответил «Маппер закрыт — установить»; новый CIM preflight
+подтвердил закрытый editor/runtime. Никакие процессы не завершались агентом.
+
+**Установлено241** штатным `packaging/install_program.ps1` в постоянную
+`artifacts/EI-Mapper-Ataman-2-first-test`. `install.log`: **186 verified /
+8 changed /0 added /0 removed**. `installed-verification.json`: installed
+CLI **EI Mapper Endurance Edition241 /exit0**, VERSION241, все186 SHA
+совпали с новым manifest,4 бинарника совпали с проверенной Release/staging.
+GUI установки не запускался. Старый зарегистрированный mapped-файл сохранён
+штатным установщиком (retired removed0/retained1).
+
+`install-user-before.json` / `install-user-after.json` / comparison:
+**19668/19668 пользовательских файлов**,0 изменений набора/SHA/размера/
+native-mtime. Исключались только manifest-managed paths и точные зарегистрированные
+retired-файлы/служебные квитанции установщика. `install-process-comparison.json`:
+**11/11 MCP-мостов** сохранили PID/creation/path. Настройки, карты, кэши,
+сохранения и прочие пользовательские файлы сохранены.
+
+Новый `artifacts/rollback240-to241-diplomacy-20261029` прошёл
+`rollback.ps1 -VerifyOnly` (**ROLLBACK_VERIFIED**, `rollback-verify.log`).
+Прежние чужие rollback не удалялись. Реализация, сборка и установка завершены;
+без push. Рабочие чужие ROADMAP/qm сохранены, новые игровые файлы не создавались
+в живой установке игры. Визуальная приёмка владельцем остаётся отдельно.
 
 ## Приёмка владельцем
 
