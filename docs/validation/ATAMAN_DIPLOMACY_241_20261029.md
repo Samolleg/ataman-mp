@@ -88,6 +88,9 @@ PowerShell задан только для процесса, системные �
 0 removed**, validator PASS,0 stale files удалено. Путь чистого комплекта:
 `work/investigations/diplomacy-241/build-staging-241-diplomacy`; после
 финализации он не запускается. Чужой рабочий qm восстановлен по исходному SHA.
+Реализация зафиксирована scoped в main:
+`c68d21187b2738b305d0ae354b2086e64719ac51`; `source-match.json` подтверждает
+**719/719** production-входов,0 working drift/0 index mismatch.
 
 **Установка ожидает закрытия редактора владельцем.** Read-only CIM preflight
 обнаружил в постоянной установке EIMapperEndurance.exe PID22336,
