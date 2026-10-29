@@ -2,7 +2,7 @@
 
 База main `346bd8d55947886571eb6d03a8e1d6dbf819ee2b` /238. Дополнение
 владельца к исходному заданию: snapshot + читаемая основа + MCP-просмотр
-зарегистрированных слоёв/фрагментов. Состояние на подготовку: VERIFIED / PREPARED239,
+зарегистрированных слоёв/фрагментов. Состояние: VERIFIED / INSTALLED239,
 без push. Рабочие данные, настройки и чужие dirty-правки сохраняются.
 
 ## Реализация
@@ -119,6 +119,24 @@ SHA mapper `8BA30A122201151F5F27D174DE0D26AF61A79C8259B88167A3969D977CEEE6B2`;
 bridge `5EE1FEE5E8D4A22A53FB96DF902BE21E553CE8BD0D571D1FEB0B0422DF4B10A9`.
 Квитанции: staging-identity.json, stage.log, finalize.log в build-topdown-239.
 
-Осталось выполнить штатную установку и записать source SHA/сохранность файлов.
+Реализация main `0d402376adad68ad884f84756fe4e82d5f33c508`.
+695 production-входов сборки сопоставлены с Git blob и raw SHA-256
+(source-inputs.json / source-match.json); чужая translations/ei_mapper_ru.qm
+сохранена побайтно:068C0225F2EAF94600C1FB906D93D94716F06F22829BD7CE823F23E1DEE8E2D6.
+
+Установлена каноническим install_program.ps1 в постоянную
+`artifacts/EI-Mapper-Ataman-2-first-test`:186 verified,8 changed,0 added,0 removed,
+installed --version239/exit0. Все19395 пользовательских файлов сохранили набор,
+SHA/размер/native-mtime;5/5 прежних bridge сохранили PID/creation/path.
+Редактор/runtime host перед заменой закрыты, мосты не останавливались.
+Автоматически удалены только4 ранее записанных освобождённых retired-файла.
+Rollback `artifacts/rollback238-to239-topdown-add-20261029` VerifyOnly PASS.
+Собственный прежний237→238 удалён только после VerifyOnly, проверки точного
+пути, полного состава190 файлов и SHA-цепочки с новым backup; чужие поколения
+не менялись. Квитанции install.log, install-user-before/after.json,
+install-bridges-before/after.json, rollback-verify.log, retired-own-rollback.json.
+
+Один обычный reconnect MCP загружает новый bridge EXE и каталог239. Уже работающие
+мосты продолжают использовать свои mapped images до штатного переподключения.
 Видимое окно/другой GPU и игровая упаковка MMP не проверялись. Семантическая
 roads-mask недоступна; исходный нестабильный237 timeout не воспроизведён на238.
