@@ -61,10 +61,32 @@ fixtures/снимки — `work/investigations/diplomacy-theme-242/` (не в Gi
 Реализация scoped main `8003c7c83953f039fd758a73c7e90e94864811f2`;
 `source-match.json`:719/719 production-входов,0 working drift/0 index mismatch.
 
-Пока постоянная папка остаётся241: preflight обнаружил открытый редактор
-PID30804/creation29.10.2026 20:53:34. Владельцу показан снимок исправленной242
-и передана просьба сохранить работу и закрыть редактор по TEST_BUILD_HANDOFF.
-Следующий шаг — guarded install с сохранностью файлов и MCP-процессов.
+Сначала preflight обнаружил открытый редактор241 PID30804 и установка ждала.
+После ответа владельца «Закрыл — установить242» новый CIM preflight подтвердил
+закрытый editor/runtime; никакие процессы агентом не завершались.
+
+Установлена242 штатным `packaging/install_program.ps1` в постоянную
+`artifacts/EI-Mapper-Ataman-2-first-test`. `install.log`: **186 verified /
+7 changed /0 added /0 removed**. `installed-verification.json`: CLI
+**EI Mapper Endurance Edition242 /exit0**, VERSION242;186 SHA совпали
+с manifest,4 бинарника совпали с проверенными raw/staged. GUI установки
+не запускался. Новые функциональные прогоны на неизменной сборке не повторялись.
+
+`install-user-before.json` / `install-user-after.json` / comparison:
+**17643/17643 пользовательских файла**,0 изменений набора/SHA/размера/
+native-mtime. Исключались manifest-managed paths и точные зарегистрированные
+retired-файлы/служебные квитанции. `install-process-comparison.json`:
+**10/10 MCP-мостов** сохранили PID/creation/path. Настройки, карты, сохранения,
+кэши и остальные пользовательские файлы сохранены.
+
+Новый `artifacts/rollback241-to242-diplomacy-theme-20261029` прошёл
+`rollback.ps1 -VerifyOnly` (**ROLLBACK_VERIFIED**, `rollback-verify.log`).
+Автоматическая проверка безопасности отклонила плановое удаление старого
+собственного `rollback240-to241-diplomacy-20261029`: необратимое удаление190
+файлов без отдельного явного разрешения. Команда не запускалась, обход
+отказа не предпринимался; выбран безопасный вариант сохранения обеих копий.
+Прежние чужие rollback также сохранены. Установка242 завершена; отложенная
+очистка резервных копий не влияет на программу. Без push.
 
 ## Границы
 
