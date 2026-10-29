@@ -9,6 +9,7 @@
 #include "render_queue.h"
 #include "render_performance.h"
 #include "selection_region.h"
+#include "diplomacy_colors.h"
 
 int main(int argc, char** argv)
 {
@@ -152,6 +153,39 @@ int main(int argc, char** argv)
     cutout.bind(0);part.drawSelect(&selection);selection.setUniformValue("u_modelMmatrix",QMatrix4x4());selection.setUniformValue("u_color",QVector4D(0,1,0,1));
     opaque.bind(0);part.drawSelect(&selection);
     check(count(margin,1)==margin.width()*margin.height()&&count(center)==center.width()*center.height(),"transparent front permits picking opaque geometry behind");
+    // Diplomacy colors travel with each queued model, including identical meshes.
+    auto tintImage=[&](const QVector4D& first,const QVector4D& second) {
+        setup(visible); auto& colorQueue=RenderQueueContext::instance(); colorQueue.begin(&visible,{});
+        colorQueue.setDiplomacyTint(first);
+        colorQueue.submit(&part,&opaque,left,ERenderMaterialClass::Opaque,false);
+        colorQueue.setDiplomacyTint(second);
+        colorQueue.submit(&part,&opaque,right,ERenderMaterialClass::Opaque,false);
+        colorQueue.end(); return fbo.toImage();
+    };
+    const QImage untinted=tintImage({},{});
+    const auto enemy=diplomacy::mapTint(diplomacy::relationColor(2));
+    const auto ally=diplomacy::mapTint(diplomacy::relationColor(0));
+    const auto neutral=diplomacy::mapTint(diplomacy::relationColor(1));
+    const auto unknown=diplomacy::mapTint(diplomacy::groupColor(-1));
+    const QImage redGreen=tintImage(enemy,ally);
+    const QColor red=redGreen.pixelColor(35,64),green=redGreen.pixelColor(93,64);
+    out<<"Diplomacy GPU pixels "<<red.name()<<" "<<green.name()<<'\n';
+    check(red.red()>red.green()*1.5 && green.green()>green.red()*2,"actual GPU same-mesh NPCs retain independent red and green tints");
+    const QImage yellowGray=tintImage(neutral,unknown);
+    const QColor yellow=yellowGray.pixelColor(35,64),gray=yellowGray.pixelColor(93,64);
+    check(yellow.red()>yellow.blue()*2 && yellow.green()>yellow.blue()*2
+        && qAbs(gray.red()-gray.blue())<55,"actual GPU neutral yellow and unknown gray");
+    check(tintImage({},{} )==untinted,"disabling mode restores exact ordinary rendered bytes");
+    const QImage isolated=tintImage(enemy,{});
+    check(isolated.pixelColor(93,64)==untinted.pixelColor(93,64),"tint cannot leak from NPC to following uncolored scenery");
+    SRenderItem batchA,batchB; batchA.instanceEligible=batchB.instanceEligible=true;
+    batchA.materialClass=batchB.materialClass=ERenderMaterialClass::Opaque;
+    batchA.diplomacyTint=enemy; batchB.diplomacyTint=ally;
+    check(!shareInstanceBatch(batchA,batchB),"different diplomatic colors split instance batch");
+    batchB.diplomacyTint=enemy; check(shareInstanceBatch(batchA,batchB),"equal diplomatic colors still permit instancing");
+    setup(selection); queue.beginSelection(&selection); queue.setDiplomacyTint(enemy);
+    queue.submitSelection(&part,&cutout,left,{1,0,0,1});queue.submitSelection(&part,&opaque,right,{0,1,0,1});queue.end();
+    check(count(full,1)>count(full)*8,"diplomacy never replaces picking IDs or alpha silhouettes");
     check(gl->glGetError()==GL_NO_ERROR,"OpenGL status");
     RenderQueueContext::instance().releaseGpuResources();
     out<<"TOTAL "<<checks<<" assertions, failures="<<failures<<'\n';out.flush();

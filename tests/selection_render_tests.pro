@@ -2,7 +2,7 @@ QT += core gui opengl
 CONFIG += console c++11
 CONFIG -= app_bundle
 TARGET = selection_render_tests
-INCLUDEPATH += ../source/core ../source/render
+INCLUDEPATH += ../source/core ../source/render ../source/ui
 SOURCES += selection_render_tests.cpp \
     ../source/render/part.cpp \
     ../source/render/render_queue.cpp \

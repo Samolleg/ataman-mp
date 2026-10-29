@@ -279,6 +279,14 @@ public:
     void unloadActiveMob();
     void openActiveMobEditParams();
     void openMobDiplomacyTable(CMob* mob);
+    void setDiplomacyMapMode(bool enabled);
+    bool diplomacyMapMode() const { return m_diplomacyMapMode; }
+    void clearDiplomacyAnchor();
+    bool focusDiplomacyNpc(const QString& source, const QString& key);
+    QColor diplomacyNpcColor(CUnit* unit) const;
+    bool editDiplomacyRelation(const QString& source, int row, int column,
+                              uint value, bool symmetric, uint expected, uint expectedReverse);
+    bool createDiplomacyTable(const QString& source);
     void openActiveMobScript();
     QString scenarioScriptText(CMob* mob, bool* draft = nullptr) const;
     bool openScenarioSource(CMob* mob, const QString& analyzedText, int offset);
@@ -901,6 +909,8 @@ public slots:
     void exportTerrainPaintDiagnostic();
 
 signals:
+    void diplomacyMapModeChanged(bool enabled);
+    void diplomacyWindowRequested();
     void canvasResizeMobPathsRequested(QStringList* paths);
     void modelConnectionSourcesChanged(const QStringList& labels,const QStringList& ids);
     void modelConnectionStatusChanged(const QString& status);
@@ -1145,6 +1155,12 @@ private:
     QHash<CMob*, QPointer<CMobScriptWindow>> m_scriptWindows;
     QVector<QVector3D> m_scenarioParticipants, m_scenarioSpawns,
                        m_scenarioDestinations, m_scenarioLinks;
+    bool m_diplomacyMapMode{false};
+    QPointer<CUnit> m_diplomacyAnchor;
+    QWidget* m_diplomacyOverlay{nullptr};
+    void setDiplomacyAnchor(CUnit* unit);
+    void updateDiplomacyOverlay();
+    void drawDiplomacyObjectVisual(CNode* node, bool active);
     CRoundMobForm* m_pRoundForm;
     QTimer* m_mprModifyTimer;
     QDateTime m_lastModifiedLand;

@@ -4881,6 +4881,7 @@ void CView::resizeEvent(QResizeEvent* event)
 {
     QGLWidget::resizeEvent(event);
     positionEnvironmentPreviewWidget();
+    updateDiplomacyOverlay();
 }
 
 void CView::applyRenderScheduling()
@@ -6630,6 +6631,7 @@ void CView::drawTestOverlaysOpenGl()
         && !(m_neighborLayoutDragActive && !m_worldMapSnapPreview.seams.isEmpty())
         && m_scenarioParticipants.isEmpty() && m_scenarioSpawns.isEmpty()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
+        && !(m_diplomacyMapMode && m_diplomacyAnchor)
         && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty() && m_leverApproachLines.isEmpty()
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
         && !(m_navmeshPanel && m_navmeshPanel->layerVisible()))
@@ -6788,6 +6790,9 @@ void CView::drawTestOverlaysOpenGl()
     scenarioGlyphs(m_scenarioParticipants, QVector4D(0.1f,0.9f,1.f,1.f), false);
     scenarioGlyphs(m_scenarioSpawns, QVector4D(0.9f,0.35f,1.f,1.f), true);
     scenarioGlyphs(m_scenarioDestinations, QVector4D(1.f,0.75f,0.15f,1.f), true);
+    if(m_diplomacyMapMode && m_diplomacyAnchor && ownerMob(m_diplomacyAnchor)
+       && !m_diplomacyAnchor->isMarkDeleted() && isMobVisible(ownerMob(m_diplomacyAnchor)))
+        scenarioGlyphs({m_diplomacyAnchor->drawPosition()}, QVector4D(1.f,1.f,1.f,1.f), false);
     if(!m_scenarioLinks.isEmpty()) {
         m_program.setUniformValue(ei::uniformLocation(&m_program, "customColor"), QVector4D(1.f,0.8f,0.3f,0.9f));
         m_program.setAttributeArray(position, m_scenarioLinks.constData());
@@ -9137,7 +9142,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                 if(!m_minimapCaptureActive
                    && node->nodeState() == ENodeState::eSelect)
                     continue;
-                node->drawObjectVisual(false, &m_program);
+                drawDiplomacyObjectVisual(node, false);
                 colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
@@ -9156,7 +9161,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                && (m_minimapCaptureActive
                    || node->nodeState() != ENodeState::eSelect))
             {
-                node->drawObjectVisual(true, &m_program);
+                drawDiplomacyObjectVisual(node, true);
                 colorSubmittedNodes.insert(node);
                 if(performance.collecting())
                     ++performance.counters().nodesSubmitted;
@@ -9243,7 +9248,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
                             continue;
                         m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"),
                             mob == m_activeMob ? activeHighlight : lockedHighlight);
-                        node->drawObjectVisual(mob == m_activeMob, &m_program);
+                        drawDiplomacyObjectVisual(node, mob == m_activeMob);
                         renderQueue.flush();
                         if(performance.collecting())
                         {
@@ -16538,7 +16543,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
     const CViewFrustum frustum(m_projection * viewMatrix);
 
     QList<CNode*> pickableNodes;
-    const bool logicPicking = CScene::getInstance()->getMode() == eEditModeLogic;
+    const bool logicPicking = !m_diplomacyMapMode && CScene::getInstance()->getMode() == eEditModeLogic;
     if(!logicPicking)
         RenderQueueContext::instance().beginSelection(&m_selectProgram);
     for(CMob* mob : m_aMob)
@@ -16562,6 +16567,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
             else
                 for(CNode* node : spatialCandidates)
                 {
+                    if(m_diplomacyMapMode && !dynamic_cast<CUnit*>(node)) continue;
                     if(node && isObjectVisualVisible(node)
                        && !pickableNodes.contains(node))
                     {
@@ -16615,6 +16621,8 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
     m_selectFrame->reset();
     recordSelectionChange(selectionBefore);
+    if(m_diplomacyMapMode)
+        setDiplomacyAnchor(dynamic_cast<CUnit*>(lastPickedNode));
     if(m_pTree)
     {
         if(lastPickedNode && lastPickedNode->nodeState() == ENodeState::eSelect)
@@ -22922,6 +22930,10 @@ void CView::collectObjectTreeData()
 
 void CView::refreshSelectContextHelp()
 {
+    if(m_diplomacyMapMode) {
+        CStatusConnector::getInstance()->updateStatus("select.ico",tr("Diplomacy: click NPC — its relations; Group colors — reset; middle mouse — camera"));
+        return;
+    }
     if(m_pOp && m_pOp->operationMethod() != eOperationMethodSelect)
         return;
     if(m_landscapeTools && m_landscapeTools->editingEnabled())
@@ -23386,6 +23398,11 @@ void CView::appendMarkedTerrainPaintIssue(const QSet<QPoint>& cells,
 void CView::mousePressEvent(QMouseEvent* event)
 {
     setFocus(Qt::MouseFocusReason);
+    if(m_diplomacyMapMode && event->button() == Qt::LeftButton) {
+        m_pOp->cancelPointerGesture();
+        pickObject(event->pos(), false);
+        viewParameters(); update(); event->accept(); return;
+    }
     if(event->button()==Qt::LeftButton && navmeshComparisonClick(event->pos())){event->accept();return;}
     if(travelMousePress(event)) return;
     if(m_worldPlacementActive)
@@ -23608,6 +23625,7 @@ void CView::mousePressEvent(QMouseEvent* event)
 
 void CView::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if(m_diplomacyMapMode && event->button() == Qt::LeftButton) { event->accept(); return; }
     if(m_travelEditing){event->accept();return;}
     if(m_worldPlacementActive) { event->accept(); return; }
     m_lastViewportMousePos = event->pos();
@@ -24194,6 +24212,8 @@ void CView::updateLandscapeSculptCoordinates(const QVector3D& position, bool val
 
 void CView::mouseMoveEvent(QMouseEvent* event)
 {
+    if(m_diplomacyMapMode && (event->buttons() & Qt::LeftButton)
+       && !(event->buttons() & Qt::MiddleButton)) { event->accept(); return; }
     if(travelMouseMove(event)) return;
     if(m_worldPlacementActive)
     { updateWorldMapPlacement(event->pos()); event->accept(); return; }
@@ -24355,6 +24375,7 @@ void CView::mouseMoveEvent(QMouseEvent* event)
 
 void CView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if(m_diplomacyMapMode && event->button() == Qt::LeftButton) { event->accept(); return; }
     if(m_terrainTileInformationPolicy.rightHeld()
        && event->button() == Qt::RightButton)
     {

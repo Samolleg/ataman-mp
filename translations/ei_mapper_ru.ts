@@ -6500,6 +6500,21 @@ in the viewport/outliner; clicking another row only focuses it here.</source>
     </context>
     <context>
         <name>CView</name>
+        <message><source>DIPLOMACY</source><translation>ДИПЛОМАТИЯ</translation></message>
+        <message><source>Diplomacy: click NPC — its relations; Group colors — reset; middle mouse — camera</source><translation>Дипломатия: ЛКМ по НПС — его отношения; «Цвета групп» — сброс; средняя кнопка мыши — камера</translation></message>
+        <message><source>Group colors</source><translation>Цвета групп</translation></message>
+        <message><source>No NPCs in visible MOBs.</source><translation>В видимых MOB нет НПС.</translation></message>
+        <message><source>Relations…</source><translation>Отношения…</translation></message>
+        <message><source>Turn off diplomacy map mode</source><translation>Выключить режим дипломатии</translation></message>
+        <message><source>Ally</source><translation>Союзник</translation></message>
+        <message><source>Neutral</source><translation>Нейтральный</translation></message>
+        <message><source>Enemy</source><translation>Враг</translation></message>
+        <message><source>Group colors · Click an NPC to see its relations to the others.</source><translation>Цвета групп · Нажмите на НПС, чтобы увидеть его отношения к остальным.</translation></message>
+        <message><source>%1 · Group %2 → other NPCs · %3</source><translation>%1 · Группа %2 → остальные НПС · %3</translation></message>
+        <message><source>No valid diplomacy table: relations are shown in gray.</source><translation>Нет корректной таблицы дипломатии: отношения показаны серым.</translation></message>
+        <message><source>Select diplomacy NPC</source><translation>Выбрать НПС в дипломатии</translation></message>
+        <message><source>Change diplomacy %1 → %2</source><translation>Изменить дипломатию %1 → %2</translation></message>
+        <message><source>Create neutral diplomacy table</source><translation>Создать нейтральную таблицу дипломатии</translation></message>
         <message>
             <source>Cannot replay terrain and object heights after the affected MOB was unloaded.</source>
             <translation>Нельзя восстановить рельеф и высоты объектов: затронутые MPR и MOB должны оставаться загруженными.</translation>
@@ -14924,6 +14939,7 @@ It could not be opened automatically.</source>
 
     <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
     <message><source>NPC diplomacy groups in connected MOBs and scripts</source><translation>Группы дипломатии НПС в подключённых MOB и скриптах</translation></message>
+    <message><source>Diplomacy map mode: group colors, NPC relations and relation editor</source><translation>Дипломатия на карте: цвета групп, отношения НПС и редактор отношений</translation></message>
 
     <message>
         <source>Do not copy settings</source>
@@ -17221,6 +17237,21 @@ Conditions: %5</source>
 </context>
 <context>
     <name>CDiplomacyDialog</name>
+    <message><source>Diplomacy on map</source><translation>Дипломатия на карте</translation></message>
+    <message><source>Back to map</source><translation>Вернуться к карте</translation></message>
+    <message><source>Groups, NPCs and relationships · Right-click an NPC to find it on the map</source><translation>Группы, НПС и отношения · ПКМ по НПС — перейти к нему на карте</translation></message>
+    <message><source>Find NPC on map</source><translation>Найти НПС на карте</translation></message>
+    <message><source>Right-click to find this NPC on the map</source><translation>ПКМ — перейти к этому НПС на карте</translation></message>
+    <message><source>Create neutral table</source><translation>Создать нейтральную таблицу</translation></message>
+    <message><source>Apply changes in both directions</source><translation>В обе стороны</translation></message>
+    <message><source>Also change the reverse relation. Otherwise only the selected row → column is changed.</source><translation>Также изменить обратное отношение. Без флажка изменяется только направление строка → столбец.</translation></message>
+    <message><source>Click a cell to change its relation, or select a pair and use the buttons below. Row → column; edits support Undo / Redo.</source><translation>Нажмите на ячейку и выберите отношение или используйте кнопки ниже. Строка → столбец; изменения можно отменять и повторять.</translation></message>
+    <message><source>This MOB is not loaded: its relations are read-only.</source><translation>Этот MOB не открыт: отношения доступны для просмотра.</translation></message>
+    <message><source>Group %1 → group %2</source><translation>Группа %1 → группа %2</translation></message>
+    <message><source>Enemy</source><translation>Враг</translation></message>
+    <message><source>Undo</source><translation>Отменить</translation></message>
+    <message><source>Redo</source><translation>Повторить</translation></message>
+    <message><source>Changes are kept in the MOB and saved with the map.</source><translation>Изменения хранятся в MOB и записываются при сохранении карты.</translation></message>
     <message><source>Diplomacy</source><translation>Дипломатия</translation></message>
     <message><source>MOB:</source><translation>MOB:</translation></message>
     <message><source>Refresh</source><translation>Обновить</translation></message>

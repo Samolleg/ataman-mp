@@ -25,6 +25,7 @@ uniform float u_fogStart;
 uniform float u_fogEnd;
 uniform vec3 u_mapFog;
 uniform bool u_backgroundScenery;
+uniform vec4 u_diplomacyTint;
 uniform int u_pointLightCount;
 uniform vec4 u_pointLightPositionRange[64];
 uniform vec3 u_pointLightColor[64];
@@ -256,5 +257,9 @@ void main(void)
     if (u_shadowCascadeDebug)
       resColor.rgb = cascadeDebugColor;
 
+    // Editor-only NPC colors retain the alpha silhouette and surface detail.
+    // Queue items own the tint so sorting/instancing cannot leak it to scenery.
+    float detail = 0.62 + 0.38 * dot(resColor.rgb, vec3(0.299, 0.587, 0.114));
+    resColor.rgb = mix(resColor.rgb, u_diplomacyTint.rgb * detail, u_diplomacyTint.a);
     gl_FragColor = resColor;
 }

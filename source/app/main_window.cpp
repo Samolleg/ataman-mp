@@ -3802,8 +3802,12 @@ void MainWindow::setupCompactViewportTools()
     connect(m_pView,&CView::loadedMapStateChanged,this,&MainWindow::updateLandscapeToolButtons);
     auto* travel=button("travelToolbarButton",QString::fromUtf8("Появления и переходы"),2,7);
     auto* diplomacy=button("diplomacyToolbarButton",tr("Diplomacy"),13,7);
-    diplomacy->setToolTip(tr("NPC diplomacy groups in connected MOBs and scripts"));
-    connect(diplomacy,&QToolButton::clicked,this,&MainWindow::openDiplomacy);
+    diplomacy->setCheckable(true);
+    diplomacy->setToolTip(tr("Diplomacy map mode: group colors, NPC relations and relation editor"));
+    connect(diplomacy,&QToolButton::toggled,m_pView,&CView::setDiplomacyMapMode);
+    connect(diplomacy,&QToolButton::clicked,this,[this](bool enabled) { if(enabled) openDiplomacy(); });
+    connect(m_pView,&CView::diplomacyMapModeChanged,diplomacy,&QToolButton::setChecked);
+    connect(m_pView,&CView::diplomacyWindowRequested,this,&MainWindow::openDiplomacy);
     // The dock may be present but covered by another tab. Qt's toggle action
     // then considers it open and a toolbar click hides it instead of showing it.
     // This button is an entry point: always expose and focus the editor.
@@ -4033,10 +4037,26 @@ void MainWindow::openDiplomacy()
                 }
             return request;
         },this);
-        connect(m_diplomacyDialog,&CDiplomacyDialog::editRelationsRequested,this,[this](const QString& path) {
-            if(m_pView) for(CMob* mob:m_pView->mobs()) if(mob && mob->filePath().absoluteFilePath()==path) {
-                m_pView->openMobDiplomacyTable(mob); break;
-            }
+        connect(m_diplomacyDialog,&CDiplomacyDialog::mapModeRequested,m_pView,&CView::setDiplomacyMapMode);
+        connect(m_pView,&CView::diplomacyMapModeChanged,m_diplomacyDialog,&CDiplomacyDialog::setMapMode);
+        connect(m_diplomacyDialog,&CDiplomacyDialog::historyStepRequested,this,[this](bool redo) {
+            if(redo) m_undoStack->redo(); else m_undoStack->undo();
+        });
+        connect(m_undoStack,&QUndoStack::indexChanged,m_diplomacyDialog,[this] {
+            m_diplomacyDialog->setHistoryAvailable(m_undoStack->canUndo(),m_undoStack->canRedo());
+        });
+        connect(m_diplomacyDialog,&CDiplomacyDialog::npcFocusRequested,this,[this](const QString& source,const QString& key) {
+            if(m_pView->focusDiplomacyNpc(source,key)) {
+                m_diplomacyDialog->hide(); m_pView->setFocus(Qt::OtherFocusReason);
+            } else m_diplomacyDialog->invalidate();
+        });
+        connect(m_diplomacyDialog,&CDiplomacyDialog::relationChangeRequested,this,
+            [this](const QString& source,int row,int column,uint value,bool symmetric,uint expected,uint reverse) {
+                if(!m_pView->editDiplomacyRelation(source,row,column,value,symmetric,expected,reverse))
+                    m_diplomacyDialog->invalidate();
+        });
+        connect(m_diplomacyDialog,&CDiplomacyDialog::createRelationsRequested,this,[this](const QString& source) {
+            if(!m_pView->createDiplomacyTable(source)) m_diplomacyDialog->invalidate();
         });
         const auto invalidate=[this] { if(m_diplomacyDialog) m_diplomacyDialog->invalidate(); };
         connect(m_pView,&CView::mobStateChanged,m_diplomacyDialog,invalidate);
@@ -4046,6 +4066,8 @@ void MainWindow::openDiplomacy()
         connect(m_pView,QOverload<CMob*>::of(&CView::unloadMob),m_diplomacyDialog,invalidate);
         connect(m_undoStack,&QUndoStack::indexChanged,m_diplomacyDialog,invalidate);
     }
+    m_diplomacyDialog->setMapMode(m_pView->diplomacyMapMode());
+    m_diplomacyDialog->setHistoryAvailable(m_undoStack->canUndo(),m_undoStack->canRedo());
     m_diplomacyDialog->show(); m_diplomacyDialog->raise(); m_diplomacyDialog->activateWindow();
 }
 

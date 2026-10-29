@@ -1,6 +1,7 @@
 #include "diplomacy_check.h"
 #include "diplomacy_dialog.h"
 #include "diplomacy_analysis.h"
+#include "diplomacy_colors.h"
 #include "endurance_document.h"
 #include "main_window.h"
 #include "view.h"
@@ -32,6 +33,9 @@
 #include <QPushButton>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QCryptographicHash>
 
 namespace {
 class HiddenDiplomacyWidgets : public QObject {
@@ -159,7 +163,10 @@ int runDiplomacyCheck()
     dialog->findChild<QLineEdit*>("diplomacyNpcFilter")->clear();
     dialog->findChild<QTabWidget*>()->setCurrentIndex(2);
     auto* relations=dialog->findChild<QTableWidget*>("diplomacyRelations");
-    check(relations->rowCount()==32 && relations->item(1,2)->text()==QString::number(fixtureRelations[1][2]) && relations->editTriggers()==QAbstractItemView::NoEditTriggers,"read-only actual relation matrix");
+    QApplication::processEvents();
+    check(relations->rowCount()==32 && relations->item(1,2)->text()==QString::number(fixtureRelations[1][2])
+        && dialog->findChild<QPushButton*>("diplomacySetRelation2")->isEnabled(),"actual relation matrix offers direct editing without free-text values");
+    check(relations->viewport()->height()>100,"relation matrix has usable height after actual layout");
     if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE"))
         check(dialog->grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")+".relations.png"),"hidden relation matrix capture");
     check(mob->parameterState()==before && !mob->isDirty() && window.m_undoStack->count()==0,"inspection preserves MOB, script, dirty flag and history");
@@ -176,6 +183,8 @@ int runDiplomacyCheck()
     check(waitFor(*dialog) && dialog->result().sources.size()==1 && !dialog->result().sources[0].draft
         && dialog->result().sources[0].npcs[0].possibleGroups==QSet<int>{12},"closing unchanged script editor restores committed source");
     dialog->findChild<QTabWidget*>()->setCurrentIndex(0); groups->setCurrentItem(groups->topLevelItem(0));
+    QApplication::processEvents();
+    check(dialog->findChild<QPlainTextEdit*>("diplomacyDetails")->isVisible(),"NPC details return after visiting relation editor");
     if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_CAPTURE"))
         check(dialog->grab().save(qEnvironmentVariable("EI_DIPLOMACY_CAPTURE")),"hidden diplomacy widget capture");
     QSharedPointer<IPropertyBase> changedGroup(new propChar(eObjParam_PLAYER,char(14)));
@@ -194,6 +203,81 @@ int runDiplomacyCheck()
     groups->setCurrentItem(groups->topLevelItem(0));
     check(groups->topLevelItem(0)->text(1)=="1" && npcs->topLevelItemCount()==1 && npcs->topLevelItem(0)->text(2)=="15","source filter displays exact NPC counts and membership");
     dialog->findChild<QComboBox*>("diplomacySourceFilter")->setCurrentIndex(0);
+    QSet<QRgb> palette;
+    for(int g=0;g<32;++g) palette.insert(diplomacy::groupColor(g).rgb());
+    check(palette.size()==32 && diplomacy::groupColor(-1)==diplomacy::groupColor(255),"all32 groups have stable distinct colors; invalid groups are gray");
+    check(view->diplomacyMapMode() && button->isChecked() && dialog->findChild<QCheckBox*>("diplomacyMapMode")->isChecked(),"toolbar, map mode and menu checkbox are synchronized");
+    view->clearDiplomacyAnchor();
+    check(view->diplomacyNpcColor(unit)==diplomacy::groupColor(14)
+        && view->diplomacyNpcColor(secondUnit)==diplomacy::groupColor(15),"unselected map colors exact MOB groups across sources");
+    auto otherTable=fixtureRelations; otherTable[15][14]=0; otherTable[15][15]=1;
+    second->setDiplomacyField(otherTable); secondUnit->setMapId(71);
+    const QString secondSource=second->filePath().absoluteFilePath(), firstSource=mob->filePath().absoluteFilePath();
+    check(view->focusDiplomacyNpc(secondSource,QString("node:%1").arg(secondUnit->innerId()))
+        && view->selectionSnapshot()==QList<CNode*>{secondUnit} && view->currentMob()==mob,
+        "navigation resolves exact source/internal identity despite duplicate NIDs and keeps active MOB");
+    check(view->diplomacyNpcColor(unit)==diplomacy::relationColor(0)
+        && view->diplomacyNpcColor(secondUnit)==diplomacy::relationColor(1),"anchor uses its own MOB table: ally green and neutral yellow");
+    view->setDiplomacyAnchor(unit);
+    check(view->diplomacyNpcColor(secondUnit)==diplomacy::relationColor(2),"reverse direction can independently be enemy red");
+    check(!view->focusDiplomacyNpc(secondSource,"node:missing"),"stale NPC key never guesses by duplicate NID");
+    dialog->invalidate(); check(waitFor(*dialog),"fresh cross-MOB navigation rows");
+    dialog->findChild<QTabWidget*>()->setCurrentIndex(0); groups->setCurrentItem(groups->topLevelItem(0));
+    QTreeWidgetItem* secondRow=nullptr;
+    for(int i=0;i<npcs->topLevelItemCount();++i)
+        if(npcs->topLevelItem(i)->toolTip(5)==secondSource) secondRow=npcs->topLevelItem(i);
+    if(secondRow) {
+        npcs->setCurrentItem(secondRow); npcs->scrollToItem(secondRow); QApplication::processEvents();
+        const QPoint at=npcs->visualItemRect(secondRow).center();
+        QContextMenuEvent context(QContextMenuEvent::Mouse,at,npcs->viewport()->mapToGlobal(at));
+        QApplication::sendEvent(npcs->viewport(),&context);
+    }
+    check(secondRow && !dialog->isVisible() && view->selectionSnapshot()==QList<CNode*>{secondUnit}
+        && view->m_diplomacyAnchor==secondUnit,"actual NPC right-click selects precise object and returns to map");
+    window.openDiplomacy(); check(waitFor(*dialog),"reopen editor after map navigation");
+    dialog->findChild<QTabWidget*>()->setCurrentIndex(2);
+    auto* relationChooser=dialog->findChild<QComboBox*>("diplomacyRelationSource");
+    relationChooser->setCurrentIndex(relationChooser->findData(firstSource)); relations->setCurrentCell(14,15);
+    auto* symmetric=dialog->findChild<QCheckBox*>("diplomacySymmetric");
+    auto* ally=dialog->findChild<QPushButton*>("diplomacySetRelation0");
+    auto* neutral=dialog->findChild<QPushButton*>("diplomacySetRelation1");
+    relations->setCurrentCell(14,15);
+    QMetaObject::invokeMethod(relations,"cellClicked",Q_ARG(int,14),Q_ARG(int,15));
+    auto* relationMenu=dialog->findChild<QMenu*>("diplomacyRelationMenu");
+    check(relationMenu && relationMenu->actions().size()==4,"clicking matrix cell opens three-choice relation editor");
+    if(relationMenu && relationMenu->actions().size()==4) relationMenu->actions()[3]->trigger();
+    check(mob->diplomacyField()[14][15]==2,"popup action routes selected value to owning MOB");
+    if(relationMenu) relationMenu->close();
+    view->setDiplomacyAnchor(unit); const auto originalState=mob->parameterState();
+    mob->captureCleanProjection(); mob->setDirty(false);
+    const int historyBefore=window.m_undoStack->count(); symmetric->setChecked(false); ally->click();
+    check(waitFor(*dialog) && mob->diplomacyField()[14][15]==0 && mob->diplomacyField()[15][14]==2
+        && window.m_undoStack->count()==historyBefore+1 && mob->isDirty()
+        && relations->currentRow()==14 && relations->currentColumn()==15,
+        "direct one-way edit changes only selected relation, marks dirty and preserves selected pair");
+    check(view->diplomacyNpcColor(secondUnit)==diplomacy::relationColor(0),"map color immediately follows relation edit");
+    dialog->findChild<QPushButton*>("diplomacyUndo")->click();
+    check(waitFor(*dialog) && mob->parameterState()==originalState,"dialog Undo restores complete previous MOB state");
+    dialog->findChild<QPushButton*>("diplomacyRedo")->click();
+    check(waitFor(*dialog) && mob->diplomacyField()[14][15]==0 && mob->diplomacyField()[15][14]==2,"dialog Redo reapplies one-way edit");
+    symmetric->setChecked(true); neutral->click();
+    check(waitFor(*dialog) && mob->diplomacyField()[14][15]==1 && mob->diplomacyField()[15][14]==1,"explicit two-way edit changes both directions atomically");
+    window.m_undoStack->undo();
+    check(waitFor(*dialog) && mob->diplomacyField()[14][15]==0 && mob->diplomacyField()[15][14]==2,"two-way Undo restores asymmetric originals");
+    const auto unchanged=mob->parameterState();
+    check(!view->editDiplomacyRelation(firstSource,14,15,2,false,7,2)
+        && !view->editDiplomacyRelation(firstSource,32,15,0,false,0,0)
+        && !view->editDiplomacyRelation(firstSource,14,15,9,false,0,2)
+        && mob->parameterState()==unchanged,"stale snapshot, invalid group and unknown requested relation refuse without mutation");
+    second->clearDiplomacyTable(); view->setDiplomacyAnchor(secondUnit);
+    check(view->diplomacyNpcColor(unit)==diplomacy::groupColor(-1),"missing owning table shows gray instead of invented neutrality");
+    check(view->createDiplomacyTable(secondSource) && second->diplomacyField()[15][14]==1
+        && second->diplomacyField()[15][15]==0,"empty owning MOB can explicitly create neutral table");
+    window.m_undoStack->undo(); check(second->diplomacyField().isEmpty(),"neutral-table creation is undoable");
+    view->setDiplomacyMapMode(false);
+    check(!button->isChecked() && !dialog->findChild<QCheckBox*>("diplomacyMapMode")->isChecked()
+        && view->m_diplomacyAnchor.isNull(),"turning mode off clears transient anchor and synchronizes controls");
+    window.m_undoStack->clear();
     view->m_aMob.removeOne(second); delete second;
     unit->markAsDeleted(); dialog->invalidate();
     check(waitFor(*dialog) && dialog->result().sources[0].npcs.isEmpty(),"deleted NPC removed from live counts");
@@ -280,7 +364,7 @@ int runDiplomacyCheck()
         && browseMatrix->horizontalHeaderItem(31)->text()=="31"
         && browseMatrix->horizontalHeaderItem(31)->toolTip().contains("Player-31"),"compact matrix retains all groups and full header tooltips");
     int editRequests=0; QString editedSource;
-    QObject::connect(&browser,&CDiplomacyDialog::editRelationsRequested,[&](const QString& source){++editRequests;editedSource=source;});
+    QObject::connect(&browser,&CDiplomacyDialog::relationChangeRequested,[&](const QString& source,int,int,uint,bool,uint,uint){++editRequests;editedSource=source;});
     relationSources->setCurrentIndex(relationSources->findData(readOnly.key));
     browseMatrix->setCurrentCell(3,4);
     check(browseMatrix->item(3,4)->text()=="7" && !browseMatrix->item(3,4)->data(Qt::BackgroundRole).isValid()
@@ -288,17 +372,44 @@ int runDiplomacyCheck()
     check(browser.findChild<QLabel*>("diplomacyRelationSelection")->text().contains("3 · Player-3")
         && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().contains("4 · Player-4")
         && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().endsWith("(7)"),"selected relation describes exact source and target including unknown values");
-    editButton->click(); relationSources->setCurrentIndex(relationSources->findData(base.key)); editButton->click();
-    check(editRequests==1 && editedSource==base.key,"editing routes only to the selected loaded MOB");
-    check(browseMatrix->item(0,0)->background().color()==QColor(Qt::darkGreen)
-        && browseMatrix->item(1,2)->background().color()==QColor(Qt::darkRed)
-        && browseMatrix->item(1,3)->background().color()==QColor(Qt::darkYellow),"legacy 0/1/2 relation colors preserved");
+    auto* browseAlly=browser.findChild<QPushButton*>("diplomacySetRelation0");
+    browseAlly->click(); relationSources->setCurrentIndex(relationSources->findData(base.key)); browseAlly->click();
+    check(editRequests==1 && editedSource==base.key,"direct editing routes only to selected loaded MOB");
+    check(browseMatrix->item(0,0)->background().color()==diplomacy::relationColor(0).darker(220)
+        && browseMatrix->item(1,2)->background().color()==diplomacy::relationColor(2).darker(220)
+        && browseMatrix->item(1,3)->background().color()==diplomacy::relationColor(1).darker(220),"readable relation matrix keeps green/yellow/red meanings");
     browsing.sources={readOnly}; browser.invalidate();
     check(waitFor(browser) && relationSources->count()==1 && browseMatrix->item(3,4)->text()=="7" && !editButton->isEnabled(),"removing selected source cannot show or edit stale relations");
     browsing.sources[0].relations.clear(); browser.invalidate();
     check(waitFor(browser) && browseMatrix->rowCount()==0
         && browser.findChild<QLabel*>("diplomacyRelationSelection")->text().isEmpty(),"incomplete source clears matrix and selected pair");
     browser.hide();
+    // The same guarded lossless writer used by Save, against owned synthetic files.
+    CMob seed; seed.setDiplomacyField(fixtureRelations); seed.setScript("WorldScript(ConsoleString(\"saved-script\"))");
+    QByteArray raw; seed.serializeMob(raw,false);
+    raw=record(0xA000,raw.mid(8)+record(0xDEADF00D,QByteArray::fromHex("0100feff112233445566")));
+    const QString saveSource=files.filePath("save-source.mob"), saveTarget=files.filePath("save-edited.mob");
+    QFile saveFile(saveSource);
+    check(saveFile.open(QIODevice::WriteOnly) && saveFile.write(raw)==raw.size(),"owned save fixture with opaque extension"); saveFile.close();
+    auto* savedMob=new CMob; savedMob->attach(view,view->m_pProgress); QFileInfo saveInfo(saveSource); QStringList saveWarnings;
+    const bool opened=savedMob->readMob(saveInfo,false,&saveWarnings)==0;
+    check(opened,"production MOB reader opens save fixture");
+    if(opened) {
+        view->m_aMob.append(savedMob);
+        check(view->editDiplomacyRelation(saveSource,2,3,0,false,fixtureRelations[2][3],fixtureRelations[3][2])
+            && savedMob->saveAs(QFileInfo(saveTarget)),"relation edit saves through production safe writer");
+        QByteArray expected=raw; const int offset=raw.indexOf(u32(0xDDDDDDD2));
+        if(offset>=0) expected.replace(offset+8+(2*32+3)*4,4,u32(0));
+        QFile savedFile(saveTarget); const bool readable=savedFile.open(QIODevice::ReadOnly);
+        const QByteArray saved=readable?savedFile.readAll():QByteArray(); savedFile.close();
+        CMobDocument reopened; CValidationReport savedReport; QVector<QVector<quint32>> savedRelations;
+        check(offset>=0 && saved==expected && reopened.loadBytes(saved,saveTarget,&savedReport)
+            && reopened.diplomacyTable(&savedRelations) && savedRelations[2][3]==0
+            && savedRelations[3][2]==fixtureRelations[3][2],"fresh readback differs only in requested cell; opaque/script/all other bytes preserved");
+        saveFile.open(QIODevice::ReadOnly); check(saveFile.readAll()==raw,"Save As preserves source fixture"); saveFile.close();
+        window.m_undoStack->clear(); view->m_aMob.removeOne(savedMob);
+    }
+    delete savedMob;
     if(!qEnvironmentVariableIsEmpty("EI_DIPLOMACY_AUDIT_MOB")) {
         diplomacy::Request corpus; corpus.extraSources=QStringList{qEnvironmentVariable("EI_DIPLOMACY_AUDIT_MOB")};
         corpus.roots=QStringList{QFileInfo(corpus.extraSources[0]).absolutePath()};

@@ -47,11 +47,13 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program,
     m_collecting = program != nullptr;
     m_selectionPass = false;
     m_shadowOnlyCollection = false;
+    m_diplomacyTint = QVector4D();
     m_modelMatrixLocation = program ? ei::uniformLocation(program, "u_modelMmatrix") : -1;
     m_colorLocation = program ? ei::uniformLocation(program, "u_color") : -1;
     m_instancedLocation = program ? ei::uniformLocation(program, "u_instanced") : -1;
     m_partAnimatedLocation = program ? ei::uniformLocation(program, "u_partAnimated") : -1;
     m_highlightLocation = program ? ei::uniformLocation(program, "u_highlight") : -1;
+    m_diplomacyTintLocation = program ? ei::uniformLocation(program, "u_diplomacyTint") : -1;
     m_materialEmissionLocation = program
         ? ei::uniformLocation(program, "u_materialEmission") : -1;
     QOpenGLContext* context = QOpenGLContext::currentContext();
@@ -160,6 +162,7 @@ void RenderQueueContext::submit(CPart* part, QOpenGLTexture* texture,
     item.instanceMatrix = modelMatrix * part->poseMatrix();
     item.materialClass = materialClass;
     item.highlighted = highlighted;
+    item.diplomacyTint = m_diplomacyTint;
     item.meshIdentity = part->meshIdentity();
     item.textureUvScale = part->textureUvScale();
     item.instanceEligible = part->canInstance();
@@ -571,6 +574,7 @@ void RenderQueueContext::flush()
         }
         m_program->setUniformValue(ei::uniformLocation(m_program, "u_receiveDynamicShadow"), !item.dynamicShadow);
         m_program->setUniformValue(m_materialEmissionLocation, item.materialEmission);
+        m_program->setUniformValue(m_diplomacyTintLocation, item.diplomacyTint);
         if(activeBackground!=item.backgroundScenery) {
             activeBackground=item.backgroundScenery;
             m_program->setUniformValue(backgroundLocation,activeBackground);
@@ -605,6 +609,7 @@ void RenderQueueContext::flush()
     m_program->setUniformValue(ei::uniformLocation(m_program, "u_localShadowSkipIndex"), -1);
     m_program->setUniformValue(backgroundLocation,false);
     m_program->setUniformValue(m_materialEmissionLocation, QVector3D());
+    m_program->setUniformValue(m_diplomacyTintLocation, QVector4D());
     if(supportsFixedFunctionAlphaTest())
         ei::gl::Enable(GL_ALPHA_TEST);
     ei::gl::Enable(GL_BLEND);

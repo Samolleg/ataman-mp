@@ -1,6 +1,7 @@
 #include "diplomacy_dialog.h"
 #include "window_geometry.h"
 #include "ui_theme.h"
+#include "diplomacy_colors.h"
 #include <QtConcurrent/QtConcurrentRun>
 #include <QTreeWidget>
 #include <QTableWidget>
@@ -24,11 +25,20 @@
 #include <QSettings>
 #include <QPainter>
 #include <QStyledItemDelegate>
+#include <QMenu>
+#include <QShortcut>
 #include <algorithm>
 
 namespace {
 enum class SectionIcon { Npc, Groups, Script, Relations, Refresh, Info };
-constexpr int DetailsRole = Qt::UserRole+1, KeyRole = Qt::UserRole+2;
+constexpr int DetailsRole = Qt::UserRole+1, KeyRole = Qt::UserRole+2,
+              SourceRole = Qt::UserRole+3, NpcRole = Qt::UserRole+4, NavigableRole = Qt::UserRole+5;
+QIcon colorIcon(const QColor& color) {
+    QPixmap image(32,32); image.fill(Qt::transparent);
+    QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(QPen(color.lighter(130),1)); p.setBrush(color); p.drawEllipse(QRectF(5,5,22,22));
+    return QIcon(image);
+}
 QIcon sectionIcon(SectionIcon section) {
     QPixmap image(48,48); image.setDevicePixelRatio(2); image.fill(Qt::transparent);
     QPainter p(&image); p.setRenderHint(QPainter::Antialiasing);
@@ -104,6 +114,7 @@ void setupTree(QTreeWidget* tree,const QStringList& columns) {
     tree->setWordWrap(false); tree->setTextElideMode(Qt::ElideRight); tree->setIconSize(QSize(20,20));
     tree->setSelectionMode(QAbstractItemView::SingleSelection);
     tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    tree->setIndentation(0);
     tree->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     tree->header()->setStretchLastSection(false);
     tree->header()->setSectionResizeMode(QHeaderView::Interactive);
@@ -125,9 +136,35 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
 {
     setObjectName("diplomacyInspector"); setWindowTitle(tr("Diplomacy"));
     setWindowIcon(sectionIcon(SectionIcon::Groups));
-    setAttribute(Qt::WA_QuitOnClose,false); resize(1560,940); setMinimumSize(900,560);
+    setAttribute(Qt::WA_QuitOnClose,false); resize(1280,820); setMinimumSize(900,560);
+    setStyleSheet(
+        "QDialog#diplomacyInspector { background: #1d252f; color: #e1e9f3; }"
+        "QDialog#diplomacyInspector QLabel { color: #dce6f2; background: transparent; }"
+        "QTreeWidget, QTableWidget, QPlainTextEdit { background: #161e27; alternate-background-color: #202c38; color: #dce6f2; border: 1px solid #344658; border-radius: 5px; selection-background-color: #355e82; selection-color: #ffffff; }"
+        "QTreeWidget::item { min-height: 29px; padding: 2px 5px; }"
+        "QHeaderView::section { background: #293848; color: #b9cada; border: none; border-right: 1px solid #3a4d60; padding: 6px; }"
+        "QLineEdit, QComboBox { background: #16212d; color: #e2ebf5; border: 1px solid #425970; border-radius: 5px; padding: 7px; }"
+        "QPushButton, QToolButton { background: #2b3d50; color: #e1ecf7; border: 1px solid #445d75; border-radius: 5px; padding: 7px 12px; }"
+        "QPushButton:hover, QToolButton:hover { background: #3a5570; }"
+        "QPushButton:disabled { background: #28313c; color: #8795a5; border-color: #354250; }"
+        "QTabWidget::pane { border: none; }"
+        "QTabBar::tab { background: #263444; color: #bacbdb; padding: 9px 20px; margin-right: 5px; border-radius: 5px; }"
+        "QTabBar::tab:selected { background: #3b6183; color: #ffffff; }"
+        "QCheckBox { color: #cedbea; spacing: 7px; padding: 3px; }"
+        "QSplitter::handle { background: #344658; }");
     ei::rememberWindowGeometry(this,QStringLiteral("diplomacyInspector"));
-    auto* layout=new QVBoxLayout(this); layout->setSpacing(8);
+    auto* layout=new QVBoxLayout(this); layout->setSpacing(10); layout->setContentsMargins(18,16,18,14);
+    auto* heading=new QHBoxLayout;
+    auto* title=new QLabel(tr("Diplomacy"),this);
+    QFont titleFont=title->font(); titleFont.setPointSize(18); titleFont.setBold(true); title->setFont(titleFont);
+    heading->addWidget(title); heading->addStretch();
+    m_mapMode=new QCheckBox(tr("Diplomacy on map"),this); m_mapMode->setObjectName("diplomacyMapMode");
+    heading->addWidget(m_mapMode);
+    auto* backToMap=new QPushButton(tr("Back to map"),this); heading->addWidget(backToMap); layout->addLayout(heading);
+    m_subtitle=new QLabel(tr("Groups, NPCs and relationships · Right-click an NPC to find it on the map"),this);
+    m_subtitle->setWordWrap(true); layout->addWidget(m_subtitle);
+    connect(m_mapMode,&QCheckBox::toggled,this,&CDiplomacyDialog::mapModeRequested);
+    connect(backToMap,&QPushButton::clicked,this,&QDialog::hide);
     auto* controls=new QHBoxLayout;
     controls->addWidget(new QLabel(tr("Sources:"),this));
     m_sources=new QComboBox(this); m_sources->setObjectName("diplomacySourceFilter");
@@ -145,9 +182,13 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     m_help->setWordWrap(true); m_help->hide(); layout->addWidget(m_help);
     connect(helpButton,&QToolButton::toggled,m_help,&QLabel::setVisible);
     m_filter=new QLineEdit(this); m_filter->setObjectName("diplomacyNpcFilter"); m_filter->setClearButtonEnabled(true);
-    m_filter->setPlaceholderText(tr("Search NPC, ID, prototype or script")); layout->addWidget(m_filter);
+    m_filter->setPlaceholderText(tr("Search NPC, ID, prototype or script"));
+    auto* searchRow=new QHBoxLayout; searchRow->addWidget(m_filter,1);
+    m_focus=new QPushButton(tr("Find NPC on map"),this); m_focus->setObjectName("diplomacyFocusNpc");
+    searchRow->addWidget(m_focus); layout->addLayout(searchRow);
+    connect(m_focus,&QPushButton::clicked,this,&CDiplomacyDialog::focusNpc);
     m_split=new QSplitter(this); m_split->setObjectName("diplomacySplitter"); m_split->setChildrenCollapsible(false);
-    auto* groupPanel=new QWidget(m_split); groupPanel->setMinimumWidth(285);
+    auto* groupPanel=new QWidget(m_split); groupPanel->setMinimumWidth(230);
     auto* groupLayout=new QVBoxLayout(groupPanel); groupLayout->setContentsMargins(0,0,0,0);
     auto* groupTitle=new QLabel(tr("Diplomacy groups"),groupPanel); groupTitle->setFont(summaryFont); groupLayout->addWidget(groupTitle);
     m_hideEmpty=new QCheckBox(tr("Hide empty groups"),groupPanel); m_hideEmpty->setObjectName("diplomacyHideEmptyGroups");
@@ -166,8 +207,13 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     m_tabs=new QTabWidget(m_detailsSplit); m_tabs->setIconSize(QSize(20,20));
     m_npcs=new ReadableTree(240,m_tabs); m_npcs->setObjectName("diplomacyNpcs");
     setupTree(m_npcs,{tr("NPC"),tr("ID"),tr("MOB group"),QStringLiteral("SetPlayer"),tr("Prototype"),tr("MOB")});
-    m_npcs->setColumnWidth(1,75); m_npcs->setColumnWidth(2,m_npcs->fontMetrics().horizontalAdvance(tr("MOB group"))+16);
-    m_npcs->setColumnWidth(3,115); m_npcs->setColumnWidth(4,175); m_npcs->setColumnWidth(5,160);
+    m_npcs->setColumnWidth(1,90); m_npcs->setColumnWidth(2,m_npcs->fontMetrics().horizontalAdvance(tr("MOB group"))+36);
+    m_npcs->setColumnWidth(3,100); m_npcs->setColumnWidth(4,185); m_npcs->setColumnWidth(5,175);
+    m_npcs->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_npcs,&QTreeWidget::customContextMenuRequested,this,[this](const QPoint& pos) {
+        if(auto* item=m_npcs->itemAt(pos)) { m_npcs->setCurrentItem(item); focusNpc(); }
+    });
+    connect(m_npcs,&QTreeWidget::itemActivated,this,[this] { focusNpc(); });
     m_npcs->headerItem()->setToolTip(2,tr("Initial diplomacy group recorded in the MOB."));
     m_npcs->headerItem()->setToolTip(3,tr("Possible diplomacy groups assigned by SetPlayer. GroupAdd / GroupSub script groups are separate."));
     m_npcs->setSortingEnabled(true); m_npcs->sortByColumn(0,Qt::AscendingOrder);
@@ -184,18 +230,9 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     relationControls->addWidget(new QLabel(tr("Relation table:"),relationPage));
     m_relationSources=new QComboBox(relationPage); m_relationSources->setObjectName("diplomacyRelationSource");
     relationControls->addWidget(m_relationSources,1);
-    m_edit=new QPushButton(sectionIcon(SectionIcon::Relations),tr("Edit relations…"),relationPage);
+    m_edit=new QPushButton(sectionIcon(SectionIcon::Relations),tr("Create neutral table"),relationPage);
     m_edit->setObjectName("diplomacyEditRelations"); m_edit->setAutoDefault(false); relationControls->addWidget(m_edit);
     relationLayout->addLayout(relationControls);
-    auto* legend=new QHBoxLayout;
-    for(int value=0;value<3;++value) {
-        const QStringList labels={tr("0 · Ally"),tr("1 · Neutral"),tr("2 · War")};
-        auto* label=new QLabel(labels[value],relationPage);
-        QTableWidgetItem style; ei::applyRelationCellColors(&style,value);
-        label->setStyleSheet(QString("background-color: %1; color: %2; padding: 3px 9px; border-radius: 3px;")
-            .arg(style.background().color().name(),style.foreground().color().name())); legend->addWidget(label);
-    }
-    legend->addStretch(); relationLayout->addLayout(legend);
     m_relationNotice=new QLabel(relationPage); m_relationNotice->setTextFormat(Qt::PlainText);
     m_relationNotice->setWordWrap(true); relationLayout->addWidget(m_relationNotice);
     m_relations=new QTableWidget(relationPage); m_relations->setObjectName("diplomacyRelations");
@@ -205,15 +242,41 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     relationLayout->addWidget(m_relations,1);
     m_relationSelection=new QLabel(relationPage); m_relationSelection->setObjectName("diplomacyRelationSelection");
     m_relationSelection->setTextFormat(Qt::PlainText); m_relationSelection->setWordWrap(true); relationLayout->addWidget(m_relationSelection);
+    auto* editRow=new QHBoxLayout;
+    const QStringList relationLabels={tr("Ally"),tr("Neutral"),tr("Enemy")};
+    for(uint value=0;value<3;++value) {
+        auto* button=new QPushButton(colorIcon(diplomacy::relationColor(value)),QString::number(value)+" · "+relationLabels[int(value)],relationPage);
+        button->setObjectName(QString("diplomacySetRelation%1").arg(value));
+        button->setAutoDefault(false); m_relationButtons.append(button); editRow->addWidget(button);
+        connect(button,&QPushButton::clicked,this,[this,value] { applySelectedRelation(value); });
+    }
+    editRow->addStretch();
+    m_symmetric=new QCheckBox(tr("Apply changes in both directions"),relationPage);
+    m_symmetric->setObjectName("diplomacySymmetric"); m_symmetric->setChecked(false);
+    m_symmetric->setToolTip(tr("Also change the reverse relation. Otherwise only the selected row → column is changed."));
+    editRow->addWidget(m_symmetric); relationLayout->addLayout(editRow);
+    auto* historyRow=new QHBoxLayout;
+    auto* historyHint=new QLabel(tr("Changes are kept in the MOB and saved with the map."),relationPage);
+    historyHint->setWordWrap(true); historyRow->addWidget(historyHint,1);
+    m_undo=new QPushButton(tr("Undo"),relationPage); m_undo->setObjectName("diplomacyUndo");
+    m_redo=new QPushButton(tr("Redo"),relationPage); m_redo->setObjectName("diplomacyRedo");
+    historyRow->addWidget(m_undo); historyRow->addWidget(m_redo); relationLayout->addLayout(historyRow);
+    connect(m_undo,&QPushButton::clicked,this,[this] { emit historyStepRequested(false); });
+    connect(m_redo,&QPushButton::clicked,this,[this] { emit historyStepRequested(true); });
+    auto* undoKey=new QShortcut(QKeySequence::Undo,this);
+    auto* redoKey=new QShortcut(QKeySequence::Redo,this);
+    connect(undoKey,&QShortcut::activated,this,[this] { if(m_undo->isEnabled()) emit historyStepRequested(false); });
+    connect(redoKey,&QShortcut::activated,this,[this] { if(m_redo->isEnabled()) emit historyStepRequested(true); });
+    setHistoryAvailable(false,false);
     m_tabs->addTab(relationPage,sectionIcon(SectionIcon::Relations),tr("Relations"));
     m_detailPanel=new QWidget(m_detailsSplit); auto* detailLayout=new QVBoxLayout(m_detailPanel); detailLayout->setContentsMargins(0,0,0,0);
     m_emptyNotice=new QLabel(m_detailPanel); m_emptyNotice->setObjectName("diplomacyEmptyNotice");
     m_emptyNotice->setStyleSheet(ei::uiTextStyle(ei::UiTextTone::Muted)); detailLayout->addWidget(m_emptyNotice);
     m_detailsTitle=new QLabel(m_detailPanel); m_detailsTitle->setFont(summaryFont); detailLayout->addWidget(m_detailsTitle);
     m_details=new QPlainTextEdit(m_detailPanel); m_details->setObjectName("diplomacyDetails");
-    m_details->setReadOnly(true); m_details->setMinimumHeight(90); detailLayout->addWidget(m_details,1);
-    m_detailsSplit->setStretchFactor(0,3); m_detailsSplit->setStretchFactor(1,1); m_detailsSplit->setSizes({480,260});
-    m_split->setStretchFactor(1,1); m_split->setSizes({340,1220}); layout->addWidget(m_split,1);
+    m_details->setReadOnly(true); m_details->setMinimumHeight(85); detailLayout->addWidget(m_details,1);
+    m_detailsSplit->setStretchFactor(0,5); m_detailsSplit->setStretchFactor(1,1); m_detailsSplit->setSizes({460,135});
+    m_split->setStretchFactor(1,1); m_split->setSizes({320,960}); layout->addWidget(m_split,1);
     QSettings settings;
     const auto sizes=settings.value("ui/diplomacy/splitter").toByteArray(); if(!sizes.isEmpty()) m_split->restoreState(sizes);
     const auto detailSizes=settings.value("ui/diplomacy/detailsSplitter").toByteArray();
@@ -246,12 +309,20 @@ CDiplomacyDialog::CDiplomacyDialog(Snapshot snapshot,QWidget* parent)
     connect(m_scripts,&QTreeWidget::itemSelectionChanged,this,&CDiplomacyDialog::showDetails);
     connect(m_tabs,&QTabWidget::currentChanged,this,[this] { populateRelations(); showDetails(); });
     connect(m_relations,&QTableWidget::currentCellChanged,this,&CDiplomacyDialog::showRelationDetails);
+    connect(m_relations,&QTableWidget::cellClicked,this,&CDiplomacyDialog::openRelationMenu);
+    connect(m_relations,&QTableWidget::cellActivated,this,&CDiplomacyDialog::openRelationMenu);
     connect(m_edit,&QPushButton::clicked,this,[this] {
-        if(const auto* src=relationSource()) if(src->loaded) emit editRelationsRequested(src->key);
+        if(const auto* src=relationSource()) if(src->loaded && src->relations.isEmpty()) emit createRelationsRequested(src->key);
     });
     showDetails();
 }
 bool CDiplomacyDialog::busy() const { return m_workerPending || m_timer->isActive(); }
+void CDiplomacyDialog::setMapMode(bool enabled) {
+    const QSignalBlocker blocker(m_mapMode); m_mapMode->setChecked(enabled);
+}
+void CDiplomacyDialog::setHistoryAvailable(bool undo,bool redo) {
+    m_undo->setEnabled(undo); m_redo->setEnabled(redo);
+}
 void CDiplomacyDialog::showEvent(QShowEvent* event) { QDialog::showEvent(event); invalidate(); }
 void CDiplomacyDialog::hideEvent(QHideEvent* event) {
     ++m_generation; m_timer->stop();
@@ -262,6 +333,9 @@ void CDiplomacyDialog::hideEvent(QHideEvent* event) {
 }
 void CDiplomacyDialog::invalidate() {
     ++m_generation;
+    if(m_relationMenu) m_relationMenu->close();
+    for(auto* button:m_relationButtons) button->setEnabled(false);
+    m_symmetric->setEnabled(false); m_focus->setEnabled(false);
     // Remove stale identities while preserving the user's group choice for refresh.
     const QSignalBlocker groups(m_groups), npcs(m_npcs), scripts(m_scripts), relations(m_relations), sources(m_relationSources);
     if(m_npcs->currentItem()) m_selectedNpcKey=m_npcs->currentItem()->data(0,KeyRole).toString();
@@ -302,7 +376,9 @@ void CDiplomacyDialog::populateGroups() {
         ++mobs;
         for(const auto& npc:src.npcs) if(npc.scripted) ++spawns; else { ++placed; ++counts[npc.group]; }
         for(int g=0;g<src.groupNames.size() && g<32;++g) {
-            const QString name=src.groupNames[g]; if(!name.isEmpty() && !names[g].contains(name)) names[g].append(name);
+            const QString name=src.groupNames[g];
+            if(!name.isEmpty() && name.compare(QString("Player-%1").arg(g),Qt::CaseInsensitive)!=0
+               && !names[g].contains(name)) names[g].append(name);
         }
     }
     for(const auto& event:m_result.events) if(includesSource(event.reference.sourceKey)
@@ -313,6 +389,7 @@ void CDiplomacyDialog::populateGroups() {
         const QString title=QString::number(g)+(names[g].isEmpty()?QString():" — "+names[g].join(" / "));
         auto* row=new QTreeWidgetItem(m_groups,{title,QString::number(counts[g]),QString::number(calls[g])});
         row->setData(0,Qt::UserRole,g); row->setToolTip(0,title);
+        row->setIcon(0,colorIcon(diplomacy::groupColor(g)));
         row->setTextAlignment(1,Qt::AlignCenter); row->setTextAlignment(2,Qt::AlignCenter);
     }
     for(int g:counts.keys()+calls.keys()) if((g<0 || g>=32) && g!=-2) {
@@ -364,6 +441,10 @@ void CDiplomacyDialog::populateDetails() {
         auto* row=addRow(m_npcs,values,details,src.key+"\n"+npc.key,npc.scripted?m_tabs->tabIcon(1):m_tabs->tabIcon(0));
         if(npc.hasId) row->setData(1,Qt::UserRole,QVariant::fromValue<qulonglong>(npc.id));
         if(npc.group>=0) row->setData(2,Qt::UserRole,npc.group);
+        row->setIcon(2,colorIcon(diplomacy::groupColor(npc.group)));
+        row->setData(0,SourceRole,src.key); row->setData(0,NpcRole,npc.key);
+        row->setData(0,NavigableRole,src.loaded && !npc.scripted);
+        if(src.loaded && !npc.scripted) row->setToolTip(0,tr("Right-click to find this NPC on the map"));
         row->setTextAlignment(1,Qt::AlignCenter); row->setTextAlignment(2,Qt::AlignCenter);
         row->setToolTip(5,src.key); row->setToolTip(3,details);
     }
@@ -401,6 +482,10 @@ void CDiplomacyDialog::populateDetails() {
 }
 void CDiplomacyDialog::showDetails() {
     const bool matrix=m_tabs->currentIndex()==2;
+    m_subtitle->setVisible(!matrix); m_summary->setVisible(!matrix);
+    m_filter->setVisible(!matrix); m_focus->setVisible(!matrix);
+    auto* npc=m_npcs->currentItem();
+    m_focus->setEnabled(m_tabs->currentIndex()==0 && npc && npc->data(0,NavigableRole).toBool());
     m_filter->setEnabled(!matrix); m_detailPanel->setVisible(!matrix); m_emptyNotice->setVisible(!matrix);
     if(matrix) return;
     auto* tree=m_tabs->currentIndex()==0?m_npcs:m_scripts;
@@ -427,19 +512,25 @@ void CDiplomacyDialog::sizeRelationCells() {
     const int width=qMax(28,m_relations->fontMetrics().horizontalAdvance("31")+4);
     m_relations->horizontalHeader()->setMinimumSectionSize(width);
     m_relations->horizontalHeader()->setDefaultSectionSize(width);
-    m_relations->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_relations->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     m_relations->verticalHeader()->setMinimumSectionSize(24);
     m_relations->verticalHeader()->setDefaultSectionSize(qMax(26,m_relations->fontMetrics().height()+2));
 }
 void CDiplomacyDialog::populateRelations() {
     if(m_tabs->currentIndex()!=2) return;
-    const auto* src=relationSource(); m_edit->setEnabled(src && src->loaded);
+    const auto* src=relationSource(); m_edit->setEnabled(src && src->loaded && src->relations.isEmpty());
+    m_edit->setVisible(src && src->relations.isEmpty());
+    for(auto* button:m_relationButtons) button->setEnabled(false);
+    m_symmetric->setEnabled(false);
     const QSignalBlocker blocker(m_relations);
     m_relations->clear(); m_relations->setRowCount(0); m_relations->setColumnCount(0); m_relationSelection->clear();
     if(!src) { m_relationNotice->setText(tr("Open a MOB to inspect diplomacy.")); return; }
     bool complete=src->relations.size()==32;
     for(const auto& row:src->relations) if(row.size()!=32) complete=false;
-    m_relationNotice->setText(complete?tr("The row group acts on the column group. Column numbers match the groups on the left."):tr("%1 has no complete diplomacy table.").arg(QFileInfo(src->key).fileName()));
+    m_relationNotice->setText(complete ? (src->loaded
+        ? tr("Click a cell to change its relation, or select a pair and use the buttons below. Row → column; edits support Undo / Redo.")
+        : tr("This MOB is not loaded: its relations are read-only."))
+        : tr("%1 has no complete diplomacy table.").arg(QFileInfo(src->key).fileName()));
     if(!complete) return;
     m_relations->setRowCount(32); m_relations->setColumnCount(32); sizeRelationCells();
     QStringList names; for(int i=0;i<32;++i) names.append(QString::number(i)+(src->groupNames.value(i).isEmpty()?QString():" · "+src->groupNames.value(i)));
@@ -450,15 +541,22 @@ void CDiplomacyDialog::populateRelations() {
     for(int r=0;r<32;++r) for(int c=0;c<32;++c) {
         const auto value=src->relations[r][c]; auto* item=new QTableWidgetItem(QString::number(value));
         item->setFlags(item->flags() & ~Qt::ItemIsEditable); ei::applyRelationCellColors(item,int(value)); item->setTextAlignment(Qt::AlignCenter);
-        item->setToolTip(names[r]+" → "+names[c]+"\n"+tr("Stored value: %1").arg(value)); m_relations->setItem(r,c,item);
+        if(value<3) { item->setBackground(diplomacy::relationColor(value).darker(220)); item->setForeground(QColor("#e8f1fa")); }
+        const QStringList labels={tr("Ally"),tr("Neutral"),tr("Enemy")};
+        item->setToolTip(names[r]+" → "+names[c]+"\n"+(value<3?labels[int(value)]:tr("Unknown relation"))+"\n"+tr("Stored value: %1").arg(value)); m_relations->setItem(r,c,item);
     }
     const int group=m_selectedGroup>=0 && m_selectedGroup<32?m_selectedGroup:0;
-    m_relations->setCurrentCell(group,group); showRelationDetails();
+    m_relations->setCurrentCell(m_relationRow>=0?m_relationRow:group,m_relationColumn>=0?m_relationColumn:group);
+    showRelationDetails();
 }
 void CDiplomacyDialog::showRelationDetails() {
     const int r=m_relations->currentRow(), c=m_relations->currentColumn();
     if(r<0 || c<0 || !m_relations->item(r,c)) { m_relationSelection->clear(); return; }
     const uint value=m_relations->item(r,c)->text().toUInt();
+    m_relationRow=r; m_relationColumn=c;
+    const auto* src=relationSource();
+    for(auto* button:m_relationButtons) button->setEnabled(src && src->loaded);
+    m_symmetric->setEnabled(src && src->loaded);
     const QStringList labels={tr("Ally"),tr("Neutral"),tr("War")};
     m_relationSelection->setText(tr("%1 → %2: %3 (%4)").arg(m_relations->verticalHeaderItem(r)->text(),m_relations->verticalHeaderItem(c)->text(),value<3?labels[int(value)]:tr("Unknown relation"),QString::number(value)));
     QFont normal=m_relations->font(), active=normal; active.setBold(true);
@@ -466,4 +564,36 @@ void CDiplomacyDialog::showRelationDetails() {
         m_relations->horizontalHeaderItem(i)->setFont(i==c?active:normal);
         m_relations->verticalHeaderItem(i)->setFont(i==r?active:normal);
     }
+}
+
+void CDiplomacyDialog::focusNpc() {
+    auto* row=m_npcs->currentItem();
+    if(row && row->data(0,NavigableRole).toBool())
+        emit npcFocusRequested(row->data(0,SourceRole).toString(),row->data(0,NpcRole).toString());
+}
+
+void CDiplomacyDialog::applySelectedRelation(uint value) {
+    const auto* src=relationSource();
+    const int row=m_relations->currentRow(), column=m_relations->currentColumn();
+    if(!src || !src->loaded || row<0 || column<0 || value>2 || src->relations.size()!=32
+       || src->relations[row].size()!=32 || src->relations[column].size()!=32) return;
+    emit relationChangeRequested(src->key,row,column,value,m_symmetric->isChecked(),
+                                 src->relations[row][column],src->relations[column][row]);
+}
+
+void CDiplomacyDialog::openRelationMenu(int row,int column) {
+    const auto* src=relationSource();
+    if(!src || !src->loaded || !m_relations->item(row,column)) return;
+    if(m_relationMenu) m_relationMenu->close();
+    auto* menu=new QMenu(this); m_relationMenu=menu; menu->setObjectName("diplomacyRelationMenu");
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->setStyleSheet("QMenu { background: #233344; color: #e5eef9; border: 1px solid #58718b; padding: 5px; } QMenu::item { padding: 9px 28px 9px 12px; } QMenu::item:selected { background: #3b6183; }");
+    menu->addSection(tr("Group %1 → group %2").arg(row).arg(column));
+    const QStringList labels={tr("Ally"),tr("Neutral"),tr("Enemy")};
+    for(uint value=0;value<3;++value) {
+        auto* action=menu->addAction(colorIcon(diplomacy::relationColor(value)),labels[int(value)]);
+        action->setCheckable(true); action->setChecked(src->relations[row][column]==value);
+        connect(action,&QAction::triggered,this,[this,value] { applySelectedRelation(value); });
+    }
+    menu->popup(m_relations->viewport()->mapToGlobal(m_relations->visualItemRect(m_relations->item(row,column)).bottomLeft()));
 }

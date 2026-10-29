@@ -29,6 +29,7 @@ struct SRenderItem
     float cameraDistanceSquared{0.0f};
     float cullingDistanceSquared{0.0f};
     bool highlighted{false};
+    QVector4D diplomacyTint;
     quintptr meshIdentity{0};
     float textureUvScale{1.0f};
     bool instanceEligible{false};
@@ -118,7 +119,8 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity
         && left.textureUvScale == right.textureUvScale
-        && left.materialEmission == right.materialEmission;
+        && left.materialEmission == right.materialEmission
+        && left.diplomacyTint == right.diplomacyTint;
 }
 
 inline int instanceBatchLength(const QVector<SRenderItem>& items, int first)
@@ -186,6 +188,7 @@ public:
     bool collecting() const { return m_collecting; }
     bool collectingSelection() const { return m_collecting && m_selectionPass; }
     void setShadowOnlyCollection(bool enabled) { m_shadowOnlyCollection = enabled; }
+    void setDiplomacyTint(const QVector4D& tint) { m_diplomacyTint = tint; }
     void setLocalShadowOwners(const QVector<quintptr>& owners)
         { m_localShadowOwners = owners; }
     void submit(CPart* part, QOpenGLTexture* texture, const QMatrix4x4& modelMatrix,
@@ -235,6 +238,8 @@ private:
     int m_partAnimatedLocation{-1};
     int m_highlightLocation{-1};
     int m_materialEmissionLocation{-1};
+    int m_diplomacyTintLocation{-1};
+    QVector4D m_diplomacyTint;
     QVector<quintptr> m_localShadowOwners;
 };
 
