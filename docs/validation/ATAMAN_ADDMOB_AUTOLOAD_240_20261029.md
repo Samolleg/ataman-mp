@@ -61,8 +61,27 @@
   `source-inputs.json` фиксирует production-входы. Finalizer
   `finalize.log`:186 prior/186 current/0 removed, package validator PASS.
   Новая staging: `build-addmob-240/build-staging-240-addmob`; после финализатора
-  не запускалась. Установка — следующий разрешённый этап; preflight редактор/
-  runtime постоянной папки закрыты.
+  не запускалась. Scoped-коммит реализации main
+  `071e7b37a70bf80715058b8d9a987831be3bae9c`; `source-match.json`:695/695
+  production-входов совпали с Git.
+
+## Установка — выполнена
+
+- Постоянная `artifacts/EI-Mapper-Ataman-2-first-test` обновлена штатным
+  `packaging/install_program.ps1` после preflight закрытых редактора/runtime.
+  `install.log`:186 verified/7 changed/0 added/0 removed. Installed
+  `--version`:EI Mapper Endurance Edition240,exit0 (`installed-version.json`).
+- `install-user-before.json` / `install-user-after.json`:18485 пользовательских
+  файлов,0 отличий; набор/SHA/размер/native-mtime сохранены. Все11 исходных
+  MCP-мостов сохранили PID/время создания, ни один не завершался.
+- Резервная копия `artifacts/rollback239-to240-addmob-20261029`:
+  `rollback-verify.log` — ROLLBACK_VERIFIED. Предыдущий собственный238→239
+  удалён только после VerifyOnly, совпадения manifest-цепочки и проверки
+  полного инвентаря190 файлов/отсутствия reparse points. Чужие откаты сохранены;
+  квитанция `retired-own-rollback.json`. Установщик отдельно удалил только один
+  прежний свободный retired-файл по штатному реестру/SHA.
+- Реализация, сборка и установка завершены. Игровые карты, настройки владельца,
+  исходный Endurance и чужие изменения не редактировались; push не выполнялся.
 
 ## Границы
 
