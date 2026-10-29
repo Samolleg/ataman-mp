@@ -58,6 +58,9 @@ fixtures/снимки — `work/investigations/diplomacy-theme-242/` (не в Gi
 
 ## Состояние установки
 
+Реализация scoped main `8003c7c83953f039fd758a73c7e90e94864811f2`;
+`source-match.json`:719/719 production-входов,0 working drift/0 index mismatch.
+
 Пока постоянная папка остаётся241: preflight обнаружил открытый редактор
 PID30804/creation29.10.2026 20:53:34. Владельцу показан снимок исправленной242
 и передана просьба сохранить работу и закрыть редактор по TEST_BUILD_HANDOFF.
