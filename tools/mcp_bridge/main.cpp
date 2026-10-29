@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cmath>
 #include <thread>
+#include <memory>
 #ifdef Q_OS_WIN
 #include <fcntl.h>
 #include <io.h>
@@ -41,6 +42,9 @@ bool available(const QJsonObject& descriptor)
 #endif
 }
 class Bridge {
+    QMutex cancelMutex;
+    QSet<QString> cancelledRequests;
+    QString requestKey(const QJsonValue& id)const{return QString::fromUtf8(QJsonDocument(QJsonObject{{"id",id}}).toJson(QJsonDocument::Compact));}
     QLocalSocket socket;
     QString secret;
     QByteArray buffer;
@@ -48,6 +52,7 @@ class Bridge {
     bool legacyInitialized{false};
     QMap<QString,qint64> editJobs;
     QMap<QString,qint64> activeJobs;
+    QSet<QString> sceneJobs;
     QJsonObject catalog{ai::mcpCatalog()};
     bool remoteCatalog{false}, changed{false}, ready{false};
     bool selected{false}, discoverMetadata{true};
@@ -94,8 +99,14 @@ class Bridge {
         catalog=value;remoteCatalog=remote;
     }
 public:
+    void requestCancellation(const QJsonValue& id) {
+        QMutexLocker lock(&cancelMutex);if(cancelledRequests.size()<64)cancelledRequests.insert(requestKey(id));
+    }
+    bool takeCancellation(const QJsonValue& id) {
+        QMutexLocker lock(&cancelMutex);return cancelledRequests.remove(requestKey(id));
+    }
     Bridge(){clock.start();}
-    void detach(){socket.abort();selected=false;legacyCatalog=false;secret.clear();buffer.clear();editJobs.clear();activeJobs.clear();catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
+    void detach(){socket.abort();selected=false;legacyCatalog=false;secret.clear();buffer.clear();editJobs.clear();activeJobs.clear();sceneJobs.clear();catalogError.clear();useCatalog(ai::mcpCatalog(),false);}
     void initialized(){ready=true;}
     bool takeChanged(){if(!ready||!changed)return false;changed=false;return true;}
     void refreshCatalog() {
@@ -176,7 +187,7 @@ public:
         }
         connectionFailed();return ai::error("Local request timeout; connection discarded. Reconnect before retrying.");
     }
-    QJsonObject tool(const QString& name,const QJsonObject& args)
+    QJsonObject tool(const QString& name,const QJsonObject& args,const QJsonValue& requestId=QJsonValue())
     {
         // Mapper owns validation of forwarded tools. An old bridge must not
         // reject a new tool just because its compiled fallback predates it.
@@ -230,6 +241,31 @@ public:
         }
         const auto selection=ensureSelected();if(selection.contains("error"))return selection;
         if(!catalogError.isEmpty())return ai::error(catalogError);
+        if(name=="window_snapshot") {
+            // A queued GUI map commit may not pump IPC at all. Its ID was
+            // already acknowledged; answer BUSY locally until the caller has
+            // observed its terminal status, rather than risking the 2s pipe.
+            for(const auto& id:sceneJobs)if(activeJobs.value(id)>QDateTime::currentMSecsSinceEpoch())
+                return {{"code","BUSY"},{"error","Map operation has not completed; poll operation_status"},{"operation",id},{"phase","opening_map"}};
+            auto start=local(name,args);if(!start.contains("operation")||start["code"]=="BUSY")return start;
+            const auto id=start["operation"].toString();activeJobs[id]=QDateTime::currentMSecsSinceEpoch()+35000;
+            QElapsedTimer deadline;deadline.start();
+            while(deadline.elapsed()<30000) {
+                if(takeCancellation(requestId)) {
+                    local("cancel_operation",{{"operation",id}},30000);activeJobs.remove(id);
+                    return {{"code","CANCELLED"},{"error","Snapshot request cancelled"},{"phase","awaiting_snapshot"}};
+                }
+                const auto status=local("operation_status",{{"operation",id}},qMax(1,30000-int(deadline.elapsed())));
+                if(status.contains("error")){activeJobs.remove(id);return status;}
+                if(status["status"]!="running") {activeJobs.remove(id);return status["result"].toObject();}
+                // No socket request is outstanding here. Let ordinary calls
+                // run during detached PNG encoding; GL stays on mapper's GUI.
+                QCoreApplication::processEvents(QEventLoop::AllEvents,5);
+                QThread::msleep(15);
+            }
+            local("cancel_operation",{{"operation",id}},30000);activeJobs.remove(id);
+            return {{"code","SNAPSHOT_TIMEOUT"},{"error","Snapshot exceeded 30 seconds"},{"phase","awaiting_snapshot"}};
+        }
         const auto now=QDateTime::currentMSecsSinceEpoch();
         for(auto it=editJobs.begin();it!=editJobs.end();)if(it.value()<now)it=editJobs.erase(it);else ++it;
         // Only new219 edit IDs get the normal serializer's bounded commit
@@ -245,6 +281,8 @@ public:
         const bool commitBusy=value["error"].toString().startsWith("Normal map commit in progress");
         if(!commitBusy && (name=="cancel_operation"||(name=="operation_status"&&(value["status"]=="complete"||value["status"]=="failed"||value["status"]=="cancelled"||value.contains("error")))))activeJobs.remove(args["operation"].toString());
         if(name=="export_map_topdown"&&value["operation"].isString())editJobs[value["operation"].toString()]=now+180000;
+        if((name=="open_map"||name=="close_map"||name=="create_map")&&value["operation"].isString())sceneJobs.insert(value["operation"].toString());
+        if((name=="operation_status"||name=="cancel_operation")&&!activeJobs.contains(args["operation"].toString()))sceneJobs.remove(args["operation"].toString());
         const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
@@ -293,9 +331,13 @@ public:
             result={{"tools",catalog["tools"]}};
         } else if(method=="tools/call") {
             if(!params["name"].isString()||(params.contains("arguments")&&!params["arguments"].isObject()))return rpcError(-32602,"Expected tool name and object arguments");
-            auto value=tool(params["name"].toString(),params["arguments"].toObject());
+            auto value=tool(params["name"].toString(),params["arguments"].toObject(),request["id"]);
             QJsonArray content;
-            if(value["mimeType"]=="image/png"&&value.contains("data"))content.append(QJsonObject{{"type","image"},{"mimeType","image/png"},{"data",value["data"]}});
+            if(value["mimeType"]=="image/png"&&value.contains("data")) {
+                auto metadata=value;metadata.remove("data");
+                content.append(QJsonObject{{"type","text"},{"text",QString::fromUtf8(QJsonDocument(metadata).toJson(QJsonDocument::Compact))}});
+                content.append(QJsonObject{{"type","image"},{"mimeType","image/png"},{"data",value["data"]}});
+            }
             else content.append(QJsonObject{{"type","text"},{"text",QString::fromUtf8(QJsonDocument(value).toJson(QJsonDocument::Compact))}});
             const auto appendImages=[&](const QJsonObject& o) {
                 for(const auto& key:{QString("preview"),QString("snapshot")}) {
@@ -356,7 +398,9 @@ int main(int argc,char** argv)
     };
     // stdin may stay silent for hours. Keep the Qt/socket timer alive so catalog
     // changes are announced without requiring a client request. Only this Qt
-    // thread owns the socket, Bridge and stdout. Blocking delivery bounds input.
+    // thread owns socket/Bridge/stdout. Bounded queued delivery also lets the
+    // input reader receive cancellation while window_snapshot awaits its job.
+    auto inputBudget=std::make_shared<QSemaphore>(16);
     QTimer poll;QObject::connect(&poll,&QTimer::timeout,&app,[&](){bridge.refreshCatalog();notify();});poll.start(1000);
     std::thread([&]() {
         QByteArray line;
@@ -365,7 +409,13 @@ int main(int argc,char** argv)
             const bool oversized=line.size()>ai::MaxFrame;
             if(c!='\n'&&!oversized)continue;
             const QByteArray frame=line;line.clear();
-            QMetaObject::invokeMethod(&app,[&,frame,oversized]() {
+            const auto notification=QJsonDocument::fromJson(frame).object();
+            if(notification["method"]=="notifications/cancelled") {
+                bridge.requestCancellation(notification["params"].toObject()["requestId"]);continue;
+            }
+            inputBudget->acquire();
+            QMetaObject::invokeMethod(&app,[&,frame,oversized,inputBudget]() {
+                inputBudget->release();
                 if(oversized){send(rpcError(-32700,"Frame limit exceeded"),QJsonValue::Null);app.exit(2);return;}
                 auto bytes=frame;QJsonObject request;QString error;
                 if(!ai::takeFrame(bytes,&request,&error)){send(rpcError(-32700,error),QJsonValue::Null);return;}
@@ -376,7 +426,7 @@ int main(int argc,char** argv)
                 const auto result=bridge.handle(request);
                 if(request.contains("id")||result.contains("error"))send(result,request.value("id").isUndefined()?QJsonValue(QJsonValue::Null):request["id"]);
                 notify();
-            },Qt::BlockingQueuedConnection);
+            },Qt::QueuedConnection);
             if(oversized)return;
         }
         QMetaObject::invokeMethod(&app,"quit",Qt::QueuedConnection);

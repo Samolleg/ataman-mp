@@ -6,6 +6,8 @@
 #include "landscape.h"
 #include "profile_database.h"
 #include "resource_profile.h"
+#include "topdown_export.h"
+#include "ai_agent_edit.h"
 #include <QBuffer>
 #include <cstdio>
 #include <cmath>
@@ -240,16 +242,12 @@ QJsonObject CAiReadAdapter::read(MainWindow* w,const QString& method,const QJson
         QJsonObject out{{"objects",rows},{"scanned",scanned}};if(more)out.insert("nextOffset",index-1);return out;
     }
     if(method=="window_snapshot") {
-        auto image=w->grab().toImage();
-        // QGLWidget is a native child surface; QWidget::grab alone may leave a
-        // black rectangle. Read its framebuffer explicitly into the window PNG.
-        v->makeCurrent();v->paintGL();const auto viewport=v->grabFrameBuffer(false);
-        if(!viewport.isNull()) {QPainter painter(&image);painter.drawImage(v->mapTo(w,QPoint()),viewport);}
-        image=image.scaled(1024,768,Qt::KeepAspectRatio,Qt::SmoothTransformation);
-        QByteArray bytes;QBuffer buffer(&bytes);buffer.open(QIODevice::WriteOnly);image.save(&buffer,"PNG");
-        if(bytes.size()>384*1024) {bytes.clear();buffer.seek(0);image=image.scaled(640,480,Qt::KeepAspectRatio);image.save(&buffer,"PNG");}
-        if(bytes.size()>384*1024)return ai::error("PNG size limit");
-        return {{"mimeType","image/png"},{"data",QString::fromLatin1(bytes.toBase64())},{"width",image.width()},{"height",image.height()}};
+        // Optional post-edit snapshot uses the same fresh owning-context path.
+        // Public window_snapshot is dispatched as an asynchronous server job.
+        QString error;auto image=v->captureTopdownPass(ETopdownPass::None,v->size().scaled(1024,768,Qt::KeepAspectRatio),{},&error);
+        if(image.isNull())return {{"code","RENDER_UNAVAILABLE"},{"error",error}};
+        auto result=ai::encodeImageBounded(image,QSize(1024,768),std::make_shared<std::atomic_bool>(false));
+        const auto c=context(w);result["profile"]=c["profile"];result["map"]=c["mpr"];result["capturedRevision"]=CAiEditAdapter::revision(w);return result;
     }
     return ai::error("Unknown read tool");
 }

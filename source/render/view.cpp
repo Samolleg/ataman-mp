@@ -8626,7 +8626,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     CRenderStallTrace stallTrace("render");
 
     QMatrix4x4 camMatrix = m_minimapCaptureActive
-        ? m_minimapCaptureView : m_cam->update();
+        ? m_minimapCaptureView : m_snapshotCaptureActive ? m_cam->viewMatrix() : m_cam->update();
     QVector3D cameraAnchor, cameraPivot, cameraRotation;
     m_cam->getLocation(cameraAnchor, cameraPivot, cameraRotation);
     m_lastRenderedCameraFinite = true;
@@ -8889,10 +8889,14 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         // enters draw() with its private FBO and review-size viewport already
         // bound; rebinding the widget target here exposes the top-down capture
         // as a one-frame flash after any edit that refreshes the minimap.
-        if(!m_minimapCaptureActive)
+        if(!m_minimapCaptureActive && !m_snapshotCaptureActive)
         {
             QOpenGLFramebufferObject::bindDefault();
             ei::gl::Viewport(0, 0, m_width, m_height);
+        }
+        else if(m_snapshotCaptureActive) {
+            QOpenGLContext::currentContext()->functions()->glBindFramebuffer(GL_FRAMEBUFFER,m_snapshotFramebuffer);
+            ei::gl::Viewport(0,0,m_snapshotSize.width(),m_snapshotSize.height());
         }
         // Fill the open lower edge of the stock sky cylinder with the same
         // color that distant geometry converges to. This removes the

@@ -131,7 +131,11 @@ bool CTopdownExport::initialize() {
     }
     const auto* profile=dynamic_cast<const COptString*>(m_view->m_pSettings->opt("resourceProfile"));
     m_sceneIdentity=sceneIdentity();
-    m_manifest={{"schemaVersion",1},{"exporter",QJsonObject{{"name","EI Mapper Ataman"},{"version",ENDURANCE_VERSION},{"method","export_map_topdown"}}},
+    m_manifest={{"schemaVersion",2},{"exportId",QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        {"retention",QJsonObject{{"policy","until owner deletes package or registration; no operation TTL"},{"viewer","read_export_image"},{"bridgeReconnect",true}}},
+        {"cartographicBase",QJsonObject{{"status","limited"},{"reason","No authored road semantics; roads must be inspected in terrain/composite"},
+            {"sources",QJsonArray{"relief.png","water-mask.png","structures-mask.png"}},{"geometry","exact pass pixels; outlines remain inside masks; no relocation or inferred geography"}}},
+        {"exporter",QJsonObject{{"name","EI Mapper Ataman"},{"version",ENDURANCE_VERSION},{"method","export_map_topdown"}}},
         {"profile",profile?profile->value():QString()},{"map",m_view->m_pLand->filePath().baseName()},
         {"mpr",savedFile(m_view->m_pLand->filePath().absoluteFilePath(),m_view->m_mprDocument.originalBytes(),m_view->m_pLand->isDirty()||m_view->m_terrainEdit.isDirty())},
         {"mobs",mobs},{"revision",m_revision},{"snapshot",QString::fromLatin1(m_sceneIdentity.toHex())},
@@ -143,7 +147,7 @@ bool CTopdownExport::initialize() {
         {"nativeConversion",QJsonObject{{"capture","GL bottom-left to QImage top-left exactly once"},{"gameImage","not used; minimap_bake applies its separate game Y convention"}}},
         {"roadsMask",QJsonObject{{"status","unavailable"},{"reason","No unambiguous authored road semantic mask in the active renderer material contract"},{"source","MPR tile atlas/materials; actual textures and transitions rendered in terrain/composite"}}},
         {"parameters",QJsonObject{{"deadlineMs",120000},{"maximumPixelsPerLayer",8*1024*1024},{"maximumTextureSize",limit},{"pose","static assembled/rest pose, time 0; overlay motion disabled"},{"neighbors",false},{"editorHiddenObjects",true},{"vegetationCategories",QJsonArray{"trees","bushes"}},{"categorySource",m_catalogPath},{"waterMask","native overlay geometry depth-tested against terrain only; independent of texture opacity"}}},
-        {"warnings",QJsonArray{"Road semantic mask unavailable; road materials are present in textured passes."}}};
+        {"warnings",QJsonArray{"Road semantic mask unavailable; road materials are present in textured passes.","Cartographic base readability is limited: no independently isolated roads; compare terrain/composite."}}};
     return unchanged();
 }
 bool CTopdownExport::resolveObject() {
@@ -267,6 +271,11 @@ void CTopdownExport::step() {
             if(!finalManifest.open(QIODevice::WriteOnly)||finalManifest.write(QJsonDocument(manifest).toJson())<0||!finalManifest.commit()) {
                 fail("OUTPUT_PATH_ERROR","Cannot finalize manifest");return;
             }
+            QString registrationError;
+            if(!ai::registerTopdownExport(QDir(m_output).filePath("manifest.json"),manifest["exportId"].toString(),
+                QCryptographicHash::hash(QJsonDocument(manifest).toJson(),QCryptographicHash::Sha256).toHex(),&registrationError)) {
+                QFile::remove(manifestPath);fail("OUTPUT_PATH_ERROR",registrationError);return;
+            }
             if(!QDir().rename(m_temporary,m_output)){
                 QFile::remove(manifestPath); // only our unpublished manifest
                 fail("OUTPUT_PATH_ERROR","Atomic export publication failed; incomplete directory retained");return;
@@ -275,6 +284,7 @@ void CTopdownExport::step() {
             for(auto it=names.begin();it!=names.end();++it)paths[it.key()]=QDir(m_output).filePath(it.key());
             paths["manifest.json"]=QDir(m_output).filePath("manifest.json");result["files"]=paths;
             result["manifestPath"]=paths["manifest.json"];result["counts"]=m_manifest["counts"];result["warnings"]=m_manifest["warnings"];
+            result["exportId"]=m_manifest["exportId"];result["cartographicBase"]=m_manifest["cartographicBase"];result["retention"]=m_manifest["retention"];
             result["revision"]=m_revision;result["deadlineMs"]=120000;result["elapsedMs"]=double(m_clock.elapsed());
             m_result=result;m_terminal="complete";m_outputLease.reset();if(finished)finished();return;
         }

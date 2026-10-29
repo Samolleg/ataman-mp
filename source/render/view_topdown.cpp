@@ -2,6 +2,7 @@
 #include "landscape.h"
 #include "gl_dispatch.h"
 #include "shader_locations.h"
+#include "camera.h"
 #include "resourcemanager.h"
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFunctions>
@@ -14,7 +15,7 @@ namespace { struct RestoreCapture { std::function<void()> restore; ~RestoreCaptu
 QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
                                const QVector<SRenderItem>& items, QString* error)
 {
-    if(QThread::currentThread()!=thread() || !isValid() || m_minimapCaptureActive) {
+    if(QThread::currentThread()!=thread() || !isValid() || m_minimapCaptureActive || m_snapshotCaptureActive) {
         *error="Renderer/context unavailable or already capturing";return {};
     }
     // The ordinary widget draw path closes its widget on shader failure.
@@ -55,7 +56,7 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
     RestoreCapture restore{[&](){
         m_projection=projection;m_minimapCaptureView=view;m_minimapCaptureCameraPosition=camera;
         m_landscapeVisible=land;m_bDrawLand=drawLand;m_bDrawWater=water;m_tileGridVisible=grid;m_bPreviewTile=preview;
-        m_topdownPass=ETopdownPass::None;m_topdownItems=nullptr;m_minimapCaptureActive=false;
+        m_topdownPass=ETopdownPass::None;m_topdownItems=nullptr;m_minimapCaptureActive=false;m_snapshotCaptureActive=false;
         m_visualWarmupCameraAnchor=anchor;m_visualWarmupCameraPivot=pivot;m_visualWarmupCameraRotation=rotation;m_visualWarmupCameraValid=warmup;
         CTextureList::getInstance()->setTerrainMipmappingEnabled(mipmapping);
         m_landProgram.bind();m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram,"u_cartographicPass"),0);
@@ -79,6 +80,21 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
     QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     QOpenGLFramebufferObject target(size,format);
     if(!target.isValid() || !target.bind()) {*error="Offscreen framebuffer unavailable";return {};}
+    if(pass==ETopdownPass::None) {
+        // Fresh current-camera frame even when paintGL deliberately skips a
+        // hidden/minimized widget. No QWidget::grab, swap or camera update.
+        m_snapshotCaptureActive=true;
+        m_snapshotFramebuffer=target.handle();m_snapshotSize=size;
+        gl->glViewport(0,0,size.width(),size.height());
+        gl->glDisable(GL_SCISSOR_TEST);gl->glEnable(GL_DEPTH_TEST);
+        gl->glDepthFunc(GL_LESS);gl->glDepthMask(GL_TRUE);
+        gl->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl->glEnable(GL_BLEND);
+        gl->glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        draw();gl->glFinish();
+        auto image=target.toImage();
+        if(image.isNull())*error="Current viewport framebuffer readback failed";
+        return image;
+    }
     const float w=m_pLand->widthInWorldUnits(),h=m_pLand->heightInWorldUnits();
     const float height=qMax(4096.0f,m_pLand->maximumHeight()+4096.0f);
     const QVector3D center(w/2,h/2,0);

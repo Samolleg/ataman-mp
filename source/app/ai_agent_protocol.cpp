@@ -96,6 +96,8 @@ QJsonArray toolDefinitions()
         {{"revision",string()},{"outputDir",QJsonObject{{"type","string"},{"maxLength",4096}}},
          {"pixelsPerWorldUnit",QJsonObject{{"type","integer"},{"minimum",1},{"maximum",4},{"enum",QJsonArray{1,2,4}},{"default",4}}}},{"revision","outputDir"});
     {auto tool=tools.last().toObject();tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",false},{"openWorldHint",false}};tools[tools.size()-1]=tool;}
+    add("read_export_image","View a registered export PNG or full-resolution crop as standard image content. No arbitrary paths. Persistent after operation TTL and bridge reconnect until owner deletes package/registration. pixelRect uses this layer's full PNG pixel boundaries; response includes world bounds.",
+        {{"exportId",string()},{"layer",string()},{"pixelRect",array(integer(0,32768),4,4)},{"maxSide",integer(64,1024)}},{"exportId","layer"});
     region.insert("layer",QJsonObject{{"type","string"},{"enum",QJsonArray{"land","overlay"}}});
     add("read_paint","Bounded live tile grid (2 world units per tile), packed physical tile, runtime type, semantic corners when known. No inferred materials.",region);
     add("material_palette","Current terrain atlas material identities, paginated.",page);
@@ -109,7 +111,7 @@ QJsonArray toolDefinitions()
     add("read_profile_map","Read a profile map without opening it: background MPR heights/tiles/materials and matching MOB objects, or a MOB alone. Use relative catalog key, no arbitrary paths. Poll operation_status.",map,{"map"});
     add("operation_status","Poll bounded operation; results expire after 60 seconds. Ordinary reads have a 30 second deadline; export_map_topdown has 120 seconds and resolving_resources/capturing/writing phases. Export terminal results consume the slot; files persist.",{{"operation",string()}},{"operation"});
     add("cancel_operation","Cancel a read operation and discard its result.",{{"operation",string()}},{"operation"});
-    add("window_snapshot","PNG of editor window, scaled to at most 1024x768 and 384 KiB.");
+    add("window_snapshot","Fresh current-camera GL viewport PNG in editor or invisible background, at most 1024x768 /384 KiB, profile/map/capturedRevision. Local server starts preparing/capturing/encoding operation (30s deadline, SNAPSHOT_TIMEOUT); MCP bridge awaits and returns image content. BUSY during map opening; failure preserves connection. cancel_operation or request cancellation supported.");
     add("get_revision","Exact document revision token. Every edit must supply this token; conflicts refuse without changing the map.");
     const auto area=object({{"shape",choice({"circle","rectangle","line"})},{"x",number(-32768,32768)},
         {"y",number(-32768,32768)},{"radius",number(0.5,1024)},{"width",number(1,2048)},

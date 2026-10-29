@@ -27,6 +27,8 @@ private:
         QPointer<QLocalSocket> owner;
         QSharedPointer<ai::EditPlan> plan;
         bool edit{false};
+        bool snapshot{false};
+        QString phase;
         QSharedPointer<CTopdownExport> topdown;
         QDateTime finishedAt;
         QJsonObject result;
@@ -42,6 +44,8 @@ private:
     QJsonObject dispatch(const QString& method, const QJsonObject& args);
     QJsonObject startJob(const QString& method, const QJsonObject& args);
     QJsonObject startTopdownExport(const QJsonObject& args);
+    QJsonObject startSnapshot();
+    void captureSnapshot(const QString& id);
     QJsonObject startEdit(const QString& method,const QJsonObject& args);
     QJsonObject startCommit(const QSharedPointer<ai::EditPlan>& plan,bool snapshot);
     void finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot);

@@ -161,7 +161,8 @@ CLAUDE_CONFIG_DIR и проектный JSON внутри каталога пр�
 | `list_profile_maps` | MPR/MOB в mapRoots профиля, включая незарегистрированные файлы |
 | `read_profile_map` | Дисковые высоты, покраска, таблица материалов, объекты соседнего MOB; также отдельный MOB; без смены открытой карты |
 | `operation_status`, `cancel_operation` | Опрос результата и отмена фонового чтения или подготовки правки |
-| `window_snapshot` | Настоящее окно с framebuffer вида, PNG до1024×768 и384 КиБ |
+| `window_snapshot` | Свежий GL-viewport текущей камеры, в том числе невидимого background, PNG до1024×768 и384 КиБ; profile/map/capturedRevision |
+| `read_export_image` | Просмотр зарегистрированного слоя или точного pixelRect по exportId; image content и world bounds, без произвольных путей |
 
 `read_terrain`, `search_database`, `list_profile_maps`, `read_profile_map` сразу
 возвращают `operation`/`status: running`. Передайте ID в `operation_status`;
@@ -207,15 +208,52 @@ CLAUDE_CONFIG_DIR и проектный JSON внутри каталога пр�
 Один GPU-вызов может закончиться перед обработкой отмены. До получения результата
 готовый комплект не публикуется: запись идёт в отдельный `.incomplete-<uuid>`.
 
-Комплект: `composite.png`, `terrain.png`, `relief.png`, `water.png`,
+Комплект: `cartographic-base.png`, `composite.png`, `terrain.png`, `relief.png`, `water.png`,
 `water-mask.png`, `structures.png`, `structures-mask.png`, `vegetation.png`,
-`preview.png`, `manifest.json`. У восьми основных изображений одинаковые размер
+`preview.png`, `composite-preview.png`, `manifest.json`. У девяти основных изображений одинаковые размер
 и охват. Слои сооружений/растительности/воды прозрачны; маски — геометрические,
 независимые от освещения и цвета текстур. Вода depth-тестируется относительно
 рельефа, без мостов/сооружений; учитываются авторские типы материала2/3 и нативная
 высота overlay. Тип4 — травяной overlay в vegetation. Наземные overlay/decal
 сохраняются в terrain. Дорожные текстуры и переходы рисует обычный renderer.
 Без однозначных авторских семантических данных `roadsMask.status=unavailable`.
+
+`cartographic-base.png` строится строго по relief и географическим water/structures
+маскам: светлая нейтральная суша, геометрический рельеф, однотонная вода и контуры
+сооружений внутри исходных масок. Без растительности/текстурной пестроты и выдуманной
+семантики. При недоступной roads-mask `cartographicBase.status=limited`: дороги
+нужно сверять в terrain/composite. Статус complete означает целостность файлового
+комплекта, а ограничение читаемости основы записано отдельно и в warnings.
+`preview.png` показывает основу, `composite-preview.png` — цветную сверку;
+длинная сторона каждого не больше1024.
+
+Результат содержит `exportId`. `read_export_image` возвращает метаданные и стандартный
+MCP image content; `layer` — точное имя PNG из manifest. Например:
+
+```json
+{"exportId":"<exportId>","layer":"structures.png","pixelRect":[510,730,150,120],"maxSide":1024}
+```
+
+`pixelRect=[x,y,width,height]` задан в полном разрешении выбранного PNG и обязан
+лежать внутри него. Если фрагмент помещается в maxSide/лимит PNG, его пиксели
+не масштабируются. Ответ содержит исходный pixelRect, sourceSize и worldBounds;
+для preview координаты пересчитываются по его собственным размерам. maxSide64..1024,
+по умолчанию1024. Подмена файла/manifest/SHA, выход за bounds, произвольный путь и
+junction отвергаются. Регистрация принадлежит этой установке и хранится отдельно
+от операций в защищённом automation/exports. Просмотр доступен после TTL операции,
+перезапуска bridge/instance, пока владелец не удалит комплект или регистрацию;
+автоматического удаления готовых комплектов нет. Срок указан в manifest.retention.
+
+`window_snapshot({})` внешне возвращает PNG и profile/map/capturedRevision.
+Внутренний локальный вызов начинает операцию с фазами preparing/capturing/encoding;
+bridge ждёт её короткими status-запросами. Общий deadline30с, ошибка
+SNAPSHOT_TIMEOUT содержит фазу. GL выполняется в owning GUI-thread в отдельном FBO
+с текущей камерой без вызова camera.update(), показа/активации окна и swap;
+PNG кодируется отдельно. Отмена MCP-запроса (`notifications/cancelled`, requestId)
+передаётся cancel_operation. При открытии/коммите карты возвращается BUSY с ID
+операции, если он известен. RENDER_UNAVAILABLE/SNAPSHOT_SIZE_LIMIT/штатная отмена
+сохраняют MCP-соединение; get_context можно вызывать сразу. Общий IPC timeout
+остальных методов не менялся.
 
 Растительность определяется категориями trees/bushes авторского каталога и
 нативными семействами nature/flora; происхождение классификации записано для

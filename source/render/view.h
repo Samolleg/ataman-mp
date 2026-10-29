@@ -1055,6 +1055,9 @@ private:
     QVector3D m_visualWarmupCameraRotation;
     bool m_visualWarmupCameraValid{false};
     bool m_minimapCaptureActive{false};
+    bool m_snapshotCaptureActive{false};
+    GLuint m_snapshotFramebuffer{0};
+    QSize m_snapshotSize;
     ETopdownPass m_topdownPass{ETopdownPass::None};
     const QVector<SRenderItem>* m_topdownItems{nullptr};
     bool m_minimapCaptureUnlitPass{false};

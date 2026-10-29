@@ -1,3 +1,10 @@
+## Ataman 239 — MCP-TOPDOWN-EXPORT-01-ADD (2026-10-29)
+
+- `window_snapshot({})` возвращает свежий GL-вид текущей камеры и profile/map/capturedRevision в editor и невидимом background. Подготовка/захват/кодирование — отдельная операция30с с отменой; PNG выдаётся обычным MCP image content. Ошибки снимка не требуют reconnect, открытие карты сообщает BUSY.
+- Экспорт дополнен светлой `cartographic-base.png`, превью основы и отдельным цветным `composite-preview.png`. Геометрия, берега и сооружения берутся из точных проходов238; растительность вынесена отдельно. Отсутствие семантики дорог отмечено отдельным ограничением основы; текстурные дороги остаются в terrain/composite.
+- `read_export_image(exportId,layer,pixelRect?,maxSide?)` показывает зарегистрированные слои и полноразмерные фрагменты через MCP, включая после TTL и нового запуска bridge. Произвольного чтения файлов нет; проверяются регистрация, manifest/SHA и границы.
+- Проверка владельцем: через MCP открыть Zone1, запросить снимок, экспорт, preview/water-mask/relief/structures и фрагмент моста; сравнить с terrain/composite для дорог. Документы не сохраняются. Подробности: docs/validation/ATAMAN_TOPDOWN_ADD_239_20261029.md.
+
 ## Ataman 238 — MCP-TOPDOWN-EXPORT-01 (2026-10-28)
 
 - `export_map_topdown` экспортирует текущую несохранённую сцену полного MPR: composite, terrain, relief, water/маску видимой воды, structures/геометрическую маску и vegetation; отдельно manifest с привязкой/учётом/провайдерами/SHA-256 и небольшое превью. Все проходы используют штатные модели, BON, текстуры и renderer.

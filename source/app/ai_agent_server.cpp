@@ -196,6 +196,14 @@ void CAiAgentServer::prune()
 {
     const auto now=QDateTime::currentDateTimeUtc();
     for(auto it=m_jobs.begin();it!=m_jobs.end();) {
+        if(it->snapshot) {
+            if(!it->complete&&it->created.msecsTo(now)>=30000) {
+                const auto phase=it->phase;cancelJob(*it);it->complete=true;it->finishedAt=now;
+                it->result={{"code","SNAPSHOT_TIMEOUT"},{"error","Snapshot exceeded 30 seconds"},{"phase",phase},{"deadlineMs",30000}};
+            }
+            if(it->complete&&it->finishedAt.msecsTo(now)>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+            continue;
+        }
         if(it->topdown) {
             if(!it->complete && it->created.msecsTo(now)>120000)it->topdown->cancel("EXPORT_TIMEOUT");
             if(it->complete && it->finishedAt.msecsTo(now)>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
@@ -296,7 +304,14 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(authority["allowSave"].toBool());
     }
     if(method=="shutdown_headless")return shutdownHeadless();
-    if(m_committing)return ai::error("Normal map commit in progress; retry after operation_status");
+    if(m_committing) {
+        if(method=="window_snapshot") {
+            QJsonObject out{{"code","BUSY"},{"error","Normal map commit in progress"},{"phase","opening_map"}};
+            for(auto it=m_jobs.constBegin();it!=m_jobs.constEnd();++it)if(it->edit&&!it->complete){out["operation"]=it.key();break;}
+            return out;
+        }
+        return ai::error("Normal map commit in progress; retry after operation_status");
+    }
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
     const QSet<QString> mutations{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
@@ -323,6 +338,8 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     }
     if(QApplication::activeModalWidget()&&method!="operation_status"&&method!="cancel_operation")return ai::error("Editor modal interaction in progress; retry later");
     if(method=="export_map_topdown")return startTopdownExport(args);
+    if(method=="window_snapshot")return startSnapshot();
+    if(method=="read_export_image")return ai::readExportImage(args);
     if(method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
     if(method=="operation_status"||method=="cancel_operation") {
         prune();const auto id=args["operation"].toString();if(!m_jobs.contains(id))return ai::error("Unknown or expired operation");
@@ -339,12 +356,60 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
             if(job.complete){out["result"]=job.result;m_jobs.remove(id);}
             return out;
         }
+        if(job.snapshot) {
+            QJsonObject out{{"operation",id},{"status",!job.complete?"running":job.result.contains("error")?"failed":"complete"},
+                {"phase",job.phase},{"deadlineMs",30000}};
+            if(job.complete){out["result"]=job.result;m_jobs.remove(id);}
+            return out;
+        }
         QJsonObject out{{"operation",id},{"status",job.complete?"complete":"running"}};
         if(job.complete)out.insert("result",job.result);return out;
     }
     auto result=CAiReadAdapter::read(m_window,method,args);
     if(method=="get_context"){result["mode"]=m_mode->currentIndex()==2?"edit":"read-only";result["allowSave"]=m_mode->currentIndex()==2&&m_allowSave->isChecked();result["background"]=qApp->property("agentHeadless").toBool();result["dirty"]=CAiEditAdapter::dirty(m_window);}
     return result;
+}
+QJsonObject CAiAgentServer::startSnapshot()
+{
+    prune();if(m_jobs.size()>=8)return ai::error("Operation limit 8; cancel or wait for expiry");
+    for(auto it=m_jobs.constBegin();it!=m_jobs.constEnd();++it)if(!it->complete&&(it->snapshot||it->edit||it->topdown))
+        return {{"code","BUSY"},{"error","Scene operation in progress"},{"operation",it.key()}};
+    if(CAiEditAdapter::busy(m_window))return {{"code","BUSY"},{"error","Scene loading or interaction in progress"}};
+    const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    Job job;job.snapshot=true;job.owner=m_currentClient;job.phase="preparing";m_jobs.insert(id,job);
+    QTimer::singleShot(0,this,[this,id](){captureSnapshot(id);});
+    return {{"operation",id},{"status","running"},{"phase","preparing"},{"deadlineMs",30000},{"poll","operation_status"}};
+}
+void CAiAgentServer::captureSnapshot(const QString& id)
+{
+    if(!m_jobs.contains(id)||m_jobs[id].complete)return;
+    auto& job=m_jobs[id];
+    const auto fail=[&](QString code,QString reason){job.result={{"code",code},{"error",reason},{"phase",job.phase},{"deadlineMs",30000}};job.complete=true;job.finishedAt=QDateTime::currentDateTimeUtc();};
+    if(job.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000){fail("SNAPSHOT_TIMEOUT","Snapshot preparation exceeded 30 seconds");return;}
+    if(CAiEditAdapter::busy(m_window)||m_committing){fail("BUSY","Map loading/interaction in progress");return;}
+    if(!m_view||!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport GL context unavailable");return;}
+    job.phase="capturing";QElapsedTimer timer;timer.start();
+    const auto revision=CAiEditAdapter::revision(m_window);const auto context=CAiReadAdapter::context(m_window);
+    QString error;
+    const auto image=m_view->captureTopdownPass(ETopdownPass::None,m_view->size().scaled(1024,768,Qt::KeepAspectRatio),{},&error);
+    const qint64 captureMs=timer.elapsed();
+    if(image.isNull()){fail("RENDER_UNAVAILABLE",error);return;}
+    if(CAiEditAdapter::revision(m_window)!=revision){fail("REVISION_CONFLICT","Document changed during snapshot");return;}
+    if(job.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000){fail("SNAPSHOT_TIMEOUT","Snapshot capture exceeded 30 seconds");return;}
+    job.phase="encoding";const auto cancel=job.cancel;
+    auto* watcher=new QFutureWatcher<QJsonObject>(this);job.watcher=watcher;
+    connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher,revision,context,captureMs](){
+        if(m_jobs.contains(id)&&!m_jobs[id].complete) {
+            auto& j=m_jobs[id];auto result=watcher->result();
+            if(j.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000)result={{"code","SNAPSHOT_TIMEOUT"},{"error","Snapshot encoding exceeded 30 seconds"},{"phase","encoding"}};
+            result["capturedRevision"]=revision;result["profile"]=context["profile"];result["map"]=context["mpr"];
+            result["captureKind"]="current GL viewport; fresh owning-context FBO";
+            result["timingsMs"]=QJsonObject{{"capture",double(captureMs)},{"total",double(j.created.msecsTo(QDateTime::currentDateTimeUtc()))}};
+            j.result=result;j.complete=true;j.phase="complete";j.finishedAt=QDateTime::currentDateTimeUtc();j.watcher=nullptr;
+        }
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run([image,cancel](){return ai::encodeImageBounded(image,QSize(1024,768),cancel);}));
 }
 QJsonObject CAiAgentServer::startTopdownExport(const QJsonObject& args)
 {

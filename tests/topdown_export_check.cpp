@@ -11,6 +11,7 @@
 #include "mob.h"
 #include "worldobj.h"
 #include "ai_agent_edit.h"
+#include "ai_agent_server.h"
 #include "topdown_export.h"
 #include "resourcemanager.h"
 #include <QOpenGLFunctions>
@@ -33,10 +34,12 @@ class Client {
     QProcess p;QByteArray buffer;int serial=0;
 public:
     QJsonArray lastContent;
+    bool cancelNextSnapshot{false};
     explicit Client(QString exe){p.start(exe,QStringList{});check(p.waitForStarted(10000),"real stdio bridge starts");call("initialize",{{"protocolVersion","2025-11-25"}});}
     ~Client(){p.closeWriteChannel();if(!p.waitForFinished(2000)){p.kill();p.waitForFinished();}}
     QJsonObject call(QString method,QJsonObject params={}) {
         const int id=++serial;p.write(QJsonDocument(QJsonObject{{"jsonrpc","2.0"},{"id",id},{"method",method},{"params",params}}).toJson(QJsonDocument::Compact)+'\n');
+        if(cancelNextSnapshot){cancelNextSnapshot=false;p.write(QJsonDocument(QJsonObject{{"jsonrpc","2.0"},{"method","notifications/cancelled"},{"params",QJsonObject{{"requestId",id}}}}).toJson(QJsonDocument::Compact)+'\n');}
         while(true){
             if(!until([&](){buffer+=p.readAllStandardOutput();return buffer.contains('\n');},40000))throw QString("MCP response timeout: ")+method+" "+QString::fromUtf8(p.readAllStandardError());
             const int end=buffer.indexOf('\n');auto r=QJsonDocument::fromJson(buffer.left(end)).object();buffer.remove(0,end+1);
@@ -60,6 +63,8 @@ public:
         QJsonObject result;
         check(until([&](){auto start=tool("open_map",{{"map",map},{"revision",tool("get_revision")["revision"]}});
             if(!start.contains("operation")){if(start["error"].toString().contains("progress")||start["error"].toString().contains("busy"))return false;throw QString::fromUtf8(QJsonDocument(start).toJson());}
+            QElapsedTimer early;early.start();const auto busy=tool("window_snapshot");
+            check(busy["code"]=="BUSY"&&busy["operation"]==start["operation"]&&early.elapsed()<2000,"real opening operation returns snapshot BUSY/operation promptly without pipe timeout");
             result=finish(start);return true;},60000),"open_map via MCP "+map);
         if(result.contains("error"))throw result["error"].toString();
         QTest::qWait(100);
@@ -67,6 +72,17 @@ public:
     QJsonObject startExport(QString path,int ppu=4) {
         QElapsedTimer t;t.start();const auto result=tool("export_map_topdown",{{"revision",tool("get_revision")["revision"]},{"outputDir",path},{"pixelsPerWorldUnit",ppu}});
         check(result["status"]=="running"&&result["deadlineMs"]==120000&&t.elapsed()<2000,"export acknowledges ID before rendering, explicit120s deadline");return result;
+    }
+    QImage snapshot(QString path={}) {
+        const auto metadata=tool("window_snapshot");
+        check(metadata["mimeType"]=="image/png"&&!metadata["capturedRevision"].toString().isEmpty()&&metadata.contains("profile")&&metadata.contains("map"),"window_snapshot returns current frame identity metadata");
+        check(lastContent.size()==2&&lastContent[1].toObject()["type"]=="image","window_snapshot standard MCP image content");
+        const auto bytes=QByteArray::fromBase64(lastContent[1].toObject()["data"].toString().toLatin1());
+        QImage image;image.loadFromData(bytes);
+        check(!image.isNull()&&image.width()==metadata["width"].toInt()&&image.height()==metadata["height"].toInt()&&image.width()<=1024&&image.height()<=768&&bytes.size()<=384*1024,"snapshot dimensions/PNG limits match actual pixels");
+        QSet<QRgb> colors;for(int y=0;y<image.height();y+=5)for(int x=0;x<image.width();x+=5)colors.insert(image.pixel(x,y));
+        check(colors.size()>50,"fresh hidden-window GL frame contains real scene, not black/empty rectangle");
+        if(!path.isEmpty()){write(path,bytes);write(path+".json",QJsonDocument(metadata).toJson());}return image;
     }
     QJsonObject exportMap(QString path,int ppu=4) {
         const auto status=finish(startExport(path,ppu),true);
@@ -80,10 +96,15 @@ void verify(QString dir,QSize size) {
     for(const auto& value:manifest["files"].toArray()) {
         const auto f=value.toObject();const auto bytes=read(dir+"/"+f["name"].toString());QImage image;image.loadFromData(bytes);
         check(QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())==f["sha256"].toString()&&bytes.size()==f["bytes"].toInt(),"file hash/size "+f["name"].toString());
-        check(f["name"]=="preview.png"?qMax(image.width(),image.height())<=1024:image.size()==size,"aligned image size "+f["name"].toString());
+        check(f["name"].toString().contains("preview")?qMax(image.width(),image.height())<=1024:image.size()==size,"aligned image size "+f["name"].toString());
     }
     const auto c=manifest["counts"].toObject();check(c["objects"].toInt()==manifest["objects"].toArray().size()&&c["objects"].toInt()==c["structures"].toInt()+c["vegetation"].toInt()+c["excluded"].toInt(),"all scope objects accounted separately from mesh parts");
     check(manifest["roadsMask"].toObject()["status"]=="unavailable","road semantics explicitly unavailable, textured rendering retained");
+    {QImage base(dir+"/cartographic-base.png"),water(dir+"/water-mask.png"),structures(dir+"/structures-mask.png");
+    int lightLand=0,wet=0,solid=0;bool aligned=true;
+    for(int y=0;y<base.height();++y)for(int x=0;x<base.width();++x){const auto c=base.pixel(x,y);if(qGray(structures.pixel(x,y))>=128){++solid;aligned&=qBlue(c)>qRed(c);}
+        else if(qGray(water.pixel(x,y))>=128){++wet;aligned&=qBlue(c)>qRed(c)+40;}else{lightLand+=qGray(c)>200;aligned&=qRed(c)==qGreen(c)&&qRed(c)==qBlue(c);}}
+    check(aligned&&lightLand>100&&wet>100&&solid>100,"light neutral technical base follows exact geographic masks without vegetation/color noise");}
     for(auto name:{"water-mask.png","structures-mask.png"}){QImage image(dir+"/"+name);int mid=0,white=0;for(int y=0;y<image.height();++y)for(int x=0;x<image.width();++x){int v=qGray(image.pixel(x,y));mid+=v!=0&&v!=255;white+=v==255;}check(mid==0&&white>0,QString("geometric binary coverage with real pixels: ")+name);}
 }
 }
@@ -110,7 +131,32 @@ int runAssemblyCatalogCheck() {
         check(status["status"]=="failed"&&status["result"].toObject()["code"]=="NO_MAP","NO_MAP returns a terminal error without breaking connection");
         background.open("zone1");
         const auto before=background.tool("get_context"),rev=background.tool("get_revision");
+        background.snapshot(root+"/background-snapshot.png");
+        background.cancelNextSnapshot=true;check(background.tool("window_snapshot")["code"]=="CANCELLED","MCP request cancellation reaches snapshot operation");
+        check(background.tool("get_context")==before,"get_context works after cancelled snapshot without reconnect");
         auto result=background.exportMap(exports+"/zone1");verify(exports+"/zone1",QSize(1408,1152));
+        const auto exportId=result["exportId"].toString();check(!exportId.isEmpty()&&json(exports+"/zone1/manifest.json")["cartographicBase"].toObject()["status"]=="limited","readable base exposes road limitation separately from file completion");
+        for(const auto layer:{"preview.png","water-mask.png","relief.png","structures.png","terrain.png","cartographic-base.png","composite-preview.png","composite.png","water.png","structures-mask.png","vegetation.png"}) {
+            const auto image=background.tool("read_export_image",{{"exportId",exportId},{"layer",layer}});
+            check(image["mimeType"]=="image/png"&&background.lastContent.size()==2&&background.lastContent[1].toObject()["type"]=="image",QString("registered layer delivered as MCP image: ")+layer);
+            write(root+"/view-"+layer,QByteArray::fromBase64(background.lastContent[1].toObject()["data"].toString().toLatin1()));
+        }
+        const QJsonArray crop{510,730,150,120};
+        auto fragment=background.tool("read_export_image",{{"exportId",exportId},{"layer","structures.png"},{"pixelRect",crop}});
+        QImage fragmentImage;fragmentImage.loadFromData(QByteArray::fromBase64(background.lastContent[1].toObject()["data"].toString().toLatin1()));
+        check(fragment["pixelRect"]==crop&&fragment["width"]==150&&fragment["height"]==120&&fragmentImage==QImage(exports+"/zone1/structures.png").copy(510,730,150,120),"full-resolution bridge crop preserves exact registered pixels and rectangle");
+        write(root+"/bridge-fragment.png",QByteArray::fromBase64(background.lastContent[1].toObject()["data"].toString().toLatin1()));
+        for(const auto layer:{"cartographic-base.png","water-mask.png","relief.png","terrain.png"}) {
+            background.tool("read_export_image",{{"exportId",exportId},{"layer",layer},{"pixelRect",crop}});
+            write(root+"/bridge-"+layer,QByteArray::fromBase64(background.lastContent[1].toObject()["data"].toString().toLatin1()));
+        }
+        for(const auto layer:{"cartographic-base.png","terrain.png","structures.png"}) {
+            background.tool("read_export_image",{{"exportId",exportId},{"layer",layer},{"pixelRect",QJsonArray{650,600,400,200}}});
+            write(root+"/gate-road-"+layer,QByteArray::fromBase64(background.lastContent[1].toObject()["data"].toString().toLatin1()));
+        }
+        check(background.tool("read_export_image",{{"exportId",exportId},{"layer","../manifest.json"}}).contains("error"),"registered viewer refuses arbitrary paths");
+        check(background.tool("read_export_image",{{"exportId",exportId},{"layer","terrain.png"},{"pixelRect",QJsonArray{1400,0,100,100}}}).contains("error"),"viewer refuses out-of-bounds rectangle");
+        {Client reconnect(bridge);reconnect.tool("connect_instance",{{"target","background"}});check(reconnect.tool("read_export_image",{{"exportId",exportId},{"layer","water-mask.png"}})["mimeType"]=="image/png","registered viewer survives real bridge restart after terminal result consumed");}
         check(background.tool("get_revision")==rev&&background.tool("get_context")==before,"production export retains revision/dirty/context");
         check(QFileInfo(result["manifestPath"].toString()).exists(),"all final files reachable without GUI");
         const auto stale=background.tool("export_map_topdown",{{"revision","stale"},{"outputDir",exports+"/stale"}});
@@ -125,6 +171,24 @@ int runAssemblyCatalogCheck() {
         auto& view=*window.view();view.show();view.makeCurrent();check(view.isValid(),"owner-window renderer runs with no visible windows");
         Client editor(bridge);check(editor.tool("connect_instance",{{"target","editor"}})["background"]==false,"explicit editor instance selected");editor.open("zone1");
         check(until([&](){return !CAiEditAdapter::busy(&window);},30000),"scene/resource initialization settles");
+        const auto editorBefore=editor.tool("get_context"),editorRevision=editor.tool("get_revision");
+        {QElapsedTimer timer;timer.start();auto image=window.grab().toImage();const auto grabMs=timer.elapsed();
+        view.makeCurrent();view.paintGL();const auto paintMs=timer.elapsed();const auto viewport=view.grabFrameBuffer(false);const auto readbackMs=timer.elapsed();
+        if(!viewport.isNull()){QPainter p(&image);p.drawImage(view.mapTo(&window,QPoint()),viewport);}
+        image=image.scaled(1024,768,Qt::KeepAspectRatio,Qt::SmoothTransformation);QByteArray png;QBuffer buffer(&png);buffer.open(QIODevice::WriteOnly);image.save(&buffer,"PNG");
+        write(root+"/legacy-pipeline-timing.json",QJsonDocument(QJsonObject{{"kind","238 pipeline measured in isolated native editor"},{"windowGrabMs",double(grabMs)},
+            {"explicitPaintMs",double(paintMs-grabMs)},{"framebufferMs",double(readbackMs-paintMs)},{"composeScalePngMs",double(timer.elapsed()-readbackMs)},
+            {"totalMs",double(timer.elapsed())},{"viewportSize",QJsonArray{view.width(),view.height()}},{"windowSize",QJsonArray{window.width(),window.height()}}}).toJson());}
+        const auto firstFrame=editor.snapshot(root+"/editor-snapshot.png");
+        QVector3D oldPos,oldPivot,oldRot;view.m_cam->getLocation(oldPos,oldPivot,oldRot);
+        view.m_cam->setLocation(oldPos+QVector3D(15,8,5),oldPivot+QVector3D(15,8,0),oldRot+QVector3D(0,0,15));
+        const auto changedCamera=view.m_cam->viewMatrix();const auto secondFrame=editor.snapshot(root+"/editor-camera-snapshot.png");
+        check(secondFrame!=firstFrame&&view.m_cam->viewMatrix()==changedCamera&&editor.tool("get_context")==editorBefore&&editor.tool("get_revision")==editorRevision,"camera-only change gives fresh frame; snapshot preserves camera/documents/revision");
+        view.m_cam->setLocation(oldPos,oldPivot,oldRot);
+        {auto* server=window.m_aiAgent;server->m_committing=true;const auto busy=server->dispatch("window_snapshot",{});server->m_committing=false;
+        check(busy["code"]=="BUSY"&&editor.tool("get_context")==editorBefore,"normal commit reports snapshot BUSY without breaking connection");
+        const auto pending=server->startSnapshot();const auto id=pending["operation"].toString();server->m_jobs[id].created=QDateTime::currentDateTimeUtc().addSecs(-31);server->prune();
+        const auto expired=server->dispatch("operation_status",{{"operation",id}});check(expired["result"].toObject()["code"]=="SNAPSHOT_TIMEOUT"&&expired["result"].toObject()["phase"]=="preparing","snapshot actual deadline branch returns SNAPSHOT_TIMEOUT/phase");}
         // Owner-window and background geography must agree despite user camera.
         auto* node=static_cast<CNode*>(nullptr);for(auto* mob:view.m_aMob)for(auto* n:mob->nodes())if(n->modelName()=="stbuho7"){node=n;break;}
         check(node!=nullptr,"real house chosen from current scene");
@@ -132,7 +196,12 @@ int runAssemblyCatalogCheck() {
         node->setState(eHidden);view.m_staticObjectsVisible=false;view.m_landscapeVisible=false;view.m_bDrawWater=false;
         const auto savedState=[&](){return QJsonDocument(QJsonObject{{"revision",CAiEditAdapter::revision(&window)},{"node",node->toJson()},{"state",int(node->nodeState())},{"activeMob",view.m_activeMob->filePath().absoluteFilePath()},{"static",view.m_staticObjectsVisible},{"land",view.m_landscapeVisible},{"water",view.m_bDrawWater}}).toJson();};
         window.findChild<QComboBox*>("aiAgentMode")->setCurrentIndex(1);QTest::qWait(30);editor.tool("connect_instance",{{"target","editor"}});
-        const auto saved=savedState();editor.exportMap(exports+"/editor-hidden");
+        const auto saved=savedState();
+        {auto started=editor.startExport(exports+"/editor-hidden");const auto id=started["operation"].toString();auto* server=window.m_aiAgent;
+        check(until([&](){return server->m_jobs.contains(id)&&server->m_jobs[id].complete;},140000),"real editor export completes before terminal TTL");
+        const auto retained=server->m_jobs[id].result;check(!retained.contains("error"),"editor export completed successfully");
+        server->m_jobs[id].finishedAt=QDateTime::currentDateTimeUtc().addSecs(-61);server->prune();
+        check(!server->m_jobs.contains(id)&&editor.tool("read_export_image",{{"exportId",retained["exportId"]},{"layer","structures.png"}})["mimeType"]=="image/png","actual terminal-operation expiry releases slot but retains registered layer viewing");}
         check(savedState()==saved&&view.m_projection==projection&&view.m_cam->viewMatrix()==camera,"hidden/layer/camera/projection/MOB/revision preserved in read-only mode");
         check(read(exports+"/editor-hidden/structures-mask.png")==read(exports+"/zone1/structures-mask.png"),"editor-hidden house and background share exact geographic geometry/mask");
         {
@@ -209,6 +278,9 @@ int runAssemblyCatalogCheck() {
             QString captureError;const auto captured=view.captureTopdownPass(ETopdownPass::Terrain,QSize(352,288),{},&captureError);
             GLint fb=0,vp[4];GLboolean dm,cm[4];gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING,&fb);gl->glGetIntegerv(GL_VIEWPORT,vp);gl->glGetBooleanv(GL_DEPTH_WRITEMASK,&dm);gl->glGetBooleanv(GL_COLOR_WRITEMASK,cm);
             check(!captured.isNull()&&GLuint(fb)==sentinel.handle()&&vp[0]==3&&vp[1]==5&&vp[2]==37&&vp[3]==39&&!dm&&cm[0]&&!cm[1]&&cm[2]&&!cm[3]&&!gl->glIsEnabled(GL_BLEND),"owning FBO/viewport/color/depth/blend restored exactly after capture");
+            const auto cameraBefore=view.m_cam->viewMatrix();const auto snapshot=view.captureTopdownPass(ETopdownPass::None,QSize(512,78),{},&captureError);
+            gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING,&fb);gl->glGetIntegerv(GL_VIEWPORT,vp);gl->glGetBooleanv(GL_DEPTH_WRITEMASK,&dm);gl->glGetBooleanv(GL_COLOR_WRITEMASK,cm);
+            check(!snapshot.isNull()&&GLuint(fb)==sentinel.handle()&&vp[0]==3&&vp[1]==5&&vp[2]==37&&vp[3]==39&&!dm&&cm[0]&&!cm[1]&&cm[2]&&!cm[3]&&!gl->glIsEnabled(GL_BLEND)&&cameraBefore==view.m_cam->viewMatrix(),"current-camera snapshot restores exact owning GL target/state and never advances camera");
             const auto oversized=view.captureTopdownPass(ETopdownPass::Terrain,QSize(1000000,4),{},&captureError);gl->glGetIntegerv(GL_FRAMEBUFFER_BINDING,&fb);
             check(oversized.isNull()&&captureError.startsWith("EXPORT_SIZE_LIMIT")&&GLuint(fb)==sentinel.handle(),"GL size refusal occurs before capture and restores owning target");
             out<<"Framebuffer image format="<<int(sentinel.toImage().format())<<" (ARGB32 premultiplied="<<int(QImage::Format_ARGB32_Premultiplied)<<")\n";
@@ -250,7 +322,8 @@ int runAssemblyCatalogCheck() {
         // Test-owned edits are reverted in memory before native window cleanup.
         {const bool visible=window.isVisible();const auto state=savedState();view.m_landProgram.removeAllShaders();QString error;
         const auto unavailable=view.captureTopdownPass(ETopdownPass::Terrain,QSize(352,288),{},&error);
-        check(unavailable.isNull()&&error.contains("shader")&&window.isVisible()==visible&&savedState()==state,"unavailable shader renderer refuses capture without closing viewport/documents");}
+        check(unavailable.isNull()&&error.contains("shader")&&window.isVisible()==visible&&savedState()==state,"unavailable shader renderer refuses capture without closing viewport/documents");
+        check(editor.tool("window_snapshot")["code"]=="RENDER_UNAVAILABLE"&&editor.tool("get_context").contains("profile")&&savedState()==state,"snapshot render failure preserves document and live MCP connection");}
         for(auto* mob:view.m_aMob)mob->setDirty(false);window.findChild<QComboBox*>("aiAgentMode")->setCurrentIndex(0);while(!view.m_aMob.isEmpty())view.unloadMobDocument(view.m_aMob.last(),false);view.m_pLand->setDirty(false);
         out<<checks<<" PASS / 0 FAIL\n";return 0;
     } catch(const QString& error){out<<"FAIL "<<error<<"\n";out.flush();return 1;}

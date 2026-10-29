@@ -56,6 +56,9 @@ private:
 };
 
 namespace ai {
+QJsonObject encodeImageBounded(QImage image,QSize maximum,const Cancellation& cancel);
+bool registerTopdownExport(const QString& manifestPath,const QString& exportId,const QByteArray& sha256,QString* error);
+QJsonObject readExportImage(const QJsonObject& args);
 QString topdownWorkspaceRoot();
 // Returns a canonical, absent destination under workspace. Every existing
 // ancestor is checked for symlinks and Windows reparse points (junctions too).
