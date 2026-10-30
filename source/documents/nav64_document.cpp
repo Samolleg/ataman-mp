@@ -23,7 +23,7 @@
 namespace {
 const quint32 Limit=512u*1024*1024;
 // Accepted wire pairs, independent of whichever producer is currently vendored.
-const struct NavFormat {quint32 container,algorithm;} Formats[]={{3,8},{3,9},{3,10},{8,21},{9,24}};
+const struct NavFormat {quint32 container,algorithm;} Formats[]={{3,8},{3,9},{3,10},{8,21},{9,24},{9,25},{10,26}};
 bool supportedFormat(quint32 container,quint32 algorithm){for(const auto& f:Formats)if(f.container==container&&f.algorithm==algorithm)return true;return false;}
 struct Reader {
     QByteArray data; int at=0;
@@ -46,9 +46,10 @@ SNav64Header header(Reader& r) {
     h.mpr=r.string();h.mob=r.string();h.profile=r.string();
     if((h.container==3&&!QRegularExpression("^[0-9a-f]{64}$").match(h.fingerprint).hasMatch())||
        !QRegularExpression("^[a-z0-9_-]+\\.mpr$").match(h.mpr).hasMatch()||
-       !QRegularExpression("^[a-z0-9_-]+\\.mob$").match(h.mob).hasMatch()||!nav64Profiles().contains(h.profile))throw QStringLiteral("Неверная идентичность Nav64");
+       !QRegularExpression("^[a-z0-9_-]+\\.mob$").match(h.mob).hasMatch()||!(nav64Profiles()+QStringList{"tiny","levitate_tiny","levitate_small"}).contains(h.profile))throw QStringLiteral("Неверная идентичность Nav64");
     auto& p=h.body;p.radius=r.f32();p.height=r.f32();p.slope=r.f32();p.climb=r.f32();p.cellSize=r.f32();p.cellHeight=r.f32();p.tileCells=r.u32();
     if(h.container!=3){p.materialClass=r.u32();if(p.materialClass>7||p.tileCells!=96)throw QStringLiteral("Неверный класс движения / размер тайла Nav64");}
+    if(h.container>=10){h.movement=r.u32();if(h.movement>2||h.movement!=(h.profile=="flying"?2u:h.profile=="levitate"?1u:0u))throw QStringLiteral("Неверный режим движения Nav64");}
     if(p.radius<0||p.radius>100||p.height<=0||p.height>100||p.slope<0||p.slope>90||p.climb<0||p.cellSize<=0||p.cellHeight<=0||!p.tileCells||p.tileCells>4096)throw QStringLiteral("Неверный профиль Nav64");
     return h;
 }
@@ -115,7 +116,7 @@ int validateTile(const QByteArray& b,const dtNavMeshParams& params,float heightT
     return outlierVertices;
 }
 }
-QStringList nav64Profiles(){return {"tiny","small","human","large","giant","levitate_tiny","levitate_small","levitate"};}
+QStringList nav64Profiles(){return {"small","human","large","giant","levitate","flying"};}
 QVector<quint32> nav64SupportedContainers(){QVector<quint32> result;for(const auto& f:Formats)if(!result.contains(f.container))result<<f.container;return result;}
 QVector<quint32> nav64SupportedAlgorithms(){QVector<quint32> result;for(const auto& f:Formats)if(!result.contains(f.algorithm))result<<f.algorithm;return result;}
 QVector4D nav64AreaColor(int area){const auto c=QColor::fromHsv((area*43+100)%360,160,235);return {float(c.redF()),float(c.greenF()),float(c.blueF()),.33f};}
@@ -150,7 +151,7 @@ SNav64Bodies readNav64Bodies(const QString& path){
             const auto model=r.string();if(model.isEmpty()||model.contains('/')||model.contains('\\')||model=="."||model=="..")throw QStringLiteral("Неверное имя модели таблицы тел");
             const float a=r.f32(),b=r.f32(),c=r.f32();Key key(model,a,b,c);
             if(!keys.insert(key).second||(!first&&key<previous))throw QStringLiteral("Повтор / неверный порядок образцов таблицы тел");previous=key;first=false;
-            const auto ground=r.u32(),levitation=r.u32();if(ground>4||levitation<5||levitation>7)throw QStringLiteral("Неверный профиль таблицы тел");
+            const auto ground=r.u32(),levitation=r.u32();if(out.algorithm>=26?(ground>3||levitation!=4):(ground>4||levitation<5||levitation>7))throw QStringLiteral("Неверный профиль таблицы тел");
             if(r.f32()<0)throw QStringLiteral("Отрицательный радиус таблицы тел");
             for(int pose=0;pose<3;++pose)if(r.f32()<=0)throw QStringLiteral("Неположительный рост таблицы тел");
         }r.end();out.valid=true;
@@ -218,7 +219,7 @@ SNav64Document loadNav64(const QString& path){
                 // A short open portal is a diagnostic candidate, not raw wall clearance.
                 if(p.neis[j]&&out.header.body.radius>0&&(a-b).length()<2*out.header.body.radius){render.narrow<<a+QVector3D(0,0,.08)<<b+QVector3D(0,0,.08);++out.narrowCount;}
             }center/=p.vertCount;if(root(i)!=largest)islandCenters[root(i)]+=center;
-            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];QVector3D points[3];for(int k=0;k<3;++k){const int v=tri[k];points[k]=world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);vertices<<points[k];}out.triangles.append({points[0],points[1],points[2],p.flags,terrainSupports.value(tile).value(item.index)!=0});}
+            for(unsigned j=0;j<d.triCount;++j){const auto* tri=&tile->detailTris[(d.triBase+j)*4];QVector3D points[3];for(int k=0;k<3;++k){const int v=tri[k];points[k]=world(v<p.vertCount?&tile->verts[p.verts[v]*3]:&tile->detailVerts[(d.vertBase+v-p.vertCount)*3]);vertices<<points[k];}out.triangles.append({points[0],points[1],points[2],p.flags,out.header.profile!="flying"&&terrainSupports.value(tile).value(item.index)!=0});}
         }for(auto it=islandCenters.cbegin();it!=islandCenters.cend();++it)out.islands<<it.value()/sizes[it.key()];
         out.polygonCount=polys.size();out.valid=true;
     }catch(const QString& e){out.error=e;out.renderTiles.clear();out.tiles.clear();out.islands.clear();}catch(const std::bad_alloc&){out.error=QStringLiteral("Недостаточно памяти для Nav64");}

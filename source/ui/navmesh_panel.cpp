@@ -19,8 +19,8 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     auto* profileRow=new QHBoxLayout;
     profileRow->addWidget(new QLabel(QStringLiteral("Профиль:"),this));
     m_profile=new QComboBox(this);m_profile->setObjectName("navmeshProfile");
-    const QStringList labels={QStringLiteral("Крошечный (tiny)"),QStringLiteral("Маленький (small)"),QStringLiteral("Человек (human)"),QStringLiteral("Крупный (large)"),QStringLiteral("Гигант (giant)"),QStringLiteral("Парящий крошечный (levitate_tiny)"),QStringLiteral("Парящий маленький (levitate_small)"),QStringLiteral("Парящий (levitate)")};
-    const auto profiles=nav64Profiles();for(int i=0;i<profiles.size();++i)m_profile->addItem(labels[i],profiles[i]);m_profile->setCurrentIndex(2);profileRow->addWidget(m_profile,1);layout->addLayout(profileRow);
+    const QStringList labels={QStringLiteral("Маленький (small)"),QStringLiteral("Человек (human)"),QStringLiteral("Крупный (large)"),QStringLiteral("Гигант (giant)"),QStringLiteral("Парящий (levitate)"),QStringLiteral("Летающий (flying)")};
+    const auto profiles=nav64Profiles();for(int i=0;i<profiles.size();++i)m_profile->addItem(labels[i],profiles[i]);m_profile->setCurrentIndex(m_profile->findData("human"));profileRow->addWidget(m_profile,1);layout->addLayout(profileRow);
     m_status=new QLabel(QStringLiteral("Сетка не запечена"),this);m_status->setObjectName("navmeshStatus");m_status->setTextFormat(Qt::PlainText);m_status->setWordWrap(true);layout->addWidget(m_status);
     m_freshness=new QLabel(this);m_freshness->setObjectName("navmeshFreshness");m_freshness->setTextFormat(Qt::PlainText);m_freshness->setWordWrap(true);layout->addWidget(m_freshness);
     m_algorithmStatus=new QLabel(this);m_algorithmStatus->setObjectName("navmeshAlgorithmStatus");m_algorithmStatus->setWordWrap(true);m_algorithmStatus->setStyleSheet("color: #ffbd69");m_algorithmStatus->hide();layout->addWidget(m_algorithmStatus);
@@ -112,6 +112,10 @@ QString CNavmeshPanel::bakerPath()const{return m_bakerPath.trimmed().isEmpty()?Q
 void CNavmeshPanel::setBakerPath(const QString& path){m_bakerPath=path;controls();}
 QString CNavmeshPanel::bakeLog()const{return m_log->toPlainText();}
 void CNavmeshPanel::controls(){
+    const bool flying=m_profile->currentData().toString()=="flying";
+    m_fill->setItemData(1,flying?0:int(Qt::ItemIsSelectable|Qt::ItemIsEnabled),Qt::UserRole-1);
+    if(flying&&m_fill->currentIndex()!=0)m_fill->setCurrentIndex(0);
+    m_fill->setToolTip(flying?QStringLiteral("Автоматический полёт над препятствиями. Сравнение с наземным слоем неприменимо."):QString());
     m_this->setEnabled(!busy()&&!m_mpr.isEmpty()&&!m_mob.isEmpty());m_all->setEnabled(!busy()&&!m_mpr.isEmpty());
     m_cancel->setVisible(busy());m_progress->setVisible(busy());m_browse->setEnabled(!busy());
     inspectBaker();

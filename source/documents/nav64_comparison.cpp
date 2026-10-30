@@ -20,6 +20,7 @@ QString nav64LegacyLayerLabel(int layer){
 }
 SNav64Comparison compareNav64(const SNav64Document& mesh,const SAiGraphPreviewBuildInput& input,int layer,const std::shared_ptr<std::atomic_bool>& cancelled){
     SNav64Comparison out;QElapsedTimer timer;timer.start();out.layer=layer;
+    if(mesh.header.profile=="flying"){out.error=QStringLiteral("У летающего профиля нет наземного слоя для сравнения");return out;}
     if(cancelled->load())return out;
     const auto old=CAiGraphPreviewBuilder::passability(input,layer);
     if(!old.valid){out.error=old.error;return out;}
@@ -34,7 +35,7 @@ SNav64Comparison compareNav64(const SNav64Document& mesh,const SAiGraphPreviewBu
     // snapping across a wall/hole. A cell represents 0.25 square metres.
     for(const auto& t:mesh.triangles){
         if(cancelled->load())return {};
-        if(!(t.clearance&clearance))continue;
+        if(!(t.clearance&clearance)||(mesh.header.algorithm>=25&&(t.clearance&(1u<<(layer+4)))))continue;
         const float denom=(t.b.y()-t.c.y())*(t.a.x()-t.c.x())+(t.c.x()-t.b.x())*(t.a.y()-t.c.y());
         if(qAbs(denom)<1e-8f)continue;
         const int x0=qMax(0,qCeil(2*qMin(t.a.x(),qMin(t.b.x(),t.c.x()))-.5f)),x1=qMin(out.width-1,qFloor(2*qMax(t.a.x(),qMax(t.b.x(),t.c.x()))-.5f));

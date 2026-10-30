@@ -9,7 +9,7 @@
 
 struct SNav64Header {
     QString fingerprint, mpr, mob, profile;
-    quint32 container=0, algorithm=0;
+    quint32 container=0, algorithm=0, movement=0;
     Navigation::Profile body;
 };
 struct SNav64Batch {
