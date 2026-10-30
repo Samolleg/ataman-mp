@@ -142,7 +142,7 @@ class TerrainShadowContractTests(unittest.TestCase):
         undo_hook = view.split("connect(m_pUndoStack", 1)[1].split(
             "m_pProgress = pProgress", 1)[0]
         selection_undo = undo_hook.split(
-            "if(!selectionOnly)", 1)[1].split("}", 1)[0]
+            "if(!selectionOnly && !layoutOnlyChange)", 1)[1].split("}", 1)[0]
         self.assertIn("m_spatialIndexDirty = true", selection_undo)
 
     def test_sector_geometry_never_owns_terrain_shadow_visibility(self):
@@ -244,7 +244,7 @@ class TerrainShadowContractTests(unittest.TestCase):
         self.assertIn("m_editorQueryFbo", view_h)
         for query_pass, read_marker in (
                 (rectangle_pick, "getColorFromRect"),
-                (point_pick, "ReadPixels"),
+                (point_pick, "getColorFromRect"),
                 (terrain_pick, "ReadPixels")):
             self.assertIn("beginEditorQueryFramebuffer", query_pass)
             self.assertIn("endEditorQueryFramebuffer", query_pass)
@@ -260,7 +260,7 @@ class TerrainShadowContractTests(unittest.TestCase):
             "void CLandscape::applyTerrainShadowUniforms", 1)[1].split(
                 "void CLandscape::updateTerrainShadowVisibility", 1)[0]
         self.assertIn("const bool available = enabled", apply)
-        self.assertIn('setUniformValue("u_terrainShadowEnabled", available)', apply)
+        self.assertRegex(apply, r'setUniformValue\(\s*ei::uniformLocation\(program,\s*"u_terrainShadowEnabled"\),\s*available\)')
         self.assertNotIn("m_terrainShadowTexture = nullptr", apply)
         self.assertNotIn("m_terrainShadowFieldGeneration = 0", apply)
 

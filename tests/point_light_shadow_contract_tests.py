@@ -45,7 +45,7 @@ class PointLightShadowContractTests(unittest.TestCase):
         self.assertNotIn("shadowLights.resize", collection)
 
         self.assertIn(
-            "renderShadowMap(cameraPosition, cameraPivot, environment, shadowLights,",
+            "renderShadowMap(logicalCameraPosition, cameraPivot, environment, shadowLights,",
             view,
         )
 

@@ -16,7 +16,7 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
             'tr("Visuals")',
             'tr("Show all")',
             'tr("Hide all")',
-            'tr("Entrances")',
+            'tr("Переходы")',
             'tr("Object helpers")',
             'tr("Static objects")',
             'tr("Dynamic objects")',
@@ -38,7 +38,10 @@ class ViewportVisualChannelsContractTests(unittest.TestCase):
         main_header = source("source/app/main_window.h")
         self.assertNotIn("showEntrancesButton", main_window)
         self.assertNotIn("m_showEntrancesButton", main_header)
-        self.assertIn("entranceOverlaysVisible()", main_window)
+        view = source("source/render/view.cpp")
+        self.assertIn('makeToggle("visualsEntrances"', view)
+        self.assertIn('connect(m_entranceVisualToggle, &QToolButton::toggled', view)
+        self.assertIn('m_entranceOverlaysVisible = visible', view)
 
     def test_channels_gate_their_render_passes_and_helpers(self):
         view = source("source/render/view.cpp")

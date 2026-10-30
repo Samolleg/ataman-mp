@@ -50,7 +50,7 @@ def main() -> int:
             "Landscape Tools settings shortcut")
     require(main_window, 'shortcut("shortcutHistory", "Ctrl+H")',
             "Undo History runtime fallback")
-    require(main_window, '"shortcutTileBrushTool", "Ctrl+L", "Landscape Tools"',
+    require(main_window, '"shortcutTileBrushTool", "Ctrl+L",',
             "Landscape Tools runtime fallback")
     require(operation_manager, "case eKey_L:", "Look Point key handler")
     require(operation_manager, "m_pView->addLogicPoint(true);",

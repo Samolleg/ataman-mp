@@ -63,13 +63,15 @@ def main() -> int:
             "concise default slot label")
     require(main_window, 'setObjectName("behaviorModeButton")',
             "bottom Behavior-mode toggle")
-    require(main_window, 'tr("Switch to Behavior mode")',
+    require(main_window, 'QString::fromUtf8("Редактировать поведение объектов")',
             "contextual Object-to-Behavior action help")
-    require(main_window, 'tr("Switch to Object mode")',
+    require(main_window, 'QString::fromUtf8("Перейти к объектам")',
             "contextual Behavior-to-Object action help")
     require(main_window, "m_behaviorModeButton->setChecked(behaviorMode);",
             "bottom toggle synchronized to active mode")
-    require(main_window, "m_behaviorModeButton->setText(target);",
+    require(main_window, "m_behaviorModeButton->setAccessibleName(target);",
+            "bottom toggle exposes its contextual target to accessibility")
+    require(main_window, "m_behaviorModeButton->setToolTip(tooltip);",
             "bottom mode help names the mode Ctrl+Tab will switch to")
 
     view = source("source/render/view.cpp")

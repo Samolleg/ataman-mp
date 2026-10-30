@@ -43,7 +43,7 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
         self.assertIn("updateCameraProjection", view)
         self.assertIn("logicalCullingPosition", view)
         self.assertIn(
-            "scheduleUnitAppearancePreparation(logicalCameraPosition, cameraMoving)",
+            "scheduleUnitAppearancePreparation(logicalCameraPosition, camMatrix,",
             view,
         )
         self.assertIn(
@@ -54,7 +54,7 @@ class TelephotoCameraSourceContractTests(unittest.TestCase):
         self.assertIn(
             "renderShadowMap(logicalCameraPosition, cameraPivot", view
         )
-        self.assertGreaterEqual(view.count('setUniformValue("u_projMmatrix", m_projection)'), 5)
+        self.assertGreaterEqual(view.count('"u_projMmatrix"), m_projection)'), 5)
         self.assertGreaterEqual(view.count("unproject(view, m_projection"), 3)
         self.assertIn("CViewFrustum frustum(m_projection * camMatrix)", view)
 

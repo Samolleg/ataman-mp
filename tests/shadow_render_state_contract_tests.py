@@ -72,10 +72,13 @@ class ShadowRenderStateContractTests(unittest.TestCase):
             "Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)", paint
         )
         self.assertIn("const auto beginVisibleFrame", draw)
-        self.assertEqual(draw.count("beginVisibleFrame();"), 2)
+        self.assertEqual(draw.count("beginVisibleFrame();"), 3)
+        shadow = draw.index("renderShadowMap(logicalCameraPosition, cameraPivot")
+        self.assertEqual(draw[shadow:].count("beginVisibleFrame();"), 2)
+        self.assertIn("if(m_topdownPass != ETopdownPass::None)", draw[:shadow])
         self.assertLess(
-            draw.index("renderShadowMap(logicalCameraPosition, cameraPivot"),
-            draw.index("beginVisibleFrame();"),
+            shadow,
+            draw.index("beginVisibleFrame();", shadow),
         )
         visible_frame = draw.split("const auto beginVisibleFrame", 1)[1].split(
             "const auto visibleNodes", 1

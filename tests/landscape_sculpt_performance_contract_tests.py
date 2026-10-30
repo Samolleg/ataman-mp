@@ -89,7 +89,7 @@ class LandscapeSculptPerformanceContractTests(unittest.TestCase):
 
         self.assertIn("m_sculptGestureCaptured = true", press)
         self.assertIn("if(m_sculptGestureCaptured", move)
-        self.assertIn("if(m_sculptGestureCaptured", release)
+        self.assertIn("if((m_sculptGestureCaptured || (brushRelease", release)
         self.assertIn("m_sculptGestureCaptured = false", release)
 
     def test_mpr_history_changes_do_not_reserialize_every_mob(self):
@@ -101,7 +101,7 @@ class LandscapeSculptPerformanceContractTests(unittest.TestCase):
         self.assertIn("mprOnlyChange", history)
         self.assertIn("CTerrainHeightPreviewCommand", history)
         self.assertIn("COverlaySurfacePreviewCommand", history)
-        self.assertIn("if(!selectionOnly && !mprOnlyChange)", history)
+        self.assertIn("if(!selectionOnly && !mprOnlyChange && !layoutOnlyChange && !objectBatchOnlyChange)", history)
 
     def test_mpr_dirty_star_does_not_rebuild_the_complete_loaded_map_tree(self):
         main_window = (ROOT / "source/app/main_window.cpp").read_text(

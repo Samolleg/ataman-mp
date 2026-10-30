@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     main_cpp = (ROOT / "source/app/main.cpp").read_text(encoding="utf-8")
+    theme_cpp = (ROOT / "source/ui/ui_theme.cpp").read_text(encoding="utf-8")
 
     expected = (
         "darkPalette.setColor(QPalette::ToolTipBase, QColor(250, 248, 240));",
@@ -17,10 +18,10 @@ def main() -> int:
         "border: 1px solid #8a8a8a; }",
     )
     for fragment in expected:
-        if fragment not in main_cpp:
+        if fragment not in theme_cpp:
             raise AssertionError(f"missing readable tooltip contract: {fragment}")
 
-    if "#07be07" in main_cpp:
+    if "#07be07" in main_cpp or "#07be07" in theme_cpp:
         raise AssertionError("bright-green tooltip background remains")
 
     print("tooltip palette contract: PASS")

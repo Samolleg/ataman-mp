@@ -25,11 +25,12 @@ class MinimapCaptureRenderTargetContractTests(unittest.TestCase):
         # normal widget path may bind the default framebuffer, but capture must
         # retain the caller-owned FBO and its review-size viewport.
         guarded_default_bind = (
-            "if(!m_minimapCaptureActive) { "
+            "if(!m_minimapCaptureActive && !m_snapshotCaptureActive) { "
             "QOpenGLFramebufferObject::bindDefault(); "
             "ei::gl::Viewport(0, 0, m_width, m_height); }"
         )
         self.assertIn(guarded_default_bind, compact)
+        self.assertIn("glBindFramebuffer(GL_FRAMEBUFFER,m_snapshotFramebuffer)", begin_scene)
         self.assertEqual(begin_scene.count("bindDefault()"), 1)
 
     def test_both_capture_passes_explicitly_rebind_the_owned_target(self):

@@ -21,6 +21,8 @@ def sha256(path: Path) -> str:
 class ParticleRuntimeBisectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not (BUNDLE / "BISECTION_MANIFEST.json").is_file():
+            raise unittest.SkipTest("Historical particle-bisection bundle is not available")
         cls.manifest = json.loads(
             (BUNDLE / "BISECTION_MANIFEST.json").read_text(encoding="utf-8")
         )

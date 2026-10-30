@@ -47,16 +47,18 @@ class NeighborMapBackgroundContractTests(unittest.TestCase):
         self.assertNotIn("m_landscapeTools", neighbor_section)
         self.assertNotIn("m_mprDocument", neighbor_section)
         self.assertNotIn("m_activeMob", neighbor_section)
-        self.assertIn("QSharedPointer<CLandscape>", neighbor_section)
+        self.assertIn("CLandscape::createReadOnlyBackground()", neighbor_section)
+        self.assertIn("loaded.landscape->readPreparedBackground(", neighbor_section)
 
-    def test_hiding_neighbors_releases_cpu_and_terrain_texture_resources(self):
+    def test_hiding_neighbors_clears_active_list_and_bounds_retained_resources(self):
         view = source("source/render/view.cpp")
         resources = source("source/resources/resourcemanager.cpp")
         clear_section = view[
-            view.index("void CView::clearNeighborLandscapes()") :
+            view.index("void CView::clearNeighborLandscapes(bool reloading)") :
             view.index("void CView::loadNeighborLandscapes()")
         ]
         self.assertIn("m_neighborLandscapes.clear()", clear_section)
+        self.assertIn("if(!reloading)trimNeighborRenderCache()", clear_section)
         self.assertNotIn("releaseTerrainTexture", clear_section)
         self.assertIn("releaseTerrainTexture(m_baseAtlasTexture)",
                       source("source/render/landscape.cpp"))

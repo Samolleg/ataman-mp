@@ -41,7 +41,7 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         self.assertIn("m_neighborPointerGestureCaptured = true;", press)
         self.assertIn("event->accept();", press[neighbor_guard:operation_dispatch])
 
-    def test_neighbor_transition_preserves_camera_while_browser_open_focuses_entrance(self):
+    def test_neighbor_transition_rebases_camera_without_ordinary_open_forcing_spawn(self):
         main_window_h = source("source/app/main_window.h")
         main_window_cpp = source("source/app/main_window.cpp")
 
@@ -72,16 +72,19 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
             browser_wrapper.index("void MainWindow::openNeighborMapPair(") :
         ]
         self.assertIn("zoneId, true, QPointF(), QPointF()", browser_wrapper)
-        self.assertIn("zoneId, false,", neighbor_wrapper)
+        self.assertIn("QString(), false,", neighbor_wrapper)
+        self.assertIn("m_preferredEditorActiveMap = zoneId", neighbor_wrapper)
         self.assertIn("sourceWorldOrigin", neighbor_wrapper)
         self.assertIn("targetWorldOrigin", neighbor_wrapper)
         helper_end = main_window_cpp.index(
             "void MainWindow::connectUiButtons()", helper_start
         )
         helper = main_window_cpp[helper_start:helper_end]
-        focus_guard = helper.index("if(focusFirstEntrance)")
-        camera_move = helper.index("moveCameraToActiveSpawn();")
+        focus_guard = helper.index("if(preserveNeighborCamera)")
+        camera_move = helper.index("rebaseCameraForOpenedNeighbor(")
         self.assertLess(focus_guard, camera_move)
+        self.assertIn("const bool preserveNeighborCamera = !ordinaryMapOpen", helper)
+        self.assertNotIn("moveCameraToActiveSpawn();", helper)
 
     def test_preserved_camera_is_rebased_through_absolute_world_coordinates(self):
         view_h = source("source/render/view.h")
@@ -138,20 +141,21 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
             handler[emit : emit + 180],
         )
 
-    def test_world_map_layout_can_be_arranged_and_reset_from_viewport(self):
+    def test_world_map_layout_is_arranged_through_guarded_undo_controller(self):
         view_h = source("source/render/view.h")
         view_cpp = source("source/render/view.cpp")
         main_window = source("source/app/main_window.cpp")
-        combined = "\n".join((view_h, view_cpp, main_window))
+        combined = "\n".join((view_h, view_cpp, main_window,
+                              source("source/app/main_window_world.cpp")))
 
         for needle in (
             '"visualsArrangeNeighborMaps"',
             'tr("Arrange maps")',
             "neighborMapOriginChangeRequested",
-            "neighborMapLayoutResetRequested",
+            "commitWorldLayoutChanges",
             "m_neighborLayoutDragActive",
-            "setZoneOrigin(",
-            "resetAllodLayout(",
+            "CWorldMapLayoutCommand",
+            "m_worldMapLayoutDocument.applyChanges(",
         ):
             self.assertIn(needle, combined)
 
@@ -225,7 +229,7 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
         mpr_preflight = handler.index("CMprDocument targetMprDocument")
         mob_preflight = handler.index("CMobDocument targetMobDocument")
         mob_projection = handler.index("CMob::validateEditableProjection")
-        dirty_prompt = handler.index("if(!isExitAllowed(!focusFirstEntrance))")
+        dirty_prompt = handler.index("if(!isExitAllowed(!ordinaryMapOpen))")
         post_prompt_recheck = handler.index("targetMpr.refresh();")
         first_mutation = handler.index("m_undoStack->clear()")
         self.assertLess(mpr_preflight, dirty_prompt)
@@ -243,10 +247,10 @@ class NeighborMapNavigationContractTests(unittest.TestCase):
             main_window,
         )
         self.assertIn(
-            "openMapPairWithCameraPolicy(mprPath, mobPath, zoneId, false,",
+            "openMapPairWithCameraPolicy(mprPath, mobPath, QString(), false,",
             main_window,
         )
-        self.assertIn("isExitAllowed(!focusFirstEntrance)", main_window)
+        self.assertIn("isExitAllowed(!ordinaryMapOpen)", main_window)
 
     def test_user_hint_explains_single_and_double_clicks(self):
         view_cpp = source("source/render/view.cpp")

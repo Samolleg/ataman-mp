@@ -28,6 +28,8 @@
 #endif
 
 #include "res_file.h"
+#include "mpr_document.h"
+#include "synthetic_terrain_fixture.h"
 
 // The focused target links the runtime reader without the unrelated core
 // utility implementation. Keep its stream format identical to util::formatStream
@@ -772,10 +774,15 @@ void ResArchiveDocumentTests::draftPublicationKeepsPathsAndRollsBackEveryStage()
     QByteArray published;
     QVERIFY(old.buildWithPublishedMembers({page,profile},false,&published,&errors));
     QVector<SMapSaveFile> files;
+    const auto draftMpr=ei_test::terrainMpr(1,1,1000);
+    const auto finalMpr=ei_test::terrainMpr(1,1,2000);
+    CMprDocument checked;
+    QVERIFY(checked.loadBytes(draftMpr,"draft.mpr"));
+    QVERIFY(checked.loadBytes(finalMpr,"final.mpr"));
     for(int i=0;i<names.size();++i) {
         SMapSaveFile item; item.path=dir.filePath(names[i]);
-        item.before=i==2?QByteArray("draft mpr"):syntheticRes();
-        item.after=i==2?QByteArray("final mpr"):published;
+        item.before=i==2?draftMpr:syntheticRes();
+        item.after=i==2?finalMpr:published;
         QFile f(item.path);QVERIFY(f.open(QIODevice::WriteOnly));QCOMPARE(f.write(item.before),qint64(item.before.size()));
         files.append(item);
     }
@@ -784,6 +791,7 @@ void ResArchiveDocumentTests::draftPublicationKeepsPathsAndRollsBackEveryStage()
     for(int stage=0;stage<3;++stage) {
         const auto result=commitMapSaveBatch(files,dir.filePath("backup"),stage);
         QVERIFY(!result.success);QVERIFY(result.rollbackComplete);
+        QVERIFY2(result.error.contains("Injected commit failure"),qPrintable(result.error));
         for(const auto& item:files) {QFile f(item.path);QVERIFY(f.open(QIODevice::ReadOnly));QCOMPARE(f.readAll(),item.before);}
     }
     const auto saved=commitMapSaveBatch(files,dir.filePath("backup"));QVERIFY2(saved.success,qPrintable(saved.error));
@@ -796,7 +804,7 @@ void ResArchiveDocumentTests::draftPublicationKeepsPathsAndRollsBackEveryStage()
         QCOMPARE(reopened.memberPayload("opaque.bin"),old.memberPayload("opaque.bin"));
     }
     QVERIFY(layout.open(QIODevice::ReadOnly));QCOMPARE(layout.readAll(),world);
-    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true),ETerrainMprSaveRoute::PublishModernAtlas);
+    QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true),ETerrainMprSaveRoute::PlainMpr);
     QCOMPARE(terrainMprSaveRoute(false,false,false,false,false,true,true),ETerrainMprSaveRoute::PublishModernAtlas);
 }
 

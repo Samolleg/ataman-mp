@@ -89,7 +89,7 @@ class TerrainAtlasPresentationContractTests(unittest.TestCase):
 
     def test_fix_does_not_disable_object_shadows(self):
         self.assertIn("&& m_objectShadowsVisible", self.view)
-        self.assertIn("renderShadowMap(cameraPosition, cameraPivot", self.view)
+        self.assertIn("renderShadowMap(logicalCameraPosition, cameraPivot", self.view)
 
 
 if __name__ == "__main__":

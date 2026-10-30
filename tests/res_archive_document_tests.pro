@@ -30,7 +30,9 @@ HEADERS += \
     ../source/resources/res_file.h \
     ../source/core/log.h
 
-SOURCES += ../source/documents/travel_document.cpp ../source/documents/map_save_batch.cpp
+SOURCES += ../source/documents/travel_document.cpp ../source/documents/map_save_batch.cpp \
+           ../source/documents/navigation_save_events.cpp
+HEADERS += ../source/documents/navigation_save_events.h
 # Current save/backup implementations also validate streamed RES and MPR data.
 SOURCES += ../source/resources/res_archive_index.cpp \
            ../source/documents/endurance_document.cpp \
