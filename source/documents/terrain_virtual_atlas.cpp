@@ -1710,6 +1710,7 @@ bool CTerrainEditModel::restoreVirtualMaterialFieldState(
     ETerrainTileLayer layer, const QVector<qint32>& current,
     const QVector<qint32>& baseline, CValidationReport* report)
 {
+    m_stateSha256.clear();
     const int expected = (tileCountX() + 1) * (tileCountY() + 1);
     const bool empty = current.isEmpty() && baseline.isEmpty();
     if(!empty && (current.size() != expected || baseline.size() != expected))
@@ -1733,6 +1734,7 @@ bool CTerrainEditModel::initializeVirtualMaterialField(
     ETerrainTileLayer layer, const CTerrainTransitionCatalog& catalog,
     CValidationReport* report, ETerrainMaterialFieldRecovery recovery)
 {
+    m_stateSha256.clear();
     QVector<qint32>& active = layer == ETerrainTileLayer::Land
         ? m_virtualLandMaterials : m_virtualOverlayMaterials;
     if(!active.isEmpty())

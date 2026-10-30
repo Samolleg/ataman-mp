@@ -213,6 +213,7 @@ public:
 
     QByteArray serialize() const { return m_originalBytes; }
     const QByteArray& originalBytes() const { return m_originalBytes; }
+    QByteArray originalSha256() const;
     const QVector<SMprArchiveMember>& members() const { return m_members; }
     const SMprMapInfo& mapInfo() const { return m_mapInfo; }
     const QVector<SMprSectorInfo>& sectors() const { return m_sectors; }
@@ -248,6 +249,7 @@ private:
     int uniqueMemberIndex(const QString& name) const;
 
     QByteArray m_originalBytes;
+    mutable QByteArray m_originalSha256;
     QVector<SMprArchiveMember> m_members;
     SMprMapInfo m_mapInfo;
     QVector<SMprSectorInfo> m_sectors;

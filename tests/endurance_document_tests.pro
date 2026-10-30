@@ -1,4 +1,4 @@
-QT += core gui widgets testlib
+QT += core gui widgets testlib concurrent
 CONFIG += testcase c++11 console
 TEMPLATE = app
 TARGET = endurance_document_tests
@@ -33,12 +33,15 @@ SOURCES += \
     ../source/render/overlay_material_animation.cpp \
     ../source/render/terrain_atlas_presets.cpp \
     ../source/documents/staged_save_validator.cpp \
+    ../source/documents/navigation_save_events.cpp \
+    ../source/resources/res_archive_index.cpp \
     ../source/documents/backup_manager.cpp \
     ../source/documents/terrain_atlas_recovery_store.cpp \
     ../source/core/portable_diagnostic_writer.cpp \
     ../source/core/log.cpp
 
 HEADERS += \
+    ../source/documents/navigation_save_events.h \
     ../source/core/landscape_edit_policy.h \
     ../source/core/terrain_atlas_shape_policy.h \
     ../source/core/terrain_save_flow_policy.h \

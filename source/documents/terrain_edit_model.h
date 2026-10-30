@@ -575,8 +575,11 @@ public:
     bool hasSeamConflicts() const;
     bool rebaseSavedBaseline(const CTerrainEditModel& disk, const CTerrainEditModel& savedState);
     bool isDirty() const;
+    // Cached per value snapshot, invalidated by every non-const mutation.
+    // Call on the snapshot's owning thread, like other model accessors.
+    QByteArray stateSha256() const;
     bool usesUnsavedAtlasArtwork(const CTerrainWorkingAtlas& atlas) const;
-    void extendMaterialTable(int count) { if(count>=m_materialCount && count<=32767)m_materialCount=count; }
+    void extendMaterialTable(int count) { if(count>=m_materialCount && count<=32767){m_stateSha256.clear();m_materialCount=count;} }
     int tileCountX() const { return m_sectorCountX * 16; }
     int tileCountY() const { return m_sectorCountY * 16; }
     quint16 packedTile(int globalX, int globalY, ETerrainTileLayer layer,
@@ -876,6 +879,7 @@ private:
         CValidationReport* report);
 
     int m_sectorCountX{0};
+    mutable QByteArray m_stateSha256;
     int m_sectorCountY{0};
     int m_vertexCountX{0};
     int m_vertexCountY{0};

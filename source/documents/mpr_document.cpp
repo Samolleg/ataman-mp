@@ -192,6 +192,13 @@ void CMprEditTransaction::replaceMemberPayload(
     m_edits.append(edit);
 }
 
+QByteArray CMprDocument::originalSha256() const
+{
+    if(m_originalSha256.isEmpty())
+        m_originalSha256=QCryptographicHash::hash(m_originalBytes,QCryptographicHash::Sha256);
+    return m_originalSha256;
+}
+
 bool CMprDocument::load(const QFileInfo& file, CValidationReport* report)
 {
     QFile input(file.filePath());
@@ -217,6 +224,7 @@ bool CMprDocument::loadBytes(const QByteArray& bytes, const QString& sourceName,
                              CValidationReport* report)
 {
     m_originalBytes = bytes;
+    m_originalSha256.clear();
     m_members.clear();
     m_mapInfo = SMprMapInfo();
     m_sectors.clear();

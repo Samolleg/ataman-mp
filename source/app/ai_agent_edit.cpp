@@ -427,9 +427,7 @@ QString CAiEditAdapter::revision(MainWindow* w)
     add(idFor(v).toUtf8());add(ei::ProfileDatabaseContext::instance().current()?ei::ProfileDatabaseContext::instance().current()->profileId.toUtf8():QByteArray());
     add(QByteArray::number(w->m_undoStack->index()));add(QByteArray::number(w->m_undoStack->count()));
     const auto model=[&](const CMprDocument& doc,const CTerrainEditModel& terrain,const QVector<SMprMaterialRecord>& materials) {
-        add(QCryptographicHash::hash(doc.originalBytes(),QCryptographicHash::Sha256));add(QByteArray::number(terrain.maxZ(),'g',12));
-        for(const auto& sector:doc.sectors())add(terrain.sectorPayload(sector.sectorX,sector.sectorY));
-        for(auto layer:{ETerrainTileLayer::Land,ETerrainTileLayer::Overlay}){QVector<qint32> current,baseline;terrain.copyVirtualMaterialFieldState(layer,&current,&baseline);add(QByteArray(reinterpret_cast<const char*>(current.constData()),current.size()*4));add(QByteArray(reinterpret_cast<const char*>(baseline.constData()),baseline.size()*4));}
+        add(doc.originalSha256());add(terrain.stateSha256());
         for(const auto& m:materials){QByteArray b;QDataStream s(&b,QIODevice::WriteOnly);s<<m.type<<m.red<<m.green<<m.blue<<m.opacity<<m.selfIllumination<<m.waveMultiplier<<m.warpSpeed<<m.reserved1<<m.reserved2<<m.reserved3;add(b);}
     };
     model(v->m_mprDocument,v->m_terrainEdit,v->m_mprMaterials);

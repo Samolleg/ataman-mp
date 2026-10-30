@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QTemporaryFile>
 #include <QTemporaryDir>
+#include <QThreadPool>
 #include <QTextCodec>
 #include <QtEndian>
 
@@ -485,6 +486,10 @@ class EnduranceDocumentTests : public QObject
     Q_OBJECT
 
 private slots:
+    void cleanupTestCase() { QVERIFY(QThreadPool::globalInstance()->waitForDone(10000)); }
+    void cachedTerrainDigestTracksSnapshotsAndUndo();
+    void cachedTerrainDigestTracksMetadataAndVirtualFields();
+    void cachedMprDigestTracksReload();
     void neighborStaticScenePreservesVisualsWithoutGameplayNodes();
     void neighborRotationsPreserveTransformedVertices();
     void neighborSceneRejectsInvalidTerrain();
@@ -1409,9 +1414,9 @@ void EnduranceDocumentTests::modernSaveRoutesThroughPublicationExactlyOnce()
         "terrainPublicationPreflightRequested");
     const int publicationAuthorized = finalize.indexOf(
         "Modern terrain publication authorized mpr:%1 res:%2");
-    const int publicationRead = finalize.indexOf("QFile sourceTextures(texturesPath)");
+    const int publicationRead = finalize.indexOf("sourceArchive.open(texturesPath");
     const int publicationCommit = finalize.indexOf(
-        "commitStagedResPublishedMembers");
+        "commitStreamedResMembers");
     QVERIFY2(publicationRead >= 0 && publicationPreflight > publicationRead
              && publicationAuthorized > publicationPreflight
              && publicationCommit > publicationAuthorized,
@@ -11090,7 +11095,10 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Uniform material sources bypass the bound-atlas loader");
     QVERIFY2(loader.contains("QImage loadGlobalTransitionTile("),
              "Global transitions bypass the bound-atlas loader");
-    QVERIFY2(loader.contains("findExactArchive("),
+    const int resolverStart=source.indexOf("STerrainAtlasArchiveBindingResult findTerrainPaintArchive(");
+    QVERIFY(resolverStart>=0 && resolverStart<start);
+    const auto resolver=source.mid(resolverStart,start-resolverStart);
+    QVERIFY2(loader.contains("findTerrainPaintArchive(") && resolver.contains("findExactArchive("),
              "Global terrain pixels bypass exact preset-atlas binding");
     QVERIFY2(!loader.contains("catalogTerrainMmpPayload("),
              "Global terrain pixels still use a name-only resource lookup");
@@ -11110,8 +11118,12 @@ void EnduranceDocumentTests::globalTerrainHydrationRequiresExactPresetAtlasBindi
              "Palette/compositor uniforms still use name-only tile lookup");
     QVERIFY2(!rebuild.contains("catalogTerrainMmpPayload("),
              "Palette/compositor uniforms still use name-only page lookup");
-    QVERIFY2(!rebuild.contains("m_terrainGlobalBoundAtlasCache.clear()"),
-             "Map switches again discard verified exact atlas bindings");
+    const int epochGuard=rebuild.indexOf("if(!m_globalPaletteReuseKey.isEmpty() && m_globalPaletteReuseKey.left(32)!=materialEpoch)");
+    const int epochEnd=rebuild.indexOf("// Modern, Classic Auto",epochGuard);
+    QVERIFY(epochGuard>=0 && epochEnd>epochGuard);
+    QVERIFY2(rebuild.mid(epochGuard,epochEnd-epochGuard).contains("m_terrainGlobalBoundAtlasCache.clear()")
+             && rebuild.count("m_terrainGlobalBoundAtlasCache.clear()")==1,
+             "Verified atlas bindings must be cleared only when the material resource epoch changes");
     QVERIFY2(!rebuild.contains("for(const STerrainGlobalMaterialFamily& family : m_terrainGlobalFamilies)\n        {\n            STerrainGlobalMaterialSource selectedSource;\n            const QImage source = loadBoundGlobalUniformSource("),
              "Palette construction again verifies every foreign atlas synchronously");
     QVERIFY2(rebuild.contains("currentMapGlobalUniformSource("),
@@ -14731,7 +14743,7 @@ void EnduranceDocumentTests::neighborRealMapReadOnly()
     }
 }
 
-QTEST_APPLESS_MAIN(EnduranceDocumentTests)
+QTEST_GUILESS_MAIN(EnduranceDocumentTests)
 #include "endurance_document_tests.moc"
 
 void EnduranceDocumentTests::profileCatalogMigrationPreservesDataAndIsolation()
@@ -14866,4 +14878,57 @@ void EnduranceDocumentTests::modelCatalogBindingsSurviveRelocationWithoutForeign
     copied.close(); portable.insert("modelTextures",QJsonObject{{"house",QJsonArray{4}}});
     QVERIFY(copied.open(QIODevice::WriteOnly|QIODevice::Truncate)); copied.write(QJsonDocument(portable).toJson());copied.close();
     QVERIFY(!reopened.load(destination,&error)); QVERIFY(!reopened.save(&error));
+}
+
+void EnduranceDocumentTests::cachedTerrainDigestTracksSnapshotsAndUndo()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2,1,100.0f,twoSectorTerrain(1000)));
+    const auto initial=terrain.stateSha256();QCOMPARE(initial.size(),32);
+    auto snapshot=terrain;
+    const auto command=terrain.makeGlobalOffset(10);
+    QVERIFY(terrain.apply(command,true));QVERIFY(terrain.stateSha256()!=initial);
+    QCOMPARE(snapshot.stateSha256(),initial);
+    QVERIFY(terrain.apply(command,false));QCOMPARE(terrain.stateSha256(),initial);
+    const auto scale=terrain.makeVerticalScale(200,ETerrainVerticalScalePolicy::ScaleTerrain);
+    QVERIFY(terrain.apply(scale,true));QVERIFY(terrain.stateSha256()!=initial);
+    QVERIFY(terrain.apply(scale,false));QCOMPARE(terrain.stateSha256(),initial);
+    QElapsedTimer timer;timer.start();
+    for(int i=0;i<20000;++i)QCOMPARE(terrain.stateSha256(),initial);
+    qInfo()<<"Cached terrain digest: 20000 warm calls ms"<<timer.elapsed();
+}
+void EnduranceDocumentTests::cachedTerrainDigestTracksMetadataAndVirtualFields()
+{
+    CTerrainEditModel terrain;
+    QVERIFY(terrain.loadSources(2,1,100.0f,twoSectorTerrain(1000)));
+    auto digest=terrain.stateSha256();terrain.enableWorkingAtlasSlots(128);
+    QVERIFY(terrain.stateSha256()!=digest);digest=terrain.stateSha256();
+    QVERIFY(terrain.setWorkingAtlasSlotType(1,3));QVERIFY(terrain.stateSha256()!=digest);
+    digest=terrain.stateSha256();QVERIFY(terrain.installWorkingAtlasSlotTypes(QVector<qint32>(128,0)));
+    QVERIFY(terrain.stateSha256()!=digest);digest=terrain.stateSha256();
+    terrain.extendMaterialTable(10);QVERIFY(terrain.stateSha256()!=digest);
+    const int size=(terrain.tileCountX()+1)*(terrain.tileCountY()+1);
+    QVector<qint32> field(size,7);const auto baseline=field;
+    QVERIFY(terrain.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,baseline));
+    digest=terrain.stateSha256();auto snapshot=terrain;field[0]=8;
+    QVERIFY(terrain.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,baseline));
+    QVERIFY(terrain.stateSha256()!=digest);QCOMPARE(snapshot.stateSha256(),digest);
+    field[0]=7;QVERIFY(terrain.restoreVirtualMaterialFieldState(ETerrainTileLayer::Land,field,baseline));
+    QCOMPARE(terrain.stateSha256(),digest);
+    QVERIFY(terrain.loadSources(2,1,100.0f,twoSectorTerrain(2000)));
+    QVERIFY(terrain.stateSha256()!=digest);
+}
+void EnduranceDocumentTests::cachedMprDigestTracksReload()
+{
+    const auto first=syntheticMpr();CMprDocument document;
+    QVERIFY(document.loadBytes(first,"digest.mpr"));
+    const auto digest=document.originalSha256();
+    QCOMPARE(digest,QCryptographicHash::hash(first,QCryptographicHash::Sha256));
+    auto snapshot=document;
+    const auto second=syntheticMpr(syntheticLandSector(1234));
+    QVERIFY(document.loadBytes(second,"digest.mpr"));
+    QCOMPARE(document.originalSha256(),QCryptographicHash::hash(second,QCryptographicHash::Sha256));
+    QVERIFY(document.originalSha256()!=digest);QCOMPARE(snapshot.originalSha256(),digest);
+    QVERIFY(!document.loadBytes("bad","digest.mpr"));
+    QCOMPARE(document.originalSha256(),QCryptographicHash::hash("bad",QCryptographicHash::Sha256));
 }

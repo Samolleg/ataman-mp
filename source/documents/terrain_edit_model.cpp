@@ -1278,8 +1278,35 @@ QVector<qint32> CTerrainTransitionCatalog::shortestMaterialPath(
     return {};
 }
 
+QByteArray CTerrainEditModel::stateSha256() const
+{
+    if(!m_stateSha256.isEmpty())return m_stateSha256;
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    const auto add=[&](const char* bytes,int size){
+        hash.addData(QByteArray::number(size)+':');hash.addData(bytes,size);
+    };
+    QByteArray metadata;QDataStream out(&metadata,QIODevice::WriteOnly);
+    out<<m_sectorCountX<<m_sectorCountY<<m_maxZ<<m_originalMaxZ<<m_textureCount<<m_materialCount;
+    add(metadata.constData(),metadata.size());
+    for(const auto& sector:m_sectors){
+        QByteArray position;QDataStream entry(&position,QIODevice::WriteOnly);
+        entry<<sector.source.sectorX<<sector.source.sectorY;
+        add(position.constData(),position.size());
+        add(sector.currentPayload.constData(),sector.currentPayload.size());
+    }
+    for(const auto* field:{&m_tileTypes,&m_virtualLandMaterials,&m_virtualOverlayMaterials,
+                          &m_originalVirtualLandMaterials,&m_originalVirtualOverlayMaterials})
+        add(reinterpret_cast<const char*>(field->constData()),field->size()*int(sizeof(qint32)));
+    QByteArray pending;QDataStream hints(&pending,QIODevice::WriteOnly);
+    hints<<m_pendingVirtualLandMaterials<<m_pendingVirtualOverlayMaterials;
+    add(pending.constData(),pending.size());
+    m_stateSha256=hash.result();
+    return m_stateSha256;
+}
+
 bool CTerrainEditModel::load(const CMprDocument& document, CValidationReport* report)
 {
+    m_stateSha256.clear();
     if(!document.mapInfo().valid)
     {
         if(report)
@@ -1319,6 +1346,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
                                     const QVector<qint32>& tileTypes,
                                     int materialCount)
 {
+    m_stateSha256.clear();
     m_sectorCountX = 0;
     m_sectorCountY = 0;
     m_vertexCountX = 0;
@@ -1473,6 +1501,7 @@ bool CTerrainEditModel::loadSources(int sectorCountX, int sectorCountY, float ma
 
 void CTerrainEditModel::enableWorkingAtlasSlots(int slotCount)
 {
+    m_stateSha256.clear();
     const int bounded = qBound(0, slotCount, 16384);
     if(bounded <= m_tileTypes.size())
         return;
@@ -1498,6 +1527,7 @@ bool CTerrainEditModel::canInstallWorkingAtlasSlotTypes(
 bool CTerrainEditModel::installWorkingAtlasSlotTypes(
     const QVector<qint32>& runtimeTerrainTypes)
 {
+    m_stateSha256.clear();
     // Validate the complete table before changing any entry. A generated
     // family can realize several physical variants at once; publishing only
     // the selected slot leaves its siblings visible in Manual mode but
@@ -1512,6 +1542,7 @@ bool CTerrainEditModel::installWorkingAtlasSlotTypes(
 bool CTerrainEditModel::setWorkingAtlasSlotType(
     int slot, qint32 runtimeTerrainType)
 {
+    m_stateSha256.clear();
     if(slot < 0 || slot >= m_tileTypes.size()
        || runtimeTerrainType < 0 || runtimeTerrainType >= 16)
         return false;
@@ -1549,6 +1580,7 @@ STerrainHeightRange CTerrainEditModel::heightRange() const
 
 bool CTerrainEditModel::rebaseSavedBaseline(const CTerrainEditModel& disk, const CTerrainEditModel& savedState)
 {
+    m_stateSha256.clear();
     if(disk.m_vertexCountX!=m_vertexCountX
        || disk.m_vertexCountY!=m_vertexCountY || disk.m_sectors.size()!=m_sectors.size())return false;
     for(const auto& sector:m_sectors)
@@ -3113,6 +3145,7 @@ STerrainVerticalScaleCommand CTerrainEditModel::makeVerticalScale(
 bool CTerrainEditModel::apply(const STerrainVerticalScaleCommand& command,
                               bool forward, CValidationReport* report)
 {
+    m_stateSha256.clear();
     if(!command.valid)
     {
         if(report)
@@ -3494,6 +3527,7 @@ STerrainEditDiagnostics CTerrainEditModel::diagnoseState(
 bool CTerrainEditModel::apply(const STerrainHeightCommand& command, bool forward,
                               CValidationReport* report, bool allowHeightClamping)
 {
+    m_stateSha256.clear();
     if(forward && command.requiresMaxZDecision() && !allowHeightClamping)
     {
         if(report)
@@ -3767,6 +3801,7 @@ STerrainTileCommand CTerrainEditModel::makeTilePaint(
     quint8 atlasIndex, quint8 tileIndex, quint8 rotation,
     const CTerrainTransitionCatalog& catalog, CValidationReport* report)
 {
+    m_stateSha256.clear();
     Q_UNUSED(report);
     STerrainTileCommand command = makeTilePaint(
         brush, layer, atlasIndex, tileIndex, rotation);
@@ -4466,6 +4501,7 @@ bool CTerrainEditModel::appendSemanticVirtualVertices(
     const CTerrainTransitionCatalog& catalog,
     CValidationReport* report)
 {
+    m_stateSha256.clear();
     if(!command)
         return false;
     if(acceptedVertices.isEmpty())
@@ -4530,6 +4566,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticTilePaint(
     quint32 distributionSeed, CValidationReport* report,
     ETerrainSemanticPaintPolicy policy)
 {
+    m_stateSha256.clear();
     CValidationReport localReport;
     CValidationReport* effectiveReport = report ? report : &localReport;
     STerrainTileCommand command = makeBoundedSemanticTilePaint(
@@ -4689,6 +4726,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexPaint(
     quint32 distributionSeed, CValidationReport* report,
     qint32 preferredSupportId, ETerrainSemanticPaintPolicy policy)
 {
+    m_stateSha256.clear();
     CValidationReport localReport;
     if(!report)
         report = &localReport;
@@ -5133,6 +5171,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticVertexStrokePaint(
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
     CValidationReport* report, ETerrainSemanticPaintPolicy policy)
 {
+    m_stateSha256.clear();
     CValidationReport localReport;
     if(!report)
         report = &localReport;
@@ -5678,6 +5717,7 @@ STerrainTileCommand CTerrainEditModel::makeSemanticCornerMaterialPaint(
     const CTerrainTransitionCatalog& catalog, quint32 distributionSeed,
     CValidationReport* report)
 {
+    m_stateSha256.clear();
     STerrainTileBrush vertexBrush;
     vertexBrush.centerX = vertexX;
     vertexBrush.centerY = vertexY;
@@ -6474,6 +6514,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaint(
     const CTerrainTransitionCatalog& catalog,quint32 distributionSeed,
     CValidationReport* report,bool randomizeUniformRotation)
 {
+    m_stateSha256.clear();
     QVector<QPoint> requested;
     const int minX=qMax(0,int(std::ceil(brush.centerX-brush.radius)));
     const int maxX=qMin(tileCountX(),int(std::floor(brush.centerX+brush.radius)));
@@ -6498,6 +6539,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualTileMaterialPaint(
     quint32 distributionSeed,CValidationReport* report,
     bool randomizeUniformRotation)
 {
+    m_stateSha256.clear();
     QSet<QPair<int,int>> vertexCoordinates;
     QSet<int> previewCoreCells;
     const int minX=qMax(0,int(std::ceil(tileBrush.centerX-tileBrush.radius)));
@@ -6549,6 +6591,7 @@ STerrainTileCommand CTerrainEditModel::makeVirtualMaterialPaintVertices(
     quint32 distributionSeed,CValidationReport* report,
     bool randomizeUniformRotation)
 {
+    m_stateSha256.clear();
     STerrainTileCommand command;
     command.description=layer==ETerrainTileLayer::Land
         ?QStringLiteral("Paint virtual terrain materials")
@@ -7392,6 +7435,7 @@ bool CTerrainEditModel::virtualMaterialCellChanged(
 bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
                               CValidationReport* report)
 {
+    m_stateSha256.clear();
     QSet<int> commandFields;
     const int expectedFieldSize = (tileCountX() + 1) * (tileCountY() + 1);
     for(const STerrainTileCommand::SVirtualFieldDelta& delta
@@ -7604,6 +7648,7 @@ bool CTerrainEditModel::apply(const STerrainTileCommand& command, bool forward,
 bool CTerrainEditModel::apply(const SOverlaySurfaceCommand& command, bool forward,
                               CValidationReport* report)
 {
+    m_stateSha256.clear();
     QSet<int> seen;
     QVector<int> indices;
     indices.reserve(command.sectors.size());
