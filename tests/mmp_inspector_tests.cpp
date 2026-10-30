@@ -28,6 +28,8 @@ private slots:
     void inspectsDxtMipChainAndPixels();
     void treatsPnt3HeaderValueAsPayloadSize();
     void rejectsTruncatedMipChain();
+    void rejectsUnboundedMipCounts();
+    void dimensionBoundSupportsAllDxtFormats();
 };
 
 void MmpInspectorTests::inspectsDxtMipChainAndPixels()
@@ -67,6 +69,39 @@ void MmpInspectorTests::rejectsTruncatedMipChain()
         header(8, 8, 3, 0x31545844) + QByteArray(8, '\0'));
     QVERIFY(!result.valid);
     QVERIFY(result.diagnostic.contains("truncated"));
+}
+
+void MmpInspectorTests::rejectsUnboundedMipCounts()
+{
+    for(int payloadBytes : {0, 8})
+    for(quint32 count : {0u, 2u, 1000000u, 0xffffffffu})
+    {
+        auto bytes=header(1,1,1,0x31545844)+QByteArray(payloadBytes,'\0');
+        putDword(&bytes,12,count);
+        const auto result=ei::inspectMmp(bytes);
+        QVERIFY(!result.valid);
+        QVERIFY(result.authoredMipSizes.isEmpty());
+        QVERIFY(!result.diagnostic.isEmpty());
+    }
+}
+
+void MmpInspectorTests::dimensionBoundSupportsAllDxtFormats()
+{
+    for(quint32 format : {0x31545844u,0x32545844u,0x33545844u,0x34545844u,0x35545844u})
+    {
+        const int blockBytes=format==0x31545844u?8:16;
+        auto bytes=header(8,4,4,format)+QByteArray(5*blockBytes,'\0');
+        const auto result=ei::inspectMmp(bytes);
+        QVERIFY2(result.valid,qPrintable(result.diagnostic));
+        QCOMPARE(result.authoredMipSizes,QVector<QSize>({{8,4},{4,2},{2,1},{1,1}}));
+        QVERIFY(!ei::inspectMmp(bytes.left(bytes.size()-1)).valid);
+        putDword(&bytes,12,5);
+        QVERIFY(!ei::inspectMmp(bytes+QByteArray(blockBytes,'\0')).valid);
+        putDword(&bytes,12,1);
+        QVERIFY(ei::inspectMmp(bytes.left(76+2*blockBytes)).valid);
+    }
+    const auto rectangle=header(3,5,3,0x31545844)+QByteArray(4*8,'\0');
+    QVERIFY(ei::inspectMmp(rectangle).valid);
 }
 
 QTEST_APPLESS_MAIN(MmpInspectorTests)

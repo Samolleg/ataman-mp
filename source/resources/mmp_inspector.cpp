@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QtEndian>
 #include <limits>
+#include <new>
 
 #include "mmp_codec.h"
 
@@ -55,7 +56,7 @@ bool checkedImageSize(quint32 width, quint32 height)
 }
 }
 
-SMmpInspection inspectMmp(const QByteArray& bytes)
+SMmpInspection inspectMmp(const QByteArray& bytes) try
 {
     SMmpInspection result;
     result.sha256 = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
@@ -104,21 +105,29 @@ SMmpInspection inspectMmp(const QByteArray& bytes)
             return result;
         }
         const int blockBytes = result.format == kDxt1 ? 8 : 16;
+        quint32 maximumMips = 1;
+        for(int side = qMax(result.width, result.height); side > 1; side /= 2)
+            ++maximumMips;
+        if(mipValue > maximumMips)
+        {
+            result.diagnostic = QStringLiteral("DXT mip count exceeds the image dimensions.");
+            return result;
+        }
         qint64 required = kCommonHeaderSize;
         int mipWidth = result.width;
         int mipHeight = result.height;
         for(quint32 level = 0; level < mipValue; ++level)
         {
-            result.authoredMipSizes.append(QSize(mipWidth, mipHeight));
             required += qint64(qMax(1, (mipWidth + 3) / 4))
                 * qint64(qMax(1, (mipHeight + 3) / 4)) * blockBytes;
+            if(required > bytes.size())
+            {
+                result.diagnostic = QStringLiteral("DXT authored mip payload is truncated.");
+                return result;
+            }
+            result.authoredMipSizes.append(QSize(mipWidth, mipHeight));
             mipWidth = qMax(1, mipWidth / 2);
             mipHeight = qMax(1, mipHeight / 2);
-        }
-        if(required > bytes.size())
-        {
-            result.diagnostic = QStringLiteral("DXT authored mip payload is truncated.");
-            return result;
         }
         const DxtFormat codec = result.format == kDxt1 ? DxtFormat::Dxt1
             : (result.format == kDxt2 || result.format == kDxt3)
@@ -143,6 +152,12 @@ SMmpInspection inspectMmp(const QByteArray& bytes)
         return result;
     }
     result.valid = true;
+    return result;
+}
+catch(const std::bad_alloc&)
+{
+    SMmpInspection result;
+    result.diagnostic = QStringLiteral("Not enough memory to inspect MMP.");
     return result;
 }
 

@@ -206,6 +206,11 @@ bool decodeDxtImage(const QByteArray& compressed, int width, int height,
     }
 
     QImage result(width, height, QImage::Format_ARGB32);
+    if(result.isNull())
+    {
+        if(diagnostic) *diagnostic = "Could not allocate decoded DXT image.";
+        return false;
+    }
     const uchar* source = reinterpret_cast<const uchar*>(compressed.constData());
     for(int blockY = 0; blockY < blocksHigh; ++blockY)
         for(int blockX = 0; blockX < blocksWide; ++blockX)
@@ -357,6 +362,11 @@ bool decodePnt3Image(const QByteArray& compressed, int width, int height,
     // On little-endian platforms ARGB32_Premultiplied is stored as BGRA,
     // exactly matching the bytes consumed by the game's MMX compositor.
     QImage result(width, height, QImage::Format_ARGB32_Premultiplied);
+    if(result.isNull())
+    {
+        if(diagnostic) *diagnostic = "Could not allocate decoded PNT3 image.";
+        return false;
+    }
     for(int y = 0; y < height; ++y)
         memcpy(result.scanLine(y), decoded.constData() + y * width * 4,
                size_t(width) * 4u);
@@ -397,6 +407,11 @@ bool decodeDirectDrawImage(const QByteArray& data, int width, int height,
     const quint32 blueShift = readDword(data, 44);
 
     QImage result(width, height, QImage::Format_ARGB32);
+    if(result.isNull())
+    {
+        if(diagnostic) *diagnostic = "Could not allocate decoded DirectDraw image.";
+        return false;
+    }
     int cursor = descriptorBytes;
     for(int y = 0; y < height; ++y)
         for(int x = 0; x < width; ++x)
@@ -425,6 +440,11 @@ bool compositeTextureLayers(const QVector<QImage>& layers, QImage* composite,
     }
     const QSize size = layers.first().size();
     QImage result(size, QImage::Format_ARGB32_Premultiplied);
+    if(result.isNull())
+    {
+        if(diagnostic) *diagnostic = "Could not allocate composited texture.";
+        return false;
+    }
     result.fill(Qt::transparent);
     for(const QImage& layer : layers)
     {
