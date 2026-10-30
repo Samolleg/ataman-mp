@@ -1,4 +1,6 @@
 #include "resourcemanager.h"
+#include "terrain_reference_path.h"
+#include <QCoreApplication>
 #include "neighbor_scene_data.h"
 #include <QtConcurrent>
 #include <QOpenGLContext>
@@ -1826,12 +1828,10 @@ QStringList CTextureList::configuredResourceArchivePaths() const
 
 QString CTextureList::terrainAuthoringArchivePath() const
 {
-    if(!m_pSettings)
-        return {};
-    const auto* option = dynamic_cast<const COptString*>(
-        m_pSettings->opt(eOptSetResource, "terrainAuthoringArchive"));
-    return option && !option->value().trimmed().isEmpty()
-        ? QFileInfo(option->value().trimmed()).absoluteFilePath() : QString();
+    const auto* option = m_pSettings ? dynamic_cast<const COptString*>(
+        m_pSettings->opt(eOptSetResource, "terrainAuthoringArchive")) : nullptr;
+    return terrainReferencePath(option ? option->value() : QString(),
+                                QCoreApplication::applicationDirPath());
 }
 
 QByteArray CTextureList::terrainAuthoringReferenceSha256() const
