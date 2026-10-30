@@ -239,7 +239,8 @@ int runAssemblyCatalogCheck()
         check(owned(bgPid),"crash test targets only isolated owned mapper");
         HANDLE killed=OpenProcess(PROCESS_TERMINATE|SYNCHRONIZE,FALSE,bgPid);check(killed!=nullptr,"owned background handle available");
         TerminateProcess(killed,98);WaitForSingleObject(killed,5000);CloseHandle(killed);QTest::qWait(1200);
-        check(QFileInfo::exists(maps+"/parallel225.mpr.mapper-edit.lock"),"abandoned map lease remains after simulated crash");
+        check(QFileInfo::exists(CProcessEditLock::lockFilePath(maps+"/parallel225.mpr")),"abandoned map lease remains in service store after simulated crash");
+        check(QDir(maps).entryList({"*.mapper-edit.lock"},QDir::Files).isEmpty(),"map directory has no edit-lock sidecars");
         check(a.tool("connect_instance",{{"target","background"}})["background"]==true,"headless singleton lock recovers after dead process");
         run(a,"open_map",{{"map","parallel225"}});check(a.tool("get_context")["mpr"].toString().endsWith("parallel225.mpr"),"dead map owner detected; abandoned lease does not block reopen");
         check(CBackupManager::validateAutosave(QFileInfo(recovery),&error),"prior crash recovery remains intact after restarting background");

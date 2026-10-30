@@ -74,8 +74,8 @@ void MinimapExportTests::resourceAndSaveLocksRefuseExport()
     QVERIFY(exportMmpToRes(request).success);
     QFile before(path);QVERIFY(before.open(QIODevice::ReadOnly));const auto baseline=before.readAll();before.close();
     request.memberName="second";
-    for(const QString& suffix:{QString(".mapper-resource.lock"),QString(".mapper-save.lock")}) {
-        QLockFile lock(CProcessEditLock::identity(path)+suffix);lock.setStaleLockTime(0);QVERIFY(lock.tryLock(0));
+    for(const QString& lockPath:{CProcessEditLock::lockFilePath(path,false),CProcessEditLock::identity(path)+".mapper-save.lock"}) {
+        QLockFile lock(lockPath);lock.setStaleLockTime(0);QVERIFY(lock.tryLock(0));
         QVERIFY(!exportMmpToRes(request).success);
         QFile disk(path);QVERIFY(disk.open(QIODevice::ReadOnly));QCOMPARE(disk.readAll(),baseline);
         QCOMPARE(CFileWriteActivity::active(),0);
