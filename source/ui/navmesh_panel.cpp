@@ -113,8 +113,8 @@ void CNavmeshPanel::setBakerPath(const QString& path){m_bakerPath=path;controls(
 QString CNavmeshPanel::bakeLog()const{return m_log->toPlainText();}
 void CNavmeshPanel::controls(){
     const bool flying=m_profile->currentData().toString()=="flying";
-    m_fill->setItemData(1,flying?0:int(Qt::ItemIsSelectable|Qt::ItemIsEnabled),Qt::UserRole-1);
-    if(flying&&m_fill->currentIndex()!=0)m_fill->setCurrentIndex(0);
+    m_fill->setItemData(2,flying?0:int(Qt::ItemIsSelectable|Qt::ItemIsEnabled),Qt::UserRole-1);
+    if(flying&&lossesVisible())m_fill->setCurrentIndex(0);
     m_fill->setToolTip(flying?QStringLiteral("Автоматический полёт над препятствиями. Сравнение с наземным слоем неприменимо."):QString());
     m_this->setEnabled(!busy()&&!m_mpr.isEmpty()&&!m_mob.isEmpty());m_all->setEnabled(!busy()&&!m_mpr.isEmpty());
     m_cancel->setVisible(busy());m_progress->setVisible(busy());m_browse->setEnabled(!busy());
