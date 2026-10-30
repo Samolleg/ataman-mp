@@ -258,24 +258,24 @@ QByteArray assemblyLink(const QStringList& components)
     return data;
 }
 
-QByteArray figureWithCrown(float crown)
+QByteArray figureWithCrown(float crown, int forms = 8)
 {
     QByteArray data;
     QDataStream stream(&data, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
-    stream << quint32(0x38474946)
+    stream << quint32(forms == 1 ? 0x31474946 : 0x38474946)
            << quint32(1) << quint32(1) << quint32(1)
            << quint32(3) << quint32(3) << quint32(0)
            << quint32(0) << quint32(0) << quint32(0);
     for(int group = 0; group < 3; ++group)
-        for(int morph = 0; morph < 8; ++morph)
+        for(int morph = 0; morph < forms; ++morph)
             stream << float(0.0f) << float(0.0f)
                    << float(group == 2 ? crown : 0.0f);
-    for(int morph = 0; morph < 8; ++morph)
+    for(int morph = 0; morph < forms; ++morph)
         stream << float(1.0f);
     for(int axis = 0; axis < 3; ++axis)
-        for(int morph = 0; morph < 8; ++morph)
+        for(int morph = 0; morph < forms; ++morph)
             for(int lane = 0; lane < 4; ++lane)
                 stream << float(axis == 2 && lane < 3 ? crown : 0.0f);
     for(int value = 0; value < 16; ++value)
@@ -324,6 +324,7 @@ private slots:
     void databaseEquippedLegacyAssemblyUsesSameHairRule();
     void helmetHairReplacementAvoidsMissingRootFallback();
     void unavailableNativeHairAvoidsMissingRootFallback();
+    void resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel_data();
     void resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel();
     void hairlessHelmetedTemplateDoesNotReportMissingHair();
     void missingAssemblyEvidenceDoesNotReportMissingHair();
@@ -1234,8 +1235,15 @@ void MobFamilyValidationTests::unavailableNativeHairAvoidsMissingRootFallback()
         { return finding.code == "mob.semantic.helmet_hair_fallback"; }));
 }
 
+void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel_data()
+{
+    QTest::addColumn<int>("headForms");QTest::addColumn<int>("hairForms");
+    QTest::newRow("FIG1")<<1<<1;QTest::newRow("FIG8")<<8<<8;QTest::newRow("mixed")<<1<<8;
+}
+
 void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamilyModel()
 {
+    QFETCH(int,headForms);QFETCH(int,hairForms);
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QByteArray bytes = mobWithUnits({unitObject(
@@ -1247,8 +1255,8 @@ void MobFamilyValidationTests::resourceBackedAssemblyEvidenceCoversUnloadedFamil
     const QStringList components = {"hd", "hr.02", "hd.armor12"};
     QMap<QString, QByteArray> nestedMembers;
     nestedMembers.insert("unhufe", assemblyLink(components));
-    nestedMembers.insert("hd", figureWithCrown(1.0f));
-    nestedMembers.insert("hr.02", figureWithCrown(1.2f));
+    nestedMembers.insert("hd", figureWithCrown(1.0f,headForms));
+    nestedMembers.insert("hr.02", figureWithCrown(1.2f,hairForms));
     nestedMembers.insert("hd.armor12", QByteArray("component"));
     const QByteArray sourceBytes = resArchive({{"unhufe.mod", resArchive(nestedMembers)}});
     const QString resourcePath = QDir(directory.path()).filePath("figures.res");

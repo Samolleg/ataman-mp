@@ -1,6 +1,7 @@
 #include <QDebug>
 #include <QVector4D>
 #include "figure.h"
+#include "figure_format.h"
 #include "../core/map_object_placement_policy.h"
 #include "figure_vertex_component.h"
 #include <cmath>
@@ -33,29 +34,28 @@ ei::CFigure::~CFigure()
     //delete this;
 }
 
-static bool readSignature(QDataStream& st)
+static int readFormCount(QDataStream& st)
 {
     uint sign = 0;
     st >> sign;
-    return sign == 0x38474946;
+    return ei::figureFormCount(sign);
 }
 
-// read xyz(3) for morph components(8)
-static void read24(QDataStream& st, QVector<QVector3D>& points)
+// Read bounds for the actual number of stored geometry forms.
+static void readVectors(QDataStream& st, QVector<QVector3D>& points, int formCount)
 {
     QVector3D xyz;
-    for(int i(0); i<8; ++i)
+    for(int i(0); i<formCount; ++i)
     {
         st >> xyz;
         points.append(xyz);
     }
 }
 
-// read morph components(8)
-static void read8(QDataStream& st, QVector<float>& points)
+static void readRadii(QDataStream& st, QVector<float>& points, int formCount)
 {
     float buf;
-    for(int i(0); i<8; ++i)
+    for(int i(0); i<formCount; ++i)
     {
         st >> buf;
         points.append(buf);
@@ -68,20 +68,20 @@ o |.............| |.............| .......
 r |.............| |.............| .......
 p |.............| |.............| .......
 h |{x07,y07,z07}| |{x17,y17,z17}| .......*/
-static void readVertices(QDataStream& st, QVector <QVector <QVector3D>>& morphVerts, const int blockCount)
+static void readVertices(QDataStream& st, QVector <QVector <QVector3D>>& morphVerts, const int blockCount, const int formCount)
 {
     QVector3D pt;
     QVector<QVector3D> vertices;
     float buf;
 
     vertices.fill(pt, blockCount*4);
-    morphVerts.fill(vertices, 8);
+    morphVerts.fill(vertices, formCount);
     //mb change header[0] to header[morph component count]
     for (int block(0); block<blockCount; ++block)
     {
         for (int xyz(0); xyz<3; ++xyz)
         {
-            for (int morph(0); morph<8; ++morph)
+            for (int morph(0); morph<formCount; ++morph)
             {
                 for (int point(0); point<4; ++point)
                 {
@@ -181,7 +181,7 @@ void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVec
         if(!ei::decodeFigureVertexComponent(
                 component, aMorphVertex, m_aNormal, m_aUvCoord, &decoded))
         {
-            qWarning() << "Skipping invalid FIG8 vertex component in" << m_name
+            qWarning() << "Skipping invalid FIG vertex component in" << m_name
                        << "indices" << component.x << component.y << component.z
                        << "limits" << aMorphVertex.size() << m_aNormal.size()
                        << m_aUvCoord.size();
@@ -206,10 +206,9 @@ bool ei::CFigure::readData(QDataStream& stream)
     m_morphMin.clear();
     m_morphMax.clear();
     //check signature
-    if(!readSignature(stream)){   // 0x38474946 == FIG8
-        //todo: process FIG1 signature
+    const int formCount = readFormCount(stream);
+    if(!formCount)
         return false;
-    }
 
     ei::SHeader header;
     header.read(stream);
@@ -226,7 +225,8 @@ bool ei::CFigure::readData(QDataStream& stream)
        || header.normalBlocks > std::numeric_limits<int>::max()/4
        || header.indexCount % 3 != 0)
         return false;
-    const qint64 bodyBytes = 320 + qint64(header.vertBlocks)*384
+    const qint64 bodyBytes = qint64(formCount)*40
+        + qint64(header.vertBlocks)*formCount*48
         + qint64(header.normalBlocks)*64 + qint64(header.uvCount)*8
         + qint64(header.indexCount)*2 + qint64(header.vertexComponentCount)*6
         + qint64(header.morphingComponentCount)*4;
@@ -237,16 +237,16 @@ bool ei::CFigure::readData(QDataStream& stream)
     try {
         //read center
         //QVector<F3> bboxCentr;
-        read24(stream, m_morphCenter);
+        readVectors(stream, m_morphCenter, formCount);
         //read min
-        read24(stream, m_morphMin);
+        readVectors(stream, m_morphMin, formCount);
         //read max
-        read24(stream, m_morphMax);
+        readVectors(stream, m_morphMax, formCount);
         //read radius
         QVector<float> radius;
-        read8(stream, radius);
+        readRadii(stream, radius, formCount);
 
-        readVertices(stream, m_aMorphVertex, header.vertBlocks);
+        readVertices(stream, m_aMorphVertex, header.vertBlocks, formCount);
         readNormals(stream, m_aNormal, header.normalBlocks);
         readTextureCoords(stream, m_aUvCoord, header.uvCount);
         //QVector<ushort> aInd;
@@ -295,6 +295,12 @@ void ei::CFigure::readAssemblyOffset(QDataStream& stream)
 {
     m_offset.resize(8);
     QVector3D xyz;
+    if(stream.device() && stream.device()->bytesAvailable() == 3 * qint64(sizeof(float)))
+    {
+        stream >> xyz;
+        m_offset.fill(xyz, 8);
+        return;
+    }
     for (int i(0); i<8; ++i)
     {
         stream >> xyz;
@@ -337,6 +343,11 @@ void ei::CFigure::getPartNames(QStringList& arrBodyParts)
 // in. constitute - three-component complection
 void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data, QVector3D& constitute)
 {
+    if(data.size() == 1)
+    {
+        complexPoint = data.first();
+        return;
+    }
     Q_ASSERT(data.size() == 8);
     QVector3D res0;
     QVector3D res1;
@@ -367,6 +378,13 @@ void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3
     if(m_aMorphVertex.empty())
     {
         //TODO: process unknown models (figures)
+        return;
+    }
+    if(m_aMorphVertex.size() == 1)
+    {
+        aMorphVertex = m_aMorphVertex.first();
+        for(auto& vertex : aMorphVertex) vertex += offset;
+        generateTriangles(aVrtData, aMorphVertex, sourceVertexIndices);
         return;
     }
     for (int i(0); i<m_aMorphVertex[0].size(); ++i){
@@ -413,8 +431,9 @@ void ei::CFigure::appendVertexData(QVector<CPart*>& model, QVector3D& complectio
         QVector3D authoredCenter;
         QVector3D authoredMinimum;
         QVector3D authoredMaximum;
-        if(m_morphCenter.size() == 8 && m_morphMin.size() == 8
-           && m_morphMax.size() == 8)
+        if((m_morphCenter.size() == 1 || m_morphCenter.size() == 8)
+           && m_morphMin.size() == m_morphCenter.size()
+           && m_morphMax.size() == m_morphCenter.size())
         {
             calcComplection(authoredCenter, m_morphCenter, complection);
             calcComplection(authoredMinimum, m_morphMin, complection);

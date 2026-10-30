@@ -1,4 +1,5 @@
 #include "resource_model_preview.h"
+#include "../render/figure_format.h"
 
 #include <QDataStream>
 #include <QMap>
@@ -17,7 +18,6 @@
 namespace ei {
 namespace {
 constexpr quint32 kResSignature = 0x019CE23C;
-constexpr quint32 kFigSignature = 0x38474946;
 constexpr quint64 kResEntrySize = 22;
 constexpr quint32 kMaxArrayItems = 3000000;
 constexpr int kMaxNestedMembers = 10000;
@@ -52,6 +52,11 @@ quint16 u16(const QByteArray& bytes, quint64 offset)
 quint32 u32(const QByteArray& bytes, quint64 offset)
 {
     return qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(bytes.constData() + offset));
+}
+
+bool isFigureData(const QByteArray& bytes)
+{
+    return bytes.size() >= 4 && ei::figureFormCount(u32(bytes, 0)) != 0;
 }
 
 bool rangeFits(const QByteArray& bytes, quint64 offset, quint64 size)
@@ -109,9 +114,10 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
               const QVector3D& offset = QVector3D())
 {
     if(!triangles) return false;
-    if(bytes.size() < 40 || u32(bytes, 0) != kFigSignature)
+    const int formCount = bytes.size() >= 4 ? figureFormCount(u32(bytes, 0)) : 0;
+    if(bytes.size() < 40 || !formCount)
     {
-        if(diagnostic) *diagnostic = QStringLiteral("FIG8 signature is invalid.");
+        if(diagnostic) *diagnostic = QStringLiteral("FIG1/FIG8 signature is invalid.");
         return false;
     }
     const quint32 vertexBlocks = u32(bytes, 4);
@@ -124,11 +130,11 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
        || uvCount > kMaxArrayItems || indexCount > kMaxArrayItems
        || componentCount > kMaxArrayItems || morphCount > kMaxArrayItems)
     {
-        if(diagnostic) *diagnostic = QStringLiteral("FIG8 array count exceeds the safety bound.");
+        if(diagnostic) *diagnostic = QStringLiteral("FIG array count exceeds the safety bound.");
         return false;
     }
-    const quint64 tail = quint64(80) * sizeof(float);
-    const quint64 vertexBytes = quint64(vertexBlocks) * 3 * 8 * 4 * sizeof(float);
+    const quint64 tail = quint64(formCount) * 10 * sizeof(float);
+    const quint64 vertexBytes = quint64(vertexBlocks) * 3 * formCount * 4 * sizeof(float);
     const quint64 normalBytes = quint64(normalBlocks) * 4 * 4 * sizeof(float);
     const quint64 uvBytes = quint64(uvCount) * 2 * sizeof(float);
     const quint64 indexBytes = quint64(indexCount) * sizeof(quint16);
@@ -138,7 +144,7 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
         + indexBytes + componentBytes + morphBytes;
     if(expected > quint64(bytes.size()))
     {
-        if(diagnostic) *diagnostic = QStringLiteral("FIG8 arrays are truncated.");
+        if(diagnostic) *diagnostic = QStringLiteral("FIG arrays are truncated.");
         return false;
     }
     QDataStream stream(bytes);
@@ -148,7 +154,7 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
     QVector<QVector3D> vertices(int(vertexBlocks * 4));
     for(quint32 block = 0; block < vertexBlocks; ++block)
         for(int axis = 0; axis < 3; ++axis)
-            for(int morph = 0; morph < 8; ++morph)
+            for(int morph = 0; morph < formCount; ++morph)
                 for(int lane = 0; lane < 4; ++lane)
                 {
                     float value = 0.0f;
@@ -174,7 +180,7 @@ bool parseFig(const QByteArray& bytes, QVector<Triangle>* triangles, QString* di
     }
     if(stream.status() != QDataStream::Ok)
     {
-        if(diagnostic) *diagnostic = QStringLiteral("FIG8 arrays could not be read.");
+        if(diagnostic) *diagnostic = QStringLiteral("FIG arrays could not be read.");
         return false;
     }
     const int complete = qMin(indices.size() - (indices.size() % 3),
@@ -456,7 +462,7 @@ SResourceModelScene buildFig8Scene(const QByteArray& bytes)
     }
     scene.parts.append(part);
     scene.triangleCount = parsed.size();
-    scene.kind = QStringLiteral("FIG8");
+    scene.kind = QString::fromLatin1(bytes.constData(), 4);
     scene.valid = true;
     return scene;
 }
@@ -470,7 +476,7 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     int figurePartCount = 0;
     int anatomyTriangleCount = 0;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
-        if(it.value().startsWith("FIG8"))
+        if(isFigureData(it.value()))
         {
             ++figurePartCount;
             if(isBaseAnatomyPart(it.key()) && it.value().size() >= 20)
@@ -479,7 +485,7 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     bool sampled = false;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
-        if(it.value().startsWith("FIG8")) continue;
+        if(isFigureData(it.value())) continue;
         QDataStream links(it.value());
         links.setByteOrder(QDataStream::LittleEndian);
         int count = 0; links >> count;
@@ -509,7 +515,7 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
         const QMap<QString, QByteArray> bon = resMembers(companionBon, &scene.diagnostics);
         for(auto it = bon.constBegin(); it != bon.constEnd(); ++it)
         {
-            if(it.value().size() < 8 * 3 * int(sizeof(float))) continue;
+            if(it.value().size() < 3 * int(sizeof(float))) continue;
             QDataStream stream(it.value());
             stream.setByteOrder(QDataStream::LittleEndian);
             stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
@@ -531,7 +537,7 @@ SResourceModelScene buildModScene(const QByteArray& bytes, const QByteArray& com
     };
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
-        if(!it.value().startsWith("FIG8")) continue;
+        if(!isFigureData(it.value())) continue;
         QVector<Triangle> parsed;
         QString diagnostic;
         if(!parseFig(it.value(), &parsed, &diagnostic, resolve(it.key(), {})))
@@ -638,7 +644,8 @@ SResourceModelPreview previewFig8(const QByteArray& bytes, const QSize& size)
     result.componentCount = 1;
     result.triangleCount = triangles.size();
     result.image = renderTriangles(triangles, size);
-    result.details = QStringLiteral("FIG8 | %1 triangle(s)").arg(result.triangleCount);
+    result.details = QStringLiteral("%1 | %2 triangle(s)")
+        .arg(QString::fromLatin1(bytes.constData(), 4)).arg(result.triangleCount);
     return result;
 }
 
@@ -653,7 +660,7 @@ SResourceModelPreview previewModAssembly(const QByteArray& bytes,
     QStringList orderedComponents;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
-        if(it.value().startsWith("FIG8")) continue;
+        if(isFigureData(it.value())) continue;
         QDataStream links(it.value());
         links.setByteOrder(QDataStream::LittleEndian);
         int count = 0;
@@ -696,7 +703,7 @@ SResourceModelPreview previewModAssembly(const QByteArray& bytes,
         const QMap<QString, QByteArray> offsets = resMembers(companionBon, &bonDiagnostics);
         for(auto it = offsets.constBegin(); it != offsets.constEnd(); ++it)
         {
-            if(it.value().size() < 8 * 3 * int(sizeof(float))) continue;
+            if(it.value().size() < 3 * int(sizeof(float))) continue;
             QDataStream stream(it.value());
             stream.setByteOrder(QDataStream::LittleEndian);
             stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
@@ -722,7 +729,7 @@ SResourceModelPreview previewModAssembly(const QByteArray& bytes,
     QVector<Triangle> triangles;
     for(auto it = members.constBegin(); it != members.constEnd(); ++it)
     {
-        if(!it.key().endsWith(QStringLiteral(".fig")) && !it.value().startsWith("FIG8")) continue;
+        if(!it.key().endsWith(QStringLiteral(".fig")) && !isFigureData(it.value())) continue;
         QString diagnostic;
         const int before = triangles.size();
         if(parseFig(it.value(), &triangles, &diagnostic, accumulated(it.key(), {})))
@@ -733,7 +740,7 @@ SResourceModelPreview previewModAssembly(const QByteArray& bytes,
     }
     if(triangles.isEmpty())
     {
-        result.diagnostics.append(QStringLiteral("MOD contains no renderable FIG8 components."));
+        result.diagnostics.append(QStringLiteral("MOD contains no renderable FIG1/FIG8 components."));
         return result;
     }
     result.valid = true;

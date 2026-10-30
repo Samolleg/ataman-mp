@@ -3,6 +3,12 @@
 #include "resourcemanager.h"
 #include "res_file.h"
 #include <QFile>
+#include <QDir>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <cmath>
+#include "resource_model_preview.h"
 #include <QTextStream>
 #include <QQuaternion>
 namespace {
@@ -41,6 +47,42 @@ int runRootBonCheck(){
    QMap<QString,QString> parents;QMap<QString,QVector3D> offsets;root.getAssemblyHierarchy(parents,offsets,morph);
    check(close(offsets["root"],QVector3D())&&close(offsets["grandchild"],c[0]+g[0]),"full skeleton matches rendered parts");
   }qDeleteAll(parts);
+ }
+ // Optional private corpus: the same production MOD/LNK/BON loader used by the scene.
+ const QString corpus=qEnvironmentVariable("EI_FIG1_CORPUS_DIRECTORY");
+ if(!corpus.isEmpty()){
+  QFile manifest(QDir(corpus).filePath("models.json"));
+  if(!manifest.open(QIODevice::ReadOnly))return 2;
+  const auto document=QJsonDocument::fromJson(manifest.readAll());
+  if(!document.isArray()||document.array().isEmpty())return 2;
+  for(const auto& value:document.array()){
+   const auto item=value.toObject();const QString model=item["model"].toString();
+   QFile mod(QDir(corpus).filePath(model+".mod")),bon(QDir(corpus).filePath(model+".bon"));
+   QFile expected(QDir(corpus).filePath(model+".vertices"));
+   if(!mod.open(QIODevice::ReadOnly)||!bon.open(QIODevice::ReadOnly)||!expected.open(QIODevice::ReadOnly))return 2;
+   const QByteArray modBytes=mod.readAll(),bonBytes=bon.readAll();
+   QDataStream input(expected.readAll());input.setByteOrder(QDataStream::LittleEndian);
+   input.setFloatingPointPrecision(QDataStream::SinglePrecision);
+   const int count=item["triangles"].toInt()*3;QVector<SVertexData> wanted;
+   for(int i=0;i<count;++i){QVector3D p,n;QVector2D uv;input>>p>>n>>uv;wanted.append(SVertexData(p,n,uv));}
+   if(input.status()!=QDataStream::Ok)return 2;
+   const QMap<QString,QByteArray> files{{model+".mod",modBytes},{model+".bon",bonBytes}};
+   for(const auto& shape:{QVector3D(0,0,0),QVector3D(.5f,.5f,.5f),QVector3D(1,1,1),QVector3D(.2f,.8f,5)}){
+    const auto parts=CObjectList::prepareStaticAssembly(files,model,shape,{});
+    bool equal=parts.size()==1&&parts.first().vertices.size()==count;
+    if(equal)for(int i=0;i<count;++i){
+     const auto& got=parts.first().vertices[i];const auto& want=wanted[i];
+     if((got.position-want.position).length()>1e-6f||(got.normal-want.normal).length()>1e-6f
+        ||(got.texCoord-want.texCoord).length()>1e-6f){equal=false;break;}
+    }
+    check(equal,model+" production assembly preserves XYZ/normals/UV, shape="+QString::number(shape.z()));
+   }
+   const auto scene=ei::buildModScene(modBytes,bonBytes);
+   check(scene.valid&&scene.triangleCount==count/3,model+" interactive model scene retains all triangles");
+   const auto preview=ei::previewModAssembly(modBytes,bonBytes,QSize(320,240));
+   check(preview.valid&&!preview.image.isNull()&&preview.triangleCount==count/3,model+" CPU preview renders all triangles");
+   if(preview.valid)preview.image.save(QDir(corpus).filePath(model+"-mapper-preview.png"));
+  }
  }
  const QString path=qEnvironmentVariable("EI_ROOT_BON_ARCHIVE");
  if(!path.isEmpty()){

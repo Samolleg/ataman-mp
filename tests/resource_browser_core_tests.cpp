@@ -79,6 +79,7 @@ private slots:
     void catalogPreservesRuntimePrecedenceAndOverrideChain();
     void catalogFiltersOneArchiveExactly();
     void mmpWidgetPreviewUsesEditorOrientation();
+    void fig8CpuPreviewRendersGeometry_data();
     void fig8CpuPreviewRendersGeometry();
     void modelSceneDefaultsToAboveGroundCamera();
     void interactiveModelViewKeepsStableFramingForPanAndZoom();
@@ -230,23 +231,31 @@ void ResourceBrowserCoreTests::mmpWidgetPreviewUsesEditorOrientation()
     QCOMPARE(preview.pixelColor(0, 1), QColor(Qt::red));
 }
 
+void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry_data()
+{
+    QTest::addColumn<int>("forms");
+    QTest::newRow("FIG1")<<1;
+    QTest::newRow("FIG8")<<8;
+}
+
 void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry()
 {
+    QFETCH(int, forms);
     QByteArray fig;
     QDataStream stream(&fig, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
-    stream << quint32(0x38474946) << quint32(1) << quint32(1) << quint32(3)
+    stream << quint32(forms == 1 ? 0x31474946 : 0x38474946) << quint32(1) << quint32(1) << quint32(3)
            << quint32(3) << quint32(3) << quint32(0) << quint32(0)
            << quint32(0) << quint32(0);
     for(int block = 0; block < 3; ++block)
-        for(int morph = 0; morph < 8; ++morph)
+        for(int morph = 0; morph < forms; ++morph)
             stream << 0.0f << 0.0f << 0.0f;
-    for(int morph = 0; morph < 8; ++morph) stream << 1.0f;
+    for(int morph = 0; morph < forms; ++morph) stream << 1.0f;
     const QVector<QVector3D> vertices = {QVector3D(-1, 0, 0), QVector3D(1, 0, 0),
                                          QVector3D(0, 0, 1), QVector3D(0, 0, 0)};
     for(int axis = 0; axis < 3; ++axis)
-        for(int morph = 0; morph < 8; ++morph)
+        for(int morph = 0; morph < forms; ++morph)
             for(const QVector3D& vertex : vertices) stream << vertex[axis];
     for(int axis = 0; axis < 4; ++axis)
         for(int lane = 0; lane < 4; ++lane) stream << (axis == 2 ? 1.0f : 0.0f);
@@ -259,6 +268,17 @@ void ResourceBrowserCoreTests::fig8CpuPreviewRendersGeometry()
     QVERIFY2(preview.valid, qPrintable(preview.diagnostics.join('\n')));
     QCOMPARE(preview.triangleCount, 1);
     QVERIFY(!preview.image.isNull());
+    QVERIFY(preview.details.startsWith(forms == 1 ? "FIG1" : "FIG8"));
+    const auto scene=ei::buildFig8Scene(fig);
+    QVERIFY(scene.valid);QCOMPARE(scene.kind,QString(forms == 1 ? "FIG1" : "FIG8"));
+    QCOMPARE(scene.parts.first().triangles.first().vertices[1].position,QVector3D(1,0,0));
+    QByteArray links;QDataStream lnk(&links,QIODevice::WriteOnly);lnk.setByteOrder(QDataStream::LittleEndian);
+    lnk<<qint32(1)<<qint32(5);lnk.writeRawData("part\0",5);lnk<<qint32(0);
+    const QByteArray mod=archiveBytes({{"model",links},{"part",fig}});
+    const auto assembly=ei::buildModScene(mod);QVERIFY(assembly.valid);QCOMPARE(assembly.triangleCount,1);
+    const auto assemblyPreview=ei::previewModAssembly(mod);
+    QVERIFY(assemblyPreview.valid);QCOMPARE(assemblyPreview.componentCount,1);
+    QVERIFY(!ei::buildFig8Scene(fig.left(fig.size()-1)).valid);
 }
 
 void ResourceBrowserCoreTests::modelSceneDefaultsToAboveGroundCamera()

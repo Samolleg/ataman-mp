@@ -77,6 +77,7 @@ int inferredAnimationLogicalLength(const SAnimationClip& clip);
 int resourceModelPreviewTriangleBudget(const QString& partName, int authoredTriangles,
                                        int partCount, int anatomyTriangles);
 bool resourcePayloadLooksText(const QByteArray& bytes);
+// Legacy API names accept both FIG1 and FIG8 payloads.
 SResourceModelScene buildFig8Scene(const QByteArray& bytes);
 SResourceModelScene buildModScene(const QByteArray& bytes,
                                   const QByteArray& companionBon = QByteArray());
@@ -85,7 +86,7 @@ QImage renderResourceModelScene(const SResourceModelScene& scene,
                                 const QSize& size = QSize(640, 480));
 
 // Bounded, CPU-only preview for browser workers. It follows the established
-// FIG8 vertex-component order and MOD/LNK hierarchy but creates no scene node,
+// FIG1/FIG8 vertex-component order and MOD/LNK hierarchy but creates no scene node,
 // OpenGL object, cache entry, or mutable resource state.
 SResourceModelPreview previewFig8(const QByteArray& bytes, const QSize& size = QSize(640, 480));
 SResourceModelPreview previewModAssembly(const QByteArray& bytes,

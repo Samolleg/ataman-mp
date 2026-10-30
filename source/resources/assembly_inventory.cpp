@@ -1,4 +1,5 @@
 #include "assembly_inventory.h"
+#include "../render/figure_format.h"
 
 #include <QDataStream>
 #include <QDateTime>
@@ -217,15 +218,16 @@ bool readFigureVerticalGeometry(const QByteArray& data,
     quint32 ignored = 0;
     stream >> signature >> vertexBlocks >> normalBlocks >> uvCount >> indexCount
            >> componentCount >> morphComponentCount >> ignored >> ignored >> ignored;
-    if(stream.status() != QDataStream::Ok || signature != 0x38474946
+    const int formCount = ei::figureFormCount(signature);
+    if(stream.status() != QDataStream::Ok || !formCount
        || vertexBlocks == 0 || vertexBlocks > 100000
        || normalBlocks > 100000 || uvCount > 1000000
        || indexCount > 3000000 || componentCount > 3000000
        || morphComponentCount > 3000000)
         return false;
 
-    const qint64 headerTailBytes = qint64(8 * 3 * 3 + 8) * qint64(sizeof(float));
-    const qint64 vertexBytes = qint64(vertexBlocks) * 3 * 8 * 4 * qint64(sizeof(float));
+    const qint64 headerTailBytes = qint64(formCount * 10) * qint64(sizeof(float));
+    const qint64 vertexBytes = qint64(vertexBlocks) * 3 * formCount * 4 * qint64(sizeof(float));
     const qint64 normalBytes = qint64(normalBlocks) * 4 * 4 * qint64(sizeof(float));
     const qint64 uvBytes = qint64(uvCount) * 2 * qint64(sizeof(float));
     const qint64 indexBytes = qint64(indexCount) * qint64(sizeof(quint16));
@@ -236,10 +238,10 @@ bool readFigureVerticalGeometry(const QByteArray& data,
     if(expected > data.size() || !stream.device()->seek(4 + 9 * sizeof(quint32) + headerTailBytes))
         return false;
 
-    geometry->morphZ.fill(QVector<float>(int(vertexBlocks * 4)), 8);
+    geometry->morphZ.fill(QVector<float>(int(vertexBlocks * 4)), formCount);
     for(quint32 block = 0; block < vertexBlocks; ++block)
         for(int axis = 0; axis < 3; ++axis)
-            for(int morph = 0; morph < 8; ++morph)
+            for(int morph = 0; morph < formCount; ++morph)
                 for(int lane = 0; lane < 4; ++lane)
                 {
                     float value = 0.0f;
@@ -296,12 +298,13 @@ bool readBonOffset(const QByteArray& archiveData,
     if(entry.Size <= 0)
         return true;
     const QByteArray data = archiveData.mid(entry.Position, entry.Size);
-    if(data.size() < 8 * 3 * int(sizeof(float)))
+    if(data.size() != 3 * int(sizeof(float)) && data.size() < 8 * 3 * int(sizeof(float)))
         return false;
     QDataStream stream(data);
     stream.setByteOrder(QDataStream::LittleEndian);
     stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
-    for(int morph = 0; morph < 8; ++morph)
+    const int endpointCount = data.size() == 3 * int(sizeof(float)) ? 1 : 8;
+    for(int morph = 0; morph < endpointCount; ++morph)
     {
         float x = 0.0f;
         float y = 0.0f;
@@ -312,6 +315,7 @@ bool readBonOffset(const QByteArray& archiveData,
             return false;
         (*offsets)[morph] = z;
     }
+    if(endpointCount == 1) offsets->fill(offsets->first(), 8);
     return true;
 }
 
@@ -388,6 +392,7 @@ bool readHeadHairGeometry(const QStringList& sources, const QString& model,
 
 float interpolateMorph(const QVector<float>& values, float x, float y, float z)
 {
+    if(values.size() == 1) return values.first();
     const float lowerA = values.at(0) + (values.at(1) - values.at(0)) * y;
     const float lowerB = values.at(2) + (values.at(3) - values.at(2)) * y;
     const float lower = lowerA + (lowerB - lowerA) * x;
@@ -400,15 +405,16 @@ float interpolateMorph(const QVector<float>& values, float x, float y, float z)
 bool crownHeight(const SVerticalFigureGeometry& geometry,
                  float x, float y, float z, float* height)
 {
-    if(!height || !geometry.valid || geometry.morphZ.size() != 8
+    if(!height || !geometry.valid
+       || (geometry.morphZ.size() != 1 && geometry.morphZ.size() != 8)
        || geometry.accumulatedOffsetZ.size() != 8)
         return false;
     const float offset = interpolateMorph(geometry.accumulatedOffsetZ, x, y, z);
     float maximum = -std::numeric_limits<float>::infinity();
-    QVector<float> vertexMorphs(8);
+    QVector<float> vertexMorphs(geometry.morphZ.size());
     for(const int vertex : geometry.referencedVertices)
     {
-        for(int morph = 0; morph < 8; ++morph)
+        for(int morph = 0; morph < vertexMorphs.size(); ++morph)
             vertexMorphs[morph] = geometry.morphZ.at(morph).at(vertex);
         maximum = qMax(maximum, interpolateMorph(vertexMorphs, x, y, z) + offset);
     }

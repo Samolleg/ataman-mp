@@ -84,11 +84,11 @@ private:
     QVector<ushort> m_aUvInd;
 
     // vectors include morph components
-    QVector<QVector<QVector3D>> m_aMorphVertex;    // [0-7][x,y,x] vertices
+    QVector<QVector<QVector3D>> m_aMorphVertex;    // [1 or 8 forms][vertex] XYZ
     //TODO: change vector to array or bbox class
-    QVector<QVector3D> m_morphMin;   // 8x3    //todo: min max convert to bbox
-    QVector<QVector3D> m_morphMax;   // 8x3
-    QVector<QVector3D> m_morphCenter; //8x3
+    QVector<QVector3D> m_morphMin;   // 1 or 8 vectors; TODO bbox class
+    QVector<QVector3D> m_morphMax;   // 1 or 8 vectors
+    QVector<QVector3D> m_morphCenter; //1 or 8 vectors
     //QVector<float> m_morphRadius;  //8
 
     QVector<QVector3D> m_offset; //8x3 assembly offset from bon file

@@ -3,16 +3,16 @@
 #include "figure.h"
 
 namespace {
-QByteArray figureBytes(bool empty = false) {
+QByteArray figureBytes(bool empty = false, int forms = 8) {
     QByteArray bytes;
     QDataStream out(&bytes,QIODevice::WriteOnly);
     out.setByteOrder(QDataStream::LittleEndian);
     out.setFloatingPointPrecision(QDataStream::SinglePrecision);
-    out << quint32(0x38474946);
+    out << quint32(forms == 1 ? 0x31474946 : 0x38474946);
     for(int n : {empty?0:1,empty?0:1,empty?0:1,empty?0:3,empty?0:1,0,0,0,0}) out<<qint32(n);
-    for(int i=0;i<80;++i)out<<float(0);
+    for(int i=0;i<10*forms;++i)out<<float(0);
     if(!empty) {
-        for(int i=0;i<96+16+2;++i)out<<float(1);
+        for(int i=0;i<12*forms+16+2;++i)out<<float(1);
         for(int i=0;i<6;++i)out<<quint16(0);
     }
     return bytes;
@@ -58,6 +58,49 @@ private slots:
         }
         auto bytes=figureBytes();dword(bytes,360,0x7f800000u);
         ei::CFigure figure;QVERIFY(!load(figure,bytes));QCOMPARE(vertices(figure),0);
+    }
+    void singleFormReadAndBoundsAreIndependentOfComplexion() {
+        ei::CFigure figure;QVERIFY(load(figure,figureBytes(false,1)));
+        for(const QVector3D& complexion : {QVector3D(0,0,0),QVector3D(1,1,1),QVector3D(.2f,.8f,5)}) {
+            QVector<CPart*> parts;auto shape=complexion;QStringList visible;
+            figure.getVertexData(parts,shape,visible,false);
+            QCOMPARE(parts.size(),1);QCOMPARE(parts[0]->vertData().size(),3);
+            for(const auto& vertex:parts[0]->vertData())QCOMPARE(vertex.position,QVector3D(1,1,1));
+            QCOMPARE(parts[0]->authoredNavigationMinimum(),QVector3D());
+            qDeleteAll(parts);
+        }
+        QVERIFY(load(figure,figureBytes()));QCOMPARE(vertices(figure),3);
+        QVERIFY(load(figure,figureBytes(false,1)));QCOMPARE(vertices(figure),3);
+    }
+    void singleFormRejectsTruncatedStreamsAndInvalidComponents() {
+        ei::CFigure figure;const auto valid=figureBytes(false,1);
+        for(int length:{0,4,39,40,79,199,valid.size()-1})QVERIFY(!load(figure,valid.left(length)));
+        for(int field:{4,8,12,16,20,24}) {
+            auto bytes=valid;dword(bytes,field,0x7fffffffu);QVERIFY(!load(figure,bytes));
+        }
+        const int indices=40+40+48+64+8;
+        for(int field:{indices,indices+6,indices+8,indices+10}) {
+            auto bytes=valid;qToLittleEndian<quint16>(65535,reinterpret_cast<uchar*>(bytes.data()+field));
+            QVERIFY(!load(figure,bytes));QCOMPARE(vertices(figure),0);
+        }
+        auto bytes=valid;dword(bytes,80,0x7f800000u);QVERIFY(!load(figure,bytes));
+        bytes=valid;dword(bytes,0,0x34474946u);QVERIFY(!load(figure,bytes));
+    }
+    void mixedFormHierarchyKeepsIndependentBonEndpoints() {
+        ei::CFigure root,child;QVERIFY(load(root,figureBytes(true,1)));
+        QVERIFY(load(child,figureBytes()));root.addChild(&child);
+        QVector<QVector3D> offsets(8,QVector3D(2,3,4));child.setOffset(offsets);root.applyAssemblyOffset();
+        QVector<CPart*> parts;QVector3D shape(.3f,.7f,5);QStringList visible;
+        root.getVertexData(parts,shape,visible,false);QCOMPARE(parts.size(),2);
+        QCOMPARE(parts[1]->vertData().first().position,QVector3D(3,4,5));qDeleteAll(parts);
+    }
+    void singleBonVectorIsIndependentOfFigureFormCount() {
+        ei::CFigure figure;QVERIFY(load(figure,figureBytes(false,1)));
+        QByteArray bon;QDataStream out(&bon,QIODevice::WriteOnly);
+        out.setByteOrder(QDataStream::LittleEndian);out.setFloatingPointPrecision(QDataStream::SinglePrecision);
+        out<<2.f<<3.f<<4.f;QDataStream in(bon);in.setByteOrder(QDataStream::LittleEndian);
+        in.setFloatingPointPrecision(QDataStream::SinglePrecision);figure.readAssemblyOffset(in);
+        for(const auto& offset:figure.offset())QCOMPARE(offset,QVector3D(2,3,4));
     }
     void emptyTransformRootKeepsChildren() {
         ei::CFigure root,child;QVERIFY(load(root,figureBytes(true)));QVERIFY(root.completeCaptureGeometry());
