@@ -292,6 +292,85 @@ private slots:
         QVERIFY(QFile::remove(dir.filePath("b.mpr")));
         afterRemoval.reload();QCOMPARE(afterRemoval.loadEditorWorld("profile",{}).zones.size(),1);
     }
+    void lateCompanionDiscoveryIsReadOnlyAndLayoutUndoPreservesBinding()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const auto make=[&](const QString& name) {
+            QFile file(dir.filePath(name)); QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("fixture");
+        };
+        make("gipat2.mpr"); make("neighbor.mpr");
+        CWorldMapLayoutDocument doc;
+        doc.setProfileDirectory(dir.path(),"p",QString());
+        SWorldMapZoneOrigin map;
+        map.profileId="p";map.allodId="gipat";map.zoneId="new-map";
+        map.componentAnchorZoneId="new-map";map.mprIdentity="gipat2";
+        map.mprPath="gipat2.mpr";map.origin=QPointF(864,-128);
+        map.sectorWidth=3;map.sectorHeight=6;
+        auto neighbor=map;neighbor.zoneId="z-neighbor";neighbor.mprIdentity="neighbor";
+        neighbor.mprPath="neighbor.mpr";neighbor.origin=QPointF(960,-128);
+        QString error; QVERIFY2(doc.addEditorMaps({map,neighbor},&error),qPrintable(error));
+        const QByteArray before=readFile(doc.path());
+        QVERIFY(doc.loadEditorWorld("p",{}).zones[0].mobPath.isEmpty());
+        make("gipat2.MOB"); // appeared after a known MPR had already been registered
+        const auto discovered=doc.loadEditorWorld("p",{}).zones;
+        QCOMPARE(discovered[0].mobPath,QStringLiteral("gipat2.MOB"));
+        QVERIFY(discovered[0].mobPathInferred);
+        QCOMPARE(readFile(doc.path()),before);
+        SWorldMapLayoutChange move;move.before=move.after=discovered[0];
+        move.after.origin+=QPointF(3,4);
+        QVERIFY2(doc.applyChanges({move},true,&error),qPrintable(error));
+        QVERIFY(QFile::remove(dir.filePath("gipat2.MOB")));
+        QVERIFY2(doc.applyChanges({move},false,&error),qPrintable(error));
+        QCOMPARE(readFile(doc.path()),before);
+        make("gipat2.MOB");
+        QVERIFY2(doc.bindMobToMap(dir.filePath("gipat2.mpr"),dir.filePath("gipat2.MOB"),&error),qPrintable(error));
+        CWorldMapLayoutDocument reopened;
+        reopened.setProfileDirectory(dir.path(),"p",QString());
+        const auto persisted=reopened.loadEditorWorld("p",{}).zones;
+        QCOMPARE(persisted[0].mobPath,QStringLiteral("gipat2.MOB"));
+        QVERIFY(!persisted[0].mobPathInferred);
+        QCOMPARE(persisted[0].origin,map.origin);
+        QCOMPARE(persisted[1].origin,neighbor.origin);
+        QVERIFY(persisted[1].mobPath.isEmpty());
+        const QByteArray attached=readFile(doc.path());
+        QVERIFY(reopened.bindMobToMap(dir.filePath("gipat2.mpr"),dir.filePath("gipat2.MOB"),&error));
+        QCOMPARE(readFile(doc.path()),attached);
+    }
+
+    void mobBindingPreservesExplicitChoicesAndDetectsConflict()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        for(const QString& name:{"a.mpr","a.mob","chosen.mob","renamed.mob","outside.mpr"})
+        {QFile file(dir.filePath(name));QVERIFY(file.open(QIODevice::WriteOnly));file.write("fixture");}
+        CWorldMapLayoutDocument doc;
+        doc.setProfileDirectory(dir.path(),"p",QString());
+        SWorldMapZoneOrigin map;
+        map.profileId="p";map.allodId="w";map.zoneId="a";map.componentAnchorZoneId="a";
+        map.mprIdentity="a";map.mprPath="a.mpr";map.mobPath="chosen.mob";
+        map.sectorWidth=map.sectorHeight=1;
+        QString error;QVERIFY(doc.addEditorMaps({map},&error));
+        const QByteArray before=readFile(doc.path());
+        QCOMPARE(doc.loadEditorWorld("p",{}).zones[0].mobPath,QStringLiteral("chosen.mob"));
+        QVERIFY(doc.bindMobToMap(dir.filePath("a.mpr"),dir.filePath("a.mob"),&error));
+        QCOMPARE(readFile(doc.path()),before); // ordinary open cannot steal a primary
+        QVERIFY(!doc.bindMobToMap(dir.filePath("a.mpr"),dir.filePath("renamed.mob"),&error,dir.filePath("a.mob")));
+        QCOMPARE(readFile(doc.path()),before);
+        QVERIFY(doc.bindMobToMap(dir.filePath("a.mpr"),dir.filePath("renamed.mob"),&error,dir.filePath("chosen.mob")));
+        QCOMPARE(doc.loadEditorWorld("p",{}).zones[0].mobPath,QStringLiteral("renamed.mob"));
+        const QByteArray renamed=readFile(doc.path());
+        QVERIFY(doc.bindMobToMap(dir.filePath("outside.mpr"),dir.filePath("a.mob"),&error));
+        QCOMPARE(readFile(doc.path()),renamed); // no invented world membership
+        CWorldMapLayoutDocument other;other.setProfileDirectory(dir.path(),"p",QString());
+        other.loadEditorWorld("p",{});
+        QVERIFY(other.setZoneOrigin("p","w","a",QPointF(50,60),&error));
+        const QByteArray external=readFile(doc.path());
+        QVERIFY(!doc.bindMobToMap(dir.filePath("a.mpr"),dir.filePath("a.mob"),&error,dir.filePath("renamed.mob")));
+        QVERIFY(!error.isEmpty());QCOMPARE(readFile(doc.path()),external);
+        QVERIFY(!doc.bindMobToMap(dir.filePath("a.mpr"),dir.filePath("missing.mob"),&error));
+        QCOMPARE(readFile(doc.path()),external);
+    }
+
     void legacyEditorWorldResolvesFilesWithoutMapTableAndBacksUp()
     {
         QTemporaryDir dir;QVERIFY(dir.isValid());

@@ -852,6 +852,58 @@ QString CWorldMapLayoutDocument::portableResourcePath(const QString& path) const
     return relative.startsWith("../") || QDir::isAbsolutePath(relative) ? absolute : relative;
 }
 
+QString CWorldMapLayoutDocument::companionMobPath(const QString& mprPath)
+{
+    if(mprPath.isEmpty()) return QString();
+    const QFileInfo mpr(mprPath);
+    const QString name = mpr.completeBaseName() + QStringLiteral(".mob");
+    QString found;
+    for(const QFileInfo& file : mpr.dir().entryInfoList(QDir::Files | QDir::Readable))
+        if(file.fileName().compare(name, Qt::CaseInsensitive) == 0)
+        {
+            if(!found.isEmpty()) return QString(); // ambiguous on case-sensitive volumes
+            found = file.absoluteFilePath();
+        }
+    return found;
+}
+
+bool CWorldMapLayoutDocument::bindMobToMap(const QString& mprPath, const QString& mobPath,
+                                          QString* error, const QString& previousMobPath)
+{
+    if(error) error->clear();
+    const auto fail = [&](const QString& text) { if(error) *error=text; return false; };
+    if(!ensureLoaded()) return fail(m_loadWarning);
+    const auto identity = [](const QString& path) {
+        if(path.isEmpty()) return QString();
+        const QFileInfo file(path);
+        return key(QDir::cleanPath(file.canonicalFilePath().isEmpty()
+            ? file.absoluteFilePath() : file.canonicalFilePath()));
+    };
+    const QString mpr = identity(mprPath), mob = identity(mobPath);
+    if(!QFileInfo(mprPath).isFile() || !QFileInfo(mobPath).isFile())
+        return fail(QStringLiteral("A selected map file is missing; its MOB binding was not changed."));
+    QVector<SWorldMapLayoutChange> changes;
+    for(const auto& zone : m_zones)
+    {
+        if((!m_storageProfileId.isEmpty() && key(zone.profileId)!=key(m_storageProfileId))
+           || zone.mprPath.isEmpty() || identity(absoluteResourcePath(zone.mprPath))!=mpr)
+            continue;
+        const QString current = identity(absoluteResourcePath(zone.mobPath));
+        if(current==mob) continue;
+        if(!current.isEmpty())
+        {
+            if(previousMobPath.isEmpty()) continue;
+            if(current!=identity(previousMobPath))
+                return fail(QStringLiteral("The map's MOB binding changed in another operation; it was preserved."));
+        }
+        SWorldMapLayoutChange change;
+        change.before=change.after=zone;
+        change.after.mobPath=portableResourcePath(mobPath);
+        changes.append(change);
+    }
+    return changes.isEmpty() || applyChanges(changes, true, error);
+}
+
 SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
     const QString& profileId, const QStringList& mapRoots)
 {
@@ -908,15 +960,21 @@ SWorldMapLayoutUpdateResult CWorldMapLayoutDocument::loadEditorWorld(
             if(mprs.size() == 1)
             {
                 zone.mprPath = portableResourcePath(mprs.first());
-                // Resolve the same-name MOB with the same profile-root priority.
-                // Different names can be attached explicitly in the world manager.
-                const auto mobs = files.value(key(zone.mprIdentity + ".mob"));
-                if(mobs.size() == 1) zone.mobPath = portableResourcePath(mobs.first());
             }
             else result.diagnostics.append(QStringLiteral("Locate MPR for %1: missing or ambiguous file.").arg(zone.mprIdentity));
         }
     }
     result.zones = profileZones(m_zones, profileId);
+    // MOBs often appear after the MPR was added to the world. Resolve on every
+    // read, independently of legacy MPR lookup, but leave the stored baseline
+    // intact for guarded edits and lifecycle Undo. Never search other roots or
+    // backups for an unbound map that already has a physical MPR path.
+    for(auto& zone : result.zones)
+        if(zone.mobPath.isEmpty() && !zone.mprPath.isEmpty())
+        {
+            zone.mobPath=portableResourcePath(companionMobPath(absoluteResourcePath(zone.mprPath)));
+            zone.mobPathInferred=!zone.mobPath.isEmpty();
+        }
     result.persisted = m_hasPersistentFile;
     return result;
 }
@@ -947,6 +1005,7 @@ bool CWorldMapLayoutDocument::addEditorMaps(
     QVector<SWorldMapZoneOrigin> candidate = m_zones;
     for(auto map : maps)
     {
+        map.mobPathInferred=false;
         if(!validZone(map, error) || map.mprPath.isEmpty()
            || map.sectorWidth <= 0 || map.sectorHeight <= 0)
         {
@@ -1031,6 +1090,7 @@ bool CWorldMapLayoutDocument::replaceEditorMap(const SWorldMapZoneOrigin& map, Q
     }
     if(index<0){if(error)*error=QStringLiteral("The map is no longer in the world layout.");return false;}
     candidate[index]=map;
+    candidate[index].mobPathInferred=false;
     candidate[index].mprPath=portableResourcePath(full);
     candidate[index].mobPath=portableResourcePath(absoluteResourcePath(map.mobPath));
     if(!save(candidate,error))return false;
@@ -1138,6 +1198,14 @@ bool CWorldMapLayoutDocument::applyChanges(const QVector<SWorldMapLayoutChange>&
             comparable.sectorWidth=next.sectorWidth=candidate[index].sectorWidth;
             comparable.sectorHeight=next.sectorHeight=candidate[index].sectorHeight;
         }
+        if(index>=0 && candidate[index].mobPath.isEmpty() && expected.mobPathInferred)
+        {
+            comparable.mobPath.clear();
+            if(change.before.mobPath==change.after.mobPath
+               && change.before.mobPathInferred && change.after.mobPathInferred)
+                next.mobPath.clear();
+        }
+        next.mobPathInferred=false;
         if((index>=0)!=hadExpected || (hadExpected && !same(candidate[index],comparable)))
         { if(error) *error=QString::fromUtf8("Раскладка карты изменилась. Перезагрузите мир перед повторным действием или отменой."); return false; }
         if(index<0 && hasDesired)

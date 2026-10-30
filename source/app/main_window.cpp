@@ -1906,6 +1906,19 @@ MainWindow::MainWindow(QWidget* parent) :
     m_pView->createNavmeshMenu(m_ui->menuTools);
     connect(m_pView, &CView::mobStateChanged,
             this, [this]() { scheduleViewportMinimapRefresh(); });
+    connect(m_pView, &CView::mobDocumentSaved, this,
+            [this](const QString& previousPath, const QString& savedPath) {
+        if(!CLandscape::getInstance()->isMprLoad()) return;
+        if(CProcessEditLock::identity(resolvedMobPathForMpr(CLandscape::getInstance()->filePath()))
+           !=CProcessEditLock::identity(previousPath)) return;
+        QString error;
+        if(!bindActiveMapMob(savedPath,&error,previousPath))
+        {
+            ei::log(eLogWarning,error);
+            QMessageBox::warning(this,tr("Map MOB binding"),tr(
+                "The MOB was saved, but its map binding could not be saved.\n\n%1").arg(error));
+        }
+    });
     connect(m_pView, &CView::updateMainWindowTitle,
             this, [this](eTitleTypeData type, const QString&) {
         if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag
@@ -7277,11 +7290,12 @@ void MainWindow::openNeighborMapPair(const QString& mprPath,
 }
 
 void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
-                                             const QString& mobPath,
+                                             const QString& requestedMobPath,
                                              const QString& zoneId,
                                              bool ordinaryMapOpen,
                                              const QPointF& sourceWorldOrigin,
-                                             const QPointF& targetWorldOrigin)
+                                             const QPointF& targetWorldOrigin,
+                                             bool bindMap)
 {
     QElapsedTimer workspaceLoadTimer;
     workspaceLoadTimer.start();
@@ -7290,7 +7304,9 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
         statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
         return;
     }
-    const bool terrainOnly = !ordinaryMapOpen && mobPath.isEmpty();
+    const QString mobPath=requestedMobPath.isEmpty() && bindMap
+        ? resolvedMobPathForMpr(QFileInfo(mprPath)) : requestedMobPath;
+    const bool terrainOnly = mobPath.isEmpty();
     QFileInfo targetMpr(mprPath);
     QFileInfo targetMob(mobPath);
     QString leaseError;auto mapLease=CProcessEditLock::acquire(mprPath,&leaseError);
@@ -7422,7 +7438,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     QFileInfo mobFile(mobPath);
     mapLoadPhase.restart();
-    if(!terrainOnly) loadMobWithDependencies(mobFile, &progress);
+    const bool mobLoaded=terrainOnly || loadMobWithDependencies(mobFile, &progress);
     const qint64 mobMs = mapLoadPhase.elapsed();
     mapLoadPhase.restart();
     rememberRecentFile(QFileInfo(mprPath));
@@ -7448,6 +7464,16 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     progress.setValue(3);
     progress.close();
     endWorkspaceLoad();
+    if(bindMap && !terrainOnly && mobLoaded)
+    {
+        QString error;
+        if(!bindActiveMapMob(mobPath,&error,QString(),!requestedMobPath.isEmpty()))
+        {
+            ei::log(eLogWarning,error);
+            QMessageBox::warning(this,tr("Map MOB binding"),tr(
+                "The MOB was opened, but its map binding could not be saved.\n\n%1").arg(error));
+        }
+    }
     ei::log(eLogInfo, QString("Workspace load complete kind:map identity:%1 elapsedMs:%2")
         .arg(zoneId).arg(workspaceLoadTimer.elapsed()));
     m_pView->setNeighborCacheTransition(false);
@@ -8243,10 +8269,31 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
     return true;
 }
 
-bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
+bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName, bool attachMob)
 {
     QString leaseError;auto lease=CProcessEditLock::acquire(fileName.absoluteFilePath(),&leaseError);
     if(!lease){m_pView->setProperty("documentLockError",leaseError);statusBar()->showMessage(leaseError,15000);ei::log(eLogWarning,leaseError);return false;}
+    // Re-selecting the collection's own terrain must not add its global map
+    // companion or turn an explicitly unmapped collection into a map workspace.
+    if((m_workspaceIdentityKind=="collection" || !m_currentCollectionPath.isEmpty())
+       && CLandscape::getInstance()->isMprLoad()
+       && CProcessEditLock::identity(CLandscape::getInstance()->filePath().absoluteFilePath())
+          ==CProcessEditLock::identity(fileName.absoluteFilePath()))
+        return true;
+    // Validate a companion before asking to discard/unload the old workspace.
+    // A missing MOB is a supported terrain-only map; a corrupt one is an error.
+    const QString companion=attachMob ? resolvedMobPathForMpr(fileName) : QString();
+    if(!companion.isEmpty() && QFileInfo::exists(companion))
+    {
+        CMobDocument document; CValidationReport report; QString error;
+        if(!document.load(QFileInfo(companion),&report) || report.hasErrors()
+           || !CMob::validateEditableProjection(document.originalBytes(),QFileInfo(companion),&error))
+        {
+            QMessageBox::warning(this,tr("Open map"),tr("Cannot read MOB:\n%1\n%2")
+                .arg(companion,report.toText()+error));
+            return false;
+        }
+    }
     CLandscape* landscape = CLandscape::getInstance();
     if(landscape->isMprLoad())
     {
@@ -8259,7 +8306,7 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
                                                      Qt::CaseInsensitive) == 0)
         {
             statusBar()->showMessage(tr("%1 is already loaded.").arg(fileName.fileName()), 4000);
-            return true;
+            return !attachMob || attachCompanionMob(fileName);
         }
 
         if(!isExitAllowed())
@@ -8275,7 +8322,7 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName)
     if(!loadLandscapeWithProgress(fileName))
         return false;
     updateDocumentActionAvailability();
-    return true;
+    return !attachMob || attachCompanionMob(fileName);
 }
 
 bool MainWindow::loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress)
@@ -8344,7 +8391,7 @@ bool MainWindow::loadMobWithDependencies(QFileInfo fileName, QProgressDialog* pr
     return true;
 }
 
-bool MainWindow::loadMobWithProgress(QFileInfo fileName)
+bool MainWindow::loadMobWithProgress(QFileInfo fileName, bool bindMap)
 {
     if(!beginWorkspaceLoad(tr("MOB %1").arg(fileName.fileName())))
         return false;
@@ -8359,6 +8406,19 @@ bool MainWindow::loadMobWithProgress(QFileInfo fileName)
     progress.close();
     endWorkspaceLoad();
     updateDocumentActionAvailability();
+    if(loaded && bindMap)
+    {
+        QString error;
+        CMob* opened=m_pView->currentMob();
+        if(!bindActiveMapMob(fileName.absoluteFilePath(),&error,QString(),
+                            opened && !opened->isQuestMob() && !opened->loadedFromAddMob()))
+        {
+            ei::log(eLogWarning,error);
+            QMessageBox::warning(this,tr("Map MOB binding"),tr(
+                "The MOB was opened, but its map binding could not be saved.\n\n%1").arg(error));
+            return false;
+        }
+    }
     return loaded;
 }
 
@@ -9094,7 +9154,16 @@ void MainWindow::on_actionNew_MOB_triggered()
     role->setObjectName(QStringLiteral("newMobRole"));
     role->addItem(tr("Primary map MOB (SC_OBJECT_DB_FILE)"));
     role->addItem(tr("Supplemental / AutoZone MOB (PR_OBJECT_DB_FILE)"));
-    role->setCurrentIndex(1);
+    bool mapMobLoaded=false;
+    if(CLandscape::getInstance()->isMprLoad())
+    {
+        const QString assigned=resolvedMobPathForMpr(CLandscape::getInstance()->filePath());
+        for(CMob* mob:m_pView->mobs())
+            mapMobLoaded|=!assigned.isEmpty() && CProcessEditLock::identity(assigned)
+                ==CProcessEditLock::identity(mob->filePath().absoluteFilePath());
+    }
+    role->setCurrentIndex(CLandscape::getInstance()->isMprLoad() && !mapMobLoaded
+                         && m_workspaceIdentityKind!="collection" && m_currentCollectionPath.isEmpty() ? 0 : 1);
     role->setToolTip(tr(
         "Primary MOBs own world settings and normally anchor a map. Supplemental "
         "MOBs are the usual choice for AutoZones and optional map states."));
@@ -9397,9 +9466,14 @@ void MainWindow::on_actionNew_MOB_triggered()
 
         COptString* opt = dynamic_cast<COptString*>(
             m_settings->opt(eOptSetGeneral, "lastVisitedFolder"));
-        const QString startFolder = opt ? opt->value() : QDir::currentPath();
+        const bool mapPrimary=!supplemental && CLandscape::getInstance()->isMprLoad();
+        const QFileInfo activeMpr=CLandscape::getInstance()->filePath();
+        const QString previousMob=mapPrimary ? resolvedMobPathForMpr(activeMpr) : QString();
+        const QString startFolder = mapPrimary ? activeMpr.absolutePath()
+            : (opt ? opt->value() : QDir::currentPath());
         QString suggestedName = supplemental
             ? QStringLiteral("autozone-new.mob") : QStringLiteral("zone-new.mob");
+        if(mapPrimary) suggestedName=activeMpr.completeBaseName()+QStringLiteral(".mob");
         QString destinationPath = QFileDialog::getSaveFileName(&dialog,
             tr("Save New MOB"), QDir(startFolder).filePath(suggestedName),
             tr("MOB (*.mob)"));
@@ -9437,6 +9511,25 @@ void MainWindow::on_actionNew_MOB_triggered()
                     .arg(destination.fileName())) != QMessageBox::Yes)
             return;
 
+        QString leaseError;
+        auto lease=CProcessEditLock::acquire(destination.absoluteFilePath(),&leaseError);
+        if(!lease)
+        {
+            QMessageBox::warning(&dialog,tr("Create New MOB"),leaseError);
+            return;
+        }
+        const bool existed=destination.exists();
+        QByteArray original;
+        if(existed)
+        {
+            QFile file(destination.absoluteFilePath());
+            if(!file.open(QIODevice::ReadOnly))
+            {
+                QMessageBox::warning(&dialog,tr("Create New MOB"),file.errorString());
+                return;
+            }
+            original=file.readAll();
+        }
         SMobSaveCommitRequest commit;
         commit.destination = destination;
         const SMobSaveCommitResult result = commitGeneratedMob(candidate, commit);
@@ -9446,16 +9539,49 @@ void MainWindow::on_actionNew_MOB_triggered()
                 "The generated MOB was not committed.\n\n%1").arg(result.error));
             return;
         }
-        if(opt)
-            opt->setValue(destination.absolutePath());
-        if(!loadMobWithProgress(destination))
+        const bool opened=loadMobWithProgress(destination,false);
+        QString bindingError;
+        // The explicit Primary role can also attach a deliberately chosen
+        // different filename. Compare against the choice captured before save.
+        const QString expectedMob=previousMob.isEmpty()
+            ? activeMpr.dir().filePath(activeMpr.completeBaseName()+".mob") : previousMob;
+        if(!opened || (mapPrimary && !bindActiveMapMob(destination.absoluteFilePath(),
+                                                      &bindingError,expectedMob)))
         {
-            QMessageBox::information(&dialog, tr("New MOB Created"), tr(
-                "The validated MOB was created at:\n%1\n\nIt could not be opened automatically.")
-                .arg(destination.absoluteFilePath()));
-            dialog.accept();
+            if(opened)
+                for(CMob* mob:m_pView->mobs())
+                    if(CProcessEditLock::identity(mob->filePath().absoluteFilePath())
+                       ==CProcessEditLock::identity(destination.absoluteFilePath()))
+                    {m_pView->unloadMob(mob->mobName());break;}
+            bool restored=false;
+            if(existed)
+            {
+                QFile backup(result.backupPath);
+                // Do not restore an older preflight snapshot if an outside
+                // writer changed the destination before the safe-save backup.
+                if(backup.open(QIODevice::ReadOnly) && backup.readAll()==original)
+                {
+                    backup.close();
+                    SMapSaveFile file;file.path=destination.absoluteFilePath();
+                    file.before=candidate;file.after=original;
+                    restored=commitMapSaveBatch({file}).success;
+                }
+            }
+            else
+            {
+                QFile file(destination.absoluteFilePath());
+                const bool owned=file.open(QIODevice::ReadOnly) && file.readAll()==candidate;
+                file.close();
+                restored=owned && QFile::remove(destination.absoluteFilePath());
+            }
+            QMessageBox::critical(&dialog,tr("Create New MOB"),tr(
+                "The MOB could not be opened and attached to the map.\n\n%1\n\n%2")
+                .arg(bindingError,restored ? tr("The file change was rolled back.")
+                    : tr("Rollback was incomplete. Inspect %1 and its backup %2.")
+                        .arg(destination.absoluteFilePath(),result.backupPath)));
             return;
         }
+        if(opt) opt->setValue(destination.absolutePath());
         rememberRecentFile(destination);
         if(openParameters->isChecked())
             m_pView->openActiveMobEditParams();

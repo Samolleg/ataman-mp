@@ -17230,6 +17230,7 @@ bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
         progress.setValue(value);
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     };
+    const QString previousPath=mob->filePath().absoluteFilePath();
     const bool saved = mob->saveAs(destination, updateProgress);
     progress.setValue(progress.maximum());
     progress.close();
@@ -17238,6 +17239,7 @@ bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
             mob->lastSaveError().isEmpty()
                 ? tr("The MOB could not be saved safely.")
                 : mob->lastSaveError());
+    if(saved) emit mobDocumentSaved(previousPath, destination.absoluteFilePath());
     return saved;
 }
 

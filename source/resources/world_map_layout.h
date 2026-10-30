@@ -28,6 +28,9 @@ struct SWorldMapZoneOrigin
     QString displayName;
     QString mprPath;
     QString mobPath;
+    // Read-time companion discovery, never serialized. Layout-only Undo must
+    // compare/preserve the original empty binding until an explicit attachment.
+    bool mobPathInferred{false};
     int sectorWidth{0};
     int sectorHeight{0};
 };

@@ -934,6 +934,7 @@ signals:
     void openDatabasePrototypeRequested(const QString& prototype);
     void leverApproachRequested();
     void mobStateChanged();
+    void mobDocumentSaved(const QString& previousPath, const QString& savedPath);
     void loadedMapStateChanged();
     void mprSaveStateChanged();
     void terrainPublicationPreflightRequested(

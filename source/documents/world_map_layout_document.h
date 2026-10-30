@@ -50,6 +50,15 @@ public:
                          const QString& mapId, QString* error);
     QString absoluteResourcePath(const QString& path) const;
     QString portableResourcePath(const QString& path) const;
+    // Only the same directory and basename identify an implicit companion.
+    // Discovery never writes the layout or replaces an explicit MOB choice.
+    static QString companionMobPath(const QString& mprPath);
+    // Called after an explicit open/create/save. Files are validated by the
+    // caller. With no world membership there is nothing to persist. A different
+    // explicit binding is preserved unless previousMobPath names that binding.
+    bool bindMobToMap(const QString& mprPath, const QString& mobPath,
+                      QString* error = nullptr,
+                      const QString& previousMobPath = QString());
     SWorldMapLayoutUpdateResult loadAndUpdate(
         const QString& profileId,
         const QVector<SMapCatalogEntry>& topology);

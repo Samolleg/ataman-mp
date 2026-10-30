@@ -118,7 +118,7 @@ ai::EditPlan CAiEditAdapter::prepareLifecycle(ai::EditPlan p,const ai::Cancellat
         QString leaseError;auto mapLease=CProcessEditLock::acquire(p.destination,&leaseError);
         auto mobLease=p.mobPath.isEmpty()?mapLease:CProcessEditLock::acquire(p.mobPath,&leaseError);
         if(!mapLease||!mobLease)return fail(leaseError);
-        p.mobPath=QFileInfo(path).dir().filePath(QFileInfo(path).completeBaseName()+".mob");
+        p.mobPath=CWorldMapLayoutDocument::companionMobPath(path);
         const auto layout=p.worldDocument.loadEditorWorld(p.profileId,p.mapRoots);
         if(layout.storageBlocked)return fail(layout.warning);
         for(const auto& zone:layout.zones)if(key(p.worldDocument.absoluteResourcePath(zone.mprPath))==key(path)&&!zone.mobPath.isEmpty())p.mobPath=p.worldDocument.absoluteResourcePath(zone.mobPath);
@@ -251,10 +251,15 @@ QJsonObject CAiEditAdapter::applyLifecycle(MainWindow* w,const ai::EditPlan& p) 
         QString leaseError;auto mapLease=CProcessEditLock::acquire(p.destination,&leaseError);
         auto mobLease=p.mobPath.isEmpty()?mapLease:CProcessEditLock::acquire(p.mobPath,&leaseError);
         if(!mapLease||!mobLease)return ai::error(leaseError);
-        if(p.mobPath.isEmpty())w->openNeighborMapPair(p.destination,QString(),QFileInfo(p.destination).completeBaseName(),QPointF(),QPointF());
-        else w->openMapPair(p.destination,p.mobPath,QFileInfo(p.destination).completeBaseName());
+        // Navigation is read-only even in a human editor. It uses exactly the
+        // pair validated by prepare(), without persisting discovery or changing
+        // lifecycle Undo's empty-binding baseline.
+        const QString zone=QFileInfo(p.destination).completeBaseName();
+        w->m_preferredEditorActiveMap=zone;
+        w->openMapPairWithCameraPolicy(p.destination,p.mobPath,p.mobPath.isEmpty()?QString():zone,
+                                       !p.mobPath.isEmpty(),QPointF(),QPointF(),false);
         if(!v->m_pLand->isMprLoad()||key(v->m_pLand->filePath().absoluteFilePath())!=key(p.destination)||!v->ensureTerrainAutoCatalogReady()) {
-            v->unloadMob("");v->unloadLand(false);if(!previous.isEmpty()){w->replaceLoadedLandscape(QFileInfo(previous));for(const auto& m:mobs){QFileInfo file(m);v->loadMob(file);}}
+            v->unloadMob("");v->unloadLand(false);if(!previous.isEmpty()){w->replaceLoadedLandscape(QFileInfo(previous),false);for(const auto& m:mobs){QFileInfo file(m);v->loadMob(file);}}
             return ai::error("Open failed; previous clean workspace restored");
         }
         w->refreshEditorWorld();return {{"status","opened"},{"path",p.destination},{"revision",revision(w)}};

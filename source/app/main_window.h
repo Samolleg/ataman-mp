@@ -112,8 +112,8 @@ public:
     ~MainWindow();
     bool shutdownPending() const { return m_closeWaiting || m_closeReady; }
     bool openDocument(const QFileInfo& fileName);
-    bool replaceLoadedLandscape(const QFileInfo& fileName);
-    bool loadMobWithProgress(QFileInfo fileName);
+    bool replaceLoadedLandscape(const QFileInfo& fileName, bool attachMob = true);
+    bool loadMobWithProgress(QFileInfo fileName, bool bindMap = true);
     bool loadLandscapeWithProgress(const QFileInfo& fileName);
     void configureAutosaveTimer();
     void configureAutosaveTimer(bool enabled, int intervalMinutes);
@@ -125,6 +125,11 @@ public:
     void testFunc1();
 
 private:
+    QString resolvedMobPathForMpr(const QFileInfo& mpr);
+    bool bindActiveMapMob(const QString& mobPath, QString* error,
+                          const QString& previousMobPath = QString(),
+                          bool allowUnboundPrimary = false);
+    bool attachCompanionMob(const QFileInfo& mpr);
     bool loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress = nullptr);
     void createTravelEditor(QMenu* menu);
     void refreshTravelContext();
@@ -192,7 +197,8 @@ private:
                                      const QString& zoneId,
                                      bool ordinaryMapOpen,
                                      const QPointF& sourceWorldOrigin,
-                                     const QPointF& targetWorldOrigin);
+                                     const QPointF& targetWorldOrigin,
+                                     bool bindMap = true);
     void openCollection(const QString& path);
     void newCollection();
     void editCollection();

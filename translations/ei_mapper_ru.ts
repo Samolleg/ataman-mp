@@ -16920,6 +16920,29 @@ Conditions: %5</source>
         <source>Map Scenario</source>
         <translation>Сценарий карты</translation>
     </message>
+    <message><source>Map MOB binding</source><translation>Привязка MOB к карте</translation></message>
+    <message><source>The linked MOB is missing: %1</source><translation>Привязанный MOB не найден: %1</translation></message>
+    <message><source>The MOB was saved, but its map binding could not be saved.
+
+%1</source><translation>MOB сохранён, но записать его привязку к карте не удалось.
+
+%1</translation></message>
+    <message><source>The MOB was opened, but its map binding could not be saved.
+
+%1</source><translation>MOB открыт, но записать его привязку к карте не удалось.
+
+%1</translation></message>
+    <message><source>The MOB could not be opened and attached to the map.
+
+%1
+
+%2</source><translation>Не удалось открыть MOB и привязать его к карте.
+
+%1
+
+%2</translation></message>
+    <message><source>The file change was rolled back.</source><translation>Изменение файла отменено.</translation></message>
+    <message><source>Rollback was incomplete. Inspect %1 and its backup %2.</source><translation>Откат выполнен не полностью. Проверьте %1 и резервную копию %2.</translation></message>
 </context>
 <context>
     <name>QObject</name>

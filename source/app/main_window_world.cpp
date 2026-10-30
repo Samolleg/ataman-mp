@@ -48,6 +48,64 @@ QString metadataKey(const QFileInfo& info)
 }
 }
 
+QString MainWindow::resolvedMobPathForMpr(const QFileInfo& mpr)
+{
+    const auto profile=activeResourceProfile();
+    CWorldMapLayoutDocument document;
+    document.setProfileDirectory(profile.valid
+        ? (profile.modRoot.isEmpty() ? profile.gameRoot : profile.modRoot) : QString(),
+        profile.profileId, QString());
+    const auto layout=document.loadEditorWorld(profile.profileId, activeMapRoots().toList());
+    for(const auto& map:layout.zones)
+        if(pathKey(document.absoluteResourcePath(map.mprPath))==pathKey(mpr.absoluteFilePath())
+           && !map.mobPath.isEmpty())
+            return document.absoluteResourcePath(map.mobPath);
+    return CWorldMapLayoutDocument::companionMobPath(mpr.absoluteFilePath());
+}
+
+bool MainWindow::bindActiveMapMob(const QString& mobPath, QString* error,
+                                   const QString& previousMobPath, bool allowUnboundPrimary)
+{
+    if(!CLandscape::getInstance()->isMprLoad()) return true;
+    if(m_workspaceIdentityKind=="collection" || !m_currentCollectionPath.isEmpty()) return true;
+    const auto profile=activeResourceProfile();
+    if(!profile.valid) return true; // standalone documents have no profile layout
+    const QFileInfo mpr=CLandscape::getInstance()->filePath();
+    if(previousMobPath.isEmpty() && !allowUnboundPrimary
+       && pathKey(resolvedMobPathForMpr(mpr))!=pathKey(mobPath))
+        return true; // an additional/opened comparison MOB is not the map's MOB
+    CWorldMapLayoutDocument document;
+    document.setProfileDirectory(profile.modRoot.isEmpty() ? profile.gameRoot : profile.modRoot,
+                                 profile.profileId, QString());
+    document.loadEditorWorld(profile.profileId, activeMapRoots().toList());
+    if(!document.bindMobToMap(mpr.absoluteFilePath(), mobPath, error, previousMobPath))
+        return false;
+    refreshMapTestContext(true, false);
+    return true;
+}
+
+bool MainWindow::attachCompanionMob(const QFileInfo& mpr)
+{
+    const QString path=resolvedMobPathForMpr(mpr);
+    if(path.isEmpty()) return true;
+    if(!QFileInfo::exists(path))
+    {
+        // A missing explicit file remains an explicit choice. In particular,
+        // do not substitute some other same-name MOB for it.
+        statusBar()->showMessage(tr("The linked MOB is missing: %1").arg(path), 15000);
+        return true;
+    }
+    for(CMob* mob:m_pView->mobs())
+        if(pathKey(mob->filePath().absoluteFilePath())==pathKey(path))
+        {
+            QString error;
+            if(bindActiveMapMob(path,&error)) return true;
+            QMessageBox::warning(this,tr("Map MOB binding"),error);
+            return false;
+        }
+    return loadMobWithProgress(QFileInfo(path));
+}
+
 bool MainWindow::validateWorldMap(SWorldMapZoneOrigin* map, QString* error)
 {
     CMprDocument mpr; CValidationReport report;
