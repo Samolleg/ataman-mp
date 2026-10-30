@@ -2,6 +2,7 @@
 #include <QTemporaryDir>
 #include <QFile>
 #include <QDataStream>
+#include <QThreadPool>
 
 #include "minimap_bake.h"
 #include "minimap_catalog_registration.h"
@@ -10,6 +11,9 @@
 #include "res_archive_document.h"
 #include "res_texture_export.h"
 #include "synthetic_map_table_archive.h"
+#include "process_edit_lock.h"
+#include "file_write_activity.h"
+#include <QLockFile>
 
 namespace {
 QImage solid(const QSize& size, const QColor& color)
@@ -39,6 +43,7 @@ class MinimapExportTests : public QObject
 {
     Q_OBJECT
 private slots:
+    void cleanupTestCase() { QVERIFY(QThreadPool::globalInstance()->waitForDone(10000)); }
     void bakes128PixelsPerSectorAndExcludesDynamic();
     void normalizesOrientationAndFramesWholeMpr();
     void composesTerrainOverlayAndStaticInOrder();
@@ -55,7 +60,70 @@ private slots:
     void stagesAppliedTextureBesideTerrainAndReplacesGenerationCleanly();
     void stagesTemporaryCatalogReferenceWithoutObjectivesMutation();
     void temporaryRuntimeNameAvoidsInstalledTextureShadowing();
+    void resourceAndSaveLocksRefuseExport();
+    void externalChangesAndAppearingDestinationArePreserved();
+    void atomicFailureAndNoOpPreserveArchive();
 };
+
+void MinimapExportTests::resourceAndSaveLocksRefuseExport()
+{
+    QTemporaryDir directory;const auto path=directory.filePath("locked.res");
+    SResTextureExportRequest request;request.destination=QFileInfo(path);request.memberName="seed";
+    request.backupRootOverride=directory.filePath("backups");
+    request.mmpPayload=ei::encodeMmp8888(solid(QSize(64,64),Qt::red));
+    QVERIFY(exportMmpToRes(request).success);
+    QFile before(path);QVERIFY(before.open(QIODevice::ReadOnly));const auto baseline=before.readAll();before.close();
+    request.memberName="second";
+    for(const QString& suffix:{QString(".mapper-resource.lock"),QString(".mapper-save.lock")}) {
+        QLockFile lock(CProcessEditLock::identity(path)+suffix);lock.setStaleLockTime(0);QVERIFY(lock.tryLock(0));
+        QVERIFY(!exportMmpToRes(request).success);
+        QFile disk(path);QVERIFY(disk.open(QIODevice::ReadOnly));QCOMPARE(disk.readAll(),baseline);
+        QCOMPARE(CFileWriteActivity::active(),0);
+    }
+    QVERIFY(exportMmpToRes(request).success);
+}
+
+void MinimapExportTests::externalChangesAndAppearingDestinationArePreserved()
+{
+    for(bool existed:{false,true}) {
+        QTemporaryDir directory;const auto path=directory.filePath("race.res");
+        SResTextureExportRequest request;request.destination=QFileInfo(path);request.memberName="seed";
+        request.backupRootOverride=directory.filePath("backups");
+        request.mmpPayload=ei::encodeMmp8888(solid(QSize(64,64),Qt::red));
+        if(existed)QVERIFY(exportMmpToRes(request).success);
+        const auto foreign=archiveWithMapTable("#owner\nforeign update\n");
+        bool called=false,active=false,written=false;
+        request.memberName="second";
+        request.beforeCommitForTest=[&](){
+            called=true;active=CFileWriteActivity::active()>0;
+            QFile disk(path);written=disk.open(QIODevice::WriteOnly)
+                &&disk.write(foreign)==foreign.size();
+        };
+        QVERIFY(!exportMmpToRes(request).success);
+        QVERIFY(called&&active&&written);
+        QFile disk(path);QVERIFY(disk.open(QIODevice::ReadOnly));QCOMPARE(disk.readAll(),foreign);
+        QCOMPARE(CFileWriteActivity::active(),0);
+    }
+}
+
+void MinimapExportTests::atomicFailureAndNoOpPreserveArchive()
+{
+    QTemporaryDir directory;const auto path=directory.filePath("atomic.res");
+    SResTextureExportRequest request;request.destination=QFileInfo(path);request.memberName="seed";
+    request.backupRootOverride=directory.filePath("backups");
+    request.mmpPayload=ei::encodeMmp8888(solid(QSize(64,64),Qt::red));
+    request.simulateAtomicCommitFailure=true;
+    QVERIFY(!exportMmpToRes(request).success);QVERIFY(!QFileInfo::exists(path));
+    request.simulateAtomicCommitFailure=false;
+    const auto first=exportMmpToRes(request);QVERIFY(first.success);
+    QFile before(path);QVERIFY(before.open(QIODevice::ReadOnly));const auto baseline=before.readAll();before.close();
+    request.conflictPolicy=EResTextureConflictPolicy::Replace;
+    const auto noOp=exportMmpToRes(request);QVERIFY(noOp.success);QCOMPARE(noOp.newArchiveSha256,first.newArchiveSha256);
+    request.memberName="second";request.simulateAtomicCommitFailure=true;
+    const auto failed=exportMmpToRes(request);QVERIFY(!failed.success);QVERIFY(!failed.backupPath.isEmpty());
+    QFile disk(path),backup(failed.backupPath);QVERIFY(disk.open(QIODevice::ReadOnly));QCOMPARE(disk.readAll(),baseline);
+    QVERIFY(backup.open(QIODevice::ReadOnly));QCOMPARE(backup.readAll(),baseline);
+}
 
 void MinimapExportTests::normalizesOrientationAndFramesWholeMpr()
 {
@@ -528,5 +596,5 @@ void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()
     QVERIFY(!registered.updatedMapTableBytes.contains("oldmap zone1quest"));
 }
 
-QTEST_APPLESS_MAIN(MinimapExportTests)
+QTEST_GUILESS_MAIN(MinimapExportTests)
 #include "minimap_export_tests.moc"

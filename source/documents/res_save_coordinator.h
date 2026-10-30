@@ -46,6 +46,7 @@ struct SResPublishedMembersSaveRequest
     QString backupRootOverride;
 #ifdef QT_TESTLIB_LIB
     bool simulateAtomicCommitFailure{false};
+    std::function<void()> beforeCommitForTest;
 #endif
 };
 
@@ -66,9 +67,11 @@ struct SResArchiveBytesSaveRequest
     QByteArray candidateBytes;
     QByteArray expectedSourceBytes;
     bool createBackup{true};
+    bool requireAbsent{false};
     QString backupRootOverride;
 #ifdef QT_TESTLIB_LIB
     bool simulateAtomicCommitFailure{false};
+    std::function<void()> beforeCommitForTest;
 #endif
 };
 

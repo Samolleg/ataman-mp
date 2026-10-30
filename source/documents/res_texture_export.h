@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
+#include <functional>
 
 enum class EResTextureConflictPolicy { Refuse, Replace };
 
@@ -17,6 +18,8 @@ struct SResTextureExportRequest
     QString backupRootOverride;
 #ifdef QT_TESTLIB_LIB
     bool simulateValidationFailure{false};
+    bool simulateAtomicCommitFailure{false};
+    std::function<void()> beforeCommitForTest;
 #endif
 };
 

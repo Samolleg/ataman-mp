@@ -452,6 +452,8 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     QVector<SBackupResult> backupLeases;
     SResArchiveBytesSaveResult result;
     auto resourceLease=CProcessEditLock::acquire(request.destination.absoluteFilePath(),&result.error,false);if(!resourceLease)return result;
+    QLockFile saveLock(CProcessEditLock::identity(request.destination.absoluteFilePath())+".mapper-save.lock");
+    if(!saveLock.tryLock(0)){result.error="Another save owns this RES.";return result;}
     result.phase = QStringLiteral("validation");
     if(request.destination.absoluteFilePath().isEmpty()
        || request.candidateBytes.isEmpty())
@@ -479,6 +481,12 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
         return result;
     }
     const bool existed = destination.exists();
+    if(request.requireAbsent && existed)
+    {
+        result.phase = QStringLiteral("source-check");
+        result.error = QStringLiteral("The new RES destination already exists.");
+        return result;
+    }
     QByteArray original;
     if(existed && !readFile(destination, &original, &result.error))
         return result;
@@ -494,6 +502,9 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
         result.success = true;
         return result;
     }
+#ifdef QT_TESTLIB_LIB
+    if(request.beforeCommitForTest)request.beforeCommitForTest();
+#endif
     if(existed && request.createBackup)
     {
         result.phase = QStringLiteral("backup");
@@ -502,6 +513,12 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
         if(!backup.success)
         {
             result.error = backup.error;
+            return result;
+        }
+        const auto expectedBackup=QCryptographicHash::hash(original,QCryptographicHash::Sha256).toHex();
+        if(backup.sha256.toLatin1()!=expectedBackup || resFileSha256(backup.backupPath,&result.error)!=expectedBackup)
+        {
+            result.error=QStringLiteral("The RES backup differs from the expected destination.");
             return result;
         }
         result.backupPath = backup.backupPath;
@@ -581,6 +598,9 @@ SResPublishedMembersSaveResult commitStreamedResMembers(
     if(QFileInfo(source.path())!=QFileInfo(path)){r.error="Streamed save requires the indexed destination.";return r;}
     r.phase="staging";
     const auto guard=[&](){
+#ifdef QT_TESTLIB_LIB
+        if(request.beforeCommitForTest)request.beforeCommitForTest();
+#endif
         r.phase="backup";
         if(request.createBackup){const auto b=CBackupManager(request.backupRootOverride).snapshotBeforeSave(QFileInfo(path));
             if(!b.success){r.error=b.error;return false;}
