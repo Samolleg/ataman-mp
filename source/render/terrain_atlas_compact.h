@@ -27,6 +27,11 @@ void terrainAtlasCopySourceIdentities(STerrainAtlasProfile* profile, const class
 struct STerrainAtlasCompactPlan {
     QString error;
     bool noOp{false};
+    // Preserve the exact source member, including its absence, for the commit
+    // conflict guard. A loaded profile may have been migrated in memory.
+    bool sourceProfilePresent{true};
+    QByteArray sourceProfileBytes;
+    QVector<QByteArray> sourcePageSha256;
     QByteArray mprBytes;
     STerrainAtlasProfile profile;
     QVector<QByteArray> pages;
@@ -38,12 +43,17 @@ struct STerrainAtlasCompactPlan {
     qint64 archiveBefore{0}, archiveEstimatedAfter{0};
     QString retirementReason;
 };
+bool terrainCompactProfileMatchesPublished(const STerrainAtlasProfile& profile,
+    const QByteArray& publishedBytes);
 // Pure preparation: no disk writes, no global resource lookup or repair.
+// An explicit empty publishedProfileBytes means no embedded source profile.
+// nullptr retains the canonical-profile expectation of in-memory callers.
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& profile, const QVector<QByteArray>& pages,
     const QByteArray& semanticBytes, const QFileInfo& mpr,
     const std::atomic_bool* cancelled = nullptr, bool forcePublication = false,
-    const QVector<QImage>* decodedSource = nullptr);
+    const QVector<QImage>* decodedSource = nullptr,
+    const QByteArray* publishedProfileBytes = nullptr);
 bool compactTerrainPublication(QByteArray* mprBytes, STerrainAtlasProfile* profile,
     QVector<SResArchiveNewMember>* members, QVector<QImage>* images,
     const QFileInfo& map, QString* error);

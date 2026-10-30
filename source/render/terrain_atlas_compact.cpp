@@ -40,21 +40,35 @@ bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByte
 }
 }
 
+bool terrainCompactProfileMatchesPublished(const STerrainAtlasProfile& profile,
+    const QByteArray& publishedBytes)
+{
+    STerrainAtlasProfile published;
+    return STerrainAtlasProfile::fromBytes(publishedBytes, &published)
+        && published.toBytes() == profile.toBytes();
+}
+
 STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     const STerrainAtlasProfile& input,const QVector<QByteArray>& pages,
     const QByteArray& semanticBytes,const QFileInfo& mpr,const std::atomic_bool* cancelled,bool forcePublication,
-    const QVector<QImage>* decodedSource)
+    const QVector<QImage>* decodedSource,const QByteArray* publishedProfileBytes)
 {
     STerrainAtlasCompactPlan p;CValidationReport report;const auto m=source.mapInfo();
     const auto fail=[&](const QString& s){p.error=s;return p;};
     if(!m.valid||pages.size()!=int(m.textureCount)||input.mprNamespace!=m.innerNamespace
        ||input.atlasSlotCount!=pages.size()*64||input.slotDefinitions.isEmpty())return fail("Missing exact published atlas/profile.");
+    p.sourceProfileBytes=publishedProfileBytes?*publishedProfileBytes:input.toBytes();
+    p.sourceProfilePresent=!p.sourceProfileBytes.isEmpty();
+    if(publishedProfileBytes&&p.sourceProfilePresent
+       &&!terrainCompactProfileMatchesPublished(input,p.sourceProfileBytes))
+        return fail("Published source profile differs from the loaded profile.");
     p.oldPages=pages.size();p.oldSlots=m.tileCount;
     QVector<int> sizes;QVector<int> widths;
     for(const auto& b:pages){if(b.size()<76||u32(b,0)!=0x00504d4d||b.mid(16,4)!="DXT1")return fail("Only complete DXT1 terrain pages can be compacted.");
         int w=u32(b,4);if((w!=1024&&w!=2048)||u32(b,8)!=w)return fail("Unsupported terrain page dimensions.");
         int length=76;for(int n=w;n;n/=2)length+=qMax(1,(n+3)/4)*qMax(1,(n+3)/4)*8;
-        if(b.size()!=length)return fail("Truncated DXT1 mip chain.");widths<<w;p.oldDxt+=b.size();p.oldRgba+=qint64(w)*w*4;}
+        if(b.size()!=length)return fail("Truncated DXT1 mip chain.");
+        p.sourcePageSha256<<hash(b);widths<<w;p.oldDxt+=b.size();p.oldRgba+=qint64(w)*w*4;}
     for(int i=0;i<int(m.tileCount);++i)sizes<<widths[i/64]/8;
     // Validate the complete source binding without retaining gigabytes of
     // discarded images. Use the exact persisted ordered pixel-hash stream.
@@ -123,12 +137,18 @@ STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     QString limitError;
     if(!terrainAtlasPageLimit(layout.size(),&limitError))return fail(limitError);
     for(int page=0;page<layout.size();++page)for(int i=0;i<64;++i)if(layout[page][i])p.remap[layout[page][i]-1]=page*64+i;
-    p.retainedSlots=keep.size();bool identity=layout.size()==pages.size();
-    for(auto it=p.remap.cbegin();it!=p.remap.cend();++it)identity&=it.key()==it.value();
+    p.retainedSlots=keep.size();
+    qint64 packedRgba=0;
+    for(const auto& page:layout)for(int value:page)if(value){
+        const qint64 width=qint64(sizes[value-1])*8;packedRgba+=width*width*4;break;}
     const int maximumTileSize=groups.lastKey();
-    identity&=int(m.textureSize)==maximumTileSize*8&&int(m.tileSize)==maximumTileSize;
-    // Sparse tails already form a normal page; avoid namespace/padding churn.
-    if(identity&&terrainAtlasHasHash(m.innerNamespace)&&!forcePublication){p.noOp=true;p.mprBytes=source.originalBytes();p.profile=input;p.pages=pages;p.newDxt=p.oldDxt;p.newRgba=p.oldRgba;return p;}
+    // Moving animation ranges or normalizing legacy SD size hints is not a
+    // saving. Avoid publishing a duplicate atlas unless pages or native pixel
+    // storage actually decrease. Forced save publication still proceeds.
+    if(!forcePublication&&layout.size()>=pages.size()&&packedRgba>=p.oldRgba){
+        p.noOp=true;p.mprBytes=source.originalBytes();p.profile=input;p.pages=pages;
+        p.remap.clear();for(int slot:keep)p.remap[slot]=slot;
+        p.newDxt=p.oldDxt;p.newRgba=p.oldRgba;return p;}
     QCryptographicHash content(QCryptographicHash::Sha256);content.addData("atlas-compact-209\n");content.addData(mpr.fileName().toCaseFolded().toUtf8());
     content.addData(input.toBytes());content.addData(hash(semanticBytes));
     content.addData(hash(source.memberPayload(m.memberName)));
@@ -204,8 +224,15 @@ STerrainAtlasCompactPlan prepareTerrainAtlasCompact(const CMprDocument& source,
     if(!source.applyIsolatedNamespaceTransaction(tx,ns,&p.mprBytes,&report))return fail(report.toText());
     CMprDocument reopened;if(!reopened.loadBytes(p.mprBytes,mpr.fileName(),&report))return fail(report.toText());
     if(!semanticBytes.isEmpty()){STerrainSemanticFieldDocument semantic;
-        if(!STerrainSemanticFieldDocument::fromBytes(semanticBytes,&semantic,&report)
-           ||!semantic.validateBinding(m.innerNamespace,QByteArray::fromHex(hash(source.originalBytes())),QByteArray::fromHex(input.atlasPixelSha256),QByteArray::fromHex(hash(input.toBytes())),int(m.sectorCountX)*16+1,int(m.sectorCountY)*16+1,&report,STerrainSemanticFieldDocument::tileBindingSha256(source)))return fail(report.toText());
+        if(!STerrainSemanticFieldDocument::fromBytes(semanticBytes,&semantic,&report))return fail(report.toText());
+        QByteArray profileHash=QByteArray::fromHex(hash(input.toBytes()));
+        // Earlier serialized profiles may hash differently after the ordinary
+        // load-time migration. Accept their exact original binding only after
+        // proving that their decoded meaning is the current input profile.
+        if(p.sourceProfilePresent&&semantic.profileSha256!=profileHash
+           &&terrainCompactProfileMatchesPublished(input,p.sourceProfileBytes))
+            profileHash=QByteArray::fromHex(hash(p.sourceProfileBytes));
+        if(!semantic.validateBinding(m.innerNamespace,QByteArray::fromHex(hash(source.originalBytes())),QByteArray::fromHex(input.atlasPixelSha256),profileHash,int(m.sectorCountX)*16+1,int(m.sectorCountY)*16+1,&report,STerrainSemanticFieldDocument::tileBindingSha256(source)))return fail(report.toText());
         semantic.schemaVersion=2;semantic.mprNamespace=ns;semantic.mprSha256=QByteArray::fromHex(hash(p.mprBytes));
         semantic.terrainTilesSha256=STerrainSemanticFieldDocument::tileBindingSha256(reopened);
         semantic.atlasPixelSha256=QByteArray::fromHex(profile.atlasPixelSha256);semantic.profileSha256=QByteArray::fromHex(hash(profile.toBytes()));
@@ -283,14 +310,20 @@ STerrainAtlasCompactCommit commitTerrainAtlasCompact(const CMprDocument& source,
     result.archiveBefore=QFileInfo(archivePath).size();
     if(read(mapPath)!=source.originalBytes()||!archive.open(archivePath,&error)){
         result.error="Map changed or RES cannot be reopened: "+error;return result;}
-    // Exact source pages/profile are rechecked at the write boundary.
-    if(archive.readMember(CTerrainAtlasProfileStore::embeddedMemberName(oldProfile.mprNamespace))!=oldProfile.toBytes()){
+    // A clean original atlas may have no embedded editor profile. Preserve
+    // that observed absence as strictly as an existing member's exact bytes.
+    const int sourceProfile=archive.memberIndex(CTerrainAtlasProfileStore::embeddedMemberName(oldProfile.mprNamespace));
+    if(sourceProfile==-2||(sourceProfile>=0)!=plan.sourceProfilePresent
+       ||(sourceProfile>=0&&archive.readMember(sourceProfile,&error)!=plan.sourceProfileBytes)
+       ||!error.isEmpty()){
         result.error="Published source profile changed.";return result;}
-    // Every remapped pixel is validated against the current archive, so even a
-    // same-size external MMP replacement cannot be published from stale inputs.
-    for(auto it=plan.remap.cbegin();it!=plan.remap.cend();++it){QImage image;QString e;
-        if(!ei::decodeMmpDxt1AtlasTile(archive.readMember(pageName(oldProfile.mprNamespace,it.key()/64)),it.key()%64,&image,&e)
-           ||image!=plan.images[it.value()]){result.error="Source atlas pixels changed: "+e;return result;}}
+    // Check each complete encoded page once. Base-pixel checks alone miss an
+    // external mip change or truncation and repeatedly decode the same page.
+    if(plan.sourcePageSha256.size()!=int(source.mapInfo().textureCount)){
+        result.error="Missing source atlas page snapshot.";return result;}
+    for(int page=0;page<plan.sourcePageSha256.size();++page)
+        if(archive.memberSha256(pageName(oldProfile.mprNamespace,page),&error)!=plan.sourcePageSha256[page]){
+            result.error="Source atlas page changed: "+error;return result;}
     QMap<QString,QByteArray> snapshots;QString reason;
     const auto retired=terrainCompactRetiredMembers(archive,oldProfile,mapPath,dirs,&snapshots,&reason);result.cleanup=reason;
     CMprDocument candidate;CValidationReport report;

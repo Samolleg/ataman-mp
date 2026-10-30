@@ -31,7 +31,10 @@ void CView::compactTerrainAtlasRequested()
     QMap<QString,QByteArray> payloads;QString error;
     if(!CTerrainAtlasArchiveBindingResolver::readArchiveMembers(archivePath,names,&payloads,nullptr,&error)){
         warn(error);return;}
-    if(payloads.value(CTerrainAtlasProfileStore::embeddedMemberName(ns))!=profile.toBytes()){
+    const QString profileMember=CTerrainAtlasProfileStore::embeddedMemberName(ns);
+    const QByteArray publishedProfileBytes=payloads.value(profileMember);
+    if(payloads.contains(profileMember)
+       &&!terrainCompactProfileMatchesPublished(profile,publishedProfileBytes)){
         warn(tr("Профиль атласа отличается от опубликованного. Сначала сохраните карту."));return;}
     QVector<QByteArray> pages;for(int i=0;i<int(source.mapInfo().textureCount);++i)pages<<payloads.value(names[i]);
     QByteArray semantic=source.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
@@ -45,7 +48,7 @@ void CView::compactTerrainAtlasRequested()
         QFutureWatcher<STerrainAtlasCompactPlan> watcher;QEventLoop loop;
         connect(&watcher,&QFutureWatcherBase::finished,&loop,&QEventLoop::quit);
         watcher.setFuture(QtConcurrent::run([&](){
-            auto prepared=prepareTerrainAtlasCompact(source,profile,pages,semantic,map,&cancelled);
+            auto prepared=prepareTerrainAtlasCompact(source,profile,pages,semantic,map,&cancelled,false,nullptr,&publishedProfileBytes);
             if(prepared.error.isEmpty()&&!prepared.noOp&&!cancelled.load())
                 estimateTerrainCompactPublication(&prepared,profile,map.absoluteFilePath(),archivePath,dirs);
             return prepared;
