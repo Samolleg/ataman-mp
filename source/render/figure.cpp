@@ -3,6 +3,9 @@
 #include "figure.h"
 #include "../core/map_object_placement_policy.h"
 #include "figure_vertex_component.h"
+#include <cmath>
+#include <limits>
+#include <new>
 
 void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data,
                      QVector3D& constitute);
@@ -32,7 +35,7 @@ ei::CFigure::~CFigure()
 
 static bool readSignature(QDataStream& st)
 {
-    uint sign;
+    uint sign = 0;
     st >> sign;
     return sign == 0x38474946;
 }
@@ -167,8 +170,12 @@ void convertUVCoords(QVector<F2>& coordsUV, int convertCount)
 void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVector3D>& aMorphVertex,
                                     QVector<int>* sourceVertexIndices)
 {
+    if(!m_completeCaptureGeometry)
+        return;
     for(auto& ind: m_aInd)
     {
+        if(ind >= m_aVertComp.size())
+            return;
         const US3& component = m_aVertComp[ind];
         SVertexData decoded;
         if(!ei::decodeFigureVertexComponent(
@@ -189,6 +196,15 @@ void ei::CFigure::generateTriangles(QVector<SVertexData>& aVrtData, QVector<QVec
 //load morphing_vertices, indices, normals, texture coordinates
 bool ei::CFigure::readData(QDataStream& stream)
 {
+    m_completeCaptureGeometry = false;
+    m_aMorphVertex.clear();
+    m_aNormal.clear();
+    m_aUvCoord.clear();
+    m_aInd.clear();
+    m_aVertComp.clear();
+    m_morphCenter.clear();
+    m_morphMin.clear();
+    m_morphMax.clear();
     //check signature
     if(!readSignature(stream)){   // 0x38474946 == FIG8
         //todo: process FIG1 signature
@@ -197,38 +213,80 @@ bool ei::CFigure::readData(QDataStream& stream)
 
     ei::SHeader header;
     header.read(stream);
+    if(stream.status() != QDataStream::Ok || !stream.device())
+        return false;
+    // Bound allocation/iteration by the actual body before blockCount*4 or
+    // QVector allocation. The unprojected morph tail must also be present.
+    for(int count : {header.vertBlocks, header.normalBlocks, header.uvCount,
+                     header.indexCount, header.vertexComponentCount,
+                     header.morphingComponentCount})
+        if(count < 0)
+            return false;
+    if(header.vertBlocks > std::numeric_limits<int>::max()/4
+       || header.normalBlocks > std::numeric_limits<int>::max()/4
+       || header.indexCount % 3 != 0)
+        return false;
+    const qint64 bodyBytes = 320 + qint64(header.vertBlocks)*384
+        + qint64(header.normalBlocks)*64 + qint64(header.uvCount)*8
+        + qint64(header.indexCount)*2 + qint64(header.vertexComponentCount)*6
+        + qint64(header.morphingComponentCount)*4;
+    if(bodyBytes > stream.device()->bytesAvailable())
+        return false;
     m_textureNumber = header.textureNumber;
 
-    //read center
-    //QVector<F3> bboxCentr;
-    read24(stream, m_morphCenter);
-    //read min
-    read24(stream, m_morphMin);
-    //read max
-    read24(stream, m_morphMax);
-    //read radius
-    QVector<float> radius;
-    read8(stream, radius);
+    try {
+        //read center
+        //QVector<F3> bboxCentr;
+        read24(stream, m_morphCenter);
+        //read min
+        read24(stream, m_morphMin);
+        //read max
+        read24(stream, m_morphMax);
+        //read radius
+        QVector<float> radius;
+        read8(stream, radius);
 
-    readVertices(stream, m_aMorphVertex, header.vertBlocks);
-    readNormals(stream, m_aNormal, header.normalBlocks);
-    readTextureCoords(stream, m_aUvCoord, header.uvCount);
-    //QVector<ushort> aInd;
-    readIndices(stream, m_aInd, header.indexCount);
-    //QVector<US3> aVertComp;
-    readVertexComponents(stream, m_aVertComp, header.vertexComponentCount);
+        readVertices(stream, m_aMorphVertex, header.vertBlocks);
+        readNormals(stream, m_aNormal, header.normalBlocks);
+        readTextureCoords(stream, m_aUvCoord, header.uvCount);
+        //QVector<ushort> aInd;
+        readIndices(stream, m_aInd, header.indexCount);
+        //QVector<US3> aVertComp;
+        readVertexComponents(stream, m_aVertComp, header.vertexComponentCount);
 
-    // A native assembly can have an empty transform-only root. Its children
-    // still carry the drawable geometry; zero indices are not a missing mesh.
-    m_completeCaptureGeometry=stream.status()==QDataStream::Ok && m_aInd.size()%3==0
-        && (m_aInd.isEmpty() || (!m_aMorphVertex.isEmpty()&&!m_aMorphVertex[0].isEmpty()));
-    for(auto index:m_aInd) {
-        if(index>=m_aVertComp.size()||m_aMorphVertex.isEmpty()){m_completeCaptureGeometry=false;break;}
-        SVertexData vertex;
-        if(!ei::decodeFigureVertexComponent(m_aVertComp[index],m_aMorphVertex[0],m_aNormal,m_aUvCoord,&vertex))m_completeCaptureGeometry=false;
+        // A native assembly can have an empty transform-only root. Its children
+        // still carry the drawable geometry; zero indices are not a missing mesh.
+        m_completeCaptureGeometry=stream.status()==QDataStream::Ok && m_aInd.size()%3==0
+            && (m_aInd.isEmpty() || (!m_aMorphVertex.isEmpty()&&!m_aMorphVertex[0].isEmpty()));
+        const auto finite3=[](const QVector3D& v) {
+            return std::isfinite(v.x()) && std::isfinite(v.y()) && std::isfinite(v.z());
+        };
+        for(const auto* bounds : {&m_morphCenter, &m_morphMin, &m_morphMax})
+            for(const auto& v : *bounds)
+                if(!finite3(v)) m_completeCaptureGeometry=false;
+        for(float value : radius)
+            if(!std::isfinite(value)) m_completeCaptureGeometry=false;
+        for(const auto& morph : m_aMorphVertex)
+            for(const auto& v : morph)
+                if(!finite3(v)) m_completeCaptureGeometry=false;
+        for(const auto& v : m_aNormal)
+            if(!std::isfinite(v.x()) || !std::isfinite(v.y())
+               || !std::isfinite(v.z()) || !std::isfinite(v.w()))
+                m_completeCaptureGeometry=false;
+        for(const auto& v : m_aUvCoord)
+            if(!std::isfinite(v.x()) || !std::isfinite(v.y()))
+                m_completeCaptureGeometry=false;
+        for(auto index:m_aInd) {
+            if(index>=m_aVertComp.size()||m_aMorphVertex.isEmpty()){m_completeCaptureGeometry=false;break;}
+            SVertexData vertex;
+            if(!ei::decodeFigureVertexComponent(m_aVertComp[index],m_aMorphVertex[0],m_aNormal,m_aUvCoord,&vertex))m_completeCaptureGeometry=false;
+        }
+
+        return m_completeCaptureGeometry;
+    } catch(const std::bad_alloc&) {
+        m_completeCaptureGeometry=false;
+        return false;
     }
-
-    return true;
 }
 
 // gets assembly offset from bon-file
@@ -296,6 +354,8 @@ void calcComplection(QVector3D& complexPoint, QVector<QVector3D>& data, QVector3
 void ei::CFigure::calculateConstitution(QVector<SVertexData>& aVrtData, QVector3D& constitute,
                                         QVector<int>* sourceVertexIndices)
 { //x == str, y == dex, z == scale
+    if(!m_completeCaptureGeometry)
+        return;
     QVector3D res0;
     QVector3D res1;
     QVector3D res2;

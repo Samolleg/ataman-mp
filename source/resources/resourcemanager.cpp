@@ -520,7 +520,12 @@ void CObjectList::readFigure(const QByteArray& file, const QString& name)
     QDataStream stream(file);
     util::formatStream(stream);
     ei::CFigure* fig = new ei::CFigure;
-    fig->readData(stream);
+    if(!fig->readData(stream))
+    {
+        ei::log(eLogWarning, "Invalid FIG resource: " + name);
+        delete fig;
+        return;
+    }
     fig->setName(name);
     m_aFigure.insert(name, fig);
     //addItem(name);
