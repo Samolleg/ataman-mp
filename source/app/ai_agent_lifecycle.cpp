@@ -279,7 +279,7 @@ QJsonObject CAiEditAdapter::applyLifecycle(MainWindow* w,const ai::EditPlan& p) 
             const bool removed=digest(p.destination)==QCryptographicHash::hash(p.mobBytes,QCryptographicHash::Sha256)&&QFile::remove(p.destination);
             return ai::error((removed?QString("MOB/layout transaction rolled back: "):QString("MOB/layout rollback incomplete; inspect ")+p.destination+": ")+error);
         }
-        auto* c=new CAiLifecycleCommand(w);c->setText("ИИ: создать основной MOB");c->mobPath=p.destination;c->changes=p.layoutChanges;c->layoutPath=p.worldDocument.path();c->profile=p.profileId;w->m_undoStack->push(c);
+        auto* c=new CAiLifecycleCommand(w);c->setText(QCoreApplication::translate("AtamanAgent", "Agent: create primary MOB"));c->mobPath=p.destination;c->changes=p.layoutChanges;c->layoutPath=p.worldDocument.path();c->profile=p.profileId;w->m_undoStack->push(c);
         if(!p.layoutChanges.isEmpty())w->refreshEditorWorld();
         w->refreshMapTestContext(false,false);return {{"status","applied"},{"path",p.destination},{"revision",revision(w)}};
     }
@@ -287,6 +287,6 @@ QJsonObject CAiEditAdapter::applyLifecycle(MainWindow* w,const ai::EditPlan& p) 
     if(w->m_worldMapLayoutDocument.path()!=p.worldDocument.path())return ai::error("World profile changed; retry");
     // Commit through the same compare/backup/atomic-write contract as manual placement.
     if(!w->m_worldMapLayoutDocument.applyChanges(p.layoutChanges,true,&error))return ai::error(error);
-    auto* c=new CAiLifecycleCommand(w);c->setText("ИИ: положение карты в мире");c->changes=p.layoutChanges;c->layoutPath=p.worldDocument.path();c->profile=p.profileId;w->m_undoStack->push(c);
+    auto* c=new CAiLifecycleCommand(w);c->setText(QCoreApplication::translate("AtamanAgent", "Agent: map position in world"));c->changes=p.layoutChanges;c->layoutPath=p.worldDocument.path();c->profile=p.profileId;w->m_undoStack->push(c);
     w->refreshEditorWorld();auto result=p.summary;result["status"]="applied";result["revision"]=revision(w);return result;
 }

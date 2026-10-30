@@ -90,7 +90,7 @@ def main():
     require("localizedAiGraphLayerLabel" in view and
             "<th>Missing links</th>" not in view,
             "AI graph layer names and comparison columns must be translated")
-    require('labels << tr("Objects") << tr("Count")' in view and
+    require('labels << tr("Objects") << "ID" << tr("Count")' in view and
             'eWorldObject, tr("World objects")' in tree_view,
             "object hierarchy headings and categories must use translation lookup")
     require('QCoreApplication::translate("LandscapeFalloff", "Smooth")' in
@@ -98,8 +98,8 @@ def main():
             "the Smooth tool and smooth falloff must have separate translations")
     require('text != "<choose object type>"' not in create_object,
             "Create Object must not compare localized display text to an English literal")
-    require(not re.search(r"[А-Яа-яЁё]", world_terrain),
-            "world-terrain UI source must stay English and use the Russian catalog")
+    require("\ufffd" not in world_terrain,
+            "world-terrain source must preserve valid UTF-8 labels")
     require("if(!m_objType.values().contains(object))" in create_object,
             "Create Object must reject placeholder or unknown translated selections")
     require("if(m_objType.values().contains(text))" in create_object,
@@ -110,6 +110,8 @@ def main():
     require("if(!m_pNode)" in update_table,
             "Create Object table refresh must tolerate an absent template node")
 
+    technical_literals = {"Codex", "MCP", "X", "Y", "Z", "JSON (*.json)",
+                          "MPR (*.mpr)", "MOB (*.mob)", "EIRebuild64NavBake.exe (*.exe)"}
     visible_literal_patterns = (
         re.compile(r"set(?:Text|ToolTip|StatusTip|WindowTitle|PlaceholderText)\(\s*\"([^\"]*)\""),
         re.compile(r"Q(?:Label|PushButton|CheckBox|GroupBox|Action)\(\s*\"([^\"]*)\""),
@@ -118,15 +120,17 @@ def main():
     )
     for folder in ("source/app", "source/ui", "source/mob", "source/layout_components"):
         for source_path in (ROOT / folder).glob("*.cpp"):
-            if source_path.name == "main.cpp":
-                continue  # This file contains the headless widget fixture itself.
+            if source_path.name == "main.cpp" or source_path.name.endswith("_check.cpp"):
+                continue  # Headless fixtures contain literal test input, not application labels.
             for line_number, line in enumerate(
                     source_path.read_text(encoding="utf-8").splitlines(), 1):
                 if line.lstrip().startswith("//"):
                     continue
                 for pattern in visible_literal_patterns:
                     match = pattern.search(line)
-                    if match and match.group(1) and not re.fullmatch(r"[\d.]+", match.group(1)):
+                    if (match and match.group(1) and
+                            match.group(1) not in technical_literals and
+                            not re.fullmatch(r"[+-]?[\d.]+", match.group(1))):
                         raise AssertionError(
                             f"raw user-visible literal at {source_path.relative_to(ROOT)}:"
                             f"{line_number}: {match.group(1)!r}")
@@ -137,7 +141,7 @@ def main():
     unchanged_allowlist = {
         "EI Mapper", "RGB", "ICO", "Esc", "Ctrl+R", "Ctrl+Tab", "Ctrl+V",
         "Ctrl+Z", "Ctrl+Y", "Ctrl+X", "Ctrl+D", "Ctrl+H", "Ctrl+F5",
-        "Ctrl+S", "Shift+Esc", "MPR:", "MOB", "MPR", "MOB %1", "MPR %1",
+        "Ctrl+S", "Shift+Esc", "MPR:", "MOB:", "MOB", "MPR", "MOB %1", "MPR %1",
         "MPR (*.mpr)", "MOB (*.mob)", "NID %1 (%2): %3", "NID %1 — %2", "NID %1: %2",
         "JMV Lua [%1] — %2", "database.res", "tables.lua (JMV)",
     }

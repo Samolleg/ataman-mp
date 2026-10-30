@@ -17420,4 +17420,9 @@ Line: %4</source><translation>Вызов:
 Источник: %3
 Строка: %4</translation></message>
 </context>
+<context>
+<name>AtamanAgent</name>
+<message><source>Agent: create primary MOB</source><translation>ИИ: создать основной MOB</translation></message>
+<message><source>Agent: map position in world</source><translation>ИИ: положение карты в мире</translation></message>
+</context>
 </TS>
