@@ -203,7 +203,8 @@ bool CTopdownExport::resolveObject() {
     if(!addResources(modelSources))return false;QJsonArray partNames;
     for(auto item:items) {
         auto* textures=CTextureList::getInstance();const auto sources=textures->textureSources(item.texture);
-        if(!renderTextureReady(item.texture)||sources.isEmpty())return bad("MISSING_RESOURCES","Texture missing/unsupported or provider unknown for "+model+" / "+item.part->name());
+        if(!renderTextureReady(item.texture))return bad("MISSING_RESOURCES","Texture missing/unsupported for "+model+" / "+item.part->name());
+        if(sources.isEmpty())return bad("MISSING_RESOURCES","Texture resource identity unavailable for "+model+" / "+item.part->name());
         if(!addResources(sources))return false;
         for(const auto& vertex:item.part->vertData()) {
             for(float coordinate:{vertex.position.x(),vertex.position.y(),vertex.position.z(),vertex.normal.x(),vertex.normal.y(),vertex.normal.z(),vertex.texCoord.x(),vertex.texCoord.y()})

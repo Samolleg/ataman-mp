@@ -18,9 +18,13 @@ void prepareNeighborVisuals(SNeighborSceneData& scene, const QStringList& archiv
     }
     CResFile auxiliary(QStringLiteral(":/auxData.res"));
     const auto aux=auxiliary.bufferOfFiles();
-    const auto read=[&](const QString& name) {
+    const auto read=[&](const QString& name,QString* provider) {
+        if(provider)provider->clear();
         for(const auto& index : sources)
-            if(index.memberIndex(name)>=0) return index.readMember(name);
+            if(index.memberIndex(name)>=0) {
+                if(provider)*provider=index.path();
+                return index.readMember(name);
+            }
         return aux.value(name);
     };
     QHash<QString,QVector<SPreparedStaticPart>> geometry;
@@ -54,8 +58,8 @@ void prepareNeighborVisuals(SNeighborSceneData& scene, const QStringList& archiv
             {
                 QStringList names; for(const auto& p:parts) names.append(p.toString());
                 QMap<QString,QByteArray> files;
-                files.insert(model+".mod",read(model+".mod"));
-                files.insert(model+".bon",read(model+".bon"));
+                files.insert(model+".mod",read(model+".mod",nullptr));
+                files.insert(model+".bon",read(model+".bon",nullptr));
                 QVector3D complexion(1,1,1);
                 if(constitution.size()==3) complexion=QVector3D(float(constitution[0].toDouble()),float(constitution[1].toDouble()),float(constitution[2].toDouble()));
                 auto prepared=CObjectList::prepareStaticAssembly(files,model,complexion,names);
@@ -71,10 +75,14 @@ void prepareNeighborVisuals(SNeighborSceneData& scene, const QStringList& archiv
                 SPreparedStaticTexture prepared;
                 for(const auto& candidate:ei::textureResourceCandidates(texture,model))
                 {
-                    const auto bytes=read(candidate);
+                    QString provider;
+                    const auto bytes=read(candidate,&provider);
                     if(bytes.isEmpty()) continue;
                     prepared=CTextureList::prepareStaticTexture(bytes);
-                    if(prepared.valid()) break;
+                    if(prepared.valid()) {
+                        if(!provider.isEmpty())prepared.sources=QJsonArray{exportResourceIdentity(candidate,provider,bytes)};
+                        break;
+                    }
                 }
                 if(!prepared.valid()) scene.diagnostics.append("Neighbor texture unavailable: "+texture+" model:"+model);
                 textures.insert(textureKey,prepared);

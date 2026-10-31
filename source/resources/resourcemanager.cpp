@@ -38,7 +38,6 @@ CObjectList* CObjectList::m_pObjectContainer = nullptr;
 CTextureList* CTextureList::m_pTextureContainer = nullptr;
 CSessionDataManager* CSessionDataManager::m_pSessionDataManger = nullptr;
 
-namespace {
 QJsonObject exportResourceIdentity(const QString& member, const QString& source, const QByteArray& bytes)
 {
     const QFileInfo f(source);
@@ -47,6 +46,7 @@ QJsonObject exportResourceIdentity(const QString& member, const QString& source,
         {"bytes",bytes.size()},{"sha256",QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())}};
 }
 
+namespace {
 QMutex s_compositePreparationMutex;
 QHash<QString, int> s_compositePreparationStates;
 QHash<QString, QImage> s_preparedCompositeImages;
@@ -1176,6 +1176,7 @@ QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& 
     }
     m_aTexture.insert(key,texture);
     m_textureMaterialClasses.insert(texture,data.material);
+    m_textureSources.insert(texture,data.sources);
     return texture;
 }
 
@@ -1222,8 +1223,13 @@ void CTextureList::loadTexture(QSet<QString>& aName)
         if(m_aTexture.contains(normalized) || m_missingTextureNames.contains(normalized))
             continue;
         QByteArray textureData;
-        if(readIndexedResource(sources, normalized + ".mmp", textureData))
+        QString sourcePath;
+        if(readIndexedResource(sources, normalized + ".mmp", textureData, &sourcePath))
+        {
             parse(textureData, normalized);
+            if(m_aTexture.contains(normalized))
+                m_textureSources[m_aTexture.value(normalized)]=QJsonArray{exportResourceIdentity(normalized + ".mmp",sourcePath,textureData)};
+        }
         if(!m_aTexture.contains(normalized))
         {
             m_missingTextureNames.insert(normalized);

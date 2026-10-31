@@ -22,6 +22,8 @@ class CSettings;
 // invalidated when the active profile or any contributing archive changes.
 QString configuredResourceFingerprint(CSettings* settings);
 QStringList configuredResourceSourcePaths(CSettings* settings);
+// Pure value metadata for the exact decoded bytes; safe in resource workers.
+QJsonObject exportResourceIdentity(const QString& member, const QString& source, const QByteArray& bytes);
 
 ///
 /// \brief The CObjectList class stores information about the currently read 3D figures from the game resources.

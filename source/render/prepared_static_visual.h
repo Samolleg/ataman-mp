@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QSharedPointer>
 #include <QMap>
+#include <QJsonArray>
 
 // Worker-owned values only. No GL handles, nodes or shared resource caches.
 struct SPreparedStaticPart
@@ -16,6 +17,9 @@ struct SPreparedStaticPart
 };
 struct SPreparedStaticTexture
 {
+    // Identity of the bytes decoded by the worker, retained through GPU upload.
+    // An auxiliary/fallback texture has no external resource identity.
+    QJsonArray sources;
     QByteArray compressed;
     QVector<int> mipSizes;
     QImage image;
