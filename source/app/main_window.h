@@ -112,7 +112,8 @@ public:
     ~MainWindow();
     bool shutdownPending() const { return m_closeWaiting || m_closeReady; }
     bool openDocument(const QFileInfo& fileName);
-    bool replaceLoadedLandscape(const QFileInfo& fileName, bool attachMob = true);
+    // Opening an MPR is terrain-only unless a caller explicitly requests its MOB.
+    bool replaceLoadedLandscape(const QFileInfo& fileName, bool attachMob = false);
     bool loadMobWithProgress(QFileInfo fileName, bool bindMap = true);
     bool loadLandscapeWithProgress(const QFileInfo& fileName);
     void configureAutosaveTimer();

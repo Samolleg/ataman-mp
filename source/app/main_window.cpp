@@ -5894,8 +5894,11 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest(bool allocati
     }
     request.mapRoots = activeMapRoots().toList();
     request.explicitComposition = !m_currentCollectionPath.isEmpty();
-    if(!request.explicitComposition && !m_mapTestEntry.mobPath.isEmpty())
-        request.mappedPrimaryMobPath = m_mapTestEntry.mobPath;
+    // Editor validation follows opened documents and their outgoing AddMob
+    // references. Catalog ownership and profile autorun are not open requests.
+    request.includeProfileWideMobs = false;
+    const QString mappedPrimaryKey = m_mapTestEntry.mobPath.isEmpty() ? QString()
+        : CProcessEditLock::identity(m_mapTestEntry.mobPath);
     request.familyLabel = !m_mapTestEntry.zoneId.isEmpty()
         ? m_mapTestEntry.zoneId
         : (!m_currentCollectionPath.isEmpty()
@@ -5911,6 +5914,9 @@ SMobFamilyValidationRequest MainWindow::mobFamilyValidationRequest(bool allocati
             continue;
         const QString path = mob->filePath().absoluteFilePath();
         request.seedMobPaths.append(path);
+        if(!request.explicitComposition && !mappedPrimaryKey.isEmpty()
+           && CProcessEditLock::identity(path) == mappedPrimaryKey)
+            request.mappedPrimaryMobPath = path;
         const QString workspaceRoot = QFileInfo(path).absolutePath();
         if(!request.workspaceRoots.contains(workspaceRoot, Qt::CaseInsensitive))
             request.workspaceRoots.prepend(workspaceRoot);
@@ -7304,8 +7310,8 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
         statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
         return;
     }
-    const QString mobPath=requestedMobPath.isEmpty() && bindMap
-        ? resolvedMobPathForMpr(QFileInfo(mprPath)) : requestedMobPath;
+    // An empty MOB selection means terrain-only, including world navigation.
+    const QString mobPath=requestedMobPath;
     const bool terrainOnly = mobPath.isEmpty();
     QFileInfo targetMpr(mprPath);
     QFileInfo targetMob(mobPath);
