@@ -4956,7 +4956,8 @@ void CView::showEvent(QShowEvent* event)
 
 void CView::updateWindow()
 {
-    if(!m_applicationShutdown && isVisible() && !window()->isMinimized())updateGL();
+    if(!m_applicationShutdown && !m_unitVisualPreparationSuspended
+       && isVisible() && !window()->isMinimized())updateGL();
 }
 
 void CView::rebuildSpatialIndices()
@@ -6286,7 +6287,12 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
 
 void CView::paintGL()
 {
-    if(m_applicationShutdown || !isVisible() || window()->isMinimized())return;
+    // Progress bars pump events between MOB records and AddMob documents.
+    // Painting those intermediate scenes repeatedly rebuilds spatial/support
+    // data and starts deferred terrain work on the foreground loader's stack.
+    // Keep pumping UI events; present the completed workspace in the next frame.
+    if(m_applicationShutdown || m_unitVisualPreparationSuspended
+       || !isVisible() || window()->isMinimized())return;
     CStartupFrameReceipt startupFrame;
     makeCurrent();
     SFramePresentationTelemetry frameTelemetry;
