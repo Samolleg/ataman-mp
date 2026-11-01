@@ -86,8 +86,17 @@ layers, real tree ID29, ordinary editor capture, resource provenance and genuine
 missing-resource refusal passed. All11 PNG files are byte-identical to266:
 `work/staged-load-267-20261101/export-comparison.json`. Total **148 native checks**.
 
-Guarded installation receipts will be recorded after packaging. Until then this
-entry describes a tested implementation, not an installed release.
+Source commit on main: `0570ff2e1d190c87500dbe4ea13b40577aa7be79`.
+All536 source files matched the build snapshot. Raw/staged executable and both
+runtime component hashes matched; raw/staged `--version` reported267.
+`build-staging-267-staged-load` passed finalization with186 managed files,
+no removed paths. Package manifest SHA256:
+`58946CCB50D8587D8E6CD58FF0B47E468B5BB7D4CEFECFBD3ED00D9423D424A3`.
+
+First installation attempt stopped at `Assert-EditorClosed`: the owner editor
+was running. No process was stopped and no program file was replaced;266 remains
+installed. `installation-blocked.json` records this guard. The owner was asked to
+close the editor; guarded installation resumes after that condition is met.
 
 ## Input guards
 
