@@ -187,6 +187,7 @@ bool CTopdownExport::resolveObject() {
     m_view->makeCurrent();
     auto items=object->staticRenderItems();
     if(items.isEmpty()){node->loadFigure();node->loadTexture();items=object->staticRenderItems();}
+    if(object->renderedFigure()!=figure)return bad("REVISION_CONFLICT","Loaded geometry belongs to a different resource generation: "+model);
     if(items.isEmpty())return bad("UNSUPPORTED_GEOMETRY","No drawable mesh parts for placed object: "+model);
     const auto addResources=[&](const QJsonArray& resources)->bool {
         for(const auto& value:resources){const auto r=value.toObject();const QString key=r["provider"].toString()+"|"+r["member"].toString()+"|"+r["sha256"].toString();

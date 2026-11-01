@@ -474,21 +474,31 @@ CObjectList::CObjectList(bool loadAuxiliary):
         if (file.first.toLower().endsWith(".mod"))
             readAssembly(aFile, file.first);
     }
+    m_auxiliaryFigures=QSet<QString>::fromList(m_aFigure.keys());
     ei::log(eLogInfo, "aux objects loaded");
 }
 
-CObjectList::~CObjectList()
+CObjectList::~CObjectList() = default;
+
+void CObjectList::cacheFigure(const QString& name,ei::CFigure* figure)
 {
-    QSet<ei::CFigure*> owned;
-    QList<ei::CFigure*> pending = m_aFigure.values();
-    while(!pending.isEmpty())
-    {
-        auto* figure = pending.takeLast();
-        if(!figure || owned.contains(figure)) continue;
-        owned.insert(figure);
-        pending.append(figure->children());
-    }
-    qDeleteAll(owned);
+    QSharedPointer<ei::CFigure> owned(figure,[](ei::CFigure* root){
+        QSet<ei::CFigure*> figures;
+        QList<ei::CFigure*> pending{root};
+        while(!pending.isEmpty()) {
+            auto* item=pending.takeLast();
+            if(!item || figures.contains(item))continue;
+            figures.insert(item);pending.append(item->children());
+        }
+        qDeleteAll(figures);
+    });
+    m_figureOwners.insert(figure,owned.toWeakRef());
+    m_aFigure.insert(name,owned);
+}
+
+QSharedPointer<ei::CFigure> CObjectList::retainSceneFigure(ei::CFigure* figure) const
+{
+    return m_figureOwners.value(figure).toStrongRef();
 }
 
 QVector<SPreparedStaticPart> CObjectList::prepareStaticAssembly(
@@ -498,7 +508,7 @@ QVector<SPreparedStaticPart> CObjectList::prepareStaticAssembly(
     CObjectList local(false);
     const QString name = model.toLower() + ".mod";
     local.readAssembly(files, name);
-    auto* figure = local.m_aFigure.value(name, nullptr);
+    auto* figure = local.m_aFigure.value(name).data();
     if(!figure) return {};
     QVector<CPart*> cpuParts;
     figure->getVertexData(cpuParts, complexion, parts, false);
@@ -529,7 +539,7 @@ void CObjectList::readFigure(const QByteArray& file, const QString& name)
         return;
     }
     fig->setName(name);
-    m_aFigure.insert(name, fig);
+    cacheFigure(name, fig);
     //addItem(name);
 }
 
@@ -667,7 +677,7 @@ void CObjectList::readAssembly(const QMap<QString, QByteArray>& aFile, const QSt
         ei::log(eLogWarning, "Assembly has no usable root: " + normalizedRoot);
         return;
     }
-    m_aFigure.insert(normalizedRoot, rootFigure);
+    cacheFigure(normalizedRoot, rootFigure);
 
     //.bon file parse here
     QString bonFile(linkName);
@@ -757,7 +767,7 @@ ei::CFigure* CObjectList::getFigure(const QString& name)
         loadFigures(figure);
     }
 
-    return m_aFigure.contains(figureName) ? m_aFigure[figureName] : figureDefault();
+    return m_aFigure.contains(figureName) ? m_aFigure[figureName].data() : figureDefault();
 }
 
 ei::CFigure* CObjectList::getFigureResource(const QString& resourceName)
@@ -771,7 +781,7 @@ ei::CFigure* CObjectList::getFigureResource(const QString& resourceName)
         requested.insert(normalized);
         loadFigures(requested);
     }
-    return m_aFigure.value(normalized, nullptr);
+    return m_aFigure.value(normalized).data();
 }
 
 QStringList CObjectList::figurePartNames(const QString& name)
@@ -814,6 +824,12 @@ void CObjectList::initResource()
 
 void CObjectList::refreshConfiguredSources()
 {
+    ++m_sourceGeneration;
+    for(auto it=m_aFigure.begin();it!=m_aFigure.end();)
+        if(m_auxiliaryFigures.contains(it.key()))++it;else it=m_aFigure.erase(it);
+    for(auto it=m_figureOwners.begin();it!=m_figureOwners.end();)
+        if(it.value().isNull())it=m_figureOwners.erase(it);else ++it;
+    m_figureSources.clear();m_figureProblems.clear();
     ei::invalidateResourceSourceFingerprintCache();
     m_missingFigureNames.clear();
     m_animationArchives.clear();
@@ -825,7 +841,7 @@ void CObjectList::refreshConfiguredSources()
 ei::CFigure *CObjectList::figureDefault()
 {
     const QString fallbackName("cannotdisplay.mod");
-    ei::CFigure* fallback = m_aFigure.value(fallbackName, nullptr);
+    ei::CFigure* fallback = m_aFigure.value(fallbackName).data();
     if(!fallback)
         ei::log(eLogWarning, "Default placeholder figure is unavailable: " + fallbackName);
     return fallback;
@@ -1089,7 +1105,7 @@ void CTextureList::parse(QByteArray& data, const QString& name)
         delete texture;
         return;
     }
-    m_aTexture.insert(name.toLower(), texture);
+    cacheTexture(name.toLower(), texture);
     m_textureMaterialClasses.insert(texture, materialClass);
 }
 
@@ -1139,7 +1155,7 @@ QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& 
                                                 const QString& name,const QString& model)
 {
     const QString key=ei::textureCacheKey(name,model);
-    if(m_aTexture.contains(key)) return m_aTexture.value(key);
+    if(m_aTexture.contains(key)) return cachedTexture(key);
     if(!data.valid()) return textureDefault();
     if(!QOpenGLContext::currentContext())
         return textureDefault();
@@ -1174,7 +1190,7 @@ QOpenGLTexture* CTextureList::uploadStaticTexture(const SPreparedStaticTexture& 
         delete texture;
         return textureDefault();
     }
-    m_aTexture.insert(key,texture);
+    cacheTexture(key,texture);
     m_textureMaterialClasses.insert(texture,data.material);
     m_textureSources.insert(texture,data.sources);
     return texture;
@@ -1197,6 +1213,7 @@ void CTextureList::initAuxTexture()
         if(m_aTexture.contains(texName)) continue;
         parse(packedTex.second, texName);
     }
+    m_auxiliaryTextures=QSet<QString>::fromList(m_aTexture.keys());
     ei::log(eLogInfo, "aux texture loaded");
 }
 
@@ -1245,7 +1262,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
     if(m_aTexture.contains(cacheKey))
     {
         if(found)*found=true;
-        return m_aTexture.value(cacheKey);
+        return cachedTexture(cacheKey);
     }
     if(m_missingTextureNames.contains(cacheKey))
     {
@@ -1278,7 +1295,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
                         .arg(candidateIndex >= 3 ? "fallback" : "alias", name, modelName,
                              candidate, sourcePath));
             if(found)*found=true;
-            return m_aTexture.value(cacheKey);
+            return cachedTexture(cacheKey);
         }
     }
 
@@ -1299,7 +1316,7 @@ QOpenGLTexture* CTextureList::loadTextureResource(const QString& name, const QSt
                 ei::log(eLogInfo, QString("Resolved database unit texture %1 model:%2 -> %3 (database:%4 texture:%5)")
                         .arg(name, modelName, databaseCandidate, databaseSource, textureSource));
                 if(found)*found=true;
-                return m_aTexture.value(cacheKey);
+                return cachedTexture(cacheKey);
             }
         }
         ei::log(eLogWarning, QString("Database unit texture is missing: %1 model:%2 resolved:%3 database:%4")
@@ -1327,7 +1344,7 @@ QOpenGLTexture* CTextureList::texture(const QString& name)
         loadTexture(texture);
     }
 
-    return m_aTexture.contains(texName) ? m_aTexture[texName] : textureDefault();
+    return m_aTexture.contains(texName) ? cachedTexture(texName) : textureDefault();
 }
 
 QOpenGLTexture* CTextureList::texture(const QString& name, const QString& modelName)
@@ -1469,7 +1486,7 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
     if(m_aTexture.contains(cacheKey))
     {
         m_layeredTextureLru.touchExisting(cacheKey);
-        return m_aTexture.value(cacheKey);
+        return cachedTexture(cacheKey);
     }
     if(!QOpenGLContext::currentContext())
         return textureDefault();
@@ -1507,7 +1524,7 @@ QOpenGLTexture* CTextureList::layeredTexture(const QStringList& layerNames,
         delete texture;
         return textureDefault();
     }
-    m_aTexture.insert(cacheKey, texture);
+    cacheTexture(cacheKey, texture);
     m_layeredTextureLru.touch(cacheKey, qint64(composite.sizeInBytes()));
     m_textureMaterialClasses.insert(texture, classifyTextureAlpha(composite));
     // A completed composite is the durable checkpoint for interrupted
@@ -2241,19 +2258,15 @@ void CTextureList::setTerrainMipmappingEnabled(bool enabled)
 
 void CTextureList::refreshConfiguredSources(bool sceneObjectsRetainTextures)
 {
-    // Scene objects and queued draw items keep raw pointers to composed GPU
-    // atlases. A resource publication can happen while those objects are still
-    // loaded; deleting the atlases here leaves QOpenGLTexture::bind() with a
-    // dangling pointer on the next frame. Their source fingerprint is part of
-    // the cache key, so changed resources still create new compositions.
-    if(sceneObjectsRetainTextures)
-    {
-        m_textureImageLru.clear();
+    Q_UNUSED(sceneObjectsRetainTextures);
+    // Invalidate lookup identities immediately; scene leases retain the old
+    // generation until the last object or queued neighbor scene releases it.
+    for(auto it=m_aTexture.begin();it!=m_aTexture.end();) {
+        if(it.key()=="default" || m_auxiliaryTextures.contains(it.key()) || m_terrainTextures.contains(it.value())) {++it;continue;}
+        m_retiredTextures.insert(it.value());it=m_aTexture.erase(it);
     }
-    else
-    {
-        clearTransientVisualCache();
-    }
+    m_layeredTextureLru.clear();m_staticTextureLru.clear();m_textureImageLru.clear();
+    collectRetiredTextures();
     ei::invalidateResourceSourceFingerprintCache();
     m_missingTextureNames.clear();
     m_aTextureImages.clear();
@@ -2276,20 +2289,18 @@ bool CTextureList::layeredTextureRefreshLifetimeRegressionCheck()
         delete heldBySceneObject;
         return false;
     }
-    m_aTexture.insert(key, heldBySceneObject);
-    m_layeredTextureLru.touch(key, qint64(pixels.sizeInBytes()));
+    cacheTexture(key, heldBySceneObject);
+    auto lease=retainSceneTexture(heldBySceneObject);
     for(int publication = 0; publication < 3; ++publication)
     {
         refreshConfiguredSources(true);
-        // Inspect the cache before touching the scene object's pointer: the
-        // old implementation deleted it and a bind would reproduce the crash.
-        if(m_aTexture.value(key) != heldBySceneObject)
+        if(m_aTexture.contains(key) || !m_retiredTextures.contains(heldBySceneObject))
             return false;
         heldBySceneObject->bind(0);
         heldBySceneObject->release(0);
     }
-    refreshConfiguredSources(false);
-    return !m_aTexture.contains(key);
+    lease.clear();collectRetiredTextures();
+    return !m_retiredTextures.contains(heldBySceneObject);
 }
 
 QSharedPointer<QOpenGLTexture> CTextureList::retainSceneTexture(QOpenGLTexture* texture)
@@ -2302,61 +2313,59 @@ QSharedPointer<QOpenGLTexture> CTextureList::retainSceneTexture(QOpenGLTexture* 
     });
 }
 
-void CTextureList::trimTransientVisualCache()
+void CTextureList::cacheTexture(const QString& key,QOpenGLTexture* texture)
 {
-    const QStringList textureEvictions = m_layeredTextureLru.trim(kLayeredTextureSessionBudget);
-    for(const QString& key : textureEvictions)
-    {
-        if(m_sceneTextureUsers.contains(m_aTexture.value(key))) {
-            const auto* held=m_aTexture.value(key);
-            m_layeredTextureLru.touch(key,qint64(held->width())*held->height()*4*4/3);
-            continue;
-        }
-        QOpenGLTexture* texture = m_aTexture.take(key);
-        if(!texture)
-            continue;
-        m_textureMaterialClasses.remove(texture);
-        m_textureSources.remove(texture);
-        if(texture->isCreated())
-            texture->destroy();
+    auto* previous=m_aTexture.value(key);
+    if(previous && previous!=texture)m_retiredTextures.insert(previous);
+    m_aTexture.insert(key,texture);
+    auto& lru=key.startsWith("layers|")?m_layeredTextureLru:m_staticTextureLru;
+    lru.touch(key,qint64(texture->width())*texture->height()*4*4/3);
+}
+
+QOpenGLTexture* CTextureList::cachedTexture(const QString& key)
+{
+    m_staticTextureLru.touchExisting(key);m_layeredTextureLru.touchExisting(key);
+    return m_aTexture.value(key);
+}
+
+void CTextureList::collectRetiredTextures()
+{
+    if(!QOpenGLContext::currentContext())return;
+    for(auto it=m_retiredTextures.begin();it!=m_retiredTextures.end();) {
+        auto* texture=*it;
+        if(m_sceneTextureUsers.contains(texture)){++it;continue;}
+        it=m_retiredTextures.erase(it);
+        m_textureMaterialClasses.remove(texture);m_textureSources.remove(texture);
         delete texture;
     }
-    const QStringList imageEvictions = m_textureImageLru.trim(kTextureImageSessionBudget);
-    for(const QString& key : imageEvictions)
-        m_aTextureImages.remove(key);
-    ei::log(eLogInfo, QString("Retained character visuals after map unload "
-                             "gpuMiB:%1 sourceMiB:%2 evictedGpu:%3 evictedSource:%4")
-            .arg(double(m_layeredTextureLru.totalBytes()) / (1024.0 * 1024.0), 0, 'f', 1)
-            .arg(double(m_textureImageLru.totalBytes()) / (1024.0 * 1024.0), 0, 'f', 1)
-            .arg(textureEvictions.size()).arg(imageEvictions.size()));
+}
+
+void CTextureList::trimTransientVisualCache()
+{
+    const auto trim=[&](ei::CVisualCacheLru& lru,qint64 budget) {
+        // Budget unpinned entries: pinned scene resources cannot be evicted.
+        const auto order=lru.oldestFirst();
+        for(const auto& key:order)
+            if(m_sceneTextureUsers.contains(m_aTexture.value(key)) || m_auxiliaryTextures.contains(key))lru.remove(key);
+        for(const auto& key:lru.trim(budget))
+            if(auto* texture=m_aTexture.take(key))m_retiredTextures.insert(texture);
+        for(const auto& key:order)if(auto* texture=m_aTexture.value(key))
+            lru.touch(key,qint64(texture->width())*texture->height()*4*4/3);
+    };
+    trim(m_layeredTextureLru,kLayeredTextureSessionBudget);
+    trim(m_staticTextureLru,256ll*1024*1024);
+    for(const auto& key:m_textureImageLru.trim(kTextureImageSessionBudget))m_aTextureImages.remove(key);
+    collectRetiredTextures();
 }
 
 void CTextureList::clearTransientVisualCache()
 {
-    m_aTextureImages.clear();
-    m_textureImageLru.clear();
-    for(auto it = m_aTexture.begin(); it != m_aTexture.end();)
-    {
-        if(!it.key().startsWith("layers|"))
-        {
-            ++it;
-            continue;
-        }
-        if(m_sceneTextureUsers.contains(it.value())) { ++it;continue; }
-        QOpenGLTexture* texture = it.value();
-        it = m_aTexture.erase(it);
-        if(texture)
-        {
-            m_textureMaterialClasses.remove(texture);
-            m_textureSources.remove(texture);
-            if(texture->isCreated())
-                texture->destroy();
-            delete texture;
-        }
-    }
-    m_layeredTextureLru.clear();
+    m_aTextureImages.clear();m_textureImageLru.clear();
+    for(auto it=m_aTexture.begin();it!=m_aTexture.end();)
+        if(it.key().startsWith("layers|")){m_retiredTextures.insert(it.value());it=m_aTexture.erase(it);}
+        else ++it;
+    m_layeredTextureLru.clear();collectRetiredTextures();
 }
-
 
 bool isDIfferent(const QString &value)
 {

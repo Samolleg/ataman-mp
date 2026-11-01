@@ -68,7 +68,8 @@ QString meshCacheScope(const QString& modelName)
     const COptString* profile = settings
         ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
     return (profile ? profile->value() : QString()) + '|'
-        + configuredResourceFingerprint(settings) + '|' + modelName.toLower();
+        + configuredResourceFingerprint(settings) + '|'
+        + QString::number(CObjectList::getInstance()->sourceGeneration()) + '|' + modelName.toLower();
 }
 
 QHash<QString, float>& transientPartUvScaleCache()
@@ -226,6 +227,8 @@ CObjectBase::CObjectBase(const CObjectBase &base):
     m_partTextures = base.m_partTextures;
     m_partEmissions = base.m_partEmissions;
     m_pFigure = base.m_pFigure;
+    m_figureLease=base.m_figureLease;
+    m_textureLeases=base.m_textureLeases;
     m_minPoint = base.m_minPoint;
     m_bodyParts = base.m_bodyParts;
     m_figureComplexion = base.m_figureComplexion;
@@ -298,6 +301,7 @@ CObjectBase::~CObjectBase()
 
 void CObjectBase::updateFigure(ei::CFigure* fig)
 {
+    m_figureLease=CObjectList::getInstance()->retainSceneFigure(fig);
     markSupportGeometryChanged();
     m_bboxDirty = true;
     if(!fig)
@@ -373,6 +377,16 @@ void CObjectBase::setTexture(QOpenGLTexture* texture)
 {
     Q_ASSERT(texture);
     m_texture = texture;
+    retainVisualTextures();
+}
+
+void CObjectBase::retainVisualTextures()
+{
+    QVector<QSharedPointer<QOpenGLTexture>> leases;
+    QSet<QOpenGLTexture*> textures=QSet<QOpenGLTexture*>::fromList(m_partTextures.values());
+    textures.insert(m_texture);textures.insert(m_secondaryTexture);textures.remove(nullptr);
+    for(auto* texture:textures)leases.append(CTextureList::getInstance()->retainSceneTexture(texture));
+    m_textureLeases.swap(leases);
 }
 
 void CObjectBase::draw(bool isActive, QOpenGLShaderProgram* program)
@@ -1021,12 +1035,13 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
             + QString::number(it.value().x(), 'g', 8) + ','
             + QString::number(it.value().y(), 'g', 8) + ','
             + QString::number(it.value().z(), 'g', 8) + ';';
-    fingerprint += '|' + emissionFingerprint;
+    fingerprint += '|' + emissionFingerprint + '|' + QString::number(CObjectList::getInstance()->sourceGeneration());
     if(fingerprint == m_transientVisualFingerprint)
         return;
     CRenderStallTrace timing("unit-model");
     m_transientVisualFingerprint = fingerprint;
     m_pFigure = CObjectList::getInstance()->getFigure(modelName);
+    m_figureLease=CObjectList::getInstance()->retainSceneFigure(m_pFigure);
     timing.mark("figure");
     // The caller already resolved profile-vs-import precedence. The
     // model-aware lookup normalizes a supplied .mmp suffix and resolves only
@@ -1049,6 +1064,7 @@ void CObjectBase::applyTransientVisual(const QString& modelName, const QString& 
                     && !m_partTextures.contains(partName.toLower()))
                 m_partTextures.insert(partName.toLower(),
                     CTextureList::getInstance()->texture(textureName, modelName));
+    retainVisualTextures();
     timing.mark("textures");
     m_bboxDirty = true;
     for(CPart* part : m_aPart)
@@ -1127,6 +1143,7 @@ void CObjectBase::applyTransientStandaloneVisual(ei::CFigure* figure,
     QString resolvedTexture;
     m_texture=CTextureList::getInstance()->texture(
         textureCandidates,modelName,&resolvedTexture);
+    retainVisualTextures();
     updateFigure(figure);
     if(!figure)return;
     for(CPart* part:m_aPart)

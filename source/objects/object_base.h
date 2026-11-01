@@ -75,6 +75,7 @@ public:
     void setModelName(QString name) {m_modelName = name;}
     QVector3D& minPosition() override { return m_minPoint; }
     void setTexture(QOpenGLTexture* texture) override;
+    ei::CFigure* renderedFigure() const { return m_pFigure; }
     void serializeJson(QJsonObject& obj) override;
     uint serialize(util::CMobParser& parser) override;
     void collectParams(QList<QSharedPointer<IPropertyBase>>& aProp, ENodeType paramType) override;
@@ -125,6 +126,7 @@ protected:
     void applyTransientPartPoses(const QMap<QString, QMatrix4x4>& poses);
     void applyTransientPartMorphs(const QMap<QString, QVector<QVector3D>>& morphs);
     void rebuildTransientAnimationSkeleton();
+    void retainVisualTextures();
     //void updateVisibility(QVector<QString>& aPart);
 
 protected:
@@ -140,6 +142,8 @@ private:
     QMap<QString, QOpenGLTexture*> m_partTextures;
     QMap<QString, QVector3D> m_partEmissions;
     ei::CFigure* m_pFigure;
+    QSharedPointer<ei::CFigure> m_figureLease;
+    QVector<QSharedPointer<QOpenGLTexture>> m_textureLeases;
     bool m_bDeleted;
     CBox m_cachedBBox;
     bool m_bboxDirty;

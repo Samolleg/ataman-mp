@@ -53,6 +53,8 @@ public:
 
     void initResource();
     void refreshConfiguredSources();
+    QSharedPointer<ei::CFigure> retainSceneFigure(ei::CFigure* figure) const;
+    quint64 sourceGeneration() const { return m_sourceGeneration; }
     static QVector<SPreparedStaticPart> prepareStaticAssembly(
         const QMap<QString,QByteArray>& files, const QString& model,
         QVector3D complexion, QStringList parts);
@@ -60,11 +62,15 @@ private:
     explicit CObjectList(bool loadAuxiliary = true);
     ~CObjectList();
     ei::CFigure* figureDefault();
+    void cacheFigure(const QString& name, ei::CFigure* figure);
 
 private:
     static CObjectList* m_pObjectContainer;
     CSettings* m_pSettings;
-    QMap<QString, ei::CFigure*> m_aFigure;
+    QMap<QString, QSharedPointer<ei::CFigure>> m_aFigure;
+    QHash<ei::CFigure*, QWeakPointer<ei::CFigure>> m_figureOwners;
+    QSet<QString> m_auxiliaryFigures;
+    quint64 m_sourceGeneration{1};
     QSet<QString> m_missingFigureNames;
     QMap<QString,QJsonArray> m_figureSources;
     QMap<QString,QStringList> m_figureProblems;
@@ -155,6 +161,7 @@ public:
                                  const QString& boundArchive = QString());
     void releaseTerrainTexture(QOpenGLTexture* texture);
     QSharedPointer<QOpenGLTexture> retainSceneTexture(QOpenGLTexture* texture);
+    void collectRetiredTextures();
     QByteArray terrainAtlasContentFingerprint(const QString& name, int pages,
                                               const QString& boundArchive = QString()) const;
     // Terrain atlases have an authored DXT mip chain. This only changes the
@@ -221,6 +228,8 @@ private:
     QOpenGLTexture* loadTextureResource(const QString& name, const QString& modelName,
                                         bool* found = nullptr);
     QImage loadTextureImageResource(const QString& name, const QString& modelName);
+    void cacheTexture(const QString& key, QOpenGLTexture* texture);
+    QOpenGLTexture* cachedTexture(const QString& key);
 
 private:
     static CTextureList* m_pTextureContainer;
@@ -228,11 +237,14 @@ private:
     QMap<QOpenGLTexture*, QJsonArray> m_textureSources;
     QMap<QString, QImage> m_aTextureImages;
     ei::CVisualCacheLru m_layeredTextureLru;
+    ei::CVisualCacheLru m_staticTextureLru;
     ei::CVisualCacheLru m_textureImageLru;
     QMap<QOpenGLTexture*, ERenderMaterialClass> m_textureMaterialClasses;
     QSet<QOpenGLTexture*> m_terrainTextures;
     QHash<QOpenGLTexture*, int> m_terrainTextureUsers;
     QHash<QOpenGLTexture*, int> m_sceneTextureUsers;
+    QSet<QOpenGLTexture*> m_retiredTextures;
+    QSet<QString> m_auxiliaryTextures;
     bool m_terrainMipmappingEnabled{true};
     QSet<QString> m_missingTextureNames;
     CSettings* m_pSettings;

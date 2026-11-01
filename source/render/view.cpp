@@ -4910,6 +4910,14 @@ void CView::refreshAfterResourceSetup()
     makeCurrent();m_neighborRenderCache.clear();
     CObjectList::getInstance()->refreshConfiguredSources();
     CTextureList::getInstance()->refreshConfiguredSources(!m_aMob.isEmpty());
+    // Loaded objects hold leases to the previous resource generation. Rebind
+    // their visual state without reopening or modifying authored MOB data.
+    for(auto* mob:m_aMob)if(mob)for(auto* node:mob->nodes())
+        if(node && !dynamic_cast<CUnit*>(node) && !node->modelName().isEmpty()) {
+            node->loadFigure();node->loadTexture();
+        }
+    refreshDatabaseVisuals(QString(),QString());
+    CTextureList::getInstance()->collectRetiredTextures();
     m_terrainGlobalUniformTileCache.clear();
     m_globalPaletteReuseCache.clear();
     m_globalPaletteReuseKey.clear();
