@@ -96,3 +96,39 @@ STOP BEFORE INSTALLATION; без push. Evidence: work/locks-programdata-271-2026
 
 Основания API: [Windows file ACL](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights),
 [Qt5.12.12 QLockFile Windows](https://github.com/qt/qtbase/blob/v5.12.12/src/corelib/io/qlockfile_win.cpp).
+
+
+## Установка принятой271 — 2026-11-01
+
+Владелец принял main `3e7a8a4bf8544f2ee94559f9d0cc9731c1c806b9` и сказал «ставь»;
+прежний STOP BEFORE INSTALLATION снят этим поручением. Без пересборки установлен
+готовый `build-staging-271-locks-programdata-20261101` (BUILD_INFO с принятым SHA,
+Release tree `ec42b8155295802cc3c3266c7a1cb04c254effc9`). Использован канонический
+`packaging/install_program.ps1` принятого main по обновлённому TEST_BUILD_HANDOFF.
+Цель: `artifacts/EI-Mapper-Ataman-2-first-test`.
+
+До установки не было ни одного EIMapperEndurance (включая headless) и игры.
+Мосты EIMapperMcp.exe PID: 732, 2324, 9456, 11208, 12076, 20236, 20872, 24836, 28880. После установки все9 живы с прежним временем
+создания. Никакие процессы владельца не завершались; computer-use/видимые окна,
+интерактивный маппер и игра не использовались. Единственный запуск установленного
+EXE — разрешённый `--version`: EI Mapper Endurance Edition271, exit0.
+
+Установщик:189 verified,11 changed,1 added,0 removed. Все189 управляемых SHA
+и SHA256SUMS.txt совпадают со staging. Откат270:
+`artifacts/rollback270-to271-locks-programdata-20261101`, штатный
+`rollback.ps1 -VerifyOnly` → ROLLBACK_VERIFIED. Откат не выполнялся.
+Занятый файл EIMapperMcp.exe заменён через rename:
+`EIMapperMcp.exe.old-ataman-0ec667abeb484351929ff820628f5e2c`.
+Отодвинутый файл сохранил SHA D05C626EA8FE8C1C5C3478F20CBAEE90FAED600405C9775B74075E2F8CA5FFED.
+Штатная очистка установщика удалила2 ранее зарегистрированных свободных retired
+файла; прежние и чужие каталоги откатов не удалялись.
+
+Все 13496 пользовательских файлов: прежний набор, SHA256, размер и mtime
+сохранены; различий0. Служебная .ataman-retired.json учитывалась отдельно.
+Финализатор на установке не запускался; регистрация мостов, .mcp.json,
+~/.codex/config.toml и старая DejaVu/Maps/.mapper-service не изменялись.
+Чужие правки ROADMAP/source/tests/QM и параллельная EI-BRIEFING-ZONE сохранены.
+Дополнительные тесты не запускались; push не выполнялся.
+Квитанции: work/install271-20261101/{result.json,installer.log,
+rollback-verification.log,installed-version.json,bridges-before.json,
+users-before.json,users-after.json}.
