@@ -52,6 +52,13 @@ public:
     QByteArray memberSha256(int index, QString* error = nullptr) const;
     QByteArray memberSha256(const QString& name, QString* error = nullptr) const;
 
+    // Single-member edit preserving the original directory, names, padding and
+    // every unrelated byte. Only the payload and necessary sizes/offsets move.
+    bool writeMemberReplacement(const QString& destination, const QString& name,
+                                const QByteArray& payload, QString* error,
+                                const std::function<bool()>& beforeCommit,
+                                QByteArray* candidateSha256) const;
+
 private:
     QByteArray readRange(quint32 offset, quint32 size, qint64 maximumBytes,
                          QString* error) const;

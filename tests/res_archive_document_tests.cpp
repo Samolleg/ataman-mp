@@ -201,6 +201,9 @@ private slots:
     void staleMemberHashRefusesOutput();
     void malformedArchiveIsRejected();
     void stagedCommitBacksUpAndReopens();
+    void streamedReplacementPreservesExactLayout();
+    void streamedReplacementMergesAndRejectsConflicts();
+    void streamedReplacementGuardsRacesAndFailures();
     void failedAtomicCommitLeavesDestinationUntouched();
     void sourceRaceRefusesSave();
     void syntheticMapTableAddsOwnedMaplessZoneLosslessly();
@@ -271,6 +274,83 @@ void ResArchiveDocumentTests::malformedArchiveIsRejected()
     QStringList errors;
     QVERIFY(!document.loadBytes(bytes, "broken.res", &errors));
     QVERIFY(!errors.isEmpty());
+}
+
+void ResArchiveDocumentTests::streamedReplacementPreservesExactLayout()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    const auto original=syntheticRes(); CResArchiveDocument baseline;
+    QVERIFY(baseline.loadBytes(original));
+    const QString source=directory.filePath("texts.res");
+    QFile f(source); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(original); f.close();
+    int serial=0;
+    for(const QByteArray& payload : {QByteArray(),QByteArray("small"),
+         QByteArray(8193,'x'),baseline.memberPayload("map.txt")}) {
+        SResMemberSaveRequest request;
+        request.source=QFileInfo(source); request.destination=QFileInfo(directory.filePath(QString::number(serial++)+".res"));
+        request.memberName="MAP.TXT"; request.expectedMemberSha256=sha(baseline.memberPayload("map.txt"));
+        request.replacementPayload=payload; request.backupRootOverride=directory.filePath("backups");
+        QByteArray expected; QVERIFY(baseline.replaceMember("map.txt",request.expectedMemberSha256,payload,&expected));
+        const auto result=commitStreamedResMemberReplacement(request);
+        QVERIFY2(result.success,qPrintable(result.phase+": "+result.error));
+        QCOMPARE(resFileSha256(request.destination.filePath()),sha(expected));
+        QCOMPARE(resFileSha256(source),sha(original));
+        QCOMPARE(result.candidateSha256.toLatin1(),sha(expected));
+        QVERIFY(result.backupPath.isEmpty());
+        const auto repeat=commitStreamedResMemberReplacement(request);
+        QVERIFY2(repeat.success && repeat.noOp,qPrintable(repeat.error));
+        QVERIFY(repeat.backupPath.isEmpty());
+        request.source=request.destination;
+        request.expectedMemberSha256=sha(payload); request.replacementPayload="next";
+        const auto inplace=commitStreamedResMemberReplacement(request);
+        QVERIFY2(inplace.success,qPrintable(inplace.error));
+        QCOMPARE(resFileSha256(inplace.backupPath),sha(expected));
+        QCOMPARE(inplace.previousDestinationSha256,sha(expected));
+    }
+}
+
+void ResArchiveDocumentTests::streamedReplacementMergesAndRejectsConflicts()
+{
+    QTemporaryDir directory; QVERIFY(directory.isValid());
+    CResArchiveDocument baseline; const auto original=syntheticRes(); QVERIFY(baseline.loadBytes(original));
+    QByteArray external; QVERIFY(baseline.replaceMember("opaque.bin",{},"external payload",&external));
+    const QString path=directory.filePath("texts.res");
+    QFile f(path); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(external); f.close();
+    SResMemberSaveRequest request; request.source=request.destination=QFileInfo(path);
+    request.memberName="map.txt"; request.expectedMemberSha256=sha(baseline.memberPayload("map.txt"));
+    request.replacementPayload="new map"; request.backupRootOverride=directory.filePath("backups");
+    const auto saved=commitStreamedResMemberReplacement(request);
+    QVERIFY2(saved.success,qPrintable(saved.error));
+    CResArchiveIndex reopened; QString error; QVERIFY(reopened.open(path,&error));
+    QCOMPARE(reopened.readMember("opaque.bin"),QByteArray("external payload"));
+    QCOMPARE(reopened.readMember("map.txt"),request.replacementPayload);
+    const auto before=resFileSha256(path);
+    const auto conflict=commitStreamedResMemberReplacement(request);
+    QVERIFY(!conflict.success); QCOMPARE(resFileSha256(path),before);
+}
+
+void ResArchiveDocumentTests::streamedReplacementGuardsRacesAndFailures()
+{
+    for(int scenario=0;scenario<4;++scenario) {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto original=syntheticRes(); CResArchiveDocument baseline; QVERIFY(baseline.loadBytes(original));
+        const QString source=directory.filePath("source.res"),destination=directory.filePath("destination.res");
+        QFile f(source); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(original); f.close();
+        QFile dest(destination);
+        if(scenario!=2) { QVERIFY(dest.open(QIODevice::WriteOnly)); dest.write(original); dest.close(); }
+        SResMemberSaveRequest request; request.source=QFileInfo(source); request.destination=QFileInfo(destination);
+        request.memberName="map.txt"; request.expectedMemberSha256=sha(baseline.memberPayload("map.txt"));
+        request.replacementPayload="changed"; request.backupRootOverride=directory.filePath("backups");
+        request.simulateAtomicCommitFailure=scenario==3;
+        if(scenario!=3) request.beforeCommitForTest=[&]() {
+            QFile raced(scenario==0?source:destination);
+            if(raced.open(QIODevice::WriteOnly)) raced.write("external writer");
+        };
+        const auto failed=commitStreamedResMemberReplacement(request);
+        QVERIFY(!failed.success);
+        QVERIFY(dest.open(QIODevice::ReadOnly));
+        QCOMPARE(dest.readAll(),scenario==1||scenario==2?QByteArray("external writer"):original);
+    }
 }
 
 void ResArchiveDocumentTests::stagedCommitBacksUpAndReopens()

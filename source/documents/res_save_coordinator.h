@@ -22,6 +22,7 @@ struct SResMemberSaveRequest
     QString backupRootOverride;
 #ifdef QT_TESTLIB_LIB
     bool simulateAtomicCommitFailure{false};
+    std::function<void()> beforeCommitForTest;
 #endif
 };
 
@@ -32,6 +33,7 @@ struct SResMemberSaveResult
     QString phase;
     QString error;
     QString candidateSha256;
+    QByteArray previousDestinationSha256;
     QString backupPath;
     QStringList validationNotes;
 };
@@ -86,6 +88,10 @@ struct SResArchiveBytesSaveResult
 
 SResMemberSaveResult commitStagedResMemberReplacement(
     const CResArchiveDocument& baseline, const SResMemberSaveRequest& request);
+
+// Reads only the edited member; rebases unrelated source changes and supports
+// in-place saves and Save As through bounded-memory, guarded atomic I/O.
+SResMemberSaveResult commitStreamedResMemberReplacement(const SResMemberSaveRequest& request);
 
 // Publishes a coherent page set through a staged, freshly reopened, race-checked
 // and atomic RES transaction. The caller deliberately controls whether an

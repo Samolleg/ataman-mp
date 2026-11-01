@@ -60,6 +60,84 @@ bool destinationMatches(const QFileInfo& destination, bool existed,
 }
 }
 
+SResMemberSaveResult commitStreamedResMemberReplacement(const SResMemberSaveRequest& request)
+{
+    CFileWriteActivity writing;
+    QVector<SBackupResult> backupLeases;
+    SResMemberSaveResult result; result.phase = "source-check";
+    const QString path = request.destination.absoluteFilePath();
+    auto lease = CProcessEditLock::acquire(path, &result.error, false);
+    if(!lease) return result;
+    QLockFile lock(path+".mapper-save.lock");
+    if(!lock.tryLock(0)) { result.error="Another save owns this RES."; return result; }
+    CResArchiveIndex source;
+    if(!source.open(request.source.absoluteFilePath(), &result.error)) return result;
+    const auto before = resFileSha256(source.path(), &result.error);
+    const auto memberHash = source.memberSha256(request.memberName, &result.error);
+    if(before.isEmpty() || memberHash.isEmpty()) return result;
+    if(memberHash != request.expectedMemberSha256) {
+        result.error="The source RES member changed on disk. Reopen it before saving."; return result;
+    }
+    const bool existed = QFileInfo::exists(path);
+    if(existed) {
+        result.previousDestinationSha256 = resFileSha256(path, &result.error);
+        if(result.previousDestinationSha256.isEmpty()) return result;
+    }
+    const auto unchanged = [&]() {
+        if(resFileSha256(source.path(), &result.error)!=before
+           || QFileInfo::exists(path)!=existed
+           || (existed && resFileSha256(path, &result.error)!=result.previousDestinationSha256)) {
+            result.error="Source or destination changed while the RES save was staged."; return false;
+        }
+        return true;
+    };
+    if(memberHash == QCryptographicHash::hash(request.replacementPayload,QCryptographicHash::Sha256).toHex()
+       && existed && result.previousDestinationSha256==before) {
+        if(!unchanged()) return result;
+        result.success=result.noOp=true; result.phase="no-op";
+        result.candidateSha256=QString::fromLatin1(before); return result;
+    }
+    result.phase="staging";
+    QByteArray candidateHash;
+    const auto guard = [&]() {
+#ifdef QT_TESTLIB_LIB
+        if(request.beforeCommitForTest) request.beforeCommitForTest();
+#endif
+        result.phase="race-check";
+        if(!unchanged()) return false;
+        if(existed && candidateHash==result.previousDestinationSha256) {
+            result.success=result.noOp=true; result.phase="no-op"; return false;
+        }
+        if(existed) {
+            result.phase="backup";
+            const auto backup=CBackupManager(request.backupRootOverride).snapshotBeforeSave(QFileInfo(path));
+            if(!backup.success) { result.error=backup.error; return false; }
+            backupLeases.append(backup); result.backupPath=backup.backupPath;
+            if(backup.sha256.toLatin1()!=result.previousDestinationSha256
+               || resFileSha256(backup.backupPath,&result.error)!=result.previousDestinationSha256) {
+                result.error="RES backup differs from the reviewed destination."; return false;
+            }
+        }
+        result.phase="pre-commit-race-check";
+        if(!unchanged()) return false;
+#ifdef QT_TESTLIB_LIB
+        if(request.simulateAtomicCommitFailure) { result.error="Simulated atomic replacement failure."; return false; }
+#endif
+        result.phase="atomic-replacement"; return true;
+    };
+    const bool written=source.writeMemberReplacement(path,request.memberName,
+        request.replacementPayload,&result.error,guard,&candidateHash);
+    result.candidateSha256=QString::fromLatin1(candidateHash);
+    if(!written) return result;
+    result.phase="post-commit-validation";
+    CResArchiveIndex reopened;
+    if(!reopened.open(path,&result.error)
+       || reopened.readMember(request.memberName,&result.error)!=request.replacementPayload) return result;
+    result.success=true; result.phase="complete";
+    CBackupManager(request.backupRootOverride).scheduleCleanup();
+    return result;
+}
+
 SResMemberSaveResult commitStagedResMemberReplacement(
     const CResArchiveDocument& baseline, const SResMemberSaveRequest& request)
 {

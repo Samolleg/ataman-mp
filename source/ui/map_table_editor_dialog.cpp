@@ -25,6 +25,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QProgressDialog>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -33,6 +34,8 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
+#include "file_write_activity.h"
 
 #include "res_save_coordinator.h"
 #include "mmp_inspector.h"
@@ -267,12 +270,19 @@ CMapTableEditorDialog::CMapTableEditorDialog(QWidget* parent)
 
 CMapTableEditorDialog::~CMapTableEditorDialog()
 {
+    // Forced parent destruction still joins the detached I/O transaction.
+    if(m_saveWatcher) m_saveWatcher->waitForFinished();
     if(!m_persistUiState)
         return;
     QSettings settings("EI Mapper Endurance", "Map Catalog Editor");
     settings.setValue("windowGeometry", saveGeometry());
     settings.setValue("mainSplitter", m_splitter->saveState());
     settings.setValue("currentTab", m_tabs->currentIndex());
+}
+
+void CMapTableEditorDialog::done(int result)
+{
+    if(!isSaving()) QDialog::done(result);
 }
 
 void CMapTableEditorDialog::setArchiveUiEnabled(bool enabled)
@@ -308,22 +318,17 @@ void CMapTableEditorDialog::chooseArchive()
 
 bool CMapTableEditorDialog::openArchive(const QString& path)
 {
-    QFile file(path);
-    if(!file.open(QIODevice::ReadOnly))
-    {
-        setStatus(file.errorString(), true);
-        return false;
-    }
-    const QByteArray bytes = file.readAll();
+    if(isSaving()) return false;
+    QString error;
     QStringList errors;
-    CResArchiveDocument archive;
-    if(!archive.loadBytes(bytes, path, &errors))
+    CResArchiveIndex archive;
+    if(!archive.open(path, &error))
     {
-        setStatus(errors.join(" | "), true);
+        setStatus(error, true);
         return false;
     }
     QString memberName;
-    for(const SResArchiveMember& member : archive.members())
+    for(const auto& member : archive.members())
     {
         if(member.name.compare("map.txt", Qt::CaseInsensitive) == 0)
         {
@@ -341,12 +346,13 @@ bool CMapTableEditorDialog::openArchive(const QString& path)
         return false;
     }
     CMapTableDocument table;
-    if(!table.loadBytes(archive.memberPayload(memberName), &errors))
+    const auto payload = archive.readMember(memberName, &error);
+    if(!error.isEmpty() || !table.loadBytes(payload, &errors))
     {
-        setStatus(errors.join(" | "), true);
+        setStatus(error + errors.join(" | "), true);
         return false;
     }
-    m_archive = archive;
+    m_originalMapPayload = payload;
     m_table = table;
     m_archivePath = QFileInfo(path).absoluteFilePath();
     m_mapMemberName = memberName;
@@ -360,6 +366,7 @@ bool CMapTableEditorDialog::openArchive(const QString& path)
 
 bool CMapTableEditorDialog::selectZoneById(const QString& zoneId)
 {
+    if(isSaving()) return false;
     for(int zoneIndex = 0; zoneIndex < m_table.zones().size(); ++zoneIndex)
     {
         if(m_table.zones().at(zoneIndex).zoneId.compare(
@@ -876,30 +883,29 @@ void CMapTableEditorDialog::importText()
 
 void CMapTableEditorDialog::saveArchiveAs()
 {
-    if(m_archivePath.isEmpty())
-        return;
+    if(isSaving() || m_archivePath.isEmpty()) return;
+    const QString destination = QFileDialog::getSaveFileName(
+        this, tr("Save verified texts.res"), m_archivePath, tr("RES archives (*.res)"));
+    if(!destination.isEmpty()) saveArchiveTo(destination);
+}
+
+bool CMapTableEditorDialog::saveArchiveTo(const QString& destination)
+{
+    if(isSaving() || m_archivePath.isEmpty() || destination.isEmpty()) return false;
     if(m_newZoneMode)
     {
         setStatus(tr("Register or cancel the new zone before saving."), true);
-        return;
+        return false;
     }
     if(!applyCurrentZone())
-        return;
+        return false;
     const SMapTableEditResult validation = m_table.validateAllZones();
     if(!validation.success)
     {
         setStatus(tr("Verified save rejected: %1").arg(validation.toText()), true);
-        return;
+        return false;
     }
-    const QString destination = QFileDialog::getSaveFileName(
-        this, tr("Save verified texts.res"), m_archivePath, tr("RES archives (*.res)"));
-    if(destination.isEmpty())
-        return;
-    QByteArray previousDestinationBytes;
-    QFile previousDestination(destination);
-    if(previousDestination.open(QIODevice::ReadOnly))
-        previousDestinationBytes = previousDestination.readAll();
-    const QByteArray currentPayload = m_archive.memberPayload(m_mapMemberName);
+    const QByteArray currentPayload = m_originalMapPayload;
     SResMemberSaveRequest request;
     request.source = QFileInfo(m_archivePath);
     request.destination = QFileInfo(destination);
@@ -907,40 +913,55 @@ void CMapTableEditorDialog::saveArchiveAs()
     request.expectedMemberSha256 = QCryptographicHash::hash(
         currentPayload, QCryptographicHash::Sha256).toHex();
     request.replacementPayload = m_table.serialize();
-    QProgressDialog progress(tr("Validating and rebuilding the destination RES..."),
-                             QString(), 0, 0, this);
-    progress.setWindowTitle(tr("Saving verified map catalog"));
-    progress.setCancelButton(nullptr);
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setMinimumDuration(0);
-    progress.setAutoClose(false);
-    progress.show();
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    const SResMemberSaveResult result = commitStagedResMemberReplacement(m_archive, request);
-    progress.close();
-    if(!result.success)
-    {
-        setStatus(result.phase + ": " + result.error, true);
-        return;
+    // Disable actual editor controls as well as showing modal progress: Escape
+    // or a window-manager close of progress must never expose editable inputs.
+    QVector<QPair<QPointer<QWidget>,bool>> enabled;
+    for(auto* widget : findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+        enabled.append(qMakePair(QPointer<QWidget>(widget),widget->isEnabled()));
+        widget->setEnabled(false);
     }
-    SMapTableSaveReport report;
-    report.destinationArchive = QFileInfo(destination).absoluteFilePath();
-    if(!previousDestinationBytes.isEmpty())
-        report.oldArchiveSha256 = QCryptographicHash::hash(
-            previousDestinationBytes, QCryptographicHash::Sha256).toHex();
-    report.newArchiveSha256 = result.candidateSha256.toLatin1();
-    report.oldMapTableSha256 = QCryptographicHash::hash(
-        currentPayload, QCryptographicHash::Sha256).toHex();
-    report.newMapTableSha256 = QCryptographicHash::hash(
-        request.replacementPayload, QCryptographicHash::Sha256).toHex();
-    report.changes = analyzeMapTableChange(currentPayload, request.replacementPayload);
-    const QString message = result.noOp ? tr("Destination already matches; no write was needed.")
-        : tr("Verified RES saved. Backup: %1").arg(
-              result.backupPath.isEmpty() ? tr("not needed (new file)") : result.backupPath);
-    if(!openArchive(destination))
-        return;
-    m_saveReports.append(report);
-    setStatus(message);
+    auto* progress = new QProgressDialog(tr("Validating and rebuilding the destination RES..."),
+                                        QString(), 0, 0, this);
+    progress->setWindowTitle(tr("Saving verified map catalog"));
+    progress->setCancelButton(nullptr);
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setMinimumDuration(0);
+    progress->setAutoClose(false);
+    m_saveActivity = std::make_shared<CFileWriteActivity>();
+    auto* watcher = new QFutureWatcher<SResMemberSaveResult>(this);
+    m_saveWatcher = watcher;
+    connect(watcher, &QFutureWatcher<SResMemberSaveResult>::finished, this,
+        [this,watcher,progress,enabled,request,currentPayload,destination]() {
+        const auto result = watcher->result();
+        m_saveWatcher = nullptr;
+        watcher->deleteLater(); progress->hide(); progress->deleteLater();
+        for(const auto& state : enabled) if(state.first) state.first->setEnabled(state.second);
+        bool success = result.success;
+        if(success) {
+            SMapTableSaveReport report;
+            report.destinationArchive = QFileInfo(destination).absoluteFilePath();
+            report.oldArchiveSha256 = result.previousDestinationSha256;
+            report.newArchiveSha256 = result.candidateSha256.toLatin1();
+            report.oldMapTableSha256 = request.expectedMemberSha256;
+            report.newMapTableSha256 = QCryptographicHash::hash(
+                request.replacementPayload,QCryptographicHash::Sha256).toHex();
+            report.changes = analyzeMapTableChange(currentPayload,request.replacementPayload);
+            // A committed save must still be reported if a later reopen fails.
+            m_saveReports.append(report);
+            success = openArchive(destination);
+            if(success) setStatus(result.noOp ? tr("Destination already matches; no write was needed.")
+                : tr("Verified RES saved. Backup: %1").arg(result.backupPath.isEmpty()
+                    ? tr("not needed (new file)") : result.backupPath));
+        } else setStatus(result.phase + ": " + result.error, true);
+        m_saveActivity.reset();
+        emit archiveSaveFinished(success);
+    });
+    // Only detached values cross threads; no document/widget/cache access.
+    watcher->setFuture(QtConcurrent::run([request]() {
+        return commitStreamedResMemberReplacement(request);
+    }));
+    progress->show();
+    return true;
 }
 
 void CMapTableEditorDialog::viewExistingMinimap()

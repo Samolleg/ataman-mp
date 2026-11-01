@@ -12,6 +12,7 @@
 #include <QtEndian>
 
 #include <limits>
+#include <algorithm>
 
 namespace {
 constexpr quint32 kSignature = 0x019CE23C;
@@ -511,4 +512,96 @@ bool replaceResFromFile(const QString& destination,const QString& candidate,cons
     while(!input.atEnd()){auto b=input.read(4*1024*1024);if(b.isEmpty()||output.write(b)!=b.size())return false;}
     if(resFileSha256(destination,error)!=expected){setError(error,"RES changed before atomic replacement.");return false;}
     return output.commit()&&resFileSha256(destination,error)==wanted;
+}
+
+bool CResArchiveIndex::writeMemberReplacement(const QString& destinationPath,
+    const QString& name, const QByteArray& payload, QString* error,
+    const std::function<bool()>& beforeCommit, QByteArray* candidateSha256) const
+{
+    const int changed = memberIndex(name);
+    if(changed < 0 || !sourceIsCurrent(error)) {
+        setError(error, "Replacement member is missing, ambiguous, or stale."); return false;
+    }
+    QFile source(path());
+    QTemporaryFile staged(QFileInfo(destinationPath).absolutePath()+"/.mapper-member-XXXXXX");
+    if(!source.open(QIODevice::ReadOnly) || !staged.open()) {
+        setError(error, "Cannot open RES source/staging file."); return false;
+    }
+    QByteArray header = source.read(kHeaderSize);
+    const qint64 tableOffset = u32(header, 8);
+    const auto& target = member(changed);
+    const qint64 oldEnd = qint64(target.dataOffset) + target.dataSize;
+    const qint64 delta = qint64(payload.size()) - target.dataSize;
+    if(tableOffset + delta < qint64(kHeaderSize)
+       || quint64(tableOffset + delta) > std::numeric_limits<quint32>::max()) {
+        setError(error, "Replacement exceeds the RES offset range."); return false;
+    }
+    QVector<QPair<quint64, quint64>> ranges;
+    for(const auto& m : members()) {
+        const quint64 end = quint64(m.dataOffset) + m.dataSize;
+        if(m.dataOffset < kHeaderSize || end > quint64(tableOffset)) {
+            setError(error, "RES payload overlaps the header or directory."); return false;
+        }
+        if(m.dataSize) ranges.append(qMakePair(quint64(m.dataOffset), end));
+    }
+    std::sort(ranges.begin(), ranges.end());
+    for(int i=1;i<ranges.size();++i) if(ranges[i].first < ranges[i-1].second) {
+        setError(error, "RES payloads overlap; replacement is unsafe."); return false;
+    }
+    if(!source.seek(tableOffset)) return false;
+    QByteArray table = source.read(qint64(memberCount()) * kEntrySize);
+    if(table.size() != qint64(memberCount()) * kEntrySize) return false;
+    put32(&header, 8, quint32(tableOffset + delta));
+    for(const auto& m : members()) {
+        const quint64 offset = quint64(m.tableIndex) * kEntrySize;
+        if(m.tableIndex == changed) put32(&table, offset+4, quint32(payload.size()));
+        else if(m.dataOffset > target.dataOffset)
+            put32(&table, offset+8, quint32(qint64(m.dataOffset)+delta));
+    }
+    QCryptographicHash expected(QCryptographicHash::Sha256);
+    const auto write = [&](const QByteArray& bytes) {
+        expected.addData(bytes);
+        if(staged.write(bytes) == bytes.size()) return true;
+        setError(error, staged.errorString()); return false;
+    };
+    const auto copy = [&](qint64 offset, qint64 count) {
+        if(!source.seek(offset)) return false;
+        while(count > 0) {
+            const qint64 n = qMin(count, qint64(4*1024*1024));
+            const auto bytes = source.read(n);
+            if(bytes.size()!=n || !write(bytes)) return false;
+            count -= n;
+        }
+        return true;
+    };
+    if(!write(header) || !copy(kHeaderSize, target.dataOffset-kHeaderSize)
+       || !write(payload) || !copy(oldEnd, tableOffset-oldEnd) || !write(table)
+       || !copy(tableOffset+table.size(), source.size()-tableOffset-table.size())
+       || !staged.flush()) return false;
+    const QByteArray wanted = expected.result().toHex();
+    CResArchiveIndex reopened;
+    if(resFileSha256(staged.fileName(), error)!=wanted
+       || !reopened.open(staged.fileName(), error)
+       || reopened.readMember(name, error)!=payload) {
+        setError(error, "Fresh streamed replacement validation failed."); return false;
+    }
+    // The streamed digest covers original gaps, directory slots and names too.
+    if(candidateSha256) *candidateSha256 = wanted;
+    source.close();
+    QSaveFile destination(destinationPath); destination.setDirectWriteFallback(false);
+    if(!destination.open(QIODevice::WriteOnly) || !staged.seek(0)) {
+        setError(error, destination.errorString()); return false;
+    }
+    while(!staged.atEnd()) {
+        const auto bytes = staged.read(4*1024*1024);
+        if(bytes.isEmpty() || destination.write(bytes)!=bytes.size()) {
+            setError(error, "Cannot copy staged replacement."); return false;
+        }
+    }
+    if(!destination.flush() || !sourceIsCurrent(error) || (beforeCommit && !beforeCommit())) return false;
+    if(!destination.commit()) { setError(error, destination.errorString()); return false; }
+    if(resFileSha256(destinationPath,error)!=wanted) {
+        setError(error, "Committed RES differs from staged replacement."); return false;
+    }
+    return true;
 }

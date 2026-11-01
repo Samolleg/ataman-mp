@@ -2,10 +2,12 @@
 #define MAP_TABLE_EDITOR_DIALOG_H
 
 #include <QDialog>
+#include <QFutureWatcher>
+#include <memory>
 
 #include "map_table_document.h"
 #include "map_table_change_report.h"
-#include "res_archive_document.h"
+#include "res_save_coordinator.h"
 
 class QCheckBox;
 class QComboBox;
@@ -18,6 +20,8 @@ class QTableWidget;
 class QTabWidget;
 class QSplitter;
 class QLabel;
+class QProgressDialog;
+class CFileWriteActivity;
 
 class CMapTableEditorDialog : public QDialog
 {
@@ -26,10 +30,18 @@ public:
     explicit CMapTableEditorDialog(QWidget* parent = nullptr);
     ~CMapTableEditorDialog() override;
     bool openArchive(const QString& path);
+    bool saveArchiveTo(const QString& destination);
+    bool isSaving() const { return m_saveWatcher != nullptr; }
     bool selectZoneById(const QString& zoneId);
     bool stageMinimapTextureForZone(const QString& zoneId,
                                     const QString& textureName);
     const QVector<SMapTableSaveReport>& saveReports() const { return m_saveReports; }
+
+signals:
+    void archiveSaveFinished(bool success);
+
+protected:
+    void done(int result) override;
 
 private slots:
     void chooseArchive();
@@ -62,7 +74,9 @@ private:
 
     QString m_archivePath;
     QString m_mapMemberName;
-    CResArchiveDocument m_archive;
+    QByteArray m_originalMapPayload;
+    QFutureWatcher<SResMemberSaveResult>* m_saveWatcher{nullptr};
+    std::shared_ptr<CFileWriteActivity> m_saveActivity;
     CMapTableDocument m_table;
     SMapTableMaps m_loadedMaps;
     QVector<SMapTableSaveReport> m_saveReports;
