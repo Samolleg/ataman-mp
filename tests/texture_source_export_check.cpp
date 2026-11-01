@@ -11,8 +11,27 @@
 #include "resourcemanager.h"
 #include "neighbor_scene_data.h"
 #include "neighbor_visual_preparation.h"
+#include <windows.h>
 
 namespace {
+struct RestoreProviderTime {
+    QString path;FILETIME stamp{};
+    HANDLE open() const {return CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),FILE_READ_ATTRIBUTES|FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);}
+    bool change(const QString& filePath){
+        path=filePath;HANDLE file=open();if(file==INVALID_HANDLE_VALUE){path.clear();return false;}
+        if(!GetFileTime(file,nullptr,nullptr,&stamp)){CloseHandle(file);path.clear();return false;}
+        ULARGE_INTEGER time;time.LowPart=stamp.dwLowDateTime;time.HighPart=stamp.dwHighDateTime;time.QuadPart+=50000000;
+        FILETIME changed{time.LowPart,time.HighPart};const bool ok=SetFileTime(file,nullptr,nullptr,&changed);CloseHandle(file);return ok;
+    }
+    bool restore(){
+        if(path.isEmpty())return true;
+        HANDLE file=open();if(file==INVALID_HANDLE_VALUE)return false;
+        const bool ok=SetFileTime(file,nullptr,nullptr,&stamp);CloseHandle(file);if(!ok)return false;
+        path.clear();return true;
+    }
+    ~RestoreProviderTime(){restore();}
+};
 QTextStream output(stdout);
 int checks=0;
 void check(bool ok,const QString& text) {
@@ -164,6 +183,32 @@ int runAssemblyCatalogCheck() {
             CObjectBase* tree=nullptr;
             for(auto* mob:view.m_aMob)for(auto* node:mob->nodes())if(node->mapId()==29&&node->modelName()=="nafltr59")tree=dynamic_cast<CObjectBase*>(node);
             check(tree!=nullptr,"original tree accessible for missing-resource regression");
+            if(qEnvironmentVariableIsSet("EI_EXPORT_WRITER_REGRESSION")) {
+                const auto rotation=tree->rotation();const auto state=tree->nodeState();const auto position=tree->drawPosition();
+                auto* environmentMob=view.m_aMob.first();const auto environment=environmentMob->worldSet();
+                const QStringList cases{"rotation","hidden","deleted","draw-position","environment","cancel","provider"};
+                for(const auto& scenario:cases) {
+                    const auto directory=root+"/exports/writer-"+scenario;
+                    CTopdownExport job(&window,{{"outputDir",directory},{"pixelsPerWorldUnit",4},{"revision",CAiEditAdapter::revision(&window)}});
+                    job.begin();check(until([&](){return job.phase()=="writing"||job.done();})&&job.phase()=="writing","reach immutable writer for "+scenario+": "+QString::fromUtf8(QJsonDocument(job.result()).toJson(QJsonDocument::Compact)));
+                    RestoreProviderTime providerTime;
+                    if(scenario=="rotation")tree->setRot(QQuaternion::fromAxisAndAngle(0,0,1,17)*rotation);
+                    else if(scenario=="hidden")tree->setState(state==eHidden?eDraw:eHidden);
+                    else if(scenario=="deleted")tree->markAsDeleted(true);
+                    else if(scenario=="draw-position")tree->setDrawPosition(position+QVector3D(1,0,0));
+                    else if(scenario=="environment"){auto changed=environment;changed.setData(eWsTypeAmbient,QString::number(environment.data(eWsTypeAmbient).toFloat()+0.125f));environmentMob->setWorldSet(changed);}
+                    else if(scenario=="provider") {
+                        const auto fixture=QDir::fromNativeSeparators(qEnvironmentVariable("EI_EXPORT_MUTABLE_FIXTURE_ROOT"));
+                        const auto provider=textures->textureSources(cached).first().toObject()["provider"].toString();
+                        check(!fixture.isEmpty()&&provider.startsWith(fixture+'/',Qt::CaseInsensitive),"provider metadata test restricted to explicit private fixture");
+                        check(providerTime.change(provider),"change private provider timestamp without changing bytes");
+                    } else job.cancel();
+                    check(until([&](){return job.done();})&&job.result()["code"]==(scenario=="cancel"?"CANCELLED":"REVISION_CONFLICT")&&!QDir(directory).exists(),"writer refuses changed/cancelled publication: "+scenario);
+                    tree->setRot(rotation);tree->setState(state);tree->markAsDeleted(false);tree->setDrawPosition(position);environmentMob->setWorldSet(environment);
+                    check(providerTime.restore(),"restore private provider timestamp");
+                    if(scenario=="provider")QTest::qWait(1500); // drain both QFileSystemWatcher notifications/dialog rejections
+                }
+            }
             view.makeCurrent();auto* missing=textures->texture("__missing_texture_export_regression__","nafltr59");
             check(textures->textureSources(missing).isEmpty(),"truly missing resource still has no false provenance");
             tree->setTexture(missing);

@@ -41,6 +41,7 @@ private:
     QElapsedTimer m_clock;
     ai::Cancellation m_cancel{std::make_shared<std::atomic_bool>(false)};
     QByteArray m_sceneIdentity;
+    quint64 m_validationCount{0},m_validationNanoseconds{0},m_providerChecks{0};
     QVector<QPointer<CNode>> m_nodes;
     QVector<QString> m_mobPaths;
     int m_next{0},m_pass{0},m_structures{0},m_vegetation{0},m_excluded{0};

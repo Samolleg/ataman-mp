@@ -29,7 +29,10 @@ QJsonObject savedFile(const QString& path,const QByteArray& baseline,bool dirty)
 }
 CTopdownExport::CTopdownExport(MainWindow* w,const QJsonObject& args):m_window(w),m_view(w?w->view():nullptr),m_args(args){}
 CTopdownExport::~CTopdownExport(){m_cancel->store(true);releaseScene();}
-void CTopdownExport::begin(){m_clock.start();QTimer::singleShot(0,this,[this](){step();});}
+void CTopdownExport::begin(){
+    m_clock.start();QTimer::singleShot(0,this,[this](){step();});
+    QTimer::singleShot(120000,this,[this](){if(!done())cancel("EXPORT_TIMEOUT");});
+}
 void CTopdownExport::releaseScene(){
     if(m_view && !m_parts.isEmpty())m_view->makeCurrent();
     m_structureItems.clear();m_vegetationItems.clear();m_parts.clear();m_textures.clear();
@@ -46,6 +49,7 @@ void CTopdownExport::cancel(const QString& code){fail(code,code=="EXPORT_TIMEOUT
 QByteArray CTopdownExport::sceneIdentity() const {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(m_revision.toUtf8());
+    hash.addData(QByteArray::number(CObjectList::getInstance()->sourceGeneration())+':');
     hash.addData(m_view->m_activeMob?m_view->m_activeMob->filePath().absoluteFilePath().toUtf8():QByteArray());
     hash.addData(m_view->m_environmentMob?m_view->m_environmentMob->filePath().absoluteFilePath().toUtf8():QByteArray());
     for(auto* mob:m_view->m_aMob) {
@@ -55,6 +59,7 @@ QByteArray CTopdownExport::sceneIdentity() const {
         for(auto* node:mob->nodes()) {
             hash.addData(QJsonDocument(node->toJson()).toJson(QJsonDocument::Compact));
             hash.addData(node->isMarkDeleted()?"deleted":"present");
+            hash.addData(node->nodeState()==eHidden?"hidden":"visible");
             hash.addData(QJsonDocument(QJsonObject{{"drawPosition",vector(node->drawPosition())}}).toJson(QJsonDocument::Compact));
         }
     }
@@ -62,13 +67,18 @@ QByteArray CTopdownExport::sceneIdentity() const {
     return hash.result();
 }
 bool CTopdownExport::unchanged() {
+    QElapsedTimer validation;validation.start();++m_validationCount;
+    struct Record { quint64& total;QElapsedTimer& timer;~Record(){total+=quint64(timer.nsecsElapsed());} } record{m_validationNanoseconds,validation};
     if(!m_window||!m_view) {fail("REVISION_CONFLICT","Source document closed");return false;}
     if(CAiEditAdapter::revision(m_window)!=m_revision || sceneIdentity()!=m_sceneIdentity) {
         fail("REVISION_CONFLICT","Map/scene changed during export; read revision and retry");return false;
     }
+    QHash<QString,QFileInfo> providers;
     for(const auto& value:m_resources) {
         const auto r=value.toObject();if(r["provider"].toString().isEmpty())continue;
-        QFileInfo f(r["provider"].toString());
+        const QString provider=r["provider"].toString();
+        if(!providers.contains(provider)){providers.insert(provider,QFileInfo(provider));++m_providerChecks;}
+        const auto& f=providers[provider];
         if(!f.exists()||double(f.size())!=r["providerBytes"].toDouble()||double(f.lastModified().toMSecsSinceEpoch())!=r["providerModifiedMs"].toDouble()) {
             fail("REVISION_CONFLICT","Resource provider changed during export",{{"resource",r}});return false;
         }
@@ -254,13 +264,17 @@ void CTopdownExport::step() {
                 if(route.contains("error")){fail(route["code"].toString(),route["error"].toString());return;}
                 const auto images=m_images;const auto manifest=m_manifest;const auto temporary=m_temporary;const auto cancel=m_cancel;const auto lease=m_outputLease;
                 m_writer=new QFutureWatcher<QJsonObject>(this);
+                connect(m_writer,&QFutureWatcher<QJsonObject>::finished,this,[this](){step();});
                 m_writer->setFuture(QtConcurrent::run([images,manifest,temporary,cancel,lease](){Q_UNUSED(lease);return ai::writeTopdownImages(images,temporary,manifest,cancel);}));
                 m_images.clear();releaseScene();
+                // The writer owns immutable images. Validate the live scene
+                // again at completion before publication; do not poll/hash the
+                // entire document every millisecond while PNGs are encoding.
+                return;
             }
         } else if(m_phase=="writing" && m_writer->isFinished()) {
             auto result=m_writer->result();m_writer->deleteLater();m_writer=nullptr;
             if(result.contains("error")){fail("OUTPUT_PATH_ERROR",result["error"].toString());return;}
-            if(!unchanged())return;
             if(m_clock.elapsed()>=120000){cancel("EXPORT_TIMEOUT");return;}
             // Revalidate the route at publication; never overwrite a newly
             // created destination or follow a substituted junction.
@@ -269,6 +283,9 @@ void CTopdownExport::step() {
             const QString manifestPath=QDir(m_temporary).filePath("manifest.json");
             QFile input(manifestPath);if(!input.open(QIODevice::ReadOnly)){fail("OUTPUT_PATH_ERROR","Cannot read prepared manifest");return;}
             auto manifest=QJsonDocument::fromJson(input.readAll()).object();input.close();manifest["status"]="complete";
+            manifest["validationPerformance"]=QJsonObject{{"checks",double(m_validationCount)},
+                {"elapsedMs",double(m_validationNanoseconds)/1000000.0},{"providerStatChecks",double(m_providerChecks)},
+                {"sceneGuard","full document hash before each resource/capture slice and after immutable PNG writer"}};
             QSaveFile finalManifest(manifestPath);
             if(!finalManifest.open(QIODevice::WriteOnly)||finalManifest.write(QJsonDocument(manifest).toJson())<0||!finalManifest.commit()) {
                 fail("OUTPUT_PATH_ERROR","Cannot finalize manifest");return;
@@ -288,6 +305,7 @@ void CTopdownExport::step() {
             result["manifestPath"]=paths["manifest.json"];result["counts"]=m_manifest["counts"];result["warnings"]=m_manifest["warnings"];
             result["exportId"]=m_manifest["exportId"];result["cartographicBase"]=m_manifest["cartographicBase"];result["retention"]=m_manifest["retention"];
             result["revision"]=m_revision;result["deadlineMs"]=120000;result["elapsedMs"]=double(m_clock.elapsed());
+            result["validationPerformance"]=manifest["validationPerformance"];
             m_result=result;m_terminal="complete";m_outputLease.reset();if(finished)finished();return;
         }
         QTimer::singleShot(1,this,[this](){step();});
