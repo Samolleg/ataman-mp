@@ -94,9 +94,22 @@ no removed paths. Package manifest SHA256:
 `58946CCB50D8587D8E6CD58FF0B47E468B5BB7D4CEFECFBD3ED00D9423D424A3`.
 
 First installation attempt stopped at `Assert-EditorClosed`: the owner editor
-was running. No process was stopped and no program file was replaced;266 remains
-installed. `installation-blocked.json` records this guard. The owner was asked to
-close the editor; guarded installation resumes after that condition is met.
+was running. No process was stopped and no program file was replaced in that
+attempt. `installation-blocked.json` preserves this historical guard result.
+
+After the owner confirmed closing the editor and requested installation,
+**267 was installed** into `artifacts/EI-Mapper-Ataman-2-first-test`.
+`work/staged-load-267-20261101/installation.json` records186 verified managed
+files,8 replaced,0 added/removed. Installed manifest matches the package above.
+All14303 unlisted user-file sizes/timestamps and both root JSON hashes were
+preserved with no drift. The common installer also retired one previously
+recorded inactive program file; it did not delete user files.
+
+Rollback266 was verified at `artifacts/rollback266-to267-staged-load-20261101`.
+The older owned265 rollback was removed only after checking its190-file
+inventory/hashes, resolved path and manifest chain to the verified installation;
+`rollback-retirement.json` records the retained266 generation. No new GUI/game
+launch was needed: the installed bytes match the tested and finalized package.
 
 ## Input guards
 
