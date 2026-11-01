@@ -415,7 +415,7 @@ public:
 bool CAiEditAdapter::busy(MainWindow* w)
 {
     auto* v=w->view();return !v||QApplication::activeModalWidget()||v->m_sculptStrokeActive||v->m_tilePaintStrokeActive
-        ||!v->m_operationBackup.isEmpty()||w->m_workspaceLoadInProgress||v->m_terrainAutoCatalogBuilding;
+        ||!v->m_operationBackup.isEmpty()||w->m_workspaceLoadInProgress||w->backgroundMobLoading()||v->m_terrainAutoCatalogBuilding;
 }
 QString CAiEditAdapter::revision(MainWindow* w)
 {

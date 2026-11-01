@@ -274,6 +274,7 @@ public:
     bool applyCanvasResizeToCurrent(const SMprCanvasResizeRequest& resize,
                                     bool removeOutsideObjects, QString* error = nullptr);
     bool loadMob(QFileInfo& filePath, QStringList* nonModalWarnings = nullptr);
+    void adoptLoadedMob(CMob* mob, const QSharedPointer<CProcessEditLock>& lease, bool activate);
     void saveMobAs();
     void saveActiveMob();
     void saveAllMob();
@@ -413,6 +414,7 @@ public:
         const QString& activeZoneId,
         const QString& layoutWarning = QString());
     void setNeighborCacheTransition(bool active);
+    void deferNeighborLoading(bool deferred);
     bool entranceOverlaysVisible() const { return m_entranceOverlaysVisible; }
     void setWorldTravelAreas(const QVector<STravelArea>& areas);
     bool projectTravelOverlay(int index, QVector3D& point) const;
@@ -718,6 +720,10 @@ private:
     void drawTilePreview(QOpenGLShaderProgram* program);
     void drawTerrainPaintOutline(QOpenGLShaderProgram* program);
     void loadNeighborLandscapes();
+    void startNeighborLoadStage(quint64 generation);
+    void finishNeighborLoadStage(quint64 generation);
+    void acceptNeighborScene(const SNeighborSceneData& result, quint64 generation,
+        const QByteArray& terrainFingerprint, const QByteArray& objectFingerprint, bool objects);
     void populateNeighborObjects(quint64 generation);
     void chooseWorldTerrainMaps();
     void updateWorldTerrainStatus();
@@ -1229,6 +1235,12 @@ private:
     void retainActiveNeighborObjects(CMob* mob);
     QThreadPool* m_neighborScenePool{nullptr};
     bool m_neighborObjectUploadScheduled{false};
+    bool m_neighborLoadingDeferred{false};
+    bool m_neighborLoadRequested{false};
+    int m_neighborLoadStage{0}; // 1 touching terrain, 2 touching objects, 3 remaining terrain
+    int m_neighborLoadJobs{0};
+    int m_neighborLoadNext{0};
+    bool m_neighborLoadPulseScheduled{false};
     QSharedPointer<std::atomic<quint64>> m_neighborSceneGeneration{
         new std::atomic<quint64>(0)};
     CWorldTerrainSession m_worldTerrainSession;

@@ -37,6 +37,7 @@ class CCreateObjectForm;
 class CView;
 class CAiAgentServer;
 class CMob;
+struct SBackgroundMobState;
 class CRandomizeForm;
 class CTileForm;
 struct SMapTableSaveReport;
@@ -132,6 +133,7 @@ private:
                           bool allowUnboundPrimary = false);
     bool attachCompanionMob(const QFileInfo& mpr);
     bool loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress = nullptr);
+    bool backgroundMobLoading() const { return !m_backgroundMobs.isNull(); }
     void createTravelEditor(QMenu* menu);
     void refreshTravelContext();
     void refreshTravelEditor();
@@ -235,6 +237,9 @@ private:
     void updateDocumentActionAvailability();
     bool beginWorkspaceLoad(const QString& description);
     void endWorkspaceLoad();
+    void cancelBackgroundMobs(bool resumeNeighbors = false);
+    void queueBackgroundMobSource(CMob* source, bool root);
+    void pumpBackgroundMobs(quint64 generation);
     void updateLoadedMapPanel();
     void updateLoadedMapMprDirtyIndicator();
     void rebuildLoadedMapPanel();
@@ -424,6 +429,9 @@ private:
     CCameraTelephotoControls* m_cameraTelephotoControls{nullptr};
     bool m_uiStateSaved{false};
     bool m_workspaceLoadInProgress{false};
+    QSharedPointer<SBackgroundMobState> m_backgroundMobs;
+    quint64 m_backgroundMobGeneration{0};
+    bool m_backgroundMobAttaching{false};
     bool m_shutdownInProgress{false};
     QString m_mapTestResultLogPath;
     ETransientNotificationAction m_transientNotificationAction{

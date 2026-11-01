@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 
 #include "mob.h"
+#include "background_mob_load.h"
 #include "navigation_save_events.h"
 #include "file_write_activity.h"
 #include "utils.h"
@@ -195,7 +196,7 @@ void CMob::setActiveRange(uint rangeId)
     m_activeRangeId = rangeId;
 }
 
-bool CMob::deserialize(QByteArray data, const CMobDocument* parsed)
+bool CMob::deserialize(QByteArray data, const CMobDocument* parsed, bool deferObjects)
 {
     ei::log(eLogInfo, "Start read mob: " + m_filePath.absoluteFilePath());
     CMobDocument localDocument;
@@ -378,6 +379,7 @@ bool CMob::deserialize(QByteArray data, const CMobDocument* parsed)
         else if(parser.isNextTag("OBJECT_SECTION"))
         {
             m_hasObjectSection = true;
+            if(deferObjects) {readByte += parser.skipTag();continue;}
             step = step/3;
             if(m_pProgress)
                 m_pProgress->update(step);
@@ -390,67 +392,13 @@ bool CMob::deserialize(QByteArray data, const CMobDocument* parsed)
             readByte += parser.skipHeader(); // object section
             while(readSecByte < objSecLen)
             {
-                if(parser.isNextTag("OBJECT"))
-                {
-                    CWorldObj* obj = new CWorldObj();
-                    readSecByte += parser.skipHeader(); // "OBJECT";
-                    readSecByte += obj->deserialize(parser);
-                    addNode(obj);
-                }
-                else if (parser.isNextTag("LEVER"))
-                {
-                    CLever* lever = new CLever();
-                    readSecByte += parser.skipHeader(); // "LEVER";
-                    readSecByte += lever->deserialize(parser);
-                    addNode(lever);
-                }
-                else if (parser.isNextTag("UNIT"))
-                {
-                    CUnit* unit = new CUnit();
-                    readSecByte += parser.skipHeader(); // "UNIT";
-                    readSecByte += unit->deserialize(parser);
-                    addNode(unit);
-                }
-                else if (parser.isNextTag("TORCH"))
-                {
-                    CTorch* torch = new CTorch();
-                    readSecByte += parser.skipHeader(); // "TORCH";
-                    readSecByte += torch->deserialize(parser);
-                    addNode(torch);
-                }
-                else if (parser.isNextTag("MAGIC_TRAP"))
-                {
-                    CMagicTrap* trap = new CMagicTrap();
-                    readSecByte += parser.skipHeader();  // "MAGIC_TRAP";
-                    readSecByte += trap->deserialize(parser);
-                    addNode(trap);
-                }
-                else if(parser.isNextTag("LIGHT"))
-                {
-                    CLight* light = new CLight();
-                    readSecByte += parser.skipHeader(); // "LIGHT";
-                    readSecByte += light->deserialize(parser);
-                    addNode(light);
-                }
-                else if(parser.isNextTag("SOUND"))
-                {
-                    CSound* sound = new CSound();
-                    readSecByte += parser.skipHeader(); // "SOUND";
-                    readSecByte += sound->deserialize(parser);
-                    addNode(sound);
-                }
-                else if(parser.isNextTag("PARTICL"))
-                {
-                    CParticle* particle = new CParticle();
-                    readSecByte += parser.skipHeader(); // "PARTICL";
-                    readSecByte += particle->deserialize(parser);
-                    addNode(particle);
-                }
-                else {
+                const uint consumed=projectObject(parser);
+                if(!consumed) {
                     ei::log(eLogFatal, QString("Unsupported object record while projecting MOB tag:%1 bytes:%2/%3")
                         .arg(parser.nextTag()).arg(readSecByte).arg(objSecLen));
                     return false;
                 }
+                readSecByte += consumed;
             }
             if(readSecByte != objSecLen)
             {
@@ -504,6 +452,54 @@ bool CMob::deserialize(QByteArray data, const CMobDocument* parsed)
         m_pProgress->update(step);
     ei::log(eLogInfo, "End read mob");
     return true;
+}
+
+uint CMob::projectObject(util::CMobParser& parser)
+{
+    CNode* node=nullptr;
+    if(parser.isNextTag("OBJECT"))node=new CWorldObj;
+    else if(parser.isNextTag("LEVER"))node=new CLever;
+    else if(parser.isNextTag("UNIT"))node=new CUnit;
+    else if(parser.isNextTag("TORCH"))node=new CTorch;
+    else if(parser.isNextTag("MAGIC_TRAP"))node=new CMagicTrap;
+    else if(parser.isNextTag("LIGHT"))node=new CLight;
+    else if(parser.isNextTag("SOUND"))node=new CSound;
+    else if(parser.isNextTag("PARTICL"))node=new CParticle;
+    if(!node)return 0;
+    const uint header=parser.skipHeader();
+    const uint bytes=node->deserialize(parser);
+    addNode(node);
+    return header+bytes;
+}
+
+bool CMob::beginPreparedLoad(const SPreparedMobLoad& source)
+{
+    if(!source.valid()||!m_aNode.isEmpty())return false;
+    m_filePath=source.source;m_originalData=source.bytes;
+    m_duplicateIds=source.document->duplicateIds();
+    return deserialize(m_originalData,source.document.data(),true);
+}
+
+bool CMob::appendPreparedObject(QByteArray record)
+{
+    util::CMobParser parser(record);
+    if(projectObject(parser)!=uint(record.size()))return false;
+    CNode* node=m_aNode.back();
+    if(!dynamic_cast<CUnit*>(node)) {node->loadFigure();node->loadTexture();}
+    CLandscape::getInstance()->projectPosition(node);
+    return true;
+}
+
+void CMob::finishPreparedLoad(const SPreparedMobLoad& source,const SPreparedMobProjection& projection)
+{
+    if(projection.rawIndices.size()==m_aNode.size())
+        for(int i=0;i<m_aNode.size();++i) {
+            const auto& raw=source.document->objects().at(projection.rawIndices[i]);
+            m_aNode[i]->setRawObjectProvenance(source.sha256,raw.sectionPath,raw.subtreeSha256,false);
+        }
+    else ei::log(eLogWarning,"Background MOB raw provenance alignment unavailable: "+m_filePath.fileName());
+    logicNodesUpdate();m_cleanProjection=projection.cleanBytes;
+    restoreAssemblyInstances();m_cleanAssemblyProjection=assemblyProjection();m_bDirty=false;
 }
 
 void CMob::updateObjects()

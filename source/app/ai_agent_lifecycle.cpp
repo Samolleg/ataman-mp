@@ -262,7 +262,8 @@ QJsonObject CAiEditAdapter::applyLifecycle(MainWindow* w,const ai::EditPlan& p) 
             v->unloadMob("");v->unloadLand(false);if(!previous.isEmpty()){w->replaceLoadedLandscape(QFileInfo(previous),false);for(const auto& m:mobs){QFileInfo file(m);v->loadMob(file);}}
             return ai::error("Open failed; previous clean workspace restored");
         }
-        w->refreshEditorWorld();return {{"status","opened"},{"path",p.destination},{"revision",revision(w)}};
+        w->refreshEditorWorld();return {{"status","opened"},{"path",p.destination},
+            {"loadingAddMobs",w->backgroundMobLoading()},{"revision",revision(w)}};
     }
     if(p.method=="create_mob") {
         if(QFileInfo::exists(p.destination)||QFileInfo(p.destination).isSymLink())return ai::error("MOB already exists; never overwrite");

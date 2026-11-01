@@ -22,6 +22,8 @@ class CTrapCastPoint;
 class CMobEditTransaction;
 class CValidationReport;
 class CMobDocument;
+struct SPreparedMobLoad;
+struct SPreparedMobProjection;
 struct STerrainHeightInfluenceBounds;
 
 struct SMobParameterState
@@ -68,6 +70,9 @@ public:
                                            QString* error = nullptr);
     int readMob(QFileInfo& path, bool createRecoverySnapshot = true,
                 QStringList* nonModalWarnings = nullptr);
+    bool beginPreparedLoad(const SPreparedMobLoad& source);
+    bool appendPreparedObject(QByteArray record);
+    void finishPreparedLoad(const SPreparedMobLoad& source, const SPreparedMobProjection& projection);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
@@ -187,7 +192,8 @@ private:
                                          QString* saveClass) const;
     bool rebindRawObjectProvenance();
     QString getAuxDirName();
-    bool deserialize(QByteArray data, const CMobDocument* parsed = nullptr);
+    bool deserialize(QByteArray data, const CMobDocument* parsed = nullptr, bool deferObjects = false);
+    uint projectObject(util::CMobParser& parser);
     void updateObjects();
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, const QString value);
     void writeData(QJsonObject& mob, const QFileInfo& file, const QString key, QByteArray& value);

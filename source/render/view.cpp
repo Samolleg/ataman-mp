@@ -3430,6 +3430,8 @@ void CView::clearNeighborLandscapes(bool reloading)
     m_neighborContextKey.clear();
     ++(*m_neighborSceneGeneration);
     m_neighborObjectUploadScheduled = false;
+    m_neighborLoadStage=0;m_neighborLoadJobs=0;m_neighborLoadNext=0;
+    m_neighborLoadPulseScheduled=false;setProperty("neighborLoadPhase",0);
     if(m_neighborLayoutDragActive)
         cancelNeighborLayoutDrag(true);
     if(m_neighborLandscapes.isEmpty())
@@ -3455,130 +3457,13 @@ void CView::clearNeighborLandscapes(bool reloading)
     ei::log(eLogInfo, "Neighbor render backgrounds retained; terrain/atlas/objects/sun preserved");
 }
 
-void CView::loadNeighborLandscapes()
-{
-    if(m_applicationShutdown)return;
-    const bool reloading=m_neighborLandscapesVisible && !m_neighborPlacements.isEmpty()
-        && m_pLand && m_pLand->isMprLoad() && isValid();
-    clearNeighborLandscapes(reloading);
-    if(!reloading)
-        return;
-    const quint64 generation = m_neighborSceneGeneration->load();
-    const auto epoch = m_neighborSceneGeneration;
-    const QStringList archives=CTextureList::getInstance()->configuredResourceArchivePaths();
-    const auto resources=neighborResourceFingerprint();
-    const QSizeF activeSize(m_pLand->widthInWorldUnits(),
-                            m_pLand->heightInWorldUnits());
-    for(const SNeighborMapPlacement& placement : m_neighborPlacements)
-    {
-        const bool loadStaticObjects = CNeighborMapLayout::touchesActiveMap(
-            activeSize, placement);
-        const auto terrainFingerprint=neighborTerrainFingerprint(placement.mprPath,resources);
-        const auto objectFingerprint=neighborContentFingerprint(placement.mobPath)+neighborObjectResourceFingerprint();
-        int cachedIndex=-1;
-        for(int i=m_neighborRenderCache.size()-1;i>=0;--i) {
-            auto& cached=m_neighborRenderCache[i];
-            if(CWorldTerrainSession::key(cached.placement.mprPath)!=CWorldTerrainSession::key(placement.mprPath))continue;
-            if(cached.terrainFingerprint!=terrainFingerprint || !cached.landscape || !cached.landscape->isMprLoad()) {
-                makeCurrent();m_neighborRenderCache.remove(i);doneCurrent();continue;
-            }
-            cachedIndex=i;break;
-        }
-        if(cachedIndex>=0) {
-            auto cached=m_neighborRenderCache.takeAt(cachedIndex);
-            cached.placement=placement;cached.showObjects=loadStaticObjects;
-            cached.lastUse=++m_neighborCacheClock;cached.drawCacheDirty=true;
-            makeCurrent();cached.landscape->setWorldOffset(QVector3D(placement.origin.x(),placement.origin.y(),0));
-            if(cached.objectFingerprint!=objectFingerprint) {
-                cached.staticObjects.clear();cached.textureLeases.clear();cached.staticLocalPositions.clear();cached.distantParts.clear();
-                cached.pendingObjects.clear();cached.pendingVisuals.clear();cached.nextObject=0;
-                cached.drawRecords.clear();cached.spatialGroups.clear();cached.objectsPrepared=false;
-            }
-            doneCurrent();m_neighborLandscapes.append(cached);
-            ei::log(eLogInfo,"Neighbor render cache hit/rebase zone:"+placement.zoneId);
-            if(!loadStaticObjects || cached.objectsPrepared)continue;
-        }
-        auto* watcher = new QFutureWatcher<SNeighborSceneData>(this);
-        connect(watcher, &QFutureWatcher<SNeighborSceneData>::finished, this,
-                [this, watcher, generation, terrainFingerprint, objectFingerprint, resources, loadStaticObjects]() {
-            const SNeighborSceneData result = watcher->result();
-            watcher->deleteLater();
-            if(generation != m_neighborSceneGeneration->load()
-               || !m_neighborLandscapesVisible || !isValid()) return;
-            for(const QString& diagnostic : result.diagnostics)
-                ei::log(eLogWarning, diagnostic);
-            if(!result.valid) return;
-            // Do not accept a worker snapshot across an external or in-session Save.
-            if(neighborTerrainFingerprint(result.placement.mprPath,neighborResourceFingerprint())!=terrainFingerprint
-               || neighborContentFingerprint(result.placement.mobPath)+neighborObjectResourceFingerprint()!=objectFingerprint) {
-                QTimer::singleShot(0,this,[this](){loadNeighborLandscapes();});return;
-            }
-            // GPU resources are created only by their owning render context.
-            // CPU workers return immutable values, never GL handles or nodes.
-            makeCurrent();
-            SLoadedNeighborLandscape loaded;
-            loaded.placement = result.placement;
-            // A drag may have updated the placement while CPU work was pending.
-            for(const auto& current : m_neighborPlacements)
-                if(current.zoneId == loaded.placement.zoneId) loaded.placement = current;
-            for(int i=0;i<m_neighborLandscapes.size();++i)
-                if(m_neighborLandscapes[i].placement.mprPath==loaded.placement.mprPath) {
-                    loaded=m_neighborLandscapes.takeAt(i);break;
-                }
-            const bool reuseTerrain=bool(loaded.landscape);
-            if(!reuseTerrain)loaded.landscape = CLandscape::createReadOnlyBackground();
-            if(!reuseTerrain && !loaded.landscape->readPreparedBackground(
-                    QFileInfo(loaded.placement.mprPath), result.terrainMembers))
-            {
-                loaded.landscape.clear();
-                doneCurrent();
-                return;
-            }
-            loaded.landscape->setWorldOffset(QVector3D(
-                float(loaded.placement.origin.x()), float(loaded.placement.origin.y()), 0));
-            loaded.terrainFingerprint=terrainFingerprint;
-            loaded.objectFingerprint=objectFingerprint;
-            loaded.objectsPrepared=loadStaticObjects;
-            loaded.showObjects=loadStaticObjects;
-            loaded.lastUse=++m_neighborCacheClock;
-            loaded.pendingObjects = result.staticObjects;
-            loaded.pendingVisuals = result.visuals;
-            m_neighborLandscapes.append(loaded);
-            trimNeighborRenderCache();
-            doneCurrent();
-            ei::log(eLogInfo, QString("Neighbor scene accepted zone:%1 staticObjects:%2 generation:%3")
-                    .arg(loaded.placement.zoneId).arg(result.staticObjects.size()).arg(generation));
-            refreshWorldTerrainNeighbors();
-            if(!m_neighborObjectUploadScheduled)
-            {
-                m_neighborObjectUploadScheduled = true;
-                QTimer::singleShot(0, this, [this, generation]() { populateNeighborObjects(generation); });
-            }
-            update();
-        });
-        const bool terrainNeeded=cachedIndex<0;
-        watcher->setFuture(QtConcurrent::run(m_neighborScenePool, [placement, loadStaticObjects, epoch, generation, archives, terrainNeeded]() {
-            if(epoch->load() != generation) return SNeighborSceneData();
-            auto scene=prepareNeighborScene(placement, loadStaticObjects, terrainNeeded);
-            if(scene.valid && !scene.staticObjects.isEmpty()) prepareNeighborVisuals(scene,archives,[epoch,generation]() {
-                return epoch->load()==generation;
-            });
-            return scene;
-        }));
-    }
-    refreshWorldTerrainNeighbors();
-    if(!m_neighborObjectUploadScheduled) {
-        m_neighborObjectUploadScheduled=true;
-        QTimer::singleShot(0,this,[this,generation](){populateNeighborObjects(generation);});
-    }
-    makeCurrent();trimNeighborRenderCache();doneCurrent();
-    update();
-}
-
 void CView::populateNeighborObjects(quint64 generation)
 {
     if(generation != m_neighborSceneGeneration->load()
        || !m_neighborLandscapesVisible || !isValid()) return;
+    if(hasPendingOperation() || QApplication::activeModalWidget()) {
+        QTimer::singleShot(30,this,[this,generation](){populateNeighborObjects(generation);});return;
+    }
     m_neighborObjectUploadScheduled = false;
     makeCurrent();
     QElapsedTimer budget; budget.start();
@@ -3586,6 +3471,7 @@ void CView::populateNeighborObjects(quint64 generation)
     bool pending = false;
     for(auto& neighbor : m_neighborLandscapes)
     {
+        if(!neighbor.showObjects)continue;
         while(neighbor.nextObject < neighbor.pendingObjects.size())
         {
             if(added >= 16 || budget.elapsed() >= 4) { pending = true; break; }
@@ -3637,6 +3523,7 @@ void CView::populateNeighborObjects(quint64 generation)
         m_neighborObjectUploadScheduled = true;
         QTimer::singleShot(8, this, [this, generation]() { populateNeighborObjects(generation); });
     }
+    finishNeighborLoadStage(generation);
 }
 
 void CView::refreshNeighborRenderCache(SLoadedNeighborLandscape& neighbor)
@@ -16854,6 +16741,15 @@ bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
         delete pMob;
         return false;
     }
+    adoptLoadedMob(pMob,lease,true);
+    ei::log(eLogInfo,QString("MOB foreground read/attach file:%1 elapsedMs:%2").arg(filePath.fileName()).arg(loadTimer.elapsed()));
+    return true;
+}
+
+void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& lease,bool activate)
+{
+    const QFileInfo filePath=pMob->filePath();
+    QElapsedTimer adoptionTimer;adoptionTimer.start();
     int unitCount = 0;
     for(CNode* node : pMob->nodes())
         if(CUnit* unit = dynamic_cast<CUnit*>(node))
@@ -16888,7 +16784,8 @@ bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
     m_scriptWorkspaces->registerMob(pMob);
     const qint64 scriptRegistrationMs = postPreloadPhase.elapsed();
     postPreloadPhase.restart();
-    changeCurrentMob(pMob);
+    if(activate)changeCurrentMob(pMob);
+    else {collectObjectTreeData();emit loadedMapStateChanged();}
     const qint64 activationMs = postPreloadPhase.elapsed();
     postPreloadPhase.restart();
     refreshAiGraphPreviewSource();
@@ -16897,13 +16794,12 @@ bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
     emit mobStateChanged();
     ei::log(eLogInfo, QString("MOB load complete file:%1 objects:%2 units:%3 elapsedMs:%4")
             .arg(filePath.fileName()).arg(pMob->nodes().size()).arg(unitCount)
-            .arg(loadTimer.elapsed()));
+            .arg(adoptionTimer.elapsed()));
     const qint64 stateSignalMs = postPreloadPhase.elapsed();
     ei::log(eLogInfo, QString(
         "MOB post-preload phases file:%1 scriptRegistrationMs:%2 activationMs:%3 aiGraphMs:%4 stateSignalMs:%5 totalMs:%6")
         .arg(filePath.fileName()).arg(scriptRegistrationMs).arg(activationMs)
         .arg(aiGraphMs).arg(stateSignalMs).arg(postPreloadTimer.elapsed()));
-    return true;
 }
 
 void CView::setWorkspaceLoadInProgress(bool inProgress)
@@ -17035,6 +16931,9 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
 
     if(unresolved.isEmpty())
     {
+        // Visual-sequence diagnostics must not advance/close between the
+        // primary's completed visuals and a later AddMob adoption.
+        if(qApp->property("workspaceVisualSmoke").toBool() && property("loadingAddMobs").toBool())return;
         if(m_unitAppearanceProgressTotal > 0)
         {
             m_unitAppearanceProgressCompleted = m_unitAppearanceProgressTotal;

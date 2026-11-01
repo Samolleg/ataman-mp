@@ -2409,6 +2409,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
 MainWindow::~MainWindow()
 {
+    cancelBackgroundMobs();
     if(m_aiAgent)m_aiAgent->stop();
     m_startupRecoveryCancel->store(true);
     saveUiState();
@@ -6085,6 +6086,7 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
 
 void MainWindow::refreshMobFamilyValidation()
 {
+    if(backgroundMobLoading())return; // one complete-family audit after the final adoption
     if(m_pView && m_pView->hasPendingOperation())
     {
         // Never snapshot/serialize MOB state while the user is positioning a
@@ -7832,8 +7834,10 @@ void MainWindow::updateDocumentActionAvailability()
 
 bool MainWindow::beginWorkspaceLoad(const QString& description)
 {
-    if(m_workspaceLoadInProgress)
+    if(m_workspaceLoadInProgress || m_backgroundMobAttaching)
         return false;
+    cancelBackgroundMobs();
+    if(m_pView)m_pView->deferNeighborLoading(true);
     m_workspaceLoadInProgress = true;
     if(m_pView)
         m_pView->setWorkspaceLoadInProgress(true);
@@ -7850,10 +7854,22 @@ void MainWindow::endWorkspaceLoad()
     m_workspaceLoadInProgress = false;
     if(m_pView)
         m_pView->setWorkspaceLoadInProgress(false);
+    // A second explicit open can interrupt a previous AddMob queue without
+    // replacing its primary. Resume every surviving explicit root as well.
+    if(m_pView)for(auto* mob:m_pView->mobs())
+        if(!mob->loadedFromAddMob())queueBackgroundMobSource(mob,true);
     ei::log(eLogInfo, "Workspace load finished");
     updateDocumentActionAvailability();
     updateMapTestAction();
     refreshViewportMinimapSources();
+    setProperty("backgroundLoadPhase",backgroundMobLoading()?"addmob":"neighbors");
+    const auto generation=m_backgroundMobGeneration;
+    // Give the completed primary scene a frame before starting dependencies.
+    QTimer::singleShot(16,this,[this,generation]() {
+        if(generation!=m_backgroundMobGeneration || m_workspaceLoadInProgress || !m_pView)return;
+        if(backgroundMobLoading())pumpBackgroundMobs(generation);
+        else m_pView->deferNeighborLoading(false);
+    });
 }
 
 void MainWindow::showLandscapeTools()
@@ -8096,8 +8112,10 @@ bool MainWindow::isDatabaseExitAllowed()
 
 void MainWindow::closeAll()
 {
+    if(m_backgroundMobAttaching)return;
     if(isExitAllowed())
     {
+        cancelBackgroundMobs();
         m_undoStack->clear();
         m_pView->unloadMob("");
         // isExitAllowed() already obtained the user's save/discard decision.
@@ -8379,70 +8397,13 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName, bool attachMo
 
 bool MainWindow::loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress)
 {
-    if(!m_pView->loadMob(fileName)) return false;
-    CMob* primary = m_pView->currentMob();
+    Q_UNUSED(progress);
+    if(!m_pView->loadMob(fileName))return false;
+    CMob* primary=m_pView->currentMob();
     primary->setLoadedFromAddMob(false);
-    QVector<CMob*> pending{primary};
-    QSet<QString> scheduled{CProcessEditLock::identity(primary->filePath().absoluteFilePath())};
-    QSet<QString> visited;
-    QStringList warnings;
-    const QStringList roots = activeMapRoots().toList();
-    // Traverse the scripts of successfully opened documents. Shared dependencies
-    // and cycles use the same canonical identity as the document registry/leases.
-    for(int i = 0; i < pending.size(); ++i)
-    {
-        CMob* source = pending.at(i);
-        const QString identity = CProcessEditLock::identity(source->filePath().absoluteFilePath());
-        if(visited.contains(identity)) continue;
-        visited.insert(identity);
-        const auto paths = CMobFamilyValidator::addMobPaths(
-            m_pView->scenarioScriptText(source), source->filePath().absoluteFilePath(), roots, &warnings);
-        for(const QString& path : paths)
-        {
-            const QString key = CProcessEditLock::identity(path);
-            if(visited.contains(key)) continue;
-            CMob* dependency = nullptr;
-            for(CMob* loaded : m_pView->mobs())
-                if(CProcessEditLock::identity(loaded->filePath().absoluteFilePath()) == key)
-                { dependency = loaded; break; }
-            if(!dependency)
-            {
-                if(progress) progress->setLabelText(tr("Loading MOB: %1").arg(QFileInfo(path).fileName()));
-                // Document projection emits progress and pumps events itself.
-                // Restore the primary before pumping the next dependency's load.
-                QFileInfo next(path);
-                if(m_pView->loadMob(next, &warnings))
-                {
-                    dependency = m_pView->currentMob();
-                    dependency->setLoadedFromAddMob(true);
-                }
-                else
-                {
-                    visited.insert(key);
-                    warnings.append(tr("AddMob: не удалось открыть %1 (см. журнал сообщений)").arg(path));
-                }
-                m_pView->changeCurrentMob(primary);
-            }
-            if(dependency && !scheduled.contains(key))
-            {
-                scheduled.insert(key);
-                pending.append(dependency);
-            }
-        }
-    }
-    m_pView->changeCurrentMob(primary);
-    ei::log(eLogInfo, QString("AddMob workspace traversal primary:%1 visited:%2 warnings:%3")
-            .arg(fileName.absoluteFilePath()).arg(visited.size()).arg(warnings.size()));
-    if(!warnings.isEmpty())
-    {
-        for(const QString& warning : warnings) ei::log(eLogWarning, warning);
-        showTransientResultNotification(
-            tr("Загрузка MOB из AddMob: предупреждения\n%1").arg(warnings.mid(0, 5).join('\n')),
-            false, true, QString(), ETransientNotificationAction::None, 15000);
-    }
+    queueBackgroundMobSource(primary,true);
     return true;
 }
-
 bool MainWindow::loadMobWithProgress(QFileInfo fileName, bool bindMap)
 {
     if(!beginWorkspaceLoad(tr("MOB %1").arg(fileName.fileName())))
@@ -9902,7 +9863,7 @@ void MainWindow::resizeEvent(QResizeEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
-    if(property("aiCommitBusy").toBool()) {
+    if(property("aiCommitBusy").toBool() || m_backgroundMobAttaching) {
         e->ignore();QTimer::singleShot(50,this,[this](){close();});return;
     }
 
@@ -9956,6 +9917,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
 
     if(!m_closeReady) {
         e->ignore();m_closeWaiting=true;m_shutdownInProgress=true;
+        cancelBackgroundMobs();
           m_startupRecoveryCancel->store(true);
         ei::log(eLogInfo,"Shutdown started timeoutMs:120000");
         if(m_autosaveTimer)m_autosaveTimer->stop();
