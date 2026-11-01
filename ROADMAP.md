@@ -1,9 +1,10 @@
 ## EI-ADDMOB-INFO-270 — уровни сообщений фоновой загрузки (2026-11-01)
 
+- INSTALLED270 (2026-11-01): владелец принял main1277fb1d8d043416acb4e02708a17e9c83801b14 и разрешил «ставь», прежний STOP снят. Готовый build-staging-270-addmob-info-20261101 установлен каноническим packaging/install_program.ps1 без пересборки;188 managed SHA совпали, CLI270;9 замен/1 добавление/0 удалений. Откат artifacts/rollback269-to270-addmob-info-20261101: rollback.ps1 -VerifyOnly PASS.13415 пользовательских файлов сохранили SHA/размер/mtime;9 прежних мостов живы. Занятый EIMapperMcp.exe переименован в EIMapperMcp.exe.old-ataman-88c5cfe5bc034357ba66bd42daa067c7; старый .old-ataman-25d26775d0d44bcbaa2866a7a1ebb57c сохранён. Маппер/игра закрыты; без завершения процессов, GUI/computer-use, регистрации моста, удаления прежних откатов и push. Приёмка270 владельцем получена. Evidence: docs/validation/ATAMAN_ADDMOB_INFO_270_20261101.md; work/addmob-info-270-20261101/install270/receipt.json.
 - DONE / STAGED270, STOP BEFORE INSTALLATION. База main77c9099f5fb21239916d4af8204c6572b375365d, установленная269. Info исключены из warnings фоновых AddMob; Warning/Critical/Error и duplicate_id сохранены. Соседние пути проверены, аналогичного сбора успешных Info нет.
 - Проверки: отдельный addmob_info_check16 PASS и mob_load_pipeline_check74 PASS, оба exit0; чистый AddMob без уведомления, duplicate_id с исходной строкой, Info не пишутся как Warning, порядок/отмена/соседи266/267 и no-op bytes сохранены. Release из git archive, CLI270 и SHA компонентов совпали. Финализатор:187 прежних/188 текущих/0 потерь относительно269. Staging build-staging-270-addmob-info-20261101.
 - SHA/размер/mtime106 исходных файлов сохранены; тестовые копии удалены после PASS. Чужие правки сохранены и исключены из коммита. Без desktop/computer-use/буфера/игры, изменения установки и push. Evidence: docs/validation/ATAMAN_ADDMOB_INFO_270_20261101.md; work/addmob-info-270-20261101/.
-- NEXT: решение владельца об установке; установка и ручная приёмка не выполнены по границе поручения.
+- DONE: владелец принял270; разрешённая установка и её проверки завершены. Push не выполнялся.
 
 ## EI-PERF-268 — производительность установленной267 и stwali1 (2026-11-01)
 

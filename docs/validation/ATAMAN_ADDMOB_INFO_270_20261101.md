@@ -50,3 +50,45 @@ HEAD. Evidence: `cleanup-result.json`, `owner-before.json` и staged diff.
 только потому, что эти файлы пакета изменились; программу после финализации
 не запускаем. Ручная приёмка владельцем и установка в этот запрос не входят.
 Постоянная установка269 не изменялась; push не выполнялся.
+
+## Установка270 — решение владельца 2026-11-01
+
+Владелец принял main `1277fb1d8d043416acb4e02708a17e9c83801b14` и сказал
+«ставь»: прежний STOP BEFORE INSTALLATION снят этим новым поручением.
+Установлен готовый Release из проверенного staging
+`build-staging-270-addmob-info-20261101`, без пересборки, через канонический
+`packaging/install_program.ps1`. BUILD_INFO: Release tree
+`50f5ab3cb55f7326fb6e0f599b18d1aa88be2c90`.
+
+Постоянный target: `artifacts/EI-Mapper-Ataman-2-first-test`.
+Откат: `artifacts/rollback269-to270-addmob-info-20261101`;
+его собственный `rollback.ps1 -VerifyOnly` вернул `ROLLBACK_VERIFIED`.
+Установщик:188 проверенных управляемых файлов,9 замен,1 добавление,0 удалений.
+Все188 SHA совпали со staging; установленный SHA256SUMS.txt:
+`2DBFBDBA3CD0CE446367691FF2BD5594C02D161B35D03662BED6D03ECAB7FF85`.
+Установленный `--version`: `EI Mapper Endurance Edition 270`, exit0,
+процесс без видимого окна.13415 пользовательских файлов сохранили
+SHA256, размер и LastWriteTimeUtc. Финализатор на установке не запускался.
+
+Перед установкой все EIMapperEndurance (включая headless), runtime host и игра
+закрыты. EIMapperMcp PID до/после:
+22272,20980,19576,11456,25200,22564,27876,10880,9564.
+Все9 живы с прежним временем создания. Никакие процессы не завершались.
+Занятый файл `EIMapperMcp.exe` отодвинут в
+`EIMapperMcp.exe.old-ataman-88c5cfe5bc034357ba66bd42daa067c7`;
+его старый SHA256 `792CCE25DA24241A74368DD70552D1B2F6291FBDA5F625F9DDEA4437280DCE00`.
+Канонический EIMapperMcp.exe установлен из270, SHA256
+`D05C626EA8FE8C1C5C3478F20CBAEE90FAED600405C9775B74075E2F8CA5FFED`.
+Прежний `EIMapperMcp.exe.old-ataman-25d26775d0d44bcbaa2866a7a1ebb57c`
+сохранён; очистка retired:0 удалено,1 сохранён до новой замены.
+Прежние откаты не удалялись.
+
+Регистрация ~/.codex/config.toml и .mcp.json, исходники/QM владельца
+сохранили SHA. ROADMAP получил только запись этой установки и завершение
+её следующего шага; чужие строки сохранены и исключены из staged diff.
+Без интерактивного запуска маппера/игры, computer-use, управления столом,
+видимых окон, дополнительных функциональных проверок и push.
+Приёмка270 владельцем получена; этот этап подтверждает установку.
+Evidence: `work/addmob-info-270-20261101/install270/receipt.json`,
+`installer.log`, `rollback-verify.log`, `bridges-before.json`,
+`bridges-after.json`, `user-before.json`, `user-after.json`.
