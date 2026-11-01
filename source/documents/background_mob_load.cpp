@@ -27,7 +27,8 @@ SPreparedMobLoad prepareBackgroundMob(const QFileInfo& source,
         result.error=report.toText();return result;
     }
     for(const auto& finding:report.findings())
-        result.warnings.append(finding.message);
+        if(finding.severity != EValidationSeverity::Info)
+            result.warnings.append(finding.message);
     std::function<void(const QVector<SMobSection>&)> collect=[&](const QVector<SMobSection>& sections) {
         for(const auto& section:sections) {
             if(section.type==0xB000) {
