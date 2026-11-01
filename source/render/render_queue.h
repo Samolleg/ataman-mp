@@ -43,6 +43,7 @@ struct SRenderItem
     float shadowBoundsRadius{0.0f};
     QVector3D materialEmission;
     quintptr shadowOwner{0};
+    int localShadowSkipIndex{-1}; // resolved for this pass, not object identity
 };
 
 inline bool renderTextureReady(const QOpenGLTexture* texture)
@@ -94,6 +95,15 @@ inline void sortRenderItems(QVector<SRenderItem>& items)
             return left.meshIdentity < right.meshIdentity;
         if(left.textureUvScale != right.textureUvScale)
             return left.textureUvScale < right.textureUvScale;
+        if(left.localShadowSkipIndex != right.localShadowSkipIndex)
+            return left.localShadowSkipIndex < right.localShadowSkipIndex;
+        if(left.backgroundScenery != right.backgroundScenery)
+            return !left.backgroundScenery;
+        if(left.diplomacyTint != right.diplomacyTint) {
+            for(int axis=0;axis<4;++axis)
+                if(left.diplomacyTint[axis]!=right.diplomacyTint[axis])
+                    return left.diplomacyTint[axis]<right.diplomacyTint[axis];
+        }
         if(left.materialEmission != right.materialEmission)
         {
             if(left.materialEmission.x() != right.materialEmission.x())
@@ -115,7 +125,7 @@ inline bool shareInstanceBatch(const SRenderItem& left, const SRenderItem& right
         && left.materialClass == right.materialClass
         && left.dynamicShadow == right.dynamicShadow
         && left.backgroundScenery == right.backgroundScenery
-        && left.shadowOwner == right.shadowOwner
+        && left.localShadowSkipIndex == right.localShadowSkipIndex
         && left.texture == right.texture
         && left.meshIdentity == right.meshIdentity
         && left.textureUvScale == right.textureUvScale

@@ -517,6 +517,11 @@ void CPart::drawSelect(QOpenGLShaderProgram *program)
     ei::gl::DrawArrays(GL_TRIANGLES, 0, m_aVertData.count());
     if(vertexArrayBound)
         arrays->selection.release();
+    auto& performance=RenderPerformanceContext::instance();
+    if(performance.collecting()) {
+        ++performance.counters().drawCalls;
+        performance.counters().triangles+=quint64(m_aVertData.count()/3);
+    }
 }
 
 bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* instanceBuffer,
@@ -597,5 +602,11 @@ bool CPart::drawSelectInstanced(QOpenGLShaderProgram* program, QOpenGLBuffer* in
     else
         m_mesh->buffer.release();
     program->setUniformValue(locations.instanced, false);
+    auto& performance=RenderPerformanceContext::instance();
+    if(performance.collecting()) {
+        ++performance.counters().drawCalls;++performance.counters().instancedDrawCalls;
+        performance.counters().instances+=quint64(instances.size());
+        performance.counters().triangles+=quint64(m_aVertData.count()/3)*quint64(instances.size());
+    }
     return true;
 }

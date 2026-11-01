@@ -119,6 +119,32 @@ void RenderQueueTests::groupsOnlyCompatibleInstanceRuns()
     SRenderItem neighbor = first;
     neighbor.backgroundScenery = true;
     QVERIFY(!shareInstanceBatch(first, neighbor)); // the border-fog uniform differs
+
+    first.shadowOwner=101;second.shadowOwner=202;
+    QVERIFY(shareInstanceBatch(first,second)); // different objects, same resolved pass state
+    first.castsShadow=second.castsShadow=true;
+    QVERIFY(shareInstanceBatch(first,second)); // sun/caster pass has no local exclusion
+    second.localShadowSkipIndex=0;
+    QVERIFY(!shareInstanceBatch(first,second));
+    first.localShadowSkipIndex=0;
+    QVERIFY(shareInstanceBatch(first,second));
+    second.localShadowSkipIndex=1;
+    QVERIFY(!shareInstanceBatch(first,second)); // different self-shadow exclusions
+    second.localShadowSkipIndex=first.localShadowSkipIndex;
+    second.instanceEligible=false;
+    QVERIFY(!shareInstanceBatch(first,second)); // animated/morphed path stays separate
+    second.instanceEligible=true;
+    second.diplomacyTint=QVector4D(1,0,0,1);
+    QVERIFY(!shareInstanceBatch(first,second));
+    second.diplomacyTint=first.diplomacyTint;
+    second.pickingColor=QVector4D(1,0,0,1);
+    QVERIFY(shareInstanceBatch(first,second)); // picking color is uploaded per instance
+
+    QVector<SRenderItem> forest;
+    first.localShadowSkipIndex=-1;
+    for(int i=0;i<1000;++i){auto tree=first;tree.shadowOwner=i+1;tree.sequence=i;forest.append(tree);}
+    sortRenderItems(forest);
+    QCOMPARE(instanceBatchLength(forest,0),1000);
 }
 
 void RenderQueueTests::filtersShadowCastersByDistance()

@@ -347,6 +347,7 @@ void RenderQueueContext::flushShadow(QOpenGLShaderProgram* shadowProgram,
             continue;
         SRenderItem item = source;
         item.highlighted = false;
+        item.localShadowSkipIndex = -1; // caster filtering above already uses owner
         shadowItems.append(item);
     }
     sortRenderItems(shadowItems);
@@ -412,8 +413,11 @@ void RenderQueueContext::flush()
     QVector<SRenderItem> colorItems;
     colorItems.reserve(m_items.size());
     for(const SRenderItem& item : m_items)
-        if(item.colorVisible)
-            colorItems.append(item);
+        if(item.colorVisible) {
+            auto resolved=item;
+            resolved.localShadowSkipIndex=m_selectionPass ? -1 : m_localShadowOwners.indexOf(item.shadowOwner);
+            colorItems.append(resolved);
+        }
     if(colorItems.isEmpty())
     {
         m_items.clear();
@@ -566,7 +570,7 @@ void RenderQueueContext::flush()
         const int runLength = m_instancingEnabled
             ? instanceBatchLength(colorItems, itemIndex) : 1;
         bool instanced = false;
-        const int localShadowSkip = m_localShadowOwners.indexOf(item.shadowOwner);
+        const int localShadowSkip = item.localShadowSkipIndex;
         if(localShadowSkip != activeLocalShadowSkip)
         {
             activeLocalShadowSkip = localShadowSkip;
@@ -597,6 +601,7 @@ void RenderQueueContext::flush()
         }
         if(!instanced)
         {
+            m_program->setUniformValue(m_instancedLocation, false);
             m_program->setUniformValue(m_modelMatrixLocation, item.modelMatrix);
             item.part->drawImmediate(m_program);
         }
