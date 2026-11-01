@@ -166,6 +166,12 @@ an existing mesh for a different MOB must never be substituted.
 
 ## Explicit static deletion and live-catalog merge
 
+Script `SetCP` and `SetCPFast` Z arguments are relative to the supporting surface.
+Migration preserves their original numeric value and token bytes, including
+nonzero offsets. Only XY follows landmarks. Effect world heights use a separate
+rule that preserves altitude above the old terrain. Never replace a SetCP zero
+with the destination terrain height; the client would add that height again.
+
 Native `remove <request.json> <candidate.mob>` requires each static object's
 section path and original subtree SHA. It rejects unit deletion, duplicate or
 missing requests, preserves all retained raw records in order, and strict-loads

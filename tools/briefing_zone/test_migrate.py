@@ -1,9 +1,36 @@
 import unittest
-from migrate import calls,number,decrypt_script,flatten
+from migrate import calls,number,decrypt_script,flatten,script_destination_z
 from finish import encrypt
 import base64,struct
+import tempfile,contextlib,io
+from pathlib import Path
+from unittest.mock import patch
+from migrate import save,load
+from revise import adjust
 
 class MigrationChecks(unittest.TestCase):
+    def test_passability_correction_does_not_replace_setcp_offset(self):
+        for command in ('SetCP','SetCPFast'):
+            with tempfile.TemporaryDirectory() as directory:
+                root=Path(directory)
+                row=dict(index=0,kind='script',function=command,identity='synthetic',inactive=False,new=[1,2,.05],navigationTarget=True)
+                save(root/'rows.json',[row]);save(root/'plan-draft.json',dict(leaves=[]))
+                save(root/'script-edits.json',[dict(row=0,new=v) for v in ('1','2','0.0500')])
+                save(root/'compare-old.json',dict(points=[dict(index=0,inBounds=True,humanPassable=True)]))
+                save(root/'compare-new.json',dict(points=[dict(index=0,inBounds=True,humanPassable=False,passableWithin2m=True,nearestPassable=[1.5,2,99],projectionDistance=.5)]))
+                with patch('revise.compose'),patch('revise.requests'),contextlib.redirect_stdout(io.StringIO()):adjust(root,'unused')
+                self.assertEqual(load(root/'rows.json')[0]['new'],[1.5,2,.05])
+                self.assertEqual(load(root/'script-edits.json')[2]['new'],'0.0500')
+
+    def test_setcp_preserves_relative_height_across_terrain_change(self):
+        for command in ('SetCP','SetCPFast'):
+            for offset in (0,1.5,-0.05):
+                self.assertEqual(script_destination_z(command,offset,2.8,6.2),offset)
+
+    def test_effect_keeps_world_height_above_old_surface(self):
+        self.assertAlmostEqual(script_destination_z('CreateFX',3,2.8,6.2),6.4)
+        self.assertAlmostEqual(script_destination_z('CreateParticleSource',0,2.8,6.2),3.4)
+
     def test_nested_arguments_and_quoted_commas(self):
         text='MoveToPoint(GetObjectByName("A, B"), -1.25, 2e1)'
         result=next((name,args) for name,args in calls(text) if name[0]=='MoveToPoint')

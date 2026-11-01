@@ -89,13 +89,16 @@ def adjust(root,cli):
         row['requiresWalkablePosition']=navigates
         if was and not now and navigates and b.get('passableWithin2m'):
             before=row['new'][:];point=b['nearestPassable'];row['new'][:2]=point[:2]
-            if row['kind']=='script' and len(row['new'])==3:row['new'][2]=point[2]
+            relative_z=row.get('function') in ('SetCP','SetCPFast')
+            if row['kind']=='script' and len(row['new'])==3 and not relative_z:row['new'][2]=point[2]
             row['adjustmentDistance']=b['projectionDistance'];assert row['adjustmentDistance']<=2.000001
             changes.append(dict(index=row['index'],kind=row['kind'],identity=row['identity'],calculated=before,corrected=row['new'][:],distance=b['projectionDistance']))
             if row['kind'] in ('unit','guard','patrol'):
                 leaf=next(e for e in draft['leaves'] if e['path']==row['path']);leaf['payload']=base64.b64encode(struct.pack('<3f',*row['new'])).decode()
             else:
-                for value,e in zip(row['new'],[e for e in edits if e['row']==row['index']]):e['new']=f'{value:.6f}'.rstrip('0').rstrip('.')
+                for component,(value,e) in enumerate(zip(row['new'],[e for e in edits if e['row']==row['index']])):
+                    if component==2 and relative_z:continue
+                    e['new']=f'{value:.6f}'.rstrip('0').rstrip('.')
     save(root/'adjustments.json',changes);save(root/'plan-draft.json',draft);save(root/'script-edits.json',edits);save(root/'rows.json',rows)
     compose(root,cli);requests(root,rows)
     print(json.dumps(dict(newlyBlocked=sum(r.get('passabilityClass')=='newly_blocked' and r.get('requiresWalkablePosition') for r in rows),adjusted=len(changes),previouslyBlocked=sum(r.get('passabilityClass')=='blocked_before_and_after' and r.get('requiresWalkablePosition') for r in rows))))

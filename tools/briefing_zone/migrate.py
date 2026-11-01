@@ -71,6 +71,13 @@ SIGNATURES = {'MoveToPoint': [(1,2)], 'RotateTo': [(1,2)],
               'CreateParticleSource': [(1,2,3)], 'CreateFX': [(0,1,2)],
               '#DontBeIdiot': [(1,2),(3,4)]}
 
+def script_destination_z(function, old_z, old_terrain, new_terrain):
+    # SetCP stores an offset above the supporting surface, including nonzero
+    # offsets. Effects instead use world heights. Never apply one rule to both.
+    if function in ('SetCP', 'SetCPFast'):
+        return old_z
+    return new_terrain + old_z - old_terrain
+
 def plan(root, anchors_path, cli):
     root = Path(root).resolve();cli=str(Path(cli).resolve()); b = load(root/'inspect/basecam.mob.json'); z = load(root/'inspect/zone1.mob.json')
     bs = {s['path']:s for s in flatten(b['sections'])}; zs = {s['path']:s for s in flatten(z['sections'])}
@@ -128,7 +135,7 @@ def plan(root, anchors_path, cli):
             before=[float(args[i][0][0]) for i in signature]
             r,a=row('script',f"line {script.count(chr(10),0,t[1])+1} {t[0]}",before,
                     function=t[0],sourceOffset=t[1],spans=[list(args[i][0][1:]) for i in signature],
-                    zMode='absolute height, preserve altitude above old terrain' if len(before)==3 else 'XY only',
+                    zMode=('relative height above surface, preserve unchanged' if t[0] in ('SetCP','SetCPFast') else 'absolute height, preserve altitude above old terrain') if len(before)==3 else 'XY only',
                     navigationTarget=t[0] not in ('RotateTo','CreateParticleSource','CreateFX'))
     # map.txt is a separate scenario resource: its local map coordinates must follow the gate too.
     text=base64.b64decode(load(root/'inspect/texts.res.json')['mapPayload']).decode('latin1');match=re.search(r'(?m)^#zone bz1g\s[\s\S]*?(?=^#zone )',text)
@@ -158,14 +165,11 @@ def plan(root, anchors_path, cli):
         if not q['available']:r['status']='проверить';r['reason']+='; outside terrain'
         if r['kind']=='script':
             if len(r['new'])==3:
-                # Zero is a ground-placement convention used by SetCP in this MOB.
-                # Effects have explicit altitude; retain their height above the terrain.
-                if r['function'] not in ('SetCP','SetCPFast'):
-                    r['new'][2]=q['terrainZ']+r['old'][2]-r['oldTerrainZ']
-                else:
-                    r['new'][2]=q['terrainZ'];r['zMode']='absolute destination on new terrain'
-            for span,val in zip(r['spans'],r['new']):
-                replacements.append(dict(start=span[0],end=span[1],old=script[span[0]:span[1]],new=f'{val:.6f}'.rstrip('0').rstrip('.'),row=r['index'],kind='coordinate'))
+                r['new'][2]=script_destination_z(r['function'],r['old'][2],r['oldTerrainZ'],q['terrainZ'])
+            for component,(span,val) in enumerate(zip(r['spans'],r['new'])):
+                original=script[span[0]:span[1]]
+                token=original if component==2 and r['function'] in ('SetCP','SetCPFast') else f'{val:.6f}'.rstrip('0').rstrip('.')
+                replacements.append(dict(start=span[0],end=span[1],old=original,new=token,row=r['index'],kind='coordinate'))
     save(root/'rows.json',rows);save(root/'script-edits.json',replacements)
     save(root/'plan-draft.json',dict(baseMob=str(root/'in/basecam.mob'),zoneMob=str(root/'in/zone1.mob'),zoneMpr=str(root/'in/zone1.mpr'),leaves=edits))
     print(json.dumps(dict(units=sum(r['kind']=='unit' for r in rows),scriptPoints=sum(r['kind']=='script' for r in rows),binaryPoints=sum(r['kind'] in ('guard','patrol','look') for r in rows),review=sum(r['status']!='OK' for r in rows))))
