@@ -596,5 +596,11 @@ void MinimapExportTests::registersCatalogOnlyAfterExportAndPreservesObjectives()
     QVERIFY(!registered.updatedMapTableBytes.contains("oldmap zone1quest"));
 }
 
-QTEST_GUILESS_MAIN(MinimapExportTests)
+int main(int argc,char** argv) {
+    QCoreApplication app(argc,argv);
+    QTemporaryDir store;
+    if(qEnvironmentVariableIsEmpty("EI_MAPPER_TEST_LOCK_ROOT"))
+        qputenv("EI_MAPPER_TEST_LOCK_ROOT",store.path().toUtf8());
+    MinimapExportTests tests;return QTest::qExec(&tests,argc,argv);
+}
 #include "minimap_export_tests.moc"

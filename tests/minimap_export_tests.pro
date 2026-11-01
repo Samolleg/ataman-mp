@@ -1,6 +1,9 @@
 QT += core gui widgets testlib concurrent
 CONFIG += testcase console c++11
 TEMPLATE = app
+SOURCES += ../source/core/process_edit_lock_store.cpp
+DEFINES += EI_MAPPER_LOCK_STORE_TESTING
+win32: LIBS += -lshell32 -lole32 -ladvapi32
 TARGET = minimap_export_tests
 INCLUDEPATH += ../source/documents ../source/resources ../source/core ../source/app
 SOURCES += minimap_export_tests.cpp \

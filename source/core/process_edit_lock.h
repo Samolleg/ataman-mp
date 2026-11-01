@@ -1,6 +1,7 @@
 #ifndef PROCESS_EDIT_LOCK_H
 #define PROCESS_EDIT_LOCK_H
 #include <QtCore>
+#include "process_edit_lock_store.h"
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #endif
@@ -60,9 +61,10 @@ public:
     static QString lockFilePath(const QString& path,bool map=true) {
         const auto key=identity(documentPath(path,map));
         const auto hash=QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(),QCryptographicHash::Sha256).toHex());
-        // Keep the store with the physical directory, shared by all installations,
-        // profiles and Windows users accessing these documents (including junctions).
-        return QDir(QFileInfo(key).absolutePath()).filePath(".mapper-service/locks/"+hash
+        // Machine-wide store; document identity and suffixes remain unchanged.
+        const auto root=mapper_edit_locks::directory();
+        if(root.isEmpty())return {};
+        return QDir(root).filePath(hash
             +(map?".mapper-edit.lock":".mapper-resource.lock"));
     }
     static QSharedPointer<CProcessEditLock> acquire(QString path,QString* error=nullptr,bool map=true) {
@@ -70,30 +72,28 @@ public:
         const auto name=lockFilePath(path,map);
         static QMutex mutex;static QMap<QString,QWeakPointer<CProcessEditLock>> leases;
         QMutexLocker guard(&mutex);auto lease=leases.value(name).toStrongRef();if(lease)return lease;
-        const auto directory=QFileInfo(name).absolutePath();
-        if(!QDir().mkpath(directory)) {
-            if(error)*error=QString::fromUtf8("Не удалось создать служебную папку блокировок: ")+directory;
-            return {};
-        }
-        lease=QSharedPointer<CProcessEditLock>(new CProcessEditLock(name));
+        const auto directory=mapper_edit_locks::directory();
         const auto busy=[&](){
             if(error)*error=map?QString::fromUtf8("Карта открыта владельцем в другом маппере (или другим агентом): ")+path
                 :QString::fromUtf8("Общий ресурс обновляется другим маппером; повторите операцию: ")+path;
+            if(error)*error+=QString::fromUtf8("; папка блокировок: ")+QDir::toNativeSeparators(directory);
         };
+        // Probe both old locations without tryLock: even a successful probe of
+        // an existing dead lock would create/remove a file inside the mod.
+        const auto key=identity(path);
+        const auto hash=QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(),QCryptographicHash::Sha256).toHex());
+        const auto suffix=map?QStringLiteral(".mapper-edit.lock"):QStringLiteral(".mapper-resource.lock");
+        const auto oldStore=QDir(QFileInfo(key).absolutePath()).filePath(".mapper-service/locks/"+hash+suffix);
+        for(const auto& old:{oldStore,key+suffix})
+            if(mapper_edit_locks::existingOwner(old)){busy();return {};}
+        if(!mapper_edit_locks::prepareDirectory(directory,error))return {};
+        lease=QSharedPointer<CProcessEditLock>(new CProcessEditLock(name));
         if(!lease->m_lock.tryLock(0)) {
             if(lease->m_lock.error()==QLockFile::LockFailedError)busy();
             else if(error)*error=QString::fromUtf8("Не удалось создать служебный файл блокировки: ")+name;
             return {};
         }
-        // During an upgrade, respect an existing old-format owner and recover a
-        // dead one using QLockFile's PID checks. Only probe an existing legacy
-        // name. Older editors do not know the service store: update all
-        // concurrently used copies before editing with the new version.
-        const auto legacyName=identity(path)+(map?".mapper-edit.lock":".mapper-resource.lock");
-        if(QFileInfo::exists(legacyName)) {
-            QLockFile legacy(legacyName);legacy.setStaleLockTime(0);
-            if(!legacy.tryLock(0)){busy();return {};}
-        }
+        // Old editors cannot see ProgramData leases: update all simultaneous copies.
         leases[name]=lease;return lease;
     }
 };

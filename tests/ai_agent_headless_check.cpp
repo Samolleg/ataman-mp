@@ -148,6 +148,33 @@ int runAssemblyCatalogCheck()
         int backgrounds=0;for(const auto& value:a.tool("list_instances")["instances"].toArray())backgrounds+=value.toObject()["background"].toBool();
         check(backgrounds==1&&firstPid,"two bridges own exactly one background mapper");
         check(ac["profile"]=="deja-vu"&&a.tool("get_revision")["allowSave"]==true,"saved Dejavu profile paths and224 Edit+Save restored before first tool");
+        if(qEnvironmentVariableIsSet("EI_MCP_LOCKS_ONLY")) {
+            qApp->setProperty("workspaceLoadSmoke",true);MainWindow owner;owner.configureAutosaveTimer(false,300000);
+            owner.m_currentCollectionPath=root+"/owner.collection";owner.resize(1000,800);owner.show();owner.view()->makeCurrent();
+            Client editor(bridge);editor.call("initialize",{{"protocolVersion","2025-11-25"}});
+            check(editor.tool("connect_instance",{{"target","editor"}})["background"]==false,"explicit editor target uses hidden production owner");
+            run(editor,"open_map",{{"map","gipat2"}});
+            run(editor,"sculpt",{{"action","raise"},{"amount",2},{"area",QJsonObject{{"shape","circle"},{"x",32},{"y",32},{"radius",12}}}});
+            const auto ownerTerrain=terrain(editor);const auto ownerDisk=read(maps+"/gipat2.mpr");
+            const auto ownerOptions=read(root+"/app/endurance-options.json");
+            check(a.tool("connect_instance",{{"target","background"}})["background"]==true,"bridge retains independent background mapper");
+            run(a,"create_map",{{"name","parallel271"},{"sectorsX",8},{"sectorsY",8},{"height",8},{"maxZ",64},{"template","0/gipat2.mpr"}});
+            run(a,"sculpt",{{"action","raise"},{"amount",1},{"area",QJsonObject{{"shape","circle"},{"x",64},{"y",64},{"radius",12}}}});
+            run(a,"save");
+            check(terrain(editor)==ownerTerrain&&read(maps+"/gipat2.mpr")==ownerDisk&&CAiEditAdapter::dirty(&owner),"two mapper processes edit different maps; background Save preserves dirty owner A");
+            check(read(root+"/app/endurance-options.json")==ownerOptions,"background preserves isolated owner options");
+            auto refused=a.tool("open_map",{{"revision",a.tool("get_revision")["revision"]},{"map","gipat2"}});
+            if(refused.contains("operation"))refused=a.finish(refused,true);
+            check(refused["error"].toString().contains(QString::fromUtf8("Карта открыта владельцем")),"second mapper cannot open same map through bridge");
+            check(!owner.replaceLoadedLandscape(QFileInfo(maps+"/parallel271.mpr"))&&terrain(editor)==ownerTerrain,"hidden owner refuses background map before changing its own document");
+            run(editor,"save");check(!CAiEditAdapter::dirty(&owner)&&read(maps+"/gipat2.mpr")!=ownerDisk,"owner independently saves A after background saves B");
+            check(a.tool("shutdown_headless")["status"]=="shutting_down","clean background closes through bridge");
+            check(until([](){return background().isEmpty();},10000),"background shutdown completes");
+            a.tool("disconnect_instance");b.tool("disconnect_instance");editor.tool("disconnect_instance");owner.close();
+            check(!QFileInfo::exists(maps+"/.mapper-service")&&!QFileInfo::exists(root+"/.mapper-service"),"open/save/close leaves map and resource data free of .mapper-service");
+            visibility.stop();check(visibleWindows==0,"no visible native windows in either mapper");
+            out<<"RESULT "<<checks<<" PASS, 0 FAIL\n";out.flush();return 0;
+        }
         authority.setValue("ui/aiAgentAllowSave",false);authority.sync();
         check(a.tool("get_revision")["allowSave"]==false,"owner's Save revocation is effective on the next request without waiting for timer");
         const auto denied=a.tool("create_map",{{"revision",a.tool("get_revision")["revision"]},{"name","denied225"},{"sectorsX",1},{"sectorsY",1}});
@@ -246,6 +273,7 @@ int runAssemblyCatalogCheck()
         check(CBackupManager::validateAutosave(QFileInfo(recovery),&error),"prior crash recovery remains intact after restarting background");
         check(a.tool("shutdown_headless")["status"]=="shutting_down","agent explicitly closes clean background");
         check(until([](){return background().isEmpty();},10000),"background shutdown completes and ordinary owner remains available");
+        check(!QFileInfo::exists(maps+"/.mapper-service"),"open/save/close never creates .mapper-service in isolated map data");
         check(editor.tool("shutdown_headless").contains("error")&&!editor.tool("get_context").contains("error"),"agent cannot shut down owner mapper");
         int arrivals=0;QObject::connect(&owner.m_aiAgent->m_server,&QLocalServer::newConnection,&owner,[&](){++arrivals;});
         a.tool("connect_instance",{{"target","editor"}});b.tool("connect_instance",{{"target","editor"}});QTest::qWait(1000);const auto beforeArrivals=arrivals;

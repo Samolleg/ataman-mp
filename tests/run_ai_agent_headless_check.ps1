@@ -1,6 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$RunRoot,
       [Parameter(Mandatory=$true)][string]$TestExe,
-      [Parameter(Mandatory=$true)][string]$ReleaseRoot)
+      [Parameter(Mandatory=$true)][string]$ReleaseRoot,
+      [string]$InstallationRoot,
+      [switch]$LocksOnly)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 if(Test-Path -LiteralPath $RunRoot){throw 'RunRoot must be new'}
@@ -16,7 +18,7 @@ foreach($path in @($maps,$res,(Join-Path $run 'Starter/Engine'))){New-Item -Item
 # The stock Dejavu profile requires a RES in both mod/res and game/Res.
 # Empty, valid public-format archive; no additional game fixture is copied.
 [IO.File]::WriteAllBytes((Join-Path $run 'res/isolated-empty.res'),[byte[]](0x3c,0xe2,0x9c,0x01,0,0,0,0,16,0,0,0,0,0,0,0))
-$installation=Join-Path $repo 'artifacts/EI-Mapper-Ataman-2-first-test'
+$installation=if($InstallationRoot){(Resolve-Path -LiteralPath $InstallationRoot).Path}else{Join-Path $repo 'artifacts/EI-Mapper-Ataman-2-first-test'}
 $options=Get-Content -Encoding UTF8 (Join-Path $installation 'endurance-options.json') -Raw | ConvertFrom-Json
 $sourceMaps=$options.Resource.mapRoots[0]
 $sourceRes=$options.Resource.resourceRoots[0]
@@ -63,8 +65,11 @@ $options.Resource.terrainAuthoringArchive=(Join-Path $run 'reference/HDPack_Terr
 $env:APPDATA=Join-Path $run 'AppData';$env:LOCALAPPDATA=Join-Path $run 'LocalAppData';$env:USERPROFILE=Join-Path $run 'User'
 $env:TEMP=Join-Path $run 'Temp';$env:TMP=$env:TEMP
 $env:EI_MCP_TEST_ROOT=$run;$env:EI_MCP_TEST_MAPS=$maps;$env:EI_MCP_TEST_BRIDGE=Join-Path $run 'app/EIMapperMcp.exe'
+$env:EI_MAPPER_TEST_LOCK_ROOT=Join-Path $run 'machine-locks'
+New-Item -ItemType Directory -Path $env:EI_MAPPER_TEST_LOCK_ROOT | Out-Null
 $env:EI_MCP_TEST_RESOURCE_ROOTS=Join-Path $run 'res';$env:EI_MAPPER_AUTOMATION_DIR=Join-Path $run 'automation'
 $env:EI_MAPPER_SETTINGS_DIR=Join-Path $run 'settings';$env:EI_MAPPER_BACKUP_ROOT=Join-Path $run 'backups';$env:EI_MAPPER_HEADLESS_IDLE_MS='7000';
+if($LocksOnly){$env:EI_MCP_LOCKS_ONLY='1';$env:EI_MAPPER_HEADLESS_IDLE_MS='60000'}
 $env:PATH="$env:EI_MAPPER_QT_BIN;$env:EI_MAPPER_MINGW_BIN;$env:PATH"
 $timer=[Diagnostics.Stopwatch]::StartNew()
 $p=Start-Process -FilePath (Join-Path $run 'app/ai_agent_headless_check.exe') -ArgumentList '--assembly-catalog-check' -WorkingDirectory (Join-Path $run 'app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.txt') -RedirectStandardError (Join-Path $run 'stderr.txt')

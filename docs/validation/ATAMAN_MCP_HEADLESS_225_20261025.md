@@ -1,5 +1,10 @@
 # Ataman225 — EI-MCP-HEADLESS-225, 2026-10-25
 
+Актуальное размещение замков карт/RES с271: общая папка Windows
+`ProgramData/EI Mapper Ataman/locks`, Users по SID S-1-5-32-545, проверка старых
+мест без записи. Детали: [271](ATAMAN_LOCKS_PROGRAMDATA_271_20261101.md).
+Ниже сохранены исторические результаты225.
+
 Решение владельца2026-10-24. Исходный main
 `89f9cf9e0b9bdeb6479a945a41b3b70720e468e7`, закоммиченная224
 EI-MCP-PERSISTENT-MODE-224; VERSION/CHANGELOG сверены, следующий номер225.

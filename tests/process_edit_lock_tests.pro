@@ -6,3 +6,6 @@ TARGET = process_edit_lock_tests
 INCLUDEPATH += ../source/core
 SOURCES += process_edit_lock_tests.cpp
 HEADERS += ../source/core/process_edit_lock.h
+SOURCES += ../source/core/process_edit_lock_store.cpp
+DEFINES += EI_MAPPER_LOCK_STORE_TESTING
+win32: LIBS += -lshell32 -lole32 -ladvapi32
