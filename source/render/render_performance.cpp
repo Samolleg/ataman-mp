@@ -41,6 +41,13 @@ void addCounters(SRenderFrameCounters& target, const SRenderFrameCounters& value
     target.instancedDrawCalls += value.instancedDrawCalls;
     target.sharedMeshes += value.sharedMeshes;
     target.gpuMemoryEstimateBytes += value.gpuMemoryEstimateBytes;
+    target.gpuMeshEstimateBytes += value.gpuMeshEstimateBytes;
+    target.gpuTextureEstimateBytes += value.gpuTextureEstimateBytes;
+    target.gpuTerrainTextureEstimateBytes += value.gpuTerrainTextureEstimateBytes;
+    target.gpuTerrainBufferEstimateBytes += value.gpuTerrainBufferEstimateBytes;
+    target.gpuFramebufferEstimateBytes += value.gpuFramebufferEstimateBytes;
+    target.cpuTerrainEstimateBytes += value.cpuTerrainEstimateBytes;
+    target.cpuImageEstimateBytes += value.cpuImageEstimateBytes;
     target.animationPoseEvaluations += value.animationPoseEvaluations;
     target.animationPoseCacheHits += value.animationPoseCacheHits;
     target.animationComponentsEvaluated += value.animationComponentsEvaluated;
@@ -137,7 +144,7 @@ void RenderPerformanceContext::endFrame()
         "nodes:%15 culled:%16 submitted:%17 logic:%18 cells:%19/%20 candidates:%21 overflow:%22 "
         "draws:%23 terrain:%24 sectors:%25/%26/%27 triangles:%28 texture-binds:%29 "
         "queues:%30/%31/%32 batches:%33 instances:%34 instanced-draws:%35 "
-        "shared-meshes:%36 gpu-memory:%37 animation-eval/cache/components:%38/%39/%40 "
+        "shared-meshes:%36 known-gpu-estimate:%37 animation-eval/cache/components:%38/%39/%40 "
         "queue-ms collect/sort/draw:%41/%42/%43")
         .arg(QString("%1 fps-cap:%2")
              .arg(m_metadata.benchmarkMode ? "benchmark"
@@ -192,7 +199,15 @@ void RenderPerformanceContext::endFrame()
           .arg(double(m_total.terrainShadowFieldRebuilds) / frames, 0, 'f', 2)
           .arg(double(m_total.terrainShadowFieldNodes) / frames, 0, 'f', 1)
           .arg(double(m_total.terrainShadowFieldSamples) / frames, 0, 'f', 1)
-          .arg(double(m_total.terrainShadowNanoseconds) / frames / 1000000.0, 0, 'f', 2);
+          .arg(double(m_total.terrainShadowNanoseconds) / frames / 1000000.0, 0, 'f', 2)
+        + QString(" memory-estimate-MiB meshes:%1 textures:%2 terrain-texture-subset:%3 terrain-buffers:%4 framebuffer:%5 cpu-terrain:%6 cpu-images:%7 (known allocations; not VRAM/RSS)")
+          .arg(double(m_total.gpuMeshEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.gpuTextureEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.gpuTerrainTextureEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.gpuTerrainBufferEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.gpuFramebufferEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.cpuTerrainEstimateBytes)/frames/1048576,0,'f',1)
+          .arg(double(m_total.cpuImageEstimateBytes)/frames/1048576,0,'f',1);
     ei::log(eLogInfo, report);
 
     // Performance captures need to survive ordinary workflow-log filtering so
@@ -234,6 +249,14 @@ void RenderPerformanceContext::endFrame()
         averages.insert("instancedDrawCalls", double(m_total.instancedDrawCalls) / frames);
         averages.insert("sharedMeshes", double(m_total.sharedMeshes) / frames);
         averages.insert("gpuMemoryEstimateBytes", double(m_total.gpuMemoryEstimateBytes) / frames);
+        averages.insert("gpuMeshEstimateBytes", double(m_total.gpuMeshEstimateBytes) / frames);
+        averages.insert("gpuTextureEstimateBytes", double(m_total.gpuTextureEstimateBytes) / frames);
+        averages.insert("gpuTerrainTextureEstimateBytes", double(m_total.gpuTerrainTextureEstimateBytes) / frames);
+        averages.insert("gpuTerrainBufferEstimateBytes", double(m_total.gpuTerrainBufferEstimateBytes) / frames);
+        averages.insert("gpuFramebufferEstimateBytes", double(m_total.gpuFramebufferEstimateBytes) / frames);
+        averages.insert("cpuTerrainEstimateBytes", double(m_total.cpuTerrainEstimateBytes) / frames);
+        averages.insert("cpuImageEstimateBytes", double(m_total.cpuImageEstimateBytes) / frames);
+        averages.insert("memoryEstimateScope", "Known renderer allocations sampled at most once per second; shared textures/images counted once; terrain textures are a subset of all textures; CPU covers terrain and image caches only; not driver VRAM or process RSS");
         averages.insert("animationPoseEvaluations", double(m_total.animationPoseEvaluations) / frames);
         averages.insert("animationPoseCacheHits", double(m_total.animationPoseCacheHits) / frames);
         averages.insert("animationComponentsEvaluated", double(m_total.animationComponentsEvaluated) / frames);

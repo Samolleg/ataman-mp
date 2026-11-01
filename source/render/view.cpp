@@ -9314,7 +9314,39 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     if(performance.collecting())
     {
         performance.counters().sharedMeshes = quint64(CPart::sharedMeshCount());
-        performance.counters().gpuMemoryEstimateBytes = CPart::sharedMeshBytes();
+        if(!m_renderMemorySampleTimer.isValid() || m_renderMemorySampleTimer.elapsed()>=1000) {
+            m_renderMemorySample={};
+            CTextureList::getInstance()->accumulateMemory(m_renderMemorySample);
+            QSet<const CLandscape*> landscapes;
+            const auto addLandscape=[&](const CLandscape* landscape){
+                if(landscape && !landscapes.contains(landscape)) {
+                    landscapes.insert(landscape);landscape->accumulateMemory(m_renderMemorySample);
+                }
+            };
+            addLandscape(m_pLand);
+            for(const auto& neighbor:m_neighborLandscapes)addLandscape(neighbor.landscape.data());
+            for(const auto& retained:m_neighborRenderCache)addLandscape(retained.landscape.data());
+            for(const auto& image:m_authoredTerrainTileImages)m_renderMemorySample.image(image);
+            if(m_pTileForm)for(const auto& image:m_pTileForm->tileImages())m_renderMemorySample.image(image);
+            if(m_workingTerrainAtlas)for(const auto& image:m_workingTerrainAtlas->activeTileImages())m_renderMemorySample.image(image);
+            for(const auto& doc:m_worldTerrainSession.documents)
+                if(doc->atlas)for(const auto& image:doc->atlas->activeTileImages())m_renderMemorySample.image(image);
+            m_framebufferMemorySample=0;
+            for(const auto* fbo:{m_shadowFbo,m_dynamicShadowFbo,m_farShadowFbo,m_farDynamicShadowFbo,m_localShadowFbo,m_editorQueryFbo})
+                if(fbo && fbo->isValid())m_framebufferMemorySample+=quint64(fbo->width())*fbo->height()
+                    *(fbo->attachment()==QOpenGLFramebufferObject::NoAttachment?4:8)*qMax(1,fbo->format().samples());
+            m_renderMemorySampleTimer.restart();
+        }
+        auto& counters=performance.counters();
+        counters.gpuMeshEstimateBytes=CPart::sharedMeshBytes();
+        counters.gpuTextureEstimateBytes=m_renderMemorySample.gpuTextureBytes;
+        counters.gpuTerrainTextureEstimateBytes=m_renderMemorySample.gpuTerrainTextureBytes;
+        counters.gpuTerrainBufferEstimateBytes=m_renderMemorySample.gpuTerrainBufferBytes;
+        counters.gpuFramebufferEstimateBytes=m_framebufferMemorySample;
+        counters.cpuTerrainEstimateBytes=m_renderMemorySample.cpuTerrainBytes;
+        counters.cpuImageEstimateBytes=m_renderMemorySample.cpuImageBytes;
+        counters.gpuMemoryEstimateBytes=counters.gpuMeshEstimateBytes+counters.gpuTextureEstimateBytes
+            +counters.gpuTerrainBufferEstimateBytes+counters.gpuFramebufferEstimateBytes;
         const SAnimationPerformanceCounters& animation = AnimationFrameContext::instance().counters();
         performance.counters().animationPoseEvaluations = animation.poseEvaluations;
         performance.counters().animationPoseCacheHits = animation.poseCacheHits;

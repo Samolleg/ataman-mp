@@ -162,6 +162,7 @@ public:
     void releaseTerrainTexture(QOpenGLTexture* texture);
     QSharedPointer<QOpenGLTexture> retainSceneTexture(QOpenGLTexture* texture);
     void collectRetiredTextures();
+    void accumulateMemory(struct SRenderMemoryEstimate& memory) const;
     QByteArray terrainAtlasContentFingerprint(const QString& name, int pages,
                                               const QString& boundArchive = QString()) const;
     // Terrain atlases have an authored DXT mip chain. This only changes the

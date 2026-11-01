@@ -1,5 +1,6 @@
 #include "texture_page_upload.h"
 #include "resourcemanager.h"
+#include "render_memory.h"
 #include "terrain_reference_path.h"
 #include <QCoreApplication>
 #include "neighbor_scene_data.h"
@@ -2313,7 +2314,7 @@ void CTextureList::cacheTexture(const QString& key,QOpenGLTexture* texture)
     if(previous && previous!=texture)m_retiredTextures.insert(previous);
     m_aTexture.insert(key,texture);
     auto& lru=key.startsWith("layers|")?m_layeredTextureLru:m_staticTextureLru;
-    lru.touch(key,qint64(texture->width())*texture->height()*4*4/3);
+    lru.touch(key,qint64(estimatedTextureStorage(texture->format(),texture->width(),texture->height(),texture->mipLevels())));
 }
 
 QOpenGLTexture* CTextureList::cachedTexture(const QString& key)
@@ -2334,6 +2335,16 @@ void CTextureList::collectRetiredTextures()
     }
 }
 
+void CTextureList::accumulateMemory(SRenderMemoryEstimate& memory) const
+{
+    for(auto* texture:m_aTexture)memory.texture(texture,m_terrainTextures.contains(texture));
+    for(auto* texture:m_retiredTextures)memory.texture(texture,m_terrainTextures.contains(texture));
+    for(const auto& image:m_aTextureImages)memory.image(image);
+    for(const auto& image:m_catalogTerrainTileCache)memory.image(image);
+    QMutexLocker guard(&s_compositePreparationMutex);
+    for(const auto& image:s_preparedCompositeImages)memory.image(image);
+}
+
 void CTextureList::trimTransientVisualCache()
 {
     const auto trim=[&](ei::CVisualCacheLru& lru,qint64 budget) {
@@ -2344,7 +2355,7 @@ void CTextureList::trimTransientVisualCache()
         for(const auto& key:lru.trim(budget))
             if(auto* texture=m_aTexture.take(key))m_retiredTextures.insert(texture);
         for(const auto& key:order)if(auto* texture=m_aTexture.value(key))
-            lru.touch(key,qint64(texture->width())*texture->height()*4*4/3);
+            lru.touch(key,qint64(estimatedTextureStorage(texture->format(),texture->width(),texture->height(),texture->mipLevels())));
     };
     trim(m_layeredTextureLru,kLayeredTextureSessionBudget);
     trim(m_staticTextureLru,256ll*1024*1024);

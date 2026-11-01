@@ -11,6 +11,9 @@
 #include "resourcemanager.h"
 #include "neighbor_scene_data.h"
 #include "neighbor_visual_preparation.h"
+#include "render_performance.h"
+#include "settings.h"
+#include <QOpenGLFramebufferObject>
 #include <windows.h>
 
 namespace {
@@ -168,6 +171,24 @@ int runAssemblyCatalogCheck() {
             check(until([&](){status=call("operation_status",{{"operation",start["operation"]}});return status["status"]!="running";}),"operation reaches terminal status");
             return status;
         };
+        if(qEnvironmentVariableIsSet("EI_EXPORT_MEMORY_REGRESSION")) {
+            check(view.ensureTerrainAutoCatalogReady()&&view.m_workingTerrainAtlas,"CPU atlas cache hydrated for memory measurement");
+            auto* counters=dynamic_cast<COptBool*>(view.settings()->opt("renderPerformanceCounters"));
+            check(counters!=nullptr,"performance option available");counters->setValue(true);
+            view.makeCurrent();QOpenGLFramebufferObject frame(256,256,QOpenGLFramebufferObject::CombinedDepthStencil);
+            check(frame.isValid()&&frame.bind(),"hidden telemetry framebuffer ready");
+            view.m_renderMemorySampleTimer.invalidate();RenderPerformanceContext::instance().beginFrame(true,false);
+            view.draw(nullptr);frame.release();
+            const auto memory=RenderPerformanceContext::instance().currentFrameCounters();
+            RenderPerformanceContext::instance().endFrame();
+            check(memory.gpuTextureEstimateBytes>=view.m_renderMemorySample.gpuTerrainTextureBytes&&memory.gpuTextureEstimateBytes>0,"telemetry includes actual loaded textures and terrain atlases");
+            check(memory.gpuMemoryEstimateBytes==memory.gpuMeshEstimateBytes+memory.gpuTextureEstimateBytes+memory.gpuTerrainBufferEstimateBytes+memory.gpuFramebufferEstimateBytes,"known GPU total equals disjoint allocation categories");
+            check(memory.gpuMemoryEstimateBytes>memory.gpuMeshEstimateBytes&&memory.cpuImageEstimateBytes>0&&memory.cpuTerrainEstimateBytes>0,"CPU/image and GPU/mesh values remain separate");
+            save(root+"/memory-estimates.json",{{"gpuMesh",double(memory.gpuMeshEstimateBytes)},{"gpuTextures",double(memory.gpuTextureEstimateBytes)},
+                {"gpuTerrainTexturesSubset",double(memory.gpuTerrainTextureEstimateBytes)},{"gpuTerrainBuffers",double(memory.gpuTerrainBufferEstimateBytes)},
+                {"gpuFramebuffers",double(memory.gpuFramebufferEstimateBytes)},{"cpuImages",double(memory.cpuImageEstimateBytes)},{"cpuTerrain",double(memory.cpuTerrainEstimateBytes)}});
+            counters->setValue(false);
+        }
         const auto before=call("get_context");const auto revision=CAiEditAdapter::revision(&window);
         save(root+"/context.json",before);
         auto result=finish(call("export_map_topdown",{{"outputDir",root+"/exports/zone9"},{"pixelsPerWorldUnit",4},{"revision",revision}}));

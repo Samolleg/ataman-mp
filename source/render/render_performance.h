@@ -32,6 +32,9 @@ struct SRenderFrameCounters
     quint64 instancedDrawCalls{0};
     quint64 sharedMeshes{0};
     quint64 gpuMemoryEstimateBytes{0};
+    quint64 gpuMeshEstimateBytes{0},gpuTextureEstimateBytes{0},gpuTerrainTextureEstimateBytes{0};
+    quint64 gpuTerrainBufferEstimateBytes{0},gpuFramebufferEstimateBytes{0};
+    quint64 cpuTerrainEstimateBytes{0},cpuImageEstimateBytes{0};
     quint64 animationPoseEvaluations{0};
     quint64 animationPoseCacheHits{0};
     quint64 animationComponentsEvaluated{0};

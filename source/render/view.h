@@ -4,6 +4,7 @@
 #include "map_save_batch.h"
 #include "technical_model_catalog.h"
 #include "endurance_document.h"
+#include "render_memory.h"
 
 #include <QGLWidget>
 #include <QOpenGLShader>
@@ -1208,6 +1209,9 @@ private:
     quint64 m_neighborCacheClock{0};
     quint64 m_neighborCacheBudget{1536ull*1024*1024}; // combined CPU + conservative GPU accounting
     quint64 m_neighborCacheEvictions{0};
+    SRenderMemoryEstimate m_renderMemorySample;
+    quint64 m_framebufferMemorySample{0};
+    QElapsedTimer m_renderMemorySampleTimer;
     bool m_neighborCacheTransition{false};
     QByteArray m_activeRenderResources;
     struct SGlobalPaletteReuse {
