@@ -15,6 +15,7 @@
 #include "resource_profile.h"
 #include "ai_graph_preview_builder.h"
 #include "map_table_document.h"
+#include "log.h"
 #include <functional>
 #include <cmath>
 
@@ -43,6 +44,7 @@ int main(int argc,char** argv){
   const bool compare=mode.startsWith("compare-"),mark=mode.startsWith("mark-"),squad=mode.startsWith("squad-"),oldScene=mode=="old"||mode.endsWith("-old");
   require(!root.isEmpty()&&(mode=="old"||mode=="new"||mode=="verify"||compare||mark||squad),"explicit isolated root and mode");
   QJsonObject scene;if(QFileInfo::exists(root+"/scene.json"))scene=QJsonDocument::fromJson(read(root+"/scene.json")).object();
+  const QString zoneId=scene["zoneId"].toString("bz1g"),zoneType=scene["zoneType"].toString("brief");const int expectedUnits=scene["unitCount"].toInt(51),expectedMobs=scene["mobCount"].toInt(1);
   QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,root+"/render-run/settings");
   QSettings().setValue("ui/viewportVisuals/neighborLandscapes",false);
   MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.configureAutosaveTimer(false,300000);window.resize(1750,1200);window.show();
@@ -57,21 +59,35 @@ int main(int argc,char** argv){
   ei::ProfileDatabaseService databases;auto db=databases.snapshot(request);require(db&&db->usable(),"DejaVu database available");ei::ProfileDatabaseContext::instance().activate(db,bindings);
   const QString dir=root+(oldScene?"/in":"/out");
   const QString mprPath=oldScene?root+"/in/basegipat.mpr":scene["mpr"].toString(dir+"/basegipat.mpr");
+  const QString mobPath=oldScene?dir+"/basecam.mob":scene["mob"].toString(dir+"/basecam.mob");
   if(!oldScene&&scene.contains("catalog")){
    CMapTableDocument catalog;QStringList errors;require(catalog.loadBytes(read(scene["catalog"].toString()),&errors),"candidate catalog parse: "+errors.join(";"));
-   bool pair=false;for(const auto& z:catalog.zones())if(z.zoneId=="bz1g")pair=z.mprName==QFileInfo(mprPath).completeBaseName()&&z.mobName=="basecam"&&z.zoneType=="brief";
-   require(pair,"bz1g catalog selects the shared zone1 MPR and separate basecam MOB");
+   bool pair=false;for(const auto& z:catalog.zones())if(z.zoneId==zoneId)pair=z.mprName==QFileInfo(mprPath).completeBaseName()&&z.mobName==QFileInfo(mobPath).completeBaseName()&&z.zoneType==zoneType;
+   require(pair,"catalog selects the exact MPR/MOB pair for "+zoneId);
   }
   if(!oldScene&&scene.contains("catalog")){
-   window.openMapPair(mprPath,dir+"/basecam.mob","bz1g");
-   require(until([&](){return !window.m_workspaceLoadInProgress&&!window.backgroundMobLoading()&&view.mobs().size()==1;},90000),"catalog pair through production openMapPair");
-   require(window.m_mapTestEntry.zoneId=="bz1g"&&window.m_mapTestEntry.isBriefing(),"production identity is bz1g brief, not gz1g");
+   window.openMapPair(mprPath,mobPath,zoneId);
+   require(until([&](){return !window.m_workspaceLoadInProgress&&!window.backgroundMobLoading()&&view.mobs().size()==expectedMobs;},90000),"catalog pair through production openMapPair");
+   require(window.m_mapTestEntry.zoneId==zoneId&&window.m_mapTestEntry.isBriefing()==(zoneType=="brief"),"production zone identity: "+zoneId+" "+zoneType);
   }else{
    require(window.loadLandscapeWithProgress(QFileInfo(mprPath)),"MPR through production loader: "+mprPath);
-   require(window.loadMobWithProgress(QFileInfo(dir+"/basecam.mob"),false),"MOB through production loader");
+   require(window.loadMobWithProgress(QFileInfo(mobPath),false),"MOB through production loader");
   }
   require(until([&](){return !window.backgroundMobLoading();},90000),"primary MOB ready");
-  require(view.mobs().size()==1,"one map, no AddMob");view.m_timer->stop();
+  require(view.mobs().size()==expectedMobs,"expected primary/AddMob composition");view.m_timer->stop();
+  CMob* primary=nullptr;for(auto* m:view.mobs())if(QFileInfo(m->filePath()).canonicalFilePath()==QFileInfo(mobPath).canonicalFilePath())primary=m;require(primary,"exact primary MOB selected");
+  if(scene["validateFamily"].toBool()){
+   auto request=window.mobFamilyValidationRequest(true);const auto family=CMobFamilyValidator::validate(request);QJsonArray findings;int bad=0;
+   for(const auto& f:family.findings){findings.append(QJsonObject{{"code",f.code},{"message",f.message},{"severity",int(f.severity)}});if(f.severity!=EMobFamilyFindingSeverity::Info&&(f.code.contains("addmob",Qt::CaseInsensitive)||f.code.contains("duplicate",Qt::CaseInsensitive)))++bad;}
+   for(auto it=family.nidOwners.cbegin();it!=family.nidOwners.cend();++it){int active=0;for(const auto& owner:it.value())if(owner.activeRuntimeFamily)++active;if(active>1)++bad;}
+   write(root+"/family-validation.json",QJsonDocument(QJsonObject{{"zone",zoneId},{"members",family.members.size()},{"addMobOrDuplicateWarnings",bad},{"findings",findings}}).toJson());require(!bad,"no AddMob or duplicate-ID warnings in native family validation");
+   QJsonArray relevant;int loadWarnings=0;
+   for(const auto& message:CLogger::getInstance()->sessionMessages()){
+    const auto text=message.message;const bool dependency=text.contains("AddMob",Qt::CaseInsensitive),duplicate=text.contains("duplicate_id",Qt::CaseInsensitive)||text.contains("duplicate ID",Qt::CaseInsensitive)||text.contains("duplicate NID",Qt::CaseInsensitive);
+    if(dependency||duplicate){relevant.append(QJsonObject{{"type",int(message.type)},{"message",text}});if(message.type==eLogWarning||message.type==eLogFatal||QRegularExpression("warnings:[1-9][0-9]*").match(text).hasMatch())++loadWarnings;}
+   }
+   write(root+"/load-warnings.json",QJsonDocument(QJsonObject{{"zone",zoneId},{"addMobOrIdLoadWarnings",loadWarnings},{"messages",relevant}}).toJson());require(!loadWarnings,"no AddMob/ID load warnings in production logger");
+  }
   if(compare){
    require(until([&](){if(view.m_terrainEditAvailable&&!view.m_terrainAutoCatalogBuilding)return true;view.makeCurrent();view.paintGL();return false;},90000),"canonical terrain ready after production first-frame deferred work");
    const QVector3D focus=oldScene?QVector3D(64,64,0):QVector3D(192,128,0);view.m_cam->setLocation(focus+QVector3D(0,0,175),focus,{0,0,0});
@@ -110,10 +126,10 @@ int main(int argc,char** argv){
    require(hidden.dialogs.isEmpty(),"no classifier load-error dialogs");window.closeAll();window.close();return 0;
   }
   if(mode=="verify") {
-   const QByteArray bytes=read(dir+"/basecam.mob");QByteArray candidate;
-   require(view.mobs().first()->buildValidatedCandidate(&candidate)&&candidate==bytes,"production CMob no-op save is byte-identical after final graph write");
+   const QByteArray bytes=read(mobPath);QByteArray candidate;
+   require(primary->buildValidatedCandidate(&candidate)&&candidate==bytes,"production CMob no-op save is byte-identical after final graph write");
    require(view.m_aiGraphLoadedDocument.isValid()&&view.m_aiGraphLoadedDocument.width()==88&&view.m_aiGraphLoadedDocument.height()==72,"final embedded 88x72 graph loaded by production view");
-   int count=0;for(auto* n:view.mobs().first()->nodes())if(n->nodeType()==eUnit)++count;require(count==51,"all 51 original units in final production scene");
+   int count=0;for(auto* n:primary->nodes())if(n->nodeType()==eUnit)++count;require(count==expectedUnits,"all original primary units in final production scene");
    require(hidden.dialogs.isEmpty(),"no final load-error dialogs");
    write(root+"/render-verify.json",QJsonDocument(QJsonObject{{"units",count},{"noOpByteIdentical",true},{"graphWidth",88},{"graphHeight",72},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}}).toJson());
    window.closeAll();window.close();return 0;
@@ -127,7 +143,7 @@ int main(int argc,char** argv){
    window.resize(2100,1550);app.processEvents();view.setWorldTravelAreas({});
    warm(camera["angle"].toDouble(-45),camera["distance"].toDouble(55),{float(f[0].toDouble()),float(f[1].toDouble()),float(f[2].toDouble())});
    const auto image=view.grabFrameBuffer();require(!image.isNull()&&image.save(root+"/screenshots/"+mode+".png"),"squad production capture");
-   require(hidden.dialogs.isEmpty(),"no squad load-error dialogs");write(root+"/render-"+mode+".json",QJsonDocument(QJsonObject{{"mpr",mprPath},{"mob",dir+"/basecam.mob"},{"camera",camera},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}}).toJson());window.closeAll();window.close();return 0;
+   require(hidden.dialogs.isEmpty(),"no squad load-error dialogs");write(root+"/render-"+mode+".json",QJsonDocument(QJsonObject{{"mpr",mprPath},{"mob",mobPath},{"camera",camera},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}}).toJson());window.closeAll();window.close();return 0;
   }
   if(mark){
    // Native production scene, with only the requested review markers added.
@@ -159,7 +175,7 @@ int main(int argc,char** argv){
   auto capture=[&](const QString& name,float angle,float distance,const QVector3D& target){warm(angle,distance,target);auto img=view.grabFrameBuffer();require(!img.isNull()&&img.save(root+"/screenshots/"+name+".png"),"capture "+name);};
   capture(mode+"-village-top",0,130,center);capture(mode+"-village-angle",-45,130,center);
   QJsonObject result{{"mode",mode},{"mobCount",view.mobs().size()},{"viewportWidth",view.width()},{"viewportHeight",view.height()},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}};
-  QJsonArray positions;for(auto* n:view.mobs().first()->nodes())if(n->nodeType()==eUnit){const auto pos=n->position(),draw=n->drawPosition();positions.append(QJsonObject{{"id",double(n->mapId())},{"stored",QJsonArray{pos.x(),pos.y(),pos.z()}},{"draw",QJsonArray{draw.x(),draw.y(),draw.z()}}});}result["units"]=positions;
+  QJsonArray positions;for(auto* n:primary->nodes())if(n->nodeType()==eUnit){const auto pos=n->position(),draw=n->drawPosition();positions.append(QJsonObject{{"id",double(n->mapId())},{"stored",QJsonArray{pos.x(),pos.y(),pos.z()}},{"draw",QJsonArray{draw.x(),draw.y(),draw.z()}}});}result["units"]=positions;
   if(mode=="new"){
    capture("new-full-map-top",0,430,{176,144,0});
    view.m_canvasNavigationStale=true;SAiGraphPreviewBuildInput input;QString error;
@@ -169,9 +185,9 @@ int main(int argc,char** argv){
    auto graph=built.document;require(graph.recolorConnectedComponents(&error),"standard graph component finalization: "+error);
    QStringList warnings;require(graph.validateRuntimeCompatibility(88,72,&error,&warnings),"graph runtime structure: "+error);
    const auto graphBytes=graph.serialize(&error);require(!graphBytes.isEmpty(),"graph serialization");
-   CMobDocument d;CValidationReport report;const auto source=read(dir+"/basecam.mob");require(d.loadBytes(source,"basecam.mob",&report),"strict graph target parse");QByteArray candidate;
+   CMobDocument d;CValidationReport report;const auto source=read(mobPath);require(d.loadBytes(source,mobPath,&report),"strict graph target parse");QByteArray candidate;
    require(d.replaceEmbeddedAiGraph(graphBytes,&candidate,&report),"replace only embedded AI graph");CMobDocument check;
-   require(check.loadBytes(candidate,"basecam.mob",&report)&&!report.hasErrors()&&check.serialize()==candidate,"strict final MOB and byte-identical no-op");write(dir+"/basecam.mob",candidate);
+   require(check.loadBytes(candidate,mobPath,&report)&&!report.hasErrors()&&check.serialize()==candidate,"strict final MOB and byte-identical no-op");write(mobPath,candidate);
    result["graph"]=QJsonObject{{"width",88},{"height",72},{"bytes",graphBytes.size()},{"collisionProxies",input.collisionProxies.size()},{"authoredProxies",built.authoredCollisionProxyCount},{"approximateCollisionMetadata",input.collisionMetadataApproximate},{"blockedAiTiles",built.blockedAiTiles},{"warnings",QJsonArray::fromStringList(warnings+built.warnings)}};
    const auto plan=QJsonDocument::fromJson(read(root+"/sample-request.json")).object();QJsonArray points;
    const int w=input.graphWidth*8,h=input.graphHeight*8;

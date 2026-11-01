@@ -90,6 +90,16 @@ int main(int argc,char** argv) {
    j["mapPayload"]=QString::fromLatin1(d.memberPayload("map.txt").toBase64());
   }
   j["validation"]=r.toJson();j["noOpByteIdentical"]=true;j["sha256"]=QString(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());write(a[3],QJsonDocument(j).toJson());
+ } else if(a[1]=="remove") {
+  const auto p=QJsonDocument::fromJson(read(a[2])).object();auto d=mob(p["mob"].toString());QMap<QString,QByteArray> removals;
+  for(const auto v:p["objects"].toArray()){const auto q=v.toObject();if(removals.contains(q["path"].toString()))throw QString("Duplicate removal request");removals.insert(q["path"].toString(),QByteArray::fromHex(q["sha256"].toString().toLatin1()));}
+  if(removals.isEmpty())throw QString("Explicit removal set required");QVector<QByteArray> raw,hashes;
+  for(const auto& o:d.objects()){
+   if(removals.contains(o.sectionPath)){if(o.unit||removals.take(o.sectionPath)!=o.subtreeSha256)throw QString("Removal identity mismatch or unit removal");continue;}
+   QByteArray bytes;if(!d.objectSubtreeBytes(o.sectionPath,o.subtreeSha256,&bytes))throw o.sectionPath;raw.append(bytes);hashes.append(o.subtreeSha256);
+  }
+  if(!removals.isEmpty())throw QString("Unknown removal path");QByteArray bytes;CValidationReport r;if(!d.rebuildObjectSequenceFromRaw(raw,hashes,&bytes,&r))throw r.toText();CMobDocument check;
+  if(!check.loadBytes(bytes,a[3],&r)||r.hasErrors()||check.serialize()!=bytes)throw r.toText();write(a[3],bytes);
  } else if(a[1]=="patch") {
   const auto p=QJsonDocument::fromJson(read(a[2])).object();auto d=mob(p["mob"].toString());CMobEditTransaction tx("Explicit reviewed leaf edits");
   for(const auto v:p["leaves"].toArray()){const auto q=v.toObject();tx.replaceLeafPayload(q["path"].toString(),QByteArray::fromHex(q["sha256"].toString().toLatin1()),QByteArray::fromBase64(q["payload"].toString().toLatin1()));}

@@ -163,3 +163,34 @@ existing screenshot numbers stable while the review set shrinks. For briefing
 zones the mapper intentionally hides the minimap; the production terrain view
 still uses the catalog-selected MPR. Nav64 identities include both MPR and MOB;
 an existing mesh for a different MOB must never be substituted.
+
+## Explicit static deletion and live-catalog merge
+
+Native `remove <request.json> <candidate.mob>` requires each static object's
+section path and original subtree SHA. It rejects unit deletion, duplicate or
+missing requests, preserves all retained raw records in order, and strict-loads
+the result. Graph regeneration remains a separate production renderer operation.
+`prune.py verify` independently reconstructs the entire final file from the
+original, the explicit deleted subtree set, the final embedded graph and changed
+ancestor lengths. Unit, script and all retained object bytes must be identical;
+parser warnings, duplicate IDs or incoming script/ParentID references fail.
+
+`prune.py catalog` starts from a newly copied current archive. It requires the
+target zone still to match the reviewed baseline, merges only the approved MPR
+and local deploy/remove/restrict changes, and preserves the rest of the current
+map.txt byte-for-byte. Native member replacement validates every other archive
+member. `test_prune.py` checks preservation of concurrent owner changes elsewhere,
+refusal of a changed target, semantic exit changes and duplicate zone definitions.
+These commands only prepare candidates; live deployment needs explicit owner
+authorization and a separately reviewed process/lock/SHA/backup/atomic-replace
+procedure. Never substitute a previous whole working archive for the current one.
+
+Renderer scene requests may explicitly select `zoneId`, `zoneType`, `mob`,
+`unitCount`, `mobCount` and `validateFamily`. This supports a game zone's unchanged
+AddMob closure alongside its primary MOB. The exact primary owns its regenerated
+embedded graph and no-op proof. Native family validation and the production log
+must contain zero AddMob/dependency/duplicate-ID load warnings; unrelated legacy
+family range findings are recorded separately. Post-install validation and captures
+must use a fresh copy of the installed profile, with only private settings/locks.
+Delete owned test profile copies after all required checks pass, retaining the
+reports, screenshots, source/candidate identities and deployment receipts.
