@@ -1,0 +1,23 @@
+QT += core gui widgets opengl concurrent multimedia network gui-private
+CONFIG += console c++11 release
+CONFIG -= app_bundle
+TEMPLATE = app
+TARGET = briefing_zone
+isEmpty(BUILD_ROOT): error(Pass BUILD_ROOT of the accepted production build)
+SOURCE_ROOT = $$clean_path($$BUILD_ROOT/../source)
+INCLUDEPATH += $$quote($$BUILD_ROOT) $$quote($$SOURCE_ROOT)
+sourceDirs = app core documents layout_components mob objects render resources runtime ui
+for(dir, sourceDirs): INCLUDEPATH += $$quote($$SOURCE_ROOT/$$dir)
+productionObjects = $$files($$quote($$BUILD_ROOT/release/*.o))
+objectResponse =
+for(object, productionObjects) {
+    !contains(object, .*/main.o):!contains(object, .*assembly_catalog_check.*) {
+        objectResponse += $$quote(\"$${object}\")
+        PRE_TARGETDEPS += $$quote($$object)
+    }
+}
+write_file($$OUT_PWD/production-objects.rsp, objectResponse)
+LIBS += @production-objects.rsp
+LIBS += -lglu32 -lopengl32 -ldbghelp -luser32 -lole32 -lshell32 -ladvapi32
+win32: LIBS += -lmingw32 $$quote($$[QT_INSTALL_LIBS]/libqtmain.a)
+SOURCES += main.cpp
