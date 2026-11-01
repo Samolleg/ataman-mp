@@ -81,6 +81,7 @@ void CAiAgentServer::updateStatus()
 }
 void CAiAgentServer::cancelJob(Job& job)
 {
+    if(job.committing)return;
     if(job.topdown){job.topdown->finished={};job.topdown->cancel();job.topdown.clear();}
     job.cancel->store(true);job.plan.clear();
     if(job.editWatcher){job.editWatcher->disconnect(this);job.editWatcher->deleteLater();job.editWatcher=nullptr;}
@@ -100,7 +101,8 @@ void CAiAgentServer::stop()
     m_server.close();m_writer.clear();
     const auto sockets=m_clients.keys();m_clients.clear();
     for(auto* socket:sockets){socket->disconnect(this);socket->abort();socket->deleteLater();}
-    for(auto& job:m_jobs)cancelJob(job);m_jobs.clear();
+    for(auto it=m_jobs.begin();it!=m_jobs.end();)
+        if(it->committing)++it;else {cancelJob(*it);it=m_jobs.erase(it);}
     if(!m_descriptor.isEmpty())QFile::remove(m_descriptor);
     m_descriptor.clear();m_secret.clear();m_id.clear();
     {QSignalBlocker blocker(m_mode);m_mode->setCurrentIndex(0);}
@@ -139,7 +141,7 @@ void CAiAgentServer::accept()
         connect(s,&QLocalSocket::readyRead,this,[this,s](){receive(s);});
         connect(s,&QLocalSocket::disconnected,this,[this,s](){
             const bool authenticated=s->property("authenticated").toBool();bool discarded=false;
-            for(auto it=m_jobs.begin();it!=m_jobs.end();)if(it->owner==s){discarded|=!it->complete||bool(it->plan);cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+            for(auto it=m_jobs.begin();it!=m_jobs.end();)if(it->owner==s&&!it->committing){discarded|=!it->complete||bool(it->plan);cancelJob(*it);it=m_jobs.erase(it);}else ++it;
             if(m_writer==s)m_writer.clear();m_clients.remove(s);s->deleteLater();updateStatus();
             if(authenticated)event(discarded?QString::fromUtf8("Агент отключён; его незавершённые операции отброшены"):QString::fromUtf8("Агент отключён"));});
         QTimer::singleShot(5000,s,[s](){if(!s->property("authenticated").toBool())s->abort();});
@@ -196,9 +198,17 @@ void CAiAgentServer::prune()
 {
     const auto now=QDateTime::currentDateTimeUtc();
     for(auto it=m_jobs.begin();it!=m_jobs.end();) {
+        // A GUI commit may pump events while opening/saving a large map. Its
+        // deadline governs cancellable preparation, never an atomic commit.
+        if(it->committing){++it;continue;}
+        if(it->complete) {
+            if(!it->finishedAt.isValid())it->finishedAt=now;
+            if(it->finishedAt.msecsTo(now)>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+            continue;
+        }
         if(it->snapshot) {
             if(!it->complete&&it->created.msecsTo(now)>=30000) {
-                const auto phase=it->phase;cancelJob(*it);it->complete=true;it->finishedAt=now;
+                const auto phase=it->phase;cancelJob(*it);it->markComplete();it->finishedAt=now;
                 it->result={{"code","SNAPSHOT_TIMEOUT"},{"error","Snapshot exceeded 30 seconds"},{"phase",phase},{"deadlineMs",30000}};
             }
             if(it->complete&&it->finishedAt.msecsTo(now)>60000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
@@ -210,8 +220,8 @@ void CAiAgentServer::prune()
             continue;
         }
         const auto age=it->created.msecsTo(now);
-        if(!it->complete&&age>it->deadlineMs){cancelJob(*it);it->complete=true;it->result=ai::error("Operation deadline exceeded");}
-        if(age>it->deadlineMs+30000){cancelJob(*it);it=m_jobs.erase(it);}else ++it;
+        if(!it->complete&&age>it->deadlineMs){cancelJob(*it);it->markComplete();it->result=ai::error("Operation deadline exceeded");}
+        ++it;
     }
     if(!qApp->property("agentHeadless").toBool())return;
     QSettings authority(qApp->property("agentAuthorityFile").toString(),QSettings::Format(qApp->property("agentAuthorityFormat").toInt()));authority.sync();
@@ -258,7 +268,7 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
         const auto db=ei::ProfileDatabaseContext::instance().current();const auto cancel=m_jobs[id].cancel;
         auto* watcher=new QFutureWatcher<QJsonObject>(this);m_jobs[id].watcher=watcher;
         connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher](){
-            if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].complete=true;m_jobs[id].watcher=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();}
+            if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].markComplete();m_jobs[id].watcher=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();}
             watcher->deleteLater();
         });
         watcher->setFuture(QtConcurrent::run([model,db,method,args,cancel](){
@@ -277,14 +287,14 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
         connect(process,&QProcess::readyReadStandardError,process,[process](){process->readAllStandardError();});
         connect(process,&QProcess::errorOccurred,this,[this,id,process](QProcess::ProcessError e){
             if(e==QProcess::FailedToStart&&m_jobs.contains(id)) {
-                m_jobs[id].result=ai::error("Read worker could not start");m_jobs[id].complete=true;m_jobs[id].process=nullptr;process->deleteLater();
+                m_jobs[id].result=ai::error("Read worker could not start");m_jobs[id].markComplete();m_jobs[id].process=nullptr;process->deleteLater();
             }
         });
         connect(process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,[this,id,process](int code,QProcess::ExitStatus status){
             if(m_jobs.contains(id)) {
                 auto result=QJsonDocument::fromJson(process->property("output").toByteArray()+process->readAllStandardOutput()).object();
                 if(status!=QProcess::NormalExit||code!=0||result.isEmpty())result=ai::error("Read worker failed or exceeded limits");
-                m_jobs[id].result=result;m_jobs[id].complete=true;m_jobs[id].process=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();
+                m_jobs[id].result=result;m_jobs[id].markComplete();m_jobs[id].process=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();
             }
             process->deleteLater();
         });
@@ -304,7 +314,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         QSignalBlocker blocker(m_allowSave);m_allowSave->setChecked(authority["allowSave"].toBool());
     }
     if(method=="shutdown_headless")return shutdownHeadless();
-    if(m_committing) {
+    if(m_committing && method!="operation_status" && method!="cancel_operation") {
         if(method=="window_snapshot") {
             QJsonObject out{{"code","BUSY"},{"error","Normal map commit in progress"},{"phase","opening_map"}};
             for(auto it=m_jobs.constBegin();it!=m_jobs.constEnd();++it)if(it->edit&&!it->complete){out["operation"]=it.key();break;}
@@ -346,6 +356,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         auto& job=m_jobs[id];
         if(job.edit && job.owner!=m_currentClient)return ai::error("Operation belongs to another writer");
         if(method=="cancel_operation"){
+            if(job.committing)return ai::error("Operation is committing; wait for its result");
             QJsonObject out{{"operation",id},{"status","cancelled"}};
             if(job.topdown && !job.complete){job.topdown->cancel();out["result"]=job.topdown->result();}
             cancelJob(job);m_jobs.remove(id);return out;
@@ -384,7 +395,7 @@ void CAiAgentServer::captureSnapshot(const QString& id)
 {
     if(!m_jobs.contains(id)||m_jobs[id].complete)return;
     auto& job=m_jobs[id];
-    const auto fail=[&](QString code,QString reason){job.result={{"code",code},{"error",reason},{"phase",job.phase},{"deadlineMs",30000}};job.complete=true;job.finishedAt=QDateTime::currentDateTimeUtc();};
+    const auto fail=[&](QString code,QString reason){job.result={{"code",code},{"error",reason},{"phase",job.phase},{"deadlineMs",30000}};job.markComplete();job.finishedAt=QDateTime::currentDateTimeUtc();};
     if(job.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000){fail("SNAPSHOT_TIMEOUT","Snapshot preparation exceeded 30 seconds");return;}
     if(CAiEditAdapter::busy(m_window)||m_committing){fail("BUSY","Map loading/interaction in progress");return;}
     if(!m_view||!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport GL context unavailable");return;}
@@ -405,7 +416,7 @@ void CAiAgentServer::captureSnapshot(const QString& id)
             result["capturedRevision"]=revision;result["profile"]=context["profile"];result["map"]=context["mpr"];
             result["captureKind"]="current GL viewport; fresh owning-context FBO";
             result["timingsMs"]=QJsonObject{{"capture",double(captureMs)},{"total",double(j.created.msecsTo(QDateTime::currentDateTimeUtc()))}};
-            j.result=result;j.complete=true;j.phase="complete";j.finishedAt=QDateTime::currentDateTimeUtc();j.watcher=nullptr;
+            j.result=result;j.markComplete();j.phase="complete";j.finishedAt=QDateTime::currentDateTimeUtc();j.watcher=nullptr;
         }
         watcher->deleteLater();
     });
@@ -421,7 +432,7 @@ QJsonObject CAiAgentServer::startTopdownExport(const QJsonObject& args)
     m_jobs.insert(id,job);
     job.topdown->finished=[this,id](){
         if(!m_jobs.contains(id))return;
-        auto& j=m_jobs[id];j.result=j.topdown->result();j.complete=true;j.finishedAt=QDateTime::currentDateTimeUtc();
+        auto& j=m_jobs[id];j.result=j.topdown->result();j.markComplete();j.finishedAt=QDateTime::currentDateTimeUtc();
         m_lastActivity=QDateTime::currentMSecsSinceEpoch();
     };
     job.topdown->begin();
@@ -454,6 +465,7 @@ QJsonObject CAiAgentServer::startCommit(const QSharedPointer<ai::EditPlan>& plan
 void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot)
 {
     if(!m_jobs.contains(id)||m_jobs[id].cancel->load()||!m_jobs[id].owner||!m_view||!m_window)return;
+    m_jobs[id].committing=true;
     QStringList targets;
     if(plan->method=="save")targets=m_view->m_worldTerrainSession.dirtyPaths();
     else if(plan->method!="create_map")for(const auto& map:plan->maps)targets.append(map.path);
@@ -478,7 +490,7 @@ void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::Edi
         if(snapshot&&!result.contains("error")&&m_window&&m_view)result["snapshot"]=CAiReadAdapter::read(m_window,"window_snapshot",{});
         if(m_window)m_window->setProperty("aiCommitBusy",false);
     }
-    if(m_jobs.contains(id)){m_jobs[id].result=result;m_jobs[id].complete=true;}
+    if(m_jobs.contains(id)){m_jobs[id].committing=false;m_jobs[id].result=result;m_jobs[id].markComplete();}
     m_lastActivity=QDateTime::currentMSecsSinceEpoch();
     const auto context=CAiReadAdapter::context(m_window);
     event(QString::fromUtf8("Операция %1: %2; MPR=%3; MOB=%4; цели=%5").arg(plan->method,result.contains("error")?result["error"].toString():result["status"].toString(),context["mpr"].toString(),QString::fromUtf8(QJsonDocument(context["mobs"].toArray()).toJson(QJsonDocument::Compact)),targets.join(";")));
@@ -508,9 +520,9 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
         if(!m_jobs.contains(id)){watcher->deleteLater();return;}
         auto plan=QSharedPointer<ai::EditPlan>::create(watcher->result());m_jobs[id].editWatcher=nullptr;watcher->deleteLater();
         if(m_jobs[id].cancel->load())return;
-        if(!plan->error.isEmpty()){m_jobs[id].result=ai::error(plan->error);m_jobs[id].complete=true;return;}
+        if(!plan->error.isEmpty()){m_jobs[id].result=ai::error(plan->error);m_jobs[id].markComplete();return;}
         if(args["preview"].toBool()) {
-            m_jobs[id].plan=plan;m_jobs[id].complete=true;m_jobs[id].result=plan->summary;
+            m_jobs[id].plan=plan;m_jobs[id].markComplete();m_jobs[id].result=plan->summary;
             m_jobs[id].result["status"]="preview";m_jobs[id].result["operation"]=id;
         } else {
             QTimer::singleShot(0,this,[this,id,plan,args](){finishCommit(id,plan,args["snapshot"].toBool());});

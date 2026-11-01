@@ -35,6 +35,8 @@ private:
         QDateTime created{QDateTime::currentDateTimeUtc()};
         int deadlineMs{30000};
         bool complete{false};
+        bool committing{false};
+        void markComplete() { complete=true;finishedAt=QDateTime::currentDateTimeUtc(); }
     };
     void setEnabled(int mode);
     void event(const QString& message);
