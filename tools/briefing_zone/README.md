@@ -118,3 +118,48 @@ namespace without corresponding textures would invalidate the atlas binding.
 
 `python -B test_migrate.py` checks nested calls, symbolic coordinates, comments,
 quoted prose, source token offsets and cipher preservation of all 256 byte values.
+
+## Shared-terrain rigid-group revision
+
+`rigid.py prepare <new-root> --previous <reviewed-root> --config <request.json>
+--cli <briefing_zone.exe>` consumes original inspect/input copies plus an external
+request: `unitIds`, two `landmarks` (`old`/`new` object IDs), reviewed `inventory`
+matches, `removeRows` and `cameraFocus`. Two retained landmarks determine a single
+rotation and translation; no scale or independent passability nudges are applied
+to members. Every stored guard/patrol/look coordinate of each selected unit follows
+that frame, including disabled logic. Entity Z offsets and zero ground placeholders
+stay authored; explicit nonzero logic Z retains its difference from the sampled
+old surface on the new surface. Quaternion directions use the same rotation.
+
+The shared-MPR compose option writes only the MOB. The catalog candidate changes
+the selected briefing's MPR reference to the existing terrain name, preserves its
+MOB, type and original edge destination, and retains the reviewed exit rectangles.
+Native RES member replacement writes a separate work candidate; all other members
+and metadata are validated. Existing matched inventory subtrees stay exact and
+are never duplicated. Missing inventory requires explicit source paths/free IDs.
+Only complete, individually selected effect-call lines can be removed; a line
+containing any other call is rejected.
+
+The optional `heights` upgrade uses the native `patch` transaction to update an
+already composed candidate's declared logic leaves while retaining its rebuilt
+graph. `report` independently verifies static bytes/ID exceptions, unit noncoordinate
+bytes, script-coordinate spans plus authorized deletions, scenario blocks, IDs,
+lookups and every pairwise XY distance. Input identities remain external private
+run data. `test_rigid.py` exercises rigidity/no scaling and exact line-deletion
+boundaries; run it together with `test_migrate.py`.
+
+`scene.json` supplies the existing working MPR path and candidate map.txt. New-scene
+rendering opens that terrain and the separate MOB using production `openMapPair`
+with an explicit briefing Zone ID; it requires the resulting identity to be brief.
+`squad-old`/`squad-new` use explicit, ground-relative matching cameras. `mark-new`
+shows only remaining findings. `compare-rigid` investigates common translations
+within 2 m at 0.25 m intervals without applying them. This sampled search does not
+prove that every continuous translation is impossible.
+
+The numbered `review.csv` retains the previous physical row slots: resolved rows
+are OK, removed effects are marked removed, and only open findings are annotated.
+`review-open.csv` is the compact list of open findings. This keeps the owner's
+existing screenshot numbers stable while the review set shrinks. For briefing
+zones the mapper intentionally hides the minimap; the production terrain view
+still uses the catalog-selected MPR. Nav64 identities include both MPR and MOB;
+an existing mesh for a different MOB must never be substituted.

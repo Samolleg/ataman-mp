@@ -53,7 +53,8 @@ int main(int argc,char** argv) {
      ||base->exits[0].destinationZoneId!=oldBase->exits[0].destinationZoneId||base->exits[0].destinationExitId!=oldBase->exits[0].destinationExitId
      ||zone->exits[1].destinationZoneId!="bz1g"||zone->exits[1].destinationExitId!=1)throw QString("Original travel target was changed");
   if(p["mapOnly"].toBool()){
-   const auto& target=base->exits[0];QJsonObject result{{"validated",true},{"archiveWritten",false},{"destination",target.destinationZoneId},{"exit",target.destinationExitId}};
+   const auto& target=base->exits[0];QJsonObject result{{"validated",true},{"archiveWritten",false},{"destination",target.destinationZoneId},{"exit",target.destinationExitId},{"mpr",base->mprName},{"mob",base->mobName},{"type",base->zoneType}};
+   QJsonArray shared;for(const auto& entry:table.zones())if(entry.mprName==base->mprName)shared.append(QJsonObject{{"zone",entry.zoneId},{"mpr",entry.mprName},{"mob",entry.mobName},{"type",entry.zoneType}});result["sharedMprZones"]=shared;
    for(const auto& edge:table.zones())if(edge.zoneId==target.destinationZoneId&&target.destinationExitId>0&&target.destinationExitId<=edge.exits.size()){
     const auto& next=edge.exits[target.destinationExitId-1];result["destinationZoneType"]=edge.zoneType;result["nextZone"]=next.destinationZoneId;result["nextExit"]=next.destinationExitId;
    }write(a[3],QJsonDocument(result).toJson());return 0;
@@ -89,6 +90,11 @@ int main(int argc,char** argv) {
    j["mapPayload"]=QString::fromLatin1(d.memberPayload("map.txt").toBase64());
   }
   j["validation"]=r.toJson();j["noOpByteIdentical"]=true;j["sha256"]=QString(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());write(a[3],QJsonDocument(j).toJson());
+ } else if(a[1]=="patch") {
+  const auto p=QJsonDocument::fromJson(read(a[2])).object();auto d=mob(p["mob"].toString());CMobEditTransaction tx("Explicit reviewed leaf edits");
+  for(const auto v:p["leaves"].toArray()){const auto q=v.toObject();tx.replaceLeafPayload(q["path"].toString(),QByteArray::fromHex(q["sha256"].toString().toLatin1()),QByteArray::fromBase64(q["payload"].toString().toLatin1()));}
+  CValidationReport r;QByteArray bytes;if(!d.applyTransaction(tx,&bytes,&r))throw r.toText();CMobDocument check;
+  if(!check.loadBytes(bytes,a[3],&r)||r.hasErrors()||check.serialize()!=bytes)throw r.toText();write(a[3],bytes);
  } else if(a[1]=="compose") {
   const auto p=QJsonDocument::fromJson(read(a[2])).object();
   auto base=mob(p["baseMob"].toString());auto zone=mob(p["zoneMob"].toString());CValidationReport r;QByteArray bytes;
@@ -103,7 +109,9 @@ int main(int argc,char** argv) {
   if(p.contains("script")){if(!moved.replaceEmbeddedScript(p["script"].toString(),&bytes,&r))throw r.toText();if(!moved.loadBytes(bytes,"moved-script.mob",&r))throw r.toText();}
   QVector<QByteArray> raw,hashes;
   for(const auto& o:zone.objects())if(!o.unit&&o.sectionType!=0xBBAB0000){QByteArray b;if(!zone.objectSubtreeBytes(o.sectionPath,o.subtreeSha256,&b))throw o.sectionPath;raw.append(b);hashes.append(o.subtreeSha256);}
-  for(const auto& o:moved.objects())if(o.unit||o.sectionType==0xBBAB0000){QByteArray b;if(!moved.objectSubtreeBytes(o.sectionPath,o.subtreeSha256,&b))throw o.sectionPath;raw.append(b);hashes.append(o.subtreeSha256);}
+  QSet<QString> retainedStatic;for(const auto v:p["retainedStaticPaths"].toArray())retainedStatic.insert(v.toString());
+  for(const auto& o:moved.objects())if(o.unit||o.sectionType==0xBBAB0000||retainedStatic.remove(o.sectionPath)){QByteArray b;if(!moved.objectSubtreeBytes(o.sectionPath,o.subtreeSha256,&b))throw o.sectionPath;raw.append(b);hashes.append(o.subtreeSha256);}
+  if(!retainedStatic.isEmpty())throw QString("Unknown retained static path");
   if(!moved.rebuildObjectSequenceFromRaw(raw,hashes,&bytes,&r))throw r.toText();
   CMobDocument result;if(!result.loadBytes(bytes,"basecam.mob",&r)||r.hasErrors()||result.serialize()!=bytes)throw r.toText();
   QDir().mkpath(a[3]);write(a[3]+"/basecam.mob",bytes);
@@ -111,7 +119,8 @@ int main(int argc,char** argv) {
   if(p.contains("namespace")&&p["namespace"].toString()!=terrain.mapInfo().innerNamespace)
    if(!terrain.applyIsolatedNamespaceTransaction(mt,p["namespace"].toString(),&mb,&r))throw r.toText();
   CMprDocument check;if(!check.loadBytes(mb,"basegipat.mpr",&r)||r.hasErrors()||check.serialize()!=mb)throw r.toText();
-  write(a[3]+"/basegipat.mpr",mb);write(a[3]+"/native-validation.json",QJsonDocument(r.toJson()).toJson());
+  if(!p["sharedMpr"].toBool())write(a[3]+"/basegipat.mpr",mb);
+  write(a[3]+"/native-validation.json",QJsonDocument(r.toJson()).toJson());
  } else throw QString("unknown mode");
  return 0;
  }catch(const QString& e){err<<e<<"\n";return 1;}

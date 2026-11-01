@@ -14,6 +14,7 @@
 #include "profile_database.h"
 #include "resource_profile.h"
 #include "ai_graph_preview_builder.h"
+#include "map_table_document.h"
 #include <functional>
 #include <cmath>
 
@@ -39,8 +40,9 @@ int main(int argc,char** argv){
  const QString root=qEnvironmentVariable("EI_BRIEF_ROOT"),mode=qEnvironmentVariable("EI_BRIEF_MODE");
  Hidden hidden;app.installEventFilter(&hidden);out.setCodec("UTF-8");
  try{
-  const bool compare=mode.startsWith("compare-"),mark=mode.startsWith("mark-"),oldScene=mode=="old"||mode.endsWith("-old");
-  require(!root.isEmpty()&&(mode=="old"||mode=="new"||mode=="verify"||compare||mark),"explicit isolated root and mode");
+  const bool compare=mode.startsWith("compare-"),mark=mode.startsWith("mark-"),squad=mode.startsWith("squad-"),oldScene=mode=="old"||mode.endsWith("-old");
+  require(!root.isEmpty()&&(mode=="old"||mode=="new"||mode=="verify"||compare||mark||squad),"explicit isolated root and mode");
+  QJsonObject scene;if(QFileInfo::exists(root+"/scene.json"))scene=QJsonDocument::fromJson(read(root+"/scene.json")).object();
   QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,root+"/render-run/settings");
   QSettings().setValue("ui/viewportVisuals/neighborLandscapes",false);
   MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.configureAutosaveTimer(false,300000);window.resize(1750,1200);window.show();
@@ -54,8 +56,20 @@ int main(int argc,char** argv){
   }
   ei::ProfileDatabaseService databases;auto db=databases.snapshot(request);require(db&&db->usable(),"DejaVu database available");ei::ProfileDatabaseContext::instance().activate(db,bindings);
   const QString dir=root+(oldScene?"/in":"/out");
-  require(window.loadLandscapeWithProgress(QFileInfo(dir+"/basegipat.mpr")),"MPR through production loader");
-  require(window.loadMobWithProgress(QFileInfo(dir+"/basecam.mob"),false),"MOB through production loader");
+  const QString mprPath=oldScene?root+"/in/basegipat.mpr":scene["mpr"].toString(dir+"/basegipat.mpr");
+  if(!oldScene&&scene.contains("catalog")){
+   CMapTableDocument catalog;QStringList errors;require(catalog.loadBytes(read(scene["catalog"].toString()),&errors),"candidate catalog parse: "+errors.join(";"));
+   bool pair=false;for(const auto& z:catalog.zones())if(z.zoneId=="bz1g")pair=z.mprName==QFileInfo(mprPath).completeBaseName()&&z.mobName=="basecam"&&z.zoneType=="brief";
+   require(pair,"bz1g catalog selects the shared zone1 MPR and separate basecam MOB");
+  }
+  if(!oldScene&&scene.contains("catalog")){
+   window.openMapPair(mprPath,dir+"/basecam.mob","bz1g");
+   require(until([&](){return !window.m_workspaceLoadInProgress&&!window.backgroundMobLoading()&&view.mobs().size()==1;},90000),"catalog pair through production openMapPair");
+   require(window.m_mapTestEntry.zoneId=="bz1g"&&window.m_mapTestEntry.isBriefing(),"production identity is bz1g brief, not gz1g");
+  }else{
+   require(window.loadLandscapeWithProgress(QFileInfo(mprPath)),"MPR through production loader: "+mprPath);
+   require(window.loadMobWithProgress(QFileInfo(dir+"/basecam.mob"),false),"MOB through production loader");
+  }
   require(until([&](){return !window.backgroundMobLoading();},90000),"primary MOB ready");
   require(view.mobs().size()==1,"one map, no AddMob");view.m_timer->stop();
   if(compare){
@@ -79,7 +93,20 @@ int main(int argc,char** argv){
     }
     q["passableWithin2m"]=found;if(found){q["nearestPassable"]=QJsonArray{nearest.x(),nearest.y(),nearest.z()};q["projectionDistance"]=std::sqrt(best);}points.append(q);
    }
-   write(root+"/"+mode+".json",QJsonDocument(QJsonObject{{"points",points},{"graphWidth",input.graphWidth},{"graphHeight",input.graphHeight},{"collisionProxies",input.collisionProxies.size()},{"approximate",input.collisionMetadataApproximate}}).toJson());
+   QJsonObject comparison{{"points",points},{"graphWidth",input.graphWidth},{"graphHeight",input.graphHeight},{"collisionProxies",input.collisionProxies.size()},{"approximate",input.collisionMetadataApproximate}};
+   if(mode=="compare-rigid"){
+    // Investigate a common bounded correction without breaking the group's
+    // geometry or writing any map coordinates. Include the original offset.
+    const auto rows=QJsonDocument::fromJson(read(root+"/rows.json")).array();const auto previous=QJsonDocument::fromJson(read(root+"/compare-old.json")).object()["points"].toArray();QSet<int> wasPassable;
+    for(const auto v:previous){const auto q=v.toObject();if(q["inBounds"].toBool()&&q["humanPassable"].toBool())wasPassable.insert(q["index"].toInt());}
+    int bestBlocked=INT_MAX,tested=0;QJsonArray options;
+    for(int sy=-8;sy<=8;++sy)for(int sx=-8;sx<=8;++sx){const double dx=sx*.25,dy=sy*.25;if(dx*dx+dy*dy>4.000001)continue;QJsonArray blocked;
+     for(const auto v:rows){const auto row=v.toObject();const auto kind=row["kind"].toString();if(!row["rigidGroup"].toBool()||!wasPassable.contains(row["index"].toInt())||(kind!="unit"&&kind!="guard"&&kind!="patrol"))continue;
+      const auto p=row["new"].toArray();const int x=int(std::floor((p[0].toDouble()+dx)*2)),y=int(std::floor((p[1].toDouble()+dy)*2));if(x<0||y<0||x>=w||y>=h||!quality[y*w+x])blocked.append(row["index"]);
+     }++tested;if(blocked.size()<bestBlocked){bestBlocked=blocked.size();options={};}if(blocked.size()==bestBlocked)options.append(QJsonObject{{"offset",QJsonArray{dx,dy}},{"blockedRows",blocked}});
+    }comparison["rigidOffsetSearch"]=QJsonObject{{"radius",2},{"step",.25},{"tested",tested},{"minimumBlocked",bestBlocked},{"bestOptions",options},{"applied",false}};
+   }
+   write(root+"/"+mode+".json",QJsonDocument(comparison).toJson());
    require(hidden.dialogs.isEmpty(),"no classifier load-error dialogs");window.closeAll();window.close();return 0;
   }
   if(mode=="verify") {
@@ -95,6 +122,13 @@ int main(int argc,char** argv){
   auto warm=[&](float angle,float distance,const QVector3D& target){view.m_cam->setLocation(target+QVector3D(0,0,distance),target,{angle,0,0});
    for(int i=0;i<14;++i){view.makeCurrent();view.paintGL();app.processEvents(QEventLoop::AllEvents,20);QThread::msleep(20);}};
   QDir().mkpath(root+"/screenshots");
+  if(squad){
+   const auto camera=scene[oldScene?"squadOld":"squadNew"].toObject();const auto f=camera["focus"].toArray();require(f.size()==3,"explicit squad camera");
+   window.resize(2100,1550);app.processEvents();view.setWorldTravelAreas({});
+   warm(camera["angle"].toDouble(-45),camera["distance"].toDouble(55),{float(f[0].toDouble()),float(f[1].toDouble()),float(f[2].toDouble())});
+   const auto image=view.grabFrameBuffer();require(!image.isNull()&&image.save(root+"/screenshots/"+mode+".png"),"squad production capture");
+   require(hidden.dialogs.isEmpty(),"no squad load-error dialogs");write(root+"/render-"+mode+".json",QJsonDocument(QJsonObject{{"mpr",mprPath},{"mob",dir+"/basecam.mob"},{"camera",camera},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}}).toJson());window.closeAll();window.close();return 0;
+  }
   if(mark){
    // Native production scene, with only the requested review markers added.
    window.resize(2100,1850);app.processEvents();view.setWorldTravelAreas({});
