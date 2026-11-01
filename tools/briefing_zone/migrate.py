@@ -41,7 +41,7 @@ def yaw(q):
 
 def tokens(text):
     # The original text and all source offsets are retained, including CRLF.
-    pattern = r'//[^\r\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|[A-Za-z_#][\w#-]*|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|[^\s]'
+    pattern = r'''//[^\r\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z_#][\w#-]*|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|[^\s]'''
     return [(m.group(), m.start(), m.end()) for m in re.finditer(pattern, text)
             if not m.group().startswith(('//', '/*'))]
 

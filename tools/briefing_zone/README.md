@@ -28,8 +28,9 @@ with the production MainWindow and CView.
    this specific basecamp task. No automatic correspondence search is performed.
 4. Run `python -B finish.py compose <run-root> --cli <briefing_zone.exe>`.
    It applies provenance-checked leaf edits and native raw-subtree composition,
-   preserves the original object IDs, copies the full MPR, and prepares a separate
-   catalog candidate. Conflicting IDs are reported rather than silently repaired.
+   preserves basecam object IDs, copies the full MPR, and prepares a separate
+   map.txt candidate. Explicit `zoneLeaves` edits may change only the selected
+   nonliving object ID fields; their byte exceptions are independently verified.
 5. Configure a private renderer application directory, resource copies or
    strictly read-only aliases, inert game-presence markers and copied options.
    Redirect AppData, LocalAppData, USERPROFILE, TEMP, settings, automation and
@@ -38,15 +39,48 @@ with the production MainWindow and CView.
 6. Set `EI_BRIEF_ROOT` and `EI_BRIEF_MODE=old`, then run the renderer hidden.
    It additionally applies WA_DontShowOnScreen to every top-level widget before
    display. Stop on any load-error dialog. It captures the old terrain/MOB first.
-   For `new`, bind the *private* resource copy to the catalog candidate using
-   atomic file replacement; never write through a hardlink. The new run captures
-   the scene and regenerates only its embedded MOB AI graph with CView's production
+   The new run captures the scene and regenerates only its embedded MOB AI graph with CView's production
    collision/terrain inputs, CAiGraphPreviewBuilder and standard graph finalization.
    `verify` freshly loads that final MOB and checks the production no-op save.
 7. Run `python -B finish.py report <run-root> --cli <briefing_zone.exe>` to produce
    transfer/review CSVs and an independent byte-boundary verification receipt.
    Recheck input hashes, inspect the PNGs, and stop for owner review. This tool
    never bakes Nav64 and never authorizes live installation.
+
+## Reviewed revision
+
+`audit <request.json> <result.json>` uses CMobDocument and
+CScriptReferenceAnalyzer on a list of copied files. Each request entry supplies
+`path`, provenance `source`, and `kind` (`mob` or `text`); archive text members may
+also supply `member`. Keep this inventory and the streamed archive-index evidence
+in `reference-audit/`, outside Git. A matching small ID in another MOB is a separate
+scope, not permission to rewrite a briefing unit reference.
+
+`revise.py prepare` consumes that audit, reserves all audited object IDs and
+literal references, and assigns free IDs within the original declared range to
+the 22 conflicting static records. It refuses unhandled basecam lookups to removed
+statics or computed ID expressions instead of silently leaving them unresolved.
+The original basecam unit IDs and all other unit fields remain protected.
+
+Run renderer modes `compare-old` and `compare-new` against the same resource
+snapshot. They wait for the production first-frame deferred terrain work, settle
+the scene, and use human layer 3 of the native classifier. `revise.py adjust` moves
+only newly blocked walking destinations to the closest passable half-metre cell
+centre within 2 m. Previously blocked placements and aim targets stay as authored;
+uncertain landmarks remain review findings even after a passability correction.
+
+Run `new`, `verify`, `finish.py report`, then `revise.py review`. The review checks
+the final full-graph classifier against the comparison, requires zero parser
+warnings, and exports static ID exceptions, all original blocker classifications,
+adjustments, and marker requests. `mark-old` / `mark-new` capture production scenes
+with only doubtful points labelled by physical review.csv line (header = 1).
+Coincident points share a label; leader lines and separated boxes retain every
+row number. Original-coordinate and new-coordinate captures use the same view.
+
+The revision preserves the original edge-zone destination verbatim. Only bz1g's
+deploy/remove rectangles and restrict centre change. The default catalog mode
+validates map.txt against the original archive without writing any texts.res;
+review captures clear travel overlays rather than patching a resource archive.
 
 `sample` reads a copied MPR through CTerrainEditModel and samples its displaced
 terrain surface. Unit and MOB logic Z values retain their terrain-relative
@@ -63,8 +97,9 @@ namespace without corresponding textures would invalidate the atlas binding.
 
 ## Verification boundaries
 
-- Nonliving source object subtrees are compared byte-for-byte, including order,
-  duplicate records, lights, sounds, particles and unknown fields.
+- Nonliving source subtrees are compared byte-for-byte in order, with exceptions
+  restricted to the explicitly declared four-byte ID leaves. Lights, sounds,
+  particles, model fields, unknown data and all other bytes must match.
 - Each unit subtree is independently reconstructed from its original bytes and
   the declared position/orientation leaf edits; all other bytes must match.
 - The embedded script cipher retains its original key. Plaintext is treated as
@@ -72,10 +107,9 @@ namespace without corresponding textures would invalidate the atlas binding.
   Comments, line endings, IDs, timers, strings and scenario code stay exact.
 - Other root scenario blocks and diplomacy are unchanged. The AI graph is a
   separate, explicitly replaced section. No AddMob closure is imported.
-- Catalog editing prepares only the bz1g local coordinates and the paired link;
-  the gz1g source registration is preserved. The entire candidate texts archive
-  is a review artifact; eventual installation must merge its named member against
-  the then-current live archive rather than overwrite unrelated resource edits.
+- Catalog editing prepares only bz1g local coordinates. The original destination,
+  all other bz1g data and the entire gz1g registration are preserved. Eventual
+  publication must merge the named member against the then-current live archive.
 - Human passability is the mapper's static classifier, not a gameplay test or
   an animal-specific routing guarantee. A look target inside an object can be
   intentional. Review counts include repeated and disabled logic coordinates.

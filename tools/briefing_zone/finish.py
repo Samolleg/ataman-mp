@@ -48,14 +48,15 @@ def compose(root,cli):
         for r in corners:r['writtenRectangle']=v
     center=next(r for r in rows if r['identity']=='bz1g camera restrict center')
     new=re.sub(r'(?m)(^#restrict\s*\r?\n)[^\r\n]+',lambda q:q[1]+f"{center['new'][0]:.6f} {center['new'][1]:.6f} {center['radius']:g}",new,count=1)
-    new=re.sub(r'(?m)(^#exit 1\s*\r?\n)[^\r\n]+',lambda q:q[1]+'gz1g 2',new,count=1)
+    # Destination is scenario semantics, independent of coordinate migration.
+    # Preserve the original edge-zone destination and its one-based exit.
     candidate=text[:m.start()]+new+text[m.end():]
     catalog=root/'catalog';catalog.mkdir(exist_ok=True);(catalog/'map.txt').write_bytes(candidate.encode('latin1'))
     (catalog/'map.diff').write_text(''.join(difflib.unified_diff(text.splitlines(True),candidate.splitlines(True),fromfile='original map.txt',tofile='candidate map.txt')),'utf8')
-    save(catalog/'plan.json',dict(archive=str(root/'in/texts.res'),map=str(catalog/'map.txt')))
-    run(cli,'catalog',catalog/'plan.json',catalog/'texts.res')
+    save(catalog/'plan.json',dict(archive=str(root/'in/texts.res'),map=str(catalog/'map.txt'),mapOnly=True))
+    run(cli,'catalog',catalog/'plan.json',catalog/'validation.json')
     save(root/'rows.json',rows)
-    print('Composed work candidate, all original IDs retained. No live publication.')
+    print('Composed work candidate; basecam IDs retained, explicit zone ID edits applied. No live publication.')
 
 def report(root,cli):
     root=Path(root).resolve();b=load(root/'inspect/basecam.mob.json');z=load(root/'inspect/zone1.mob.json');rows=load(root/'rows.json')
@@ -66,7 +67,16 @@ def report(root,cli):
     bs={s['path']:s for s in flatten(b['sections'])};zs={s['path']:s for s in flatten(z['sections'])}
     bbytes=(root/'in/basecam.mob').read_bytes();zbytes=(root/'in/zone1.mob').read_bytes();obytes=(root/'out/basecam.mob').read_bytes()
     def raw(s,data):return data[s['offset']:s['offset']+s['size']]
-    source_static=[raw(zs[o['path']],zbytes) for o in static]
+    zone_edits={e['path']:base64.b64decode(e['payload']) for e in load(root/'plan.json').get('zoneLeaves',[])}
+    used_zone_edits=set();source_static=[]
+    for obj in static:
+        section=zs[obj['path']];expected=bytearray(raw(section,zbytes))
+        for s in flatten([section]):
+            if s['path'] not in zone_edits:continue
+            assert s['type'] in (0xb002,0xaa05,0xcc02,0xdd02) and len(zone_edits[s['path']])==4,'Static edit is not a single ID'
+            begin=s['offset']-section['offset']+8;expected[begin:begin+4]=zone_edits[s['path']];used_zone_edits.add(s['path'])
+        source_static.append(bytes(expected))
+    assert used_zone_edits==set(zone_edits),'Unverified zone edit outside copied static objects'
     actual_static=[raw(rsecs[o['path']],obytes) for o in result['objects'] if not o['unit'] and o['sectionType']!='0XBBAB0000']
     assert source_static==actual_static,'static subtree byte mismatch'
     assert len([o for o in result['objects'] if o['unit']])==len(units),'unit count mismatch'
@@ -116,17 +126,23 @@ def report(root,cli):
             start=r.get('corner',0)*2;r['new']=v[start:start+2]
             if tag!='restrict':r['writtenRectangle']=v
         if r['kind']=='unit':r['displayPosition']=drawn[r['unitId']]
-        reasons=[r['reason']] if r['reason'] else []
+        initial_reason=r.get('initialReason',r['reason']);reasons=[initial_reason] if initial_reason else []
         if r['kind']=='unit' and r['unitId'] in duplicates:reasons.append('ID also used by another object; original IDs preserved')
         if not r['inactive']:
             q=nav[r['index']];r['waterDepth']=q.get('waterDepth',0);r['humanPassable']=q.get('humanPassable',False)
             if not q['inBounds']:reasons.append('outside map')
-            elif r['kind'] not in ('catalog',) and r.get('navigationTarget',True):
+            elif r['kind'] not in ('catalog',) and r.get('requiresWalkablePosition',r.get('navigationTarget',True)):
                 if q.get('waterDepth',0)>0.1:reasons.append('water')
-                if not q.get('humanPassable'):reasons.append('blocked in native human passability')
+                if not q.get('humanPassable'):
+                    if 'oldHumanPassable' in r and not r['oldHumanPassable']:r['passabilityNote']='blocked before and after: preserved normal source placement'
+                    else:reasons.append('newly blocked after transfer' if 'oldHumanPassable' in r else 'blocked in native human passability')
+                elif r.get('adjustmentDistance'):r['passabilityNote']='new blockage corrected within 2 m'
         r['reason']='; '.join(reasons);r['status']='проверить' if reasons else 'OK'
     save(root/'rows.json',rows)
-    fields=['index','kind','identity','old','anchor','anchorDistance','rotationDegrees','new','terrainZ','oldTerrainZ','displayPosition','zMode','writtenRectangle','status','reason','waterDepth','humanPassable']
+    review=[r for r in rows if r['status']!='OK']
+    for number,r in enumerate(review,2):r['csvLine']=number
+    save(root/'rows.json',rows)
+    fields=['csvLine','index','kind','identity','old','anchor','anchorDistance','rotationDegrees','new','terrainZ','oldTerrainZ','displayPosition','zMode','writtenRectangle','oldHumanPassable','initialNewHumanPassable','passabilityClass','adjustmentDistance','passabilityNote','status','reason','waterDepth','humanPassable']
     for name,values in [('transfer.csv',rows),('review.csv',[r for r in rows if r['status']!='OK'])]:
         with (root/name).open('w',encoding='utf-8-sig',newline='') as f:
             writer=csv.DictWriter(f,fields,extrasaction='ignore');writer.writeheader()
@@ -139,7 +155,7 @@ def report(root,cli):
                  inactiveZeroPoints=sum(r['inactive'] for r in rows),reviewRows=sum(r['status']!='OK' for r in rows),
                  reviewUnits=sum(r['kind']=='unit' and r['status']!='OK' for r in rows),
                  reviewScriptPoints=sum(r['kind']=='script' and r['status']!='OK' for r in rows),
-                 duplicateIds=len(duplicates),scriptCoordinateOnlyDiff=True,staticByteIdentical=True,scenarioBlocksByteIdentical=True,mprByteIdentical=True,
+                 duplicateIds=len(duplicates),scriptCoordinateOnlyDiff=True,staticByteIdentical=not zone_edits,staticOnlyDeclaredIdChanges=True,staticIdExceptions=len(zone_edits),scenarioBlocksByteIdentical=True,mprByteIdentical=True,
                  unitOnlyPlannedLeafEdits=True,
                  nativeNoOpByteIdentical=result['noOpByteIdentical'],nativeScriptNoOpByteIdentical=result['scriptNoOpByteIdentical'],
                  scriptDefinitions=len(re.findall(r'(?m)^Script\s+',source)),addMobCopied=False,

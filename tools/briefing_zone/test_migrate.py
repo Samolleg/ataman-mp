@@ -23,6 +23,12 @@ class MigrationChecks(unittest.TestCase):
         custom=next(args for name,args in calls(text) if name[0]=='#DontBeIdiot')
         self.assertEqual(len(custom),5)
 
+    def test_single_quoted_prose_and_id_argument(self):
+        text="ConsoleString('GetObject(67)') GetObjectByID('159')"
+        result=list(calls(text))
+        self.assertEqual([name[0] for name,args in result],['ConsoleString','GetObjectByID'])
+        self.assertEqual(result[1][1][0][0][0],"'159'")
+
     def test_script_cipher_preserves_all_bytes_and_original_key(self):
         plain=b'//\r\n'+bytes(range(256))+b'\0'
         encrypted=encrypt(plain,0x12345678)

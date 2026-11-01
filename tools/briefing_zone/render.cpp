@@ -39,7 +39,8 @@ int main(int argc,char** argv){
  const QString root=qEnvironmentVariable("EI_BRIEF_ROOT"),mode=qEnvironmentVariable("EI_BRIEF_MODE");
  Hidden hidden;app.installEventFilter(&hidden);out.setCodec("UTF-8");
  try{
-  require(!root.isEmpty()&&(mode=="old"||mode=="new"||mode=="verify"),"explicit isolated root and mode");
+  const bool compare=mode.startsWith("compare-"),mark=mode.startsWith("mark-"),oldScene=mode=="old"||mode.endsWith("-old");
+  require(!root.isEmpty()&&(mode=="old"||mode=="new"||mode=="verify"||compare||mark),"explicit isolated root and mode");
   QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,root+"/render-run/settings");
   QSettings().setValue("ui/viewportVisuals/neighborLandscapes",false);
   MainWindow window;window.setAttribute(Qt::WA_DontShowOnScreen);window.configureAutosaveTimer(false,300000);window.resize(1750,1200);window.show();
@@ -52,11 +53,35 @@ int main(int argc,char** argv){
    for(auto it=profile.providers.begin();it!=profile.providers.end();++it)bindings[it.key()]=it.value().id;
   }
   ei::ProfileDatabaseService databases;auto db=databases.snapshot(request);require(db&&db->usable(),"DejaVu database available");ei::ProfileDatabaseContext::instance().activate(db,bindings);
-  const QString dir=root+(mode=="old"?"/in":"/out");
+  const QString dir=root+(oldScene?"/in":"/out");
   require(window.loadLandscapeWithProgress(QFileInfo(dir+"/basegipat.mpr")),"MPR through production loader");
   require(window.loadMobWithProgress(QFileInfo(dir+"/basecam.mob"),false),"MOB through production loader");
   require(until([&](){return !window.backgroundMobLoading();},90000),"primary MOB ready");
   require(view.mobs().size()==1,"one map, no AddMob");view.m_timer->stop();
+  if(compare){
+   require(until([&](){if(view.m_terrainEditAvailable&&!view.m_terrainAutoCatalogBuilding)return true;view.makeCurrent();view.paintGL();return false;},90000),"canonical terrain ready after production first-frame deferred work");
+   const QVector3D focus=oldScene?QVector3D(64,64,0):QVector3D(192,128,0);view.m_cam->setLocation(focus+QVector3D(0,0,175),focus,{0,0,0});
+   for(int i=0;i<14;++i){view.makeCurrent();view.paintGL();app.processEvents(QEventLoop::AllEvents,20);QThread::msleep(20);}
+   view.m_canvasNavigationStale=true;SAiGraphPreviewBuildInput input;QString error;
+   const bool captured=view.captureAiGraphPreviewBuildInput(&input,&error);
+   require(captured,"production classifier inputs: "+error+QString(" editAvailable:%1 MPR:%2 vertices:%3x%4").arg(view.m_terrainEditAvailable).arg(view.m_pLand->isMprLoad()).arg(view.m_terrainEdit.vertexCountX()).arg(view.m_terrainEdit.vertexCountY()));
+   const auto pass=CAiGraphPreviewBuilder::passability(input,3);require(pass.valid,"native human layer classification: "+pass.error);
+   const auto quality=pass.layerPassability.value(3);const int w=input.graphWidth*8,h=input.graphHeight*8;require(quality.size()==w*h,"complete human passability grid");
+   const auto request=QJsonDocument::fromJson(read(root+(oldScene?"/sample-old-request.json":"/sample-request.json"))).object();QJsonArray points;
+   for(const auto v:request["points"].toArray()){
+    auto q=v.toObject();const float x=float(q["x"].toDouble()),y=float(q["y"].toDouble());const int ix=int(std::floor(x*2)),iy=int(std::floor(y*2));const bool inside=ix>=0&&iy>=0&&ix<w&&iy<h;q["inBounds"]=inside;
+    q["humanPassable"]=inside&&quality[iy*w+ix]!=0;
+    if(inside)q["waterDepth"]=input.waterDepths[iy*w+ix];
+    double best=4.00000001;QVector3D nearest;bool found=false;
+    for(int py=qMax(0,iy-4);py<=qMin(h-1,iy+4);++py)for(int px=qMax(0,ix-4);px<=qMin(w-1,ix+4);++px){
+     if(!quality[py*w+px])continue;const float nx=(px+.5f)*.5f,ny=(py+.5f)*.5f;const double dx=nx-x,dy=ny-y,d2=dx*dx+dy*dy;if(d2>=best)continue;
+     bool available=false;const float z=view.m_terrainEdit.terrainSurfaceHeight(nx,ny,&available);if(!available)continue;best=d2;nearest={nx,ny,z};found=true;
+    }
+    q["passableWithin2m"]=found;if(found){q["nearestPassable"]=QJsonArray{nearest.x(),nearest.y(),nearest.z()};q["projectionDistance"]=std::sqrt(best);}points.append(q);
+   }
+   write(root+"/"+mode+".json",QJsonDocument(QJsonObject{{"points",points},{"graphWidth",input.graphWidth},{"graphHeight",input.graphHeight},{"collisionProxies",input.collisionProxies.size()},{"approximate",input.collisionMetadataApproximate}}).toJson());
+   require(hidden.dialogs.isEmpty(),"no classifier load-error dialogs");window.closeAll();window.close();return 0;
+  }
   if(mode=="verify") {
    const QByteArray bytes=read(dir+"/basecam.mob");QByteArray candidate;
    require(view.mobs().first()->buildValidatedCandidate(&candidate)&&candidate==bytes,"production CMob no-op save is byte-identical after final graph write");
@@ -66,10 +91,37 @@ int main(int argc,char** argv){
    write(root+"/render-verify.json",QJsonDocument(QJsonObject{{"units",count},{"noOpByteIdentical",true},{"graphWidth",88},{"graphHeight",72},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}}).toJson());
    window.closeAll();window.close();return 0;
   }
-  const QVector3D center=mode=="old"?QVector3D(69,79,0):QVector3D(197,143,0);
+  const QVector3D center=oldScene?QVector3D(69,79,0):QVector3D(197,143,0);
   auto warm=[&](float angle,float distance,const QVector3D& target){view.m_cam->setLocation(target+QVector3D(0,0,distance),target,{angle,0,0});
    for(int i=0;i<14;++i){view.makeCurrent();view.paintGL();app.processEvents(QEventLoop::AllEvents,20);QThread::msleep(20);}};
   QDir().mkpath(root+"/screenshots");
+  if(mark){
+   // Native production scene, with only the requested review markers added.
+   window.resize(2100,1850);app.processEvents();view.setWorldTravelAreas({});
+   const QVector3D focus=oldScene?QVector3D(64,64,0):QVector3D(192,128,0);warm(0,175,focus);view.setWorldTravelAreas({});view.makeCurrent();view.paintGL();
+   QImage image=view.grabFrameBuffer();require(!image.isNull(),"native review capture");
+   const auto request=QJsonDocument::fromJson(read(root+"/markers.json")).array();QJsonArray projected;
+   struct Label {QPointF point;QStringList numbers;};QMap<QString,Label> labels;
+   for(const auto v:request){auto q=v.toObject();const auto xy=q[oldScene?"old":"new"].toArray();const float x=xy[0].toDouble(),y=xy[1].toDouble();bool available=false;const float z=view.m_terrainEdit.terrainSurfaceHeight(x,y,&available);
+    const auto pixel=QVector3D(x,y,available?z:0).project(view.m_cam->viewMatrix(),view.m_projection,QRect(0,0,view.width(),view.height()));const QPointF point(pixel.x()*image.width()/view.width(),(view.height()-pixel.y())*image.height()/view.height());
+    q["pixel"]=QJsonArray{point.x(),point.y()};q["visible"]=pixel.z()>=0&&pixel.z()<=1&&QRectF(image.rect()).contains(point);projected.append(q);
+    const QString key=QString::number(x,'f',2)+","+QString::number(y,'f',2);auto& l=labels[key];l.point=point;l.numbers.append(QString::number(q["csvLine"].toInt()));
+   }
+   QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing);QFont font("Arial",11,QFont::Bold);painter.setFont(font);const QFontMetrics metrics(font);
+   QVector<QRectF> occupied{QRectF(10,10,650,29)};
+   for(auto it=labels.cbegin();it!=labels.cend();++it){const auto& l=it.value();
+    const QString text=l.numbers.join(",");const QRectF shape=metrics.boundingRect(text).adjusted(-3,-2,3,2);QRectF box;bool placed=false;
+    for(int radius=10;radius<=330&&!placed;radius+=16)for(int direction=0;direction<16&&!placed;++direction){const double angle=direction*6.283185307179586/16;QRectF option=shape;option.moveCenter(l.point+QPointF(std::cos(angle)*(radius+shape.width()/2),std::sin(angle)*(radius+shape.height()/2)));
+     if(!QRectF(image.rect()).adjusted(4,42,-4,-4).contains(option))continue;bool overlap=false;for(const auto& prev:occupied)if(prev.adjusted(-3,-3,3,3).intersects(option)){overlap=true;break;}if(!overlap){box=option;placed=true;}
+    }
+    if(!placed){box=shape;box.moveTopLeft(l.point+QPointF(6,-shape.height()-3));}occupied.append(box);
+    painter.setPen(QPen(QColor(255,100,80),1));painter.drawLine(l.point,box.center());painter.setPen(QPen(QColor(255,70,65),2));painter.setBrush(QColor(255,70,65));painter.drawEllipse(l.point,3,3);
+    painter.fillRect(box,QColor(0,0,0,215));painter.setPen(QColor(255,235,125));painter.drawText(box,Qt::AlignCenter,text);
+   }
+   painter.fillRect(QRect(10,10,650,29),QColor(0,0,0,205));painter.setPen(Qt::white);painter.drawText(QRect(17,10,640,29),Qt::AlignVCenter,QString::fromUtf8(oldScene?"СТАРАЯ | номера строк review.csv (заголовок = 1)":"НОВАЯ | номера строк review.csv (заголовок = 1)"));painter.end();
+   require(image.save(root+"/screenshots/"+mode+".png"),"save numbered review image");write(root+"/screenshots/"+mode+"-points.json",QJsonDocument(projected).toJson());
+   require(hidden.dialogs.isEmpty(),"no review capture dialogs");window.closeAll();window.close();return 0;
+  }
   auto capture=[&](const QString& name,float angle,float distance,const QVector3D& target){warm(angle,distance,target);auto img=view.grabFrameBuffer();require(!img.isNull()&&img.save(root+"/screenshots/"+name+".png"),"capture "+name);};
   capture(mode+"-village-top",0,130,center);capture(mode+"-village-angle",-45,130,center);
   QJsonObject result{{"mode",mode},{"mobCount",view.mobs().size()},{"viewportWidth",view.width()},{"viewportHeight",view.height()},{"dialogs",QJsonArray::fromStringList(hidden.dialogs)}};
