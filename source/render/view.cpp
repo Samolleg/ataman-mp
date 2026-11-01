@@ -1,3 +1,4 @@
+#include "render_memory.h"
 #include "ai_agent_edit.h"
 #include "file_write_activity.h"
 #include "terrain_atlas_compact.h"
@@ -3317,25 +3318,27 @@ QByteArray CView::neighborObjectResourceFingerprint() const
 void CView::trimNeighborRenderCache()
 {
     if(m_neighborCacheTransition)return; // old maps are temporarily unpinned during rebase
-    const auto bytes=[](const SLoadedNeighborLandscape& n) {
-        // Meshes/textures are shared, but charge them to each holder conservatively.
-        quint64 b=n.landscape?n.landscape->residentBytes():0;
-        b+=quint64(n.staticObjects.size())*65536;
-        b+=quint64(n.pendingObjects.size())*131072;
-        QSet<QOpenGLTexture*> textures;
-        for(const auto& lease:n.textureLeases)if(lease)textures.insert(lease.data());
-        for(const auto* texture:textures)b+=quint64(texture->width())*texture->height()*4*4/3;
-        return b;
+    const auto charged=[&]() {
+        SRenderMemoryEstimate memory;quint64 objectAllowance=0;
+        QSet<const CLandscape*> landscapes;
+        const auto add=[&](const SLoadedNeighborLandscape& n) {
+            if(n.landscape && !landscapes.contains(n.landscape.data())) {
+                landscapes.insert(n.landscape.data());n.landscape->accumulateMemory(memory);
+            }
+            objectAllowance+=quint64(n.staticObjects.size())*65536+quint64(n.pendingObjects.size())*131072;
+            for(const auto& lease:n.textureLeases)memory.texture(lease.data());
+        };
+        for(const auto& n:m_neighborLandscapes)add(n);
+        for(const auto& n:m_neighborRenderCache)add(n);
+        return memory.total()+objectAllowance;
     };
-    quint64 total=0;for(const auto& n:m_neighborLandscapes)total+=bytes(n);
-    for(const auto& n:m_neighborRenderCache)total+=bytes(n);
+    quint64 total=charged();
     // Visible maps are pinned. Eviction cannot make the current world disappear.
     while(!m_neighborRenderCache.isEmpty() && total>m_neighborCacheBudget) {
         int oldest=0;
         for(int i=1;i<m_neighborRenderCache.size();++i)
             if(m_neighborRenderCache[i].lastUse<m_neighborRenderCache[oldest].lastUse)oldest=i;
-        total-=bytes(m_neighborRenderCache[oldest]);
-        m_neighborRenderCache.remove(oldest);++m_neighborCacheEvictions;
+        m_neighborRenderCache.remove(oldest);++m_neighborCacheEvictions;total=charged();
     }
     ei::log(eLogInfo,QString("Neighbor cache visible:%1 retained:%2 chargedMiB:%3 budgetMiB:%4 evictions:%5")
         .arg(m_neighborLandscapes.size()).arg(m_neighborRenderCache.size()).arg(total/1048576)
@@ -12918,7 +12921,9 @@ void CView::rebuildTerrainAutoCatalog()
             .arg(m_workingTerrainAtlas->capacityLimit()
                  - m_authoredTerrainTileImages.size())
             .arg(m_workingAtlasProtectedSlots.size()));
-        primeWorkingTerrainAtlasPreview(&report);
+        // The authored atlas already displays these unmodified slots. Allocate
+        // an editable GPU preview only at the first successful publication.
+        // previewTerrainAtlas handles first upload/regrid and rollback itself.
         refreshClassicAutoPalette();
         classicPaletteDataMs = catalogDetailTimer.restart();
         refreshManualAtlasPalette();

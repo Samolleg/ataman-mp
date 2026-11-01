@@ -89,6 +89,7 @@ public:
     void setWorldOffset(const QVector3D& offset);
     void swapRenderState(CLandscape& other);
     quint64 residentBytes() const;
+    void accumulateMemory(struct SRenderMemoryEstimate& memory) const;
     QByteArray baselineSha256() const;
     bool save(const SaveProgress& progress = SaveProgress());
     bool saveMapAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());

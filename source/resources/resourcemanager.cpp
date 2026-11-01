@@ -1,3 +1,4 @@
+#include "texture_page_upload.h"
 #include "resourcemanager.h"
 #include "terrain_reference_path.h"
 #include <QCoreApplication>
@@ -2062,24 +2063,17 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
         if(!context) return nullptr;
         GLint limit = 0; context->functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &limit);
         if(maximumPage * atlasColumns > limit || maximumPage * rows > limit) return nullptr;
-        QImage combined(maximumPage * atlasColumns, maximumPage * rows, QImage::Format_RGBA8888);
-        if(combined.isNull()) return nullptr;
-        combined.fill(Qt::transparent);
-        for(int i = 0; i < aPart.size(); ++i) {
-            const auto& part = aPart.at(i);
-            QImage page; QString diagnostic;
-            const int size = part.header.m_width;
-            if(size != int(part.header.m_height)
-               || !ei::decodeDxtImage(part.data.mid(part.header.size(), dxt1MipBytes(size, size)),
-                    size, size, ei::DxtFormat::Dxt1, &page, &diagnostic)) return nullptr;
-            page = page.convertToFormat(QImage::Format_RGBA8888);
-            if(size != maximumPage) page = page.scaled(maximumPage, maximumPage, Qt::IgnoreAspectRatio, Qt::FastTransformation);
-            for(int y = 0; y < maximumPage; ++y)
-                memcpy(combined.scanLine((i / atlasColumns) * maximumPage + y) + (i % atlasColumns) * maximumPage * 4,
-                       page.constScanLine(y), size_t(maximumPage) * 4);
-        }
-        auto* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-        texture->setData(combined);
+        auto* texture=uploadRgbaAtlasPages(texCount,atlasColumns,maximumPage,[&](int i)->QImage {
+            const auto& part=aPart.at(i);QImage page;QString diagnostic;
+            const int size=part.header.m_width;
+            if(size!=int(part.header.m_height)
+               ||!ei::decodeDxtImage(part.data.mid(part.header.size(),dxt1MipBytes(size,size)),
+                   size,size,ei::DxtFormat::Dxt1,&page,&diagnostic))return {};
+            page=page.convertToFormat(QImage::Format_RGBA8888);
+            if(size!=maximumPage)page=page.scaled(maximumPage,maximumPage,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+            return page;
+        });
+        if(!texture)return nullptr;
         texture->setMinificationFilter(m_terrainMipmappingEnabled ? QOpenGLTexture::NearestMipMapLinear : QOpenGLTexture::Nearest);
         texture->setMagnificationFilter(QOpenGLTexture::Nearest);
         texture->setWrapMode(QOpenGLTexture::Repeat);

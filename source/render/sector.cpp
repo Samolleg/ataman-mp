@@ -1,3 +1,4 @@
+#include "render_memory.h"
 #include "shader_locations.h"
 #include <QtGlobal>
 #include <QtEndian>
@@ -7,6 +8,9 @@
 #include "sector.h"
 
 quint64 CSector::residentBytes() const
+{ SRenderMemoryEstimate memory;accumulateMemory(memory);return memory.total(); }
+
+void CSector::accumulateMemory(SRenderMemoryEstimate& memory) const
 {
     // QOpenGLBuffer::size() queries the currently bound buffer of its target,
     // not this wrapper's buffer. Accounting must neither depend on draw state
@@ -18,11 +22,11 @@ quint64 CSector::residentBytes() const
         +(m_indexBuf.isCreated()?256ull*24*sizeof(ushort):0)
         +(m_gridIndexBuf.isCreated()?256ull*8*sizeof(ushort):0)
         +(m_waterIndexBuf.isCreated()?256ull*24*sizeof(ushort):0);
-    return quint64(m_arrLandVrtData.capacity())*sizeof(SVertexData)
+    memory.gpuTerrainBufferBytes+=gpuBytes;
+    memory.cpuTerrainBytes+=quint64(m_arrLandVrtData.capacity())*sizeof(SVertexData)
         + quint64(m_arrLitLandVrtData.capacity())*sizeof(STerrainVertexData)
         + quint64(m_arrWaterVrtData.capacity())*sizeof(SVertexData)
         + quint64(m_arrAnimatedWaterVrtData.capacity())*sizeof(SWaterVertexData)
-        + gpuBytes
         + 2ull*32*32*sizeof(CTile);
 }
 

@@ -223,10 +223,10 @@ private slots:
         // GPU-side sector preview accepts the exact changed payload.
         QVERIFY(view.m_pLand->previewCanonicalSector(0,0,view.m_terrainEdit.sectorPayload(0,0)));
         QString error;view.recordWorldTerrainStroke(view.m_worldTerrainStroke);view.m_worldTerrainStroke={};
-        QVERIFY(view.m_worldTerrainSession.undo(&error));
+        QVERIFY(view.worldTerrainHistory(false,true));
         const auto id=CWorldTerrainSession::key(s.path);QVERIFY(view.previewWorldPaintState(id));
         QCOMPARE(view.m_terrainEdit.sectorPayload(0,0),before);
-        QVERIFY(view.m_worldTerrainSession.redo(&error));QVERIFY(view.previewWorldPaintState(id));
+        QVERIFY(view.worldTerrainHistory(true,true));QVERIFY(view.previewWorldPaintState(id));
         QCOMPARE(view.m_terrainEdit.overlayMaterialIndex(5,5),qint16(0));
         QCOMPARE(read(s.path),s.original);QCOMPARE(read(s.archive),s.archiveBytes);
     }

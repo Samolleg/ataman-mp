@@ -55,6 +55,7 @@ public:
     void rebindMaterials(const QVector<SMaterial>* materials, const QVector<SAnimTile>* animations)
     { m_materials=materials; m_animatedTiles=animations; }
     quint64 residentBytes() const;
+    void accumulateMemory(struct SRenderMemoryEstimate& memory) const;
     void setWorldOffset(const QVector3D& offset)
     { m_worldOffset = offset; updatePosition(); }
     const UI2& index() {return m_index;}

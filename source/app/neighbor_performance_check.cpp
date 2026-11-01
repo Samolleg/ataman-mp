@@ -475,9 +475,9 @@ int runNeighborPerformanceCheck()
         out<<"Painter message: "<<message<<"\n";
         check(view.m_worldTerrainStroke.paint.contains(activeId)&&view.m_worldTerrainStroke.paint.contains(neighborId),"one stroke changes both real independent atlases");
         view.endTileBrushGroup();
-        QString error;check(view.m_worldTerrainSession.undo(&error),"undo complete paint cohort");out<<error<<"\n";
+        check(view.worldTerrainHistory(false,true),"undo complete paint cohort");
         check(view.m_worldTerrainSession.documents.value(activeId) && view.m_worldTerrainSession.documents[activeId]->terrain.sectorPayload(0,0)==before.sectorPayload(0,0),"undo restores active terrain");
-        check(view.m_worldTerrainSession.redo(&error),"redo complete paint cohort");
+        check(view.worldTerrainHistory(true,true),"redo complete paint cohort");
         for(const auto& id:QStringList{activeId,neighborId})check(view.previewWorldPaintState(id),"restore redo preview for each world document");
         tools.activateMode(ELandscapeEditMode::OverlaySurface,true);tools.adjustPaintSize(1);
         selected=false;

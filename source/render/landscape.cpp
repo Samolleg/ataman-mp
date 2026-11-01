@@ -1,3 +1,5 @@
+#include "texture_page_upload.h"
+#include "render_memory.h"
 #include "shader_locations.h"
 #include <QFileInfo>
 #include <QDir>
@@ -53,17 +55,17 @@ QByteArray CLandscape::baselineSha256() const
 { return QCryptographicHash::hash(m_originalMprData,QCryptographicHash::Sha256); }
 
 quint64 CLandscape::residentBytes() const
-{
-    quint64 bytes=m_originalMprData.capacity();
-    for(const auto& row:m_aSector)for(const auto* sector:row)if(sector)bytes+=sector->residentBytes();
-    const QOpenGLTexture* textures[]={m_baseAtlasTexture,m_previewAtlasTexture,m_terrainShadowTexture};
-    for(const auto* texture:textures)if(texture)bytes+=quint64(texture->width())*texture->height()*4*4/3;
-    for(const auto& image:m_previewAtlasImages)bytes+=quint64(image.sizeInBytes());
-    for(const auto& image:m_previewDisplayImages)bytes+=quint64(image.sizeInBytes());
-    for(const auto& cached:m_terrainSunCache)bytes+=quint64(cached.field.visibility.capacity())*sizeof(float);
-    return bytes;
-}
+{ SRenderMemoryEstimate memory;accumulateMemory(memory);return memory.total(); }
 
+void CLandscape::accumulateMemory(SRenderMemoryEstimate& memory) const
+{
+    memory.cpuTerrainBytes+=quint64(m_originalMprData.capacity());
+    for(const auto& row:m_aSector)for(const auto* sector:row)if(sector)sector->accumulateMemory(memory);
+    for(const auto* texture:{m_baseAtlasTexture,m_previewAtlasTexture,m_terrainShadowTexture})memory.texture(texture,true);
+    for(const auto& image:m_previewAtlasImages)memory.image(image);
+    for(const auto& image:m_previewDisplayImages)memory.image(image);
+    for(const auto& cached:m_terrainSunCache)memory.cpuTerrainBytes+=quint64(cached.field.visibility.capacity())*sizeof(float);
+}
 void CLandscape::swapRenderState(CLandscape& other)
 {
     Q_ASSERT(!m_canonicalTerrain && !other.m_canonicalTerrain);
@@ -176,17 +178,13 @@ CLandscape::CLandscape(bool readOnlyBackground):
 bool CLandscape::previewTerrainAtlasFullUpload(
     const QVector<QImage>& tileImages, int textureCount, int columns, int rows)
 {
-    const QImage combined = CTerrainVirtualAtlas::composeAtlasGrid(
-        tileImages, textureCount, columns);
-    if(combined.isNull())
-        return false;
-    QOpenGLTexture* replacement = new QOpenGLTexture(
-        combined, QOpenGLTexture::GenerateMipMaps);
-    if(!replacement->isCreated())
-    {
-        delete replacement;
-        return false;
-    }
+    if(tileImages.isEmpty())return false;
+    const int pageSize=tileImages.first().width()*8;
+    const int width=columns*pageSize,height=rows*pageSize;
+    auto* replacement=uploadRgbaAtlasPages(textureCount,columns,pageSize,[&](int page){
+        return CTerrainVirtualAtlas::composePage(tileImages,page*64,pageSize/8);
+    });
+    if(!replacement)return false;
     replacement->setMinificationFilter(QOpenGLTexture::NearestMipMapLinear);
     replacement->setMagnificationFilter(QOpenGLTexture::Nearest);
     replacement->setWrapMode(QOpenGLTexture::Repeat);
@@ -198,7 +196,7 @@ bool CLandscape::previewTerrainAtlasFullUpload(
     ei::log(eLogInfo, QString(
         "Working terrain atlas full upload: slots:%1 pages:%2 grid:%3x%4 dimensions:%5x%6")
         .arg(tileImages.size()).arg(textureCount).arg(columns).arg(rows)
-        .arg(combined.width()).arg(combined.height()));
+        .arg(width).arg(height));
     return true;
 }
 
