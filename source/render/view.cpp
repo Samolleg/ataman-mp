@@ -9001,6 +9001,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition, logicalCameraPosition);
+    renderQueue.setStableResourceOrder(m_topdownPass != ETopdownPass::None);
     stallTrace.mark("setup");
     bool terrainDrawn = false;
     const auto drawTerrainColor = [&](bool withShadows)

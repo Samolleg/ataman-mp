@@ -31,6 +31,7 @@ struct SRenderItem
     bool highlighted{false};
     QVector4D diplomacyTint;
     quintptr meshIdentity{0};
+    QByteArray stableTextureKey, stableMeshKey; // export-only content identities
     float textureUvScale{1.0f};
     bool instanceEligible{false};
     QVector4D pickingColor;
@@ -66,9 +67,9 @@ struct SShadowCasterGroup
     bool dynamic{false};
 };
 
-inline void sortRenderItems(QVector<SRenderItem>& items)
+inline void sortRenderItems(QVector<SRenderItem>& items, bool stableResources = false)
 {
-    std::stable_sort(items.begin(), items.end(), [](const SRenderItem& left,
+    std::stable_sort(items.begin(), items.end(), [stableResources](const SRenderItem& left,
                                                     const SRenderItem& right)
     {
         if(left.highlighted != right.highlighted)
@@ -89,10 +90,17 @@ inline void sortRenderItems(QVector<SRenderItem>& items)
             return int(left.materialClass) < int(right.materialClass);
         if(left.dynamicShadow != right.dynamicShadow)
             return !left.dynamicShadow;
-        if(left.texture != right.texture)
-            return quintptr(left.texture) < quintptr(right.texture);
-        if(left.meshIdentity != right.meshIdentity)
-            return left.meshIdentity < right.meshIdentity;
+        if(stableResources) {
+            if(left.stableTextureKey != right.stableTextureKey)
+                return left.stableTextureKey < right.stableTextureKey;
+            if(left.stableMeshKey != right.stableMeshKey)
+                return left.stableMeshKey < right.stableMeshKey;
+        } else {
+            if(left.texture != right.texture)
+                return quintptr(left.texture) < quintptr(right.texture);
+            if(left.meshIdentity != right.meshIdentity)
+                return left.meshIdentity < right.meshIdentity;
+        }
         if(left.textureUvScale != right.textureUvScale)
             return left.textureUvScale < right.textureUvScale;
         if(left.localShadowSkipIndex != right.localShadowSkipIndex)
@@ -198,6 +206,7 @@ public:
     bool collecting() const { return m_collecting; }
     bool collectingSelection() const { return m_collecting && m_selectionPass; }
     void setShadowOnlyCollection(bool enabled) { m_shadowOnlyCollection = enabled; }
+    void setStableResourceOrder(bool enabled) { m_stableResourceOrder = enabled; }
     void setDiplomacyTint(const QVector4D& tint) { m_diplomacyTint = tint; }
     void setLocalShadowOwners(const QVector<quintptr>& owners)
         { m_localShadowOwners = owners; }
@@ -225,6 +234,7 @@ public:
     QVector<SShadowCasterGroup> shadowCasterGroups(float maximumDistance) const;
 
 private:
+    bool m_stableResourceOrder{false};
     int reserveInstanceBytes(int bytes);
     bool m_collecting{false};
     bool m_selectionPass{false};

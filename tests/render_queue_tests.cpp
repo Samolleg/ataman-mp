@@ -13,6 +13,7 @@ private slots:
     void alphaClassification();
     void rejectsUncreatedRenderTextures();
     void deterministicQueueOrder();
+    void exportOrderIgnoresResourceAddresses();
     void groupsOnlyCompatibleInstanceRuns();
     void filtersShadowCastersByDistance();
     void filtersShadowCastersByCascadeFootprint();
@@ -24,6 +25,35 @@ private slots:
     void combinesShadowCastingPointLights();
     void pointLightInfluenceIsCasterLocalAndFallsWithDistance();
 };
+
+void RenderQueueTests::exportOrderIgnoresResourceAddresses()
+{
+    SRenderItem a,b,c;
+    for(auto* item : {&a,&b,&c}) item->materialClass=ERenderMaterialClass::Opaque;
+    a.sequence=0; b.sequence=1; c.sequence=2;
+    a.stableTextureKey=b.stableTextureKey="first"; c.stableTextureKey="second";
+    a.stableMeshKey="mesh1"; b.stableMeshKey="mesh2";
+    a.texture=b.texture=reinterpret_cast<QOpenGLTexture*>(quintptr(100));
+    c.texture=reinterpret_cast<QOpenGLTexture*>(quintptr(1));
+    a.meshIdentity=200; b.meshIdentity=100;
+    QVector<SRenderItem> old{a,b,c}; sortRenderItems(old);
+    QCOMPARE(old.front().sequence,quint64(2)); // address-dependent counterexample
+    QVector<SRenderItem> stable{a,b,c}; sortRenderItems(stable,true);
+    QCOMPARE(stable[0].sequence,quint64(0)); QCOMPARE(stable[1].sequence,quint64(1));
+    a.texture=b.texture=reinterpret_cast<QOpenGLTexture*>(quintptr(1));
+    c.texture=reinterpret_cast<QOpenGLTexture*>(quintptr(100));
+    a.meshIdentity=1; b.meshIdentity=200;
+    QVector<SRenderItem> relocated{a,b,c}; sortRenderItems(relocated,true);
+    for(int i=0;i<3;++i) QCOMPARE(relocated[i].sequence,stable[i].sequence);
+    a.materialClass=b.materialClass=ERenderMaterialClass::Transparent;
+    a.cameraDistanceSquared=1; b.cameraDistanceSquared=100;
+    relocated={a,b}; sortRenderItems(relocated,true);
+    QCOMPARE(relocated.front().sequence,quint64(1));
+    a.instanceEligible=b.instanceEligible=true;
+    a.materialClass=b.materialClass=ERenderMaterialClass::Opaque;
+    a.stableMeshKey=b.stableMeshKey;
+    QVERIFY(!shareInstanceBatch(a,b)); // content keys never replace actual GPU identity
+}
 
 void RenderQueueTests::alphaClassification()
 {

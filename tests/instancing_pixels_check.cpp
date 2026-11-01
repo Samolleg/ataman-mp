@@ -68,6 +68,28 @@ int runAssemblyCatalogCheck() {
         check(performance.currentFrameCounters().instancedDrawCalls>0,"picking uses actual instance path");
         QSet<int> ids;for(int y=0;y<batched.height();++y)for(int x=0;x<batched.width();++x)if(batched.pixelColor(x,y).alpha())ids.insert(batched.pixelColor(x,y).red());
         check(ids.size()==24,"24 distinct picking identities preserved");
+        QImage red(2,2,QImage::Format_RGBA8888),blue=red;
+        red.fill(Qt::red);blue.fill(Qt::blue);
+        QOpenGLTexture storageA(red),storageB(blue);
+        const auto coincident=[&](bool stable,bool swapped) {
+            fbo.bind();auto* gl=QOpenGLContext::currentContext()->functions();
+            gl->glViewport(0,0,256,256);gl->glEnable(GL_DEPTH_TEST);gl->glDepthFunc(GL_LESS);gl->glDepthMask(GL_TRUE);
+            gl->glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            program.bind();program.setUniformValue("u_testPicking",false);
+            queue.begin(&program,{});queue.setStableResourceOrder(stable);
+            for(int i=0;i<2;++i) {
+                auto* texture=(bool(i)==swapped)?&storageA:&storageB;
+                auto item=RenderQueueContext::prepareStaticItem(&part,texture,QMatrix4x4(),ERenderMaterialClass::Opaque,false,0);
+                item.stableTextureKey=i?"blue":"red";item.stableMeshKey="triangle";
+                queue.submitPrepared(item,true,false);
+            }
+            queue.end();gl->glFinish();const auto result=fbo.toImage();fbo.release();return result;
+        };
+        const auto unstableBefore=coincident(false,false),stableBefore=coincident(true,false);
+        storageA.destroy();storageA.setData(blue);storageB.destroy();storageB.setData(red);
+        const auto unstableAfter=coincident(false,true),stableAfter=coincident(true,true);
+        check(unstableBefore!=unstableAfter,"coplanar depth winner changes with pointer/resource assignment (original cause)");
+        check(stableBefore==stableAfter,"stable resource order preserves every coplanar color pixel after relocation");
         performance.endFrame();out<<passes<<" PASS / 0 FAIL\n";return 0;
     }catch(const QString& error){out<<"FAIL "<<error<<'\n';return 1;}
 }

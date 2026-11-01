@@ -51,6 +51,7 @@ private:
     QVector<SRenderItem> m_structureItems,m_vegetationItems;
     QVector<QSharedPointer<CPart>> m_parts;
     QVector<QSharedPointer<QOpenGLTexture>> m_textures;
+    QHash<quintptr,QByteArray> m_meshKeys;
     QMap<QString,QImage> m_images;
     QSize m_size;
     QFutureWatcher<QJsonObject>* m_writer{nullptr};

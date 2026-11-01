@@ -1,4 +1,5 @@
 #include "topdown_export.h"
+#include <QDataStream>
 #include "main_window.h"
 #include "view.h"
 #include "landscape.h"
@@ -221,6 +222,27 @@ bool CTopdownExport::resolveObject() {
             for(float coordinate:{vertex.position.x(),vertex.position.y(),vertex.position.z(),vertex.normal.x(),vertex.normal.y(),vertex.normal.z(),vertex.texCoord.x(),vertex.texCoord.y()})
                 if(!qIsFinite(coordinate))return bad("UNSUPPORTED_GEOMETRY","Non-finite mesh vertex: "+model+" / "+item.part->name());
         }
+        // GL_LESS makes the first coplanar fragment win. Pointer-based resource
+        // sorting changes that winner across processes/cache warm-up orders.
+        // Hash actual geometry once per mesh; texture identities exclude paths.
+        QStringList textureKeys;
+        for(const auto& source : sources) {
+            const auto identity=source.toObject();
+            textureKeys.append(identity.value("sha256").toString()+":"+identity.value("member").toString());
+        }
+        textureKeys.sort(); item.stableTextureKey=textureKeys.join('\n').toUtf8();
+        if(!m_meshKeys.contains(item.meshIdentity)) {
+            QByteArray geometry;
+            QDataStream stream(&geometry,QIODevice::WriteOnly);
+            stream.setByteOrder(QDataStream::LittleEndian);
+            stream.setFloatingPointPrecision(QDataStream::SinglePrecision);
+            for(const auto& vertex : item.part->vertData())
+                stream << vertex.position.x() << vertex.position.y() << vertex.position.z()
+                       << vertex.normal.x() << vertex.normal.y() << vertex.normal.z()
+                       << vertex.texCoord.x() << vertex.texCoord.y();
+            m_meshKeys.insert(item.meshIdentity,QCryptographicHash::hash(geometry,QCryptographicHash::Sha256));
+        }
+        item.stableMeshKey=m_meshKeys.value(item.meshIdentity);
         auto clone=QSharedPointer<CPart>::create(*item.part);m_parts.append(clone);
         m_textures.append(textures->retainSceneTexture(item.texture));
         item.part=clone.data();item.highlighted=false;item.castsShadow=false;

@@ -47,6 +47,7 @@ void RenderQueueContext::begin(QOpenGLShaderProgram* program,
     m_collecting = program != nullptr;
     m_selectionPass = false;
     m_shadowOnlyCollection = false;
+    m_stableResourceOrder = false;
     m_diplomacyTint = QVector4D();
     m_modelMatrixLocation = program ? ei::uniformLocation(program, "u_modelMmatrix") : -1;
     m_colorLocation = program ? ei::uniformLocation(program, "u_color") : -1;
@@ -430,7 +431,7 @@ void RenderQueueContext::flush()
     if(collectPerformance)
         performance.counters().queueCollectNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
-    sortRenderItems(colorItems);
+    sortRenderItems(colorItems, m_stableResourceOrder);
     if(collectPerformance)
         performance.counters().queueSortNanoseconds += quint64(m_phaseTimer.nsecsElapsed());
     m_phaseTimer.restart();
