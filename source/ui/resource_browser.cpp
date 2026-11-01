@@ -804,6 +804,7 @@ void CResourceBrowser::indexedArchiveChanged(const QString& archivePath)
 {
     const QString normalized = QDir::cleanPath(QFileInfo(archivePath).absoluteFilePath()).toLower();
     if(m_internalPublications.remove(normalized)) return;
+    ei::log(eLogInfo,"Resource Browser observed external archive change:"+archivePath);
     const QString label = m_activeProfileMode ? m_activeProfileName
         : QFileInfo(m_loadedSources.value(0)).fileName();
     const auto name=QFileInfo(archivePath).fileName().toLower();
@@ -909,6 +910,10 @@ void CResourceBrowser::finishLoad()
 
 void CResourceBrowser::rebuildList()
 {
+    const bool sorting = m_resources->isSortingEnabled();
+    const bool updates = m_resources->updatesEnabled();
+    m_resources->setSortingEnabled(false);
+    m_resources->setUpdatesEnabled(false);
     m_resources->clear();
     m_visibleEntries.clear();
     const QString search = m_search->text().trimmed();
@@ -916,6 +921,8 @@ void CResourceBrowser::rebuildList()
     const QString archiveFilter = selectedArchivePath();
     const QVector<SResourceCatalogEntry> candidates = archiveFilter.isEmpty()
         ? m_catalog.entries() : m_catalog.entriesForArchive(archiveFilter);
+    QList<QTreeWidgetItem*> rows;
+    rows.reserve(candidates.size());
     for(const SResourceCatalogEntry& entry : candidates)
     {
         const QString type = suffixType(entry.logicalName, entry.archiveName);
@@ -926,12 +933,16 @@ void CResourceBrowser::rebuildList()
         if(m_statusFilter->currentIndex() == 2 && entry.winning) continue;
         const int row = m_visibleEntries.size();
         m_visibleEntries.append(entry);
-        auto* item = new QTreeWidgetItem(m_resources,
+        auto* item = new QTreeWidgetItem(
             {entry.logicalName, type, humanBytes(entry.size),
              entry.winning ? tr("Winning") : tr("Overridden"), entry.archiveName});
         item->setData(0, kEntryRole, row);
         item->setToolTip(4, entry.archivePath);
+        rows.append(item);
     }
+    m_resources->addTopLevelItems(rows);
+    m_resources->setSortingEnabled(sorting);
+    m_resources->setUpdatesEnabled(updates);
 }
 
 QString CResourceBrowser::selectedArchivePath() const

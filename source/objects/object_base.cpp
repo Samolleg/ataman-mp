@@ -62,14 +62,18 @@ QCache<QString, CachedFigureAssembly>& transientAssemblyCache(EAssemblyCacheClas
         ? characterVisuals : generalObjects;
 }
 
+void synchronizeAssemblyResourceScope(const QString& scope);
+
 QString meshCacheScope(const QString& modelName)
 {
     CSettings* settings = CObjectList::getInstance()->settings();
     const COptString* profile = settings
         ? dynamic_cast<const COptString*>(settings->opt("resourceProfile")) : nullptr;
-    return (profile ? profile->value() : QString()) + '|'
+    const QString scope = (profile ? profile->value() : QString()) + '|'
         + configuredResourceFingerprint(settings) + '|'
-        + QString::number(CObjectList::getInstance()->sourceGeneration()) + '|' + modelName.toLower();
+        + QString::number(CObjectList::getInstance()->sourceGeneration());
+    synchronizeAssemblyResourceScope(scope);
+    return scope + '|' + modelName.toLower();
 }
 
 QHash<QString, float>& transientPartUvScaleCache()
@@ -82,6 +86,19 @@ QHash<QString, float>& transientProjectionMinZCache()
 {
     static QHash<QString, float> cache;
     return cache;
+}
+
+void synchronizeAssemblyResourceScope(const QString& scope)
+{
+    static QString currentScope;
+    if(currentScope == scope)return;
+    // Old generation keys can never hit again. Scene parts own independent
+    // shared mesh leases, so dropping cache entries does not invalidate them.
+    transientAssemblyCache(EAssemblyCacheClass::GeneralObject).clear();
+    transientAssemblyCache(EAssemblyCacheClass::CharacterVisual).clear();
+    transientPartUvScaleCache().clear();
+    transientProjectionMinZCache().clear();
+    currentScope=scope;
 }
 
 void cloneAssembly(QVector<CPart*>& destination, const QVector<CPart*>& source)

@@ -101,7 +101,22 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     });
     controls();
 }
-CNavmeshPanel::~CNavmeshPanel(){m_shuttingDown=true;m_autoBakeTimer->stop();m_pendingBakes.clear();if(m_compareCancel)m_compareCancel->store(true);m_comparing->waitForFinished();if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}m_loading->waitForFinished();}
+CNavmeshPanel::~CNavmeshPanel()
+{
+    m_shuttingDown=true;
+    // QProcess::waitForFinished can synchronously deliver remaining output.
+    // During parent QWidget destruction its layout is already gone: a late
+    // contentChanged -> CView layout update must not escape this destructor.
+    blockSignals(true);
+    QObject::disconnect(m_process,nullptr,this,nullptr);
+    QObject::disconnect(m_comparing,nullptr,this,nullptr);
+    QObject::disconnect(m_loading,nullptr,this,nullptr);
+    m_autoBakeTimer->stop();m_pendingBakes.clear();
+    if(m_compareCancel)m_compareCancel->store(true);
+    m_comparing->waitForFinished();
+    if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}
+    m_loading->waitForFinished();
+}
 bool CNavmeshPanel::layerVisible()const{return m_layerVisible&&m_document.valid;}
 void CNavmeshPanel::setLayerVisible(bool visible){m_layerVisible=visible;emit geometryChanged();}
 bool CNavmeshPanel::fillVisible()const{return m_fill->currentIndex()==0;}

@@ -738,6 +738,15 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
             continue;
         }
         m_figureSources[fig]=QJsonArray{exportResourceIdentity(fig,figureProvider,figureData)};
+        const auto reuseUnchangedFigure=[&]() {
+            const auto previous=m_previousFigures.take(fig);
+            // Re-read the winning MOD/FIG and BON and compare their identities.
+            // A texture/catalog publication need not parse unchanged geometry.
+            if(!previous.figure || previous.sources!=m_figureSources.value(fig))return false;
+            m_aFigure.insert(fig,previous.figure);
+            m_figureProblems[fig]=previous.problems;
+            return true;
+        };
 
         if(fig.endsWith(".mod"))
         {
@@ -750,10 +759,16 @@ void CObjectList::loadFigures(QSet<QString>& aFigure)
                 assemblyFiles.insert(bonName, bonData);
                 m_figureSources[fig].append(exportResourceIdentity(bonName,bonProvider,bonData));
             }
-            readAssembly(assemblyFiles, fig);
+            if(!reuseUnchangedFigure())readAssembly(assemblyFiles, fig);
         }
         else if(fig.endsWith(".fig"))
-            readFigure(figureData, fig);
+        {
+            if(!reuseUnchangedFigure())readFigure(figureData, fig);
+        }
+        // Cache malformed resources as well as absent ones for this source
+        // generation. Scene objects may request the same rejected assembly
+        // thousands of times; refreshConfiguredSources permits a repaired retry.
+        if(!m_aFigure.contains(fig))m_missingFigureNames.insert(fig);
     }
 }
 
@@ -827,8 +842,17 @@ void CObjectList::initResource()
 void CObjectList::refreshConfiguredSources()
 {
     ++m_sourceGeneration;
+    // Only the immediately previous generation is eligible for content-checked
+    // reuse. Live objects retain their own leases; no stale lookup is returned.
+    m_previousFigures.clear();
     for(auto it=m_aFigure.begin();it!=m_aFigure.end();)
-        if(m_auxiliaryFigures.contains(it.key()))++it;else it=m_aFigure.erase(it);
+        if(m_auxiliaryFigures.contains(it.key()))++it;else {
+            PreviousFigure previous;previous.figure=it.value();
+            previous.sources=m_figureSources.value(it.key());
+            previous.problems=m_figureProblems.value(it.key());
+            if(!previous.sources.isEmpty())m_previousFigures.insert(it.key(),previous);
+            it=m_aFigure.erase(it);
+        }
     for(auto it=m_figureOwners.begin();it!=m_figureOwners.end();)
         if(it.value().isNull())it=m_figureOwners.erase(it);else ++it;
     m_figureSources.clear();m_figureProblems.clear();

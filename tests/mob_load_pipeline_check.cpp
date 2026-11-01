@@ -233,6 +233,9 @@ int runAssemblyCatalogCheck()
 
         window.closeAll();check(window.loadLandscapeWithProgress(QFileInfo(maps+"/zone3obr.mpr")),"terrain for staged-neighbor check");
         check(waitFor([&](){return !window.m_worldMetadataWatcher;}),"world metadata settled");
+        // The next fixture supplies two explicit preview placements. Prevent
+        // the real profile's external-world poll from replacing them mid-check.
+        QScopedValueRollback<bool> syntheticLayoutGuard(window.m_worldAlignmentPreviewActive,true);
         view.m_neighborPlacements.clear();
         const qreal width=view.m_pLand->widthInWorldUnits();
         for(int i=0;i<2;++i) {

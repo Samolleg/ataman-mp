@@ -72,6 +72,26 @@ private slots:
         QVERIFY(load(figure,figureBytes()));QCOMPARE(vertices(figure),3);
         QVERIFY(load(figure,figureBytes(false,1)));QCOMPARE(vertices(figure),3);
     }
+    void unusedBlockPaddingIsNotDrawableGeometry() {
+        for(int forms : {1,8}) {
+            auto bytes=figureBytes(false,forms);
+            const int data=40+40*forms;
+            // Only vertex zero is indexed. Other SIMD lanes are exporter padding.
+            for(int form=0;form<forms;++form)
+                dword(bytes,data+form*16+8,0x7fc00000u);
+            ei::CFigure figure;QVERIFY(load(figure,bytes));QCOMPARE(vertices(figure),3);
+            for(int form=0;form<forms;++form) {
+                auto invalid=bytes;dword(invalid,data+form*16,0x7fc00000u);
+                QVERIFY(!load(figure,invalid));QCOMPARE(vertices(figure),0);
+            }
+        }
+    }
+    void privatePaddingCorpusWhenProvided() {
+        const QString path=qEnvironmentVariable("EI_FIG_PADDING_CORPUS");
+        if(path.isEmpty())QSKIP("Optional private FIG payload not supplied");
+        QFile file(path);QVERIFY(file.open(QIODevice::ReadOnly));
+        ei::CFigure figure;QVERIFY(load(figure,file.readAll()));QCOMPARE(vertices(figure),288);
+    }
     void singleFormRejectsTruncatedStreamsAndInvalidComponents() {
         ei::CFigure figure;const auto valid=figureBytes(false,1);
         for(int length:{0,4,39,40,79,199,valid.size()-1})QVERIFY(!load(figure,valid.left(length)));

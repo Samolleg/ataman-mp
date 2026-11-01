@@ -266,9 +266,6 @@ bool ei::CFigure::readData(QDataStream& stream)
                 if(!finite3(v)) m_completeCaptureGeometry=false;
         for(float value : radius)
             if(!std::isfinite(value)) m_completeCaptureGeometry=false;
-        for(const auto& morph : m_aMorphVertex)
-            for(const auto& v : morph)
-                if(!finite3(v)) m_completeCaptureGeometry=false;
         for(const auto& v : m_aNormal)
             if(!std::isfinite(v.x()) || !std::isfinite(v.y())
                || !std::isfinite(v.z()) || !std::isfinite(v.w()))
@@ -276,10 +273,23 @@ bool ei::CFigure::readData(QDataStream& stream)
         for(const auto& v : m_aUvCoord)
             if(!std::isfinite(v.x()) || !std::isfinite(v.y()))
                 m_completeCaptureGeometry=false;
+        QVector<bool> checkedVertices(m_aMorphVertex.isEmpty()?0:m_aMorphVertex.first().size(),false);
         for(auto index:m_aInd) {
             if(index>=m_aVertComp.size()||m_aMorphVertex.isEmpty()){m_completeCaptureGeometry=false;break;}
             SVertexData vertex;
-            if(!ei::decodeFigureVertexComponent(m_aVertComp[index],m_aMorphVertex[0],m_aNormal,m_aUvCoord,&vertex))m_completeCaptureGeometry=false;
+            const auto& component=m_aVertComp[index];
+            if(!ei::decodeFigureVertexComponent(component,m_aMorphVertex[0],m_aNormal,m_aUvCoord,&vertex)) {
+                m_completeCaptureGeometry=false;break;
+            }
+            // FIG vertices are stored in blocks of four. Exporters may leave
+            // NaNs in unused padding lanes (e.g. stwali1/fence00). Only indexed
+            // vertices reach triangles, but every form of those vertices must
+            // remain finite for complexion interpolation and animation.
+            if(!checkedVertices[component.x]) {
+                checkedVertices[component.x]=true;
+                for(const auto& morph:m_aMorphVertex)
+                    if(!finite3(morph[component.x]))m_completeCaptureGeometry=false;
+            }
         }
 
         return m_completeCaptureGeometry;

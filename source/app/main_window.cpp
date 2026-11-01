@@ -1218,6 +1218,7 @@ MainWindow::MainWindow(QWidget* parent) :
     });
     connect(m_resourceBrowser, &CResourceBrowser::activeResourcesPublished,
             this, [this](const QString& archivePath) {
+        ei::log(eLogInfo,"Live resource refresh requested by Resource Browser archive:"+archivePath);
         if(m_pView) m_pView->refreshAfterResourceSetup();
         statusBar()->showMessage(tr("Reloaded resources after publishing %1")
             .arg(QFileInfo(archivePath).fileName()), 8000);
@@ -1732,7 +1733,9 @@ MainWindow::MainWindow(QWidget* parent) :
     {
         if(m_resourceBrowser)
             m_resourceBrowser->finishInternalPublication(
-                resourceArchivePath, committed);
+                // Terrain save/compaction adopts its own validated atlas.
+                // Updating its catalog must not reload unrelated scene models.
+                resourceArchivePath, committed, false);
     });
     connect(m_mapTestLauncher, &CJmvMapTestLauncher::testStarted, this,
             [this](const QString& runId, const QString& mapName)

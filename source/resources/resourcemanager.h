@@ -68,6 +68,12 @@ private:
     static CObjectList* m_pObjectContainer;
     CSettings* m_pSettings;
     QMap<QString, QSharedPointer<ei::CFigure>> m_aFigure;
+    struct PreviousFigure {
+        QSharedPointer<ei::CFigure> figure;
+        QJsonArray sources;
+        QStringList problems;
+    };
+    QMap<QString,PreviousFigure> m_previousFigures;
     QHash<ei::CFigure*, QWeakPointer<ei::CFigure>> m_figureOwners;
     QSet<QString> m_auxiliaryFigures;
     quint64 m_sourceGeneration{1};

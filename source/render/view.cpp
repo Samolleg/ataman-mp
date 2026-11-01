@@ -7069,117 +7069,63 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     if(!ensureParticleRendererInitialized())
         return;
 
-    // Resolve every resource before changing shader, buffer, depth or blend
-    // state. Texture creation can fail during a profile/map transition and an
-    // early return must never leave the rest of the frame using particle GL
-    // state.
+    // Resolve only textures actually used by visible effects. Build the CPU
+    // batches before binding particle GL state, since texture upload changes it.
+    struct LazyParticleTexture {
+        CTextureList* textures;
+        const char* name;
+        const LazyParticleTexture* fallback;
+        mutable bool resolved{false};
+        mutable QOpenGLTexture* value{nullptr};
+        LazyParticleTexture(CTextureList* t,const char* n,const LazyParticleTexture* f=nullptr)
+            : textures(t),name(n),fallback(f) {}
+        operator QOpenGLTexture*() const {
+            if(!resolved) {
+                value=textures->texture(name);
+                if(value==textures->textureDefault())
+                    value=fallback ? static_cast<QOpenGLTexture*>(*fallback) : nullptr;
+                resolved=true;
+            }
+            return value;
+        }
+    };
     CTextureList* textures = CTextureList::getInstance();
     QOpenGLTexture* fallbackTexture = textures->textureDefault();
-    QOpenGLTexture* fireSmokeTexture = textures->texture("firesmoke");
-    if(fireSmokeTexture == fallbackTexture)
-        fireSmokeTexture = nullptr;
-    QOpenGLTexture* tendrilSmokeTexture = textures->texture("tendrismoke");
-    if(tendrilSmokeTexture == fallbackTexture)
-        tendrilSmokeTexture = fireSmokeTexture;
-    QOpenGLTexture* tornadoTexture = textures->texture("tornado");
-    if(tornadoTexture == fallbackTexture)
-        tornadoTexture = nullptr;
-    QOpenGLTexture* tendriLightTexture = textures->texture("tendrilight");
-    if(tendriLightTexture == fallbackTexture)
-        tendriLightTexture = nullptr;
-    QOpenGLTexture* acidRayTexture = textures->texture("acidray");
-    if(acidRayTexture == fallbackTexture)
-        acidRayTexture = nullptr;
-    QOpenGLTexture* bansheeTexture = textures->texture("banshee");
-    if(bansheeTexture == fallbackTexture)
-        bansheeTexture = nullptr;
-    QOpenGLTexture* changeHeroTexture = textures->texture("changehero");
-    if(changeHeroTexture == fallbackTexture)
-        changeHeroTexture = nullptr;
-    QOpenGLTexture* rainSnowTexture = textures->texture("rainsnow");
-    if(rainSnowTexture == fallbackTexture)
-        rainSnowTexture = nullptr;
-    QOpenGLTexture* fireArrowSmokeTexture = textures->texture("firearrowsmoke");
-    if(fireArrowSmokeTexture == fallbackTexture)
-        fireArrowSmokeTexture = nullptr;
-    QOpenGLTexture* rikArrowSmokeTexture = textures->texture("rikarrowsmoke");
-    if(rikArrowSmokeTexture == fallbackTexture)
-        rikArrowSmokeTexture = nullptr;
-    QOpenGLTexture* stenchTexture = textures->texture("stench");
-    if(stenchTexture == fallbackTexture)
-        stenchTexture = nullptr;
-    QOpenGLTexture* linkTexture = textures->texture("link");
-    if(linkTexture == fallbackTexture)
-        linkTexture = nullptr;
-    QOpenGLTexture* protectionATexture = textures->texture("protectiona");
-    if(protectionATexture == fallbackTexture)
-        protectionATexture = nullptr;
-    QOpenGLTexture* protectionETexture = textures->texture("protectione");
-    if(protectionETexture == fallbackTexture)
-        protectionETexture = nullptr;
-    QOpenGLTexture* protectionFTexture = textures->texture("protectionf");
-    if(protectionFTexture == fallbackTexture)
-        protectionFTexture = nullptr;
-    QOpenGLTexture* antimagicTexture = textures->texture("antimagic");
-    if(antimagicTexture == fallbackTexture)
-        antimagicTexture = nullptr;
-    QOpenGLTexture* stunTexture = textures->texture("stun");
-    if(stunTexture == fallbackTexture)
-        stunTexture = nullptr;
-    QOpenGLTexture* healingTexture = textures->texture("healing");
-    if(healingTexture == fallbackTexture)
-        healingTexture = nullptr;
-    QOpenGLTexture* explosionTexture = textures->texture("explosion");
-    if(explosionTexture == fallbackTexture)
-        explosionTexture = nullptr;
-    QOpenGLTexture* poisonCloudTexture = textures->texture("poisoncloud");
-    if(poisonCloudTexture == fallbackTexture)
-        poisonCloudTexture = nullptr;
-    QOpenGLTexture* fireworksTexture = textures->texture("fireworks");
-    if(fireworksTexture == fallbackTexture)
-        fireworksTexture = nullptr;
-    QOpenGLTexture* vulkanTexture = textures->texture("vulkan");
-    if(vulkanTexture == fallbackTexture)
-        vulkanTexture = nullptr;
-    QOpenGLTexture* clayRingTexture = textures->texture("clayring");
-    if(clayRingTexture == fallbackTexture)
-        clayRingTexture = nullptr;
-    QOpenGLTexture* teleportTexture = textures->texture("teleport");
-    if(teleportTexture == fallbackTexture)
-        teleportTexture = nullptr;
-    QOpenGLTexture* zoneExitTexture = textures->texture("zoneexit");
-    if(zoneExitTexture == fallbackTexture)
-        zoneExitTexture = nullptr;
-    QOpenGLTexture* shapeChangeTexture = textures->texture("shapechange");
-    if(shapeChangeTexture == fallbackTexture)
-        shapeChangeTexture = nullptr;
-    QOpenGLTexture* bagTexture = textures->texture("bag");
-    if(bagTexture == fallbackTexture)
-        bagTexture = nullptr;
-    QOpenGLTexture* casting6Texture = textures->texture("casting6");
-    if(casting6Texture == fallbackTexture)
-        casting6Texture = nullptr;
-    QOpenGLTexture* casting2Texture = textures->texture("casting2");
-    if(casting2Texture == fallbackTexture)
-        casting2Texture = nullptr;
-    QOpenGLTexture* casting1Texture = textures->texture("casting1");
-    if(casting1Texture == fallbackTexture)
-        casting1Texture = nullptr;
-    QOpenGLTexture* casting3Texture = textures->texture("casting3");
-    if(casting3Texture == fallbackTexture)
-        casting3Texture = nullptr;
-    QOpenGLTexture* casting4Texture = textures->texture("casting4");
-    if(casting4Texture == fallbackTexture)
-        casting4Texture = nullptr;
-    QOpenGLTexture* casting7Texture = textures->texture("casting7");
-    if(casting7Texture == fallbackTexture)
-        casting7Texture = nullptr;
-    QOpenGLTexture* casting8Texture = textures->texture("casting8");
-    if(casting8Texture == fallbackTexture)
-        casting8Texture = nullptr;
-    QOpenGLTexture* visionFogTexture = textures->texture("visionfog");
-    if(visionFogTexture == fallbackTexture)
-        visionFogTexture = nullptr;
+    const LazyParticleTexture fireSmokeTexture(textures, "firesmoke");
+    const LazyParticleTexture tendrilSmokeTexture(textures, "tendrismoke", &fireSmokeTexture);
+    const LazyParticleTexture tornadoTexture(textures, "tornado");
+    const LazyParticleTexture tendriLightTexture(textures, "tendrilight");
+    const LazyParticleTexture acidRayTexture(textures, "acidray");
+    const LazyParticleTexture bansheeTexture(textures, "banshee");
+    const LazyParticleTexture changeHeroTexture(textures, "changehero");
+    const LazyParticleTexture rainSnowTexture(textures, "rainsnow");
+    const LazyParticleTexture fireArrowSmokeTexture(textures, "firearrowsmoke");
+    const LazyParticleTexture rikArrowSmokeTexture(textures, "rikarrowsmoke");
+    const LazyParticleTexture stenchTexture(textures, "stench");
+    const LazyParticleTexture linkTexture(textures, "link");
+    const LazyParticleTexture protectionATexture(textures, "protectiona");
+    const LazyParticleTexture protectionETexture(textures, "protectione");
+    const LazyParticleTexture protectionFTexture(textures, "protectionf");
+    const LazyParticleTexture antimagicTexture(textures, "antimagic");
+    const LazyParticleTexture stunTexture(textures, "stun");
+    const LazyParticleTexture healingTexture(textures, "healing");
+    const LazyParticleTexture explosionTexture(textures, "explosion");
+    const LazyParticleTexture poisonCloudTexture(textures, "poisoncloud");
+    const LazyParticleTexture fireworksTexture(textures, "fireworks");
+    const LazyParticleTexture vulkanTexture(textures, "vulkan");
+    const LazyParticleTexture clayRingTexture(textures, "clayring");
+    const LazyParticleTexture teleportTexture(textures, "teleport");
+    const LazyParticleTexture zoneExitTexture(textures, "zoneexit");
+    const LazyParticleTexture shapeChangeTexture(textures, "shapechange");
+    const LazyParticleTexture bagTexture(textures, "bag");
+    const LazyParticleTexture casting6Texture(textures, "casting6");
+    const LazyParticleTexture casting2Texture(textures, "casting2");
+    const LazyParticleTexture casting1Texture(textures, "casting1");
+    const LazyParticleTexture casting3Texture(textures, "casting3");
+    const LazyParticleTexture casting4Texture(textures, "casting4");
+    const LazyParticleTexture casting7Texture(textures, "casting7");
+    const LazyParticleTexture casting8Texture(textures, "casting8");
+    const LazyParticleTexture visionFogTexture(textures, "visionfog");
 
     bool inverseOk = false;
     const QMatrix4x4 inverseView = cameraMatrix.inverted(&inverseOk);
@@ -7192,26 +7138,6 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
     if(cameraRight.isNull() || cameraUp.isNull())
         return;
 
-    if(!m_particleProgram.bind())
-        return;
-    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_projMmatrix"), m_projection);
-    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_viewMmatrix"), cameraMatrix);
-
-    // Scene parts are submitted through cached VAOs. Never configure the
-    // dynamic particle stream while the last part VAO is still bound: doing so
-    // replaces that cached VAO's attribute layout with the particle VBO and
-    // corrupts normal scene submission on the following frame. The default VAO
-    // keeps the particle attributes isolated from every shared mesh.
-    QOpenGLContext* particleContext = QOpenGLContext::currentContext();
-    QOpenGLExtraFunctions* particleFunctions
-        = particleContext ? particleContext->extraFunctions() : nullptr;
-    if(particleFunctions)
-        particleFunctions->glBindVertexArray(0);
-
-    ei::gl::Enable(GL_DEPTH_TEST);
-    ei::gl::DepthMask(GL_FALSE);
-    ei::gl::Enable(GL_BLEND);
-    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     const qint64 particleTimeMs = QDateTime::currentMSecsSinceEpoch();
     const float timeSeconds = float(particleTimeMs % 600000) / 1000.0f;
     const qint64 logicalTick = particleTimeMs / ei::particle::kLogicalQuantMilliseconds;
@@ -8465,6 +8391,26 @@ void CView::drawParticles(const QMatrix4x4& cameraMatrix,
         }
     }
 
+    if(!m_particleProgram.bind())
+        return;
+    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_projMmatrix"), m_projection);
+    m_particleProgram.setUniformValue(ei::uniformLocation(&m_particleProgram, "u_viewMmatrix"), cameraMatrix);
+
+    // Scene parts are submitted through cached VAOs. Never configure the
+    // dynamic particle stream while the last part VAO is still bound: doing so
+    // replaces that cached VAO's attribute layout with the particle VBO and
+    // corrupts normal scene submission on the following frame. The default VAO
+    // keeps the particle attributes isolated from every shared mesh.
+    QOpenGLContext* particleContext = QOpenGLContext::currentContext();
+    QOpenGLExtraFunctions* particleFunctions
+        = particleContext ? particleContext->extraFunctions() : nullptr;
+    if(particleFunctions)
+        particleFunctions->glBindVertexArray(0);
+
+    ei::gl::Enable(GL_DEPTH_TEST);
+    ei::gl::DepthMask(GL_FALSE);
+    ei::gl::Enable(GL_BLEND);
+    ei::gl::BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     const int worldLocation = ei::attributeLocation(&m_particleProgram, "a_worldPosition");
     const int textureLocation = ei::attributeLocation(&m_particleProgram, "a_texture");
     const int localTextureLocation = ei::attributeLocation(&m_particleProgram, "a_localTexture");
