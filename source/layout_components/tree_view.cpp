@@ -71,7 +71,7 @@ void CTreeView::clear()
 void CTreeView::beginRefresh()
 {
     m_filterTimer->stop();
-    m_savedScroll = verticalScrollBar()->value();
+    if(!m_refreshSuspended) m_savedScroll = verticalScrollBar()->value();
     m_refreshSignals = blockSignals(true);
     setUpdatesEnabled(false);
     m_usedRows.clear(); m_nextPosition.clear();
@@ -171,22 +171,63 @@ void CTreeView::finishRefresh()
     QList<QTreeWidgetItem*> roots;
     for(auto* item : obsolete) if(!stale.contains(item->parent())) roots.append(item);
     qDeleteAll(roots);
-    blockSignals(m_refreshSignals); setUpdatesEnabled(true);
-    applyFilter();
+    blockSignals(m_refreshSignals);
+    if(m_refreshSuspended) return;
+    setUpdatesEnabled(true);
     if(m_pView) {
         const auto selected = m_pView->selectionSnapshot();
-        markNodes(selected, selected.isEmpty() ? nullptr : selected.back());
+        markNodes(selected, selected.isEmpty() ? nullptr : selected.back(), false, false);
     }
+    applyFilter();
     verticalScrollBar()->setValue(m_savedScroll);
 }
+
+void CTreeView::setRefreshSuspended(bool suspended)
+{
+    if(m_refreshSuspended == suspended) return;
+    m_refreshSuspended = suspended;
+    if(suspended) {
+        m_filterTimer->stop();
+        m_savedScroll = verticalScrollBar()->value();
+        m_suspendedSignals = blockSignals(true);
+        m_suspendedUpdates = updatesEnabled();
+        m_suspendedEnabled = isEnabled();
+        setUpdatesEnabled(false);
+        setEnabled(false);
+        // Qt events can run between MOB deletion and the final refresh. Keep
+        // row keys/expansion, but expose no stale scene or logic bindings.
+        QTreeWidgetItemIterator it(this);
+        while(*it) {
+            auto* item = *it; ++it;
+            if(auto* object = dynamic_cast<CTreeObject*>(item)) object->setNode(nullptr);
+            item->setData(0, Qt::UserRole + 1, QVariant());
+            item->setData(0, Qt::UserRole + 11, QVariant());
+        }
+        return;
+    }
+    blockSignals(m_suspendedSignals);
+    setEnabled(m_suspendedEnabled);
+    if(m_pView) {
+        const auto selected = m_pView->selectionSnapshot();
+        markNodes(selected, selected.isEmpty() ? nullptr : selected.back(), false, false);
+    }
+    applyFilter();
+    verticalScrollBar()->setValue(m_savedScroll);
+    setUpdatesEnabled(m_suspendedUpdates);
+}
+
+CNode* CTreeObject::node() const { return m_pNode.data(); }
+CUnit* CTreeView::focusedLogicUnit() const { return m_focusedLogicUnit.data(); }
 QTreeWidgetItem* CTreeView::rowForNode(CNode* node) const
 {
+    if(m_refreshSuspended || !node) return nullptr;
     QTreeWidgetItemIterator it(const_cast<CTreeView*>(this));
     while(*it) { auto* row=dynamic_cast<CTreeObject*>(*it); if(row && row->node()==node) return row; ++it; }
     return nullptr;
 }
 void CTreeView::mousePressEvent(QMouseEvent* event)
 {
+    if(m_refreshSuspended) return;
     auto* item=itemAt(event->pos()); auto* row=dynamic_cast<CTreeObject*>(item);
     if(event->button()==Qt::LeftButton && row && !row->node()) {
         item->setExpanded(!item->isExpanded()); event->accept(); return;
@@ -195,7 +236,7 @@ void CTreeView::mousePressEvent(QMouseEvent* event)
 }
 void CTreeView::syncSelectionToView()
 {
-    if(m_syncing || !m_pView) return;
+    if(m_refreshSuspended || m_syncing || !m_pView) return;
     QScopedValueRollback<bool> guard(m_syncing, true);
     if(currentItem() && currentItem()->data(0, Qt::UserRole + 10).isValid()
        && !dynamic_cast<CTreeObject*>(currentItem())) {
@@ -222,7 +263,7 @@ void CTreeView::syncSelectionToView()
 }
 void CTreeView::selectGroup(QTreeWidgetItem* group, bool foundOnly)
 {
-    if(!group || !m_pView) return;
+    if(m_refreshSuspended || !group || !m_pView) return;
     QList<CNode*> nodes; QList<QTreeWidgetItem*> pending{group};
     while(!pending.isEmpty()) {
         auto* item=pending.takeLast();
@@ -407,6 +448,7 @@ bool CTreeView::filterItem(QTreeWidgetItem* item, const QStringList& terms,
 
 void CTreeView::applyFilter()
 {
+    if(m_refreshSuspended) return;
     QElapsedTimer elapsed;
     elapsed.start();
     const bool updatesWereEnabled = updatesEnabled();
@@ -446,6 +488,7 @@ void CTreeView::applyFilter()
 
 void CTreeView::keyPressEvent(QKeyEvent *pEvent)
 {
+    if(m_refreshSuspended) return;
     if(pEvent->matches(QKeySequence::Copy))
     {
         if(focusedLogicUnit() && focusedLogicSlot() >= 0)
@@ -482,6 +525,7 @@ void CTreeView::keyPressEvent(QKeyEvent *pEvent)
 
 void CTreeView::contextMenuEvent(QContextMenuEvent* event)
 {
+    if(m_refreshSuspended) return;
     QTreeWidgetItem* item = itemAt(event->pos());
     if(auto* group = dynamic_cast<CTreeObject*>(item)) if(!group->node()) {
         QMenu menu(this);
@@ -605,7 +649,7 @@ ENodeType CTreeView::objectTypeByString(QString str) const
 void CTreeView::itemClickedOver(QTreeWidgetItem *pItem, int column)
 {
     Q_UNUSED(column);
-    if(!pItem || !m_pView) return;
+    if(m_refreshSuspended || !pItem || !m_pView) return;
     if(auto* group = dynamic_cast<CTreeObject*>(pItem)) if(!group->node()) {
         group->setExpanded(!group->isExpanded()); return;
     }
@@ -740,6 +784,7 @@ void CTreeView::addNodeToTree(CNode *pNode)
 
 void CTreeView::itemDoubleClickedOver(QTreeWidgetItem* pItem, int column)
 {
+    if(m_refreshSuspended || !pItem || !m_pView) return;
     if(pItem->data(0, Qt::UserRole + 10).isValid()
        && !dynamic_cast<CTreeObject*>(pItem))
     {
@@ -780,8 +825,9 @@ void CTreeView::markNode(CNode* pNode, bool scrollToNode)
 }
 
 void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
-                          bool scrollToPrimary)
+                          bool scrollToPrimary, bool refilter)
 {
+    if(m_refreshSuspended) return;
     const QSignalBlocker signalGuard(this);
     QSet<CNode*> wanted;
     for(CNode* node : nodes)
@@ -824,11 +870,12 @@ void CTreeView::markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
     }
     if(m_focusedLogicUnit)
         focusLogicSlot(m_focusedLogicUnit, m_focusedLogicSlot, scrollToPrimary);
-    applyFilter();
+    if(refilter) applyFilter();
 }
 
 void CTreeView::focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToFocused)
 {
+    if(m_refreshSuspended) return;
     const QSignalBlocker signalGuard(this);
     m_focusedLogicUnit = owner;
     m_focusedLogicSlot = logicSlot;

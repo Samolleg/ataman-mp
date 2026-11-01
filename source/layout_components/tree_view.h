@@ -4,6 +4,7 @@
 #include "ui/flat_tree_widget.h"
 #include <QHash>
 #include <QSet>
+#include <QPointer>
 #include "types.h"
 
 class CView;
@@ -26,12 +27,12 @@ public:
     uint nodeId() const;
     uint storedId() const {return m_nodeId;}
     void setId(uint id) {m_nodeId = id;}
-    CNode* node() const {return m_pNode;}
+    CNode* node() const;
     void setNode(CNode* node);
 
 private:
     uint m_nodeId;
-    CNode* m_pNode;
+    QPointer<CNode> m_pNode;
 };
 
 ///
@@ -56,9 +57,9 @@ public:
     void revealNode(CNode* pNode);
     void markNode(CNode* pNode, bool scrollToNode = false);
     void markNodes(const QList<CNode*>& nodes, CNode* primaryNode,
-                   bool scrollToPrimary = false);
+                   bool scrollToPrimary = false, bool refilter = true);
     void clearViewportSelectionMarker();
-    CUnit* focusedLogicUnit() const { return m_focusedLogicUnit; }
+    CUnit* focusedLogicUnit() const;
     int focusedLogicSlot() const { return m_focusedLogicSlot; }
     void focusLogicSlot(CUnit* owner, int logicSlot, bool scrollToItem = false);
     void clearLogicSlotFocus();
@@ -68,6 +69,7 @@ public:
     QTreeWidgetItem* acquireRow(const QString& key, QTreeWidgetItem* parent,
                                 CNode* node = nullptr, bool plain = false);
     void finishRefresh();
+    void setRefreshSuspended(bool suspended);
     void setShowAllMobs(bool all);
     bool showAllMobs() const { return m_showAllMobs; }
     QIcon objectIcon(ENodeType type) const;
@@ -120,6 +122,8 @@ private:
     bool m_syncing{false};
     bool m_showAllMobs{false};
     bool m_refreshSignals{false};
+    bool m_refreshSuspended{false};
+    bool m_suspendedSignals{false}, m_suspendedUpdates{true}, m_suspendedEnabled{true};
     int m_savedScroll{0};
     QHash<QString, QTreeWidgetItem*> m_rows;
     QSet<QString> m_usedRows;
@@ -134,7 +138,7 @@ private:
     QHash<QTreeWidgetItem*, bool> m_expansionBeforeFilter;
     QSet<uint> m_criticalNids;
     QSet<uint> m_warningNids;
-    CUnit* m_focusedLogicUnit{nullptr};
+    QPointer<CUnit> m_focusedLogicUnit;
     int m_focusedLogicSlot{-1};
 };
 

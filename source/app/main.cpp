@@ -12,6 +12,7 @@
 #include "model_gallery_check.h"
 #include "profile_model_catalog_check.h"
 #include "object_hierarchy_check.h"
+#include "objects/unit.h"
 #include "group_rotation_check.h"
 #include "model_connection_check.h"
 #include "assembly_catalog_check.h"
@@ -893,7 +894,8 @@ int runHeadlessCommand(QApplication& app)
         behaviorFilterTree.applyFilter();
         const bool behaviorFilterRebuildSafe = !rebuiltLook->isHidden();
 
-        CUnit* virtualLogicOwner = reinterpret_cast<CUnit*>(quintptr(1));
+        CUnit virtualLogicFixture;
+        CUnit* virtualLogicOwner = &virtualLogicFixture;
         auto virtualLogicRow = new QTreeWidgetItem(&behaviorFilterTree);
         virtualLogicRow->setData(0, Qt::UserRole + 10, 4);
         virtualLogicRow->setData(0, Qt::UserRole + 11,

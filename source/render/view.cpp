@@ -16906,9 +16906,15 @@ void CView::setWorkspaceLoadInProgress(bool inProgress)
     m_unitVisualPreparationSuspended = inProgress;
     if(inProgress)
     {
+        if(m_pTree) m_pTree->setRefreshSuspended(true);
         if(m_unitVisualPreparationTimer)
             m_unitVisualPreparationTimer->stop();
         return;
+    }
+    if(m_pTree) {
+        collectObjectTreeData();
+        m_pTree->setRefreshSuspended(false);
+        viewParameters();
     }
     if(m_unitVisualPreparationTimer
             && ei::shouldPumpUnitVisualPreparation(m_unitAppearanceProgressPending,
@@ -22397,6 +22403,7 @@ void CView::updateParameter(EObjParam propType)
 
 void CView::viewParameters()
 {
+    if(m_unitVisualPreparationSuspended) return;
     if(m_objectEditBatchDepth)
     {
         m_objectEditBatchParameters = true;
@@ -22769,6 +22776,7 @@ void CView::onPropertiesChange(const QList<QSharedPointer<IPropertyBase>>& prope
 
 void CView::collectObjectTreeData()
 {
+    if(m_unitVisualPreparationSuspended) return;
     if(m_objectEditBatchDepth)
     {
         m_objectEditBatchTree = true;
