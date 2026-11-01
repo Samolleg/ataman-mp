@@ -705,9 +705,9 @@ void MainWindow::showDatabaseEditor(const QString& prototype)
             if(affectsVisuals)m_pView->refreshDatabaseVisuals(tableKey, rowKey);
         });
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::undoRequested,
-                m_undoStack, &QUndoStack::undo);
+                this, &MainWindow::on_actionUndo_triggered);
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::redoRequested,
-                m_undoStack, &QUndoStack::redo);
+                this, &MainWindow::on_actionRedo_triggered);
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::itemSpellConstructorRequested,
                 this, &MainWindow::showItemSpellConstructor);
         connect(m_databaseEditorDialog, &ei::DatabaseEditorDialog::resourceBrowserRequested,
@@ -2825,9 +2825,40 @@ void MainWindow::testFunc1()
     ei::log(eLogDebug, "test func 1 ended");
 }
 
+namespace {
+// QUndoView normally calls QUndoStack::setIndex directly for keyboard and
+// selection-model navigation. Route every such request through the same
+// preflight as the menu, including when a world stroke has lost its MOB.
+class GuardedHistorySelection final : public QItemSelectionModel {
+    std::function<void(int)> m_navigate;
+    std::function<int()> m_current;
+    bool m_navigating{false};
+public:
+    GuardedHistorySelection(QAbstractItemModel* model,QObject* parent,
+                            std::function<void(int)> navigate,std::function<int()> current)
+        : QItemSelectionModel(model,parent),m_navigate(navigate),m_current(current) {}
+    void setCurrentIndex(const QModelIndex& index,SelectionFlags flags) override {
+        if(index.isValid()&&!m_navigating&&index.row()!=m_current()) {
+            QScopedValueRollback<bool> guard(m_navigating,true);
+            m_navigate(index.row());
+            QItemSelectionModel::setCurrentIndex(model()->index(m_current(),0),flags);
+            return;
+        }
+        QItemSelectionModel::setCurrentIndex(index,flags);
+    }
+};
+}
+
 void MainWindow::createUndoView()
 {
     m_undoView = new QUndoView(m_undoStack);
+    m_undoView->setSelectionModel(new GuardedHistorySelection(m_undoView->model(),m_undoView,
+        [this](int index){if(m_pView&&m_pView->prepareHistoryNavigation())runUndoToIndex(index);},
+        [this](){return m_undoStack->index();}));
+    connect(m_undoStack,&QUndoStack::indexChanged,m_undoView,[this](int index){
+        m_undoView->selectionModel()->setCurrentIndex(m_undoView->model()->index(index,0),
+            QItemSelectionModel::ClearAndSelect);
+    });
     m_historyDock = new QDockWidget(tr("History"), this);
     m_historyDock->setObjectName("undoHistoryDock");
     m_historyDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea |
@@ -2938,7 +2969,22 @@ void MainWindow::runUndoToIndex(int targetIndex)
     }
     ei::log(eLogInfo, QString("Applying undo history current:%1 target:%2 workUnits:%3 progress:%4")
             .arg(currentIndex).arg(targetIndex).arg(workUnits).arg(!progress.isNull()));
-    m_undoStack->setIndex(targetIndex);
+    while(m_undoStack->index()!=qBound(0,targetIndex,m_undoStack->count()))
+    {
+        const int before=m_undoStack->index();
+        const bool forward=targetIndex>before;
+        QString error;
+        if(m_pView && !m_pView->validateHistoryCommand(
+                m_undoStack->command(before-(forward?0:1)),forward,&error))
+        {
+            setProperty("aiLifecycleHistoryError",error);
+            statusBar()->showMessage(error,10000);
+            ei::log(eLogWarning,error);
+            break;
+        }
+        if(forward)m_undoStack->redo();else m_undoStack->undo();
+        if(m_undoStack->index()==before)break;
+    }
     if(progress)
         progress->close();
     keepFloatingHistoryRaised();
@@ -4053,7 +4099,7 @@ void MainWindow::openDiplomacy()
         connect(m_diplomacyDialog,&CDiplomacyDialog::mapModeRequested,m_pView,&CView::setDiplomacyMapMode);
         connect(m_pView,&CView::diplomacyMapModeChanged,m_diplomacyDialog,&CDiplomacyDialog::setMapMode);
         connect(m_diplomacyDialog,&CDiplomacyDialog::historyStepRequested,this,[this](bool redo) {
-            if(redo) m_undoStack->redo(); else m_undoStack->undo();
+            if(redo)on_actionRedo_triggered();else on_actionUndo_triggered();
         });
         connect(m_undoStack,&QUndoStack::indexChanged,m_diplomacyDialog,[this] {
             m_diplomacyDialog->setHistoryAvailable(m_undoStack->canUndo(),m_undoStack->canRedo());
@@ -9667,7 +9713,6 @@ void MainWindow::on_action_Mob_parameters_triggered()
 void MainWindow::on_actionUndo_triggered()
 {
     if(m_pView->travelEditing())m_pView->cancelTravelGesture();
-    if(!travelHistoryPending(false) && m_pView->worldTerrainHistory(false)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() - 1);
     else
@@ -9689,7 +9734,6 @@ void MainWindow::on_moveButton_clicked()
 void MainWindow::on_actionRedo_triggered()
 {
     if(m_pView->travelEditing())m_pView->cancelTravelGesture();
-    if(!travelHistoryPending(true) && m_pView->worldTerrainHistory(true)) return;
     if(m_pView->prepareHistoryNavigation())
         runUndoToIndex(m_undoStack->index() + 1);
     else

@@ -258,7 +258,7 @@ int runNeighborPerformanceCheck()
                     check(doc->atlas->stateFingerprint()==originalAtlases[id],"ready atlas identity and runtime classes stay unchanged");
                     check(doc->atlas->activeTileImages()==originalPixels[id],"every ready pixel including transition borders stays unchanged");
                 }
-                check(!view.m_worldTerrainSession.canUndo(),"no new artwork or empty repair is added to world history");
+                check(!(view.nextWorldTerrainStroke(false)!=nullptr),"no new artwork or empty repair is added to world history");
             }
             check(digest(placement.mprPath)==terrainHash && digest(placement.mobPath)==mobHash,"source map and objects remain unchanged");
             return failures?1:0;
@@ -393,7 +393,7 @@ int runNeighborPerformanceCheck()
                 check(audit.worldPackedDeltas.size()==2 && terrainResolveChangedCellCount(audit)>0,"world audit records changes to both maps");
             }
             QString error;
-            if(view.m_worldTerrainSession.canUndo()) {
+            if((view.nextWorldTerrainStroke(false)!=nullptr)) {
                 check(view.worldTerrainHistory(false,true),"three-map repair undo");
                 for(auto it=beforeModels.cbegin();it!=beforeModels.cend();++it) {
                     const auto doc=view.m_worldTerrainSession.documents[it.key()];
@@ -493,7 +493,7 @@ int runNeighborPerformanceCheck()
         check(surfaceY>=0,"find boundary without existing surfaces on either map");
         view.beginTileBrushGroup();message.clear();
         check(view.paintWorldTerrainAt(QVector3D(adjacent.origin.x(),surfaceY*2,0),false),"shared surface creation handles boundary");
-        out<<"Surface message: "<<message<<" mode "<<int(tools.editMode())<<" operation "<<int(tools.overlaySurfaceOperation())<<" paint "<<view.m_worldTerrainStroke.paint.size()<<" overlays "<<view.m_worldTerrainStroke.overlays.size()<<" history "<<view.m_worldTerrainSession.canUndo()<<"\n";
+        out<<"Surface message: "<<message<<" mode "<<int(tools.editMode())<<" operation "<<int(tools.overlaySurfaceOperation())<<" paint "<<view.m_worldTerrainStroke.paint.size()<<" overlays "<<view.m_worldTerrainStroke.overlays.size()<<" history "<<(view.nextWorldTerrainStroke(false)!=nullptr)<<"\n";
         check(view.m_worldTerrainStroke.paint.contains(activeId)&&view.m_worldTerrainStroke.paint.contains(neighborId),"surface creation changes both maps");
         view.endTileBrushGroup();
         check(view.worldTerrainHistory(false,true),"surface undo through view history");

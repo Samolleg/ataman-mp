@@ -610,8 +610,7 @@ QJsonObject CAiEditAdapter::undo(MainWindow* w)
     auto* v=w->view();if(busy(w))return ai::error("Editor is busy");
     const auto* top=w->m_undoStack->index()>0?w->m_undoStack->command(w->m_undoStack->index()-1):nullptr;
     const bool command=dynamic_cast<const CAiAgentCommand*>(top)||lifecycleCommand(top);
-    const auto* world=v->m_worldTerrainSession.nextCommand(false);
-    if(!command||(world&&world->localUndoIndex==w->m_undoStack->index()))return ai::error("The last operation belongs to human/world history; no agent operation undone");
+    if(!command)return ai::error("The last operation belongs to human/world history; no agent operation undone");
     w->setProperty("aiLifecycleHistoryError",QString());
     const int index=w->m_undoStack->index();w->on_actionUndo_triggered();
     const auto lifecycleError=w->property("aiLifecycleHistoryError").toString();if(!lifecycleError.isEmpty())return ai::error(lifecycleError);

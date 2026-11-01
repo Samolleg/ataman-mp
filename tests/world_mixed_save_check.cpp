@@ -54,8 +54,8 @@ int runScenarioLayerCheck(){
             const QPoint point(qRound(projected.x()),qRound(view.height()-projected.y()));check(view.rect().contains(point),"paint projects into viewport");
             QMouseEvent hover(QEvent::MouseMove,point,Qt::NoButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(&view,&hover);QCoreApplication::processEvents();
             QTest::mouseClick(&view,Qt::LeftButton,Qt::NoModifier,point);
-            QElapsedTimer done;done.start();while(done.elapsed()<8000){QCoreApplication::processEvents();QTest::qWait(10);if(!view.m_tileStrokeFinishing&&view.m_worldTerrainSession.canUndo())break;}
-            const auto after=sectors();check(after!=before&&view.m_worldTerrainSession.canUndo(),"actual vertex paint changes terrain with one Undo");
+            QElapsedTimer done;done.start();while(done.elapsed()<8000){QCoreApplication::processEvents();QTest::qWait(10);if(!view.m_tileStrokeFinishing&&(view.nextWorldTerrainStroke(false)!=nullptr))break;}
+            const auto after=sectors();check(after!=before&&(view.nextWorldTerrainStroke(false)!=nullptr),"actual vertex paint changes terrain with one Undo");
             check(view.worldTerrainHistory(false,true),"world Undo");check(sectors()==before,"paint Undo exact");check(view.worldTerrainHistory(true,true),"world Redo");check(sectors()==after,"paint Redo exact");return after;
         };
         const auto recoveryTerrain=sectors();
@@ -68,7 +68,7 @@ int runScenarioLayerCheck(){
         for(int i=0;i<untouchedBefore.size();++i)if(untouchedBefore[i]==paintedImages[i]){++untouched;if(savedImages[i]!=untouchedBefore[i])pixelsPreserved=false;}
         check(pixelsPreserved&&untouched>0,"unmodified tiles including water and transitions exact");
         check(atlasFile.open(QIODevice::ReadOnly),"read saved atlas");CResArchiveDocument savedArchive;check(savedArchive.loadBytes(atlasFile.readAll()),"saved atlas parsed");atlasFile.close();
-        bool headers=true;for(const auto& m:originalArchive.members())if(m.name.endsWith(".mmp",Qt::CaseInsensitive))headers&=m.payload.left(76)==savedArchive.memberPayload(m.name).left(76);check(headers,"all authored page headers and sizes preserved");check(!view.m_worldTerrainSession.canUndo(),"world Save explicit history checkpoint");
+        bool headers=true;for(const auto& m:originalArchive.members())if(m.name.endsWith(".mmp",Qt::CaseInsensitive))headers&=m.payload.left(76)==savedArchive.memberPayload(m.name).left(76);check(headers,"all authored page headers and sizes preserved");check(!(view.nextWorldTerrainStroke(false)!=nullptr),"world Save explicit history checkpoint");
         view.m_worldTerrainSession.clear();view.unloadLand(false);view.makeCurrent();view.loadLandscape(map,false);view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"reopened painted catalog");check(sectors()==painted,"reopened painting exact");setupWorld();
         stroke(1);check(view.saveWorldTerrainMaps(),"second world paint Save");
         const QDir rescue(qEnvironmentVariable("EI_SAVE_RESCUE"));check(rescue.exists(),"explicit rescue directory");

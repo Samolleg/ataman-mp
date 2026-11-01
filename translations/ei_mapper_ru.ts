@@ -10701,6 +10701,10 @@ Do you want to %3?</source>
             <translation>выкл.</translation>
         </message>
         <message>
+        <source>World terrain stroke</source>
+        <translation>Мазок общего ландшафта</translation>
+    </message>
+    <message>
             <source>World terrain history refused</source>
             <translation>Общий мазок нельзя отменить или повторить</translation>
         </message>

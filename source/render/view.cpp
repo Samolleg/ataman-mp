@@ -2532,8 +2532,10 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
     {
         bool selectionOnly = m_lastUndoStackIndex >= 0
             && index != m_lastUndoStackIndex && m_pUndoStack;
-        const int first = qMin(index, m_lastUndoStackIndex);
-        const int last = qMax(index, m_lastUndoStackIndex);
+        int first = qMin(index, m_lastUndoStackIndex);
+        int last = qMax(index, m_lastUndoStackIndex);
+        // A push/merge at QUndoStack's limit can keep the numeric index.
+        if(index==m_lastUndoStackIndex && index>0){first=index-1;last=index;}
         if(first < 0 || last > (m_pUndoStack ? m_pUndoStack->count() : 0))
             selectionOnly = false;
         for(int commandIndex = first; selectionOnly && commandIndex < last; ++commandIndex)
@@ -2549,7 +2551,8 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
                 || dynamic_cast<const CTerrainVerticalScalePreviewCommand*>(command)
                 || dynamic_cast<const CTerrainTilePreviewCommand*>(command)
                 || dynamic_cast<const COverlaySurfacePreviewCommand*>(command)
-                || dynamic_cast<const CMprParametersPreviewCommand*>(command);
+                || dynamic_cast<const CMprParametersPreviewCommand*>(command)
+                || isWorldTerrainHistoryCommand(command);
         }
         bool layoutOnlyChange=first>=0 && first<last && last<=m_pUndoStack->count();
         for(int i=first;layoutOnlyChange && i<last;++i)
@@ -2576,6 +2579,7 @@ void CView::attach(CSettings* pSettings, QTableWidget* pParam, QUndoStack* pStac
         if(navigationChange)
             invalidateAiGraphPreview();
         m_lastUndoStackIndex = index;
+        updateWorldTerrainStatus();
     });
 
     m_pProgress = pProgress;
@@ -21000,8 +21004,7 @@ void CView::pickQuickAccessTile(int index)
 void CView::endTileBrushGroup()
 {
     if(m_tilePaintStrokeActive && !m_worldTerrainStroke.isEmpty()) {
-        m_worldTerrainStroke.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;
-        m_worldTerrainSession.record(m_worldTerrainStroke);
+        recordWorldTerrainStroke(m_worldTerrainStroke);
         m_worldTerrainStroke=SWorldTerrainStroke();
         updateWorldTerrainStatus();syncMprDirtyState();
     }
@@ -25341,6 +25344,10 @@ bool CView::prepareUndo()
 
 bool CView::prepareHistoryNavigation()
 {
+    finishSculptStroke();
+    endTileBrushGroup();
+    if(m_tileStrokeFinishing)return false;
+    syncWorldTerrainActive();
     if(!m_pOp || operationAllowsHistoryNavigation(m_pOp->operationMethod()))
         return true;
 
@@ -26908,9 +26915,8 @@ void CView::finishSculptStroke()
     applyTerrainMobHeights(m_sculptStrokeMobHeightState.data(), true, true);
     if(!m_worldTerrainStroke.isEmpty())
     {
-        m_worldTerrainStroke.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;
         m_worldTerrainStroke.mobHeightState = m_sculptStrokeMobHeightState;
-        m_worldTerrainSession.record(m_worldTerrainStroke);
+        recordWorldTerrainStroke(m_worldTerrainStroke);
         updateWorldTerrainStatus();
         const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
         if(m_worldTerrainStroke.maps.contains(active))

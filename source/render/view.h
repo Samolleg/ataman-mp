@@ -89,6 +89,7 @@ class CKeyManager;
 class CSettings;
 class CStringItem;
 class QUndoStack;
+class QUndoCommand;
 class QThreadPool;
 struct SParam;
 class CComboBoxItem;
@@ -588,6 +589,11 @@ public:
     QString sessionWorkspaceMapZoneId() const { return m_sessionWorkspaceMapZoneId; }
     bool onExit(bool retainWorldTerrain = false);
     bool worldTerrainHistory(bool forward, bool force = false);
+    void recordWorldTerrainStroke(const SWorldTerrainStroke& stroke);
+    const SWorldTerrainStroke* nextWorldTerrainStroke(bool forward) const;
+    bool isWorldTerrainHistoryCommand(const QUndoCommand* command) const;
+    bool validateHistoryCommand(const QUndoCommand* command, bool forward, QString* error);
+    bool replayWorldTerrainStroke(const SWorldTerrainStroke& stroke, bool forward);
     QString captureShadowDiagnostics(QString* error = nullptr);
 
 protected:

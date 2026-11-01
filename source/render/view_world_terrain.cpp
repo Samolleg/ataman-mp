@@ -20,6 +20,79 @@
 #include <QtWidgets>
 #include <QCryptographicHash>
 #include <cmath>
+#include "ai_graph_preview_invalidation.h"
+
+namespace {
+class CWorldTerrainHistoryCommand final : public QUndoCommand,
+                                         public IAiGraphPreviewInvalidatingCommand {
+    QPointer<CView> m_view;
+    SWorldTerrainStroke m_stroke;
+    bool m_initialRedo{true};
+public:
+    CWorldTerrainHistoryCommand(CView* view,const SWorldTerrainStroke& stroke)
+        : m_view(view),m_stroke(stroke) { setText(CView::tr("World terrain stroke")); }
+    const SWorldTerrainStroke& stroke() const { return m_stroke; }
+    void undo() override { if(m_view)m_view->replayWorldTerrainStroke(m_stroke,false); }
+    void redo() override {
+        if(m_initialRedo){m_initialRedo=false;return;}
+        if(m_view)m_view->replayWorldTerrainStroke(m_stroke,true);
+    }
+    bool invalidatesAiGraphPreview() const override { return true; }
+};
+const SWorldTerrainStroke* worldStroke(const QUndoCommand* command,bool forward) {
+    if(!command)return nullptr;
+    if(auto* world=dynamic_cast<const CWorldTerrainHistoryCommand*>(command))return &world->stroke();
+    for(int n=0;n<command->childCount();++n) {
+        const int index=forward?n:command->childCount()-1-n;
+        if(auto* stroke=worldStroke(command->child(index),forward))return stroke;
+    }
+    return nullptr;
+}
+}
+
+void CView::recordWorldTerrainStroke(const SWorldTerrainStroke& stroke)
+{
+    if(stroke.isEmpty())return;
+    Q_ASSERT(m_pUndoStack);
+    if(m_pUndoStack)m_pUndoStack->push(new CWorldTerrainHistoryCommand(this,stroke));
+    updateWorldTerrainStatus();
+}
+
+const SWorldTerrainStroke* CView::nextWorldTerrainStroke(bool forward) const
+{
+    if(!m_pUndoStack)return nullptr;
+    const int index=m_pUndoStack->index()-(forward?0:1);
+    return index>=0&&index<m_pUndoStack->count()?worldStroke(m_pUndoStack->command(index),forward):nullptr;
+}
+
+bool CView::isWorldTerrainHistoryCommand(const QUndoCommand* command) const
+{
+    return worldStroke(command,false)!=nullptr;
+}
+
+bool CView::validateHistoryCommand(const QUndoCommand* command,bool forward,QString* error)
+{
+    if(!worldStroke(command,forward))return true;
+    syncWorldTerrainActive();
+    // Validate against detached COW values before QUndoStack advances its index.
+    // This also supports macros containing several world strokes.
+    auto staged=m_worldTerrainSession;
+    for(auto it=staged.documents.begin();it!=staged.documents.end();++it)
+        it.value().reset(new SWorldTerrainDocument(*it.value()));
+    std::function<bool(const QUndoCommand*)> validate=[&](const QUndoCommand* entry) {
+        if(auto* world=dynamic_cast<const CWorldTerrainHistoryCommand*>(entry)) {
+            if(!terrainMobHeightStateAvailable(world->stroke().mobHeightState.data())) {
+                if(error)*error=tr("Cannot replay terrain and object heights after the affected MOB was unloaded.");
+                return false;
+            }
+            return staged.apply(world->stroke(),forward,error);
+        }
+        for(int n=0;n<entry->childCount();++n)
+            if(!validate(entry->child(forward?n:entry->childCount()-1-n)))return false;
+        return true;
+    };
+    return validate(command);
+}
 
 void CView::updateWorldTerrainStatus()
 {
@@ -29,8 +102,8 @@ void CView::updateWorldTerrainStatus()
     const QString status=tr("World terrain: %1. Enabled neighbors: %2. Modified: %3")
         .arg(m_worldTerrainEnabled?tr("on"):tr("off"))
         .arg(m_worldTerrainEnabledPaths.size()).arg(names.isEmpty()?tr("none"):names.join(", "));
-    m_landscapeTools->setWorldTerrainStatus(status,m_worldTerrainSession.canUndo(),
-        m_worldTerrainSession.canRedo(),!names.isEmpty(),m_worldTerrainEnabled,m_worldTerrainEnabledPaths.size());
+    m_landscapeTools->setWorldTerrainStatus(status,nextWorldTerrainStroke(false)!=nullptr,
+        nextWorldTerrainStroke(true)!=nullptr,!names.isEmpty(),m_worldTerrainEnabled,m_worldTerrainEnabledPaths.size());
     const bool pending=!names.isEmpty();
     if(pending!=m_worldTerrainSavePendingNotified) {
         m_worldTerrainSavePendingNotified=pending;
@@ -355,21 +428,25 @@ bool CView::sculptWorldTerrainAt(const QVector3D& position,float fraction)
 bool CView::worldTerrainHistory(bool forward,bool force)
 {
     if(!force && !(m_worldTerrainEnabled && m_landscapeTools && m_landscapeTools->editingEnabled())) return false;
-    finishSculptStroke();syncWorldTerrainActive();
-    const auto next=m_worldTerrainSession.nextCommand(forward);
-    if(!next) return force;
-    if(!force && m_pUndoStack && next->localUndoIndex>=0
-       && next->localUndoIndex!=m_pUndoStack->index())return false;
-    const auto stroke=*next;
+    if(!prepareHistoryNavigation())return true;
+    if(!nextWorldTerrainStroke(forward))return force;
+    QString error;
+    const auto* command=m_pUndoStack->command(m_pUndoStack->index()-(forward?0:1));
+    if(!validateHistoryCommand(command,forward,&error)){emit updateMsg(error);return true;}
+    if(forward)m_pUndoStack->redo();else m_pUndoStack->undo();
+    return true;
+}
+
+bool CView::replayWorldTerrainStroke(const SWorldTerrainStroke& stroke,bool forward)
+{
     if(!terrainMobHeightStateAvailable(stroke.mobHeightState.data()))
     {
         emit updateMsg(tr("Cannot replay terrain and object heights after the affected MOB was unloaded."));
-        return true;
+        return false;
     }
     QString error;
-    if(!prepareHistoryNavigation()) return true;
-    if(!(forward?m_worldTerrainSession.redo(&error):m_worldTerrainSession.undo(&error)))
-    { QMessageBox::warning(this,tr("World terrain history refused"),error);return true; }
+    if(!m_worldTerrainSession.apply(stroke,forward,&error))
+    { emit updateMsg(error);return false; }
     if(m_pLand->isMprLoad() && m_terrainEditAvailable)
     {
         const QString active=CWorldTerrainSession::key(m_pLand->filePath().absoluteFilePath());
@@ -604,6 +681,8 @@ bool CView::saveWorldTerrainMaps()
         }
     }
     m_worldTerrainSession=rebased;
+    // Published physical slot identities start a new shared history.
+    if(m_pUndoStack)m_pUndoStack->clear();
     for(const auto& path:paths) {
         const auto id=CWorldTerrainSession::key(path);
         if(profiles.contains(id)) {
@@ -1028,7 +1107,7 @@ bool CView::resolveWorldMaterialBlends(QString* summary,CValidationReport* repor
             for(const auto& id:stamp.paint.keys())previewWorldPaintState(id);
             report->add("terrain.world.preview",EValidationSeverity::Error,tr("Предпросмотр не обновлён; исправление отменено."));return true;
         }
-        stamp.localUndoIndex=m_pUndoStack?m_pUndoStack->index():-1;m_worldTerrainSession.record(stamp);
+        recordWorldTerrainStroke(stamp);
         refreshWorldTerrainNeighbors();updateWorldTerrainStatus();
     }
     if(audit) {
