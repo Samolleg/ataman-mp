@@ -6116,8 +6116,7 @@ void CView::applyShadowUniforms(QOpenGLShaderProgram& program, bool enabled,
     program.setUniformValue(ei::uniformLocation(&program, "u_farStaticLightSpaceMatrix"), m_farStaticLightSpaceMatrix);
     program.setUniformValue(ei::uniformLocation(&program, "u_farDynamicLightSpaceMatrix"), m_farDynamicLightSpaceMatrix);
     program.setUniformValue(ei::uniformLocation(&program, "u_nearShadowSplit"), m_nearShadowSplit);
-    program.setUniformValue(ei::uniformLocation(&program, "u_shadowCascadeDebug"),
-        m_shadowCascadeDiagnostic && !m_minimapCaptureActive);
+    program.setUniformValue(ei::uniformLocation(&program, "u_shadowCascadeDebug"), m_shadowCascadeDiagnostic);
     program.setUniformValue(ei::uniformLocation(&program, "u_receiveStaticShadow"), receiveStatic);
     program.setUniformValue(ei::uniformLocation(&program, "u_receiveDynamicShadow"), receiveDynamic);
     program.setUniformValue(ei::uniformLocation(&program, "u_staticShadowMap"), 1);
@@ -8563,14 +8562,14 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         ? dynamic_cast<const COptInt*>(m_pSettings->opt("renderLightingMode")) : nullptr;
     const int requestedLightingMode = qBound(0,
         lightingModeOption ? lightingModeOption->value() : 2, 2);
-    // Minimap grading compares unlit terrain with achromatic relief. Keep
-    // static geometry identical in both passes, independent of viewport tone.
+    // Minimap capture needs authored region/cave colors on every renderer.
+    // ANGLE cannot use the shadow-atlas path, but capture disables shadows,
+    // fog, sky, and point lights, leaving the compatible environment diffuse.
     const int lightingMode = m_minimapCaptureActive
-        ? (m_minimapCaptureUnlitPass ? 0 : 3)
+        ? (m_minimapCaptureUnlitPass ? 0 : 2)
         : (m_openGlesCompatibility ? qMin(requestedLightingMode, 1)
                                    : requestedLightingMode);
-    const int objectLightingMode = m_minimapCaptureActive ? 3 : lightingMode;
-    const bool environmentEnabled = lightingMode >= 2;
+    const bool environmentEnabled = lightingMode == 2;
     // The viewport lighting-model selector owns environment activation. Keep
     // the resource sky in Full environment and out of the compatibility
     // modes instead of exposing a contradictory second Render setting.
@@ -8620,11 +8619,9 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         ? ei::clockValueToHours(timeOption->value()) : 12.0f;
     const CWorldSet* worldSet = m_environmentMob
         ? &m_environmentMob->worldSet() : nullptr;
-    const ei::SRenderEnvironment authoredEnvironment = ei::renderEnvironment(
+    const ei::SRenderEnvironment environment = ei::renderEnvironment(
         worldSet, overrideWorldTime, previewTime, m_caveEnvironment,
         m_weatherRegion);
-    const ei::SRenderEnvironment environment = m_minimapCaptureActive
-        ? ei::minimapReliefEnvironment(authoredEnvironment) : authoredEnvironment;
     // Offscreen minimap/query draws are consumers of renderer state, never
     // owners of the persistent terrain-shadow snapshot. Only the visible
     // viewport may request a replacement, and disabling a draw pass merely
@@ -8839,7 +8836,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
     m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"), activeHighlight);
     m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
     applyEnvironmentUniforms(m_program, environment, sceneLights,
-                             objectLightingMode, fogEnabled);
+                             lightingMode, fogEnabled);
     applyShadowUniforms(m_program, false);
     RenderQueueContext& renderQueue = RenderQueueContext::instance();
     renderQueue.begin(&m_program, cameraPosition, logicalCameraPosition);
@@ -8917,7 +8914,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         m_program.setUniformValue(ei::uniformLocation(&m_program, "u_viewMmatrix"), camMatrix);
         m_program.setUniformValue(ei::uniformLocation(&m_program, "qt_Texture0"), 0);
         applyEnvironmentUniforms(m_program, environment, sceneLights,
-                                 objectLightingMode, fogEnabled);
+                                 lightingMode, fogEnabled);
         // Stock projected shadows use selected receivers. Ordinary static
         // meshes do not receive their own broad static map; this removes the
         // camera-dependent fence/roof acne absent from the game.
@@ -9464,7 +9461,7 @@ SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCapture
 {
     QVector<SMinimapBakeLayer> layers;
     layers.append({EMinimapBakeLayerKind::Terrain,
-                   tr("loaded MPR terrain with neutral relief lighting and unchanged static geometry, without projected shadows"), result.capturedReviewImage});
+                   tr("loaded MPR terrain and overlays with authored environment lighting, without projected shadows"), result.capturedReviewImage});
     if(result.staticGeometrySourcePresent)
     {
         QImage marker(result.capturedReviewImage.size(), QImage::Format_ARGB32_Premultiplied);

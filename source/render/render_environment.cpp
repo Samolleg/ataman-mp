@@ -189,19 +189,6 @@ SRenderEnvironment renderEnvironmentForValues(float timeHours,
     return result;
 }
 
-SRenderEnvironment minimapReliefEnvironment(const SRenderEnvironment& authored)
-{
-    SRenderEnvironment result = renderEnvironmentForValues(12.0f, 1.0f, 1.0f);
-    result.sunDirection = authored.sunDirection;
-    result.sunColor = QVector3D(1.0f, 1.0f, 1.0f);
-    // Retain the neutral noon ambient brightness, not its RGB weather tint.
-    const float ambient = QVector3D::dotProduct(result.ambientColor,
-        QVector3D(0.2126f, 0.7152f, 0.0722f));
-    result.ambientColor = QVector3D(ambient, ambient, ambient);
-    result.skyColor = result.fogColor = QVector3D();
-    return result;
-}
-
 SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
                                      bool overrideTime, float overrideHours,
                                      bool caveEnvironment,
