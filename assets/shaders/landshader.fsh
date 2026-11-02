@@ -171,7 +171,14 @@ void main(void)
   vec3 cascadeDebugColor = vec3(0.0);
   if (u_environmentEnabled)
   {
-    if (u_lightingMode == 1)
+    if (u_lightingMode == 3)
+    {
+      // Minimap relief is a scalar response. Authored emissive RGB, weather
+      // colors, fog and projected shadows must not recolor this pass.
+      float diffuse = max(dot(norm, -normalize(u_sunDirection)), 0.0);
+      light = vec3(max(u_ambientColor.r, diffuse));
+    }
+    else if (u_lightingMode == 1)
     {
       float simpleDiffuse = max(dot(norm, normalize(vec3(0.35, 0.45, 0.82))), 0.0);
       light = vec3(0.62 + 0.52 * simpleDiffuse);

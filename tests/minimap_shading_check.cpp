@@ -27,7 +27,9 @@ QJsonObject evidence;
 for(const auto name:{QString("zone1"),QString("basecam"),QString("simple274"),QString("zone1-dawn")}){
  if(qEnvironmentVariableIsSet("EI_MINIMAP_ONLY_SIMPLE")&&name!="simple274")continue;
  if(!qEnvironmentVariable("EI_MINIMAP_SCENARIO").isEmpty()&&qEnvironmentVariable("EI_MINIMAP_SCENARIO")!=name)continue;
- if(name=="simple274")check(window.replaceLoadedLandscape(QFileInfo(maps+"/"+name+".mpr"),false),"open simple terrain");else {const auto map=name=="zone1-dawn"?QString("zone1"):name;window.openNeighborMapPair(maps+"/"+map+".mpr",maps+"/"+map+".mob",map,{},{});}
+ if(name=="simple274")check(window.replaceLoadedLandscape(QFileInfo(maps+"/"+name+".mpr"),false),"open simple terrain");else {const auto map=name=="zone1-dawn"?QString("zone1"):name;check(window.loadLandscapeWithProgress(QFileInfo(maps+"/"+map+".mpr")),"fixture MPR open");
+view.m_timer->stop();view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"fixture terrain ready before MOB");
+check(window.loadMobWithProgress(QFileInfo(maps+"/"+map+".mob"),false),"fixture MOB open");}
  check(until([&](){return !window.backgroundMobLoading();}),"complete scene "+name);view.makeCurrent();check(view.ensureTerrainAutoCatalogReady(),"native atlas ready "+name);window.m_minimapRefreshTimer->stop();view.paintGL();
  if(name=="zone1-dawn"){check(view.m_environmentMob!=nullptr,"authored environment available");auto ws=view.m_environmentMob->worldSet();ws.setData(eWsTypeTime,"4");view.m_environmentMob->setWorldSet(ws);}
  auto raw=view.captureMinimapScene(name!="simple274",1024,false);check(!raw.capturedReviewImage.isNull()&&!raw.capturedUnlitReviewImage.isNull(),"both GL readbacks "+name);check(raw.capturedReviewImage.size()==raw.capturedUnlitReviewImage.size(),"same readback dimensions "+name);check(raw.capturedReviewImage.save(root+"/"+name+"-shaded-review.png")&&raw.capturedUnlitReviewImage.save(root+"/"+name+"-unlit-review.png"),"intermediate PNGs "+name);

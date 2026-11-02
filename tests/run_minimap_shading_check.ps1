@@ -3,7 +3,10 @@
       [Parameter(Mandatory=$true)][string]$ReleaseRoot,
 
       [string]$BeforeRoot,
-      [ValidateSet("zone1","basecam","simple274","zone1-dawn")][string]$Scenario="zone1")
+      [ValidateSet("zone1","basecam","simple274","zone1-dawn")][string]$Scenario="zone1",
+      [ValidateSet("minimap_shading_check","minimap_relief_check","minimap_relief_reference_check")][string]$ExecutableName="minimap_shading_check",
+      [switch]$ReferenceOnly,
+      [string]$SourceOptionsPath)
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 $run=[IO.Path]::GetFullPath($RunRoot)
@@ -15,7 +18,8 @@ foreach($name in @('app','Maps','res','reference','AppData','LocalAppData','User
 $maps=Join-Path $run 'Starter/MODS/DejaVu/Maps'
 $modRes=Join-Path $run 'Starter/MODS/DejaVu/res'
 $installation=Join-Path $repo 'artifacts/EI-Mapper-Ataman-2-first-test'
-$options=Get-Content -LiteralPath (Join-Path $installation 'endurance-options.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$optionSource=if($SourceOptionsPath){[IO.Path]::GetFullPath($SourceOptionsPath)}else{Join-Path $installation 'endurance-options.json'}
+$options=Get-Content -LiteralPath $optionSource -Raw -Encoding UTF8 | ConvertFrom-Json
 $inputs=@();$receipts=@()
 $sourceMaps=$options.Resource.mapRoots[0]
 # Maps are writable private copies. Resource archives are hard links until a
@@ -38,7 +42,7 @@ foreach($pair in @(@{source=$modSource;target=$modRes},@{source=$baseSource;targ
 }
 $inputs+=@{source=$options.Resource.terrainAuthoringArchive;target=(Join-Path $run 'reference/terrain-reference.res');link=$true}
 $inputs+=@{source=(Join-Path (Split-Path -Parent $options.Resource.resourceRoots[0]) 'lua/tables.lua');target=(Join-Path $run 'Starter/MODS/DejaVu/lua/tables.lua');link=$false}
-$protected=@((Join-Path $installation 'endurance-options.json'))
+$protected=@($optionSource)
 foreach($line in Get-Content -LiteralPath (Join-Path $installation 'SHA256SUMS.txt')){
  if($line -match '^[a-fA-F0-9]{64} \*(.+)$'){$protected+=Join-Path $installation $Matches[1]}
 }
@@ -51,7 +55,7 @@ foreach($input in $inputs){if($input.link){New-Item -ItemType HardLink -Path $in
 [IO.File]::WriteAllText((Join-Path $run 'Starter/MODS/DejaVu/main.lua'),'-- isolated profile marker')
 [IO.File]::WriteAllText((Join-Path $run 'Starter/Engine/game.exe'),'non-executable profile marker')
 [IO.File]::WriteAllText((Join-Path $run 'game.exe'),'non-executable profile marker')
-Copy-Item -LiteralPath $TestExe -Destination (Join-Path $run 'app/minimap_shading_check.exe')
+Copy-Item -LiteralPath $TestExe -Destination (Join-Path $run ('app/'+$ExecutableName+'.exe'))
 
 Copy-Item -LiteralPath (Join-Path $ReleaseRoot 'EIMapperMcp.exe') -Destination (Join-Path $run 'app/EIMapperMcp.exe')
 foreach($name in @('data','assets')){Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $run ('app/'+$name)) -Recurse}
@@ -72,10 +76,11 @@ $env:EI_MAPPER_AUTOMATION_DIR=Join-Path $run 'automation';$env:EI_MAPPER_SETTING
 $env:EI_MAPPER_BACKUP_ROOT=Join-Path $run 'backups';$env:EI_MAPPER_HEADLESS_IDLE_MS='600000'
 $env:EI_MINIMAP_BEFORE=$BeforeRoot
 $env:EI_MINIMAP_SCENARIO=$Scenario
+if($ReferenceOnly){$env:EI_MINIMAP_REFERENCE_ONLY='1'}else{Remove-Item Env:EI_MINIMAP_REFERENCE_ONLY -ErrorAction SilentlyContinue}
 
 $env:PATH="$env:EI_MAPPER_QT_BIN;$env:EI_MAPPER_MINGW_BIN;$env:PATH"
 $timer=[Diagnostics.Stopwatch]::StartNew()
-$p=Start-Process -FilePath (Join-Path $run 'app/minimap_shading_check.exe') -ArgumentList '--assembly-catalog-check' -WorkingDirectory (Join-Path $run 'app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.txt') -RedirectStandardError (Join-Path $run 'stderr.txt')
+$p=Start-Process -FilePath (Join-Path $run ('app/'+$ExecutableName+'.exe')) -ArgumentList '--assembly-catalog-check' -WorkingDirectory (Join-Path $run 'app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.txt') -RedirectStandardError (Join-Path $run 'stderr.txt')
 $null=$p.Handle
 if(-not $p.WaitForExit(900000)){Stop-Process -Id $p.Id;throw 'Owned test timeout'}
 $p.WaitForExit();$code=$p.ExitCode

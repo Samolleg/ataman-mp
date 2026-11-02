@@ -140,7 +140,14 @@ void main(void)
     if (u_environmentEnabled && customColor.w == 0.0)
     {
       vec3 normal = normalize(v_normal);
-      if (u_lightingMode == 1)
+      if (u_lightingMode == 3)
+      {
+        // Static geometry has the same neutral lighting in both minimap
+        // passes; the grading slider therefore changes terrain relief only.
+        float diffuse = max(dot(normal, -normalize(u_sunDirection)), 0.0);
+        resColor.rgb *= vec3(max(u_ambientColor.r, diffuse));
+      }
+      else if (u_lightingMode == 1)
       {
         float simpleDiffuse = max(dot(normal, normalize(vec3(0.35, 0.45, 0.82))), 0.0);
         resColor.rgb *= max(vec3(0.62 + 0.52 * simpleDiffuse),

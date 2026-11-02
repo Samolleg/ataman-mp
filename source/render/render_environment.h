@@ -34,6 +34,10 @@ struct SRenderEnvironment
     float fogEnd{900.0f};
 };
 
+// Minimap relief keeps the map's light direction, with a fixed achromatic
+// daylight response. Viewport weather, clock overrides and fog are irrelevant.
+SRenderEnvironment minimapReliefEnvironment(const SRenderEnvironment& authored);
+
 SRenderEnvironment renderEnvironment(const CWorldSet* worldSet,
                                      bool overrideTime, float overrideHours,
                                      bool caveEnvironment = false,

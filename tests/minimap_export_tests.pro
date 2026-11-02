@@ -5,8 +5,9 @@ SOURCES += ../source/core/process_edit_lock_store.cpp
 DEFINES += EI_MAPPER_LOCK_STORE_TESTING
 win32: LIBS += -lshell32 -lole32 -ladvapi32
 TARGET = minimap_export_tests
-INCLUDEPATH += ../source/documents ../source/resources ../source/core ../source/app
+INCLUDEPATH += ../source/documents ../source/resources ../source/core ../source/app ../source/render
 SOURCES += minimap_export_tests.cpp \
+    ../source/render/render_environment.cpp \
     ../source/documents/minimap_bake.cpp \
     ../source/documents/minimap_catalog_registration.cpp \
     ../source/documents/map_table_document.cpp \

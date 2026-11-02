@@ -13,6 +13,7 @@
 #include "synthetic_map_table_archive.h"
 #include "process_edit_lock.h"
 #include "file_write_activity.h"
+#include "render_environment.h"
 #include <QLockFile>
 
 namespace {
@@ -52,6 +53,7 @@ private slots:
     void preservesHighResolutionAspectPadding();
     void gradesShadingAndColorDeterministically();
     void extraShadingPreservesWeatherColor();
+    void minimapReliefKeepsMapDirectionWithoutWeatherTint();
     void createsAddsReplacesAndRefusesCollision();
     void appendValidationMatchesByNameAfterHashTableReorder();
     void validationFailureDoesNotPublish();
@@ -318,6 +320,27 @@ void MinimapExportTests::gradesShadingAndColorDeterministically()
     QCOMPARE(desaturated.green(), desaturated.blue());
     QCOMPARE(gradeMinimapImage(unlit, shaded, settings),
              gradeMinimapImage(unlit, shaded, settings));
+}
+
+void MinimapExportTests::minimapReliefKeepsMapDirectionWithoutWeatherTint()
+{
+    const auto noon = ei::renderEnvironmentForValues(12.0f, 1.0f, 1.0f);
+    const float ambient = QVector3D::dotProduct(noon.ambientColor,
+        QVector3D(0.2126f, 0.7152f, 0.0722f));
+    for(float hour : {0.0f, 4.0f, 12.0f, 20.0f})
+        for(const auto& region : {QString("gipat"), QString("ingos")})
+            for(bool cave : {false, true})
+            {
+                auto authored = ei::renderEnvironmentForValues(hour, .1f, .9f, cave, region);
+                const auto original = authored;
+                const auto relief = ei::minimapReliefEnvironment(authored);
+                QCOMPARE(relief.sunDirection, original.sunDirection);
+                QCOMPARE(relief.sunColor, QVector3D(1, 1, 1));
+                QCOMPARE(relief.ambientColor, QVector3D(ambient, ambient, ambient));
+                QCOMPARE(authored.sunColor, original.sunColor);
+                QCOMPARE(authored.ambientColor, original.ambientColor);
+                QCOMPARE(relief.fogColor, QVector3D());
+            }
 }
 
 void MinimapExportTests::extraShadingPreservesWeatherColor()
