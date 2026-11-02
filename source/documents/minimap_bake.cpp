@@ -27,6 +27,22 @@ QImage gradeMinimapImage(const QImage& unlitImage, const QImage& shadedImage,
                 qRed(raw[x]) + (qRed(lit[x]) - qRed(raw[x])) * shade,
                 qGreen(raw[x]) + (qGreen(lit[x]) - qGreen(raw[x])) * shade,
                 qBlue(raw[x]) + (qBlue(lit[x]) - qBlue(raw[x])) * shade};
+            if(shade > 1.0)
+            {
+                // RGB extrapolation past the authored light can drive individual
+                // weather-tinted channels below zero (e.g. dawn blue), changing
+                // the whole map's hue. Extend attenuation, not the RGB vector:
+                // keep the 100% light color and apply extra luminance loss.
+                const double rawLuma = 0.2126 * qRed(raw[x])
+                    + 0.7152 * qGreen(raw[x]) + 0.0722 * qBlue(raw[x]);
+                const double litLuma = 0.2126 * qRed(lit[x])
+                    + 0.7152 * qGreen(lit[x]) + 0.0722 * qBlue(lit[x]);
+                const double attenuation = rawLuma > 0.0
+                    ? qPow(litLuma / rawLuma, shade - 1.0) : 1.0;
+                channel[0] = qRed(lit[x]) * attenuation;
+                channel[1] = qGreen(lit[x]) * attenuation;
+                channel[2] = qBlue(lit[x]) * attenuation;
+            }
             QColor hueColor(qBound(0, qRound(channel[0]), 255),
                             qBound(0, qRound(channel[1]), 255),
                             qBound(0, qRound(channel[2]), 255));

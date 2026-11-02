@@ -51,6 +51,7 @@ private slots:
     void encodesDeterministicJmvDxt1Profile();
     void preservesHighResolutionAspectPadding();
     void gradesShadingAndColorDeterministically();
+    void extraShadingPreservesWeatherColor();
     void createsAddsReplacesAndRefusesCollision();
     void appendValidationMatchesByNameAfterHashTableReorder();
     void validationFailureDoesNotPublish();
@@ -306,7 +307,7 @@ void MinimapExportTests::gradesShadingAndColorDeterministically()
              QColor(80, 50, 20));
     settings.shadingPercent = 150;
     QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
-             QColor(40, 25, 10));
+             QColor(57, 35, 14));
     settings = {0, 100, 100, 100, 120};
     QCOMPARE(gradeMinimapImage(unlit, shaded, settings).pixelColor(0, 0),
              QColor(40, 160, 100));
@@ -317,6 +318,34 @@ void MinimapExportTests::gradesShadingAndColorDeterministically()
     QCOMPARE(desaturated.green(), desaturated.blue());
     QCOMPARE(gradeMinimapImage(unlit, shaded, settings),
              gradeMinimapImage(unlit, shaded, settings));
+}
+
+void MinimapExportTests::extraShadingPreservesWeatherColor()
+{
+    const QImage raw = solid(QSize(2, 2), QColor(160, 160, 160, 173));
+    const QImage lit = solid(QSize(2, 2), QColor(85, 61, 54, 173));
+    SMinimapGradeSettings settings(100, 100, 100, 100, 0);
+    QCOMPARE(gradeMinimapImage(raw, lit, settings), lit);
+    QColor previous = lit.pixelColor(0, 0);
+    for(int shade : {101, 128, 150})
+    {
+        settings.shadingPercent = shade;
+        const QColor color = gradeMinimapImage(raw, lit, settings).pixelColor(0, 0);
+        QVERIFY(color.red() <= previous.red());
+        QVERIFY(color.green() <= previous.green());
+        QVERIFY(color.blue() <= previous.blue());
+        // One common attenuation keeps the RGB ratios within byte rounding.
+        QVERIFY(qAbs(color.red() * 54 - color.blue() * 85) <= 85);
+        QVERIFY(qAbs(color.green() * 54 - color.blue() * 61) <= 61);
+        QVERIFY(color.blue() > 20); // old RGB extrapolation gave only 1 at150.
+        QCOMPARE(color.alpha(), 173);
+        previous = color;
+    }
+    settings.shadingPercent = 150;
+    const auto black = solid(QSize(2, 2), QColor(0, 0, 0, 173));
+    QCOMPARE(gradeMinimapImage(raw, black, settings), black);
+    QCOMPARE(gradeMinimapImage(black, black, settings), black);
+    QCOMPARE(gradeMinimapImage(black, lit, settings), lit);
 }
 
 void MinimapExportTests::appendValidationMatchesByNameAfterHashTableReorder()
