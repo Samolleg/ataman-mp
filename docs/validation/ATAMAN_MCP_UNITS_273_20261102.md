@@ -202,3 +202,36 @@ finalization-final.log, package273.json. После финализации пр�
 этап — удалить78 частных тестовых каталогов по cleanup-plan.json, когда
 удаление станет доступно. Основная задача отмечена STAGED / CLEANUP BLOCKED,
 не DONE. Готовый staging не устанавливается без отдельного решения владельца.
+
+## Приёмка и установка 273 — 2026-11-02
+
+DONE / INSTALLED. Директор принял 273 по отчёту, владелец сказал «ставь».
+Принят main `6395e7f41cd7972c28090e57e583d753f684e5f5`; использован готовый
+`build-staging-273-mcp-units-20261102`, без пересборки. Прежний STOP снят этим
+поручением. Тестовые копии `work/mcp-units-273-20261102` оставлены владельцу;
+их очистка больше не является незавершённым этапом этой задачи.
+
+Канонический `packaging/install_program.ps1` обновил только управляемый комплект
+в `artifacts/EI-Mapper-Ataman-2-first-test`: 191 managed SHA совпал со staging,
+10 замен, 1 добавление, 0 удалений. Manifest совпал побайтно. Откат
+`artifacts/rollback272-to273-mcp-units-20261102` создан установщиком;
+`rollback.ps1 -VerifyOnly` — `ROLLBACK_VERIFIED`. Прежние откаты сохранены.
+Все пользовательские файлы вне manifest сохранили SHA256, размер и mtime.
+Финализатор на установке не запускался; регистрации моста не менялись.
+
+Перед заменой отсутствовали любые EIMapperEndurance, включая headless, и игра.
+Мосты PID 48724, 40160, 25864, 45880, 39576, 31432, 27408 сохранились живыми;
+никакие процессы владельца не завершались. Занятый `EIMapperMcp.exe` переименован
+в `EIMapperMcp.exe.old-ataman-23c09032994244d7a791a8f63dfe7a45`; новое каноническое
+имя содержит файл 273 из staging. Прежний занятый
+`EIMapperMcp.exe.old-ataman-4e2bfdea3a9641a5a8810e946f7c09c7` также сохранён;
+installer сообщил retired removed=0, retained=1 до замены.
+
+Установленный `--version`: `EI Mapper Endurance Edition 273`, exit 0,
+скрытый запуск только этого ключа с перенаправлением stdout/stderr.
+Первый прямой вызов из PowerShell не захватил вывод GUI-subsystem EXE;
+повторён только захват версии, остальные успешные проверки не запускались заново.
+Редактор интерактивно и игра не запускались, computer-use не применялся.
+Квитанции установки: `work/install-273-20261102/` — receipt.json,
+installer.log, rollback-verify.log, bridges-before.json, user-before/after.json,
+version.stdout/stderr. Чужие изменения checkout сохранены, push не выполнялся.
