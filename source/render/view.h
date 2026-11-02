@@ -194,6 +194,7 @@ class CView : public QGLWidget
     friend class CAiReadAdapter;
     friend class CAiEditAdapter;
     friend class CAiAgentCommand;
+    friend class CAiObjectCommand;
     friend class CAiLifecycleCommand;
     friend class CAiAgentServer;
     friend class CTopdownExport;

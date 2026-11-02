@@ -91,6 +91,7 @@ QJsonObject planImage(const ai::EditPlan& plan,const QRectF& b)
 
 ai::EditPlan ai::prepareEdit(EditPlan plan,const Cancellation& cancel)
 {
+    if(CAiEditAdapter::objectTool(plan.method))return CAiEditAdapter::prepareObjects(plan,cancel);
     const auto fail=[&](QString error){plan.error=error;plan.stroke={};plan.newMap.clear();return plan;};
     try {
         if(cancel->load())return fail("Cancelled; live map unchanged");
@@ -437,7 +438,8 @@ QString CAiEditAdapter::revision(MainWindow* w)
         for(const auto& image:v->m_workingTerrainAtlas->activeTileImages())add(QByteArray::number(image.cacheKey()));
     }
     for(const auto& doc:v->m_worldTerrainSession.documents){if(CWorldTerrainSession::key(doc->path)==idFor(v))continue;add(doc->path.toUtf8());model(doc->baseline,doc->terrain,doc->materials);}
-    for(const auto& mob:v->m_aMob){add(mob->filePath().absoluteFilePath().toUtf8());add(QByteArray::number(mob->isDirty()));for(auto* n:mob->nodes()){auto p=n->position();add(QByteArray::number(n->mapId())+':'+QByteArray::number(p.x(),'g',9)+','+QByteArray::number(p.y(),'g',9)+','+QByteArray::number(p.z(),'g',9));}}
+    for(const auto& mob:v->m_aMob){add(mob->filePath().absoluteFilePath().toUtf8());add(QByteArray::number(mob->isDirty()));
+        QByteArray projection;mob->serializeMob(projection,false);add(projection);}
     add(QByteArray::number(v->m_worldTerrainEnabled));add(QByteArray::number(w->hasTravelChanges()));
     auto paths=v->m_worldTerrainEnabledPaths.values();std::sort(paths.begin(),paths.end());for(const auto& path:paths)add(path.toUtf8());
     for(const auto& n:v->m_neighborPlacements){epoch(n.mprPath);add(n.mprPath.toUtf8()+':'+QByteArray::number(n.worldOrigin.x(),'g',16)+','+QByteArray::number(n.worldOrigin.y(),'g',16));}
@@ -450,6 +452,7 @@ QString CAiEditAdapter::revision(MainWindow* w)
 }
 ai::EditPlan CAiEditAdapter::capture(MainWindow* w,const QString& method,const QJsonObject& args)
 {
+    if(objectTool(method))return captureObjects(w,method,args);
     if(lifecycle(method)||method=="create_map")return captureLifecycle(w,method,args);
     ai::EditPlan plan;plan.method=method;plan.args=args;plan.description=QString::fromUtf8("ИИ: ")+(method=="sculpt"?QString::fromUtf8("Рельеф / ")+args["action"].toString():method=="paint"?QString::fromUtf8("Покраска"):method=="generate_terrain"?QString::fromUtf8("Природный рельеф / ")+args["preset"].toString():method=="erode"?QString::fromUtf8("Эрозия"):method=="carve_river"?QString::fromUtf8("Русло реки"):method=="auto_paint"?QString::fromUtf8("Автопокраска"):QString::fromUtf8("Новая карта"));
     auto* v=w->view();const auto fail=[&](QString error){plan.error=error;return plan;};
@@ -545,6 +548,7 @@ QJsonObject CAiEditAdapter::apply(MainWindow* w,const ai::EditPlan& plan)
 {
     if(busy(w))return ai::error("Editor gesture/load/modal interaction in progress; retry");
     if(revision(w)!=plan.revision)return ai::error("Document revision conflict; candidate discarded, prepare again");
+    if(objectTool(plan.method))return applyObjects(w,plan);
     auto* v=w->view();
     if(lifecycle(plan.method))return applyLifecycle(w,plan);
     if(plan.method=="create_map") {
@@ -609,7 +613,7 @@ QJsonObject CAiEditAdapter::undo(MainWindow* w)
 {
     auto* v=w->view();if(busy(w))return ai::error("Editor is busy");
     const auto* top=w->m_undoStack->index()>0?w->m_undoStack->command(w->m_undoStack->index()-1):nullptr;
-    const bool command=dynamic_cast<const CAiAgentCommand*>(top)||lifecycleCommand(top);
+    const bool command=dynamic_cast<const CAiAgentCommand*>(top)||lifecycleCommand(top)||objectCommand(top);
     if(!command)return ai::error("The last operation belongs to human/world history; no agent operation undone");
     w->setProperty("aiLifecycleHistoryError",QString());
     const int index=w->m_undoStack->index();w->on_actionUndo_triggered();
@@ -620,14 +624,18 @@ QJsonObject CAiEditAdapter::undo(MainWindow* w)
 QJsonObject CAiEditAdapter::save(MainWindow* w)
 {
     if(busy(w))return ai::error("Editor is busy");
+    const bool staleNavigation=navigationStale(w);
     auto* v=w->view();QScopedValueRollback<bool> permission(v->m_agentSaveAuthorized,true);
     w->on_actionSave_landscape_MPR_triggered();
     if(!v->m_pLand->isDirty()&&!v->hasDirtyWorldTerrain()&&!w->hasTravelChanges())v->saveAllMob();
     if(v->m_pLand->isDirty()||v->hasDirtyWorldTerrain()||w->hasTravelChanges())return ai::error("Normal Save did not complete; changes remain in memory");
     for(auto* mob:v->m_aMob)if(mob->isDirty())return ai::error("Normal MOB save did not complete; changes remain in memory");
+    // Save retires history, but does not rebuild navigation. Retain the stale
+    // state for subsequent272 queries until an explicit graph regeneration.
+    if(staleNavigation)v->m_canvasNavigationStale=true;
     // World publication rebases physical identities. Retire snapshot commands
     // with that same normal save boundary, never replay old slots after save.
-    bool agentHistory=false;for(int i=0;i<w->m_undoStack->count();++i)agentHistory|=dynamic_cast<const CAiAgentCommand*>(w->m_undoStack->command(i))!=nullptr||lifecycleCommand(w->m_undoStack->command(i));
+    bool agentHistory=false;for(int i=0;i<w->m_undoStack->count();++i)agentHistory|=dynamic_cast<const CAiAgentCommand*>(w->m_undoStack->command(i))!=nullptr||lifecycleCommand(w->m_undoStack->command(i))||objectCommand(w->m_undoStack->command(i));
     if(agentHistory)w->m_undoStack->clear();
     return {{"status","saved"},{"revision",revision(w)}};
 }

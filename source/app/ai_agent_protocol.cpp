@@ -113,6 +113,24 @@ QJsonArray toolDefinitions()
     add("cancel_operation","Cancel a read operation and discard its result.",{{"operation",string()}},{"operation"});
     add("window_snapshot","Fresh current-camera GL viewport PNG in editor or invisible background, at most 1024x768 /384 KiB, profile/map/capturedRevision. Local server starts preparing/capturing/encoding operation (30s deadline, SNAPSHOT_TIMEOUT); MCP bridge awaits and returns image content. BUSY during map opening; failure preserves connection. cancel_operation or request cancellation supported.");
     add("get_revision","Exact document revision token. Every edit must supply this token; conflicts refuse without changing the map.");
+    const auto objectArea=object({{"shape",choice({"rectangle","polygon"})},{"x",number(0,32768)},
+        {"y",number(0,32768)},{"width",number(0.01,32768)},{"height",number(0.01,32768)},
+        {"points",array(array(number(0,32768),2,2),3,128)}},{"shape"});
+    const auto placementObject=object({{"prototype",string()},{"x",number(0,32768)},{"y",number(0,32768)},
+        {"z",number(-10000,10000)},{"rotation",array(number(-36000,36000),3,3)},
+        {"scale",array(number(0,10),3,3)},{"name",string()},{"primaryTexture",string()},{"secondaryTexture",string()},
+        {"parts",array(string(),0,128)},{"shadow",QJsonObject{{"type","boolean"}}}},{"prototype","x","y"});
+    const QJsonObject objectEdit{{"revision",string()},{"action",choice({"place","transform","copy","delete"})},
+        {"objects",array(placementObject,1,500)},{"ids",array(integer(1,4294967295.0),1,500)},
+        {"area",objectArea},{"prototype",string()},{"type",integer(0,65535)},
+        {"delta",array(number(-32768,32768),3,3)},{"rotation",number(-36000,36000)},
+        {"pivot",array(number(-32768,32768),3,3)},{"preview",QJsonObject{{"type","boolean"}}},
+        {"snapshot",QJsonObject{{"type","boolean"}}}};
+    add("edit_objects","272: place/transform/copy/delete up to500 static objects; units read-only. get_revision first, poll operation_status. preview=true returns affected IDs/MOB/coordinates without edits, then apply/cancel. place objects use key/name from search_database(prototypes), including static:model from the native model catalog; primaryTexture may select an authored textures entry, optional secondaryTexture/parts/shadow. x/y, terrain-relative z=0, Euler rotation=[X,Y,Z] degrees, scale=[grace,strength,height] as in manual figure properties. transform/copy require ids or area rectangle/polygon; optional prototype/model/type filters. delta=[dx,dy,dz], rotation=group Z degrees about pivot or group centroid. IDs unique across primary/AddMob/units/technical records. Referenced delete/transform refused with reference locations, no force. One native Undo; save separately with owner permission. Examples: {action:'delete',ids:[324],revision:'...',preview:true}; {action:'place',objects:[{prototype:'stbuho7',x:40,y:50}],revision:'...'}. Contains no arbitrary file access.",objectEdit,{"revision","action"});
+    const QJsonObject graphEdit{{"revision",string()},{"preview",QJsonObject{{"type","boolean"}}},{"snapshot",QJsonObject{{"type","boolean"}}}};
+    add("rebuild_ai_graph","272: rebuild all8 legacy AI layers with the same native builder as Navigation AI / Update graph. Bounded16384 graph cells, detached prepare, op ID/cancel/preview/apply, one Undo. Embeds graph in primary MOB in memory; only save persists under owner Save authority. Example {revision:'...',preview:true}; poll, then apply.",graphEdit,{"revision"});
+    add("query_passability","272 read-only: current native legacy0.5m classifier for selected AI layer0..7:0 flying,1 prone,2 crawling,3 human,4 tall,5 wide/low,6 wide/tall,7 very large. At most200 XY points, nearest passable point within radius0..32m (default8), coordinates/distance or null. graphStale explicitly reports graph outdated by edits; classification uses current terrain/static objects. Poll operation_status. Example {layer:0,points:[[160.44,170.96]],radius:8}.",{{"layer",integer(0,7)},{"points",array(array(number(-32768,32768),2,2),1,200)},{"radius",number(0,32)}},{"layer","points"});
+    add("validate_map","272 read-only: native MOB/AddMob family validation, duplicate IDs, missing references, parser/projection findings, resources and stale AI graph. Poll operation_status; findings have level Info/Warning/Error, code, message, ID/path/coordinates when applicable. Info is separate from findings/warnings; max2000 findings and512KiB, overflow fails explicitly. Example {}. Never repairs data or saves.");
     const auto area=object({{"shape",choice({"circle","rectangle","line"})},{"x",number(-32768,32768)},
         {"y",number(-32768,32768)},{"radius",number(0.5,1024)},{"width",number(1,2048)},
         {"height",number(1,2048)},{"points",array(array(number(-32768,32768),2,2),2,128)},
@@ -161,7 +179,7 @@ QJsonArray toolDefinitions()
         {"level",number(0,10000)}},{"material","liquid","level"}));
     add("auto_paint","Modern131 palette painting by height/slope/curvature/drainage and water level, coherent noisy thresholds and seeded variants. Optional ordered rules and road line. Palette defaults are resolved by active profile material names, IDs can override. One async Undo.",automatic,{"revision","preset"});
     add("preview","Prepare an edit without applying; returns region overlay PNG and operation ID for apply.",
-        {{"tool",choice({"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"})},{"arguments",QJsonObject{{"anyOf",QJsonArray{object(sculpt,{"revision","action","area"}),object(paint,{"revision","area"}),object(generate,{"revision","preset","seed"}),object(erosion,{"revision"}),object(river,{"revision","points","width","depth"}),object(automatic,{"revision","preset"})}}}}},{"tool","arguments"});
+        {{"tool",choice({"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","edit_objects","rebuild_ai_graph"})},{"arguments",QJsonObject{{"anyOf",QJsonArray{object(sculpt,{"revision","action","area"}),object(paint,{"revision","area"}),object(generate,{"revision","preset","seed"}),object(erosion,{"revision"}),object(river,{"revision","points","width","depth"}),object(automatic,{"revision","preset"}),object(objectEdit,{"revision","action"}),object(graphEdit,{"revision"})}}}}},{"tool","arguments"});
     // Schemas overlap (e.g. generate/auto-paint); anyOf keeps client validation
     // correct. The server strictly validates the selected tool below.
     add("apply","Apply a completed preview only at its captured revision, one Undo.",{{"operation",string()},{"revision",string()},{"snapshot",QJsonObject{{"type","boolean"}}}},{"operation","revision"});
@@ -182,7 +200,7 @@ QJsonArray toolDefinitions()
         {"rangeMinimum",integer(1,4294967295.0)},{"rangeMaximum",integer(1,4294967295.0)},{"time",number(-1000000,1000000)}},{"revision"});
     add("undo_last_agent_operation","Undo only the top agent command. Refuses if human/world history intervened. Does not undo somebody else's work.",{{"revision",string()}},{"revision"});
     add("save","Use normal map Save209–216 only when the human enabled Allow agent to save. Async status; backups, atlas publication and 126-page limit remain authoritative.",{{"revision",string()}},{"revision"});
-    const QSet<QString> mutations{"shutdown_headless","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"edit_objects","rebuild_ai_graph","shutdown_headless","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","undo_last_agent_operation","save"};
     for(int i=0;i<tools.size();++i) {
         auto tool=tools[i].toObject();if(!mutations.contains(tool["name"].toString()))continue;
         tool["annotations"]=QJsonObject{{"readOnlyHint",false},{"destructiveHint",true},{"openWorldHint",false}};tools[i]=tool;
@@ -219,7 +237,7 @@ bool validateArguments(const QString& name, const QJsonObject& args, QString* di
     diagnostic->clear();
     if(name=="preview") {
         if(args.keys()!=QStringList{"arguments","tool"}||!args["arguments"].isObject()
-           ||!QStringList{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"}.contains(args["tool"].toString())){*diagnostic="preview expects an editable terrain tool and its arguments";return false;}
+           ||!QStringList{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","edit_objects","rebuild_ai_graph"}.contains(args["tool"].toString())){*diagnostic="preview expects an editable tool and its arguments";return false;}
         return validateArguments(args["tool"].toString(),args["arguments"].toObject(),diagnostic);
     }
     for(const auto& v : toolDefinitions()) {

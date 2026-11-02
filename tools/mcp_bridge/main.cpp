@@ -283,7 +283,7 @@ public:
         if(name=="export_map_topdown"&&value["operation"].isString())editJobs[value["operation"].toString()]=now+180000;
         if((name=="open_map"||name=="close_map"||name=="create_map")&&value["operation"].isString())sceneJobs.insert(value["operation"].toString());
         if((name=="operation_status"||name=="cancel_operation")&&!activeJobs.contains(args["operation"].toString()))sceneJobs.remove(args["operation"].toString());
-        const QSet<QString> edits{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
+        const QSet<QString> edits{"query_passability","validate_map","edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","save"};
         if(edits.contains(name)&&value["operation"].isString()) {
             if(editJobs.size()>=8)editJobs.erase(editJobs.begin());
             editJobs[value["operation"].toString()]=now+60000;

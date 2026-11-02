@@ -12,6 +12,7 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QCoreApplication>
+#include <QScopedValueRollback>
 
 #include "mob.h"
 #include "background_mob_load.h"
@@ -2185,6 +2186,31 @@ bool CMob::buildRawObjectSequenceCandidate(
 }
 
 bool CMob::buildValidatedCandidate(QByteArray* data,
+                                   CValidationReport* report,
+                                   QString* saveClass)
+{
+    if(m_originalData.isEmpty())return buildValidatedProjectionCandidate(data,report,saveClass);
+    CMobDocument baseline;
+    QByteArray originalGraph;
+    if(!baseline.loadBytes(m_originalData,m_filePath.filePath(),report))return false;
+    if(baseline.hasEmbeddedAiGraph() && !baseline.embeddedAiGraph(&originalGraph,report))return false;
+    if(originalGraph==m_aiGraph)return buildValidatedProjectionCandidate(data,report,saveClass);
+    const QByteArray editedGraph=m_aiGraph;
+    {
+        QScopedValueRollback<QByteArray> original(m_aiGraph,originalGraph);
+        if(!buildValidatedProjectionCandidate(data,report,saveClass))return false;
+    }
+    CMobDocument candidate;
+    if(!candidate.loadBytes(*data,m_filePath.filePath(),report))return false;
+    QByteArray combined;
+    if(!(editedGraph.isEmpty()?candidate.removeEmbeddedAiGraph(&combined,report)
+         :candidate.replaceEmbeddedAiGraph(editedGraph,&combined,report)))return false;
+    *data=combined;
+    if(saveClass)*saveClass="OBJECTS_AND_EMBEDDED_GRAPH";
+    return true;
+}
+
+bool CMob::buildValidatedProjectionCandidate(QByteArray* data,
                                    CValidationReport* report,
                                    QString* saveClass)
 {

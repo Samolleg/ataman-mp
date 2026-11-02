@@ -7,6 +7,8 @@
 #include "terrain_virtual_atlas.h"
 #include "world_map_layout_document.h"
 #include "process_edit_lock.h"
+#include "ai_graph_preview_builder.h"
+#include "mob_family_validation.h"
 class MainWindow;
 class QUndoCommand;
 class CAiAgentCommand;
@@ -54,6 +56,14 @@ struct EditPlan {
     QVector<SWorldMapLayoutChange> layoutChanges;
     QMap<QString,QByteArray> fileHashes;
     QJsonObject summary;
+    // 272: value snapshots only; never pass live objects to preparation workers.
+    SMobFamilyValidationRequest family;
+    QJsonArray objects, changes;
+    SAiGraphPreviewBuildInput graphInput;
+    SAiGraphPreviewBuildResult graphResult;
+    bool graphStale{false};
+    QJsonArray captureFindings;
+    QSet<quint32> reservedObjectIds;
 };
 EditPlan prepareEdit(EditPlan plan,const Cancellation& cancel);
 }
@@ -74,6 +84,13 @@ public:
     static bool dirty(MainWindow*);
     static bool lifecycleCommand(const QUndoCommand*);
     static bool lifecycleWrites(const QUndoCommand*);
+    static bool objectTool(const QString&);
+    static bool objectCommand(const QUndoCommand*);
+    static bool navigationStale(MainWindow*);
+    static QSharedPointer<const ei::SProfileDatabaseSnapshot> objectDatabase(MainWindow*);
+    static ai::EditPlan captureObjects(MainWindow*,const QString&,const QJsonObject&);
+    static ai::EditPlan prepareObjects(ai::EditPlan,const ai::Cancellation&);
+    static QJsonObject applyObjects(MainWindow*,const ai::EditPlan&);
 private:
     static bool replay(MainWindow* window,const SWorldTerrainStroke& stroke,bool forward,QString* error);
 };

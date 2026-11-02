@@ -28,7 +28,12 @@ QJsonObject databaseSnapshot(const QSharedPointer<const ei::SProfileDatabaseSnap
     const auto add=[&](QString kind,QString key,QString name,QString detail) {
         if(!(key+" "+name+" "+detail).contains(a["query"].toString(),Qt::CaseInsensitive))return;
         if(index++<a["offset"].toInt()||rows.size()>=a["limit"].toInt(100))return;
-        rows.append(QJsonObject{{"category",kind},{"key",key.left(256)},{"name",name.left(256)},{"detail",detail.left(256)}});
+        QJsonObject row{{"category",kind},{"key",key.left(256)},{"name",name.left(256)},{"detail",detail.left(256)}};
+        if(kind=="prototypes"&&key.startsWith("static:")){
+            row["source"]="static-model-catalog";row["nodeType"]=3;
+            row["textures"]=QJsonArray::fromStringList(db->raceModels.value(key).primaryTextures);
+        }
+        rows.append(row);
     };
     if(category=="all"||category=="monsters")for(auto i=db->monsters.begin();i!=db->monsters.end();++i) {
         if(cancel->load())return error("Cancelled");add("monsters",i.key(),i->name,i->baseRace);

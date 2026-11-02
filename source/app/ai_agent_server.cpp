@@ -263,9 +263,28 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
     int running=0;for(const auto& j:m_jobs)if(!j.complete)++running;
     if(running>=2)return ai::error("Two reads already running");
     const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);m_jobs.insert(id,Job{});
-    if(method=="read_terrain"||method=="search_database") {
+    if(method=="query_passability"||method=="validate_map") {
+        const auto cancel=m_jobs[id].cancel;
+        auto* watcher=new QFutureWatcher<QJsonObject>(this);m_jobs[id].watcher=watcher;
+        connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher](){
+            if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].markComplete();m_jobs[id].watcher=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();}
+            watcher->deleteLater();
+        });
+        QTimer::singleShot(0,this,[this,id,method,args,cancel,watcher](){
+            if(!m_jobs.contains(id)||!m_window)return;
+            const auto captured=CAiEditAdapter::captureObjects(m_window,method,args);
+            if(!m_jobs.contains(id)||cancel->load())return;
+            if(!captured.error.isEmpty()){
+                m_jobs[id].result=ai::error(captured.error);m_jobs[id].markComplete();m_jobs[id].watcher=nullptr;watcher->deleteLater();return;
+            }
+            watcher->setFuture(QtConcurrent::run([captured,cancel](){
+                const auto result=CAiEditAdapter::prepareObjects(captured,cancel);
+                return result.error.isEmpty()?result.summary:ai::error(result.error);
+            }));
+        });
+    } else if(method=="read_terrain"||method=="search_database") {
         const auto model=method=="read_terrain"?CAiReadAdapter::terrain(m_window):CTerrainEditModel();
-        const auto db=ei::ProfileDatabaseContext::instance().current();const auto cancel=m_jobs[id].cancel;
+        const auto db=method=="search_database"?CAiEditAdapter::objectDatabase(m_window):ei::ProfileDatabaseContext::instance().current();const auto cancel=m_jobs[id].cancel;
         auto* watcher=new QFutureWatcher<QJsonObject>(this);m_jobs[id].watcher=watcher;
         connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher](){
             if(m_jobs.contains(id)){m_jobs[id].result=watcher->result();m_jobs[id].markComplete();m_jobs[id].watcher=nullptr;m_lastActivity=QDateTime::currentMSecsSinceEpoch();}
@@ -323,7 +342,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         return ai::error("Normal map commit in progress; retry after operation_status");
     }
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
-    const QSet<QString> mutations{"create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
         if(m_mode->currentIndex()!=2)return ai::error("Read-only mode: only the human can enable Правка in the dock");
         if(m_writer&&m_writer!=m_currentClient)return ai::error("Another agent owns the writer session; disconnect it before switching writer");
@@ -350,7 +369,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     if(method=="export_map_topdown")return startTopdownExport(args);
     if(method=="window_snapshot")return startSnapshot();
     if(method=="read_export_image")return ai::readExportImage(args);
-    if(method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
+    if(method=="query_passability"||method=="validate_map"||method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
     if(method=="operation_status"||method=="cancel_operation") {
         prune();const auto id=args["operation"].toString();if(!m_jobs.contains(id))return ai::error("Unknown or expired operation");
         auto& job=m_jobs[id];
@@ -507,7 +526,8 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
     }
     if(m_editWorkers->load()!=0)return ai::error("Previous cancelled writer is still releasing its snapshot; retry shortly");
     if(requested=="preview")args["preview"]=true;
-    const auto candidate=CAiEditAdapter::capture(m_window,method,args);
+    const bool deferredCapture=CAiEditAdapter::objectTool(method);
+    const auto candidate=deferredCapture?ai::EditPlan():CAiEditAdapter::capture(m_window,method,args);
     if(!candidate.error.isEmpty())return ai::error(candidate.error);
     const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);Job job;job.edit=true;job.owner=m_currentClient;
     // A rich Modern131 coast palette may need more than30s to resolve its
@@ -528,11 +548,21 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
             QTimer::singleShot(0,this,[this,id,plan,args](){finishCommit(id,plan,args["snapshot"].toBool());});
         }
     });
-    const auto workers=m_editWorkers;workers->fetch_add(1);
-    watcher->setFuture(QtConcurrent::run([candidate,cancel,workers](){
-        struct Release {std::shared_ptr<std::atomic_int> count;~Release(){count->fetch_sub(1);}} release{workers};
-        return ai::prepareEdit(candidate,cancel);
-    }));
+    const auto workers=m_editWorkers;
+    const auto launch=[this,id,watcher,candidate,cancel,workers,method,args,deferredCapture](){
+        if(!m_jobs.contains(id)||!m_window)return;
+        const auto snapshot=deferredCapture?CAiEditAdapter::capture(m_window,method,args):candidate;
+        if(!m_jobs.contains(id)||cancel->load())return;
+        if(!snapshot.error.isEmpty()){
+            m_jobs[id].result=ai::error(snapshot.error);m_jobs[id].markComplete();m_jobs[id].editWatcher=nullptr;watcher->deleteLater();return;
+        }
+        workers->fetch_add(1);
+        watcher->setFuture(QtConcurrent::run([snapshot,cancel,workers](){
+            struct Release {std::shared_ptr<std::atomic_int> count;~Release(){count->fetch_sub(1);}} release{workers};
+            return ai::prepareEdit(snapshot,cancel);
+        }));
+    };
+    if(deferredCapture)QTimer::singleShot(0,this,launch);else launch();
     return {{"operation",id},{"status","running"},{"poll","operation_status"},{"expiresMs",60000}};
 }
 void CAiAgentServer::configureClient()

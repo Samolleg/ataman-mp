@@ -156,6 +156,8 @@ public:
     uint freeMapId();
     const QSet<quint32>& scriptReferencedMapIds() const;
     const QByteArray& aiGraphData() const { return m_aiGraph; }
+    // In-memory graph editing. Persistence remains exclusively the normal Save pipeline.
+    void setAiGraphData(const QByteArray& bytes) { m_aiGraph=bytes; }
 
     //functions for logic processing
     QList<CNode*>& logicNodes();
@@ -179,6 +181,7 @@ public:
     // <== end functions of logic
 
 private:
+    bool buildValidatedProjectionCandidate(QByteArray*, CValidationReport*, QString*);
     friend int runDatabaseCreationCheck();
     friend int runGroupRotationCheck();
     friend int runModelConnectionCheck();
