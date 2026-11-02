@@ -26,6 +26,7 @@ private:
         QPointer<QFutureWatcher<ai::EditPlan>> editWatcher;
         QPointer<QLocalSocket> owner;
         QSharedPointer<ai::EditPlan> plan;
+        QSharedPointer<ai::EditPlan> unitSource;
         bool edit{false};
         bool snapshot{false};
         QString phase;

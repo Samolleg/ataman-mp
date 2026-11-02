@@ -5,6 +5,7 @@
 #include "node.h"
 #include "worldobj.h"
 #include "lever.h"
+#include "unit.h"
 #include "landscape.h"
 #include "endurance_document.h"
 #include "script_reference_analyzer.h"
@@ -26,7 +27,7 @@ QJsonObject world(const QJsonObject& d){return d.contains("World object")?d["Wor
 QJsonObject base(const QJsonObject& d){return world(d)["Base object"].toObject();}
 QJsonObject setBase(QJsonObject d,const QJsonObject& b){auto o=world(d);o["Base object"]=b;if(d.contains("World object"))d["World object"]=o;else d=o;return d;}
 QJsonObject row(CMob* mob,CNode* n){const auto d=n->toJson();return {{"mob",mob->filePath().absoluteFilePath()},{"id",double(n->mapId())},
-    {"type",int(n->nodeType())},{"prototype",world(d)["Object template"]},{"model",n->modelName()},
+    {"type",int(n->nodeType())},{"prototype",n->nodeType()==eUnit?d["Prototype name"]:world(d)["Object template"]},{"model",n->modelName()},
     {"name",n->mapName()},{"position",vector(n->position())},{"data",d}};}
 QByteArray hashFile(const QString& p){return resFileSha256(p);}
 QJsonObject finding(QString level,QString code,QString message,QString path={},QJsonValue id=QJsonValue()){
@@ -61,9 +62,117 @@ void logicReferences(const QJsonValue& value,const QString& path,QMap<quint32,QS
     }}
 }
 QJsonObject publicRow(QJsonObject r){r.remove("data");r.remove("after");return r;}
+bool unitRead(const QString& method){return method=="list_units"||method=="get_unit";}
+bool unitTool(const QString& method){return unitRead(method)||method=="edit_units";}
+bool selectedUnit(const QJsonObject& r,const QJsonObject& a){
+    if(r["type"].toInt()!=eUnit)return false;
+    if(a.contains("id")&&a["id"]!=r["id"])return false;
+    if(a.contains("mob")&&QFileInfo(r["mob"].toString()).fileName().compare(a["mob"].toString(),Qt::CaseInsensitive)!=0
+        &&r["mob"]!=a["mob"])return false;
+    const int player=world(r["data"].toObject())["Player(dimpomacy group)"].toInt();
+    if(a.contains("player")&&a["player"].toInt()!=player)return false;
+    if(a.contains("group")&&a["group"].toInt()!=player)return false;
+    return selected(r,a);
+}
+// Logic coordinates are world-space; the unit's Position.Z is terrain-relative.
+QJsonArray logicPoints(const QJsonObject& data){
+    QJsonArray result;int slot=0;
+    for(const auto& l:data["Logics"].toArray()){
+        auto logic=l.toObject();result.append(QJsonObject{{"kind","guard"},{"logic",slot},{"position",logic["Guard placement"]}});
+        int patrol=0;for(const auto& p:logic["Patrol Points"].toArray()){
+            auto point=p.toObject();result.append(QJsonObject{{"kind","patrol"},{"logic",slot},{"patrol",patrol},{"position",point["Position"]}});
+            int look=0;for(const auto& v:point["Looking points"].toArray())result.append(QJsonObject{{"kind","look"},{"logic",slot},{"patrol",patrol},{"look",look++},{"position",v.toObject()["Position"]}});
+            ++patrol;
+        }++slot;
+    }return result;
+}
+void transformLogic(QJsonObject& data,const QVector3D& pivot,const QQuaternion& rotation,const QVector3D& delta){
+    const auto move=[&](QJsonValue v){return vector(pivot+rotation.rotatedVector(vector(v.toArray())-pivot)+delta);};
+    auto logics=data["Logics"].toArray();for(int i=0;i<logics.size();++i){auto l=logics[i].toObject();
+        l["Guard placement"]=move(l["Guard placement"]);auto patrols=l["Patrol Points"].toArray();
+        for(int j=0;j<patrols.size();++j){auto p=patrols[j].toObject();p["Position"]=move(p["Position"]);auto looks=p["Looking points"].toArray();
+            for(int k=0;k<looks.size();++k){auto v=looks[k].toObject();v["Position"]=move(v["Position"]);looks[k]=v;}
+            p["Looking points"]=looks;patrols[j]=p;
+        }l["Patrol Points"]=patrols;logics[i]=l;
+    }data["Logics"]=logics;
+}
+bool referenceKey(QString key){key=key.toLower();return key.contains("target")||key.contains("object id")||key.contains("parent id");}
+QJsonValue remapUnitReferences(QJsonValue value,const QMap<quint32,quint32>& ids){
+    if(value.isObject()){auto o=value.toObject();for(auto i=o.begin();i!=o.end();++i){
+        if(referenceKey(i.key())&&i->isDouble()&&ids.contains(quint32(i->toDouble())))i.value()=double(ids[quint32(i->toDouble())]);
+        else i.value()=remapUnitReferences(i.value(),ids);
+    }return o;}if(value.isArray()){auto a=value.toArray();for(int i=0;i<a.size();++i)a[i]=remapUnitReferences(a[i],ids);return a;}return value;
+}
+QString editPoint(QJsonObject& data,const QJsonObject& edit){
+    auto logicSlots=data["Logics"].toArray();const int slot=edit["logic"].toInt();
+    if(slot<0||slot>=logicSlots.size())return "Logic slot is absent";
+    auto logic=logicSlots[slot].toObject();const auto kind=edit["kind"].toString(),action=edit["action"].toString();
+    if(action=="direction"&&kind!="look")return "direction is only valid for a look point";
+    if(action!="direction"&&(edit.contains("direction")||edit.contains("distance")))return "direction/distance require action=direction";
+    if(action=="direction"&&(edit.contains("position")||edit.contains("delta")))return "direction accepts no position/delta";
+    if(action=="remove"&&(edit.contains("position")||edit.contains("delta")))return "remove accepts no position/delta";
+    if(action=="add"&&edit.contains("delta"))return "add requires position, not delta";
+    const auto position=[&](QJsonArray old){
+        if(edit.contains("position"))return edit["position"].toArray();
+        return vector(vector(old)+vector(edit["delta"].toArray()));
+    };
+    if(kind=="guard"){
+        if(action!="move")return "Guard placement is a single native field; only move is supported";
+        logic["Guard placement"]=position(logic["Guard placement"].toArray());
+    }else{
+        auto patrols=logic["Patrol Points"].toArray();int pi=edit["patrol"].toInt(-1);
+        if(kind=="patrol"){
+            if(action=="add"){
+                if(pi<0||pi>patrols.size()||!edit.contains("position"))return "New patrol requires insertion index0..count and position";
+                patrols.insert(pi,QJsonObject{{"Position",edit["position"]},{"Looking points",QJsonArray{}}});
+            }else{
+                if(pi<0||pi>=patrols.size())return "Patrol index is absent";
+                if(action=="remove")patrols.removeAt(pi);
+                else{auto point=patrols[pi].toObject();point["Position"]=position(point["Position"].toArray());patrols[pi]=point;}
+            }
+        }else{
+            if(pi<0||pi>=patrols.size())return "Look point requires an existing patrol index";
+            auto point=patrols[pi].toObject();auto looks=point["Looking points"].toArray();int vi=edit["look"].toInt(-1);
+            if(action=="add"){
+                if(vi<0||vi>looks.size()||!edit.contains("position"))return "New look point requires insertion index0..count and position";
+                looks.insert(vi,QJsonObject{{"Position",edit["position"]},{"Wait",0},{"Turn speed",0},{"Point flag",0}});
+            }else{
+                if(vi<0||vi>=looks.size())return "Look index is absent";
+                if(action=="remove")looks.removeAt(vi);
+                else{auto look=looks[vi].toObject();
+                    if(action=="direction"){
+                        if(!edit.contains("direction"))return "direction requires degrees around Z";
+                        auto origin=vector(point["Position"].toArray()),old=vector(look["Position"].toArray());
+                        const double angle=qDegreesToRadians(edit["direction"].toDouble());
+                        const double distance=edit["distance"].toDouble(std::hypot(old.x()-origin.x(),old.y()-origin.y()));
+                        look["Position"]=QJsonArray{origin.x()+distance*std::cos(angle),origin.y()+distance*std::sin(angle),old.z()};
+                    }else look["Position"]=position(look["Position"].toArray());
+                    looks[vi]=look;
+                }
+            }point["Looking points"]=looks;patrols[pi]=point;
+        }logic["Patrol Points"]=patrols;
+    }logicSlots[slot]=logic;data["Logics"]=logicSlots;return {};
+}
+QJsonObject unitLocation(const ai::EditPlan& p,const QJsonArray& pos,int layer,QMap<int,SAiGraphPreviewBuildResult>& masks){
+    const double x=pos[0].toDouble(),y=pos[1].toDouble();const auto bounds=p.args["_bounds"].toArray();
+    const bool in=x>=0&&y>=0&&x<=bounds[0].toDouble()&&y<=bounds[1].toDouble();
+    const int width=p.graphInput.graphWidth*8,height=p.graphInput.graphHeight*8;
+    const int ix=ei::runtimeAiTileCoordinate(float(x)),iy=ei::runtimeAiTileCoordinate(float(y));
+    const bool sample=in&&ix>=0&&iy>=0&&ix<width&&iy<height;const int index=iy*width+ix;
+    const bool water=sample&&p.graphInput.waterDepths.value(index)>0;
+    bool inObject=false;
+    if(in)for(const auto& proxy:p.graphInput.collisionProxies){
+        if(proxy.passability==EAiGraphObjectPassability::Ignored||proxy.passability==EAiGraphObjectPassability::Bridge)continue;
+        QPolygonF polygon;for(const auto& v:proxy.footprint)polygon<<QPointF(v.x(),v.y());
+        if(polygon.containsPoint(QPointF(x,y),Qt::OddEvenFill)){inObject=true;break;}
+    }
+    const bool pass=sample&&masks[layer].layerPassability.value(layer).value(index)!=0;
+    return {{"layer",layer},{"layerLabel",CAiGraphDocument::layerLabel(layer)},{"inBounds",in},{"outsideMap",!in},
+        {"inObject",inObject},{"inWater",water},{"passable",pass},{"graphStale",p.graphStale}};
+}
 }
 
-bool CAiEditAdapter::objectTool(const QString& s){return QStringList{"edit_objects","rebuild_ai_graph","query_passability","validate_map"}.contains(s);}
+bool CAiEditAdapter::objectTool(const QString& s){return unitTool(s)||QStringList{"edit_objects","rebuild_ai_graph","query_passability","validate_map"}.contains(s);}
 bool CAiEditAdapter::navigationStale(MainWindow* w){
     auto* v=w->view();if(!v)return false;
     if(v->m_aiGraphRegeneratedFresh&&!v->m_aiGraphPreviewUsesLoadedSource)return false;
@@ -105,18 +214,28 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
     if(busy(w))return fail("Editor gesture/load/modal interaction in progress; retry after it finishes");
     if(!v->m_pLand->isMprLoad())return fail("Open a terrain map first");
     p.revision=revision(w);
+    p.activePath=v->m_pLand->filePath().absoluteFilePath();
     p.args["_bounds"]=QJsonArray{v->m_terrainEdit.vertexCountX()-1,v->m_terrainEdit.vertexCountY()-1};
-    const bool edit=method=="edit_objects"||method=="rebuild_ai_graph";
+    const bool edit=method=="edit_objects"||method=="edit_units"||method=="rebuild_ai_graph";
     if(edit&&args["revision"].toString()!=p.revision)return fail("Document revision conflict; call get_revision and prepare again");
     p.graphStale=navigationStale(w);
-    if(method=="query_passability"||method=="rebuild_ai_graph"){
+    if(method=="query_passability"||method=="rebuild_ai_graph"||method=="edit_units"){
         if(!v->captureAiGraphPreviewBuildInput(&p.graphInput,&p.error))return p;
         if(p.graphInput.graphWidth*p.graphInput.graphHeight>16384)return fail("AI graph budget: at most 16384 graph cells (512x512 metres)");
     }
     if(method=="query_passability")return p;
-    if(method=="edit_objects"){
+    if(unitTool(method))p.unitTerrain=v->m_terrainEdit;
+    if(method=="edit_units"){
         const auto action=args["action"].toString();
-        if(action=="place"&&!args.contains("objects"))return fail("place requires objects");
+        if(action=="transform"&&!args.contains("delta")&&!args.contains("rotation"))return fail("transform requires delta or rotation");
+        if(action=="points"&&(!args.contains("edits")||args.contains("delta")||args.contains("rotation")||args.contains("pivot")))return fail("points requires edits and no group transform");
+        if(action!="points"&&args.contains("edits"))return fail("edits is only valid for action=points");
+        if(action=="delete"&&(args.contains("delta")||args.contains("rotation")||args.contains("pivot")))return fail("delete accepts no group transform");
+        if(action!="copy"&&(args.contains("sourceOperation")||args.contains("targetMob")))return fail("sourceOperation/targetMob are only valid for copy");
+    }
+    if(method=="edit_objects"||unitTool(method)){
+        const auto action=args["action"].toString();
+        if(method=="edit_objects"&&action=="place"&&!args.contains("objects"))return fail("place requires objects");
         if(action!="place"&&args.contains("objects"))return fail("objects is only valid for action=place");
         if(action=="place"&&(args.contains("ids")||args.contains("area")||args.contains("delta")||args.contains("pivot")||args.contains("rotation")))return fail("place uses per-object coordinates/rotation; selectors and group transforms are invalid");
         if(action=="delete"&&(args.contains("delta")||args.contains("rotation")||args.contains("pivot")))return fail("delete does not accept transform parameters");
@@ -144,14 +263,15 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
         p.family.inMemoryMobData[QDir::cleanPath(mob->filePath().absoluteFilePath()).toLower()]=bytes;
         if(method=="validate_map")for(const auto& f:report.findings())p.captureFindings.append(finding(f.severity==EValidationSeverity::Info?"Info":f.severity==EValidationSeverity::Warning?"Warning":"Error",f.code,f.message,f.location));
         QHash<CNode*,QPair<QByteArray,QByteArray>> templates;
-        if(method=="edit_objects"&&args["action"]=="copy"){
+        if((method=="edit_objects"&&args["action"]=="copy")||unitRead(method)||(method=="edit_units"&&args["action"]=="copy")){
             QList<CNode*> selectedNodes;
-            for(auto* n:mob->nodes())if(n->hasRawObjectProvenance()&&selected(row(mob,n),args))selectedNodes.append(n);
+            for(auto* n:mob->nodes())if(n->hasRawObjectProvenance()&&(unitTool(method)?selectedUnit(row(mob,n),args):selected(row(mob,n),args)))selectedNodes.append(n);
             if(selectedNodes.size()>ObjectLimit)return fail("Object operation limit500 exceeded; narrow the selector");
             if(!selectedNodes.isEmpty()&&!mob->rawObjectTemplatesBytes(selectedNodes,&templates))return fail("Cannot capture exact copy provenance");
         }
         for(auto* n:mob->nodes()){
             auto r=row(mob,n);auto data=r["data"].toObject();
+            if(n->nodeType()==eUnit){r["prototype"]=data["Prototype name"];r["absoluteHeight"]=v->m_terrainEdit.terrainSurfaceHeight(n->position().x(),n->position().y())+n->position().z();}
             if(templates.contains(n)){
                 const auto source=templates[n].first,clean=templates[n].second;
                 data["_Endurance raw provenance"]=QJsonObject{{"sourceDocumentSha256",QString::fromLatin1(n->rawSourceDocumentSha256().toHex())},
@@ -170,6 +290,14 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
     // Destination is always the primary MOB of this map, never an AddMob/unit.
     const auto primary=QFileInfo(v->m_pLand->filePath().absolutePath(),v->m_pLand->filePath().completeBaseName()+".mob").absoluteFilePath();
     for(auto* mob:v->m_aMob)if(CProcessEditLock::identity(mob->filePath().absoluteFilePath())==CProcessEditLock::identity(primary))p.mobPath=mob->filePath().absoluteFilePath();
+    if(method=="edit_units"){
+        if(p.mobPath.isEmpty()&&v->currentMob())p.mobPath=v->currentMob()->filePath().absoluteFilePath();
+        if(args.contains("targetMob")){
+            QString target;for(auto* mob:v->m_aMob)if(mob->filePath().fileName().compare(args["targetMob"].toString(),Qt::CaseInsensitive)==0||mob->filePath().absoluteFilePath()==args["targetMob"].toString()){
+                if(!target.isEmpty())return fail("Ambiguous targetMob");target=mob->filePath().absoluteFilePath();
+            }if(target.isEmpty())return fail("targetMob must identify an already open MOB from get_context");p.mobPath=target;
+        }
+    }
     if(method=="rebuild_ai_graph"&&p.mobPath.isEmpty())return fail("An opened primary MOB is required for an embedded AI graph");
     if(method=="edit_objects"&&args["action"]=="place"){
         if(p.mobPath.isEmpty())return fail("Load the primary MOB before placing objects");
@@ -297,7 +425,99 @@ static ai::EditPlan prepareObjectValues(ai::EditPlan p,const ai::Cancellation& c
     }
     for(const auto& r:p.objects){auto o=r.toObject();logicReferences(o["data"],o["mob"].toString()+"/"+QString::number(o["id"].toDouble(),'f',0),refs);}
     for(const auto& f:p.captureFindings){auto o=f.toObject();if(o["code"]=="map_txt.reference")refs[quint32(o["id"].toDouble())]<<o["path"].toString();}
+    if(unitRead(p.method)){
+        QJsonArray units;QSet<quint32> seen;
+        for(const auto& value:p.objects){auto r=value.toObject();if(!selectedUnit(r,p.args))continue;
+            const auto id=quint32(r["id"].toDouble());if(seen.contains(id))return fail("Ambiguous unit ID; specify mob");seen.insert(id);
+            if(units.size()>=ObjectLimit)return fail("Unit read limit500 exceeded; narrow ids/area/prototype/player/group/mob");
+            r["references"]=QJsonArray::fromStringList(refs.value(id));p.changes.append(r);const auto d=r["data"].toObject(),o=world(d);auto out=publicRow(r);
+            out["rotation"]=base(d)["Rotation"];out["player"]=o["Player(dimpomacy group)"];out["group"]=o["Player(dimpomacy group)"];
+            out["parentId"]=o["Parent Id"];out["logics"]=d["Logics"];out["stats"]=d["Unit stats"];
+            out["inScript"]=o["Is used in script?"];out["references"]=QJsonArray::fromStringList(refs.value(id));
+            out["zSemantics"]="terrain-relative offset; logic points are world coordinates";units.append(out);
+        }
+        for(const auto& id:p.args["ids"].toArray())if(!seen.contains(quint32(id.toDouble())))return fail("Requested unit absent or excluded by filters");
+        if(p.method=="get_unit"&&units.size()!=1)return fail("Unit ID absent or ambiguous; specify mob");
+        p.summary={{"capturedRevision",p.revision},{"units",units},{"count",units.size()},{"limit",ObjectLimit}};
+        if(QJsonDocument(p.summary).toJson(QJsonDocument::Compact).size()>ai::MaxResult)return fail("Unit response exceeds512KiB; narrow selector (no truncation)");
+        return p;
+    }
+    if(p.method=="edit_units"){
+        if(family.criticalCount()||family.incompleteCount())return fail("MOB family contains errors; use validate_map");
+        const auto a=p.args;const auto action=a["action"].toString();
+        if(!a.contains("ids")&&!a.contains("area")&&p.unitSource.isEmpty())return fail("Specify ids or area; whole-map unit edits refused");
+        const auto source=p.unitSource.isEmpty()?p.objects:p.unitSource;QJsonArray selectedRows;QSet<quint32> seen;
+        for(const auto& value:source){auto r=value.toObject();if(!selectedUnit(r,a))continue;
+            quint32 id=quint32(r["id"].toDouble());if(seen.contains(id))return fail("Ambiguous duplicate unit ID; specify mob");seen.insert(id);
+            if(selectedRows.size()>=ObjectLimit)return fail("Unit operation limit500 exceeded");
+            const auto references=p.unitSource.isEmpty()?QJsonArray::fromStringList(refs.value(id)):r["references"].toArray();r["references"]=references;
+            if(action=="delete"&&!references.isEmpty())return fail("Referenced unit ID "+QString::number(id)+"; deletion refused (no force):\n"+QJsonDocument(references).toJson());
+            selectedRows.append(r);
+        }
+        for(const auto& id:a["ids"].toArray())if(!seen.contains(quint32(id.toDouble())))return fail("Requested unit absent or excluded by filters: "+QString::number(id.toDouble(),'f',0));
+        if(selectedRows.isEmpty())return fail("No units matched selector");
+        if(action=="copy"&&p.mobPath.isEmpty())return fail("Load target MOB before copying");
+        if(action=="points")for(const auto& edit:a["edits"].toArray())if(!seen.contains(quint32(edit.toObject()["id"].toDouble())))return fail("Point edit ID is not selected");
+        for(auto i=refs.begin();i!=refs.end();++i)occupied.insert(i.key());occupied.unite(p.reservedObjectIds);
+        QSet<QString> usedNames;for(const auto& member:family.members)for(const auto& object:member.objects)usedNames.insert(object.name.toCaseFolded());
+        QMap<quint32,quint32> newIds;
+        if(action=="copy")for(const auto& value:selectedRows){quint32 id=0;
+            if(!family.suggestReplacementNid(p.mobPath,&id,nullptr,occupied)||!CMobFamilyValidator::isAuthorableObjectNid(id))return fail("No free unit ID in target MOB authoring ranges");
+            occupied.insert(id);newIds[quint32(value.toObject()["id"].toDouble())]=id;
+        }
+        QVector3D pivot; if(a.contains("pivot"))pivot=vector(a["pivot"].toArray());else{for(const auto& r:selectedRows)pivot+=vector(base(r.toObject()["data"].toObject())["Position"].toArray());pivot/=selectedRows.size();}
+        const auto rotation=QQuaternion::fromAxisAndAngle(0,0,1,float(a["rotation"].toDouble()));const auto delta=vector(a["delta"].toArray().isEmpty()?QJsonArray{0,0,0}:a["delta"].toArray());
+        QMap<int,SAiGraphPreviewBuildResult> masks;QJsonArray affected,untransferred;int pointCount=0;
+        for(const auto& value:selectedRows){if(cancel->load())return fail("Cancelled");auto change=value.toObject();auto data=change["data"].toObject();auto b=base(data);const auto oldId=quint32(change["id"].toDouble());
+            change["kind"]=action=="delete"?"delete":action=="copy"?"create":"transform";
+            if(action=="copy"){
+                if(!data.contains("_Endurance raw provenance"))return fail("Source has no exact raw copy provenance; save/reload before copying");
+                change["sourceId"]=double(oldId);change["id"]=double(newIds[oldId]);change["mob"]=p.mobPath;b["Id"]=double(newIds[oldId]);
+                const auto sourceName=b["Map name"].toString();change["sourceName"]=sourceName;
+                auto name=sourceName+QString(" [copy %1]").arg(newIds[oldId]);const auto stem=name;int suffix=1;
+                while(usedNames.contains(name.toCaseFolded()))name=stem+QString("-%1").arg(suffix++);
+                usedNames.insert(name.toCaseFolded());b["Map name"]=name;
+                for(const auto& ref:change["references"].toArray())untransferred.append(QJsonObject{{"sourceId",double(oldId)},{"reference",ref}});
+                // Scripts are deliberately absent. InScript on a new copy would
+                // falsely claim the source script owns its new ID.
+                auto o=world(data);o["Is used in script?"]=false;data["World object"]=o;
+            }
+            if(action=="transform"||action=="copy"){
+                auto pos=vector(b["Position"].toArray());auto after=pivot+rotation.rotatedVector(pos-pivot)+delta;
+                after.setZ(pos.z()+delta.z());b["Position"]=vector(after);
+                auto q=b["Rotation"].toArray();auto next=rotation*QQuaternion(float(q[3].toDouble()),float(q[0].toDouble()),float(q[1].toDouble()),float(q[2].toDouble()));b["Rotation"]=QJsonArray{next.x(),next.y(),next.z(),next.scalar()};
+                transformLogic(data,pivot,rotation,delta);
+            }
+            data=setBase(data,b);
+            if(action=="points")for(const auto& edit:a["edits"].toArray())if(edit.toObject()["id"].toDouble()==oldId){auto e=edit.toObject();
+                if(e["action"]=="move"&&e.contains("delta")==e.contains("position"))return fail("Point move requires exactly one of position/delta");
+                auto error=editPoint(data,e);if(!error.isEmpty())return fail(error);
+            }
+            if(action=="copy")data=remapUnitReferences(data,newIds).toObject();
+            int layer=a["layer"].toInt(-1);
+            for(const auto& entry:a["layers"].toArray())if(entry.toObject()["id"].toDouble()==oldId)layer=entry.toObject()["layer"].toInt();
+            if(layer<0||layer>7)return fail("Specify appropriate native layer0..7 (or per-unit layers); no animal size is guessed");
+            if(!masks.contains(layer)){auto mask=CAiGraphPreviewBuilder::passability(p.graphInput,layer);if(!mask.valid)return fail(mask.error);masks[layer]=mask;}
+            auto out=publicRow(change);out["positionAfter"]=base(data)["Position"];out["rotationAfter"]=base(data)["Rotation"];out["nameAfter"]=base(data)["Map name"];
+            const auto pos=out["positionAfter"].toArray();out["absoluteHeight"]=p.unitTerrain.terrainSurfaceHeight(float(pos[0].toDouble()),float(pos[1].toDouble()))+pos[2].toDouble();
+            out["passability"]=unitLocation(p,pos,layer,masks);QJsonArray points;
+            for(const auto& v:logicPoints(data)){auto point=v.toObject();point["passability"]=unitLocation(p,point["position"].toArray(),layer,masks);points.append(point);}
+            pointCount+=points.size();if(pointCount>200)return fail("Unit logic point budget200 exceeded (all five logicSlots); narrow group");
+            out["points"]=points;out["logicsAfter"]=data["Logics"];affected.append(out);change["after"]=data;p.changes.append(change);
+        }
+        p.summary={{"revision",p.revision},{"action",action},{"count",affected.size()},{"affected",affected},{"pointCount",pointCount},{"limit",ObjectLimit},
+            {"untransferredReferences",untransferred},{"warning",action=="copy"?"Scripts/triggers/transitions are NOT copied or changed. Listed source references do not target the new IDs; external outgoing ParentID/targets remain unchanged.":""}};
+        if(QJsonDocument(p.summary).toJson(QJsonDocument::Compact).size()>ai::MaxResult)return fail("Unit result exceeds512KiB; narrow group (no truncation)");return p;
+    }
     if(p.method=="validate_map"){
+        for(const auto& r:p.objects){auto unit=r.toObject();if(unit["type"].toInt()!=eUnit)continue;
+            auto points=logicPoints(unit["data"].toObject());points.append(QJsonObject{{"kind","unit"},{"position",unit["position"]}});
+            const auto bounds=p.args["_bounds"].toArray();for(const auto& v:points){auto point=v.toObject();auto xy=point["position"].toArray();double x=xy[0].toDouble(),y=xy[1].toDouble();
+                if(!std::isfinite(x)||!std::isfinite(y)||x<0||y<0||x>bounds[0].toDouble()||y>bounds[1].toDouble()){
+                    auto f=finding("Warning","unit.point_outside","Unit/logic point outside terrain bounds",unit["mob"].toString()+"/"+QString::fromUtf8(QJsonDocument(point).toJson(QJsonDocument::Compact)),unit["id"]);f["coordinates"]=xy;findings.append(f);
+                }
+            }
+        }
         if(p.graphStale)findings.append(finding("Warning","ai_graph.stale","AI graph is stale after document edits; use rebuild_ai_graph",p.mobPath));
         for(auto i=refs.constBegin();i!=refs.constEnd();++i)if(i.key()!=0&&i.key()!=quint32(-1)&&!occupied.contains(i.key()))
             findings.append(finding("Warning","reference.missing","Reference to absent object ID "+QString::number(i.key()),i.value().join(";"),double(i.key())));
@@ -366,18 +586,22 @@ ai::EditPlan CAiEditAdapter::prepareObjects(ai::EditPlan p,const ai::Cancellatio
 
 class CAiObjectCommand : public QUndoCommand,public IAiGraphPreviewInvalidatingCommand {
 public:
-    struct Change{CMob* mob;CNode* node;int index;QString kind;QVector3D before,after;QQuaternion beforeRot,afterRot;};
+    struct Change{CMob* mob;CNode* node;int index;QString kind;QVector3D before,after;QQuaternion beforeRot,afterRot;QJsonArray beforeLogic,afterLogic;};
     QPointer<MainWindow> window;QVector<Change> changes;CMob* graphMob{nullptr};QByteArray beforeGraph,afterGraph;
     CAiGraphDocument beforeDocument,afterDocument;SAiGraphPreviewBuildResult beforeResult,afterResult;
-    bool beforeFresh{false},beforeLoaded{true},beforeCanvasStale{false},first{true};
+    bool beforeFresh{false},beforeLoaded{true},beforeCanvasStale{false},first{true},unitOnly{false};
     QString beforeSource,beforeDisplaySource;
-    bool invalidatesAiGraphPreview()const override{return !graphMob;}
+    bool invalidatesAiGraphPreview()const override{return !graphMob&&!unitOnly;}
     void run(bool forward){auto* v=window?window->view():nullptr;if(!v)return;
         v->makeCurrent();v->beginObjectEditBatch();
         const auto apply=[&](Change& c){
             if(c.kind=="create"){if(forward)c.mob->restoreDeletedNode(c.node,c.index);else c.mob->deleteNode(c.node);}
             else if(c.kind=="delete"){if(forward)c.mob->deleteNode(c.node);else c.mob->restoreDeletedNode(c.node,c.index);}
-            else{auto pos=forward?c.after:c.before;c.node->setRot(forward?c.afterRot:c.beforeRot);c.node->updatePos(pos);}
+            else{auto pos=forward?c.after:c.before;c.node->setRot(forward?c.afterRot:c.beforeRot);
+                if(auto* unit=dynamic_cast<CUnit*>(c.node)){
+                    unit->CObjectBase::updatePos(pos);const auto logicSlots=forward?c.afterLogic:c.beforeLogic;
+                    for(int i=0;i<logicSlots.size();++i)unit->logicAt(i)->replaceFromJson(logicSlots[i].toObject());unit->refreshLogicProjection();
+                }else c.node->updatePos(pos);}
             v->setDurty(c.mob);
         };
         if(forward)for(auto& c:changes)apply(c);else for(int i=changes.size()-1;i>=0;--i)apply(changes[i]);
@@ -391,7 +615,7 @@ public:
             v->m_aiGraphSource=forward?v->m_aiGraphRegeneratedSource:beforeDisplaySource;
             v->m_aiGraphDocument=forward?afterDocument:(beforeLoaded?v->m_aiGraphLoadedDocument:beforeDocument);
             v->m_aiGraphOverlayDirty=true;v->setDurty(graphMob);v->syncAiGraphPreviewWidget();
-        } else v->m_canvasNavigationStale=forward?true:beforeCanvasStale;
+        } else if(!unitOnly)v->m_canvasNavigationStale=forward?true:beforeCanvasStale;
         v->collectObjectTreeData();v->viewParameters();v->endObjectEditBatch();v->update();
         window->updateDocumentActionAvailability();window->scheduleMobFamilyValidation();
     }
@@ -403,6 +627,7 @@ bool CAiEditAdapter::objectCommand(const QUndoCommand* c){return dynamic_cast<co
 QJsonObject CAiEditAdapter::applyObjects(MainWindow* w,const ai::EditPlan& p){
     for(auto i=p.fileHashes.begin();i!=p.fileHashes.end();++i)if(i.value().isEmpty()||hashFile(i.key())!=i.value())return ai::error("Document revision conflict: family/map.txt dependency changed; prepare again");
     auto* v=w->view();QScopedPointer<CAiObjectCommand> command(new CAiObjectCommand);command->window=w;command->setText(p.description);
+    command->unitOnly=p.method=="edit_units";
     command->beforeCanvasStale=v->m_canvasNavigationStale;
     const auto mobFor=[&](QString path)->CMob*{for(auto* mob:v->m_aMob)if(mob->filePath().absoluteFilePath()==path)return mob;return nullptr;};
     if(p.method=="rebuild_ai_graph"){
@@ -419,11 +644,12 @@ QJsonObject CAiEditAdapter::applyObjects(MainWindow* w,const ai::EditPlan& p){
             const auto kind=c["kind"].toString();CNode* node=nullptr;
             if(kind=="create"){
                 node=mob->createNode(c["after"].toObject());if(!node){for(const auto& old:command->changes)if(old.kind=="create")old.mob->discardUncommittedNode(old.node);return ai::error("Native object creation failed; unchanged");}
-                node->setMapId(quint32(c["id"].toDouble()));node->setState(eDraw);auto pos=node->position();node->updatePos(pos);
+                node->setMapId(quint32(c["id"].toDouble()));node->setState(eDraw);auto pos=node->position();
+                if(auto* unit=dynamic_cast<CUnit*>(node)){unit->CObjectBase::updatePos(pos);unit->refreshLogicProjection();}else node->updatePos(pos);
             }else node=mob->nodeByMapId(quint32(c["id"].toDouble()));
             if(!node)return ai::error("Selected object disappeared");
             const auto b=base(c["after"].toObject());const auto q=b["Rotation"].toArray();
-            command->changes.append({mob,node,mob->nodes().indexOf(node),kind,node->position(),vector(b["Position"].toArray()),node->rotation(),QQuaternion(float(q[3].toDouble()),float(q[0].toDouble()),float(q[1].toDouble()),float(q[2].toDouble()))});
+            command->changes.append({mob,node,mob->nodes().indexOf(node),kind,node->position(),vector(b["Position"].toArray()),node->rotation(),QQuaternion(float(q[3].toDouble()),float(q[0].toDouble()),float(q[1].toDouble()),float(q[2].toDouble())),node->toJson()["Logics"].toArray(),c["after"].toObject()["Logics"].toArray()});
         }
         // Created nodes already exist; detach once so the forward operation has
         // the same provenance-preserving restore path as later Redo.

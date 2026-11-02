@@ -83,7 +83,7 @@ void CAiAgentServer::cancelJob(Job& job)
 {
     if(job.committing)return;
     if(job.topdown){job.topdown->finished={};job.topdown->cancel();job.topdown.clear();}
-    job.cancel->store(true);job.plan.clear();
+    job.cancel->store(true);job.plan.clear();job.unitSource.clear();
     if(job.editWatcher){job.editWatcher->disconnect(this);job.editWatcher->deleteLater();job.editWatcher=nullptr;}
     if(job.watcher){job.watcher->disconnect(this);job.watcher->deleteLater();job.watcher=nullptr;}
     if(job.process) {
@@ -263,7 +263,27 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
     int running=0;for(const auto& j:m_jobs)if(!j.complete)++running;
     if(running>=2)return ai::error("Two reads already running");
     const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);m_jobs.insert(id,Job{});
-    if(method=="query_passability"||method=="validate_map") {
+    if(method=="list_units"||method=="get_unit") {
+        m_jobs[id].owner=m_currentClient;
+        const auto cancel=m_jobs[id].cancel;
+        auto* watcher=new QFutureWatcher<ai::EditPlan>(this);m_jobs[id].editWatcher=watcher;
+        connect(watcher,&QFutureWatcher<ai::EditPlan>::finished,this,[this,id,watcher](){
+            if(m_jobs.contains(id)){
+                auto plan=QSharedPointer<ai::EditPlan>::create(watcher->result());auto& job=m_jobs[id];job.editWatcher=nullptr;
+                if(!job.cancel->load()){
+                    job.result=plan->error.isEmpty()?plan->summary:ai::error(plan->error);
+                    if(plan->error.isEmpty()){job.unitSource=plan;job.result["sourceOperation"]=id;}
+                    job.markComplete();
+                }
+            }watcher->deleteLater();
+        });
+        QTimer::singleShot(0,this,[this,id,method,args,cancel,watcher](){
+            if(!m_jobs.contains(id)||!m_window)return;const auto captured=CAiEditAdapter::captureObjects(m_window,method,args);
+            if(!m_jobs.contains(id)||cancel->load())return;
+            if(!captured.error.isEmpty()){m_jobs[id].result=ai::error(captured.error);m_jobs[id].markComplete();m_jobs[id].editWatcher=nullptr;watcher->deleteLater();return;}
+            watcher->setFuture(QtConcurrent::run([captured,cancel](){return CAiEditAdapter::prepareObjects(captured,cancel);}));
+        });
+    } else if(method=="query_passability"||method=="validate_map") {
         const auto cancel=m_jobs[id].cancel;
         auto* watcher=new QFutureWatcher<QJsonObject>(this);m_jobs[id].watcher=watcher;
         connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher](){
@@ -342,7 +362,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         return ai::error("Normal map commit in progress; retry after operation_status");
     }
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
-    const QSet<QString> mutations{"edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
+    const QSet<QString> mutations{"edit_units","edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
         if(m_mode->currentIndex()!=2)return ai::error("Read-only mode: only the human can enable Правка in the dock");
         if(m_writer&&m_writer!=m_currentClient)return ai::error("Another agent owns the writer session; disconnect it before switching writer");
@@ -369,7 +389,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     if(method=="export_map_topdown")return startTopdownExport(args);
     if(method=="window_snapshot")return startSnapshot();
     if(method=="read_export_image")return ai::readExportImage(args);
-    if(method=="query_passability"||method=="validate_map"||method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
+    if(method=="list_units"||method=="get_unit"||method=="query_passability"||method=="validate_map"||method=="read_terrain"||method=="search_database"||method=="read_profile_map"||method=="list_profile_maps")return startJob(method,args);
     if(method=="operation_status"||method=="cancel_operation") {
         prune();const auto id=args["operation"].toString();if(!m_jobs.contains(id))return ai::error("Unknown or expired operation");
         auto& job=m_jobs[id];
@@ -520,6 +540,15 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
     for(const auto& job:m_jobs)if(job.edit&&!job.complete)return ai::error("A writer operation is already running");
     const auto method=requested=="preview"?original["tool"].toString():requested;
     auto args=requested=="preview"?original["arguments"].toObject():original;
+    QSharedPointer<ai::EditPlan> unitSource;
+    if(method=="edit_units"&&args.contains("sourceOperation")){
+        const auto source=args["sourceOperation"].toString();
+        if(args["action"]!="copy"||!m_jobs.contains(source)||!m_jobs[source].complete||m_jobs[source].owner!=m_currentClient||!m_jobs[source].unitSource)
+            return ai::error("sourceOperation must be a completed list_units/get_unit snapshot owned by this connection (TTL60s)");
+        unitSource=m_jobs[source].unitSource;
+        if(unitSource->activePath==CLandscape::getInstance()->filePath().absoluteFilePath()&&unitSource->revision!=CAiEditAdapter::revision(m_window))
+            return ai::error("Source unit revision conflict; read source units again");
+    }
     if(method=="save") {
         auto plan=QSharedPointer<ai::EditPlan>::create();plan->method="save";plan->revision=args["revision"].toString();
         return startCommit(plan,false);
@@ -549,9 +578,16 @@ QJsonObject CAiAgentServer::startEdit(const QString& requested,const QJsonObject
         }
     });
     const auto workers=m_editWorkers;
-    const auto launch=[this,id,watcher,candidate,cancel,workers,method,args,deferredCapture](){
+    const auto launch=[this,id,watcher,candidate,cancel,workers,method,args,deferredCapture,unitSource](){
         if(!m_jobs.contains(id)||!m_window)return;
-        const auto snapshot=deferredCapture?CAiEditAdapter::capture(m_window,method,args):candidate;
+        auto snapshot=deferredCapture?CAiEditAdapter::capture(m_window,method,args):candidate;
+        if(unitSource){
+            snapshot.unitSource=unitSource->changes;
+            for(auto i=unitSource->fileHashes.begin();i!=unitSource->fileHashes.end();++i){
+                if(snapshot.fileHashes.contains(i.key())&&snapshot.fileHashes[i.key()]!=i.value())snapshot.error="Source MOB dependency revision conflict";
+                snapshot.fileHashes[i.key()]=i.value();
+            }
+        }
         if(!m_jobs.contains(id)||cancel->load())return;
         if(!snapshot.error.isEmpty()){
             m_jobs[id].result=ai::error(snapshot.error);m_jobs[id].markComplete();m_jobs[id].editWatcher=nullptr;watcher->deleteLater();return;

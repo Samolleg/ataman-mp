@@ -64,6 +64,8 @@ struct EditPlan {
     bool graphStale{false};
     QJsonArray captureFindings;
     QSet<quint32> reservedObjectIds;
+    CTerrainEditModel unitTerrain;
+    QJsonArray unitSource;
 };
 EditPlan prepareEdit(EditPlan plan,const Cancellation& cancel);
 }
