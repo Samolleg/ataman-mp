@@ -137,7 +137,7 @@ production inputs окончательного scoped дерева совпад�
 Свежий `build-staging-274-minimap-shading-20261102`, CLI raw/staged274 exit0;
 4 SHA editor/MCP/runtime bridge/host совпадают с новым Release. Finalizer и
 validate_distribution PASS: **191→191 managed,0 removed**, без исключений состава.
-Manifest SHA256 `df1389ff16d356eb18522dca65f7b5c616cfe3065c090da9bacfbacd47abe7ff`. После финализации пакет не запускался
+Manifest SHA256 `1d9c81b267800c4f312c188ead02965943622e8cd224ab622e610705329148a9`. После финализации пакет не запускался
 и не менялся. BUILD_INFO указывает точный compiled archive tree, финальный
 commit main записан в commit-result.json и итоговой передаче.
 
@@ -150,6 +150,11 @@ commit main записан в commit-result.json и итоговой перед�
 PNG, receipts, stdout/stderr и анализ сохранены. Чужие landscape/view/neighbor/
 trace/mob_load_pipeline_check/QM/.mcp.json побайтно неизменны; тело owner ROADMAP
 сохранено и исключено из scoped-коммита. Проверка: preservation.json.
+
+Новые русские строки Readme/CHANGELOG исправлены после потери кириллицы в
+PowerShell→Python pipeline; в staging экспортированы корректные UTF-8 blobs.
+После правки только этих заметок finalizer повторён:191→191/0 потерь; все4
+программных SHA прежние. Финализированный пакет после этого не менялся.
 
 Полный общий UI-suite не запускался: он использует буфер, запрещённый поручением.
 Вместо него выполнены относящиеся production-dialog/native GPU проверки выше.
