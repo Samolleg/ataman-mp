@@ -330,6 +330,7 @@ void MainWindow::refreshTravelContext()
     }
     refreshTravelEditor();
     if(!error.isEmpty())m_travelPanel->setStatus(error);
+    refreshCameraContext();
 }
 void MainWindow::refreshTravelEditor()
 {
@@ -537,6 +538,7 @@ void MainWindow::createPairedTravelRoute()
 
 bool MainWindow::resolveTravelClose()
 {
+    flushCameraEditor();
     if(m_travelPanel && !m_travelPanel->flush()) {
         const auto choice=QMessageBox::question(this,tr("Незавершённые поля перехода"),
             tr("В панели переходов есть незавершённые или неверные значения. Отбросить несохранённые изменения переходов и продолжить закрытие? Остальные изменённые документы будут проверены отдельно."),
@@ -544,17 +546,20 @@ bool MainWindow::resolveTravelClose()
         if(choice!=QMessageBox::Discard)return false;
         m_pView->cancelTravelGesture();
         for(const auto& doc:m_travelDocuments)doc->discard();
+        discardCameraChanges();
         refreshTravelEditor();return true;
     }
-    bool dirty=false;for(const auto& doc:m_travelDocuments)dirty|=doc->dirty();if(!dirty)return true;
-    const auto choice=QMessageBox::question(this,tr("Изменены входы и переходы"),tr("Сохранить карту и изменения map.txt перед продолжением?"),QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Save);
+    if(!hasTravelChanges())return true;
+    const auto choice=QMessageBox::question(this,tr("Изменены данные карты"),tr("Сохранить карту, изменения map.txt и CAM перед продолжением?"),QMessageBox::Save|QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Save);
     if(choice==QMessageBox::Cancel)return false;
     if(choice==QMessageBox::Save)return saveMapWithTravel();
-    for(const auto& doc:m_travelDocuments)doc->discard();refreshTravelEditor();return true;
+    for(const auto& doc:m_travelDocuments)doc->discard();
+    discardCameraChanges();refreshTravelEditor();return true;
 }
 
 bool MainWindow::saveMapWithTravel(const QString& backupRoot)
 {
+    flushCameraEditor();
     m_pView->cancelTravelGesture();
     if(m_travelPanel && !m_travelPanel->flush())return false;
     QVector<SMapSaveFile> files;QString error;
@@ -564,7 +569,10 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         SMapSaveFile file;if(!doc->prepareSave(&file,&error)){QMessageBox::warning(this,tr("Переходы не сохранены"),error);return false;}
         files.append(file);changed.append(doc);committedSnapshots.append(doc->snapshot());
     }
-    if(changed.isEmpty())return false;
+    if(!appendCameraSaves(&files,&error)){
+        QMessageBox::warning(this,tr("CAM не сохранён"),error);return false;
+    }
+    if(files.isEmpty())return false;
     CMob* mob=m_pView->currentMob();QByteArray mobBytes;
     if(mob && mob->isDirty()){
         CValidationReport report;QString saveClass;
@@ -585,6 +593,7 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
     bool companionsSaved=false;
     const bool saved=m_pView->saveMapCompanions(files,&error,backupRoot,[&](){
         for(int i=0;i<changed.size();++i)changed[i]->acceptCommittedSnapshot(committedSnapshots[i]);
+        acceptCameraSaves(files);
         if(mob && !mobBytes.isEmpty())mob->adoptCommittedBytes(mobBytes);
         companionsSaved=true;
     });
@@ -610,7 +619,7 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
 bool MainWindow::hasTravelChanges() const
 {
     for(const auto& doc:m_travelDocuments)if(doc->dirty())return true;
-    return false;
+    return hasCameraChanges();
 }
 
 bool MainWindow::flushTravelEditor(){return !m_travelPanel || m_travelPanel->flush();}

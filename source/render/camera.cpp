@@ -63,6 +63,26 @@ void CCamera::reset()
     syncMotionInterpolation();
 }
 
+void CCamera::setPreviewView(const QMatrix4x4& view)
+{
+    if(!m_previewActive) {
+        getLocation(m_beforePreviewPosition, m_beforePreviewPivot, m_beforePreviewRotation);
+        m_beforePreviewTelephoto = m_telephotoEnabled;
+    }
+    m_previewView = view;
+    m_previewActive = true;
+    m_telephotoEnabled = false;
+}
+
+void CCamera::clearPreviewView()
+{
+    if(!m_previewActive) return;
+    m_previewActive = false;
+    m_telephotoEnabled = m_beforePreviewTelephoto;
+    setLocation(m_beforePreviewPosition, m_beforePreviewPivot, m_beforePreviewRotation);
+    m_updateTimer.invalidate();
+}
+
 void CCamera::getLocation(QVector3D& pos, QVector3D& pivot,
                           QVector3D& rot) const
 {
@@ -141,6 +161,7 @@ bool CCamera::movementInputActive() const
 
 QMatrix4x4 CCamera::update()
 {
+    if(m_previewActive) return m_previewView;
     double elapsedSeconds = 1.0 / 60.0;
     if(m_updateTimer.isValid())
     {
@@ -173,6 +194,7 @@ QMatrix4x4 CCamera::update()
 
 QMatrix4x4 CCamera::viewMatrix()
 {
+    if(m_previewActive) return m_previewView;
     const QVector3D position = m_motionStateInitialized ? m_renderPos : m_pos;
     const QVector3D pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;
     return ei::activeCameraViewMatrix(matrixFor(position, pivot), pivot,
@@ -183,6 +205,7 @@ QMatrix4x4 CCamera::viewMatrix()
 
 QVector3D CCamera::logicalCullingPosition() const
 {
+    if(m_previewActive) return ei::cameraEyeFromMatrix(m_previewView);
     const QVector3D position = m_motionStateInitialized ? m_renderPos : m_pos;
     const QVector3D pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;
     const QMatrix4x4 normalView = matrixFor(position, pivot);

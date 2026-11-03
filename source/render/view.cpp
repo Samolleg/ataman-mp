@@ -6541,6 +6541,7 @@ void CView::drawTestOverlaysOpenGl()
         && m_scenarioDestinations.isEmpty() && m_scenarioLinks.isEmpty()
         && !(m_diplomacyMapMode && m_diplomacyAnchor)
         && !showOverlayMaterialSlots && m_connectionGlyphs.isEmpty() && m_connectionGhostVertices.isEmpty() && m_leverApproachLines.isEmpty()
+        && m_cameraTrackLines.isEmpty()
         && !(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid())
         && !(m_navmeshPanel && m_navmeshPanel->layerVisible()))
        || width() <= 0 || height() <= 0)
@@ -6708,6 +6709,7 @@ void CView::drawTestOverlaysOpenGl()
     }
     ei::gl::LineWidth(1.0f);
 
+    drawCameraTrack(position);
     drawNavmeshOverlay(position);
     if(m_aiGraphPreviewVisible && m_aiGraphDocument.isValid()
        && !(m_navmeshPanel && m_navmeshPanel->layerVisible()))

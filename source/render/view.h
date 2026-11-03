@@ -2,6 +2,7 @@
 #define MYGLWIDGET_H
 #include "travel_area_geometry.h"
 #include "map_save_batch.h"
+#include "camera_document.h"
 #include "technical_model_catalog.h"
 #include "endurance_document.h"
 #include "render_memory.h"
@@ -211,6 +212,7 @@ class CView : public QGLWidget
     friend int runAssemblyCatalogCheck();
     friend int runObjectRandomizationCheck();
     friend int runWindowLayoutCheck();
+    friend int runStartCameraCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);
     friend bool terrainBaselineAnimationIntegrationCheck(CView* view);
     friend int runNeighborPerformanceCheck();
@@ -374,6 +376,9 @@ public:
     void moveCameraToMinimapPoint(const QPointF& worldPosition);
     bool captureCameraLocation(QVector3D* position, QVector3D* pivot,
                                QVector3D* rotation) const;
+    bool captureCamPose(SCameraPose* pose) const;
+    void setCameraTrack(const QVector<SCameraPose>& poses, int selected, bool preview);
+    void drawCameraTrack(int positionAttribute);
     void rebaseCameraForOpenedNeighbor(
         const QPointF& sourceWorldOrigin,
         const QPointF& targetWorldOrigin,
@@ -632,6 +637,8 @@ private:
     bool travelMouseMove(QMouseEvent* event);
     bool travelMouseRelease(QMouseEvent* event);
     QVector<STravelArea> m_travelAreas;
+    QVector<QVector3D> m_cameraTrackLines;
+    bool m_camPreviewActive{false};
     bool m_travelEditing{false};
     bool m_travelSelectedRemove{false};
     bool m_travelDrawing{false};

@@ -24,6 +24,7 @@
 #include <QApplication>
 #include <QGroupBox>
 #include "window_layout_check.h"
+#include "start_camera_check.h"
 #include <QOffscreenSurface>
 #include <QOpenGLContext>
 #include "render/landscape.h"
@@ -4286,6 +4287,7 @@ int main(int argc, char *argv[])
     qApp->setStyle(new CEnduranceStyle(QStyleFactory::create("Fusion")));
     ei::installDarkUiPalette();
 
+    if(app.arguments().contains("--start-camera-check")) return runStartCameraCheck();
     const int commandResult = runHeadlessCommand(app);
     if(commandResult >= 0)
         return commandResult;

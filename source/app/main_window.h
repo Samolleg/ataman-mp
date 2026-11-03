@@ -26,6 +26,7 @@
 #include "minimap_bake.h"
 #include "world_map_layout_document.h"
 #include "database_document.h"
+#include "camera_document.h"
 
 namespace Ui {
 class MainWindow;
@@ -50,6 +51,8 @@ class CLandscapeTools;
 struct SResourceProfileEvaluation;
 struct SEnduranceCollection;
 class QComboBox;
+class QSpinBox;
+class QDoubleSpinBox;
 class QCheckBox;
 class QToolButton;
 class QLabel;
@@ -107,6 +110,7 @@ class MainWindow : public QMainWindow
 
 public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
+    friend int runStartCameraCheck();
     friend int runAssemblyCatalogCheck();
     friend int runWorldMapSnapCheck();
     friend int runDiplomacyCheck();
@@ -137,6 +141,26 @@ private:
     bool backgroundMobLoading() const { return !m_backgroundMobs.isNull(); }
     void createTravelEditor(QMenu* menu);
     void refreshTravelContext();
+    void createCameraEditor(QMenu* menu);
+    void refreshCameraContext();
+    void refreshCameraEditor();
+    bool openCameraFile(const QString& source, const QString& target = QString());
+    void editCameraField(int field);
+    void flushCameraEditor();
+    bool hasCameraChanges() const;
+    void discardCameraChanges();
+    bool appendCameraSaves(QVector<SMapSaveFile>* files, QString* error) const;
+    void acceptCameraSaves(const QVector<SMapSaveFile>& files);
+    QDockWidget* m_cameraDock{nullptr};
+    QLabel* m_cameraStatus{nullptr};
+    QSpinBox* m_cameraKey{nullptr};
+    QDoubleSpinBox* m_cameraFields[5]{};
+    QCheckBox* m_cameraAllKeys{nullptr};
+    QCheckBox* m_cameraPreview{nullptr};
+    QCheckBox* m_cameraMarkers{nullptr};
+    QPushButton* m_cameraFromView{nullptr};
+    QSharedPointer<CCameraDocument> m_cameraDocument;
+    QMap<QString,QSharedPointer<CCameraDocument>> m_cameraDocuments;
     void refreshTravelEditor();
     void refreshTravelAreas();
     void changeTravelZone(int index, const SMapTableZone& zone, const QString& label);

@@ -26,6 +26,7 @@ struct SMapCatalogEntry
     QString allodId;
     QString zoneType;
     QString skyType;
+    QString cameraName;
     QString mprName;
     QString mobName;
     QString mprPath;

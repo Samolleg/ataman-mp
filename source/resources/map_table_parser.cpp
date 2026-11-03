@@ -27,7 +27,7 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
     QVector<SMapCatalogEntry> entries;
     SMapCatalogEntry current;
     enum class PendingValue { None, Resources, MapsSize, MapsTextures,
-                              Sky, ExitTarget, Deploy, View };
+                              Sky, Camera, ExitTarget, Deploy, View };
     PendingValue pending = PendingValue::None;
     int currentExitIndex = -1;
     const QStringList lines = text.split(QRegularExpression("\\r?\\n"));
@@ -68,6 +68,11 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
         if(line.compare("#sky", Qt::CaseInsensitive) == 0)
         {
             pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::Sky;
+            continue;
+        }
+        if(line.compare("#camera", Qt::CaseInsensitive) == 0)
+        {
+            pending = current.zoneId.isEmpty() ? PendingValue::None : PendingValue::Camera;
             continue;
         }
         if(line.compare("#maps", Qt::CaseInsensitive) == 0)
@@ -142,6 +147,10 @@ QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
                 current.minimapTexture = parts.at(0);
                 current.objectivesTexture = parts.at(1);
             }
+        }
+        else if(pending == PendingValue::Camera && !parts.isEmpty())
+        {
+            current.cameraName = parts.at(0);
         }
         else if(pending == PendingValue::Sky && !parts.isEmpty())
         {

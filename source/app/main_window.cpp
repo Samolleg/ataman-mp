@@ -1960,6 +1960,7 @@ MainWindow::MainWindow(QWidget* parent) :
     scenarioDock->hide();
     m_ui->menuTools->addAction(scenarioDock->toggleViewAction());
     createTravelEditor(m_ui->menuTools);
+    createCameraEditor(m_ui->menuTools);
     connect(scenarioDock, &QDockWidget::visibilityChanged, m_scenarioPanel, &CScenarioPanel::setLayerEnabled);
     connect(m_scenarioPanel, &CScenarioPanel::showRequested, this, [this, scenarioDock]() {
         scenarioDock->show(); scenarioDock->raise();
@@ -9653,6 +9654,7 @@ void MainWindow::on_actionClose_all_triggered()
 
 void MainWindow::on_actionSave_triggered()
 {
+    flushCameraEditor();
     if(!flushTravelEditor())return;
     if(hasTravelChanges()){saveMapWithTravel();return;}
     if(!m_pView->hasActiveMob()) { m_pView->saveLand(); return; }
@@ -10100,6 +10102,7 @@ void MainWindow::on_tileBrushButton_clicked()
 
 void MainWindow::on_actionSave_landscape_MPR_triggered()
 {
+    flushCameraEditor();
     if(!flushTravelEditor())return;
     if(hasTravelChanges()){saveMapWithTravel();return;}
     m_pView->saveLand();
