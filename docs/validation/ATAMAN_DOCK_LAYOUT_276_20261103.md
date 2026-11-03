@@ -157,3 +157,49 @@ C:\GOGGAM~1\maped\EI-MAP~2. Q из первой диагностической �
 
 Граница передачи остаётся STOP BEFORE INSTALLATION. Интерактивная проверка
 на рабочем столе владельца в этот объём не входит.
+
+## Установка 273 → 276 — DONE / INSTALLED (2026-11-03)
+
+Директор принял 276 по этому отчёту, владелец сказал «ставь 276».
+Этим поручением снят прежний STOP BEFORE INSTALLATION. Принят main
+98dc9846ffcb5255572676b2ff4bc06df292101d; использован уже проверенный
+build-staging-276-dock-layout-20261103 из указанного выше Release tree,
+без пересборки и повторения функциональных проверок. 274 и 275 отменены,
+в постоянную установку не устанавливались.
+
+Перед заменой проверено отсутствие любых EIMapperEndurance (включая
+headless225), runtime host и игровых процессов. Канонический
+packaging/install_program.ps1 обновил только управляемые пути в
+artifacts/EI-Mapper-Ataman-2-first-test: verified=192, changed=8,
+added=1, removed=0. Финализатор на установке не запускался.
+
+Откат: artifacts/rollback273-to276-dock-layout-20261103. Создан самим
+установщиком с предыдущим manifest и helpers; его rollback.ps1 -VerifyOnly
+выдал ROLLBACK_VERIFIED. Чужие и прежние каталоги откатов не удалялись.
+
+Занят и отодвинут через rename только EIMapperMcp.exe:
+`EIMapperMcp.exe.old-ataman-e4a4030338c04999a937852bd076e07a`.
+SHA256 отодвинутого файла:
+`ce2ca2cf85144483cd778e7dd847ccdb2663bce8dbf1d3d1cbf503c727495912`.
+Два прежних retired-файла удалены самим установщиком по его квитанции,
+после проверки SHA и отсутствия блокировки; новые retired-файлы оставлены.
+
+PID мостов до замены и после неё: 40044, 20248, 47820, 31812, 37740,
+12308, 42960, 19620, 8388. Все девять живы с прежним временем создания
+(сравнение до миллисекунд, точность сохранённого JSON). Мосты, Codex и
+Claude Code не завершались. Новые канонические файлы совпадают со staging;
+прежние мосты продолжают использовать загруженный образ.
+
+Установленный --version: `EI Mapper Endurance Edition 276`, exit0,
+запущен без окна. Все 192 managed SHA и сам manifest совпали со staging.
+Все 14354 пользовательских файла вне manifest (за исключением служебного
+retired-реестра и его файлов) сохранили SHA256 и время изменения.
+Защищённые landscape/view/neighbor/trace/MOB-test, QM, .mcp.json и
+~/.codex/config.toml сохранили SHA256 (8 файлов). Чужие строки ROADMAP
+сохранены, в коммит включено только собственное дополнение.
+subst пуст; букв дисков, junction и ссылок не создавалось.
+Интерактивный маппер, игра и управление рабочим столом не запускались.
+
+Квитанции: work/install-276-20261103/ — bridges-before.json,
+user-files-before.json, protected-before.json, retired-before.json,
+install.log, rollback-verify.log, version.txt, verification.json.
