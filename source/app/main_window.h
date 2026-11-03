@@ -429,6 +429,7 @@ private:
     QDoubleSpinBox* m_cameraSpeedSpin{nullptr};
     CCameraTelephotoControls* m_cameraTelephotoControls{nullptr};
     bool m_uiStateSaved{false};
+    bool m_restoringDockLayout{false};
     bool m_workspaceLoadInProgress{false};
     QSharedPointer<SBackgroundMobState> m_backgroundMobs;
     quint64 m_backgroundMobGeneration{0};

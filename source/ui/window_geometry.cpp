@@ -1,6 +1,7 @@
 #include "window_geometry.h"
 #include <QApplication>
 #include <QEvent>
+#include <QLayout>
 #include <QScreen>
 #include <QSettings>
 #include <QTimer>
@@ -26,15 +27,24 @@ protected:
         if(event->type() == QEvent::Show && !m_restoring)
         {
             m_restoring = true;
-            // Restore after constructor defaults and layouts, also for reused forms.
+            m_timer.stop();
             const QByteArray geometry = m_geometry.isEmpty()
                 ? QSettings().value(m_key).toByteArray() : m_geometry;
             if(!geometry.isEmpty()) m_window->restoreGeometry(geometry);
             ei::keepWindowOnScreen(m_window);
             m_seen = true;
             m_window->setProperty("windowGeometryRestored", !geometry.isEmpty());
-            m_restoring = false;
-            capture();
+            // An event filter runs BEFORE the widget's showEvent. Dynamic
+            // forms can still have a temporary, larger minimum size here.
+            // Keep the requested bytes until showEvent and its layouts finish,
+            // otherwise that temporary clamp becomes the next saved geometry.
+            QTimer::singleShot(0, this, [this, geometry]() {
+                if(m_window->layout()) m_window->layout()->activate();
+                if(!geometry.isEmpty()) m_window->restoreGeometry(geometry);
+                ei::keepWindowOnScreen(m_window);
+                m_restoring = false;
+                capture();
+            });
         }
         else if(m_seen && !m_restoring)
         {

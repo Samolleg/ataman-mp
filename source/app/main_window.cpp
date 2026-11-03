@@ -1157,6 +1157,7 @@ MainWindow::MainWindow(QWidget* parent) :
     ei::enableNativeFloatingDockControls(m_messageLogDock);
     connect(this, &QMainWindow::tabifiedDockWidgetActivated, this,
             [this](QDockWidget* active) {
+        if(m_restoringDockLayout) return;
         if(active == m_messageLogDock)
             ei::refreshFloatingDockTabs(m_messageLogDock, m_validationDock);
         else if(active == m_validationDock)
@@ -1258,7 +1259,7 @@ MainWindow::MainWindow(QWidget* parent) :
     viewMenu->addAction(openValidationPanel);
     connect(openValidationPanel, &QAction::toggled, this, [this](bool visible)
     {
-        if(!visible) return;
+        if(!visible || m_restoringDockLayout) return;
         QTimer::singleShot(0, this, [this]()
         {
             if(!m_validationDock || !m_validationDock->isVisible()) return;
@@ -1582,8 +1583,7 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // Restore widths after floating tab hosts reach their final geometry.
     // Split heights and topology are owned exclusively by QMainWindow state.
-    // Landscape editing is an explicit working mode, not session layout.
-    // Always start closed while preserving the user's last sculpt controls.
+    // Initialize the tool before restoring its saved dock visibility below.
     m_landscapeToolsDock->hide();
     m_landscapeTools->setEditingEnabled(false, false);
     if(initializeDefaultDockLayout)
@@ -2346,17 +2346,6 @@ MainWindow::MainWindow(QWidget* parent) :
             });
         }
     }
-    if(firstRunSetup)
-    {
-        // First-run setup can queue a dock-state restoration after the early
-        // hide. Landscape Tools is working-mode state, never startup state.
-        QTimer::singleShot(0, this, [this]()
-        {
-            hideLandscapeTools();
-            if(m_landscapeTools)
-                m_landscapeTools->setEditingEnabled(false, false);
-        });
-    }
     m_aiAgent=new CAiAgentServer(this);
     addDockWidget(Qt::RightDockWidgetArea,m_aiAgent->dock());
     viewMenu->addAction(m_aiAgent->dock()->toggleViewAction());
@@ -2366,6 +2355,10 @@ MainWindow::MainWindow(QWidget* parent) :
     // deliver visibilityChanged into a partially initialized editor.
     for(QDockWidget* dock : findChildren<QDockWidget*>(QString(), Qt::FindDirectChildrenOnly))
         m_workspaceDocks.append(dock);
+    // restoreState emits toggled/activation signals for every restored tab.
+    // Those signals are not user requests to raise the validation panel.
+    // Keep its queued focus/host refresh handlers out of the initial layout.
+    m_restoringDockLayout = true;
     restoreState(savedMainWindowState);
     for(const auto& dock : m_workspaceDocks)
     {
@@ -2373,8 +2366,10 @@ MainWindow::MainWindow(QWidget* parent) :
         ei::enableNativeFloatingDockControls(dock);
         ei::restoreFloatingDockWindowState(dock);
     }
-    hideLandscapeTools();
-    QTimer::singleShot(0, this, &MainWindow::restoreMainDockExtents);
+    QTimer::singleShot(0, this, [this]() {
+        restoreMainDockExtents();
+        m_restoringDockLayout = false;
+    });
     startup.mark("restoreDocks");
     if(!qApp->property("agentHeadless").toBool()) {
         // Native file revisions are cheap and detect atomic replacements. Hash
@@ -7999,8 +7994,6 @@ void MainWindow::saveUiState()
     if(qApp->property("agentHeadless").toBool())return;
     if(m_uiStateSaved || !m_ui)
         return;
-    if(m_landscapeToolsDock)
-        hideLandscapeTools();
     QSettings uiSettings;
     for(const auto& dock : m_workspaceDocks)
         if(dock) ei::saveFloatingDockWindowState(dock);
@@ -9949,9 +9942,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
         });poll->start();return;
     }
     CShutdownDeadline::instance().arm(CLogger::getInstance()->logFilePath());
-    // Persist ordinary dock visibility before secondary-window cleanup closes
-    // docks. Landscape Tools is intentionally normalized to closed by
-    // saveUiState(); editing mode never resumes implicitly next session.
+    // Persist the complete layout before secondary-window cleanup closes docks.
     saveUiState();
     // Autosave owns callbacks which query the live document/view state. Stop
     // both its long-period timer and any active countdown before the viewport

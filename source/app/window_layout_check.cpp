@@ -22,6 +22,8 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QMouseEvent>
 #include <QComboBox>
 #include <QLabel>
@@ -41,6 +43,15 @@ class HiddenCheckWindows : public QObject
             if(auto* widget=qobject_cast<QWidget*>(object))
                 if(widget->isWindow()) widget->setAttribute(Qt::WA_DontShowOnScreen);
         return false;
+    }
+};
+
+class DynamicMinimumDialog : public QDialog
+{
+    void showEvent(QShowEvent* event) override
+    {
+        setMinimumSize(400, 300);
+        QDialog::showEvent(event);
     }
 };
 }
@@ -67,6 +78,18 @@ int runWindowLayoutCheck()
         if(!passed) ++failures;
     };
     auto pump = []() { for(int i=0; i<6; ++i) QApplication::processEvents(); };
+    const auto closeWindow = [&pump](MainWindow& window) {
+        window.close();
+        QElapsedTimer deadline;
+        deadline.start();
+        while(window.isVisible() && deadline.elapsed() < 20000) {
+            QEventLoop events;
+            QTimer::singleShot(10, &events, &QEventLoop::quit);
+            events.exec();
+        }
+        pump();
+        return !window.isVisible();
+    };
     auto hidden = [](QWidget& window) { window.setAttribute(Qt::WA_DontShowOnScreen); };
     if(!fixturePhase.isEmpty())
     {
@@ -165,7 +188,7 @@ int runWindowLayoutCheck()
                 }
                 check("properties retain validation/log tabs",window.tabifiedDockWidgets(properties).contains(validation)&&window.tabifiedDockWidgets(properties).contains(log));
             }
-            check("split-column production window closes normally",window.close());pump();
+            check("split-column production window closes normally",closeWindow(window));
             return failures ? 1 : 0;
         }
         if(saving)
@@ -263,7 +286,7 @@ int runWindowLayoutCheck()
         QMouseEvent release(QEvent::MouseButtonRelease,QPointF(220,188),QPointF(destination),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
         QApplication::sendEvent(movable,&release);pump();
         check("title drag detaches restored production dock",movable->isFloating());
-        check("production window closes normally",window.close());pump();
+        check("production window closes normally",closeWindow(window));
         return failures ? 1 : 0;
     }
     const QSize wanted(800,600);
@@ -285,6 +308,17 @@ int runWindowLayoutCheck()
     }
     {
         QDialog neverShown; ei::rememberWindowGeometry(&neverShown, "checkDialog"); neverShown.resize(200,100);
+    }
+    {
+        DynamicMinimumDialog dynamic;
+        hidden(dynamic);
+        dynamic.setMinimumSize(400, 760);
+        ei::rememberWindowGeometry(&dynamic, "checkDialog");
+        dynamic.show();
+        pump();
+        check("showEvent minimum change preserves saved geometry",
+              dynamic.size() == wanted && dynamic.pos() == position);
+        dynamic.hide();
     }
     QDialog other; hidden(other); other.resize(410,270); ei::rememberWindowGeometry(&other, "otherDialog");
     other.show(); pump(); check("unrelated dialog uses independent key", other.size()==QSize(410,270)); other.hide();
