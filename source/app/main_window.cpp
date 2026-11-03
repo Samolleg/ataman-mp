@@ -1359,6 +1359,8 @@ MainWindow::MainWindow(QWidget* parent) :
     QAction* openItemSpellConstructor = new QAction(tr("Item / Spell Constructor..."), this);
     openItemSpellConstructor->setObjectName(QStringLiteral("openItemSpellConstructorAction"));
     QAction* generateMinimapAction = new QAction(tr("Export Minimap..."), this);
+    QAction* questMapAction = new QAction(tr("Quest Map Editor..."), this);
+    questMapAction->setObjectName("questMapEditorAction");
     QAction* persistAiGraphAction = new QAction(tr("Bake / Export AI Graph..."), this);
     m_mapTestAction = new QAction(tr("Test Current Map"), this);
     m_mapTestAction->setToolTip(tr("Stages unique temporary MPR/MOB copies and launches the active validated runtime profile. JMV uses hash-owned temporary aliases in the mod Maps directory; source maps are never overwritten."));
@@ -1377,6 +1379,8 @@ MainWindow::MainWindow(QWidget* parent) :
     m_ui->menuTools->addAction(openDatabaseEditor);
     m_ui->menuTools->addAction(openItemSpellConstructor);
     m_ui->menuTools->addAction(generateMinimapAction);
+    m_ui->menuTools->addAction(questMapAction);
+    connect(questMapAction, &QAction::triggered, this, &MainWindow::generateQuestMap);
     m_ui->menuTools->addAction(persistAiGraphAction);
     m_ui->menuTools->addAction(m_mapTestAction);
     m_ui->menuTools->addAction(m_stopMapTestAction);

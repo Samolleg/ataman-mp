@@ -35,6 +35,7 @@ public:
     bool selectZoneById(const QString& zoneId);
     bool stageMinimapTextureForZone(const QString& zoneId,
                                     const QString& textureName);
+    bool stageObjectivesTextureForZone(const QString& zoneId,const QString& textureName);
     const QVector<SMapTableSaveReport>& saveReports() const { return m_saveReports; }
 
 signals:

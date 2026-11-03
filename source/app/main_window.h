@@ -170,6 +170,7 @@ private:
     void closeAll();
     void showGameAndModSetup();
     void generateMinimap();
+    void generateQuestMap();
     void persistAiGraph();
     void scheduleViewportMinimapRefresh(int delayMs = 250, bool force = false);
     void refreshViewportMinimap();

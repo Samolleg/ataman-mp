@@ -69,3 +69,4 @@ RESOURCES += \
 
 TRANSLATIONS += translations/ei_mapper_ru.ts
 RESOURCES += translations/translations.qrc
+RESOURCES += assets/quest-map/quest-map.qrc

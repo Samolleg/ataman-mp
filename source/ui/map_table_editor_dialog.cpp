@@ -1032,6 +1032,15 @@ bool CMapTableEditorDialog::stageMinimapTextureForZone(
     return true;
 }
 
+bool CMapTableEditorDialog::stageObjectivesTextureForZone(const QString& zoneId,const QString& textureName)
+{
+    if(!selectZoneById(zoneId)||textureName.trimmed().isEmpty()||!m_loadedMaps.present)return false;
+    m_tabs->setCurrentIndex(1);
+    m_objectivesEdit->setText(textureName.trimmed());
+    setStatus(tr("Quest map reference staged. Review it, then save the verified catalog update."));
+    return true;
+}
+
 void CMapTableEditorDialog::setStatus(const QString& text, bool error)
 {
     m_statusEdit->setText(text.simplified());

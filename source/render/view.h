@@ -209,6 +209,7 @@ class CView : public QGLWidget
     friend int runProfileModelCatalogCheck();
     friend int runModelConnectionCheck();
     friend int runAssemblyCatalogCheck();
+    friend class CQuestMapSource;
     friend int runObjectRandomizationCheck();
     friend int runWindowLayoutCheck();
     friend bool patrolAuthoringIntegrationCheck(CView* view);

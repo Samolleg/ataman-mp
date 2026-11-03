@@ -1812,7 +1812,8 @@ SHA-256: %6</translation>
             <source>Minimap reference staged. Review it, then use Save As to publish the verified catalog update.</source>
             <translation>Ссылка на миникарту подготовлена. Проверьте её и выберите «Сохранить как», чтобы записать изменения каталога.</translation>
         </message>
-    </context>
+        <message><source>Quest map reference staged. Review it, then save the verified catalog update.</source><translation>Ссылка на карту квеста подготовлена. Проверьте её и сохраните проверенное обновление каталога.</translation></message>
+</context>
     <context>
         <name>CMapsBrowser</name>
         <message>
@@ -14987,6 +14988,8 @@ Choose another source or create a MOB without copying settings.</source>
         <source>The template MOB is read-only. Choose a different destination.</source>
         <translation>MOB-шаблон используется только для чтения. Выберите другой файл для сохранения.</translation>
     </message>
+    <message><source>Quest Map Editor</source><translation>Редактор карты квеста</translation></message>
+    <message><source>Quest Map Editor...</source><translation>Редактор карты квеста…</translation></message>
 </context>
     <context>
         <name>MobDiffTerms</name>
@@ -15598,6 +15601,15 @@ Choose another source or create a MOB without copying settings.</source>
     <message><source>Missing or ambiguous MOB %1 (%2:%3)</source><translation>MOB %1 отсутствует или неоднозначен (%2:%3)</translation></message>
 
     <message><source>Ambiguous loaded MOB: %1</source><translation>Неоднозначный открытый MOB: %1</translation></message>
+    <message><source>Add stamp</source><translation>Добавить штамп</translation></message>
+    <message><source>Bake stamps</source><translation>Запечь штампы</translation></message>
+    <message><source>Delete stamp</source><translation>Удалить штамп</translation></message>
+    <message><source>Extracted %1 icons from your configured game textures. Missing variants use procedural ink icons.</source><translation>Из настроенных игровых текстур извлечено значков: %1. Недостающие варианты заменены процедурными значками.</translation></message>
+    <message><source>Icon cache: %1</source><translation>Кэш значков: %1</translation></message>
+    <message><source>Load an MPR and its MOB family before generating a quest map.</source><translation>Перед созданием карты квеста откройте MPR и её семейство MOB.</translation></message>
+    <message><source>Move stamp</source><translation>Переместить штамп</translation></message>
+    <message><source>Original quest textures were not found at stock resolution. Using procedural ink icons; configure game resources to extract originals.</source><translation>Исходные текстуры карт квеста в оригинальном разрешении не найдены. Используются процедурные значки. Для извлечения оригиналов настройте игровые ресурсы.</translation></message>
+    <message><source>Scale stamp</source><translation>Изменить масштаб штампа</translation></message>
 </context>
     <context>
         <name>QPlatformTheme</name>
@@ -17428,5 +17440,69 @@ Line: %4</source><translation>Вызов:
 <name>AtamanAgent</name>
 <message><source>Agent: create primary MOB</source><translation>ИИ: создать основной MOB</translation></message>
 <message><source>Agent: map position in world</source><translation>ИИ: положение карты в мире</translation></message>
+</context>
+<context>
+<name>CQuestMapDialog</name>
+    <message><source>5551 (original game)</source><translation>5551 (оригинальная игра)</translation></message>
+    <message><source>Add stamp</source><translation>Добавить штамп</translation></message>
+    <message><source>Automatic</source><translation>Автоматически</translation></message>
+    <message><source>Bake stamps</source><translation>Запечь штампы</translation></message>
+    <message><source>Bridges</source><translation>Мосты</translation></message>
+    <message><source>Changes regenerate the preview. Undo restores the previous image and stamps. Drag stamps on the preview; Delete removes the selection.</source><translation>Изменения обновляют предпросмотр. Отмена восстанавливает прежнюю картинку и штампы. Перетаскивайте штампы мышью; Delete удаляет выбранный.</translation></message>
+    <message><source>DDS image (*.dds)</source><translation>Изображение DDS (*.dds)</translation></message>
+    <message><source>Delete stamp</source><translation>Удалить штамп</translation></message>
+    <message><source>DXT1 (mod textures)</source><translation>DXT1 (текстуры мода)</translation></message>
+    <message><source>Edge roughness (%)</source><translation>Неровность края (%)</translation></message>
+    <message><source>Enter a texture name without whitespace or path characters.</source><translation>Введите имя текстуры без пробелов и символов пути.</translation></message>
+    <message><source>Evil Islands resource archive (*.res)</source><translation>Архив ресурсов Проклятых Земель (*.res)</translation></message>
+    <message><source>Exit</source><translation>Выход</translation></message>
+    <message><source>Exits from map.txt</source><translation>Выходы из map.txt</translation></message>
+    <message><source>Export quest map</source><translation>Экспорт карты квеста</translation></message>
+    <message><source>Export quest map to texture RES</source><translation>Экспорт карты квеста в RES текстур</translation></message>
+    <message><source>Export readback failed.</source><translation>Проверка повторного чтения экспорта не пройдена.</translation></message>
+    <message><source>Export to texture RES...</source><translation>Экспорт в RES текстур…</translation></message>
+    <message><source>Forest</source><translation>Лес</translation></message>
+    <message><source>Forests</source><translation>Леса</translation></message>
+    <message><source>Frame</source><translation>Рамка</translation></message>
+    <message><source>Game export format</source><translation>Формат экспорта в игру</translation></message>
+    <message><source>Game export requires a square power-of-two size from 64 to 2048.</source><translation>Для игры нужен квадрат со стороной от 64 до 2048, равной степени двойки.</translation></message>
+    <message><source>Game texture name</source><translation>Имя игровой текстуры</translation></message>
+    <message><source>Generate quest map</source><translation>Создать карту квеста</translation></message>
+    <message><source>Generated icon scale</source><translation>Масштаб значков генератора</translation></message>
+    <message><source>Generated icons as movable stamps</source><translation>Значки генератора — подвижные штампы</translation></message>
+    <message><source>Generated quest map</source><translation>Создаваемая карта квеста</translation></message>
+    <message><source>Goblin house</source><translation>Дом гоблинов</translation></message>
+    <message><source>Goblin houses</source><translation>Дома гоблинов</translation></message>
+    <message><source>House</source><translation>Дом</translation></message>
+    <message><source>Image size</source><translation>Размер изображения</translation></message>
+    <message><source>Ink: %1</source><translation>Чернила: %1</translation></message>
+    <message><source>Object icons</source><translation>Значки объектов</translation></message>
+    <message><source>Open Map Catalog Editor to review the zone&apos;s objectives texture reference? Save there to publish map.txt.</source><translation>Открыть редактор каталога карт для проверки ссылки на карту квеста этой зоны? Запись map.txt выполняется отдельным сохранением в каталоге.</translation></message>
+    <message><source>Original game texture</source><translation>Оригинальная игровая текстура</translation></message>
+    <message><source>PNG image (*.png)</source><translation>Изображение PNG (*.png)</translation></message>
+    <message><source>Quest Map Editor</source><translation>Редактор карты квеста</translation></message>
+    <message><source>Redo</source><translation>Повторить</translation></message>
+    <message><source>Register quest map</source><translation>Привязать карту квеста</translation></message>
+    <message><source>Relief</source><translation>Рельеф</translation></message>
+    <message><source>Rolled left and right</source><translation>Свиток по бокам</translation></message>
+    <message><source>Rolled top and bottom</source><translation>Свиток сверху и снизу</translation></message>
+    <message><source>Save PNG / DDS...</source><translation>Сохранить PNG / DDS…</translation></message>
+    <message><source>Save quest map</source><translation>Сохранить карту квеста</translation></message>
+    <message><source>Seed</source><translation>Зерно генерации</translation></message>
+    <message><source>Shop tent</source><translation>Лавка</translation></message>
+    <message><source>Stamp palette</source><translation>Палитра штампов</translation></message>
+    <message><source>Stamp scale</source><translation>Масштаб штампа</translation></message>
+    <message><source>Stone bridge</source><translation>Каменный мост</translation></message>
+    <message><source>Tent</source><translation>Палатка</translation></message>
+    <message><source>The image could not be written: %1</source><translation>Не удалось записать изображение: %1</translation></message>
+    <message><source>Torn sheet</source><translation>Рваный лист</translation></message>
+    <message><source>Tower</source><translation>Башня</translation></message>
+    <message><source>Undo</source><translation>Отменить</translation></message>
+    <message><source>Use original size and format</source><translation>Размер и формат оригинала</translation></message>
+    <message><source>Verified %1 and %1m. Backup: %2</source><translation>Проверены %1 и %1m. Резервная копия: %2</translation></message>
+    <message><source>Wall</source><translation>Стена</translation></message>
+    <message><source>Water</source><translation>Вода</translation></message>
+    <message><source>Wooden bridge</source><translation>Деревянный мост</translation></message>
+    <message><source>Write the quest map pair to %1? Existing members with these names will be replaced after a verified backup. Other members will be preserved.</source><translation>Записать пару карт квеста в %1? Существующие записи с этими именами будут заменены после создания проверенной резервной копии. Остальные записи сохранятся.</translation></message>
 </context>
 </TS>
