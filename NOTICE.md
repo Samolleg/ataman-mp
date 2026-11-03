@@ -39,15 +39,3 @@ Character FIG/UV pipeline research was cross-checked against
 [konstvest/ei_figer](https://github.com/konstvest/ei_figer), the GPL-3.0 Blender
 add-on for importing and exporting Evil Islands models. No game or mod assets
 are redistributed with Endurance.
-
-Quest-map generator and pixel compositor in source/documents/quest_map.h/.cpp
-are adapted from Kyr4l's um-multitool Texture editor (quest_map.hpp/.cpp).
-Icon category/name mapping and assets/quest-map/quest-icons.tsv are metadata
-from the same source; runtime cutout/background removal follows the selection
-stamp approach in texture_app.cpp. Copyright (C) 2026 Kyr4l,
-SPDX-License-Identifier: GPL-3.0-or-later.
-Source: https://github.com/Kyr4l/ei-universal-mod/tree/810a9019a57d1b3081e39d50444f3339ba0fa56f/tools/um-multitool/texedit
-Pinned upstream SHA: 810a9019a57d1b3081e39d50444f3339ba0fa56f.
-Ataman's Qt editor, procedural fallback icons/scrolls, resource extraction,
-cache and protected export are adaptations. No quest-icons PNG, generated
-pixel array (quest_icons_generated.hpp), or other game artwork is included.
