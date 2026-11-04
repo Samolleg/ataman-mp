@@ -15,7 +15,7 @@ for(object, productionObjects) {
 }
 write_file($$OUT_PWD/production-objects.rsp, objectResponse)
 LIBS += @production-objects.rsp
-LIBS += -lglu32 -lopengl32 -ldbghelp -luser32 -lole32 -lshell32 -ladvapi32
+LIBS += -lglu32 -lopengl32 -ldbghelp -luser32 -lole32 -lshell32 -ladvapi32 -lgdi32
 win32: LIBS += -lmingw32 $$quote($$[QT_INSTALL_LIBS]/libqtmain.a)
 SOURCES += dpi_minimap_check.cpp
 SOURCES += $$quote($$SOURCE_ROOT/core/process_edit_lock_store.cpp)

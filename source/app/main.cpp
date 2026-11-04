@@ -115,6 +115,7 @@
 #include "window_lifecycle.h"
 #include "settings.h"
 #include "endurance_ui_scale.h"
+#include "windows_ui_scaling.h"
 #include "localization.h"
 #include "jmv_map_test_launcher.h"
 #include "view.h"
@@ -2681,9 +2682,7 @@ int runHeadlessCommand(QApplication& app)
                 QComboBox* cameraWheelGesture = settingsWindow.findChild<QComboBox*>(
                     "cameraSpeedWheelGesture");
                 QComboBox* language = settingsWindow.findChild<QComboBox*>("language");
-                QSlider* uiScale = settingsWindow.findChild<QSlider*>("uiScalePercent");
-                QLabel* uiScaleValue = settingsWindow.findChild<QLabel*>(
-                    "uiScalePercentValue");
+                QComboBox* uiScale = settingsWindow.findChild<QComboBox*>("uiScaleMode");
                 QPushButton* saveCloseButton = settingsWindow.findChild<QPushButton*>(
                     "buttonSaveClose");
                 QPushButton* applyButton = settingsWindow.findChild<QPushButton*>(
@@ -2741,7 +2740,7 @@ int runHeadlessCommand(QApplication& app)
                     if(language)
                         language->setCurrentIndex(language->findData("ru"));
                     if(uiScale)
-                        uiScale->setValue(150);
+                        uiScale->setCurrentIndex(uiScale->findData("150"));
                     if(renderTerrainShadowsCheck)
                         renderTerrainShadowsCheck->setChecked(false);
                     QTimer restartPromptDismissTimer;
@@ -2797,14 +2796,12 @@ int runHeadlessCommand(QApplication& app)
                             && savedCameraGesture && savedCameraGesture->value() == "Shift+Wheel"
                             && savedCameraMultiplier
                             && qAbs(savedCameraMultiplier->value() - 1.0) < 0.001;
-                    COptInt* savedUiScale = dynamic_cast<COptInt*>(
-                        settingsWindow.opt(eOptSetGeneral, "uiScalePercent"));
-                    uiScaleSettingsPersist = uiScale && uiScale->minimum() == 75
-                            && uiScale->maximum() == 200
-                            && uiScale->singleStep() == 5
-                            && uiScaleValue && uiScaleValue->text() == "150%"
-                            && savedUiScale && savedUiScale->value() == 150
-                            && ei::persistedUiScalePercent() == 150;
+                    COptString* savedUiScale = dynamic_cast<COptString*>(
+                        settingsWindow.opt(eOptSetGeneral, "uiScaleMode"));
+                    uiScaleSettingsPersist = uiScale && uiScale->count() == 6
+                            && uiScale->itemData(0).toString() == "auto"
+                            && savedUiScale && savedUiScale->value() == "150"
+                            && ei::persistedUiScaleMode() == "150";
                     QMetaObject::invokeMethod(&settingsWindow,
                                               "on_buttonSaveClose_clicked",
                                               Qt::DirectConnection);
@@ -4195,9 +4192,7 @@ int main(int argc, char *argv[])
     if(automatedWorkspaceSmokeRequested(argc, argv))
         SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 #endif
-    // Keep Qt's default scaling policy. In Qt 5.12, forcing DisableHighDpiScaling
-    // also skips logical-DPI initialization when QT_SCALE_FACTOR is supplied.
-    // CView converts its logical geometry to framebuffer pixels explicitly.
+    ei::configureUiScaling(argc, argv);
 
     const char* openGlBackend = requestedOpenGlBackend(argc, argv);
     const bool renderBenchmark = renderBenchmarkRequested(argc, argv);
@@ -4207,6 +4202,7 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    ei::initializeUiScaling(app);
     app.setProperty("agentHeadless",agentHeadless);
     if(agentHeadless)app.setQuitOnLastWindowClosed(false);
     app.setProperty("startupReferenceMs",startupClock.msecsSinceReference());
@@ -4297,7 +4293,8 @@ int main(int argc, char *argv[])
     // Apply the saved scale before constructing the splash, first-run dialogs,
     // or main window so a high-DPI user never has to navigate an undersized
     // setup flow just to reach the setting.
-    ei::applyUiScalePercent(ei::persistedUiScalePercent());
+    if(app.property("legacyUiScaling").toBool())
+        ei::applyUiScalePercent(ei::persistedUiScalePercent());
 
 
     QElapsedTimer startupPhase;startupPhase.start();

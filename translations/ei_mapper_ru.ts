@@ -17429,4 +17429,20 @@ Line: %4</source><translation>Вызов:
 <message><source>Agent: create primary MOB</source><translation>ИИ: создать основной MOB</translation></message>
 <message><source>Agent: map position in world</source><translation>ИИ: положение карты в мире</translation></message>
 </context>
+
+<context>
+<name>CSettings</name>
+<message><source>Auto (Windows)</source><translation>Авто (как в Windows)</translation></message>
+<message><source>Scales the entire interface, icons and viewport panels. Restart the editor to apply. Auto follows each Windows monitor. Explicit Qt scale environment variables take precedence. Use --legacy-ui-scaling to restore the previous font-only behavior.</source><translation>Масштабирует весь интерфейс, иконки и плашки вида. Применяется после перезапуска. Авто следует масштабу каждого монитора Windows. Переменные масштаба Qt, заданные пользователем, имеют приоритет. Ключ --legacy-ui-scaling возвращает прежнее масштабирование только шрифтов.</translation></message>
+<message><source>Restart EI Mapper to apply interface language or scale changes.</source><translation>Перезапустите EI Mapper для применения языка или масштаба интерфейса.</translation></message>
+</context>
+
+<context>
+<name>MainWindow</name>
+<message><source>one-way</source><translation>односторонний</translation></message>
+<message><source>Entrance %1 from %2 — (%3, %4)</source><translation>Вход %1 из %2 — (%3, %4)</translation></message>
+<message><source>none (one-way deployment)</source><translation>нет (одностороннее появление)</translation></message>
+<message><source>Starts zone %1 at local entrance %2. Incoming routes: %3. Outgoing destination: %4:%5.</source><translation>Запускает зону %1 через её вход %2. Входящие маршруты — %3. Исходящий переход — %4:%5.</translation></message>
+</context>
+<context><name>MainWindow</name><message><source>Entrance %1 (one-way) — (%2, %3)</source><translation>Вход %1 (односторонний) — (%2, %3)</translation></message></context>
 </TS>

@@ -334,6 +334,31 @@ private:
     QString m_fullText;
 };
 
+class CViewportToolsScrollArea final : public QScrollArea
+{
+public:
+    explicit CViewportToolsScrollArea(QWidget* parent) : QScrollArea(parent)
+    {
+        setObjectName("viewportToolsScrollArea");
+        setWidgetResizable(true);
+        setFrameShape(QFrame::NoFrame);
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        policy.setHeightForWidth(true);
+        setSizePolicy(policy);
+        setMaximumHeight(220);
+    }
+    int heightForWidth(int width) const override
+    {
+        if(!widget() || !widget()->layout()) return 100;
+        const int contentWidth = qMax(1, width - verticalScrollBar()->sizeHint().width());
+        return qMin(220, widget()->layout()->totalHeightForWidth(contentWidth));
+    }
+    QSize sizeHint() const override { return QSize(400, heightForWidth(width())); }
+    QSize minimumSizeHint() const override { return QSize(0, 90); }
+};
+
 struct SNewMprHeightmap
 {
     QImage image;
@@ -1578,7 +1603,7 @@ MainWindow::MainWindow(QWidget* parent) :
     const QByteArray savedMainWindowState =
             uiSettings.value("ui/mainWindowState").toByteArray();
     const bool initializeDefaultDockLayout = firstRunSetup && savedMainWindowState.isEmpty();
-    restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
+    ei::restoreWindowGeometry(this, uiSettings.value("ui/mainWindowGeometry").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // Restore widths after floating tab hosts reach their final geometry.
@@ -1858,7 +1883,10 @@ MainWindow::MainWindow(QWidget* parent) :
     sizePolicy.setVerticalStretch(0);
     sizePolicy.setHeightForWidth(m_pView->sizePolicy().hasHeightForWidth());
     m_pView->setSizePolicy(sizePolicy);
-    m_pView->setMinimumSize(QSize(200, 200));
+    const QScreen* screen = QGuiApplication::primaryScreen();
+    const int viewMinimumWidth = screen
+        ? qBound(200, screen->availableGeometry().width() / 3, 640) : 640;
+    m_pView->setMinimumSize(QSize(viewMinimumWidth, 280));
     m_pView->setMouseTracking(true);
     createViewportToolbars();
     m_viewportMinimap = new CViewportMinimapWidget(m_pView);
@@ -3392,11 +3420,19 @@ void MainWindow::populateEntranceCombo()
         const int dataIndex = m_validEntrances.size();
         m_validEntrances.append(entrance);
         const QPointF center = entrance.spawnPoint();
-        const QString destination = entrance.destinationZoneId.isEmpty()
-            ? tr("none") : entrance.destinationZoneId;
-        m_entranceCombo->addItem(tr("Entrance %1 -> %2:%3 — (%4, %5)")
-            .arg(entrance.exitId).arg(destination).arg(entrance.destinationExitId)
-            .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1), dataIndex);
+        const QStringList sources = mapEntranceSources(m_mapCatalog.topologyEntries,
+            m_mapTestEntry.zoneId, entrance.exitId);
+        const QString caption = sources.isEmpty()
+            ? tr("Entrance %1 (one-way) — (%2, %3)").arg(entrance.exitId)
+                .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1)
+            : tr("Entrance %1 from %2 — (%3, %4)").arg(entrance.exitId).arg(sources.join(", "))
+                .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1);
+        m_entranceCombo->addItem(caption, dataIndex);
+        m_entranceCombo->setItemData(dataIndex, tr(
+            "Starts zone %1 at local entrance %2. Incoming routes: %3. Outgoing destination: %4:%5.")
+            .arg(m_mapTestEntry.zoneId).arg(entrance.exitId)
+            .arg(sources.isEmpty() ? tr("none (one-way deployment)") : sources.join(", "))
+            .arg(entrance.destinationZoneId).arg(entrance.destinationExitId), Qt::ToolTipRole);
     }
     if(m_validEntrances.isEmpty())
     {
@@ -4057,6 +4093,15 @@ void MainWindow::setupCompactViewportTools()
     group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,diplomacy,travel,scenario,script});
     group("helperToolGroup","Помощники",{magnet,camera});
     rows->addWidget(bar->findChild<QWidget*>("modelConnectionControls"));
+    // A saved narrow dock layout must not turn wrapped tool groups into a
+    // column taller than the viewport when Windows scales the whole UI.
+    auto* content = new QWidget(bar);
+    content->setLayout(rows);
+    auto* scroll = new CViewportToolsScrollArea(bar);
+    scroll->setWidget(content);
+    auto* container = new QVBoxLayout(bar);
+    container->setContentsMargins(0, 0, 0, 0);
+    container->addWidget(scroll);
     bar->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
     updateLandscapeToolButtons();
 }

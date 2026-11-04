@@ -16,6 +16,7 @@ logLevel
 landCheckTime
 undoHistoryLimit
 uiScalePercent
+uiScaleMode
 mapTestWarningVersion
 openLastSessionOnStartup
 autosaveEnabled

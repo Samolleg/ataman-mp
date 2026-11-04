@@ -14,6 +14,8 @@
 #include "resourcemanager.h"
 #include "camera.h"
 #include "localization.h"
+#include "windows_ui_scaling.h"
+#include "map_spawn_planner.h"
 
 namespace {
 int visibleWindows = 0;
@@ -60,11 +62,8 @@ int runStartCameraCheck()
         }
     });
     modals.start(10);
-    const int uiScale=qEnvironmentVariableIntValue("EI_DPI_UI_SCALE");
-    if(qEnvironmentVariableIsSet("EI_DPI_CALIBRATE_FONT")) {
-        QFont base=qApp->font(); base.setPixelSize(12); qApp->setFont(base);
-    }
-    ei::applyUiScalePercent(uiScale ? uiScale : 150);
+    if(qApp->property("legacyUiScaling").toBool())
+        ei::applyUiScalePercent(ei::persistedUiScalePercent());
     MainWindow window;
     window.configureAutosaveTimer(false,300000);
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -107,7 +106,7 @@ int runStartCameraCheck()
     QJsonObject result;
     result["qtScaleFactor"]=qEnvironmentVariable("QT_SCALE_FACTOR");
     result["qtScreenScaleFactors"]=qEnvironmentVariable("QT_SCREEN_SCALE_FACTORS");
-    result["uiScale"]=uiScale;
+    result["uiScale"]=qApp->property("enduranceUiScalePercent").toInt();
     result["window"]=rectJson(window.geometry());
     result["widget"]=rectJson(view->geometry());
     QJsonArray ancestors;
@@ -123,7 +122,15 @@ int runStartCameraCheck()
     result["screenGeometry"]=rectJson(window.windowHandle()->screen()->geometry());
     result["logicalDpi"]=window.windowHandle()->screen()->logicalDotsPerInch();
     result["fontHeight"]=window.fontMetrics().height();
-    result["calibratedFont"]=qEnvironmentVariableIsSet("EI_DPI_CALIBRATE_FONT");
+    result["calibratedFont"]=false;
+    result["startupMode"]=qApp->property("uiScaleStartupMode").toString();
+    result["startupSource"]=qApp->property("uiScaleStartupSource").toString();
+    result["monitors"]=qApp->property("uiScaleMonitors").toJsonArray();
+    result["fontPointSize"]=window.font().pointSizeF();
+    result["fontPixelSize"]=window.font().pixelSize();
+    result["applicationFontHeight"]=QFontMetrics(qApp->font()).height();
+    result["fontSource"]=qApp->property("uiScaleFontSource").toString();
+    result["systemFontPixels"]=qApp->property("uiScaleSystemFontPixels").toInt();
     QJsonArray catalog;
     for(const auto& entry:window.m_mapCatalog.entries) if(entry.mprName=="zone1")
         catalog.append(QJsonObject{{"zone",entry.zoneId},{"mpr",entry.mprPath},{"mob",entry.mobPath},{"type",entry.zoneType}});
@@ -154,6 +161,30 @@ int runStartCameraCheck()
     result["minimapVisible"]=window.m_viewportMinimap->isVisible();
     result["minimap"]=rectJson(window.m_viewportMinimap->geometry());
     result["minimapInside"]=view->rect().contains(window.m_viewportMinimap->geometry());
+    for(const char* name : {"timeOfDayWidget", "environmentPreviewWidget", "aiGraphPreviewWidget"})
+        if(auto* overlay=view->findChild<QWidget*>(name,Qt::FindDirectChildrenOnly))
+            result[QString("minimapApartFrom_")+name]=!overlay->isVisible()
+                || !window.m_viewportMinimap->geometry().intersects(overlay->geometry());
+    QJsonArray entrances;
+    for(int i=0;i<window.m_validEntrances.size();++i) {
+        const auto& entrance=window.m_validEntrances[i];
+        window.m_entranceCombo->setCurrentIndex(i);
+        QMetaObject::invokeMethod(window.m_entranceCombo,"activated",Qt::DirectConnection,Q_ARG(int,i));
+        const auto ordinary=CMapSpawnPlanner::chooseEntrance(*window.selectedTravelZone(),{});
+        const auto custom=CMapSpawnPlanner::chooseCustom(entrance.spawnPoint(),window.selectedTravelZone()->exitId,{});
+        entrances.append(QJsonObject{{"id",entrance.exitId},{"x",entrance.spawnPoint().x()},{"y",entrance.spawnPoint().y()},
+            {"sources",QJsonArray::fromStringList(mapEntranceSources(window.m_mapCatalog.topologyEntries,"gz1g",entrance.exitId))},
+            {"caption",window.m_entranceCombo->currentText()},{"zone",window.m_mapTestEntry.zoneId},
+            {"ordinaryExit",ordinary.exitId},{"customExit",custom.exitId},{"ordinaryValid",ordinary.valid},{"customValid",custom.valid}});
+    }
+    window.m_entranceCombo->setCurrentIndex(0);
+    result["entrances"]=entrances;
+    if(auto* select=window.findChild<QToolButton*>("selectButton")) {
+        const auto icon=select->icon().pixmap(window.windowHandle(),select->iconSize());
+        result["iconLogical"]=QJsonArray{select->iconSize().width(),select->iconSize().height()};
+        result["iconPixmap"]=QJsonArray{icon.width(),icon.height()};
+        result["iconPixmapDpr"]=icon.devicePixelRatioF();
+    }
     QJsonArray overlays;
     for(auto* widget:view->findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))
         if(widget->isVisible()) overlays.append(QJsonObject{{"name",widget->objectName()},{"rect",rectJson(widget->geometry())}});
@@ -167,9 +198,10 @@ int runStartCameraCheck()
     result["clippedButtons"]=clipped;
     const QString tag=qEnvironmentVariable("EI_DPI_TAG");
     auto frame=view->grabFrameBuffer();
-    result["frameSize"]=QJsonArray{frame.width(),frame.height()};
+    result["qtGrabSize"]=QJsonArray{frame.width(),frame.height()};
     QString captureError;
-    auto snapshot=view->captureTopdownPass(ETopdownPass::None,frame.size(),{},&captureError);
+    const QSize physicalSize=view->viewportFramebufferSize();
+    auto snapshot=view->captureTopdownPass(ETopdownPass::None,physicalSize,{},&captureError);
     result["captureError"]=captureError;
     if(!snapshot.isNull()) frame=snapshot;
     deadline.restart();
@@ -184,10 +216,11 @@ int runStartCameraCheck()
     }
     result["sceneReady"]=!sceneBusy();
     if(result["sceneReady"].toBool()) {
-        snapshot=view->captureTopdownPass(ETopdownPass::None,frame.size(),{},&captureError);
+        snapshot=view->captureTopdownPass(ETopdownPass::None,physicalSize,{},&captureError);
         if(!snapshot.isNull()) frame=snapshot;
     }
     frame.save(root+"/"+tag+"-frame.png");
+    result["frameSize"]=QJsonArray{frame.width(),frame.height()};
     auto canvas=window.grab().toImage();
     // QGLWidget is a native child. Composite its owning GL readback into grab.
     QPainter painter(&canvas);
@@ -197,6 +230,37 @@ int runStartCameraCheck()
         if(widget->isVisible()) painter.drawPixmap(offset+widget->pos(),widget->grab());
     painter.end();
     canvas.save(root+"/"+tag+"-window.png");
+    if(auto* tools=window.findChild<QScrollArea*>("viewportToolsScrollArea")) {
+        result["toolPanelHeight"]=tools->height();
+        result["toolPanelScrollMaximum"]=tools->verticalScrollBar()->maximum();
+        if(auto* camera=window.findChild<QToolButton*>("cameraSettingsButton")) {
+            tools->ensureWidgetVisible(camera,0,0);
+            QApplication::processEvents();
+            result["lastToolReachable"]=tools->viewport()->rect().intersects(
+                QRect(camera->mapTo(tools->viewport(),QPoint()),camera->size()));
+        }
+    }
+    for(auto* label:window.m_viewportMinimap->findChildren<QLabel*>()) {
+        const QPixmap* pixmap=label->pixmap();
+        if(!pixmap || pixmap->isNull() || label->height()<48) continue;
+        result["minimapPixmapDpr"]=pixmap->devicePixelRatioF();
+        result["minimapPixmapPixels"]=QJsonArray{pixmap->width(),pixmap->height()};
+        const QSize logicalImage=pixmap->size()/pixmap->devicePixelRatioF();
+        QSignalSpy moved(window.m_viewportMinimap,SIGNAL(cameraMoveRequested(QPointF)));
+        QTest::mouseClick(label,Qt::LeftButton,Qt::NoModifier,label->rect().center());
+        if(!moved.isEmpty()) {
+            const QPointF point=moved.first().first().toPointF();
+            const qreal worldWidth=view->m_pLand->widthInWorldUnits();
+            const qreal worldHeight=view->m_pLand->heightInWorldUnits();
+            result["minimapClickWorld"]=QJsonArray{point.x(),point.y()};
+            result["minimapWorldSize"]=QJsonArray{worldWidth,worldHeight};
+            // One integer mouse pixel may span several world units in a
+            // compact thumbnail; test its actual spatial resolution.
+            result["minimapClickCentered"]=qAbs(point.x()-worldWidth/2.0)<=1.1*worldWidth/qMax(1,logicalImage.width())
+                && qAbs(point.y()-worldHeight/2.0)<=1.1*worldHeight/qMax(1,logicalImage.height());
+        }
+        break;
+    }
     // Explicit identity, direct MPR context, and briefing regression.
     QJsonArray identities;
     for(const QString& zone:QStringList{"gz1g","bz1g","gz1g"}) {

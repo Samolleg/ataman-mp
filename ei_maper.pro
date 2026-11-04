@@ -52,7 +52,7 @@ SOURCES -= $$PWD/source/runtime/base_runtime_host/base_runtime_host.cpp
 HEADERS += $$files($$PWD/source/*.h, true)
 FORMS += $$files($$PWD/source/*.ui, true)
 LIBS += -lglu32 -lopengl32 -ldbghelp -luser32
-win32: LIBS += -lole32 -ladvapi32 -lshell32
+win32: LIBS += -lole32 -ladvapi32 -lshell32 -lgdi32
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin

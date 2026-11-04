@@ -3898,7 +3898,7 @@ void CView::positionEnvironmentPreviewWidget()
         const int contentHeight = m_navigationContent->layout()->heightForWidth(
             m_aiGraphPreviewWidget->width() - 32);
         const int wanted = qMax(m_navigationContent->sizeHint().height(), contentHeight);
-        m_navigationScroll->setFixedHeight(qMin(wanted + 2, qMax(30, height() - 78)));
+        m_navigationScroll->setFixedHeight(qMin(wanted + 2, qMax(30, height() / 3 - 42)));
         m_aiGraphPreviewWidget->adjustSize();
         m_aiGraphPreviewWidget->move(12,
             qMax(12, height() - m_aiGraphPreviewWidget->height() - 12));

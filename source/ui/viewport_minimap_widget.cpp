@@ -108,9 +108,9 @@ private:
         const QPixmap* displayed = pixmap();
         if(!displayed || displayed->isNull() || !m_clickHandler)
             return false;
-        const QRect imageRect((width() - displayed->width()) / 2,
-                              (height() - displayed->height()) / 2,
-                              displayed->width(), displayed->height());
+        const QSize logicalSize = displayed->size() / displayed->devicePixelRatioF();
+        const QRect imageRect((width() - logicalSize.width()) / 2,
+                              (height() - logicalSize.height()) / 2, logicalSize.width(), logicalSize.height());
         if(!imageRect.contains(position))
             return false;
         const QPointF normalized(
@@ -145,8 +145,12 @@ private:
             painter.setBrush(Qt::NoBrush);
             painter.drawPolygon(polygon);
         }
-        setPixmap(QPixmap::fromImage(decorated).scaled(
-            size(), Qt::KeepAspectRatio, Qt::FastTransformation));
+        const qreal dpr = devicePixelRatioF();
+        auto displayed = QPixmap::fromImage(decorated).scaled(
+            QSize(qRound(width() * dpr), qRound(height() * dpr)),
+            Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        displayed.setDevicePixelRatio(dpr);
+        setPixmap(displayed);
     }
     QImage m_image;
     QPolygonF m_footprint;
@@ -440,8 +444,30 @@ void CViewportMinimapWidget::setSizeLevel(int level)
     QSize wanted = m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38);
     wanted = wanted.expandedTo(layout()->minimumSize());
     if(parentWidget())
+    {
         wanted = wanted.boundedTo((parentWidget()->size() - QSize(20, 20))
                                   .expandedTo(QSize(1, 1)));
+        // Compact mode shares a narrow viewport with the navigation panel.
+        // Keep their bodies apart; explicit enlarged modes may cover the view.
+        if(m_expanded && m_sizeLevel == 0)
+        {
+            int leftControls = 0;
+            for(const char* name : {"timeOfDayWidget", "environmentPreviewWidget"})
+                if(auto* control = parentWidget()->findChild<QWidget*>(name, Qt::FindDirectChildrenOnly))
+                    if(control->isVisible()) leftControls = qMax(leftControls, control->geometry().right() + 12);
+            wanted.setWidth(qMin(wanted.width(), qMax(layout()->minimumSize().width(),
+                parentWidget()->width() - leftControls - 10)));
+        }
+        auto* navigation = parentWidget()->findChild<QWidget*>(
+            "aiGraphPreviewWidget", Qt::FindDirectChildrenOnly);
+        if(m_expanded && m_sizeLevel == 0 && navigation && navigation->isVisible())
+        {
+            const int left = parentWidget()->width() - wanted.width() - 10;
+            if(left < navigation->geometry().right() + 10)
+                wanted.setHeight(qMin(wanted.height(), qMax(layout()->minimumSize().height(),
+                    navigation->y() - 20)));
+        }
+    }
     if(size() != wanted)
     {
         setFixedSize(wanted);

@@ -21,6 +21,18 @@ QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index)
         .arg(route.destinationExitId).arg(occurrence);
 }
 
+QStringList mapEntranceSources(const QVector<SMapCatalogEntry>& topology,
+                              const QString& zoneId, int entranceId)
+{
+    QStringList sources;
+    for(const auto& source : topology)
+        for(const auto& route : source.travelZones)
+            if(route.destinationZoneId.compare(zoneId, Qt::CaseInsensitive) == 0
+               && route.destinationExitId == entranceId && !sources.contains(source.zoneId))
+                sources.append(source.zoneId);
+    return sources;
+}
+
 QVector<SMapCatalogEntry> CMapCatalog::parseMapTopology(
     const QString& text, const QString& sourceArchive)
 {

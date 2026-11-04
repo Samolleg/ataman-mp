@@ -1,5 +1,6 @@
 #include "ui_theme.h"
 #include "minimap_export_dialog.h"
+#include "window_geometry.h"
 
 #include <QtWidgets>
 #include <QtConcurrent>
@@ -457,7 +458,7 @@ CMinimapExportDialog::CMinimapExportDialog(
         setGenerationLocked(true);
     }
     updateGradePreview();
-    const bool restored = restoreGeometry(
+    const bool restored = ei::restoreWindowGeometry(this,
         QSettings().value("minimap/exportGeometry").toByteArray());
     QScreen* activeScreen = QGuiApplication::screenAt(
         parentWidget() ? parentWidget()->mapToGlobal(parentWidget()->rect().center())
