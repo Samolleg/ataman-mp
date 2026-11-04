@@ -24,10 +24,6 @@ void CStatusConnector::attach(QLabel *pLabel, QLabel *pLine)
 {
     m_pIco = pLabel;
     m_pStatus = pLine;
-    // The shortcut hint may exceed a scaled window's width. It must not force
-    // the splitter and its native GL child beyond the central widget's edge.
-    m_pStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    m_pStatus->setMinimumWidth(0);
     m_pStatus->setStyleSheet("* { background-color: rgba(0, 0, 0, 0); }"); //disable background
 }
 
@@ -41,7 +37,6 @@ void CStatusConnector::updateStatus(QString icoName, QString statusString)
 
     m_pStatus->clear();
     m_pStatus->setText(statusString);
-    m_pStatus->setToolTip(statusString);
 }
 
 CStatusConnector::CStatusConnector()

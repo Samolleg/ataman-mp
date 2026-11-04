@@ -1,6 +1,5 @@
 #include "window_geometry.h"
 #include <QApplication>
-#include <QDataStream>
 #include <QEvent>
 #include <QLayout>
 #include <QScreen>
@@ -31,7 +30,7 @@ protected:
             m_timer.stop();
             const QByteArray geometry = m_geometry.isEmpty()
                 ? QSettings().value(m_key).toByteArray() : m_geometry;
-            if(!geometry.isEmpty()) ei::restoreWindowGeometry(m_window, geometry);
+            if(!geometry.isEmpty()) m_window->restoreGeometry(geometry);
             ei::keepWindowOnScreen(m_window);
             m_seen = true;
             m_window->setProperty("windowGeometryRestored", !geometry.isEmpty());
@@ -41,7 +40,7 @@ protected:
             // otherwise that temporary clamp becomes the next saved geometry.
             QTimer::singleShot(0, this, [this, geometry]() {
                 if(m_window->layout()) m_window->layout()->activate();
-                if(!geometry.isEmpty()) ei::restoreWindowGeometry(m_window, geometry);
+                if(!geometry.isEmpty()) m_window->restoreGeometry(geometry);
                 ei::keepWindowOnScreen(m_window);
                 m_restoring = false;
                 capture();
@@ -80,43 +79,6 @@ private:
     QByteArray m_geometry;
     bool m_seen = false, m_restoring = false;
 };
-}
-
-bool ei::restoreWindowGeometry(QWidget* window, const QByteArray& geometry)
-{
-    // Qt 5.12 rejects otherwise valid saved geometry when the logical screen
-    // width differs by more than 25%. Keep its rectangles, states and unknown
-    // suffix intact, updating only that versioned screen-width sanity field.
-    QByteArray adjusted = geometry;
-    QDataStream input(geometry);
-    input.setVersion(QDataStream::Qt_4_0);
-    quint32 magic = 0;
-    quint16 major = 0, minor = 0;
-    input >> magic >> major >> minor;
-    if(input.status() == QDataStream::Ok && magic == 0x1d9d0cb && (major == 2 || major == 3))
-    {
-        QRect frame, normal;
-        qint32 screen = 0, savedWidth = 0;
-        quint8 maximized = 0, fullscreen = 0;
-        input >> frame >> normal >> screen >> maximized >> fullscreen;
-        const qint64 widthOffset = input.device()->pos();
-        input >> savedWidth;
-        const auto screens = QApplication::screens();
-        QScreen* target = screens.value(screen, QApplication::primaryScreen());
-        if(input.status() == QDataStream::Ok && target && savedWidth > 0)
-        {
-            const int width = target->geometry().width();
-            const qreal ratio = qreal(savedWidth) / qMax(1, width);
-            if(ratio < 0.8 || ratio > 1.25)
-            {
-                QDataStream output(&adjusted, QIODevice::ReadWrite);
-                output.setVersion(QDataStream::Qt_4_0);
-                output.device()->seek(widthOffset);
-                output << qint32(width);
-            }
-        }
-    }
-    return window && window->restoreGeometry(adjusted);
 }
 
 void ei::rememberWindowGeometry(QWidget* window, const QString& id)

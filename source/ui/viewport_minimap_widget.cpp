@@ -108,9 +108,9 @@ private:
         const QPixmap* displayed = pixmap();
         if(!displayed || displayed->isNull() || !m_clickHandler)
             return false;
-        const QSize logicalSize = displayed->size() / displayed->devicePixelRatioF();
-        const QRect imageRect((width() - logicalSize.width()) / 2,
-                              (height() - logicalSize.height()) / 2, logicalSize.width(), logicalSize.height());
+        const QRect imageRect((width() - displayed->width()) / 2,
+                              (height() - displayed->height()) / 2,
+                              displayed->width(), displayed->height());
         if(!imageRect.contains(position))
             return false;
         const QPointF normalized(
@@ -145,12 +145,8 @@ private:
             painter.setBrush(Qt::NoBrush);
             painter.drawPolygon(polygon);
         }
-        const qreal dpr = devicePixelRatioF();
-        auto displayed = QPixmap::fromImage(decorated).scaled(
-            QSize(qRound(width() * dpr), qRound(height() * dpr)),
-            Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        displayed.setDevicePixelRatio(dpr);
-        setPixmap(displayed);
+        setPixmap(QPixmap::fromImage(decorated).scaled(
+            size(), Qt::KeepAspectRatio, Qt::FastTransformation));
     }
     QImage m_image;
     QPolygonF m_footprint;
@@ -184,9 +180,6 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_title->setFont(titleFont);
     m_export = new QToolButton(this);
     m_export->setText(tr("Export..."));
-    m_export->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
-    m_export->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_export->setAccessibleName(tr("Export..."));
     m_export->setToolTip(tr("Review and export the current generated minimap"));
     m_refresh = new QToolButton(this);
     m_refresh->setObjectName("viewportMinimapRefresh");
@@ -441,43 +434,8 @@ void CViewportMinimapWidget::setSizeLevel(int level)
     static const QSize expandedSizes[] = {
         QSize(390, 430), QSize(520, 560), QSize(910, 980)
     };
-    QSize wanted = m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38);
-    wanted = wanted.expandedTo(layout()->minimumSize());
-    if(parentWidget())
-    {
-        wanted = wanted.boundedTo((parentWidget()->size() - QSize(20, 20))
-                                  .expandedTo(QSize(1, 1)));
-        // Compact mode shares a narrow viewport with the navigation panel.
-        // Keep their bodies apart; explicit enlarged modes may cover the view.
-        if(m_expanded && m_sizeLevel == 0)
-        {
-            int leftControls = 0;
-            for(const char* name : {"timeOfDayWidget", "environmentPreviewWidget"})
-                if(auto* control = parentWidget()->findChild<QWidget*>(name, Qt::FindDirectChildrenOnly))
-                    if(control->isVisible()) leftControls = qMax(leftControls, control->geometry().right() + 12);
-            wanted.setWidth(qMin(wanted.width(), qMax(layout()->minimumSize().width(),
-                parentWidget()->width() - leftControls - 10)));
-        }
-        auto* navigation = parentWidget()->findChild<QWidget*>(
-            "aiGraphPreviewWidget", Qt::FindDirectChildrenOnly);
-        if(m_expanded && m_sizeLevel == 0 && navigation && navigation->isVisible())
-        {
-            const int left = parentWidget()->width() - wanted.width() - 10;
-            if(left < navigation->geometry().right() + 10)
-                wanted.setHeight(qMin(wanted.height(), qMax(layout()->minimumSize().height(),
-                    navigation->y() - 20)));
-        }
-    }
-    if(size() != wanted)
-    {
-        setFixedSize(wanted);
-        emit sizeModeChanged();
-    }
-}
-
-void CViewportMinimapWidget::fitToViewport()
-{
-    setSizeLevel(m_sizeLevel);
+    setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38));
+    emit sizeModeChanged();
 }
 
 QImage CViewportMinimapWidget::visibleMapImage(const QImage& image) const

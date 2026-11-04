@@ -612,7 +612,6 @@ protected:
     void hideEvent(QHideEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void resizeGL(int width, int height) override;
-    QSize viewportFramebufferSize() const;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;

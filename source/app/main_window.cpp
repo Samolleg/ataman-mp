@@ -334,31 +334,6 @@ private:
     QString m_fullText;
 };
 
-class CViewportToolsScrollArea final : public QScrollArea
-{
-public:
-    explicit CViewportToolsScrollArea(QWidget* parent) : QScrollArea(parent)
-    {
-        setObjectName("viewportToolsScrollArea");
-        setWidgetResizable(true);
-        setFrameShape(QFrame::NoFrame);
-        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        policy.setHeightForWidth(true);
-        setSizePolicy(policy);
-        setMaximumHeight(220);
-    }
-    int heightForWidth(int width) const override
-    {
-        if(!widget() || !widget()->layout()) return 100;
-        const int contentWidth = qMax(1, width - verticalScrollBar()->sizeHint().width());
-        return qMin(220, widget()->layout()->totalHeightForWidth(contentWidth));
-    }
-    QSize sizeHint() const override { return QSize(400, heightForWidth(width())); }
-    QSize minimumSizeHint() const override { return QSize(0, 90); }
-};
-
 struct SNewMprHeightmap
 {
     QImage image;
@@ -1603,7 +1578,7 @@ MainWindow::MainWindow(QWidget* parent) :
     const QByteArray savedMainWindowState =
             uiSettings.value("ui/mainWindowState").toByteArray();
     const bool initializeDefaultDockLayout = firstRunSetup && savedMainWindowState.isEmpty();
-    ei::restoreWindowGeometry(this, uiSettings.value("ui/mainWindowGeometry").toByteArray());
+    restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // Restore widths after floating tab hosts reach their final geometry.
@@ -1883,10 +1858,7 @@ MainWindow::MainWindow(QWidget* parent) :
     sizePolicy.setVerticalStretch(0);
     sizePolicy.setHeightForWidth(m_pView->sizePolicy().hasHeightForWidth());
     m_pView->setSizePolicy(sizePolicy);
-    const QScreen* screen = QGuiApplication::primaryScreen();
-    const int viewMinimumWidth = screen
-        ? qBound(200, screen->availableGeometry().width() / 3, 640) : 640;
-    m_pView->setMinimumSize(QSize(viewMinimumWidth, 280));
+    m_pView->setMinimumSize(QSize(200, 200));
     m_pView->setMouseTracking(true);
     createViewportToolbars();
     m_viewportMinimap = new CViewportMinimapWidget(m_pView);
@@ -3420,19 +3392,11 @@ void MainWindow::populateEntranceCombo()
         const int dataIndex = m_validEntrances.size();
         m_validEntrances.append(entrance);
         const QPointF center = entrance.spawnPoint();
-        const QStringList sources = mapEntranceSources(m_mapCatalog.topologyEntries,
-            m_mapTestEntry.zoneId, entrance.exitId);
-        const QString caption = sources.isEmpty()
-            ? tr("Entrance %1 (one-way) — (%2, %3)").arg(entrance.exitId)
-                .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1)
-            : tr("Entrance %1 from %2 — (%3, %4)").arg(entrance.exitId).arg(sources.join(", "))
-                .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1);
-        m_entranceCombo->addItem(caption, dataIndex);
-        m_entranceCombo->setItemData(dataIndex, tr(
-            "Starts zone %1 at local entrance %2. Incoming routes: %3. Outgoing destination: %4:%5.")
-            .arg(m_mapTestEntry.zoneId).arg(entrance.exitId)
-            .arg(sources.isEmpty() ? tr("none (one-way deployment)") : sources.join(", "))
-            .arg(entrance.destinationZoneId).arg(entrance.destinationExitId), Qt::ToolTipRole);
+        const QString destination = entrance.destinationZoneId.isEmpty()
+            ? tr("none") : entrance.destinationZoneId;
+        m_entranceCombo->addItem(tr("Entrance %1 -> %2:%3 — (%4, %5)")
+            .arg(entrance.exitId).arg(destination).arg(entrance.destinationExitId)
+            .arg(center.x(), 0, 'f', 1).arg(center.y(), 0, 'f', 1), dataIndex);
     }
     if(m_validEntrances.isEmpty())
     {
@@ -3532,28 +3496,25 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             || !m_openedMapZoneId.isEmpty();
         const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
         QVector<SMapCatalogEntry> nameMatches;
-        // Several zones share one MPR (for example bz1g/gz1g/cz1g).
-        // Resolve an explicit zone before considering a physical-path match.
-        if(!m_openedMapZoneId.isEmpty())
-            for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
-                if(entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
-                {
-                    m_mapTestEntry = entry;
-                    break;
-                }
         for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
         {
-            if(!m_mapTestEntry.zoneId.isEmpty())
+            if(!m_openedMapZoneId.isEmpty()
+               && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+            {
+                m_mapTestEntry = entry;
                 break;
+            }
             if(!allowCatalogInference)
                 continue;
             if(!entry.mprPath.isEmpty()
                && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
             {
-                CMob* primary = mapTestStagingMob();
-                if(primary && primary->filePath().absoluteFilePath().compare(
-                    QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
-                if(!primary && m_workspaceIdentityKind == "world") continue;
+                if(m_workspaceIdentityKind == "world")
+                {
+                    CMob* primary = mapTestStagingMob();
+                    if(!primary || primary->filePath().absoluteFilePath().compare(
+                        QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
+                }
                 m_mapTestEntry = entry;
                 break;
             }
@@ -4093,15 +4054,6 @@ void MainWindow::setupCompactViewportTools()
     group("scenarioToolGroup","Сценарий",{m_behaviorModeButton,diplomacy,travel,scenario,script});
     group("helperToolGroup","Помощники",{magnet,camera});
     rows->addWidget(bar->findChild<QWidget*>("modelConnectionControls"));
-    // A saved narrow dock layout must not turn wrapped tool groups into a
-    // column taller than the viewport when Windows scales the whole UI.
-    auto* content = new QWidget(bar);
-    content->setLayout(rows);
-    auto* scroll = new CViewportToolsScrollArea(bar);
-    scroll->setWidget(content);
-    auto* container = new QVBoxLayout(bar);
-    container->setContentsMargins(0, 0, 0, 0);
-    container->addWidget(scroll);
     bar->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
     updateLandscapeToolButtons();
 }
@@ -4182,7 +4134,7 @@ void MainWindow::createViewportToolbars()
 {
     QWidget* testBar = new QWidget(m_ui->workspaceContainer);
     testBar->setObjectName("mapTestToolbar");
-    auto* testLayout = new CViewportToolsLayout(testBar);
+    QHBoxLayout* testLayout = new QHBoxLayout(testBar);
     testLayout->setContentsMargins(4, 3, 4, 3);
     testLayout->setSpacing(5);
     QToolButton* testButton = new QToolButton(testBar);
@@ -4210,8 +4162,9 @@ void MainWindow::createViewportToolbars()
     m_spawnPositionLabel->setMinimumWidth(150);
     testLayout->addWidget(testButton);
     testLayout->addWidget(stopButton);
+    testLayout->addSpacing(8);
     testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
-    testLayout->addWidget(m_entranceCombo);
+    testLayout->addWidget(m_entranceCombo, 1);
     testLayout->addWidget(m_gotoEntranceButton);
     testLayout->addWidget(m_playFromHereButton);
     testLayout->addWidget(m_spawnPositionLabel);
@@ -5513,7 +5466,6 @@ void MainWindow::positionViewportMinimap()
     if(!m_pView || !m_viewportMinimap)
         return;
     const int margin = 10;
-    m_viewportMinimap->fitToViewport();
     m_viewportMinimap->move(
         qMax(margin, m_pView->width() - m_viewportMinimap->width() - margin),
         margin);

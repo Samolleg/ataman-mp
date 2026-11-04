@@ -1,5 +1,4 @@
 #include "terrain_atlas_review_dialog.h"
-#include "window_geometry.h"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -426,7 +425,7 @@ CTerrainAtlasReviewDialog::CTerrainAtlasReviewDialog(
     }
 
     QSettings settings;
-    const bool restored = ei::restoreWindowGeometry(this,
+    const bool restored = restoreGeometry(
         settings.value(QStringLiteral("terrainAtlasReview/geometry")).toByteArray());
     QScreen* activeScreen = QGuiApplication::screenAt(
         parentWidget() ? parentWidget()->mapToGlobal(parentWidget()->rect().center())

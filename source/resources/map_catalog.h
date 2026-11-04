@@ -52,8 +52,6 @@ struct SMapCatalogResult
 };
 
 QString mapTravelRouteKey(const QVector<SMapTravelZone>& routes, int index);
-QStringList mapEntranceSources(const QVector<SMapCatalogEntry>& topology,
-                              const QString& zoneId, int entranceId);
 
 class CMapCatalog
 {

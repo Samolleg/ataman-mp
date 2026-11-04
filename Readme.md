@@ -1,6 +1,6 @@
 # EI Mapper Ataman
 
-Версия **278**, main. Полный масштаб UI по текущему DPI Windows, Авто/100/125/150/175/200% после перезапуска; корректные входы gz1g и физический GL. `--legacy-ui-scaling` возвращает прежнее поведение. [Отчёт278, R2](docs/validation/ATAMAN_DPI150_MINIMAP_278_20261104.md#доработка-r2--входы-gz1g-и-полный-масштаб-windows). STOP BEFORE INSTALLATION.
+Версия **277**, main. Редактор `.cam` меню и катсцен, путь и точки в 3D, вид из выбранной камеры, XYZ/рыскание/наклон, текущий вид, Undo и Ctrl+S с резервной копией. Инструменты → Стартовая камера / CAM. [Отчёт277](docs/validation/ATAMAN_START_CAMERA_277_20261103.md). STOP BEFORE INSTALLATION.
 
 Версия **276**, main. Сохранение раскладки доков, вкладок и плавающих окон. [Отчёт276](docs/validation/ATAMAN_DOCK_LAYOUT_276_20261103.md). Версии274 и275 отменены. STOP BEFORE INSTALLATION.
 

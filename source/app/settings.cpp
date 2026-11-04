@@ -24,7 +24,6 @@
 #include "profile_database.h"
 #include "persistent_visual_cache.h"
 #include "settings_persistence.h"
-#include "windows_ui_scaling.h"
 
 CSettings::CSettings(QWidget *parent) :
     QWidget(parent, Qt::Window)
@@ -63,17 +62,28 @@ CSettings::CSettings(QWidget *parent) :
 
     QLabel* uiScaleLabel = new QLabel(tr("UI scale"), ui->tabGeneral);
     uiScaleLabel->setToolTip(tr(
-        "Scales the entire interface, icons and viewport panels. Restart the editor to apply. "
-        "Auto follows each Windows monitor. Explicit Qt scale environment variables take precedence. "
-        "Use --legacy-ui-scaling to restore the previous font-only behavior."));
-    auto* uiScale = new QComboBox(ui->tabGeneral);
-    uiScale->setObjectName("uiScaleMode");
-    uiScale->addItem(tr("Auto (Windows)"), "auto");
-    for(const QString& value : {"100", "125", "150", "175", "200"})
-        uiScale->addItem(value + '%', value);
+        "Scales editor fonts, menus, dialogs, docks, property tables, and viewport text labels. "
+        "Applied immediately. Default: 100%."));
+    QSlider* uiScale = new QSlider(Qt::Horizontal, ui->tabGeneral);
+    uiScale->setObjectName("uiScalePercent");
+    uiScale->setRange(75, 200);
+    uiScale->setSingleStep(5);
+    uiScale->setPageStep(25);
+    uiScale->setTickInterval(25);
     uiScale->setToolTip(uiScaleLabel->toolTip());
+    QLabel* uiScaleValue = new QLabel(QStringLiteral("100%"), ui->tabGeneral);
+    uiScaleValue->setObjectName("uiScalePercentValue");
+    uiScaleValue->setMinimumWidth(48);
+    uiScaleValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    QHBoxLayout* uiScaleControls = new QHBoxLayout;
+    uiScaleControls->addWidget(uiScale, 1);
+    uiScaleControls->addWidget(uiScaleValue);
     ui->gridLayout->addWidget(uiScaleLabel, 7, 0);
-    ui->gridLayout->addWidget(uiScale, 7, 1);
+    ui->gridLayout->addLayout(uiScaleControls, 7, 1);
+    connect(uiScale, &QSlider::valueChanged, this, [uiScaleValue](int value)
+    {
+        uiScaleValue->setText(QStringLiteral("%1%").arg(value));
+    });
 
     QLabel* editorLabel = new QLabel(tr("External script editor"), ui->tabGeneral);
     editorLabel->setToolTip(tr("Executable used to edit managed MOB scripts. Clear this field to use the Windows .lua file association."));
@@ -527,7 +537,6 @@ void CSettings::initOptions()
     aOpt.append(QSharedPointer<COpt>(new COptInt("landCheckTime", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("undoHistoryLimit", 512)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("uiScalePercent", 100)));
-    aOpt.append(QSharedPointer<COpt>(new COptString("uiScaleMode", "auto")));
     aOpt.append(QSharedPointer<COpt>(new COptInt("mapTestWarningVersion", 0)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("autosaveIntervalMinutes", 5)));
     aOpt.append(QSharedPointer<COpt>(new COptInt("visualCacheLimitMiB", 4096)));
@@ -782,8 +791,6 @@ void CSettings::applyUiOptions()
         opt(eOptSetGeneral, "language"));
     const QString previousLanguage = storedLanguage
         ? storedLanguage->value() : QStringLiteral("ru");
-    const QString previousScale = dynamic_cast<COptString*>(
-        opt(eOptSetGeneral, "uiScaleMode"))->value();
     updateOptFromUi();
     const COptBool* autosaveEnabled = dynamic_cast<const COptBool*>(
         opt(eOptSetGeneral, "autosaveEnabled"));
@@ -797,8 +804,7 @@ void CSettings::applyUiOptions()
         ? visualCacheLimit->value() : 4096));
     emit autosaveSettingsApplied(autosaveEnabled && autosaveEnabled->value(),
                                  qBound(1, autosaveInterval ? autosaveInterval->value() : 5, 120));
-    if(qApp->property("legacyUiScaling").toBool())
-        emit uiScaleApplied(qBound(75, uiScale ? uiScale->value() : 100, 200));
+    emit uiScaleApplied(qBound(75, uiScale ? uiScale->value() : 100, 200));
     emit shortcutsChanged();
     emit settingsApplied();
     emit renderSettingsChanged();
@@ -807,12 +813,10 @@ void CSettings::applyUiOptions()
         opt(eOptSetGeneral, "language"));
     const bool languageChanged = selectedLanguage
         && selectedLanguage->value() != previousLanguage;
-    const bool scaleChanged = previousScale != dynamic_cast<COptString*>(
-        opt(eOptSetGeneral, "uiScaleMode"))->value();
-    if(languageChanged || scaleChanged)
+    if(languageChanged)
     {
         QMessageBox::information(this, tr("Restart required"),
-            tr("Restart EI Mapper to apply interface language or scale changes."));
+            tr("Restart EI Mapper to apply the new interface language."));
     }
 }
 
