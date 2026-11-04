@@ -3711,7 +3711,7 @@ int runHeadlessCommand(QApplication& app)
                 && validationViewStartsUnchecked && validationViewShowsAndChecks
                 && validationViewHidesAndUnchecks && validationViewReopensBesideMessageLog
                 && routineDockDiagnosticsSuppressed
-                && QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
+                && !QCoreApplication::testAttribute(Qt::AA_DisableHighDpiScaling)
                 && !QCoreApplication::testAttribute(Qt::AA_EnableHighDpiScaling)
             && uniqueMaterialPaletteCards
             && materialVariantsRemainDistinctAndGrouped
@@ -4195,12 +4195,9 @@ int main(int argc, char *argv[])
     if(automatedWorkspaceSmokeRequested(argc, argv))
         SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
 #endif
-    // The legacy OpenGL viewport and its embedded overlays use physical pixel
-    // coordinates. Qt's global logical-coordinate conversion makes the GL
-    // framebuffer render into only part of the widget on scaled displays.
-    // Keep physical-pixel behavior until the entire viewport pipeline is made
-    // device-pixel-ratio aware; Endurance's explicit UI scale remains usable.
-    QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    // Keep Qt's default scaling policy. In Qt 5.12, forcing DisableHighDpiScaling
+    // also skips logical-DPI initialization when QT_SCALE_FACTOR is supplied.
+    // CView converts its logical geometry to framebuffer pixels explicitly.
 
     const char* openGlBackend = requestedOpenGlBackend(argc, argv);
     const bool renderBenchmark = renderBenchmarkRequested(argc, argv);

@@ -3496,25 +3496,28 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             || !m_openedMapZoneId.isEmpty();
         const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
         QVector<SMapCatalogEntry> nameMatches;
+        // Several zones share one MPR (for example bz1g/gz1g/cz1g).
+        // Resolve an explicit zone before considering a physical-path match.
+        if(!m_openedMapZoneId.isEmpty())
+            for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+                if(entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+                {
+                    m_mapTestEntry = entry;
+                    break;
+                }
         for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
         {
-            if(!m_openedMapZoneId.isEmpty()
-               && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
-            {
-                m_mapTestEntry = entry;
+            if(!m_mapTestEntry.zoneId.isEmpty())
                 break;
-            }
             if(!allowCatalogInference)
                 continue;
             if(!entry.mprPath.isEmpty()
                && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
             {
-                if(m_workspaceIdentityKind == "world")
-                {
-                    CMob* primary = mapTestStagingMob();
-                    if(!primary || primary->filePath().absoluteFilePath().compare(
-                        QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
-                }
+                CMob* primary = mapTestStagingMob();
+                if(primary && primary->filePath().absoluteFilePath().compare(
+                    QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
+                if(!primary && m_workspaceIdentityKind == "world") continue;
                 m_mapTestEntry = entry;
                 break;
             }
@@ -4134,7 +4137,7 @@ void MainWindow::createViewportToolbars()
 {
     QWidget* testBar = new QWidget(m_ui->workspaceContainer);
     testBar->setObjectName("mapTestToolbar");
-    QHBoxLayout* testLayout = new QHBoxLayout(testBar);
+    auto* testLayout = new CViewportToolsLayout(testBar);
     testLayout->setContentsMargins(4, 3, 4, 3);
     testLayout->setSpacing(5);
     QToolButton* testButton = new QToolButton(testBar);
@@ -4162,9 +4165,8 @@ void MainWindow::createViewportToolbars()
     m_spawnPositionLabel->setMinimumWidth(150);
     testLayout->addWidget(testButton);
     testLayout->addWidget(stopButton);
-    testLayout->addSpacing(8);
     testLayout->addWidget(new QLabel(tr("Entrance:"), testBar));
-    testLayout->addWidget(m_entranceCombo, 1);
+    testLayout->addWidget(m_entranceCombo);
     testLayout->addWidget(m_gotoEntranceButton);
     testLayout->addWidget(m_playFromHereButton);
     testLayout->addWidget(m_spawnPositionLabel);
@@ -5466,6 +5468,7 @@ void MainWindow::positionViewportMinimap()
     if(!m_pView || !m_viewportMinimap)
         return;
     const int margin = 10;
+    m_viewportMinimap->fitToViewport();
     m_viewportMinimap->move(
         qMax(margin, m_pView->width() - m_viewportMinimap->width() - margin),
         margin);

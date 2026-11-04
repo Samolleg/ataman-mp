@@ -180,6 +180,9 @@ CViewportMinimapWidget::CViewportMinimapWidget(QWidget* parent)
     m_title->setFont(titleFont);
     m_export = new QToolButton(this);
     m_export->setText(tr("Export..."));
+    m_export->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    m_export->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_export->setAccessibleName(tr("Export..."));
     m_export->setToolTip(tr("Review and export the current generated minimap"));
     m_refresh = new QToolButton(this);
     m_refresh->setObjectName("viewportMinimapRefresh");
@@ -434,8 +437,21 @@ void CViewportMinimapWidget::setSizeLevel(int level)
     static const QSize expandedSizes[] = {
         QSize(390, 430), QSize(520, 560), QSize(910, 980)
     };
-    setFixedSize(m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38));
-    emit sizeModeChanged();
+    QSize wanted = m_expanded ? expandedSizes[m_sizeLevel] : QSize(116, 38);
+    wanted = wanted.expandedTo(layout()->minimumSize());
+    if(parentWidget())
+        wanted = wanted.boundedTo((parentWidget()->size() - QSize(20, 20))
+                                  .expandedTo(QSize(1, 1)));
+    if(size() != wanted)
+    {
+        setFixedSize(wanted);
+        emit sizeModeChanged();
+    }
+}
+
+void CViewportMinimapWidget::fitToViewport()
+{
+    setSizeLevel(m_sizeLevel);
 }
 
 QImage CViewportMinimapWidget::visibleMapImage(const QImage& image) const

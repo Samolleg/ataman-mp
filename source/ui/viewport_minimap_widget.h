@@ -32,6 +32,7 @@ public:
     void moveCameraFromNormalizedPoint(const QPointF& normalizedPoint);
     bool isExpanded() const { return m_expanded; }
     int sizeLevel() const { return m_sizeLevel; }
+    void fitToViewport();
 
 signals:
     void exportRequested();

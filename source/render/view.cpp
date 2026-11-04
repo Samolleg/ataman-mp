@@ -3891,7 +3891,9 @@ void CView::positionEnvironmentPreviewWidget()
     }
     if(m_aiGraphPreviewWidget && m_navigationScroll)
     {
-        m_aiGraphPreviewWidget->setFixedWidth(qMin(520, qMax(160, width() - 24)));
+        const int contentWidth = m_navigationContent->minimumSizeHint().width() + 16;
+        m_aiGraphPreviewWidget->setFixedWidth(
+            qMin(qMax(520, contentWidth), qMax(160, width() - 24)));
         m_navigationContent->layout()->activate();
         const int contentHeight = m_navigationContent->layout()->heightForWidth(
             m_aiGraphPreviewWidget->width() - 32);
@@ -3938,7 +3940,7 @@ void CView::initAiGraphPreviewWidget()
     m_navigationScroll = new QScrollArea(m_aiGraphPreviewWidget);
     m_navigationScroll->setFrameShape(QFrame::NoFrame);
     m_navigationScroll->setWidgetResizable(true);
-    m_navigationScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_navigationScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_navigationContent = new QWidget;
     m_navigationContent->setObjectName("navigationContent");
     auto* navigation = new QVBoxLayout(m_navigationContent);
@@ -5159,15 +5161,21 @@ void CView::initializeGL()
     //doneCurrent();
 }
 
-void CView::resizeGL(int width, int height)
+QSize CView::viewportFramebufferSize() const
+{
+    const qreal dpr = devicePixelRatioF();
+    return QSize(qMax(1, qRound(width() * dpr)),
+                 qMax(1, qRound(height() * dpr)));
+}
+
+void CView::resizeGL(int, int)
 {
     makeCurrent();
-    m_height = height;
-    m_width = width;
-    //const int side = qMin(width, height);
-    //ei::gl::Viewport((width - side) / 2, (height - side) / 2, side, side);
-    const float ratio = float(width)/height;
-    ei::gl::Viewport(0, 0, width, height);
+    const QSize framebufferSize = viewportFramebufferSize();
+    m_height = framebufferSize.height();
+    m_width = framebufferSize.width();
+    const float ratio = float(m_width) / m_height;
+    ei::gl::Viewport(0, 0, m_width, m_height);
 
     m_normalProjection.setToIdentity();
     m_normalProjection.perspective(45, ratio, 1, 1000);
@@ -5311,7 +5319,11 @@ void CView::releaseShadowFramebuffers()
 
 bool CView::beginEditorQueryFramebuffer()
 {
-    if(m_width <= 0 || m_height <= 0 || !isValid())
+    if(!isValid())
+        return false;
+    if(QSize(m_width, m_height) != viewportFramebufferSize())
+        resizeGL(width(), height());
+    if(m_width <= 0 || m_height <= 0)
         return false;
     makeCurrent();
     const QSize requiredSize(m_width, m_height);
@@ -6233,7 +6245,9 @@ void CView::paintGL()
                 .arg(defaultFramebufferBound ? 1 : 0));
         logOpenGlDiagnosticState(QStringLiteral("frame/begin"));
     }
-    ei::gl::Viewport(0, 0, width(), height());
+    if(QSize(m_width, m_height) != viewportFramebufferSize())
+        resizeGL(width(), height());
+    ei::gl::Viewport(0, 0, m_width, m_height);
     ei::gl::Enable(GL_DEPTH_TEST);
     ei::gl::DepthMask(GL_TRUE);
     QOpenGLContext* paintContext = QOpenGLContext::currentContext();
@@ -9377,7 +9391,8 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
         m_minimapCaptureUnlitPass = false;
         m_minimapCaptureIncludeStaticGeometry = false;
         QOpenGLFramebufferObject::bindDefault();
-        ei::gl::Viewport(0, 0, width(), height());
+        const QSize framebufferSize = viewportFramebufferSize();
+        ei::gl::Viewport(0, 0, framebufferSize.width(), framebufferSize.height());
         update();
     };
 
@@ -10073,7 +10088,10 @@ bool CView::ensureTerrainAutoCatalogReady()
     }
     const qint64 archiveBindingMs = phaseTimer.elapsed();
 
-    for(CMob* mob : m_aMob)
+    // Projection rebuilds unit support, which shares and can detach m_aMob.
+    // Keep this traversal's storage alive across those nested updates.
+    const auto projectedMobs = m_aMob;
+    for(CMob* mob : projectedMobs)
         mob->reprojectForCurrentTerrain();
     connect(m_pTileForm, SIGNAL(applyChangesSignal()),
             this, SLOT(onMapMaterialUpdate()), Qt::UniqueConnection);
@@ -11481,7 +11499,10 @@ QDebug operator<<(QDebug stream, const SColor& color)
 
 void CView::getColorFromRect(const QRect& rect, QVector<SColor>& aColor)
 {
-    const QRect region = selectionReadRegion(rect, QSize(m_width, m_height));
+    const qreal dpr = devicePixelRatioF();
+    const QRect physicalRect(QPoint(qRound(rect.left() * dpr), qRound(rect.top() * dpr)),
+                             QPoint(qRound(rect.right() * dpr), qRound(rect.bottom() * dpr)));
+    const QRect region = selectionReadRegion(physicalRect, QSize(m_width, m_height));
     if(region.isEmpty())
         return;
     const qint64 bytes = qint64(region.width()) * region.height() * 3;
@@ -16379,10 +16400,10 @@ void CView::checkNewLandVersion()
 void CView::drawSelectFrame(QRect &rect)
 {
     //convert frame to [(-1, 1), (-1, 1)]
-    float leftX = rect.bottomLeft().x()/(float)m_width*2-1.0f;
-    float leftY = rect.bottomLeft().y()/(float)m_height*2-1.0f;
-    float rightX = rect.topRight().x()/(float)m_width*2-1.0f;
-    float rightY = rect.topRight().y()/(float)m_height*2-1.0f;
+    float leftX = rect.bottomLeft().x()/(float)width()*2-1.0f;
+    float leftY = rect.bottomLeft().y()/(float)height()*2-1.0f;
+    float rightX = rect.topRight().x()/(float)width()*2-1.0f;
+    float rightY = rect.topRight().y()/(float)height()*2-1.0f;
     QPointF bottomLeft(leftX, -leftY);
     QPointF topRight(rightX, -rightY);
     m_selectFrame->updateFrame(bottomLeft, topRight);
@@ -22643,7 +22664,10 @@ void CView::collectObjectTreeData()
     labels << tr("Objects") << "ID" << tr("Count");
     m_pTree->setHeaderLabels(labels);
     m_pTree->header()->setStretchLastSection(false);
-    m_pTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_pTree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
+    const int categoryWidth = m_pTree->fontMetrics().horizontalAdvance(
+        m_pTree->objectNameByType(eParticle)) + 3 * m_pTree->indentation() + 24;
+    m_pTree->setColumnWidth(0, qMax(m_pTree->columnWidth(0), categoryWidth));
     // Numeric columns have bounded widths. ResizeToContents repeatedly measures
     // every exposed row during header/layout changes on large native trees.
     m_pTree->header()->setSectionResizeMode(1, QHeaderView::Interactive);
