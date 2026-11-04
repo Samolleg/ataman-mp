@@ -330,3 +330,48 @@ Raw exe SHA256 `3cd1c55fde91ae584c1f7d17a54859ca23c3f5ec6a9b6871f03b43485c1828a3
 cleanup-plan.json с проверкой границ; изображения/JSON/журналы доказательств сохраняются.
 Чужие dirty-файлы, исходные ROADMAP и trace-hunks view.cpp сохраняются, не коммитятся.
 STOP BEFORE INSTALLATION. Push нет. Живая/игровая приёмка владельца остаётся открытой.
+
+
+## Установка принятой R2 — DONE / INSTALLED
+
+2026-11-04. Владелец принял278 и поручил «ставь 278», снимая прежний STOP.
+HEAD точно `0ca5a4da826cf7c1dee71af87f98825e14c32d38`, main.
+Готовый `build-staging-278-dpi150-r2-20261104` установлен каноническим
+`packaging/install_program.ps1`, без пересборки, в
+`artifacts/EI-Mapper-Ataman-2-first-test`. До замены маппер этой установки,
+включая headless/runtime host, и игра закрыты. Процессы не завершались.
+
+Установщик подтвердил193 managed-файла,8 заменённых,1 добавленный,0 удалённых.
+Все установленные SHA256 и SHA256SUMS.txt совпали со staging R2.
+SHA256 exe `3cd1c55fde91ae584c1f7d17a54859ca23c3f5ec6a9b6871f03b43485c1828a3`.
+Установленный `--version` дал `EI Mapper Endurance Edition 278`, exit0, VERSION278.
+Единственный запуск установленного exe — скрытый --version.
+15491 пользовательский файл сохранил SHA256, размер и LastWriteTimeUtc.
+Настройки, включая масштаб UI, сохранены. Финализатор на установке не запускался.
+Существующий BUILD_INFO.txt принятого staging содержит историческую запись273.
+Его байты сохранены по manifest пакета, фактическая версия подтверждена выше.
+
+Откат `artifacts/rollback277-to278-dpi150-20261104` создан установщиком.
+Штатный `rollback.ps1 -VerifyOnly` дал `ROLLBACK_VERIFIED`, проверив старые
+managed-файлы и manifest. Чужие и прежние rollback-каталоги сохранены.
+
+Все6 мостов PID9748,47476,29136,43592,16064,28892 зафиксированы до замены
+и после неё живы с теми же временами создания. Codex и Claude Code сохранены.
+Занят только `EIMapperMcp.exe`, отодвинут в
+`EIMapperMcp.exe.old-ataman-98afb85d209a4c43af6eeda7e97b0234`, SHA256
+`985c17f3c8604336467cc7e8fbe2d32d7da4704f0bf8341a293213e2852be14c`.
+Новый канонический EIMapperMcp.exe совпал со staging.
+Полный итоговый перечень `.old-*` содержит только этот новый файл.
+Установщик штатно удалил2 освобождённых файла по `.ataman-retired.json`,
+проверив SHA и возможность эксклюзивного открытия перед удалением:
+`EIMapperMcp.exe.old-ataman-e4a4030338c04999a937852bd076e07a` и
+`EIMapperMcp.exe.old-ataman-ebe68142fd104105ab15b0f2ff82caf2`.
+
+Регистрация `~/.codex/config.toml` и `.mcp.json`, чужие render/neighbor/trace/test/QM
+и отчёт277 сохранили SHA256. В ROADMAP добавлена только собственная строка,
+в индекс включена эта строка поверх HEAD без незакоммиченных правок владельца.
+Subst пуст до и после, буквы дисков и junction не создавались.
+Квитанции — `work/install278-dpi150-20261104/verification.json`, install.log,
+rollback-verify.log, bridges-before.xml, users-before.xml, protected-before.xml,
+retired-before.json и вывод --version. Установка завершена.
+Интерактивный маппер, игра и computer-use не запускались. Push не выполнялся.
