@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QDir>
 #include <QFileInfo>
 #include <QString>
@@ -17,4 +18,17 @@ inline QString terrainReferencePath(const QString& configured,
     if(QFileInfo(bundled).isFile())
         return QFileInfo(bundled).absoluteFilePath();
     return path.isEmpty() ? QString() : QFileInfo(path).absoluteFilePath();
+}
+
+inline bool terrainPaintReferenceMatches(const QByteArray& reference,
+                                         const QByteArray& profileReference)
+{
+    if(reference.isEmpty())
+        return false;
+    if(reference == profileReference)
+        return true;
+    // The Astral update only appended a separate atlas. All original paint
+    // sources are byte-identical and remain valid for saved map profiles.
+    return reference == "a93378623cb2002a3168bf4d3fd3dd0bf8005db38fd6c746e6e4d25e064d55f9"
+        && profileReference == "50c285225fb1745ee70d280e57a214f346481e6d380a78d55475f730d11a81b2";
 }

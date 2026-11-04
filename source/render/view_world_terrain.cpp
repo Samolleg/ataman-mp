@@ -4,6 +4,7 @@
 #include "view.h"
 #include "node.h"
 #include "resourcemanager.h"
+#include "terrain_reference_path.h"
 #include "resource_name.h"
 #include "mmp_codec.h"
 #include "tile_form.h"
@@ -915,8 +916,8 @@ bool CView::ensureWorldTerrainAtlas(const QString& id,CValidationReport* report)
         const auto* textures=CTextureList::getInstance();
         if(!textures->terrainAuthoringArchivePath().isEmpty()) {
             const auto reference=textures->terrainAuthoringReferenceSha256();
-            catalog.setPaintReference(reference.isEmpty()?QByteArray(64,'0'):reference,!reference.isEmpty()
-                && profile.paintReferenceSha256==reference);
+            catalog.setPaintReference(reference.isEmpty()?QByteArray(64,'0'):reference,
+                terrainPaintReferenceMatches(reference, profile.paintReferenceSha256));
         }
 
         for(const auto& family:m_terrainGlobalFamilies)catalog.declareMaterial(family.id);
@@ -1153,7 +1154,8 @@ bool CView::paintWorldTerrainAt(const QVector3D& position,bool land)
     const auto palette=m_landscapeTools->paintPaletteMode();
     const bool manual=palette==ETerrainPaintPaletteMode::Manual;
     const bool classic=palette==ETerrainPaintPaletteMode::ClassicAuto;
-    const bool tileTarget=m_landscapeTools->paintTargetMode()==ETerrainPaintTargetMode::Tile;
+    const bool tileTarget=astralBrushSelected()
+        || m_landscapeTools->paintTargetMode()==ETerrainPaintTargetMode::Tile;
     const bool activating=m_landscapeTools->overlaySurfaceEnabled()
         && m_landscapeTools->overlaySurfaceOperation()==EOverlaySurfaceOperation::Activate;
     const auto layer=land?ETerrainTileLayer::Land:ETerrainTileLayer::Overlay;

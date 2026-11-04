@@ -28,6 +28,13 @@ int main(int argc, char** argv)
     if(!check(terrainReferencePath("", root + "/absent").isEmpty())) return 3;
     if(!check(terrainReferencePath(explicitPath, root + "/absent") == explicitPath)) return 3;
     if(!check(terrainReferencePath(root + "/missing.res", root + "/absent") == root + "/missing.res")) return 3;
+    const QByteArray original("50c285225fb1745ee70d280e57a214f346481e6d380a78d55475f730d11a81b2");
+    const QByteArray withAstral("a93378623cb2002a3168bf4d3fd3dd0bf8005db38fd6c746e6e4d25e064d55f9");
+    if(!check(terrainPaintReferenceMatches(original, original))) return 3;
+    if(!check(terrainPaintReferenceMatches(withAstral, original))) return 3;
+    if(!check(terrainPaintReferenceMatches(withAstral, withAstral))) return 3;
+    if(!check(!terrainPaintReferenceMatches(QByteArray(64, 'f'), original))) return 3;
+    if(!check(!terrainPaintReferenceMatches({}, {}))) return 3;
     std::printf("PASS %d portable reference checks\n", checks);
     return 0;
 }

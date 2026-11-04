@@ -11,6 +11,7 @@
 #include "mmp_codec.h"
 #include "terrain_save_flow_policy.h"
 #include "resourcemanager.h"
+#include "terrain_reference_path.h"
 #include "terrain_preview_context.h"
 #include "terrain_mob_height_state.h"
 #include "natural_terrain.h"
@@ -677,7 +678,11 @@ bool CAiEditAdapter::hydrate(ai::EditPlan* plan,const ai::Cancellation& cancel)
             }
             const auto analysis=map.profile.usableAnalysis(&report);if(!analysis.usable)return fail(report.toText());
             auto catalog=CTerrainAtlasPresetCatalog::globalizedCatalog(map.profile,analysis.overlayCatalogWithLandFamilies(),&plan->sources.families);
-            if(!plan->sources.reference.isEmpty()){const auto reference=plan->sources.referenceHash;catalog.setPaintReference(reference.isEmpty()?QByteArray(64,'0'):reference,!reference.isEmpty()&&map.profile.paintReferenceSha256==reference);}
+            if(!plan->sources.reference.isEmpty()) {
+                const auto reference=plan->sources.referenceHash;
+                catalog.setPaintReference(reference.isEmpty()?QByteArray(64,'0'):reference,
+                    terrainPaintReferenceMatches(reference, map.profile.paintReferenceSha256));
+            }
             QMap<qint32,ETerrainBlendStyle> styles;QMap<qint32,qint32> types;
             for(const auto& family:plan->sources.families){catalog.declareMaterial(family.id);styles[family.id]=CTerrainVirtualAtlas::blendStyleForMaterialName(family.name);types[family.id]=family.runtimeTerrainType;}
             map.state.atlas.reset(new CTerrainWorkingAtlas(catalog,images,0,kMprPackedTerrainAtlasSlotLimit,{},styles,map.baseline.mapInfo().tileTypes,types));

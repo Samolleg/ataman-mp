@@ -68,6 +68,7 @@
 #include <QDateTime>
 #include "mob\mob.h"
 #include "resourcemanager.h"
+#include "terrain_reference_path.h"
 #include "mmp_codec.h"
 #include "terrain_image_sizes.h"
 #include "resource_name.h"
@@ -12760,7 +12761,7 @@ void CView::rebuildTerrainAutoCatalog()
         {
             const auto reference = textures->terrainAuthoringReferenceSha256();
             workingCatalog.setPaintReference(reference.isEmpty() ? QByteArray(64, '0') : reference,
-                !reference.isEmpty() && m_terrainAtlasProfile.paintReferenceSha256 == reference);
+                terrainPaintReferenceMatches(reference, m_terrainAtlasProfile.paintReferenceSha256));
         }
         m_workingTerrainAtlas.reset(new CTerrainWorkingAtlas(
             workingCatalog,
@@ -19516,6 +19517,7 @@ bool CView::resolveTerrainPaintFootprint(
         location->xSec * 16 + qBound(0, qRound(position.x() / 2.0f), 16),
         location->ySec * 16 + qBound(0, qRound(position.y() / 2.0f), 16));
     const bool cellCentered = manualTilePaintingEnabled()
+        || astralBrushSelected()
         || m_landscapeTools->paintTargetMode() == ETerrainPaintTargetMode::Tile;
     *footprint = terrainPaintFootprintSnapshot(
         cellAnchor, *detailVertex, cellCentered,
@@ -20837,6 +20839,18 @@ bool CView::manualTilePaintingEnabled() const
     return m_landscapeTools && m_landscapeTools->manualTileSelectionEnabled();
 }
 
+bool CView::astralBrushSelected() const
+{
+    if(!m_landscapeTools || m_landscapeTools->paintPaletteMode()
+        != ETerrainPaintPaletteMode::Modern)
+        return false;
+    static const qint32 astralId = CTerrainAtlasPresetCatalog::globalMaterialId(
+        QStringLiteral("Astral"), ETerrainAtlasLayer::Land, {}, 0);
+    bool selected = false;
+    const qint32 material = m_landscapeTools->paintTerrainType(&selected);
+    return selected && material == astralId;
+}
+
 float CView::terrainPaintStampSpacing() const
 {
     if(!m_landscapeTools || manualTilePaintingEnabled())
@@ -21921,7 +21935,7 @@ void CView::beginTileBrushGroup()
     m_tileStrokeAutoResolveBlends = !m_landscapeTools
         || m_landscapeTools->paintPaletteMode()
              != ETerrainPaintPaletteMode::Modern
-        || m_landscapeTools->modernAutoResolveBlends();
+        || (m_landscapeTools->modernAutoResolveBlends() && !astralBrushSelected());
     // Draw one nonce only when a new committed stroke begins. Every preview
     // recomputation within that stroke keeps this immutable seed; undo/redo
     // later replays captured packed values and never consults randomness.

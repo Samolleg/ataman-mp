@@ -540,6 +540,7 @@ public:
     void adjustTerrainPaintMaterial(int steps);
     void selectTerrainPaintPaletteMode(ETerrainPaintPaletteMode mode);
     bool manualTilePaintingEnabled() const;
+    bool astralBrushSelected() const;
     float terrainPaintStampSpacing() const;
     bool terrainTileEditLayerIsLand() const;
     bool terrainBrushProjectsToLand() const;
