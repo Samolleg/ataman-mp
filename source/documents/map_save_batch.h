@@ -28,3 +28,8 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& files,
                                      const QString& backupRoot = QString(),
                                      int failCommitForTest = -1,
                                      const std::function<void()>& committed = {});
+
+// Reuses the batch journal. Run off the GUI thread; consent must marshal its
+// question to the GUI thread. Headless never requests consent or alters files.
+QStringList recoverMapSaveBatches(const QString& backupStore, bool headless,
+    const std::function<bool(const QString&)>& consent = {});

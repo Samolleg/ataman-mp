@@ -1,3 +1,4 @@
+#include "res_write_audit.h"
 #include "res_save_coordinator.h"
 #include "process_edit_lock.h"
 
@@ -290,11 +291,13 @@ SResMemberSaveResult commitStagedResMemberReplacement(
         output.cancelWriting();
         return result;
     }
+    const auto audit=beginResWriteAudit(destination.absoluteFilePath(),resAuditDigest(destinationBytes));
     if(!output.commit())
     {
         result.error = output.errorString();
         return result;
     }
+    finishResWriteAudit(audit,result.candidateSha256.toLatin1(),"validated-res-publication");
     result.success = true;
     result.phase = "complete";
     CBackupManager(request.backupRootOverride).scheduleCleanup();
@@ -481,11 +484,13 @@ SResPublishedMembersSaveResult commitStagedResPublishedMembers(
         output.cancelWriting();
         return result;
     }
+    const auto audit=beginResWriteAudit(destination.absoluteFilePath(),resAuditDigest(destinationBytes));
     if(!output.commit())
     {
         result.error = output.errorString();
         return result;
     }
+    finishResWriteAudit(audit,result.candidateSha256.toLatin1(),"validated-res-publication");
 
     result.phase = QStringLiteral("post-commit-validation");
     QByteArray committedBytes;
@@ -616,6 +621,7 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
     }
 #endif
     result.phase = QStringLiteral("atomic-replacement");
+    const auto audit=beginResWriteAudit(destination.absoluteFilePath(),resAuditDigest(original));
     QSaveFile output(destination.absoluteFilePath());
     if(!output.open(QIODevice::WriteOnly)
        || output.write(request.candidateBytes) != request.candidateBytes.size()
@@ -624,6 +630,7 @@ SResArchiveBytesSaveResult commitValidatedResArchiveBytes(
         result.error = output.errorString();
         return result;
     }
+    finishResWriteAudit(audit,result.candidateSha256.toLatin1(),"validated-res-bytes");
     QByteArray reopenedBytes;
     CResArchiveDocument reopened;
     errors.clear();

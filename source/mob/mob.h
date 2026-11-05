@@ -13,6 +13,8 @@
 #include "types.h"
 #include "node.h"
 
+struct SMapSaveFile;
+namespace ei { class TechnicalModelCatalog; }
 class CView;
 class CProgressView;
 class CPatrolPoint;
@@ -74,9 +76,13 @@ public:
     bool appendPreparedObject(QByteArray record);
     void finishPreparedLoad(const SPreparedMobLoad& source, const SPreparedMobProjection& projection);
     QVector<uint> checkUniqueId(QSet<uint>& aId);
+    bool prepareSaveBytes(const QFileInfo& path,QByteArray* bytes,const SaveProgress& progress = SaveProgress());
     bool saveAs(const QFileInfo& path, const SaveProgress& progress = SaveProgress());
     bool save(const SaveProgress& progress = SaveProgress());
     void restoreAssemblyInstances();
+    bool prepareAssemblySave(const QByteArray& savedBytes, QMap<QString,ei::TechnicalModelCatalog>* catalogs, QString* error, const QString& destination = QString());
+    void acceptAssemblySave();
+    static bool appendAssemblySaveFiles(const QMap<QString,ei::TechnicalModelCatalog>& catalogs, QVector<SMapSaveFile>* files, QString* error);
     bool saveAssemblyInstances(const QString& destination, QString* error = nullptr);
     const QString& lastSaveError() const { return m_lastSaveError; }
     bool buildValidatedCandidate(QByteArray* data,

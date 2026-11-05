@@ -1,3 +1,4 @@
+#include "res_write_audit.h"
 #include "window_geometry.h"
 #include "resource_browser.h"
 #include "startup_phases.h"
@@ -796,6 +797,10 @@ void CResourceBrowser::beginLoad(const QVector<QString>& archives, bool activePr
     m_loadWatcher->setFuture(QtConcurrent::run([archives]() {
         SResourceBrowserLoadResult result;
         result.catalog.build(archives, &result.errors);
+        // Observation hashing has its own worker: publication never waits for
+        // a browser catalog load to hash hundreds of megabytes of RES payloads.
+        QtConcurrent::run([archives](){for(const auto& archive:archives)resFileSha256(archive);});
+
         return result;
     }));
 }
@@ -804,7 +809,13 @@ void CResourceBrowser::indexedArchiveChanged(const QString& archivePath)
 {
     const QString normalized = QDir::cleanPath(QFileInfo(archivePath).absoluteFilePath()).toLower();
     if(m_internalPublications.remove(normalized)) return;
-    ei::log(eLogInfo,"Resource Browser observed external archive change:"+archivePath);
+    const auto before=knownResState(archivePath);
+    QtConcurrent::run([archivePath,before](){
+        const auto hash=resFileSha256(archivePath);const QFileInfo info(archivePath);
+        SResObservedState after;after.sha=hash;after.size=info.exists()?info.size():-1;after.modified=info.lastModified();
+        const QJsonObject row{{"path",archivePath},{"before",resStateJson(before)},{"after",resStateJson(after)}};
+        ei::log(eLogInfo,"Resource Browser observed external archive change "+QString::fromUtf8(QJsonDocument(row).toJson(QJsonDocument::Compact)));
+    });
     const QString label = m_activeProfileMode ? m_activeProfileName
         : QFileInfo(m_loadedSources.value(0)).fileName();
     const auto name=QFileInfo(archivePath).fileName().toLower();

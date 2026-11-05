@@ -18,6 +18,8 @@ public:
     static QString pathForDatabase(const QString& databasePath);
     bool save(QString* error = nullptr);
     QByteArray stagedBytes() const;
+    const QByteArray& originalBytes() const { return m_original; }
+    bool sourceExisted() const { return m_existed; }
     QString path() const { return m_path; }
     bool writable() const { return m_valid; }
     quint64 revision() const { return m_revision; }

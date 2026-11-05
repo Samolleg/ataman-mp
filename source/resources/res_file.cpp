@@ -1,3 +1,6 @@
+#include "res_write_audit.h"
+#include <QtConcurrent>
+#include <QCryptographicHash>
 #include "QDebug"
 #include <QTextCodec>
 #include <QSaveFile>
@@ -307,6 +310,8 @@ CResFile::CResFile(const QByteArray& data)
 
 void CResFile::saveToFile(QString path)
 {
+    auto hash=QtConcurrent::run([path](){return QFileInfo::exists(path)?resFileSha256(path):QByteArray();});hash.waitForFinished();
+    const auto audit=beginResWriteAudit(path,hash.result());
     QSaveFile file(path);
     try
     {
@@ -320,6 +325,7 @@ void CResFile::saveToFile(QString path)
         file.write(resData);
         if(!file.commit())
             qDebug() << file.fileName() << " Error while committing res-file" << file.errorString();
+        else {auto digest=QtConcurrent::run([resData](){return QCryptographicHash::hash(resData,QCryptographicHash::Sha256).toHex();});digest.waitForFinished();finishResWriteAudit(audit,digest.result(),"legacy-res-write");}
     }
     catch (std::exception ex)
     {

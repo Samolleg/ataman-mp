@@ -1,4 +1,5 @@
 #include "mob.h"
+#include "map_save_batch.h"
 #include "technical_model_catalog.h"
 #include "profile_database.h"
 #include "log.h"
@@ -59,7 +60,7 @@ bool CMob::saveAssemblyInstances(const QString& destination,QString* error) {
     const bool saved=writeAssemblyInstances(destination,error);m_assemblyMetadataPending=!saved;
     if(saved)m_cleanAssemblyProjection=assemblyProjection();else setDirty(true);return saved;
 }
-bool CMob::writeAssemblyInstances(const QString& destination,QString* error) {
+bool CMob::prepareAssemblySave(const QByteArray& savedBytes,QMap<QString,ei::TechnicalModelCatalog>* catalogs,QString* error,const QString& destination) {
     QJsonObject grouped;
     for(auto* node:m_aNode) if(!node->isMarkDeleted() && !node->assemblyTag().isEmpty()) {
         const auto tag=node->assemblyTag();const auto id=tag.value("instanceId").toString();auto group=grouped.value(id).toObject();
@@ -70,9 +71,35 @@ bool CMob::writeAssemblyInstances(const QString& destination,QString* error) {
     const QString path=catalogPath();
     if(grouped.isEmpty() && (path.isEmpty() || !QFileInfo::exists(path)))return true;
     if(path.isEmpty()){if(error)*error=QString::fromUtf8("Нет database.res профиля для сохранения группировки сборок.");return false;}
-    ei::TechnicalModelCatalog catalog;if(!catalog.load(path,error))return false;
-    if(grouped.isEmpty() && catalog.assemblyInstances(destination).isEmpty())return true;
+    ei::TechnicalModelCatalog catalog;
+    if(catalogs->contains(path))catalog=catalogs->value(path);else if(!catalog.load(path,error))return false;
+    const auto target=destination.isEmpty()?m_filePath.absoluteFilePath():destination;
+    if(grouped.isEmpty() && catalog.assemblyInstances(target).isEmpty())return true;
     QJsonArray groups;for(auto it=grouped.begin();it!=grouped.end();++it)groups.append(it.value());
-    catalog.setAssemblyInstances(destination,groups.isEmpty()?QJsonObject():QJsonObject{{"mobSha256",digest(m_originalData)},{"groups",groups}});
-    return catalog.save(error);
+    const auto instances=groups.isEmpty()?QJsonObject():QJsonObject{{"mobSha256",digest(savedBytes)},{"groups",groups}};
+    if(catalog.assemblyInstances(target)==instances)return true;
+    catalog.setAssemblyInstances(target,instances);
+    if(catalog.stagedBytes().isEmpty()){if(error)*error=QString::fromUtf8("Каталог сборок не подготовлен: ")+path;return false;}
+    catalogs->insert(path,catalog);return true;
+}
+
+void CMob::acceptAssemblySave(){m_assemblyMetadataPending=false;m_cleanAssemblyProjection=assemblyProjection();}
+bool CMob::writeAssemblyInstances(const QString& destination,QString* error){
+    // Save As temporarily uses its destination identity in the same preparation.
+    const auto source=m_filePath;m_filePath=QFileInfo(destination);
+    QMap<QString,ei::TechnicalModelCatalog> catalogs;
+    const bool prepared=prepareAssemblySave(m_originalData,&catalogs,error);m_filePath=source;
+    if(!prepared)return false;
+    for(auto& catalog:catalogs)if(!catalog.save(error))return false;
+    return true;
+}
+
+bool CMob::appendAssemblySaveFiles(const QMap<QString,ei::TechnicalModelCatalog>& catalogs,QVector<SMapSaveFile>* files,QString* error)
+{
+    for(auto it=catalogs.cbegin();it!=catalogs.cend();++it){
+        SMapSaveFile file;file.path=it.key();file.existed=it.value().sourceExisted();file.before=it.value().originalBytes();file.after=it.value().stagedBytes();
+        if(file.after.isEmpty()){if(error)*error=QString::fromUtf8("Каталог сборок не подготовлен: ")+file.path;return false;}
+        files->append(file);
+    }
+    return true;
 }

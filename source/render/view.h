@@ -253,7 +253,9 @@ public:
     void focusTravelArea(int exitIndex,bool remove);
     void cancelTravelGesture();
     void saveLand();
-    bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString(), const std::function<void()>& committed = {});
+    QStringList terrainAtlasInventoryDirectories(const QString& map) const;
+    bool saveMapFamily(QString* error = nullptr, const QString& backupRoot = QString(), const QVector<SMapSaveFile>& companions = {}, const std::function<void()>& committed = {});
+    bool saveMapCompanions(const QVector<SMapSaveFile>& files, QString* error, const QString& backupRoot = QString(), const std::function<void()>& committed = {}, bool forceTerrain = false);
     void saveLandAs();
     void saveModernDraftAs();
     bool buildValidatedLandscapeCandidate(QByteArray* data,
@@ -282,6 +284,7 @@ public:
     void saveActiveMob();
     void saveAllMob();
     bool saveMobDocument(CMob* mob, const QFileInfo& destination);
+    bool saveMobCohort(const QList<CMob*>& mobs,const QFileInfo& destination,QString* error,const std::function<void(CMob*,const QString&,int,int)>& progress = {});
     void unloadActiveMob();
     void openActiveMobEditParams();
     void openMobDiplomacyTable(CMob* mob);

@@ -168,7 +168,7 @@ private:
     void registerTravelMap();
     void createReverseTravel();
     void createPairedTravelRoute();
-    bool saveMapWithTravel(const QString& backupRoot = QString());
+    bool saveMapWithTravel(const QString& backupRoot = QString(), bool agentFamily = false);
     bool hasTravelChanges() const;
     bool flushTravelEditor();
     bool travelHistoryPending(bool redo) const;

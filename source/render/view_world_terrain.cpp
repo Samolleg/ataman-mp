@@ -665,7 +665,7 @@ bool CView::saveWorldTerrainMaps()
     diskCommitted=true;
     for(const auto& path:paths){const auto id=CWorldTerrainSession::key(path);const auto source=m_worldTerrainAtlasSources[id];
         ei::log(eLogInfo,retireTerrainAtlasAfterSave(source.archive,source.profile,path,
-            terrainAtlasMapDirectories(path,CTextureList::getInstance()->configuredResourceArchivePaths())));}
+            terrainAtlasInventoryDirectories(path)));}
 
     // Adopt the validated compact disk bindings and the new history.
     for(const auto& path:paths) {

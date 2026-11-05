@@ -627,8 +627,10 @@ QJsonObject CAiEditAdapter::save(MainWindow* w)
     if(busy(w))return ai::error("Editor is busy");
     const bool staleNavigation=navigationStale(w);
     auto* v=w->view();QScopedValueRollback<bool> permission(v->m_agentSaveAuthorized,true);
-    w->on_actionSave_landscape_MPR_triggered();
-    if(!v->m_pLand->isDirty()&&!v->hasDirtyWorldTerrain()&&!w->hasTravelChanges())v->saveAllMob();
+    w->flushCameraEditor();if(!w->flushTravelEditor())return ai::error("Travel editor did not accept its pending edit");
+    QString saveError;
+    const bool saved=w->hasTravelChanges()?w->saveMapWithTravel(QString(),true):v->saveMapFamily(&saveError);
+    if(!saved)return ai::error(saveError.isEmpty()?QString("Normal Save did not complete; changes remain in memory"):saveError);
     if(v->m_pLand->isDirty()||v->hasDirtyWorldTerrain()||w->hasTravelChanges())return ai::error("Normal Save did not complete; changes remain in memory");
     for(auto* mob:v->m_aMob)if(mob->isDirty())return ai::error("Normal MOB save did not complete; changes remain in memory");
     // Save retires history, but does not rebuild navigation. Retain the stale

@@ -1,3 +1,4 @@
+#include "res_write_audit.h"
 #include "process_edit_lock.h"
 #include "res_archive_index.h"
 #include "native_sha256.h"
@@ -487,7 +488,9 @@ bool CResArchiveTransaction::writeCandidate(const QString& destinationPath, QStr
     while(!staged.atEnd()){auto b=staged.read(4*1024*1024);
         if(b.isEmpty()||destination.write(b)!=b.size()){setError(error,"Cannot copy staged RES.");return false;}}
     if(!destination.flush()||!m_source.sourceIsCurrent(error)||(beforeCommit&&!beforeCommit()))return false;
+    const auto audit=beginResWriteAudit(destinationPath,knownResState(destinationPath).sha);
     if(!destination.commit()){setError(error,destination.errorString());return false;}
+    finishResWriteAudit(audit,expected,"streamed-transaction");
     if(resFileSha256(destinationPath,error)!=expected){setError(error,"Committed RES differs from the validated staging file.");return false;}
     return true;
 }
@@ -500,7 +503,7 @@ QByteArray resFileSha256(const QString& path, QString* error)
         if(system)native.addData(b);else portable.addData(b);}
     auto digest=system?native.result():portable.result();
     if(digest.isEmpty()&&system){f.close();if(!f.open(QIODevice::ReadOnly)||!portable.addData(&f))return {};digest=portable.result();}
-    return digest.toHex();
+    const auto result=digest.toHex();rememberResState(path,result,QFileInfo(f));return result;
 }
 
 bool replaceResFromFile(const QString& destination,const QString& candidate,const QByteArray& expected,QString* error)
@@ -511,7 +514,10 @@ bool replaceResFromFile(const QString& destination,const QString& candidate,cons
     if(!input.open(QIODevice::ReadOnly)||!output.open(QIODevice::WriteOnly))return false;
     while(!input.atEnd()){auto b=input.read(4*1024*1024);if(b.isEmpty()||output.write(b)!=b.size())return false;}
     if(resFileSha256(destination,error)!=expected){setError(error,"RES changed before atomic replacement.");return false;}
-    return output.commit()&&resFileSha256(destination,error)==wanted;
+    const auto audit=beginResWriteAudit(destination,expected);
+    if(!output.commit())return false;
+    finishResWriteAudit(audit,wanted,"atomic-copy-or-rollback");
+    return resFileSha256(destination,error)==wanted;
 }
 
 bool CResArchiveIndex::writeMemberReplacement(const QString& destinationPath,
@@ -599,7 +605,9 @@ bool CResArchiveIndex::writeMemberReplacement(const QString& destinationPath,
         }
     }
     if(!destination.flush() || !sourceIsCurrent(error) || (beforeCommit && !beforeCommit())) return false;
+    const auto audit=beginResWriteAudit(destinationPath,knownResState(destinationPath).sha);
     if(!destination.commit()) { setError(error, destination.errorString()); return false; }
+    finishResWriteAudit(audit,wanted,"streamed-member-replacement");
     if(resFileSha256(destinationPath,error)!=wanted) {
         setError(error, "Committed RES differs from staged replacement."); return false;
     }

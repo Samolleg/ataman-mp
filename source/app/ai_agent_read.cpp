@@ -203,6 +203,7 @@ QJsonObject CAiReadAdapter::context(MainWindow* w)
     const auto* profileOption=dynamic_cast<COptString*>(w->m_settings->opt(eOptSetResource,"resourceProfile"));
     return {{"version",ENDURANCE_VERSION},{"mode","read-only"},{"profile",profileOption?profileOption->value():(profile?profile->profileId:QString())},
         {"mpr",CLandscape::getInstance()->isMprLoad()?CLandscape::getInstance()->filePath().absoluteFilePath():QString()},{"mobs",mobs},
+        {"saveRecoveryWarnings",QJsonArray::fromStringList(qApp->property("mapSaveRecoveryWarnings").toStringList())},
         {"loadingAddMobs",w->backgroundMobLoading()},{"neighborLoadStage",v->property("neighborLoadPhase").toInt()},
         {"terrainDirty",model.isDirty()},{"worldTerrainDirty",v->hasDirtyWorldTerrain()},
         {"travelDirty",w->hasTravelChanges()},{"verticesX",model.vertexCountX()},{"verticesY",model.vertexCountY()},

@@ -39,7 +39,7 @@ void CView::compactTerrainAtlasRequested()
     QVector<QByteArray> pages;for(int i=0;i<int(source.mapInfo().textureCount);++i)pages<<payloads.value(names[i]);
     QByteArray semantic=source.memberPayload(STerrainSemanticFieldDocument::embeddedMemberName());
     if(semantic.isEmpty())semantic=payloads.value(STerrainSemanticFieldDocument::memberName(ns,map));
-    const auto dirs=terrainAtlasMapDirectories(map.absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths());
+    const auto dirs=terrainAtlasInventoryDirectories(map.absoluteFilePath());
     std::atomic_bool cancelled(false);STerrainAtlasCompactPlan plan;
     {
         QProgressDialog progress(tr("Подготовка компактного атласа…"),tr("Отмена"),0,0,this);
@@ -96,7 +96,7 @@ void CView::cleanTerrainPackRequested(){
     if(!m_pLand||!m_pLand->isMprLoad()||m_activeTerrainArchivePath.isEmpty()){warn(tr("Сначала откройте карту из Dejavu с HDPack_Terrain.res."));return;}
     const auto path=m_activeTerrainArchivePath;
     if(QFileInfo(path).fileName().compare("HDPack_Terrain.res",Qt::CaseInsensitive)){warn(tr("Очистка предназначена для HDPack_Terrain.res."));return;}
-    const auto dirs=terrainAtlasMapDirectories(m_pLand->filePath().absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths());
+    const auto dirs=terrainAtlasInventoryDirectories(m_pLand->filePath().absoluteFilePath());
     STerrainPackCleanupPlan plan;
     {QProgressDialog progress(tr("Проверка всех карт Dejavu и Base…"),QString(),0,0,this);
         progress.setCancelButton(nullptr);progress.setWindowModality(Qt::ApplicationModal);progress.show();

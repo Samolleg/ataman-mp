@@ -557,7 +557,7 @@ bool MainWindow::resolveTravelClose()
     discardCameraChanges();refreshTravelEditor();return true;
 }
 
-bool MainWindow::saveMapWithTravel(const QString& backupRoot)
+bool MainWindow::saveMapWithTravel(const QString& backupRoot,bool agentFamily)
 {
     flushCameraEditor();
     m_pView->cancelTravelGesture();
@@ -574,7 +574,7 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
     }
     if(files.isEmpty())return false;
     CMob* mob=m_pView->currentMob();QByteArray mobBytes;
-    if(mob && mob->isDirty()){
+    if(!agentFamily && mob && mob->isDirty()){
         CValidationReport report;QString saveClass;
         if(!mob->buildValidatedCandidate(&mobBytes,&report,&saveClass)){
             QMessageBox::warning(this,tr("MOB не сохранён"),report.toText());return false;}
@@ -582,6 +582,9 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         if(!checked.success){QMessageBox::warning(this,tr("MOB не сохранён"),checked.error);return false;}
         SMapSaveFile file;file.path=mob->filePath().absoluteFilePath();file.before=mob->originalData();file.after=mobBytes;files.append(file);
     }
+    QMap<QString,ei::TechnicalModelCatalog> catalogs;
+    if(mob&&!mobBytes.isEmpty()&&(!mob->prepareAssemblySave(mobBytes,&catalogs,&error)||!CMob::appendAssemblySaveFiles(catalogs,&files,&error))){
+        QMessageBox::warning(this,tr("MOB не сохранён"),error);return false;}
     // map.txt writes are ours, not external visual-resource publications. Remove
     // the watcher before commit so its queued notification cannot clear textures
     // still referenced by the current scene. Reindex without a GPU cache reset.
@@ -591,18 +594,17 @@ bool MainWindow::saveMapWithTravel(const QString& backupRoot)
         if(m_resourceBrowser)m_resourceBrowser->beginInternalPublication(file.path);
     }
     bool companionsSaved=false;
-    const bool saved=m_pView->saveMapCompanions(files,&error,backupRoot,[&](){
+    const auto checkpoint=[&](){
         for(int i=0;i<changed.size();++i)changed[i]->acceptCommittedSnapshot(committedSnapshots[i]);
         acceptCameraSaves(files);
-        if(mob && !mobBytes.isEmpty())mob->adoptCommittedBytes(mobBytes);
+        if(mob && !mobBytes.isEmpty()){mob->adoptCommittedBytes(mobBytes);mob->acceptAssemblySave();}
         companionsSaved=true;
-    });
+    };
+    const bool saved=agentFamily?m_pView->saveMapFamily(&error,backupRoot,files,checkpoint)
+        :m_pView->saveMapCompanions(files,&error,backupRoot,checkpoint);
     for(const auto& archive:travelArchives)
         if(m_resourceBrowser)m_resourceBrowser->finishInternalPublication(archive,companionsSaved,false);
-    QString assemblyError;
-    const bool assembliesSaved=!companionsSaved || !mob || mobBytes.isEmpty() || mob->saveAssemblyInstances(mob->filePath().absoluteFilePath(),&assemblyError);
-    if(!assembliesSaved) {mob->setDirty(true);error+=tr("\nMOB сохранён, но группировка сборок не записана: %1").arg(assemblyError);}
-    if(!saved || !assembliesSaved){
+    if(!saved){
         if(companionsSaved){
             refreshMapsBrowser();refreshTravelEditor();updateLoadedMapPanel();rebuildWindowTitle();
             error=tr("Переходы и сопутствующие данные уже сохранены. Последующий этап сохранения карты не завершён.\n%1").arg(error);

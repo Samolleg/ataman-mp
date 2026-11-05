@@ -2463,13 +2463,10 @@ bool CMob::buildCanvasCropCandidate(float offsetX, float offsetY,
     return true;
 }
 
-bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
+bool CMob::prepareSaveBytes(const QFileInfo& path,QByteArray* bytes,const SaveProgress& progress)
 {
-    CFileWriteActivity writing;
-    const QString filePath = path.filePath();
-    m_lastSaveError.clear();
-    try
-    {
+    const QString filePath=path.filePath();m_lastSaveError.clear();
+    try {
         QByteArray data;
         CValidationReport candidateReport;
         QString saveClass;
@@ -2501,6 +2498,20 @@ bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
         }
         ei::log(eLogInfo, QString("Staged MOB validation passed path:%1 size:%2 sha256:%3")
             .arg(filePath).arg(validation.size).arg(validation.sha256));
+
+        *bytes=data;return true;
+    }catch(const std::exception& ex){m_lastSaveError=QString("The MOB save failed before replacement.\n\n%1").arg(ex.what());return false;}
+}
+
+bool CMob::saveAs(const QFileInfo& path, const SaveProgress& progress)
+{
+    CFileWriteActivity writing;
+    const QString filePath = path.filePath();
+    m_lastSaveError.clear();
+    try
+    {
+        QByteArray data;
+        if(!prepareSaveBytes(path,&data,progress))return false;
 
         if(progress) progress("Creating the pre-save backup...", 2, 5);
         if(QFileInfo(filePath).exists())

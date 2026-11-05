@@ -10242,6 +10242,8 @@ void CView::unloadLand(bool promptForSave)
 
 void CView::saveLand()
 {
+    if(!m_mapCohortActive){QString error;saveMapCompanions({},&error,QString(),{},persistedModernDraftRequiresPublication());return;}
+
     finishSculptStroke();endTileBrushGroup();syncWorldTerrainActive();
     if(!m_worldTerrainSession.dirtyPaths().isEmpty())
     {
@@ -10695,8 +10697,7 @@ bool CView::saveChangedLandscapeDocument(const QFileInfo& destination,
     }
     bool workingExtension = workingAtlasAvailable;
     const STerrainAtlasProfile previousProfile=m_terrainAtlasProfile;
-    const auto inventoryDirs=terrainAtlasMapDirectories(destination.absoluteFilePath(),
-        CTextureList::getInstance()->configuredResourceArchivePaths());
+    const auto inventoryDirs=terrainAtlasInventoryDirectories(destination.absoluteFilePath());
     QProgressDialog progress(tr("Preparing canonical terrain patches..."), QString(),
                              0, workingExtension ? 8 : 4, this);
     progress.setWindowTitle(tr("Saving MPR"));
@@ -16254,7 +16255,7 @@ void CView::finalizeVirtualTerrainAtlas()
         return;
     }
     if(mprDestination.absoluteFilePath().compare(m_pLand->filePath().absoluteFilePath(),Qt::CaseInsensitive)==0)ei::log(eLogInfo,retireTerrainAtlasAfterSave(texturesPath,previousPublishedProfile,mprDestination.absoluteFilePath(),
-        terrainAtlasMapDirectories(mprDestination.absoluteFilePath(),CTextureList::getInstance()->configuredResourceArchivePaths())));
+        terrainAtlasInventoryDirectories(mprDestination.absoluteFilePath())));
     publishProgress.setLabelText(tr("Adopting the saved map in this session..."));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     if(!adoptCompleteTerrainBaseline(
@@ -17067,6 +17068,7 @@ void CView::saveMobAs()
 
 void CView::saveActiveMob()
 {
+
     if(nullptr == m_activeMob)
         return;
 
@@ -17076,6 +17078,7 @@ void CView::saveActiveMob()
 
 void CView::saveAllMob()
 {
+
     QList<CMob*> dirtyMobs;
     for(CMob* mob : m_aMob)
         if(mob && mob->isDirty())
@@ -17091,31 +17094,13 @@ void CView::saveAllMob()
     progress.setMinimumDuration(250);
     progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowContextHelpButtonHint
                              & ~Qt::WindowCloseButtonHint);
-    CMob* failedMob = nullptr;
-    for(int index = 0; index < dirtyMobs.size(); ++index)
-    {
-        CMob* mob = dirtyMobs.at(index);
-        const auto updateProgress = [&progress, index, mob](const QString& label,
-                                                            int value, int maximum)
-        {
-            Q_UNUSED(maximum);
-            progress.setLabelText(QString("%1: %2").arg(mob->mobName(), label));
-            progress.setValue(index * 5 + value);
-            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-        };
-        if(!mob->save(updateProgress))
-        {
-            failedMob = mob;
-            break;
-        }
-    }
-    progress.setValue(progress.maximum());
-    progress.close();
-    if(failedMob)
-        QMessageBox::critical(this, tr("Endurance safe save"),
-            failedMob->lastSaveError().isEmpty()
-                ? tr("The MOB could not be saved safely.")
-                : failedMob->lastSaveError());
+    QString error;
+    const auto updateProgress=[&progress](CMob* mob,const QString& label,int value,int maximum){Q_UNUSED(maximum);
+        progress.setLabelText(QString("%1: %2").arg(mob->mobName(),label));progress.setValue(value);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);};
+    const bool saved=saveMobCohort(dirtyMobs,{},&error,updateProgress);
+    progress.setValue(progress.maximum());progress.close();
+    if(!saved)QMessageBox::critical(this,tr("Endurance safe save"),error.isEmpty()?tr("The MOB could not be saved safely."):error);
     if(m_activeMob && !m_activeMob->isDirty())
         emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag, "");
 }
@@ -17141,14 +17126,13 @@ bool CView::saveMobDocument(CMob* mob, const QFileInfo& destination)
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     };
     const QString previousPath=mob->filePath().absoluteFilePath();
-    const bool saved = mob->saveAs(destination, updateProgress);
+    QString error;
+    const bool saved=saveMobCohort({mob},destination,&error,[&](CMob*,const QString& label,int value,int maximum){updateProgress(label,value,maximum);});
     progress.setValue(progress.maximum());
     progress.close();
     if(!saved)
         QMessageBox::critical(this, tr("Endurance safe save"),
-            mob->lastSaveError().isEmpty()
-                ? tr("The MOB could not be saved safely.")
-                : mob->lastSaveError());
+            error.isEmpty()?tr("The MOB could not be saved safely."):error);
     if(saved) emit mobDocumentSaved(previousPath, destination.absoluteFilePath());
     return saved;
 }

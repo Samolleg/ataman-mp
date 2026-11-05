@@ -4179,6 +4179,8 @@ int runHeadlessCommand(QApplication& app)
 }
 
 #include "agent_headless.h"
+#include "map_save_batch.h"
+#include <QtConcurrent>
 int main(int argc, char *argv[])
 {
     bool agentHeadless=false;
@@ -4317,6 +4319,22 @@ int main(int argc, char *argv[])
                     if(setup->isVisible())setup->reject();
         });
         smokeSetupDriver.start(1);
+    }
+    // Hashing and backup verification stay off the GUI thread. No pending
+    // journal means no changes to the ordinary save/startup workflow.
+    {
+        QFutureWatcher<QStringList> recovery;QEventLoop wait;
+        QObject::connect(&recovery,&QFutureWatcher<QStringList>::finished,&wait,&QEventLoop::quit);
+        const auto isolated=qEnvironmentVariable("EI_MAPPER_BACKUP_ROOT");
+        const auto store=isolated.isEmpty()?QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)).filePath("EI Mapper Endurance/backups"):isolated;
+        recovery.setFuture(QtConcurrent::run([&app,store,agentHeadless](){
+            return recoverMapSaveBatches(store,agentHeadless,[&app](const QString& question){
+                bool accepted=false;
+                QMetaObject::invokeMethod(&app,[&](){accepted=QMessageBox::question(nullptr,QObject::tr("Прерванное сохранение карты"),question,QMessageBox::Yes|QMessageBox::No,QMessageBox::No)==QMessageBox::Yes;},Qt::BlockingQueuedConnection);
+                return accepted;
+            });
+        }));
+        wait.exec();app.setProperty("mapSaveRecoveryWarnings",recovery.result());
     }
     MainWindow window;
     if(agentHeadless) {

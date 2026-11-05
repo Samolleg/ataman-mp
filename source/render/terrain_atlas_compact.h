@@ -8,7 +8,7 @@ class CResArchiveIndex;
 
 bool terrainAtlasPageLimit(int pages, QString* error);
 bool terrainAtlasHasHash(const QString& name);
-QStringList terrainAtlasMapDirectories(const QString& map, const QStringList& archives);
+QStringList terrainAtlasMapDirectories(const QString& map, const QStringList& archives, const QStringList& mapRoots = {});
 struct STerrainPackCleanupRow {
     QString name; int pages{0}; qint64 bytes{0}; bool removable{false}; QString usage;
 };

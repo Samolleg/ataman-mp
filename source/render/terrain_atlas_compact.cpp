@@ -18,6 +18,12 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include "res_archive_index.h"
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 QByteArray hash(const QByteArray& b){return QCryptographicHash::hash(b,QCryptographicHash::Sha256).toHex();}
@@ -25,17 +31,44 @@ QByteArray read(const QString& p){QFile f(p);return f.open(QIODevice::ReadOnly)?
 int u32(const QByteArray& b,int o){return int(qFromLittleEndian<quint32>(reinterpret_cast<const uchar*>(b.constData()+o)));}
 void put(QByteArray& b,int o,int n){qToLittleEndian<quint32>(quint32(n),reinterpret_cast<uchar*>(b.data()+o));}
 QString pageName(const QString& ns,int p){return QString("%1%2.mmp").arg(ns).arg(p,3,10,QLatin1Char('0'));}
-bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByteArray>* out,QMap<QString,QString>* namespaces=nullptr){
-    out->clear();if(dirs.isEmpty())return false;
-    for(const auto& d:dirs){QDir dir(d);if(!dir.exists()||!QFileInfo(d).isReadable())return false;
-        const auto files=dir.entryInfoList(QDir::Files|QDir::Hidden|QDir::System);
-        for(const auto& f:files){if(f.suffix().compare("mpr",Qt::CaseInsensitive))continue;
-            if(f.isSymLink())return false;
+bool inventory(const QStringList& dirs,const QString& current,QMap<QString,QByteArray>* out,QMap<QString,QString>* namespaces=nullptr,QString* reason=nullptr){
+    out->clear();if(namespaces)namespaces->clear();
+    const auto fail=[&](const QString& path){if(reason)*reason="Incomplete readable MPR inventory: "+path+"; old atlas retained.";return false;};
+    if(dirs.isEmpty())return fail("no map roots");
+    QStringList pending=dirs;QSet<QString> visited;
+    while(!pending.isEmpty()){
+        const auto path=pending.takeLast();QFileInfo info(path);QDir dir(path);
+        if(!info.isDir()||!info.isReadable()||info.isSymLink()||info.canonicalFilePath().isEmpty())return fail(path);
+        const auto key=info.canonicalFilePath().toCaseFolded();if(visited.contains(key))continue;visited.insert(key);
+        QFileInfoList entries;
+#ifdef Q_OS_WIN
+        // QFileInfo::isReadable alone cannot distinguish a denied directory
+        // enumeration from an empty Windows directory. Check every native
+        // enumeration result, including FindNextFile failure.
+        const auto pattern=QDir::toNativeSeparators(dir.filePath("*"));WIN32_FIND_DATAW found;
+        HANDLE listing=FindFirstFileW(reinterpret_cast<LPCWSTR>(pattern.utf16()),&found);
+        if(listing==INVALID_HANDLE_VALUE){if(GetLastError()!=ERROR_FILE_NOT_FOUND)return fail(path);}
+        else {
+            bool complete=true;
+            do {const auto name=QString::fromWCharArray(found.cFileName);if(name!="."&&name!="..")entries.append(QFileInfo(dir.filePath(name)));}
+            while(FindNextFileW(listing,&found));
+            complete=GetLastError()==ERROR_NO_MORE_FILES;FindClose(listing);if(!complete)return fail(path);
+        }
+#else
+        entries=dir.entryInfoList(QDir::AllEntries|QDir::NoDotAndDotDot|QDir::Hidden|QDir::System);
+#endif
+        for(const auto& f:entries){
+            if(f.isSymLink())return fail(f.absoluteFilePath());
+            if(f.isDir()){pending.append(f.absoluteFilePath());continue;}
+            if(f.suffix().compare("mpr",Qt::CaseInsensitive))continue;
             if(f.absoluteFilePath().compare(QFileInfo(current).absoluteFilePath(),Qt::CaseInsensitive)==0)continue;
-            const auto b=read(f.absoluteFilePath());CMprDocument doc;CValidationReport r;
-            if(b.isEmpty()||!doc.loadBytes(b,f.fileName(),&r)||r.hasErrors())return false;
-            out->insert(f.absoluteFilePath(),hash(b));
-            if(namespaces)namespaces->insert(f.absoluteFilePath(),doc.mapInfo().innerNamespace);}}
+            QFile file(f.absoluteFilePath());if(!file.open(QIODevice::ReadOnly))return fail(f.absoluteFilePath());
+            const auto bytes=file.readAll();CMprDocument doc;CValidationReport report;
+            if(file.error()!=QFileDevice::NoError||bytes.isEmpty()||!doc.loadBytes(bytes,f.fileName(),&report)||report.hasErrors())return fail(f.absoluteFilePath());
+            out->insert(f.absoluteFilePath(),hash(bytes));
+            if(namespaces)namespaces->insert(f.absoluteFilePath(),doc.mapInfo().innerNamespace);
+        }
+    }
     return true;
 }
 }
@@ -260,9 +293,10 @@ bool buildTerrainArchiveWithout(const CResArchiveDocument& source,const QStringL
 QStringList terrainCompactRetiredMembers(const CResArchiveDocument& archive,const STerrainAtlasProfile& profile,const QString& current,const QStringList& dirs,QMap<QString,QByteArray>* snapshots,QString* reason){
     const auto ns=profile.mprNamespace;
     if(!terrainAtlasHasHash(ns)){*reason="Original or unowned atlas retained.";return {};}
-    if(!inventory(dirs,current,snapshots)){*reason="Incomplete readable MPR inventory; old atlas retained.";return {};}
-    for(auto it=snapshots->cbegin();it!=snapshots->cend();++it){CMprDocument doc;doc.loadBytes(read(it.key()),it.key());
-        if(doc.mapInfo().innerNamespace.compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
+    QMap<QString,QString> namespaces;
+    if(!inventory(dirs,current,snapshots,&namespaces,reason))return {};
+    for(auto it=namespaces.cbegin();it!=namespaces.cend();++it){
+        if(it.value().compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
     QStringList names;QRegularExpression pages("^"+QRegularExpression::escape(ns)+"[0-9]{3}\\.mmp$",QRegularExpression::CaseInsensitiveOption);
     const QString semantic=STerrainSemanticFieldDocument::memberName(ns,QFileInfo(current));
     for(const auto& m:archive.members())if(pages.match(m.name).hasMatch()||m.name==CTerrainAtlasProfileStore::embeddedMemberName(ns)||m.name==semantic
@@ -273,9 +307,10 @@ QStringList terrainCompactRetiredMembers(const CResArchiveDocument& archive,cons
 QStringList terrainCompactRetiredMembers(const CResArchiveIndex& archive,const STerrainAtlasProfile& profile,const QString& current,const QStringList& dirs,QMap<QString,QByteArray>* snapshots,QString* reason){
     const auto ns=profile.mprNamespace;
     if(!terrainAtlasHasHash(ns)){*reason="Original or unowned atlas retained.";return {};}
-    if(!inventory(dirs,current,snapshots)){*reason="Incomplete readable MPR inventory; old atlas retained.";return {};}
-    for(auto it=snapshots->cbegin();it!=snapshots->cend();++it){CMprDocument doc;doc.loadBytes(read(it.key()),it.key());
-        if(doc.mapInfo().innerNamespace.compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
+    QMap<QString,QString> namespaces;
+    if(!inventory(dirs,current,snapshots,&namespaces,reason))return {};
+    for(auto it=namespaces.cbegin();it!=namespaces.cend();++it){
+        if(it.value().compare(ns,Qt::CaseInsensitive)==0){*reason="Namespace shared by another map; retained.";return {};}}
     QStringList names;QRegularExpression pages("^"+QRegularExpression::escape(ns)+"[0-9]{3}\\.mmp$",QRegularExpression::CaseInsensitiveOption);
     const QString semantic=STerrainSemanticFieldDocument::memberName(ns,QFileInfo(current));
     for(const auto& m:archive.members())if(pages.match(m.name).hasMatch()||m.name==CTerrainAtlasProfileStore::embeddedMemberName(ns)||m.name==semantic
@@ -375,8 +410,8 @@ bool terrainAtlasPageLimit(int pages,QString* error){
     if(error)*error=QString::fromUtf8("Атлас: %1 страниц; предел игры — 126. Сохранение отменено. Сожмите атлас или сократите число используемых вариантов/материалов.").arg(pages);
     return false;
 }
-QStringList terrainAtlasMapDirectories(const QString& map,const QStringList& archives){
-    QStringList dirs;const QFileInfo m(map);dirs<<m.absolutePath();
+QStringList terrainAtlasMapDirectories(const QString& map,const QStringList& archives,const QStringList& roots){
+    QStringList dirs=roots;const QFileInfo m(map);dirs<<m.absolutePath();
     QDir root=m.dir();root.cdUp();QDir mods=root;mods.cdUp();
     if(mods.dirName().compare("MODS",Qt::CaseInsensitive)==0){mods.cdUp();
         const auto base=mods.filePath("Base/Maps");
@@ -445,7 +480,7 @@ QString retireTerrainAtlasAfterSave(const QString& path,const STerrainAtlasProfi
     if(dirs.size()<2||!archive.open(path,&error))return "Incomplete inventory or archive; previous namespace retained.";
     const auto names=terrainCompactRetiredMembers(archive,profile,map,dirs,&snapshots,&reason);
     if(names.isEmpty())return reason;
-    CMprDocument current;if(!current.loadBytes(read(map),map)||current.mapInfo().innerNamespace.compare(profile.mprNamespace,Qt::CaseInsensitive)==0)return "Current map still uses namespace; retained.";
+    CValidationReport report;CMprDocument current;if(!current.loadBytes(read(map),map,&report)||report.hasErrors()||current.mapInfo().innerNamespace.compare(profile.mprNamespace,Qt::CaseInsensitive)==0)return "Current map still uses namespace; retained.";
     const auto mapHash=hash(read(map));
     SResPublishedMembersSaveRequest r;r.source=r.destination=QFileInfo(path);r.backupRootOverride=backup;
     auto result=commitStreamedResMembers(archive,r,names,{},[&](){return terrainCompactInventoryUnchanged(snapshots,dirs,map)&&hash(read(map))==mapHash;});
