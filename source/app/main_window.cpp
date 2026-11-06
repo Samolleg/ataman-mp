@@ -3496,25 +3496,28 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             || !m_openedMapZoneId.isEmpty();
         const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
         QVector<SMapCatalogEntry> nameMatches;
+        // Several zones share one MPR (for example bz1g/gz1g/cz1g).
+        // Resolve an explicit zone before considering a physical-path match.
+        if(!m_openedMapZoneId.isEmpty())
+            for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
+                if(entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
+                {
+                    m_mapTestEntry = entry;
+                    break;
+                }
         for(const SMapCatalogEntry& entry : m_mapCatalog.entries)
         {
-            if(!m_openedMapZoneId.isEmpty()
-               && entry.zoneId.compare(m_openedMapZoneId, Qt::CaseInsensitive) == 0)
-            {
-                m_mapTestEntry = entry;
+            if(!m_mapTestEntry.zoneId.isEmpty())
                 break;
-            }
             if(!allowCatalogInference)
                 continue;
             if(!entry.mprPath.isEmpty()
                && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
             {
-                if(m_workspaceIdentityKind == "world")
-                {
-                    CMob* primary = mapTestStagingMob();
-                    if(!primary || primary->filePath().absoluteFilePath().compare(
-                        QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
-                }
+                CMob* primary = mapTestStagingMob();
+                if(primary && primary->filePath().absoluteFilePath().compare(
+                    QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
+                if(!primary && m_workspaceIdentityKind == "world") continue;
                 m_mapTestEntry = entry;
                 break;
             }
