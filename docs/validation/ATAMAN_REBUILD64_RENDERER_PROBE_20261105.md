@@ -1,5 +1,7 @@
 # EI-REBUILD64-RENDERER-PROBE — этап 1, 2026-11-05
 
+> Обновление 2026-11-06: настоящий owned::Renderer запущен; актуальный результат, цифры и ограничения — в разделе «Этап 1Б». Ранние выводы ниже относятся к этапу 1 от 2026-11-05.
+
 ## Результат и решение
 
 **Частичный технический успех: общий upstream-декодер и шейдеры настоящего рельефа работают вне игры на аппаратном D3D11 через MSVC DLL, вызываемую MinGW 7.3. Полный production `owned::Renderer` вне игры не запущен.** Это два разных результата, их нельзя объединять в PASS полного Rebuild64.
@@ -13,7 +15,7 @@
 
 ## Полномочия, идентичность и сохранность
 
-Применено поручение владельца от 2026-11-05: переключатель OpenGL / Rebuild64 в будущем; текущий OpenGL и инструменты сохраняются. Разрешение Ilufus на использование описано **со слов владельца**; исследование не выдаёт его за отсутствующее, но письменный документ здесь не проверен. Публикации/поставки этой пробы нет.
+Применено поручение владельца от 2026-11-05: переключатель OpenGL / Rebuild64 в будущем; текущий OpenGL и инструменты сохраняются. **Актуализация этапа 1Б, 2026-11-06:** разрешение лично подтвердил автор Илья Руднев (Ilufus), автор renderer и основы Endurance; скриншот подтверждения находится у директора. Вопрос разрешения для этой работы закрыт. Публикации/поставки этой пробы нет.
 
 `AGENTS.md` прочитан с диска и проверен перед отчётом: SHA-256 `2A2F58EF34F63D6C5D67D165D0B809B046D0A519181119D22EA8FDD8781FE3B7`, tracked diff отсутствует. Прочитаны CONTRIBUTING, договоры данных/сборки, относящийся пункт ROADMAP и [этап 0](ATAMAN_REBUILD64_RENDERER_STUDY_20261105.md). Профильных навыков `evil-islands-modding` / `evil-islands-private-engine-reference` нет; неизвестные приватные источники не использовались.
 
@@ -149,9 +151,9 @@ MinGW в своём RAM-буфере меняет сектор **(7,5)**: 961 в
 
 По PE import table: Windows D3D11/D3DCompiler_47, ole32, bcrypt, Kernel32/UCRT; MSVC `MSVCP140.dll`, `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`; клиенту также нужен MinGW **libwinpthread-1.dll (52 224 B)**. Qt не нужен DLL/клиенту; он нужен только отдельному GL reference target. Необходимые runtime DLL использованы из установленного toolchain/system, не оформлены в проверенный redistributable package. Нет NGX/DLSS DLL/imports у успешного target. Игровые MPR/MOB/RES/MMP остаются внешними пользовательскими данными и в поставку не включаются. Объём ресурсов/SDK для **полного** Renderer этой пробой не установлен.
 
-Upstream `LICENSE.md` — **PolyForm Noncommercial 1.0.0**, `NOTICE.md` требует сохранить licence/required notices и credit **EID3D11 renderer by Ilufus**, обозначать модифицированные копии. Это не GPL/MIT и не свидетельство произвольного способа распространения объединённого Ataman. Перед передачей команде нужно зафиксировать **письменное разрешение автора** на точные ревизии, изменения, C-ABI-интеграцию и способ передачи; сейчас разрешение описано только со слов владельца, его письменные условия здесь не проверены. Это условие передачи не отменяет данное владельцем разрешение на настоящую локальную пробу.
+Upstream `LICENSE.md` — **PolyForm Noncommercial 1.0.0**, `NOTICE.md` требует сохранить licence/required notices и credit **EID3D11 renderer by Ilufus**, обозначать модифицированные копии. **Разрешение автора Ильи Руднева (Ilufus) лично подтверждено; скриншот у директора, вопрос разрешения закрыт решением этапа 1Б от 2026-11-06.** Прежнее требование повторно получать подтверждение к этой работе не применяется. Публичный текст лицензии и notices сохраняются; он не переименовывается в GPL/MIT.
 
-Изменённая embedded-поставка требует отдельно учесть права на изменения EIRebuild64; разрешение автора upstream автоматически не проверяет права всего игрового слоя. DLSS/NGX/NVIDIA SDK и runtime имеют **отдельные условия**: лицензия renderer на них не распространяется. У полного upstream host также отдельные FidelityFX/NVAPI/DXC dependencies. Даже если они выключены в UI, это не доказательство исключения из сборки/поставки. Полный licensing/distribution review не закрыт локальным compile/link.
+Игровые классы и приватные заголовки по границам задания не переносятся. DLSS/NGX/NVIDIA SDK и runtime имеют **отдельные условия**: разрешение на renderer их не заменяет. У полного upstream host также отдельные FidelityFX/NVAPI/DXC dependencies. Даже если они выключены в UI, это не доказательство исключения из сборки/поставки. Для технической пробы это не повод повторно открывать уже закрытый вопрос разрешения автора.
 
 ## Что требуется от автора и план этапа 2
 
@@ -181,3 +183,227 @@ OpenGL и все редакторские инструменты сохраня�
 Автоматическая проверка инструмента отклонила рекурсивное удаление собственного производного GL cache с причиной **`blocked by policy`**; весь отклонённый вызов не выполнялся. Кэш **оставлен**, статус плана `blocked_by_automatic_tool_review`: `W/gl-build/release/cache`, **269 файлов / 34 713 877 байт**. Обход отказа не выполнялся. Source/binaries/images/logs сохранены; постоянная установка и соседние work-задачи не затрагивались.
 
 Итоговый readback `W/verification.json`: **943** файла исходников/tests/VERSION/ei_maper.pro GL archive совпадают с архивом HEAD; в upstream archive-копии изменены только `Prototypes/shader-lab/lab_world.h/.cpp`, в embedded archive-копии — только `OwnedRenderer/Renderer.props` плюс собственные добавленные диагностические headers. Хеши сохранённых бинарников подтверждены. Собственных probe-процессов после завершения нет; `subst` пуст.
+
+## Этап 1Б — настоящий owned::Renderer, 2026-11-06
+
+**Вне игры работает настоящий `owned::Renderer`: MSVC x64 DLL успешно вызывается через C ABI из MinGW 7.3.** Получены zone1 DejaVu с настоящими материалами, водой/водопадами, небом, атмосферным туманом, светом на 12:40, тенями и статическими MOB-объектами. Штатный Terrain 2.0 тоже работает после подготовки его профиля. Это уже полный renderer orchestration, а не shader-lab. Кадры остаются **частичными по составу мира**: персонаж не реализован; один объект `stst8`, NID 742, отклонён валидатором.
+
+**Продолжать — да: можно начинать отдельный, первоначально неизменяемый вид QWidget/native HWND и переключатель OpenGL / Rebuild64.** Пригодность к непрерывной кисти пока не подтверждена: полное поколение до проверенного кадра — **median 206.562 мс / p95 327.643 мс, 50 замен**. Нужен частичный путь и явный контракт готовности поколения.
+
+### Границы, база и восстановление после прерывания
+
+Сверены AGENTS SHA-256 `2A2F58EF34F63D6C5D67D165D0B809B046D0A519181119D22EA8FDD8781FE3B7`, отчёт этапа 0 и существующий W/stage1b. При возобновлении HEAD маппера — `744e720e73a0a51b2638bc906a3c94d04e31d4b4` (280). Код маппера, версия, ROADMAP и чужие изменения не редактировались; состояние этой пробы хранится в отчёте и W/stage1b. Git получит только этот файл.
+
+Успех старого пустого кадра был проверен по exit/log/PNG. Прерванный shader producer не оставил завершённой таблицы `.bin/.res`; она **не объявляется собранной**. Окончательный DLL повторно проверен: `readiness-build.exit=0`, `material-client-build.exit=0`, `final-material-generation.exit=0`; initialize → пустой кадр → PNG → load_map(MPR,MOB) → обе камеры → замены → destroy. После каждого кадра мира идёт штатный `present()` в скрытый HWND, включая обслуживание ресурсов.
+
+База полного renderer — archive-копия **EIRebuild64 `origin/main` `81dbcdd29b41baeb346f167c6dfb511dff05f295`**, включая её `external/owned-renderer` и публичные E1-адаптеры. В ней уже есть типизированные E1World/E1Terrain/E1Scene, completed surfaces и retained scene. Upstream main `d17a6149e5b5d4c2d23873d18e037bc270269050` остаётся эталоном сравнения/дальнейшей синхронизации; prototype `00461a736e1a5768d8800ba6555c5aff3b0eb9` не выбран, поскольку его маленькая синтетическая сцена не заменяет мир zone1. Checkout владельца и read-only upstream не изменялись. Старый compile-label `eirebuild64-X64RUPD02-b1ffc736` в props не является SHA использованных исходников.
+
+Личное подтверждение разрешения автором Ильёй Рудневым (Ilufus) принято, скриншот находится у директора. **Вопрос разрешения закрыт.** LICENSE.md/PolyForm Noncommercial и авторство сохраняются. Разрешение автора renderer не заменяет условия NVIDIA/NGX/DLSS. Публикации/поставки этой пробы нет.
+
+### 68 символов и независимые поставщики хоста
+
+Ниже все **68 уникальных неразрешённых символов** из исходного link3. Полные demangled signatures и исходные linker-строки сохранены в `W/stage1b/symbols68.json` и `W/logs/host-link3-gy.log`. В таблице для читаемости приведены имена функций. Все они разрешены в итоговой DLL.
+
+| Символ | Поставщик в EIRebuild64 | Назначение для кадра | Решение в хосте |
+|---|---|---|---|
+| `E1CompleteVisualFrame` | `E1CompletedVisuals.cpp:123` | Завершённые immutable appearance/pose/visibility факты мира перед depth/colour. | наш host provider; независимые опубликованные render facts |
+| `bridge_critter_obstacles` | `E1AmbientEffects.cpp` | Препятствия для renderer-owned critters из retained entities. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_critter_perches` | `E1AmbientEffects.cpp` | Опоры/деревья для critters из retained scene и текстур дерева. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_ground_cover_footprints` | `E1AmbientEffects.cpp` | Опубликованные следы в snow/ground-cover; без симуляции они отсутствуют. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_ground_cover_objects` | `E1AmbientEffects.cpp` | Contact/cover stamps статических объектов. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_ground_cover_units` | `E1AmbientEffects.cpp` | Footprint/trail/detail факты units для ground cover. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_liquid_ripples` | `E1AmbientEffects.cpp` | Возмущения воды от опубликованных движения/габаритов; без движения wake отсутствует. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_live_wants_capture` | `Game/LiveObserver.cpp:388–389` | Запрос retail LiveObserver capture; наш capture принадлежит C ABI. | retail capture выключен; собственный readback C ABI |
+| `bridge_local_single_player_mission` | `E2LoadReveal.cpp:15` | Граница load-reveal: наличие игровой local mission. | независимый E2LoadReveal; local mission не объявлена |
+| `bridge_outer_frame_timing_matches` | `E2Diagnostics.cpp:96` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_outer_frame_timing_supported` | `E2Diagnostics.cpp:93` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_take_outer_frame_timing` | `E2Diagnostics.cpp:95` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `camp_inventory_clear` | `E4Camp.cpp:218` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_input` | `E4Camp.cpp:206` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_preview_specular_rgb` | `E4Camp.cpp:191` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_take_decoration` | `E4Camp.cpp:158` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_wheel` | `E4Camp.cpp:197` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `game_focus_swallow_activation` | `E3Input.cpp:98` | Игровой focus/input/camp dispatch; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `game_hud_editing` | `E3Input.cpp:90` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `game_hud_editor_available` | `E3Input.cpp:89` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `harness_enabled` | `E2Diagnostics.cpp:104` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `harness_on_travel_map` | `E2Diagnostics.cpp:110` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `harness_timed_out` | `E2Diagnostics.cpp:68` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `widescreen_interface_owned` | `E3Input.cpp:88` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_notice` | `E4Camp.cpp:182` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `figure_fallback_reason_name` | `E2Diagnostics.cpp:60` | Читаемое имя причины отказа geometry. | диагностика: независимые E2Diagnostics/E1Notices |
+| `harness_directory` | `E2Diagnostics.cpp:105` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `camp_inventory_blit` | `E4Camp.cpp:215` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `bridge_latest_profile` | `E2Diagnostics.cpp:87` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `camp_inventory_take_scroll_cost` | `E4Camp.cpp:156` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `harness_present_step` | `E2Diagnostics.cpp:107` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `res_cache_release_snapshot` | `E2Diagnostics.cpp:113` | Диагностика addon cache hook; hook не установлен. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_scene_renderer_timing_begin` | `E2Diagnostics.cpp:97` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `current_semantic_context` | `E2Host.cpp:57` | Классификация текущего host pass для учёта; game caller RVA отсутствует. | наш provider: frame context, без game RVA |
+| `bridge_shadow_reuse_diagnostics` | `E2Diagnostics.cpp:101` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `embedded_frame_scope_begin` | `E2Diagnostics.cpp:49` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_append_probe_event` | `E2Diagnostics.cpp:78` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_ground_cover_corpses` | `E1AmbientEffects.cpp` | Contact stamps тел из опубликованных render facts. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_live_capture` | `Game/LiveObserver.cpp:388–389` | Retail capture swapchain; не используется для снимков нашего хоста. | retail capture выключен; собственный readback C ABI |
+| `bridge_neighbour_diagnostic` | `E1Notices.cpp:18` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_post_engine_surface_material_group_scan` | `E2Diagnostics.cpp:90` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_release_ground_contacts` | `E1AmbientEffects.cpp` | Освобождение contact/perch/footprint caches при retirement. | типизированный E1AmbientEffects; retained scene/MPR |
+| `bridge_report_event` | `E2Diagnostics.cpp:71` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_request_hovered_shadow_capture` | `E2Diagnostics.cpp:89` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_scene_renderer_timing_end` | `E2Diagnostics.cpp:100` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_set_camp_input_overlay` | `E2Input.cpp:16` | Игровой focus/input/camp dispatch; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `bridge_set_load_reveal` | `E2LoadReveal.cpp:20` | Запрос загрузочного reveal; игровая пауза в самостоятельном хосте не вызывается. | независимый E2LoadReveal; local mission не объявлена |
+| `bridge_set_native_terrain_animation_owned` | `E2TerrainAnimation.cpp:8` | Признак renderer-owned terrain animation. | независимый E2TerrainAnimation |
+| `bridge_set_outer_frame_timing_active` | `E2Diagnostics.cpp:94` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `bridge_set_profile_enabled` | `E2Diagnostics.cpp:88` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика / retail command выключена |
+| `bridge_trace_input_focus` | `E2Diagnostics.cpp:82` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `camp_inventory_art_failed` | `E4Camp.cpp:162` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_cancel_drag` | `E4Camp.cpp:195` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_output` | `E4Camp.cpp:173` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_popup_failed` | `E4Camp.cpp:163` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_popup_published` | `E4Camp.cpp:164` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_retire_textures` | `E4Camp.cpp:157` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `camp_inventory_set_wide` | `E4Camp.cpp:181` | Camp UI/preview/layout/scroll state; в standalone редакторе отсутствует. | выключено в host policy; E4Camp/E3Input исключены |
+| `embedded_frame_scope_end` | `E2Diagnostics.cpp:52` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `embedded_perf06_report` | `E2Diagnostics.cpp:56` | Диагностическое время/счётчики; не поставщик геометрии. | диагностика: независимые E2Diagnostics/E1Notices |
+| `embedded_report_render_failure` | `E2Diagnostics.cpp:21` | Диагностика/trace/capture-request renderer; не игровой источник состояния. | диагностика: независимые E2Diagnostics/E1Notices |
+| `harness_complete` | `E2Diagnostics.cpp:108` | Retail harness request/timing/completion; не управляет нашим кадром. | диагностика: независимые E2Diagnostics/E1Notices |
+| `request_debug_lightning` | `E2Diagnostics.cpp:111` | Retail debug-команда молнии; не является обязательным world input. | диагностика / retail command выключена |
+| `set_background_mode` | `E2Host.cpp:63` | Политика игровой паузы в фоне; хост сам задаёт кадры и время. | игровая пауза выключена; clock принадлежит host |
+| `set_game_effect_distance` | `E2EffectDistance.cpp:10` | Ограничение дальности визуальных эффектов. | независимый E2EffectDistance |
+| `set_game_hud_editing` | `E3Input.cpp:91` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `widescreen_clear_hud_frame_sink` | `E3Input.cpp:107` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+| `widescreen_set_hud_frame_sink` | `E3Input.cpp:104` | Игровой HUD/UI ownership и frame sink; отсутствует в редакторе. | выключено в host policy; E4Camp/E3Input исключены |
+
+
+E1CompleteVisualFrame получает готовые immutable assemblies/poses из нашего retained-поставщика; игровых указателей в нём нет. Отключены camp inventory/preview, game HUD/portraits, game focus/input, retail capture и игровая фоновая пауза. E4Camp/E3Input и приватные классы не подключались; необходимые entry points возвращают явное отсутствие функции/невыполненный blit либо ничего не публикуют. Это политика редакторского хоста, а не эмуляция игры. Нет UI-кадра, который выдавался бы за игровой.
+
+Дополнительно реализован существующий типизированный `scene_core::Config::run`: хост передаёт свои renderer options в памяти. `ensure_host` сам не читает ini — полагаться только на файл настроек было ошибкой адаптера. Собственный ini находится в W/stage1b/profiles; настройки владельца не использовались.
+
+Диагностические заменители только в нашей копии: `embedded/Game/CorePerf.h` (пустые scopes/counters и диагностический frameNumber) и `embedded/Game/GameJournal.h` (Event в stderr собственного клиента, Count no-op). Это не игровые классы. GameJournal/CorePerf не являются источником камеры, времени, геометрии или world epoch.
+
+Минимальные reviewable изменения поставки:
+
+- `W/patches/001-typed-terrain-snapshot.patch` + `001-rationale.md`: E1Terrain получает готовый проверенный TerrainCpuAsset, новое поколение и существующий prepared-resource путь. Алгоритмы renderer не заменены. Объявление ingress находится в собственном host adapter.
+- `W/patches/002-function-level-linking.patch` + rationale: build-only `/Gy` для `/OPT:REF`, чтобы не подтягивать неиспользуемые game hook installers. Изменение возникло на этапе 1.
+
+Остальная реализация — собственные `W/stage1b/host.cpp`, `terrain.inc`, `snapshots.inc`, `host_providers.cpp`, `api.h`, `client.cpp`, `W/probe1b.vcxproj`. В Source renderer алгоритмических правок нет. Ничего из этого не добавляется в Git маппера.
+
+### Сборка, C ABI и скрытый GPU-хост
+
+MSVC v143/VS2022 BuildTools, x64, `/MD`, C++17; MinGW GCC **7.3.0** из того же Qt kit, что маппер. Команды сохранены в `W/stage1b/build-probe1b.ps1`; сборка использует `C:/GOGGAM~1/maped/EI-MAP~2`, без subst/junction. DLSS SDK использован только read-only для обязательных headers/static library существующего target; штатной no-NGX сборочной опции в этой базе нет. Большой переделки backend ради удаления SDK не делалось.
+
+Запуск: `run.py final-material-generation map village bench`, CREATE_NO_WINDOW, TEMP/TMP и EI_RENDERER_DEBUG_DIR в W. D3D11 HARDWARE, **NVIDIA GeForce RTX 4070 SUPER**, FL 11.0. WARP не нужен. Используется `adopt_host_device` → `ensure_host`; `NgxBackend::initialize` не вызывается, NGX/SL/DLSS runtime DLL не требуются этому запуску. Обычный `ensure()` с NGX и AppData-путём не использовался.
+
+ABI v2: `probe1b_version/create/load_map/set_camera/set_time_of_day/frame/capture_png/get_terrain_snapshot/replace_terrain_snapshot/get_statistics/destroy`; дополнительные probe-only `frame_status`, `set_features`, `load_objects`, `retire_gpu_world`, `debug_cpu`. `load_map` загружает оба MPR и MOB; features управляют последовательностью показа. `sizeof(create_info)=80` подтверждён обеими сторонами. Проверялся один create/destroy на процесс с одной активной сессией; многократная смена документов/recreate внутри одной DLL ещё не принята. Буферы принадлежат вызывающему коду, handle освобождает DLL; Qt/STL/исключения и C++ allocations через границу не передаются. Ошибки — HRESULT и фиксированный error record, для snapshot также 20–23; `E_PENDING` отделяет незавершённую подготовку.
+
+Окно WS_POPUP (-32000,-32000), WS_EX_NOACTIVATE/TOOLWINDOW, без Show/активации; в последнем логе `window_visible=0`. `present()` нужен и для offscreen-потребителя: он запускает tile-family preparation, trim и bookkeeping. Строка renderer `shader_preparation ... window=shown` означает progress draw/Present в уже предоставленный **скрытый** swapchain; соответствующий код не вызывает ShowWindow. Отдельных видимых окон, computer-use, desktop screenshots, игры, EIRebuild и установленного маппера не было.
+
+В итоговой DLL нет shader-lab object files/functions. Только плоский snapshot wire format первоначально переиспользовал ту же схему; теперь определения находятся в stage1b/api.h с собственными именами.
+
+### Настоящие данные zone1 и полнота кадра
+
+PZ читался напрямую, без записи/ремонта. Явные loose roots Maps/Res DejaVu и Base; упорядоченные figure, redress и texture chains из профиля, включая HDPack_Terrain.res, с archive_kinds. Те же mounts переданы resource runtime через `owned_resource_runtime_adopt_mounts`, без обнаружения настроек игры. Необходимые redress archives устранили 9 первоначальных missing-texture ошибок.
+
+MPR: 11×9 секторов, 352×288 м, 19 основных atlas pages, два отсутствующих необязательных long-atlas слота сохраняются отсутствующими. Никакой подменной текстуры не создано. Реальная выбранная цепочка даёт смесь страниц 1024/2048; размер из заголовка MPR не подменяет размер загруженного MMP.
+
+MOB decoder дал **1809** visual/static/lever записей: families 53 — 1106, 54 — 625, 55 — 46, 60 — 32. Загружены **106 моделей, 74 текстуры, asset failures 0**. Собственная render-only политика пропускает типизированные исходные позы через общий `prepare_retained_static_candidate`, не ограничиваясь игровым static-admission gate 53/55. Семейства/записи не переименовываются, скрипты не запускаются. Опубликованы **1808** настоящих rigid assemblies; NID **742 / stst8 / family 54 / node 4** отклонён с `figure_structure`. Проверка не обходилась и заглушка не рисовалась.
+
+| Часть | Проверенный результат |
+|---|---|
+| Рельеф/материалы | MPR geometry, реальные MMP и renderer materials; Terrain 2.0 после штатной подготовки профиля |
+| Вода/водопады | Успешный transparent pass в обеих камерах; видны море/реки и водопады, включая procedural-fall геометрию из MPR |
+| Небо/туман/свет | WorldEnvironment 12:40, Gipat, ясная погода; RGB из LightsGipat.ini; направление солнца в том же публичном часовом соглашении, что GL |
+| Тени | Включены sun/far/point-shadow settings; работает полный E1RunOwnedVisualFrame и его depth/colour путь; дневные тени видны на итоговых кадрах |
+| Дома/ограда/деревья | Настоящие FIG/BON/MMP assemblies и исходные MOB poses; оба ракурса |
+| Персонаж | Не реализован: текущий loader выделяет static/lever источники, отдельный unit appearance/animation producer не написан |
+
+Поза объектов, terrain layer shifts и tile animation phases зафиксированы. Часы окружения задаются хостом; игра/симуляция/NPC AI не запускаются. Нет игровой HUD, соседних карт, точек входа как editor overlays и полной реконструкции игрового состояния. Material classes JSON и Terrain 2.0 mask resources не упакованы: renderer честно сообщает штатные defaults/bilinear fallback. Это не приёмка полного визуального совпадения с установленным EIRebuild64.
+
+Семейства Terrain 2.0 подготовлены из реального `ei_atlas_profile_zone1_9f571c20fa04_c444762f8d84493c.json`: в логе ready 25344/25344 transition tiles, 21 plain materials, 2 liquid-bed families; 4816 profile corners, 48 unassigned. Промежуточный пурпурный marker был следствием отсутствующего в раннем адаптере Present/подготовки данных, а не доказательством неисправности теней. Итоговые опубликованные пары не содержат этого маркера.
+
+### Парные изображения и честная готовность
+
+Во время продолжения обнаружено изменение zone1.mob в **2026-11-06 01:02:02**, после старых GL captures. Поэтому только GL-снимки пересняты тем же изолированным capture target из archive `761f52765835aaf1922d8a9ce24e7f1270655dc3` (279); код/сборка владельца не запускались. 280 относится к save integrity и не использован вместо графического эталона. Оба новых GL процесса exit 0, 2012 узлов, effective_hour 12.6667. **Полная готовность всех unit appearances в GL снова TIMEOUT 45 s (`prepared=0`)**, PNG сохранены; это не PASS полного GL мира.
+
+Одинаковые 1280×720, VFOV 45°, near/far 1/2000, Z-up:
+
+- Деревня: eye (240,110,175), target (240,171,10).
+- Вдоль берега: eye (90,22,52), target (90,140,6).
+
+Пары (слева GL, справа настоящий renderer Terrain 2.0), все пути относительно W:
+
+- `stage1b/images/zone1-pair-village-1b.png`
+- `stage1b/images/zone1-pair-coast-1b.png`
+- Исходные renderer PNG: `stage1b/images/zone1-owned-stage4-village.png`, `...-coast.png`.
+- Этапы показа: `zone1-owned-stage0..2-{village,coast}.png` — terrain → water → environment; `stage4` — итог с MOB и Terrain 2.0. Вариант stage3/terrain_blend=0 для берега не принят (см. ниже); старый PNG с marker перенесён в checkpoints как stale/rejected.
+- `stage1b/images/empty-owned-renderer-final.png` — самый ранний успешно снятый пустой кадр текущего ABI.
+
+Рендер может завершить GPU readback до готовности производных material tables. В этой пробе MinGW дополнительно вызывает `frame_status` и повторяет кадр при **реальном shader diagnostic marker** (без изменения пикселей, лимит 30 s). За итоговый прогон было 27 успешных ожиданий / 52 дополнительных кадров. Это проверка конкретной zone1, **не универсальный production readiness API**; нужен явный готовый generation token. Методика предотвращает выдачу переходного пурпурного кадра за полный. QA, размеры, SHA и pixel counts — `image-verification.json`.
+
+В предыдущем исследовательском прогоне `final-ready-generation` было отдельное **FAIL/TIMEOUT**, не скрытое exit 0 общего исследовательского клиента: stage3/берег с `terrain_blend=0` не стал пригоден к показу за 30 s (413349 marker pixels, 1872 retries, E_PENDING). Клиент продолжил независимый штатный вариант Terrain 2.0 (`terrain_blend=1`): обе его камеры приняты, marker pixels **0**, и все 50 измеренных замен дошли до принятого кадра. Готовый вид и замеры относятся именно к нему. Отключение blending в этой комбинации E1/host inputs пока не подтверждено; это не объявляется исправленным. Старый stage3-coast файл не переиспользован как новый успешный результат. В окончательном `final-material-generation` этот уже известный нерабочий вспомогательный вариант пропущен; весь итоговый кадр и 50 замен используют Terrain 2.0.
+
+### Полная замена поколения и память
+
+`get_terrain_snapshot` вернул **1 266 452 B** в caller-owned память. На секторе **(7,5)** изменены **961** внутренних вершины, плавный подъём с пиком **+6 м**; один tile frame/material reference **810 → 788** в той же atlas page: **Grass / Common → Grass / Dark**. Разные семьи подтверждены CPU-декодером и тем же atlas profile (`material-audit.log`): IDs 2142727678 → 1974896831. После первой замены обратное чтение всего снимка через C ABI совпало побайтно (`roundtrip_snapshot=exact`). Ранний вариант 810→805 оказался той же семьёй Grass/Common и не использован как итог проверки материала. Меняется настоящее поле tile_index; переназначение page/topology этой C-схемой пока не разрешено. Каждый новый снимок имеет большее поколение, целиком копируется/валидируется и передаётся E1 ingress. MPR/MOB/RES на диске не сохранялись.
+
+Замер: один warm replacement, затем 50 чередований baseline/edited; QPC от вызова replace до **проверенного нового кадра**, включая D3D11 readback, readiness retries и Present/bookkeeping. Включены полный renderer, Terrain 2.0, вода, окружение, тени и MOB. Это уже не лабораторные 546 мс.
+
+| Метрика | Итог |
+|---|---:|
+| Полная замена: median / p95 (nearest-rank), N=50 | **206.562 / 327.643 мс** |
+| Private Bytes перед / после 50 | 1501.215 / 1511.863 МиБ |
+| Рост Private Bytes после 50 | **+10.648 МиБ** |
+| После ≥1880 дополнительных кадров и ≥30 s | 1440.453 МиБ, к исходному **-60.762 МиБ** |
+| После явного E1 world retirement и renderer frame begin | 773.625 МиБ |
+| DXGI local VRAM перед / после 50 / после ожидания | 1023.344 / 1029.969 / 985.574 МиБ |
+| 30 обычных кадров: median / p95 | 13.191 / 53.382 мс |
+| Синхронный capture/readiness/Present FPS по median | **75.81** |
+
+Output BGRA8/RGBA8 1280×720 — **3.516 МиБ**; CPU pixel buffer и временный staging readback имеют такой же объём каждый. В таблице DXGI приведена память всей сцены/кэшей, а не только output. Поле `targetsBytes=0` в сырой статистике не реализовано и **не означает нулевую память кадра**. FPS включает диагностический readback и ожидания; это не обещание FPS видимого QWidget. Сырые данные: `snapshot-latencies.csv`, `benchmark.json`, `retirement.json`, каноническая сводка `measurements-final.json`, `final-audit.json`.
+
+До/после: `stage1b/images/terrain-edit-pair-1b.png` и `terrain-edit-crop-1b.png`; оригиналы `zone1-owned-before.png`, `zone1-owned-edit-after.png`. Static MOB objects сохраняют опубликованные исходные позы; автоматическая перестановка объектов на изменённую землю не проверялась.
+
+**Разбор старого роста памяти.** Ранний полный хост без Present удерживал сотни МиБ, даже после 1880 кадров; его цифры сохранены как `before-present-*` и не являются итогом. Пропущен был штатный trim/preparation path. После исправления финальные числа выше показывают освобождение поколений при обычном обслуживании; необратимая утечка из прежних +289/+110 МиБ не следует.
+
+Отдельно повторена именно старая shader-lab DLL на **100** заменах: после 50 Private Bytes **860.496 МиБ**, после 100 **965.648 МиБ**; ещё 150 кадров/30 s — **824.273 МиБ**; после destroy **270.563 МиБ**, после FreeLibrary/2 s **15.145 МиБ** против **1.094 МиБ** до LoadLibrary. Освобождение основной памяти согласуется с владением ресурсами/кэшами DLL/драйвера и отложенным освобождением; безвозвратная утечка процесса не доказана. Остаток не нулевой; неограниченный soak/heap audit этим не заменён. Лог `lab-memory100.log`, 100 строк `lab-memory-latencies.csv`; эта лаборатория использовалась **только для диагностики старых чисел**, не для финальных картинок/таймингов полного renderer.
+
+### Частичное обновление и вопросы Илье
+
+В текущем E1 seam произвольное изменение base height/UV/material требует новой immutable TerrainCpuAsset. Уже есть отдельные `E1PublishTerrainSectors` (phases/layer_z), layer shifts в OwnedTerrainGeometryValues и GPU prepared parts с ключами sector/material/subpart/LOD. Это полезные механизмы, но **готового editor API для произвольного base-sector/atlas-page update не подтверждено**. Сдвиг слоя воды не является заменой кисти базовой земли.
+
+Для 30–60 мс нужен per-sector revision/COW и сохранение неизменённых prepared handles: пересчитать dirty sector + halo нормалей/стыков, обновить его GPU ranges и tile/class/height pages, адресно инвалидировать Terrain 2.0/тени/воду. Не перечитывать архивы, не пересоздавать все atlases, объединять частые mouse moves; держать прежний согласованный кадр до готовности нового. Скорость такого пути ещё не измерена. Полную публикацию на каждое движение кисти начинать рано.
+
+Точечные вопросы автору (ответа не ожидали, доступная работа доведена до результата):
+
+1. **E1Terrain.cpp / E1PublishTerrainSource и patch 001:** можно ли принять типизированный completed CPU snapshot ingress и какой контракт sector/material revision нужен для частичной замены вместо целого TerrainCpuAsset? Какие normal/LOD/liquid dependency halos обязательны?
+2. **owned_terrain_front_end.h::OwnedTerrainPreparedResources, renderer_native_queue.cpp::trim_native_mesh_cache/retire_native_source_values:** какой поддерживаемый per-generation/sector retirement путь сохраняет статические объекты и shaders? Нужен ли отдельный offscreen end-frame/housekeeping вместо обязательного Present скрытого swapchain? После правильного Present финальный рост памяти не остаётся прежним сотням МиБ.
+3. **renderer_frame.cpp::present_frame, prestart_terrain_tile_families, renderer_terrain.cpp/renderer_terrain2_cache.cpp:** как получить явный токен «все производные данные данного поколения пригодны к показу»? RGB marker polling — только приём пробы; QWidget не должен показывать промежуточные marker frames.
+4. **retained_static_submission.cpp::prepare_retained_static_candidate:** почему `stst8`, NID 742/family 54/node 4, нарушает figure_structure? Как штатно описать этот узел (включая возможный недrawable/service node), не ослабляя валидатор и не теряя целый объект?
+5. **owned_asset_loader.cpp::parse_mob_document, E1Scene/E1FigureSources:** какой открытый typed producer рекомендуется для одного unit из MOB: appearance/body parts/material composition + idle ANM/ADB/completed pose? Игровые классы и симуляция в редактор не переносятся.
+6. **OwnedRenderer.vcxproj/DlssSdk.props, scene_core::Config, Tools/shader_embed.cpp:** нужен поддерживаемый standalone MSVC target с optional NGX/SL и конечной shader-table `.res`, documented Config/mounts/end-frame contract. Сейчас game-free запуск уже доказан, но build SDK и длительный runtime FXC остаются неудобными.
+7. **renderer_terrain.cpp::apply_terrain_tile_blend/update_native_terrain_constants, scene_core::Config:** почему `terrain_blend=0` в береговом E1-кадре оставляет marker, тогда как `terrain_blend=1` и подготовленный профиль работают? Каков поддерживаемый контракт выключения и инвалидирования уже начатых Terrain 2.0 jobs/tables? Гипотеза — несогласованное включение rows/table при смене option; причина ещё не установлена.
+
+Для доказанного кадра автору **не требуется возвращать game.exe, хуки или приватные классы**. Его изменения/согласование API желательны для production упаковки, readiness и быстрого редактирования; разрешение на код не является открытым вопросом.
+
+### Поставка, воспроизведение и сохранность
+
+Проверенный DLL **14,715,392 B** (SHA-256 `23665c987767da753587983b30cc1d69d423b867daeaa061604854953e30b1c4`), MinGW client **605,225 B** (`736bd57dfbe6f1285387b33ec15b4b1712acb4b268242197ce7601a15f47a578`). Вместе **14.611 МиБ**, плюс MinGW libwinpthread-1.dll 52 224 B, MSVC 14 runtime и штатные Windows D3D11/D3DCompiler_47/WIC/COM библиотеки. NGX/DLSS runtime imports в этом пути отсутствуют; NVIDIA SDK статически использован при линковке по read-only пути и требует отдельного учёта условий при будущей поставке.
+
+Отдельных HLSL-файлов shader-lab этот target не читает: shader sources уже в DLL, при отсутствии встроенной таблицы компилируются штатно. В последнем запуске **272/272 shader programs, failed 0, 108241 мс** подготовки; это заметная startup-задержка. Прерванную `.bin/.res` нельзя включать в пакет. Нужна завершённая штатная таблица для следующего этапа. Ресурсы PZ/MPR/MOB/RES остаются внешними, не копируются в пакет. Дополнительные renderer material/mask assets и их exact deployment layout надо закрепить при упаковке; текущие fallbacks названы выше.
+
+`W/cleanup-plan.json` обновлён. Сырых рабочих копий MPR/MOB/RES не создавалось. Источники и бинарники полного хоста, patches, конфигурация, таблица символов, логи и PNG оставлены в W. Старый производный GL cache остаётся: предыдущая автоматическая проверка удаления ответила «blocked by policy»; обхода или повторной попытки удаления другим способом не было. Ни PZ, ни installation `artifacts/EI-Mapper-Ataman-2-first-test`, ни AppData/ProgramData/registry владельца не записывались. Аккаунты/Git config не менялись; push отсутствует; subst в конце пуст.
+
+### План этапа 2: окно и переключатель
+
+Начать можно с **отдельного read-only Rebuild64 вида**: один собственный QWidget с native HWND, DLL load/unload/resize/device-loss, копия камеры и согласованный snapshot карты. OpenGL продолжает обслуживать существующие инструменты; editable mode требует отдельного рубежа частичного обновления, готовности и проверки Undo/Redo. Эта проба сама не изменяет код маппера и не занимает номер.
+
+Предполагаемые файлы следующего этапа (в этом задании не менялись):
+
+- Новые `source/render/rebuild64_viewport_widget.{h,cpp}`, `rebuild64_backend_client.{h,cpp}`, flat ABI header/renderer-backend contract.
+- `source/app/main_window.{h,cpp,ui}`, `main_window_world.cpp`: действие OpenGL / Rebuild64, lifetime активного документа и native child.
+- `source/render/view.{h,cpp}`, `camera.{h,cpp}`, `landscape.{h,cpp}`: камера и immutable terrain generations; GL overlays/picking сохраняют текущего владельца.
+- `source/resources/resourcemanager.*`, `source/mob/mob.*`: точный snapshot mounts, статических transforms/appearances, source identities; Save-путь 280 не используется как канал обновления renderer.
+- `source/app/settings*`, `options.*`, `ei_maper.pro`: renderer preference и сборочная проводка; meaningful ABI/lifetime/generation checks при реализации.
+
+Существенные риски: Qt/MinGW ↔ MSVC lifetime и threading; HWND/DPI/resize, device loss; суммарная VRAM GL+D3D; ожидание CPU/GPU derivative jobs без marker frames; чистое retirement/reload документа и DLL; согласованность материалов/поколений, grounded objects; неподдержанный stst8, unit appearance/animation и недостающие renderer-data assets. Задача редакторской кисти 30–60 мс остаётся отдельным проверяемым пунктом, а успешный внешний кадр — основание продолжать, не её приёмка.
