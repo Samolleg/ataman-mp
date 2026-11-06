@@ -5,7 +5,7 @@ int eir_error(EirError* out,int rc,const probe1b_error& in) noexcept {
 int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) noexcept {
  if(result)*result=nullptr;
  probe1b_error e{};
- if(!in||!result||in->size!=sizeof(*in)||in->abi!=EIR_ABI||!in->window||!in->scratch_path||!in->game_data_path||in->mount_count>4096||!in->mounts)
+ if(!in||!result||in->size!=sizeof(*in)||in->abi!=EIR_ABI||!in->window||!in->scratch_path||!in->game_data_path||!in->neighbour_layout_path||in->mount_count>4096||!in->mounts)
   return eir_error(out,fail(&e,E_INVALIDARG,"invalid renderer C ABI create"),e);
  return eir_error(out,guarded(&e,[&]{
   std::vector<std::wstring> roots,archives;std::vector<uint8_t> kinds;
@@ -16,7 +16,7 @@ int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) no
   // it contains no maps and cannot shadow a real resource.
   roots.push_back(std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Maps");
   std::vector<const wchar_t*> rootPointers,archivePointers;for(const auto& p:roots)rootPointers.push_back(p.c_str());for(const auto& p:archives)archivePointers.push_back(p.c_str());
-  const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=scratch+L"/layouts.json";
+  const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
   const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
   auto& session=*static_cast<Session*>(*result);session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
@@ -29,6 +29,8 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   return eir_error(out,fail(&e,E_INVALIDARG,"invalid memory document"),e);
  return eir_error(out,guarded(&e,[&]{
   auto& s=*static_cast<Session*>(handle);
+  owned::neighbour_client_stop();
+  OwnedRender::RetireTerrainPlacement(&s);
   HRESULT hr=s.renderer.retire_embedded_world();if(FAILED(hr))return fail(&e,hr,"retire previous world");
   for(const auto id:s.atlasIds)if(id)s.renderer.retire_surface(id);
   OwnedRender::E1Scene().Retire(&s,s.world);OwnedRender::E1RetireTerrain(&s);OwnedRender::E1RetireWorld(&s);owned::embedded_sky().detach(&s);
@@ -51,7 +53,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   std::fprintf(stderr,"TERRAIN_SOURCE pages=%zu/%zu swamp_side=%u %s\n",pageCount,terrain->pages.size(),terrain->swamp_frame_side,swamp.c_str());s.terrain=terrain;s.baseline=terrain;
   if(!OwnedRender::E1PublishTerrainSnapshot(&s,s.world,s.generation,terrain))return fail(&e,E_FAIL,"publish in-memory terrain");
   std::string why;if(!upload_atlases(s,why))return fail(&e,E_FAIL,why.c_str());
-  auto combined=std::make_shared<owned::OwnedMapSnapshot>();combined->generation=s.world;combined->terrain=terrain;
+  auto combined=std::make_shared<owned::OwnedMapSnapshot>();combined->generation=s.world;combined->terrain=terrain;combined->terrain_resource=in->terrain_name;
   auto terrainBytes=std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t*>(in->terrain.data),static_cast<const uint8_t*>(in->terrain.data)+in->terrain.bytes);
   for(uint32_t i=0;i<in->mob_count;++i){
    const auto span=in->mobs[i];if(!span.data||!span.bytes||span.bytes>UINT32_MAX)return fail(&e,E_INVALIDARG,"invalid memory MOB span");
@@ -65,6 +67,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
    combined->models.insert(loaded->models.begin(),loaded->models.end());combined->textures.insert(loaded->textures.begin(),loaded->textures.end());combined->failures.insert(combined->failures.end(),loaded->failures.begin(),loaded->failures.end());
   }
   s.map=combined;
+  OwnedRender::PublishTerrainPlacement(&s,identity());
   auto& membership=OwnedRender::E1Scene();membership.Begin(&s,s.world);auto& scene=membership.Scene();auto transaction=scene.begin_source(owned::MobSourceRole::main,in->terrain_name,"ataman-memory.mob");scene.record_source(transaction,"ataman-memory.mob");
   for(const auto& object:combined->objects)scene.record_admission(transaction,object.nid,object.family,int32_t(object.nid));
   if(!scene.finish_source(transaction,true,true,why)||!scene.publish_source(transaction,combined))return fail(&e,E_FAIL,"in-memory visual scene publication rejected");
@@ -93,6 +96,12 @@ int32_t EIR_CALL host_camera(void* h,const EirCamera* camera,EirError* out) noex
   for(float n:camera->world_to_clip)if(!std::isfinite(n))return fail(&e,E_INVALIDARG,"nonfinite camera");
   if(camera->point_light_count>EIR_MAX_POINT_LIGHTS)return fail(&e,E_INVALIDARG,"point light count");
   if(!std::isfinite(camera->hour))return fail(&e,E_INVALIDARG,"nonfinite hour");
+  const bool requested=camera->neighbours_visible!=0;
+  if(requested!=s.neighboursRequested){
+   s.neighboursRequested=requested;owned::scene_core::Config config;owned::scene_core::ConfigOption option;
+   option.key="neighbour_maps";option.type=uint8_t(owned::RendererOptionType::boolean);option.boolean_value=requested&&s.neighboursConfigured;
+   config.options.push_back(option);config.run(s.renderer);
+  }
   std::copy(camera->world_to_clip,camera->world_to_clip+16,s.clip.begin());s.explicitClip=true;s.frameCamera=*camera;
   std::copy(camera->eye,camera->eye+3,s.camera.eye);std::copy(camera->target,camera->target+3,s.camera.target);s.hour=camera->hour;return 0;
  }),e);
@@ -112,6 +121,10 @@ int32_t EIR_CALL host_frame(void* h,EirStatistics* stats,EirError* out) noexcept
   const auto start=std::chrono::steady_clock::now();const int rc=map_frame(s,&e);if(rc)return rc;
   probe1b_statistics memory{};probe1b_get_statistics(h,&memory,&e);
   stats->generation=s.generation;stats->ready_generation=s.readyGeneration;stats->private_bytes=memory.private_bytes;stats->video_bytes=memory.video_local;stats->width=s.width;stats->height=s.height;stats->pending=s.pending;
+  stats->neighbours_pending=owned::neighbour_client_settled(s.world)?0u:1u;
+  stats->neighbours_accepted=owned::AtamanReadiness::neighbours(s.renderer);
+  const auto neighbourError=owned::neighbour_client_error(s.world);
+  if(neighbourError!=s.neighbourError){s.neighbourError=neighbourError;if(!neighbourError.empty())std::fprintf(stderr,"NEIGHBOUR_FAILURE epoch=%llu %s\n",(unsigned long long)s.world,neighbourError.c_str());}
   stats->frame_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return s.readyGeneration==s.generation?0:1;
  }),e);
 }

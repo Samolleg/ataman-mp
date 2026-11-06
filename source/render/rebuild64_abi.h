@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 5u
+#define EIR_ABI 6u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -22,6 +22,7 @@ typedef struct EirCreate {
     const EirMount* mounts;
     uint32_t mount_count, test_failure; // 1=no D3D11, 2=initialisation
     const uint16_t* scratch_path;
+    const uint16_t* neighbour_layout_path; // selected game/mod world-map-layouts.json, read only
     const uint16_t* game_data_path; // isolated work directory; unchanged game Config light tables
 } EirCreate;
 typedef struct EirDocument {
@@ -41,11 +42,13 @@ typedef struct EirCamera {
     double world_time; // world segments (.055 seconds), editor preview clock
     float wind_direction[3], wind_force;
     float fog_projection[3]; // TL _33/_34/_43 from the common camera
+    uint32_t neighbours_visible; // existing human neighbour-landscapes toggle
     uint32_t visuals; // 1=sky, 2=fog, 4=terrain, 8=water, 16=static objects
 } EirCamera;
 typedef struct EirStatistics {
     uint64_t generation, ready_generation, private_bytes, video_bytes;
     uint32_t width, height, pending, reserved;
+    uint32_t neighbours_pending, neighbours_accepted;
     double frame_ms;
 } EirStatistics;
 typedef struct EirApi {

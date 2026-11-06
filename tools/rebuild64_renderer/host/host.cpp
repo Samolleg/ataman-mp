@@ -15,6 +15,9 @@
 #include <cmath>
 #include <cstring>
 #include "sky_clouds.h"
+#include "neighbour_maps.h"
+#include "neighbour_client.h"
+#include "NeighbourTerrain.h"
 
 #include <psapi.h>
 #include <dxgi1_4.h>
@@ -63,6 +66,8 @@ struct AtamanReadiness {
   std::fprintf(stderr,"RENDERER_CONFIG terrain_blend=%d material_terrain=%d water_simple=%d\n",configured_integer(c,"terrain_blend",1),configured_boolean(c,"material_terrain",true),configured_boolean(c,"water_simple",false));
  }
  static void settings(const Renderer& r){for(const auto& o:r.debug_overlay_.config().options()){std::string v;switch(o.type){case RendererOptionType::boolean:v=o.boolean_value?"true":"false";break;case RendererOptionType::integer:v=std::to_string(o.integer_value);break;case RendererOptionType::floating_point:v=std::to_string(o.floating_value);break;case RendererOptionType::text:v=o.text_value;break;}std::fprintf(stderr,"EFFECTIVE_CONFIG %s=%s\n",o.key.c_str(),v.c_str());}}
+ static bool neighboursEnabled(const Renderer& r) {return configured_boolean(r.debug_overlay_.config(),"neighbour_maps",false);}
+ static uint32_t neighbours(const Renderer& r) noexcept {return uint32_t(r.neighbours_.accepted.size());}
  static uint32_t pending(const Renderer& r) noexcept {
   // Disabled Terrain2 has no required style/bake to complete. Contact-atlas
   // publication remains required for the object contact path in either mode.
@@ -88,7 +93,14 @@ struct HiddenWindow {
  HWND value=nullptr;
  ~HiddenWindow(){if(value)DestroyWindow(value);}
 };
-struct Session {GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
+// Match the public resource runtime's acquire/release lifetime. Merely adopting
+// mounts (the remote-core path) never released selected RES handles on close.
+// This member is destroyed last, after renderer/world/snapshot retirement.
+struct ResourceRuntimeLifetime {
+ ResourceRuntimeLifetime(){owned::owned_resource_runtime_acquire();}
+ ~ResourceRuntimeLifetime(){owned::owned_resource_runtime_release();}
+};
+struct Session {ResourceRuntimeLifetime resources;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
 bool active=false;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -134,8 +146,6 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   auto s=std::make_unique<Session>();
   s->hidden.value=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,L"STATIC",L"",WS_POPUP,-32000,-32000,int(in->width),int(in->height),nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
   if(!s->hidden.value||IsWindowVisible(s->hidden.value))return fail(e,E_FAIL,"cannot create hidden renderer surface");s->width=in->width;s->height=in->height;for(uint32_t i=0;i<in->loose_count;++i)s->mounts.loose_roots.emplace_back(in->loose[i]);for(uint32_t i=0;i<in->archive_count;++i)s->mounts.archives.emplace_back(in->archives[i]);if(in->archive_kinds)s->mounts.archive_kinds.assign(in->archive_kinds,in->archive_kinds+in->archive_count);
-  auto dataMounts=s->mounts;dataMounts.archive_kinds.clear();
-  owned::owned_resource_runtime_adopt_mounts(s->mounts,dataMounts,dataMounts);
   const D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_0};D3D_FEATURE_LEVEL level;
   HRESULT hr=in->test_failure==1?DXGI_ERROR_UNSUPPORTED:D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT|D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,levels,1,D3D11_SDK_VERSION,&s->device,&level,&s->context);
   if(FAILED(hr))return fail(e,hr,"D3D11CreateDevice hardware");
@@ -144,6 +154,7 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   if(!owned::AtamanReadiness::load(s->renderer,in->ini))return fail(e,E_FAIL,"read copied Rebuild64 configuration");
   std::puts("before ensure_host");std::fflush(stdout);
   hr=in->test_failure==2?E_FAIL:s->renderer.ensure_host(s->hidden.value,s->width,s->height);if(FAILED(hr))return fail(e,hr,"ensure_host");
+  s->neighboursConfigured=owned::AtamanReadiness::neighboursEnabled(s->renderer);s->neighboursRequested=s->neighboursConfigured;
   owned::AtamanReadiness::quality(s->renderer);owned::AtamanReadiness::settings(s->renderer);
   ComPtr<IDXGIDevice> dx;ComPtr<IDXGIAdapter> ad;ComPtr<IDXGIFactory> factory;
   hr=s->device.As(&dx);if(SUCCEEDED(hr))hr=dx->GetAdapter(&ad);if(SUCCEEDED(hr))hr=ad->GetParent(IID_PPV_ARGS(&factory));
@@ -168,6 +179,7 @@ int32_t __cdecl probe1b_capture_png(void* h,const wchar_t* path,probe1b_error* e
 void __cdecl probe1b_destroy(void* h) noexcept {
  std::unique_ptr<Session> s(static_cast<Session*>(h));
  if(!s)return;
+ owned::neighbour_client_stop();OwnedRender::RetireTerrainPlacement(s.get());
  try{s->renderer.retire_embedded_world();}catch(...){}
  for(const auto id:s->atlasIds)if(id)s->renderer.retire_surface(id);
  OwnedRender::E1Scene().Retire(s.get(),s->world);OwnedRender::E1RetireTerrain(s.get());OwnedRender::E1RetireWorld(s.get());owned::embedded_sky().detach(s.get());

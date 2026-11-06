@@ -1,4 +1,4 @@
-# Rebuild64 display backend for Ataman283, R3
+# Rebuild64 display backend for Ataman285
 
 The host embeds the pinned renderer and public typed adapters. It does not
 define an editor art profile. The owner cancelled GL visual comparison on
@@ -9,13 +9,15 @@ RendererRepositoryPath (material source), and a new owned BuildRoot under work/.
 Use an ASCII/8.3 path here. The source.lock.json pins both archives and patches.
 No private game code, game resources, SDK or binaries are committed.
 
-Active patches001–007 provide CPU snapshots, function-level linking, no-NGX
+Active patches001–008 provide CPU snapshots, function-level linking, no-NGX
 build substitution, readiness inspection, in-memory map loading and explicit
-host retirement. None changes shading. Patches008–010 and stock_sky.inc were
+host retirement. New008 joins an embedded neighbour stream before DLL unload;
+retail keeps its original stop/detach behavior. None changes shading. Historical
+R2 patches008–010 and stock_sky.inc were
 removed in R3. The pinned game's E1Terrain/surface path also resolves one mip;
 R2's mip patch was not proven an editor-only loss and is not kept.
 
-ABI5 is flat C, copied across one renderer worker thread. QLibrary remains
+ABI6 is flat C, copied across one renderer worker thread. QLibrary remains
 lazy: ordinary OpenGL startup does not load the DLL. The native presentation
 receives only accepted renderer-owned output. PNG capture is its own readback.
 Frame readiness observes resource/contact/Terrain2 publication; it does not
@@ -56,3 +58,37 @@ Optional -PrebuiltShaderRoot reuses validated .bin/.res tables only when all
 shader producers match. Runtime source is fully rebuilt with every active lock
 patch. R3 removes CPU-only patches, changes no shader producer and reuses638
 prebuilt programs. It never splices a replacement object into an old library.
+
+Neighbours285: C ABI carries the selected profile's world-map-layouts.json,
+the real active terrain resource name and the existing human visibility toggle.
+The host publishes the active terrain placement and immutable memory source;
+the renderer's normal static-terrain flush starts neighbour_client/neighbour_maps
+and adopts neighbour_piece values. No second neighbour renderer or GL placement
+conversion is used. Selection remains the pinned renderer's deja-vu layout
+selector: same allod/component, intersecting/touching rectangles, layout order.
+map.txt is used by the mapper catalog; the native neighbour selector reads the
+saved catalog paths/dimensions in world-map-layouts.json, as its public adapter
+does. It does not read the mapper's current world-workspace placements.
+
+All graphics options, including neighbour_maps, load_reveal_hold,
+neighbour_fog_range/skip, terrain_blend_neighbours, shadow_neighbour_casters and
+water_surf_no_sea_maps, stay in the normal file-backed registry. Human visibility
+gates neighbour_maps with its source-config value; it never enables a source-
+disabled stream. No game loading picture is supplied: native load_reveal_hold
+therefore does not hold the main frame; pieces arrive in native frame order.
+
+Map replacement/empty document and pausing the view stop/join the stream and
+retire its renderer session on the worker. Embedded-only008 forbids detaching
+a worker that could execute unloaded DLL code. The startup marker remains armed
+while neighbours are pending, including after a usable main frame; a human
+off->on toggle re-arms it. Stream errors are logged as NEIGHBOUR_FAILURE while
+the active memory terrain remains usable. C++ decode failures are contained by
+the native stream. The marker is recovery, not AV isolation: a native access
+violation can still kill this in-process backend; process isolation remains a
+separate prerequisite before making this the default.
+
+Unsaved active edits keep the prior memory snapshot path. Neighbours always read
+saved MPR/MOB files; another open document's unsaved edits are not visible there.
+The renderer owns welding, decoration admission and fog. Units/torches/traps on
+neighbours are excluded by its native family policy. Source/render/shader view
+parameters are not adjusted against OpenGL; game-frame acceptance is the owner.

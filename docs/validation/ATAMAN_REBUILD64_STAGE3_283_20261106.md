@@ -1147,6 +1147,9 @@ sky_clouds.h, cave_lighting.h, engine_bridge.cpp (world environment/light manage
 |MOB emitters, flame particle stream, units, scripts|Готовые particle/pose/lifetime facts игры|Полного live игрового producer нет; старые ограничения units/stst8/742 и динамики сохраняются|**Не заявляется полнота сцены/частиц как в игре**; это не имитируется собственным цветом/постпроцессом|
 |Neighbours/world reveal|Настройки neighbour_maps/load_reveal_hold и runtime placement/layout/state|G не менялся; выбранный memory document/профиль. Полного игрового runtime layout/reveal state нет|Полнота этого входа не подтверждена|
 
+**Уточнение EI-REBUILD64-NEIGHBOURS-285 (2026-11-06):** в установленной283 вход соседей отсутствует, а не просто «полнота не подтверждена». Хост передаёт один memory MPR и видимые MOB активного документа, оставляет пустым terrain_resource объединённого snapshot, не публикует neighbour placement и задаёт отсутствующий scratch/layouts.json. Штатный neighbour stream не получает пригодный вход, несмотря на neighbour_maps=true. Разбор и статус исправления: [отчёт285](ATAMAN_REBUILD64_NEIGHBOURS_285_20261106.md).
+
+
 Таким образом, правило «ни своих значений цвета/вида» выполнено в части удаления
 политики и синтетических TORCH values, но **полный запрос части3 о всех игровых
 входах остаётся невыполненным**. Сохранены ABI/light publication для реальных

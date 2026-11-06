@@ -56,7 +56,7 @@ struct CRebuild64Viewport::Worker {
         QByteArray terrain,name;
         QVector<QByteArray> mobs;
         QStringList paths;
-        QString gameRoot;
+        QString gameRoot, neighbourLayout;
         quint64 generation{0};
         EirCamera camera{};
         QSize size;
@@ -100,8 +100,8 @@ struct CRebuild64Viewport::Worker {
             failure(QString::fromUtf8("Несовместимая DLL Rebuild64 (C ABI)."));return;
         }
         loaded=true;
-        void* handle=nullptr;quint64 generation=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot;
-        bool injected=false;
+        void* handle=nullptr;quint64 generation=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot, activeLayout;
+        bool injected=false,startupArmed=true,previousNeighbours=false;
         for(;;) {
             const auto frameStart=std::chrono::steady_clock::now();
             Input next;
@@ -109,11 +109,15 @@ struct CRebuild64Viewport::Worker {
                 std::unique_lock<std::mutex> lock(mutex);
                 wake.wait_for(lock,std::chrono::milliseconds(16),[this]{return stop || (!paused && input.generation);});
                 if(stop)break;
-                if(paused || !input.generation)continue;
+                if(paused || !input.generation) {
+                    lock.unlock();
+                    if(handle){api.destroy(handle);handle=nullptr;generation=0;startup.clear();}
+                    continue;
+                }
                 next=input; input.capture.clear();
             }
             EirError error{};
-            if(handle&&(activePaths!=next.paths||activeGameRoot!=next.gameRoot)){api.destroy(handle);handle=nullptr;generation=0;}
+            if(handle&&(activePaths!=next.paths||activeGameRoot!=next.gameRoot||activeLayout!=next.neighbourLayout)){api.destroy(handle);handle=nullptr;generation=0;}
             if(!handle) {
                 std::vector<std::wstring> paths;
                 for(const auto& path:next.paths)paths.push_back(path.toStdWString());
@@ -145,10 +149,11 @@ struct CRebuild64Viewport::Worker {
                 }
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str())};
+                const auto layout=next.neighbourLayout.toStdWString();
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str())};
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
                 size=next.size;
-                activePaths=next.paths;activeGameRoot=next.gameRoot;
+                activePaths=next.paths;activeGameRoot=next.gameRoot;activeLayout=next.neighbourLayout;
             }
             if(generation!=next.generation) {
                 if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
@@ -156,15 +161,21 @@ struct CRebuild64Viewport::Worker {
                 for(const auto& bytes:next.mobs)mobs.push_back({bytes.constData(),uint64_t(bytes.size())});
                 EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData()};
                 if(api.document(handle,&doc,&error)) {failure(QString::fromUtf8(error.message));break;}
-                generation=next.generation;pending.restart();
+                generation=next.generation;pending.restart();startupArmed=true;
             }
             if(next.terrain.isEmpty()) {
+                api.destroy(handle);handle=nullptr;generation=0;startup.clear();
                 std::lock_guard<std::mutex> lock(mutex);paused=true;continue;
             }
             if(size!=next.size) {
                 if(api.resize(handle,uint32_t(next.size.width()),uint32_t(next.size.height()),&error)){failure(QString::fromUtf8(error.message));break;}
                 size=next.size;
             }
+            if(next.camera.neighbours_visible && !previousNeighbours && !startupArmed) {
+                if(!startup.arm()){failure("Cannot arm neighbour load crash marker");break;}
+                startupArmed=true;
+            }
+            previousNeighbours=next.camera.neighbours_visible!=0;
             if(api.camera(handle,&next.camera,&error)){failure(QString::fromUtf8(error.message));break;}
             if(hook=="device-lost"&&!injected){api.test_device_loss(handle);injected=true;}
             EirStatistics stats{};const int rc=api.frame(handle,&stats,&error);
@@ -173,7 +184,9 @@ struct CRebuild64Viewport::Worker {
                 failure(QString::fromUtf8("Rebuild64: данные нового кадра не подготовлены за 120 секунд. Открыт OpenGL."));break;
             }
             if(!rc) {
-                startup.clear();
+                // Main frame is usable while the native neighbour stream runs.
+                // Keep the crash marker until its async load/adoption settles.
+                if(!stats.neighbours_pending){startup.clear();startupArmed=false;}
                 pending.invalidate();
                 QMetaObject::invokeMethod(owner,[target=owner,stats]{
                     target->m_statistics=stats;
@@ -316,6 +329,7 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
             light.radius=radius;light.casts_shadow=shadow;light.source_id=source;
         }
     result.region=m_gl->m_weatherRegion=="ingos"?2:m_gl->m_weatherRegion=="suslanger"?3:1;result.cave=m_gl->m_caveEnvironment?1:0;
+    result.neighbours_visible=m_gl->m_neighborLandscapesVisible?1u:0u;
     result.visuals=31; // full world content; graphics policy comes from Config64
     return result;
 }
@@ -369,6 +383,14 @@ void CRebuild64Viewport::tick() {
     next.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
     next.paths=configuredResourceSourcePaths(m_gl->settings());
     if(const auto* root=dynamic_cast<const COptString*>(m_gl->m_pSettings->opt("gameRoot")))next.gameRoot=root->value();
+    if(const auto* selected=dynamic_cast<const COptString*>(m_gl->m_pSettings->opt("resourceProfile"))) {
+        for(const auto& profile:builtInResourceProfiles())if(profile.id==selected->value()) {
+            const auto evaluated=evaluateResourceProfile(next.gameRoot,profile);
+            if(evaluated.valid&&!evaluated.modRoot.isEmpty())
+                next.neighbourLayout=QDir(evaluated.modRoot).filePath("world-map-layouts.json");
+            break;
+        }
+    }
     // CView's validated map-local atlas can override the profile's RES order.
     // It is a resource source, never a file used for geometry or save output.
     if(!m_gl->m_activeTerrainArchivePath.isEmpty()) {

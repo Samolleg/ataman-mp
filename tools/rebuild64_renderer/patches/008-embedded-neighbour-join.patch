@@ -1,0 +1,17 @@
+--- a/external/owned-renderer/Source/neighbour_maps.cpp
++++ b/external/owned-renderer/Source/neighbour_maps.cpp
+@@ -761,8 +761,14 @@
+             std::unique_lock<std::mutex> guard(s.lock);
+             exited=s.wake.wait_for(guard,std::chrono::seconds(5),[&]{return s.exited>=id;});
+         }
++#ifdef EID3D11_EMBEDDED
++        // Embedded hosts unload the DLL. A detached worker cannot outlive it.
++        // Stop runs on the host renderer worker, never on the UI thread.
++        s.worker.join();
++#else
+         if(exited)s.worker.join();
+         else {s.worker.detach();OutputDebugStringA("EID3D11 neighbour maps: stream did not stop within 5 s; detached\n");}
++#endif
+     }
+     {std::lock_guard<std::mutex> guard(s.lock);++s.run;s.epoch=0;s.held=false;s.error.clear();s.next_take=0;s.total=0;s.resident=0;}
+ }
