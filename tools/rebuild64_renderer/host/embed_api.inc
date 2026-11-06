@@ -19,7 +19,7 @@ int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) no
   const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
   const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
-  auto& session=*static_cast<Session*>(*result);session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
+  auto& session=*static_cast<Session*>(*result);session.canPresent=in->can_present;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
   return 0;
  }),e);
 }
@@ -41,7 +41,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   // This host supplies a complete immutable document, not the game's same-name
   // MOB reuse transition. Retire source publications as well as positive IDs.
   OwnedRender::E1Scene().Scene().reset();
-  s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.materialsPublished=false;s.generation=in->generation;++s.world;
+  s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.completedReadyEpoch=~uint64_t(0);s.materialsPublished=false;s.generation=in->generation;++s.world;
   s.editorSeeds.clear();s.poseAuditDone=false;
   if(!in->terrain.bytes)return 0;
   if(s.world>1) {
@@ -52,6 +52,12 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
    hr=s.renderer.adopt_host_device(s.device.Get(),s.context.Get(),s.width,s.height);
    if(FAILED(hr))return fail(&e,hr,"readopt host device for confirmed document");
    if(!owned::AtamanReadiness::load(s.renderer,s.rendererIni.c_str()))return fail(&e,E_FAIL,"reload isolated renderer configuration");
+   // The immutable replacement must start with the host's current visibility,
+   // before any world materials are registered. INI is not the editor toggle.
+   owned::scene_core::Config visibility;owned::scene_core::ConfigOption option;
+   option.key="neighbour_maps";option.type=uint8_t(owned::RendererOptionType::boolean);
+   option.boolean_value=s.frameCamera.neighbours_visible&&s.neighboursConfigured;
+   visibility.options.push_back(option);visibility.run(s.renderer);
    hr=s.renderer.ensure_host(s.hidden.value,s.width,s.height);
    if(FAILED(hr))return fail(&e,hr,"restart embedded renderer for confirmed document");
    s.neighboursRequested=owned::AtamanReadiness::neighboursEnabled(s.renderer);

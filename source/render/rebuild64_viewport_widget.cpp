@@ -67,7 +67,7 @@ struct CRebuild64Viewport::Worker {
         QVector<EirObjectPose> poses,documentObjects;
         quint64 serviceSerial{0};double serviceCpuMs{0};
         QSize size;
-        QString capture;bool captureWorld{false};
+        QString capture;bool captureWorld{false},documentDirty{false},operationPreview{false};
     } input;
     CRebuild64Viewport* owner;
     void* window;
@@ -89,6 +89,16 @@ struct CRebuild64Viewport::Worker {
     }
     void failure(const QString& detail) {
         QMetaObject::invokeMethod(owner,[target=owner,detail]{target->fallback(detail);},Qt::QueuedConnection);
+    }
+    static uint32_t EIR_CALL canPresent(void* context,uint64_t generation,uint32_t neighbours,uint32_t phase) {
+        auto& worker=*static_cast<Worker*>(context);
+        if(phase==1){worker.mutex.unlock();return 1;}
+        worker.mutex.lock();
+        const bool current=!worker.stop&&!worker.paused&&worker.input.generation==generation
+            &&worker.input.camera.neighbours_visible==neighbours
+            &&(!worker.input.documentDirty||worker.input.operationPreview);
+        if(phase==2||!current)worker.mutex.unlock();
+        return current;
     }
     void run() {
         CRebuild64StartupGuard startup(scratch);
@@ -161,18 +171,38 @@ struct CRebuild64Viewport::Worker {
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
                 const auto layout=next.neighbourLayout.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str())};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this};
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
                 size=next.size;
                 activePaths=next.paths;activeGameRoot=next.gameRoot;activeLayout=next.neighbourLayout;
+            }
+            if(handle&&generation&&next.camera.neighbours_visible!=uint32_t(previousNeighbours)) {
+                // Re-adopt before a live visibility transition can invalidate
+                // material registrations. The host applies the requested flag
+                // before publishing the replacement world on this display.
+                generation=0;
+                QMetaObject::invokeMethod(owner,[target=owner]{if(target->m_gl)emit target->m_gl->updateMsg(QString::fromUtf8("Rebuild64: обновление соседних карт; показан последний готовый кадр."));},Qt::QueuedConnection);
             }
             if(generation!=next.generation) {
                 if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
                 std::vector<EirSpan> mobs;
                 for(const auto& bytes:next.mobs)mobs.push_back({bytes.constData(),uint64_t(bytes.size())});
                 EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData(),next.documentObjects.constData(),uint32_t(next.documentObjects.size())};
+                // Supply visibility before document adoption. Applying the INI
+                // default and changing it after world upload retires materials.
+                if(api.camera(handle,&next.camera,&error)) {failure(QString::fromUtf8(error.message));break;}
                 if(api.document(handle,&doc,&error)) {failure(QString::fromUtf8(error.message));break;}
                 generation=next.generation;pending.restart();startupArmed=true;
+                // Document decode may take seconds. Do not render a retired
+                // request or reuse the camera/service tuple from before it.
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    if(stop||paused||input.generation!=generation)continue;
+                    if(input.camera.neighbours_visible!=next.camera.neighbours_visible){generation=0;continue;}
+                    next.camera=input.camera;next.size=input.size;
+                    next.service=input.service;next.poses=input.poses;
+                    next.serviceSerial=input.serviceSerial;next.serviceCpuMs=input.serviceCpuMs;
+                }
             }
             if(next.terrain.isEmpty()) {
                 api.destroy(handle);handle=nullptr;generation=0;startup.clear();
@@ -243,8 +273,8 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
     m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
-    connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;});
-    connect(gl,&CView::loadedMapStateChanged,this,[this]{m_documentRefreshPending=true;});
+    connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
+    connect(gl,&CView::loadedMapStateChanged,this,[this]{m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
     connect(gl,&CView::selectionChanged,this,[this]{
         if(!m_selected)return;
         for(auto* node:m_gl->selectionSnapshot())if(node->nodeType()==ENodeType::eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0){
@@ -449,7 +479,7 @@ void CRebuild64Viewport::tick() {
     next.paths=configuredResourceSourcePaths(m_gl->settings());
     if(const auto* root=dynamic_cast<const COptString*>(m_gl->m_pSettings->opt("gameRoot")))next.gameRoot=root->value();
     if(const auto* selected=dynamic_cast<const COptString*>(m_gl->m_pSettings->opt("resourceProfile"))) {
-        for(const auto& profile:builtInResourceProfiles())if(profile.id==selected->value()) {
+        for(const auto& profile:loadResourceProfiles())if(profile.id==selected->value()) {
             const auto evaluated=evaluateResourceProfile(next.gameRoot,profile);
             if(evaluated.valid&&!evaluated.modRoot.isEmpty())
                 next.neighbourLayout=QDir(evaluated.modRoot).filePath("world-map-layouts.json");
@@ -523,11 +553,11 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
     if(mouse && event->type()==QEvent::MouseButtonPress)m_native->setFocus(Qt::MouseFocusReason);
 }
 void CRebuild64Viewport::serviceInput() {
-    if(!m_worker || m_stack->currentWidget()!=m_native)return;
+    if(!m_worker)return;
     if(editorMobOrder(m_gl)!=m_documentMobOrder)return;
     syncEditorViewport();
     // Advance the single editor camera once, before both consumers.
-    m_gl->m_cam->update();
+    if(m_stack->currentWidget()==m_native)m_gl->m_cam->update();
     QElapsedTimer timer;timer.start();QString error;
     const QSize size(qMax(1,qRound(m_native->width()*devicePixelRatioF())),qMax(1,qRound(m_native->height()*devicePixelRatioF())));
     auto image=m_gl->captureEditorServiceLayer(size,&error).convertToFormat(QImage::Format_RGBA8888_Premultiplied);
@@ -544,7 +574,7 @@ void CRebuild64Viewport::serviceInput() {
     }
     std::lock_guard<std::mutex> lock(m_worker->mutex);
     m_worker->input.camera=cameraSnapshot();m_worker->input.size=size;
-    m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.service=image;m_worker->input.poses=std::move(poses);++m_worker->input.serviceSerial;
+    m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.service=image;m_worker->input.operationPreview=m_gl->hasPendingOperation();m_worker->input.poses=std::move(poses);++m_worker->input.serviceSerial;
 }
 
 void CRebuild64Viewport::syncEditorViewport() {

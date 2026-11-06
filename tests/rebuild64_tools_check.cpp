@@ -54,6 +54,7 @@ void testGroupMenu(CView* view) {
     QTreeWidgetItem* item=nullptr;for(QTreeWidgetItemIterator it(view->m_pTree);*it;++it)if(auto* group=dynamic_cast<CTreeObject*>(*it))if(!group->node()&&group->childCount()){item=group;break;}
     check(item,"outliner group with existing context menu");view->m_pTree->scrollToItem(item);const auto at=view->m_pTree->visualItemRect(item).center();QContextMenuEvent context(QContextMenuEvent::Mouse,at,view->m_pTree->viewport()->mapToGlobal(at));QApplication::sendEvent(view->m_pTree->viewport(),&context);closer.stop();check(menus>0&&actions==2,"canonical outliner group menu in native view");
 }
+#ifndef TOOLS286_HELPERS_ONLY
 int main(int argc,char** argv) {
  SetErrorMode(SEM_NOGPFAULTERRORBOX|SEM_FAILCRITICALERRORS);
  if(qEnvironmentVariableIsEmpty("EI_EMBED_CASE")||qEnvironmentVariableIsEmpty("EI_MAPPER_TEST_LOCK_ROOT"))return 2;
@@ -224,3 +225,5 @@ int main(int argc,char** argv) {
   view->unloadLand(false);QTest::qWait(100);if(recordedResources)check(wait([&]{auto extra=ownResourceHandles286();for(const auto& path:resourceBaseline)extra.removeOne(path);return extra.isEmpty();},60000),"native map/resource handles retired after close");EnumWindows(inspect,0);check(!visible,"zero visible HWNDs");window.close();out<<"PASS tools286 checks="<<passes<<'\n';out.flush();return 0;
  }catch(const QString& e){out<<"FAIL "<<e<<'\n';out.flush();return 1;}
 }
+
+#endif

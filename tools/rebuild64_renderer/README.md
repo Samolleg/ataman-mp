@@ -17,7 +17,7 @@ R2 patches008–010 and stock_sky.inc were
 removed in R3. The pinned game's E1Terrain/surface path also resolves one mip;
 R2's mip patch was not proven an editor-only loss and is not kept.
 
-ABI7 is flat C, copied across one renderer worker thread. QLibrary remains
+ABI8 is flat C, copied across one renderer worker thread. QLibrary remains
 lazy: ordinary OpenGL startup does not load the DLL. The native presentation
 receives only accepted renderer-owned output. PNG capture is its own readback.
 Frame readiness observes resource/contact/Terrain2 publication; it does not

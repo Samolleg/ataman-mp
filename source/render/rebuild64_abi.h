@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 7u
+#define EIR_ABI 8u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -24,6 +24,8 @@ typedef struct EirCreate {
     const uint16_t* scratch_path;
     const uint16_t* neighbour_layout_path; // selected game/mod world-map-layouts.json, read only
     const uint16_t* game_data_path; // isolated work directory; unchanged game Config light tables
+    uint32_t (EIR_CALL *can_present)(void*,uint64_t,uint32_t,uint32_t); // 0=lease,1=release,2=probe
+    void* present_context; // host worker admission only; no Qt/DLL document ownership
 } EirCreate;
 typedef struct EirObjectPose {
     uint32_t mob,nid,visible,changed;
