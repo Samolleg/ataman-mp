@@ -1275,3 +1275,48 @@ TL fog tuple/day-night transition в standalone host и, если foam-квад�
 с игрой → process isolation для сохранности памяти → service/picking → sector
 deltas → units/stst8/динамика → приёмка. Прежний GL visual gate отменён.
 **STOP BEFORE INSTALLATION, no push.**
+
+
+## Установка принятого R3 — EI-INSTALL-283-R3 (2026-11-06)
+
+Владелец принял результат и явно сказал «ставь 283». Это разрешение снимает
+прежний STOP BEFORE INSTALLATION для данного staging R3; push не разрешён.
+До установки main/HEAD точно `0248f6e7f9495ac2946856c5500fc20ab5d7a0cb`.
+Использован **репозиторный** `packaging/install_program.ps1`, а не старая копия
+из установки. `packaging/*` совпадал с принятой базой и не менялся во время установки.
+
+- Источник: `build-staging-283-rebuild64-stage3-r3-20261106` (только R3).
+  Все 1365 файла staging сохранили SHA и состав; пересборки,
+  финализации и запуска staging не было.
+- Цель: `artifacts/EI-Mapper-Ataman-2-first-test`, версия282 → **283**.
+  Installer: verified=1364, changed=12, added=0, removed=0.
+  Все управляемые файлы и manifest совпадают по SHA со staging R3.
+  `ataman_rebuild64.dll` SHA256 `9F1D59DFFA63852D0D69DFD1159A91E939BB22BCC4BB53F1F7BBB56151601EF7`; DLL не загружалась.
+- Запущен только установленный `EIMapperMcp.exe --version`:
+  `EIMapperMcp 283`, exit0.
+- Откат: `artifacts/rollback282-to283-rebuild64-stage3-20261106`.
+  Создан установщиком; его `rollback.ps1 -VerifyOnly`: **ROLLBACK_VERIFIED**.
+  Прежние поколения откатов не удалялись.
+- Все 15159 пользовательских файлов вне program manifest и служебных
+  installer receipts сохранены: набор путей и SHA до/после одинаковы.
+  Настройки, карты, журналы, сохранения и выбор OpenGL не менялись;
+  финализатор на установке не запускался.
+- До замены зафиксированы 13 мостов EIMapperMcp.exe:
+  PID 26868, 17412, 26580, 17188, 28512, 14280, 38908, 32556, 17220, 41892, 40248, 73176, 55636. После установки все живы, совпадают PID и CreationDate.
+  Ни мосты, ни Codex/Claude Code, ни другие процессы не завершались.
+- Занят и отодвинут при этой установке только `EIMapperMcp.exe`:
+  `EIMapperMcp.exe.old-ataman-c90a94963191402ab5d87677abde4a43`.
+  Прежний `EIMapperMcp.exe.old-ataman-0faf7fe49f064623b59d728f72a63a89`
+  сохранён; cleanup installer: removed=0, retained=1. После установки всего
+  два `.old-*` файла, оба перечислены в result.json и штатном retired receipt.
+- Маппер из установки (включая headless) и игра перед заменой были закрыты.
+  Маппер/игра не запускались, computer-use и видимых окон не было.
+  Регистрация мостов, код и VERSION этой работой не менялись.
+  Чужие незакоммиченные файлы сохранены; в ROADMAP добавлена только своя строка.
+  subst в конце пуст, subst/junction не создавались. Push не выполнялся.
+
+Установка завершена. Прежние технические ограничения preview и последующие
+этапы renderer этим действием не объявляются устранёнными.
+Квитанция: [result.json](../../work/install-283-r3-20261106/result.json),
+[installer.log](../../work/install-283-r3-20261106/installer.log),
+[rollback-verify.log](../../work/install-283-r3-20261106/rollback-verify.log).
