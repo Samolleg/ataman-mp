@@ -364,6 +364,12 @@ private slots:
 protected:
     bool event(QEvent* event) override;
     void closeEvent(QCloseEvent* e) override;
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray& eventType,void* message,long* result) override;
+#endif
+    bool m_navBakeCloseQuestion{false};
+    QString m_navBakeCloseSource;
+    QObject* m_navBakeQuitFilter{nullptr};
     bool m_closeWaiting{false};
     bool m_closeReady{false};
     void resizeEvent(QResizeEvent* e) override;

@@ -40,6 +40,11 @@ public:
     void requestBakeOnSave(const QString& outputRootOverride=QString());
     void acknowledgeSave(const QString& path);
     void cancelBake();
+    bool bakeActive() const;
+    QString bakeProgressText() const;
+    // Must run before shutdown changes the live document or starts its deadline.
+    bool confirmBakeClose(QWidget* owner,const QString& source,bool unattended);
+    void interruptBakeForShutdown(const QString& reason);
     void setBakerPath(const QString& path);
     bool lastBakeSucceeded() const {return m_lastSuccess;}
     int lastBakeExitCode() const {return m_lastExit;}
@@ -76,6 +81,11 @@ private:
     QTimer* m_autoBakeTimer;
     bool m_shuttingDown=false;
     void drain(bool errors);
+    void flushBakeOutput();
+    void appendBakeLog(const QString& text);
+    void saveBakeLog();
+    void requestBakeCancellation(const QString& reason);
+    void prepareQueuedInterruption();
     void line(const QByteArray& bytes);
     void freshness();
     void controls();
@@ -116,6 +126,9 @@ private:
     QString m_requestMpr,m_requestMob;
     QString m_bakerPath;
     QByteArray m_stdout,m_stderr;
+    QString m_bakeTranscript,m_interruptionReason,m_currentBakeMap;
+    int m_mapsTotal=0,m_mapsCompleted=0;
+    bool m_logSaved=false,m_bakeUnfinalized=false;
     QVector<SBackupResult> m_backups;
     bool m_unsaved=false,m_done=false,m_errors=false,m_cancelled=false,m_lastSuccess=false;
     bool m_layerVisible=false;

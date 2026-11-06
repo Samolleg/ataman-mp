@@ -1,5 +1,6 @@
 #include "navmesh_panel.h"
 #include "file_write_activity.h"
+#include "log.h"
 #include <QtWidgets>
 #include <QtConcurrent>
 #include <algorithm>
@@ -38,7 +39,7 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     m_compareStatus=new QLabel(this);m_compareStatus->setObjectName("navmeshCompareStatus");m_compareStatus->setWordWrap(true);layout->addWidget(m_compareStatus);
     m_regions=new QListWidget(this);m_regions->setObjectName("navmeshRegions");m_regions->setMaximumHeight(100);m_regions->setToolTip(QStringLiteral("Нажмите область для перехода и подсветки; также можно нажать заливку в сцене."));layout->addWidget(m_regions);
     m_exportLosses=new QPushButton(QStringLiteral("Экспорт списка…"),this);m_exportLosses->setObjectName("navmeshExportLosses");layout->addWidget(m_exportLosses);
-    connect(m_exportLosses,&QPushButton::clicked,this,[this](){const auto path=QFileDialog::getSaveFileName(this,QStringLiteral("Экспорт потерь проходимости"),QFileInfo(m_mpr).completeBaseName()+"-"+m_profile->currentData().toString()+"-losses.csv",QStringLiteral("CSV (*.csv)"));if(path.isEmpty())return;QString error;if(!exportLosses(path,&error))m_log->appendPlainText(QStringLiteral("Экспорт: ")+error);else m_log->appendPlainText(QStringLiteral("Экспорт списка: ")+path);});
+    connect(m_exportLosses,&QPushButton::clicked,this,[this](){const auto path=QFileDialog::getSaveFileName(this,QStringLiteral("Экспорт потерь проходимости"),QFileInfo(m_mpr).completeBaseName()+"-"+m_profile->currentData().toString()+"-losses.csv",QStringLiteral("CSV (*.csv)"));if(path.isEmpty())return;QString error;if(!exportLosses(path,&error))appendBakeLog(QStringLiteral("Экспорт: ")+error);else appendBakeLog(QStringLiteral("Экспорт списка: ")+path);});
     m_bakerPath=QSettings().value("nav64/bakerPath").toString();
     m_browse=new QPushButton(this);m_browse->setObjectName("navmeshBakerBrowse");layout->addWidget(m_browse);
     m_browse->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -76,16 +77,16 @@ CNavmeshPanel::CNavmeshPanel(QWidget* parent):QWidget(parent) {
     connect(m_browse,&QPushButton::clicked,this,[this](){auto path=QFileDialog::getOpenFileName(this,QStringLiteral("Запекатель Nav64"),bakerPath(),"EIRebuild64NavBake.exe (*.exe)");if(!path.isEmpty()){setBakerPath(path);QSettings().setValue("nav64/bakerPath",path);}});
     connect(m_this,&QPushButton::clicked,this,[this](){startBake(false);});connect(m_all,&QPushButton::clicked,this,[this](){startBake(true);});connect(m_cancel,&QPushButton::clicked,this,&CNavmeshPanel::cancelBake);
     connect(m_process,&QProcess::readyReadStandardOutput,this,[this](){drain(false);});connect(m_process,&QProcess::readyReadStandardError,this,[this](){drain(true);});
-    connect(m_process,&QProcess::errorOccurred,this,[this](QProcess::ProcessError error){if(error==QProcess::FailedToStart){m_lastExit=-1;m_lastSuccess=false;m_status->setText(QStringLiteral("Не удалось запустить запекатель: ")+m_process->errorString());m_log->appendPlainText(m_status->text());m_backups.clear();controls();emit bakeFinished(false);}});
+    connect(m_process,&QProcess::errorOccurred,this,[this](QProcess::ProcessError error){if(error==QProcess::FailedToStart){m_bakeUnfinalized=false;m_lastExit=-1;m_lastSuccess=false;m_status->setText(QStringLiteral("Не удалось запустить запекатель: ")+m_process->errorString());appendBakeLog(m_status->text());saveBakeLog();m_backups.clear();controls();emit bakeFinished(false);}});
     connect(m_process,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),this,[this](int code,QProcess::ExitStatus status){
-        drain(false);drain(true);if(!m_stdout.isEmpty())line(m_stdout);if(!m_stderr.isEmpty())line(m_stderr);m_stdout.clear();m_stderr.clear();
+        flushBakeOutput();m_bakeUnfinalized=false;
         m_lastExit=code;m_lastSuccess=!m_cancelled&&status==QProcess::NormalExit&&code==0&&m_done&&!m_errors;
-        m_log->appendPlainText(m_lastSuccess?QStringLiteral("Запекание завершено: exit=0 и BAKE_DONE errors=0."):QStringLiteral("Запекание не завершено: exit=%1, BAKE_DONE=%2%3").arg(code).arg(m_done).arg(m_cancelled?QStringLiteral(", отменено"):QString()));
+        appendBakeLog(m_lastSuccess?QStringLiteral("Запекание завершено: exit=0 и BAKE_DONE errors=0."):QStringLiteral("Запекание не завершено: exit=%1, BAKE_DONE=%2%3").arg(code).arg(m_done).arg(m_cancelled?QStringLiteral(", отменено"):QString()));
         if(!m_lastSuccess){
             m_status->setText(m_cancelled?QStringLiteral("Запекание отменено. Подробности в журнале."):QStringLiteral("Запекание не завершено (код %1). %2").arg(code).arg(m_failureDetail.isEmpty()?QStringLiteral("Проверьте ошибки в журнале."):m_failureDetail));
             m_logToggle->setChecked(true);
         }
-        if(!m_reportRoot.isEmpty()){QSaveFile log(QDir(m_reportRoot).filePath("bake.log"));if(log.open(QIODevice::WriteOnly)){const auto text=m_log->toPlainText().toUtf8();if(log.write(text)==text.size())log.commit();}}
+        saveBakeLog();
         if(m_lastSuccess)acceptSuccessfulBake();
         m_backups.clear();controls();
         if(m_lastSuccess&&m_requestMpr==m_mpr&&m_requestMob==m_mob){m_directory=QDir(m_outputRoot).filePath("Maps/Nav64");reload();}emit bakeFinished(m_lastSuccess);
@@ -111,10 +112,9 @@ CNavmeshPanel::~CNavmeshPanel()
     QObject::disconnect(m_process,nullptr,this,nullptr);
     QObject::disconnect(m_comparing,nullptr,this,nullptr);
     QObject::disconnect(m_loading,nullptr,this,nullptr);
-    m_autoBakeTimer->stop();m_pendingBakes.clear();
+    interruptBakeForShutdown(qApp->isSavingSession()?QStringLiteral("завершение сеанса"):QStringLiteral("закрытие без диалога (уничтожение панели)"));
     if(m_compareCancel)m_compareCancel->store(true);
     m_comparing->waitForFinished();
-    if(m_process->state()!=QProcess::NotRunning){m_process->kill();m_process->waitForFinished(3000);}
     m_loading->waitForFinished();
 }
 bool CNavmeshPanel::layerVisible()const{return m_layerVisible&&m_document.valid;}
@@ -125,7 +125,7 @@ bool CNavmeshPanel::islandsVisible()const{return m_islands->isChecked();}
 bool CNavmeshPanel::busy()const{return m_process->state()!=QProcess::NotRunning;}
 QString CNavmeshPanel::bakerPath()const{return m_bakerPath.trimmed().isEmpty()?QDir(m_gameRoot).filePath("Engine64/EIRebuild64NavBake.exe"):m_bakerPath.trimmed();}
 void CNavmeshPanel::setBakerPath(const QString& path){m_bakerPath=path;controls();}
-QString CNavmeshPanel::bakeLog()const{return m_log->toPlainText();}
+QString CNavmeshPanel::bakeLog()const{return m_bakeTranscript;}
 void CNavmeshPanel::controls(){
     const bool flying=m_profile->currentData().toString()=="flying";
     m_fill->setItemData(2,flying?0:int(Qt::ItemIsSelectable|Qt::ItemIsEnabled),Qt::UserRole-1);
@@ -216,9 +216,14 @@ void CNavmeshPanel::acceptSuccessfulBake(){
     freshness();
 }
 void CNavmeshPanel::line(const QByteArray& bytes){
-    const QString s=QString::fromUtf8(bytes).trimmed();if(s.isEmpty())return;m_log->appendPlainText(s);
+    const QString s=QString::fromUtf8(bytes).trimmed();if(s.isEmpty())return;appendBakeLog(s);
     QMap<QString,QString> fields;auto matches=QRegularExpression("(?:^|\\s)([A-Za-z0-9_]+)=([^\\s]+)").globalMatch(s);
     while(matches.hasNext()){const auto match=matches.next();fields[match.captured(1)]=match.captured(2);}
+    // Progress and the transcript also work with all QObject signals disconnected.
+    if(s.startsWith("BAKE_BEGIN "))m_mapsTotal=fields.value("maps").toInt();
+    if(s.startsWith("MAP_BEGIN "))m_currentBakeMap=fields.value("mpr")+" / "+fields.value("mob");
+    if(s.startsWith("MAP_DONE "))++m_mapsCompleted;
+    if(m_shuttingDown)return; // no settings, widgets, contentChanged or layout callbacks
     if(s.startsWith("BAKE_BEGIN ")){
         bool valid=false;const int algorithm=fields.value("algorithm").toInt(&valid);
         if(valid&&algorithm>0&&!m_runningBakerSha.isEmpty()){
@@ -228,7 +233,7 @@ void CNavmeshPanel::line(const QByteArray& bytes){
     }
     if(s.startsWith("BAKE_DONE ")){bool mapsOk=false,completedOk=false;const int maps=fields.value("maps").toInt(&mapsOk),completed=fields.value("completed").toInt(&completedOk);m_done=mapsOk&&completedOk&&maps>0&&completed==maps&&fields.value("errors")=="0"&&fields.value("missing")=="0";if(!m_done)m_errors=true;}
     if(s.startsWith("MAP_ERROR ")||s.startsWith("BAKE_ERROR ")){m_errors=true;m_failureDetail=s.contains(" reason=")?s.section(" reason=",1):s;m_status->setText(QStringLiteral("Ошибка запекания: ")+m_failureDetail);}
-    if(s.startsWith("MAP_MISSING ")){m_errors=true;m_status->setText(QStringLiteral("Нет исходников MPR/MOB: %1 / %2. Карта пропущена (код 5).").arg(fields.value("mpr"),fields.value("mob")));m_log->appendPlainText(m_status->text());}
+    if(s.startsWith("MAP_MISSING ")){m_errors=true;m_status->setText(QStringLiteral("Нет исходников MPR/MOB: %1 / %2. Карта пропущена (код 5).").arg(fields.value("mpr"),fields.value("mob")));appendBakeLog(m_status->text());}
     // Keep every PROFILE/MAP_DONE record visible; neither implies overall success.
     if(s.startsWith("PROFILE ")){
         ++m_completedProfiles;m_progress->setRange(0,8);m_progress->setValue(qMin(8,m_completedProfiles));
@@ -238,7 +243,7 @@ void CNavmeshPanel::line(const QByteArray& bytes){
         m_heightOutliers->setVisible(warning);
         m_heightOutliers->setText((warning?QStringLiteral("Предупреждение: "):QString())+QStringLiteral("PROFILE %1: height_outliers=%2").arg(fields.value("type"),valid?QString::number(count):QStringLiteral("не сообщён — проверьте версию запекателя")));
         m_heightOutliers->setStyleSheet(warning?QStringLiteral("color: #ffbd69"):QString());
-        if(warning){m_errors=true;m_log->appendPlainText(m_heightOutliers->text());}
+        if(warning){m_errors=true;appendBakeLog(m_heightOutliers->text());}
     }
     if(s.startsWith("MAP_DONE "))m_status->setText(QStringLiteral("Карта готова; ожидается BAKE_DONE: ")+s);
     if(s.startsWith("MAP_BEGIN ")){m_completedProfiles=0;m_progress->setRange(0,0);m_status->setText(QStringLiteral("Запекание карты: ")+fields.value("mpr"));}
@@ -250,8 +255,8 @@ bool CNavmeshPanel::startBake(bool all,const QString& outputRootOverride){
     return startBakeScene(all,currentBakeScene(outputRootOverride),false);
 }
 bool CNavmeshPanel::startBakeScene(bool all,const SBakeScene& scene,bool automatic){
-    if(busy())return false;m_lastSuccess=false;m_lastExit=-1;
-    auto fail=[this](const QString& message){m_status->setText(message);m_log->appendPlainText(message);emit contentChanged();emit bakeFinished(false);return false;};
+    if(m_shuttingDown||busy())return false;m_lastSuccess=false;m_lastExit=-1;
+    auto fail=[this](const QString& message){m_status->setText(message);appendBakeLog(message);emit contentChanged();emit bakeFinished(false);return false;};
     if(scene.mpr.isEmpty()||(!all&&scene.mob.isEmpty()))return fail(QStringLiteral("Откройте карту с первичным MOB."));
     if(!automatic&&m_unsaved)return fail(QStringLiteral("Сначала сохраните MPR и первичный MOB: запекатель читает файлы с диска."));
     const QString exe=m_bakerPath.trimmed().isEmpty()?QDir(scene.gameRoot).filePath("Engine64/EIRebuild64NavBake.exe"):m_bakerPath.trimmed();
@@ -262,19 +267,100 @@ bool CNavmeshPanel::startBakeScene(bool all,const SBakeScene& scene,bool automat
     m_outputRoot=scene.outputRoot.isEmpty()?mod:QDir(scene.outputRoot).absolutePath();const QString output=QDir(m_outputRoot).filePath("Maps/Nav64");
     m_reportRoot=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("nav64-reports/"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")+"-"+QUuid::createUuid().toString(QUuid::WithoutBraces));
     if(!QDir().mkpath(m_reportRoot))return fail(QStringLiteral("Не удалось создать приватный каталог отчётов запекания: ")+m_reportRoot);
-    m_failureDetail.clear();m_log->clear();m_log->appendPlainText(QStringLiteral("Отчёты и журнал: ")+m_reportRoot);
+    m_failureDetail.clear();m_log->clear();m_bakeTranscript.clear();m_logSaved=false;m_interruptionReason.clear();
+    m_currentBakeMap=QStringLiteral("ещё не начата");m_mapsTotal=all?0:1;m_mapsCompleted=0;appendBakeLog(QStringLiteral("Отчёты и журнал: ")+m_reportRoot);
     m_runningScene=scene;
     m_requestMpr=scene.mpr;m_requestMob=scene.mob;m_backups.clear();
     const QString prefix=QFileInfo(scene.mpr).completeBaseName().toLower()+"--"+QFileInfo(scene.mob).completeBaseName().toLower()+".";
-    for(const auto& entry:QDir(output).entryInfoList({"*.nav64","*.navgeom","*.navworld","bodies.navbody"},QDir::Files)){if(!all&&entry.fileName()!="bodies.navbody"&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);m_log->appendPlainText(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
+    for(const auto& entry:QDir(output).entryInfoList({"*.nav64","*.navgeom","*.navworld","bodies.navbody"},QDir::Files)){if(!all&&entry.fileName()!="bodies.navbody"&&!entry.fileName().startsWith(prefix,Qt::CaseInsensitive))continue;const auto backup=CBackupManager().snapshotBeforeSave(entry);if(!backup.success){m_backups.clear();return fail(QStringLiteral("Перезапись запрещена: не создан бэкап ")+entry.fileName()+": "+backup.error);}m_backups.append(backup);appendBakeLog(QStringLiteral("BACKUP ")+entry.fileName()+" -> "+backup.backupPath);}
     for(int i=m_pendingBakes.size()-1;i>=0;--i)
         if(saveStateKey(m_pendingBakes[i])==saveStateKey(scene)&&m_pendingBakes[i].savedAt<=scene.savedAt)m_pendingBakes.remove(i);
     QStringList args{"--game-root",scene.gameRoot,"--mod",mod,"--output-root",m_outputRoot,"--report-root",m_reportRoot};if(all)args<<"--all";else args<<"--map"<<QFileInfo(scene.mpr).completeBaseName()<<"--mob"<<QFileInfo(scene.mob).completeBaseName();
-    m_stdout.clear();m_stderr.clear();m_done=false;m_errors=false;m_cancelled=false;m_log->appendPlainText(QStringLiteral("Вывод: ")+output);
+    m_stdout.clear();m_stderr.clear();m_done=false;m_errors=false;m_cancelled=false;appendBakeLog(QStringLiteral("Вывод: ")+output);
     m_completedProfiles=0;m_progress->setRange(0,0);m_status->setText(QStringLiteral("Запекание: подготовка геометрии…"));m_heightOutliers->hide();
-    m_process->setWorkingDirectory(scene.gameRoot);m_process->start(exe,args);freshness();controls();return true;
+    m_bakeUnfinalized=true;m_process->setWorkingDirectory(scene.gameRoot);m_process->start(exe,args);freshness();controls();return true;
 }
-void CNavmeshPanel::cancelBake(){m_pendingBakes.clear();m_autoBakeTimer->stop();if(!busy())return;m_cancelled=true;m_log->appendPlainText(QStringLiteral("Отмена: запекатель остановлен; уже записанные файлы сохранены, прежние версии — в бэкапах."));m_process->terminate();QTimer::singleShot(2000,m_process,[this](){if(m_cancelled&&busy())m_process->kill();});}
+void CNavmeshPanel::appendBakeLog(const QString& text){
+    if(!m_bakeTranscript.isEmpty())m_bakeTranscript+='\n';m_bakeTranscript+=text;
+    if(!m_shuttingDown)m_log->appendPlainText(text);
+}
+void CNavmeshPanel::flushBakeOutput(){
+    drain(false);drain(true);
+    if(!m_stdout.isEmpty())line(m_stdout);if(!m_stderr.isEmpty())line(m_stderr);
+    m_stdout.clear();m_stderr.clear();
+}
+void CNavmeshPanel::saveBakeLog(){
+    if(m_logSaved||m_reportRoot.isEmpty())return;
+    if(!m_interruptionReason.isEmpty())appendBakeLog(QStringLiteral("Пакет прерван: %1. Последняя начатая карта: %2; пройдено %3 из %4.")
+        .arg(m_interruptionReason,m_currentBakeMap).arg(m_mapsCompleted).arg(m_mapsTotal?QString::number(m_mapsTotal):QStringLiteral("неизвестно")));
+    QSaveFile log(QDir(m_reportRoot).filePath("bake.log"));
+    const auto bytes=m_bakeTranscript.toUtf8();
+    if(log.open(QIODevice::WriteOnly)&&log.write(bytes)==bytes.size()&&log.commit())m_logSaved=true;
+    else ei::log(eLogWarning,"Shutdown NavBake journal write failed: "+log.fileName()+": "+log.errorString());
+}
+bool CNavmeshPanel::bakeActive()const{return busy()||m_bakeUnfinalized||!m_pendingBakes.isEmpty();}
+QString CNavmeshPanel::bakeProgressText()const{
+    const bool queued=!busy()&&!m_bakeUnfinalized&&!m_pendingBakes.isEmpty();
+    const QString map=queued?QFileInfo(m_pendingBakes.first().mpr).fileName():m_currentBakeMap;
+    return QStringLiteral("Карта: %1. Пройдено %2 из %3; профилей текущей карты: %4. В очереди: %5.")
+        .arg(map).arg(queued?0:m_mapsCompleted).arg(queued?QString::number(m_pendingBakes.size()):m_mapsTotal?QString::number(m_mapsTotal):QStringLiteral("неизвестно"))
+        .arg(queued?0:m_completedProfiles).arg(m_pendingBakes.size());
+}
+void CNavmeshPanel::prepareQueuedInterruption(){
+    if(busy()||m_bakeUnfinalized||m_pendingBakes.isEmpty())return;
+    // A queued save is a separate run: never overwrite the previous bake.log.
+    m_reportRoot=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("nav64-reports/"+QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QDir().mkpath(m_reportRoot);m_bakeTranscript.clear();m_logSaved=false;m_interruptionReason.clear();
+    m_currentBakeMap=QStringLiteral("ещё не начата (в очереди: %1)").arg(QFileInfo(m_pendingBakes.first().mpr).fileName());m_mapsTotal=m_pendingBakes.size();m_mapsCompleted=0;
+    appendBakeLog(QStringLiteral("Автозапекание в очереди; процесс ещё не запущен."));
+}
+void CNavmeshPanel::requestBakeCancellation(const QString& reason){
+    prepareQueuedInterruption();const bool active=bakeActive();
+    if(active&&!m_pendingBakes.isEmpty()){
+        QStringList maps;for(const auto& scene:m_pendingBakes)maps<<QFileInfo(scene.mpr).fileName();
+        appendBakeLog(QStringLiteral("Отменена очередь автозапекания: %1").arg(maps.join(", ")));
+    }
+    m_pendingBakes.clear();m_autoBakeTimer->stop();if(!active)return;
+    m_cancelled=true;if(m_interruptionReason.isEmpty())m_interruptionReason=reason;
+    appendBakeLog(QStringLiteral("Отмена: запекатель остановлен; уже записанные файлы сохранены, прежние версии — в бэкапах."));
+    if(!busy()){flushBakeOutput();m_bakeUnfinalized=false;saveBakeLog();return;}
+    m_process->terminate();QTimer::singleShot(2000,m_process,[this](){if(m_cancelled&&busy())m_process->kill();});
+}
+void CNavmeshPanel::cancelBake(){requestBakeCancellation(QStringLiteral("выбор человека (Отмена в панели)"));}
+void CNavmeshPanel::interruptBakeForShutdown(const QString& reason){
+    if(!bakeActive())return;
+    requestBakeCancellation(reason);
+    // finished remains connected during normal closing; the destructor severs
+    // it first and uses the same drain/save functions without touching widgets.
+    if(busy()&&!m_process->waitForFinished(2000)){
+        m_process->kill();
+        if(busy()&&!m_process->waitForFinished(3000)&&busy())appendBakeLog(QStringLiteral("Процесс не завершился за время ожидания (terminate 2000 мс + kill 3000 мс)."));
+    }
+    flushBakeOutput();m_bakeUnfinalized=false;saveBakeLog();
+}
+bool CNavmeshPanel::confirmBakeClose(QWidget* owner,const QString& source,bool unattended){
+    if(!bakeActive())return true;
+    const auto receipt=[this,&source](const QString& decision){ei::log(eLogInfo,"Shutdown NavBake source:"+source+" decision:"+decision+" "+bakeProgressText());};
+    receipt("requested");
+    if(unattended){receipt(qApp->isSavingSession()?"session-interrupt":"unattended-interrupt");
+        interruptBakeForShutdown(qApp->isSavingSession()?QStringLiteral("завершение сеанса"):QStringLiteral("закрытие без диалога (headless)"));return true;}
+    QMessageBox question(QMessageBox::Question,QStringLiteral("Идёт запекание Nav64"),QString(),QMessageBox::NoButton,owner);
+    question.setObjectName("navBakeCloseQuestion");question.setTextFormat(Qt::PlainText);
+    auto* wait=question.addButton(QStringLiteral("Дождаться"),QMessageBox::RejectRole);wait->setObjectName("navBakeCloseWait");
+    auto* stop=question.addButton(QStringLiteral("Прервать и закрыть"),QMessageBox::DestructiveRole);stop->setObjectName("navBakeCloseStop");
+    question.setDefaultButton(wait);question.setEscapeButton(wait);
+    bool completed=false;QTimer poll;
+    const auto update=[&](){
+        question.setText(bakeProgressText()+QStringLiteral("\n\nДождаться — отменить закрытие и продолжить запекание.\nПрерывание оставит уже записанные файлы. Файлы Nav64 и общая таблица тел могут оказаться несогласованными: перед использованием заново запеките весь мод. Прежние версии находятся в резервных копиях."));
+        if(!bakeActive()){completed=true;question.done(0);}
+    };
+    connect(&poll,&QTimer::timeout,&question,update);poll.start(100);update();
+    if(!completed)question.exec();poll.stop();
+    if(completed){receipt("bake-finished");return true;}
+    if(question.clickedButton()!=stop){receipt("wait");return false;}
+    receipt("interrupt-and-close");interruptBakeForShutdown(QStringLiteral("выбор человека (Прервать и закрыть)"));return true;
+}
+
 
 void CNavmeshPanel::inspectBaker(){
     const QFileInfo file(bakerPath());const auto modified=file.lastModified().toMSecsSinceEpoch();
@@ -291,7 +377,7 @@ void CNavmeshPanel::bodiesStatus(){
     else if(!bodies.valid)text=QStringLiteral("Таблица тел: ")+bodies.error;
     else text=QStringLiteral("Таблица тел: %1 образцов, алгоритм %2").arg(bodies.sampleCount).arg(bodies.algorithm);
     m_bodiesStatus->setText(text);m_bodiesStatus->setToolTip(path);
-    if(text!=m_lastBodiesStatus){m_log->appendPlainText(text);m_lastBodiesStatus=text;}
+    if(text!=m_lastBodiesStatus){appendBakeLog(text);m_lastBodiesStatus=text;}
 }
 bool CNavmeshPanel::exportLosses(const QString& path,QString* error)const{
     return exportNav64ComparisonCsv(path,QFileInfo(m_mpr).completeBaseName(),m_document.header.profile,m_comparison,error);
@@ -306,7 +392,7 @@ void CNavmeshPanel::algorithmStatus(){
     }
     const auto message=nav64AlgorithmMismatch(algorithm,m_bakerIdentity.algorithm);
     m_algorithmStatus->setText(message);m_algorithmStatus->setVisible(!message.isEmpty());
-    if(!message.isEmpty()&&message!=m_lastMismatch)m_log->appendPlainText(message);
+    if(!message.isEmpty()&&message!=m_lastMismatch)appendBakeLog(message);
     m_lastMismatch=message;
 }
 bool CNavmeshPanel::lossesVisible()const{return m_fill->currentIndex()==2;}

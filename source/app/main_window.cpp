@@ -1,6 +1,8 @@
 #include <functional>
 #include "rebuild64_viewport_widget.h"
 #include "window_geometry.h"
+#include "navmesh_panel.h"
+#include <QSessionManager>
 #include "lever_approach_dialog.h"
 #include "ui_theme.h"
 #include "main_window.h"
@@ -46,6 +48,25 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+
+namespace {
+// This application filter sees only Quit. The existing widget event filter
+// must stay local: its raw widget pointers are invalid during child teardown.
+class CNavBakeQuitFilter final : public QObject {
+public:
+    CNavBakeQuitFilter(QObject* parent,const std::function<bool()>& request)
+        :QObject(parent),m_request(request){}
+protected:
+    bool eventFilter(QObject* watched,QEvent* event) override {
+        if(watched==qApp&&event->type()==QEvent::Quit&&m_request()){
+            event->ignore();return true;
+        }
+        return false;
+    }
+private:
+    std::function<bool()> m_request;
+};
+}
 #include <QFormLayout>
 #include <QActionGroup>
 #include <QInputDialog>
@@ -1908,6 +1929,30 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_pView, &CView::aiGraphPersistenceRequested,
             this, &MainWindow::persistAiGraph);
     m_pView->createNavmeshMenu(m_ui->menuTools);
+    m_navBakeQuitFilter=new CNavBakeQuitFilter(this,[this](){
+        if(!m_shutdownInProgress&&m_pView&&m_pView->navmeshPanel()->bakeActive()){
+            m_navBakeCloseSource="application-quit-event";
+            if(!m_navBakeCloseQuestion)QTimer::singleShot(0,this,[this](){close();});
+            return true;
+        }
+        return false;
+    });
+    qApp->installEventFilter(m_navBakeQuitFilter);
+    connect(qApp,&QGuiApplication::commitDataRequest,this,[this](QSessionManager&){
+        // Do not request interaction or cancel Windows session shutdown.
+        if(m_pView&&m_pView->navmeshPanel()->bakeActive()) {
+            auto* panel=m_pView->navmeshPanel();
+            ei::log(eLogInfo,"Shutdown NavBake source:windows-session decision:session-interrupt "+panel->bakeProgressText());
+            panel->interruptBakeForShutdown(QStringLiteral("завершение сеанса"));
+        }
+    },Qt::DirectConnection);
+    connect(qApp,&QCoreApplication::aboutToQuit,this,[this](){
+        if(m_pView&&m_pView->navmeshPanel()->bakeActive()) {
+            auto* panel=m_pView->navmeshPanel();
+            ei::log(eLogInfo,"Shutdown NavBake source:application-aboutToQuit decision:unattended-interrupt "+panel->bakeProgressText());
+            panel->interruptBakeForShutdown(qApp->isSavingSession()?QStringLiteral("завершение сеанса"):QStringLiteral("закрытие без диалога (выход приложения)"));
+        }
+    });
     connect(m_pView, &CView::mobStateChanged,
             this, [this]() { scheduleViewportMinimapRefresh(); });
     connect(m_pView, &CView::mobDocumentSaved, this,
@@ -2409,6 +2454,7 @@ MainWindow::MainWindow(QWidget* parent) :
 
 MainWindow::~MainWindow()
 {
+    qApp->removeEventFilter(m_navBakeQuitFilter);
     cancelBackgroundMobs();
     if(m_aiAgent)m_aiAgent->stop();
     m_startupRecoveryCancel->store(true);
@@ -9870,8 +9916,27 @@ void MainWindow::resizeEvent(QResizeEvent* e)
     positionViewportMinimap();
 }
 
+#ifdef Q_OS_WIN
+bool MainWindow::nativeEvent(const QByteArray& eventType,void* message,long* result)
+{
+    const auto* msg=static_cast<MSG*>(message);
+    if(msg->message==WM_SYSCOMMAND&&(msg->wParam&0xfff0)==SC_CLOSE)
+        m_navBakeCloseSource="windows-SC_CLOSE"; // also Alt+F4/system menu; not proof of a titlebar click
+    return QMainWindow::nativeEvent(eventType,message,result);
+}
+#endif
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if(m_navBakeCloseQuestion){e->ignore();return;}
+    const QString source=m_navBakeCloseSource.isEmpty()
+        ?(qApp->property("agentHeadlessClosing").toBool()?QStringLiteral("shutdown_headless"):qApp->isSavingSession()?QStringLiteral("windows-session"):QStringLiteral("unknown"))
+        :m_navBakeCloseSource;
+    m_navBakeCloseSource.clear();
+    if(m_pView&&m_pView->navmeshPanel()->bakeActive()) {
+        QScopedValueRollback<bool> asking(m_navBakeCloseQuestion,true);
+        if(!m_pView->navmeshPanel()->confirmBakeClose(this,source,
+           qApp->property("agentHeadless").toBool()||qApp->isSavingSession())){e->ignore();return;}
+    }
     if(property("aiCommitBusy").toBool() || m_backgroundMobAttaching) {
         e->ignore();QTimer::singleShot(50,this,[this](){close();});return;
     }
@@ -9922,6 +9987,14 @@ void MainWindow::closeEvent(QCloseEvent *e)
     {
         e->ignore();
         return;
+    }
+
+    // Saving from the unsaved-changes question can enqueue an automatic bake.
+    // Apply the same gate before stopping workers or starting the deadline.
+    if(!m_closeReady&&m_pView&&m_pView->navmeshPanel()->bakeActive()) {
+        QScopedValueRollback<bool> asking(m_navBakeCloseQuestion,true);
+        if(!m_pView->navmeshPanel()->confirmBakeClose(this,source,
+           qApp->property("agentHeadless").toBool()||qApp->isSavingSession())){e->ignore();return;}
     }
 
     if(!m_closeReady) {
