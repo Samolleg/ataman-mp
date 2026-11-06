@@ -55,4 +55,5 @@ private:
     QList<QPointer<QWidget>> m_panels;
     EirStatistics m_statistics{};
     QElapsedTimer m_sceneSnapshotTimer;
+    QElapsedTimer m_previewClock;
 };

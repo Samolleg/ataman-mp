@@ -646,3 +646,632 @@ default для сохранности несохранённой памяти; �
 picking, sector deltas30–60мс, units/stst8, полная приёмка. R2 этого не
 реализует и не заменяет. Следующий шаг — визуальная приёмка новых пар и
 ответ Ильи по оставшемуся liquid/light response; **STOP BEFORE INSTALLATION**.
+
+
+## R3 — игровой профиль вместо сравнения с GL (2026-11-06)
+
+**Поправка владельца/директора:** критерий «не хуже OpenGL» отменён целиком.
+Все прежние выводы о необходимости сближать цвет, воду, контраст или чёткость
+с GL остаются историей R1/R2 и **не являются критериями этой задачи**.
+Рендер и его художественная политика принадлежат автору Rebuild64. Новая цель:
+передавать его настройки и исходные факты; собственных улучшений вида нет.
+Причина смены критерия — новое решение владельца, не ошибка исполнения R2.
+
+База main `12acdabc5c5e8346cc060ee881930c953d1cf65f`, VERSION283; история не
+переписывалась. **Настройки проверены; полная эквивалентность всех игровых
+входов НЕ достигнута**: недостающие runtime-контракты перечислены ниже.
+Игру не запускали; эталонного игрового кадра нет и совпадение с ним не
+заявляется. Кадры сверит владелец. Установка и push не выполнялись.
+
+W=`work/rebuild64-renderer-stage3-283-20261106`, T=`W/r3`.
+Новые [восемь кадров Rebuild64](../../work/rebuild64-renderer-stage3-283-20261106/pairs-r3/)
+содержат только неизменённый1280×720 readback нового рендера, без GL рядом,
+постобработки, масштабирования или повышения резкости. Старые pairs/pairs-r2
+и все предыдущие разделы отчёта сохранены. Снимков экрана владельца, desktop/
+computer-use, видимых окон, запуска установки/старых EXE/игры не было.
+
+### Что снято и какие патчи оставлены
+
+Удалены `stock_sky.inc` и загрузка/отрисовка nask0sky/Sky00. Штатный
+`E1ClaimSky` передаёт небо самому renderer с его sky_clouds. Сняты все
+host-quality overrides: shadows/point_shadows/shadow_far, draw_distance1000,
+sky_clouds0, fog_preset0, cave_brightness−1, terrain_blend0, SMAA-решения,
+water_simple=true, material_terrain=false, material_quality/aniso и document
+feature bit, менявший terrain_blend. Эти значения теперь определяет INI.
+GL renderLightingMode/sceneLights/frustum и переключатели GL sky/fog не задают
+политику Rebuild64. Общие камера/час/регион остаются сервисными входами редактора.
+
+Патчи008/009/010 удалены из lock и из дерева исходников. Для010 отдельная
+потеря именно embedded-хоста **не доказана**: проверенный pinned typed-путь
+`E1Terrain::E1PrepareTerrainCommand` также публикует surface без mip_count,
+а общий get_native_owned_texture выбирает1 mip. Поэтому сохранять R2-расширение
+как «правильнее игры» нельзя. Это не утверждение о любом другом игровом
+texture producer или о качестве изображения. Исходный путь восстановлен;
+embedded shader/appearance-патч вместо010 не вводился.
+
+| Патч | Назначение | Решение R3 |
+|---|---|---|
+|001 E1Terrain|Публикация immutable CPU snapshot без retail pointers|Оставлен: вход памяти|
+|002 Renderer.props|FunctionLevelLinking для независимой линковки|Оставлен: сборка|
+|003 OwnedRenderer|Исключение SDK props/DLSS backend, no_ngx provider|Оставлен: сборка без SDK|
+|004 renderer.h|Friend для readiness и host bootstrap нормального config reader|Оставлен: доступ к встраиванию, shading не меняется|
+|005/006 owned_asset_loader|memory_map/memory_terrain вместо повторного открытия файлов|Оставлены: unsaved memory ingress|
+|007 embedded_host|Явный reset после завершения единственного сеанса|Оставлен: lifetime|
+|008|Редакторский cave sentinel−1|Снят|
+|009|Изменённая admission Terrain2 table|Снят|
+|010|Расширенная передача GPU mip chain|Снят: editor-only loss не доказан|
+
+Все001–007 просмотрены: нет поправок художественной модели. Повторная чистая
+проверка применила001–007 к pinned archive и сравнила12 файлов со сборкой,
+включая восстановленные поверхности/renderer_device/flush/surfaces после008–010.
+[Audit](../../work/rebuild64-renderer-stage3-283-20261106/r3/final-recipe-audit.json).
+
+### Настройки: источник, bootstrap и отступления
+
+G в полной таблице ниже означает неизменённый источник
+`C:/GOG Games/PZ/Config64/rddraw.ini`, секция `[graphics]`.
+S означает `C:/GOG Games/PZ/Config64/settings.ini` с указанной секцией.
+Файлы владельца только читались. Перед каждым renderer session worker создаёт
+изолированные копии под cache тестового/будущего mapper process. Renderer может
+сохранять только свои копии. Missing/invalid required config даёт явный fallback,
+а не собственный профиль качества. Строки nvidia_cache_id не переносятся:
+это process-cache bookkeeping, не настройка изображения.
+
+Обнаружена и исправлена причина скрытого использования defaults: pinned
+`Renderer::ensure_host()` регистрирует options и вызывает apply, **но не
+загружает INI**, в отличие от обычного bootstrap с DebugOverlay. Теперь хост
+до ensure_host вызывает тот же register_config_options и RendererConfig::load
+над копией. Повторная регистрация не сбрасывает уже загруженные значения
+(RendererConfig::register_option отвергает duplicate key). В первом R3 прогоне
+был draw_distance300/aniso3/material2; он не считается проверкой конфигурации
+и не используется в pairs-r3. Финальные процессы подтвердили340/340 source
+values через EFFECTIVE_CONFIG, без подмены значений.
+
+Единственные изменения graphics-копии:
+
+| Параметр | Игра/G | Хост | Причина и влияние |
+|---|---:|---:|---|
+|renderer_backend|1 (D3D12)|0 (D3D11)|Разрешённый backend без D3D12; может менять точность/порядок GPU операций и производительность. Пиксельное равенство не заявляется. Общие shaders/материалы не исправлялись.|
+|upscaler|1 (DLSS), quality1|0|NGX/DLSS не входят. Нет их temporal reconstruction/jitter/detail response; render_scale100 оставлен из файла, вывод native resolution.|
+|frame_generation|2|0|Streamline/FG отсутствуют: нет генерированных промежуточных кадров/их артефактов, меняется плавность и задержка.|
+|reflex|0|0|SDK latency integration отсутствует; на этих настройках значение уже0, собственно изображение не меняется.|
+
+upscaler_quality и upscale_sharpness сохранены из файла, но при off не действуют.
+Все остальные340 зарегистрированных values загружены, включая mist/wisps,
+clouds, modern water, PBR, Terrain2 и эффекты. Числа float в dump округлены до
+6 знаков, comma-list нормализованы штатным reader; сравнение учитывает это.
+Нерегистрируемых/пропавших graphics keys в данном INI нет.
+
+| Параметр | G | Effective | Источник |
+|---|---|---|---|
+| `confine_cursor` | `true` | `true` | G |
+| `vsync` | `false` | `false` | G |
+| `background_mode` | `1` | `1` | G |
+| `background_frame_limit` | `15` | `15` | G |
+| `frame_limit` | `60` | `60` | G |
+| `shadows` | `true` | `true` | G |
+| `terrain_normal_sunlight` | `true` | `true` | G |
+| `smaa` | `true` | `true` | G |
+| `depth_prepass` | `true` | `true` | G |
+| `upscaler` | `1` | `0` | G; разрешённое отступление |
+| `upscaler_quality` | `1` | `1` | G |
+| `upscale_sharpness` | `0.200000003` | `0.200000` | G |
+| `render_scale` | `100` | `100` | G |
+| `camp_ui_layout` | `1` | `1` | G |
+| `ui_language` | `0` | `0` | G |
+| `harness_shot_after_overlay` | `false` | `false` | G |
+| `frame_generation` | `2` | `0` | G; разрешённое отступление |
+| `frame_generation_min_fps` | `15` | `15` | G |
+| `reflex` | `0` | `0` | G |
+| `latency_pacing` | `0` | `0` | G |
+| `fg_frame_image` | `false` | `false` | G |
+| `renderer_backend` | `1` | `0` | G; разрешённое отступление |
+| `display_mode` | `0` | `0` | G |
+| `window_width` | `0` | `0` | G |
+| `window_height` | `0` | `0` | G |
+| `owned_ui_text` | `true` | `true` | G |
+| `anisotropy` | `4` | `4` | G |
+| `water_reflections` | `true` | `true` | G |
+| `water_reflection_quality` | `2` | `2` | G |
+| `water_reflection_step_pixels` | `8` | `8.000000` | G |
+| `water_simple` | `false` | `false` | G |
+| `water_physical` | `true` | `true` | G |
+| `water_surf_quality` | `2` | `2` | G |
+| `water_surf_debug` | `0` | `0` | G |
+| `water_surf_wave_height` | `0.600000024` | `0.600000` | G |
+| `water_surf_wavelength` | `9` | `9.000000` | G |
+| `water_surf_speed` | `1.20000005` | `1.200000` | G |
+| `water_surf_choppiness` | `2.5` | `2.500000` | G |
+| `water_surf_octaves` | `4` | `4` | G |
+| `water_surf_chop_height` | `0.25` | `0.250000` | G |
+| `water_surf_segment` | `18` | `18.000000` | G |
+| `water_surf_randomness` | `0.75` | `0.750000` | G |
+| `water_surf_shore_foam` | `1` | `1.000000` | G |
+| `water_surf_shore_width` | `0.600000024` | `0.600000` | G |
+| `water_surf_crest_foam` | `0.949999988` | `0.950000` | G |
+| `water_surf_foam_cell` | `1.60000002` | `1.600000` | G |
+| `water_surf_shallow_tint` | `0.699999988` | `0.700000` | G |
+| `water_surf_absorption` | `1` | `1.000000` | G |
+| `water_surf_cliff_burst` | `1` | `1.000000` | G |
+| `water_surf_no_sea_maps` | `zone7` | `zone7` | G |
+| `water_surf_edge_fade` | `40` | `40.000000` | G |
+| `bloom` | `2` | `2` | G |
+| `emissive_lights` | `2` | `2` | G |
+| `emissive_light_strength` | `1` | `1.000000` | G |
+| `bloom_strength` | `1` | `1.000000` | G |
+| `bloom_threshold` | `1` | `1.000000` | G |
+| `depth_of_field` | `1` | `1` | G |
+| `depth_of_field_strength` | `0.100000001` | `0.100000` | G |
+| `bloom_debug_view` | `false` | `false` | G |
+| `ground_cover` | `3` | `3` | G |
+| `critters` | `2` | `2` | G |
+| `critter_rats` | `true` | `true` | G |
+| `critter_rats_weight` | `100` | `100` | G |
+| `critter_spiders` | `true` | `true` | G |
+| `critter_spiders_weight` | `100` | `100` | G |
+| `critter_larvae` | `true` | `true` | G |
+| `critter_larvae_weight` | `100` | `100` | G |
+| `critter_frogs` | `true` | `true` | G |
+| `critter_frogs_weight` | `100` | `100` | G |
+| `critter_lizards` | `true` | `true` | G |
+| `critter_lizards_weight` | `100` | `100` | G |
+| `critter_snakes` | `true` | `true` | G |
+| `critter_snakes_weight` | `100` | `100` | G |
+| `critter_scolopendras` | `true` | `true` | G |
+| `critter_scolopendras_weight` | `100` | `100` | G |
+| `critter_dung_beetles` | `true` | `true` | G |
+| `critter_dung_beetles_weight` | `100` | `100` | G |
+| `critter_small_birds` | `true` | `true` | G |
+| `critter_small_birds_weight` | `100` | `100` | G |
+| `critter_corvids` | `true` | `true` | G |
+| `critter_corvids_weight` | `100` | `100` | G |
+| `critter_vultures` | `true` | `true` | G |
+| `critter_vultures_weight` | `100` | `100` | G |
+| `critter_crabs` | `true` | `true` | G |
+| `critter_crabs_weight` | `100` | `100` | G |
+| `critter_snow_birds` | `true` | `true` | G |
+| `critter_snow_birds_weight` | `100` | `100` | G |
+| `critter_snow_mice` | `true` | `true` | G |
+| `critter_snow_mice_weight` | `100` | `100` | G |
+| `critter_bats` | `true` | `true` | G |
+| `critter_bats_weight` | `100` | `100` | G |
+| `ambient_particles` | `2` | `2` | G |
+| `ambient_particle_density` | `1` | `1.000000` | G |
+| `ambient_particle_size` | `1` | `1.000000` | G |
+| `shadow_close_range` | `0` | `0` | G |
+| `shadow_cascade_quality` | `2` | `2` | G |
+| `shadow_close_cascades` | `3` | `3` | G |
+| `shadow_far` | `true` | `true` | G |
+| `shadow_membership_scroll` | `true` | `true` | G |
+| `shadow_neighbour_casters` | `2` | `2` | G |
+| `shadow_far_foliage_opaque` | `true` | `true` | G |
+| `shadow_early_out` | `true` | `true` | G |
+| `hero_light` | `false` | `false` | G |
+| `point_shadows` | `true` | `true` | G |
+| `point_shadow_quality` | `2` | `2` | G |
+| `material_quality` | `3` | `3` | G |
+| `material_view` | `0` | `0` | G |
+| `material_reflections` | `1` | `1.000000` | G |
+| `material_metal_mask` | `true` | `true` | G |
+| `material_world` | `true` | `true` | G |
+| `material_relief` | `1` | `1.000000` | G |
+| `material_world_roughness` | `0` | `0.000000` | G |
+| `material_terrain` | `true` | `true` | G |
+| `material_terrain_relief` | `0.0599999987` | `0.060000` | G |
+| `material_terrain_crevices` | `1` | `1.000000` | G |
+| `shadow_softness` | `2` | `2` | G |
+| `shadow_sun_angle` | `15` | `15` | G |
+| `point_shadow_light_size` | `100` | `100` | G |
+| `change_driven_object_poses` | `true` | `true` | G |
+| `terrain_far_shadow_prewarm` | `true` | `true` | G |
+| `merge_character_parts` | `true` | `true` | G |
+| `skip_scenery_draw_walk` | `true` | `true` | G |
+| `occlusion_culling` | `true` | `true` | G |
+| `render_thread` | `true` | `true` | G |
+| `render_thread_frame_latency` | `2` | `2` | G |
+| `cull_min_screen_permille` | `5` | `5` | G |
+| `shadow_cull_min_texels` | `2` | `2` | G |
+| `highlight_briefing` | `true` | `true` | G |
+| `highlight_selected` | `false` | `false` | G |
+| `highlight_hover_characters` | `true` | `true` | G |
+| `highlight_hover_objects` | `true` | `true` | G |
+| `cursor_scale` | `100` | `100` | G |
+| `pillarbox_fill` | `1` | `1` | G |
+| `ui_scale` | `100` | `100` | G |
+| `message_panel_width` | `100` | `100.000000` | G |
+| `portrait_head` | `true` | `true` | G |
+| `portrait_helmet` | `false` | `false` | G |
+| `hud_fade_duration` | `250` | `250` | G |
+| `hud_fade_in_duration` | `250` | `250` | G |
+| `hud_fade_delay` | `2000` | `2000` | G |
+| `spell_bar_auto_fade` | `false` | `false` | G |
+| `spell_bar_fade_transparency` | `80` | `80` | G |
+| `ability_bar_auto_fade` | `false` | `false` | G |
+| `ability_bar_fade_transparency` | `80` | `80` | G |
+| `minimap_auto_fade` | `false` | `false` | G |
+| `minimap_fade_transparency` | `80` | `80` | G |
+| `character_info_auto_fade` | `false` | `false` | G |
+| `character_info_fade_transparency` | `80` | `80` | G |
+| `portraits_auto_fade` | `false` | `false` | G |
+| `portraits_fade_transparency` | `80` | `80` | G |
+| `weapon_switcher_auto_fade` | `false` | `false` | G |
+| `weapon_switcher_fade_transparency` | `80` | `80` | G |
+| `quick_items_auto_fade` | `false` | `false` | G |
+| `quick_items_fade_transparency` | `80` | `80` | G |
+| `message_panel_auto_fade` | `false` | `false` | G |
+| `message_panel_fade_transparency` | `80` | `80` | G |
+| `quest_items_auto_fade` | `false` | `false` | G |
+| `quest_items_fade_transparency` | `80` | `80` | G |
+| `stance_auto_fade` | `false` | `false` | G |
+| `stance_fade_transparency` | `80` | `80` | G |
+| `game_speed_auto_fade` | `false` | `false` | G |
+| `game_speed_fade_transparency` | `80` | `80` | G |
+| `stance_scale` | `100` | `100.000000` | G |
+| `game_speed_scale` | `100` | `100.000000` | G |
+| `spell_bar_scale` | `100` | `100.000000` | G |
+| `spell_bar_x` | `-1` | `-1.000000` | G |
+| `spell_bar_y` | `-1` | `-1.000000` | G |
+| `ability_bar_scale` | `100` | `100.000000` | G |
+| `ability_bar_x` | `-1` | `-1.000000` | G |
+| `ability_bar_y` | `-1` | `-1.000000` | G |
+| `minimap_scale` | `100` | `100.000000` | G |
+| `minimap_x` | `-1` | `-1.000000` | G |
+| `minimap_y` | `-1` | `-1.000000` | G |
+| `character_info_scale` | `100` | `100.000000` | G |
+| `character_info_x` | `-1` | `-1.000000` | G |
+| `character_info_y` | `-1` | `-1.000000` | G |
+| `portraits_scale` | `100` | `100.000000` | G |
+| `portraits_x` | `-1` | `-1.000000` | G |
+| `portraits_y` | `-1` | `-1.000000` | G |
+| `weapon_switcher_scale` | `100` | `100.000000` | G |
+| `weapon_switcher_x` | `-1` | `-1.000000` | G |
+| `weapon_switcher_y` | `-1` | `-1.000000` | G |
+| `quick_items_scale` | `100` | `100.000000` | G |
+| `quick_items_x` | `-1` | `-1.000000` | G |
+| `quick_items_y` | `-1` | `-1.000000` | G |
+| `interface_profile` | `default` | `default` | G |
+| `quest_items_scale` | `100` | `100.000000` | G |
+| `quest_items_x` | `-1` | `-1.000000` | G |
+| `quest_items_y` | `-1` | `-1.000000` | G |
+| `minimap_border_padding` | `3` | `3` | G |
+| `minimap_buttons_scale` | `100` | `100` | G |
+| `minimap_buttons_side` | `0` | `0` | G |
+| `character_info_border_padding` | `3` | `3` | G |
+| `character_info_buttons_scale` | `100` | `100` | G |
+| `character_info_buttons_side` | `0` | `0` | G |
+| `message_panel_border_padding` | `3` | `3` | G |
+| `message_panel_buttons_scale` | `100` | `100` | G |
+| `message_panel_buttons_side` | `0` | `0` | G |
+| `spell_bar_direction` | `0` | `0` | G |
+| `ability_bar_direction` | `0` | `0` | G |
+| `portrait_direction` | `0` | `0` | G |
+| `weapon_switcher_direction` | `2` | `2` | G |
+| `quick_items_direction` | `3` | `3` | G |
+| `spell_bar_padding` | `0` | `0` | G |
+| `spell_bar_preview` | `false` | `false` | G |
+| `spell_bar_preview_count` | `3` | `3` | G |
+| `spell_bar_slots_per_column` | `0` | `0` | G |
+| `ability_bar_padding` | `0` | `0` | G |
+| `ability_bar_preview` | `false` | `false` | G |
+| `ability_bar_preview_count` | `3` | `3` | G |
+| `ability_bar_slots_per_column` | `0` | `0` | G |
+| `portraits_padding` | `0` | `0` | G |
+| `portraits_preview` | `false` | `false` | G |
+| `portraits_preview_count` | `3` | `3` | G |
+| `weapon_switcher_padding` | `0` | `0` | G |
+| `weapon_switcher_preview` | `false` | `false` | G |
+| `weapon_switcher_preview_count` | `4` | `4` | G |
+| `weapon_switcher_slots_per_column` | `0` | `0` | G |
+| `quick_items_padding` | `0` | `0` | G |
+| `quick_items_preview` | `false` | `false` | G |
+| `quick_items_preview_count` | `4` | `4` | G |
+| `quick_items_slots_per_column` | `0` | `0` | G |
+| `message_panel_text_scale` | `100` | `100` | G |
+| `hud_border_scale` | `100` | `100` | G |
+| `hud_border_transparency` | `0` | `0` | G |
+| `combat_text_scale` | `100` | `100` | G |
+| `message_panel_height` | `100` | `100.000000` | G |
+| `message_panel_x` | `50` | `50.000000` | G |
+| `message_panel_y` | `0` | `0.000000` | G |
+| `hud_width` | `2` | `2` | G |
+| `point_shadow_fast_overlays` | `4` | `4` | G |
+| `point_shadow_merge` | `3` | `3` | G |
+| `weather_wind_variation` | `true` | `true` | G |
+| `wind_floor` | `0.150000006` | `0.150000` | G |
+| `wind_trails` | `2` | `2` | G |
+| `precipitation` | `4` | `4` | G |
+| `precip_strength` | `0` | `0` | G |
+| `precip_test` | `0` | `0` | G |
+| `precip_strength_override` | `0` | `0` | G |
+| `contact_blend` | `0.699999988` | `0.700000` | G |
+| `contact_blend_height` | `0.400000006` | `0.400000` | G |
+| `tree_sway` | `true` | `true` | G |
+| `tree_sway_strength` | `100` | `100` | G |
+| `ao_quality` | `2` | `2` | G |
+| `ao_strength` | `0.75` | `0.750000` | G |
+| `ao_radius` | `1.5` | `1.500000` | G |
+| `ao_low_light_boost` | `1.60000002` | `1.600000` | G |
+| `sky_clouds` | `2` | `2` | G |
+| `cave_brightness` | `0.699999988` | `0.700000` | G |
+| `cave_ambient_floor` | `0.300000012` | `0.300000` | G |
+| `cave_gi` | `2` | `2` | G |
+| `bounce_debug` | `false` | `false` | G |
+| `sun_bounce_strength` | `1` | `1.000000` | G |
+| `cave_gi_strength` | `1` | `1.000000` | G |
+| `sky_brightness` | `1` | `1.000000` | G |
+| `sky_night_brightness` | `1.5` | `1.500000` | G |
+| `sky_cloud_shadows` | `1` | `1.000000` | G |
+| `sky_cloud_shadow_speed` | `8` | `8.000000` | G |
+| `sky_cloud_wind_speed` | `25` | `25.000000` | G |
+| `sky_cloud_motion` | `1` | `1.000000` | G |
+| `fog_preset` | `2` | `2` | G |
+| `fog_volume_quality` | `1` | `1` | G |
+| `fog_debug_component` | `0` | `0` | G |
+| `sun_shafts` | `3` | `3` | G |
+| `sun_shaft_strength` | `2` | `2.000000` | G |
+| `fog_strength` | `1` | `1.000000` | G |
+| `fog_test_dense` | `false` | `false` | G |
+| `fog_visibility` | `5000` | `5000.000000` | G |
+| `fog_density` | `0.100000001` | `0.100000` | G |
+| `fog_morning_chance` | `0.349999994` | `0.350000` | G |
+| `fog_after_rain_hours` | `4` | `4.000000` | G |
+| `neighbour_maps` | `true` | `true` | G |
+| `load_reveal_hold` | `true` | `true` | G |
+| `neighbour_fog_range` | `1` | `1.000000` | G |
+| `ground_cover_distance` | `300` | `300` | G |
+| `ground_cover_shadows` | `2` | `2` | G |
+| `effect_distance` | `500` | `500` | G |
+| `impostors` | `true` | `true` | G |
+| `impostor_pixels` | `64` | `64.000000` | G |
+| `impostor_debug` | `false` | `false` | G |
+| `lod` | `true` | `true` | G |
+| `lod_pixel_error` | `1` | `1.000000` | G |
+| `draw_distance` | `500` | `500` | G |
+| `terrain_lod` | `true` | `true` | G |
+| `terrain_quality` | `2` | `2` | G |
+| `terrain_antitile` | `true` | `true` | G |
+| `terrain_cliffs` | `true` | `true` | G |
+| `cliff_rock_amount` | `0.550000012` | `0.550000` | G |
+| `cliff_rock_softness` | `0.150000006` | `0.150000` | G |
+| `cliff_rock_scale` | `1` | `1.000000` | G |
+| `cliff_streak_length` | `2` | `2.000000` | G |
+| `cliff_steep_start` | `40` | `40.000000` | G |
+| `cliff_steep_full` | `60` | `60.000000` | G |
+| `cliff_snow_rock` | `0.349999994` | `0.350000` | G |
+| `cliff_face_warp` | `0.600000024` | `0.600000` | G |
+| `cliff_rock_detail` | `0.600000024` | `0.600000` | G |
+| `neighbour_fog_skip` | `true` | `true` | G |
+| `terrain_blend_neighbours` | `true` | `true` | G |
+| `terrain_blend` | `1` | `1` | G |
+| `terrain_tessellation` | `1` | `1` | G |
+| `terrain2_cache` | `0` | `0` | G |
+| `terrain2_cache_density` | `100` | `100` | G |
+| `terrain2_cache_bake` | `4096` | `4096` | G |
+| `terrain2_cache_bias` | `0` | `0.000000` | G |
+| `terrain_height_blend` | `true` | `true` | G |
+| `sky_weather_test` | `0` | `0` | G |
+| `critter_labels` | `0` | `0` | G |
+| `fur_mode` | `1` | `1` | G |
+| `fur_shells` | `16` | `16` | G |
+| `fur_length` | `100` | `100` | G |
+| `fur_density` | `100` | `100` | G |
+| `fur_quality` | `1` | `1` | G |
+| `critter_showcase` | `0` | `0` | G |
+| `combat_portrait_effects` | `true` | `true` | G |
+| `combat_healthplates` | `true` | `true` | G |
+| `combat_plate_combat` | `false` | `false` | G |
+| `combat_plate_alt` | `true` | `true` | G |
+| `combat_plate_paused` | `true` | `true` | G |
+| `combat_plate_hover` | `true` | `true` | G |
+| `combat_plate_all` | `false` | `false` | G |
+| `combat_plate_idle_opacity` | `50` | `50` | G |
+| `combat_plate_width` | `120` | `120` | G |
+| `combat_plate_height` | `8` | `8` | G |
+| `combat_plate_spacing` | `28` | `28` | G |
+| `combat_plate_stacking` | `true` | `true` | G |
+| `combat_plate_stack_gap` | `4` | `4` | G |
+| `combat_icon_scale` | `1.14999998` | `1.150000` | G |
+| `combat_split_effects` | `true` | `true` | G |
+| `combat_effect_outlines` | `true` | `true` | G |
+| `combat_hp_values` | `true` | `true` | G |
+| `combat_hp_percent` | `false` | `false` | G |
+| `combat_hp_text_size` | `18` | `18` | G |
+| `combat_max_effects` | `3` | `3` | G |
+| `combat_durations` | `true` | `true` | G |
+| `combat_duration_size` | `10` | `10` | G |
+| `combat_priority` | `29,34,25,32,30,15,38` | `29, 34, 25, 32, 30, 15, 38` | G |
+| `combat_effect_priorities` | `9:99,10:99,11:99,15:102,25:102,26:101,29:102,30:102,31:101,33:101,34:101,38:102` | `9:99, 10:99, 11:99, 15:102, 25:102, 26:101, 29:102, 30:102, 31:101, 33:101, 34:101, 38:102` | G |
+| `combat_blacklist` | `13,14,12` | `13, 14, 12` | G |
+| `combat_buff_overrides` | `` | `` | G |
+| `combat_debuff_overrides` | `16,50` | `16, 50` | G |
+
+Настройки S не являются вторым renderer-quality preset: это источник фактов
+legacy/game terrain/camera и flags. Политика современных эффектов — в G.
+
+| S: секция / параметр | Значение | Передача / граница |
+|---|---:|---|
+|General Settings / VideoResolution|3840×2160|Игровое окно. В маппере native target — размер viewport; тестовый output1280×720 задан заданием, камера — те же восемь кадров.|
+|VideoColorDepthInBits / VideoZBufferDepthInBits|32 /16|Не навязываются D3D11 native backend; форматы определяет тот же renderer (включено в backend-отступление).|
+|Antialiasing|1|Legacy device flag; native SMAA=true берётся из G, собственное AA не вводится.|
+|Dithering / Specular|0 /0|Legacy fixed-state policy. Native PBR регулируется G; defaults fixed-state host не включают specular. Полная TL state snapshot из игры отсутствует.|
+|TextureQuality / Mipmapping / Filtering|0 /0 /2|Нет дополнительной редакторской обработки текстур. Pinned typed surface path и native anisotropy4 сохранены; equivalence всех retail TL sampler states не доказана.|
+|PerspectiveCorrection|1|Общий 3D pipeline renderer; отдельной экранной коррекции хоста нет.|
+|ShowParticles|1|MOB/game runtime particles отсутствуют как полный игровой поток; native ambient_particles2/precipitation4 из G сохранены. См. неполные входы.|
+|Brightness / Contrast / Gamma|0 /0 /0|Нейтральные значения; host grade отсутствует. Не утверждается наличие полного игрового TL gamma/state потока.|
+|Terrain Settings / LOD1 / LOD2|90 /130|Передаются в OwnedTerrainFrameInputs; прежние10000/20000 сняты. Terrain_lod и качество — G.|
+|EnableWaterWaves / EnableDynamicLights|1 /1|Читаются из S и передаются/применяются как flags источника.|
+|BorderFogDistance|8|Требует runtime terrain fog extents/flags; они не восстановлены из полного игрового terrain state. Не подменено своим эффектом.|
+|EnableSelfShadowing|0|Legacy terrain shadow state не эмулируется; native shadows из G сохранены.|
+|EnableFootprints/Bloodprints/Fireprints/BloodprintsRelight|1/1/1/0|В редакторе нет соответствующих live game events; не синтезируются.|
+|Camera Settings / NearClipDistance / FarClipDistance|1 /199680|Рабочая камера маппера общая; для кадров projection near1/far2000 как в предыдущих captures. Native draw_distance500 из G.|
+|Game Specific Settings / DefaultWindForce|.4|Raw MOB wind передан, нормализованная сила/phase runtime не известны; собственная формула не объявляется игровой.|
+|DefaultTimeScale|60|Нет запуска game tick/time-scale simulation; редакторский час и preview clock описаны ниже.|
+|ObjectsLightingCoeff|1|Самостоятельный коэффициент host не добавлялся; источник modern world light — таблицы.|
+|FogNightStartDistance / FogDayStartDistance|50 /90|Читаются из S; текущие тестовые часы используют day90. Исходный TL fog snapshot отсутствует; это отмечено ниже.|
+
+Все прочие поля S относятся к аудио, вводу/движению камеры, интерфейсу и gameplay;
+они не переписываются и не превращаются в настройки Qt маппера. Источники G/S
+и шесть Lights-файлов сверены по SHA до/после тестов:
+T/game-input-source-hashes.json. Cache copies Lights и settings.ini побайтно
+проверяются отдельно; G сравнивается по340 effective values, поскольку его
+копия содержит только перечисленные исключения и собственный cache bookkeeping.
+
+### Входы игры и хоста: подтверждённое и недостающее
+
+Проверены только публичные typed adapters и public engine_bridge указанного
+lock SHA `81dbcdd29b41baeb346f167c6dfb511dff05f295`. Приватный код движка
+не читался и не копировался. Reference contracts: E1World.cpp/h, E1Terrain.cpp,
+E1VisualFrame.cpp, E1AmbientEffects.cpp, model_lighting.h, world_fog.h,
+sky_clouds.h, cave_lighting.h, engine_bridge.cpp (world environment/light manager).
+Доступ к фактам интерфейса не означает наличие их игрового производителя в
+редакторе. В таблице нет заявления «все входы совпали».
+
+| Вход | Игровой путь pinned adapters | Хост R3 / действие | Статус |
+|---|---|---|---|
+|Camera/world_to_clip|E1WorldFrame camera snapshot|Общая камера маппера, D3D depth0..1; те же позиции/FOV кадров|Контракт и конверсия проверены; камера намеренно управляется редактором|
+|Час / region / cave|game_hours=ticks×scale+base, wrapped hour; region выбирает Lights; map.txt cave|Час панели/WS_TIME и реальный map.txt catalog: Gipat zone1, Ingos zone12, cave zone12dun2|Выбор source metadata проверен; unwrapped game days/ticks отсутствуют|
+|Ambient/sun/sky colours|ModelLightingFacts: packed ambient, source diffuse; Lights[Cave]region tables|GL renderEnvironmentForValues исключён. Чтение реальных таблиц, source interpolation; общий produce_model_lighting выполняет packing/направление, gamma-grade нет|Файлы и typed conversion проверены; полный byte-for-byte runtime tuple игры без её производителя не засвидетельствован|
+|Sun track / cave|sky_clouds.h документирует clock track; cave_lighting.h — cave table index0 и fixed ray|Clock formula по публичному adapter contract; cave row0 и fixed ray, затем обычный cave_brightness=.7/floor.3|Не вводит редакторский cave sentinel или цвет|
+|Fog colour / clear|Источник — hourly sky colour; modern fog response внутри renderer|Тот же source sky в captured_fog_color/clear; stock_sky удалён|Источник цвета проверен; итоговый haze не корректируется|
+|Fog TL start/end/projection|Игра читает реальный TL snapshot start/end/scale и _33/_34/_43|Day90/night50 из S, projection общей камеры; прежние180/620 сняты. Выбор day/night по clock track, полного игрового TL snapshot нет|Частично: переход/clip/runtime extents требуют авторского source seam; строгая эквивалентность не доказана|
+|Owned sky|E1ClaimSky запрашивает штатный sky при активном world frame|E1ClaimSky вызывается, sky_clouds2 и weather tuple получает штатный renderer|Gate/config переданы; stock replacement отсутствует|
+|World animation clock|world_time — segment+fraction, .055sec/segment, pause/game speed|Независимый preview clock, не связанный с hidden GL paint; в снимках явно segment0|Единицы/передача проверены, не тот же игровой момент/pause/script state|
+|Weather/rain/snow|CWeather current/next/start/length, particle power, precipitation strength|Редактор не исполняет game world/scripts. Передан unloaded/clear tuple0, native precip_test/strength из G не отключены|**Неполный игровой вход**; не выдаётся за актуальную погоду игры|
+|LIGHT|Готовые point manager center/color/radius/flags; native attenuation/shadows|Все доступные map LIGHT без GL frustum/lighting mode, raw radius/color/position, без +2Z и без GL-эвристики деления color>1 на255. В zone1 передано6, native GI их принимает|Typed publication проверена; runtime manager IDs/attachments/fades полностью не воспроизведены|
+|TORCH|Адаптер читает уже созданный runtime CLight; flame-center lift .951×particle scale, затем native light path|R2 (.8,.8,.8), power×10 были синтезом из GL и не имеют доказанного MOB→CLight контракта. Они удалены, а не объявлены игровыми|**4 TORCH-света zone1 теперь не переданы. Требование сохранить весь свет не выполнено до ответа Ильи.**|
+|GI light tables|Renderer читает Config/lightsregion.ini относительно последнего Maps-root|В private game-work скопированы неизменённые6 Lights-файлов, добавлен пустой Maps-root. Раньше light table no, теперь yes|Исправлена доказанная потеря source context; ни Base Maps, ни чужие файлы не создаются|
+|MPR geometry/material/water|Shared TerrainCpuAsset parser, source pages и properties|Immutable memory MPR, water color/opacity/depth из карты, source pages до swamp classifier сохранены из R2|Ingress исправлен;19/21 source pages найдены,2 отсутствующих optional pages зафиксированы ранее|
+|Texture mips / Terrain2|Общий typed surface path / renderer reconstruction|001–007, без010/009; terrain_blend1, antitile/PBR/water из G|Нет редакторского исправления вида; каждый producer игры отдельно не засвидетельствован|
+|Terrain wind / animated sectors / border fog|Полный runtime NativeTerrainState, phase arrays и dynamic layer shifts|Raw MOB wind и file-backed wave flag; LOD90/130. Нормализованная сила/phase, runtime layer shifts/fog extents не восстановлены; baseline frozen helper|**Неполный игровой вход**; GL/придуманная нормализация не подставлена|
+|Ambient particles/cover/critters|Renderer генерирует по G, shared environment/terrain/visual facts|G оставлен целиком, E1AmbientEffects обычный; доступные retained statics/terrain переданы|Генератор не менялся; полнота зависит от недостающих runtime facts|
+|MOB emitters, flame particle stream, units, scripts|Готовые particle/pose/lifetime facts игры|Полного live игрового producer нет; старые ограничения units/stst8/742 и динамики сохраняются|**Не заявляется полнота сцены/частиц как в игре**; это не имитируется собственным цветом/постпроцессом|
+|Neighbours/world reveal|Настройки neighbour_maps/load_reveal_hold и runtime placement/layout/state|G не менялся; выбранный memory document/профиль. Полного игрового runtime layout/reveal state нет|Полнота этого входа не подтверждена|
+
+Таким образом, правило «ни своих значений цвета/вида» выполнено в части удаления
+политики и синтетических TORCH values, но **полный запрос части3 о всех игровых
+входах остаётся невыполненным**. Сохранены ABI/light publication для реальных
+LIGHT, source-pages fix, панели и one-shot crash protection. Скрывать потерю
+четырёх TORCH под словами «совпадает с игрой» нельзя. Нужен публичный producer
+из MOB/MPR/clock или документированный DTO-контракт автора, без копирования
+приватного engine code и без запуска игры агентом.
+
+### Заливка, пятна, болото и зерно
+
+На coast/top большая светлая область ниже горизонта осталась. R3 не рисует
+вместо неё цилиндр/облака и не исправляет цвет. Проверены штатный sky gate,
+sky_clouds2, source hour/sky colour и обычный fog/sky shader path, в котором
+нижняя полусфера использует haze. **Не проверено**, что такой же кадр есть в
+запущенной игре: её эталона нет, полный runtime tuple ещё неполный. Поэтому
+утверждение «заливка точно как в игре» не делается; владелец сверит кадр.
+
+Пена/белые water patches, modern shallow tint/reflectance, Terrain2 noise и
+material response оставлены штатными. Ни water_simple, ни material_terrain,
+ни terrain_blend ради вида не переключаются. Для swamp сохранён только
+обоснованный ingress source pages; дальнейшая пестрота/переходы определяются
+материалом карты и обычным renderer. Вопрос Илье о маленьком прямоугольнике
+foam возможен как о предполагаемом артефакте discretization; это не назначено
+ошибкой из-за отличия от GL. Пещера использует .7/.3 и обычное отключение sun
+самим renderer, а не008/редакторский свет. Сравнения яркости/контраста с GL
+в R3 не проводились и не служат приёмкой.
+
+### Проверки и замеры
+
+Итоговые случаи — T/case-configured-raw-zone1, -zone12, -zone12dun2.
+Во всех exit0,340 effective config values сверены,0 visible process HWNDs,
+новые кадры приняты renderer; источник PNG — только собственный readback.
+Последние кадры заново сняты после bootstrap, ModelLightingFacts и GI input
+исправлений. Более ранние case-native/configured/configured-final — история
+исследования; они не используются как итоговый input/config PASS.
+Неподходящий первый прогон с defaults явно исключён.
+
+| Кадр | Ready ms | n | frame min ms | median ms | p95 ms | max ms |
+|---|---:|---:|---:|---:|---:|---:|
+| zone1-village-1240 | 1447 | 21 | 15.68 | 16.63 | 16.99 | 17.36 |
+| zone1-coast-1240 | 869 | 21 | 16.01 | 16.64 | 16.80 | 17.26 |
+| zone1-top-1240 | 831 | 21 | 15.68 | 16.62 | 16.82 | 17.56 |
+| zone1-village-1930 | 861 | 19 | 15.96 | 16.68 | 17.17 | 17.17 |
+| zone1-coast-1930 | 887 | 15 | 15.44 | 16.64 | 17.84 | 17.84 |
+| zone1-top-1930 | 840 | 21 | 14.18 | 16.54 | 16.79 | 19.02 |
+| zone12-1240 | 1329 | 21 | 16.36 | 16.65 | 16.98 | 45.97 |
+| zone12dun2-1240 | 877 | 21 | 16.34 | 16.64 | 16.81 | 18.46 |
+
+frame_ms — wall time DLL frame call, включая map submission, composite,
+Present/пейсинг и memory query; **не GPU timestamp** и не цена PNG capture.
+n — реально полученные samples, часть queued Qt notifications объединяется;
+это короткий замер, не статистический performance benchmark. Ready — от
+выбора вида до первого принятого кадра для указанной камеры. Затем ждём ещё
+>20 frame events/pending0 перед readback. Снимки замораживают world segment0;
+обычный preview clock идёт независимо от GL. Один renderer source/одна машина
+RTX4070SUPER, фоновая нагрузка владельца не контролировалась и не останавливалась.
+Настройки по результату времени не снижались. Timeout ожидания готовности
+повышен30→120sec для полного профиля; до него ни один итоговый запуск не дошёл.
+
+Финальный GL-контроль — один прогон T/case-gl-control-final, прежняя камера
+village1240, реально прочитанный water uniform0. С R2-final отличаются3 из
+921600 пикселей, mean absolute RGB .00004919/255; учтены два известных водных
+состояния, без нового запуска старого EXE. Это technical GL regression check,
+а не сравнение качества Rebuild64. T/gl-control.json.
+
+В логах остаются libpng IDAT CRC warnings; тот же класс был в R2 (16 против
+10 в исходном zone1 прогоне R3). Исходники игровых ресурсов не исправлялись,
+по этому предупреждению не объявлен новый renderer PASS/дефект и оно не
+скрыто. Итоговая сборка шейдеров не имеет compilation failures.
+
+Панельный код/переезд/native parent/DPR-логика и selectRebuild guard из R2 не
+менялись; повтор DPR проверок не назначался. Их предыдущая доказательная
+граница сохраняется: readback + QWidget::render не показывают реального
+наложения на видимую D3D-поверхность; никто этого здесь не видел. Это проверка
+владельца. Реальный AV и one-shot retry уже проверены в R2 для обоих saved
+preferences; эта логика сохранена. При выбранном OpenGL новых изменений
+изображения/инструментов/Save/MCP/uiScalePercent в R3 нет.
+
+### Сборка, staging, сохранность и оставшиеся вопросы
+
+Полностью пересобран pinned runtime с001–007:98 объектов, SHA lib
+`17e5bb43c8754d33f255c1dd4d96ac5a22789b4806db596603a7dac2b80b13ca`.
+Затем host последовательно перелинкован с этой неизменной целой lib после
+исправлений входа. Одного obj splice нет. Материал исходной пробы/282 не
+менялся; переиспользован собственный source283/work/r2-renderer build root,
+а не ещё одна полная копия.638 prebuilt shader resources сохранены:190
+headers/HLSL и34 raw shader blocks в public CPP совпадают с282. Шейдеры
+не менялись, новая таблица не нужна. Shader bin SHA
+`38fb2f9c8931f79080ca036d75f89388170852531627c31415b3ed3d99872f64`.
+Проверены DLL imports/no NVIDIA SDK и единственный export ataman_renderer_get_api.
+
+Release из git archive tree `3dc00032c5dfc908892ad3b418f7c5ff8b5fbaf8`.
+Wrapper вернул1 на известной передаче нормализованного пути с пробелами в
+x86.cmd; это не записано как PASS. Qt/MCP собраны; оба runtime из **того же
+архива** собраны напрямую по8.3 пути, exit0/0, затем включены в пакет.
+Raw/staged --version283 exit0, одинаковый SHA.
+
+Mapper SHA256 `f9394979fcb30eb4a2bdb861af42352c71856d7c8a950c00657262532ed779f2`.
+DLL SHA256 `9f1d59dffa63852d0d69dfd1159a91e939bb22bcc4bb53f1f7bbb56151601ef7`.
+[Новый staging](../../build-staging-283-rebuild64-stage3-r3-20261106/): финализатор exit0,
+1364→1364 против282,0 потерь,0 добавленных файлов (список добавленных пуст).
+[Квитанция](../../work/rebuild64-renderer-stage3-283-20261106/r3/package-receipt.json).
+Staging после финализации не запускался/не изменялся. **Он не является
+подтверждённым полным игровым preview** из-за перечисленных пробелов входа.
+Установка и push не выполнялись. Настройки владельца, AppData/ProgramData,
+установка282, мосты/чужие процессы не затрагивались; subst пуст, junction нет.
+
+Защищённые CPP/H/QM/.mcp.json/отчёт277 сохранены по SHA и исключены из archive/
+коммита, свои строки ROADMAP отделены. VERSION остаётся283. Из программы
+сняты только перечисленные stock_sky/GL policies/008–010 и неподтверждённый
+синтетический TORCH input; инструменты/горячие клавиши/сохранение/форматы/MCP
+не менялись, MPR/MOB/RES новый вид не записывает. Очистка тестовых копий и
+оставленный build/evidence материал — T/cleanup-plan.json и W/cleanup-plan.json.
+Удалены6 собственных map/resource payloads, 8179477 байт;18 копий Lights и3 settings.ini побайтно совпали с источниками.
+Удалены также только5 устаревших копий снятых файлов из собственного archive/host cache, не материал282/пробы.
+
+Илье нужен конкретный контракт: как из MOB TORCH_STRENGHT/PTLINK получить
+точные runtime CLight color/radius/scale/attachment, и есть ли публичный
+preview producer для CWeather, unwrapped clock, нормализованного wind/phase,
+terrain fog/sector state и связанных emitters/pose facts. Отдельно — нормативный
+TL fog tuple/day-night transition в standalone host и, если foam-квадрат
+непреднамеренный, его проверка в renderer. Авторское разрешение уже закрыто;
+это технические вопросы о данных, не повторный запрос разрешения.
+
+Порядок до default: закрыть source contracts/полноту входа → владелец сверяет
+с игрой → process isolation для сохранности памяти → service/picking → sector
+deltas → units/stst8/динамика → приёмка. Прежний GL visual gate отменён.
+**STOP BEFORE INSTALLATION, no push.**

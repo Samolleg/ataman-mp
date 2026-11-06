@@ -1,5 +1,5 @@
 {
-  "abi": 4,
+  "abi": 5,
   "sourceRepository": "Samolleg/EIRebuild64",
   "sourceCommit": "81dbcdd29b41baeb346f167c6dfb511dff05f295",
   "archivePaths": [
@@ -39,18 +39,6 @@
     {
       "path": "007-embedded_host.patch",
       "sha256": "aa2c54d4e185812447a92f5dfdcbb203f254fb3ecc789d0b601545931a0a58a7"
-    },
-    {
-      "path": "008-embedded-cave-authored-light.patch",
-      "sha256": "52b1f82a951bb46a9ecc8a9cc4f60ae3eadb3a5dcb471eae1324d24948bf85f0"
-    },
-    {
-      "path": "009-terrain2-respect-blend-switch.patch",
-      "sha256": "00e4f3e45d126ad507c0d75ca8e83a23aa040d8f003bfa51be521a0dbd90d113"
-    },
-    {
-      "path": "010-embedded-surface-authored-mips.patch",
-      "sha256": "1712d7a05adb9538f76a31692dc15bec65a3239424b5d1c65694a490bb1b5dcb"
     }
   ],
   "nvidiaSdk": false,

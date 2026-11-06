@@ -89,7 +89,7 @@ int main(int argc,char** argv){
  const auto mode=app.arguments().value(1,"--visual");const QString fixture=QDir::fromNativeSeparators(qEnvironmentVariable("EI_EMBED_FIXTURE"));
  try{
   check(root.contains("/work/rebuild64-renderer-stage3-283-20261106/")&&fixture.contains("/work/rebuild64-renderer-stage3-283-20261106/"),"all writable paths isolated");
-  check(QStringList{"--guard-first","--guard-second","--r2-controls","--visual","--save-recover","--recover-crash","--save-crash","--crash","--quality","--panels","--close-native","--close-probe","--minimap-export"}.contains(mode),"recognized test scenario");
+  check(QStringList{"--r3-native","--r3-gl","--guard-first","--guard-second","--r2-controls","--visual","--save-recover","--recover-crash","--save-crash","--crash","--quality","--panels","--close-native","--close-probe","--minimap-export"}.contains(mode),"recognized test scenario");
   if(mode=="--save-recover"){
    const auto warnings=recoverMapSaveBatches(root+"/backups",false,[](const QString&){return true;});out<<"RECOVERY "<<warnings.join('\n')<<'\n';
    for(const auto& name:QStringList{"zone1.mob","recovery-second.mob"}){QFile a(fixture+"/Maps/"+name),b(root+"/before-"+name);check(a.open(QIODevice::ReadOnly)&&b.open(QIODevice::ReadOnly),"recovery inputs "+name);auto bytes=a.readAll();check(bytes==b.readAll(),"recovery restores exact before bytes "+name);CMob mob;check(mob.deserialize(bytes),"recovered MOB strict parse "+name);}
@@ -138,19 +138,24 @@ int main(int argc,char** argv){
   else check(!embedded->backendLoaded(),"GL startup does not load DLL");
   quint64 frames=0;QObject::connect(embedded,&CRebuild64Viewport::frameCommitted,[&](quint64){++frames;});
   auto ready=[&]{return wait([&]{return !embedded->lastFailure().isEmpty()||(embedded->statistics().ready_generation==embedded->m_generation&&embedded->statistics().ready_generation>0&&embedded->m_stack->currentWidget()!=view);},60000)&&embedded->lastFailure().isEmpty();};
-  auto owned=[&](const QString& label){const auto previous=frames;check(wait([&]{return frames>previous+20&&embedded->statistics().pending==0;}),"settled renderer programs and frames "+label);const auto path=root+"/"+label+".png";QFile::remove(path);embedded->capture(path);check(wait([&]{return !QImage(path).isNull();}),"renderer-owned readback "+label);};
+  auto owned=[&](const QString& label){const auto previous=frames;QVector<double> samples;quint64 sampled=frames;QElapsedTimer elapsed;elapsed.start();check(wait([&]{if(frames!=sampled){samples.push_back(embedded->statistics().frame_ms);sampled=frames;}return frames>previous+20&&embedded->statistics().pending==0;}),"settled renderer programs and frames "+label);std::sort(samples.begin(),samples.end());if(!samples.isEmpty())out<<"R3_FRAME "<<label<<" n="<<samples.size()<<" min_ms="<<samples.first()<<" median_ms="<<samples[samples.size()/2]<<" p95_ms="<<samples[qMin(samples.size()-1,int(samples.size()*.95))]<<" max_ms="<<samples.last()<<" settle_ms="<<elapsed.elapsed()<<'\n';out.flush();const auto path=root+"/"+label+".png";QFile::remove(path);embedded->capture(path);check(wait([&]{return !QImage(path).isNull();}),"renderer-owned readback "+label);};
 #endif
   const auto only=qEnvironmentVariable("EI_STAGE3_MAP_ONLY");open(only.isEmpty()?QString("zone1"):only);
-  if(mode=="--visual"){
+  if(mode=="--visual"||mode=="--r3-native"||mode=="--r3-gl"){
    auto pair=[&](const QString& label,QVector3D eye,QVector3D target,int clock){
+    if(mode=="--r3-gl"&&label!="zone1-village-1240")return;
     if(!qEnvironmentVariableIsEmpty("EI_R2_FRAME_ONLY")&&label!=qEnvironmentVariable("EI_R2_FRAME_ONLY"))return;
 #ifndef STAGE3_BASELINE
     embedded->selectRebuild(false,false);
 #endif
     dynamic_cast<COptInt*>(window.m_settings->opt("renderTimeOfDay"))->setValue(clock);view->m_overlayAnimationTimer.invalidate();QMatrix4x4 camera;camera.lookAt(eye,target,{0,0,1});view->m_cam->setPreviewView(camera);view->m_normalProjection.setToIdentity();view->m_normalProjection.perspective(45,1280.f/720.f,1,2000);view->m_projection=view->m_normalProjection;
-    captureGL(view,"gl-"+label);
+    if(mode!="--r3-native")captureGL(view,"gl-"+label);
 #ifndef STAGE3_BASELINE
-    embedded->selectRebuild(true,false);check(ready(),"new view ready "+label+": "+embedded->lastFailure());owned("owned-"+label);embedded->selectRebuild(false,false);
+    if(mode=="--r3-native")embedded->m_previewClock.invalidate(); // explicit static world segment0 for these readbacks
+#endif
+    if(mode=="--r3-gl")return;
+#ifndef STAGE3_BASELINE
+    QElapsedTimer load;load.start();embedded->selectRebuild(true,false);check(ready(),"new view ready "+label+": "+embedded->lastFailure());out<<"R3_READY "<<label<<" ms="<<load.elapsed()<<'\n';out.flush();owned("owned-"+label);embedded->selectRebuild(false,false);
 #endif
    };
    if(only.isEmpty()||only=="zone1")for(int clock:{1240,1930}){const auto h=QString::number(clock);pair("zone1-village-"+h,{240,110,175},{240,171,10},clock);pair("zone1-coast-"+h,{90,22,52},{90,140,6},clock);pair("zone1-top-"+h,{240,160,260},{240,171,10},clock);}

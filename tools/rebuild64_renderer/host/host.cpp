@@ -14,6 +14,7 @@
 #include <exception>
 #include <cmath>
 #include <cstring>
+#include "sky_clouds.h"
 
 #include <psapi.h>
 #include <dxgi1_4.h>
@@ -38,6 +39,11 @@ void Config::run(Renderer& renderer) {
 }
 namespace owned {
 struct AtamanReadiness {
+ static bool load(Renderer& r,const wchar_t* path) {
+  // ensure_host registers defaults but intentionally has no game's overlay
+  // bootstrap. Use the same registry and INI loader before its first apply.
+  r.register_config_options();return r.debug_overlay_.config().load(path);
+ }
  static HRESULT material(Renderer& r,const std::string& name,const TextureCpuAsset& texture) {
   static_assert(int(MmpFormat::dxt5)==int(NativeOwnedTextureFormat::dxt5),"pinned MMP format order");
   NativeOwnedTextureView view;view.value_source=static_cast<UINT>(texture.value_source)+1;
@@ -54,8 +60,9 @@ struct AtamanReadiness {
  }
  static void quality(const Renderer& r) noexcept {
   const auto& c=r.debug_overlay_.config();std::fprintf(stderr,"HOST_QUALITY draw_distance=%d smaa=%d render_scale=%d upscaler=%d anisotropy=%d fog_preset=%d sky_clouds=%d material_quality=%d\n",configured_integer(c,"draw_distance",300),configured_boolean(c,"smaa",true),configured_integer(c,"render_scale",100),configured_integer(c,"upscaler",0),configured_integer(c,"anisotropy",3),configured_integer(c,"fog_preset",2),configured_integer(c,"sky_clouds",2),configured_integer(c,"material_quality",3));
-  std::fprintf(stderr,"EDITOR_QUALITY terrain_blend=%d material_terrain=%d water_simple=%d\n",configured_integer(c,"terrain_blend",1),configured_boolean(c,"material_terrain",true),configured_boolean(c,"water_simple",false));
+  std::fprintf(stderr,"RENDERER_CONFIG terrain_blend=%d material_terrain=%d water_simple=%d\n",configured_integer(c,"terrain_blend",1),configured_boolean(c,"material_terrain",true),configured_boolean(c,"water_simple",false));
  }
+ static void settings(const Renderer& r){for(const auto& o:r.debug_overlay_.config().options()){std::string v;switch(o.type){case RendererOptionType::boolean:v=o.boolean_value?"true":"false";break;case RendererOptionType::integer:v=std::to_string(o.integer_value);break;case RendererOptionType::floating_point:v=std::to_string(o.floating_value);break;case RendererOptionType::text:v=o.text_value;break;}std::fprintf(stderr,"EFFECTIVE_CONFIG %s=%s\n",o.key.c_str(),v.c_str());}}
  static uint32_t pending(const Renderer& r) noexcept {
   // Disabled Terrain2 has no required style/bake to complete. Contact-atlas
   // publication remains required for the object contact path in either mode.
@@ -75,13 +82,13 @@ struct AtamanReadiness {
  }
 }; }
 using Microsoft::WRL::ComPtr;
-#include "stock_sky.inc"
+#include "game_inputs.inc"
 namespace {
 struct HiddenWindow {
  HWND value=nullptr;
  ~HiddenWindow(){if(value)DestroyWindow(value);}
 };
-struct Session {StockSky sky;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
+struct Session {GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
 bool active=false;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -134,13 +141,10 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   if(FAILED(hr))return fail(e,hr,"D3D11CreateDevice hardware");
   ComPtr<IDXGIDevice> dxgi;ComPtr<IDXGIAdapter> adapter;if(SUCCEEDED(s->device.As(&dxgi))&&SUCCEEDED(dxgi->GetAdapter(&adapter))){DXGI_ADAPTER_DESC desc{};adapter->GetDesc(&desc);std::printf("adapter=%ls\n",desc.Description);std::fflush(stdout);}
   hr=s->renderer.adopt_host_device(s->device.Get(),s->context.Get(),s->width,s->height);if(FAILED(hr))return fail(e,hr,"adopt_host_device");
+  if(!owned::AtamanReadiness::load(s->renderer,in->ini))return fail(e,E_FAIL,"read copied Rebuild64 configuration");
   std::puts("before ensure_host");std::fflush(stdout);
   hr=in->test_failure==2?E_FAIL:s->renderer.ensure_host(s->hidden.value,s->width,s->height);if(FAILED(hr))return fail(e,hr,"ensure_host");
-  owned::scene_core::Config config;for(const char* name:{"shadows","point_shadows","shadow_far"}){owned::scene_core::ConfigOption option;option.key=name;option.type=uint8_t(owned::RendererOptionType::boolean);option.boolean_value=true;config.options.push_back(option);}owned::scene_core::ConfigOption terrain;terrain.key="terrain_blend";terrain.type=uint8_t(owned::RendererOptionType::integer);terrain.integer_value=0;config.options.push_back(terrain);for(auto pair:{std::pair<const char*,int>{"sky_clouds",0},{"fog_preset",0},{"draw_distance",1000},{"material_quality",3},{"anisotropy",4}}){owned::scene_core::ConfigOption o;o.key=pair.first;o.type=uint8_t(owned::RendererOptionType::integer);o.integer_value=pair.second;config.options.push_back(o);}{owned::scene_core::ConfigOption o;o.key="cave_brightness";o.type=uint8_t(owned::RendererOptionType::floating_point);o.floating_value=-1.f;config.options.push_back(o);}
- // Editor comparison uses authored liquid art and ground mapping. These are
- // renderer options, not filters applied to the completed image.
- for(const auto& setting:{std::pair<const char*,bool>{"smaa",true},{"water_simple",true},{"material_terrain",false}}){owned::scene_core::ConfigOption o;o.key=setting.first;o.type=uint8_t(owned::RendererOptionType::boolean);o.boolean_value=setting.second;config.options.push_back(o);}
- config.run(s->renderer);owned::AtamanReadiness::quality(s->renderer);std::puts("host_config sky_clouds=0 (authored stock sky) fog_preset=0 (faithful: no mist/wisps);  shadows=1 point_shadows=1 shadow_far=1 terrain_blend=0 (authored terrain); typed Config");
+  owned::AtamanReadiness::quality(s->renderer);owned::AtamanReadiness::settings(s->renderer);
   ComPtr<IDXGIDevice> dx;ComPtr<IDXGIAdapter> ad;ComPtr<IDXGIFactory> factory;
   hr=s->device.As(&dx);if(SUCCEEDED(hr))hr=dx->GetAdapter(&ad);if(SUCCEEDED(hr))hr=ad->GetParent(IID_PPV_ARGS(&factory));
   DXGI_SWAP_CHAIN_DESC desc{};desc.BufferDesc.Width=s->width;desc.BufferDesc.Height=s->height;desc.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;desc.BufferCount=2;desc.OutputWindow=in->window;desc.Windowed=TRUE;desc.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;

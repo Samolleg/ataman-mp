@@ -14,6 +14,7 @@
 #include "options.h"
 #include "resourcemanager.h"
 #include "render_environment.h"
+#include "resource_profile.h"
 #include "rebuild64_startup_guard.h"
 #include "layout_components/viewport_widget.h"
 #include "endurance_document.h"
@@ -55,6 +56,7 @@ struct CRebuild64Viewport::Worker {
         QByteArray terrain,name;
         QVector<QByteArray> mobs;
         QStringList paths;
+        QString gameRoot;
         quint64 generation{0};
         EirCamera camera{};
         QSize size;
@@ -98,7 +100,7 @@ struct CRebuild64Viewport::Worker {
             failure(QString::fromUtf8("Несовместимая DLL Rebuild64 (C ABI)."));return;
         }
         loaded=true;
-        void* handle=nullptr;quint64 generation=0;QSize size;QElapsedTimer pending;QStringList activePaths;
+        void* handle=nullptr;quint64 generation=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot;
         bool injected=false;
         for(;;) {
             const auto frameStart=std::chrono::steady_clock::now();
@@ -111,17 +113,42 @@ struct CRebuild64Viewport::Worker {
                 next=input; input.capture.clear();
             }
             EirError error{};
-            if(handle&&activePaths!=next.paths){api.destroy(handle);handle=nullptr;generation=0;}
+            if(handle&&(activePaths!=next.paths||activeGameRoot!=next.gameRoot)){api.destroy(handle);handle=nullptr;generation=0;}
             if(!handle) {
                 std::vector<std::wstring> paths;
                 for(const auto& path:next.paths)paths.push_back(path.toStdWString());
                 std::vector<EirMount> mounts;
                 for(size_t i=0;i<paths.size();++i)mounts.push_back({reinterpret_cast<const uint16_t*>(paths[i].c_str()),QFileInfo(next.paths[int(i)]).isDir()?3u:0u,0});
+                // The renderer can save config. Give it an isolated copy;
+                // never hand its config writer the owner's Config64 path.
+                const QDir game(next.gameRoot);
+                const QDir config(game.filePath("Config64"));
+                for(const auto& file:QStringList{"rddraw.ini","settings.ini"}) {
+                    QFile source(config.filePath(file));QSaveFile copy(QDir(scratch).filePath(file=="rddraw.ini"?"renderer.ini":file));
+                    if(!source.open(QIODevice::ReadOnly)||!copy.open(QIODevice::WriteOnly)) {failure(QString::fromUtf8("Не удалось прочитать конфигурацию EIRebuild64: ")+source.fileName());return;}
+                    const auto bytes=source.readAll();if(copy.write(bytes)!=bytes.size()||!copy.commit()){failure("Cannot copy renderer configuration to isolated cache");return;}
+                }
+                QSettings local(QDir(scratch).filePath("renderer.ini"),QSettings::IniFormat);
+                local.setValue("graphics/renderer_backend",0); // host device is D3D11
+                local.setValue("graphics/upscaler",0); // no DLSS/NGX SDK in mapper
+                local.setValue("graphics/frame_generation",0); // no Streamline
+                local.setValue("graphics/reflex",0); // no NGX/Reflex integration
+                local.remove("setup/nvidia_cache_id"); // process-local cache bookkeeping
+                local.sync();
+                const QDir work(QDir(scratch).filePath("game-work"));
+                if(!QDir().mkpath(work.filePath("Config"))||!QDir().mkpath(work.filePath("Maps"))){failure("Cannot create isolated renderer work paths");return;}
+                const QDir sourceConfig(QDir(resourceGameDataRoot(next.gameRoot)).filePath("Config"));
+                for(const auto& region:QStringList{"gipat","ingos","suslanger"})for(const auto& prefix:QStringList{"lights","lightscave"}) {
+                    const auto file=prefix+region+".ini";QFile source(sourceConfig.filePath(file));QSaveFile copy(work.filePath("Config/"+file));
+                    if(!source.open(QIODevice::ReadOnly)||!copy.open(QIODevice::WriteOnly)){failure("Cannot read game light table: "+source.fileName());return;}
+                    const auto bytes=source.readAll();if(copy.write(bytes)!=bytes.size()||!copy.commit()){failure("Cannot copy game light table");return;}
+                }
+                const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str())};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str())};
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
                 size=next.size;
-                activePaths=next.paths;
+                activePaths=next.paths;activeGameRoot=next.gameRoot;
             }
             if(generation!=next.generation) {
                 if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
@@ -142,8 +169,8 @@ struct CRebuild64Viewport::Worker {
             if(hook=="device-lost"&&!injected){api.test_device_loss(handle);injected=true;}
             EirStatistics stats{};const int rc=api.frame(handle,&stats,&error);
             if(rc!=0 && rc!=1){failure(QString::fromUtf8(error.message));break;}
-            if(rc==1 && pending.isValid() && pending.elapsed()>30000) {
-                failure(QString::fromUtf8("Rebuild64: данные нового кадра не подготовлены за 30 секунд. Открыт OpenGL."));break;
+            if(rc==1 && pending.isValid() && pending.elapsed()>120000) {
+                failure(QString::fromUtf8("Rebuild64: данные нового кадра не подготовлены за 120 секунд. Открыт OpenGL."));break;
             }
             if(!rc) {
                 startup.clear();
@@ -182,6 +209,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     connect(m_glAction,&QAction::triggered,this,[this]{selectRebuild(false);});
     connect(m_rebuildAction,&QAction::triggered,this,[this]{selectRebuild(true);});
     m_native->installEventFilter(this);
+    m_previewClock.start();
     m_timer->setInterval(16);connect(m_timer,&QTimer::timeout,this,&CRebuild64Viewport::tick);
     m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
     m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
@@ -263,46 +291,32 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
     result.eye[0]=eye.x();result.eye[1]=eye.y();result.eye[2]=eye.z();
     result.target[0]=target.x();result.target[1]=target.y();result.target[2]=target.z();
     result.hour=m_gl->effectiveWorldTimeHours();
-    const auto environment=ei::renderEnvironmentForValues(float(result.hour),1,1,m_gl->m_caveEnvironment,m_gl->m_weatherRegion);
-    for(int axis=0;axis<3;++axis) {
-        result.ambient[axis]=environment.ambientColor[axis]*environment.ambientStrength;
-        result.sun_diffuse[axis]=environment.sunColor[axis]*environment.sunStrength;
-        result.sun_direction[axis]=-environment.sunDirection[axis];
-        result.fog_color[axis]=environment.fogColor[axis];
-    }
-    // Match CView's Full environment LIGHT/TORCH admission. Copy live values
+    // Hour/region are editor controls; colours are read by the DLL from the
+    // game's Lights[Cave]<region>.ini, never from GL's environment policy.
+    result.world_time=m_previewClock.isValid()?m_previewClock.elapsed()/55.0:0.0;
+    if(m_gl->m_activeMob){const auto& world=m_gl->m_activeMob->worldSet();const auto wind=util::vec3FromString(world.data(eWsTypeWindDir));for(int axis=0;axis<3;++axis)result.wind_direction[axis]=wind[axis];result.wind_force=world.data(eWsTypeWindStr).toFloat();}
+    result.fog_projection[0]=.5f*(1-m_gl->m_projection(2,2));result.fog_projection[1]=1;result.fog_projection[2]=.5f*m_gl->m_projection(2,3);
+    // Publish map light facts. The renderer owns attenuation and brightness. Copy live values
     // every camera tick, including preview positions; no saved-file light cache.
-    const auto enabled=[this](const char* name,bool fallback){const auto* o=m_gl->m_pSettings?dynamic_cast<const COptBool*>(m_gl->m_pSettings->opt(name)):nullptr;return o?o->value():fallback;};
-    const auto* mode=m_gl->m_pSettings?dynamic_cast<const COptInt*>(m_gl->m_pSettings->opt("renderLightingMode")):nullptr;
-    const CViewFrustum frustum(clip);uint32_t source=0;
-    if((!mode||mode->value()==2)&&m_gl->m_sceneLightsVisible&&enabled("renderSceneLights",true))
+    uint32_t source=0;
         for(auto* mob:m_gl->m_aMob)for(auto* node:mob->nodes()) {
             ++source;if(node->nodeState()==ENodeState::eHidden)continue;
             QVector3D position,color;float radius=0;bool shadow=false;
             if(auto* light=dynamic_cast<CLight*>(node)) {
-                position=(light->drawPosition().isNull()?light->position():light->drawPosition())+QVector3D(0,0,2);
+                position=(light->drawPosition().isNull()?light->position():light->drawPosition());
                 color=light->lightColor();radius=light->range();shadow=light->shadowEnabled();
             } else if(auto* torch=dynamic_cast<CTorch*>(node)) {
-                position=torch->particleWorldPosition();color={.8f,.8f,.8f};radius=torch->power()*10;shadow=true;
+                Q_UNUSED(torch)
+                continue; // MOB -> runtime torch CLight contract is not exposed by the pinned adapter.
             }
-            if(radius<=0||(enabled("frustumCulling",true)&&!frustum.intersectsSphere(position,radius)))continue;
+            if(radius<=0)continue;
             if(result.point_light_count==EIR_MAX_POINT_LIGHTS)break;
-            if(qMax(color.x(),qMax(color.y(),color.z()))>1.01f)color/=255.f;
             auto& light=result.point_lights[result.point_light_count++];
             for(int axis=0;axis<3;++axis){light.position[axis]=position[axis];light.color[axis]=color[axis];}
             light.radius=radius;light.casts_shadow=shadow;light.source_id=source;
         }
-    result.fog_start=environment.fogStart;result.fog_end=environment.fogEnd;
     result.region=m_gl->m_weatherRegion=="ingos"?2:m_gl->m_weatherRegion=="suslanger"?3:1;result.cave=m_gl->m_caveEnvironment?1:0;
-    auto skyView=view;skyView(0,3)=skyView(1,3)=skyView(2,3)=0;
-    skyView.translate(0,0,-6.95752f);skyView.rotate(environment.skyRotationDegrees,0,0,1);
-    const auto skyClip=m_gl->m_projection*skyView;
-    for(int row=0;row<4;++row)for(int col=0;col<4;++col)
-        result.sky_to_clip[row*4+col]=skyClip(row==2?3:row,col);
-    for(int axis=0;axis<3;++axis)result.sky_tint[axis]=environment.skyColor[axis];
-    result.visuals=(m_gl->m_skyboxVisible&&!m_gl->m_caveEnvironment?1u:0u)
-        |(m_gl->m_fogVisible?2u:0u)|(m_gl->m_bDrawLand?4u:0u)
-        |(m_gl->m_bDrawWater?8u:0u)|(m_gl->m_staticObjectsVisible?16u:0u);
+    result.visuals=31; // full world content; graphics policy comes from Config64
     return result;
 }
 void CRebuild64Viewport::tick() {
@@ -354,6 +368,7 @@ void CRebuild64Viewport::tick() {
     next.generation=m_generation;next.camera=cameraSnapshot();
     next.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
     next.paths=configuredResourceSourcePaths(m_gl->settings());
+    if(const auto* root=dynamic_cast<const COptString*>(m_gl->m_pSettings->opt("gameRoot")))next.gameRoot=root->value();
     // CView's validated map-local atlas can override the profile's RES order.
     // It is a resource source, never a file used for geometry or save output.
     if(!m_gl->m_activeTerrainArchivePath.isEmpty()) {

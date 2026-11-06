@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 4u
+#define EIR_ABI 5u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -22,6 +22,7 @@ typedef struct EirCreate {
     const EirMount* mounts;
     uint32_t mount_count, test_failure; // 1=no D3D11, 2=initialisation
     const uint16_t* scratch_path;
+    const uint16_t* game_data_path; // isolated work directory; unchanged game Config light tables
 } EirCreate;
 typedef struct EirDocument {
     uint32_t size, mob_count;
@@ -34,13 +35,12 @@ typedef struct EirCamera {
     float world_to_clip[16]; // row-major, D3D depth [0,1], Z-up
     float eye[3], target[3];
     double hour;
-    float ambient[3], sun_diffuse[3], sun_direction[3];
-    float fog_color[3], fog_start, fog_end;
     uint32_t region, cave;
     uint32_t point_light_count;
     EirPointLight point_lights[EIR_MAX_POINT_LIGHTS];
-    float sky_to_clip[16]; // authored sky; translation removed; depth at far plane
-    float sky_tint[3];
+    double world_time; // world segments (.055 seconds), editor preview clock
+    float wind_direction[3], wind_force;
+    float fog_projection[3]; // TL _33/_34/_43 from the common camera
     uint32_t visuals; // 1=sky, 2=fog, 4=terrain, 8=water, 16=static objects
 } EirCamera;
 typedef struct EirStatistics {

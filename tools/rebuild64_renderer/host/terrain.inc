@@ -29,39 +29,36 @@ bool upload_atlases(Session& s,std::string& why){
 int map_frame(Session& s,probe1b_error* e){
  using namespace OwnedRender;E1BeginFrame();E1Scene().Begin(&s,s.world);if(FAILED(s.renderer.begin_engine_frame()))return fail(e,E_FAIL,"begin_engine_frame");
  E1WorldFrame wf;wf.camera.valid=true;wf.camera.world_to_clip=s.explicitClip?s.clip:camera_matrix(s.camera,float(s.width)/s.height);
- wf.environment.valid=true;wf.environment.game_hours=s.hour;wf.environment.hour=float(s.hour);wf.environment.world_time=s.hour*3600;wf.environment.region=owned::fog_region_gipat;
- wf.lightingValid=true;wf.lighting.ambient={129/255.f,135/255.f,125/255.f,1};wf.lighting.sunlight_diffuse={1,1,1,1};const float az=float(s.hour)*6.28318530718f/24,el=(60.f-3.75f*std::abs(float(s.hour)-12.f))*3.14159265359f/180;wf.lighting.sunlight_direction={-std::cos(az)*std::cos(el),-std::sin(az)*std::cos(el),std::sin(el),0};
- wf.fog.valid=true;wf.fog.enabled=s.environment&&(!s.explicitClip||(s.frameCamera.visuals&2));wf.fog.failure=nullptr;wf.fog.fog={90,100,25.5f,2000.f/1999.f,1,-2000.f/1999.f};
- if(s.explicitClip&&s.frameCamera.fog_end>s.frameCamera.fog_start){
-  wf.environment.region=int(s.frameCamera.region);wf.environment.cave=s.frameCamera.cave!=0;
-  for(unsigned i=0;i<3;++i){wf.lighting.ambient[i]=s.frameCamera.ambient[i];wf.lighting.sunlight_diffuse[i]=s.frameCamera.sun_diffuse[i];wf.lighting.sunlight_direction[i]=s.frameCamera.sun_direction[i];}
-  wf.fog.fog.start=s.frameCamera.fog_start;wf.fog.fog.end=s.frameCamera.fog_end;wf.fog.fog.scale=255.f/(wf.fog.fog.end-wf.fog.fog.start);
- }
+ std::string inputFailure;
+ if(!s.game.frame(s.frameCamera,wf,inputFailure))return fail(e,E_FAIL,inputFailure.c_str());
  E1WorldDraw draw(&s,s.world,wf);
+ E1ClaimSky((s.frameCamera.visuals&1)!=0&&!wf.environment.cave);
  std::vector<owned::RetainedWorldPointLight> lights;
- for(uint32_t index=0;index<s.frameCamera.point_light_count;++index){const auto& in=s.frameCamera.point_lights[index];owned::RetainedWorldPointLight l;l.source_id=int32_t(in.source_id);std::copy_n(in.position,3,l.center.begin());std::copy_n(in.color,3,l.color.begin());l.radius=in.radius;l.casts_shadow=in.casts_shadow!=0;lights.push_back(l);}
+ if(s.game.setting(L"Terrain Settings",L"EnableDynamicLights")!=0)for(uint32_t index=0;index<s.frameCamera.point_light_count;++index){const auto& in=s.frameCamera.point_lights[index];owned::RetainedWorldPointLight l;l.source_id=int32_t(in.source_id);std::copy_n(in.position,3,l.center.begin());std::copy_n(in.color,3,l.color.begin());l.radius=in.radius;l.casts_shadow=in.casts_shadow!=0;lights.push_back(l);}
  const char* lightFailure=nullptr;if(!E1Scene().Scene().visual_publish_world_point_lights(std::move(lights),&lightFailure))return fail(e,E_INVALIDARG,lightFailure?lightFailure:"point light publication");
  if(!s.materialsPublished&&s.map){
   for(const auto& texture:s.map->textures)if(texture.second){const HRESULT hr=owned::AtamanReadiness::material(s.renderer,texture.first,*texture.second);if(FAILED(hr))return fail(e,hr,"world material texture ingress failed");}
   s.materialsPublished=true;
  }
  auto geometry=owned::frozen_owned_terrain_geometry(*s.terrain);geometry.revision=s.generation;
+ geometry.animation.precise_time=s.frameCamera.world_time;
+ std::copy_n(s.frameCamera.wind_direction,2,geometry.animation.wind_direction);
+ geometry.animation.wind_force=s.frameCamera.wind_force;
+ // Normalized wind/phase are game terrain runtime state, absent from MOB.
+ // Do not label the raw map force as that already-normalized value.
+ geometry.animation.waves_enabled=s.game.setting(L"Terrain Settings",L"EnableWaterWaves")!=0;
  if(!E1PublishTerrainFrame(&s,geometry,identity()))return fail(e,E_FAIL,"publish geometry");
  owned::RetainedTerrainSourceSnapshot completed;E1CurrentTerrainSource(completed);auto& retained=E1Scene().Scene();const auto rid=retained.terrain_source_identity();if(rid.source_generation){retained.publish_terrain_geometry(rid.source_generation,rid.source_revision,completed.geometry.get());for(unsigned i=0;i<s.atlasIds.size();++i)if(s.atlasIds[i])retained.publish_terrain_texture(rid.source_generation,rid.source_revision,i,E1SurfaceValue(s.atlasIds[i]));}
 
  std::vector<E1TerrainSectorValues> sectors;for(unsigned i=0;i<s.terrain->sectors.size();++i){E1TerrainSectorValues v;v.sector=i;v.phases.resize(s.terrain->sectors[i].animation_count,0);sectors.push_back(std::move(v));}
  if(!E1PublishTerrainSectors(&s,sectors))return fail(e,E_FAIL,"publish sectors");
- E1PublishTerrainAtlases(&s,s.atlasIds);owned::OwnedTerrainFrameInputs view;std::copy(s.camera.eye,s.camera.eye+3,view.camera_position.begin());view.object_to_clip=wf.camera.world_to_clip;view.runtime_texture_count=s.terrain->texture_count;view.lod_distances={10000,20000};view.force_full_detail=true;
+ E1PublishTerrainAtlases(&s,s.atlasIds);owned::OwnedTerrainFrameInputs view;std::copy(s.camera.eye,s.camera.eye+3,view.camera_position.begin());view.object_to_clip=wf.camera.world_to_clip;view.runtime_texture_count=s.terrain->texture_count;view.lod_distances={s.game.setting(L"Terrain Settings",L"LOD1"),s.game.setting(L"Terrain Settings",L"LOD2")};
  if(!E1PublishTerrainView(&s,view))return fail(e,E_FAIL,"publish terrain view");
- owned::NativeOwnedFixedState material;material.enabled=true;material.replay_frame_state=true;material.captured_viewport={0,0,s.width,s.height};material.captured_fog_enable=wf.fog.enabled;material.captured_fog_color=0x2eb5d9;
- if(s.explicitClip&&s.frameCamera.fog_end>s.frameCamera.fog_start){material.captured_fog_color=0;for(unsigned i=0;i<3;++i)material.captured_fog_color|=uint32_t(std::clamp(s.frameCamera.fog_color[i],0.f,1.f)*255.f)<<(16-8*i);}material.fill_mode=D3DFILL_SOLID;material.cull_mode=D3DCULL_NONE;material.z_enable=1;material.z_write_enable=1;material.z_func=D3DCMP_LESSEQUAL;material.source_blend=D3DBLEND_ONE;material.destination_blend=D3DBLEND_ZERO;material.alpha_func=D3DCMP_ALWAYS;material.texture_factor=0xffffffff;material.color_op=D3DTOP_MODULATE;material.color_arg1=D3DTA_TEXTURE;material.color_arg2=D3DTA_DIFFUSE;material.alpha_op=D3DTOP_SELECTARG1;material.alpha_arg1=D3DTA_TEXTURE;material.alpha_arg2=D3DTA_DIFFUSE;material.address_u=material.address_v=D3DTADDRESS_WRAP;material.min_filter=material.mag_filter=D3DTFN_LINEAR;material.mip_filter=D3DTFP_LINEAR;
+ owned::NativeOwnedFixedState material;material.enabled=true;material.replay_frame_state=true;material.captured_viewport={0,0,s.width,s.height};material.captured_fog_enable=wf.fog.enabled;material.captured_fog_color=s.game.fogColor;
+ material.fill_mode=D3DFILL_SOLID;material.cull_mode=D3DCULL_NONE;material.z_enable=1;material.z_write_enable=1;material.z_func=D3DCMP_LESSEQUAL;material.source_blend=D3DBLEND_ONE;material.destination_blend=D3DBLEND_ZERO;material.alpha_func=D3DCMP_ALWAYS;material.texture_factor=0xffffffff;material.color_op=D3DTOP_MODULATE;material.color_arg1=D3DTA_TEXTURE;material.color_arg2=D3DTA_DIFFUSE;material.alpha_op=D3DTOP_SELECTARG1;material.alpha_arg1=D3DTA_TEXTURE;material.alpha_arg2=D3DTA_DIFFUSE;material.address_u=material.address_v=D3DTADDRESS_WRAP;material.min_filter=material.mag_filter=D3DTFN_LINEAR;material.mip_filter=D3DTFP_LINEAR;
  if(!E1PublishTerrainMaterial(&s,false,material))return fail(e,E_FAIL,"publish base material");
- s.renderer.begin_scene();s.renderer.visit_embedded_device(&s,[](void* context,const owned::EmbeddedDeviceView& v)->HRESULT{auto& session=*static_cast<Session*>(context);float c[]={0,0,0,1};if(session.explicitClip)for(unsigned i=0;i<3;++i)c[i]=session.frameCamera.fog_color[i];v.context->ClearRenderTargetView(v.color,c);v.context->ClearDepthStencilView(v.depth,D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);return S_OK;});
+ s.renderer.begin_scene();s.renderer.visit_embedded_device(&s,[](void* context,const owned::EmbeddedDeviceView& v)->HRESULT{auto& session=*static_cast<Session*>(context);float c[]={float((session.game.fogColor>>16)&255)/255.f,float((session.game.fogColor>>8)&255)/255.f,float(session.game.fogColor&255)/255.f,1};v.context->ClearRenderTargetView(v.color,c);v.context->ClearDepthStencilView(v.depth,D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);return S_OK;});
  E1TerrainSubmission result;HRESULT hr=S_OK;
- if(s.explicitClip&&(s.frameCamera.visuals&1)&&!s.frameCamera.cave){
-  hr=load_stock_sky(s.sky,s.store,s.device.Get());if(FAILED(hr))return fail(e,hr,"authored nask0sky/Sky00 unavailable");
-  hr=draw_stock_sky(s.sky,s.renderer,s.frameCamera,s.width,s.height);if(FAILED(hr))return fail(e,hr,"authored sky submission");
- }
  if(s.objects&&(!s.explicitClip||(s.frameCamera.visuals&16))){owned::FixedState fixed=owned::native_owned_submission_state({},material);E1VisualInputs inputs;inputs.time=wf.environment.world_time;inputs.sceneFlags=0xc0u|((!s.explicitClip||(s.frameCamera.visuals&4))?0x100u:0u);inputs.worldToClip=wf.camera.world_to_clip;inputs.cameraAnchorZ=s.camera.target[2];inputs.ambient=wf.lighting.ambient;inputs.sunDiffuse=wf.lighting.sunlight_diffuse;inputs.sunDirection=wf.lighting.sunlight_direction;inputs.lightingValid=true;inputs.fog=[](void*,const float*)->unsigned char{return 255;};
  if(!E1RunOwnedVisualFrame(s.renderer,fixed,inputs))hr=E_FAIL;
  size_t drawn=0,omitted=0;unsigned shown=0;for(const auto& o:s.map->objects){const auto* why=E1OwnedVisualOmission(int32_t(o.nid));if(why&&shown++<12)std::fprintf(stderr,"omission id=%u reason=%s\n",o.nid,why);}for(const auto& o:s.map->objects){if(E1OwnedVisualDrawn(int32_t(o.nid)))++drawn;else ++omitted;}std::printf("retained drawn=%zu omitted=%zu\n",drawn,omitted);
@@ -71,4 +68,4 @@ int map_frame(Session& s,probe1b_error* e){
  draw.Complete();s.renderer.end_scene();hr=s.renderer.composite_world();if(FAILED(hr))return fail(e,hr,"composite_world");hr=s.renderer.visit_embedded_output(&s,&commit_output);if(FAILED(hr))return fail(e,hr,"readback failed");hr=s.renderer.present();if(FAILED(hr))return fail(e,hr,"hidden HWND present/housekeeping");return fail(e,0,SUCCEEDED(hr)?"actual owned renderer terrain frame completed":"readback failed");
 }
 }
-int32_t __cdecl probe1b_set_features(void* h,uint32_t bits,probe1b_error* e) noexcept {return guarded(e,[&]{auto& s=*static_cast<Session*>(h);s.water=bits&1;s.environment=bits&2;s.objects=bits&4;if(!s.environment)owned::embedded_sky().configure(false);owned::scene_core::Config cfg;owned::scene_core::ConfigOption blend;blend.key="terrain_blend";blend.type=uint8_t(owned::RendererOptionType::integer);blend.integer_value=(bits&16)?1:0;cfg.options.push_back(blend);cfg.run(s.renderer);return fail(e,0,"features");});}
+int32_t __cdecl probe1b_set_features(void* h,uint32_t bits,probe1b_error* e) noexcept {return guarded(e,[&]{auto& s=*static_cast<Session*>(h);s.water=bits&1;s.environment=bits&2;s.objects=bits&4;if(!s.environment)owned::embedded_sky().configure(false);return fail(e,0,"features");});}

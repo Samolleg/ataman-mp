@@ -5,16 +5,22 @@ int eir_error(EirError* out,int rc,const probe1b_error& in) noexcept {
 int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) noexcept {
  if(result)*result=nullptr;
  probe1b_error e{};
- if(!in||!result||in->size!=sizeof(*in)||in->abi!=EIR_ABI||!in->window||!in->scratch_path||in->mount_count>4096||!in->mounts)
+ if(!in||!result||in->size!=sizeof(*in)||in->abi!=EIR_ABI||!in->window||!in->scratch_path||!in->game_data_path||in->mount_count>4096||!in->mounts)
   return eir_error(out,fail(&e,E_INVALIDARG,"invalid renderer C ABI create"),e);
  return eir_error(out,guarded(&e,[&]{
   std::vector<std::wstring> roots,archives;std::vector<uint8_t> kinds;
   for(uint32_t i=0;i<in->mount_count;++i){if(!in->mounts[i].path)return fail(&e,E_INVALIDARG,"null mount");auto path=std::wstring(reinterpret_cast<const wchar_t*>(in->mounts[i].path));
    if(in->mounts[i].kind==3)roots.push_back(std::move(path));else{archives.push_back(std::move(path));kinds.push_back(in->mounts[i].kind?uint8_t(in->mounts[i].kind):uint8_t(owned::kArchiveAllKinds));}}
+  // Pinned GI obtains Config/lights*.ini from the parent of the last Maps
+  // root. This empty private root supplies that unchanged config context;
+  // it contains no maps and cannot shadow a real resource.
+  roots.push_back(std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Maps");
   std::vector<const wchar_t*> rootPointers,archivePointers;for(const auto& p:roots)rootPointers.push_back(p.c_str());for(const auto& p:archives)archivePointers.push_back(p.c_str());
   const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=scratch+L"/layouts.json";
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
-  const int rc=probe1b_create(&info,result,&e);if(rc)owned::embedded_host_configuration().reset();return rc;
+  const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
+  auto& session=*static_cast<Session*>(*result);session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
+  return 0;
  }),e);
 }
 int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out) noexcept {
@@ -77,8 +83,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   }
   std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
   s.water=s.environment=s.objects=true;
-  // The editor keeps the authored atlas transitions. Bit16 would silently
-  // override terrain_blend=0 at every document load.
+  // Content feature bits must not override the file-backed renderer settings.
   const int result=probe1b_set_features(handle,7,&e);if(!result)owned::AtamanReadiness::quality(s.renderer);return result;
  }),e);
 }
