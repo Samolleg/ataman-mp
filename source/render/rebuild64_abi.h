@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 6u
+#define EIR_ABI 7u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -25,12 +25,19 @@ typedef struct EirCreate {
     const uint16_t* neighbour_layout_path; // selected game/mod world-map-layouts.json, read only
     const uint16_t* game_data_path; // isolated work directory; unchanged game Config light tables
 } EirCreate;
+typedef struct EirObjectPose {
+    uint32_t mob,nid,visible,changed;
+    float position[3],quaternion[4],shape[3]; // wxyz; semantic strength,grace,tall
+} EirObjectPose;
+
 typedef struct EirDocument {
     uint32_t size, mob_count;
     uint64_t generation;
     EirSpan terrain;
     const EirSpan* mobs;
     const char* terrain_name; // UTF-8, resource identity only; never reopened
+    const EirObjectPose* objects; // immutable editor admission/geometry facts
+    uint32_t object_count;
 } EirDocument;
 typedef struct EirCamera {
     float world_to_clip[16]; // row-major, D3D depth [0,1], Z-up
@@ -47,10 +54,20 @@ typedef struct EirCamera {
 } EirCamera;
 typedef struct EirStatistics {
     uint64_t generation, ready_generation, private_bytes, video_bytes;
+    uint64_t service_serial, document_updates;
     uint32_t width, height, pending, reserved;
     uint32_t neighbours_pending, neighbours_accepted;
-    double frame_ms;
+    double frame_ms,service_cpu_ms,service_composite_ms;
 } EirStatistics;
+
+typedef struct EirService {
+    uint32_t size,width,height,stride;
+    uint64_t serial,generation;
+    double cpu_ms;
+    EirSpan rgba; // top-down, premultiplied RGBA8; editor-owned GL depth
+    const EirObjectPose* poses;
+    uint32_t pose_count;
+} EirService;
 typedef struct EirApi {
     uint32_t size, abi;
     int32_t (EIR_CALL *create)(const EirCreate*,void**,EirError*);
@@ -61,5 +78,7 @@ typedef struct EirApi {
     int32_t (EIR_CALL *frame)(void*,EirStatistics*,EirError*); // 1=pending, 0=committed
     int32_t (EIR_CALL *capture)(void*,const uint16_t*,EirError*);
     void (EIR_CALL *test_device_loss)(void*);
+    int32_t (EIR_CALL *service)(void*,const EirService*,EirError*);
+    int32_t (EIR_CALL *capture_world)(void*,const uint16_t*,EirError*);
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

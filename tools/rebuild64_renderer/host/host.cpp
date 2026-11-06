@@ -10,6 +10,7 @@
 #include <wincodec.h>
 #include <memory>
 #include <vector>
+#include <unordered_set>
 #include <cstdio>
 #include <exception>
 #include <cmath>
@@ -100,7 +101,9 @@ struct ResourceRuntimeLifetime {
  ResourceRuntimeLifetime(){owned::owned_resource_runtime_acquire();}
  ~ResourceRuntimeLifetime(){owned::owned_resource_runtime_release();}
 };
-struct Session {ResourceRuntimeLifetime resources;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
+#include "editor_service.h"
+struct EditorSeed {uint32_t mob=0,nid=0;int32_t rendererId=0;std::shared_ptr<const owned::VisualAssemblyAsset> assembly;owned::VisualObjectPose pose;bool visible=true;};
+struct Session {ResourceRuntimeLifetime resources;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;uint64_t documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
 bool active=false;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -120,17 +123,23 @@ HRESULT read_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* sou
 namespace {
 HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* source) {
  auto& s=*static_cast<Session*>(user);s.pending=owned::AtamanReadiness::pending(s.renderer);
- if(s.pending)return S_OK;
+ if(s.pending||(s.holdObjectRefresh&&!owned::neighbour_client_settled(s.world)))return S_OK;
  D3D11_TEXTURE2D_DESC d{};source->GetDesc(&d);
  if(d.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)return E_NOTIMPL;
  ComPtr<ID3D11Texture2D> next=s.accepted;D3D11_TEXTURE2D_DESC old{};if(next)next->GetDesc(&old);
  if(!next||old.Width!=d.Width||old.Height!=d.Height){next.Reset();d.BindFlags=0;d.Usage=D3D11_USAGE_DEFAULT;d.CPUAccessFlags=0;d.MiscFlags=0;HRESULT hr=s.device->CreateTexture2D(&d,nullptr,&next);if(FAILED(hr))return hr;}
  context->CopyResource(next.Get(),source);
+ D3D11_TEXTURE2D_DESC rawDesc{};if(s.rawAccepted)s.rawAccepted->GetDesc(&rawDesc);
+ if(!s.rawAccepted||rawDesc.Width!=d.Width||rawDesc.Height!=d.Height){s.rawAccepted.Reset();d.BindFlags=0;d.Usage=D3D11_USAGE_DEFAULT;d.CPUAccessFlags=0;d.MiscFlags=0;const auto hr=s.device->CreateTexture2D(&d,nullptr,&s.rawAccepted);if(FAILED(hr))return hr;}
+ context->CopyResource(s.rawAccepted.Get(),source);
  DXGI_SWAP_CHAIN_DESC display{};HRESULT resized=s.display->GetDesc(&display);if(FAILED(resized))return resized;
  if(display.BufferDesc.Width!=d.Width||display.BufferDesc.Height!=d.Height){resized=s.display->ResizeBuffers(0,d.Width,d.Height,DXGI_FORMAT_UNKNOWN,0);if(FAILED(resized))return resized;}
  ComPtr<ID3D11Texture2D> back;HRESULT hr=s.display->GetBuffer(0,IID_PPV_ARGS(&back));if(FAILED(hr))return hr;
- context->CopyResource(back.Get(),source);hr=s.display->Present(0,0);if(FAILED(hr))return hr;
- s.accepted=std::move(next);s.readyGeneration=s.generation;return s.device->GetDeviceRemovedReason();
+ context->CopyResource(back.Get(),source);
+ const auto compositeStart=std::chrono::steady_clock::now();hr=s.service.draw(s.device.Get(),context,back.Get(),s.generation);if(FAILED(hr))return hr;
+ const auto compositeMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-compositeStart).count();
+ context->CopyResource(next.Get(),back.Get());hr=s.display->Present(0,0);if(FAILED(hr))return hr;
+ s.accepted=std::move(next);s.readyGeneration=s.generation;s.acceptedServiceSerial=s.service.generation==s.generation?s.service.serial:0;s.acceptedServiceCpuMs=s.service.cpuMs;s.acceptedCompositeMs=compositeMs;return s.device->GetDeviceRemovedReason();
 }
 }
 int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_error* e) noexcept {
@@ -143,7 +152,7 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   paths.data_mounts=paths.mounts;paths.data_mounts.archive_kinds.clear();
   paths.text_mounts=paths.data_mounts;
   owned::embedded_host_configuration().configure(std::move(paths));
-  auto s=std::make_unique<Session>();
+  auto s=std::make_unique<Session>();s->rendererIni=in->ini;
   s->hidden.value=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,L"STATIC",L"",WS_POPUP,-32000,-32000,int(in->width),int(in->height),nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
   if(!s->hidden.value||IsWindowVisible(s->hidden.value))return fail(e,E_FAIL,"cannot create hidden renderer surface");s->width=in->width;s->height=in->height;for(uint32_t i=0;i<in->loose_count;++i)s->mounts.loose_roots.emplace_back(in->loose[i]);for(uint32_t i=0;i<in->archive_count;++i)s->mounts.archives.emplace_back(in->archives[i]);if(in->archive_kinds)s->mounts.archive_kinds.assign(in->archive_kinds,in->archive_kinds+in->archive_count);
   const D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_0};D3D_FEATURE_LEVEL level;

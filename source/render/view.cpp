@@ -9095,55 +9095,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
         renderQueue.flush();
         logOpenGlErrors(QStringLiteral("draw/object-queue"));
         stallTrace.mark("objects");
-        ei::gl::DepthFunc(GL_LEQUAL);
-        for(CMob* mob : m_aMob)
-            if(!m_minimapCaptureActive && isMobVisible(mob))
-                for(CNode* node : mob->nodes())
-                    if(node->nodeState() == ENodeState::eSelect)
-                    {
-                        if(node==m_connectionGhostNode && !m_connectionGhostVertices.isEmpty())continue;
-                        if(!isObjectVisualVisible(node))
-                            continue;
-                        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"),
-                            mob == m_activeMob ? activeHighlight : lockedHighlight);
-                        drawDiplomacyObjectVisual(node, mob == m_activeMob);
-                        renderQueue.flush();
-                        if(performance.collecting())
-                        {
-                            ++performance.counters().nodesSubmitted;
-                        }
-                    }
-        m_program.setUniformValue(ei::uniformLocation(&m_program, "u_highlightColor"), activeHighlight);
-        renderQueue.flush();
-        const auto drawBehaviorHelpers = [&]()
-        {
-            if(m_minimapCaptureActive)
-                return;
-            ei::CHelperVisibilityScope helperVisibility(cullingEnabled ? &frustum : nullptr);
-            for(CMob* mob : m_aMob)
-            {
-                if(!isMobVisible(mob))
-                    continue;
-                for(CNode* node : mob->nodes())
-                {
-                    if(!traverseHelpers && node->nodeState() != ENodeState::eSelect)
-                        continue;
-                    if(node->nodeType() != ENodeType::eUnit && node->nodeType() != ENodeType::eMagicTrap)
-                        continue;
-                    node->drawLogicVisual(mob == m_activeMob, &m_program);
-                    if(performance.collecting())
-                        ++performance.counters().logicSubmissions;
-                }
-            }
-            // Patrol/look/trap marker models join the object queue, while their
-            // relationship lines draw immediately. Flush only after terrain
-            // and selected objects are complete so neither can paint over the
-            // helpers.
-            renderQueue.flush();
-        };
-        stallTrace.mark("selection-highlight");
-        drawBehaviorHelpers();
-        ei::gl::DepthFunc(GL_LESS);
+        drawEditorObjectServices(camMatrix,cullingEnabled,traverseHelpers,&stallTrace);
     }
 
     if(!terrainDrawn)
@@ -16423,54 +16375,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         return;
     }
 
-    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_projMmatrix"), m_projection);
-    m_selectProgram.setUniformValue(ei::uniformLocation(&m_selectProgram, "u_viewMmatrix"), viewMatrix);
-
-    const COptBool* cullingOption = m_pSettings
-        ? dynamic_cast<const COptBool*>(m_pSettings->opt("frustumCulling")) : nullptr;
-    const COptBool* drawLogicOption = m_pSettings
-        ? dynamic_cast<const COptBool*>(m_pSettings->opt("drawLogic")) : nullptr;
-    const bool cullingEnabled = (!cullingOption || cullingOption->value())
-        && (!drawLogicOption || !drawLogicOption->value())
-        && CScene::getInstance()->getMode() != eEditModeLogic;
-    const CViewFrustum frustum(m_projection * viewMatrix);
-
-    QList<CNode*> pickableNodes;
-    const bool logicPicking = !m_diplomacyMapMode && CScene::getInstance()->getMode() == eEditModeLogic;
-    if(!logicPicking)
-        RenderQueueContext::instance().beginSelection(&m_selectProgram);
-    for(CMob* mob : m_aMob)
-        if(isMobVisible(mob))
-        {
-            const QVector<CNode*> spatialCandidates = logicPicking
-                ? QVector<CNode*>()
-                : spatiallyVisibleNodes(mob, cullingEnabled ? &frustum : nullptr, nullptr);
-            const QList<CNode*>& legacyCandidates = logicPicking
-                ? mob->logicNodes() : mob->nodes();
-            if(logicPicking)
-                for(CNode* node : legacyCandidates)
-                {
-                    if(node && isObjectVisualVisible(node)
-                       && !pickableNodes.contains(node))
-                    {
-                        pickableNodes.append(node);
-                        node->drawSelect(&m_selectProgram);
-                    }
-                }
-            else
-                for(CNode* node : spatialCandidates)
-                {
-                    if(m_diplomacyMapMode && !dynamic_cast<CUnit*>(node)) continue;
-                    if(node && isObjectVisualVisible(node)
-                       && !pickableNodes.contains(node))
-                    {
-                        pickableNodes.append(node);
-                        node->drawSelect(&m_selectProgram);
-                    }
-                }
-        }
-    if(!logicPicking)
-        RenderQueueContext::instance().end();
+    const auto pickableNodes=drawEditorPickIds(viewMatrix);
 
     QVector<SColor> aColor;
     getColorFromRect(rect, aColor);

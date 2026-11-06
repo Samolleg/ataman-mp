@@ -90,7 +90,9 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
         gl->glDepthFunc(GL_LESS);gl->glDepthMask(GL_TRUE);
         gl->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl->glEnable(GL_BLEND);
         gl->glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
-        draw();gl->glFinish();
+        if(m_editorServicePass){drawEditorServiceScene();drawTestOverlaysOpenGl();}
+        else draw();
+        gl->glFinish();
         auto image=target.toImage();
         if(image.isNull())*error="Current viewport framebuffer readback failed";
         return image;
@@ -123,4 +125,12 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
         return mask;
     }
     return image;
+}
+
+QImage CView::captureEditorServiceLayer(const QSize& size, QString* error)
+{
+    if(m_editorServicePass)return {};
+    m_editorServicePass=true;
+    RestoreCapture restore{[this]{m_editorServicePass=false;}};
+    return captureTopdownPass(ETopdownPass::None,size,{},error);
 }

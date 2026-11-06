@@ -1,4 +1,4 @@
-# Rebuild64 display backend for Ataman285
+# Rebuild64 display backend for Ataman286
 
 The host embeds the pinned renderer and public typed adapters. It does not
 define an editor art profile. The owner cancelled GL visual comparison on
@@ -17,7 +17,7 @@ R2 patches008–010 and stock_sky.inc were
 removed in R3. The pinned game's E1Terrain/surface path also resolves one mip;
 R2's mip patch was not proven an editor-only loss and is not kept.
 
-ABI6 is flat C, copied across one renderer worker thread. QLibrary remains
+ABI7 is flat C, copied across one renderer worker thread. QLibrary remains
 lazy: ordinary OpenGL startup does not load the DLL. The native presentation
 receives only accepted renderer-owned output. PNG capture is its own readback.
 Frame readiness observes resource/contact/Terrain2 publication; it does not
@@ -48,7 +48,12 @@ constructors. Synthetic GL TORCH colors/radius and LIGHT+2Z were removed;
 the missing TORCH constructor contract needs the author. The host cannot claim
 complete game-input equality or a matching game frame. See the R3 input table.
 
-OpenGL stays the default and editing backend. Panels and one-shot crash retry
+OpenGL stays the default. Object input in Rebuild64 uses the same CView handlers;
+the host composes a CView GL depth/RGBA service layer. Pending transforms have
+a service preview; confirmation restarts the embedded renderer on the same
+device and publishes a full immutable document. No working incremental
+main-source pose update is claimed. See the286 report for latency and open
+DPR/ID/depth criteria. Terrain brushes require OpenGL. Panels and one-shot crash retry
 remain. A cache retry latch keeps GL after an acknowledged crash without
 rewriting ui/renderer; explicit menu selection clears it. Actual composition
 of native panels over a visible D3D window has not been observed in automation;

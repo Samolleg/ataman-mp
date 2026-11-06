@@ -4,6 +4,8 @@
 #include <QVector>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <QHash>
+#include <QSet>
 #include <memory>
 #include "rebuild64_abi.h"
 class CView;
@@ -24,7 +26,7 @@ public:
     void selectRebuild(bool selected, bool persist=true);
     QString lastFailure() const { return m_failure; }
     EirStatistics statistics() const { return m_statistics; }
-    void capture(const QString& path);
+    void capture(const QString& path, bool worldOnly=false);
 signals:
     void backendFailure(const QString& message);
     void frameCommitted(quint64 generation);
@@ -34,7 +36,12 @@ private:
     struct Worker;
     void tick();
     void fallback(const QString& message);
-    void cameraInput(QEvent* event);
+    void editorInput(QEvent* event);
+    void serviceInput();
+    void syncEditorViewport();
+    bool m_pointerDown{false};
+    QImage m_serviceImage;
+    double m_serviceMilliseconds{0};
     void movePanels(bool native);
     EirCamera cameraSnapshot();
     CView* m_gl;
@@ -44,6 +51,11 @@ private:
     QAction *m_glAction,*m_rebuildAction;
     std::unique_ptr<Worker> m_worker;
     QByteArray m_documentHash;
+    bool m_transformPreviewMessage{false};
+    QByteArray m_documentVisibility;
+    QHash<quint64,EirObjectPose> m_documentPoses;
+    QSet<quint64> m_poseOverrides;
+    QVector<quintptr> m_documentMobOrder;
     QByteArray m_terrainState;
     bool m_documentRefreshPending{true};
     quint64 m_generation{0};

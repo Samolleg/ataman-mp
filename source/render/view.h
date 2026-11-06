@@ -69,6 +69,7 @@ inline uint qHash(const QPoint& point, uint seed = 0)
 #include "world_material_boundary.h"
 #include "terrain_mob_height_state.h"
 
+class CRenderStallTrace;
 class QLineEdit;
 class QFrame;
 class QLabel;
@@ -896,6 +897,11 @@ private:
                          SFramePresentationTelemetry* frameTelemetry);
     bool ensureShadowFramebuffers(int quality);
     void releaseShadowFramebuffers();
+    void drawEditorServiceScene();
+    void drawEditorObjectServices(const QMatrix4x4& camera,bool culling,bool helpers,CRenderStallTrace* trace=nullptr);
+    QList<CNode*> drawEditorPickIds(const QMatrix4x4& camera);
+    bool m_editorServicePass{false};
+    QImage captureEditorServiceLayer(const QSize& size, QString* error);
     bool beginEditorQueryFramebuffer();
     void endEditorQueryFramebuffer();
     bool drawSelectionTerrainDepth(const QMatrix4x4& viewMatrix);

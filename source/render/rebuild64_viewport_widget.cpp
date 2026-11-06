@@ -21,6 +21,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QKeyEvent>
@@ -34,6 +37,7 @@
 #include <QWheelEvent>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -59,8 +63,11 @@ struct CRebuild64Viewport::Worker {
         QString gameRoot, neighbourLayout;
         quint64 generation{0};
         EirCamera camera{};
+        QImage service;
+        QVector<EirObjectPose> poses,documentObjects;
+        quint64 serviceSerial{0};double serviceCpuMs{0};
         QSize size;
-        QString capture;
+        QString capture;bool captureWorld{false};
     } input;
     CRebuild64Viewport* owner;
     void* window;
@@ -85,6 +92,9 @@ struct CRebuild64Viewport::Worker {
     }
     void run() {
         CRebuild64StartupGuard startup(scratch);
+        // A settled in-process DLL can also fault during an object update.
+        // Retain one live-session marker without a filesystem write per frame.
+        CRebuild64StartupGuard activity(scratch);
         if(!startup.arm()) {failure(QString::fromUtf8("Не удалось записать метку безопасного запуска Rebuild64."));return;}
         // QLibrary and every DLL/D3D call live on this one worker, including teardown.
         QLibrary library(QDir(QCoreApplication::applicationDirPath()).filePath("ataman_rebuild64.dll"));
@@ -111,7 +121,7 @@ struct CRebuild64Viewport::Worker {
                 if(stop)break;
                 if(paused || !input.generation) {
                     lock.unlock();
-                    if(handle){api.destroy(handle);handle=nullptr;generation=0;startup.clear();}
+                    if(handle){api.destroy(handle);handle=nullptr;generation=0;startup.clear();activity.clear();}
                     continue;
                 }
                 next=input; input.capture.clear();
@@ -119,6 +129,7 @@ struct CRebuild64Viewport::Worker {
             EirError error{};
             if(handle&&(activePaths!=next.paths||activeGameRoot!=next.gameRoot||activeLayout!=next.neighbourLayout)){api.destroy(handle);handle=nullptr;generation=0;}
             if(!handle) {
+                if(!activity.arm()){failure("Cannot arm renderer session recovery marker");break;}
                 std::vector<std::wstring> paths;
                 for(const auto& path:next.paths)paths.push_back(path.toStdWString());
                 std::vector<EirMount> mounts;
@@ -159,7 +170,7 @@ struct CRebuild64Viewport::Worker {
                 if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
                 std::vector<EirSpan> mobs;
                 for(const auto& bytes:next.mobs)mobs.push_back({bytes.constData(),uint64_t(bytes.size())});
-                EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData()};
+                EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData(),next.documentObjects.constData(),uint32_t(next.documentObjects.size())};
                 if(api.document(handle,&doc,&error)) {failure(QString::fromUtf8(error.message));break;}
                 generation=next.generation;pending.restart();startupArmed=true;
             }
@@ -176,6 +187,10 @@ struct CRebuild64Viewport::Worker {
                 startupArmed=true;
             }
             previousNeighbours=next.camera.neighbours_visible!=0;
+            if(api.service) {
+                EirService service{sizeof(EirService),uint32_t(next.service.width()),uint32_t(next.service.height()),uint32_t(next.service.bytesPerLine()),next.serviceSerial,next.generation,next.serviceCpuMs,{next.service.constBits(),uint64_t(next.service.sizeInBytes())},next.poses.constData(),uint32_t(next.poses.size())};
+                if(api.service(handle,&service,&error)){failure(QString::fromUtf8(error.message));break;}
+            }
             if(api.camera(handle,&next.camera,&error)){failure(QString::fromUtf8(error.message));break;}
             if(hook=="device-lost"&&!injected){api.test_device_loss(handle);injected=true;}
             EirStatistics stats{};const int rc=api.frame(handle,&stats,&error);
@@ -193,12 +208,13 @@ struct CRebuild64Viewport::Worker {
                     if(target->m_selected && stats.ready_generation==target->m_generation) {
                         target->m_stack->setCurrentWidget(target->m_native);
                         target->movePanels(true);
+                        target->syncEditorViewport();
                         emit target->frameCommitted(stats.ready_generation);
                     }
                 },Qt::QueuedConnection);
                 if(!next.capture.isEmpty()) {
                     const auto path=next.capture.toStdWString();
-                    if(api.capture(handle,reinterpret_cast<const uint16_t*>(path.c_str()),&error))failure(QString::fromUtf8(error.message));
+                    if((next.captureWorld?api.capture_world:api.capture)(handle,reinterpret_cast<const uint16_t*>(path.c_str()),&error))failure(QString::fromUtf8(error.message));
                 }
             }
             // No busy loop when the condition predicate already has input.
@@ -216,7 +232,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_stack->setContentsMargins(0,0,0,0);m_stack->setSpacing(0);m_stack->addWidget(gl);m_stack->addWidget(m_native);m_stack->setCurrentWidget(gl);
     auto* viewMenu=menu->addMenu(QString::fromUtf8("Вид карты"));
     auto* group=new QActionGroup(this);group->setExclusive(true);
-    m_glAction=viewMenu->addAction("OpenGL");m_rebuildAction=viewMenu->addAction(QString::fromUtf8("Rebuild64 (просмотр)"));
+    m_glAction=viewMenu->addAction("OpenGL");m_rebuildAction=viewMenu->addAction(QString::fromUtf8("Rebuild64"));
     for(auto* action:{m_glAction,m_rebuildAction}){action->setCheckable(true);group->addAction(action);}
     m_glAction->setChecked(true);
     connect(m_glAction,&QAction::triggered,this,[this]{selectRebuild(false);});
@@ -229,6 +245,13 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
     connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{m_documentRefreshPending=true;});
+    connect(gl,&CView::selectionChanged,this,[this]{
+        if(!m_selected)return;
+        for(auto* node:m_gl->selectionSnapshot())if(node->nodeType()==ENodeType::eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0){
+            emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: персонажи и stst8 требуют OpenGL для достоверного отображения правок. Переключите вид через меню; правки остаются в документе."));
+            break;
+        }
+    });
     if(!m_interruptedStarts.isEmpty()) {
         QTimer::singleShot(0,this,[this]{
             if(m_interruptedStarts.isEmpty()||!m_gl)return;
@@ -280,10 +303,14 @@ void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     m_stack->setCurrentWidget(m_gl);
     if(!selected) {
         m_timer->stop();if(m_worker)m_worker->pause(true);
+        // Restore QGLWidget's original physical draw/query extent. Native mode
+        // uses logical editor queries; it must not alter the retained GL path.
+        m_gl->m_width=qMax(1,qRound(m_gl->width()*m_gl->devicePixelRatioF()));
+        m_gl->m_height=qMax(1,qRound(m_gl->height()*m_gl->devicePixelRatioF()));
         m_gl->resumeRendering();m_gl->setFocus();return;
     }
     m_failure.clear();m_documentHash.clear();m_documentRefreshPending=true;m_sceneSnapshotTimer.invalidate();
-    emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: подготовка вида; редактирование — в OpenGL."));
+    emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: подготовка вида и инструментов редактора."));
     m_timer->start();tick();
 }
 void CRebuild64Viewport::fallback(const QString& message) {
@@ -333,8 +360,26 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
     result.visuals=31; // full world content; graphics policy comes from Config64
     return result;
 }
+namespace {
+QVector<quintptr> editorMobOrder(CView* view) {
+    QVector<quintptr> result;for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob))result.append(quintptr(mob));return result;
+}
+QVector<EirObjectPose> editorPoses(CView* view) {
+    QVector<EirObjectPose> poses;uint32_t mobIndex=0;
+    for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob)) {
+        for(auto* node:mob->nodes()) {
+            EirObjectPose pose{};pose.mob=mobIndex;pose.nid=node->mapId();
+            const auto p=node->drawPosition();const auto q=node->rotation();const auto shape=node->constitution();
+            for(int a=0;a<3;++a){pose.position[a]=p[a];pose.shape[a]=shape[a];}
+            pose.shape[0]=shape.y();pose.shape[1]=shape.x();
+            pose.quaternion[0]=q.scalar();pose.quaternion[1]=q.x();pose.quaternion[2]=q.y();pose.quaternion[3]=q.z();
+            pose.visible=node->nodeState()!=ENodeState::eHidden&&!node->isMarkDeleted();poses.append(pose);
+        }++mobIndex;
+    }return poses;
+}
+}
 void CRebuild64Viewport::tick() {
-    if(!m_selected||!m_gl||m_gl->m_applicationShutdown)return;
+    if(!m_selected||!m_gl||m_gl->m_applicationShutdown||m_gl->m_unitVisualPreparationSuspended)return;
     if(!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()) {
         movePanels(false);
         m_stack->setCurrentWidget(m_gl);
@@ -345,6 +390,21 @@ void CRebuild64Viewport::tick() {
         }
         m_documentHash.clear();return;
     }
+    if(m_worker && m_gl->m_pLand->filePath().fileName().toUtf8()!=m_worker->input.name) {
+        movePanels(false);m_stack->setCurrentWidget(m_gl);
+    }
+    const auto mobOrder=editorMobOrder(m_gl);
+    QByteArray visibility;
+    for(auto* mob:m_gl->m_aMob)if(m_gl->isMobVisible(mob))for(auto* node:mob->nodes())
+        if(node->nodeState()==ENodeState::eHidden||node->isMarkDeleted())visibility+=QByteArray::number(quintptr(mob))+":"+QByteArray::number(node->mapId())+";";
+    const bool cohortChanged=m_worker&&(mobOrder!=m_documentMobOrder||visibility!=m_documentVisibility);
+    // MOB ordinals belong to one immutable generation. Never apply the new
+    // visible cohort's poses to the preceding generation's numeric IDs.
+    if(cohortChanged){m_documentRefreshPending=true;m_sceneSnapshotTimer.invalidate();}
+    const bool preview=m_gl->hasPendingOperation();
+    if(preview&&!m_transformPreviewMessage)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: предпросмотр преобразования. Мир обновится после подтверждения."));
+    m_transformPreviewMessage=preview;
+    serviceInput();
     if(m_worker&&m_sceneSnapshotTimer.isValid()&&m_sceneSnapshotTimer.elapsed()<100) {
         const auto camera=cameraSnapshot();
         const QSize size(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
@@ -353,14 +413,17 @@ void CRebuild64Viewport::tick() {
     }
     m_sceneSnapshotTimer.restart();
     const auto terrainState=m_gl->m_terrainEditAvailable?m_gl->m_terrainEdit.stateSha256():QByteArray();
-    if(m_worker&&!m_documentRefreshPending&&terrainState==m_terrainState) {
+    if(m_worker&&!cohortChanged&&(!m_documentRefreshPending || m_pointerDown || m_gl->hasPendingOperation())&&terrainState==m_terrainState) {
         const auto camera=cameraSnapshot();
         std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.camera=camera;
         m_worker->input.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
         return;
     }
+    m_documentMobOrder=mobOrder;m_documentVisibility=visibility;
     m_terrainState=terrainState;m_documentRefreshPending=false;
-    Worker::Input next;
+    m_documentPoses.clear();m_poseOverrides.clear();
+    for(const auto& pose:editorPoses(m_gl))m_documentPoses.insert((quint64(pose.mob)<<32)|pose.nid,pose);
+    Worker::Input next;next.documentObjects=editorPoses(m_gl);
     CMprEditTransaction transaction(QStringLiteral("Rebuild64 memory snapshot"));CValidationReport report;
     if(!m_gl->m_terrainEditAvailable) {
         // CView defers its editor model after visible load. Its original bytes
@@ -378,7 +441,9 @@ void CRebuild64Viewport::tick() {
     next.name=m_gl->m_pLand->filePath().fileName().toUtf8();
     QCryptographicHash hash(QCryptographicHash::Sha256);hash.addData(next.name);hash.addData(next.terrain);
     for(const auto& mob:next.mobs){hash.addData(QByteArray::number(mob.size()));hash.addData(mob);}
-    const auto fingerprint=hash.result();if(fingerprint!=m_documentHash){m_documentHash=fingerprint;++m_generation;}
+    hash.addData(visibility);
+    const auto fingerprint=hash.result();const bool documentChanged=fingerprint!=m_documentHash;if(documentChanged){m_documentHash=fingerprint;++m_generation;}
+    if(documentChanged&&m_worker)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: обновление вида после правки; пока показан последний готовый кадр. Правки находятся в документе."));
     next.generation=m_generation;next.camera=cameraSnapshot();
     next.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
     next.paths=configuredResourceSourcePaths(m_gl->settings());
@@ -403,47 +468,95 @@ void CRebuild64Viewport::tick() {
         QDir().mkpath(scratch);
         m_worker.reset(new Worker(this,reinterpret_cast<void*>(m_native->winId()),scratch));
     }
-    {std::lock_guard<std::mutex> lock(m_worker->mutex);next.capture=m_worker->input.capture;m_worker->input=std::move(next);m_worker->paused=false;}
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);next.capture=m_worker->input.capture;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
     m_worker->wake.notify_all();
 }
-void CRebuild64Viewport::capture(const QString& path) {
-    if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.capture=path;}
+void CRebuild64Viewport::capture(const QString& path,bool worldOnly) {
+    if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.capture=path;m_worker->input.captureWorld=worldOnly;}
 }
 bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
-    if(object==m_native) {
+    if(object==m_native && m_selected) {
         switch(event->type()) {
-        case QEvent::KeyPress:case QEvent::KeyRelease:case QEvent::MouseButtonPress:case QEvent::MouseMove:case QEvent::MouseButtonRelease:case QEvent::Wheel:case QEvent::FocusOut:
-            cameraInput(event);return true;
-        case QEvent::Resize:if(m_selected){m_gl->resize(m_native->size());QTimer::singleShot(0,this,&CRebuild64Viewport::tick);}break;
+        case QEvent::ShortcutOverride:case QEvent::KeyPress:case QEvent::KeyRelease:case QEvent::MouseButtonPress:case QEvent::MouseMove:case QEvent::MouseButtonRelease:case QEvent::Wheel:case QEvent::FocusOut:case QEvent::ContextMenu:
+            editorInput(event);return true;
+        case QEvent::Resize:
+            if(m_stack->currentWidget()==m_native)syncEditorViewport();
+            QTimer::singleShot(0,this,&CRebuild64Viewport::tick);break;
         default:break;
         }
     }
     return QWidget::eventFilter(object,event);
 }
-void CRebuild64Viewport::cameraInput(QEvent* event) {
+void CRebuild64Viewport::editorInput(QEvent* event) {
     if(event->type()==QEvent::FocusOut){m_gl->m_pOp->keyManager()->keys().clear();return;}
-    if(event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease) {
-        auto* key=static_cast<QKeyEvent*>(event);if(key->isAutoRepeat())return;
-        EKeyCode code;
-        switch(key->key()) {
-        case Qt::Key_W:code=eKey_W;break;case Qt::Key_A:code=eKey_A;break;case Qt::Key_S:code=eKey_S;break;case Qt::Key_D:code=eKey_D;break;
-        case Qt::Key_Q:code=eKey_Q;break;case Qt::Key_E:code=eKey_E;break;case Qt::Key_Shift:code=eKey_Shift;break;
-        case Qt::Key_Up:code=eKey_UpArrow;break;case Qt::Key_Down:code=eKey_DownArrow;break;case Qt::Key_Left:code=eKey_LeftArrow;break;case Qt::Key_Right:code=eKey_RightArrow;break;
-        default:return;
+    if((event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)
+       && m_gl->m_landscapeTools && m_gl->m_landscapeTools->editingEnabled()) {
+        const auto* key=static_cast<QKeyEvent*>(event);
+        const auto cameraKeys=QVector<int>{Qt::Key_W,Qt::Key_A,Qt::Key_S,Qt::Key_D,Qt::Key_Q,Qt::Key_E,Qt::Key_Up,Qt::Key_Down,Qt::Key_Left,Qt::Key_Right,Qt::Key_Shift,Qt::Key_Escape};
+        if(!cameraKeys.contains(key->key())&&!(key->modifiers()&(Qt::ControlModifier|Qt::AltModifier))) {
+            if(event->type()==QEvent::KeyPress)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: инструменты рельефа требуют OpenGL."));
+            event->accept();return;
         }
-        if(event->type()==QEvent::KeyPress)m_gl->m_pOp->keyManager()->press(code);else m_gl->m_pOp->keyManager()->release(code);
-    } else if(event->type()==QEvent::Wheel) {
-        m_gl->m_cam->enlarge(static_cast<QWheelEvent*>(event)->angleDelta().y()>0);
-    } else {
-        auto* mouse=static_cast<QMouseEvent*>(event);
-        if(event->type()==QEvent::MouseButtonPress){m_native->setFocus();m_lastMouse=mouse->pos();if(mouse->button()==Qt::MiddleButton)m_gl->anchorCameraRotationToViewportCenter();}
-        if(event->type()==QEvent::MouseMove&&(mouse->buttons()&Qt::MiddleButton)) {
-            const auto delta=mouse->pos()-m_lastMouse;
-            auto* sx=dynamic_cast<COptInt*>(m_gl->settings()->opt(eOptSetGeneral,"mouseSenseX"));
-            auto* sy=dynamic_cast<COptInt*>(m_gl->settings()->opt(eOptSetGeneral,"mouseSenseY"));
-            float x=delta.y()/(12.f-(sy?sy->value():50)/10.f),z=delta.x()/(12.f-(sx?sx->value():50)/10.f);
-            m_gl->m_cam->xRotate(x);m_gl->m_cam->zRotate(z);
-        }
-        m_lastMouse=mouse->pos();
     }
+    const bool mouse=event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonRelease;
+    if(mouse) {
+        auto* e=static_cast<QMouseEvent*>(event);
+        if(event->type()==QEvent::MouseButtonPress&&e->button()==Qt::LeftButton
+           &&!m_gl->hasPendingOperation()
+           &&(m_documentRefreshPending||m_statistics.ready_generation!=m_generation)) {
+            emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: кадр после правки ещё обновляется. Дождитесь готового кадра перед новым выбором мышью; Undo и сохранение доступны."));
+            event->accept();return;
+        }
+        const bool terrain=m_gl->m_landscapeTools && m_gl->m_landscapeTools->editingEnabled();
+        if(terrain && (e->button()!=Qt::MiddleButton && !(e->buttons()&Qt::MiddleButton))) {
+            if(event->type()==QEvent::MouseButtonPress)
+                emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: кисти рельефа требуют OpenGL. Выберите OpenGL через меню вида; текущие правки сохранены в документе."));
+            event->accept();return;
+        }
+        if(event->type()==QEvent::MouseButtonPress)m_pointerDown=true;
+        if(event->type()==QEvent::MouseButtonRelease)m_pointerDown=e->buttons()!=Qt::NoButton;
+    }
+    // Native surface and hidden CView share one logical rectangle. Deliver the
+    // original event (native key/modifiers included) to the canonical Qt widget.
+    syncEditorViewport();
+    QApplication::sendEvent(m_gl,event);
+    if(mouse && event->type()==QEvent::MouseButtonPress)m_native->setFocus(Qt::MouseFocusReason);
+}
+void CRebuild64Viewport::serviceInput() {
+    if(!m_worker || m_stack->currentWidget()!=m_native)return;
+    if(editorMobOrder(m_gl)!=m_documentMobOrder)return;
+    syncEditorViewport();
+    // Advance the single editor camera once, before both consumers.
+    m_gl->m_cam->update();
+    QElapsedTimer timer;timer.start();QString error;
+    const QSize size(qMax(1,qRound(m_native->width()*devicePixelRatioF())),qMax(1,qRound(m_native->height()*devicePixelRatioF())));
+    auto image=m_gl->captureEditorServiceLayer(size,&error).convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+    m_serviceMilliseconds=timer.nsecsElapsed()/1e6;
+    if(image.isNull()){emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: служебный слой недоступен: ")+error);return;}
+    m_serviceImage=image;
+    auto poses=editorPoses(m_gl);
+    for(auto& pose:poses) {
+        const auto key=(quint64(pose.mob)<<32)|pose.nid;
+        const auto baseline=m_documentPoses.constFind(key);
+        if(baseline!=m_documentPoses.cend() &&
+           (std::memcmp(pose.position,baseline->position,sizeof(pose.position)) || std::memcmp(pose.quaternion,baseline->quaternion,sizeof(pose.quaternion)) || std::memcmp(pose.shape,baseline->shape,sizeof(pose.shape))))m_poseOverrides.insert(key);
+        pose.changed=m_poseOverrides.contains(key)?1u:0u;
+    }
+    std::lock_guard<std::mutex> lock(m_worker->mutex);
+    m_worker->input.camera=cameraSnapshot();m_worker->input.size=size;
+    m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.service=image;m_worker->input.poses=std::move(poses);++m_worker->input.serviceSerial;
+}
+
+void CRebuild64Viewport::syncEditorViewport() {
+    const QSize size=m_native->size();if(size.isEmpty())return;
+    const auto projection=m_gl->m_projection,normal=m_gl->m_normalProjection;
+    const double before=m_gl->m_height>0?double(m_gl->m_width)/m_gl->m_height:0;
+    const double after=double(size.width())/size.height();
+    m_gl->resize(size);
+    // QGLWidget reports physical dimensions to resizeGL on Windows. Editor
+    // events and query rectangles are logical. A DPR-only change must not
+    // rebuild the shared lens (including the current far/telephoto projection).
+    if(qAbs(before-after)>.000001)m_gl->resizeGL(size.width(),size.height());
+    else {m_gl->m_projection=projection;m_gl->m_normalProjection=normal;}
+    m_gl->m_width=size.width();m_gl->m_height=size.height();
 }
