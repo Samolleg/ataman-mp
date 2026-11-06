@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$RendererRepositoryPath,
     [Parameter(Mandatory=$true)][string]$BuildRoot,
     [string]$ShaderStore,
+    [string]$PrebuiltShaderRoot,
     [string]$MSBuild='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/MSBuild.exe'
 )
 $ErrorActionPreference='Stop'
@@ -59,7 +60,23 @@ if($ShaderStore){
     $env:EID3D11_SHADER_STORE=$resolvedStore
 }
 $hostRoot=$target.Replace('\','/')+'/'
-foreach($project in @('vendor/OwnedRenderer/RendererShaders.vcxproj','vendor/OwnedRenderer/OwnedRenderer.vcxproj','backend.vcxproj')) {
+$projects=@('vendor/OwnedRenderer/RendererShaders.vcxproj','vendor/OwnedRenderer/OwnedRenderer.vcxproj','backend.vcxproj')
+if($PrebuiltShaderRoot) {
+    # Explicit reuse of a previously validated table; the caller must verify
+    # unchanged shader producers and retain their hashes in the build receipt.
+    # Only the table resources are copied. Runtime vendor objects are rebuilt.
+    $prebuilt=(Resolve-Path -LiteralPath $PrebuiltShaderRoot).Path
+    $shaderOutput=Join-Path $vendor 'out/x64/Release/RendererShaders'
+    New-Item -ItemType Directory -Path $shaderOutput -Force|Out-Null
+    foreach($name in @('eid3d11_shaders.bin','eid3d11_shaders.res','eid3d11_camp_art.res')) {
+        $file=Join-Path $prebuilt $name
+        if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Prebuilt shader resource missing: $name"}
+        Copy-Item -LiteralPath $file -Destination $shaderOutput
+        Get-FileHash -LiteralPath $file -Algorithm SHA256
+    }
+    $projects=@('vendor/OwnedRenderer/OwnedRenderer.vcxproj','backend.vcxproj')
+}
+foreach($project in $projects) {
     $log=Join-Path $target ('logs/'+[IO.Path]::GetFileNameWithoutExtension($project)+'.log')
     & $MSBuild (Join-Path $target $project) /p:Configuration=Release /p:Platform=x64 "/p:AtamanHostRoot=$hostRoot" /m:2 /v:minimal *> $log
     if($LASTEXITCODE){throw ('Build failed: '+$project+'; '+$log)}

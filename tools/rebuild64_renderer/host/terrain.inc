@@ -38,6 +38,9 @@ int map_frame(Session& s,probe1b_error* e){
   wf.fog.fog.start=s.frameCamera.fog_start;wf.fog.fog.end=s.frameCamera.fog_end;wf.fog.fog.scale=255.f/(wf.fog.fog.end-wf.fog.fog.start);
  }
  E1WorldDraw draw(&s,s.world,wf);
+ std::vector<owned::RetainedWorldPointLight> lights;
+ for(uint32_t index=0;index<s.frameCamera.point_light_count;++index){const auto& in=s.frameCamera.point_lights[index];owned::RetainedWorldPointLight l;l.source_id=int32_t(in.source_id);std::copy_n(in.position,3,l.center.begin());std::copy_n(in.color,3,l.color.begin());l.radius=in.radius;l.casts_shadow=in.casts_shadow!=0;lights.push_back(l);}
+ const char* lightFailure=nullptr;if(!E1Scene().Scene().visual_publish_world_point_lights(std::move(lights),&lightFailure))return fail(e,E_INVALIDARG,lightFailure?lightFailure:"point light publication");
  if(!s.materialsPublished&&s.map){
   for(const auto& texture:s.map->textures)if(texture.second){const HRESULT hr=owned::AtamanReadiness::material(s.renderer,texture.first,*texture.second);if(FAILED(hr))return fail(e,hr,"world material texture ingress failed");}
   s.materialsPublished=true;

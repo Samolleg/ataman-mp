@@ -20,7 +20,7 @@ notices. Stage them together with the MSVC 14 x64 runtime. No NGX, DLSS,
 Streamline or NVIDIA SDK library is used. The replacement backend explicitly
 reports DLSS unavailable and creates no SDK worker or writable NGX directory.
 
-The caller loads `ataman_renderer_get_api` with QLibrary and ABI version 3.
+The caller loads `ataman_renderer_get_api` with QLibrary and ABI version 4.
 All calls for a handle, including destruction, belong to one worker thread.
 Inputs are borrowed only for each call and copied before returning. Captures
 read the last committed renderer-owned texture. The renderer's internal
@@ -52,15 +52,17 @@ the DLL. Author permission was settled by the owner on 2026-11-06.
 
 Stage 3 host policy (not a change to the renderer's game defaults):
 
-- ABI3 carries the authored sky matrix/tint and existing viewport sky/fog/
+- ABI4 carries the authored sky matrix/tint and existing viewport sky/fog/
   terrain/water/static visibility. The host resolves nask0sky.fig and Sky00
   from the same read-only mounts and uses the shipped fixed-function shader.
   The clear colour also follows the environment below the open sky cylinder.
 - sky_clouds=0 selects that stock sky; fog_preset=0 removes modern mist/wisps
   and the added atmospheric fog. draw_distance=1000 is the supported maximum,
   beyond the current GL fog end620; the previous default300 faded top views.
-- render_scale=100/upscaler=0 (no SDK), smaa=false match the unmultisampled GL
-  capture. anisotropy=4 means16 samples, material_quality=3 matches the saved
+- render_scale=100/upscaler=0 (no SDK), R1 smaa=false matched the unmultisampled GL
+  capture in R1. R2 enables standard SMAA after noise/aliasing comparison;
+  Laplacian variance is not proof of visual sharpness. anisotropy=4 means16
+  samples, material_quality=3 matches the saved
   game quality values. No completed-frame colour/sharpness filter is added.
 - Patch008 only extends the embedded config range to the already implemented
   negative cave-light sentinel. cave_brightness=-1 preserves the caller's cave
@@ -80,3 +82,39 @@ The isolated stage3 harness uses no owner profile, visible HWND, desktop capture
 or ProgramData lock store. Diagnostic DLL fault/config exports exist only in
 work, never in the production package. See the stage3 validation report for
 remaining quality limits and the proposed process/tool migration stages.
+
+R2 host corrections (283 remains uninstalled):
+
+- ABI4 copies up to64 live scene point lights from the same LIGHT/TORCH inputs,
+  including visibility, frustum, preview positions, color normalization, radius
+  and shadow eligibility. The retained scene's ordinary world-light publication
+  supplies the renderer; no game object lookup or shader special case is added.
+- The interrupted startup is acknowledged once. A cache retry latch keeps GL
+  on later starts without repeating the message or rewriting ui/renderer. An
+  explicit menu selection of either backend clears both stale markers and the
+  latch; a new interrupted load is a new crash, with one new message.
+- Populate TerrainCpuAsset::pages before swamp-frame classification, as the
+  source loader does. A GPU atlas alone does not provide the classifier's art.
+- Document feature bits no longer override terrain_blend=0. The editor keeps
+  authored atlas transitions; water_simple=true uses authored liquid tile art
+  and opacity, avoiding modern SSR/refraction/foam. material_terrain=false avoids
+  terrain PBR highlights from the stock cave's fixed diffuse light direction.
+  These are native renderer options; no finished-frame colour/sharpness grade.
+- build_backend.ps1 -PrebuiltShaderRoot may reuse validated .bin/.res files
+  while rebuilding all runtime vendor objects from the pinned archive and every
+  lock patch. Caller evidence must establish unchanged shader producers and
+  record the reused hashes. R2 uses this path, with no single-object lib splice.
+- Panel tests use renderer readback + QWidget::render and native parent/input
+  checks. Nobody has observed their actual composition over a visible D3D
+  window in these tests; that remains owner verification.
+
+R2 patches009/010 close two further ingress defects: a Terrain2 table entry
+was advertised even with terrain_blend=0, and completed GPU atlas surfaces were
+forced to one mip and copied only at level0. Patch009 gates the CPU table index;
+patch010 publishes E1SurfaceMipCount and copies every declared authored mip.
+Existing one-level producers keep their old behaviour. No shader source changes.
+The readiness observer ignores a disabled Terrain2 bake and still waits for
+contact-atlas copies. The complete general shader is valid while optional
+specialised optimisations build; their residency must not freeze a frame.
+R2 resource/SRV descriptor inspection confirms12 levels, not just the host's
+initial texture descriptor. Laplacian growth in R1 included this aliasing.

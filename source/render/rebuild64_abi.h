@@ -7,7 +7,12 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 3u
+#define EIR_ABI 4u
+#define EIR_MAX_POINT_LIGHTS 64u
+typedef struct EirPointLight {
+    float position[3], color[3], radius;
+    uint32_t source_id, casts_shadow;
+} EirPointLight;
 typedef struct EirError { int32_t code; char message[2048]; } EirError;
 typedef struct EirSpan { const void* data; uint64_t bytes; } EirSpan;
 typedef struct EirMount { const uint16_t* path; uint32_t kind; uint32_t reserved; } EirMount;
@@ -32,6 +37,8 @@ typedef struct EirCamera {
     float ambient[3], sun_diffuse[3], sun_direction[3];
     float fog_color[3], fog_start, fog_end;
     uint32_t region, cave;
+    uint32_t point_light_count;
+    EirPointLight point_lights[EIR_MAX_POINT_LIGHTS];
     float sky_to_clip[16]; // authored sky; translation removed; depth at far plane
     float sky_tint[3];
     uint32_t visuals; // 1=sky, 2=fog, 4=terrain, 8=water, 16=static objects

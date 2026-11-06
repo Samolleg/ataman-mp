@@ -4,6 +4,10 @@
 #include "landscape.h"
 #include "mob.h"
 #include "node.h"
+#include "light.h"
+#include "torch.h"
+#include "view_frustum.h"
+#include <QSaveFile>
 #include "operationmanager.h"
 #include "key_manager.h"
 #include "settings.h"
@@ -185,9 +189,19 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{m_documentRefreshPending=true;});
     if(!m_interruptedStarts.isEmpty()) {
-        QTimer::singleShot(0,this,[this]{emit m_gl->updateMsg(QString::fromUtf8(
-            "Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL; Rebuild64 можно снова выбрать в Настройках → Вид карты."));});
-    } else if(QSettings().value("ui/renderer",QStringLiteral("OpenGL")).toString()=="Rebuild64")
+        QTimer::singleShot(0,this,[this]{
+            if(m_interruptedStarts.isEmpty()||!m_gl)return;
+            // Latch before acknowledging the crash: removing its marker must
+            // never re-enable a crashing saved backend on the next startup.
+            QSaveFile latch(QDir(m_guardDirectory).filePath("manual-retry-required"));
+            const bool recorded=latch.open(QIODevice::WriteOnly)
+                &&latch.write("Rebuild64 requires an explicit menu selection\n")>0&&latch.commit();
+            emit m_gl->updateMsg(QString::fromUtf8(
+                "Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL. Для повторного запуска выберите Rebuild64 в Настройках → Вид карты."));
+            if(recorded){for(const auto& path:m_interruptedStarts)QFile::remove(path);m_interruptedStarts.clear();}
+        });
+    } else if(!QFileInfo::exists(QDir(m_guardDirectory).filePath("manual-retry-required"))
+              &&QSettings().value("ui/renderer",QStringLiteral("OpenGL")).toString()=="Rebuild64")
         QTimer::singleShot(0,this,[this]{selectRebuild(true,false);});
 }
 CRebuild64Viewport::~CRebuild64Viewport(){m_timer->stop();m_worker.reset();movePanels(false);}
@@ -216,9 +230,10 @@ void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     if(!m_gl)return;
     m_selected=selected;m_glAction->setChecked(!selected);m_rebuildAction->setChecked(selected);
     if(persist)QSettings().setValue("ui/renderer",selected?"Rebuild64":"OpenGL");
-    if(selected && persist) {
+    if(persist) {
         for(const auto& path:m_interruptedStarts)QFile::remove(path);
         m_interruptedStarts.clear();
+        QFile::remove(QDir(m_guardDirectory).filePath("manual-retry-required"));
     }
     movePanels(false);
     m_stack->setCurrentWidget(m_gl);
@@ -255,6 +270,28 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
         result.sun_direction[axis]=-environment.sunDirection[axis];
         result.fog_color[axis]=environment.fogColor[axis];
     }
+    // Match CView's Full environment LIGHT/TORCH admission. Copy live values
+    // every camera tick, including preview positions; no saved-file light cache.
+    const auto enabled=[this](const char* name,bool fallback){const auto* o=m_gl->m_pSettings?dynamic_cast<const COptBool*>(m_gl->m_pSettings->opt(name)):nullptr;return o?o->value():fallback;};
+    const auto* mode=m_gl->m_pSettings?dynamic_cast<const COptInt*>(m_gl->m_pSettings->opt("renderLightingMode")):nullptr;
+    const CViewFrustum frustum(clip);uint32_t source=0;
+    if((!mode||mode->value()==2)&&m_gl->m_sceneLightsVisible&&enabled("renderSceneLights",true))
+        for(auto* mob:m_gl->m_aMob)for(auto* node:mob->nodes()) {
+            ++source;if(node->nodeState()==ENodeState::eHidden)continue;
+            QVector3D position,color;float radius=0;bool shadow=false;
+            if(auto* light=dynamic_cast<CLight*>(node)) {
+                position=(light->drawPosition().isNull()?light->position():light->drawPosition())+QVector3D(0,0,2);
+                color=light->lightColor();radius=light->range();shadow=light->shadowEnabled();
+            } else if(auto* torch=dynamic_cast<CTorch*>(node)) {
+                position=torch->particleWorldPosition();color={.8f,.8f,.8f};radius=torch->power()*10;shadow=true;
+            }
+            if(radius<=0||(enabled("frustumCulling",true)&&!frustum.intersectsSphere(position,radius)))continue;
+            if(result.point_light_count==EIR_MAX_POINT_LIGHTS)break;
+            if(qMax(color.x(),qMax(color.y(),color.z()))>1.01f)color/=255.f;
+            auto& light=result.point_lights[result.point_light_count++];
+            for(int axis=0;axis<3;++axis){light.position[axis]=position[axis];light.color[axis]=color[axis];}
+            light.radius=radius;light.casts_shadow=shadow;light.source_id=source;
+        }
     result.fog_start=environment.fogStart;result.fog_end=environment.fogEnd;
     result.region=m_gl->m_weatherRegion=="ingos"?2:m_gl->m_weatherRegion=="suslanger"?3:1;result.cave=m_gl->m_caveEnvironment?1:0;
     auto skyView=view;skyView(0,3)=skyView(1,3)=skyView(2,3)=0;

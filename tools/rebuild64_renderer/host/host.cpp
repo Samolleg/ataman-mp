@@ -54,8 +54,15 @@ struct AtamanReadiness {
  }
  static void quality(const Renderer& r) noexcept {
   const auto& c=r.debug_overlay_.config();std::fprintf(stderr,"HOST_QUALITY draw_distance=%d smaa=%d render_scale=%d upscaler=%d anisotropy=%d fog_preset=%d sky_clouds=%d material_quality=%d\n",configured_integer(c,"draw_distance",300),configured_boolean(c,"smaa",true),configured_integer(c,"render_scale",100),configured_integer(c,"upscaler",0),configured_integer(c,"anisotropy",3),configured_integer(c,"fog_preset",2),configured_integer(c,"sky_clouds",2),configured_integer(c,"material_quality",3));
+  std::fprintf(stderr,"EDITOR_QUALITY terrain_blend=%d material_terrain=%d water_simple=%d\n",configured_integer(c,"terrain_blend",1),configured_boolean(c,"material_terrain",true),configured_boolean(c,"water_simple",false));
  }
  static uint32_t pending(const Renderer& r) noexcept {
+  // Disabled Terrain2 has no required style/bake to complete. Contact-atlas
+  // publication remains required for the object contact path in either mode.
+  if(configured_integer(r.debug_overlay_.config(),"terrain_blend",1)==0)
+   return r.contact_maps_.pending?4u:0u;
+  // The complete generic programs draw while optional specialised sets build.
+  // Their optimisation residency is not a resource-readiness requirement.
   return (!r.tile_blend_ready_?1u:0u)|(!r.tile_blend_rows_?2u:0u)|(r.contact_maps_.pending?4u:0u)|
    (!r.terrain2_map_.style_serial?8u:0u)|(r.terrain2_map_.dirty?16u:0u)|
    (r.terrain2_map_.seen_ready!=r.contact_maps_.ready?32u:0u)|
@@ -130,7 +137,9 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   std::puts("before ensure_host");std::fflush(stdout);
   hr=in->test_failure==2?E_FAIL:s->renderer.ensure_host(s->hidden.value,s->width,s->height);if(FAILED(hr))return fail(e,hr,"ensure_host");
   owned::scene_core::Config config;for(const char* name:{"shadows","point_shadows","shadow_far"}){owned::scene_core::ConfigOption option;option.key=name;option.type=uint8_t(owned::RendererOptionType::boolean);option.boolean_value=true;config.options.push_back(option);}owned::scene_core::ConfigOption terrain;terrain.key="terrain_blend";terrain.type=uint8_t(owned::RendererOptionType::integer);terrain.integer_value=0;config.options.push_back(terrain);for(auto pair:{std::pair<const char*,int>{"sky_clouds",0},{"fog_preset",0},{"draw_distance",1000},{"material_quality",3},{"anisotropy",4}}){owned::scene_core::ConfigOption o;o.key=pair.first;o.type=uint8_t(owned::RendererOptionType::integer);o.integer_value=pair.second;config.options.push_back(o);}{owned::scene_core::ConfigOption o;o.key="cave_brightness";o.type=uint8_t(owned::RendererOptionType::floating_point);o.floating_value=-1.f;config.options.push_back(o);}
- {owned::scene_core::ConfigOption o;o.key="smaa";o.type=uint8_t(owned::RendererOptionType::boolean);o.boolean_value=false;config.options.push_back(o);}
+ // Editor comparison uses authored liquid art and ground mapping. These are
+ // renderer options, not filters applied to the completed image.
+ for(const auto& setting:{std::pair<const char*,bool>{"smaa",true},{"water_simple",true},{"material_terrain",false}}){owned::scene_core::ConfigOption o;o.key=setting.first;o.type=uint8_t(owned::RendererOptionType::boolean);o.boolean_value=setting.second;config.options.push_back(o);}
  config.run(s->renderer);owned::AtamanReadiness::quality(s->renderer);std::puts("host_config sky_clouds=0 (authored stock sky) fog_preset=0 (faithful: no mist/wisps);  shadows=1 point_shadows=1 shadow_far=1 terrain_blend=0 (authored terrain); typed Config");
   ComPtr<IDXGIDevice> dx;ComPtr<IDXGIAdapter> ad;ComPtr<IDXGIFactory> factory;
   hr=s->device.As(&dx);if(SUCCEEDED(hr))hr=dx->GetAdapter(&ad);if(SUCCEEDED(hr))hr=ad->GetParent(IID_PPV_ARGS(&factory));

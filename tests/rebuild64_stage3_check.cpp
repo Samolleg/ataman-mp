@@ -21,6 +21,8 @@
 #include "landscape.h"
 #include "mob.h"
 #include "node.h"
+#include "light.h"
+#include "torch.h"
 #include "unit.h"
 #include "settings.h"
 #include "resource_profile.h"
@@ -64,7 +66,7 @@ void captureGL(CView* view,const QString& label){
  QString error;QImage image,previous;int stable=0;QElapsedTimer t;t.start();
  while(t.elapsed()<30000&&stable<2){QApplication::processEvents();view->m_overlayAnimationTimer.invalidate();image=view->captureTopdownPass(ETopdownPass::None,{1280,720},{},&error);stable=(!image.isNull()&&image==previous)?stable+1:0;previous=image;QTest::qWait(20);}
  check(!image.isNull()&&image.save(root+"/"+label+".png"),"GL readback saved: "+label);
- view->makeCurrent();float waterTime=-999;QOpenGLContext::currentContext()->functions()->glGetUniformfv(view->m_landProgram.programId(),view->m_landProgram.uniformLocation("u_overlayTimeSeconds"),&waterTime);out<<"GL_WATER_TIME "<<waterTime<<"\n";check(waterTime==0,"fixed GL water shader time");
+ view->makeCurrent();float waterTime=-999;QOpenGLContext::currentContext()->functions()->glGetUniformfv(view->m_landProgram.programId(),view->m_landProgram.uniformLocation("u_overlayTimeSeconds"),&waterTime);int count=-1;QOpenGLContext::currentContext()->functions()->glGetUniformiv(view->m_landProgram.programId(),view->m_landProgram.uniformLocation("u_pointLightCount"),&count);out<<"GL_POINT_LIGHTS "<<count<<"\n";out<<"GL_WATER_TIME "<<waterTime<<"\n";check(waterTime==0,"fixed GL water shader time");
  out<<"GL stable="<<stable<<" wait_ms="<<t.elapsed()<<" size="<<image.width()<<"x"<<image.height()<<"\n";out.flush();
 }
 quint64 privateBytes(){PROCESS_MEMORY_COUNTERS_EX m{};m.cb=sizeof(m);GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&m),sizeof(m));return m.PrivateUsage;}
@@ -87,13 +89,27 @@ int main(int argc,char** argv){
  const auto mode=app.arguments().value(1,"--visual");const QString fixture=QDir::fromNativeSeparators(qEnvironmentVariable("EI_EMBED_FIXTURE"));
  try{
   check(root.contains("/work/rebuild64-renderer-stage3-283-20261106/")&&fixture.contains("/work/rebuild64-renderer-stage3-283-20261106/"),"all writable paths isolated");
-  check(QStringList{"--visual","--save-recover","--recover-crash","--save-crash","--crash","--quality","--panels","--close-native","--close-probe","--minimap-export"}.contains(mode),"recognized test scenario");
+  check(QStringList{"--guard-first","--guard-second","--r2-controls","--visual","--save-recover","--recover-crash","--save-crash","--crash","--quality","--panels","--close-native","--close-probe","--minimap-export"}.contains(mode),"recognized test scenario");
   if(mode=="--save-recover"){
    const auto warnings=recoverMapSaveBatches(root+"/backups",false,[](const QString&){return true;});out<<"RECOVERY "<<warnings.join('\n')<<'\n';
    for(const auto& name:QStringList{"zone1.mob","recovery-second.mob"}){QFile a(fixture+"/Maps/"+name),b(root+"/before-"+name);check(a.open(QIODevice::ReadOnly)&&b.open(QIODevice::ReadOnly),"recovery inputs "+name);auto bytes=a.readAll();check(bytes==b.readAll(),"recovery restores exact before bytes "+name);CMob mob;check(mob.deserialize(bytes),"recovered MOB strict parse "+name);}
   }
   QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,[]{EnumWindows(inspect,0);for(QWidget* w:QApplication::topLevelWidgets()){if(auto* d=qobject_cast<CResourceSetupDialog*>(w))d->reject();if(auto* b=qobject_cast<QMessageBox*>(w))b->reject();}});dialogs.start(5);
-  MainWindow window;window.configureAutosaveTimer(false,300000);window.m_minimapCameraTimer->stop();window.m_minimapRefreshTimer->stop();
+  if(!qEnvironmentVariableIsEmpty("EI_R2_RENDERER_PREF"))QSettings().setValue("ui/renderer",qEnvironmentVariable("EI_R2_RENDERER_PREF"));
+  MainWindow window;int crashMessages=0;QObject::connect(window.view(),&CView::updateMsg,[&](const QString& text){if(text.contains(QString::fromUtf8("Предыдущая загрузка Rebuild64")))++crashMessages;});
+#ifndef STAGE3_BASELINE
+  if(mode=="--guard-first"||mode=="--guard-second"){
+   QTest::qWait(300);auto* wrapper=window.findChild<CRebuild64Viewport*>("rebuild64Viewport");
+   check(crashMessages==(mode=="--guard-first"?1:0),"one message per crash across restarts");
+   check(!wrapper->rebuildSelected()&&!wrapper->backendLoaded(),"automatic native restart suppressed");
+   check(QSettings().value("ui/renderer").toString()==qEnvironmentVariable("EI_R2_RENDERER_PREF"),"saved renderer preference unchanged");
+   check(wrapper->m_interruptedStarts.isEmpty()&&QDir(wrapper->m_guardDirectory).entryList({"startup-*.json"},QDir::Files).isEmpty(),"old crash markers acknowledged");
+   check(QFileInfo::exists(QDir(wrapper->m_guardDirectory).filePath("manual-retry-required")),"retry latch persists without repeated warning");
+   if(mode=="--guard-second"){wrapper->selectRebuild(false);check(!QFileInfo::exists(QDir(wrapper->m_guardDirectory).filePath("manual-retry-required")),"manual OpenGL selection clears latch");}
+   EnumWindows(inspect,0);check(!visible,"zero visible HWNDs");window.close();return 0;
+  }
+#endif
+  window.configureAutosaveTimer(false,300000);window.m_minimapCameraTimer->stop();window.m_minimapRefreshTimer->stop();
   SResourceProfileEvaluation profile;for(const auto& p:builtInResourceProfiles())if(p.id=="deja-vu")profile=evaluateResourceProfile("C:/GOG Games/PZ",p);
   check(profile.valid,"DejaVu read-only resources evaluated");window.m_settings->applyResourceProfile(profile);
   dynamic_cast<COptStringList*>(window.m_settings->opt(eOptSetResource,"mapRoots"))->setValue({fixture+"/Maps"});auto* view=window.view();view->refreshAfterResourceSetup();
@@ -118,15 +134,16 @@ int main(int argc,char** argv){
 #ifndef STAGE3_BASELINE
   auto* embedded=window.findChild<CRebuild64Viewport*>("rebuild64Viewport");check(embedded,"production wrapper exists");
   QObject::connect(embedded,&CRebuild64Viewport::backendFailure,[&](const QString& s){out<<"BACKEND_FAILURE "<<s<<'\n';out.flush();});
-  if(mode=="--recover-crash"){check(!embedded->rebuildSelected()&&!embedded->backendLoaded(),"crashed startup suppressed to GL");check(QSettings().value("ui/renderer").toString()=="Rebuild64","saved renderer choice preserved");check(!embedded->m_interruptedStarts.isEmpty(),"interrupted marker detected");}
+  if(mode=="--recover-crash"){check(!embedded->rebuildSelected()&&!embedded->backendLoaded(),"crashed startup suppressed to GL");check(QSettings().value("ui/renderer").toString()=="Rebuild64","saved renderer choice preserved");check(crashMessages==1&&QFileInfo::exists(QDir(embedded->m_guardDirectory).filePath("manual-retry-required")),"interrupted startup acknowledged once and retry latched");}
   else check(!embedded->backendLoaded(),"GL startup does not load DLL");
   quint64 frames=0;QObject::connect(embedded,&CRebuild64Viewport::frameCommitted,[&](quint64){++frames;});
   auto ready=[&]{return wait([&]{return !embedded->lastFailure().isEmpty()||(embedded->statistics().ready_generation==embedded->m_generation&&embedded->statistics().ready_generation>0&&embedded->m_stack->currentWidget()!=view);},60000)&&embedded->lastFailure().isEmpty();};
-  auto owned=[&](const QString& label){const auto previous=frames;check(wait([&]{return frames>previous+20;}),"settled renderer frames "+label);const auto path=root+"/"+label+".png";QFile::remove(path);embedded->capture(path);check(wait([&]{return !QImage(path).isNull();}),"renderer-owned readback "+label);};
+  auto owned=[&](const QString& label){const auto previous=frames;check(wait([&]{return frames>previous+20&&embedded->statistics().pending==0;}),"settled renderer programs and frames "+label);const auto path=root+"/"+label+".png";QFile::remove(path);embedded->capture(path);check(wait([&]{return !QImage(path).isNull();}),"renderer-owned readback "+label);};
 #endif
   const auto only=qEnvironmentVariable("EI_STAGE3_MAP_ONLY");open(only.isEmpty()?QString("zone1"):only);
   if(mode=="--visual"){
    auto pair=[&](const QString& label,QVector3D eye,QVector3D target,int clock){
+    if(!qEnvironmentVariableIsEmpty("EI_R2_FRAME_ONLY")&&label!=qEnvironmentVariable("EI_R2_FRAME_ONLY"))return;
 #ifndef STAGE3_BASELINE
     embedded->selectRebuild(false,false);
 #endif
@@ -140,12 +157,36 @@ int main(int argc,char** argv){
    for(const auto& name:QStringList{"zone12","zone12dun2"})if(only.isEmpty()||only==name){if(only.isEmpty())open(name);const float x=view->m_pLand->widthInWorldUnits()*.5f,y=view->m_pLand->heightInWorldUnits()*.5f,z=view->m_terrainEdit.terrainSurfaceHeight(x,y);pair(name+"-1240",{x,y-80,z+140},{x,y,z},1240);}
   }
 #ifndef STAGE3_BASELINE
-  else if(mode=="--crash"){embedded->selectRebuild(true);check(ready(),"unexpectedly survived injected DLL access violation");throw QString("fault injection did not crash");}
+  else if(mode=="--crash"){embedded->selectRebuild(true,false);check(ready(),"unexpectedly survived injected DLL access violation");throw QString("fault injection did not crash");}
   else if(mode=="--recover-crash"){embedded->selectRebuild(true);check(ready(),"manual opt-in after crash works");check(CRebuild64StartupGuard::interrupted(embedded->m_guardDirectory).isEmpty(),"stale marker cleared after explicit opt-in");check(QDir(embedded->m_guardDirectory).entryList({"startup-*.json"},QDir::Files).isEmpty(),"first accepted frame clears marker");embedded->selectRebuild(false,false);}
   else if(mode=="--save-crash"){
    embedded->selectRebuild(true,false);check(ready(),"Rebuild64 selected during journaled save");QFile input(fixture+"/Maps/zone1.mob");check(input.open(QIODevice::ReadOnly),"save original MOB");const auto before=input.readAll();input.close();view->m_activeMob->setScript(view->m_activeMob->script()+"\r\n// isolated stage3 recovery test\r\n");QByteArray after;CValidationReport report;QString saveClass;check(view->m_activeMob->buildValidatedCandidate(&after,&report,&saveClass),"validated journal candidate");QVector<SMapSaveFile> packet;
    for(const auto& name:QStringList{"zone1.mob","recovery-second.mob"}){QFile original(root+"/before-"+name);check(original.open(QIODevice::WriteOnly)&&original.write(before)==before.size(),"record recovery before "+name);QFile target(fixture+"/Maps/"+name);if(name!="zone1.mob"){check(target.open(QIODevice::WriteOnly)&&target.write(before)==before.size(),"prepare second journal target");target.close();}SMapSaveFile file;file.path=target.fileName();file.before=before;file.after=after;packet.append(file);}
    qputenv("EI_STAGE3_SAVE_CRASH","1");const auto saved=commitMapSaveBatch(packet,root+"/backups");check(saved.success,"journal test save failed before interruption: "+saved.error);throw QString("save interruption hook did not run");
+  }
+  else if(mode=="--r2-controls"){
+   const auto command=root+"/r2-options.txt";SetEnvironmentVariableW(L"ATAMAN_STAGE3_OPTIONS_FILE",reinterpret_cast<const wchar_t*>(command.utf16()));
+   auto write=[&](int blend,int aa,int stock,int reflections,int lights,float cave){QSaveFile f(command);check(f.open(QIODevice::WriteOnly),"write R2 controls");f.write(QString("terrain_blend 1 %1\nsmaa 0 %2\nwater_simple 0 %3\nwater_reflections 0 %4\nwater_physical 0 1\nwater_surf_debug 1 0\nmaterial_terrain 0 1\neditor_lights 0 %5\ncave_brightness 2 %6\n").arg(blend).arg(aa).arg(stock).arg(reflections).arg(lights).arg(cave).toLatin1());check(f.commit(),"R2 control commit");};
+   auto frame=[&](const QString& name,QVector3D eye,QVector3D target,int time){
+    if(qEnvironmentVariableIsSet("EI_R2_WATER_ONLY")&&!name.contains("coast")&&!name.contains("top"))return;
+    embedded->selectRebuild(false,false);dynamic_cast<COptInt*>(window.m_settings->opt("renderTimeOfDay"))->setValue(time);QMatrix4x4 camera;camera.lookAt(eye,target,{0,0,1});view->m_cam->setPreviewView(camera);view->m_normalProjection.setToIdentity();view->m_normalProjection.perspective(45,1280.f/720.f,1,2000);view->m_projection=view->m_normalProjection;
+    captureGL(view,"gl-"+name);write(1,0,0,1,1,-1);embedded->selectRebuild(true,false);check(ready(),"R2 controls ready");
+    const auto cameraValues=embedded->cameraSnapshot();out<<"POINT_LIGHTS "<<name<<" count="<<cameraValues.point_light_count<<" hour="<<cameraValues.hour<<'\n';for(unsigned i=0;i<cameraValues.point_light_count;++i){const auto& l=cameraValues.point_lights[i];out<<"LIGHT "<<l.source_id<<' '<<l.position[0]<<' '<<l.position[1]<<' '<<l.position[2]<<' '<<l.radius<<' '<<l.color[0]<<' '<<l.color[1]<<' '<<l.color[2]<<'\n';}out.flush();
+    owned(name+"-blend1");write(0,0,0,1,1,-1);owned(name+"-blend0");write(0,1,0,1,1,-1);owned(name+"-blend0-aa");write(0,1,1,1,1,-1);owned(name+"-stock-water");{QFile f(command);check(f.open(QIODevice::Append),"editor material command");f.write("material_terrain 0 0\n");f.close();owned(name+"-editor");}
+    if(time==1930||only=="zone12dun2"){write(0,1,1,1,0,-1);owned(name+"-no-lights");}
+    write(0,1,0,0,1,-1);owned(name+"-no-ssr");
+    if(name.contains("coast")||name.contains("top")){write(0,1,0,1,1,-1);QFile f(command);check(f.open(QIODevice::Append),"water physical control");f.write("water_physical 0 0\n");f.close();owned(name+"-old-physical");write(0,0,0,1,1,-1);check(f.open(QIODevice::Append),"sea foam debug control");f.write("water_surf_debug 1 3\n");f.close();owned(name+"-foam-debug");}
+    if(only=="zone12dun2"){write(0,1,0,1,1,.7f);owned(name+"-cave-default");write(1,1,0,1,1,-1);QFile material(command);check(material.open(QIODevice::Append),"material control");material.write("material_terrain 0 0\n");material.close();owned(name+"-no-terrain-pbr");}
+    if(only=="zone1"&&time==1930){
+     write(0,1,1,1,1,-1);CLight* source=nullptr;for(auto* mob:view->m_aMob)for(auto* node:mob->nodes())if(!source)source=dynamic_cast<CLight*>(node);check(source,"real map LIGHT available for live update");
+     const auto before=embedded->cameraSnapshot();const auto original=source->drawPosition();source->setDrawPosition((original.isNull()?source->position():original)+QVector3D(1,0,0));const auto after=embedded->cameraSnapshot();check(memcmp(before.point_lights,after.point_lights,sizeof(before.point_lights))!=0,"live LIGHT preview changes ABI without save");owned(name+"-light-moved");source->setDrawPosition(original);
+     dynamic_cast<COptInt*>(window.m_settings->opt("renderTimeOfDay"))->setValue(2000);check(embedded->cameraSnapshot().hour==20,"live hour updates camera tuple");dynamic_cast<COptInt*>(window.m_settings->opt("renderTimeOfDay"))->setValue(time);
+    }
+    embedded->selectRebuild(false,false);
+   };
+   if(only=="zone1"){frame("zone1-village-1930",{240,110,175},{240,171,10},1930);frame("zone1-coast-1240",{90,22,52},{90,140,6},1240);frame("zone1-top-1240",{240,160,260},{240,171,10},1240);frame("zone1-village-1240",{240,110,175},{240,171,10},1240);}
+   else {float x=view->m_pLand->widthInWorldUnits()*.5f,y=view->m_pLand->heightInWorldUnits()*.5f,z=view->m_terrainEdit.terrainSurfaceHeight(x,y);frame(only+"-1240",{x,y-80,z+140},{x,y,z},1240);}
+   SetEnvironmentVariableW(L"ATAMAN_STAGE3_OPTIONS_FILE",nullptr);
   }
   else if(mode=="--quality"){
    QMatrix4x4 camera;if(only.isEmpty()||only=="zone1")camera.lookAt({240,160,260},{240,171,10},{0,0,1});else{const float x=view->m_pLand->widthInWorldUnits()*.5f,y=view->m_pLand->heightInWorldUnits()*.5f,z=view->m_terrainEdit.terrainSurfaceHeight(x,y);camera.lookAt({x,y-80,z+140},{x,y,z},{0,0,1});}view->m_cam->setPreviewView(camera);view->m_normalProjection.setToIdentity();view->m_normalProjection.perspective(45,1280.f/720.f,1,2000);view->m_projection=view->m_normalProjection;captureGL(view,"quality-gl");

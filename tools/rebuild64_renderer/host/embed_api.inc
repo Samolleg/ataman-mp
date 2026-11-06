@@ -34,7 +34,15 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   owned::ResourceFailure error;owned::ResourceBlob blob;
   if(!s.store.open(s.mounts,error)||!s.store.copy_selected_memory(in->terrain_name,in->terrain.data,uint32_t(in->terrain.bytes),blob,error))return fail(&e,E_FAIL,error.message.c_str());
   auto terrain=std::make_shared<owned::TerrainCpuAsset>();if(!owned::parse_terrain_asset(blob,in->terrain_name,*terrain,error))return fail(&e,E_FAIL,error.message.c_str());
-  owned::owned_terrain_classify_swamp_frames(*terrain);s.terrain=terrain;s.baseline=terrain;
+  // parse_terrain_asset supplies geometry and records, not the source pages.
+  // Complete the same retained page inputs as OwnedResourceLoader before
+  // classifying swamp frames; GPU atlas upload alone cannot supply their art.
+  auto pages=std::make_shared<owned::ResourceStore>();if(!pages->open(s.mounts,error))return fail(&e,E_FAIL,error.message.c_str());
+  terrain->pages.resize(terrain->texture_resources.size());size_t pageCount=0;
+  for(size_t index=0;index<terrain->pages.size();++index){auto& page=terrain->pages[index];page.store=pages;
+   if(!pages->locate(terrain->texture_resources[index]+".mmp",page.location,error)||!page.ensure_upload_bytes(error,false)){page={};continue;}++pageCount;}
+  const auto swamp=owned::owned_terrain_classify_swamp_frames(*terrain);
+  std::fprintf(stderr,"TERRAIN_SOURCE pages=%zu/%zu swamp_side=%u %s\n",pageCount,terrain->pages.size(),terrain->swamp_frame_side,swamp.c_str());s.terrain=terrain;s.baseline=terrain;
   if(!OwnedRender::E1PublishTerrainSnapshot(&s,s.world,s.generation,terrain))return fail(&e,E_FAIL,"publish in-memory terrain");
   std::string why;if(!upload_atlases(s,why))return fail(&e,E_FAIL,why.c_str());
   auto combined=std::make_shared<owned::OwnedMapSnapshot>();combined->generation=s.world;combined->terrain=terrain;
@@ -69,13 +77,16 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   }
   std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
   s.water=s.environment=s.objects=true;
-  return probe1b_set_features(handle,23,&e);
+  // The editor keeps the authored atlas transitions. Bit16 would silently
+  // override terrain_blend=0 at every document load.
+  const int result=probe1b_set_features(handle,7,&e);if(!result)owned::AtamanReadiness::quality(s.renderer);return result;
  }),e);
 }
 int32_t EIR_CALL host_camera(void* h,const EirCamera* camera,EirError* out) noexcept {
  probe1b_error e{};if(!h||!camera)return eir_error(out,fail(&e,E_INVALIDARG,"camera arguments"),e);
  return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);
   for(float n:camera->world_to_clip)if(!std::isfinite(n))return fail(&e,E_INVALIDARG,"nonfinite camera");
+  if(camera->point_light_count>EIR_MAX_POINT_LIGHTS)return fail(&e,E_INVALIDARG,"point light count");
   if(!std::isfinite(camera->hour))return fail(&e,E_INVALIDARG,"nonfinite hour");
   std::copy(camera->world_to_clip,camera->world_to_clip+16,s.clip.begin());s.explicitClip=true;s.frameCamera=*camera;
   std::copy(camera->eye,camera->eye+3,s.camera.eye);std::copy(camera->target,camera->target+3,s.camera.target);s.hour=camera->hour;return 0;
