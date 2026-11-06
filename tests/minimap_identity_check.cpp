@@ -3,6 +3,7 @@
 #include <QtTest>
 #include <windows.h>
 #include <cstring>
+#include <algorithm>
 #define private public
 #include "main_window.h"
 #include "view.h"
@@ -49,6 +50,7 @@ int main(int argc,char** argv) {
     root=QDir::fromNativeSeparators(qEnvironmentVariable("EI_IDENTITY_CASE"));
     const QString fixture=QDir::fromNativeSeparators(qEnvironmentVariable("EI_IDENTITY_FIXTURE"));
     const bool red=app.arguments().contains("--expect-red");
+    const bool renamedRed=app.arguments().contains("--expect-renamed-red");
     try {
         check(root.contains("/work/minimap-identity-281-20261106/")&&fixture.contains("/work/minimap-identity-281-20261106/"),"owned isolated paths");
         QTimer dialogs;QObject::connect(&dialogs,&QTimer::timeout,[] {
@@ -124,9 +126,47 @@ int main(int argc,char** argv) {
             open(QString(),"zone1","implicit-game");open(QString(),"basecam","implicit-briefing");
             open(QString(),"zone1","world-game","world");open(QString(),"basecam","world-briefing","world");
         }
+        // R2: retain 280's MPR fallback for copied/renamed primary MOBs.
+        // Use the real catalog snapshot; do not synthesize its zone order/types.
+        const auto fullCatalog=window.m_mapCatalog;
+        QVector<SMapCatalogEntry> unique;
+        for(const auto& e:fullCatalog.entries)if(e.mprName=="zone10")unique.append(e);
+        check(unique.size()==1&&!unique.first().travelZones.isEmpty(),"zone10 has one real catalog entry with entrances");
+        auto copied=[&](const QString& map,const QString& expected,const QString& tag,const QString& kind=QString(),const QString& explicitId=QString()) {
+            window.m_mapCatalog=fullCatalog;
+            window.openMapPair(fixture+"/Maps/"+map+".mpr",fixture+"/Maps/"+map+"_work.mob",explicitId);
+            QElapsedTimer timer;timer.start();
+            while((window.view()->hasPendingOperation()||window.backgroundMobLoading())&&timer.elapsed()<120000)QTest::qWait(10);
+            check(timer.elapsed()<120000&&window.view()->hasActiveMob(),tag+": copied primary opened");
+            if(!kind.isEmpty()){window.m_workspaceIdentityKind=kind;window.refreshMapTestContext(false,false);}
+            window.m_minimapRefreshTimer->stop();
+            auto* primary=window.mapTestStagingMob();
+            check(primary&&primary->filePath().completeBaseName()==map+"_work"&&!primary->isQuestMob(),tag+": structurally primary copied MOB retained");
+            const auto& entry=window.m_mapTestEntry;
+            QJsonObject state{{"tag",tag},{"zone",entry.zoneId},{"type",entry.zoneType},{"entranceCount",window.m_validEntrances.size()},
+                {"stagingMob",primary->filePath().fileName()},{"travelZone",window.m_travelDocument&&window.m_travelZone>=0?window.m_travelDocument->table().zones()[window.m_travelZone].zoneId:QString()}};
+            states.append(state);out<<"STATE "<<QJsonDocument(state).toJson(QJsonDocument::Compact)<<'\n';out.flush();
+            const QString wanted=renamedRed?QString():expected;
+            check(entry.zoneId==wanted,tag+(renamedRed?": RED lost identity reproduced":": 280-compatible identity"));
+            int expectedEntrances=0;
+            if(!wanted.isEmpty())for(const auto& e:fullCatalog.entries)if(e.zoneId==wanted)
+                for(const auto& entrance:e.travelZones)if(entrance.exitId>0&&entrance.hasDeployRectangle&&!entrance.deployRectangle.normalized().isEmpty())++expectedEntrances;
+            check(window.m_validEntrances.size()==expectedEntrances,tag+": entrance availability");
+        };
+        copied("zone10",unique.first().zoneId,"renamed-unique");
+        copied("zone1","bz1g","renamed-shared");
+        copied("zone10",QString(),"renamed-world","world");
+        copied("zone10",unique.first().zoneId,"unknown-explicit-fallback",QString(),"not-in-catalog");
+        window.m_mapCatalog=fullCatalog;
+        std::reverse(window.m_mapCatalog.entries.begin(),window.m_mapCatalog.entries.end());
+        window.openMapPair(mpr,fixture+"/Maps/basecam.mob",QString());
+        QElapsedTimer orderTimer;orderTimer.start();
+        while((window.view()->hasPendingOperation()||window.backgroundMobLoading())&&orderTimer.elapsed()<120000)QTest::qWait(10);
+        check(orderTimer.elapsed()<120000&&window.m_mapTestEntry.zoneId=="bz1g","MOB match beats earlier MPR fallback with reversed catalog order");
+        window.m_minimapRefreshTimer->stop();
         EnumWindows(inspect,0);check(visible==0,"zero native visible windows");
         QFile result(root+"/result.json");check(result.open(QIODevice::WriteOnly),"evidence writable");
-        result.write(QJsonDocument(QJsonObject{{"red",red},{"catalog",catalog},{"states",states},{"passes",passes},{"visibleWindows",visible}}).toJson());
+        result.write(QJsonDocument(QJsonObject{{"red",red},{"renamedRed",renamedRed},{"catalog",catalog},{"states",states},{"passes",passes},{"visibleWindows",visible}}).toJson());
         window.view()->unloadLand(false);out<<"PASS TOTAL "<<passes<<'\n';return 0;
     }catch(const QString& error) {out<<"FAIL "<<error<<'\n';return 1;}
 }

@@ -3496,6 +3496,7 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             || !m_openedMapZoneId.isEmpty();
         const QString loaded = QFileInfo(CLandscape::getInstance()->filePath()).absoluteFilePath();
         QVector<SMapCatalogEntry> nameMatches;
+        const SMapCatalogEntry* firstMprMatch = nullptr;
         // Several zones share one MPR (for example bz1g/gz1g/cz1g).
         // Resolve an explicit zone before considering a physical-path match.
         if(!m_openedMapZoneId.isEmpty())
@@ -3514,6 +3515,10 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
             if(!entry.mprPath.isEmpty()
                && QFileInfo(entry.mprPath).absoluteFilePath().compare(loaded, Qt::CaseInsensitive) == 0)
             {
+                // Preserve loose copied/renamed MOB workflows, but keep looking
+                // so an exact MPR/MOB pair wins regardless of catalog order.
+                if(m_workspaceIdentityKind != "world" && !firstMprMatch)
+                    firstMprMatch = &entry;
                 CMob* primary = mapTestStagingMob();
                 if(primary && primary->filePath().absoluteFilePath().compare(
                     QFileInfo(entry.mobPath).absoluteFilePath(), Qt::CaseInsensitive) != 0) continue;
@@ -3525,6 +3530,8 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
                && entry.mprName.compare(QFileInfo(loaded).completeBaseName(), Qt::CaseInsensitive) == 0)
                 nameMatches.append(entry);
         }
+        if(m_mapTestEntry.zoneId.isEmpty() && firstMprMatch)
+            m_mapTestEntry = *firstMprMatch;
         if(m_mapTestEntry.zoneId.isEmpty() && nameMatches.size() == 1)
             m_mapTestEntry = nameMatches.first();
     }
