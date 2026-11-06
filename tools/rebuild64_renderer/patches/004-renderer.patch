@@ -1,0 +1,10 @@
+--- a/external/owned-renderer/Source/renderer.h
++++ b/external/owned-renderer/Source/renderer.h
+@@ -964,6 +964,7 @@
+     friend struct scene_ui::GlyphAtlas;
+     friend struct scene_cmd::MarkLoadPicture;
+ public:
++    friend struct AtamanReadiness;
+     Renderer() = default;
+     Renderer(const Renderer&) = delete;
+     Renderer& operator=(const Renderer&) = delete;

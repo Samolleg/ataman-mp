@@ -1,0 +1,46 @@
+{
+  "abi": 2,
+  "sourceRepository": "Samolleg/EIRebuild64",
+  "sourceCommit": "81dbcdd29b41baeb346f167c6dfb511dff05f295",
+  "archivePaths": [
+    "OwnedRenderer",
+    "external/owned-renderer",
+    "Game/OwnedRender"
+  ],
+  "rendererUpstream": "Ilufus/evil-islands-owned-renderer",
+  "rendererUpstreamCommit": "b1ffc736d4792eb36f3528a8d8ee2c358da80d54",
+  "dataCommit": "b1ffc736d4792eb36f3528a8d8ee2c358da80d54",
+  "dataArchivePath": "Data/eid3d_materials",
+  "patches": [
+    {
+      "path": "001-E1Terrain.patch",
+      "sha256": "09fb099f79ef75edf269d6f55190f9191ab02794d11a6d72f411f4cd9b0fdc2f"
+    },
+    {
+      "path": "002-Renderer.patch",
+      "sha256": "4e8d4ad6858b4cda7481a3f3b41279705547573a79dc6dc16b2e180a01606dcd"
+    },
+    {
+      "path": "003-OwnedRenderer.patch",
+      "sha256": "29f0722d1bad1ce7f9e9430cc63ccd204da7dc691200cb391b954f598bea0ed7"
+    },
+    {
+      "path": "004-renderer.patch",
+      "sha256": "e1db56cf6563b25eb54719ec6ca0f9c6bd93c58df558e9c07f6dee9d118c2d49"
+    },
+    {
+      "path": "005-owned_asset_loader.patch",
+      "sha256": "e34242742881179770582567d4ef92e4da8410ed88fcfbaca038ee592f8c7081"
+    },
+    {
+      "path": "006-owned_asset_loader.patch",
+      "sha256": "19bbdc40ccdd1ad722ce3f618c13a6d192cc624abe1b349632d5dad6ba9bfd8d"
+    },
+    {
+      "path": "007-embedded_host.patch",
+      "sha256": "aa2c54d4e185812447a92f5dfdcbb203f254fb3ecc789d0b601545931a0a58a7"
+    }
+  ],
+  "nvidiaSdk": false,
+  "permission": "owner decision 2026-11-06; author permission settled"
+}

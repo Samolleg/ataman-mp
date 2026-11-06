@@ -146,6 +146,7 @@ public:
                                       int textureCount);
     void setDirty(bool bDirty) {if(!m_readOnlyBackground) m_bDirty = bDirty;}
     bool isDirty() const {return m_bDirty;}
+    const QByteArray& originalMprData() const { return m_originalMprData; }
     bool adoptCanonicalSave(const QFileInfo& path, const QByteArray& bytes);
     bool adoptCanonicalTerrainSave(
         const QFileInfo& path, const QByteArray& bytes,

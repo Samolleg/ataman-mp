@@ -1,4 +1,5 @@
 #include <functional>
+#include "rebuild64_viewport_widget.h"
 #include "window_geometry.h"
 #include "lever_approach_dialog.h"
 #include "ui_theme.h"
@@ -4430,7 +4431,7 @@ void MainWindow::createViewportToolbars()
     m_ui->toolsLayout->setSpacing(0);
 
     m_ui->workSpaceLayout->addWidget(testBar);
-    m_ui->workSpaceLayout->addWidget(m_pView, 1);
+    m_ui->workSpaceLayout->addWidget(new CRebuild64Viewport(m_pView, m_ui->menuSettings, m_ui->centralWidget), 1);
     m_ui->workSpaceLayout->addWidget(operationBar);
 
     connect(m_entranceCombo, QOverload<int>::of(&QComboBox::activated), this,

@@ -192,6 +192,7 @@ struct STerrainRecoveryCandidate
 #include "process_edit_lock.h"
 class CView : public QGLWidget
 {
+    friend class CRebuild64Viewport;
     friend class CAiReadAdapter;
     friend class CAiEditAdapter;
     friend class CAiAgentCommand;

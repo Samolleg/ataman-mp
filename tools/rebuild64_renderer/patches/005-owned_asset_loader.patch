@@ -1,0 +1,12 @@
+--- a/external/owned-renderer/Source/owned_asset_loader.h
++++ b/external/owned-renderer/Source/owned_asset_loader.h
+@@ -688,6 +688,9 @@
+     std::string terrain_resource;
+     // Explicit saved-layout selections. Empty keeps the normal first-wins
+     // resolver. These files are read once by the worker through the owned store.
++    // Ataman: immutable caller snapshots. The worker never reopens map files.
++    std::shared_ptr<const std::vector<std::uint8_t>> memory_map;
++    std::shared_ptr<const std::vector<std::uint8_t>> memory_terrain;
+     std::wstring selected_map_file;
+     std::wstring selected_terrain_file;
+     bool terrain_only = false; // saved entries may omit decorative MOB data

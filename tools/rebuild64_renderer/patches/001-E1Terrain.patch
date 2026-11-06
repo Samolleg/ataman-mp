@@ -1,0 +1,24 @@
+--- a/Game/OwnedRender/E1Terrain.cpp
++++ b/Game/OwnedRender/E1Terrain.cpp
+@@ -125,6 +125,21 @@
+     sourceOwner = owner; worldIdentity = world; sourceRevision = revision;
+     return true;
+ } catch (...) { clear(); try { failure = "terrain source allocation/read failed"; } catch (...) {} return false; }
++
++// Editor host: completed immutable CPU snapshot, no retail pointers or callbacks.
++bool E1PublishTerrainSnapshot(const void* owner, std::uint64_t world,
++    std::uint64_t revision, std::shared_ptr<owned::TerrainCpuAsset> terrain) noexcept try {
++    if (!owner || !world || !revision || !terrain ||
++        !owned::validate_terrain_asset_descriptor_once(*terrain)) return false;
++    clear();
++    if (++nextGeneration == 0) ++nextGeneration;
++    source.source_generation = nextGeneration; source.source_revision = revision;
++    source.prepared = std::make_shared<owned::OwnedTerrainPreparedResources>();
++    source.terrain = std::move(terrain);
++    sourceOwner = owner; worldIdentity = world; sourceRevision = revision;
++    return true;
++} catch (...) { clear(); return false; }
++
+ void E1PublishTerrainAtlases(const void* owner, const std::vector<std::uint64_t>& surfaces) noexcept try {
+     if (owner != sourceOwner) return;
+     atlasIds.clear();

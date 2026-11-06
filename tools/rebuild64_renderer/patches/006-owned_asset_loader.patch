@@ -1,0 +1,24 @@
+--- a/external/owned-renderer/Source/owned_asset_loader.cpp
++++ b/external/owned-renderer/Source/owned_asset_loader.cpp
+@@ -3511,7 +3511,9 @@
+             return;
+         }
+         ResourceBlob map_blob;
+-        if (!state->request.terrain_only && !(state->request.selected_map_file.empty()
++        if (!state->request.terrain_only && !(state->request.memory_map
++                ? state->store->copy_selected_memory(state->request.map_resource,state->request.memory_map->data(),static_cast<std::uint32_t>(state->request.memory_map->size()),map_blob,failure)
++                : state->request.selected_map_file.empty()
+                 ? state->store->resolve(state->request.map_resource, map_blob, failure)
+                 : state->store->read_loose_file(state->request.selected_map_file,
+                     state->request.map_resource, map_blob, failure))) {
+@@ -3523,7 +3525,9 @@
+         if (!state->request.terrain_resource.empty()) {
+             ResourceBlob terrain_blob;
+             auto terrain = std::make_shared<TerrainCpuAsset>();
+-            if (!(state->request.selected_terrain_file.empty()
++            if (!(state->request.memory_terrain
++                    ? state->store->copy_selected_memory(state->request.terrain_resource,state->request.memory_terrain->data(),static_cast<std::uint32_t>(state->request.memory_terrain->size()),terrain_blob,failure)
++                    : state->request.selected_terrain_file.empty()
+                     ? state->store->resolve(state->request.terrain_resource, terrain_blob, failure)
+                     : state->store->read_loose_file(state->request.selected_terrain_file,
+                         state->request.terrain_resource, terrain_blob, failure)) ||

@@ -1,0 +1,114 @@
+namespace {
+int eir_error(EirError* out,int rc,const probe1b_error& in) noexcept {
+ if(out){out->code=rc;std::snprintf(out->message,sizeof(out->message),"%s",in.detail);}return rc;
+}
+int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) noexcept {
+ if(result)*result=nullptr;
+ probe1b_error e{};
+ if(!in||!result||in->size!=sizeof(*in)||in->abi!=EIR_ABI||!in->window||!in->scratch_path||in->mount_count>4096||!in->mounts)
+  return eir_error(out,fail(&e,E_INVALIDARG,"invalid renderer C ABI create"),e);
+ return eir_error(out,guarded(&e,[&]{
+  std::vector<std::wstring> roots,archives;std::vector<uint8_t> kinds;
+  for(uint32_t i=0;i<in->mount_count;++i){if(!in->mounts[i].path)return fail(&e,E_INVALIDARG,"null mount");auto path=std::wstring(reinterpret_cast<const wchar_t*>(in->mounts[i].path));
+   if(in->mounts[i].kind==3)roots.push_back(std::move(path));else{archives.push_back(std::move(path));kinds.push_back(in->mounts[i].kind?uint8_t(in->mounts[i].kind):uint8_t(owned::kArchiveAllKinds));}}
+  std::vector<const wchar_t*> rootPointers,archivePointers;for(const auto& p:roots)rootPointers.push_back(p.c_str());for(const auto& p:archives)archivePointers.push_back(p.c_str());
+  const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=scratch+L"/layouts.json";
+  probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
+  const int rc=probe1b_create(&info,result,&e);if(rc)owned::embedded_host_configuration().reset();return rc;
+ }),e);
+}
+int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out) noexcept {
+ probe1b_error e{};
+ if(!handle||!in||in->size!=sizeof(*in)||!in->generation||in->terrain.bytes>UINT32_MAX||(in->terrain.bytes&&!in->terrain.data)||in->mob_count>1024||(in->mob_count&&!in->mobs)||!in->terrain_name)
+  return eir_error(out,fail(&e,E_INVALIDARG,"invalid memory document"),e);
+ return eir_error(out,guarded(&e,[&]{
+  auto& s=*static_cast<Session*>(handle);
+  HRESULT hr=s.renderer.retire_embedded_world();if(FAILED(hr))return fail(&e,hr,"retire previous world");
+  for(const auto id:s.atlasIds)if(id)s.renderer.retire_surface(id);
+  OwnedRender::E1Scene().Retire(&s,s.world);OwnedRender::E1RetireTerrain(&s);OwnedRender::E1RetireWorld(&s);owned::embedded_sky().detach(&s);
+  // This host supplies a complete immutable document, not the game's same-name
+  // MOB reuse transition. Retire source publications as well as positive IDs.
+  OwnedRender::E1Scene().Scene().reset();
+  s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.materialsPublished=false;s.generation=in->generation;++s.world;
+  if(!in->terrain.bytes)return 0;
+  owned::ResourceFailure error;owned::ResourceBlob blob;
+  if(!s.store.open(s.mounts,error)||!s.store.copy_selected_memory(in->terrain_name,in->terrain.data,uint32_t(in->terrain.bytes),blob,error))return fail(&e,E_FAIL,error.message.c_str());
+  auto terrain=std::make_shared<owned::TerrainCpuAsset>();if(!owned::parse_terrain_asset(blob,in->terrain_name,*terrain,error))return fail(&e,E_FAIL,error.message.c_str());
+  owned::owned_terrain_classify_swamp_frames(*terrain);s.terrain=terrain;s.baseline=terrain;
+  if(!OwnedRender::E1PublishTerrainSnapshot(&s,s.world,s.generation,terrain))return fail(&e,E_FAIL,"publish in-memory terrain");
+  std::string why;if(!upload_atlases(s,why))return fail(&e,E_FAIL,why.c_str());
+  auto combined=std::make_shared<owned::OwnedMapSnapshot>();combined->generation=s.world;combined->terrain=terrain;
+  auto terrainBytes=std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t*>(in->terrain.data),static_cast<const uint8_t*>(in->terrain.data)+in->terrain.bytes);
+  for(uint32_t i=0;i<in->mob_count;++i){
+   const auto span=in->mobs[i];if(!span.data||!span.bytes||span.bytes>UINT32_MAX)return fail(&e,E_INVALIDARG,"invalid memory MOB span");
+   owned::OwnedResourceLoader loader;owned::OwnedResourceRequestToken token;owned::OwnedMapLoadRequest request;
+   request.generation=s.world;request.map_resource="ataman-memory-"+std::to_string(i)+".mob";request.terrain_resource=in->terrain_name;request.mounts=s.mounts;request.backdrop_objects=true;
+   request.memory_map=std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t*>(span.data),static_cast<const uint8_t*>(span.data)+span.bytes);request.memory_terrain=terrainBytes;
+   std::shared_ptr<const owned::OwnedMapSnapshot> loaded;
+   if(!loader.start(4,error)||!loader.request(request,error,&token)||loader.wait_publish(token,loaded)!=owned::OwnedResourceWaitResult::ready||!loaded)return fail(&e,E_FAIL,error.message.c_str());
+   loader.shutdown();
+   for(auto object:loaded->objects){object.nid=uint32_t(combined->objects.size()+1);combined->objects.push_back(std::move(object));}
+   combined->models.insert(loaded->models.begin(),loaded->models.end());combined->textures.insert(loaded->textures.begin(),loaded->textures.end());combined->failures.insert(combined->failures.end(),loaded->failures.begin(),loaded->failures.end());
+  }
+  s.map=combined;
+  auto& membership=OwnedRender::E1Scene();membership.Begin(&s,s.world);auto& scene=membership.Scene();auto transaction=scene.begin_source(owned::MobSourceRole::main,in->terrain_name,"ataman-memory.mob");scene.record_source(transaction,"ataman-memory.mob");
+  for(const auto& object:combined->objects)scene.record_admission(transaction,object.nid,object.family,int32_t(object.nid));
+  if(!scene.finish_source(transaction,true,true,why)||!scene.publish_source(transaction,combined))return fail(&e,E_FAIL,"in-memory visual scene publication rejected");
+  size_t seeds=0,omitted=0;
+  for(const auto& object:combined->objects){
+   if(object.rejection==owned::StaticObjectRejection::malformed||object.rejection==owned::StaticObjectRejection::duplicate_nid||object.rejection==owned::StaticObjectRejection::hierarchical||object.visual_reference.empty()||!combined->models.count(object.visual_reference)){++omitted;continue;}
+   std::shared_ptr<owned::RetainedStaticSourceCandidate> candidate;owned::RetainedStaticPrepareDiagnostic diag;
+   if(!owned::prepare_retained_static_candidate(combined,terrain,object,candidate,&diag)||!candidate||!candidate->assembly){++omitted;continue;}
+   // Generic retained assets carry texture identity but no material-class key.
+   // Publish that real texture name so the renderer can build its world profile.
+   auto assembly=std::make_shared<owned::VisualAssemblyAsset>(*candidate->assembly);
+   for(auto& part:assembly->parts)if(part.material_name.empty())part.material_name=part.texture_source_name;
+   assembly->revision^=0x4154414d41544c32ull;if(!assembly->revision)assembly->revision=1;candidate->assembly=std::move(assembly);
+   owned::VisualObjectPose pose;pose.position=candidate->world_position;pose.quaternion=object.quaternion;pose.shape=object.shape;pose.source_generation=s.world;pose.appearance_revision=candidate->assembly->revision;
+   if(scene.visual_seed(int32_t(object.nid),candidate->assembly,pose))++seeds;else ++omitted;
+  }
+  std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
+  s.water=s.environment=s.objects=true;
+  return probe1b_set_features(handle,23,&e);
+ }),e);
+}
+int32_t EIR_CALL host_camera(void* h,const EirCamera* camera,EirError* out) noexcept {
+ probe1b_error e{};if(!h||!camera)return eir_error(out,fail(&e,E_INVALIDARG,"camera arguments"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);
+  for(float n:camera->world_to_clip)if(!std::isfinite(n))return fail(&e,E_INVALIDARG,"nonfinite camera");
+  if(!std::isfinite(camera->hour))return fail(&e,E_INVALIDARG,"nonfinite hour");
+  std::copy(camera->world_to_clip,camera->world_to_clip+16,s.clip.begin());s.explicitClip=true;s.frameCamera=*camera;
+  std::copy(camera->eye,camera->eye+3,s.camera.eye);std::copy(camera->target,camera->target+3,s.camera.target);s.hour=camera->hour;return 0;
+ }),e);
+}
+int32_t EIR_CALL host_resize(void* h,uint32_t width,uint32_t height,EirError* out) noexcept {
+ probe1b_error e{};if(!h||!width||!height||width>16384||height>16384)return eir_error(out,fail(&e,E_INVALIDARG,"resize arguments"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);s.readyGeneration=0;
+  HRESULT hr=s.renderer.resize(width,height);
+  if(FAILED(hr))return fail(&e,hr,"Rebuild64 resize/device failure");s.width=width;s.height=height;return 0;
+ }),e);
+}
+int32_t EIR_CALL host_frame(void* h,EirStatistics* stats,EirError* out) noexcept {
+ probe1b_error e{};if(!h||!stats)return eir_error(out,fail(&e,E_INVALIDARG,"frame arguments"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);*stats={};
+  HRESULT hr=s.loseDevice?DXGI_ERROR_DEVICE_REMOVED:s.device->GetDeviceRemovedReason();if(FAILED(hr))return fail(&e,hr,"Rebuild64 D3D11 device lost; unsaved documents remain in OpenGL");
+  if(!s.terrain)return 1;
+  const auto start=std::chrono::steady_clock::now();const int rc=map_frame(s,&e);if(rc)return rc;
+  probe1b_statistics memory{};probe1b_get_statistics(h,&memory,&e);
+  stats->generation=s.generation;stats->ready_generation=s.readyGeneration;stats->private_bytes=memory.private_bytes;stats->video_bytes=memory.video_local;stats->width=s.width;stats->height=s.height;stats->pending=s.pending;
+  stats->frame_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return s.readyGeneration==s.generation?0:1;
+ }),e);
+}
+int32_t EIR_CALL host_capture(void* h,const uint16_t* path,EirError* out) noexcept {
+ probe1b_error e{};if(!h||!path)return eir_error(out,fail(&e,E_INVALIDARG,"capture arguments"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);if(!s.accepted)return fail(&e,E_PENDING,"no agreed frame");
+  const auto hr=read_output(&s,s.context.Get(),s.accepted.Get());if(FAILED(hr))return fail(&e,hr,"accepted target readback failed");
+  return probe1b_capture_png(h,reinterpret_cast<const wchar_t*>(path),&e);
+ }),e);
+}
+void EIR_CALL host_device_loss(void* h){if(h)static_cast<Session*>(h)->loseDevice=true;}
+}
+extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_renderer_get_api(uint32_t abi,EirApi* out) noexcept {
+ if(abi!=EIR_ABI||!out||out->size!=sizeof(*out))return -1;
+ *out={sizeof(EirApi),EIR_ABI,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss};return 0;
+}

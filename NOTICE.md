@@ -39,3 +39,13 @@ Character FIG/UV pipeline research was cross-checked against
 [konstvest/ei_figer](https://github.com/konstvest/ei_figer), the GPL-3.0 Blender
 add-on for importing and exporting Evil Islands models. No game or mod assets
 are redistributed with Endurance.
+
+Ataman 282 optionally loads evil-islands-owned-renderer by Ilya Rudnev
+(Ilufus), with typed adapters from EIRebuild64. Its pinned source identities
+and local integration patches are described in
+`third_party/eirebuild64-renderer/source.lock.json` and
+`tools/rebuild64_renderer/README.md`. Original renderer LICENSE, NOTICE,
+PROVENANCE and component notices are distributed in `licenses/rebuild64/`.
+No NVIDIA NGX, DLSS or Streamline SDK or runtime is included.
+Required renderer credit: EID3D11 renderer by Ilufus. This is a modified,
+pinned integration; the local patches and Ataman host are identified above.

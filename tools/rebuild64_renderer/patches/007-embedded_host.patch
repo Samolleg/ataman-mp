@@ -1,0 +1,14 @@
+--- a/external/owned-renderer/Source/embedded_host.h
++++ b/external/owned-renderer/Source/embedded_host.h
+@@ -32,6 +32,11 @@
+         paths_ = std::move(paths);
+         configured_ = true;
+     }
++    // Ataman calls only after its sole session and all its jobs have retired.
++    void reset() {
++        std::lock_guard<std::mutex> guard(lock_);
++        paths_ = {}; configured_ = false;
++    }
+     EmbeddedHostPaths snapshot() const {
+         std::lock_guard<std::mutex> guard(lock_);
+         if (!configured_) throw std::logic_error("embedded renderer host not configured");

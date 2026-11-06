@@ -1,0 +1,24 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Label="Globals"><ProjectGuid>{AE98BE9F-BE95-4B60-BE1B-E82A18323B71}</ProjectGuid><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>DynamicLibrary</ConfigurationType><PlatformToolset>v143</PlatformToolset><UseDebugLibraries>false</UseDebugLibraries></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(MSBuildThisFileDirectory)bin\</OutDir><IntDir>$(MSBuildThisFileDirectory)obj-host\</IntDir><TargetName>ataman_rebuild64</TargetName></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary><PrecompiledHeader>NotUsing</PrecompiledHeader><ExceptionHandling>Sync</ExceptionHandling><FunctionLevelLinking>true</FunctionLevelLinking><Optimization>MaxSpeed</Optimization><PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;EID3D11_EMBEDDED;DIRECTDRAW_VERSION=0x0700;DIRECT3D_VERSION=0x0700;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)vendor\external\owned-renderer\Source;$(MSBuildThisFileDirectory)vendor\external\owned-renderer\ThirdParty\imgui;$(MSBuildThisFileDirectory)vendor\Game\OwnedRender;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><OptimizeReferences>true</OptimizeReferences><AdditionalDependencies>$(MSBuildThisFileDirectory)vendor/out/x64/Release/RendererShaders/eid3d11_shaders.res;$(MSBuildThisFileDirectory)vendor/out/x64/Release/RendererShaders/eid3d11_camp_art.res;$(MSBuildThisFileDirectory)vendor\out\x64\Release\OwnedRenderer\OwnedRenderer.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;user32.lib;gdi32.lib;comctl32.lib;bcrypt.lib;pdh.lib;psapi.lib;ole32.lib;shell32.lib;advapi32.lib;winmm.lib;windowscodecs.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="host/host.cpp" /><ClCompile Include="host/host_providers.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E1World.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E1Terrain.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E1Scene.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E1Surface.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E1TextLifetime.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\E3Scale.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\ResourceMapping.cpp" />
+    <ClCompile Include="vendor\Game\OwnedRender\NeighbourTerrain.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E2Diagnostics.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E1AmbientEffects.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E2LoadReveal.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E2TerrainAnimation.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E2EffectDistance.cpp" /><ClCompile Include="vendor/Game/OwnedRender/E1Notices.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,0 +1,4 @@
+int32_t __cdecl probe1b_get_statistics(void* h,probe1b_statistics* output,probe1b_error* e) noexcept {
+ return guarded(e,[&]{auto& s=*static_cast<Session*>(h);if(!output)return fail(e,23,"stats output missing");*output={};PROCESS_MEMORY_COUNTERS_EX m{};m.cb=sizeof(m);GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&m),sizeof(m));output->private_bytes=m.PrivateUsage;output->working_set=m.WorkingSetSize;output->generation=s.generation;
+ ComPtr<IDXGIDevice> dxgi;ComPtr<IDXGIAdapter> adapter;ComPtr<IDXGIAdapter3> budget;if(SUCCEEDED(s.device.As(&dxgi))&&SUCCEEDED(dxgi->GetAdapter(&adapter))&&SUCCEEDED(adapter.As(&budget))){DXGI_QUERY_VIDEO_MEMORY_INFO info{};if(SUCCEEDED(budget->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&info)))output->video_local=info.CurrentUsage;}return fail(e,0,"process and GPU memory");});
+}
