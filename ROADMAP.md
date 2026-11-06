@@ -1,5 +1,7 @@
 ## EI-REBUILD64-RENDERER-EMBED-282 — этап 2 (2026-11-06)
 
+- EI-INSTALL-282 / PACKAGING VERIFIED (2026-11-06): разрешено директором узкое исключение eid3d_materials/maps/ для JSON/PNG без . и ..; остальные запреты сохранены. Read-ProgramManifest:9 случаев PASS, настоящие manifest280/282=192/1364 читаются. Финализатор ранее использовал только отдельный validator; теперь общий guard для baseline и нового manifest. VERSION и готовый staging282 не меняются. NEXT: установка тех же бинарников штатным исправленным installer без повторного согласования.
+
 - INSTALLATION BLOCKED (2026-11-06): владелец принял282 и разрешил установку main aab96e4994a45dedd9fe2f39996e331448923d89. Канонический installer остановлен до замены: Protected user path in manifest: eid3d_materials/maps/djwblade.json; staged helper содержит тот же запрет maps. Остаётся280/192 managed SHA;15111 пользовательских файлов неизменны,4 моста живы, новых old-файлов нет, откат280→282 ещё не создан. NEXT: устранить блокер канонического установщика, затем установить неизменный staging282 без пересборки. Подробности в отчёте282 и work/install-282-20261106; без push.
 
 - IMPLEMENTED / STAGED / PARTIAL: исходная цель — настоящий owned::Renderer как переключаемый read-only вид, общая камера и unsaved memory MPR/MOB; OpenGL по умолчанию до будущего этапа инструментов. База main `61b0e24b928ae510a5ff022b10e763de287f27b1`,281→282. Разрешены реализация, scoped-коммит, hidden tests и Release/staging; STOP BEFORE INSTALLATION, без push. Чужие изменения сохранены.

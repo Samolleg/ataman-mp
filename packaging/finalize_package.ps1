@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'program_files.ps1')
 $root = (Resolve-Path -LiteralPath $PackageRoot).Path
 $removed = [System.Collections.Generic.List[string]]::new()
 
@@ -29,6 +30,7 @@ if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot)) {
     if($previous -eq $root){throw 'The accepted installation is not a staging folder.'}
     $manifest = Join-Path $previous 'SHA256SUMS.txt'
     if(-not(Test-Path -LiteralPath $manifest -PathType Leaf)){throw 'Accepted manifest is missing.'}
+    $null = Read-ProgramManifest $previous
     # Fail before cleanup: a missing managed file must not be hidden by a new
     # self-consistent manifest. The full validator repeats this after cleanup.
     foreach($line in Get-Content -LiteralPath $manifest) {
@@ -155,6 +157,9 @@ Get-ChildItem -LiteralPath $root -Recurse -File |
         $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash *$relative"
     } | Set-Content -LiteralPath $checksums -Encoding ascii
+
+# Reject paths with the same policy used by installation and rollback.
+$null = Read-ProgramManifest $root
 
 $validatorArguments = @{ PackageRoot = $root }
 if(-not [string]::IsNullOrWhiteSpace($PreviousPackageRoot))

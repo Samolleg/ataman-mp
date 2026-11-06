@@ -20,7 +20,10 @@ function Read-ProgramManifest([string]$Root) {
         $null=Get-ProgramPath $Root $relative
         if($result.ContainsKey($relative) -or $relative -eq 'SHA256SUMS.txt'){throw 'Duplicate/reserved manifest path'}
         # A manifest cannot turn user state into managed program data.
-        if($relative -match '(?i)(^|/)(endurance-options\.json|options\.json|world-map-layouts\.json|\.ataman[^/]*|logs?|saves?|autosaves?|cache|maps)(/|$)' -or $relative -match '(?i)(^|/)rollback[^/]*/' -or $relative -match '(?i)\.(mpr|mob|res|grp|dmp|log)$'){throw "Protected user path in manifest: $relative"}
+        $materialMap = $relative.StartsWith('eid3d_materials/maps/',[StringComparison]::OrdinalIgnoreCase) -and
+            $relative.Split('/') -notcontains '.' -and $relative.Split('/') -notcontains '..' -and
+            $relative -match '(?i)\.(json|png)$'
+        if(($relative -match '(?i)(^|/)maps(/|$)' -and -not $materialMap) -or $relative -match '(?i)(^|/)(endurance-options\.json|options\.json|world-map-layouts\.json|\.ataman[^/]*|logs?|saves?|autosaves?|cache)(/|$)' -or $relative -match '(?i)(^|/)rollback[^/]*/' -or $relative -match '(?i)\.(mpr|mob|res|grp|dmp|log)$'){throw "Protected user path in manifest: $relative"}
         $result[$relative]=$sha.ToUpperInvariant()
     }
     if(-not $result.ContainsKey('EIMapperEndurance.exe') -or -not $result.ContainsKey('EIMapperMcp.exe') -or -not $result.ContainsKey('VERSION')){throw 'Incomplete program manifest'}
