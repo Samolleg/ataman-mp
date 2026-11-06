@@ -1,5 +1,7 @@
 ## EI-REBUILD64-RENDERER-EMBED-282 — этап 2 (2026-11-06)
 
+- EI-INSTALL-282 / DONE INSTALLED (2026-11-06): прежний блокер снят packaging-коммитом795aae2b3c846ee0c339e413cbb0fd541d8e03e0; неизменный staging282 установлен без пересборки. EIMapperMcp282/exit0;1364 managed SHA=staging,15111 пользовательских файлов неизменны,5 мостов PID26868/17412/35644/20972/17768 живы. Откат artifacts/rollback280-to282-rebuild64-view-20261106 — ROLLBACK_VERIFIED. Отодвинут EIMapperMcp.exe.old-ataman-0faf7fe49f064623b59d728f72a63a89;1 прежний освобождённый retired удалён installer по receipt. Установленный tools/program_files.ps1 старый до следующей версии: установщиком из установки не пользоваться. Настройки/вид сохранены; subst пуст; без GUI/игры/DLL/push. Evidence: отчёт282 и work/install-282-20261106/install-retry-result.json. NEXT: установка завершена; прежние визуальные ограничения282 сохраняются.
+
 - EI-INSTALL-282 / PACKAGING VERIFIED (2026-11-06): разрешено директором узкое исключение eid3d_materials/maps/ для JSON/PNG без . и ..; остальные запреты сохранены. Read-ProgramManifest:9 случаев PASS, настоящие manifest280/282=192/1364 читаются. Финализатор ранее использовал только отдельный validator; теперь общий guard для baseline и нового manifest. VERSION и готовый staging282 не меняются. NEXT: установка тех же бинарников штатным исправленным installer без повторного согласования.
 
 - INSTALLATION BLOCKED (2026-11-06): владелец принял282 и разрешил установку main aab96e4994a45dedd9fe2f39996e331448923d89. Канонический installer остановлен до замены: Protected user path in manifest: eid3d_materials/maps/djwblade.json; staged helper содержит тот же запрет maps. Остаётся280/192 managed SHA;15111 пользовательских файлов неизменны,4 моста живы, новых old-файлов нет, откат280→282 ещё не создан. NEXT: устранить блокер канонического установщика, затем установить неизменный staging282 без пересборки. Подробности в отчёте282 и work/install-282-20261106; без push.
@@ -9,6 +11,8 @@
 - Свежий git archive/Release и staging `build-staging-282-rebuild64-view-20261106`,193→1364 managed files/0 потерь; DLL94969344B, оригинальные notices сохранены. НЕ ЗАКРЫТО: строгий GL0-pixel diff (8/7px; сама281 между запусками также нестабильна), визуальная эквивалентность sky/material/fog, общий upstream ready-token API и полностью холодный final driver cache. Основной этап целиком не объявлен PASS. NEXT: передать локальный scoped-коммит и результат без установки/push; отдельно разобрать GL-недетерминированность и принять картинку до основного режима. Evidence: `docs/validation/ATAMAN_REBUILD64_EMBED_282_20261106.md`; W=`work/rebuild64-renderer-embed-282-20261106/`,4 private fixtures удалены с SHA receipt, cleanup-plan оставлен.
 
 ## EI-MINIMAP-IDENTITY-281 — идентичность миникарты gz1g (2026-11-06)
+
+- EI-INSTALL-282 / INSTALLED WITH282 (2026-11-06):281 R2 установлена только в составе282, отдельно не устанавливалась. Прежний блокер снят;1364 managed SHA=staging, версия установки282, откат280→282 проверен VerifyOnly. См. новые разделы установки в отчётах281/282; функциональные проверки не повторялись.
 
 - INSTALLATION BLOCKED WITH282 (2026-11-06):281 R2 принята в составе282; отдельно не устанавливалась. Установщик282 отклонил eid3d_materials/maps/djwblade.json до замены, остаётся280. NEXT: завершить установку282 после устранения блокера; см. отчёты281/282.
 
