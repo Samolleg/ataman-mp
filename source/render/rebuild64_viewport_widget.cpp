@@ -10,6 +10,8 @@
 #include "options.h"
 #include "resourcemanager.h"
 #include "render_environment.h"
+#include "rebuild64_startup_guard.h"
+#include "layout_components/viewport_widget.h"
 #include "endurance_document.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -76,6 +78,8 @@ struct CRebuild64Viewport::Worker {
         QMetaObject::invokeMethod(owner,[target=owner,detail]{target->fallback(detail);},Qt::QueuedConnection);
     }
     void run() {
+        CRebuild64StartupGuard startup(scratch);
+        if(!startup.arm()) {failure(QString::fromUtf8("Не удалось записать метку безопасного запуска Rebuild64."));return;}
         // QLibrary and every DLL/D3D call live on this one worker, including teardown.
         QLibrary library(QDir(QCoreApplication::applicationDirPath()).filePath("ataman_rebuild64.dll"));
         const QByteArray hook=qgetenv("ATAMAN_REBUILD64_TEST_FAILURE");
@@ -116,6 +120,7 @@ struct CRebuild64Viewport::Worker {
                 activePaths=next.paths;
             }
             if(generation!=next.generation) {
+                if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
                 std::vector<EirSpan> mobs;
                 for(const auto& bytes:next.mobs)mobs.push_back({bytes.constData(),uint64_t(bytes.size())});
                 EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData()};
@@ -137,11 +142,13 @@ struct CRebuild64Viewport::Worker {
                 failure(QString::fromUtf8("Rebuild64: данные нового кадра не подготовлены за 30 секунд. Открыт OpenGL."));break;
             }
             if(!rc) {
+                startup.clear();
                 pending.invalidate();
                 QMetaObject::invokeMethod(owner,[target=owner,stats]{
                     target->m_statistics=stats;
                     if(target->m_selected && stats.ready_generation==target->m_generation) {
                         target->m_stack->setCurrentWidget(target->m_native);
+                        target->movePanels(true);
                         emit target->frameCommitted(stats.ready_generation);
                     }
                 },Qt::QueuedConnection);
@@ -172,18 +179,48 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     connect(m_rebuildAction,&QAction::triggered,this,[this]{selectRebuild(true);});
     m_native->installEventFilter(this);
     m_timer->setInterval(16);connect(m_timer,&QTimer::timeout,this,&CRebuild64Viewport::tick);
+    m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
+    m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
     connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{m_documentRefreshPending=true;});
-    if(QSettings().value("ui/renderer",QStringLiteral("OpenGL")).toString()=="Rebuild64")
+    if(!m_interruptedStarts.isEmpty()) {
+        QTimer::singleShot(0,this,[this]{emit m_gl->updateMsg(QString::fromUtf8(
+            "Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL; Rebuild64 можно снова выбрать в Настройках → Вид карты."));});
+    } else if(QSettings().value("ui/renderer",QStringLiteral("OpenGL")).toString()=="Rebuild64")
         QTimer::singleShot(0,this,[this]{selectRebuild(true,false);});
 }
-CRebuild64Viewport::~CRebuild64Viewport(){m_timer->stop();m_worker.reset();}
+CRebuild64Viewport::~CRebuild64Viewport(){m_timer->stop();m_worker.reset();movePanels(false);}
+void CRebuild64Viewport::movePanels(bool native) {
+    if(!m_gl)return;
+    if(native) {
+        for(auto* child:m_gl->findChildren<QWidget*>(QString(),Qt::FindDirectChildrenOnly))
+            if(dynamic_cast<CViewportWidget*>(child)&&!m_panels.contains(child))m_panels.append(child);
+    }
+    for(const auto& pointer:m_panels) {
+        auto* panel=pointer.data();if(!panel)continue;
+        QWidget* parent=native?static_cast<QWidget*>(m_native):static_cast<QWidget*>(m_gl);
+        if(panel->parentWidget()==parent)continue;
+        const bool shown=!panel->isHidden();const auto geometry=panel->geometry();
+        panel->setParent(parent);
+        // These controls already own an opaque backing rectangle in OpenGL.
+        // Native child HWNDs keep the same paint/input path above D3D, without
+        // a transparent top-level window, screen capture or coordinate scaling.
+        panel->setAttribute(Qt::WA_NativeWindow,native);
+        panel->setGeometry(geometry);panel->setVisible(shown);panel->raise();
+    }
+    if(!native)m_panels.clear();
+}
 bool CRebuild64Viewport::backendLoaded() const {return m_worker&&m_worker->loaded.load();}
 void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     if(!m_gl)return;
     m_selected=selected;m_glAction->setChecked(!selected);m_rebuildAction->setChecked(selected);
     if(persist)QSettings().setValue("ui/renderer",selected?"Rebuild64":"OpenGL");
+    if(selected && persist) {
+        for(const auto& path:m_interruptedStarts)QFile::remove(path);
+        m_interruptedStarts.clear();
+    }
+    movePanels(false);
     m_stack->setCurrentWidget(m_gl);
     if(!selected) {
         m_timer->stop();if(m_worker)m_worker->pause(true);
@@ -219,12 +256,22 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
         result.fog_color[axis]=environment.fogColor[axis];
     }
     result.fog_start=environment.fogStart;result.fog_end=environment.fogEnd;
-    result.region=m_gl->m_weatherRegion=="ingos"?2:1;result.cave=m_gl->m_caveEnvironment?1:0;
+    result.region=m_gl->m_weatherRegion=="ingos"?2:m_gl->m_weatherRegion=="suslanger"?3:1;result.cave=m_gl->m_caveEnvironment?1:0;
+    auto skyView=view;skyView(0,3)=skyView(1,3)=skyView(2,3)=0;
+    skyView.translate(0,0,-6.95752f);skyView.rotate(environment.skyRotationDegrees,0,0,1);
+    const auto skyClip=m_gl->m_projection*skyView;
+    for(int row=0;row<4;++row)for(int col=0;col<4;++col)
+        result.sky_to_clip[row*4+col]=skyClip(row==2?3:row,col);
+    for(int axis=0;axis<3;++axis)result.sky_tint[axis]=environment.skyColor[axis];
+    result.visuals=(m_gl->m_skyboxVisible&&!m_gl->m_caveEnvironment?1u:0u)
+        |(m_gl->m_fogVisible?2u:0u)|(m_gl->m_bDrawLand?4u:0u)
+        |(m_gl->m_bDrawWater?8u:0u)|(m_gl->m_staticObjectsVisible?16u:0u);
     return result;
 }
 void CRebuild64Viewport::tick() {
     if(!m_selected||!m_gl||m_gl->m_applicationShutdown)return;
     if(!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()) {
+        movePanels(false);
         m_stack->setCurrentWidget(m_gl);
         if(m_worker&&!m_documentHash.isEmpty()) {
             std::lock_guard<std::mutex> lock(m_worker->mutex);
@@ -278,7 +325,7 @@ void CRebuild64Viewport::tick() {
     }
     const QString mapRoot=m_gl->m_pLand->filePath().absolutePath();if(!next.paths.contains(mapRoot))next.paths.prepend(mapRoot);
     if(!m_worker) {
-        const QString scratch=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
+        const QString scratch=m_guardDirectory;
         QDir().mkpath(scratch);
         m_worker.reset(new Worker(this,reinterpret_cast<void*>(m_native->winId()),scratch));
     }
@@ -293,7 +340,7 @@ bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
         switch(event->type()) {
         case QEvent::KeyPress:case QEvent::KeyRelease:case QEvent::MouseButtonPress:case QEvent::MouseMove:case QEvent::MouseButtonRelease:case QEvent::Wheel:case QEvent::FocusOut:
             cameraInput(event);return true;
-        case QEvent::Resize:if(m_selected)QTimer::singleShot(0,this,&CRebuild64Viewport::tick);break;
+        case QEvent::Resize:if(m_selected){m_gl->resize(m_native->size());QTimer::singleShot(0,this,&CRebuild64Viewport::tick);}break;
         default:break;
         }
     }

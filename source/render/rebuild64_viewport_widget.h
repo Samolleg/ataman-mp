@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QVector>
 #include <QElapsedTimer>
+#include <QPointer>
 #include <memory>
 #include "rebuild64_abi.h"
 class CView;
@@ -34,6 +35,7 @@ private:
     void tick();
     void fallback(const QString& message);
     void cameraInput(QEvent* event);
+    void movePanels(bool native);
     EirCamera cameraSnapshot();
     CView* m_gl;
     CRebuild64NativeSurface* m_native;
@@ -48,6 +50,9 @@ private:
     bool m_selected{false};
     QPoint m_lastMouse;
     QString m_failure;
+    QString m_guardDirectory;
+    QStringList m_interruptedStarts;
+    QList<QPointer<QWidget>> m_panels;
     EirStatistics m_statistics{};
     QElapsedTimer m_sceneSnapshotTimer;
 };

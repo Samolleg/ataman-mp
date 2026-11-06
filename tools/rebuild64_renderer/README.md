@@ -1,4 +1,4 @@
-# Rebuild64 display backend for Ataman 282
+# Rebuild64 display backend for Ataman 283
 
 Only the Ataman host and flat C ABI are built in this repository. Renderer and
 typed adapters are extracted from the commits in
@@ -20,7 +20,7 @@ notices. Stage them together with the MSVC 14 x64 runtime. No NGX, DLSS,
 Streamline or NVIDIA SDK library is used. The replacement backend explicitly
 reports DLSS unavailable and creates no SDK worker or writable NGX directory.
 
-The caller loads `ataman_renderer_get_api` with QLibrary and ABI version 2.
+The caller loads `ataman_renderer_get_api` with QLibrary and ABI version 3.
 All calls for a handle, including destruction, belong to one worker thread.
 Inputs are borrowed only for each call and copied before returning. Captures
 read the last committed renderer-owned texture. The renderer's internal
@@ -49,3 +49,34 @@ follow the explicit task's offscreen and writable-path boundaries.
 Renderer credit: Ilya Rudnev (Ilufus), evil-islands-owned-renderer; embedded
 adapters from EIRebuild64. Original notices and third-party licenses travel with
 the DLL. Author permission was settled by the owner on 2026-11-06.
+
+Stage 3 host policy (not a change to the renderer's game defaults):
+
+- ABI3 carries the authored sky matrix/tint and existing viewport sky/fog/
+  terrain/water/static visibility. The host resolves nask0sky.fig and Sky00
+  from the same read-only mounts and uses the shipped fixed-function shader.
+  The clear colour also follows the environment below the open sky cylinder.
+- sky_clouds=0 selects that stock sky; fog_preset=0 removes modern mist/wisps
+  and the added atmospheric fog. draw_distance=1000 is the supported maximum,
+  beyond the current GL fog end620; the previous default300 faded top views.
+- render_scale=100/upscaler=0 (no SDK), smaa=false match the unmultisampled GL
+  capture. anisotropy=4 means16 samples, material_quality=3 matches the saved
+  game quality values. No completed-frame colour/sharpness filter is added.
+- Patch008 only extends the embedded config range to the already implemented
+  negative cave-light sentinel. cave_brightness=-1 preserves the caller's cave
+  light table. Game defaults/ranges are unchanged outside EID3D11_EMBEDDED.
+- Existing opaque CViewportWidget panels become native children of the active
+  surface; logical geometry and Qt input remain owned by the same widgets.
+  Lazy panels are discovered too. Scenario and autosave UI have independent
+  parents. GL query/minimap/export paths remain available while hidden.
+- startup-<pid>-<uuid>.json in the renderer cache is armed before loading the
+  DLL and each document, cleared at an accepted frame and on normal teardown.
+  PID plus process creation time distinguish a dead load from another live
+  mapper. A stale marker suppresses automatic Rebuild64 selection, shows a
+  message and preserves ui/renderer; explicit selection clears stale markers.
+  This prevents startup crash loops; it cannot contain an in-process AV.
+
+The isolated stage3 harness uses no owner profile, visible HWND, desktop capture
+or ProgramData lock store. Diagnostic DLL fault/config exports exist only in
+work, never in the production package. See the stage3 validation report for
+remaining quality limits and the proposed process/tool migration stages.

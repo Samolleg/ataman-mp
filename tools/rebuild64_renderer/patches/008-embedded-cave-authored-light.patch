@@ -1,0 +1,19 @@
+--- a/external/owned-renderer/Source/renderer_device.cpp
++++ b/external/owned-renderer/Source/renderer_device.cpp
+@@ -886,7 +886,15 @@
+ config.register_floating_point("ao_radius","AO radius (m)","Graphics",1.5f,.25f,4.f,.25f,false,"World-space reach of the occlusion search.");
+ config.register_floating_point("ao_low_light_boost","AO low-light boost","Graphics",1.6f,1.f,3.f,.1f,false,"Strength multiplier reached when the ambient light dominates the sun (night, overcast); 1 disables. Radius grows up to 25%.");
+ config.register_integer("sky_clouds","Sky and clouds","Graphics",2,0,2,1,false,"Owned sky with volumetric clouds, sun, moon, stars and moving cloud shadows on the ground; follows the game hour, rain and snow, and the region. Water reflects it. 0: the game's original sky, 1: low (quarter-resolution clouds), 2: high (half resolution, more detail).");
+-config.register_floating_point("cave_brightness","Cave brightness","Graphics",kDefaultCaveBrightness,.25f,1.25f,.05f,false,"Light level in caves and dungeons: scales the cave ambient (1 is the game's own cave table). Caves have no sun light or sun shadows; lava, torches, lamps and glowing objects light them and add on top unchanged. Outdoor zones are not affected.");
++// An editor may supply the authored cave light table itself. The existing
++// cave_lighting_profile negative sentinel preserves that explicit light.
++// Keep the game's user-facing range and its default policy unchanged.
++#ifdef EID3D11_EMBEDDED
++constexpr float cave_brightness_minimum = -1.f;
++#else
++constexpr float cave_brightness_minimum = .25f;
++#endif
++config.register_floating_point("cave_brightness","Cave brightness","Graphics",kDefaultCaveBrightness,cave_brightness_minimum,1.25f,.05f,false,"Light level in caves and dungeons: scales the cave ambient (1 is the game's own cave table). Caves have no sun light or sun shadows; lava, torches, lamps and glowing objects light them and add on top unchanged. Outdoor zones are not affected.");
+ config.register_floating_point("cave_ambient_floor","Cave darkness floor","Graphics",kDefaultCaveAmbientFloor,0.f,.6f,.02f,false,"Lowest ambient light in caves (brightest channel, 0-1): keeps unlit cave areas visible. 0 lets them go as dark as the cave table and Cave brightness make them; .30 is the default.");
+ config.register_integer("cave_gi","Bounce light","Graphics",2,0,2,1,false,"Light from torches, campfires, lamps, lava and other glowing ground bounces once off the ground, rock and walls and lights the surroundings beyond the lamp's direct reach. Outdoors the sun also bounces off the ground; in caves the exits let in the outdoor light of the hour. It only ever adds light. 0: off, 1: low (4 m grid, cheaper), 2: high (2 m grid). A part of it is recomputed every frame.");
+ config.register_boolean("bounce_debug","Bounce light view","Diagnostics",false,false,"Shows the bounce light alone, eight times brighter, in place of the lamps' direct light.");
