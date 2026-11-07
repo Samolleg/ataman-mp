@@ -11058,6 +11058,10 @@ Save all, discard the entire session, or cancel?</source>
     </context>
     <context>
         <name>MainWindow</name>
+    <message><source>Текущий вид карты: %1. Настройки → Вид карты.
+%2</source><translation>Текущий вид карты: %1. Настройки → Вид карты.
+%2</translation></message>
+
         <message><source>Enter finite X and Y coordinates using a decimal point.</source><translation>Введите конечные координаты X и Y, используя точку как десятичный разделитель.</translation></message>
         <message>
             <location filename="../source/app/main_window.ui" line="14" />

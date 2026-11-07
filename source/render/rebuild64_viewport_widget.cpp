@@ -1,6 +1,7 @@
 #include <QContextMenuEvent>
 #include "rebuild64_viewport_widget.h"
 #include "view.h"
+#include "log.h"
 #include "opening_trace.h"
 #include "legacy_projection_pulse.h"
 #include "mob_family_validation.h"
@@ -532,8 +533,10 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
             &&latch.write("Rebuild64 requires an explicit menu selection\n")>0&&latch.commit();
         if(recorded){for(const auto& path:m_interruptedStarts)QFile::remove(path);m_interruptedStarts.clear();}
     }
+    ei::log(eLogInfo,QString("Renderer startup requested:%1 latched:%2 interrupted:%3")
+        .arg(requested?"Rebuild64":"OpenGL").arg(latched).arg(interrupted));
     // Select before MainWindow can show. Migration does not acknowledge a guard.
-    selectRebuild(requested&&!latched&&!interrupted,false);
+    selectRebuild(requested&&!latched&&!interrupted,false,QStringLiteral("startup"));
     if(latched||interrupted)QTimer::singleShot(0,this,[this]{
         emit m_gl->updateMsg(tr("Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL. Для повторного запуска выберите Rebuild64 в Настройках → Вид карты."));
     });
@@ -596,12 +599,14 @@ void CRebuild64Viewport::prepareBackend() {
     m_worker->wake.notify_all();
 }
 
-void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
+void CRebuild64Viewport::selectRebuild(bool selected,bool persist,const QString& action) {
     if(!m_gl||m_stopping)return;
     if(!selected){cancelOutputs(tr("Offscreen отменён: выбран OpenGL."));if(!m_activeCapturePath.isEmpty())emit captureFinished(m_activeCapturePath,tr("Снимок отменён: выбран OpenGL."),m_generation);}
     if(selected && qApp->property("agentHeadless").toBool())return;
     if(selected)for(auto* node:m_gl->selectionSnapshot())if(node->nodeType()==ENodeType::eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0){
-        if(m_selected)selectRebuild(false,false);m_glAction->setChecked(true);m_rebuildAction->setChecked(false);
+        const auto reason=QString::fromUtf8("Персонажи, appearance и stst8");
+        ei::log(eLogWarning,QString("Renderer selection refused action:%1").arg(reason));
+        if(m_selected)selectRebuild(false,false,reason);m_glAction->setChecked(true);m_rebuildAction->setChecked(false);
         emit m_gl->updateMsg(tr("Выделенные персонажи и stst8 пока требуют OpenGL. Выделение и правки сохранены; снимите выделение для перехода в Rebuild64."));return;
     }
 
@@ -610,6 +615,10 @@ void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     if(!selected)m_restartWhenFinished=false;
     m_gl->setFocusProxy(selected?m_native:nullptr);
     m_pointerDown=false;
+    ei::log(eLogInfo,QString("Renderer selection from:%1 to:%2 persist:%3 action:%4")
+        .arg(m_selected?"Rebuild64":"OpenGL").arg(selected?"Rebuild64":"OpenGL")
+        .arg(persist).arg(action.isEmpty()?QStringLiteral("menu"):action));
+    m_gl->setProperty("rendererAction",action.isEmpty()?QStringLiteral("menu"):action);
     m_selected=selected;m_gl->setProperty("rebuild64Selected",selected);
     m_gl->setProperty("nativeLegacyVisualState",m_gl->legacyVisualState());
     m_glAction->setChecked(!selected);m_rebuildAction->setChecked(selected);
@@ -695,11 +704,13 @@ void CRebuild64Viewport::beginDocumentTransition() {
 }
 void CRebuild64Viewport::requireOpenGL(const QString& action) {
     if(!m_selected)return;
-    selectRebuild(false,false);
+    ei::log(eLogInfo,QString("Renderer compatibility action:%1").arg(action));
+    selectRebuild(false,false,action);
     emit m_gl->updateMsg(tr("%1 пока требует OpenGL. Открыт OpenGL; документы и правки сохранены. Вернуться можно через Настройки → Вид карты.").arg(action));
 }
 void CRebuild64Viewport::fallback(const QString& message) {
     if(!m_gl)return;
+    ei::log(eLogWarning,QString("Renderer fallback action:backend failure detail:%1").arg(message));
     if(m_outputOnly){m_failure=message;m_outputOnly=false;m_timer->stop();
         if(m_worker){QList<Worker::OutputJob> jobs;{std::lock_guard<std::mutex> lock(m_worker->mutex);jobs=m_worker->outputs;m_worker->outputs.clear();}
             for(const auto& job:jobs)emit outputFinished(job.serial,{},message,job.generation,{},0);}
@@ -709,7 +720,7 @@ void CRebuild64Viewport::fallback(const QString& message) {
     // A failed device is an output failure, not a user cancellation. GUI
     // function adapters may complete through their ordinary GL fallback.
     cancelOutputs(message);
-    selectRebuild(false,false);
+    selectRebuild(false,false,QString::fromUtf8("Сбой Rebuild64: ")+message);
     m_worker.reset();
     emit m_gl->updateMsg(QString::fromUtf8("Rebuild64 недоступен. Открыт OpenGL. ")+message);
     if(!pendingCapture.isEmpty())emit captureFinished(pendingCapture,message,m_generation);

@@ -570,7 +570,19 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="offscreen") {
+            if(mode=="accept288r2") {
+                auto* indicator=window->findChild<QLabel*>("viewportRendererIndicator");
+                check(native->rebuildSelected()&&indicator&&indicator->text()=="Rebuild64","startup renderer and permanent status indicator");
+                if(!configuration["restart"].toBool()) {
+                    gallery("zone1");outputCheck("r2-zone1-snapshot");
+                    const auto snapshot=operation(request("window_snapshot"));check(!snapshot.contains("error")&&snapshot["captureKind"].toString().startsWith("Rebuild64"),"R2 native MCP snapshot");
+                    QString error;auto image=nativeOutput(view,0,QSize(),native->outputCamera(),&error);check(!image.isNull(),"R2 accepted viewport: "+error);image.save(caseRoot+"/r2-viewport.png");
+                    CNode* selected=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName().startsWith("stbuho",Qt::CaseInsensitive)){selected=node;break;}
+                    check(selected,"R2 static preview source");CPreview preview(nullptr,view);preview.setAttribute(Qt::WA_DontShowOnScreen);preview.resize(480,360);preview.attachView(view);preview.attachNode(selected);preview.show();previewCheck(&preview,"r2-model");preview.close();preview.attachNode(nullptr,false);
+                    auditOpenResources();window->closeAll();
+                }
+            }
+            else if(mode=="offscreen") {
                 openPair(map);validateReady(map);auditOpenResources();
                 if(!configuration["skipPackage"].toBool()) {
                 auto snapshot=operation(request("window_snapshot"));check(!snapshot.contains("error")&&snapshot["captureKind"].toString().startsWith("Rebuild64"),"MCP window_snapshot actual native path");

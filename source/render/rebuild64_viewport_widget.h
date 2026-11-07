@@ -37,7 +37,7 @@ public:
     void finishApplicationShutdown();
     bool applicationShutdownFinished() const;
     void prepareBackend();
-    void selectRebuild(bool selected, bool persist=true);
+    void selectRebuild(bool selected, bool persist=true, const QString& action=QString());
     void beginDocumentTransition();
     void openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search);
     void requireOpenGL(const QString& action);

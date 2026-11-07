@@ -4509,6 +4509,16 @@ void MainWindow::createViewportToolbars()
     m_ui->workSpaceLayout->addWidget(testBar);
     auto* renderer=new CRebuild64Viewport(m_pView,m_ui->menuSettings,m_ui->centralWidget);
     m_ui->workSpaceLayout->addWidget(renderer,1);
+    auto* rendererIndicator=new QLabel(this);
+    rendererIndicator->setObjectName(QStringLiteral("viewportRendererIndicator"));
+    statusBar()->addPermanentWidget(rendererIndicator);
+    const auto updateRendererIndicator=[this,renderer,rendererIndicator](bool native){
+        rendererIndicator->setText(native?QStringLiteral("Rebuild64"):QStringLiteral("OpenGL"));
+        rendererIndicator->setToolTip(tr("Текущий вид карты: %1. Настройки → Вид карты.\n%2")
+            .arg(rendererIndicator->text(),m_pView->property("rendererAction").toString()));
+    };
+    connect(renderer,&CRebuild64Viewport::rendererSelectionChanged,this,updateRendererIndicator);
+    updateRendererIndicator(renderer->rebuildSelected());
     connect(renderer,&CRebuild64Viewport::rendererSelectionChanged,this,[this](bool native){
         if(!native)scheduleViewportMinimapRefresh(0);
     });
