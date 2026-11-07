@@ -1,3 +1,5 @@
+#include <QtConcurrent/QtConcurrentRun>
+#include <QFutureWatcher>
 #include "window_geometry.h"
 #include "ui_theme.h"
 #include "item_spell_constructor_dialog.h"
@@ -39,13 +41,18 @@
 namespace {
 class CConstructorPreviewObject final : public CWorldObj
 {
+    QJsonObject m_nativePreview;
 public:
+    QJsonObject independentPreviewSource() const override { return m_nativePreview; }
     void applyResolvedItem(const QString& modelName,const QString& primaryTexture,
                            const QStringList& parts,
                            const QMap<QString,QString>& partTextures,
                            const QStringList& bodyTextureLayers,
                            const QMap<QString,QVector3D>& emissions)
     {
+        QStringList uniqueTextures=partTextures.values();uniqueTextures.removeDuplicates();
+        m_nativePreview={{"model",modelName},{"texture",uniqueTextures.size()==1?uniqueTextures.first():primaryTexture},{"parts",QJsonArray::fromStringList(parts)},
+            {"requiresAppearance",!bodyTextureLayers.isEmpty()||uniqueTextures.size()>1}};
         applyTransientVisual(modelName,primaryTexture,parts,QVector3D(1,1,1),
                              partTextures,QString(),bodyTextureLayers,emissions);
     }
@@ -54,6 +61,7 @@ public:
                              bool preserveAuthoredUvs,
                              bool normalizeAuthoredAtlasCell)
     {
+        m_nativePreview={{"model",modelName},{"texture",textureCandidates.value(0)},{"standalone",true}};
         applyTransientStandaloneVisual(figure,modelName,textureCandidates,
                                        preserveAuthoredUvs,normalizeAuthoredAtlasCell);
     }
@@ -122,9 +130,9 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     CView* view, QWidget* parent)
     : QDialog(nullptr, Qt::Window | Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint |
                       Qt::WindowCloseButtonHint),
-      m_catalog(document ? ItemSpellConstructorCatalog::fromDocument(*document)
+      m_catalog(document && !(view && view->property("rebuild64Selected").toBool()) ? ItemSpellConstructorCatalog::fromDocument(*document)
                          : ItemSpellConstructorCatalog()),
-      m_databaseSnapshot(document ? document->currentSnapshot() : QSharedPointer<const SProfileDatabaseSnapshot>()),
+      m_databaseSnapshot(document && !(view && view->property("rebuild64Selected").toBool()) ? document->currentSnapshot() : QSharedPointer<const SProfileDatabaseSnapshot>()),
       m_providerId(document ? document->providerId() : QString()),
       m_profileId(document ? document->profileId() : QString()),
       m_view(view)
@@ -140,8 +148,8 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     ei::rememberWindowGeometry(this, QStringLiteral("itemSpellConstructor"));
     resize(1100, 720);
     setMinimumSize(780, 520);
-    const SGameTextCatalog texts = loadGameTextCatalog(resourceRoots);
-    m_catalog.applyGameTexts(texts.entries);
+    const bool native = view && view->property("rebuild64Selected").toBool();
+    if(!native){const SGameTextCatalog texts = loadGameTextCatalog(resourceRoots);m_catalog.applyGameTexts(texts.entries);}
 
     auto* root = new QVBoxLayout(this);
     auto* codeRow = new QHBoxLayout;
@@ -277,7 +285,20 @@ ItemSpellConstructorDialog::ItemSpellConstructorDialog(
     connect(import,&QPushButton::clicked,this,&ItemSpellConstructorDialog::importCode);
     connect(copy,&QPushButton::clicked,this,&ItemSpellConstructorDialog::copyCode);
     connect(m_tabs,&QTabWidget::currentChanged,this,&ItemSpellConstructorDialog::updateOutput);
-    refreshItemFilterChoices();refreshItemFilter(); refreshSpellFilter();
+    if(native) {
+        m_nativeLoading=true;m_tabs->setEnabled(false);m_validation->setText(tr("Rebuild64: подготовка каталога просмотра…"));
+        struct Value {ItemSpellConstructorCatalog catalog;QSharedPointer<const SProfileDatabaseSnapshot> snapshot;};
+        auto* watcher=new QFutureWatcher<Value>(this);const auto detached=document?QSharedPointer<DatabaseDocument>::create(*document):QSharedPointer<DatabaseDocument>();
+        connect(watcher,&QFutureWatcher<Value>::finished,this,[this,watcher]{
+            const auto value=watcher->result();m_catalog=value.catalog;m_databaseSnapshot=value.snapshot;watcher->deleteLater();m_nativeLoading=false;m_tabs->setEnabled(true);
+            refreshItemFilterChoices();refreshItemFilter();refreshSpellFilter();updateOutput();
+            if(!m_pendingCode.isEmpty()){const auto code=m_pendingCode;m_pendingCode.clear();setCode(code);}
+        });
+        watcher->setFuture(QtConcurrent::run([detached,resourceRoots]{
+            Value value;value.snapshot=detached?detached->currentSnapshot():QSharedPointer<const SProfileDatabaseSnapshot>();value.catalog=detached?ItemSpellConstructorCatalog::fromDocument(*detached):ItemSpellConstructorCatalog();
+            value.catalog.applyGameTexts(loadGameTextCatalog(resourceRoots).entries);return value;
+        }));
+    } else {refreshItemFilterChoices();refreshItemFilter();refreshSpellFilter();updateOutput();}
 }
 
 ItemSpellConstructorDialog::~ItemSpellConstructorDialog()
@@ -292,7 +313,7 @@ ItemSpellConstructorDialog::~ItemSpellConstructorDialog()
     if(m_itemPreview)m_itemPreview->doneCurrent();
 }
 QString ItemSpellConstructorDialog::code() const { return m_codeEdit->text().trimmed(); }
-void ItemSpellConstructorDialog::setCode(const QString& value) { m_codeEdit->setText(value); importCode(); }
+void ItemSpellConstructorDialog::setCode(const QString& value) { if(m_nativeLoading){m_pendingCode=value;return;}m_codeEdit->setText(value); importCode(); }
 
 const SConstructorItem* ItemSpellConstructorDialog::currentItem() const
 { return m_itemList->currentItem() ? m_catalog.findItem(m_itemList->currentItem()->data(Qt::UserRole).toString()) : nullptr; }

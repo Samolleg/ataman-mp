@@ -1,3 +1,9 @@
+#include "settings.h"
+#include "options.h"
+#include <QDir>
+#include <QFile>
+#include "native_output.h"
+#include "view.h"
 #include "gallery_thumbnail_cache.h"
 #include <QThreadPool>
 #include <QThread>
@@ -165,6 +171,25 @@ CModelGallery::CModelGallery(const QStringList& models,ei::TechnicalModelCatalog
     CView* assemblyView=nullptr;
     for(QWidget* owner=parent;owner && !assemblyView;owner=owner->parentWidget()) {
         assemblyView=qobject_cast<CView*>(owner);if(!assemblyView)assemblyView=owner->findChild<CView*>();
+    }
+    // 288: backend is part of both the disk and memory cache namespace.
+    // The legacy namespace/files remain untouched and still serve OpenGL.
+    if(assemblyView&&assemblyView->property("rebuild64Selected").toBool()) {
+        m_nativeThumbnails=true;
+        QByteArray producer="rebuild64-288";const QFileInfo dll(QCoreApplication::applicationDirPath()+"/ataman_rebuild64.dll");producer+=QByteArray::number(dll.size())+QByteArray::number(dll.lastModified().toMSecsSinceEpoch());
+        if(const auto* root=dynamic_cast<const COptString*>(assemblyView->settings()->opt("gameRoot")))
+            for(const auto& file:{"Config64/rddraw.ini","Config64/settings.ini","Config/lightsgipat.ini","Base/Config/lightsgipat.ini"}) {QFile source(QDir(root->value()).filePath(file));if(source.open(QIODevice::ReadOnly))producer+=source.readAll();}
+        m_thumbnailNamespace=QString::fromLatin1(QCryptographicHash::hash(producer,QCryptographicHash::Sha256).toHex())+"/"+m_thumbnailNamespace;
+        const QPointer<CView> weak=assemblyView;const auto fallback=m_provider;
+        m_provider=[weak,fallback](const QString& model,const QString& texture)->QImage {
+            if(!weak)return {};QString error;EirCamera camera{};
+            auto image=nativeOutput(weak,3,QSize(192,132),camera,&error,model,texture,QVector3D(1,1,1));
+            if(image.isNull()&&fallback) {
+                QMetaObject::invokeMethod(qApp,[weak,error]{if(weak)emit weak->updateMsg(QObject::tr("Миниатюра Rebuild64 недоступна; используется штатный CPU-просмотр этой функции. %1").arg(error));},Qt::QueuedConnection);
+                image=fallback(model,texture);image.setText("nativeFallback","CPU");
+            }
+            return image;
+        };
     }
     if(assemblyView) {
         auto* assemblies=new QPushButton(QString::fromUtf8("Готовые сборки…"),this);assemblies->setObjectName("modelGalleryAssemblies");
@@ -453,7 +478,7 @@ void CModelGallery::loadVisibleThumbnail()
         m_thumbnailJobs.insert(key,watcher);
         connect(watcher,&QFutureWatcher<QImage>::finished,this,[this,watcher,model,key]{finishThumbnail(watcher,model,key);});
         const auto provider=m_provider;
-        const QString directory=m_thumbnailNamespace.isEmpty()?QString():ei::galleryThumbnailDirectory();
+        const QString directory=m_thumbnailNamespace.isEmpty()?QString():ei::galleryThumbnailDirectory(m_nativeThumbnails?"Rebuild64":QString());
         // No dialog/item/catalog references enter workers. Destroying a watcher
         // disconnects delivery without blocking; captured provider state outlives it.
         QElapsedTimer submitted;submitted.start();
@@ -466,7 +491,7 @@ void CModelGallery::loadVisibleThumbnail()
             if(hit) {if(trace)qInfo("GALLERY worker queue_ms=%.3f read_ms=%.3f provider_ms=0 write_ms=0 hit=1",queueMs,readMs);return image;}
             image=provider(model,texture);
             const double providerMs=stage.nsecsElapsed()/1e6;stage.restart();
-            if(!directory.isEmpty() && !image.isNull()) ei::writeGalleryThumbnail(directory,key,image);
+            if(!directory.isEmpty() && !image.isNull()&&image.text("nativeFallback").isEmpty()) ei::writeGalleryThumbnail(directory,key,image);
             if(trace)qInfo("GALLERY worker queue_ms=%.3f read_ms=%.3f provider_ms=%.3f write_ms=%.3f hit=0",queueMs,readMs,providerMs,stage.nsecsElapsed()/1e6);
             return image;
         }));
@@ -475,15 +500,15 @@ void CModelGallery::loadVisibleThumbnail()
 void CModelGallery::finishThumbnail(QFutureWatcher<QImage>* watcher,const QString& model,const QString& key)
 {
     QElapsedTimer delivered;delivered.start();
-    const QImage image=watcher->result(); m_thumbnails.insert(key,new QImage(image),imageCost(image));
+    const QImage image=watcher->result(); if(image.text("nativeFallback").isEmpty())m_thumbnails.insert(key,new QImage(image),imageCost(image));
     m_thumbnailJobs.remove(key);watcher->deleteLater();
-    if(!m_thumbnailNamespace.isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
+    if(!m_thumbnailNamespace.isEmpty()&&image.text("nativeFallback").isEmpty()) sharedThumbnails().insert(key,new QImage(image),imageCost(image));
     for(int i=0;i<m_list->count();++i)
     {
         auto* item=m_list->item(i);
         if(item->data(Qt::UserRole).toString()==model && cacheKey(model,textureForModel(model))==key) {
             item->setIcon(image.isNull()?QIcon():QIcon(QPixmap::fromImage(image)));
-            item->setToolTip(model+"\n"+(image.isNull()?tr("Preview unavailable"):item->data(Qt::UserRole+1).toString()));
+            item->setToolTip(model+"\n"+(!image.text("nativeFallback").isEmpty()?tr("Запасной CPU-просмотр; native-миниатюра недоступна."):image.isNull()?tr("Preview unavailable"):item->data(Qt::UserRole+1).toString()));
             item->setData(Qt::UserRole+2,key);
         }
     }

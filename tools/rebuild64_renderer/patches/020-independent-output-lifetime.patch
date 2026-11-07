@@ -1,0 +1,85 @@
+--- a/external/owned-renderer/Source/renderer.h
++++ b/external/owned-renderer/Source/renderer.h
+@@ -975,6 +975,15 @@
+         std::uint64_t epoch = 0;
+         std::uint64_t scene_token = 0; // scene mode: the scene thread holds the real checkpoint
+     };
++#ifdef EID3D11_EMBEDDED
++    // Independent output does not own global world/sky/neighbour services.
++    HRESULT ensure_embedded_output(HWND hwnd, UINT width, UINT height) {
++        embedded_output_only_ = true; return ensure_host(hwnd, width, height);
++    }
++private:
++    bool embedded_output_only_ = false;
++public:
++#endif
+     HRESULT ensure(HWND hwnd, UINT width, UINT height);
+     // Explicit test entry point for headless WARP lifecycle checks. Production
+     // initialization continues to use ensure(), which selects hardware.
+--- a/external/owned-renderer/Source/renderer_device.cpp
++++ b/external/owned-renderer/Source/renderer_device.cpp
+@@ -1071,6 +1071,9 @@
+  set_fsr_unavailable_reason(Fsr2Upscaler::unavailable_reason(device_.Get()));
+  shader_objects_=ShaderObjects::attach(device_.Get());
+  frame_acct::install_device_counters(device_.Get(),context_.Get());
++#ifdef EID3D11_EMBEDDED
++ if(!embedded_output_only_)
++#endif
+  retained_visual_scene().visual_set_surface_texture_retainer(&Renderer::retain_detached_surface_texture,this);
+  HRESULT hr;
+  if(FAILED(hr=create_swap_chain()))return hr;
+@@ -1086,6 +1089,9 @@
+   set_test_initialization_stage("start-liquid-map-job");
+  start_liquid_maps_job();
+   set_test_initialization_stage("set-neighbour-device");
++#ifdef EID3D11_EMBEDDED
++ if(!embedded_output_only_)
++#endif
+  neighbour_maps_set_device(device_.Get());
+   set_test_initialization_stage("create-targets");
+  if(FAILED(hr=create_targets()))return hr;
+@@ -1099,7 +1105,7 @@
+  system_telemetry_.start(adapter3_.Get());
+ #ifdef EID3D11_EMBEDDED
+   set_test_initialization_stage("attach-embedded-sky");
+- if(!embedded_sky().attach(this))return E_UNEXPECTED;
++ if(!embedded_output_only_&&!embedded_sky().attach(this))return E_UNEXPECTED;
+ #endif
+   set_test_initialization_stage("complete");
+  return S_OK;
+@@ -3333,7 +3339,14 @@
+  camp_inventory_retire_textures();
+  // Detached copies belong to this device and must not reach the next one.
+  retained_visual_scene().visual_clear_surface_texture_retainer(this);
+- neighbour_client_stop();neighbour_maps_set_device(nullptr);neighbour_maps_set_d3d12(nullptr);release_neighbour_maps();
++#ifdef EID3D11_EMBEDDED
++ if(!embedded_output_only_) {
++#endif
++ neighbour_client_stop();neighbour_maps_set_device(nullptr);neighbour_maps_set_d3d12(nullptr);
++#ifdef EID3D11_EMBEDDED
++ }
++#endif
++ release_neighbour_maps();
+  // Tile family jobs (CPU only): cancelled and joined before the device goes.
+  tile_families_job_={};tile_families_prestart_={};tile_families_prestart_terrain_.reset();
+  join_tile_family_jobs();
+@@ -3362,6 +3375,9 @@
+  retire_native_shadows();
+  native_shadow_prepare_cs_.Reset();native_shadow_commit_cs_.Reset();native_shadow_build_cs_.Reset();native_shadow_vs_.Reset();native_shadow_ps_.Reset();
+  finish_placed_hitch_profile(PlacedHitchFinishReason::renderer_release);
++#ifdef EID3D11_EMBEDDED
++ if(!embedded_output_only_)
++#endif
+  bridge_set_native_terrain_animation_owned(false);
+  flush_native();
+  // The lossless mask targets belong to this device, including saved views.
+@@ -3381,6 +3397,9 @@
+  debug_overlay_.clear_over_budget_marker();
+  close_shader_marker();
+  debug_overlay_.shutdown();
++#ifdef EID3D11_EMBEDDED
++ if(!embedded_output_only_)
++#endif
+  bridge_set_profile_enabled(false);
+  profiler_.shutdown();
+  if(context_)context_->ClearState();

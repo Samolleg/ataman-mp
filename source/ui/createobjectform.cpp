@@ -1,3 +1,5 @@
+#include <QtConcurrent/QtConcurrentRun>
+#include <QFutureWatcher>
 #include <QPointer>
 #include <algorithm>
 #include "window_geometry.h"
@@ -640,6 +642,67 @@ void CCreateObjectForm::refreshDatabase()
         const QFileInfo file(QDir(root).filePath("texts.res"));
         token+=QString("|%1:%2").arg(file.size()).arg(file.lastModified().toMSecsSinceEpoch());
     }
+    if(m_pView && m_pView->property("rebuild64Selected").toBool() && token!=m_databaseRefreshToken) {
+        if(property("nativeDatabasePreparing").toString()==token)return;
+        setProperty("nativeDatabasePreparing",token);m_databaseEntries.clear();m_databaseList->clear();m_databaseList->setEnabled(false);ui->buttonCreate->setEnabled(false);
+        m_databaseDetails->setText(tr("Rebuild64: подготовка каталога расстановки… Окно работает."));
+        struct Value {QVector<ei::SDatabaseMapEntry> databaseEntries;ei::ItemSpellConstructorCatalog itemCatalog;ei::MapWeaponCatalog weaponCatalog;ei::MapInventoryCatalog inventoryCatalog;ei::TechnicalModelCatalog modelCatalog;QString modelCatalogProfile,modelCatalogError;};
+        auto* watcher=new QFutureWatcher<Value>(this);const auto snapshot=activeDatabase;const auto generation=ei::ProfileDatabaseContext::instance().generation();
+        connect(watcher,&QFutureWatcher<Value>::finished,this,[this,watcher,token,snapshot,generation]{
+            auto value=watcher->result();watcher->deleteLater();
+            if(property("nativeDatabasePreparing").toString()!=token||ei::ProfileDatabaseContext::instance().current()!=snapshot)return;
+            setProperty("nativeDatabasePreparing",QString());m_databaseRefreshToken=token;m_databaseGeneration=generation;
+            m_databaseEntries=std::move(value.databaseEntries);
+            m_itemCatalog=std::move(value.itemCatalog);
+            m_weaponCatalog=std::move(value.weaponCatalog);
+            m_inventoryCatalog=std::move(value.inventoryCatalog);
+            m_modelCatalogProfile=std::move(value.modelCatalogProfile);
+            m_modelCatalogError=std::move(value.modelCatalogError);
+            m_modelCatalog=std::move(value.modelCatalog);
+            m_databaseList->setEnabled(true);filterDatabase();
+        });
+        watcher->setFuture(QtConcurrent::run([snapshot,resourceRoots,mapRoots,weaponsPath,inventoryPath]{Value value;
+        value.databaseEntries = snapshot && snapshot->usable()
+                ? ei::databaseMapCatalog(*snapshot) : QVector<ei::SDatabaseMapEntry>();
+        const auto document = snapshot ? ei::DatabaseDocument::fromSnapshot(snapshot)
+                                                                   : QSharedPointer<ei::DatabaseDocument>();
+        value.itemCatalog = document ? ei::ItemSpellConstructorCatalog::fromDocument(*document)
+                                                        : ei::ItemSpellConstructorCatalog();
+        const auto texts=ei::loadGameTextCatalog(resourceRoots);
+        ei::applyDatabaseMapTexts(&value.databaseEntries,texts.entries);
+        value.itemCatalog.applyGameTexts(texts.entries);
+        value.weaponCatalog.load(weaponsPath, value.itemCatalog);
+        value.inventoryCatalog.load(inventoryPath, document.data());
+        if(value.weaponCatalog.present() || value.inventoryCatalog.present()) {
+                QVector<ei::SDatabaseMapEntry> filtered;
+                for(auto entry : value.databaseEntries) {
+                        if(entry.category == ei::EDatabaseMapCategory::Item) {
+                                if(const auto* inventory = value.inventoryCatalog.find(entry.name)) {
+                                        entry.model = inventory->model;
+                                        for(const auto& variant : inventory->variants) entry.model += " " + variant.label;
+                                        entry.unavailableReason = inventory->unavailableReason;
+                                        if(!entry.labelFromTexts && !inventory->label.isEmpty()) entry.label = inventory->label;
+                                        filtered.append(entry);
+                                        continue;
+                                }
+                                const auto* item = value.itemCatalog.findItem(entry.name);
+                                if(value.inventoryCatalog.present() && (!item || item->category == "Quick Item")) continue;
+                                if(!value.weaponCatalog.present()) { filtered.append(entry); continue; }
+                                const auto models = value.weaponCatalog.models(entry.name);
+                                if(models.isEmpty()) continue;
+                                QStringList names;
+                                for(const auto& model : models) names.append(model.model);
+                                entry.model = names.join(" / ");
+                        }
+                        filtered.append(entry);
+                }
+                value.databaseEntries = filtered;
+        }
+        // Read the existing database-side catalog without importing or saving it.
+        value.modelCatalogProfile=ei::TechnicalModelCatalog::profileKey(mapRoots);
+        value.modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(snapshot?snapshot->sourceArchivePath:QString()),&value.modelCatalogError);
+        return value;}));return;
+    }
     if(token==m_databaseRefreshToken) {
         const auto database=ei::ProfileDatabaseContext::instance().current();
         m_modelCatalog.load(ei::TechnicalModelCatalog::pathForDatabase(database?database->sourceArchivePath:QString()),&m_modelCatalogError);
@@ -692,6 +755,7 @@ void CCreateObjectForm::refreshDatabase()
 
 void CCreateObjectForm::filterDatabase()
 {
+    if(!property("nativeDatabasePreparing").toString().isEmpty()){m_databaseDetails->setText(tr("Rebuild64: подготовка каталога расстановки… Окно работает."));return;}
     m_databaseMode = m_databaseCategory->currentIndex() != 3;
     setWindowTitle(m_databaseMode ? tr("Add from database") : tr("Create object"));
     ui->labelObjectType->setVisible(!m_databaseMode);
@@ -913,6 +977,9 @@ void CCreateObjectForm::selectDatabaseEntry()
         updateTable(); return;
     }
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
+    if(entry.category==ei::EDatabaseMapCategory::Creature && m_pView && m_pView->property("rebuild64Selected").toBool()) {
+        m_databaseDetails->setText(tr("Персонажи, appearance и stst8 требуют следующего этапа. Для этого просмотра и расстановки выберите OpenGL; текущие правки сохранены."));updateTable();return;
+    }
     if(entry.category == ei::EDatabaseMapCategory::Item)
     {
         if(const auto* inventory = m_inventoryCatalog.find(entry.name)) {

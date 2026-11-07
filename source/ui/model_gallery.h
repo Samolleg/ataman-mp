@@ -61,6 +61,7 @@ private:
     const ei::TechnicalTextureCatalog* m_scan;
     QString m_profile;
     QString m_thumbnailNamespace;
+    bool m_nativeThumbnails{false};
     QSet<QString> m_availableTextures;
     mutable QHash<QString,QVector<ei::STechnicalTextureChoice>> m_textureChoices;
     mutable quint64 m_catalogRevision = 0, m_scanRevision = 0;

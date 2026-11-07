@@ -1,0 +1,14 @@
+--- a/external/owned-renderer/Source/renderer.h
++++ b/external/owned-renderer/Source/renderer.h
+@@ -977,6 +977,11 @@
+     };
+ #ifdef EID3D11_EMBEDDED
+     // Independent output does not own global world/sky/neighbour services.
++    HRESULT begin_embedded_output_frame() {
++        if (!embedded_output_only_) return E_UNEXPECTED;
++        const HRESULT hr = begin_engine_frame_at(0);
++        if (SUCCEEDED(hr)) begin_scene_renderer(); return hr;
++    }
+     HRESULT ensure_embedded_output(HWND hwnd, UINT width, UINT height) {
+         embedded_output_only_ = true; return ensure_host(hwnd, width, height);
+     }

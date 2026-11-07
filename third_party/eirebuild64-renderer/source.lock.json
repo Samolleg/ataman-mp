@@ -43,6 +43,14 @@
     {
       "path": "008-embedded-neighbour-join.patch",
       "sha256": "adc33a65a73e2b7c8ff1efd2e16b77cb203697141332b75cb6c549f9a73fa3fd"
+    },
+    {
+      "path": "020-independent-output-lifetime.patch",
+      "sha256": "4d1694c87870a3c81f35c484a4d15a71816d547c6d1de4df23fd958e5dd871e7"
+    },
+    {
+      "path": "021-independent-frame-boundary.patch",
+      "sha256": "2836225e9e1ecb87f533d7cb85fd8ad33b299a7e6da9808d04fb70ec8918ee2e"
     }
   ],
   "nvidiaSdk": false,

@@ -55,12 +55,12 @@ qint64 prune(const QString& directory, qint64 budget)
 }
 }
 namespace ei {
-QString galleryThumbnailDirectory()
+QString galleryThumbnailDirectory(const QString& backend)
 {
     // Same installation-relative user-cache location as character-*; avoid the
     // character-cache helper's unrelated deprecated-cache cleanup side effect.
     return visualCacheDirectoryForApplication(QCoreApplication::applicationDirPath(),
-                                              QStringLiteral("gallery-thumbnails"));
+                                              backend=="Rebuild64"?QStringLiteral("gallery-thumbnails-rebuild64"):QStringLiteral("gallery-thumbnails"));
 }
 QString galleryThumbnailKey(const QString& resourceNamespace, const QString& profile,
                             const QString& model, const QString& texture, int format)

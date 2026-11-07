@@ -119,6 +119,9 @@ EarlyWorld readOpening(const QFileInfo& mpr,const QStringList& roots,const QStri
 }
 }
 struct CRebuild64Viewport::Worker {
+    struct OutputJob {quint64 serial,generation;QSize size;int mode;EirCamera camera;QByteArray model,texture;QVector3D shape;QVector<float> preview;QVector<quint64> objectKeys;QByteArray secondary,parts,modelBytes,boneBytes,textureBytes;};
+    QList<OutputJob> outputs;
+
     struct Input {
         QByteArray terrain,name;
         QVector<QByteArray> mobs;
@@ -146,6 +149,7 @@ struct CRebuild64Viewport::Worker {
             resourcesReady=!gameRoot.isEmpty();
         }
     } input;
+    Input liveInput; // retains spans supplied by the output-only callback
     CRebuild64Viewport* owner;
     void* window;
     QTemporaryDir sessionDirectory;
@@ -176,6 +180,13 @@ struct CRebuild64Viewport::Worker {
     void failure(const QString& detail) {
         QMetaObject::invokeMethod(owner,[target=owner,detail]{if(!target->m_stopping)target->fallback(detail);},Qt::QueuedConnection);
     }
+    static uint32_t EIR_CALL liveValues(void* context,uint64_t generation,uint32_t neighbours,EirCamera* camera,EirService* service) {
+        auto& worker=*static_cast<Worker*>(context);std::lock_guard<std::mutex> lock(worker.mutex);
+        if(worker.stop||worker.paused||worker.input.generation!=generation||worker.input.documentDirty||worker.input.camera.neighbours_visible!=neighbours)return 0;
+        worker.liveInput=worker.input;const auto& current=worker.liveInput;*camera=current.camera;
+        *service={sizeof(EirService),uint32_t(current.service.width()),uint32_t(current.service.height()),uint32_t(current.service.bytesPerLine()),current.serviceSerial,current.generation,current.serviceCpuMs,{current.service.constBits(),uint64_t(current.service.sizeInBytes())},current.poses.constData(),uint32_t(current.poses.size())};
+        return 1;
+    }
     static uint32_t EIR_CALL canPresent(void* context,uint64_t generation,uint32_t neighbours,uint32_t phase) {
         auto& worker=*static_cast<Worker*>(context);
         if(phase==1){worker.mutex.unlock();return 1;}
@@ -186,6 +197,32 @@ struct CRebuild64Viewport::Worker {
             ; // Native world readiness is independent of editor query geometry.
         if(phase==2||!current)worker.mutex.unlock();
         return current;
+    }
+    void processOutput(void* handle,EirApi& api,quint64 generation,const EirStatistics& stats) {
+        EirError error{};
+                OutputJob job{};bool hasJob=false;
+                {std::lock_guard<std::mutex> lock(mutex);if(!outputs.isEmpty()){job=outputs.takeFirst();hasJob=true;}}
+                if(hasJob) {
+                    const QSize extent=job.mode<2?QSize(stats.width,stats.height):job.size;
+                    QImage image(extent,QImage::Format_ARGB32);EirOutput value{};value.size=sizeof(value);
+                    value.bgra=image.bits();value.capacity=image.sizeInBytes();
+                    EirOutputRequest request{};request.size=sizeof(request);request.mode=job.mode;request.width=extent.width();request.height=extent.height();
+                    request.generation=job.generation;request.serial=job.serial;request.camera=job.camera;
+                    request.model=job.model.constData();request.texture=job.texture.constData();for(int a=0;a<3;++a)request.shape[a]=job.shape[a];request.preview[4]=1;for(int a=0;a<qMin(12,job.preview.size());++a)request.preview[a]=job.preview[a];request.object_keys={job.objectKeys.constData(),uint64_t(job.objectKeys.size())*sizeof(quint64)};request.secondary_texture=job.secondary.constData();request.part_names=job.parts.constData();
+                    request.model_bytes={job.modelBytes.constData(),uint64_t(job.modelBytes.size())};request.bone_bytes={job.boneBytes.constData(),uint64_t(job.boneBytes.size())};request.texture_bytes={job.textureBytes.constData(),uint64_t(job.textureBytes.size())};
+                    QString diagnostic;
+                    if(job.generation!=generation)diagnostic=QString::fromUtf8("Документ изменился до offscreen-вывода Rebuild64. Повторите запрос.");
+                    else if(!qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE").isEmpty()&&QFileInfo::exists(qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE")+".offscreen-error"))diagnostic=QString::fromUtf8("Тестовая ошибка offscreen Rebuild64.");
+                    else if(api.output(handle,&request,&value,&error))diagnostic=QString::fromUtf8(error.message);
+                    else image=image.copy(0,0,int(value.width),int(value.height));
+                    if(qEnvironmentVariableIsSet("ATAMAN_REBUILD64_LAUNCH_CASE"))qInfo("NATIVE_OUTPUT mode=%d serial=%llu generation=%llu map=%s neighbours_accepted=%u pending=%u extent=%ux%u error=%s",job.mode,(unsigned long long)job.serial,(unsigned long long)value.generation,value.map,value.neighbours_accepted,value.pending,value.width,value.height,qPrintable(diagnostic));
+
+                    QMetaObject::invokeMethod(owner,[target=owner,job,image,diagnostic,value]{
+                        QString error=diagnostic;
+                        if(target->m_stopping||(!target->m_selected&&!target->m_outputOnly)||job.generation!=target->m_generation||(job.mode!=3&&target->m_documentRefreshPending))error=QString::fromUtf8("Offscreen отменён: карта закрыта или изменена.");
+                        emit target->outputFinished(job.serial,error.isEmpty()?image:QImage(),error,value.generation,QString::fromUtf8(value.map),int(value.neighbours_accepted));
+                    },Qt::QueuedConnection);
+                }
     }
     void run() {
         struct Completion {std::atomic<bool>& value;~Completion(){value=true;}} completion{finished};
@@ -229,7 +266,9 @@ struct CRebuild64Viewport::Worker {
                 next=input; // A pending frame must not consume a capture request without a response.
             }
             EirError error{};
-            if(next.terrain.isEmpty() && !next.opening) {
+            bool detachedPreview=false;
+            {std::lock_guard<std::mutex> lock(mutex);detachedPreview=!outputs.isEmpty()&&outputs.front().mode==3;}
+            if(next.terrain.isEmpty() && !next.opening&&!detachedPreview) {
                 // There is no world to prepare. A device created for the empty
                 // profile would be discarded when map-local mounts/layout arrive.
                 // Closing a document also retires its device instead of submitting
@@ -287,7 +326,7 @@ struct CRebuild64Viewport::Worker {
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
                 const auto layout=next.neighbourLayout.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues};
                 phase(QString::fromUtf8("Создание D3D11 и подготовка шейдеров"));
                 opening::Scope deviceTiming("native.create");
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
@@ -319,6 +358,7 @@ struct CRebuild64Viewport::Worker {
                 next.opening.reset();
             }
             {std::lock_guard<std::mutex> lock(mutex);if(stop)break;if(paused||input.generation!=next.generation)continue;}
+            if(detachedPreview&&next.terrain.isEmpty())processOutput(handle,api,next.generation,{});
             if(!next.generation) {
                 startup.clear();prepared=true;phase(QString::fromUtf8("Готов к открытию карты"));
                 std::unique_lock<std::mutex> lock(mutex);
@@ -407,11 +447,20 @@ struct CRebuild64Viewport::Worker {
                     {std::lock_guard<std::mutex> lock(mutex);currentRequest=input.capture==next.capture&&input.captureGeneration==next.captureGeneration;
                         if(currentRequest)input.capture.clear();}
                     if(!currentRequest)continue;
-                    const auto path=next.capture.toStdWString();
-                    const auto captureError=next.captureGeneration!=generation?QString::fromUtf8("Документ изменился до получения кадра Rebuild64. Повторите window_snapshot."):(next.captureWorld?api.capture_world:api.capture)(handle,reinterpret_cast<const uint16_t*>(path.c_str()),&error)?QString::fromUtf8(error.message):QString();
+                    QString captureError;
+                    if(next.captureGeneration!=generation)captureError=QString::fromUtf8("Документ изменился до получения кадра Rebuild64. Повторите window_snapshot.");
+                    else {
+                        QImage image(int(stats.width),int(stats.height),QImage::Format_ARGB32);
+                        EirOutput value{};value.size=sizeof(value);value.bgra=image.bits();value.capacity=image.sizeInBytes();
+                        EirOutputRequest request{};request.size=sizeof(request);request.mode=next.captureWorld?1:0;request.generation=generation;
+                        if(!qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE").isEmpty()&&QFileInfo::exists(qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE")+".offscreen-error"))captureError=QString::fromUtf8("Тестовая ошибка offscreen Rebuild64.");
+                        else if(api.output(handle,&request,&value,&error))captureError=QString::fromUtf8(error.message);
+                        else if(!image.save(next.capture,"PNG"))captureError=QString::fromUtf8("Не удалось записать снимок Rebuild64.");
+                    }
                     QMetaObject::invokeMethod(owner,[target=owner,path=next.capture,captureError,generation]{emit target->captureFinished(path,captureError,generation);},Qt::QueuedConnection);
                 }
             }
+            if(!rc)processOutput(handle,api,generation,stats);
             // No busy loop when the condition predicate already has input.
             std::unique_lock<std::mutex> lock(mutex);
             wake.wait_until(lock,frameStart+std::chrono::milliseconds(16),[this]{return stop||paused;});
@@ -423,6 +472,7 @@ struct CRebuild64Viewport::Worker {
 
 CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     :QWidget(parent),m_gl(gl),m_native(new CRebuild64NativeSurface(this)),m_preparation(new QWidget(this)),m_preparationText(new QLabel(m_preparation)),m_stack(new QStackedLayout(this)),m_timer(new QTimer(this)) {
+    connect(this,&CRebuild64Viewport::captureFinished,this,[this](const QString& path,const QString&,quint64){if(m_activeCapturePath==path)m_activeCapturePath.clear();});
     setObjectName("rebuild64Viewport");m_native->setObjectName("rebuild64NativeSurface");
     m_preparation->setObjectName("rebuild64Preparation");
     m_preparation->setAutoFillBackground(true);
@@ -448,7 +498,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
         if(m_earlyDocument && m_gl->m_pLand && m_gl->m_pLand->isMprLoad()
            &&m_earlyMap==m_gl->m_pLand->filePath().absoluteFilePath())return;
         m_documentRefreshPending=true;
-        if(m_selected && (!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()
+        if((m_selected||m_outputOnly) && (!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()
            || m_documentMapPath!=m_gl->m_pLand->filePath().absoluteFilePath()))beginDocumentTransition();
         if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}
     });
@@ -513,7 +563,7 @@ bool CRebuild64Viewport::backendLoaded() const {return m_worker&&m_worker->loade
 bool CRebuild64Viewport::backendPrepared() const {return m_worker&&m_worker->prepared.load();}
 bool CRebuild64Viewport::backendResourcesRetired() const {return !m_worker||m_worker->resourcesRetired.load();}
 void CRebuild64Viewport::stopForApplicationShutdown() {
-    if(m_stopping)return;m_stopping=true;m_selected=false;m_timer->stop();
+    if(m_stopping)return;cancelOutputs(tr("Offscreen отменён: приложение завершает работу."));m_stopping=true;m_selected=false;m_timer->stop();
     if(m_gl){m_gl->suspendRendering();m_gl->setFocusProxy(nullptr);}movePanels(false);
     if(m_worker){{std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->stop=true;}m_worker->wake.notify_all();}
 }
@@ -548,6 +598,7 @@ void CRebuild64Viewport::prepareBackend() {
 
 void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     if(!m_gl||m_stopping)return;
+    if(!selected){cancelOutputs(tr("Offscreen отменён: выбран OpenGL."));if(!m_activeCapturePath.isEmpty())emit captureFinished(m_activeCapturePath,tr("Снимок отменён: выбран OpenGL."),m_generation);}
     if(selected && qApp->property("agentHeadless").toBool())return;
     if(selected)for(auto* node:m_gl->selectionSnapshot())if(node->nodeType()==ENodeType::eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0){
         if(m_selected)selectRebuild(false,false);m_glAction->setChecked(true);m_rebuildAction->setChecked(false);
@@ -629,12 +680,14 @@ void CRebuild64Viewport::updatePreparationText() {
             :tr("Rebuild64\nКарта не открыта. Откройте или создайте карту через меню Файл.\nВосстановление сохранений и настройки доступны в обычных меню.")));
 }
 void CRebuild64Viewport::beginDocumentTransition() {
-    if(!m_selected)return;
+    cancelOutputs(tr("Offscreen отменён: карта закрывается или меняется."));
+    if(!m_activeCapturePath.isEmpty())emit captureFinished(m_activeCapturePath,tr("Снимок отменён: карта закрывается или меняется."),m_generation);
+    if(!m_selected&&!m_outputOnly)return;
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);if(m_worker->input.opening)m_worker->input.opening->cancel->store(true);}
     m_earlyDocument=false;m_earlyMap.clear();
     // Resource-write transitions on the same map retain pending tool input.
     ++m_generation;m_backendResourceKey.clear();
-    m_gl->setProperty("rebuild64LegacyNeighborsDemanded",false);
+    if(m_selected)m_gl->setProperty("rebuild64LegacyNeighborsDemanded",false);
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->paused=true;m_worker->retainPausedHandle=true;m_worker->input.documentDirty=true;m_worker->input.generation=m_generation;}
     emit documentTransitionStarted(m_generation);
     m_documentHash.clear();m_documentMapPath.clear();m_sceneSnapshotTimer.invalidate();m_documentRefreshPending=true;
@@ -647,10 +700,19 @@ void CRebuild64Viewport::requireOpenGL(const QString& action) {
 }
 void CRebuild64Viewport::fallback(const QString& message) {
     if(!m_gl)return;
+    if(m_outputOnly){m_failure=message;m_outputOnly=false;m_timer->stop();
+        if(m_worker){QList<Worker::OutputJob> jobs;{std::lock_guard<std::mutex> lock(m_worker->mutex);jobs=m_worker->outputs;m_worker->outputs.clear();}
+            for(const auto& job:jobs)emit outputFinished(job.serial,{},message,job.generation,{},0);}
+        m_worker.reset();emit backendFailure(message);return;}
+    const auto pendingCapture=m_activeCapturePath;m_activeCapturePath.clear();
     m_failure=message;
+    // A failed device is an output failure, not a user cancellation. GUI
+    // function adapters may complete through their ordinary GL fallback.
+    cancelOutputs(message);
     selectRebuild(false,false);
     m_worker.reset();
     emit m_gl->updateMsg(QString::fromUtf8("Rebuild64 недоступен. Открыт OpenGL. ")+message);
+    if(!pendingCapture.isEmpty())emit captureFinished(pendingCapture,message,m_generation);
     emit backendFailure(message);
 }
 EirCamera CRebuild64Viewport::cameraSnapshot() {
@@ -735,7 +797,7 @@ void CRebuild64Viewport::tick() {
         }
         return;
     }
-    if(!m_selected||!m_gl||m_gl->m_applicationShutdown)return;
+    if((!m_selected&&!m_outputOnly)||!m_gl||m_gl->m_applicationShutdown)return;
     updatePreparationText();
     if(m_restartWhenFinished){
         if(m_worker&&!m_worker->finished.load())return;
@@ -765,6 +827,12 @@ void CRebuild64Viewport::tick() {
     if(ei::legacyProjectionPulse()||m_gl->m_unitVisualPreparationSuspended||m_gl->m_openingProjectionDepth || qApp->property("rebuild64StartupDocumentBatch").toBool())return;
     if(auto* main=qobject_cast<MainWindow*>(window()))if(!main->rebuild64DocumentReady())return;
     if(!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()) {
+        if(m_outputOnly) {
+            cancelOutputs(tr("Offscreen отменён: карта закрыта."));
+            if(m_worker){{std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->stop=true;}m_worker->wake.notify_all();}
+            m_outputOnly=false;m_statistics={};m_timer->stop();return;
+        }
+
         // A standalone MOB/terrain-less collection is a real document, not an
         // empty editor. The pinned native scene ingress requires MPR terrain.
         if(!m_gl->m_aMob.isEmpty()) {
@@ -789,7 +857,7 @@ void CRebuild64Viewport::tick() {
     const bool preview=m_gl->hasPendingOperation();
     if(preview&&!m_transformPreviewMessage)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: предпросмотр преобразования. Мир обновится после подтверждения."));
     m_transformPreviewMessage=preview;
-    serviceInput();
+    if(!m_outputOnly)serviceInput();
     if(m_worker&&m_sceneSnapshotTimer.isValid()&&m_sceneSnapshotTimer.elapsed()<100) {
         const auto camera=cameraSnapshot();
         const QSize size(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
@@ -873,6 +941,7 @@ void CRebuild64Viewport::openDocumentEarly(const QFileInfo& file,const QStringLi
     m_worker->wake.notify_all();
 }
 void CRebuild64Viewport::capture(const QString& path,bool worldOnly) {
+    m_activeCapturePath=path;
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.capture=path;m_worker->input.captureGeneration=m_generation;m_worker->input.captureWorld=worldOnly;}
 }
 QImage CRebuild64Viewport::emptyViewportImage() {
@@ -880,6 +949,7 @@ QImage CRebuild64Viewport::emptyViewportImage() {
     QImage image(m_preparation->size(),QImage::Format_ARGB32_Premultiplied);image.fill(Qt::transparent);m_preparation->render(&image);return image;
 }
 void CRebuild64Viewport::cancelCapture(const QString& path) {
+    if(m_activeCapturePath==path)m_activeCapturePath.clear();
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);if(m_worker->input.capture==path)m_worker->input.capture.clear();}
 }
 bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
@@ -1108,4 +1178,29 @@ void CRebuild64Viewport::resizeEvent(QResizeEvent* event) {
     m_gl->m_normalProjection.setToIdentity();m_gl->m_normalProjection.perspective(45,float(extent.width())/extent.height(),1,1000);
     m_gl->updateCameraProjection();m_editorViewportDirty=true;
     QTimer::singleShot(0,this,&CRebuild64Viewport::tick);
+}
+
+quint64 CRebuild64Viewport::requestOutput(const QSize& size,int mode,const EirCamera& camera,const QString& model,const QString& texture,const QVector3D& shape,const QVector<float>& preview,const QVector<quint64>& objectKeys,const QString& secondary,const QStringList& parts,const QByteArray& modelBytes,const QByteArray& boneBytes,const QByteArray& textureBytes) {
+    const auto serial=++m_outputSerial;
+    if(!m_selected&&qApp->property("agentHeadless").toBool()&&qApp->property("agentNativeOutput").toBool()) {
+        if(!m_gl->m_pLand||!m_gl->m_pLand->isMprLoad()) {
+            QTimer::singleShot(0,this,[this,serial]{emit outputFinished(serial,{},tr("Для native-вывода сначала откройте MPR."),0,{},0);});return serial;
+        }
+        if(m_worker&&m_worker->finished.load())m_worker.reset();
+
+        m_outputOnly=true;m_documentRefreshPending=true;m_timer->start();tick();
+    }
+    if((!m_selected&&!m_outputOnly)||!m_worker||(mode!=3&&!m_outputOnly&&!frameIsCurrent())) {
+        QTimer::singleShot(0,this,[this,serial]{emit outputFinished(serial,{},tr("Rebuild64: мир, материалы и соседние карты ещё готовятся. Повторите вывод после готовности кадра."),0,{},0);});return serial;
+    }
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);
+        if(m_worker->outputs.size()>=8){QTimer::singleShot(0,this,[this,serial]{emit outputFinished(serial,{},tr("Rebuild64: очередь вывода заполнена. Повторите запрос."),0,{},0);});return serial;}
+        m_worker->outputs.append({serial,m_generation,size,mode,camera,model.toUtf8(),texture.toUtf8(),shape,preview,objectKeys,secondary.toUtf8(),parts.join("\n").toUtf8(),modelBytes,boneBytes,textureBytes});}
+    m_worker->wake.notify_all();return serial;
+}
+
+void CRebuild64Viewport::cancelOutputs(const QString& reason) {
+    if(!m_worker)return;QList<Worker::OutputJob> jobs;
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);jobs=m_worker->outputs;m_worker->outputs.clear();}
+    for(const auto& job:jobs)emit outputFinished(job.serial,{},reason,job.generation,{},0);
 }

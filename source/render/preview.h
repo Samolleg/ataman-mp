@@ -5,9 +5,14 @@
 #include <QMatrix4x4>
 #include <QOpenGLShaderProgram>
 #include "types.h"
+#include <QImage>
+#include <QTimer>
+#include <QPointer>
+class QLabel;
 
 class CNode;
 class CView;
+class CRebuild64Viewport;
 class CCamera;
 class CSettings;
 class QMouseEvent;
@@ -22,7 +27,8 @@ class CPreview : public QGLWidget
 public:
     explicit CPreview(QWidget* parent=nullptr, const QGLWidget* shareWidget=nullptr);
     //explicit CPreview(QWidget* parent=nullptr, const QGLWidget* pShareWidget=nullptr);
-    void attachView(CView* pView) {m_pView = pView;}
+    void attachView(CView* pView);
+    QImage nativeImage() const { return m_nativeImage; }
     void attachNode(CNode* pNode, bool resetView = true);
     void resetView(const QVector3D& cameraRotation = QVector3D(-70.0f, 0.0f, -45.0f),
                    float modelPitch = 0.0f, float modelYaw = 0.0f);
@@ -43,17 +49,28 @@ protected:
 
 private:
     void draw();
+    bool nativeSelected() const;
+    QByteArray nativeStateKey() const;
+    QByteArray m_nativeRequestKey;
+    QPointer<CRebuild64Viewport> m_nativeViewport;
+    void requestNative();
+    QLabel* m_nativeLabel{nullptr};
+    QImage m_nativeImage;
+    QTimer m_nativeTimer;
+    quint64 m_nativeSerial{0};bool m_nativePending{false},m_nativeFallback{false};
+    float m_nativeZoom{1};QPointF m_nativeOrbit;
+
 
 private slots:
     void refreshCam(CBox nodePos);
 
 private:
-    CNode* m_pNode;
+    QPointer<CNode> m_pNode;
     int m_height;
     int m_width;
     QMatrix4x4 m_projection;
     QOpenGLShaderProgram m_program;
-    CView* m_pView;
+    QPointer<CView> m_pView;
     QSharedPointer<CCamera> m_cam;
     QPoint m_lastMouse;
     Qt::MouseButton m_dragButton{Qt::NoButton};

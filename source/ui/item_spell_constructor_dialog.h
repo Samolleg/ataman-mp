@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QSharedPointer>
+#include <QPointer>
 #include "item_spell_constructor.h"
 
 class CPreview;
@@ -66,6 +67,7 @@ private:
     void updateSpellPreview();
     void showImportDiagnostic(const QStringList& messages);
 
+    bool m_nativeLoading{false};QString m_pendingCode;
     ItemSpellConstructorCatalog m_catalog;
     QSharedPointer<const SProfileDatabaseSnapshot> m_databaseSnapshot;
     QString m_providerId;
@@ -85,7 +87,7 @@ private:
     QLabel* m_itemSpellBadge{nullptr};
     CPreview* m_itemPreview{nullptr};
     CWorldObj* m_previewObject{nullptr};
-    CView* m_view{nullptr};
+    QPointer<CView> m_view;
     bool m_itemPreviewInitialized{false};
     QString m_itemPreviewCategory;
 

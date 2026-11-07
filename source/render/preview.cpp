@@ -1,3 +1,5 @@
+#include "res_file.h"
+#include "object_assembly.h"
 #include "shader_locations.h"
 #include "preview.h"
 #include "gl_dispatch.h"
@@ -9,18 +11,29 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QOpenGLContext>
+#include <QLabel>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include "native_output.h"
+#include "rebuild64_viewport_widget.h"
 
 CPreview::CPreview(QWidget *parent, const QGLWidget* shareWidget):
     QGLWidget(parent, shareWidget)
   ,m_pNode(nullptr)
   ,m_pView(nullptr)
 {
+    m_nativeLabel=new QLabel(this);m_nativeLabel->setAlignment(Qt::AlignCenter);m_nativeLabel->setWordWrap(true);
+    m_nativeLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_nativeLabel->setStyleSheet("background:#292929;color:white");m_nativeLabel->hide();
+    m_nativeTimer.setSingleShot(true);m_nativeTimer.setInterval(33);connect(&m_nativeTimer,&QTimer::timeout,this,&CPreview::requestNative);
     m_cam.reset(new CCamera(QVector3D(0.0, 0.5, 5.0), QVector3D(0.0, 0.0, 0.0), -70.0f, -45.0f));
 }
 
 void CPreview::attachNode(CNode *pNode, bool resetView)
 {
-    m_pNode = pNode;
+    m_pNode = pNode;m_nativeSerial=0;m_nativePending=false;m_nativeFallback=false;m_nativeImage={};m_nativeRequestKey.clear();
+    if(nativeSelected()){if(resetView){m_pan={};m_modelPitch=m_modelYaw=0;m_nativeZoom=1;m_nativeOrbit={};}m_nativeLabel->setText(tr("Rebuild64: подготовка просмотра…"));m_nativeLabel->show();m_nativeTimer.start();return;}
     if(resetView)
         this->resetView();
     else
@@ -33,6 +46,7 @@ void CPreview::resetView(const QVector3D& cameraRotation,float modelPitch,float 
     m_modelYaw = modelYaw;
     m_modelPitch = modelPitch;
     m_resetCameraRotation=cameraRotation;
+    if(nativeSelected()){m_nativeTimer.start();return;}
     if(m_pNode)
         refreshCam(m_pNode->getBBox());
 }
@@ -51,6 +65,7 @@ CPreview::~CPreview()
 
 void CPreview::initializeGL()
 {
+    if(nativeSelected())return;
     makeCurrent();
     // Textures/geometry are shared with the viewport, shader state is not.
     // Map overlays leave customColor and environment uniforms behind.
@@ -77,7 +92,8 @@ void CPreview::resizeGL(int width, int height)
     makeCurrent();
     m_height = height;
     m_width = width;
-    const float ratio = float(width)/height;
+    m_nativeLabel->setGeometry(rect());if(nativeSelected()){m_nativeTimer.start();return;}
+    const float ratio = float(width)/qMax(1,height);
     ei::gl::Viewport(0, 0, width, height);
     m_projection.setToIdentity();
     m_projection.perspective(45, ratio, 0.02f, 1000.0f);
@@ -85,12 +101,15 @@ void CPreview::resizeGL(int width, int height)
 
 void CPreview::showEvent(QShowEvent* event)
 {
-    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("GL-предпросмотр модели"));
+    if(nativeSelected()){m_nativeLabel->setGeometry(rect());m_nativeLabel->show();m_nativeTimer.start();}
     QGLWidget::showEvent(event);
 }
 
 void CPreview::paintGL()
 {
+    if(nativeSelected()){m_nativeLabel->setGeometry(rect());m_nativeLabel->show();if(nativeStateKey()!=m_nativeRequestKey&&!m_nativeTimer.isActive())m_nativeTimer.start();return;}
+    m_nativeLabel->hide();
+    if(!m_program.isLinked()){initializeGL();resizeGL(width(),height());}
     makeCurrent();
     ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     draw();
@@ -100,6 +119,7 @@ void CPreview::paintGL()
 
 void CPreview::wheelEvent(QWheelEvent *event)
 {
+    if(nativeSelected()){m_nativeZoom=qBound(.1f,m_nativeZoom*(event->angleDelta().y()>0?1.15f:1/1.15f),10.f);m_nativeTimer.start();event->accept();return;}
     event->angleDelta().y() > 0 ? m_cam->strafeForward(false) : m_cam->strafeBack(false);
     updateGL();
     event->accept();
@@ -116,6 +136,12 @@ void CPreview::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint delta = event->pos() - m_lastMouse;
     m_lastMouse = event->pos();
+    if(nativeSelected()) {
+        if(m_dragButton==Qt::LeftButton)m_pan+=QVector3D(-2.f*delta.x()/qMax(1,width()),0,2.f*delta.y()/qMax(1,height()));
+        else if(m_dragButton==Qt::MiddleButton){m_modelYaw+=delta.x()*.45f;m_modelPitch=qBound(-89.f,m_modelPitch+delta.y()*.45f,89.f);}
+        else if(m_dragButton==Qt::RightButton)m_nativeOrbit+=QPointF(delta.x()*.5f,-delta.y()*.4f);
+        m_nativeTimer.start();event->accept();return;
+    }
     if(m_dragButton == Qt::LeftButton)
     {
         const float scale = m_pNode ? qMax(0.1f, m_pNode->getBBox().radius()) : 1.0f;
@@ -170,7 +196,7 @@ void CPreview::draw()
     pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_projMmatrix"), m_projection);
     pProgram->setUniformValue(ei::uniformLocation(pProgram, "u_viewMmatrix"), camMatrix);
 
-    if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode))
+    if(CUnit* unit = dynamic_cast<CUnit*>(m_pNode.data()))
         unit->drawObjectVisual(true, pProgram);
     else
         m_pNode->draw(true, pProgram);
@@ -185,3 +211,55 @@ void CPreview::refreshCam(CBox box)
     updateGL();
 }
 
+
+QByteArray CPreview::nativeStateKey() const {
+    if(!m_pNode)return {};
+    return QJsonDocument(QJsonObject{{"node",m_pNode->toJson()},{"transient",m_pNode->independentPreviewSource()},{"width",width()},{"height",height()},{"pitch",m_modelPitch},{"yaw",m_modelYaw},{"orbitX",m_nativeOrbit.x()},{"orbitY",m_nativeOrbit.y()},{"zoom",m_nativeZoom},{"panX",m_pan.x()},{"panZ",m_pan.z()}}).toJson(QJsonDocument::Compact);
+}
+bool CPreview::nativeSelected() const {return m_pView&&m_pView->property("rebuild64Selected").toBool()&&!m_nativeFallback;}
+void CPreview::attachView(CView* view) {
+    m_pView=view;if(view&&view->settings())m_cam->attachSettings(view->settings());
+    if(auto* viewport=nativeOutputViewport(view)) {
+        if(m_nativeViewport==viewport)return;
+        if(m_nativeViewport)disconnect(m_nativeViewport,nullptr,this,nullptr);m_nativeViewport=viewport;
+        connect(viewport,&CRebuild64Viewport::outputFinished,this,[this](quint64 serial,const QImage& image,const QString& error,quint64,const QString&,int){
+            if(serial!=m_nativeSerial)return;m_nativePending=false;
+            if(nativeStateKey()!=m_nativeRequestKey){m_nativeImage={};m_nativeLabel->setText(tr("Rebuild64: подготовка просмотра…"));m_nativeTimer.start();return;}
+            if(!error.isEmpty()) {
+                m_nativeLabel->setText(error);qWarning("NATIVE_PREVIEW %s",error.toUtf8().constData());
+                // Only this preview falls back. The displayed map, camera and
+                // documents remain in their current renderer.
+                m_nativeFallback=true;if(m_pView)emit m_pView->updateMsg(tr("Просмотр Rebuild64 недоступен; для этого просмотра используется OpenGL. %1").arg(error));
+                if(m_pNode)refreshCam(m_pNode->getBBox());m_nativeLabel->hide();updateGL();return;
+            }
+            if(nativeStateKey()!=m_nativeRequestKey){m_nativeImage={};m_nativeLabel->setText(tr("Rebuild64: подготовка просмотра…"));m_nativeTimer.start();return;}
+            m_nativeImage=image;m_nativeLabel->setText({});m_nativeLabel->setPixmap(QPixmap::fromImage(image).scaled(size(),Qt::KeepAspectRatio,Qt::SmoothTransformation));
+        });
+        connect(viewport,&CRebuild64Viewport::rendererSelectionChanged,this,[this]{m_nativeSerial=0;m_nativePending=false;m_nativeFallback=false;m_nativeTimer.start();updateGL();});
+    }
+}
+void CPreview::requestNative() {
+    if(!nativeSelected()||!isVisible())return;
+    if(!m_pNode){m_nativeLabel->clear();return;}
+    const auto transient=m_pNode->independentPreviewSource();
+    if(dynamic_cast<CUnit*>(m_pNode.data())||transient.value("requiresAppearance").toBool()||(transient.isEmpty()&&m_pNode->modelName().compare("stst8",Qt::CaseInsensitive)==0)){m_nativeLabel->setText(tr("Просмотр персонажа, appearance и stst8 будет доступен на следующем этапе. Для него выберите OpenGL."));return;}
+    if(m_nativePending){m_nativeTimer.start();return;}
+    auto* viewport=nativeOutputViewport(m_pView);if(!viewport)return;
+    if(m_nativeViewport!=viewport)attachView(m_pView.data());
+    const auto object=ei::assemblyWorldObject(m_pNode->toJson());
+    const auto c=m_pNode->complection();const QVector3D complection(c.y(),c.x(),c.z());
+    const auto texture=transient.value("texture").toString(m_pNode->textureName());
+    QStringList parts;for(const auto& part:(transient.contains("parts")?transient.value("parts"):object.value("Object parts")).toArray())parts.append(part.toString());
+    // Built-in logic markers live in the mapper's own resource bundle. Pass
+    // their exact bytes; the renderer must not search the game's archives for them.
+    static const QMap<QString,QByteArray> auxiliary=[] {CResFile archive(QStringLiteral(":/auxData.res"));return archive.bufferOfFiles();}();
+    const auto baseRotation=m_pNode->rotation();
+    const auto model=transient.value("model").toString(m_pNode->modelName());const auto modelBytes=auxiliary.value(model.toLower()+".mod");
+    if(qEnvironmentVariableIsSet("ATAMAN_REBUILD64_LAUNCH_CASE"))setProperty("nativeOutputSource",QJsonObject{{"model",model},{"texture",texture},{"parts",QJsonArray::fromStringList(parts)},{"transient",transient}});
+    if(qEnvironmentVariableIsSet("ATAMAN_REBUILD64_LAUNCH_CASE"))qInfo("NATIVE_PREVIEW_SOURCE model=%s texture=%s parts=%s transient=%s",qPrintable(model),qPrintable(texture),qPrintable(parts.join(",")),QJsonDocument(transient).toJson(QJsonDocument::Compact).constData());
+    m_nativeRequestKey=nativeStateKey();m_nativeImage={};m_nativeLabel->setText(tr("Rebuild64: подготовка просмотра…"));
+    m_nativePending=true;
+    m_nativeSerial=viewport->requestOutput(size(),3,viewport->outputCamera(),model,texture,complection,
+        {m_modelPitch,m_modelYaw,float(m_nativeOrbit.x()),float(m_nativeOrbit.y()),m_nativeZoom,m_pan.x(),m_pan.z(),baseRotation.scalar(),baseRotation.x(),baseRotation.y(),baseRotation.z()},{},(transient.isEmpty()?object.value("Secondary texture").toString():transient.value("secondary").toString(texture)),parts,
+        modelBytes,auxiliary.value(model.toLower()+".bon"),auxiliary.value(texture.toLower()+".mmp"));
+}

@@ -545,6 +545,7 @@ int runHeadlessCommand(QApplication& app)
                                      "Print the application version without opening a window.");
     parser.addOption(versionOption);
     parser.addOption(QCommandLineOption("agent-headless","Run the mapper invisibly for MCP under saved owner permissions."));
+    parser.addOption(QCommandLineOption("agent-native-output","Enable explicit native offscreen requests in agent-headless; D3D stays lazy."));
     parser.addOption(QCommandLineOption("rebuild64-launch-check","Run an explicitly isolated hidden startup case.","case-json"));
     QCommandLineOption validateOption("validate", "Validate a MOB or MPR without changing it.", "file");
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
@@ -4218,6 +4219,9 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     installRebuild64LaunchCheck(app);
     app.setProperty("agentHeadless",agentHeadless);
+    // Explicit output capability; no worker/DLL is created until an output tool asks.
+    bool nativeOutputRequested=false;for(int i=1;i<argc;++i)nativeOutputRequested|=std::strcmp(argv[i],"--agent-native-output")==0;
+    app.setProperty("agentNativeOutput",agentHeadless&&nativeOutputRequested);
     if(agentHeadless)app.setQuitOnLastWindowClosed(false);
     app.setProperty("startupReferenceMs",startupClock.msecsSinceReference());
     g_previousQtMessageHandler = qInstallMessageHandler(

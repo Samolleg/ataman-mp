@@ -48,7 +48,7 @@ struct AtamanReadiness {
   // bootstrap. Use the same registry and INI loader before its first apply.
   r.register_config_options();return r.debug_overlay_.config().load(path);
  }
- static HRESULT material(Renderer& r,const std::string& name,const TextureCpuAsset& texture) {
+ static HRESULT material(Renderer& r,const std::string& name,const TextureCpuAsset& texture,Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>* output=nullptr) {
   static_assert(int(MmpFormat::dxt5)==int(NativeOwnedTextureFormat::dxt5),"pinned MMP format order");
   NativeOwnedTextureView view;view.value_source=static_cast<UINT>(texture.value_source)+1;
   view.identity=texture.value_source==TextureValueSource::archive?1:texture.value_serial;view.generation=1;
@@ -59,7 +59,7 @@ struct AtamanReadiness {
   view.mips=levels.data();view.mip_count=UINT(levels.size());view.material_name=&name;
   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;uint64_t backing=0;NativeGeometryResult result;
   const HRESULT hr=r.get_native_owned_texture(view,srv,backing,&result,true,true);
-  if(SUCCEEDED(hr))r.note_material_texture(name,backing,false);
+  if(SUCCEEDED(hr)){r.note_material_texture(name,backing,false);if(output)*output=srv;}
   return hr;
  }
  static void quality(const Renderer& r) noexcept {
@@ -106,7 +106,7 @@ struct ResourceRuntimeLifetime {
 #include "editor_service.h"
 #include "presentation_trace.h"
 struct EditorSeed {uint32_t mob=0,nid=0;int32_t rendererId=0;std::shared_ptr<const owned::VisualAssemblyAsset> assembly;owned::VisualObjectPose pose;bool visible=true;};
-struct Session {ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;};
+struct Session {uint32_t(EIR_CALL *liveValues)(void*,uint64_t,uint32_t,EirCamera*,EirService*)=nullptr;std::chrono::steady_clock::time_point livePump=std::chrono::steady_clock::now();UINT pixelWidth=0,pixelHeight=0;bool independentOutput=false;ComPtr<ID3D11Texture2D> outputTarget;ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;HiddenWindow previewWindow;ComPtr<ID3D11Device> previewDevice;ComPtr<ID3D11DeviceContext> previewContext;std::unique_ptr<owned::Renderer> previewRenderer;std::shared_ptr<owned::RetainedStaticSourceCandidate> previewSource;std::string previewKey;};
 bool active=false;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -115,9 +115,9 @@ HRESULT read_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* sou
  if(desc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM&&desc.Format!=DXGI_FORMAT_R8G8B8A8_UNORM)return E_NOTIMPL;
  const bool bgra=desc.Format==DXGI_FORMAT_B8G8R8A8_UNORM;
  desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
- ComPtr<ID3D11Texture2D> staging;HRESULT hr=s.device->CreateTexture2D(&desc,nullptr,&staging);if(FAILED(hr))return hr;
+ ComPtr<ID3D11Device> sourceDevice;source->GetDevice(&sourceDevice);ComPtr<ID3D11Texture2D> staging;HRESULT hr=sourceDevice->CreateTexture2D(&desc,nullptr,&staging);if(FAILED(hr))return hr;
  context->CopyResource(staging.Get(),source);D3D11_MAPPED_SUBRESOURCE mapped{};hr=context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped);if(FAILED(hr))return hr;
- s.width=desc.Width;s.height=desc.Height;s.pixels.resize(size_t(desc.Width)*desc.Height*4);
+ s.pixelWidth=desc.Width;s.pixelHeight=desc.Height;s.pixels.resize(size_t(desc.Width)*desc.Height*4);
  for(UINT y=0;y<desc.Height;++y){const auto* src=static_cast<const uint8_t*>(mapped.pData)+y*mapped.RowPitch;auto* dst=s.pixels.data()+size_t(y)*desc.Width*4;
   for(UINT x=0;x<desc.Width;++x){dst[x*4]=src[x*4+(bgra?0:2)];dst[x*4+1]=src[x*4+1];dst[x*4+2]=src[x*4+(bgra?2:0)];dst[x*4+3]=255;}}
  context->Unmap(staging.Get(),0);return S_OK;
@@ -134,6 +134,14 @@ HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* s
  // admit only the next draw in the same ready epoch.
  if(s.completedReadyEpoch!=owned::AtamanReadiness::epoch(s.renderer))return S_OK;
  if(s.canPresent&&!s.canPresent(s.presentContext,s.generation,s.frameCamera.neighbours_visible,2))return S_OK;
+ // Offscreen 288: same readiness gate, separate GPU target, no display Present,
+ // no accepted-frame/service/camera publication and no world replacement.
+ if(s.independentOutput) {
+  D3D11_TEXTURE2D_DESC d{};source->GetDesc(&d);d.BindFlags=0;d.Usage=D3D11_USAGE_DEFAULT;d.CPUAccessFlags=0;d.MiscFlags=0;
+  s.outputTarget.Reset();HRESULT hr=s.device->CreateTexture2D(&d,nullptr,&s.outputTarget);
+  if(SUCCEEDED(hr))context->CopyResource(s.outputTarget.Get(),source);return hr;
+ }
+
  D3D11_TEXTURE2D_DESC d{};source->GetDesc(&d);
  if(d.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)return E_NOTIMPL;
  ComPtr<ID3D11Texture2D> next=s.accepted;D3D11_TEXTURE2D_DESC old{};if(next)next->GetDesc(&old);
@@ -203,8 +211,8 @@ int32_t __cdecl probe1b_capture_png(void* h,const wchar_t* path,probe1b_error* e
   ComPtr<IWICStream> stream;ComPtr<IWICBitmapEncoder> encoder;ComPtr<IWICBitmapFrameEncode> frame;
   if(SUCCEEDED(hr))hr=factory->CreateStream(&stream);if(SUCCEEDED(hr))hr=stream->InitializeFromFilename(path,GENERIC_WRITE);
   if(SUCCEEDED(hr))hr=factory->CreateEncoder(GUID_ContainerFormatPng,nullptr,&encoder);if(SUCCEEDED(hr))hr=encoder->Initialize(stream.Get(),WICBitmapEncoderNoCache);
-  if(SUCCEEDED(hr))hr=encoder->CreateNewFrame(&frame,nullptr);if(SUCCEEDED(hr))hr=frame->Initialize(nullptr);if(SUCCEEDED(hr))hr=frame->SetSize(s.width,s.height);
-  auto format=GUID_WICPixelFormat32bppBGRA;if(SUCCEEDED(hr))hr=frame->SetPixelFormat(&format);if(SUCCEEDED(hr))hr=frame->WritePixels(s.height,s.width*4,UINT(s.pixels.size()),s.pixels.data());
+  if(SUCCEEDED(hr))hr=encoder->CreateNewFrame(&frame,nullptr);if(SUCCEEDED(hr))hr=frame->Initialize(nullptr);if(SUCCEEDED(hr))hr=frame->SetSize(s.pixelWidth,s.pixelHeight);
+  auto format=GUID_WICPixelFormat32bppBGRA;if(SUCCEEDED(hr))hr=frame->SetPixelFormat(&format);if(SUCCEEDED(hr))hr=frame->WritePixels(s.pixelHeight,s.pixelWidth*4,UINT(s.pixels.size()),s.pixels.data());
   if(SUCCEEDED(hr))hr=frame->Commit();if(SUCCEEDED(hr))hr=encoder->Commit();frame.Reset();encoder.Reset();stream.Reset();factory.Reset();if(SUCCEEDED(init))CoUninitialize();
   return fail(e,hr,SUCCEEDED(hr)?"PNG saved from renderer-owned target":"WIC capture failed");});
 }
@@ -216,6 +224,7 @@ void capture_presented_trace(void* handle,ID3D11Texture2D* texture) {
 void __cdecl probe1b_destroy(void* h) noexcept {
  std::unique_ptr<Session> s(static_cast<Session*>(h));
  if(!s)return;
+ s->previewSource.reset();s->previewRenderer.reset();
  owned::neighbour_client_stop();OwnedRender::RetireTerrainPlacement(s.get());
  try{s->renderer.retire_embedded_world();}catch(...){}
  for(const auto id:s->atlasIds)if(id)s->renderer.retire_surface(id);

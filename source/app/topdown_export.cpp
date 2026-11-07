@@ -1,3 +1,5 @@
+#include "native_output.h"
+#include "rebuild64_viewport_widget.h"
 #include "topdown_export.h"
 #include <QDataStream>
 #include "main_window.h"
@@ -50,7 +52,7 @@ void CTopdownExport::cancel(const QString& code){fail(code,code=="EXPORT_TIMEOUT
 QByteArray CTopdownExport::sceneIdentity() const {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(m_revision.toUtf8());
-    hash.addData(QByteArray::number(CObjectList::getInstance()->sourceGeneration())+':');
+    if(!m_forceLegacy)hash.addData(QByteArray::number(CObjectList::getInstance()->sourceGeneration())+':');
     hash.addData(m_view->m_activeMob?m_view->m_activeMob->filePath().absoluteFilePath().toUtf8():QByteArray());
     hash.addData(m_view->m_environmentMob?m_view->m_environmentMob->filePath().absoluteFilePath().toUtf8():QByteArray());
     for(auto* mob:m_view->m_aMob) {
@@ -61,7 +63,9 @@ QByteArray CTopdownExport::sceneIdentity() const {
             hash.addData(QJsonDocument(node->toJson()).toJson(QJsonDocument::Compact));
             hash.addData(node->isMarkDeleted()?"deleted":"present");
             hash.addData(node->nodeState()==eHidden?"hidden":"visible");
-            hash.addData(QJsonDocument(QJsonObject{{"drawPosition",vector(node->drawPosition())}}).toJson(QJsonDocument::Compact));
+            // A native-to-GL function fallback builds derived bounds/positions itself.
+            // Document revision, node JSON/visibility and provider epochs still guard edits.
+            if(!m_forceLegacy)hash.addData(QJsonDocument(QJsonObject{{"drawPosition",vector(node->drawPosition())}}).toJson(QJsonDocument::Compact));
         }
     }
     hash.addData(m_catalog.stagedBytes());
@@ -109,19 +113,38 @@ bool CTopdownExport::initialize() {
         fail("EXPORT_SIZE_LIMIT","Export limit is 8,388,608 pixels per layer; pixelsPerWorldUnit must be 1, 2 or 4");return false;
     }
     m_size=QSize(int(w)*ppu,int(h)*ppu);
+    m_nativeCapture=!m_forceLegacy&&(m_view->property("rebuild64Selected").toBool()
+        ||(qApp->property("agentHeadless").toBool()&&qApp->property("agentNativeOutput").toBool()));
+    GLint limit=8192;QJsonArray terrainSources;bool preview=false;
+    if(m_nativeCapture) {
+        auto* native=nativeOutputViewport(m_view);
+        if(!native||!native->frameIsCurrent()) {
+            QString error;EirCamera camera{};const auto ready=nativeOutput(m_view,1,QSize(1,1),camera,&error);
+            if(ready.isNull()){fail("RENDER_UNAVAILABLE",error);return false;}
+        }
+        for(const auto& path:configuredResourceSourcePaths(m_view->settings())) {
+            const QFileInfo source(path);if(!source.isFile())continue;
+            terrainSources.append(QJsonObject{{"provider",source.canonicalFilePath()},{"providerBytes",double(source.size())},
+                {"providerModifiedMs",double(source.lastModified().toMSecsSinceEpoch())},{"kind","immutable accepted Rebuild64 resource cohort"},
+                {"sha256",QJsonValue::Null},{"generation",QString::number(native->statistics().ready_generation)}});
+        }
+        if(m_size.width()>limit||m_size.height()>limit){fail("EXPORT_SIZE_LIMIT","Native offscreen texture limit 8192");return false;}
+    } else {
+
     if(!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport renderer is unavailable");return false;}
-    m_view->makeCurrent();auto* context=QOpenGLContext::currentContext();GLint limit=0;
+    m_view->makeCurrent();auto* context=QOpenGLContext::currentContext();limit=0;
     if(context)context->functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE,&limit);
     if(!context||!limit){fail("RENDER_UNAVAILABLE","Owning GL context is unavailable");return false;}
     if(m_size.width()>limit||m_size.height()>limit){fail("EXPORT_SIZE_LIMIT","Requested size exceeds GPU texture limit",{{"maximumTextureSize",limit}});return false;}
     auto* textures=CTextureList::getInstance();
-    const auto terrainSources=textures->textureSources(m_view->m_pLand->captureSourceAtlas());
+    terrainSources=textures->textureSources(m_view->m_pLand->captureSourceAtlas());
     // Live atlas previews are owned by the terrain edit document; their
     // snapshot/revision is their identity rather than a fictitious disk hash.
-    const bool preview=m_view->m_pLand->captureUsesPreviewAtlas();
+    preview=m_view->m_pLand->captureUsesPreviewAtlas();
     if(terrainSources.size()!=int(m_view->m_pLand->textureNum())) {
         fail("MISSING_RESOURCES","Terrain atlas has missing/unsupported pages or a fallback texture",
              {{"mapNamespace",m_view->m_pLand->mapName()},{"requiredPages",QJsonArray::fromStringList(ei::terrainTextureResourceNames(m_view->m_pLand->mapName(),int(m_view->m_pLand->textureNum())))},{"resolvedPages",terrainSources}});return false;
+    }
     }
     m_resources=terrainSources;
     if(preview)m_resources.append(QJsonObject{{"kind","live terrain working atlas"},{"revision",m_revision},{"provider",QJsonValue::Null}});
@@ -159,6 +182,12 @@ bool CTopdownExport::initialize() {
         {"roadsMask",QJsonObject{{"status","unavailable"},{"reason","No unambiguous authored road semantic mask in the active renderer material contract"},{"source","MPR tile atlas/materials; actual textures and transitions rendered in terrain/composite"}}},
         {"parameters",QJsonObject{{"deadlineMs",120000},{"maximumPixelsPerLayer",8*1024*1024},{"maximumTextureSize",limit},{"pose","static assembled/rest pose, time 0; overlay motion disabled"},{"neighbors",false},{"editorHiddenObjects",true},{"vegetationCategories",QJsonArray{"trees","bushes"}},{"categorySource",m_catalogPath},{"waterMask","native overlay geometry depth-tested against terrain only; independent of texture opacity"}}},
         {"warnings",QJsonArray{"Road semantic mask unavailable; road materials are present in textured passes.","Cartographic base readability is limited: no independently isolated roads; compare terrain/composite."}}};
+    if(m_forceLegacy)m_manifest["renderer"]="OpenGL fallback";
+    if(m_nativeCapture) {
+        m_manifest["nativeConversion"]=QJsonObject{{"capture","Rebuild64 GPU output, top-left BGRA memory; no GL frame"},{"gameImage","minimap_bake keeps its game Y convention"}};
+        m_manifest["renderer"]="Rebuild64";
+        if(auto* native=nativeOutputViewport(m_view))m_manifest["rendererGeneration"]=QString::number(native->statistics().ready_generation);
+    }
     return unchanged();
 }
 bool CTopdownExport::resolveObject() {
@@ -183,6 +212,17 @@ bool CTopdownExport::resolveObject() {
     else if(node->nodeType()==eMagicTrap)excluded="magic-trap logic/effect marker; renderer uses the internal trap helper";
     else if(node->nodeType()!=eBaseType&&node->nodeType()!=eWorldObject&&node->nodeType()!=eTorch&&node->nodeType()!=eMagicTrap&&node->nodeType()!=eLever)excluded="editor/logic marker";
     if(!excluded.isEmpty()){entry["included"]=false;entry["reason"]=excluded;entry["category"]="excluded";m_objects.append(entry);++m_excluded;return true;}
+    if(m_nativeCapture) {
+        int ordinal=0;bool admitted=false;
+        for(auto* mob:m_view->m_aMob)if(mob&&m_view->isMobVisible(mob)) {
+            if(mob->filePath().absoluteFilePath()==m_mobPaths[index]){admitted=true;break;}++ordinal;
+        }
+        if(!admitted||node->nodeState()==eHidden){entry["included"]=false;entry["reason"]="not in the accepted visible native MOB cohort";m_objects.append(entry);++m_excluded;return true;}
+        const quint64 key=(quint64(ordinal)<<32)|node->mapId();
+        if(plant)m_vegetationKeys.append(key);else m_structureKeys.append(key);
+        entry["included"]=true;entry["reason"]="immutable model/texture/shape of the accepted native world; terrain depth may occlude it";
+        m_objects.append(entry);if(plant)++m_vegetation;else ++m_structures;return true;
+    }
     auto* object=dynamic_cast<CObjectBase*>(node);
     auto* models=CObjectList::getInstance();QString resource=model+".mod";
     auto* figure=models->getFigureResource(resource);
@@ -274,7 +314,21 @@ void CTopdownExport::step() {
             const auto pass=passes[m_pass];QString error;
             const auto& items=pass.pass==ETopdownPass::Vegetation?m_vegetationItems:
                 (pass.pass==ETopdownPass::Composite||pass.pass==ETopdownPass::Structures||pass.pass==ETopdownPass::StructuresMask)?m_structureItems:QVector<SRenderItem>();
-            auto image=m_view->captureTopdownPass(pass.pass,m_size,items,&error);
+            auto image=m_nativeCapture
+                ?(pass.pass==ETopdownPass::Composite||pass.pass==ETopdownPass::Terrain
+                  ?nativeTopdown(m_view,m_size,pass.pass==ETopdownPass::Composite,&error)
+                  :nativeCartographic(m_view,int(pass.pass),m_size,pass.pass==ETopdownPass::Vegetation?m_vegetationKeys:m_structureKeys,&error))
+                :m_view->captureTopdownPass(pass.pass,m_size,items,&error,m_forceLegacy);
+            if(m_nativeCapture&&!image.isNull()&&topdownMask(pass.pass))image=image.convertToFormat(QImage::Format_Grayscale8);
+            if(image.isNull()&&m_nativeCapture&&!qApp->property("agentHeadless").toBool()
+               &&!error.contains("cancel",Qt::CaseInsensitive)&&!error.contains("changed",Qt::CaseInsensitive)
+               &&!error.contains(QString::fromUtf8("отмен"),Qt::CaseInsensitive)&&!error.contains(QString::fromUtf8("измен"),Qt::CaseInsensitive)
+               &&!error.contains("ready",Qt::CaseInsensitive)&&!error.contains(QString::fromUtf8("готов"))) {
+                emit m_view->updateMsg(QObject::tr("Offscreen Rebuild64 недоступен; весь пакет этой функции будет заново выведен через OpenGL. Документы не изменены. %1").arg(error));
+                m_forceLegacy=true;m_nativeCapture=false;m_revision.clear();m_images.clear();m_objects={};m_resources={};m_resourceKeys.clear();m_nodes.clear();m_mobPaths.clear();m_structureKeys.clear();m_vegetationKeys.clear();m_next=m_pass=m_structures=m_vegetation=m_excluded=0;m_phase="resolving_resources";m_outputLease.reset();releaseScene();
+                m_view->ensureLegacyQueryContext();m_view->ensureLegacyWorldResources();m_view->m_pLand->ensureRenderResources();
+                QTimer::singleShot(0,this,[this]{step();});return;
+            }
             if(image.isNull()){fail(error.startsWith("EXPORT_SIZE_LIMIT")?"EXPORT_SIZE_LIMIT":"RENDER_UNAVAILABLE",error,{{"pass",pass.file}});return;}
             m_images.insert(pass.file,image);++m_pass;
             if(m_pass==8) {

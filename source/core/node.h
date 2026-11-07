@@ -41,6 +41,8 @@ public:
     virtual uint deserialize(util::CMobParser& parser) {Q_UNUSED(parser); Q_ASSERT("pure virtual" && false); return 0;} //todo: define this method in CObjectBase
     virtual QString& modelName() = 0;
     virtual QString textureName() = 0;
+    // Value-only source for transient independent previews; never serialized.
+    virtual QJsonObject independentPreviewSource() const { return {}; }
     virtual QVector3D& minPosition() = 0;
     virtual void updateFigure(ei::CFigure* fig) = 0;
     virtual void loadFigure() = 0;

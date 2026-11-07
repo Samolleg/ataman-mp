@@ -166,6 +166,7 @@ struct SMinimapSceneCaptureResult
     int hiddenStaticObjectCount{0};
     int excludedDynamicUnitCount{0};
     bool staticGeometrySourcePresent{false};
+    bool nativeOutput{false};
     QString framingDescription;
     QString orientationDescription;
     int targetTextureSize{256};
@@ -502,7 +503,7 @@ public:
         bool finishBake = true);
     static SMinimapSceneCaptureResult finishMinimapSceneCapture(SMinimapSceneCaptureResult capture);
     QImage captureTopdownPass(ETopdownPass pass, const QSize& size,
-                             const QVector<SRenderItem>& items, QString* error);
+                             const QVector<SRenderItem>& items, QString* error, bool forceLegacy = false);
     void addLogicPoint(bool bLookPoint = false);
     void copySelectedIDsToClipboard();
     void changeCurrentMob(CMob* pMob);

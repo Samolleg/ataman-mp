@@ -6,7 +6,7 @@ namespace ei {
 // Bump when pixel generation, background, framing, or the on-disk layout changes.
 constexpr int GalleryThumbnailFormat = 1;
 constexpr qint64 GalleryThumbnailBudget = 128ll * 1024 * 1024;
-QString galleryThumbnailDirectory();
+QString galleryThumbnailDirectory(const QString& backend = QString());
 QString galleryThumbnailKey(const QString& resourceNamespace, const QString& profile,
                             const QString& model, const QString& texture,
                             int format = GalleryThumbnailFormat);

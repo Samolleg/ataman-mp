@@ -1,3 +1,6 @@
+#include "mob.h"
+#include "node.h"
+#include "native_output.h"
 #include "view.h"
 #include "opening_trace.h"
 #include "landscape.h"
@@ -14,9 +17,21 @@
 namespace { struct RestoreCapture { std::function<void()> restore; ~RestoreCapture(){restore();} }; }
 
 QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
-                               const QVector<SRenderItem>& items, QString* error)
+                               const QVector<SRenderItem>& items, QString* error, bool forceLegacy)
 {
     opening::Scope captureTiming(m_editorServicePass?"gui.service.capture":"gui.capture.topdown");
+    if(!forceLegacy&&!m_editorServicePass&&property("rebuild64Selected").toBool()) {
+        if(pass==ETopdownPass::Composite||pass==ETopdownPass::Terrain)
+            return nativeTopdown(this,size,pass==ETopdownPass::Composite,error);
+        if(pass==ETopdownPass::None) {
+            EirCamera camera{};return nativeOutput(this,0,size,camera,error);
+        }
+        QVector<quint64> keys;int ordinal=0;
+        for(auto* mob:m_aMob){if(!mob)continue;if(!isMobVisible(mob))continue;
+            for(auto* node:mob->nodes())if(std::any_of(items.cbegin(),items.cend(),[node](const SRenderItem& item){return item.shadowOwner==reinterpret_cast<quintptr>(node);}))keys.append((quint64(ordinal)<<32)|node->mapId());++ordinal;}
+        return nativeCartographic(this,int(pass),size,keys,error);
+    }
+
     if(QThread::currentThread()!=thread() || !isValid() || m_minimapCaptureActive || m_snapshotCaptureActive) {
         *error="Renderer/context unavailable or already capturing";return {};
     }

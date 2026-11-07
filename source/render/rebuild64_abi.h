@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 8u
+#define EIR_ABI 9u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -16,6 +16,7 @@ typedef struct EirPointLight {
 typedef struct EirError { int32_t code; char message[2048]; } EirError;
 typedef struct EirSpan { const void* data; uint64_t bytes; } EirSpan;
 typedef struct EirMount { const uint16_t* path; uint32_t kind; uint32_t reserved; } EirMount;
+struct EirCamera;struct EirService;
 typedef struct EirCreate {
     uint32_t size, abi, width, height;
     void* window;
@@ -26,6 +27,8 @@ typedef struct EirCreate {
     const uint16_t* game_data_path; // isolated work directory; unchanged game Config light tables
     uint32_t (EIR_CALL *can_present)(void*,uint64_t,uint32_t,uint32_t); // 0=lease,1=release,2=probe
     void* present_context; // host worker admission only; no Qt/DLL document ownership
+    // Offscreen 288: copied live camera/service values, never a GUI callback.
+    uint32_t (EIR_CALL *live_values)(void*,uint64_t,uint32_t,struct EirCamera*,struct EirService*);
 } EirCreate;
 typedef struct EirObjectPose {
     uint32_t mob,nid,visible,changed;
@@ -70,6 +73,27 @@ typedef struct EirService {
     const EirObjectPose* poses;
     uint32_t pose_count;
 } EirService;
+// Output 288: all buffers are caller-owned; no DLL allocation crosses the ABI.
+// mode: 0=current accepted editor frame, 1=current accepted world,
+// 2=independent world camera/extent, 3=independent static model preview.
+typedef struct EirOutputRequest {
+    uint32_t size, mode, width, height;
+    uint64_t generation, serial;
+    EirCamera camera;
+    const char *model, *texture;
+    float shape[3];
+    float preview[12]; // model pitch/yaw, orbit azimuth/elevation, zoom, pan XY, cartographic pass
+    EirSpan object_keys; // mode 4: uint64 keys (MOB ordinal << 32 | document NID)
+    const char *secondary_texture,*part_names; // LF-delimited authored part names
+    EirSpan model_bytes,bone_bytes,texture_bytes; // optional exact editor-owned auxiliary assets
+} EirOutputRequest;
+typedef struct EirOutput {
+    uint32_t size, width, height, stride;
+    void* bgra; uint64_t capacity;
+    uint64_t generation, serial;
+    uint32_t neighbours_accepted, pending;
+    char map[512];
+} EirOutput;
 typedef struct EirApi {
     uint32_t size, abi;
     int32_t (EIR_CALL *create)(const EirCreate*,void**,EirError*);
@@ -82,5 +106,6 @@ typedef struct EirApi {
     void (EIR_CALL *test_device_loss)(void*);
     int32_t (EIR_CALL *service)(void*,const EirService*,EirError*);
     int32_t (EIR_CALL *capture_world)(void*,const uint16_t*,EirError*);
+    int32_t (EIR_CALL *output)(void*,const EirOutputRequest*,EirOutput*,EirError*);
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

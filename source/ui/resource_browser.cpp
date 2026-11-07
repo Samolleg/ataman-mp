@@ -544,7 +544,7 @@ CResourceBrowser::CResourceBrowser(QWidget* parent) : QWidget(parent)
     previewLayout->addWidget(m_previewStack, 1);
     previewLayout->addWidget(m_previewDetails);
     auto* actions = new QGridLayout;
-    m_export = new QPushButton(tr("Export..."), preview);
+    m_export = new QPushButton(tr("Export..."), preview);m_export->setObjectName("resourceExportButton");
     m_copyName = new QPushButton(tr("Copy Name"), preview);
     m_openLocation = new QPushButton(tr("Open Location"), preview);
     m_databaseEditor = new QPushButton(tr("Open in Database Editor"), preview);

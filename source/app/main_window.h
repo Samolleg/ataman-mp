@@ -260,6 +260,7 @@ private:
     void setCustomSpawnPicking(bool enabled);
     void updateCustomSpawnControls();
     QString currentMapContextKey() const;
+    QString minimapOutputContextKey() const;
     void preserveCustomSpawnAfterDocumentReplacement();
     void moveCameraToActiveSpawn();
     void updateEntranceOverlays();
@@ -550,6 +551,7 @@ private:
     QString m_embeddedMinimapName;
     QString m_embeddedMinimapSource;
     SMinimapGradeSettings m_minimapGrade;
+    SMinimapGradeSettings m_nativeMinimapGrade{100,100,100,100};
     QString m_generatedMinimapContextKey;
     int m_minimapTargetTextureSize{1024};
     bool m_minimapTargetDxt1{true};

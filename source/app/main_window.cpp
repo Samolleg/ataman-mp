@@ -660,7 +660,23 @@ void MainWindow::showItemSpellConstructor(const QString& initialCode)
     if(!m_databaseDocument || !snapshot
        || QFileInfo(m_databaseDocument->sourceArchivePath()).absoluteFilePath().compare(
               QFileInfo(snapshot->sourceArchivePath).absoluteFilePath(), Qt::CaseInsensitive) != 0)
+    {
+        if(m_pView && m_pView->property("rebuild64Selected").toBool()) {
+            if(property("nativeConstructorPreparing").toBool())return;
+            setProperty("nativeConstructorPreparing",true);
+            auto* progress=new QProgressDialog(tr("Rebuild64: подготовка базы для независимого просмотра. Окно работает."),QString(),0,0,this);
+            progress->setCancelButton(nullptr);progress->setWindowModality(Qt::NonModal);progress->setMinimumDuration(0);progress->show();
+            auto* watcher=new QFutureWatcher<QSharedPointer<ei::DatabaseDocument>>(this);
+            connect(watcher,&QFutureWatcher<QSharedPointer<ei::DatabaseDocument>>::finished,this,[this,watcher,progress,snapshot,initialCode]{
+                auto document=watcher->result();watcher->deleteLater();progress->deleteLater();setProperty("nativeConstructorPreparing",false);
+                if(ei::ProfileDatabaseContext::instance().current()!=snapshot)return;
+                if(document){m_databaseDocument=document;showItemSpellConstructor(initialCode);}
+                else statusBar()->showMessage(tr("Не удалось подготовить базу для просмотра."),10000);
+            });
+            watcher->setFuture(QtConcurrent::run([snapshot]{return ei::DatabaseDocument::fromSnapshot(snapshot);}));return;
+        }
         m_databaseDocument = ei::DatabaseDocument::fromSnapshot(snapshot, &diagnostic);
+    }
     if(!m_databaseDocument)
     {
         QMessageBox::warning(this, tr("Item / Spell Constructor"),
@@ -1917,7 +1933,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
             this, &MainWindow::positionViewportMinimap);
     connect(m_viewportMinimap, &CViewportMinimapWidget::regenerationRequested,
-            this, [this]() { m_pView->useLegacyViewport(tr("Генерация миникарты")); scheduleViewportMinimapRefresh(0, true); });
+            this, [this]() { scheduleViewportMinimapRefresh(0, true); });
     connect(m_viewportMinimap, &CViewportMinimapWidget::generationLockRequested,
             this, &MainWindow::setMinimapGenerationLocked);
     connect(m_viewportMinimap, &CViewportMinimapWidget::cameraMoveRequested,
@@ -2455,7 +2471,11 @@ MainWindow::MainWindow(QWidget* parent) :
             ready->setFuture(QtConcurrent::run([changed](){for(const auto& path:changed)neighborFileSha256(path);return true;}));
         });poll->start();
     }
-    if(auto* native=findChild<CRebuild64Viewport*>())native->prepareBackend();
+    if(auto* native=findChild<CRebuild64Viewport*>()) {
+        connect(native,&CRebuild64Viewport::rendererSelectionChanged,this,[this]{
+            ++m_minimapGeneration;refreshViewportMinimapSources();
+        });native->prepareBackend();
+    }
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
@@ -5267,7 +5287,7 @@ void MainWindow::refreshViewportMinimapSources()
             ? int(landscape->widthInWorldUnits() / 32u) : 0,
         landscape && landscape->isMprLoad()
             ? int(landscape->heightInWorldUnits() / 32u) : 0);
-    const QString context = currentMapContextKey();
+    const QString context = minimapOutputContextKey();
     const bool contextChanged = context != m_minimapSourceContextKey;
     if(contextChanged)
     {
@@ -5382,7 +5402,7 @@ void MainWindow::refreshViewportMinimap()
     }
     m_minimapCaptureRunning = true;
     const quint64 generation = m_minimapGeneration;
-    const QString context = currentMapContextKey();
+    const QString context = minimapOutputContextKey();
     QElapsedTimer elapsed; elapsed.start();
     auto capture = m_pView->captureMinimapScene(
         !m_pView->mobs().isEmpty(), m_minimapTargetTextureSize, false);
@@ -5399,7 +5419,7 @@ void MainWindow::refreshViewportMinimap()
         return;
     }
     const SMinimapGradeSettings grade = m_minimapExportDialog
-        ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+        ? m_minimapExportDialog->gradeSettings() : (m_pView->property("rebuild64Selected").toBool()?m_nativeMinimapGrade:m_minimapGrade);
     auto* watcher = new QFutureWatcher<SMinimapSceneCaptureResult>(this);
     m_minimapWorker = watcher;
     connect(watcher, &QFutureWatcher<SMinimapSceneCaptureResult>::finished,
@@ -5409,14 +5429,14 @@ void MainWindow::refreshViewportMinimap()
         m_minimapWorker = nullptr;
         m_minimapCaptureRunning = false;
         const bool current = generation == m_minimapGeneration
-            && context == currentMapContextKey() && !m_minimapGenerationLocked
+            && context == minimapOutputContextKey() && !m_minimapGenerationLocked
             && m_pView && !m_pView->hasPendingOperation();
         if(current && capture.bake.success)
         {
             m_minimapNeedsRefresh = false;
             if(m_minimapExportDialog) m_minimapExportDialog->setCapture(capture);
             const auto activeGrade = m_minimapExportDialog
-                ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+                ? m_minimapExportDialog->gradeSettings() : (m_pView->property("rebuild64Selected").toBool()?m_nativeMinimapGrade:m_minimapGrade);
             m_minimapNeedsRefresh = !applyMinimapCapture(capture, activeGrade);
             m_viewportMinimap->show(); positionViewportMinimap();
         }
@@ -5457,7 +5477,7 @@ bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
                                      const SMinimapGradeSettings& grade)
 {
     const auto& prepared = capture.preparedGrade;
-    const bool usePrepared = !capture.preparedMmp.isEmpty()
+    const bool usePrepared = !capture.nativeOutput && !capture.preparedMmp.isEmpty()
         && capture.targetDxt1 == m_minimapTargetDxt1
         && prepared.shadingPercent == grade.shadingPercent
         && prepared.saturationPercent == grade.saturationPercent
@@ -5479,10 +5499,10 @@ bool MainWindow::applyMinimapCapture(const SMinimapSceneCaptureResult& capture,
             tr("Generated preview encoding failed: %1").arg(diagnostic));
         return false;
     }
-    m_minimapGrade = grade;
+    if(capture.nativeOutput)m_nativeMinimapGrade=grade;else m_minimapGrade=grade;
     m_generatedMinimapMmp = mmp;
     m_generatedMinimapImage = graded;
-    m_generatedMinimapContextKey = currentMapContextKey();
+    m_generatedMinimapContextKey = minimapOutputContextKey();
     m_viewportMinimap->setGeneratedPreview(
         graded, capture.bake.incomplete,
         tr("Generated: %1 static objects; %2 hidden; %3 units excluded\n%4")
@@ -5516,7 +5536,7 @@ bool MainWindow::ensureGeneratedMinimap()
 {
     m_minimapRefreshTimer->stop();
     if(!m_generatedMinimapMmp.isEmpty()
-       && m_generatedMinimapContextKey == currentMapContextKey()
+       && m_generatedMinimapContextKey == minimapOutputContextKey()
        && (m_minimapGenerationLocked || !m_minimapNeedsRefresh))
         return true;
     // Explicit export/Test Current Map requires a complete current image now.
@@ -5528,7 +5548,7 @@ bool MainWindow::ensureGeneratedMinimap()
     capture.exportProfileDescription = m_minimapExportProfileDescription;
     if(!capture.bake.success) return false;
     const auto grade = m_minimapExportDialog
-        ? m_minimapExportDialog->gradeSettings() : m_minimapGrade;
+        ? m_minimapExportDialog->gradeSettings() : (m_pView->property("rebuild64Selected").toBool()?m_nativeMinimapGrade:m_minimapGrade);
     m_minimapNeedsRefresh = false;
     if(!applyMinimapCapture(capture, grade))
     {
@@ -5779,10 +5799,11 @@ void MainWindow::generateMinimap()
     }
     const bool includeLoadedStaticGeometry = !m_pView->mobs().isEmpty();
     SMinimapSceneCaptureResult capture;
-    SMinimapGradeSettings dialogGrade = m_minimapGrade;
+    SMinimapGradeSettings dialogGrade = m_pView->property("rebuild64Selected").toBool()?m_nativeMinimapGrade:m_minimapGrade;
     if(m_minimapGenerationLocked && !m_generatedMinimapImage.isNull())
     {
         capture.bake.success = true;
+        capture.nativeOutput = m_pView->property("rebuild64Selected").toBool();
         capture.bake.gameImage = m_generatedMinimapImage;
         capture.bake.reviewImage = m_generatedMinimapImage;
         capture.unlitGameImage = m_generatedMinimapImage;
@@ -10275,4 +10296,8 @@ void MainWindow::on_actionSave_landscape_MPR_triggered()
     if(!flushTravelEditor())return;
     if(hasTravelChanges()){saveMapWithTravel();return;}
     m_pView->saveLand();
+}
+
+QString MainWindow::minimapOutputContextKey() const {
+    return currentMapContextKey()+(m_pView&&m_pView->property("rebuild64Selected").toBool()?"|Rebuild64-288":"|OpenGL");
 }

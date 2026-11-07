@@ -576,6 +576,30 @@ Choose a primary texture in Advanced properties before placing.</source>
         <source>%1 texture binding(s) available from the model catalog.</source>
         <translation>Для этой модели доступно текстур из каталога: %1.</translation>
     </message>
+    <message>
+        <source>Не удалось создать объект</source>
+        <translation>Не удалось создать объект</translation>
+    </message>
+    <message>
+        <source>Проверьте обязательные поля объекта.
+
+%1</source>
+        <translation>Проверьте обязательные поля объекта.
+
+%1</translation>
+    </message>
+    <message>
+        <source>Rebuild64: подготовка каталога расстановки… Окно работает.</source>
+        <translation>Rebuild64: подготовка каталога расстановки… Окно работает.</translation>
+    </message>
+    <message>
+        <source>Не удалось создать объекты</source>
+        <translation>Не удалось создать объекты</translation>
+    </message>
+    <message>
+        <source>Персонажи, appearance и stst8 требуют следующего этапа. Для этого просмотра и расстановки выберите OpenGL; текущие правки сохранены.</source>
+        <translation>Персонажи, appearance и stst8 требуют следующего этапа. Для этого просмотра и расстановки выберите OpenGL; текущие правки сохранены.</translation>
+    </message>
 </context>
     <context>
         <name>CJmvMapTestLauncher</name>
@@ -2345,7 +2369,11 @@ Backup: %1</source>
             <translation>
 Резервная копия: %1</translation>
         </message>
-    </context>
+        <message>
+        <source>Rebuild64 сохраняет штатный свет. Изменение интенсивности освещения требует отдельного unlit-вывода и пока недоступно.</source>
+        <translation>Rebuild64 сохраняет штатный свет. Изменение интенсивности освещения требует отдельного unlit-вывода и пока недоступно.</translation>
+    </message>
+</context>
     <context>
         <name>CMob</name>
         <message>
@@ -14999,6 +15027,50 @@ Choose another source or create a MOB without copying settings.</source>
         <source>Восстановление предыдущей сессии</source>
         <translation>Восстановление предыдущей сессии</translation>
     </message>
+    <message>
+        <source>Rebuild64: подготовка базы для независимого просмотра. Окно работает.</source>
+        <translation>Rebuild64: подготовка базы для независимого просмотра. Окно работает.</translation>
+    </message>
+    <message>
+        <source>Не удалось подготовить базу для просмотра.</source>
+        <translation>Не удалось подготовить базу для просмотра.</translation>
+    </message>
+    <message>
+        <source>Активный MOB</source>
+        <translation>Активный MOB</translation>
+    </message>
+    <message>
+        <source>Все загруженные MOB</source>
+        <translation>Все загруженные MOB</translation>
+    </message>
+    <message>
+        <source>Другие документы заблокированы для правки. Двойной щелчок делает документ активным.</source>
+        <translation>Другие документы заблокированы для правки. Двойной щелчок делает документ активным.</translation>
+    </message>
+    <message>
+        <source>; вне списка выбрано: %1</source>
+        <translation>; вне списка выбрано: %1</translation>
+    </message>
+    <message>
+        <source>Переход №%1 → %2:%3</source>
+        <translation>Переход №%1 → %2:%3</translation>
+    </message>
+    <message>
+        <source>Появление №%1</source>
+        <translation>Появление №%1</translation>
+    </message>
+    <message>
+        <source>Существующий .grp устарел после изменения холста. Сначала экспортируйте пересчитанный граф.</source>
+        <translation>Существующий .grp устарел после изменения холста. Сначала экспортируйте пересчитанный граф.</translation>
+    </message>
+    <message>
+        <source>Навигация</source>
+        <translation>Навигация</translation>
+    </message>
+    <message>
+        <source>Карта %1 уже существует. Сохранить резерв и заменить карту?</source>
+        <translation>Карта %1 уже существует. Сохранить резерв и заменить карту?</translation>
+    </message>
 </context>
     <context>
         <name>MobDiffTerms</name>
@@ -15610,6 +15682,42 @@ Choose another source or create a MOB without copying settings.</source>
     <message><source>Missing or ambiguous MOB %1 (%2:%3)</source><translation>MOB %1 отсутствует или неоднозначен (%2:%3)</translation></message>
 
     <message><source>Ambiguous loaded MOB: %1</source><translation>Неоднозначный открытый MOB: %1</translation></message>
+    <message>
+        <source>Rebuild64: просмотр закрыт.</source>
+        <translation>Rebuild64: просмотр закрыт.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: приложение завершает работу.</source>
+        <translation>Rebuild64: приложение завершает работу.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: время ожидания просмотра истекло.</source>
+        <translation>Rebuild64: время ожидания просмотра истекло.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: модуль вывода недоступен.</source>
+        <translation>Rebuild64: модуль вывода недоступен.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: время ожидания offscreen-вывода истекло.</source>
+        <translation>Rebuild64: время ожидания offscreen-вывода истекло.</translation>
+    </message>
+    <message>
+        <source>Offscreen отменён: вид закрыт.</source>
+        <translation>Offscreen отменён: вид закрыт.</translation>
+    </message>
+    <message>
+        <source>Сначала откройте карту.</source>
+        <translation>Сначала откройте карту.</translation>
+    </message>
+    <message>
+        <source>Миниатюра Rebuild64 недоступна; используется штатный CPU-просмотр этой функции. %1</source>
+        <translation>Миниатюра Rebuild64 недоступна; используется штатный CPU-просмотр этой функции. %1</translation>
+    </message>
+    <message>
+        <source>Offscreen Rebuild64 недоступен; весь пакет этой функции будет заново выведен через OpenGL. Документы не изменены. %1</source>
+        <translation>Offscreen Rebuild64 недоступен; весь пакет этой функции будет заново выведен через OpenGL. Документы не изменены. %1</translation>
+    </message>
 </context>
     <context>
         <name>QPlatformTheme</name>
@@ -16719,7 +16827,11 @@ Runes:
             <source>Map texture %1.mmp is missing or cannot be loaded. Add the converted texture to the active profile resources.</source>
             <translation>Текстура для карты %1.mmp отсутствует или не загружается. Добавьте преобразованную текстуру в ресурсы активного профиля.</translation>
         </message>
-    </context>
+        <message>
+        <source>Rebuild64: подготовка каталога просмотра…</source>
+        <translation>Rebuild64: подготовка каталога просмотра…</translation>
+    </message>
+</context>
     <context>
         <name>CCameraTelephotoControls</name>
         <message>
@@ -17247,6 +17359,10 @@ Conditions: %5</source>
         <source>Choose a section and an island before saving.</source>
         <translation>Перед сохранением выберите раздел и остров.</translation>
     </message>
+    <message>
+        <source>Запасной CPU-просмотр; native-миниатюра недоступна.</source>
+        <translation>Запасной CPU-просмотр; native-миниатюра недоступна.</translation>
+    </message>
 </context>
 <context>
     <name>TechnicalModelCatalog</name>
@@ -17517,6 +17633,42 @@ Line: %4</source><translation>Вызов:
         <source>Rebuild64 не освободил архивы за 120 секунд. Сохранение отменено; документы и правки сохранены в памяти.</source>
         <translation>Rebuild64 не освободил архивы за 120 секунд. Сохранение отменено; документы и правки сохранены в памяти.</translation>
     </message>
+    <message>
+        <source>Offscreen отменён: приложение завершает работу.</source>
+        <translation>Offscreen отменён: приложение завершает работу.</translation>
+    </message>
+    <message>
+        <source>Offscreen отменён: выбран OpenGL.</source>
+        <translation>Offscreen отменён: выбран OpenGL.</translation>
+    </message>
+    <message>
+        <source>Снимок отменён: выбран OpenGL.</source>
+        <translation>Снимок отменён: выбран OpenGL.</translation>
+    </message>
+    <message>
+        <source>Offscreen отменён: карта закрывается или меняется.</source>
+        <translation>Offscreen отменён: карта закрывается или меняется.</translation>
+    </message>
+    <message>
+        <source>Снимок отменён: карта закрывается или меняется.</source>
+        <translation>Снимок отменён: карта закрывается или меняется.</translation>
+    </message>
+    <message>
+        <source>Offscreen отменён: карта закрыта.</source>
+        <translation>Offscreen отменён: карта закрыта.</translation>
+    </message>
+    <message>
+        <source>Для native-вывода сначала откройте MPR.</source>
+        <translation>Для native-вывода сначала откройте MPR.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: мир, материалы и соседние карты ещё готовятся. Повторите вывод после готовности кадра.</source>
+        <translation>Rebuild64: мир, материалы и соседние карты ещё готовятся. Повторите вывод после готовности кадра.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: очередь вывода заполнена. Повторите запрос.</source>
+        <translation>Rebuild64: очередь вывода заполнена. Повторите запрос.</translation>
+    </message>
 </context>
 <context><name>CRebuild64Viewport</name><message><source>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</source><translation>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</translation></message></context>
 <context><name>MainWindow</name><message><source>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</source><translation>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</translation></message></context>
@@ -17526,5 +17678,27 @@ Line: %4</source><translation>Вызов:
 <context><name>CRebuild64Viewport</name>
 <message><source>Отложенный ввод отменён: размер вида изменился. Повторите выбор и правку; документ сохранён.</source><translation>Отложенный ввод отменён: размер вида изменился. Повторите выбор и правку; документ сохранён.</translation></message>
 <message><source>OpenGL: подготовка атласов и геометрии. Дождитесь готовности; правки сохранены.</source><translation>OpenGL: подготовка атласов и геометрии. Дождитесь готовности; правки сохранены.</translation></message>
+</context>
+<context>
+    <name>CPreview</name>
+    <message>
+        <source>Rebuild64: подготовка просмотра…</source>
+        <translation>Rebuild64: подготовка просмотра…</translation>
+    </message>
+    <message>
+        <source>Просмотр Rebuild64 недоступен; для этого просмотра используется OpenGL. %1</source>
+        <translation>Просмотр Rebuild64 недоступен; для этого просмотра используется OpenGL. %1</translation>
+    </message>
+    <message>
+        <source>Просмотр персонажа, appearance и stst8 будет доступен на следующем этапе. Для него выберите OpenGL.</source>
+        <translation>Просмотр персонажа, appearance и stst8 будет доступен на следующем этапе. Для него выберите OpenGL.</translation>
+    </message>
+</context>
+<context>
+    <name>CAiAgentServer</name>
+    <message>
+        <source>Снимок Rebuild64 недоступен; для этого снимка используется OpenGL. %1</source>
+        <translation>Снимок Rebuild64 недоступен; для этого снимка используется OpenGL. %1</translation>
+    </message>
 </context>
 </TS>

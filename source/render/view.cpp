@@ -49,6 +49,7 @@
 #include "view.h"
 #include "rebuild64_viewport_widget.h"
 #include "opening_trace.h"
+#include "native_output.h"
 #include "legacy_projection_pulse.h"
 #include "opening_cpu_value.h"
 #include <tuple>
@@ -9282,7 +9283,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 SMinimapSceneCaptureResult CView::captureMinimapScene(
     bool includeLoadedStaticGeometry, int targetTextureSize, bool finishBake)
 {
-    useLegacyViewport(QString::fromUtf8("Генерация миникарты"));
+    // 288: minimap output follows the selected backend; never switches the main view.
     SMinimapSceneCaptureResult result;
     result.targetTextureSize = targetTextureSize;
     result.framingDescription = tr(
@@ -9301,6 +9302,21 @@ SMinimapSceneCaptureResult CView::captureMinimapScene(
     {
         result.bake.error = tr("The loaded MPR has invalid sector dimensions.");
         return result;
+    }
+    if(property("rebuild64Selected").toBool()) {
+        QString error;const auto image=nativeTopdown(this,reviewSize,includeLoadedStaticGeometry,&error);
+        if(!image.isNull()) {
+            result.nativeOutput=true;result.capturedReviewImage=image;result.capturedUnlitReviewImage=image;
+            result.staticGeometrySourcePresent=includeLoadedStaticGeometry&&!m_aMob.isEmpty();
+            // Rebuild64 exports its own game lighting. No GL grade or fake
+            // unlit pass is applied to the native frame.
+            return finishBake?finishMinimapSceneCapture(result):result;
+        }
+        if(!m_pLand->isMprLoad()||error.contains(QString::fromUtf8("готов"))||error.contains(QString::fromUtf8("отмен"),Qt::CaseInsensitive)) {
+            result.bake.error=error;return result;
+        }
+        emit updateMsg(tr("Миникарта Rebuild64 недоступна; используется OpenGL для этого вывода. %1").arg(error));
+        ensureLegacyQueryContext();ensureLegacyWorldResources();m_pLand->ensureRenderResources();
     }
     if(!isValid())
     {

@@ -1,3 +1,4 @@
+#include "native_output.h"
 #include "ai_agent_server.h"
 #include "main_window.h"
 #include "view.h"
@@ -477,7 +478,15 @@ void CAiAgentServer::captureSnapshot(const QString& id)
         *connection=connect(native,&CRebuild64Viewport::captureFinished,this,[this,id,path,file,connection,revision,context,timer](const QString& result,const QString& error,quint64){
             if(result!=path)return;disconnect(*connection);
             if(!m_jobs.contains(id)||m_jobs[id].complete)return;
-            if(!error.isEmpty()){auto& j=m_jobs[id];j.result={{"code","RENDER_UNAVAILABLE"},{"error",error}};j.markComplete();return;}
+            if(!error.isEmpty()) {
+                if(error.contains(QString::fromUtf8("отмен"),Qt::CaseInsensitive)){auto& j=m_jobs[id];j.result={{"code","CANCELLED"},{"error",error}};j.markComplete();return;}
+                if(CAiEditAdapter::revision(m_window)!=revision){auto& j=m_jobs[id];j.result={{"code","REVISION_CONFLICT"},{"error",error}};j.markComplete();return;}
+                emit m_view->updateMsg(tr("Снимок Rebuild64 недоступен; для этого снимка используется OpenGL. %1").arg(error));
+                m_view->ensureLegacyQueryContext();m_view->ensureLegacyWorldResources();CLandscape::getInstance()->ensureRenderResources();
+                QString diagnostic;const auto fallback=m_view->captureTopdownPass(ETopdownPass::None,m_view->size().scaled(1024,768,Qt::KeepAspectRatio),{},&diagnostic,true);
+                if(fallback.isNull()){auto& j=m_jobs[id];j.result={{"code","RENDER_UNAVAILABLE"},{"error",diagnostic}};j.markComplete();return;}
+                encodeSnapshot(id,fallback,revision,context,timer.elapsed(),"OpenGL fallback for native snapshot; current owning-context FBO");return;
+            }
             encodeSnapshot(id,QImage(path),revision,context,timer.elapsed(),"Rebuild64 accepted native frame and editor service; own GPU readback");
         });
         QTimer::singleShot(30000,this,[this,id,file,connection,path,native=QPointer<CRebuild64Viewport>(native)]{
@@ -485,6 +494,12 @@ void CAiAgentServer::captureSnapshot(const QString& id)
             if(m_jobs.contains(id)&&!m_jobs[id].complete){auto& j=m_jobs[id];j.result={{"code","SNAPSHOT_TIMEOUT"},{"error","Native snapshot deadline exceeded"}};j.markComplete();}
         });
         native->capture(path);return;
+    }
+    if(qApp->property("agentHeadless").toBool()&&qApp->property("agentNativeOutput").toBool()) {
+        QString error;QElapsedTimer elapsed;elapsed.start();EirCamera camera{};
+        const auto image=nativeOutput(m_view,0,QSize(1024,768),camera,&error);
+        if(image.isNull()){fail("RENDER_UNAVAILABLE",error);return;}
+        encodeSnapshot(id,image,revision,context,elapsed.elapsed(),"explicit headless Rebuild64 native memory output");return;
     }
     if(!m_view||!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport GL context unavailable");return;}
     job.phase="capturing";QElapsedTimer timer;timer.start();QString error;
@@ -518,8 +533,6 @@ void CAiAgentServer::encodeSnapshot(const QString& id,const QImage& image,const 
 }
 QJsonObject CAiAgentServer::startTopdownExport(const QJsonObject& args)
 {
-    if(m_view && m_view->property("rebuild64Selected").toBool())
-        return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Экспорт карты сверху пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
     prune();if(m_jobs.size()>=8)return ai::error("Operation limit 8; cancel or wait for expiry");
     int running=0;for(const auto& job:m_jobs){if(!job.complete)++running;if(job.topdown&&!job.complete)return ai::error("A topdown export is already running");}
     if(running>=2)return ai::error("Two reads already running");

@@ -1,3 +1,14 @@
+#include "resource_browser.h"
+#include "res_archive_index.h"
+#include "mmp_inspector.h"
+#include "gallery_thumbnail_cache.h"
+#include "minimap_export_dialog.h"
+#include "createobjectform.h"
+#include "item_spell_constructor_dialog.h"
+#include "model_gallery.h"
+#include "native_output.h"
+#include "topdown_export.h"
+#include "preview.h"
 #include "opening_cpu_value.h"
 #include "operationmanager.h"
 #include "key_manager.h"
@@ -336,15 +347,15 @@ public:
         check(wait([&]{buffer+=socket->readAll();if(!buffer.contains('\n'))return false;const auto end=buffer.indexOf('\n');response=QJsonDocument::fromJson(buffer.left(end)).object();buffer.remove(0,end+1);return true;},180000),"MCP response "+method);
         check(response["id"].toInt()==id,"MCP response identity");return response["result"].toObject();
     }
-    QJsonObject operation(QJsonObject result)
+    QJsonObject operation(QJsonObject result,bool allowError=false)
     {
         check(!result.contains("error"),"MCP request accepted: "+result.value("error").toString());
         const auto id=result["operation"].toString();if(id.isEmpty())return result;
         QElapsedTimer poll;poll.start();
         check(wait([&]{if(poll.elapsed()<50)return false;poll.restart();result=request("operation_status",{{"operation",id}});return result["status"].toString()!="running";},240000),"MCP operation terminal");
-        record("mcp_result",result);check(!result.contains("error"),"MCP operation success");
+        record("mcp_result",result);if(!allowError)check(!result.contains("error"),"MCP operation success");
         if(result["result"].isObject())result=result["result"].toObject();
-        check(!result.contains("error"),"MCP operation payload success: "+result.value("error").toString());return result;
+        if(!allowError)check(!result.contains("error"),"MCP operation payload success: "+result.value("error").toString());return result;
     }
     void key(int value,const QString& text={}) {
         QWidget* target=native->rebuildSelected()?native->findChild<QWidget*>("rebuild64NativeSurface"):view;
@@ -354,6 +365,56 @@ public:
     QJsonArray latestPresentClip() {
         QFile file(caseRoot+"/presented.jsonl");if(!file.open(QIODevice::ReadOnly))return {};
         const auto rows=file.readAll().split('\n');for(int i=rows.size()-1;i>=0;--i){const auto row=QJsonDocument::fromJson(rows[i]).object();if(row["event"]=="present"&&row["qtPageShown"].toBool())return row["cameraClip"].toArray();}return {};
+    }
+    void outputCheck(const QString& name) {
+        const auto stats=native->statistics();const int expected=CLandscape::getInstance()->filePath().completeBaseName()=="zone1"?5:4;
+        record("output_barrier",{{"name",name},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"generation",QString::number(stats.generation)},{"neighbours_accepted",int(stats.neighbours_accepted)},{"pending",int(stats.neighbours_pending)},{"exeSha256",qEnvironmentVariable("ATAMAN_REBUILD64_EXE_SHA")},{"dllSha256",qEnvironmentVariable("ATAMAN_REBUILD64_DLL_SHA")}});
+        check(native->rebuildSelected()&&int(stats.neighbours_accepted)==expected&&!stats.neighbours_pending&&native->frameIsCurrent(),"native output barrier: "+name);
+    }
+    void previewCheck(CPreview* preview,const QString& name) {
+        check(preview,"real preview widget: "+name);const qint64 begin=qpc();qint64 previous=begin,maxGap=0;
+        QTimer heartbeat;heartbeat.setInterval(10);connect(&heartbeat,&QTimer::timeout,this,[&]{const auto now=qpc();maxGap=qMax(maxGap,now-previous);previous=now;});heartbeat.start();
+        const bool delivered=wait([&]{return !preview->nativeImage().isNull();},20000);if(!delivered){QStringList labels;for(auto* label:preview->findChildren<QLabel*>())labels<<label->text();record("preview_wait_failure",{{"name",name},{"labels",labels.join(" | ")}});}check(delivered,"native preview delivered: "+name);heartbeat.stop();maxGap=qMax(maxGap,qpc()-previous);
+        record("preview_source_value",{{"name",name},{"source",QJsonObject::fromVariantMap(preview->property("nativeOutputSource").toMap())}});outputCheck(name);preview->nativeImage().save(caseRoot+"/"+name+".png");record("preview_timing",{{"name",name},{"elapsedMs",double(qpc()-begin)/10000},{"maxQtGapMs",double(maxGap)/10000}});
+    }
+    void resourceInspector() {
+        auto* browser=window->m_resourceBrowser;check(browser,"ordinary resource browser");window->m_resourceBrowserDock->show();
+        check(wait([&]{return browser->selectResourceReference("humanhouse06.mmp");},30000),"resource texture selected through ordinary browser");
+        auto* stack=browser->findChild<QStackedWidget*>("resourcePreviewStack");auto* imageView=browser->findChild<QGraphicsView*>("resourceImagePanZoom");
+        check(wait([&]{return stack&&stack->currentIndex()==1&&imageView&&imageView->scene()&&!imageView->scene()->items().isEmpty();},30000),"CPU texture inspector delivered");
+        auto* pixmapItem=dynamic_cast<QGraphicsPixmapItem*>(imageView->scene()->items().first());check(pixmapItem,"resource inspector image output");outputCheck("resource-texture");pixmapItem->pixmap().toImage().save(caseRoot+"/resource-texture.png");
+        nextFile=caseRoot+"/resource-humanhouse06.mmp";browser->findChild<QPushButton*>("resourceExportButton")->click();QFile texture(nextFile.isEmpty()?caseRoot+"/resource-humanhouse06.mmp":nextFile);check(texture.open(QIODevice::ReadOnly)&&ei::inspectMmp(texture.readAll()).valid,"resource byte export is a valid unchanged MMP");texture.close();
+        check(browser->selectResourceReference("stbuho7.mod"),"resource model selected through ordinary browser");auto* canvas=browser->findChild<QLabel*>("resourceModelCanvas");
+        check(wait([&]{return stack->currentIndex()==2&&canvas&&canvas->pixmap()&&!canvas->pixmap()->isNull();},30000),"CPU structural model inspector delivered");outputCheck("resource-model");canvas->pixmap()->toImage().save(caseRoot+"/resource-model.png");
+        nextFile=caseRoot+"/resource-stbuho7.mod";browser->findChild<QPushButton*>("resourceExportButton")->click();check(QFileInfo(caseRoot+"/resource-stbuho7.mod").size()>0,"resource model byte export");window->m_resourceBrowserDock->hide();
+    }
+    void independentWidgets() {
+        const auto begin=qpc();window->generateMinimap();check(window->m_minimapExportDialog,"menu minimap dialog");outputCheck("menu-minimap");
+        auto* minimap=window->m_minimapExportDialog.data();check(minimap->capture().nativeOutput,"menu minimap native provenance");minimap->gradedImage().save(caseRoot+"/menu-minimap.png");
+        auto* shading=minimap->findChild<QSlider*>("minimapShadingSlider");check(shading&&!shading->isEnabled()&&!shading->toolTip().isEmpty(),"unsupported native relighting is explicit");
+        nextFile=caseRoot+"/menu-review.png";QMetaObject::invokeMethod(minimap,"saveReviewPng",Qt::DirectConnection);check(!QImage(caseRoot+"/menu-review.png").isNull(),"menu minimap review PNG normal path");minimap->findChild<QLineEdit*>("minimapTextureName")->setText("native288_zone1");minimap->findChild<QLineEdit*>("minimapDestinationRes")->setText(caseRoot+"/native-minimap.res");for(auto* box:minimap->findChildren<QCheckBox*>())box->setChecked(false);
+        QMetaObject::invokeMethod(minimap,"exportTexture",Qt::DirectConnection);check(minimap->exportSucceeded(),"menu exports native MMP to private RES");CResArchiveIndex archive;QString archiveError;check(archive.open(caseRoot+"/native-minimap.res",&archiveError),"native minimap RES index readback");const auto decoded=ei::inspectMmp(archive.readMember("native288_zone1.mmp",&archiveError));check(decoded.valid&&decoded.width==minimap->capture().targetTextureSize,"native MMP format and extent preserved");decoded.baseImage.save(caseRoot+"/native-minimap-res-readback.png");
+        minimap->close();record("menu_minimap_ms",{{"elapsed",double(qpc()-begin)/10000}});
+        qint64 previewPulse=qpc(),previewMaxGap=0;QTimer previewHeartbeat;previewHeartbeat.setInterval(10);connect(&previewHeartbeat,&QTimer::timeout,&previewHeartbeat,[&]{const auto now=qpc();previewMaxGap=qMax(previewMaxGap,now-previewPulse);previewPulse=now;});previewHeartbeat.start();
+        CNode* galleryNode=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName().startsWith("stbuho",Qt::CaseInsensitive)){galleryNode=node;break;}
+        check(galleryNode,"gallery model source");QString galleryFailure;
+        QTimer::singleShot(0,this,[&]{auto* gallery=view->findChild<CModelGallery*>();try {
+            check(gallery,"ordinary CView object-gallery dialog");gallery->findChild<QLineEdit*>("modelGallerySearch")->setText(galleryNode->modelName());gallery->setCurrentModel(galleryNode->modelName());gallery->setCurrentTexture(galleryNode->textureName());
+            auto* tiles=gallery->findChild<QListWidget*>("modelGalleryTiles");check(tiles&&tiles->count(),"real gallery model tile");QListWidgetItem* tile=nullptr;for(int row=0;row<tiles->count();++row)if(tiles->item(row)->data(Qt::UserRole).toString().contains(galleryNode->modelName(),Qt::CaseInsensitive)){tile=tiles->item(row);break;}check(tile,"selected real house tile");
+            check(wait([&]{return !tile->data(Qt::UserRole+2).toString().isEmpty()&&!tile->icon().isNull();},30000),"gallery thumbnail delivered");outputCheck("gallery-thumbnail");check(!tile->toolTip().contains("CPU"),"gallery native thumbnail, no fallback");tile->icon().pixmap(192,132).toImage().save(caseRoot+"/gallery-thumbnail.png");
+            check(ei::galleryThumbnailDirectory("Rebuild64")!=ei::galleryThumbnailDirectory(),"native and legacy disk cache directories differ");
+        }catch(const QString& error){galleryFailure=error;}if(gallery)gallery->reject();});
+        view->openObjectGallery();check(galleryFailure.isEmpty(),"ordinary object gallery: "+galleryFailure);record("preview_open_qt_gap",{{"name","object-gallery"},{"maxQtGapMs",double(qMax(previewMaxGap,qpc()-previewPulse))/10000}});previewPulse=qpc();previewMaxGap=0;
+        window->showItemSpellConstructor();check(wait([&]{return !window->m_itemSpellConstructorDialog.isNull();},30000),"ordinary async item constructor path");auto* constructor=window->m_itemSpellConstructorDialog.data();
+        auto* items=constructor->findChild<QListWidget*>("constructorItemList");check(wait([&]{return items&&items->count();},30000),"constructor real database items");
+        auto* category=constructor->findChild<QComboBox*>("constructorItemCategory");category->setCurrentIndex(1);
+        check(items->count(),"weapon database candidates");items->setCurrentRow(0);auto* itemPreview=constructor->findChild<CPreview*>();previewCheck(itemPreview,"constructor-item");constructor->hide();record("preview_open_qt_gap",{{"name","constructor"},{"maxQtGapMs",double(qMax(previewMaxGap,qpc()-previewPulse))/10000}});previewPulse=qpc();previewMaxGap=0;
+        auto* create=window->m_createDialog.data();check(create,"ordinary new-object dialog");create->show();
+        auto* databaseCategory=create->findChild<QComboBox*>("databaseCategory");check(databaseCategory,"database category widget");databaseCategory->setCurrentIndex(1);
+        auto* entries=create->findChild<QListWidget*>("databaseObjects");check(wait([&]{return entries&&entries->count()>0;},30000),"database placement candidates");bool databasePreview=false;int chosen=-1;
+        for(int row=0;row<qMin(entries->count(),20)&&!databasePreview;++row){entries->setCurrentRow(row);QElapsedTimer attempt;attempt.start();wait([&]{return !create->viewWidget()->nativeImage().isNull()||attempt.elapsed()>500;},1000);if(!create->viewWidget()->nativeImage().isNull()){chosen=row;databasePreview=true;}}
+        if(!databasePreview){databaseCategory->setCurrentIndex(2);for(int row=0;row<qMin(entries->count(),20)&&!databasePreview;++row){entries->setCurrentRow(row);QElapsedTimer attempt;attempt.start();wait([&]{return !create->viewWidget()->nativeImage().isNull()||attempt.elapsed()>500;},1000);if(!create->viewWidget()->nativeImage().isNull()){chosen=row;databasePreview=true;}}}
+        if(!databasePreview){QStringList text;for(auto* label:create->findChildren<QLabel*>())if(!label->text().isEmpty())text<<label->objectName()+":"+label->text();record("database_preview_unavailable",{{"details",text.join(" | ")},{"visible",create->viewWidget()->isVisible()},{"width",create->viewWidget()->width()},{"height",create->viewWidget()->height()},{"source",create->viewWidget()->property("nativeOutputSource").toJsonObject()}});}check(databasePreview,"database has a real available native preview");record("database_preview_source",{{"row",chosen},{"prototype",entries->item(chosen)->data(Qt::UserRole+1).toString()}});previewCheck(create->viewWidget(),"database-item");create->hide();previewHeartbeat.stop();record("preview_open_qt_gap",{{"name","database/new-object"},{"maxQtGapMs",double(qMax(previewMaxGap,qpc()-previewPulse))/10000}});
     }
     void measureCamera(const QString& kind,const std::function<void()>& input) {
         const auto before=latestPresentClip();const auto begin=qpc();input();
@@ -509,7 +570,53 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="gl-camera") {
+            if(mode=="offscreen") {
+                openPair(map);validateReady(map);auditOpenResources();
+                if(!configuration["skipPackage"].toBool()) {
+                auto snapshot=operation(request("window_snapshot"));check(!snapshot.contains("error")&&snapshot["captureKind"].toString().startsWith("Rebuild64"),"MCP window_snapshot actual native path");
+                const QString exported=caseRoot+"/native-package";
+                check(exported.startsWith(writableRoot+"/"),"export path stays in the owned stage directory");
+                const auto package=operation(request("export_map_topdown",{{"revision",request("get_revision")["revision"]},{"outputDir",exported},{"pixelsPerWorldUnit",1}}));
+                check(!package.contains("error"),"MCP native eight-layer package: "+package["error"].toString());
+                for(const auto& name:{"composite.png","terrain.png","relief.png","water.png","water-mask.png","structures.png","structures-mask.png","vegetation.png"})check(!QImage(exported+"/"+name).isNull(),"native export layer "+QString(name));
+                }
+                const int expected=map=="zone1"?5:4;check(int(native->statistics().neighbours_accepted)==expected,"offscreen accepted neighbours exact");
+                outputCheck("memory-current");QString error;const auto camera=native->outputCamera();const auto generation=native->statistics().generation;
+                const auto current=nativeOutput(view,1,QSize(640,480),camera,&error);check(!current.isNull(),"accepted native memory frame: "+error);current.save(caseRoot+"/memory-current.png");
+                outputCheck("native-topdown");auto top=nativeTopdown(view,QSize(768,768),true,&error);check(!top.isNull(),"independent native topdown: "+error);top.save(caseRoot+"/native-topdown.png");
+                check(native->rebuildSelected()&&native->statistics().generation==generation,"offscreen leaves native world generation selected");
+                const auto after=native->outputCamera();check(!std::memcmp(camera.world_to_clip,after.world_to_clip,sizeof(camera.world_to_clip)),"offscreen leaves editor camera exact");
+                outputCheck("native-minimap");const auto minimap=view->captureMinimapScene(false,256);check(minimap.bake.success,"normal minimap path uses native offscreen");minimap.bake.gameImage.save(caseRoot+"/native-minimap.png");
+                CNode* selected=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName().startsWith("stbuho",Qt::CaseInsensitive)){selected=node;break;}
+                check(selected,"static house preview source");record("preview_source",{{"model",selected->modelName()},{"texture",selected->textureName()}});CPreview preview(nullptr,view);preview.setAttribute(Qt::WA_DontShowOnScreen);preview.resize(480,360);preview.attachView(view);preview.attachNode(selected);preview.show();
+                previewCheck(&preview,"native-preview");
+                CNode* other=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName()!=selected->modelName()&&node->modelName().compare("stst8",Qt::CaseInsensitive)){other=node;break;}
+                check(other,"second native model source");preview.attachNode(other);previewCheck(&preview,"native-preview-second");const auto previousImage=preview.nativeImage().cacheKey();
+                QWheelEvent zoom(QPointF(200,150),QPointF(200,150),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);QApplication::sendEvent(&preview,&zoom);
+                check(wait([&]{return !preview.nativeImage().isNull()&&preview.nativeImage().cacheKey()!=previousImage;},30000),"real preview wheel refreshes native output");outputCheck("native-preview-wheel");preview.nativeImage().save(caseRoot+"/native-preview-wheel.png");preview.attachNode(nullptr,false);preview.hide();
+                if(configuration["widgets"].toBool()){independentWidgets();resourceInspector();}
+                if(configuration["glOverlay"].toBool()){native->m_glAction->trigger();validateReady(map+"-overlay-gl",true);QString glError;QImage gl=view->captureTopdownPass(ETopdownPass::Composite,QSize(768,768),{},&glError);check(!gl.isNull(),"GL geometry comparison capture: "+glError);gl.save(caseRoot+"/gl-topdown.png");native->m_rebuildAction->trigger();validateReady(map+"-overlay-return");}
+                auditOpenResources();window->closeAll();
+            }
+            else if(mode=="offscreen-races") {
+                openPair(map);validateReady(map);outputCheck("race-begin");
+                const auto before=native->outputCamera();QElapsedTimer baseline;baseline.start();wait([&]{return baseline.elapsed()>1000;},2000);record("offscreen_interval_begin");
+                QTimer cameraInput;cameraInput.setSingleShot(true);connect(&cameraInput,&QTimer::timeout,this,[this]{key(Qt::Key_W,"w");});cameraInput.start(10);
+                QString error;auto image=nativeTopdown(view,QSize(2048,2048),true,&error);check(!image.isNull(),"offscreen while native Present: "+error);record("offscreen_interval_end");outputCheck("race-topdown");image.save(caseRoot+"/race-topdown.png");
+                check(native->rebuildSelected(),"offscreen never switches main renderer");
+                auto serial=native->requestOutput(QSize(4096,4096),2,native->outputCamera());bool cancelled=false;
+                auto connection=connect(native,&CRebuild64Viewport::outputFinished,this,[&](quint64 id,const QImage&,const QString& why,quint64,const QString&,int){if(id==serial)cancelled=!why.isEmpty();});
+                window->closeAll();check(wait([&]{return cancelled;},30000),"close cancels queued or executing output");disconnect(connection);
+                openPair("zone7");validateReady("zone7");outputCheck("race-last-map");
+                serial=native->requestOutput(QSize(4096,4096),2,native->outputCamera());cancelled=false;connection=connect(native,&CRebuild64Viewport::outputFinished,this,[&](quint64 id,const QImage&,const QString& why,quint64,const QString&,int){if(id==serial)cancelled=!why.isEmpty();});
+                openPair("zone1");check(wait([&]{return cancelled;},30000),"map switch cancels obsolete offscreen result");disconnect(connection);validateReady("zone1");outputCheck("race-last-map-2");
+                QFile failure(caseRoot+"/case.json.offscreen-error");check(failure.open(QIODevice::WriteOnly),"own offscreen failure injection");failure.write("1");failure.close();
+                const auto fallback=operation(request("export_map_topdown",{{"revision",request("get_revision")["revision"]},{"outputDir",caseRoot+"/fallback-package"},{"pixelsPerWorldUnit",1}}));check(!fallback.contains("error"),"offscreen failure uses this function's GL export");QFile::remove(failure.fileName());
+                check(native->rebuildSelected(),"per-function GL fallback preserves selected native view");
+                QFile loss(caseRoot+"/case.json.device-loss");check(loss.open(QIODevice::WriteOnly),"own device loss");loss.write("1");loss.close();check(wait([&]{return !native->lastFailure().isEmpty();}),"device-loss fallback");validateReady("zone1-device-fallback",true);
+                check(view->m_neighborLandscapes.size()==11,"fallback restores all 11 GL landscapes");window->closeAll();
+            }
+            else if(mode=="gl-camera") {
                 check(!native->rebuildSelected(),"GL control selected by saved preference");openPair("zone1");validateReady("zone1-gl-control",true);
                 check(view->m_neighborLandscapes.size()==11,"ordinary OpenGL retains all eleven neighbours");
                 CNode* target=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName().compare("stst8",Qt::CaseInsensitive)){target=node;break;}
@@ -628,7 +735,15 @@ public:
                 for(auto* mob:view->m_aMob)check(QDir::fromNativeSeparators(mob->filePath().canonicalFilePath()).startsWith(QDir::fromNativeSeparators(fixture()+"/Maps/"),Qt::CaseInsensitive),"Save target is a private MOB copy: "+mob->filePath().fileName());
                 revision=request("get_revision")["revision"].toString();operation(request("save",{{"revision",revision}}));
                 if(headless)check(!native->backendLoaded()&&!GetModuleHandleW(L"ataman_rebuild64.dll"),"headless has no D3D before/after open/read/Save");
-                auto snapshot=operation(request("window_snapshot"));check(!snapshot.contains("error"),"MCP snapshot");
+                QJsonObject snapshot;
+                if(headless&&qApp->property("agentNativeOutput").toBool()) {
+                    QElapsedTimer preparation;preparation.start();
+                    do {snapshot=operation(request("window_snapshot"),true);if(!snapshot.contains("error")||configuration["failure"].toString()=="missing")break;QElapsedTimer pause;pause.start();wait([&]{return pause.elapsed()>100;},1000);}while(preparation.elapsed()<120000);
+                    if(configuration["failure"].toString()=="missing")check(snapshot.contains("error")&&!GetModuleHandleW(L"ataman_rebuild64.dll"),"explicit native request without DLL is an error, no quiet GL");
+                    else {check(!snapshot.contains("error")&&snapshot["captureKind"].toString().contains("Rebuild64"),"explicit headless native snapshot");check(native->backendLoaded(),"headless creates D3D only for explicit output");
+                        const auto stats=native->statistics();check(int(stats.neighbours_accepted)==(map=="zone1"?5:4)&&!stats.neighbours_pending,"headless native neighbours exact");
+                        operation(request("export_map_topdown",{{"revision",request("get_revision")["revision"]},{"outputDir",caseRoot+"/headless-native-package"},{"pixelsPerWorldUnit",1}}));}
+                } else {snapshot=operation(request("window_snapshot"));check(!snapshot.contains("error"),"MCP snapshot");}
                 record("snapshot_kind",{{"kind",snapshot["captureKind"]}});
                 revision=request("get_revision")["revision"].toString();operation(request("close_map",{{"revision",revision}}));
             } else {
@@ -669,7 +784,7 @@ public:
         if(!exitCode){window->close();if(!wait([&]{return window->m_closeReady&&!window->view();},125000)){record("complete",{{"success",false},{"error","Real MainWindow close did not finish"}});exitCode=1;}
             else record("complete",{{"success",deniedWrites.load()==0},{"realClose",true},{"maxQtGapTicks",QString::number(maxGap)}});
         }
-        QCoreApplication::exit(exitCode);
+        qApp->setProperty("nativeCheckComplete",true);QCoreApplication::exit(exitCode);
     }
     bool eventFilter(QObject* object,QEvent* event)override
     {
@@ -703,7 +818,7 @@ public:
         return false;
     }
 private:
-    QFile log;MainWindow* window=nullptr;CView* view=nullptr;CRebuild64Viewport* native=nullptr;
+    QFile log;QPointer<MainWindow> window;QPointer<CView> view;QPointer<CRebuild64Viewport> native;
     bool prepareCaptureSent=false,prepareCaptureDone=false;QString prepareCaptureError;
     bool liveWanted=false,liveSent=false,liveDone=false;QString liveError;
     bool earlyInputSent=false;quint32 earlyTargetNid=0;QVector3D earlyTargetPosition;int earlyUndoIndex=0;
@@ -713,7 +828,7 @@ private:
     QLocalSocket* socket=nullptr;QByteArray buffer;
 };
 namespace {CRebuild64LaunchCheck* driver=nullptr;
-void glPresented(HDC dc,qint64 begin,qint64 end,BOOL ok){if(driver)driver->swapped(dc,begin,end,ok);}
+void glPresented(HDC dc,qint64 begin,qint64 end,BOOL ok){if(qApp&&driver&&!qApp->property("nativeCheckComplete").toBool())driver->swapped(dc,begin,end,ok);}
 }
 int initializeRebuild64LaunchCheck(int argc,char** argv)
 {
@@ -722,7 +837,7 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if(!normalized.contains("/work/rebuild64-launch-287-")||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;

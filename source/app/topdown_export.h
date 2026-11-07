@@ -53,6 +53,8 @@ private:
     QVector<QSharedPointer<QOpenGLTexture>> m_textures;
     QHash<quintptr,QByteArray> m_meshKeys;
     QMap<QString,QImage> m_images;
+    bool m_nativeCapture{false},m_forceLegacy{false};
+    QVector<quint64> m_structureKeys,m_vegetationKeys;
     QSize m_size;
     QFutureWatcher<QJsonObject>* m_writer{nullptr};
 };

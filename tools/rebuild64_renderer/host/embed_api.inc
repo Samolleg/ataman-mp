@@ -19,7 +19,7 @@ int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) no
   const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
   const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
-  auto& session=*static_cast<Session*>(*result);session.canPresent=in->can_present;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
+  auto& session=*static_cast<Session*>(*result);session.canPresent=in->can_present;session.liveValues=in->live_values;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
   return 0;
  }),e);
 }
@@ -208,9 +208,10 @@ int32_t EIR_CALL host_capture_world(void* h,const uint16_t* path,EirError* out) 
   return probe1b_capture_png(h,reinterpret_cast<const wchar_t*>(path),&e);
  }),e);
 }
+#include "offscreen_output.inc"
 void EIR_CALL host_device_loss(void* h){if(h)static_cast<Session*>(h)->loseDevice=true;}
 }
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_renderer_get_api(uint32_t abi,EirApi* out) noexcept {
  if(abi!=EIR_ABI||!out||out->size!=sizeof(*out))return -1;
- *out={sizeof(EirApi),EIR_ABI,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world};return 0;
+ *out={sizeof(EirApi),EIR_ABI,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output};return 0;
 }

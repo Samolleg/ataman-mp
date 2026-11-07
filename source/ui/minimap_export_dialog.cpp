@@ -452,10 +452,7 @@ CMinimapExportDialog::CMinimapExportDialog(
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_textureName, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
     connect(m_destination, &QLineEdit::textChanged, this, &CMinimapExportDialog::updateReadyState);
-    if(m_generationLocked)
-    {
-        setGenerationLocked(true);
-    }
+    setGenerationLocked(m_generationLocked);
     updateGradePreview();
     const bool restored = restoreGeometry(
         QSettings().value("minimap/exportGeometry").toByteArray());
@@ -546,10 +543,12 @@ void CMinimapExportDialog::setGenerationLocked(bool locked)
     m_generationLocked = locked;
     for(QSlider* slider : {m_shading, m_saturation, m_contrast,
                            m_brightness, m_hue})
-        slider->setEnabled(!locked);
+        slider->setEnabled(!locked && (slider != m_shading || !m_capture.nativeOutput));
     for(QSpinBox* box : {m_shadingValue, m_saturationValue, m_contrastValue,
                          m_brightnessValue, m_hueValue})
-        box->setEnabled(!locked);
+        box->setEnabled(!locked && (box != m_shadingValue || !m_capture.nativeOutput));
+    const QString shadingNotice = m_capture.nativeOutput ? tr("Rebuild64 сохраняет штатный свет. Изменение интенсивности освещения требует отдельного unlit-вывода и пока недоступно.") : QString();
+    m_shading->setToolTip(shadingNotice);m_shadingValue->setToolTip(shadingNotice);
     m_regenerateButton->setEnabled(m_available && !locked);
     m_applyLockButton->setEnabled(m_available);
     m_resetGradeButton->setEnabled(m_available && !locked);
