@@ -79,6 +79,10 @@
     {
       "path": "080-neighbour-mpr-rectangles.patch",
       "sha256": "dc5bf4927ef9be4e1d235724038f314b0ec6e934f632ed5c125f5f98ebd9b01e"
+    },
+    {
+      "path": "081-shared-liquid-wave-edges.patch",
+      "sha256": "cc6dc057ca7f3717b1d29e341216cc155b8c24eb56d89d7237034c3f157f4ec3"
     }
   ],
   "nvidiaSdk": false,

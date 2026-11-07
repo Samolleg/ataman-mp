@@ -39,6 +39,7 @@ int32_t EIR_CALL host_terrain_update(void* h,const EirTerrainUpdate* in,EirError
    if(!owned::parse_terrain_asset(blob,s.terrainName,*next,error))return fail(&e,E_FAIL,error.message.c_str());
    if(next->sector_count_x!=s.terrain->sector_count_x||next->sector_count_y!=s.terrain->sector_count_y||next->maximum_z!=s.terrain->maximum_z)return fail(&e,E_INVALIDARG,"layout transaction changed terrain dimensions");
    layout=true;
+   next->liquid_wave_seams=s.terrain->liquid_wave_seams;
    if(!brush_load_pages(s,*next,in->pages,in->page_count,s.terrain.get(),error,in->terrain_profile))return fail(&e,E_INVALIDARG,error.message.c_str());
   }
   if(layout)return brush_layout_update(s,in,std::move(next),begin,&e);

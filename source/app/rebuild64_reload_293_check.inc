@@ -13,9 +13,11 @@ void reloadFrame293(const QString& name) {
     check(wait([&]{return native->frameIsCurrent()&&!native->pendingEditorInput()&&!native->m_queryInFlight;}),"293 current native scene: "+name);
     check(native->rebuildSelected(),"293 no fallback: "+native->lastFailure());
     check(wait([&]{return !native->statistics().neighbours_pending&&native->statistics().neighbours_accepted==5;}),"293 five owner neighbours: "+name);
+    if(configuration["close292SeamOnly"].toBool())
+        check(wait([&]{return !native->property("nativeDerivedPending292").toBool()&&native->property("nativeFinalized292").toULongLong()>=native->terrainPresentedSerial();},30000),"292 seam derived publication settled: "+name);
     const auto path=caseRoot+"/"+name+".png";bool done=false;QString error;
     auto c=connect(native,&CRebuild64Viewport::captureFinished,this,[&](const QString& p,const QString& e,quint64){if(p==path){done=true;error=e;}});
-    native->capture(path,false);check(wait([&]{return done;},30000)&&error.isEmpty(),"293 native capture "+name+": "+error);disconnect(c);
+    native->capture(path,configuration["close292SeamOnly"].toBool());check(wait([&]{return done;},30000)&&error.isEmpty(),"293 native capture "+name+": "+error);disconnect(c);
     record("reload293_frame",{{"name",name},{"generation",QString::number(native->statistics().generation)},{"terrainSerial",QString::number(native->terrainPresentedSerial())},{"neighbours",int(native->statistics().neighbours_accepted)}});
 }
 void reloadAim293(const QVector3D& aim,float distance) {

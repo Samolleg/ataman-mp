@@ -530,6 +530,10 @@ struct CRebuild64Viewport::Worker {
                     target->m_statistics=stats;
                     bool neighborPending=false;{std::lock_guard<std::mutex> lock(target->m_worker->mutex);neighborPending=!target->m_worker->input.neighborUpdates.isEmpty();}
                     if(!neighborPending)target->m_terrainPresented=updates.presented_serial;
+                    if(!qEnvironmentVariableIsEmpty("ATAMAN_REBUILD64_LAUNCH_CASE")){
+                        target->setProperty("nativeFinalized292",QVariant::fromValue<qulonglong>(updates.finalized_serial));
+                        target->setProperty("nativeDerivedPending292",bool(updates.derived_pending||neighborPending));
+                    }
                     if(target->m_selected && !target->m_documentRefreshPending && stats.ready_generation==target->m_generation) {
                         const bool firstShow=target->m_stack->currentWidget()!=target->m_native;
                         target->m_stack->setCurrentWidget(target->m_native);

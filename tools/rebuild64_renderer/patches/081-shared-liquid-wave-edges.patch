@@ -1,0 +1,100 @@
+diff --git a/external/owned-renderer/Source/owned_asset_loader.h b/external/owned-renderer/Source/owned_asset_loader.h
+--- a/external/owned-renderer/Source/owned_asset_loader.h
++++ b/external/owned-renderer/Source/owned_asset_loader.h
+@@ -593,6 +593,8 @@
+     // such an edge and its outer rows are the map's authored rim, so they
+     // fade out toward it (owned_terrain_foot_rise, owned_terrain_wall_above).
+     std::uint8_t welded_sides = 0;
++    // Embedded editor: closed, layout-confirmed liquid boundary runs (x0,y0,x1,y1).
++    std::vector<std::array<float,4>> liquid_wave_seams;
+     // River flow of level liquid reaches, built on first use from the liquid
+     // surface then shown (owned_terrain_liquid_outflow); created with the
+     // descriptor, reset when a neighbour's seam is set. Added to
+diff --git a/external/owned-renderer/Source/owned_asset_loader.cpp b/external/owned-renderer/Source/owned_asset_loader.cpp
+--- a/external/owned-renderer/Source/owned_asset_loader.cpp
++++ b/external/owned-renderer/Source/owned_asset_loader.cpp
+@@ -2518,6 +2518,7 @@
+         previous->tile_animation_phases!=terrain.tile_animation_phases || previous->objects.size()!=terrain.objects.size())) {
+         fail(failure,ResourceFailureCode::parse,"partial update changes global map layout; complete document required");return false;
+     }
++    if(previous)terrain.liquid_wave_seams=previous->liquid_wave_seams;
+     if(previous)for(std::size_t i=0;i<terrain.objects.size();++i) {
+         const auto& a=previous->objects[i];const auto& b=terrain.objects[i];
+         if(a.type!=b.type||a.color!=b.color||a.opacity!=b.opacity||a.self_illumination!=b.self_illumination||a.wave_multiplier!=b.wave_multiplier||a.warp_speed!=b.warp_speed){
+diff --git a/external/owned-renderer/Source/neighbour_maps.h b/external/owned-renderer/Source/neighbour_maps.h
+--- a/external/owned-renderer/Source/neighbour_maps.h
++++ b/external/owned-renderer/Source/neighbour_maps.h
+@@ -13,6 +13,9 @@
+ #include <string>
+ 
+ namespace owned {
++// Same saved-layout selection as the embedded neighbour stream; CPU-only.
++std::vector<std::array<float,4>> neighbour_liquid_wave_seams(const std::string& mpr);
++
+ struct D3D12PreparedUpload;  // d3d12_frame.h
+ class D3D12Preparer;
+ // One dedicated geometry page a worker created with its final contents.
+diff --git a/external/owned-renderer/Source/neighbour_maps.cpp b/external/owned-renderer/Source/neighbour_maps.cpp
+--- a/external/owned-renderer/Source/neighbour_maps.cpp
++++ b/external/owned-renderer/Source/neighbour_maps.cpp
+@@ -420,6 +420,7 @@
+             auto& terrain=const_cast<TerrainCpuAsset&>(*upload.map->terrain);
+             const double x=upload.selection.x,y=upload.selection.y;
+ #ifdef EID3D11_EMBEDDED
++            terrain.liquid_wave_seams=neighbour_liquid_wave_seams(upload.selection.placement.mpr);
+             upload.brush=brush_neighbour_capture(terrain,upload.brush_source_path);
+             upload.brush->basis=brush_neighbour_basis(terrain,x,y,strips);
+             upload.brush->basis_strips=strips;
+@@ -706,6 +707,28 @@
+ void neighbour_maps_enable(bool value) noexcept {enabled.store(value,std::memory_order_release);}
+ bool neighbour_maps_enabled() noexcept {return enabled.load(std::memory_order_acquire);}
+ std::wstring neighbour_layout_file() {return layout_file();}
++std::vector<std::array<float,4>> neighbour_liquid_wave_seams(const std::string& mpr) {
++    std::vector<std::array<float,4>> seams;
++    if(!neighbour_maps_enabled())return seams;
++    try {
++        const auto layout=parse_neighbour_layout(read_layout(layout_file()));
++        const auto& active=neighbour_layout_active(layout,"deja-vu",map_name(mpr));
++        for(const auto& n:select_neighbour_layout(layout,"deja-vu",map_name(mpr))) {
++            const double loX=(std::max)(0.,n.x),hiX=(std::min)(active.width,n.x+n.placement.width);
++            const double loY=(std::max)(0.,n.y),hiY=(std::min)(active.height,n.y+n.placement.height);
++            if(hiY>loY) {
++                if(n.x==active.width)seams.push_back({float(active.width),float(loY),float(active.width),float(hiY)});
++                if(n.x+n.placement.width==0)seams.push_back({0,float(loY),0,float(hiY)});
++            }
++            if(hiX>loX) {
++                if(n.y==active.height)seams.push_back({float(loX),float(active.height),float(hiX),float(active.height)});
++                if(n.y+n.placement.height==0)seams.push_back({float(loX),0,float(hiX),0});
++            }
++        }
++    }catch(...) {seams.clear();} // No unconfirmed contact changes a liquid vertex.
++    return seams;
++}
++
+ std::string neighbour_map_name(const std::string& mpr) {return map_name(mpr);}
+ bool neighbour_layout_origin(const std::string& mpr,double& x,double& y) noexcept try {
+     x=y=0;
+diff --git a/external/owned-renderer/Source/owned_terrain_decode.cpp b/external/owned-renderer/Source/owned_terrain_decode.cpp
+--- a/external/owned-renderer/Source/owned_terrain_decode.cpp
++++ b/external/owned-renderer/Source/owned_terrain_decode.cpp
+@@ -480,6 +480,20 @@
+                                 terrain_vertex.flags |= native_terrain_grass_vertex;
+                         }
+                     }
++                    // The embedded shared-vertex path also serves untessellated
++                    // water. Seal the logical boundary on the CPU, so every
++                    // unchanged shader path receives an authored rest edge.
++                    // Interior vertices and unshared perimeter runs keep waves.
++                    if(water_tile&&!context->source->liquid_wave_seams.empty()) {
++                        const auto grid=source_index-kTerrainLayerVertexOffset;
++                        const float gx=float(context->sector->map_x*32+grid%33u);
++                        const float gy=float(context->sector->map_y*32+grid/33u);
++                        for(const auto& seam:context->source->liquid_wave_seams)
++                            if(gx>=seam[0]&&gx<=seam[2]&&gy>=seam[1]&&gy<=seam[3]) {
++                                terrain_vertex.wind_multiplier=0;
++                                terrain_vertex.flags&=~native_terrain_wave_vertex;break;
++                            }
++                    }
+                     if (water_tile) {
+                         const auto& object=liquid_materials[source_index-kTerrainLayerVertexOffset];
+                         std::copy(object.color.begin(),object.color.end(),terrain_vertex.object_color);

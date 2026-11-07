@@ -52,6 +52,7 @@ void close292Structural() {
         if(qAbs(p.origin.y()+p.size.height())<.01&&hiX-loX>24){seam=QVector3D(float((loX+hiX)/2),0,0);neighbor=key;break;}}
     check(!neighbor.isEmpty(),"293 real touching MPR edge");QString err;check(view->m_worldTerrainSession.load(neighbor,&err),"293 neighbor canonical model: "+err);
     seam.setZ(view->m_terrainEdit.terrainSurfaceHeight(qBound(0.f,seam.x(),width-.01f),qBound(0.f,seam.y(),height-.01f)));
+    if(configuration["close292SeamOnly"].toBool())native->m_diagnosticFrame=300;
     radius->setValue(8);reloadAim293(seam,60);reloadFrame293("zone1-seam-before");
     const auto worldBefore=brushSnapshot(),neighborBefore=reloadNeighbor293(neighbor),mobBeforeWorld=brushMobs();const auto worldUndo=window->m_undoStack->index();
     close292Begin("seam-stroke");
@@ -92,6 +93,10 @@ void close292Scenario() {
     close292Begin("mcp-paint-undo");serial=native->terrainPresentedSerial();operation(request("undo_last_agent_operation",{{"revision",request("get_revision")["revision"]}}));check(atlas292State()==before,"292 MCP paint exact Undo");atlas292Settle("292-mcp-paint-undo",serial);close292End();
     }
     if(!configuration["close292UnitsOnly"].toBool())close292Structural();
+    if(configuration["close292SeamOnly"].toBool()){
+        auditOpenResources();window->closeAll();
+        record("292_focused_seam",{{"qtBlocked",close292Blocked},{"renderer","Rebuild64"}});return;
+    }
     view->m_worldTerrainEnabled=false;view->setLandscapeEditingEnabled(false);view->changeOperation(EButtonOpSelect);
     CUnit* unit=nullptr;for(auto* node:view->m_activeMob->nodes())if(auto* candidate=dynamic_cast<CUnit*>(node))if(!unit||candidate->renderedModelName().startsWith("unhum",Qt::CaseInsensitive))unit=candidate;
     check(unit,"292 real unit");const auto nid=unit->mapId();const auto original=unit->position();const auto mobsBefore=brushMobs();

@@ -69,6 +69,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   owned::ResourceFailure error;owned::ResourceBlob blob;
   if(!s.store.open(s.mounts,error)||!s.store.copy_selected_memory(in->terrain_name,in->terrain.data,uint32_t(in->terrain.bytes),blob,error))return fail(&e,E_FAIL,error.message.c_str());
   auto terrain=std::make_shared<owned::TerrainCpuAsset>();if(!owned::parse_terrain_asset(blob,in->terrain_name,*terrain,error))return fail(&e,E_FAIL,error.message.c_str());
+  terrain->liquid_wave_seams=owned::neighbour_liquid_wave_seams(in->terrain_name);
   // parse_terrain_asset supplies geometry and records, not the source pages.
   // Complete the same retained page inputs as OwnedResourceLoader before
   // classifying swamp frames; GPU atlas upload alone cannot supply their art.
