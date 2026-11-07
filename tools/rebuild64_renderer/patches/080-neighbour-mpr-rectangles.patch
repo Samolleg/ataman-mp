@@ -1,0 +1,68 @@
+--- a/external/owned-renderer/Source/brush_neighbour_prepare.inc
++++ b/external/owned-renderer/Source/brush_neighbour_prepare.inc
+@@ -15,6 +15,7 @@
+         const auto& selection=resident.selection;
+         const auto basis=brush_neighbour_basis(*cache.original,selection.x,selection.y,strips);
+         auto dirty=brush_neighbour_dirty(cache,selection.x,selection.y,strips);
++        dirty.insert(cache.source_dirty.begin(),cache.source_dirty.end());
+         const auto touches=[](const NeighbourSelection& a,const NeighbourSelection& b){return a.x<=b.x+b.placement.width&&b.x<=a.x+a.placement.width&&a.y<=b.y+b.placement.height&&b.y<=a.y+a.placement.height;};
+         std::vector<const TerrainLiquidRim*> dependencies;
+         if(whole(selection)){
+@@ -25,7 +26,7 @@
+         }
+         const auto liquid_basis=whole(selection)?brush_liquid_dependencies(dependencies):0;
+         const bool liquid_changed=liquid_basis!=cache.liquid_basis&&brush_neighbour_liquid_changed(cache,index,pieces,welded,*active,active_rim);
+-        const bool geometry_changed=basis!=cache.basis;
++        const bool geometry_changed=basis!=cache.basis||!cache.source_dirty.empty();
+         const bool finalize=(flags&8)&&(cache.pending_global||cache.pending_finish);
+         const bool changed=geometry_changed||liquid_changed||finalize;
+         if(!changed){
+@@ -130,7 +131,7 @@
+         brush_neighbour_remember(cache,*terrain);cache.basis_strips=strips;
+         cache.basis=basis;cache.liquid_basis=liquid_basis;cache.rim=welded[index];
+         cache.pending_global=!(flags&8)&&(cache.pending_global||touches_liquid);
+-        cache.pending_finish=!(flags&8);++cache.revision;
++        cache.pending_finish=!(flags&8);cache.source_dirty.clear();++cache.revision;
+         for(const auto& strip:cache.strips)strips.push_back(strip);
+         ready.milliseconds=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+         batch->entries.push_back(std::move(ready));
+--- a/external/owned-renderer/Source/brush_neighbour_source.h
++++ b/external/owned-renderer/Source/brush_neighbour_source.h
+@@ -17,6 +17,7 @@
+     std::vector<NeighbourEdgeStrip> strips;
+     std::vector<NeighbourEdgeStrip> basis_strips;
+     std::wstring path;
++    std::set<std::uint32_t> source_dirty; //293-B explicit editor MPR rectangles
+     std::uint64_t revision=0;
+     std::uint64_t basis=0;
+     bool pending_global=false;
+--- a/external/owned-renderer/Source/brush_neighbour_update.inc
++++ b/external/owned-renderer/Source/brush_neighbour_update.inc
+@@ -47,7 +47,8 @@
+         auto& resident=*state.brush_pieces[index];auto& cache=*resident.brush;
+         const auto& selection=resident.selection;
+         const auto basis=brush_neighbour_basis(*cache.original,selection.x,selection.y,strips);
+-        auto dirty=brush_neighbour_dirty(cache,selection.x,selection.y,strips);brush_timing.mark("weld_basis");
++        auto dirty=brush_neighbour_dirty(cache,selection.x,selection.y,strips);
++        dirty.insert(cache.source_dirty.begin(),cache.source_dirty.end());brush_timing.mark("weld_basis");
+         const auto touches=[](const NeighbourSelection& a,const NeighbourSelection& b){return a.x<=b.x+b.placement.width&&b.x<=a.x+a.placement.width&&a.y<=b.y+b.placement.height&&b.y<=a.y+a.placement.height;};
+         std::vector<const TerrainLiquidRim*> dependencies;
+         if(whole(selection)){
+@@ -59,7 +60,7 @@
+         const auto liquid_basis=whole(selection)?brush_liquid_dependencies(dependencies):0;
+         const bool liquid_changed=liquid_basis!=cache.liquid_basis&&brush_neighbour_liquid_changed(cache,index,state.brush_pieces,welded,*active,active_rim);
+         brush_timing.mark("weld_liquid_projection");
+-        const bool geometry_changed=basis!=cache.basis;
++        const bool geometry_changed=basis!=cache.basis||!cache.source_dirty.empty();
+         const bool finalize=(flags&8)&&(cache.pending_global||cache.pending_finish);
+         const bool changed=geometry_changed||liquid_changed||finalize;
+         if(!changed){
+@@ -195,7 +196,7 @@
+         cache.basis=basis;cache.liquid_basis=liquid_basis;cache.rim=welded[index];
+         brush_timing.mark("weld_remember");
+         cache.pending_global=!(flags&8)&&(cache.pending_global||touches_liquid);
+-        cache.pending_finish=!(flags&8);++cache.revision;
++        cache.pending_finish=!(flags&8);cache.source_dirty.clear();++cache.revision;
+         for(const auto& strip:cache.strips)strips.push_back(strip);
+         // The old complete shadow bake remains visible during the stroke.
+         // The completed asynchronous weld invalidates it when all inputs agree.

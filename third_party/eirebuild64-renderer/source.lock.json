@@ -1,5 +1,5 @@
 {
-  "abi": 13,
+  "abi": 15,
   "sourceRepository": "Samolleg/EIRebuild64",
   "sourceCommit": "81dbcdd29b41baeb346f167c6dfb511dff05f295",
   "archivePaths": [
@@ -75,6 +75,10 @@
     {
       "path": "042-embedded-unit-source-records.patch",
       "sha256": "1d969018a54609cd5327b0af11097cf7bdd1a7ac1c6e86e6d7a00e35a491dbba"
+    },
+    {
+      "path": "080-neighbour-mpr-rectangles.patch",
+      "sha256": "dc5bf4927ef9be4e1d235724038f314b0ec6e934f632ed5c125f5f98ebd9b01e"
     }
   ],
   "nvidiaSdk": false,

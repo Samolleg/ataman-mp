@@ -38,6 +38,7 @@
 #include "contact_blend.h"
 #include "brush_ambient_prepared.h"
 #include "brush_neighbour_work.h"
+#include "brush_neighbour_source.h"
 #include "brush_vertex_streams.h"
 #include "E1TerrainSubmission.h"
 #include "scene_core_types.h"
@@ -87,6 +88,22 @@ struct AtamanReadiness {
   }return S_OK;
  }
  static void brushPrepared(Renderer& r,std::shared_ptr<BrushAmbientPrepared> ready){r.contact_tile_rows_=ready->contact;r.brush_ambient_prepared_=std::move(ready);}
+ static bool neighbourName293(const std::string& resident,const char* name) {
+  std::string leaf=name;const auto slash=leaf.find_last_of("/\\");if(slash!=std::string::npos)leaf.erase(0,slash+1);
+  if(leaf.size()>4&&!_stricmp(leaf.c_str()+leaf.size()-4,".mpr"))leaf.resize(leaf.size()-4);
+  return !_stricmp(resident.c_str(),name)||!_stricmp(resident.c_str(),leaf.c_str());
+ }
+ static std::shared_ptr<BrushNeighbourSource> neighbourSource293(Renderer& r,const char* name) {
+  for(const auto& piece:r.neighbours_.brush_pieces)if(neighbourName293(piece->selection.placement.mpr,name))return piece->brush;
+  return {};
+ }
+ static bool neighbourPublish293(Renderer& r,const char* name,const std::shared_ptr<BrushNeighbourSource>& source,
+   const std::shared_ptr<TerrainCpuAsset>& active,uint32_t flags) {
+  for(auto& piece:r.neighbours_.brush_pieces)if(neighbourName293(piece->selection.placement.mpr,name)){
+   if(r.neighbours_.brush_work)r.neighbours_.brush_work->cancel->store(true);
+   piece->brush=source;r.neighbours_.brush_terrain=active;r.neighbours_.brush_flags|=flags;return true;
+  }return false;
+ }
  static bool brushNeighboursReady(const Renderer& r){return !r.neighbours_.brush_terrain&&!r.neighbours_.brush_work;}
  static bool brushSurfSea(const Renderer& r){return liquid_surf_map_takes_sea(r.ambient_map_name_,r.liquid_surf_no_sea_maps());}
  static bool brushDerivedReady(const Renderer& r){
@@ -202,7 +219,7 @@ struct ResourceRuntimeLifetime {
 struct EditorSeed {uint32_t mob=0,nid=0;int32_t rendererId=0;std::shared_ptr<const owned::VisualAssemblyAsset> assembly;owned::VisualObjectPose pose;bool visible=true;float relativeZ=0;bool completed=false,unit=false;};
 // The worker is explicitly joined before any world/device release.
 #include "brush_worker.h"
-struct Session {std::map<std::string,std::shared_ptr<const owned::TextureCpuAsset>> unitAtlases289;bool querying=false;uint32_t(EIR_CALL *liveValues)(void*,uint64_t,uint32_t,EirCamera*,EirService*)=nullptr;std::chrono::steady_clock::time_point livePump=std::chrono::steady_clock::now();UINT pixelWidth=0,pixelHeight=0;bool independentOutput=false;ComPtr<ID3D11Texture2D> outputTarget;bool editorEmptyFootprints=false;bool verticesWarmed=false;BrushFinalizeWorker brushWorker;uint64_t finalizePublishedSerial=0;std::chrono::steady_clock::time_point finalizeStart{};uint64_t diagnosticFrame=0;uint32_t presentHold=0,leaseProbe=~0u,leaseAcquire=~0u;DWORD ownerThread=GetCurrentThreadId();EirUpdateState edits{};uint64_t editRevision=0;std::chrono::steady_clock::time_point editStart{};ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;std::vector<std::string> atlasNames;std::vector<std::array<unsigned char,32>> atlasDigests;std::map<std::array<unsigned char,32>,owned::TerrainTileFamilies> brushFamilyCache;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;HiddenWindow previewWindow;ComPtr<ID3D11Device> previewDevice;ComPtr<ID3D11DeviceContext> previewContext;std::unique_ptr<owned::Renderer> previewRenderer;std::shared_ptr<owned::RetainedStaticSourceCandidate> previewSource;std::string previewKey;};
+struct Session {std::map<std::string,uint64_t> neighbourSerials293;std::map<std::string,std::shared_ptr<const owned::TextureCpuAsset>> unitAtlases289;bool querying=false;uint32_t(EIR_CALL *liveValues)(void*,uint64_t,uint32_t,EirCamera*,EirService*)=nullptr;std::chrono::steady_clock::time_point livePump=std::chrono::steady_clock::now();UINT pixelWidth=0,pixelHeight=0;bool independentOutput=false;ComPtr<ID3D11Texture2D> outputTarget;bool editorEmptyFootprints=false;bool verticesWarmed=false;BrushFinalizeWorker brushWorker;uint64_t finalizePublishedSerial=0;std::chrono::steady_clock::time_point finalizeStart{};uint64_t diagnosticFrame=0;uint32_t presentHold=0,leaseProbe=~0u,leaseAcquire=~0u;DWORD ownerThread=GetCurrentThreadId();EirUpdateState edits{};uint64_t editRevision=0;std::chrono::steady_clock::time_point editStart{};ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;std::vector<std::string> atlasNames;std::vector<std::array<unsigned char,32>> atlasDigests;std::map<std::array<unsigned char,32>,owned::TerrainTileFamilies> brushFamilyCache;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;HiddenWindow previewWindow;ComPtr<ID3D11Device> previewDevice;ComPtr<ID3D11DeviceContext> previewContext;std::unique_ptr<owned::Renderer> previewRenderer;std::shared_ptr<owned::RetainedStaticSourceCandidate> previewSource;std::string previewKey;};
 bool active=false;std::atomic<void*> activeHandle{nullptr};std::atomic<DWORD> activeOwner{0};uint64_t nextWorld=0;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -223,7 +240,7 @@ namespace {
 HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* source) {
  auto& s=*static_cast<Session*>(user);if(s.querying)return S_OK;s.presentHold=0;s.leaseProbe=s.leaseAcquire=~0u;s.pending=owned::AtamanReadiness::pending(s.renderer);
  if(s.pending){s.presentHold=1;return S_OK;}if(s.neighboursRequested&&!owned::neighbour_client_settled(s.world)){s.presentHold=2;return S_OK;}
-  if(s.readyGeneration!=s.generation&&!owned::AtamanReadiness::brushNeighboursReady(s.renderer)){s.presentHold=8;return S_OK;}
+  if(!owned::AtamanReadiness::brushNeighboursReady(s.renderer)){s.presentHold=8;return S_OK;}
  if(s.trace.capture){
   wchar_t expected[16]{};const auto n=GetEnvironmentVariableW(L"ATAMAN_BRUSH_EXPECT_NEIGHBOURS",expected,16);
   if(n&&n<16&&std::wcstoul(expected,nullptr,10)!=owned::AtamanReadiness::neighbours(s.renderer)){

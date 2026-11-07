@@ -17,7 +17,6 @@
 
 void CView::compactTerrainAtlasRequested()
 {
-    useLegacyViewport(QString::fromUtf8("Уплотнение атласа"));
     const auto warn=[&](const QString& s){QMessageBox::warning(this,tr("Сжать атлас карты"),s);};
     if(!m_pLand||!m_pLand->isMprLoad()){warn(tr("Сначала откройте карту."));return;}
     finishSculptStroke();endTileBrushGroup();
@@ -93,7 +92,6 @@ void CView::compactTerrainAtlasRequested()
 #include <QPushButton>
 #include <QTabWidget>
 void CView::cleanTerrainPackRequested(){
-    useLegacyViewport(QString::fromUtf8("Очистка terrain pack"));
     const auto warn=[&](const QString& e){QMessageBox::warning(this,tr("Очистить пак"),e);};
     if(!m_pLand||!m_pLand->isMprLoad()||m_activeTerrainArchivePath.isEmpty()){warn(tr("Сначала откройте карту из Dejavu с HDPack_Terrain.res."));return;}
     const auto path=m_activeTerrainArchivePath;

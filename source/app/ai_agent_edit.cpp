@@ -1,4 +1,5 @@
 #include "ai_agent_edit.h"
+#include "opening_trace.h"
 #include "main_window.h"
 #include "view.h"
 #include "landscape.h"
@@ -421,6 +422,7 @@ bool CAiEditAdapter::busy(MainWindow* w)
 }
 QString CAiEditAdapter::revision(MainWindow* w)
 {
+    opening::Scope timing292("gui.292.ai.revision");
     auto* v=w->view();if(!v)return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);
     const auto add=[&](const QByteArray& b){hash.addData(QByteArray::number(b.size())+':');hash.addData(b);};

@@ -143,9 +143,27 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
         editorLogic()->drawSelect(program);
 }
 
+QByteArray CUnit::nativeVisualCacheKey(const QString& resourceFingerprint) const
+{
+    const auto& context=ei::ProfileDatabaseContext::instance();
+    // Pose/selection/logic edits do not change this semantic appearance packet.
+    // Database generation and resource identity invalidate externally resolved data.
+    const QJsonObject key{{"databaseGeneration",QString::number(context.generation())},
+        {"appearanceProvider",context.providerForRole("characterAppearance")},
+        {"equipmentProvider",context.providerForRole("equipmentLayout")},
+        {"animationProvider",context.providerForRole("unitAnimation")},
+        {"resources",resourceFingerprint},
+        {"prototype",m_prototypeName},{"parentTemplate",m_parentTemplate},
+        {"model",m_modelName},{"primary",m_primaryTexture},{"secondary",m_secondaryTexture},
+        {"parts",QJsonArray::fromStringList(m_bodyParts)},
+        {"armor",QJsonArray::fromStringList(m_aArmor)},
+        {"weapons",QJsonArray::fromStringList(m_aWeapon)},{"import",m_bImport}};
+    return QJsonDocument(key).toJson(QJsonDocument::Compact);
+}
+
 QJsonObject CUnit::nativeVisualPlan()
 {
-    if(needsVisualResolution() && !refreshTransientVisual(true))return {};
+    if(needsVisualResolution() && !refreshTransientVisual(true,true))return {};
     auto plan=m_nativeVisualPlan;
     if(plan.isEmpty())return {};
     auto& context=ei::ProfileDatabaseContext::instance();
@@ -317,15 +335,16 @@ QMap<QString, QVector3D> jsonVectorMap(const QJsonObject& object);
 
 }
 
-bool CUnit::refreshTransientVisual(bool force)
+bool CUnit::refreshTransientVisual(bool force, bool nativeOnly)
 {
     ei::ProfileDatabaseContext& context = ei::ProfileDatabaseContext::instance();
     const quint64 generation = context.generation();
     prepareUnitGenerationCaches(generation);
-    if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision)
+    if(m_resolvedDatabaseGeneration == generation && m_resolvedVisualRevision == m_visualRevision && (nativeOnly || !m_nativeOnly292))
         return true;
     if(!force && !AnimationFrameContext::instance().claimColdVisualResolution())
         return false;
+    m_nativeOnly292=nativeOnly;
     opening::Scope appearanceTiming("gui.character.appearance_resolve");
     CRenderStallTrace timing("unit-visual");
     m_resolvedDatabaseGeneration = generation;
@@ -342,7 +361,7 @@ bool CUnit::refreshTransientVisual(bool force)
     {
         m_visualDiagnostics.append("provider.unavailable: " + diagnostic);
         ei::log(eLogWarning, "Unit visual provider unavailable: " + diagnostic);
-        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        if(!nativeOnly)applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
         return true;
     }
@@ -375,7 +394,7 @@ bool CUnit::refreshTransientVisual(bool force)
         m_visualDiagnostics.append(appearanceResult.code + ": " + appearanceResult.message);
         ei::log(eLogWarning, QString("Unit %1 appearance placeholder [%2]: %3")
                 .arg(m_prototypeName, appearanceResult.code, appearanceResult.message));
-        applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
+        if(!nativeOnly)applyTransientVisual("cannotdisplay", "default", {}, QVector3D(1, 1, 1));
         m_resolvedAnimationModel.clear(); m_resolvedAnimationWeapons.clear();
         return true;
     }
@@ -404,7 +423,7 @@ bool CUnit::refreshTransientVisual(bool force)
     const QString visualPlanKey = resolvedVisualPlanKey(planIdentity);
     timing.mark("appearance");
     bool cachedPlanPending = false;
-    auto applyResolvedPlan = [this, &cachedPlanPending, &timing](const QJsonObject& plan,
+    auto applyResolvedPlan = [this, nativeOnly, &cachedPlanPending, &timing](const QJsonObject& plan,
                                                        const QVector3D& complexion) -> bool
     {
         const QString resolvedModel = plan.value("model").toString();
@@ -419,7 +438,7 @@ bool CUnit::refreshTransientVisual(bool force)
             jsonStringMap(plan.value("componentTextures").toObject());
         const QMap<QString, QVector3D> resolvedEmissions =
             jsonVectorMap(plan.value("partEmissions").toObject());
-        if(!resolvedLayers.isEmpty())
+        if(!nativeOnly && !resolvedLayers.isEmpty())
         {
             const ei::ECachedCompositePreparation composite =
                 ei::requestCachedLayerComposite(
@@ -442,7 +461,7 @@ bool CUnit::refreshTransientVisual(bool force)
         m_renderedPrimaryTextureName = resolvedTexture;
         m_renderedSecondaryTextureName = resolvedSecondary;
         m_renderedBodyTextureLayers = resolvedLayers;
-        applyTransientVisual(resolvedModel, resolvedTexture, resolvedParts, complexion,
+        if(!nativeOnly)applyTransientVisual(resolvedModel, resolvedTexture, resolvedParts, complexion,
                              resolvedComponentTextures, resolvedSecondary,
                              resolvedLayers, resolvedEmissions);
         timing.mark("cached-model");
@@ -592,7 +611,7 @@ bool CUnit::refreshTransientVisual(bool force)
     m_renderedPrimaryTextureName = texture;
     m_renderedSecondaryTextureName = secondaryTexture;
     m_renderedBodyTextureLayers = bodyTextureLayers;
-    applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
+    if(!nativeOnly)applyTransientVisual(model, texture, visibleParts, complexion, componentTextures,
                          secondaryTexture, bodyTextureLayers, partEmissions);
     timing.mark("model");
     m_resolvedAnimationModel = model;

@@ -1067,10 +1067,10 @@ class CTerrainHeightPreviewCommand : public QUndoCommand,
 public:
     CTerrainHeightPreviewCommand(CView* view, const STerrainHeightCommand& command,
                                  bool alreadyApplied = false,
-                                 QSharedPointer<STerrainMobHeightState> mobHeights = {})
+                                 QSharedPointer<STerrainMobHeightState> mobHeights = {}, bool reloadScene = false)
         : m_view(view), m_command(command), m_skipInitialRedo(alreadyApplied)
         , m_mobHeights(mobHeights)
-        , m_firstApplication(!alreadyApplied)
+        , m_firstApplication(!alreadyApplied), m_reloadScene(reloadScene)
     {
         setText(command.description);
         if(!alreadyApplied && !m_mobHeights)
@@ -1082,6 +1082,7 @@ public:
     void undo() override {
         if(m_view->applyTerrainHeightPreview(m_command, false))
             m_view->applyTerrainMobHeights(m_mobHeights.data(), false);
+        if(m_reloadScene)emit m_view->nativeSceneReloadRequested();
     }
     void redo() override
     {
@@ -1093,6 +1094,7 @@ public:
         if(m_view->applyTerrainHeightPreview(m_command, true))
             m_view->applyTerrainMobHeights(m_mobHeights.data(), true, m_firstApplication);
         m_firstApplication = false;
+        if(m_reloadScene)emit m_view->nativeSceneReloadRequested();
     }
     bool invalidatesAiGraphPreview() const override
     {
@@ -1104,6 +1106,7 @@ private:
     bool m_skipInitialRedo{false};
     QSharedPointer<STerrainMobHeightState> m_mobHeights;
     bool m_firstApplication{true};
+    bool m_reloadScene{false};
 };
 
 class CTerrainVerticalScalePreviewCommand : public QUndoCommand,
@@ -4337,6 +4340,7 @@ void CView::refreshAiGraphPreviewSource()
 bool CView::captureAiGraphPreviewBuildInput(SAiGraphPreviewBuildInput* input,
                                             QString* error)
 {
+    opening::Scope timing292("gui.292.ai.capture_graph");
     if(error)
         error->clear();
     if(!input || !m_terrainEditAvailable || !m_pLand || !m_pLand->isMprLoad())
@@ -13896,7 +13900,6 @@ QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
 
 void CView::reviewTerrainAtlasProfile()
 {
-    useLegacyViewport(QString::fromUtf8("Просмотр профиля атласа"));
     reviewTerrainAtlasProfileAtSlot(-1);
 }
 
@@ -13954,6 +13957,7 @@ void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
             return;
         }
         rebuildTerrainAutoCatalog();
+        emit nativeTerrainChanged(QRect(),16u|2u|8u);
         emit updateMsg(tr("Local Material atlas override removed; the built-in default is active."));
         return;
     }
@@ -13961,6 +13965,7 @@ void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
     if(!dialog.shouldPersistOverride())
     {
         rebuildTerrainAutoCatalog();
+        emit nativeTerrainChanged(QRect(),16u|2u|8u);
         emit updateMsg(tr("Built-in Material atlas remains active; no local override was created."));
         return;
     }
@@ -13971,6 +13976,7 @@ void CView::reviewTerrainAtlasProfileAtSlot(int initialSlot)
         return;
     }
     rebuildTerrainAutoCatalog();
+        emit nativeTerrainChanged(QRect(),16u|2u|8u);
     const QString savedPath = CTerrainAtlasProfileStore::profilePath(mprNamespace);
     emit updateMsg(reviewed.approved
         ? tr("Material atlas applied and saved to %1.")
@@ -14110,7 +14116,6 @@ void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
 
 void CView::exportTerrainPaintDiagnostic()
 {
-    useLegacyViewport(QString::fromUtf8("Диагностика покраски"));
     if(!m_pLand->isMprLoad())
     {
         emit updateMsg(tr("Load an MPR before exporting a paint diagnostic."));
@@ -15245,7 +15250,8 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
                 atlas->generatedTileCount());
         return true;
     }
-    useLegacyViewport(QString::fromUtf8("Новые страницы рабочего атласа"));
+    if(atlas->activeTextureCount()>63)
+        useLegacyViewport(QString::fromUtf8("Атлас превышает 63 страницы: требуется другая схема шейдера Rebuild64"));
     const QVector<QImage> activeImages = atlas->activeTileImages();
     const int authoredSlotCount = atlas->authoredSlotCount();
     if(authoredSlotCount <= 0
@@ -15352,6 +15358,8 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
             return false;
     }
     atlas->acknowledgeChangedSlots(changed);
+    // Snapshot only after the enclosing command installed selectors and types.
+    QTimer::singleShot(0,this,[this]{emit nativeTerrainChanged(QRect(),16u|2u|8u);});
     if(publishingLiveAtlas)
     {
         if(m_landscapeTools)
@@ -16201,7 +16209,10 @@ void CView::finalizeVirtualTerrainAtlas()
         }
         transientRollback.close();
     }
-    QTemporaryFile cohortCandidate(QDir::tempPath()+"/terrain-publish-cohort-XXXXXX.res");
+    // QTemporaryFile retains a Windows handle even after close(); QSaveFile
+    // cannot atomically replace that reserved destination. Own a directory and
+    // let the transaction create an unopened leaf for the same cohort lifetime.
+    QTemporaryDir cohortCandidate(QDir::tempPath()+"/terrain-publish-cohort-XXXXXX");
     STerrainAtlasProfile stagedEmbeddedProfile;
     CValidationReport stagedEmbeddedReport;
     if(!STerrainAtlasProfile::fromBytes(
@@ -16235,8 +16246,8 @@ void CView::finalizeVirtualTerrainAtlas()
     resRequest.createBackup = createTexturesBackup;
     SResPublishedMembersSaveResult resResult;
     if(m_mapCohortActive){
-        CResArchiveTransaction tx(sourceArchive);bool ok=cohortCandidate.open();
-        const auto path=cohortCandidate.fileName();cohortCandidate.close();
+        CResArchiveTransaction tx(sourceArchive);bool ok=cohortCandidate.isValid();
+        const auto path=cohortCandidate.filePath("atlas.res");
         for(const auto& member:pages)if(ok){const int i=sourceArchive.memberIndex(member.name);
             if(i>=0){
                 if(sourceArchive.readMember(i)==member.payload)continue;
@@ -17984,7 +17995,6 @@ void CView::resetSelectedId()
 
 void CView::openMapParameters()
 {
-    useLegacyViewport(QString::fromUtf8("Настройки рельефа и воды MPR"));
     if(!m_worldTerrainSession.documents.isEmpty() && !resolveWorldTerrainClose(false)) return;
     if(m_mprSettingsDock)
     {
@@ -18169,6 +18179,7 @@ void CView::openMapParameters()
     QPushButton* removeMaterial = new QPushButton(tr("Remove last unused slot"), materialsPage);
     QPushButton* resetMaterials = new QPushButton(tr("Reset draft"), materialsPage);
     QPushButton* applyMaterials = new QPushButton(tr("Apply as one undoable change"), materialsPage);
+    applyMaterials->setObjectName(QStringLiteral("mprApplyMaterials"));
     materialActions->addWidget(duplicateMaterial);
     materialActions->addWidget(removeMaterial);
     materialActions->addStretch(1);
@@ -18544,6 +18555,7 @@ void CView::openMapParameters()
     QVBoxLayout* scaleLayout = new QVBoxLayout(scalePage);
     QFormLayout* scaleForm = new QFormLayout;
     QDoubleSpinBox* scaleTarget = new QDoubleSpinBox(scalePage);
+    scaleTarget->setObjectName("mprScaleTarget293");
     scaleTarget->setDecimals(6);
     scaleTarget->setRange(0.000001, 1000000000.0);
     scaleTarget->setSingleStep(1.0);
@@ -18568,6 +18580,7 @@ void CView::openMapParameters()
     scalePreview->setMinimumHeight(110);
     scaleLayout->addWidget(scalePreview);
     QPushButton* applyScale = new QPushButton(tr("Apply undoable scale migration"), scalePage);
+    applyScale->setObjectName("mprApplyScale293");
     scaleLayout->addWidget(applyScale, 0, Qt::AlignRight);
     scaleLayout->addStretch(1);
     tabs->addTab(scalePage, tr("Vertical scale"));
@@ -19179,7 +19192,7 @@ void CView::openMapParameters()
                 .arg(diagnostics.changedVertexCount)
                 .arg(diagnostics.affectedSectorCount)) != QMessageBox::Yes)
             return;
-        m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+        m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command, false, {}, true));
         refreshSummary();
         refreshPreview();
     });
@@ -19300,8 +19313,9 @@ void CView::closeMprSettingsDock()
 
 void CView::openMprMaterials()
 {
-    useLegacyViewport(QString::fromUtf8("Материалы MPR"));
+    setProperty("nativeMaterialsDialogOpen",true);
     openMapParameters();
+    setProperty("nativeMaterialsDialogOpen",false);
     if(!m_mprSettingsDock)
         return;
     QTabWidget* tabs = m_mprSettingsDock->findChild<QTabWidget*>(
@@ -19318,7 +19332,6 @@ void CView::refreshMprSettingsDock()
 
 void CView::openAtlasTiles()
 {
-    useLegacyViewport(QString::fromUtf8("Атлас плиток"));
     if(!m_pLand->isMprLoad())
         return;
     if(!ensureTerrainAutoCatalogReady())
@@ -20963,7 +20976,10 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
-    QTimer::singleShot(0,this,[this]{emit nativeTerrainChanged(QRect(),8u);});
+    QTimer::singleShot(0,this,[this]{
+        emit nativeTerrainChanged(QRect(),8u);
+        for(const auto& loaded:m_neighborLandscapes)emit nativeNeighborTerrainChanged(loaded.placement.mprPath,QRect(),8u);
+    });
     if(m_tilePaintStrokeActive && !m_worldTerrainStroke.isEmpty()) {
         recordWorldTerrainStroke(m_worldTerrainStroke);
         m_worldTerrainStroke=SWorldTerrainStroke();
@@ -21409,7 +21425,6 @@ void CView::requestResolveMissingTerrainBlends(
 
 void CView::resolveMissingTerrainBlends()
 {
-    useLegacyViewport(QString::fromUtf8("Переходы материалов"));
     const ETerrainResolveAuditTrigger trigger =
         m_pendingTerrainResolveAuditTrigger;
     m_pendingTerrainResolveAuditTrigger =
@@ -23016,8 +23031,10 @@ bool CView::terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell)
 {
     if(!cell || !m_pLand || !m_pLand->isMprLoad()) return false;
     bool hit = false;
-    QVector3D terrainPosition = getTerrainPos(
-        viewportPosition.x(), viewportPosition.y(), true, &hit);
+    QVector3D terrainPosition;
+    if(property("rebuild64Selected").toBool())
+        hit=nativeTerrainPositionAt(viewportPosition,&terrainPosition,true);
+    else terrainPosition=getTerrainPos(viewportPosition.x(),viewportPosition.y(),true,&hit);
     if(!hit) return false;
     CTile* tile = nullptr;
     STileLocation location;
@@ -23029,7 +23046,6 @@ bool CView::terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell)
 
 void CView::showTerrainTileInformation(const QPoint& viewportPosition)
 {
-    useLegacyViewport(QString::fromUtf8("Информация о плитке"));
     QPoint cell;
     if(!terrainCellAtViewport(viewportPosition, &cell))
     {
@@ -23886,6 +23902,7 @@ bool CView::terrainMobHeightStateAvailable(const STerrainMobHeightState* state) 
 void CView::applyTerrainMobHeights(STerrainMobHeightState* state, bool forward,
                                   bool captureAfter)
 {
+    opening::Scope timing293("gui.293.applyTerrainMobHeights");
     if(!state)
         return;
     CTerrainPreviewContext contextGuard(this);
@@ -23922,7 +23939,12 @@ void CView::applyTerrainMobHeights(STerrainMobHeightState* state, bool forward,
         if(m_activeMob)
             emit updateMainWindowTitle(eTitleTypeData::eTitleTypeDataDirtyFlag,
                                       m_activeMob->isDirty() ? "*" : "");
+        emit nativeTerrainPosesChanged();
+        // Preserve ordinary panel/minimap/scenario invalidation. Only the
+        // native document adapter can consume this as an offset-only update.
+        setProperty("nativeTerrainPoseCommit293",true);
         emit mobStateChanged();
+        setProperty("nativeTerrainPoseCommit293",false);
         m_staticShadowFingerprint.clear();
         m_farStaticShadowFingerprint.clear();
         m_aiGraphOverlayDirty = true;
@@ -24064,6 +24086,7 @@ bool CView::applyTerrainVerticalScalePreview(
         mob->reprojectForCurrentTerrain();
     syncMprDirtyState();
     m_aiGraphOverlayDirty = true;
+    emit nativeSceneReloadRequested();
     emit updateMsg(tr("Vertical range changed to %1; %2 vertex/vertices were requantized and navigation data may need review.")
         .arg(m_terrainEdit.maxZ(), 0, 'g', 8)
         .arg(command.heights.deltas.size()));
@@ -24074,7 +24097,6 @@ bool CView::applyTerrainVerticalScalePreview(
 
 void CView::importTerrainHeightmap()
 {
-    useLegacyViewport(QString::fromUtf8("Импорт карты высот"));
     if(!m_terrainEditAvailable)
     {
         QMessageBox::information(this, tr("Heightmap import"),
@@ -24138,7 +24160,7 @@ void CView::importTerrainHeightmap()
             .arg(m_terrainEdit.vertexCountX()).arg(m_terrainEdit.vertexCountY())
             .arg(orientation).arg(minimum).arg(maximum)) != QMessageBox::Yes)
         return;
-    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command));
+    m_pUndoStack->push(new CTerrainHeightPreviewCommand(this, command, false, {}, true));
 }
 
 void CView::updateOverlaySculptPointer()
@@ -26839,6 +26861,7 @@ bool CView::applyMprParametersPreview(
         &m_workingAtlasProtectedSlots);
     m_pLand->setMaterials(renderMaterials(materials));
     m_pLand->setAnimTils(renderAnimatedTiles(animatedTiles));
+    emit nativeTerrainChanged(QRect(),16u|6u|8u);
     if(m_pTileForm)
     {
         m_pTileForm->setMaterial(renderMaterials(materials));
@@ -26895,7 +26918,10 @@ void CView::finishSculptStroke()
     int reprojectedObjects = 0;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
-    QTimer::singleShot(0,this,[this]{emit nativeTerrainChanged(QRect(),8u);});
+    QTimer::singleShot(0,this,[this]{
+        emit nativeTerrainChanged(QRect(),8u);
+        for(const auto& loaded:m_neighborLandscapes)emit nativeNeighborTerrainChanged(loaded.placement.mprPath,QRect(),8u);
+    });
     m_sculptPointerValid = false;
     applyTerrainMobHeights(m_sculptStrokeMobHeightState.data(), true, true);
     if(!m_worldTerrainStroke.isEmpty())

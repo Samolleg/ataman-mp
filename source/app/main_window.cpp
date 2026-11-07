@@ -5231,6 +5231,7 @@ void MainWindow::launchCurrentMapTest()
 
 void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
 {
+    opening::Scope timing293("gui.293.scheduleViewportMinimapRefresh");
     ++m_minimapGeneration;
     m_minimapNeedsRefresh = true;
     if(!m_minimapRefreshTimer)
@@ -5288,6 +5289,7 @@ void MainWindow::scheduleViewportMinimapRefresh(int delayMs, bool force)
 
 void MainWindow::refreshViewportMinimapSources()
 {
+    opening::Scope timing293("gui.293.refreshViewportMinimapSources");
     if(!m_viewportMinimap)
         return;
     CLandscape* landscape = CLandscape::getInstance();
@@ -5394,6 +5396,7 @@ void MainWindow::refreshViewportMinimapSources()
 
 void MainWindow::refreshViewportMinimap()
 {
+    opening::Scope timing293("gui.293.refreshViewportMinimap");
     if(m_pView && m_pView->property("rebuild64Selected").toBool()) {
         m_minimapNeedsRefresh=true;
         if(m_viewportMinimap)m_viewportMinimap->clearGeneratedPreview(
@@ -6192,6 +6195,10 @@ void MainWindow::scheduleMobFamilyValidation(int delayMs)
 
 void MainWindow::refreshMobFamilyValidation()
 {
+    opening::Scope timing292("gui.292.mob_family_refresh");
+    // The atomic MCP command validates its immutable candidate on a worker.
+    // Snapshot the family after commit, reusing that exact proven candidate.
+    if(property("aiCommitBusy").toBool()){scheduleMobFamilyValidation(100);return;}
     if(backgroundMobLoading())return; // one complete-family audit after the final adoption
     if(m_pView && m_pView->hasPendingOperation())
     {

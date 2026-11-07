@@ -2191,10 +2191,30 @@ bool CMob::buildRawObjectSequenceCandidate(
     return true;
 }
 
+QByteArray CMob::validationCohort292() const
+{
+    QByteArray bytes;QDataStream stream(&bytes,QIODevice::WriteOnly);
+    for(const auto* node:m_aNode)stream<<quint64(quintptr(node))<<node->rawSourceDocumentSha256()<<node->rawSourceObjectPath()<<node->rawSourceSubtreeSha256();
+    return bytes;
+}
+void CMob::retainValidatedValueCandidate292(const QByteArray& original,const QByteArray& clean,
+    const QByteArray& projection,const QByteArray& graph,const QByteArray& bytes,const QString& saveClass)
+{
+    if(original!=m_originalData||clean!=m_cleanProjection||graph!=m_aiGraph||bytes.isEmpty())return;
+    m_validatedOriginal292=original;m_validatedClean292=clean;m_validatedProjection292=projection;
+    m_validatedGraph292=graph;m_validatedBytes292=bytes;m_validatedClass292=saveClass;m_validatedCohort292=validationCohort292();
+}
+
 bool CMob::buildValidatedCandidate(QByteArray* data,
                                    CValidationReport* report,
                                    QString* saveClass)
 {
+    if(data&&!m_validatedBytes292.isEmpty()&&m_validatedOriginal292==m_originalData
+       &&m_validatedClean292==m_cleanProjection&&m_validatedGraph292==m_aiGraph
+       &&m_validatedCohort292==validationCohort292()) {
+        QByteArray projection;serializeMob(projection,false);
+        if(projection==m_validatedProjection292){*data=m_validatedBytes292;if(saveClass)*saveClass=m_validatedClass292;return true;}
+    }
     if(m_originalData.isEmpty())return buildValidatedProjectionCandidate(data,report,saveClass);
     CMobDocument baseline;
     QByteArray originalGraph;

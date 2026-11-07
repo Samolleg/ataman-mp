@@ -23,6 +23,10 @@
 #include "unit.h"
 #include "scene.h"
 #include "mmp_codec.h"
+#include "types.h"
+#include "utils.h"
+#include "res_archive_document.h"
+#include "terrain_virtual_atlas.h"
 #include "diplomacy_colors.h"
 #include "resource_name.h"
 #include "light.h"
@@ -127,17 +131,29 @@ EarlyWorld readOpening(const QFileInfo& mpr,const QStringList& roots,const QStri
     if(cancel->load())world.error="cancelled";return world;
 }
 }
+struct CRebuild64Viewport::VisualCache292 {
+    struct Entry {QByteArray key,body;QString composite;};
+    QHash<quintptr,Entry> nodes;
+    QHash<QString,QByteArray> composites;
+    QHash<QString,QFuture<QByteArray>> composing;
+    QHash<QString,QString> textures;
+    QString resources;
+    quint64 builds{0},hits{0};
+};
 struct CRebuild64Viewport::Worker {
     struct OutputJob {quint64 serial,generation;QSize size;int mode;EirCamera camera;QByteArray model,texture;QVector3D shape;QVector<float> preview;QVector<quint64> objectKeys;QByteArray secondary,parts,modelBytes,boneBytes,textureBytes,visuals;};
     QList<OutputJob> outputs;
 
     struct Query {quint64 serial=0,generation=0,terrainSerial=0;EirCamera camera{};QMatrix4x4 clip;QSize size,logicalSize;QVector<EirPickPixel> pixels;};
+    #include "rebuild64_atlas292.inc"
     struct TerrainPacket {
-        QByteArray bytes,name;QRect rect;quint32 flags{0};quint64 serial{0};
+        QByteArray bytes,name;QRect rect;quint32 flags{0};quint64 serial{0};bool preserveObjects{false};std::shared_ptr<AtlasSource> atlas;
     };
     struct Input {
         QByteArray terrain,name,visuals;
+        std::shared_ptr<AtlasSource> atlas;
         TerrainPacket terrainUpdate;
+        QMap<QByteArray,TerrainPacket> neighborUpdates;
         QVector<QByteArray> mobs;
         QStringList paths;
         QString gameRoot, neighbourLayout;
@@ -154,6 +170,7 @@ struct CRebuild64Viewport::Worker {
         std::chrono::steady_clock::time_point cameraStamp{std::chrono::steady_clock::now()};
         std::shared_ptr<EarlyRead> opening;
         void resources(CSettings* settings,const QSize& extent) {
+            opening::Scope timing("gui.293.Input.resources");
             size=extent;paths=configuredResourceSourcePaths(settings);
             if(const auto* root=dynamic_cast<const COptString*>(settings->opt("gameRoot")))gameRoot=root->value();
             if(const auto* selected=dynamic_cast<const COptString*>(settings->opt("resourceProfile")))
@@ -392,7 +409,11 @@ struct CRebuild64Viewport::Worker {
                 if(!startup.arm()){failure(QString::fromUtf8("Не удалось записать метку загрузки Rebuild64."));break;}
                 std::vector<EirSpan> mobs;
                 for(const auto& bytes:next.mobs)mobs.push_back({bytes.constData(),uint64_t(bytes.size())});
+                QVector<QByteArray> atlasNames,atlasPages;QByteArray atlasProfile;QString atlasError;
+                if(!atlasPackage(next.terrain,next.atlas,atlasNames,atlasPages,atlasProfile,atlasError)){failure(atlasError);break;}
+                QVector<EirTexturePage> documentPages;for(int i=0;i<atlasPages.size();++i)documentPages.append({atlasNames[i].constData(),{atlasPages[i].constData(),uint64_t(atlasPages[i].size())}});
                 EirDocument doc{sizeof(doc),uint32_t(mobs.size()),next.generation,{next.terrain.constData(),uint64_t(next.terrain.size())},mobs.data(),next.name.constData(),next.documentObjects.constData(),uint32_t(next.documentObjects.size())};doc.visuals={next.visuals.constData(),uint64_t(next.visuals.size())};
+                doc.pages=documentPages.constData();doc.page_count=uint32_t(documentPages.size());doc.terrain_profile={atlasProfile.constData(),uint64_t(atlasProfile.size())};
                 // Supply visibility before document adoption. Applying the INI
                 // default and changing it after world upload retires materials.
                 if(api.camera(handle,&next.camera,&error)) {failure(QString::fromUtf8(error.message));break;}
@@ -426,14 +447,29 @@ struct CRebuild64Viewport::Worker {
             // unsent rectangles; generation and native world are checked at ingress.
             EirUpdateState updates{};
             if(api.update_state(handle,&updates,&error)){failure(QString::fromUtf8(error.message));break;}
-            if(next.terrainUpdate.serial>updates.applied_serial && updates.world && readyGeneration==generation) {
+            if(next.terrainUpdate.flags&&next.terrainUpdate.serial>updates.applied_serial && updates.world && readyGeneration==generation) {
                 const auto& p=next.terrainUpdate;
-                EirTerrainUpdate update{};update.size=sizeof(update);update.flags=p.flags;
+                QByteArray terrain=p.bytes,profile;QVector<QByteArray> names,pages;QString diagnostic;
+                if(!atlasPackage(terrain,p.atlas,names,pages,profile,diagnostic)){failure(diagnostic);break;}
+                QVector<EirTexturePage> inputPages;for(int i=0;i<pages.size();++i)inputPages.append({names[i].constData(),{pages[i].constData(),uint64_t(pages[i].size())}});
+                EirTerrainUpdate update{};update.size=sizeof(update);update.flags=p.flags&15u;
                 update.generation=generation;update.world=updates.world;update.serial=p.serial;
                 update.x0=p.rect.x();update.y0=p.rect.y();update.x1=p.rect.x()+p.rect.width();update.y1=p.rect.y()+p.rect.height();
-                update.terrain_name=p.name.constData();update.terrain={p.bytes.constData(),uint64_t(p.bytes.size())};
-                if(api.terrain_update(handle,&update,&error)){failure(QString::fromUtf8(error.message));break;}
+                update.preserve_object_height=p.preserveObjects;update.terrain_name=p.name.constData();update.terrain={terrain.constData(),uint64_t(terrain.size())};
+                update.pages=inputPages.constData();update.page_count=uint32_t(inputPages.size());update.terrain_profile={profile.constData(),uint64_t(profile.size())};
+                const auto call=p.atlas?api.atlas_update:api.terrain_update;
+                if(call(handle,&update,&error)){failure(QString::fromUtf8(error.message));break;}
                 {std::lock_guard<std::mutex> lock(mutex);if(input.generation==generation&&input.terrainUpdate.serial==p.serial)input.terrainUpdate=TerrainPacket();}
+            }
+            for(auto it=next.neighborUpdates.cbegin();it!=next.neighborUpdates.cend();++it) {
+                const auto& p=it.value();EirTerrainUpdate update{};update.size=sizeof(update);update.flags=p.flags;
+                update.generation=generation;update.world=updates.world;update.serial=p.serial;
+                update.x0=p.rect.x();update.y0=p.rect.y();update.x1=p.rect.x()+p.rect.width();update.y1=p.rect.y()+p.rect.height();
+                update.terrain_name=p.name.constData();update.terrain={p.bytes.constData(),uint64_t(p.bytes.size())};update.preserve_object_height=p.preserveObjects;
+                const int rc=api.neighbour_terrain(handle,&update,&error);
+                if(rc<0){failure(QString::fromUtf8(error.message));return;}
+                if(!rc){std::lock_guard<std::mutex> lock(mutex);auto pending=input.neighborUpdates.find(it.key());
+                    if(input.generation==generation&&pending!=input.neighborUpdates.end()&&pending->serial==p.serial)input.neighborUpdates.erase(pending);}
             }
             if(next.camera.neighbours_visible && !previousNeighbours && !startupArmed) {
                 if(!startup.arm()){failure("Cannot arm neighbour load crash marker");break;}
@@ -491,7 +527,9 @@ struct CRebuild64Viewport::Worker {
                 if(api.update_state(handle,&updates,&error)){failure(QString::fromUtf8(error.message));break;}
                 QMetaObject::invokeMethod(owner,[target=owner,stats,updates]{
                     if(target->m_stopping||stats.ready_generation!=target->m_generation)return;
-                    target->m_statistics=stats;target->m_terrainPresented=updates.presented_serial;
+                    target->m_statistics=stats;
+                    bool neighborPending=false;{std::lock_guard<std::mutex> lock(target->m_worker->mutex);neighborPending=!target->m_worker->input.neighborUpdates.isEmpty();}
+                    if(!neighborPending)target->m_terrainPresented=updates.presented_serial;
                     if(target->m_selected && !target->m_documentRefreshPending && stats.ready_generation==target->m_generation) {
                         const bool firstShow=target->m_stack->currentWidget()!=target->m_native;
                         target->m_stack->setCurrentWidget(target->m_native);
@@ -540,6 +578,9 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_stack->setContentsMargins(0,0,0,0);m_stack->setSpacing(0);m_stack->addWidget(gl);m_stack->addWidget(m_native);m_stack->addWidget(m_preparation);m_stack->setCurrentWidget(m_preparation);
     connect(gl,&CView::legacyViewportRequested,this,&CRebuild64Viewport::requireOpenGL);
     connect(gl,&CView::nativeTerrainChanged,this,&CRebuild64Viewport::queueTerrain);
+    connect(gl,&CView::nativeNeighborTerrainChanged,this,&CRebuild64Viewport::queueNeighborTerrain);
+    connect(gl,&CView::nativeSceneReloadRequested,this,&CRebuild64Viewport::reloadScene);
+    connect(gl,&CView::nativeTerrainPosesChanged,this,[this]{m_gl->setProperty("nativeTerrainPoses293",true);});
     auto* viewMenu=menu->addMenu(QString::fromUtf8("Вид карты"));
     auto* group=new QActionGroup(this);group->setExclusive(true);
     m_glAction=viewMenu->addAction("OpenGL");m_rebuildAction=viewMenu->addAction(QString::fromUtf8("Rebuild64"));
@@ -553,7 +594,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
     m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
-    connect(gl,&CView::mobStateChanged,this,[this]{if(m_earlyDocument)return;m_mobDocumentRefresh=true;m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
+    connect(gl,&CView::mobStateChanged,this,[this]{if(m_earlyDocument||m_gl->property("nativeTerrainPoseCommit293").toBool())return;m_mobDocumentRefresh=true;m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{
         if(m_earlyDocument && m_gl->m_pLand && m_gl->m_pLand->isMprLoad()
            &&m_earlyMap==m_gl->m_pLand->filePath().absoluteFilePath())return;
@@ -772,12 +813,12 @@ void CRebuild64Viewport::updatePreparationText() {
             :tr("Rebuild64\nКарта не открыта. Откройте или создайте карту через меню Файл.\nВосстановление сохранений и настройки доступны в обычных меню.")));
 }
 void CRebuild64Viewport::beginDocumentTransition() {
-    m_terrainFlags=0;m_strokeFlags=0;m_terrainDirty=QRect();m_strokeDirty=QRect();m_terrainSubmitted=0;m_terrainPresented=0;
+    m_terrainFlags=0;m_strokeFlags=0;m_terrainDirty=QRect();m_strokeDirty=QRect();m_terrainSubmitted=0;m_terrainPresented=0;m_neighborDirty.clear();m_neighborStroke.clear();
     cancelOutputs(tr("Offscreen отменён: карта закрывается или меняется."));
     if(!m_activeCapturePath.isEmpty())emit captureFinished(m_activeCapturePath,tr("Снимок отменён: карта закрывается или меняется."),m_generation);
     if(!m_selected&&!m_outputOnly)return;
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);if(m_worker->input.opening)m_worker->input.opening->cancel->store(true);}
-    m_earlyDocument=false;m_earlyMap.clear();
+    m_earlyDocument=false;m_earlyMap.clear();m_visualCache292.reset();
     // Resource-write transitions on the same map retain pending tool input.
     ++m_generation;m_gl->m_nativeQueryPixels.clear();m_queryInput.clear();++m_querySerial;m_queryInFlight=false;m_backendResourceKey.clear();
     if(m_selected)m_gl->setProperty("rebuild64LegacyNeighborsDemanded",false);
@@ -855,6 +896,7 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
 }
 namespace {
 void projectNativeUnits289(CView* view) {
+    opening::Scope timing("gui.293.projectNativeUnits289");
     auto* land=CLandscape::getInstance();if(!land||!land->isMprLoad())return;
     QVector<QPair<CNode*,QVector3D>> projected;
     for(auto* mob:view->mobs())for(auto* node:mob->nodes())if(node->nodeType()==eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0) {
@@ -868,62 +910,8 @@ void projectNativeUnits289(CView* view) {
 QVector<quintptr> editorMobOrder(CView* view) {
     QVector<quintptr> result;for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob))result.append(quintptr(mob));return result;
 }
-// Units289 semantic ingress. No sampled GL meshes or rendered pixels cross the ABI.
-QByteArray editorVisuals289(CView* view,CNode* only=nullptr) {
-    if(!only)view->setProperty("nativeUnitsPending289",false);
-    QByteArray bytes;QDataStream out(&bytes,QIODevice::WriteOnly);out.setByteOrder(QDataStream::LittleEndian);
-    const auto blob=[&](const QByteArray& value){out<<quint32(value.size());out.writeRawData(value.constData(),value.size());};
-    const auto text=[&](const QString& value){blob(value.toUtf8());};
-    const auto list=[&](const QJsonArray& values){out<<quint32(values.size());for(const auto& value:values)text(value.toString());};
-    uint32_t ordinal=0;QSet<QString> composedAtlases;QHash<QString,QString> textureNames;
-    const auto selectedTexture=[&](const QString& name,const QString& model){
-        const auto key=model+"/"+name;if(textureNames.contains(key))return textureNames.value(key);
-        for(const auto& candidate:ei::textureResourceCandidates(name,model))
-            if(!CObjectList::getInstance()->resourceData(candidate).isEmpty()){textureNames[key]=candidate;return candidate;}
-        textureNames[key]=name;return name;
-    };
-    QVector<QPair<quint32,CNode*>> entries;
-    if(only)entries.append(qMakePair(0u,only));
-    else for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob)){for(auto* node:mob->nodes())entries.append(qMakePair(ordinal,node));++ordinal;}
-    for(const auto& entry:entries) {
-            ordinal=entry.first;auto* node=entry.second;
-            auto* unit=dynamic_cast<CUnit*>(node);
-            if(!unit&&node->modelName().compare("stst8",Qt::CaseInsensitive))continue;
-            QJsonObject plan;
-            if(unit)plan=unit->nativeVisualPlan();
-            else {auto data=node->toJson();plan={{"model",data["Model name"]},{"primaryTexture",data["Primary texture"]},{"secondaryTexture",data["Secondary texture"]},{"visibleParts",data["Object parts"]}};}
-            if(plan.isEmpty()){if(unit)view->setProperty("nativeUnitsPending289",true);continue;}
-            const auto model=plan["model"].toString();
-            plan["primaryTexture"]=selectedTexture(plan["primaryTexture"].toString(),model);
-            plan["secondaryTexture"]=selectedTexture(plan["secondaryTexture"].toString(),model);
-            auto componentTextures=plan["componentTextures"].toObject();
-            for(auto i=componentTextures.begin();i!=componentTextures.end();++i)i.value()=selectedTexture(i.value().toString(),model);
-            plan["componentTextures"]=componentTextures;
-            auto bodyLayers=plan["bodyTextureLayers"].toArray();
-            for(int i=0;i<bodyLayers.size();++i)bodyLayers[i]=selectedTexture(bodyLayers[i].toString(),model);
-            plan["bodyTextureLayers"]=bodyLayers;
-            out<<quint32(ordinal)<<quint32(node->mapId())<<quint32(unit?1:0);
-            text(plan["model"].toString());text(plan["primaryTexture"].toString());text(plan["secondaryTexture"].toString());
-            const auto animation=plan["animation"].toObject();text(animation["actionName"].toString());out<<quint32(animation["length"].toInt());
-            list(plan["visibleParts"].toArray());
-            const auto textures=plan["componentTextures"].toObject();out<<quint32(textures.size());
-            for(auto i=textures.begin();i!=textures.end();++i){text(i.key());text(i.value().toString());}
-            list(plan["bodyTextureLayers"].toArray());
-            const auto emissions=plan["partEmissions"].toObject();out<<quint32(emissions.size());
-            for(auto i=emissions.begin();i!=emissions.end();++i)text(i.key());
-            QByteArray composite;
-            if(!plan["bodyTextureLayers"].toArray().isEmpty()) {
-                QStringList layers;for(const auto& value:plan["bodyTextureLayers"].toArray())layers.append(value.toString());
-                const auto key=plan["model"].toString()+"\n"+layers.join("\n");
-                if(!composedAtlases.contains(key)) {
-                    const auto image=CTextureList::getInstance()->layeredTextureImage(layers,plan["model"].toString());
-                    if(!image.isNull()){composite=ei::encodeMmp8888(image);composedAtlases.insert(key);}
-                }
-            }
-            blob(composite);
-    }return bytes;
-}
 QVector<EirObjectPose> editorPoses(CView* view) {
+    opening::Scope timing("gui.293.editorPoses");
     QVector<EirObjectPose> poses;uint32_t mobIndex=0;
     for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob)) {
         for(auto* node:mob->nodes()) {
@@ -939,6 +927,106 @@ QVector<EirObjectPose> editorPoses(CView* view) {
         }++mobIndex;
     }return poses;
 }
+}
+QByteArray CRebuild64Viewport::editorVisuals292(CNode* only) {
+    opening::Scope timing("gui.292.editorVisuals.cached");
+    if(!m_visualCache292)m_visualCache292.reset(new VisualCache292);
+    auto& cache=*m_visualCache292;QElapsedTimer budget;budget.start();
+    const auto resources=configuredResourceFingerprint(m_gl->settings());
+    if(resources!=cache.resources){cache.nodes.clear();cache.composites.clear();cache.composing.clear();cache.textures.clear();cache.resources=resources;}
+    qint64 coldWorkNs=0;
+    QByteArray bytes;QDataStream out(&bytes,QIODevice::WriteOnly);out.setByteOrder(QDataStream::LittleEndian);
+    const auto blob=[&](const QByteArray& value){out<<quint32(value.size());out.writeRawData(value.constData(),value.size());};
+    QVector<QPair<quint32,CNode*>> entries;quint32 ordinal=0;
+    if(only)entries.append(qMakePair(0u,only));
+    else for(auto* mob:m_gl->mobs())if(mob&&m_gl->isMobVisible(mob)){for(auto* node:mob->nodes())entries.append(qMakePair(ordinal,node));++ordinal;}
+    QSet<quintptr> live;QSet<QString> emitted;bool pending=false;
+    for(const auto& entry:entries) {
+        auto* node=entry.second;auto* unit=dynamic_cast<CUnit*>(node);
+        if(!unit&&node->modelName().compare("stst8",Qt::CaseInsensitive))continue;
+        const auto id=quintptr(node);live.insert(id);
+        QJsonObject identity;
+        if(!unit){const auto data=node->toJson();identity={{"model",data["Model name"]},{"primaryTexture",data["Primary texture"]},{"secondaryTexture",data["Secondary texture"]},{"visibleParts",data["Object parts"]}};}
+        const auto key=unit?unit->nativeVisualCacheKey(resources):QJsonDocument(identity).toJson(QJsonDocument::Compact);
+        auto found=cache.nodes.find(id);
+        if(found==cache.nodes.end()||found->key!=key) {
+            // Snapshot the existing semantic plan without building a duplicate
+            // GL character. Pixel composition/encoding below runs on a worker.
+            // Charge only cold work: serialization of hits must not starve a
+            // later unresolved node in a large document.
+            if(coldWorkNs>=12000000){pending=true;continue;}
+            QElapsedTimer nodeWork;nodeWork.start();const auto begin=opening::clock();
+            auto plan=unit?unit->nativeVisualPlan():identity;
+            if(plan.isEmpty()){
+                coldWorkNs+=nodeWork.nsecsElapsed();
+                if(unit&&unit->needsVisualResolution())pending=true;
+                else {VisualCache292::Entry omitted;omitted.key=key;cache.nodes.insert(id,omitted);}
+                continue;
+            }
+            const auto model=plan["model"].toString();
+            const auto selectedTexture=[&](const QString& name){
+                const auto textureKey=key+model.toUtf8()+"/"+name.toUtf8();const auto k=QString::fromLatin1(QCryptographicHash::hash(textureKey,QCryptographicHash::Sha256).toHex());
+                if(cache.textures.contains(k))return cache.textures.value(k);
+                for(const auto& candidate:ei::textureResourceCandidates(name,model))if(!CObjectList::getInstance()->resourceData(candidate).isEmpty()){cache.textures[k]=candidate;return candidate;}
+                cache.textures[k]=name;return name;
+            };
+            plan["primaryTexture"]=selectedTexture(plan["primaryTexture"].toString());
+            plan["secondaryTexture"]=selectedTexture(plan["secondaryTexture"].toString());
+            auto textures=plan["componentTextures"].toObject();for(auto i=textures.begin();i!=textures.end();++i)i.value()=selectedTexture(i.value().toString());
+            auto layers=plan["bodyTextureLayers"].toArray();for(int i=0;i<layers.size();++i)layers[i]=selectedTexture(layers[i].toString());
+            VisualCache292::Entry value;value.key=key;
+            QDataStream packet(&value.body,QIODevice::WriteOnly);packet.setByteOrder(QDataStream::LittleEndian);
+            const auto text=[&](const QString& text){const auto raw=text.toUtf8();packet<<quint32(raw.size());packet.writeRawData(raw.constData(),raw.size());};
+            const auto list=[&](const QJsonArray& list){packet<<quint32(list.size());for(const auto& v:list)text(v.toString());};
+            text(model);text(plan["primaryTexture"].toString());text(plan["secondaryTexture"].toString());
+            const auto animation=plan["animation"].toObject();text(animation["actionName"].toString());packet<<quint32(animation["length"].toInt());
+            list(plan["visibleParts"].toArray());packet<<quint32(textures.size());for(auto i=textures.begin();i!=textures.end();++i){text(i.key());text(i.value().toString());}
+            list(layers);const auto emissions=plan["partEmissions"].toObject();packet<<quint32(emissions.size());for(auto i=emissions.begin();i!=emissions.end();++i)text(i.key());
+            if(!layers.isEmpty()) {
+                QStringList names;for(const auto& v:layers)names.append(v.toString());
+                value.composite=model+"\n"+names.join("\n");
+                if(!cache.composites.contains(value.composite)&&!cache.composing.contains(value.composite)) {
+                    // Copy only source payloads on Qt. Decoder/compositor/MMP
+                    // encoder see immutable values, no QObject/cache/GL access.
+                    QVector<QByteArray> payloads;
+                    for(const auto& name:names)payloads.append(CObjectList::getInstance()->resourceData(name));
+                    cache.composing[value.composite]=QtConcurrent::run([payloads]{
+                        QVector<QImage> images;
+                        for(const auto& raw:payloads){
+                            if(raw.isEmpty()){if(images.isEmpty())return QByteArray();else continue;}
+                            QDataStream stream(raw);util::formatStream(stream);SMmpHeader header;stream>>header;
+                            if(header.m_signature!=0x00504D4D||header.m_format!=ETextureFormat::eMMP_PNT3){if(images.isEmpty())return QByteArray();else continue;}
+                            QImage image(header.m_width,header.m_height,QImage::Format_RGBA64);QString error;
+                            if(!ei::decodePnt3Image(raw.mid(76,int(header.m_mipcount)),header.m_width,header.m_height,&image,&error)){if(images.isEmpty())return QByteArray();else continue;}
+                            images.append(image);
+                        }
+                        QImage composite;QString error;
+                        if(!ei::compositeTextureLayers(images,&composite,&error))return QByteArray();
+                        return ei::encodeMmp8888(composite);
+                    });
+                }
+            }
+            found=cache.nodes.insert(id,std::move(value));++cache.builds;
+            coldWorkNs+=nodeWork.nsecsElapsed();
+            opening::span("gui.292.visual.node",begin,QString::number(node->mapId()));
+        } else ++cache.hits;
+        if(found->body.isEmpty())continue;
+        if(!found->composite.isEmpty()&&!cache.composites.contains(found->composite)) {
+            auto job=cache.composing.find(found->composite);
+            if(job==cache.composing.end()||!job->isFinished()){pending=true;continue;}
+            cache.composites[found->composite]=job->result();cache.composing.erase(job);
+        }
+        out<<quint32(entry.first)<<quint32(node->mapId())<<quint32(unit?1:0);
+        out.writeRawData(found->body.constData(),found->body.size());
+        if(!found->composite.isEmpty()&&!emitted.contains(found->composite)){blob(cache.composites.value(found->composite));emitted.insert(found->composite);}else blob({});
+    }
+    if(!only){
+        for(auto i=cache.nodes.begin();i!=cache.nodes.end();)if(!live.contains(i.key()))i=cache.nodes.erase(i);else ++i;
+        m_visualsPending292=pending;m_gl->setProperty("nativeUnitsPending289",pending);
+        m_gl->setProperty("nativeVisualBuilds292",QVariant::fromValue(cache.builds));
+        m_gl->setProperty("nativeVisualHits292",QVariant::fromValue(cache.hits));
+    }
+    return bytes;
 }
 void CRebuild64Viewport::updateLiveCamera() {
             if(m_worker) {
@@ -1028,7 +1116,7 @@ void CRebuild64Viewport::tick() {
     m_transformPreviewMessage=preview;
     projectNativeUnits289(m_gl);
     if(!m_outputOnly)serviceInput();
-    if(m_worker&&!cohortChanged&&m_terrainFlags&&submitTerrain()) {
+    if(m_worker&&!cohortChanged&&(m_terrainFlags||!m_neighborDirty.isEmpty())&&submitTerrain()) {
         updateLiveCamera();return;
     }
     if(m_worker&&m_sceneSnapshotTimer.isValid()&&m_sceneSnapshotTimer.elapsed()<100) {
@@ -1054,20 +1142,23 @@ void CRebuild64Viewport::tick() {
     m_documentPoses.clear();m_poseOverrides.clear();
     for(const auto& pose:editorPoses(m_gl))m_documentPoses.insert((quint64(pose.mob)<<32)|pose.nid,pose);
     Worker::Input next;
-    m_gl->ensureLegacyQueryContext();next.visuals=editorVisuals289(m_gl);
+    next.visuals=editorVisuals292();
     projectNativeUnits289(m_gl);next.documentObjects=editorPoses(m_gl);
+    next.atlas=Worker::atlasSource(m_gl);
     CMprEditTransaction transaction(QStringLiteral("Rebuild64 memory snapshot"));CValidationReport report;
     if(!m_gl->m_terrainEditAvailable) {
         // CView defers its editor model after visible load. Its original bytes
         // are already owned in memory; preview must not reopen the MPR meanwhile.
         next.terrain=m_gl->m_pLand->originalMprData();
     } else if(!m_gl->m_terrainEdit.appendSectorEdits(&transaction,&report)
-       || !m_gl->m_mprDocument.appendMapParametersEdit(m_gl->m_terrainEdit.maxZ(),m_gl->m_mprMaterials,m_gl->m_mprAnimatedTiles,&transaction,&report)
+       || !(next.atlas?m_gl->m_mprDocument.appendMaxZEdit(m_gl->m_terrainEdit.maxZ(),&transaction,&report)
+            :m_gl->m_mprDocument.appendMapParametersEdit(m_gl->m_terrainEdit.maxZ(),m_gl->m_mprMaterials,m_gl->m_mprAnimatedTiles,&transaction,&report))
        || !m_gl->m_mprDocument.applyTransaction(transaction,&next.terrain,&report)) {
         fallback(QString::fromUtf8("Не удалось создать снимок рельефа из памяти."));return;
     }
     if(next.terrain.isEmpty()){fallback(QString::fromUtf8("В памяти нет загруженного рельефа."));return;}
     for(auto* mob:m_gl->m_aMob)if(mob&&m_gl->isMobVisible(mob)) {
+        opening::Scope timing("gui.293.serializeMob");
         QByteArray bytes;mob->serializeMob(bytes,false);next.mobs.append(bytes);
     }
     opening::span("gui.native.document_serialize",serializationStart);
@@ -1079,6 +1170,11 @@ void CRebuild64Viewport::tick() {
     const auto fingerprint=hash.result();const bool documentChanged=fingerprint!=m_documentHash;if(documentChanged){m_documentHash=fingerprint;++m_generation;m_gl->m_nativeQueryPixels.clear();m_terrainSubmitted=0;m_terrainPresented=0;m_terrainFlags=0;m_terrainDirty=QRect();m_strokeDirty=QRect();m_strokeFlags=0;}
     if(documentChanged&&m_worker)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: обновление вида после правки; пока показан последний готовый кадр. Правки находятся в документе."));
     next.generation=m_generation;next.camera=cameraSnapshot();
+    if(documentChanged)for(auto it=m_gl->m_worldTerrainSession.documents.cbegin();it!=m_gl->m_worldTerrainSession.documents.cend();++it)
+        if(it.key()!=CWorldTerrainSession::key(m_documentMapPath)) {
+            const auto& doc=*it.value();
+            queueNeighborTerrain(doc.path,QRect(0,0,doc.baseline.mapInfo().sectorCountX,doc.baseline.mapInfo().sectorCountY),9u);
+        }
     {opening::Scope stage("gui.native.resource_snapshot");next.resources(m_gl->settings(),QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF()))));}
     if(!next.resourcesReady){fallback(tr("Для Rebuild64 выберите установленную игру в настройках игры и мода. Правки остаются в документе."));return;}
     // CView's validated map-local atlas can override the profile's RES order.
@@ -1093,7 +1189,8 @@ void CRebuild64Viewport::tick() {
         QDir().mkpath(scratch);
         m_worker.reset(new Worker(this,reinterpret_cast<void*>(m_native->winId()),scratch));
     }
-    {std::lock_guard<std::mutex> lock(m_worker->mutex);next.query=m_worker->input.query;next.serviceScene=m_worker->input.serviceScene;next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureServiceSerial=m_worker->input.captureServiceSerial;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
+    const auto inputLockStart293=opening::clock();
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);opening::span("gui.293.publishInput.lockWait",inputLockStart293);opening::Scope inputTiming("gui.293.publishInput.assign");next.query=m_worker->input.query;next.serviceScene=m_worker->input.serviceScene;next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureServiceSerial=m_worker->input.captureServiceSerial;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
     m_worker->wake.notify_all();
     if(!m_waitingInput.isEmpty() && frameIsCurrent() && editorQueryReady()){replayEditorInput();}
 }
@@ -1105,34 +1202,65 @@ void CRebuild64Viewport::queueTerrain(const QRect& rect,quint32 flags) {
     m_gl->m_nativeQueryPixels.clear();++m_querySerial;m_queryInFlight=false;
     for(const auto& pending:m_queryInput)m_waitingInput.append(pending);m_queryInput.clear();
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.query.reset();}
-    if((flags&1u)&&m_gl->m_landscapeTools&&!m_gl->m_landscapeTools->moveMobObjectsWithTerrain()) {
-        requireOpenGL(tr("Лепка с сохранением мировой высоты объектов"));return;
-    }
+    if(flags&16u)m_terrainDirty=QRect(0,0,int(m_gl->m_mprDocument.mapInfo().sectorCountX),int(m_gl->m_mprDocument.mapInfo().sectorCountY));
     if(!rect.isEmpty()){m_terrainDirty=m_terrainDirty.united(rect);m_strokeDirty=m_strokeDirty.united(rect);m_strokeFlags|=flags&7u;}
     if((flags&8u)&&m_terrainDirty.isEmpty())m_terrainDirty=m_strokeDirty;
     if(m_terrainDirty.isEmpty())return;
     m_terrainFlags|=flags|m_strokeFlags;
     if(flags&8u){m_strokeDirty=QRect();m_strokeFlags=0;}
 }
+void CRebuild64Viewport::reloadScene() {
+    if(!m_selected&&!m_outputOnly)return;
+    m_terrainFlags=m_strokeFlags=0;m_terrainDirty=m_strokeDirty=QRect();
+    m_documentHash.clear();m_documentRefreshPending=true;m_sceneSnapshotTimer.invalidate();
+    m_gl->m_nativeQueryPixels.clear();++m_querySerial;m_queryInFlight=false;
+    if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;m_worker->input.terrainUpdate={};m_worker->input.neighborUpdates.clear();}
+}
+void CRebuild64Viewport::queueNeighborTerrain(const QString& path,const QRect& rect,quint32 flags) {
+    if(!m_selected&&!m_outputOnly)return;
+    const auto key=CWorldTerrainSession::key(path);
+    auto stroke=m_neighborStroke.value(key);
+    if(!rect.isEmpty()){stroke.first=stroke.first.united(rect);stroke.second|=flags&7u;}
+    auto& dirty=m_neighborDirty[key];dirty.first=dirty.first.united(rect);dirty.second|=flags|stroke.second;
+    if((flags&8u)&&dirty.first.isEmpty())dirty.first=stroke.first;
+    if(flags&8u)m_neighborStroke.remove(key);else m_neighborStroke[key]=stroke;
+    if(dirty.first.isEmpty())m_neighborDirty.remove(key);
+    m_gl->m_nativeQueryPixels.clear();
+}
 bool CRebuild64Viewport::submitTerrain() {
     if(!m_worker||!m_gl->m_terrainEditAvailable||m_earlyDocument||m_mobDocumentRefresh)return false;
     {std::lock_guard<std::mutex> lock(m_worker->mutex);
         if(m_worker->input.generation!=m_generation||m_worker->input.name!=m_gl->m_pLand->filePath().fileName().toUtf8())return false;}
     Worker::TerrainPacket packet;CValidationReport report;
+    if(m_terrainFlags&18u)packet.atlas=Worker::atlasSource(m_gl);
     CMprEditTransaction transaction(QStringLiteral("Rebuild64 brush snapshot"));
     if(!m_gl->m_terrainEdit.appendSectorEdits(&transaction,&report)
-       ||!m_gl->m_mprDocument.appendMapParametersEdit(m_gl->m_terrainEdit.maxZ(),m_gl->m_mprMaterials,m_gl->m_mprAnimatedTiles,&transaction,&report)
+       ||!(packet.atlas?m_gl->m_mprDocument.appendMaxZEdit(m_gl->m_terrainEdit.maxZ(),&transaction,&report)
+            :m_gl->m_mprDocument.appendMapParametersEdit(m_gl->m_terrainEdit.maxZ(),m_gl->m_mprMaterials,m_gl->m_mprAnimatedTiles,&transaction,&report))
        ||!m_gl->m_mprDocument.applyTransaction(transaction,&packet.bytes,&report)) {
         fallback(tr("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ РѕР±РЅРѕРІР»РµРЅРёРµ РєРёСЃС‚Рё: ")+report.toText());return false;
     }
     packet.name=m_gl->m_pLand->filePath().fileName().toUtf8();
     packet.rect=m_terrainDirty.intersected(QRect(0,0,int(m_gl->m_mprDocument.mapInfo().sectorCountX),int(m_gl->m_mprDocument.mapInfo().sectorCountY)));
+    packet.preserveObjects=m_gl->m_landscapeTools&&!m_gl->m_landscapeTools->moveMobObjectsWithTerrain();
     packet.flags=m_terrainFlags;packet.serial=++m_terrainSubmitted;
+    QMap<QByteArray,Worker::TerrainPacket> neighbors;
+    for(auto it=m_neighborDirty.cbegin();it!=m_neighborDirty.cend();++it) {
+        const auto doc=m_gl->m_worldTerrainSession.documents.value(it.key());if(!doc)continue;
+        Worker::TerrainPacket n;CMprEditTransaction tx(QStringLiteral("Rebuild64 neighbour brush"));
+        if(!doc->terrain.appendSectorEdits(&tx,&report)
+           ||!doc->baseline.appendMapParametersEdit(doc->terrain.maxZ(),doc->materials,doc->baseline.mapInfo().animatedTiles,&tx,&report)
+           ||!doc->baseline.applyTransaction(tx,&n.bytes,&report)){fallback(report.toText());return false;}
+        n.name=QFileInfo(doc->path).fileName().toUtf8();n.rect=it->first;n.flags=it->second;n.serial=packet.serial;neighbors[n.name]=std::move(n);
+    }
     m_terrainState=m_gl->m_terrainEdit.stateSha256();m_documentRefreshPending=false;
     {std::lock_guard<std::mutex> lock(m_worker->mutex);
         auto& pending=m_worker->input.terrainUpdate;
         packet.rect=packet.rect.united(pending.rect);packet.flags|=pending.flags;
-        pending=std::move(packet);m_worker->input.documentDirty=false;}
+        pending=std::move(packet);m_worker->input.documentDirty=false;
+        for(auto it=neighbors.begin();it!=neighbors.end();++it){auto& old=m_worker->input.neighborUpdates[it.key()];it->rect=it->rect.united(old.rect);it->flags|=old.flags;old=std::move(it.value());}
+    }
+    m_neighborDirty.clear();
     m_terrainFlags=0;m_terrainDirty=QRect();m_worker->wake.notify_all();return true;
 }
 void CRebuild64Viewport::openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search) {
@@ -1351,8 +1479,9 @@ void CRebuild64Viewport::serviceInput() {
         const auto baseline=m_documentPoses.constFind(key);
         if(baseline!=m_documentPoses.cend() &&
            (std::memcmp(pose.position,baseline->position,sizeof(pose.position)) || std::memcmp(pose.quaternion,baseline->quaternion,sizeof(pose.quaternion)) || std::memcmp(pose.shape,baseline->shape,sizeof(pose.shape))))m_poseOverrides.insert(key);
-        pose.changed=m_poseOverrides.contains(key)?1u:0u;
+        pose.changed=(m_poseOverrides.contains(key)||m_gl->property("nativeTerrainPoses293").toBool())?1u:0u;
     }
+    m_gl->setProperty("nativeTerrainPoses293",false);
     opening::span("gui.service.poses",poseStart);
     std::lock_guard<std::mutex> lock(m_worker->mutex);
     m_worker->input.camera=cameraSnapshot();m_worker->input.size=size;
@@ -1382,7 +1511,7 @@ void CRebuild64Viewport::resizeEvent(QResizeEvent* event) {
     QTimer::singleShot(0,this,&CRebuild64Viewport::tick);
 }
 
-QByteArray CRebuild64Viewport::appearanceVisuals(CNode* node){m_gl->ensureLegacyQueryContext();return editorVisuals289(m_gl,node);}
+QByteArray CRebuild64Viewport::appearanceVisuals(CNode* node){return editorVisuals292(node);}
 quint64 CRebuild64Viewport::requestOutput(const QSize& size,int mode,const EirCamera& camera,const QString& model,const QString& texture,const QVector3D& shape,const QVector<float>& preview,const QVector<quint64>& objectKeys,const QString& secondary,const QStringList& parts,const QByteArray& modelBytes,const QByteArray& boneBytes,const QByteArray& textureBytes,const QByteArray& visuals) {
     const auto serial=++m_outputSerial;
     if(!m_selected&&qApp->property("agentHeadless").toBool()&&qApp->property("agentNativeOutput").toBool()) {

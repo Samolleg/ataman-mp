@@ -370,6 +370,9 @@ public:
         if(!allowError)check(!result.contains("error"),"MCP operation payload success: "+result.value("error").toString());return result;
     }
     #include "rebuild64_brush_check.inc"
+    #include "rebuild64_atlas292_check.inc"
+    #include "rebuild64_reload_293_check.inc"
+    #include "rebuild64_close292_check.inc"
     #include "rebuild64_brush_290_check.inc"
     void key(int value,const QString& text={}) {
         QWidget* target=native->rebuildSelected()?native->findChild<QWidget*>("rebuild64NativeSurface"):view;
@@ -587,7 +590,10 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="acceptUnits291"){for(const auto& zone:{QString("zone1"),QString("zone3obr")})unitsScenario289(zone);}
+            if(mode=="acceptClose292")close292Scenario();
+            else if(mode=="acceptAtlas292")atlas292Scenario();
+            else if(mode=="acceptReload293")reloadScenario293();
+            else if(mode=="acceptUnits291"){for(const auto& zone:{QString("zone1"),QString("zone3obr")})unitsScenario289(zone);}
             else if(mode=="acceptBrush290") {for(const auto& zone:{QString("zone1"),QString("zone7")}){native->selectRebuild(true,false);openPair(zone);validateReady(zone);brushScenario(zone);}}
             else if(mode=="acceptWater290") {
                 native->selectRebuild(true,false);openPair("zone7");validateReady("zone7");
@@ -852,6 +858,12 @@ public:
                     });
                     else QTimer::singleShot(0,setup,&QDialog::reject);
                 } else if(auto* message=qobject_cast<QMessageBox*>(widget)) {
+                    if(atlas292Compact){record("292_compact_dialog",{{"text",message->text()}});QTimer::singleShot(0,message,[message]{message->done(message->standardButtons().testFlag(QMessageBox::Yes)?QMessageBox::Yes:QMessageBox::Ok);});return false;}
+
+                    if(configuration["mode"].toString()=="acceptReload293"&&reloadConfirm293&&message->icon()==QMessageBox::Question&&message->button(QMessageBox::Yes)) {
+                        record("reload293_confirmation",{{"title",message->windowTitle()},{"text",message->text()}});
+                        QTimer::singleShot(0,message,[message]{message->button(QMessageBox::Yes)->click();});return false;
+                    }
                     const bool knownDataNotice=(message->text().contains("INFO:")&&message->text().contains("Autozone"))||(configuration["firstSetupAccept"].toBool()&&message->icon()==QMessageBox::Information&&message->text().contains("DejaVu launch287 isolated"));
                     if(!knownDataNotice)++unexpectedDialogs;record(knownDataNotice?"existing_map_validation_notice":"unexpected_dialog",{{"text",message->text()}});QTimer::singleShot(0,message,&QDialog::reject);if(!knownDataNotice)QTimer::singleShot(1,this,[]{for(auto* w:QApplication::topLevelWidgets())if(auto* d=qobject_cast<QDialog*>(w))if(d->findChild<QLineEdit*>("newMprNamespace"))d->reject();});
                 }
@@ -879,10 +891,18 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-close-292-20261108/")&&!normalized.contains("/work/rebuild64-atlas-292-20261108/")&&!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-reload-293-20261108/")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;
+    if(configuration["mode"].toString()=="acceptReload293"||configuration["mode"].toString()=="acceptClose292") {
+        QFile frozen(configuration["ownerSettings"].toString());if(!frozen.open(QIODevice::ReadOnly))return 97;
+        QSettings seed(QDir(caseRoot).filePath("settings/EI Mapper Endurance/EI Mapper Endurance Edition.ini"),QSettings::IniFormat);
+        for(const auto& value:QJsonDocument::fromJson(frozen.readAll()).array()) {
+            const auto row=value.toObject();seed.setValue(row["key"].toString(),row["type"].toInt()==3?QVariant(QByteArray::fromHex(row["value"].toString().toLatin1())):row["value"].toVariant());
+        }
+        seed.setValue("ui/renderer","Rebuild64");seed.setValue("ui/aiAgentMode",2);seed.setValue("ui/aiAgentAllowSave",true);seed.sync();
+    }
     isolatedSharedCache=configuration.value("sharedCache").toBool();
     knownFolderRoot=QDir::fromNativeSeparators(QDir::cleanPath(configuration["cacheRoot"].toString()));
     if(!knownFolderRoot.startsWith(QFileInfo(caseRoot).absolutePath()+"/",Qt::CaseInsensitive))return 97;

@@ -148,6 +148,10 @@ public:
     bool refreshDirtyFromProjection();
     const QVector<uint>& duplicateIds() const {return m_duplicateIds;}
     const QByteArray& originalData() const {return m_originalData;}
+    QByteArray cleanProjectionBytes() const {return m_cleanProjection;}
+    void retainValidatedValueCandidate292(const QByteArray& original,const QByteArray& clean,
+        const QByteArray& projection,const QByteArray& graph,const QByteArray& bytes,const QString& saveClass);
+
     void adoptCommittedBytes(const QByteArray& bytes);
     void generateDiplomacyTable();
     void clearDiplomacyTable();
@@ -187,6 +191,9 @@ public:
     // <== end functions of logic
 
 private:
+    QByteArray validationCohort292() const;
+    QByteArray m_validatedOriginal292,m_validatedClean292,m_validatedProjection292,m_validatedGraph292,m_validatedBytes292,m_validatedCohort292;
+    QString m_validatedClass292;
     bool buildValidatedProjectionCandidate(QByteArray*, CValidationReport*, QString*);
     friend int runDatabaseCreationCheck();
     friend int runGroupRotationCheck();

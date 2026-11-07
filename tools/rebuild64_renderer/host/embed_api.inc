@@ -44,6 +44,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   // MOB reuse transition. Retire source publications as well as positive IDs.
   OwnedRender::E1Scene().Scene().reset();
   s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.completedReadyEpoch=~uint64_t(0);s.materialsPublished=false;s.generation=in->generation;s.world=++nextWorld;s.edits.applied_serial=s.edits.presented_serial=0;s.traceFrameStarted=s.traceNeighboursSettled=s.traceResourcesSettled=false;
+  s.neighbourSerials293.clear();
   s.editorSeeds.clear();s.unitAtlases289.clear();s.poseAuditDone=false;
   if(!in->terrain.bytes)return 0;
   if(s.world>1) {
@@ -225,7 +226,9 @@ int32_t EIR_CALL host_service(void* handle,const EirService* in,EirError* out) n
    if(seed.completed){seed.pose.object_flags=p.selected?0x10u:0u;std::copy(p.editor_tint,p.editor_tint+4,seed.pose.editor_tint.begin());}
    if(!p.changed&&!seed.unit)continue;
    std::copy(p.position,p.position+3,seed.pose.position.begin());std::copy(p.quaternion,p.quaternion+4,seed.pose.quaternion.begin());std::copy(p.shape,p.shape+3,seed.pose.shape.begin());
-   if(seed.completed&&!OwnedRender::E1Scene().Scene().visual_editor_pose(seed.rendererId,{},seed.pose,seed.unit))return fail(&e,E_FAIL,"editor transform pose rejected");
+   auto& scene=OwnedRender::E1Scene().Scene();
+   if(!(seed.completed?scene.visual_editor_pose(seed.rendererId,{},seed.pose,seed.unit):scene.editor_seed_pose(seed.rendererId,seed.pose)))return fail(&e,E_FAIL,"editor transform pose rejected");
+   float ground=0;if(s.terrain&&owned::sample_terrain_height(*s.terrain,seed.pose.position[0],seed.pose.position[1],ground))seed.relativeZ=seed.pose.position[2]-ground;
   }
   size_t compared=0,differing=0;double maxPosition=0,maxShape=0,maxRotation=0;
   if(!s.poseAuditDone)for(const auto& seed:s.editorSeeds) {
@@ -256,11 +259,44 @@ int32_t EIR_CALL host_capture_world(void* h,const uint16_t* path,EirError* out) 
 #include "offscreen_output.inc"
 #include "editor_query.inc"
 #include "brush_api.inc"
+#include "atlas292_api.inc"
+int32_t EIR_CALL host_neighbour_terrain293(void* h,const EirTerrainUpdate* in,EirError* out) noexcept {
+ probe1b_error e{};
+ if(!h||h!=activeHandle.load()||GetCurrentThreadId()!=activeOwner.load()||!in||in->size!=sizeof(*in)||!in->terrain_name||!in->terrain.data||!in->terrain.bytes||in->terrain.bytes>UINT32_MAX||!(in->flags&1)||in->flags&~9u)
+  return eir_error(out,fail(&e,E_INVALIDARG,"invalid neighbour rectangle"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);
+  if(in->generation!=s.generation||in->world!=s.world||!in->serial)return fail(&e,E_INVALIDARG,"stale neighbour world");
+  const std::string name=in->terrain_name;
+  if(in->serial<=s.neighbourSerials293[name])return 0;
+  auto previous=owned::AtamanReadiness::neighbourSource293(s.renderer,in->terrain_name);
+  if(!previous)return owned::neighbour_client_settled(s.world)?fail(&e,E_INVALIDARG,"requested neighbour is outside the resident layout"):1;
+  if(in->x0>=in->x1||in->y0>=in->y1||in->x1>previous->original->sector_count_x||in->y1>previous->original->sector_count_y)return fail(&e,E_INVALIDARG,"neighbour rectangle outside map");
+  owned::ResourceFailure error;owned::ResourceBlob blob;
+  if(!s.store.copy_selected_memory(name,in->terrain.data,uint32_t(in->terrain.bytes),blob,error))return fail(&e,E_FAIL,error.message.c_str());
+  auto terrain=std::make_shared<owned::TerrainCpuAsset>();
+  if(!owned::parse_terrain_rectangle(blob,name,*previous->original,{in->x0,in->y0,in->x1,in->y1},*terrain,error))return fail(&e,E_FAIL,error.message.c_str());
+  auto source=std::make_shared<owned::BrushNeighbourSource>(*previous);source->original=terrain;
+  owned::MemoryResourceArchive archive;if(!archive.open(blob,error))return fail(&e,E_FAIL,error.message.c_str());
+  const auto base=terrain->map_header_resource.substr(0,terrain->map_header_resource.size()-3);
+  for(uint32_t y=in->y0;y<in->y1;++y)for(uint32_t x=in->x0;x<in->x1;++x){
+   const auto i=y*terrain->sector_count_x+x;auto& sector=terrain->sectors[i];
+   char suffix[32];std::snprintf(suffix,sizeof(suffix),"%03u%03u.sec",x,y);owned::ResourceBlob member;
+   if(!archive.resolve(base+suffix,member,error))return fail(&e,E_FAIL,error.message.c_str());
+   source->border[i]=std::move(member);source->source_dirty.insert(i);
+   sector.heights.clear();for(const auto& v:sector.vertices)sector.heights.push_back(owned::terrain_height_vertex(v));
+  }
+  source->forecast=std::make_shared<owned::TerrainLiquidRim>(owned::owned_terrain_liquid_rim(*terrain));
+  if(!owned::AtamanReadiness::neighbourPublish293(s.renderer,in->terrain_name,source,s.terrain,in->flags))return 1;
+  s.neighbourSerials293[name]=in->serial;s.edits.applied_serial=std::max(s.edits.applied_serial,in->serial);++s.edits.updates;
+  std::fprintf(stderr,"NEIGHBOUR_RECT map=%s serial=%llu rect=%u,%u,%u,%u flags=%u\n",in->terrain_name,in->serial,in->x0,in->y0,in->x1,in->y1,in->flags);return 0;
+ }),e);
+}
+
 void EIR_CALL host_device_loss(void* h){if(h)static_cast<Session*>(h)->loseDevice=true;}
 }
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_renderer_get_api(uint32_t abi,EirApi* out) noexcept {
  if(abi!=EIR_ABI||!out||out->size!=sizeof(*out))return -1;
- *out={sizeof(EirApi),abi,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output,&host_query,&host_depth,&host_terrain_update,&host_poses,&host_update_state};return 0;
+ *out={sizeof(EirApi),abi,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output,&host_query,&host_depth,&host_terrain_update,&host_poses,&host_update_state,&host_atlas_update,&host_neighbour_terrain293};return 0;
 }
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_brush_debug(void* h,char* out,uint32_t capacity) noexcept {
  if(!h||h!=activeHandle.load()||GetCurrentThreadId()!=activeOwner.load()||!out||!capacity)return -1;

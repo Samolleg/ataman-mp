@@ -69,3 +69,5 @@ RESOURCES += \
 
 TRANSLATIONS += translations/ei_mapper_ru.ts
 RESOURCES += translations/translations.qrc
+
+QMAKE_PROJECT_DEPTH = 0

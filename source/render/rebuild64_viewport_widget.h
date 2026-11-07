@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QPointer>
 #include <QHash>
+#include <QMap>
 #include <QSet>
 #include <memory>
 #include "rebuild64_abi.h"
@@ -46,7 +47,7 @@ public:
     quint64 terrainPresentedSerial() const { return m_terrainPresented; }
     bool frameIsCurrent() const { return (m_selected||m_outputOnly) && !m_documentRefreshPending
         && m_generation && m_statistics.ready_generation==m_generation
-        && m_terrainPresented>=m_terrainSubmitted && !m_terrainFlags; }
+        && m_terrainPresented>=m_terrainSubmitted && !m_terrainFlags && m_neighborDirty.isEmpty() && !m_visualsPending292; }
     void capture(const QString& path, bool worldOnly=false);
     void cancelCapture(const QString& path);
     void cancelOutputs(const QString& reason);
@@ -71,6 +72,10 @@ protected:
     void resizeEvent(QResizeEvent*) override;
 private:
     struct Worker;
+    bool m_visualsPending292{false};
+    struct VisualCache292;
+    std::unique_ptr<VisualCache292> m_visualCache292;
+    QByteArray editorVisuals292(CNode* only=nullptr);
     bool queryEditorInput(QEvent* event);
     bool m_queryReplaying{false},m_queryInFlight{false};
     quint64 m_querySerial{0};
@@ -79,6 +84,9 @@ private:
     void updateLiveCamera();
     void queueTerrain(const QRect&,quint32);
     bool submitTerrain();
+    void queueNeighborTerrain(const QString&,const QRect&,quint32);
+    void reloadScene();
+    QMap<QString,QPair<QRect,quint32>> m_neighborDirty,m_neighborStroke;
     void fallback(const QString& message);
     void editorInput(QEvent* event);
     void serviceInput();

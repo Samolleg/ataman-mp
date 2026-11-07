@@ -959,6 +959,9 @@ public slots:
 signals:
     void legacyViewportRequested(const QString& action);
     void nativeTerrainChanged(const QRect& sectors, quint32 flags);
+    void nativeNeighborTerrainChanged(const QString& path,const QRect& sectors,quint32 flags);
+    void nativeSceneReloadRequested();
+    void nativeTerrainPosesChanged();
     void diplomacyMapModeChanged(bool enabled);
     void diplomacyWindowRequested();
     void canvasResizeMobPathsRequested(QStringList* paths);

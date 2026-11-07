@@ -106,8 +106,6 @@ int32_t EIR_CALL host_terrain_update(void* h,const EirTerrainUpdate* in,EirError
   auto map=std::make_shared<owned::OwnedMapSnapshot>(*s.map);map->terrain=next;
   const auto decoded=std::chrono::steady_clock::now();
   auto& scene=OwnedRender::E1Scene().Scene();
-  if(!scene.editor_replace_terrain(map)||!OwnedRender::E1UpdateTerrainSnapshot(&s,next))return fail(&e,E_FAIL,"partial source publication rejected");
-   ingressTimer.mark("publish_scene");
   // Native placement is MOB relative Z plus the same terrain sampler used at
   // complete load. Reselection of mesh/material is unnecessary for rigid seeds.
   size_t moved=0;
@@ -120,12 +118,19 @@ int32_t EIR_CALL host_terrain_update(void* h,const EirTerrainUpdate* in,EirError
     if(x<float(in->x0*32)-1||x>float(in->x1*32)+1||y<float(in->y0*32)-1||y>float(in->y1*32)+1)continue;
    float oldZ=0,newZ=0;
    if(!owned::sample_terrain_height(*s.terrain,seed.pose.position[0],seed.pose.position[1],oldZ)||!owned::sample_terrain_height(*next,seed.pose.position[0],seed.pose.position[1],newZ))continue;
+   if(in->preserve_object_height){
+    seed.relativeZ=seed.pose.position[2]-newZ;
+    for(auto& object:map->objects)if(object.nid==uint32_t(seed.rendererId)){object.position[2]=seed.relativeZ;break;}
+    continue;
+   }
    if(oldZ==newZ)continue;
    auto pose=seed.pose;pose.position[2]=newZ+seed.relativeZ;
    if(!scene.editor_seed_pose(seed.rendererId,pose,true))return fail(&e,E_FAIL,"terrain object reprojection rejected");
    seed.pose=pose;++moved;
   }
    ingressTimer.mark("publish_reproject");
+  if(!scene.editor_replace_terrain(map)||!OwnedRender::E1UpdateTerrainSnapshot(&s,next))return fail(&e,E_FAIL,"partial source publication rejected");
+   ingressTimer.mark("publish_scene");
   if(const auto hr=owned::AtamanReadiness::brushResources(s.renderer,next,map,in->flags&~8u,in->x0,in->y0,in->x1,in->y1);FAILED(hr))return fail(&e,hr,"partial terrain resource update rejected");
    ingressTimer.mark("publish_local_resources");
   s.terrain=next;s.baseline=next;s.map=map;

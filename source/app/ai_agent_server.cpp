@@ -13,7 +13,12 @@
 
 namespace {
 bool nativePlanRequiresLegacy(const ai::EditPlan& plan) {
-    if(QStringList{"paint","auto_paint","generate_terrain","erode"}.contains(plan.method))return true;
+    // Independent neighbour MPR publication is still the world-edit boundary
+    // owned by branch B. Do not silently display its old saved native terrain.
+    if((plan.method=="paint"||plan.method=="auto_paint")&&!plan.maps.isEmpty())
+        for(auto it=plan.stroke.paint.cbegin();it!=plan.stroke.paint.cend();++it)
+            if(it.key()!=plan.maps.first().id)return true;
+    if(QStringList{"generate_terrain","erode"}.contains(plan.method))return true;
     return false;
 }
 QJsonObject nativePlanRefusal() {
@@ -377,7 +382,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     if(method!="operation_status" && method!="cancel_operation" && m_view
        && m_view->property("rebuild64Selected").toBool() && CLandscape::getInstance()->isMprLoad() && !m_view->m_terrainEditAvailable
        && !CAiEditAdapter::busy(m_window))m_view->ensureTerrainAutoCatalogReady();
-    const QSet<QString> legacyTerrainTools{"paint","auto_paint","generate_terrain","erode"};
+    const QSet<QString> legacyTerrainTools{"generate_terrain","erode"};
     const auto requestedTool=method=="preview"?args["tool"].toString():method;
     if(m_view && m_view->property("rebuild64Selected").toBool() && legacyTerrainTools.contains(requestedTool))
         return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Изменение рельефа, текстур, воды и дорог пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};

@@ -178,12 +178,14 @@ void CView::refreshWorldTerrainNeighbors()
         const bool retainedDirty=doc->terrain.isDirty() || doc->materials!=doc->baseline.mapInfo().materials;
         // Clean atlas snapshots are already represented by the disk renderer.
         // Reapplying one would hide an external atlas publication.
-        if(!retainedDirty)continue;
-        useLegacyViewport(QString::fromUtf8("Одновременная правка нескольких MPR мира"));
-        if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
+        Q_UNUSED(retainedDirty)
+            if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
+            //293-B transfers structural rectangles. Until the separate atlas
+            //branch supplies neighbour page/layout ingress, retain this guard.
+            useLegacyViewport(QString::fromUtf8("Покраска нескольких MPR мира"));
             if(!previewWorldPaintState(id)){emit updateMsg(tr("Не удалось обновить атлас соседней карты."));continue;}
         }
-        bool changed=false, shadowChanged=false;
+        bool changed=false, shadowChanged=false;QRect nativeDirty;
         for(const auto& sector:doc->baseline.sectors())
         {
             const auto key=qMakePair(sector.sectorX,sector.sectorY);
@@ -192,12 +194,13 @@ void CView::refreshWorldTerrainNeighbors()
             const auto after=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
             if(before==after) continue;
             if(loaded.landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,after))
-            { loaded.terrainPreviewPayloads[key]=after;changed=true;
+            { loaded.terrainPreviewPayloads[key]=after;changed=true;nativeDirty=nativeDirty.united(QRect(sector.sectorX,sector.sectorY,1,1));
               shadowChanged |= terrainShadowInputsChanged(before,after); }
             else emit updateMsg(tr("Neighbor terrain preview failed: %1").arg(loaded.placement.zoneId));
         }
         if(changed)
         {
+            emit nativeNeighborTerrainChanged(loaded.placement.mprPath,nativeDirty,1u|(m_sculptStrokeActive?0u:8u));
             if(shadowChanged)loaded.landscape->invalidateTerrainShadowField();
             loaded.drawCacheDirty=true;
             for(int index=0; index<loaded.staticObjects.size(); ++index)
@@ -212,7 +215,6 @@ void CView::refreshWorldTerrainNeighbors()
 
 void CView::chooseWorldTerrainMaps()
 {
-    useLegacyViewport(QString::fromUtf8("Выбор карт для лепки мира"));
     finishSculptStroke();
     if(!m_hasActiveMapWorldOrigin || !m_neighborLayoutStorageWritable
        || !m_pLand->isMprLoad() || !ensureTerrainAutoCatalogReady())
@@ -1409,8 +1411,10 @@ bool CView::previewWorldPaintState(const QString& id,
     if(id==active) {
         if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
         m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
-        if(doc->atlas->generatedTileCount()>0)useLegacyViewport(QString::fromUtf8("Новые страницы рабочего атласа мира"));
-        emit nativeTerrainChanged(nativeDirty,7u | (m_tilePaintStrokeActive?0u:8u));
+        if(doc->atlas->activeTextureCount()>63)
+            useLegacyViewport(QString::fromUtf8("Атлас мира превышает 63 страницы: требуется другая схема шейдера Rebuild64"));
+        // The full state is installed below before the queued snapshot runs.
+        emit nativeTerrainChanged(nativeDirty,16u|2u | (m_tilePaintStrokeActive?0u:8u));
         // Restore the immutable source together with its working cache. The
         // renderer/picker contain edited slots and cannot serve as that source.
         m_authoredTerrainTileImages=doc->atlas->authoredTileImages();

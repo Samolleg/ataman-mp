@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 14u
+#define EIR_ABI 15u
 #define EIR_PREVIEW_STATIC_FOOTPRINTS 1u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
@@ -132,6 +132,7 @@ typedef struct EirTerrainUpdate {
     const EirTexturePage* pages;
     uint32_t page_count;
     EirSpan terrain_profile; // optional mapper atlas profile JSON, scoped to this source
+    uint32_t preserve_object_height; //293-B absolute world pose survives this sculpt
 } EirTerrainUpdate;
 typedef struct EirPoseUpdate {
     uint32_t size,count;
@@ -163,5 +164,11 @@ typedef struct EirApi {
     int32_t (EIR_CALL *terrain_update)(void*,const EirTerrainUpdate*,EirError*);
     int32_t (EIR_CALL *poses)(void*,const EirPoseUpdate*,EirError*);
     int32_t (EIR_CALL *update_state)(void*,EirUpdateState*,EirError*);
+    // Atlas292: complete active-map layout/pages/materials in the terrain serial
+    // domain. Immutable MMP spans are borrowed only for this owner-thread call.
+    int32_t (EIR_CALL *atlas_update)(void*,const EirTerrainUpdate*,EirError*);
+    // 293-B: same rectangle contract, terrain_name identifies a resident neighbour.
+    // 1 = stream still loading; retry after frame. No mutation on that result.
+    int32_t (EIR_CALL *neighbour_terrain)(void*,const EirTerrainUpdate*,EirError*);
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

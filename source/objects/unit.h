@@ -218,6 +218,7 @@ public:
     const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
     QJsonObject nativeVisualPlan();
+    QByteArray nativeVisualCacheKey(const QString& resourceFingerprint) const;
     bool needsVisualResolution() const;
     void invalidateDatabaseVisual();
     void carryResolvedVisualToCurrentDatabaseGeneration();
@@ -263,7 +264,8 @@ public:
 
 private:
     CLogic* editorLogic() const;
-    bool refreshTransientVisual(bool force = false);
+    bool refreshTransientVisual(bool force = false, bool nativeOnly = false);
+    bool m_nativeOnly292{false};
     void refreshAnimationPose();
     //"UNIT_R", eNull};
     QString m_prototypeName;//"UNIT_PROTOTYPE", eString};

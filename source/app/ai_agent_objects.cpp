@@ -1,4 +1,8 @@
 #include "ai_agent_edit.h"
+#include "opening_trace.h"
+#include <QtConcurrent>
+#include <QThread>
+#include <QEventLoop>
 #include "main_window.h"
 #include "view.h"
 #include "mob.h"
@@ -210,6 +214,7 @@ QSharedPointer<const ei::SProfileDatabaseSnapshot> CAiEditAdapter::objectDatabas
 }
 
 ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,const QJsonObject& args){
+    opening::Scope timing292("gui.292.ai.capture_objects",method);
     // Unit-only object selections use the existing five-slot transaction,
     // including passability reporting, exact reference handling and Undo.
     if(method=="edit_objects"&&args["action"]!="place") {
@@ -611,6 +616,41 @@ ai::EditPlan CAiEditAdapter::prepareObjects(ai::EditPlan p,const ai::Cancellatio
     catch(...){p.error="Object/graph preparation failed; live documents unchanged";return p;}
 }
 
+namespace {
+// Only immutable value snapshots cross the worker boundary. The existing
+// provenance-aware root transaction and fresh parse remain the acceptance gate.
+struct NativeCandidate292 {bool success{false};QByteArray bytes;CValidationReport report;QString saveClass;};
+NativeCandidate292 valueCandidate292(const QByteArray& original,const QByteArray& clean,
+                                    const QByteArray& projection,const QByteArray& graph,const QString& path) {
+    opening::Scope timing("worker.292.ai.validate_candidate");NativeCandidate292 result;
+    CMobDocument baseline;if(!baseline.loadBytes(original,path,&result.report))return result;
+    QByteArray originalGraph;if(baseline.hasEmbeddedAiGraph()&&!baseline.embeddedAiGraph(&originalGraph,&result.report))return result;
+    if(projection==clean){result.bytes=original;result.saveClass="BYTE_IDENTICAL";}
+    else {CMobEditTransaction transaction;
+        if(!CMobDocument::buildOwnedRootProjectionCandidate(original,path,clean,projection,&transaction,&result.bytes,&result.saveClass,&result.report))return result;}
+    if(result.bytes.size()<16||result.bytes.left(4)!=original.left(4))return result;
+    CMobDocument candidate;if(!candidate.loadBytes(result.bytes,"native-value-candidate.mob",&result.report))return result;
+    if(originalGraph!=graph){QByteArray combined;
+        if(!(graph.isEmpty()?candidate.removeEmbeddedAiGraph(&combined,&result.report):candidate.replaceEmbeddedAiGraph(graph,&combined,&result.report)))return result;
+        CMobDocument fresh;if(!fresh.loadBytes(combined,"native-value-graph.mob",&result.report))return result;result.bytes=combined;result.saveClass="OBJECTS_AND_EMBEDDED_GRAPH";}
+    result.success=true;return result;
+}
+bool validatedCandidate292(MainWindow* window,CMob* mob,QByteArray* bytes,CValidationReport* report) {
+    if(!window->property("aiCommitBusy").toBool()||!window->view()->property("rebuild64Selected").toBool()
+       ||mob->originalData().isEmpty()||mob->cleanProjectionBytes().isEmpty())return mob->buildValidatedCandidate(bytes,report);
+    QByteArray projection;mob->serializeMob(projection,false);
+    const auto original=mob->originalData(),clean=mob->cleanProjectionBytes(),graph=mob->aiGraphData();const auto path=mob->filePath().filePath();
+    auto future=QtConcurrent::run([original,clean,projection,graph,path]{return valueCandidate292(original,clean,projection,graph,path);});
+    // aiCommitBusy defers Close and rejects other mutations; user input is held
+    // until this atomic command completes. Painting/timers continue normally.
+    while(!future.isFinished()){QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents,4);QThread::msleep(1);}
+    const auto result=future.result();
+    if(result.success){mob->retainValidatedValueCandidate292(original,clean,projection,graph,result.bytes,result.saveClass);*bytes=result.bytes;if(report)*report=result.report;return true;}
+    // Structural/provenance fallbacks retain the complete original contract.
+    return mob->buildValidatedCandidate(bytes,report);
+}
+}
+
 class CAiObjectCommand : public QUndoCommand,public IAiGraphPreviewInvalidatingCommand {
 public:
     struct Change{CMob* mob;CNode* node;int index;QString kind;QVector3D before,after;QQuaternion beforeRot,afterRot;QJsonArray beforeLogic,afterLogic;};
@@ -619,7 +659,7 @@ public:
     bool beforeFresh{false},beforeLoaded{true},beforeCanvasStale{false},first{true},unitOnly{false};
     QString beforeSource,beforeDisplaySource;
     bool invalidatesAiGraphPreview()const override{return !graphMob&&!unitOnly;}
-    void run(bool forward){auto* v=window?window->view():nullptr;if(!v)return;
+    void run(bool forward){opening::Scope timing292("gui.292.ai.object_command");auto* v=window?window->view():nullptr;if(!v)return;
         v->makeCurrent();v->beginObjectEditBatch();
         const auto apply=[&](Change& c){
             if(c.kind=="create"){if(forward)c.mob->restoreDeletedNode(c.node,c.index);else c.mob->deleteNode(c.node);}
@@ -655,6 +695,7 @@ public:
 bool CAiEditAdapter::objectCommand(const QUndoCommand* c){return dynamic_cast<const CAiObjectCommand*>(c)!=nullptr;}
 
 QJsonObject CAiEditAdapter::applyObjects(MainWindow* w,const ai::EditPlan& p){
+    opening::Scope timing292("gui.292.ai.apply_objects",p.method);
     for(auto i=p.fileHashes.begin();i!=p.fileHashes.end();++i)if(i.value().isEmpty()||hashFile(i.key())!=i.value())return ai::error("Document revision conflict: family/map.txt dependency changed; prepare again");
     auto* v=w->view();QScopedPointer<CAiObjectCommand> command(new CAiObjectCommand);command->window=w;command->setText(p.description);
     command->unitOnly=p.method=="edit_units";
@@ -686,8 +727,8 @@ QJsonObject CAiEditAdapter::applyObjects(MainWindow* w,const ai::EditPlan& p){
         for(auto& c:command->changes)if(c.kind=="create")c.mob->deleteNode(c.node);
     }
     command->run(true);
-    for(auto* mob:v->m_aMob){QByteArray bytes;CValidationReport report;
-        if(!mob->buildValidatedCandidate(&bytes,&report)){command->run(false);return ai::error("Native candidate rejected; complete operation rolled back: "+report.toText());}
+    for(auto* mob:v->m_aMob){opening::Scope validate292("gui.292.ai.validate_candidate");QByteArray bytes;CValidationReport report;
+        if(!validatedCandidate292(w,mob,&bytes,&report)){command->run(false);return ai::error("Native candidate rejected; complete operation rolled back: "+report.toText());}
     }
     for(const auto& c:command->changes)if(c.kind=="create")w->m_sessionAllocatedNids.insert(c.node->mapId());
     w->m_undoStack->push(command.take());
