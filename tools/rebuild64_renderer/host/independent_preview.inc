@@ -34,11 +34,28 @@ int model_output(Session& s,const EirOutputRequest& request,EirOutput& output,pr
     uint64_t(request.width)*request.height>4194304)return fail(error,E_INVALIDARG,"invalid independent preview extent/model/texture");
  if(request.model_bytes.bytes>67108864||request.bone_bytes.bytes>67108864||request.texture_bytes.bytes>67108864||
     (request.model_bytes.bytes&&!request.model_bytes.data)||(request.bone_bytes.bytes&&!request.bone_bytes.data)||(request.texture_bytes.bytes&&!request.texture_bytes.data))return fail(error,E_INVALIDARG,"invalid auxiliary preview bytes");
- uint64_t bytesKey=1469598103934665603ull;for(const auto span:{request.model_bytes,request.bone_bytes,request.texture_bytes}){const auto* b=static_cast<const uint8_t*>(span.data);for(uint64_t i=0;i<span.bytes;++i){bytesKey^=b[i];bytesKey*=1099511628211ull;}}
+ uint64_t bytesKey=1469598103934665603ull;for(const auto span:{request.model_bytes,request.bone_bytes,request.texture_bytes,request.visuals}){const auto* b=static_cast<const uint8_t*>(span.data);for(uint64_t i=0;i<span.bytes;++i){bytesKey^=b[i];bytesKey*=1099511628211ull;}}
  const std::string secondary=request.secondary_texture&&*request.secondary_texture?request.secondary_texture:request.texture;
  const std::string key=std::string(request.model)+"/"+request.texture+"/"+secondary+"/"+(request.part_names?request.part_names:"")+"/"+std::to_string(bytesKey)+"/"+std::to_string(request.shape[0])+"/"+std::to_string(request.shape[1])+"/"+std::to_string(request.shape[2]);
  if(!s.previewSource||s.previewKey!=key) {
   owned::ResourceFailure failure;if(!s.store.open(s.mounts,failure))return fail(error,E_FAIL,failure.message.c_str());
+  if(request.visuals.bytes) {
+   auto plans=units289::read(request.visuals);if(plans.size()!=1)return fail(error,E_INVALIDARG,"preview needs one completed appearance");
+   auto plan=plans.begin()->second;plan.action.clear();plan.length=0;
+   auto snapshot=std::make_shared<owned::OwnedMapSnapshot>();owned::StaticObjectSource object;object.nid=1;object.family=54;object.quaternion={1,0,0,0};std::copy_n(request.shape,3,object.shape.begin());std::string why;
+   if(!units289::prepare(s,*snapshot,object,plan,why))return fail(error,E_FAIL,why.c_str());
+   const auto model=snapshot->models.at(plan.model);auto selected=object;selected.part_names.clear();
+   for(size_t i=0;i<model->nodes.size();++i)if(owned::retained_static_node_selected(object,*model,i)&&model->nodes[i].transform_available&&!model->nodes[i].figure.indices.empty())selected.part_names.push_back(model->nodes[i].name);
+   snapshot->objects.push_back(selected);auto plane=std::make_shared<owned::TerrainCpuAsset>();plane->sector_count_x=plane->sector_count_y=1;plane->sectors.resize(1);plane->sectors[0].vertices.resize(1089);owned::RetainedStaticPrepareDiagnostic diagnostic;
+   if(!owned::prepare_retained_static_candidate(snapshot,plane,snapshot->objects.front(),s.previewSource,&diagnostic))return fail(error,E_FAIL,owned::retained_static_prepare_result_name(diagnostic.result));
+   auto assembly=std::make_shared<owned::VisualAssemblyAsset>(*s.previewSource->assembly);owned::VisualObjectPose pose;
+   if(!units289::complete(s,plan,assembly,pose,why))return fail(error,E_FAIL,why.c_str());s.previewSource->assembly=assembly;
+   for(size_t i=0;i<s.previewSource->nodes.size();++i){auto& node=s.previewSource->nodes[i];const auto& texture=assembly->parts[i].texture;node.texture=texture.get();node.texture_mips.clear();
+    for(const auto& mip:texture->mips)node.texture_mips.push_back({texture->source->data()+mip.byte_offset,mip.width,mip.height,mip.bytes});
+    node.texture_identity=std::hash<std::string>{}(texture->identity.key());
+    switch(texture->format){case owned::MmpFormat::dxt1:node.texture_format=owned::NativeOwnedTextureFormat::dxt1;break;case owned::MmpFormat::dxt3:node.texture_format=owned::NativeOwnedTextureFormat::dxt3;break;case owned::MmpFormat::dxt5:node.texture_format=owned::NativeOwnedTextureFormat::dxt5;break;default:node.texture_format=owned::NativeOwnedTextureFormat::argb8888;break;}
+   }
+  } else {
   auto snapshot=std::make_shared<owned::OwnedMapSnapshot>();auto model=std::make_shared<owned::ModelCpuAsset>();
   if(request.model_bytes.bytes) {
    owned::ResourceBlob modelBlob,boneBlob;
@@ -76,6 +93,7 @@ int model_output(Session& s,const EirOutputRequest& request,EirOutput& output,pr
   owned::RetainedStaticPrepareDiagnostic diagnostic;
   if(!owned::prepare_retained_static_candidate(snapshot,plane,snapshot->objects.front(),s.previewSource,&diagnostic))
    return fail(error,E_FAIL,owned::retained_static_prepare_result_name(diagnostic.result));
+  }
   s.previewKey=key;
  }
  if(const auto rc=pump_output_display(s,error))return rc;

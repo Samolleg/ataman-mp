@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 13u
+#define EIR_ABI 14u
 #define EIR_PREVIEW_STATIC_FOOTPRINTS 1u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
@@ -37,7 +37,8 @@ typedef struct EirCreate {
     uint32_t preview_flags;
 } EirCreate;
 typedef struct EirObjectPose {
-    uint32_t mob,nid,visible,changed;
+    uint32_t mob,nid,visible,changed,selected;
+    float editor_tint[4]; // diagnostic diplomacy RGB/weight only
     float position[3],quaternion[4],shape[3]; // wxyz; semantic strength,grace,tall
 } EirObjectPose;
 
@@ -52,6 +53,7 @@ typedef struct EirDocument {
     const EirTexturePage* pages;
     uint32_t page_count;
     EirSpan terrain_profile; // optional mapper atlas profile JSON, scoped to this source
+    EirSpan visuals; // Units289: bounded LE32 records; UTF-8 semantic plans + optional composed MMP.
 } EirDocument;
 typedef struct EirCamera {
     float world_to_clip[16]; // row-major, D3D depth [0,1], Z-up
@@ -97,6 +99,7 @@ typedef struct EirOutputRequest {
     float preview[12]; // model pitch/yaw, orbit azimuth/elevation, zoom, pan XY, cartographic pass
     EirSpan object_keys; // mode 4: uint64 keys (MOB ordinal << 32 | document NID)
     const char *secondary_texture,*part_names; // LF-delimited authored part names
+    EirSpan visuals; //291 completed appearance for independent unit/stst8 preview
     EirSpan model_bytes,bone_bytes,texture_bytes; // optional exact editor-owned auxiliary assets
 } EirOutputRequest;
 typedef struct EirOutput {

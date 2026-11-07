@@ -115,7 +115,8 @@ int32_t EIR_CALL host_terrain_update(void* h,const EirTerrainUpdate* in,EirError
     // Rectangle decode leaves every other sector and the MP object table
     // unchanged. Only sample seeds touching this rectangle (plus one metre
     // for boundary ownership), instead of querying all map objects twice.
-    const auto x=seed.pose.position[0],y=seed.pose.position[1];
+    if(seed.unit)continue; // UNIT support is authoritative CPU ingress, including bridges.
+     const auto x=seed.pose.position[0],y=seed.pose.position[1];
     if(x<float(in->x0*32)-1||x>float(in->x1*32)+1||y<float(in->y0*32)-1||y>float(in->y1*32)+1)continue;
    float oldZ=0,newZ=0;
    if(!owned::sample_terrain_height(*s.terrain,seed.pose.position[0],seed.pose.position[1],oldZ)||!owned::sample_terrain_height(*next,seed.pose.position[0],seed.pose.position[1],newZ))continue;
@@ -170,7 +171,7 @@ int32_t EIR_CALL host_poses(void* h,const EirPoseUpdate* in,EirError* out) noexc
   for(uint32_t i=0;i<in->count;++i){const auto& p=in->poses[i];auto& seed=*std::find_if(s.editorSeeds.begin(),s.editorSeeds.end(),[&](const auto& x){return x.mob==p.mob&&x.nid==p.nid;});
    auto pose=seed.pose;std::copy_n(p.position,3,pose.position.begin());std::copy_n(p.quaternion,4,pose.quaternion.begin());std::copy_n(p.shape,3,pose.shape.begin());
    include(seed.pose.position[0],seed.pose.position[1]);include(pose.position[0],pose.position[1]);
-   if(!scene.editor_seed_pose(seed.rendererId,pose))return fail(&e,E_FAIL,"pose publication rejected");seed.pose=pose;
+   if(!(seed.completed?scene.visual_editor_pose(seed.rendererId,{},pose,seed.unit):scene.editor_seed_pose(seed.rendererId,pose)))return fail(&e,E_FAIL,"pose publication rejected");seed.pose=pose;
    float ground=0;owned::sample_terrain_height(*next,pose.position[0],pose.position[1],ground);seed.relativeZ=pose.position[2]-ground;
    auto object=std::find_if(map->objects.begin(),map->objects.end(),[&](const auto& value){return value.nid==uint32_t(seed.rendererId);});
    if(object==map->objects.end())return fail(&e,E_FAIL,"pose CPU source identity missing");

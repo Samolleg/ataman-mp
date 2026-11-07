@@ -6,6 +6,7 @@
 #include "worldobj.h"
 #include "lever.h"
 #include "unit.h"
+#include "database_map_catalog.h"
 #include "landscape.h"
 #include "endurance_document.h"
 #include "script_reference_analyzer.h"
@@ -209,6 +210,15 @@ QSharedPointer<const ei::SProfileDatabaseSnapshot> CAiEditAdapter::objectDatabas
 }
 
 ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,const QJsonObject& args){
+    // Unit-only object selections use the existing five-slot transaction,
+    // including passability reporting, exact reference handling and Undo.
+    if(method=="edit_objects"&&args["action"]!="place") {
+        bool units=false,others=false;
+        for(auto* mob:w->view()->mobs())for(auto* node:mob->nodes())if(selected(row(mob,node),args)) {
+            if(node->nodeType()==eUnit)units=true;else others=true;
+        }
+        if(units&&!others)return captureObjects(w,"edit_units",args);
+    }
     ai::EditPlan p;p.method=method;p.args=args;p.description=QString::fromUtf8("ИИ: ")+method;
     const auto fail=[&](QString e){p.error=e;return p;};auto* v=w->view();
     if(busy(w))return fail("Editor gesture/load/modal interaction in progress; retry after it finishes");
@@ -271,9 +281,6 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
         }
         for(auto* n:mob->nodes()){
             auto r=row(mob,n);auto data=r["data"].toObject();
-            if(edit && method=="edit_objects" && v->property("rebuild64Selected").toBool()
-               && selected(r,args) && n->modelName().compare("stst8",Qt::CaseInsensitive)==0)
-                return fail(QString::fromUtf8("Правки stst8 пока требуют OpenGL. Выберите OpenGL через Настройки → Вид карты; правки сохранены."));
             if(n->nodeType()==eUnit){r["prototype"]=data["Prototype name"];r["absoluteHeight"]=v->m_terrainEdit.terrainSurfaceHeight(n->position().x(),n->position().y())+n->position().z();}
             if(templates.contains(n)){
                 const auto source=templates[n].first,clean=templates[n].second;
@@ -309,6 +316,23 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
         if(QFileInfo::exists(catalogPath))p.fileHashes[catalogPath]=hashFile(catalogPath);
         for(const auto& value:args["objects"].toArray()){
             const auto spec=value.toObject();const auto key=spec["prototype"].toString().toLower();
+            if(db->monsters.contains(key)) {
+                ei::SDatabaseMapEntry entry;bool found=false;
+                for(const auto& candidate:ei::databaseMapCatalog(*db))if(candidate.category==ei::EDatabaseMapCategory::Creature &&
+                    (candidate.key.compare(key,Qt::CaseInsensitive)==0||candidate.name.compare(key,Qt::CaseInsensitive)==0)){entry=candidate;found=true;break;}
+                if(!found)return fail("Creature has no authorable database appearance");
+                CUnit defaults;QJsonObject data;if(!ei::applyDatabaseMapEntry(entry,defaults.toJson(),&data))return fail("Database creature defaults rejected");
+                auto b=base(data);b["Map name"]=spec["name"].toString(entry.name);
+                b["Position"]=QJsonArray{spec["x"],spec["y"],spec["z"].toDouble(0)};
+                const auto rot=spec["rotation"].toArray();const auto q=QQuaternion::fromEulerAngles(vector(rot.isEmpty()?QJsonArray{0,0,0}:rot));
+                b["Rotation"]=QJsonArray{q.x(),q.y(),q.z(),q.scalar()};if(spec.contains("scale"))b["Complection"]=spec["scale"];
+                data=setBase(data,b);const auto pos=vector(b["Position"].toArray());
+                const auto ground=v->m_terrainEdit.terrainSurfaceHeight(pos.x(),pos.y());
+                transformLogic(data,{},q,{pos.x(),pos.y(),ground+pos.z()});
+                CUnit seed(data);QJsonObject prepared;CValidationReport report;
+                if(!CMob::prepareFreshDatabaseNode(&seed,&prepared,&report))return fail(report.toText());
+                p.changes.append(QJsonObject{{"mob",p.mobPath},{"data",prepared},{"kind","create"}});continue;
+            }
             auto it=db->raceModels.constFind(key);
             if(it==db->raceModels.constEnd()){
                 for(auto j=db->raceModels.constBegin();j!=db->raceModels.constEnd();++j)if(j->name.compare(key,Qt::CaseInsensitive)==0){it=j;break;}
@@ -317,8 +341,6 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
             if(it->typeId>=50&&it->typeId<=52)return fail("Units are read-only in272; unit placement is refused");
             if(it->typeId!=54)return fail("Prototype is not a static world object (database type54); units and other record types are refused in272");
             if(it->primaryTextures.isEmpty())return fail("Static prototype has no installed authored texture binding; choose/bind it in the manual model catalog first");
-            if(v->property("rebuild64Selected").toBool() && it->model.compare("stst8",Qt::CaseInsensitive)==0)
-                return fail(QString::fromUtf8("Расстановка stst8 пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; правки сохранены."));
             CWorldObj defaults;auto data=defaults.toJson();
             data["Model name"]=it->model;data["Object template"]=it->name;
             data["Primary texture"]=it->primaryTextures.value(0);data["Secondary texture"]=it->secondaryTextures.value(0,"default0");
@@ -605,7 +627,10 @@ public:
             else{auto pos=forward?c.after:c.before;c.node->setRot(forward?c.afterRot:c.beforeRot);
                 if(auto* unit=dynamic_cast<CUnit*>(c.node)){
                     unit->CObjectBase::updatePos(pos);const auto logicSlots=forward?c.afterLogic:c.beforeLogic;
-                    for(int i=0;i<logicSlots.size();++i)unit->logicAt(i)->replaceFromJson(logicSlots[i].toObject());unit->refreshLogicProjection();
+                    for(int i=0;i<logicSlots.size();++i)unit->logicAt(i)->replaceFromJson(logicSlots[i].toObject());
+                    // Replacement deletes patrol/look children. Rebuild their cache
+                    // before native service, selection or Undo can observe it.
+                    c.mob->logicNodesUpdate();unit->refreshLogicProjection();
                 }else c.node->updatePos(pos);}
             v->setDurty(c.mob);
         };

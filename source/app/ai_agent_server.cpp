@@ -13,12 +13,7 @@
 
 namespace {
 bool nativePlanRequiresLegacy(const ai::EditPlan& plan) {
-    if(QStringList{"paint","auto_paint","generate_terrain","erode","edit_units"}.contains(plan.method))return true;
-    if(plan.method=="edit_objects")for(const auto& value:plan.changes) {
-        auto object=value.toObject()["after"].toObject();
-        if(object.contains("World object"))object=object["World object"].toObject();
-        if(object["Model name"].toString().compare("stst8",Qt::CaseInsensitive)==0)return true;
-    }
+    if(QStringList{"paint","auto_paint","generate_terrain","erode"}.contains(plan.method))return true;
     return false;
 }
 QJsonObject nativePlanRefusal() {
@@ -386,8 +381,6 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     const auto requestedTool=method=="preview"?args["tool"].toString():method;
     if(m_view && m_view->property("rebuild64Selected").toBool() && legacyTerrainTools.contains(requestedTool))
         return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Изменение рельефа, текстур, воды и дорог пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
-    if(m_view && m_view->property("rebuild64Selected").toBool() && method=="edit_units")
-        return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Правки персонажей, appearance и stst8 пока требуют OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
     const QSet<QString> mutations{"edit_units","edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
@@ -603,8 +596,8 @@ void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::Edi
         else result=CAiEditAdapter::apply(m_window,*plan);
         qApp->removeEventFilter(&dialogs);
         if(!dialogs.error.isEmpty())result=ai::error(dialogs.error);
-        if(snapshot&&!result.contains("error")&&m_window&&m_view)result["snapshot"]=CAiReadAdapter::read(m_window,"window_snapshot",{});
         if(m_window)m_window->setProperty("aiCommitBusy",false);
+        if(snapshot&&!result.contains("error")&&m_window&&m_view)result["snapshot"]=CAiReadAdapter::read(m_window,"window_snapshot",{});
     }
     if(m_jobs.contains(id)){m_jobs[id].committing=false;m_jobs[id].result=result;m_jobs[id].markComplete();}
     m_lastActivity=QDateTime::currentMSecsSinceEpoch();

@@ -63,6 +63,18 @@
     {
       "path": "010-same-world-terrain-and-seed-pose.patch",
       "sha256": "b6bc70b6323c5789e80c1b2107b727c22eeb93efef4c99dfec21c3654bbb41e6"
+    },
+    {
+      "path": "040-editor-completed-units.patch",
+      "sha256": "5a0329030a25cb2bba113412b9f17f468693d9013abd0b26d3b2a7aeaabaa927"
+    },
+    {
+      "path": "041-editor-diplomacy-values.patch",
+      "sha256": "0d94829ce1d7fc0395ce86b8bd6cc1005676ce1e87bab1c426290c9e39f09700"
+    },
+    {
+      "path": "042-embedded-unit-source-records.patch",
+      "sha256": "1d969018a54609cd5327b0af11097cf7bdd1a7ac1c6e86e6d7a00e35a491dbba"
     }
   ],
   "nvidiaSdk": false,

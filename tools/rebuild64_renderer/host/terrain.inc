@@ -39,6 +39,7 @@ bool upload_atlases(Session& s,std::string& why){
 }
 int map_frame(Session& s,probe1b_error* e){
  BrushFrameTimer timing(s.edits.applied_serial);
+ units289::advance(s);
  using namespace OwnedRender;E1BeginFrame();E1Scene().Begin(&s,s.world);if(FAILED(s.renderer.begin_engine_frame()))return fail(e,E_FAIL,"begin_engine_frame");
  if(!owned::AtamanReadiness::testFrame(s.renderer,s.frameCamera.test_frame))return fail(e,E_INVALIDARG,"diagnostic native frame clock must be monotonic");
  E1WorldFrame wf;wf.camera.valid=true;wf.camera.world_to_clip=s.explicitClip?s.clip:camera_matrix(s.camera,float(s.width)/s.height);

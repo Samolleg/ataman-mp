@@ -1,0 +1,18 @@
+--- a/external/owned-renderer/Source/owned_asset_loader.cpp
++++ b/external/owned-renderer/Source/owned_asset_loader.cpp
+@@ -651,7 +651,14 @@
+         // applies the MOB complection after the lever parameters, so the
+         // common fields alone give its authored appearance.
+         const bool lever = include_levers && chunk.id == kMobLever;
+-        if (chunk.id == kMobObject || lever) {
++        // Embedded editor requests retain the common UNIT fields too. Retail
++        // source admission stays unchanged; runtime units use their live owner.
++#ifdef EID3D11_EMBEDDED
++        const bool editor_unit = include_levers && chunk.id == kMobUnit;
++#else
++        const bool editor_unit = false;
++#endif
++        if (chunk.id == kMobObject || lever || editor_unit) {
+             StaticObjectSource object{};
+             // The game reads fields in order: a repeated field keeps the last
+             // value, and an unknown field id is skipped (recorded here for

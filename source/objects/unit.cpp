@@ -143,6 +143,21 @@ void CUnit::drawSelect(QOpenGLShaderProgram* program)
         editorLogic()->drawSelect(program);
 }
 
+QJsonObject CUnit::nativeVisualPlan()
+{
+    if(needsVisualResolution() && !refreshTransientVisual(true))return {};
+    auto plan=m_nativeVisualPlan;
+    if(plan.isEmpty())return {};
+    auto& context=ei::ProfileDatabaseContext::instance();
+    static ProfileVisualProviderService providers;
+    const auto resolver=providers.animationResolver(context.providerForRole("unitAnimation"),context.current());
+    SUnitAnimationRequest request;request.prototype=m_prototypeName;request.model=plan["model"].toString();
+    for(const auto& value:plan["animationWeapons"].toArray())request.weapons.append(value.toString());
+    QJsonObject animation;
+    if(resolver && resolver->resolve(request,&animation).success)plan["animation"]=animation;
+    return plan;
+}
+
 void CUnit::preloadVisualResources()
 {
     // Called with the viewport GL context current immediately after MOB
@@ -421,6 +436,7 @@ bool CUnit::refreshTransientVisual(bool force)
                 return false;
             }
         }
+        m_nativeVisualPlan = plan;
         m_visualDiagnostics = jsonStringList(plan, "diagnostics");
         m_renderedModelName = resolvedModel;
         m_renderedPrimaryTextureName = resolvedTexture;
@@ -603,6 +619,7 @@ bool CUnit::refreshTransientVisual(bool force)
         cachedEmissions.insert(it.key(), values);
     }
     cachedPlan.insert("partEmissions", cachedEmissions);
+    m_nativeVisualPlan = cachedPlan;
     writeResolvedVisualPlan(visualPlanKey, cachedPlan);
     m_preparedAppearanceValid = false;
     return true;
@@ -1180,7 +1197,7 @@ bool CUnit::updatePos(QVector3D &pos)
         if(landscape->isMprLoad())
             offset.setZ(offset.z()+landscape->unitSurfacePosition(m_position).z()
                         -landscape->unitSurfacePosition(previousPosition).z());
-        m_aLogic.front()->updatePos(offset);
+        for(auto* logic:m_aLogic)if(logic)logic->updatePos(offset);
     }
 
     return true;

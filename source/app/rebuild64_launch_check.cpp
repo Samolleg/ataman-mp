@@ -9,6 +9,7 @@
 #include "native_output.h"
 #include "topdown_export.h"
 #include "preview.h"
+#include "scene.h"
 #include "opening_cpu_value.h"
 #include "operationmanager.h"
 #include "navmesh_panel.h"
@@ -206,7 +207,7 @@ public:
             }
             QSaveFile shown(caseRoot+"/qt-page-shown-"+QString::number(generation)+".json");if(shown.open(QIODevice::WriteOnly)){shown.write(QJsonDocument(QJsonObject{{"renderer","Rebuild64"},{"neighbours_accepted",int(s.neighbours_accepted)},{"exeSha256",exeSha},{"dllSha256",dllSha},{"qpc",QString::number(qpc())}}).toJson());shown.commit();}
             const auto actualMap=native->openingDocument()?native->m_earlyMap:CLandscape::getInstance()->filePath().absoluteFilePath();
-            const int expected=QFileInfo(actualMap).completeBaseName()=="zone1"?5:QFileInfo(actualMap).completeBaseName()=="zone7"?4:0;
+            const int expected=!configuration["seedNeighbors"].toBool(true)?0:QFileInfo(actualMap).completeBaseName()=="zone1"?5:QFileInfo(actualMap).completeBaseName()=="zone7"?4:0;
             if(int(s.neighbours_accepted)!=expected||s.neighbours_pending)record("FAIL",{{"check","first displayed frame neighbour cohort"}});
             record("first_frame",{{"expectedNeighbours",expected},{"cohortValid",int(s.neighbours_accepted)==expected&&!s.neighbours_pending},{"generation",QString::number(generation)},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"map",CLandscape::getInstance()->filePath().absoluteFilePath()},
                 {"neighbours_accepted",int(s.neighbours_accepted)},{"neighbours_pending",int(s.neighbours_pending)},
@@ -372,8 +373,9 @@ public:
     #include "rebuild64_brush_290_check.inc"
     void key(int value,const QString& text={}) {
         QWidget* target=native->rebuildSelected()?native->findChild<QWidget*>("rebuild64NativeSurface"):view;
-        QKeyEvent press(QEvent::KeyPress,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&press);
-        QKeyEvent release(QEvent::KeyRelease,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&release);
+        const quint32 nativeKey=value==Qt::Key_Return?VK_RETURN:value==Qt::Key_Delete?VK_DELETE:value;
+        QKeyEvent press(QEvent::KeyPress,value,Qt::NoModifier,0,nativeKey,0,text);QApplication::sendEvent(target,&press);
+        QKeyEvent release(QEvent::KeyRelease,value,Qt::NoModifier,0,nativeKey,0,text);QApplication::sendEvent(target,&release);
     }
     QJsonArray latestPresentClip() {
         QFile file(caseRoot+"/presented.jsonl");if(!file.open(QIODevice::ReadOnly))return {};
@@ -561,6 +563,7 @@ public:
         check(node,"recovered object exists");const auto expected=saved["position"].toArray();check(node->position()==QVector3D(expected[0].toDouble(),expected[1].toDouble(),expected[2].toDouble()),"recovered object edit retained exactly");
         native->m_rebuildAction->trigger();validateReady("zone1-recovered-native");window->closeAll();
     }
+ #include "rebuild64_units_check.inc"
  void startWhenIdle(){
   if(!window||qApp->property("rebuild64StartupDocumentBatch").toBool()||window->m_workspaceLoadInProgress||window->backgroundMobLoading()||window->m_worldMetadataWatcher){QTimer::singleShot(50,this,[this]{startWhenIdle();});return;}
   run();
@@ -584,7 +587,8 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="acceptBrush290") {for(const auto& zone:{QString("zone1"),QString("zone7")}){native->selectRebuild(true,false);openPair(zone);validateReady(zone);brushScenario(zone);}}
+            if(mode=="acceptUnits291"){for(const auto& zone:{QString("zone1"),QString("zone3obr")})unitsScenario289(zone);}
+            else if(mode=="acceptBrush290") {for(const auto& zone:{QString("zone1"),QString("zone7")}){native->selectRebuild(true,false);openPair(zone);validateReady(zone);brushScenario(zone);}}
             else if(mode=="acceptWater290") {
                 native->selectRebuild(true,false);openPair("zone7");validateReady("zone7");
                 check(view->ensureTerrainAutoCatalogReady(),"water regression canonical terrain ready");view->m_worldTerrainEnabled=false;
@@ -875,7 +879,7 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;

@@ -12,7 +12,7 @@
 #include <QSet>
 #include <memory>
 #include "rebuild64_abi.h"
-class CView;
+class CView; class CNode;
 class QMenu;
 class QAction;
 class QStackedLayout;
@@ -54,7 +54,8 @@ public:
     // 288: asynchronous owned-pixel output. A document transition cancels delivery.
     quint64 requestOutput(const QSize& size,int mode,const EirCamera& camera,
                           const QString& model={},const QString& texture={},const QVector3D& shape={},const QVector<float>& preview={},const QVector<quint64>& objectKeys={},const QString& secondary={},const QStringList& parts={},
-                          const QByteArray& modelBytes={},const QByteArray& boneBytes={},const QByteArray& textureBytes={});
+                          const QByteArray& modelBytes={},const QByteArray& boneBytes={},const QByteArray& textureBytes={},const QByteArray& visuals={});
+    QByteArray appearanceVisuals(CNode* node);
     EirCamera outputCamera() { return cameraSnapshot(); }
 
 signals:

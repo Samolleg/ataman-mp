@@ -2514,7 +2514,6 @@ MainWindow::~MainWindow()
 
 void MainWindow::showUnitTexturePreview()
 {
-    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("Предпросмотр текстур персонажа"));
     if(!m_unitTextureDialog)
     {
         m_unitTextureDialog = new QDialog(this);
@@ -9884,7 +9883,6 @@ void MainWindow::on_actionDuplicate_selected_objects_triggered()
 
 void MainWindow::on_actionCreate_new_object_triggered()
 {
-    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("GL-предпросмотр нового объекта"));
     if(!m_pView || !m_pView->hasActiveMob())
     {
         statusBar()->showMessage(tr("Open or activate a MOB before creating an object."), 4000);

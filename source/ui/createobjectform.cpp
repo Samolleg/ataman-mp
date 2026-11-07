@@ -977,9 +977,6 @@ void CCreateObjectForm::selectDatabaseEntry()
         updateTable(); return;
     }
     auto entry = m_databaseEntries.at(selected->data(Qt::UserRole).toInt());
-    if(entry.category==ei::EDatabaseMapCategory::Creature && m_pView && m_pView->property("rebuild64Selected").toBool()) {
-        m_databaseDetails->setText(tr("Персонажи, appearance и stst8 требуют следующего этапа. Для этого просмотра и расстановки выберите OpenGL; текущие правки сохранены."));updateTable();return;
-    }
     if(entry.category == ei::EDatabaseMapCategory::Item)
     {
         if(const auto* inventory = m_inventoryCatalog.find(entry.name)) {

@@ -1,0 +1,119 @@
+--- a/external/owned-renderer/Source/retained_static_scene.h
++++ b/external/owned-renderer/Source/retained_static_scene.h
+@@ -838,6 +838,13 @@
+     bool visual_seed(std::int32_t signed_id,
+         std::shared_ptr<const VisualAssemblyAsset> assembly,
+         const VisualObjectPose& pose) noexcept;
++#ifdef EID3D11_EMBEDDED
++    // Ataman: completed semantic appearance/pose, no game route or callbacks.
++    // Null assembly updates an existing editor incarnation only.
++    bool visual_editor_pose(std::int32_t signed_id,
++        std::shared_ptr<const VisualAssemblyAsset> assembly,
++        const VisualObjectPose& pose, bool unit) noexcept;
++#endif
+     // `eligible` is the sorted set of IDs the local server would stream. When
+     // `authoritative`, every detached copy (seed or window exit) outside it is
+     // retired: the server deleted, hid or stopped streaming that object.
+@@ -1012,6 +1019,7 @@
+         bool detection_unavailable = false;
+         VisualObjectPose object_pose{};
+         bool has_object_pose = false;
++        bool completed_pose = false;
+         bool mesh_declared = false;
+         std::vector<VisualBridgePlane> bridge_planes;
+         std::uint64_t last_idle_event = 0;
+--- a/external/owned-renderer/Source/retained_static_scene.cpp
++++ b/external/owned-renderer/Source/retained_static_scene.cpp
+@@ -720,6 +720,34 @@
+     }
+ }
+ 
++#ifdef EID3D11_EMBEDDED
++bool RetainedStaticScene::visual_editor_pose(std::int32_t id,
++    std::shared_ptr<const VisualAssemblyAsset> assembly,
++    const VisualObjectPose& pose, bool unit) noexcept {
++    std::array<float,16> matrix{};
++    if (!retained_object_matrix(pose.position,pose.quaternion,matrix) ||
++        !std::all_of(pose.shape.begin(),pose.shape.end(),[](float x){return std::isfinite(x);}) ||
++        !std::isfinite(pose.phase) || pose.phase<0 ||
++        (!pose.selection.neutral && (!pose.selection.database || !pose.selection.clip ||
++            pose.selection.ordinal>=pose.selection.database->entries.size())))return false;
++    if(assembly) {
++        auto neutral=pose;neutral.selection={nullptr,nullptr,0,true};neutral.phase=0;
++        if(!visual_seed(id,std::move(assembly),neutral))return false;
++    }
++    ExclusiveLock guard(lock_);
++    const auto found=detached_.find(id);
++    if(found==detached_.end()||!found->second.seeded)return false;
++    auto& entity=found->second.entity;
++    const bool envelope=entity.object_pose.shape!=pose.shape ||
++        !same_selection(entity.object_pose.selection,pose.selection);
++    entity.completed_pose=true;entity.tick.unit=unit;
++    entity.object_pose=pose;entity.has_object_pose=true;
++    if(envelope&&!visual_refresh_envelope(entity,false))return false;
++    ++entity.pose_revision;visual_values_changed_unlocked(id);detached_changed_unlocked();
++    return true;
++}
++#endif
++
+ void RetainedStaticScene::visual_reconcile_seeds(const std::vector<std::int32_t>& eligible,
+     bool authoritative, std::vector<std::int32_t>& missing) noexcept {
+     missing.clear();
+@@ -1645,10 +1673,10 @@
+     if (!entity.assembly) return true;
+     try {
+     const auto& assembly = *entity.assembly;
+-    const auto& shape = !entity.tick.unit && entity.has_object_pose ? entity.object_pose.shape : assembly.shape;
+-    const std::vector<VisualClipSelection> object_selection = !entity.tick.unit && entity.has_object_pose
++    const auto& shape = (!entity.tick.unit || entity.completed_pose) && entity.has_object_pose ? entity.object_pose.shape : assembly.shape;
++    const std::vector<VisualClipSelection> object_selection = (!entity.tick.unit || entity.completed_pose) && entity.has_object_pose
+         ? std::vector<VisualClipSelection>{entity.object_pose.selection} : std::vector<VisualClipSelection>{};
+-    const auto& selections = !entity.tick.unit && entity.has_object_pose ? object_selection : entity.intent.selections;
++    const auto& selections = (!entity.tick.unit || entity.completed_pose) && entity.has_object_pose ? object_selection : entity.intent.selections;
+     float radius = 0, rotation_scale = 1;
+     if (!visual_model_envelope(*assembly.skeleton, selections,
+         shape, assembly.center_shift, radius, &rotation_scale)) return false;
+@@ -2764,6 +2792,7 @@
+         sample.mesh_declared = entity.mesh_declared;
+         sample.assembly = entity.assembly;
+         sample.prepared = entity.prepared;
++        sample.completed_pose = entity.completed_pose;
+         sample.object_pose = entity.object_pose;
+         sample.values = entity.tick;
+         sample.values.highlight = static_cast<std::uint8_t>(
+@@ -2779,7 +2808,7 @@
+         sample.envelope_radius = entity.envelope_radius;
+         VisualRouteSample route{};
+         bool root_valid=entity.has_object_pose;
+-        if (!entity.tick.unit) {
++        if (!entity.tick.unit || entity.completed_pose) {
+             if (entity.has_object_pose) {
+                 route.position = {entity.object_pose.position[0]*2,entity.object_pose.position[1]*2};
+                 sample.pose.root = entity.object_pose.position;
+@@ -2813,7 +2842,7 @@
+         ++result.diagnostic.samples;
+         roots.push_back(route);
+         records.push_back(&entity);
+-        if(entity.tick.unit){
++        if(entity.tick.unit && !entity.completed_pose){
+             entity.frame_unit_ordinal=unit_ordinals.size();
+             unit_ordinals.push_back(entity.frame_ordinal);
+         }
+@@ -2890,7 +2919,7 @@
+         const auto i=unit_ordinals[unit_ordinal];
+         auto& sample = result.entities[i];
+         const auto& entity = *records[i];
+-        if (sample.status != RetainedVisualStatus::ready || !sample.values.unit) continue;
++        if (sample.status != RetainedVisualStatus::ready || !sample.values.unit || sample.completed_pose) continue;
+         auto route = roots[i];
+         std::array<float,2> target_position{};
+         const std::array<float, 2>* target = nullptr;
+@@ -3320,7 +3349,7 @@
+         else committed=visual_frame_cache_;
+         for (auto& sample : committed->entities) {
+             auto* entity = visual_find_unlocked(sample.resource);
+-            if (!entity || !sample.values.unit) continue;
++            if (!entity || !sample.values.unit || sample.completed_pose) continue;
+             if (sample.status == RetainedVisualStatus::ready ||
+                 sample.status == RetainedVisualStatus::unavailable_surface ||
+                 sample.status == RetainedVisualStatus::unavailable_terrain) {

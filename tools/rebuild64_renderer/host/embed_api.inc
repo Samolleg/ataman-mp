@@ -44,7 +44,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   // MOB reuse transition. Retire source publications as well as positive IDs.
   OwnedRender::E1Scene().Scene().reset();
   s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.completedReadyEpoch=~uint64_t(0);s.materialsPublished=false;s.generation=in->generation;s.world=++nextWorld;s.edits.applied_serial=s.edits.presented_serial=0;s.traceFrameStarted=s.traceNeighboursSettled=s.traceResourcesSettled=false;
-  s.editorSeeds.clear();s.poseAuditDone=false;
+  s.editorSeeds.clear();s.unitAtlases289.clear();s.poseAuditDone=false;
   if(!in->terrain.bytes)return 0;
   if(s.world>1) {
    // A new source must not inherit stale material/terrain GPU registrations.
@@ -99,6 +99,12 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
    for(auto object:loaded->objects){if(hidden.count((uint64_t(i)<<32)|object.nid))continue;identities.push_back({i,object.nid});object.nid=uint32_t(combined->objects.size()+1);combined->objects.push_back(std::move(object));}
    combined->models.insert(loaded->models.begin(),loaded->models.end());combined->textures.insert(loaded->textures.begin(),loaded->textures.end());combined->failures.insert(combined->failures.end(),loaded->failures.begin(),loaded->failures.end());
   }
+  const auto unitPlans=units289::read(in->visuals);
+  for(size_t index=0;index<combined->objects.size();++index){const auto identity=identities.at(index);
+   const auto found=unitPlans.find((uint64_t(identity.first)<<32)|identity.second);if(found==unitPlans.end())continue;
+   std::string reason;if(!units289::prepare(s,*combined,combined->objects[index],found->second,reason))
+    return fail(&e,E_FAIL,("appearance "+std::to_string(identity.second)+": "+reason).c_str());
+  }
   s.map=combined;s.trace.phase("mob_resource_snapshots_end");s.trace.phase("scene_visual_seed_begin");
   OwnedRender::PublishTerrainPlacement(&s,identity());
   auto& membership=OwnedRender::E1Scene();membership.Begin(&s,s.world);auto& scene=membership.Scene();auto transaction=scene.begin_source(owned::MobSourceRole::main,in->terrain_name,"ataman-memory.mob");scene.record_source(transaction,"ataman-memory.mob");
@@ -106,20 +112,38 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   if(!scene.finish_source(transaction,true,true,why)||!scene.publish_source(transaction,combined))return fail(&e,E_FAIL,"in-memory visual scene publication rejected");
   size_t seeds=0,omitted=0;
   for(const auto& object:combined->objects){
+   const auto identity=identities.at(object.nid-1);
+   const auto plan=unitPlans.find((uint64_t(identity.first)<<32)|identity.second);
+   const bool completed=plan!=unitPlans.end();
    if(object.rejection==owned::StaticObjectRejection::malformed||object.rejection==owned::StaticObjectRejection::duplicate_nid||object.rejection==owned::StaticObjectRejection::hierarchical||object.visual_reference.empty()||!combined->models.count(object.visual_reference)){++omitted;continue;}
    std::shared_ptr<owned::RetainedStaticSourceCandidate> candidate;owned::RetainedStaticPrepareDiagnostic diag;
-   if(!owned::prepare_retained_static_candidate(combined,terrain,object,candidate,&diag)||!candidate||!candidate->assembly){++omitted;continue;}
+   std::string candidateReason;
+   const bool prepared=completed?units289::candidate(combined,terrain,object,candidate,candidateReason):owned::prepare_retained_static_candidate(combined,terrain,object,candidate,&diag);
+   if(!prepared||!candidate||!candidate->assembly){
+    if(completed)return fail(&e,E_FAIL,("appearance "+std::to_string(identity.second)+" candidate "+candidateReason).c_str());
+    ++omitted;continue;
+   }
    // Generic retained assets carry texture identity but no material-class key.
    // Publish that real texture name so the renderer can build its world profile.
    auto assembly=std::make_shared<owned::VisualAssemblyAsset>(*candidate->assembly);
    for(auto& part:assembly->parts)if(part.material_name.empty())part.material_name=part.texture_source_name;
    assembly->revision^=0x4154414d41544c32ull;if(!assembly->revision)assembly->revision=1;candidate->assembly=std::move(assembly);
    owned::VisualObjectPose pose;pose.position=candidate->world_position;pose.quaternion=object.quaternion;pose.shape=object.shape;pose.source_generation=s.world;pose.appearance_revision=candidate->assembly->revision;
-   if(scene.visual_seed(int32_t(object.nid),candidate->assembly,pose)) {
+   if(completed)for(uint32_t i=0;i<in->object_count;++i) {
+    const auto& source=in->objects[i];if(source.mob==identity.first&&source.nid==identity.second){
+     std::copy(source.position,source.position+3,pose.position.begin());break;
+    }
+   }
+   if(completed){auto resolved=std::make_shared<owned::VisualAssemblyAsset>(*candidate->assembly);std::string reason;
+    if(!units289::complete(s,plan->second,resolved,pose,reason))return fail(&e,E_FAIL,("appearance "+std::to_string(identity.second)+": "+reason).c_str());
+    candidate->assembly=std::move(resolved);
+   }
+   if(completed ? scene.visual_editor_pose(int32_t(object.nid),candidate->assembly,pose,plan->second.unit) : scene.visual_seed(int32_t(object.nid),candidate->assembly,pose)) {
        ++seeds;const auto identity=identities.at(object.nid-1);
-       s.editorSeeds.push_back({identity.first,identity.second,int32_t(object.nid),candidate->assembly,pose,true,object.position[2]});
+       s.editorSeeds.push_back({identity.first,identity.second,int32_t(object.nid),candidate->assembly,pose,true,object.position[2],completed,completed&&plan->second.unit});
        if(GetEnvironmentVariableW(L"ATAMAN_BRUSH_POSE_TRACE",nullptr,0)&&identity.second==104)
         std::fprintf(stderr,"POSE_FULL nid=%u renderer=%u world=%.9g,%.9g,%.9g relative=%.9g quat=%.9g,%.9g,%.9g,%.9g shape=%.9g,%.9g,%.9g assembly=%llu\n",identity.second,object.nid,pose.position[0],pose.position[1],pose.position[2],object.position[2],pose.quaternion[0],pose.quaternion[1],pose.quaternion[2],pose.quaternion[3],pose.shape[0],pose.shape[1],pose.shape[2],candidate->assembly->revision);
+       if(completed)std::fprintf(stderr,"NATIVE_APPEARANCE mob=%u nid=%u model=%s parts=%zu unit=%d clip=%s shape=%.3f,%.3f,%.3f\n",identity.first,identity.second,object.visual_reference.c_str(),candidate->assembly->parts.size(),plan->second.unit,plan->second.action.c_str(),pose.shape[0],pose.shape[1],pose.shape[2]);
    } else ++omitted;
   }
   std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
@@ -194,6 +218,15 @@ int32_t EIR_CALL host_service(void* handle,const EirService* in,EirError* out) n
   if(in->generation!=s.generation)return 0;
   std::unordered_map<uint64_t,const EirObjectPose*> poses;
   for(uint32_t i=0;i<in->pose_count;++i){const auto& p=in->poses[i];poses.emplace((uint64_t(p.mob)<<32)|p.nid,&p);}
+  // Only changed editor poses replace the native baseline. Unit animation
+  // stays attached to the completed assembly through transform previews.
+  for(auto& seed:s.editorSeeds){const auto found=poses.find((uint64_t(seed.mob)<<32)|seed.nid);if(found==poses.end())continue;
+   const auto& p=*found->second;
+   if(seed.completed){seed.pose.object_flags=p.selected?0x10u:0u;std::copy(p.editor_tint,p.editor_tint+4,seed.pose.editor_tint.begin());}
+   if(!p.changed&&!seed.unit)continue;
+   std::copy(p.position,p.position+3,seed.pose.position.begin());std::copy(p.quaternion,p.quaternion+4,seed.pose.quaternion.begin());std::copy(p.shape,p.shape+3,seed.pose.shape.begin());
+   if(seed.completed&&!OwnedRender::E1Scene().Scene().visual_editor_pose(seed.rendererId,{},seed.pose,seed.unit))return fail(&e,E_FAIL,"editor transform pose rejected");
+  }
   size_t compared=0,differing=0;double maxPosition=0,maxShape=0,maxRotation=0;
   if(!s.poseAuditDone)for(const auto& seed:s.editorSeeds) {
    const auto found=poses.find((uint64_t(seed.mob)<<32)|seed.nid);

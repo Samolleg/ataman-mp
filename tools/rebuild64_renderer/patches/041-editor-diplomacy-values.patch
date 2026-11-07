@@ -1,0 +1,44 @@
+--- a/external/owned-renderer/Source/retained_static_scene.h
++++ b/external/owned-renderer/Source/retained_static_scene.h
+@@ -166,6 +166,7 @@
+     std::uint32_t object_flags = 0;
+     VisualClipSelection selection{nullptr,nullptr,0,true};
+     double phase = 0;
++    std::array<float,4> editor_tint{}; // embedded diagnostic colour; zero weight preserves native art
+     std::uint64_t source_generation = 0;
+     // The cached ADB can survive an appearance change; current ANM selection
+     // must be observed again for that completed appearance revision.
+--- a/external/owned-renderer/Source/retained_static_scene.cpp
++++ b/external/owned-renderer/Source/retained_static_scene.cpp
+@@ -740,7 +740,11 @@
+     auto& entity=found->second.entity;
+     const bool envelope=entity.object_pose.shape!=pose.shape ||
+         !same_selection(entity.object_pose.selection,pose.selection);
+-    entity.completed_pose=true;entity.tick.unit=unit;
++    if(entity.completed_pose && entity.tick.unit==unit && entity.object_pose.position==pose.position &&
++       entity.object_pose.quaternion==pose.quaternion && entity.object_pose.shape==pose.shape &&
++       entity.object_pose.phase==pose.phase && entity.object_pose.object_flags==pose.object_flags &&
++       entity.object_pose.editor_tint==pose.editor_tint && same_selection(entity.object_pose.selection,pose.selection))return true;
++    entity.completed_pose=true;entity.tick.unit=unit;entity.tick.object_flags=pose.object_flags;
+     entity.object_pose=pose;entity.has_object_pose=true;
+     if(envelope&&!visual_refresh_envelope(entity,false))return false;
+     ++entity.pose_revision;visual_values_changed_unlocked(id);detached_changed_unlocked();
+--- a/external/owned-renderer/Source/retained_static_submission.cpp
++++ b/external/owned-renderer/Source/retained_static_submission.cpp
+@@ -2486,8 +2486,16 @@
+     values.default_diffuse=defaults?part.diffuse:0xffffffffu;values.default_specular=defaults?part.specular:UINT(current_fog)<<24;
+     values.lighting_enabled=defaults?0:1;
+     std::copy_n(part.material->diffuse.begin(),3,values.diffuse.begin());
++    if(sample.completed_pose) {
++        const auto& tint=sample.object_pose.editor_tint;const float weight=std::clamp(tint[3],0.f,1.f);
++        for(unsigned channel=0;channel<3;++channel)values.diffuse[channel]*=1.f-weight+weight*tint[channel];
++    }
+     values.alpha=retained_visual_effective_alpha(sample,part);
+     values.emissive=retained_visual_emissive(sample.values,sample.quest_light_active,*part.material);values.specular=sample.values.stunned?std::array<float,4>{sample.effects.stun_red,0,0,1}:part.material->specular;
++    if(sample.completed_pose) {
++        const auto& tint=sample.object_pose.editor_tint;const float weight=std::clamp(tint[3],0.f,1.f);
++        for(unsigned channel=0;channel<3;++channel)values.emissive[channel]*=1.f-weight+weight*tint[channel];
++    }
+     values.specular[3]=1;values.specular_enable=specular?TRUE:FALSE;
+     values.flags|=retained_visual_sway_flags(sample,part);
+     // Rigid world objects meet the terrain with its colour; units never do.

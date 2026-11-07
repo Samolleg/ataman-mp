@@ -229,6 +229,7 @@ void CPreview::attachView(CView* view) {
                 m_nativeLabel->setText(error);qWarning("NATIVE_PREVIEW %s",error.toUtf8().constData());
                 // Only this preview falls back. The displayed map, camera and
                 // documents remain in their current renderer.
+                if(m_pNode&&(dynamic_cast<CUnit*>(m_pNode.data())||m_pNode->modelName().compare("stst8",Qt::CaseInsensitive)==0)){if(m_pView)emit m_pView->updateMsg(error);return;}
                 m_nativeFallback=true;if(m_pView)emit m_pView->updateMsg(tr("Просмотр Rebuild64 недоступен; для этого просмотра используется OpenGL. %1").arg(error));
                 if(m_pNode)refreshCam(m_pNode->getBBox());m_nativeLabel->hide();updateGL();return;
             }
@@ -242,24 +243,26 @@ void CPreview::requestNative() {
     if(!nativeSelected()||!isVisible())return;
     if(!m_pNode){m_nativeLabel->clear();return;}
     const auto transient=m_pNode->independentPreviewSource();
-    if(dynamic_cast<CUnit*>(m_pNode.data())||transient.value("requiresAppearance").toBool()||(transient.isEmpty()&&m_pNode->modelName().compare("stst8",Qt::CaseInsensitive)==0)){m_nativeLabel->setText(tr("Просмотр персонажа, appearance и stst8 будет доступен на следующем этапе. Для него выберите OpenGL."));return;}
+
     if(m_nativePending){m_nativeTimer.start();return;}
     auto* viewport=nativeOutputViewport(m_pView);if(!viewport)return;
     if(m_nativeViewport!=viewport)attachView(m_pView.data());
     const auto object=ei::assemblyWorldObject(m_pNode->toJson());
     const auto c=m_pNode->complection();const QVector3D complection(c.y(),c.x(),c.z());
-    const auto texture=transient.value("texture").toString(m_pNode->textureName());
+    const auto unit=dynamic_cast<CUnit*>(m_pNode.data());
+    const auto resolved=unit?unit->nativeVisualPlan():QJsonObject{};
+    const auto texture=unit?resolved["primaryTexture"].toString():transient.value("texture").toString(m_pNode->textureName());
     QStringList parts;for(const auto& part:(transient.contains("parts")?transient.value("parts"):object.value("Object parts")).toArray())parts.append(part.toString());
     // Built-in logic markers live in the mapper's own resource bundle. Pass
     // their exact bytes; the renderer must not search the game's archives for them.
     static const QMap<QString,QByteArray> auxiliary=[] {CResFile archive(QStringLiteral(":/auxData.res"));return archive.bufferOfFiles();}();
     const auto baseRotation=m_pNode->rotation();
-    const auto model=transient.value("model").toString(m_pNode->modelName());const auto modelBytes=auxiliary.value(model.toLower()+".mod");
+    const auto model=unit?resolved["model"].toString():transient.value("model").toString(m_pNode->modelName());const auto modelBytes=auxiliary.value(model.toLower()+".mod");
     if(qEnvironmentVariableIsSet("ATAMAN_REBUILD64_LAUNCH_CASE"))setProperty("nativeOutputSource",QJsonObject{{"model",model},{"texture",texture},{"parts",QJsonArray::fromStringList(parts)},{"transient",transient}});
     if(qEnvironmentVariableIsSet("ATAMAN_REBUILD64_LAUNCH_CASE"))qInfo("NATIVE_PREVIEW_SOURCE model=%s texture=%s parts=%s transient=%s",qPrintable(model),qPrintable(texture),qPrintable(parts.join(",")),QJsonDocument(transient).toJson(QJsonDocument::Compact).constData());
     m_nativeRequestKey=nativeStateKey();m_nativeImage={};m_nativeLabel->setText(tr("Rebuild64: подготовка просмотра…"));
     m_nativePending=true;
     m_nativeSerial=viewport->requestOutput(size(),3,viewport->outputCamera(),model,texture,complection,
         {m_modelPitch,m_modelYaw,float(m_nativeOrbit.x()),float(m_nativeOrbit.y()),m_nativeZoom,m_pan.x(),m_pan.z(),baseRotation.scalar(),baseRotation.x(),baseRotation.y(),baseRotation.z()},{},(transient.isEmpty()?object.value("Secondary texture").toString():transient.value("secondary").toString(texture)),parts,
-        modelBytes,auxiliary.value(model.toLower()+".bon"),auxiliary.value(texture.toLower()+".mmp"));
+        modelBytes,auxiliary.value(model.toLower()+".bon"),auxiliary.value(texture.toLower()+".mmp"),viewport->appearanceVisuals(m_pNode));
 }

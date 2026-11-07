@@ -26,6 +26,10 @@ void CView::drawEditorObjectServices(const QMatrix4x4& camMatrix,bool cullingEna
             for(CNode* node : mob->nodes())
                 if(node->nodeState() == ENodeState::eSelect)
                 {
+                    // Native units/stst8 own their colour and selection. Keep
+                    // the shared logic/picking service without repainting a GL model.
+                    if(m_editorServicePass && property("rebuild64Selected").toBool()
+                       && (node->nodeType()==eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0))continue;
                     if(node==m_connectionGhostNode && !m_connectionGhostVertices.isEmpty())continue;
                     if(!isObjectVisualVisible(node))
                         continue;

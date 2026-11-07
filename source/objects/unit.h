@@ -217,6 +217,7 @@ public:
     const QStringList& renderedBodyTextureLayers() const { return m_renderedBodyTextureLayers; }
     const QStringList& visualDiagnostics() const { return m_visualDiagnostics; }
     void preloadVisualResources();
+    QJsonObject nativeVisualPlan();
     bool needsVisualResolution() const;
     void invalidateDatabaseVisual();
     void carryResolvedVisualToCurrentDatabaseGeneration();
@@ -294,6 +295,7 @@ private:
     SAnimationClip m_idleClip;
     double m_lastAppliedAnimationFrame{-1.0};
     bool m_animationPoseIsStatic{true};
+    QJsonObject m_nativeVisualPlan;
     QString m_renderedModelName;
     QString m_renderedPrimaryTextureName;
     QString m_renderedSecondaryTextureName;
