@@ -2980,3 +2980,17 @@ W проверен с небольшим наклоном eye–target=(0,-1,100
 ### Сборка и состав R3
 
 Свежий `build-staging-287-rebuild64-launch-r3-20261107`, финализатор exit0. Против `build-staging-286-rebuild64-tools-r2-20261107`:1364→1365 управляемых файлов, **0 потерь**; добавлен только `docs/validation/ATAMAN_REBUILD64_LAUNCH_287_20261107.md`. Новые DLL/SDK/шейдеры не добавлены. Изменены EXE, embedding DLL, свежесобранные MCP/runtime, VERSION/Readme/CHANGELOG/BUILD_INFO и QM. QM: **3367 finished,0 unfinished** (R2:3365,286:3341), SHA256 `ca8f7665e32457cf77ad693869695e304a92891dd47c3f34a07627cbf167ebdd`. Рабочий QM владельца не менялся. Изолированный resource profile исключён из пакета. [package-receipt.json](../../work/rebuild64-launch-287-r3-20261107/package-receipt.json) и stage SHA256SUMS проверяют каждый файл; BUILD_INFO после scoped-коммита указывает его полный SHA. Удалённых функций/настроек нет. GL обычный путь и headless сохранены; новый отложенный путь включается при Rebuild64. Установка, push и следующий этап не выполнялись.
+
+### Установка 287 — 2026-11-07
+
+По явному поручению владельца «ставь 287» установлен неизменённый проверенный `build-staging-287-rebuild64-launch-r3-20261107` в `artifacts/EI-Mapper-Ataman-2-first-test`. До установки VERSION=286; HEAD main точно `682c495bca6f5c290f3f78fb1155ad585087492c`, diff принятого коммита с рабочим packaging/* пуст. Использован только репозиторный `packaging/install_program.ps1`; пересборка, финализация и изменение staging не выполнялись.
+
+- Установщик: `INSTALLED verified=1365 changed=10 added=1 removed=0`. Все 1365 установленных управляемых SHA256 и SHA манифеста совпали со staging, включая EXE, ataman_rebuild64.dll, runtime/EIMapperEnduranceJmvBridge.plg, runtime/EIMapperEnduranceRuntimeHost.exe и translations/ei_mapper_ru.qm.
+- Контрольные EXE/DLL: `13cb39156ff8c8b2afc5b0a8e0dae1a33097d6cf02762c8fc5a6aef5d4ef1cfa` / `5319e9599b4a3d2ffdd06c85c31ceaa6755885bd2ecd2b07d4f77523a9417801`. `EIMapperMcp.exe --version`: `EIMapperMcp 287`, exit0.
+- Откат `artifacts/rollback286-to287-rebuild64-launch-20261107`: штатный `rollback.ps1 -VerifyOnly` → `ROLLBACK_VERIFIED`. Прежние поколения отката сохранены.
+- SHA256 всех 15410 пользовательских файлов вне managed manifest совпали с предустановочным снимком. Настройки вида/соседей не менялись; миграция Rebuild64 остаётся первому запуску маппера. Регистрация мостов не изменялась.
+- До замены зафиксированы PID мостов 17412, 49824, 40536, 36036, 2608, 55780, 16456; после установки все живы с тем же временем создания (при сравнении учтена потеря долей миллисекунды в JSON). Ни один процесс не завершался.
+- Занятый `EIMapperMcp.exe` отодвинут в `EIMapperMcp.exe.old-ataman-7afec64e64ae4104bb1ce9512c6815cb`. Также остался прежний `EIMapperMcp.exe.old-ataman-0faf7fe49f064623b59d728f72a63a89`. Установщик штатно удалил один освобождённый зарегистрированный retired-файл `EIMapperMcp.exe.old-ataman-e4ab1eab98e14e43ab799e091bfd2d2d`; остальные файлы и прежние откаты не очищались.
+- Маппер/host из установки и игра при проверках отсутствовали; не запускались. DLL не загружалась, computer-use и видимых окон не было. `subst` пуст. Чужие изменения, включая ROADMAP, код, VERSION/CHANGELOG/Readme, QM и work288, не включены в этот коммит.
+
+Квитанции: `work/install-287-20261107/before.json`, `install.txt`, `result.json`. Этап EI-REBUILD64-LAUNCH-287 остаётся **PARTIAL по времени открытия**; установка не закрывает временные цели. Видимая приёмка за владельцем, push не выполнялся.
