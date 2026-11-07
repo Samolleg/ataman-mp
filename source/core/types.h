@@ -340,6 +340,8 @@ public:
     CBox(QVector3D minPos, QVector3D maxPos);
     void expand(const CBox& box);
     void move(QVector3D offset);
+    QVector3D minimum() const {return m_minPos;}
+    QVector3D maximum() const {return m_maxPos;}
     QVector3D center();
     float radius();
     bool isInit() {return m_bInit;}

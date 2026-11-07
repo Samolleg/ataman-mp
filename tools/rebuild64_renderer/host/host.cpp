@@ -43,6 +43,18 @@ void Config::run(Renderer& renderer) {
 }
 namespace owned {
 struct AtamanReadiness {
+ static void editorQuery(Renderer& r,int byte,bool terrain=false){
+  if((r.embedded_editor_byte_>=0)!=(byte>=0)){
+   r.native_static_set_.dirty=r.native_terrain_set_.dirty=r.neighbours_.opaque.dirty=true;
+   for(auto& layout:r.native_submission_layouts_){layout.source_revision=0;layout.static_revision=0;}
+  }
+  r.embedded_editor_byte_=byte;r.embedded_editor_terrain_=terrain;
+ }
+ static ID3D11Texture2D* editorDepth(Renderer& r){return r.depth_.Get();}
+ static std::pair<unsigned,std::string> editorNeighbour(const Renderer& r,unsigned id){
+  const auto found=r.embedded_editor_neighbours_.find(id);if(found==r.embedded_editor_neighbours_.end())return {};
+  return {found->second.nid,found->second.map};
+ }
  static bool load(Renderer& r,const wchar_t* path) {
   // ensure_host registers defaults but intentionally has no game's overlay
   // bootstrap. Use the same registry and INI loader before its first apply.
@@ -106,7 +118,7 @@ struct ResourceRuntimeLifetime {
 #include "editor_service.h"
 #include "presentation_trace.h"
 struct EditorSeed {uint32_t mob=0,nid=0;int32_t rendererId=0;std::shared_ptr<const owned::VisualAssemblyAsset> assembly;owned::VisualObjectPose pose;bool visible=true;};
-struct Session {uint32_t(EIR_CALL *liveValues)(void*,uint64_t,uint32_t,EirCamera*,EirService*)=nullptr;std::chrono::steady_clock::time_point livePump=std::chrono::steady_clock::now();UINT pixelWidth=0,pixelHeight=0;bool independentOutput=false;ComPtr<ID3D11Texture2D> outputTarget;ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;HiddenWindow previewWindow;ComPtr<ID3D11Device> previewDevice;ComPtr<ID3D11DeviceContext> previewContext;std::unique_ptr<owned::Renderer> previewRenderer;std::shared_ptr<owned::RetainedStaticSourceCandidate> previewSource;std::string previewKey;};
+struct Session {bool querying=false;uint32_t(EIR_CALL *liveValues)(void*,uint64_t,uint32_t,EirCamera*,EirService*)=nullptr;std::chrono::steady_clock::time_point livePump=std::chrono::steady_clock::now();UINT pixelWidth=0,pixelHeight=0;bool independentOutput=false;ComPtr<ID3D11Texture2D> outputTarget;ResourceRuntimeLifetime resources;PresentationTrace trace;uint32_t (EIR_CALL *canPresent)(void*,uint64_t,uint32_t,uint32_t)=nullptr;void* presentContext=nullptr;double acceptedServiceCpuMs=0,acceptedCompositeMs=0;bool poseAuditDone=false,holdObjectRefresh=false;bool traceFrameStarted=false,traceNeighboursSettled=false,traceResourcesSettled=false;uint64_t completedReadyEpoch=~uint64_t(0),documentUpdates=0,acceptedServiceSerial=0;EditorService service;std::vector<EditorSeed> editorSeeds;std::vector<uint8_t> terrainBytes;std::string terrainName;std::wstring rendererIni;GameInputs game;HiddenWindow hidden;owned::Renderer renderer;ComPtr<IDXGISwapChain> display;ComPtr<ID3D11Texture2D> accepted,rawAccepted;uint64_t world=0,readyGeneration=0;uint32_t pending=0;bool loseDevice=false;EirCamera frameCamera{};std::array<float,16> clip{};bool explicitClip=false;bool materialsPublished=false;bool neighboursConfigured=false,neighboursRequested=false;std::string neighbourError;ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;UINT width=0,height=0;std::vector<uint8_t> pixels; owned::ResourceStoreConfig mounts;owned::ResourceStore store;std::shared_ptr<owned::TerrainCpuAsset> terrain,baseline;std::vector<std::unique_ptr<OwnedRender::E1Surface>> atlases;std::vector<uint64_t> atlasIds;probe1b_camera camera{{240,110,175},{240,171,10},45};uint64_t generation=1;double hour=12.6666667;bool water=false,environment=false,objects=false;std::shared_ptr<const owned::OwnedMapSnapshot> map;HiddenWindow previewWindow;ComPtr<ID3D11Device> previewDevice;ComPtr<ID3D11DeviceContext> previewContext;std::unique_ptr<owned::Renderer> previewRenderer;std::shared_ptr<owned::RetainedStaticSourceCandidate> previewSource;std::string previewKey;};
 bool active=false;
 int fail(probe1b_error* e,int code,const char* text) noexcept {if(e){e->code=code;std::snprintf(e->detail,sizeof(e->detail),"%s",text);}return code;}
 template<class F> int guarded(probe1b_error* e,F f) noexcept {try{return f();}catch(const std::exception& x){return fail(e,E_FAIL,x.what());}catch(...){return fail(e,E_FAIL,"C++ exception contained inside DLL");}}
@@ -125,7 +137,7 @@ HRESULT read_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* sou
 }
 namespace {
 HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* source) {
- auto& s=*static_cast<Session*>(user);s.pending=owned::AtamanReadiness::pending(s.renderer);
+ auto& s=*static_cast<Session*>(user);if(s.querying)return S_OK;s.pending=owned::AtamanReadiness::pending(s.renderer);
  if(s.pending||(s.neighboursRequested&&!owned::neighbour_client_settled(s.world)))return S_OK;
  // The editor service layer may arrive after the first complete native world.
  // EditorService::draw skips absent/stale pixels; world/material/neighbour gates remain unchanged.
@@ -152,7 +164,7 @@ HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* s
  if(display.BufferDesc.Width!=d.Width||display.BufferDesc.Height!=d.Height){resized=s.display->ResizeBuffers(0,d.Width,d.Height,DXGI_FORMAT_UNKNOWN,0);if(FAILED(resized))return resized;}
  ComPtr<ID3D11Texture2D> back;HRESULT hr=s.display->GetBuffer(0,IID_PPV_ARGS(&back));if(FAILED(hr))return hr;
  context->CopyResource(back.Get(),source);
- const auto compositeStart=std::chrono::steady_clock::now();hr=s.service.draw(s.device.Get(),context,back.Get(),s.generation);if(FAILED(hr))return hr;
+ const auto compositeStart=std::chrono::steady_clock::now();hr=std::memcmp(s.service.clip,s.frameCamera.world_to_clip,sizeof(s.service.clip))?S_OK:s.service.draw(s.device.Get(),context,back.Get(),s.generation);if(FAILED(hr))return hr;
  const auto compositeMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-compositeStart).count();
  bool tracePixels=false;
  {

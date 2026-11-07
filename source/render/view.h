@@ -1,5 +1,7 @@
 #ifndef MYGLWIDGET_H
 #define MYGLWIDGET_H
+#include "rebuild64_abi.h"
+#include "native_editor_service.h"
 #include "travel_area_geometry.h"
 #include "map_save_batch.h"
 #include "camera_document.h"
@@ -239,6 +241,7 @@ public:
     ~CView();
     bool prepareForApplicationShutdown();
     void stopForApplicationShutdown();
+    bool nativeObjectVisible(CNode* node) const {return isObjectVisualVisible(node);}
     void useLegacyViewport(const QString& action);
     QVariantList legacyVisualState() const;
     void ensureLegacyQueryContext();
@@ -904,6 +907,12 @@ private:
                          SFramePresentationTelemetry* frameTelemetry);
     bool ensureShadowFramebuffers(int quality);
     void releaseShadowFramebuffers();
+    CNativeEditorService nativeServiceSnapshot();
+    QList<CNode*> nativePickNodes(const QRect& rect);
+    bool nativeTerrainPositionAt(const QPoint& point,QVector3D* position,bool land) const;
+    QVector<EirPickPixel> m_nativeQueryPixels;
+    QMatrix4x4 m_nativeQueryClip;
+    QSize m_nativeQuerySize;
     void drawEditorServiceScene();
     void drawEditorObjectServices(const QMatrix4x4& camera,bool culling,bool helpers,CRenderStallTrace* trace=nullptr);
     QList<CNode*> drawEditorPickIds(const QMatrix4x4& camera);

@@ -196,7 +196,7 @@ int32_t EIR_CALL host_service(void* handle,const EirService* in,EirError* out) n
   }
   if(!s.poseAuditDone&&compared){std::fprintf(stderr,"POSE_AUDIT map=%s compared=%zu differing=%zu max_position_m=%.9f max_shape=%.9f max_quaternion=%.9f (unedited native poses retained)\n",s.map?s.map->terrain_resource.c_str():"",compared,differing,maxPosition,maxShape,maxRotation);s.poseAuditDone=true;}
   auto& service=s.service;
-  if(service.serial!=in->serial||service.generation!=in->generation) {service.cpuMs=in->cpu_ms;service.serial=in->serial;service.generation=in->generation;service.width=in->width;service.height=in->height;service.stride=in->stride;
+  if(in->image_update&&(service.serial!=in->serial||service.generation!=in->generation)) {std::copy_n(in->world_to_clip,16,service.clip);service.cpuMs=in->cpu_ms;service.serial=in->serial;service.generation=in->generation;service.width=in->width;service.height=in->height;service.stride=in->stride;
    const auto* begin=static_cast<const uint8_t*>(in->rgba.data);if(in->rgba.bytes)service.pixels.assign(begin,begin+in->rgba.bytes);else service.pixels.clear();}
   return 0;
  }),e);
@@ -209,9 +209,10 @@ int32_t EIR_CALL host_capture_world(void* h,const uint16_t* path,EirError* out) 
  }),e);
 }
 #include "offscreen_output.inc"
+#include "editor_query.inc"
 void EIR_CALL host_device_loss(void* h){if(h)static_cast<Session*>(h)->loseDevice=true;}
 }
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_renderer_get_api(uint32_t abi,EirApi* out) noexcept {
  if(abi!=EIR_ABI||!out||out->size!=sizeof(*out))return -1;
- *out={sizeof(EirApi),EIR_ABI,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output};return 0;
+ *out={sizeof(EirApi),EIR_ABI,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output,&host_query,&host_depth};return 0;
 }

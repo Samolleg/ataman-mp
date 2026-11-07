@@ -1,0 +1,166 @@
+--- a/external/owned-renderer/Source/renderer.h
++++ b/external/owned-renderer/Source/renderer.h
+@@ -965,6 +965,16 @@
+     friend struct scene_cmd::MarkLoadPicture;
+ public:
+     friend struct AtamanReadiness;
++#ifdef EID3D11_EMBEDDED
++    // Editor ownership uses the low seven stencil bits. Bit 7 belongs to
++    // the renderer's existing shadow prepass. No pixel/vertex shader changes.
++    int embedded_editor_byte_ = -1;
++    bool embedded_editor_terrain_ = false;
++    struct EditorIdentity { unsigned nid=0; std::string map; };
++    std::map<unsigned,EditorIdentity> embedded_editor_neighbours_;
++    unsigned embedded_editor_next_ = 0x80000000u;
++    std::map<unsigned,ComPtr<ID3D11DepthStencilState>> embedded_editor_states_;
++#endif
+     Renderer() = default;
+     Renderer(const Renderer&) = delete;
+     Renderer& operator=(const Renderer&) = delete;
+@@ -2180,6 +2190,7 @@
+         D3D12TextureRef d3d12;  // renderer_backend=d3d12: the texture instead of texture/srv
+     };
+     struct NativeQueuedDraw {
++        UINT editor_id = 0;
+         NativeMesh* mesh = nullptr;
+         UINT geometry_page = UINT_MAX;
+         NativeInstanceGpu instance{};
+@@ -2245,6 +2256,7 @@
+     };
+     static_assert(sizeof(NativeInstanceUpdate)==464,"NativeInstanceUpdate must match the structured HLSL layout");
+     struct NativeBatch {
++        UINT editor_id = 0;
+         std::size_t first_draw = 0;
+         std::size_t draw_count = 0;
+         UINT state_bucket = 0;
+--- a/external/owned-renderer/Source/engine_bridge.h
++++ b/external/owned-renderer/Source/engine_bridge.h
+@@ -827,6 +827,8 @@
+ 
+ struct FurProfile;
+ struct NativeGeometryView {
++    // Embedded host sidecar, never consumed by the game or shaders.
++    std::uint32_t editor_id = 0;
+     float contact_world_height = 0;
+     // Fur prototype: an owned preview's part record carries its fur profile
+     // here (the submission's own shared pointer, valid for the submit call;
+--- a/external/owned-renderer/Source/renderer_native_queue.cpp
++++ b/external/owned-renderer/Source/renderer_native_queue.cpp
+@@ -2258,7 +2258,7 @@
+    const auto supports_order=[](const NativeQueuedDraw& item){
+     return item.preserve_order&&(!item.instance.lighting_enabled||item.instance.world_geometry);
+    };
+-   NativeBatch batch;batch.first_draw=first;batch.state_bucket=draw.state_bucket;
++   NativeBatch batch;batch.editor_id=draw.editor_id;batch.first_draw=first;batch.state_bucket=draw.state_bucket;
+    batch.foliage=(draw.instance.flags&native_foliage_part_flag)!=0;
+    batch.geometry_page=draw.geometry_page;
+    batch.preserves_order=!shadows&&native_state_buckets_[draw.state_bucket].semantic_kind==SemanticKind::figure&&supports_order(draw);
+@@ -2266,6 +2266,9 @@
+    if(shadows||draw.reorderable||batch.preserves_order)
+     while(last<native_draw_order_.size()&&last-first<4096){
+      const auto& candidate=native_queued_draw(native_draw_order_[last]);
++#ifdef EID3D11_EMBEDDED
++     if(embedded_editor_byte_>=0&&candidate.editor_id!=draw.editor_id)break;
++#endif
+      if(candidate.state_bucket!=draw.state_bucket||!(candidate.camp_clip==draw.camp_clip)||candidate.geometry_page!=draw.geometry_page||
+         !widescreen::same_composition(candidate.hud_composition,draw.hud_composition)||
+         (shadows&&native_far_foliage_opaque_&&
+@@ -3330,6 +3333,7 @@
+    if(FAILED(hr=resolve_native_pose(submission.pose,submission.identity,0,pose)))return fail(hr,"records.pose_after_drain");
+   for(const auto selected:native_registration_){
+    auto& record=native_instance_records_[selected.record];
++   record.command.editor_id=UINT(submission.identity.signed_id);
+    if((!record.uploaded||!record.descriptor_uploaded)&&!record.scheduled){
+     native_instance_dirty_.push_back(selected.record);record.scheduled=true;
+    }
+@@ -3604,7 +3608,7 @@
+  auto object_to_clip=view.object_to_clip;
+  if(widescreen::interface_owned&&!view.world.enabled)
+   widescreen::compose_hud_clip(object_to_clip.data(),widescreen::hud_blit,float(canvas_width()),float(canvas_height()));
+- NativeQueuedDraw draw{};if(widescreen::interface_owned)draw.hud_composition=widescreen::hud_blit;draw.mesh=mesh;draw.geometry_page=mesh->allocation.page;draw.index_count=view.index_count;draw.component_count=view.component_count;std::memcpy(&draw.instance.object_to_clip,object_to_clip.data(),sizeof(draw.instance.object_to_clip));jitter_clip(&draw.instance.object_to_clip._11);if(view.lighting.enabled)std::memcpy(&draw.instance.object_to_world,view.lighting.object_to_world.data(),sizeof(draw.instance.object_to_world));draw.instance.geometry_offsets={mesh->position_offset,mesh->normal_offset,mesh->texture_coordinate_offset,mesh->component_offset};draw.instance.color_offsets={mesh->diffuse_offset,mesh->specular_offset};draw.instance.uv_shift[0]=view.u_shift;draw.instance.uv_shift[1]=view.v_shift;draw.instance.flags=view.flags&~native_preview_specular_rgb_flag;draw.instance.default_diffuse=view.default_diffuse;draw.instance.default_specular=view.default_specular;draw.instance.morph_offset=morph_offset;draw.instance.morph_count=view.morph_count;draw.instance.terrain_vertex_offset=mesh->terrain_vertex_offset;draw.instance.terrain_phase_offset=terrain_phase_offset;native_terrain_values(draw.instance,view.terrain,view.semantic_kind==SemanticKind::terrain && !configured_boolean(debug_overlay_.config(),"terrain_normal_sunlight",true));draw.instance.lighting_enabled=view.lighting.enabled;std::copy(view.lighting.emissive.begin(),view.lighting.emissive.end(),draw.instance.emissive);std::copy(view.lighting.specular.begin(),view.lighting.specular.end(),draw.instance.specular);draw.instance.material_alpha=view.lighting.material_alpha;std::copy(view.lighting.material_diffuse.begin(),view.lighting.material_diffuse.end(),draw.instance.material_diffuse);
++ NativeQueuedDraw draw{};draw.editor_id=view.editor_id;if(widescreen::interface_owned)draw.hud_composition=widescreen::hud_blit;draw.mesh=mesh;draw.geometry_page=mesh->allocation.page;draw.index_count=view.index_count;draw.component_count=view.component_count;std::memcpy(&draw.instance.object_to_clip,object_to_clip.data(),sizeof(draw.instance.object_to_clip));jitter_clip(&draw.instance.object_to_clip._11);if(view.lighting.enabled)std::memcpy(&draw.instance.object_to_world,view.lighting.object_to_world.data(),sizeof(draw.instance.object_to_world));draw.instance.geometry_offsets={mesh->position_offset,mesh->normal_offset,mesh->texture_coordinate_offset,mesh->component_offset};draw.instance.color_offsets={mesh->diffuse_offset,mesh->specular_offset};draw.instance.uv_shift[0]=view.u_shift;draw.instance.uv_shift[1]=view.v_shift;draw.instance.flags=view.flags&~native_preview_specular_rgb_flag;draw.instance.default_diffuse=view.default_diffuse;draw.instance.default_specular=view.default_specular;draw.instance.morph_offset=morph_offset;draw.instance.morph_count=view.morph_count;draw.instance.terrain_vertex_offset=mesh->terrain_vertex_offset;draw.instance.terrain_phase_offset=terrain_phase_offset;native_terrain_values(draw.instance,view.terrain,view.semantic_kind==SemanticKind::terrain && !configured_boolean(debug_overlay_.config(),"terrain_normal_sunlight",true));draw.instance.lighting_enabled=view.lighting.enabled;std::copy(view.lighting.emissive.begin(),view.lighting.emissive.end(),draw.instance.emissive);std::copy(view.lighting.specular.begin(),view.lighting.specular.end(),draw.instance.specular);draw.instance.material_alpha=view.lighting.material_alpha;std::copy(view.lighting.material_diffuse.begin(),view.lighting.material_diffuse.end(),draw.instance.material_diffuse);
+  std::uint32_t preview_rgb=0;
+  if(camp_inventory_preview_specular_rgb(preview_rgb)){
+   draw.instance.flags|=native_preview_specular_rgb_flag;
+--- a/external/owned-renderer/Source/neighbour_piece.h
++++ b/external/owned-renderer/Source/neighbour_piece.h
+@@ -64,6 +64,7 @@
+ 
+ // One drawn decoration node.
+ struct NeighbourPieceDecoration {
++    std::uint32_t nid = 0;
+     std::uint32_t candidate = 0;         // nodes of one MOB object share it (contact span)
+     std::uint32_t figure = 0;            // NeighbourPiece::figures
+     std::uint32_t texture = 0;           // NeighbourPiece::textures
+--- a/external/owned-renderer/Source/neighbour_piece.cpp
++++ b/external/owned-renderer/Source/neighbour_piece.cpp
+@@ -167,7 +167,7 @@
+             if (!node.figure || !node.texture) { ++piece.unbuilt_decorations; continue; }
+             const auto found = upload.prebuilt_figures.find(neighbour_figure_shape(node.figure, candidate.source->shape));
+             if (found == upload.prebuilt_figures.end() || !found->second.bytes) { ++piece.unbuilt_decorations; continue; }
+-            NeighbourPieceDecoration draw;
++            NeighbourPieceDecoration draw;draw.nid=candidate.source->nid;
+             draw.candidate = static_cast<std::uint32_t>(candidate_index);
+             draw.figure = builder.figure(*node.figure);
+             draw.texture = builder.texture(node.texture->identity, node.texture_identity, node.texture_format,
+--- a/external/owned-renderer/Source/renderer_neighbour_maps.cpp
++++ b/external/owned-renderer/Source/renderer_neighbour_maps.cpp
+@@ -258,7 +258,8 @@
+                 if(accepted) {
+                     // Each MOB object's ground-contact span over all its nodes.
+                     std::unordered_map<std::uint32_t,std::array<float,2>> contact;
+-                    for(const auto& node:upload->decorations) {
++                    std::map<unsigned,unsigned> editor_ids;
++                for(const auto& node:upload->decorations) {
+                         auto local=node.object_to_world;local[3]+=float(upload->selection.x);local[7]+=float(upload->selection.y);
+                         const auto z=contact_world_vertical_bounds(node.bounds_center,node.bounds_minimum,node.bounds_maximum,
+                             retained_multiply_matrix(map_placement,local));
+@@ -319,6 +320,11 @@
+                     const auto& span=contact[node.candidate];
+                     view.contact_world_height=span[1]-span[0];view.contact_map=first_part+1;
+                     view.ordering=NativeOrdering::reorderable;view.contribution={true,true,0};
++#ifdef EID3D11_EMBEDDED
++                    auto& editor_id=editor_ids[node.nid];
++                    if(!editor_id){editor_id=embedded_editor_next_++;embedded_editor_neighbours_[editor_id]={node.nid,upload->selection.placement.mpr};}
++                    view.editor_id=editor_id;
++#endif
+                     NativeGeometryResult result;if(!submit(&submission,view,result)){accepted=false;step="decoration.submit";break;}
+                     }
+                 }
+--- a/external/owned-renderer/Source/renderer_flush.cpp
++++ b/external/owned-renderer/Source/renderer_flush.cpp
+@@ -1166,6 +1166,9 @@
+   const auto* baked=static_reuse?&bake.batches[batch_index]:nullptr;
+   const NativeQueuedDraw& draw=baked?native_instance_records_[baked->first_record].command:native_queued_draw(native_draw_order_[batch.first_draw]);
+   const NativeStateBucket& bucket=native_state_buckets_[batch.state_bucket];const auto& st=bucket.state;
++#ifdef EID3D11_EMBEDDED
++  if(embedded_editor_terrain_&&bucket.semantic_kind!=SemanticKind::terrain)continue;
++#endif
+   if(bucket.opacity==NativeOpacityClass::ordered||draw.hud_composition.opacity<1.f)continue;
+   // Posed draws (characters, animated objects): their skinning runs per
+   // vertex in both passes for few pixels; they keep the full lookup.
+@@ -1516,6 +1519,24 @@
+    unlit_batch=!native_queued_draw(native_draw_order_[item]).instance.lighting_enabled;
+   context_->PSSetShader(bucket.semantic_kind==SemanticKind::terrain?batch_terrain_ps:unlit_batch?native_pixel(&Renderer::native_low_unlit_ps_,contact,fast):batch_object_ps,nullptr,0);
+   if(masked)context_->OMSetDepthStencilState(masked_depth_state_.Get(),0);
++#ifdef EID3D11_EMBEDDED
++  if(embedded_editor_terrain_ && bucket.semantic_kind!=SemanticKind::terrain)continue;
++  if(embedded_editor_byte_>=0&&!scene_composited_&&!native_shadow_collecting_){
++   ComPtr<ID3D11DepthStencilState> previous;UINT reference=0;
++   context_->OMGetDepthStencilState(&previous,&reference);
++   D3D11_DEPTH_STENCIL_DESC desc{};
++   if(previous)previous->GetDesc(&desc);else{desc.DepthEnable=TRUE;desc.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;desc.DepthFunc=D3D11_COMPARISON_LESS;}
++   // Preserve every depth choice, cutout discard, tessellation and LOD. The
++   // low bits have no world consumer; keep the prepass's reserved high bit.
++   desc.StencilEnable=TRUE;desc.StencilReadMask=0x7f;desc.StencilWriteMask=0x7f;
++   desc.FrontFace={D3D11_STENCIL_OP_KEEP,D3D11_STENCIL_OP_KEEP,D3D11_STENCIL_OP_REPLACE,D3D11_COMPARISON_ALWAYS};desc.BackFace=desc.FrontFace;
++   const unsigned key=unsigned(desc.DepthEnable)|(unsigned(desc.DepthWriteMask)<<1)|(unsigned(desc.DepthFunc)<<3);
++   auto& state=embedded_editor_states_[key];
++   if(!state&&FAILED(hr=device_->CreateDepthStencilState(&desc,&state)))return native_flush_failure_line_=__LINE__,finish(hr);
++   const UINT id=bucket.semantic_kind==SemanticKind::terrain?0u:batch.editor_id;
++   context_->OMSetDepthStencilState(state.Get(),(id>>(7*embedded_editor_byte_))&0x7fu);
++  }
++#endif
+   // Cliff tessellation: terrain batches as 3-point patches (same vertex count).
+   // Without a snow trail field the flat tile class (the first region of a
+   // batch with flat_pixels) draws untessellated: its edges stay whole on

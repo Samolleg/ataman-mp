@@ -3,6 +3,7 @@
 #include <d3d11_1.h>
 // Host composition only. Never changes the renderer-owned output/depth/policy.
 struct EditorService {
+    float clip[16]{};
     uint64_t serial=0,generation=0;
     double cpuMs=0;
     UINT width=0,height=0,stride=0;

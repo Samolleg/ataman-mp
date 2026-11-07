@@ -4,3 +4,6 @@ assets/resources/terrain_atlas_presets.json text eol=lf
 patches/*.patch -whitespace
 # Preserve the pinned upstream blobs exactly, including their line endings.
 third_party/eirebuild64-nav/** -text
+
+# Locked renderer patches must keep their SHA-256 across Windows checkouts.
+tools/rebuild64_renderer/patches/*.patch text eol=lf -whitespace

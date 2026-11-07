@@ -68,6 +68,10 @@ protected:
     void resizeEvent(QResizeEvent*) override;
 private:
     struct Worker;
+    bool queryEditorInput(QEvent* event);
+    bool m_queryReplaying{false},m_queryInFlight{false};
+    quint64 m_querySerial{0};
+
     void tick();
     void updateLiveCamera();
     void fallback(const QString& message);
@@ -86,7 +90,7 @@ private:
     QString m_earlyMap;
     bool m_earlyDocument{false};
     struct WaitingInput {std::shared_ptr<QEvent> event;QMatrix4x4 view,projection;QSize extent;};
-    QVector<WaitingInput> m_waitingInput;
+    QVector<WaitingInput> m_waitingInput,m_queryInput;
     const WaitingInput* m_replayInput{nullptr};
     void queueEditorInput(std::shared_ptr<QEvent> event);
     void replayEditorInput();
@@ -124,6 +128,7 @@ private:
     QString m_guardDirectory;
     QStringList m_interruptedStarts;
     QList<QPointer<QWidget>> m_panels;
+    QPointer<QWidget> m_nativeLegend;
     EirStatistics m_statistics{};
     QElapsedTimer m_sceneSnapshotTimer;
     QElapsedTimer m_previewClock;

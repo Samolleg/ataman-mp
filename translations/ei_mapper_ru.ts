@@ -17673,6 +17673,10 @@ Line: %4</source><translation>Вызов:
         <source>Rebuild64: очередь вывода заполнена. Повторите запрос.</source>
         <translation>Rebuild64: очередь вывода заполнена. Повторите запрос.</translation>
     </message>
+    <message>
+        <source>Rebuild64: точный запрос недоступен: %1</source>
+        <translation>Rebuild64: точный запрос недоступен: %1</translation>
+    </message>
 </context>
 <context><name>CRebuild64Viewport</name><message><source>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</source><translation>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</translation></message></context>
 <context><name>MainWindow</name><message><source>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</source><translation>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</translation></message></context>

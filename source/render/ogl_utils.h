@@ -20,6 +20,8 @@ public:
     ~CSelectFrame();
     void draw(QOpenGLShaderProgram* program);
     void updateFrame(QPointF& bottomLeft, QPointF& topRight);
+    void updateNativeFrame(const QPointF& a,const QPointF& b) {m_aPoints={QVector3D(a.x(),a.y(),0),QVector3D(a.x(),b.y(),0),QVector3D(b.x(),b.y(),0),QVector3D(b.x(),a.y(),0)};}
+    const QVector<QVector3D>& points() const {return m_aPoints;}
     void reset();
 
 private:

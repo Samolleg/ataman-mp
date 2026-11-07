@@ -1,5 +1,5 @@
 {
-  "abi": 6,
+  "abi": 10,
   "sourceRepository": "Samolleg/EIRebuild64",
   "sourceCommit": "81dbcdd29b41baeb346f167c6dfb511dff05f295",
   "archivePaths": [
@@ -51,6 +51,10 @@
     {
       "path": "021-independent-frame-boundary.patch",
       "sha256": "2836225e9e1ecb87f533d7cb85fd8ad33b299a7e6da9808d04fb70ec8918ee2e"
+    },
+    {
+      "path": "060-editor-native-stencil-query.patch",
+      "sha256": "79385bc9373c3e008d60b70f08e97464d8c2ec794a2854824b166342d3cafa80"
     }
   ],
   "nvidiaSdk": false,

@@ -11,6 +11,7 @@
 #include "preview.h"
 #include "opening_cpu_value.h"
 #include "operationmanager.h"
+#include "navmesh_panel.h"
 #include "key_manager.h"
 #include "rebuild64_launch_check.h"
 #include "main_window.h"
@@ -23,6 +24,7 @@
 #include "landscape.h"
 #include "mob.h"
 #include "node.h"
+#include "unit.h"
 #include "camera.h"
 #include "settings.h"
 #include "resource_setup_dialog.h"
@@ -181,7 +183,7 @@ public:
     void attach(MainWindow& value)
     {
         window=&value;view=value.view();native=value.findChild<CRebuild64Viewport*>();
-        native->setFixedSize(1920,1080);
+        native->setFixedSize(configuration["mode"].toString()=="service291"?QSize(1024,768):QSize(1920,1080));
         window->resize(2560,1440);
         connect(view,&CView::updateMsg,this,[this](const QString& text){record("message",{{"text",text}});});
         connect(native,&CRebuild64Viewport::backendFailure,this,[this](const QString& text){++failures;record("backend_failure",{{"text",text}});});
@@ -552,6 +554,7 @@ public:
   if(!window||qApp->property("rebuild64StartupDocumentBatch").toBool()||window->m_workspaceLoadInProgress||window->backgroundMobLoading()||window->m_worldMetadataWatcher){QTimer::singleShot(50,this,[this]{startWhenIdle();});return;}
   run();
  }
+    #include "rebuild64_service_check.inc"
     void run()
     {
         int exitCode=0;
@@ -570,7 +573,9 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="accept288r2") {
+            if(mode=="acceptService289") {serviceScenario("zone1",true);serviceScenario("zone7",true);}
+            else if(mode=="service291") {serviceScenario(map);}
+            else if(mode=="accept288r2") {
                 auto* indicator=window->findChild<QLabel*>("viewportRendererIndicator");
                 check(native->rebuildSelected()&&indicator&&indicator->text()=="Rebuild64","startup renderer and permanent status indicator");
                 if(!configuration["restart"].toBool()) {
@@ -849,7 +854,7 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;

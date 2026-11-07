@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 9u
+#define EIR_ABI 10u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -69,9 +69,11 @@ typedef struct EirService {
     uint32_t size,width,height,stride;
     uint64_t serial,generation;
     double cpu_ms;
-    EirSpan rgba; // top-down, premultiplied RGBA8; editor-owned GL depth
+    EirSpan rgba; // top-down, premultiplied RGBA8; editor-owned image; native worker resolves depth
     const EirObjectPose* poses;
     uint32_t pose_count;
+    uint32_t image_update; // 0=poses only, keep the worker-composited image
+    float world_to_clip[16]; // service camera lease
 } EirService;
 // Output 288: all buffers are caller-owned; no DLL allocation crosses the ABI.
 // mode: 0=current accepted editor frame, 1=current accepted world,
@@ -94,6 +96,17 @@ typedef struct EirOutput {
     uint32_t neighbours_accepted, pending;
     char map[512];
 } EirOutput;
+// Service 289 append-only query block (combined ABI10 with output288). IDs come from the ordinary native fragments,
+// not the game's flat hit-test shader (which skips alpha/LOD discard).
+typedef struct EirPickPixel { uint32_t renderer_id,mob,nid; float depth,terrain_depth,overlay_depth; } EirPickPixel;
+typedef struct EirQuery {
+    uint32_t size,width,height; uint64_t generation;
+    EirCamera camera; EirPickPixel* pixels; uint64_t capacity;
+} EirQuery;
+typedef struct EirDepth {
+    uint32_t size,width,height; uint64_t generation;
+    float* pixels; uint64_t capacity;
+} EirDepth;
 typedef struct EirApi {
     uint32_t size, abi;
     int32_t (EIR_CALL *create)(const EirCreate*,void**,EirError*);
@@ -107,5 +120,7 @@ typedef struct EirApi {
     int32_t (EIR_CALL *service)(void*,const EirService*,EirError*);
     int32_t (EIR_CALL *capture_world)(void*,const uint16_t*,EirError*);
     int32_t (EIR_CALL *output)(void*,const EirOutputRequest*,EirOutput*,EirError*);
+    int32_t (EIR_CALL *query)(void*,EirQuery*,EirError*);
+    int32_t (EIR_CALL *depth)(void*,EirDepth*,EirError*);
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

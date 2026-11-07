@@ -115,6 +115,8 @@ public:
     uint serialize(util::CMobParser& parser);
     bool isUse() const {return m_use;}
     EBehaviourType behaviorType() const {return m_behaviour;}
+    const QVector<QVector3D>& editorPreviewPath() const {return m_aDrawPoint;}
+    const QVector<QVector3D>& editorPreviewHelp() const {return m_aHelpPoint;}
     void updatePos(QVector3D& offset);
     void appendMovementState(QVector<QVector3D>& state) const;
     bool restoreMovementState(const QVector<QVector3D>& state, int& index);

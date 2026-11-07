@@ -29,6 +29,7 @@ public:
     void markAsDeleted(bool bDeleted = true) override;
     bool isOperationAxisAllow(EOperationAxisType type) override final;
     float radius() const { return m_radius; }
+    const QVector<QVector3D>& editorPreviewArea() const {return m_aDrawPoint;}
 
 signals:
     void changeActZone();

@@ -1975,7 +1975,6 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
 
 void CView::setDrawWater(bool bDraw)
 {
-    if(m_bDrawWater != bDraw)useLegacyViewport(QString::fromUtf8("Видимость overlay и воды"));
     if(m_bDrawWater == bDraw)
     {
         syncVisualChannelButtons();
@@ -1991,7 +1990,6 @@ void CView::setDrawWater(bool bDraw)
 
 void CView::setDrawLand(bool bDraw)
 {
-    if(m_bDrawLand != bDraw)useLegacyViewport(QString::fromUtf8("Видимость главной поверхности"));
     if(m_bDrawLand == bDraw)
     {
         syncVisualChannelButtons();
@@ -3589,6 +3587,15 @@ bool CView::neighborMapAtViewport(const QPoint& viewportPosition,
         *placement = SNeighborMapPlacement();
     if(hitPoint)
         *hitPoint = QVector3D();
+    if(property("rebuild64Selected").toBool()&&!m_nativeQueryPixels.isEmpty()){
+        if(!m_neighborLandscapesVisible||!m_landscapeVisible||(!m_bDrawLand&&!m_bDrawWater))return false;
+        QVector3D point;if(!nativeTerrainPositionAt(viewportPosition,&point,land))return false;
+        const int px=qBound(0,int((viewportPosition.x()+.5)*m_nativeQuerySize.width()/qMax(1,width())),m_nativeQuerySize.width()-1),py=qBound(0,int((viewportPosition.y()+.5)*m_nativeQuerySize.height()/qMax(1,height())),m_nativeQuerySize.height()-1);
+        const auto& id=m_nativeQueryPixels[py*m_nativeQuerySize.width()+px];if(id.mob==UINT32_MAX&&id.nid)setProperty("nativeNeighborPickId",id.nid);
+        const QPointF xy(point.x(),point.y());if(!preferNeighbor&&QRectF(QPointF(),QSizeF(m_pLand->widthInWorldUnits(),m_pLand->heightInWorldUnits())).contains(xy))return false;
+        for(const auto& item:m_neighborPlacements)if(QRectF(item.origin,item.size).contains(xy)){if(placement)*placement=item;if(hitPoint)*hitPoint=point;return true;}
+        return false;
+    }
     if(!m_neighborLandscapesVisible || !m_landscapeVisible
        || (!m_bDrawLand && !m_bDrawWater) || m_minimapCaptureActive
        || m_neighborLandscapes.isEmpty() || !m_pLand
@@ -12021,7 +12028,6 @@ void CView::setWorkspaceVisibility(const QList<CMob*>& mobs,
 
 void CView::setLandscapeVisible(bool visible)
 {
-    if(m_landscapeVisible != visible)useLegacyViewport(QString::fromUtf8("Видимость ландшафта"));
     if(m_landscapeVisible == visible)
         return;
     m_landscapeVisible = visible;
@@ -16444,7 +16450,8 @@ void CView::drawSelectFrame(QRect &rect)
     float rightY = rect.topRight().y()/(float)m_height*2-1.0f;
     QPointF bottomLeft(leftX, -leftY);
     QPointF topRight(rightX, -rightY);
-    m_selectFrame->updateFrame(bottomLeft, topRight);
+    if(property("rebuild64Selected").toBool())m_selectFrame->updateNativeFrame(bottomLeft,topRight);
+    else m_selectFrame->updateFrame(bottomLeft, topRight);
 }
 
 void CView::pickObject(const QRect &rect, bool bAddToSelect)
@@ -16455,36 +16462,19 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
         return;
     }
 
-    // Hit testing is an editor-only render pass. Never clear or replace the
-    // presented scene while producing picking IDs.
-    if(!beginEditorQueryFramebuffer())
-    {
-        m_selectFrame->reset();
-        return;
-    }
-
     const QList<CNode*> selectionBefore = selectionSnapshot();
-
-    const QMatrix4x4 viewMatrix = m_cam->viewMatrix();
-    ei::gl::Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if(!drawSelectionTerrainDepth(viewMatrix))
-    {
-        endEditorQueryFramebuffer();
-        m_selectFrame->reset();
-        return;
-    }
-    if (!m_selectProgram.bind())
-    {
-        endEditorQueryFramebuffer();
-        close();
-        return;
-    }
-
-    const auto pickableNodes=drawEditorPickIds(viewMatrix);
-
+    QList<CNode*> pickableNodes;
     QVector<SColor> aColor;
-    getColorFromRect(rect, aColor);
-    endEditorQueryFramebuffer();
+    if(property("rebuild64Selected").toBool()) {
+        pickableNodes=nativePickNodes(rect);
+        for(auto* node:pickableNodes){const auto* color=node->color();aColor.append(SColor(color[0],color[1],color[2]));}
+    } else {
+        if(!beginEditorQueryFramebuffer()){m_selectFrame->reset();return;}
+        const auto viewMatrix=m_cam->viewMatrix();
+        ei::gl::Clear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        if(!drawSelectionTerrainDepth(viewMatrix)||!m_selectProgram.bind()){endEditorQueryFramebuffer();m_selectFrame->reset();return;}
+        pickableNodes=drawEditorPickIds(viewMatrix);getColorFromRect(rect,aColor);endEditorQueryFramebuffer();
+    }
 
     //if(m_operationType == EOperationTypeObjects)
 
@@ -16543,6 +16533,7 @@ void CView::pickObject(const QRect &rect, bool bAddToSelect)
 
 QVector3D CView::getTerrainPos(bool bLand)
 {
+    if(property("rebuild64Selected").toBool()){const auto p=property("nativePointer").toPoint();return getTerrainPos(p.x(),p.y(),bLand);}
     QPoint globalCursorPos = QCursor::pos();
     QPoint localCursorPos = mapFromGlobal(globalCursorPos);
     return getTerrainPos(localCursorPos.x(), localCursorPos.y(), bLand);
@@ -24789,6 +24780,7 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
        || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
         return false;
 
+    if(property("rebuild64Selected").toBool()&&!m_nativeQueryPixels.isEmpty())return nativeTerrainPositionAt(viewportPosition,position,land);
     const QRect viewport(0, 0, width(), height());
     const float screenY = float(height() - viewportPosition.y());
     const QMatrix4x4 view = m_cam->viewMatrix();
@@ -25059,7 +25051,7 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
     if(property("rebuild64Selected").toBool()) {
-        const bool found=terrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand);
+        const bool found=nativeTerrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand);
         if(hit)*hit=found;return point;
     }
 
