@@ -201,3 +201,5 @@ EI Mapper v0.3 installation and `options.json` untouched.
 
 GPL-3.0, preserving upstream authorship and history. Distributions of binaries
 must include the corresponding source and notices.
+
+Доработка 287 R2 (EI-REBUILD64-LAUNCH-287): первый полный кадр Rebuild64 готовится параллельно с геометрией инструментов; открытие карты проверяет камеру. Подробности, замеры и оставшиеся ограничения — [отчёт, R2](docs/validation/ATAMAN_REBUILD64_LAUNCH_287_20261107.md). Сборка не устанавливается без слова владельца.

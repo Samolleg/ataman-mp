@@ -41,7 +41,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   // This host supplies a complete immutable document, not the game's same-name
   // MOB reuse transition. Retire source publications as well as positive IDs.
   OwnedRender::E1Scene().Scene().reset();
-  s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.completedReadyEpoch=~uint64_t(0);s.materialsPublished=false;s.generation=in->generation;++s.world;
+  s.terrain.reset();s.baseline.reset();s.map.reset();s.atlases.clear();s.atlasIds.clear();s.readyGeneration=0;s.completedReadyEpoch=~uint64_t(0);s.materialsPublished=false;s.generation=in->generation;++s.world;s.traceFrameStarted=s.traceNeighboursSettled=s.traceResourcesSettled=false;
   s.editorSeeds.clear();s.poseAuditDone=false;
   if(!in->terrain.bytes)return 0;
   if(s.world>1) {
@@ -148,7 +148,13 @@ int32_t EIR_CALL host_frame(void* h,EirStatistics* stats,EirError* out) noexcept
  return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(h);*stats={};
   HRESULT hr=s.loseDevice?DXGI_ERROR_DEVICE_REMOVED:s.device->GetDeviceRemovedReason();if(FAILED(hr))return fail(&e,hr,"Rebuild64 D3D11 device lost; unsaved documents remain in OpenGL");
   if(!s.terrain)return 1;
+  if(!s.traceFrameStarted){s.trace.phase("native_frame_work_begin");s.traceFrameStarted=true;}
   const auto start=std::chrono::steady_clock::now();const int rc=map_frame(s,&e);if(rc)return rc;
+  const unsigned expectedNeighbours=!s.neighboursRequested?0:_stricmp(s.terrainName.c_str(),"zone1.mpr")==0?5:_stricmp(s.terrainName.c_str(),"zone7.mpr")==0?4:0;
+  const bool neighboursReady=owned::neighbour_client_settled(s.world)&&owned::AtamanReadiness::neighbours(s.renderer)==expectedNeighbours;
+  if(!s.traceNeighboursSettled&&neighboursReady) {s.trace.phase("neighbour_client_settled");s.traceNeighboursSettled=true;}
+  if(!s.traceResourcesSettled&&neighboursReady&&!owned::AtamanReadiness::pending(s.renderer)&&s.completedReadyEpoch==owned::AtamanReadiness::epoch(s.renderer)) {s.trace.phase("native_resources_pending_clear");s.traceResourcesSettled=true;}
+
   probe1b_statistics memory{};probe1b_get_statistics(h,&memory,&e);
   stats->service_cpu_ms=s.acceptedServiceCpuMs;stats->service_composite_ms=s.acceptedCompositeMs;stats->service_serial=s.acceptedServiceSerial;stats->document_updates=s.documentUpdates;
   stats->generation=s.generation;stats->ready_generation=s.readyGeneration;stats->private_bytes=memory.private_bytes;stats->video_bytes=memory.video_local;stats->width=s.width;stats->height=s.height;stats->pending=s.pending;

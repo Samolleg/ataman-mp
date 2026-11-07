@@ -1,5 +1,9 @@
 #include "rebuild64_viewport_widget.h"
 #include "view.h"
+#include "opening_trace.h"
+#include "legacy_projection_pulse.h"
+#include "mob_family_validation.h"
+#include <QtConcurrent>
 #include "main_window.h"
 #include "renderer_preferences.h"
 #include "resource_write_lease.h"
@@ -36,6 +40,8 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QKeyEvent>
+#include <QFocusEvent>
+#include <QResizeEvent>
 #include <QLibrary>
 #include <QMenu>
 #include <QMouseEvent>
@@ -64,6 +70,53 @@ public:
     QPaintEngine* paintEngine() const override { return nullptr; }
 };
 
+namespace {
+struct EarlyWorld {QByteArray terrain,name;QVector<QByteArray> mobs;QString error;CWorldSet world;bool hasWorld{false};QVector<EirPointLight> lights;};
+struct EarlyRead {QFuture<EarlyWorld> future;std::shared_ptr<std::atomic_bool> cancel{std::make_shared<std::atomic_bool>(false)};};
+EarlyWorld readOpening(const QFileInfo& mpr,const QStringList& roots,const QStringList& search,const std::shared_ptr<std::atomic_bool>& cancel) {
+    opening::Scope total("cpu.cohort",mpr.fileName());EarlyWorld world;world.name=mpr.fileName().toUtf8();
+    {opening::Scope timing("cpu.mpr.read",mpr.fileName());QFile file(mpr.absoluteFilePath());
+        if(!file.open(QIODevice::ReadOnly)){world.error=file.errorString();return world;}world.terrain=file.readAll();}
+    QStringList queue=roots;QSet<QString> seen;uint32_t lightSource=0;
+    while(!queue.isEmpty()&&!cancel->load()) {
+        const QFileInfo source(queue.takeFirst());const auto key=source.canonicalFilePath().toCaseFolded();
+        if(key.isEmpty()){world.error="MOB disappeared: "+source.absoluteFilePath();return world;}
+        if(seen.contains(key))continue;seen.insert(key);
+        CMobDocument document;CValidationReport report;
+        {opening::Scope timing("cpu.mob.read_parse",source.fileName());
+            if(!document.load(source,&report)||report.hasErrors()){world.error=report.toText();return world;}}
+        if(world.mobs.isEmpty()) {SMobParameterState parameters;QString error;
+            opening::Scope timing("cpu.mob.environment",source.fileName());
+            if(!CMob::readTemplateParameters(source,&parameters,&error)){world.error=error;return world;}
+            world.world=parameters.worldSet;world.hasWorld=true;
+        }
+        // Copy authored light facts from the CPU document. Constructing CLight
+        // here would request GL resources; no editor objects exist on this worker.
+        for(const auto& group:document.sections().front().children)if(group.type==45056u)
+            for(const auto& object:group.children) {
+                ++lightSource;if(object.type!=43521u||world.lights.size()>=EIR_MAX_POINT_LIGHTS)continue;
+                EirPointLight light{};light.radius=10;light.source_id=lightSource;
+                for(int i=0;i<3;++i)light.color[i]=1;
+                for(const auto& field:object.children) {
+                    QDataStream data(field.rawBytes.mid(8));util::formatStream(data);
+                    if(field.type==43522u)data>>light.radius;
+                    else if(field.type==43524u)for(int i=0;i<3;++i)data>>light.position[i];
+                    else if(field.type==43527u)for(int i=0;i<3;++i)data>>light.color[i];
+                    else if(field.type==43526u){quint8 shadow=0;data>>shadow;light.casts_shadow=shadow?1u:0u;}
+                }
+                if(light.radius>0)world.lights.append(light);
+            }
+        world.mobs.append(document.originalBytes());QString script;
+        if(!document.embeddedScript(&script,&report)){world.error=report.toText();return world;}
+        {opening::Scope timing("cpu.addmob.resolve",source.fileName());QStringList warnings;
+            queue.append(CMobFamilyValidator::addMobPaths(script,source.absoluteFilePath(),search,&warnings));
+            // Resolution uses the same validator as CView's background cohort.
+            // Missing optional AddMob paths are handled by that contract, not guessed here.
+        }
+    }
+    if(cancel->load())world.error="cancelled";return world;
+}
+}
 struct CRebuild64Viewport::Worker {
     struct Input {
         QByteArray terrain,name;
@@ -77,7 +130,9 @@ struct CRebuild64Viewport::Worker {
         quint64 serviceSerial{0},captureGeneration{0};double serviceCpuMs{0};
         QSize size;
         QString capture;bool captureWorld{false},documentDirty{false},operationPreview{false},editorGeometryReady{false};
-        bool resourcesReady{false};
+        bool resourcesReady{false},overrideHour{false},openingClock{false};
+        std::chrono::steady_clock::time_point cameraStamp{std::chrono::steady_clock::now()};
+        std::shared_ptr<EarlyRead> opening;
         void resources(CSettings* settings,const QSize& extent) {
             size=extent;paths=configuredResourceSourcePaths(settings);
             if(const auto* root=dynamic_cast<const COptString*>(settings->opt("gameRoot")))gameRoot=root->value();
@@ -127,7 +182,7 @@ struct CRebuild64Viewport::Worker {
         const bool current=!worker.stop&&!worker.paused&&worker.input.generation==generation
             &&worker.input.camera.neighbours_visible==neighbours
             &&(!worker.input.documentDirty||worker.input.operationPreview)
-            &&worker.input.editorGeometryReady;
+            ; // Native world readiness is independent of editor query geometry.
         if(phase==2||!current)worker.mutex.unlock();
         return current;
     }
@@ -173,7 +228,7 @@ struct CRebuild64Viewport::Worker {
                 next=input; input.capture.clear();
             }
             EirError error{};
-            if(next.terrain.isEmpty()) {
+            if(next.terrain.isEmpty() && !next.opening) {
                 // There is no world to prepare. A device created for the empty
                 // profile would be discarded when map-local mounts/layout arrive.
                 // Closing a document also retires its device instead of submitting
@@ -233,9 +288,34 @@ struct CRebuild64Viewport::Worker {
                 const auto layout=next.neighbourLayout.toStdWString();
                 EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this};
                 phase(QString::fromUtf8("Создание D3D11 и подготовка шейдеров"));
+                opening::Scope deviceTiming("native.create");
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
                 prepared=true;size=next.size;
                 activePaths=next.paths;activeGameRoot=next.gameRoot;activeLayout=next.neighbourLayout;
+            }
+            if(next.opening) {
+                if(next.opening->cancel->load())continue;
+                if(!next.opening->future.isFinished()) {
+                    std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(10));continue;
+                }
+                const auto raw=next.opening->future.result();
+                if(!raw.error.isEmpty()){failure(QString::fromUtf8("Не удалось подготовить полный мир Rebuild64: ")+raw.error);break;}
+                next.terrain=raw.terrain;next.name=raw.name;next.mobs=raw.mobs;
+                if(raw.hasWorld) {
+                    if(!next.overrideHour)next.camera.hour=ei::renderEnvironment(&raw.world,false,float(next.camera.hour),next.camera.cave!=0).timeHours;
+                    const auto wind=util::vec3FromString(raw.world.data(eWsTypeWindDir));
+                    for(int i=0;i<3;++i)next.camera.wind_direction[i]=wind[i];next.camera.wind_force=raw.world.data(eWsTypeWindStr).toFloat();
+                }
+                next.camera.point_light_count=uint32_t(raw.lights.size());
+                for(int i=0;i<raw.lights.size();++i)next.camera.point_lights[i]=raw.lights[i];
+                // Publish the immutable raw cohort under the same generation guard.
+                {std::lock_guard<std::mutex> lock(mutex);if(stop||paused||input.generation!=next.generation)continue;
+                    input.terrain=next.terrain;input.name=next.name;input.mobs=next.mobs;input.camera=next.camera;input.opening.reset();}
+                QCryptographicHash hash(QCryptographicHash::Sha256);hash.addData(next.name);hash.addData(next.terrain);
+                for(const auto& mob:next.mobs){hash.addData(QByteArray::number(mob.size()));hash.addData(mob);}
+                const auto fingerprint=hash.result();const auto ticket=next.generation;
+                QMetaObject::invokeMethod(owner,[target=owner,fingerprint,ticket]{if(target->m_generation==ticket&&target->m_earlyDocument)target->m_documentHash=fingerprint;},Qt::QueuedConnection);
+                next.opening.reset();
             }
             {std::lock_guard<std::mutex> lock(mutex);if(stop)break;if(paused||input.generation!=next.generation)continue;}
             if(!next.generation) {
@@ -260,6 +340,7 @@ struct CRebuild64Viewport::Worker {
                 // default and changing it after world upload retires materials.
                 if(api.camera(handle,&next.camera,&error)) {failure(QString::fromUtf8(error.message));break;}
                 phase(QString::fromUtf8("Подготовка карты и материалов"));
+                opening::Scope documentTiming("native.document");
                 if(api.document(handle,&doc,&error)) {failure(QString::fromUtf8(error.message));break;}
                 generation=next.generation;previousNeighbours=next.camera.neighbours_visible!=0;pending.restart();startupArmed=true;
                 // Document decode may take seconds. Do not render a retired
@@ -293,6 +374,7 @@ struct CRebuild64Viewport::Worker {
                 EirService service{sizeof(EirService),uint32_t(next.service.width()),uint32_t(next.service.height()),uint32_t(next.service.bytesPerLine()),next.serviceSerial,next.generation,next.serviceCpuMs,{next.service.constBits(),uint64_t(next.service.sizeInBytes())},next.poses.constData(),uint32_t(next.poses.size())};
                 if(api.service(handle,&service,&error)){failure(QString::fromUtf8(error.message));break;}
             }
+            if(next.openingClock)next.camera.world_time+=std::chrono::duration<double>(std::chrono::steady_clock::now()-next.cameraStamp).count()/.055;
             if(api.camera(handle,&next.camera,&error)){failure(QString::fromUtf8(error.message));break;}
             if(hook=="device-lost"&&!injected){api.test_device_loss(handle);injected=true;}
             EirStatistics stats{};const int rc=api.frame(handle,&stats,&error);
@@ -350,14 +432,16 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_glAction->setChecked(true);
     connect(m_glAction,&QAction::triggered,this,[this]{selectRebuild(false);});
     connect(m_rebuildAction,&QAction::triggered,this,[this]{selectRebuild(true);});
-    m_native->installEventFilter(this);
+    m_native->installEventFilter(this);m_gl->installEventFilter(this);
     m_previewClock.start();
     m_timer->setInterval(16);connect(m_timer,&QTimer::timeout,this,&CRebuild64Viewport::tick);
     m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
     m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
-    connect(gl,&CView::mobStateChanged,this,[this]{m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
+    connect(gl,&CView::mobStateChanged,this,[this]{if(m_earlyDocument)return;m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{
+        if(m_earlyDocument && m_gl->m_pLand && m_gl->m_pLand->isMprLoad()
+           &&m_earlyMap==m_gl->m_pLand->filePath().absoluteFilePath())return;
         m_documentRefreshPending=true;
         if(m_selected && (!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()
            || m_documentMapPath!=m_gl->m_pLand->filePath().absoluteFilePath()))beginDocumentTransition();
@@ -482,7 +566,7 @@ void CRebuild64Viewport::selectRebuild(bool selected,bool persist) {
     movePanels(false);
     if(!selected) {
         m_stack->setCurrentWidget(m_gl);
-        m_timer->stop();if(m_worker)m_worker->pause(true);
+        if(m_waitingInput.isEmpty())m_timer->stop();else m_timer->start();if(m_worker)m_worker->pause(true);
         // Restore QGLWidget's original physical draw/query extent. Native mode
         // uses logical editor queries; it must not alter the retained GL path.
         m_gl->m_width=qMax(1,qRound(m_gl->width()*m_gl->devicePixelRatioF()));
@@ -538,6 +622,9 @@ void CRebuild64Viewport::updatePreparationText() {
 }
 void CRebuild64Viewport::beginDocumentTransition() {
     if(!m_selected)return;
+    if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);if(m_worker->input.opening)m_worker->input.opening->cancel->store(true);}
+    m_earlyDocument=false;m_earlyMap.clear();
+    // Resource-write transitions on the same map retain pending tool input.
     ++m_generation;m_backendResourceKey.clear();
     m_gl->setProperty("rebuild64LegacyNeighborsDemanded",false);
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->paused=true;m_worker->retainPausedHandle=true;m_worker->input.documentDirty=true;m_worker->input.generation=m_generation;}
@@ -616,14 +703,53 @@ QVector<EirObjectPose> editorPoses(CView* view) {
 }
 }
 void CRebuild64Viewport::tick() {
+    if(!m_selected&&m_gl&&!m_waitingInput.isEmpty()) {
+        auto* main=qobject_cast<MainWindow*>(window());
+        if(main&&main->rebuild64DocumentReady()&&!m_gl->m_unitVisualPreparationSuspended&&!m_gl->m_openingProjectionDepth&&editorQueryReady()&&!ei::legacyProjectionPulse()) {
+            m_earlyDocument=false;auto pending=std::move(m_waitingInput);m_waitingInput.clear();
+            for(const auto& event:pending)QApplication::sendEvent(m_gl,event.get());m_timer->stop();
+        }
+        return;
+    }
     if(!m_selected||!m_gl||m_gl->m_applicationShutdown)return;
     updatePreparationText();
     if(m_restartWhenFinished){
         if(m_worker&&!m_worker->finished.load())return;
         m_worker.reset();m_restartWhenFinished=false;m_backendResourceKey.clear();m_documentHash.clear();m_documentRefreshPending=true;m_sceneSnapshotTimer.invalidate();
     }
-    if(m_resourceWriteDepth)return;
-    if(m_gl->m_unitVisualPreparationSuspended || qApp->property("rebuild64StartupDocumentBatch").toBool())return;
+    if(m_resourceWriteDepth||ei::legacyProjectionPulse()||window()->property("nativeMapRequestPending").toBool())return;
+    if(!m_earlyDocument && !m_waitingInput.isEmpty() && frameIsCurrent() && editorQueryReady()){
+        auto pending=std::move(m_waitingInput);m_waitingInput.clear();for(const auto& event:pending)editorInput(event.get());
+    }
+    if(m_earlyDocument) {
+        auto* main=qobject_cast<MainWindow*>(window());
+        const bool ready=main&&main->rebuild64DocumentReady()&&!m_gl->m_unitVisualPreparationSuspended&&!m_gl->m_openingProjectionDepth
+            &&!qApp->property("rebuild64StartupDocumentBatch").toBool();
+        if(!ready) {
+            // Camera motion does not require the tool projection. Keep the raw
+            // document's environment/light facts while updating the shared lens.
+            if(m_worker) {
+                // Initializing/resizing the hidden QGLWidget must not replace
+                // the native viewport's lens while tool geometry is loading.
+                const int logicalWidth=qMax(1,width()),logicalHeight=qMax(1,height());
+                m_gl->m_width=logicalWidth;m_gl->m_height=logicalHeight;
+                m_gl->m_normalProjection(0,0)=m_gl->m_normalProjection(1,1)*float(logicalHeight)/logicalWidth;
+                m_gl->updateCameraProjection();
+                const auto view=frameIsCurrent()?m_gl->m_cam->update():m_gl->m_cam->viewMatrix(),clip=m_gl->m_projection*view;
+                const auto inverse=view.inverted();const auto eye=inverse.map(QVector3D()),target=inverse.map(QVector3D(0,0,-1));
+                std::lock_guard<std::mutex> lock(m_worker->mutex);auto& camera=m_worker->input.camera;
+                for(int row=0;row<4;++row)for(int col=0;col<4;++col)camera.world_to_clip[row*4+col]=row==2?.5f*(clip(2,col)+clip(3,col)):clip(row,col);
+                for(int axis=0;axis<3;++axis){camera.eye[axis]=eye[axis];camera.target[axis]=target[axis];}
+                m_worker->input.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
+            }
+            return;
+        }
+        // Reconcile with the canonical editable document before enabling tools.
+        // A mismatch is submitted as a new guarded generation, never ignored.
+        m_earlyDocument=false;m_documentRefreshPending=true;
+        m_sceneSnapshotTimer.invalidate();
+    }
+    if(m_gl->m_unitVisualPreparationSuspended||m_gl->m_openingProjectionDepth || qApp->property("rebuild64StartupDocumentBatch").toBool())return;
     if(auto* main=qobject_cast<MainWindow*>(window()))if(!main->rebuild64DocumentReady())return;
     if(!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()) {
         // A standalone MOB/terrain-less collection is a real document, not an
@@ -708,6 +834,26 @@ void CRebuild64Viewport::tick() {
     }
     {std::lock_guard<std::mutex> lock(m_worker->mutex);next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
     m_worker->wake.notify_all();
+    if(!m_waitingInput.isEmpty() && frameIsCurrent() && editorQueryReady()){auto pending=std::move(m_waitingInput);m_waitingInput.clear();for(const auto& event:pending)editorInput(event.get());}
+}
+void CRebuild64Viewport::openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search) {
+    if(!m_selected||m_resourceWriteDepth||m_stopping||window()->property("nativeMapRequestPending").toBool())return;
+    opening::Scope timing("gui.native_dispatch",file.fileName());
+    if(auto* main=qobject_cast<MainWindow*>(window()))main->configureOpeningEnvironment(file);
+    beginDocumentTransition();m_earlyDocument=true;m_earlyMap=file.absoluteFilePath();
+    Worker::Input next;next.resources(m_gl->settings(),QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF()))));
+    if(!m_gl->m_activeTerrainArchivePath.isEmpty()){next.paths.removeAll(m_gl->m_activeTerrainArchivePath);next.paths.prepend(m_gl->m_activeTerrainArchivePath);}
+    const auto mapRoot=file.absolutePath();if(!next.paths.contains(mapRoot))next.paths.prepend(mapRoot);
+    if(!next.resourcesReady)return;
+    // The profile's authoring archive is validated by CView before its world
+    // projection. Raw MPR/MOB remain immutable until that projection is ready.
+    next.generation=m_generation;next.camera=cameraSnapshot();next.overrideHour=m_gl->overridesWorldTime();next.openingClock=true;next.cameraStamp=std::chrono::steady_clock::now();
+    next.opening=std::make_shared<EarlyRead>();const auto cancel=next.opening->cancel;
+    next.opening->future=QtConcurrent::run([file,mobs,search,cancel]{return readOpening(file,mobs,search,cancel);});
+    m_documentRefreshPending=false;
+    if(!m_worker){QDir().mkpath(m_guardDirectory);m_worker.reset(new Worker(this,reinterpret_cast<void*>(m_native->winId()),m_guardDirectory));}
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input=std::move(next);m_worker->paused=false;m_worker->retainPausedHandle=false;}
+    m_worker->wake.notify_all();
 }
 void CRebuild64Viewport::capture(const QString& path,bool worldOnly) {
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.capture=path;m_worker->input.captureGeneration=m_generation;m_worker->input.captureWorld=worldOnly;}
@@ -720,6 +866,13 @@ void CRebuild64Viewport::cancelCapture(const QString& path) {
     if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);if(m_worker->input.capture==path)m_worker->input.capture.clear();}
 }
 bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
+    if(object==m_gl&&!m_selected&&m_gl->property("nativeOpeningInput").toBool()&&(m_gl->m_unitVisualPreparationSuspended||m_gl->m_openingProjectionDepth)) {
+        switch(event->type()) {
+        case QEvent::KeyPress:case QEvent::KeyRelease:case QEvent::MouseButtonPress:case QEvent::MouseButtonDblClick:case QEvent::MouseMove:case QEvent::MouseButtonRelease:case QEvent::Wheel:
+            m_earlyDocument=true;editorInput(event);if(!m_waitingInput.isEmpty())m_timer->start();return true;
+        default:break;
+        }
+    }
     if(object==m_native && m_selected) {
         switch(event->type()) {
         case QEvent::ShortcutOverride:case QEvent::KeyPress:case QEvent::KeyRelease:case QEvent::MouseButtonPress:case QEvent::MouseButtonDblClick:case QEvent::MouseMove:case QEvent::MouseButtonRelease:case QEvent::Wheel:case QEvent::FocusOut:case QEvent::ContextMenu:
@@ -733,7 +886,21 @@ bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
     return QWidget::eventFilter(object,event);
 }
 void CRebuild64Viewport::editorInput(QEvent* event) {
-    if(event->type()==QEvent::FocusOut){m_gl->m_pOp->keyManager()->keys().clear();return;}
+    if(event->type()==QEvent::FocusOut){
+        m_gl->m_pOp->keyManager()->keys().clear();
+        if((m_earlyDocument||!editorQueryReady())&&!m_waitingInput.isEmpty())m_waitingInput.append(std::make_shared<QFocusEvent>(*static_cast<QFocusEvent*>(event)));
+        return;
+    }
+    if(m_earlyDocument || !editorQueryReady()) {
+        if(event->type()==QEvent::MouseMove && static_cast<QMouseEvent*>(event)->buttons()==Qt::NoButton && m_waitingInput.isEmpty())return;
+        if(event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)
+            m_waitingInput.append(std::make_shared<QKeyEvent>(*static_cast<QKeyEvent*>(event)));
+        else if(event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease||event->type()==QEvent::MouseButtonDblClick||event->type()==QEvent::MouseMove)
+            m_waitingInput.append(std::make_shared<QMouseEvent>(*static_cast<QMouseEvent*>(event)));
+        else if(event->type()==QEvent::Wheel)m_waitingInput.append(std::make_shared<QWheelEvent>(*static_cast<QWheelEvent*>(event)));
+        if(!m_waitingInput.isEmpty())emit m_gl->updateMsg(tr("Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки."));
+        event->accept();return;
+    }
     if(event->type()==QEvent::KeyPress && m_gl->m_pendingOperationOwnsPaste) {
         const auto* key=static_cast<QKeyEvent*>(event);
         if((key->key()==Qt::Key_Return||key->key()==Qt::Key_Enter)
@@ -813,6 +980,7 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
     if(m_selected && mouse && event->type()==QEvent::MouseButtonPress)m_native->setFocus(Qt::MouseFocusReason);
 }
 bool CRebuild64Viewport::editorQueryReady() const {
+    if(m_gl->m_openingProjectionDepth)return false;
     if(!m_gl->m_neighborLandscapesVisible)return true;
     const QSizeF size(m_gl->m_pLand->widthInWorldUnits(),m_gl->m_pLand->heightInWorldUnits());
     for(const auto& placement:m_gl->m_neighborPlacements) {
@@ -862,7 +1030,15 @@ void CRebuild64Viewport::syncEditorViewport() {
     // QGLWidget reports physical dimensions to resizeGL on Windows. Editor
     // events and query rectangles are logical. A DPR-only change must not
     // rebuild the shared lens (including the current far/telephoto projection).
-    if(qAbs(before-after)>.000001)m_gl->resizeGL(size.width(),size.height());
+    if(qAbs(before-after)>.000001 || m_editorViewportDirty){m_gl->resizeGL(size.width(),size.height());if(qAbs(before-after)<=.000001){m_gl->m_projection=projection;m_gl->m_normalProjection=normal;}}
     else {m_gl->m_projection=projection;m_gl->m_normalProjection=normal;}
-    m_gl->m_width=size.width();m_gl->m_height=size.height();
+    m_gl->m_width=size.width();m_gl->m_height=size.height();m_editorViewportDirty=false;
+}
+
+void CRebuild64Viewport::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);if(m_stopping||!m_gl||!m_selected||event->size().isEmpty())return;
+    const auto extent=event->size();m_gl->m_width=extent.width();m_gl->m_height=extent.height();
+    m_gl->m_normalProjection.setToIdentity();m_gl->m_normalProjection.perspective(45,float(extent.width())/extent.height(),1,1000);
+    m_gl->updateCameraProjection();m_editorViewportDirty=true;
+    QTimer::singleShot(0,this,&CRebuild64Viewport::tick);
 }

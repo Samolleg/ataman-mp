@@ -17518,4 +17518,9 @@ Line: %4</source><translation>Вызов:
         <translation>Rebuild64 не освободил архивы за 120 секунд. Сохранение отменено; документы и правки сохранены в памяти.</translation>
     </message>
 </context>
+<context><name>CRebuild64Viewport</name><message><source>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</source><translation>Rebuild64: подготовка геометрии инструментов. Ввод сохранён в очереди и будет выполнен после подготовки.</translation></message></context>
+<context><name>MainWindow</name><message><source>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</source><translation>Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты.</translation></message></context>
+<context><name>CView</name><message><source>Не удалось подготовить полный MOB. Неполный документ не принят.</source><translation>Не удалось подготовить полный MOB. Неполный документ не принят.</translation></message></context>
+<context><name>MainWindow</name><message><source>Rebuild64: открытие новой карты поставлено в очередь; предыдущий кадр не будет опубликован.</source><translation>Rebuild64: открытие новой карты поставлено в очередь; предыдущий кадр не будет опубликован.</translation></message></context>
+<context><name>MainWindow</name><message><source>Подготовка геометрии: повторите закрытие или смену карты после завершения текущего участка.</source><translation>Подготовка геометрии: повторите закрытие или смену карты после завершения текущего участка.</translation></message></context>
 </TS>

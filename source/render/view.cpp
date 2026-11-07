@@ -47,6 +47,14 @@
 #include <algorithm>
 
 #include "view.h"
+#include "rebuild64_viewport_widget.h"
+#include "opening_trace.h"
+#include "legacy_projection_pulse.h"
+#include "opening_cpu_value.h"
+#include <tuple>
+#include "background_mob_load.h"
+#include <QtConcurrent>
+#include <QThread>
 #include "navigation_save_events.h"
 #include "navmesh_panel.h"
 #include <QHideEvent>
@@ -6199,7 +6207,7 @@ void CView::paintGL()
     // Painting those intermediate scenes repeatedly rebuilds spatial/support
     // data and starts deferred terrain work on the foreground loader's stack.
     // Keep pumping UI events; present the completed workspace in the next frame.
-    if(m_applicationShutdown || m_unitVisualPreparationSuspended
+    if(m_applicationShutdown || m_unitVisualPreparationSuspended || m_openingProjectionDepth
        || !isVisible() || window()->isMinimized())return;
     CStartupFrameReceipt startupFrame;
     makeCurrent();
@@ -9472,7 +9480,19 @@ SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCapture
 
 void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
 {
-    if(property("rebuild64Selected").toBool())ensureLegacyQueryContext();
+    opening::Scope openTiming("gui.landscape",filePath.fileName());
+    const auto openingSerial=property("openingSerial").toULongLong()+1;
+    setProperty("openingSerial",openingSerial);
+    const bool nativeOpening=property("rebuild64Selected").toBool();
+    const QScopedValueRollback<int> projectionDepth(m_openingProjectionDepth,m_openingProjectionDepth+(nativeOpening?1:0));
+    setProperty("nativeOpeningInput",nativeOpening);
+    if(nativeOpening&&!m_program.isLinked()) {
+        const auto* viewport=window()->findChild<CRebuild64Viewport*>();const QSize extent=viewport?viewport->size():size();
+        m_width=qMax(1,extent.width());m_height=qMax(1,extent.height());
+        m_normalProjection.setToIdentity();m_normalProjection.perspective(45,float(m_width)/m_height,1,1000);
+        updateCameraProjection(); // shared CView lens, no GL work needed
+    }
+
     QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
     if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return;}
     setProperty("documentLockError",QString());
@@ -9526,8 +9546,13 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
     // with the newly published archive under one namespace.
     CMprDocument bindingDocument;
     CValidationReport bindingDocumentReport;
-    if(bindingDocument.load(filePath, &bindingDocumentReport)
-       && !bindingDocumentReport.hasErrors())
+    auto bindingValue=ei::openingCpuValue(nativeOpening,[filePath]{
+        opening::Scope timing("cpu.mpr.parse");CMprDocument document;CValidationReport report;
+        const bool ok=document.load(filePath,&report);return std::make_tuple(ok,document,report);
+    });
+    if(property("openingSerial").toULongLong()!=openingSerial||m_applicationShutdown)return;
+    bindingDocument=std::get<1>(bindingValue);bindingDocumentReport=std::get<2>(bindingValue);
+    if(std::get<0>(bindingValue) && !bindingDocumentReport.hasErrors())
     {
         QStringList embeddedCandidates;
         QStringList otherConfiguredArchives;
@@ -9551,11 +9576,12 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
         const QString preferredHDPack = embeddedCandidates.isEmpty()
             || !terrainPublicationIsHDPackArchive(embeddedCandidates.first())
             ? QString() : embeddedCandidates.first();
-        STerrainAtlasEmbeddedBindingResult embedded =
-            CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
-                embeddedCandidates,
-                bindingDocument.mapInfo().innerNamespace,
-                preferredHDPack);
+        const auto innerNamespace=bindingDocument.mapInfo().innerNamespace;
+        STerrainAtlasEmbeddedBindingResult embedded=ei::openingCpuValue(nativeOpening,[embeddedCandidates,innerNamespace,preferredHDPack]{
+            opening::Scope timing("cpu.mpr.atlas_binding");
+            return CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(embeddedCandidates,innerNamespace,preferredHDPack);
+        });
+        if(property("openingSerial").toULongLong()!=openingSerial||m_applicationShutdown)return;
         // A finalized sidecar mirrors the publication, but subsequent ordinary
         // saves update semantic state in the recorded runtime archive. Prefer
         // that exact bound archive; keep the sidecar as a portable fallback.
@@ -9563,8 +9589,11 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
            && !embedded.profile.resourceArchiveHint.isEmpty()) {
             const QString publishedPath = filePath.dir().absoluteFilePath(
                 embedded.profile.resourceArchiveHint);
-            const auto published = CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive(
-                {publishedPath}, bindingDocument.mapInfo().innerNamespace, publishedPath);
+            const auto published=ei::openingCpuValue(nativeOpening,[publishedPath,innerNamespace]{
+                opening::Scope timing("cpu.mpr.published_binding");
+                return CTerrainAtlasArchiveBindingResolver::findEmbeddedArchive({publishedPath},innerNamespace,publishedPath);
+            });
+            if(property("openingSerial").toULongLong()!=openingSerial||m_applicationShutdown)return;
             if(published.success()
                && terrainPublicationIsHDPackArchive(publishedPath))
                 embedded = published;
@@ -9866,7 +9895,17 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
     const qint64 bindingPreflightMs = m_terrainAutoCatalogLoadTimer.elapsed();
     CTextureList::getInstance()->setMapLocalTerrainArchive(mapLocalAtlas);
     m_activeTerrainArchivePath = QFileInfo::exists(mapLocalAtlas)
+
         ? QFileInfo(mapLocalAtlas).absoluteFilePath() : QString();
+    ensureMapOpeningCamera(filePath);
+    if(property("openingSerial").toULongLong()!=openingSerial||m_applicationShutdown)return;
+    if(auto* native=window()->findChild<CRebuild64Viewport*>()) {
+        const auto roots=property("rebuild64OpeningMobs").toStringList();
+        setProperty("rebuild64OpeningMobs",QVariant());
+        auto search=property("rebuild64OpeningSearch").toStringList();if(!search.contains(filePath.absolutePath()))search.prepend(filePath.absolutePath());
+        native->openDocumentEarly(filePath,roots,search);
+    }
+    if(nativeOpening)ensureLegacyQueryContext();
     QElapsedTimer phaseTimer;
     phaseTimer.start();
     ei::setCrashContext("mpr/open/dispatch:" + filePath.fileName());
@@ -9890,7 +9929,14 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
         ei::log(eLogInfo,"Neighbor terrain promoted to active without GPU upload: "+filePath.fileName());
         break;
     }
-    if(!promoted)m_pLand->readMap(filePath,createRecoverySnapshot);
+    if(!promoted) {
+        QElapsedTimer pulseClock;pulseClock.start();
+        ei::LegacyProjectionPulseScope responsive(property("rebuild64Selected").toBool()?std::function<void()>([this,&pulseClock]{
+            if(pulseClock.elapsed()<8)return;
+            QCoreApplication::processEvents(QEventLoop::AllEvents,4);makeCurrent();pulseClock.restart();
+        }):std::function<void()>());
+        m_pLand->readMap(filePath,createRecoverySnapshot);
+    }
     m_activeRenderResources=fingerprint;
     const qint64 rendererLoadMs = phaseTimer.elapsed();
     if(!m_pLand->isMprLoad())
@@ -9960,6 +10006,8 @@ void CView::queueDeferredTerrainAutoCatalogBuild()
 
 bool CView::ensureTerrainAutoCatalogReady()
 {
+    opening::Scope timing("gui.catalog");
+
     if(!m_terrainAutoCatalogPending)
         return !m_terrainAutoCatalogBuilding;
     if(terrainCatalogLoadAction(
@@ -10138,6 +10186,8 @@ bool CView::ensureTerrainAutoCatalogReady()
 
 void CView::unloadLand(bool promptForSave)
 {
+    setProperty("openingSerial",property("openingSerial").toULongLong()+1);
+
     cancelWorldMapPlacement();
     finishSculptStroke();
     syncWorldTerrainActive();
@@ -16589,6 +16639,9 @@ QVector3D CView::getTerrainBrushPos(const int cursorPosX, const int cursorPosY,
 
 bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
 {
+    const QScopedValueRollback<int> projectionDepth(m_openingProjectionDepth,m_openingProjectionDepth+(property("rebuild64Selected").toBool()?1:0));
+    opening::Scope timing("gui.mob");
+
     QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
     if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return false;}
     QElapsedTimer loadTimer;
@@ -16617,7 +16670,39 @@ bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
     // this widget's OpenGL context non-current.
     if(isValid())
         makeCurrent();
-    const int result = pMob->readMob(filePath, true, nonModalWarnings);
+    int result=0;
+    if(property("rebuild64Selected").toBool() && m_pLand->isMprLoad()) {
+        // Reuse the existing lossless AddMob preparation/provenance contract
+        // for a primary MOB. CPU validation and semantic alignment run outside
+        // the GUI; only canonical node/GL construction stays on this thread.
+        const auto terrain=m_pLand->filePath().absoluteFilePath();
+        const auto openingSerial=property("openingSerial").toULongLong();
+        const auto cancel=std::make_shared<std::atomic_bool>(false);
+        const auto current=[&]{return !m_applicationShutdown&&property("openingSerial").toULongLong()==openingSerial&&m_pLand->isMprLoad()&&m_pLand->filePath().absoluteFilePath()==terrain;};
+        const auto pulse=[&]{QCoreApplication::processEvents(QEventLoop::AllEvents,4);if(isValid())makeCurrent();};
+        auto preparedFuture=QtConcurrent::run([filePath,cancel]{opening::Scope scope("cpu.primary.prepare");return prepareBackgroundMob(filePath,cancel);});
+        while(!preparedFuture.isFinished()&&current()){pulse();QThread::msleep(1);}
+        if(!current()){cancel->store(true);delete pMob;return false;}
+        const auto prepared=preparedFuture.result();
+        if(!prepared.valid()||!prepared.sourceIsCurrent()||!pMob->beginPreparedLoad(prepared))result=3;
+        if(nonModalWarnings)nonModalWarnings->append(prepared.warnings);
+        else for(const auto& warning:prepared.warnings)emit updateMsg(warning);
+        QElapsedTimer slice;slice.start();
+        for(int i=0;!result&&i<prepared.objects.size();++i) {
+            if(!pMob->appendPreparedObject(prepared.objects[i])){result=4;break;}
+            if(slice.elapsed()>=4){pulse();slice.restart();if(!current()){cancel->store(true);delete pMob;return false;}}
+        }
+        if(!result) {
+            QByteArray projection;{opening::Scope scope("gui.primary.serialize");pMob->serializeMob(projection,false);}
+            auto aligned=QtConcurrent::run([prepared,projection]{opening::Scope scope("cpu.primary.alignment");return validateBackgroundMobProjection(prepared,projection);});
+            while(!aligned.isFinished()&&current()){pulse();QThread::msleep(1);}
+            if(!current()){cancel->store(true);delete pMob;return false;}
+            const auto alignment=aligned.result();
+            if(!prepared.sourceIsCurrent()||!alignment.error.isEmpty())result=4;
+            else pMob->finishPreparedLoad(prepared,alignment);
+        }
+        if(result)emit updateMsg(tr("Не удалось подготовить полный MOB. Неполный документ не принят."));
+    } else result=pMob->readMob(filePath,true,nonModalWarnings);
     if(result != 0)
     {
         ei::log(eLogWarning, QString("MOB load was rejected without registering a partial document path:%1 result:%2")
@@ -16632,6 +16717,8 @@ bool CView::loadMob(QFileInfo &filePath, QStringList* nonModalWarnings)
 
 void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& lease,bool activate)
 {
+    opening::Scope timing("gui.mob.adopt");
+
     const QFileInfo filePath=pMob->filePath();
     QElapsedTimer adoptionTimer;adoptionTimer.start();
     int unitCount = 0;
@@ -16715,6 +16802,7 @@ void CView::scheduleUnitAppearancePreparation(const QVector3D& cameraPosition,
                                               const QMatrix4x4& cameraMatrix,
                                               bool cameraMoving)
 {
+    opening::Scope appearanceTiming("gui.character.schedule");
     // Workspace replacement pumps Qt events while parsing/projecting thousands
     // of objects. Never let the previous map's idle preparation generation use
     // those event-loop windows and compete with the foreground load.
@@ -27588,6 +27676,7 @@ void CView::saveSession()
 
 void CView::loadSession()
 {
+    const QScopedValueRollback<int> projectionDepth(m_openingProjectionDepth,m_openingProjectionDepth+(property("rebuild64Selected").toBool()?1:0));
     auto pManager = CSessionDataManager::getInstance();
     pManager->reset();
     pManager->loadSession();
@@ -27612,6 +27701,9 @@ void CView::loadSession()
     }
     prepareDocumentTransition();
     m_pUndoStack->clear();
+    QVector3D savedPos,savedPivot,savedRot;
+    if(pManager->getCameraData(savedPos,savedPivot,savedRot))m_cam->setLocation(savedPos,savedPivot,savedRot);
+    setProperty("rebuild64OpeningMobs",QStringList(arrMobPath.toList()));
     loadLandscape(mprFile);
 
     for(const auto& mobPath: arrMobPath)
@@ -27624,13 +27716,6 @@ void CView::loadSession()
         }
         loadMob(mobFile);
         roundActiveMob();
-    }
-
-    QVector3D pos, pivot, rot;
-    if(pManager->getCameraData(pos, pivot, rot))
-    {
-        m_cam->moveTo(pos);
-        m_cam->setLocation(pos, pivot, rot);
     }
 
     QVector<int> arrQuickInd;

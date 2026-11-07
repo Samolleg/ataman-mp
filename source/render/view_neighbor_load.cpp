@@ -1,3 +1,5 @@
+#include "legacy_projection_pulse.h"
+#include "opening_trace.h"
 #include "view.h"
 #include "landscape.h"
 #include "resourcemanager.h"
@@ -42,7 +44,7 @@ void CView::startNeighborLoadStage(quint64 generation)
     if(generation!=m_neighborSceneGeneration->load())return;
     m_neighborLoadPulseScheduled=false;
     if(m_neighborLoadingDeferred || !m_neighborLandscapesVisible || m_applicationShutdown)return;
-    if(hasPendingOperation() || QApplication::activeModalWidget()) {
+    if(ei::legacyProjectionPulse() || hasPendingOperation() || QApplication::activeModalWidget()) {
         m_neighborLoadPulseScheduled=true;
         QTimer::singleShot(30,this,[this,generation](){startNeighborLoadStage(generation);});return;
     }
@@ -131,6 +133,12 @@ void CView::acceptNeighborScene(const SNeighborSceneData& result,quint64 generat
             acceptNeighborScene(result,generation,terrainFingerprint,objectFingerprint,objects);
         });return;
     }
+    opening::Scope timing("gui.gl.neighbour_accept",result.placement.zoneId);
+    QElapsedTimer pulseClock;pulseClock.start();
+    ei::LegacyProjectionPulseScope responsive(property("rebuild64Selected").toBool()?std::function<void()>([this,&pulseClock]{
+        if(pulseClock.elapsed()<8)return;
+        QCoreApplication::processEvents(QEventLoop::AllEvents,4);makeCurrent();pulseClock.restart();
+    }):std::function<void()>());
     --m_neighborLoadJobs;
     for(const auto& diagnostic:result.diagnostics)ei::log(eLogWarning,diagnostic);
     if(!result.valid){finishNeighborLoadStage(generation);return;}
@@ -152,6 +160,7 @@ void CView::acceptNeighborScene(const SNeighborSceneData& result,quint64 generat
             loaded.landscape.clear();doneCurrent();finishNeighborLoadStage(generation);return;
         }
     }
+    if(generation!=m_neighborSceneGeneration->load() || !m_neighborLandscapesVisible) {makeCurrent();loaded.landscape.clear();return;}
     loaded.landscape->setWorldOffset(QVector3D(loaded.placement.origin.x(),loaded.placement.origin.y(),0));
     loaded.terrainFingerprint=terrainFingerprint;loaded.showObjects=objects;
     if(objects) {

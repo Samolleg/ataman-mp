@@ -42,6 +42,7 @@ CCamera::CCamera(QVector3D pos, QVector3D pivot, float xRot, float zRot)
 void CCamera::reset()
 {
     m_updateTimer.invalidate();
+    m_yRot = 0;
     COptBool* pOpt = dynamic_cast<COptBool*>(m_pSettings->opt("freeCamera"));
     Q_ASSERT(pOpt);
     if (pOpt->value())
@@ -61,6 +62,19 @@ void CCamera::reset()
         m_step = 1.0f;
     }
     syncMotionInterpolation();
+}
+
+void CCamera::adoptView(const QMatrix4x4& view)
+{
+    const float y=qAsin(qBound(-1.0f,view(0,2),1.0f));
+    const float x=qAbs(qCos(y))>1e-5f?qAtan2(-view(1,2),view(2,2)):qAtan2(view(2,1),view(1,1));
+    const float z=qAbs(qCos(y))>1e-5f?qAtan2(-view(0,1),view(0,0)):0.0f;
+    m_previewActive=false;m_telephotoEnabled=false;
+    m_xRot=qRadiansToDegrees(x);m_yRot=qRadiansToDegrees(y);m_zRot=qRadiansToDegrees(z);
+    const auto inverse=view.inverted();m_pivot=inverse.map(QVector3D(0,0,-10));
+    QMatrix4x4 rotation;rotation.rotate(m_xRot,1,0,0);rotation.rotate(m_yRot,0,1,0);rotation.rotate(m_zRot,0,0,1);
+    m_pos=m_pivot-rotation.mapVector(m_pivot)-QVector3D(view(0,3),view(1,3),view(2,3));
+    syncMotionInterpolation();m_updateTimer.invalidate();
 }
 
 void CCamera::setPreviewView(const QMatrix4x4& view)
@@ -88,7 +102,7 @@ void CCamera::getLocation(QVector3D& pos, QVector3D& pivot,
 {
     pos = m_motionStateInitialized ? m_renderPos : m_pos;
     pivot = m_motionStateInitialized ? m_renderPivot : m_pivot;
-    rot = QVector3D(m_xRot, 0, m_zRot);
+    rot = QVector3D(m_xRot, m_yRot, m_zRot);
 }
 
 void CCamera::setLocation(const QVector3D& pos, const QVector3D& pivot, const QVector3D& rot)
@@ -96,6 +110,7 @@ void CCamera::setLocation(const QVector3D& pos, const QVector3D& pivot, const QV
     m_pos = pos;
     m_pivot = pivot;
     m_xRot = rot.x();
+    m_yRot = rot.y();
     m_zRot = rot.z();
     syncMotionInterpolation();
 }
@@ -106,8 +121,9 @@ void CCamera::setOrbitPivotPreservingView(const QVector3D& pivot)
     // Replacing only the pivot changes the current view before the user has
     // moved the mouse. Compensate the stored position so the matrix remains
     // identical, then subsequent rotations orbit the newly selected point.
-    m_pos = ei::reanchoredCameraPosition(
-        m_pos, m_pivot, pivot, m_xRot, m_zRot);
+    const auto view = matrixFor(m_pos,m_pivot);
+    QMatrix4x4 rotation;rotation.rotate(m_xRot,1,0,0);rotation.rotate(m_yRot,0,1,0);rotation.rotate(m_zRot,0,0,1);
+    m_pos = pivot - rotation.mapVector(pivot) - QVector3D(view(0,3),view(1,3),view(2,3));
     m_pivot = pivot;
     syncMotionInterpolation();
 }
@@ -225,6 +241,7 @@ QMatrix4x4 CCamera::matrixFor(const QVector3D& position, const QVector3D& pivot)
     matrix.translate(pivot.x(), pivot.y(), pivot.z());
     matrix.translate(-position.x(), -position.y(), -position.z());
     matrix.rotate(m_xRot, 1.0, 0.0, 0.0);
+    matrix.rotate(m_yRot, 0.0, 1.0, 0.0);
     matrix.rotate(m_zRot, 0.0, 0.0, 1.0);
     matrix.translate(-pivot.x(), -pivot.y(), -pivot.z());
     return matrix;

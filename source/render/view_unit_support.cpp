@@ -1,3 +1,4 @@
+#include "opening_trace.h"
 #include "view.h"
 #include "landscape.h"
 #include "camera.h"
@@ -7,6 +8,7 @@
 
 void CView::ensureUnitSupportSurface()
 {
+    opening::Scope timing("gui.geometry.support");
     const auto revision=CObjectBase::supportGeometryRevision();
     if(m_unitSupportRevision==revision && m_unitSupportMobs==m_aMob)return;
     m_unitSupportSurface.clear();

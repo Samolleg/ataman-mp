@@ -1,3 +1,4 @@
+#include "opening_trace.h"
 #include <QDebug>
 #include <QSet>
 #include <QJsonDocument>
@@ -199,6 +200,7 @@ void CMob::setActiveRange(uint rangeId)
 
 bool CMob::deserialize(QByteArray data, const CMobDocument* parsed, bool deferObjects)
 {
+    opening::Scope phaseTiming("mob.deserialize");
     ei::log(eLogInfo, "Start read mob: " + m_filePath.absoluteFilePath());
     CMobDocument localDocument;
     if(!parsed)
@@ -483,6 +485,7 @@ bool CMob::beginPreparedLoad(const SPreparedMobLoad& source)
 
 bool CMob::appendPreparedObject(QByteArray record)
 {
+    opening::Scope openingTiming("gui.mob.project_object");
     util::CMobParser parser(record);
     if(projectObject(parser)!=uint(record.size()))return false;
     CNode* node=m_aNode.back();
@@ -493,6 +496,7 @@ bool CMob::appendPreparedObject(QByteArray record)
 
 void CMob::finishPreparedLoad(const SPreparedMobLoad& source,const SPreparedMobProjection& projection)
 {
+    opening::Scope openingTiming("gui.mob.finish");
     if(projection.rawIndices.size()==m_aNode.size())
         for(int i=0;i<m_aNode.size();++i) {
             const auto& raw=source.document->objects().at(projection.rawIndices[i]);
@@ -505,6 +509,7 @@ void CMob::finishPreparedLoad(const SPreparedMobLoad& source,const SPreparedMobP
 
 void CMob::updateObjects()
 {
+    opening::Scope phaseTiming("gui.geometry.mob_figures_textures");
     if(m_view && m_view->isValid())
         m_view->makeCurrent();
     QElapsedTimer updateTimer;
@@ -1168,6 +1173,7 @@ CNode *CMob::undo_deleteNode(uint mapId, int restoreIndex)
 
 int CMob::readMob(QFileInfo &path, bool createRecoverySnapshot, QStringList* nonModalWarnings)
 {
+    opening::Scope openingTiming("gui.mob.read_project");
     const auto report = [&](bool critical, const QString& title, const QString& message) {
         if(nonModalWarnings) nonModalWarnings->append(path.fileName() + ": " + message);
         else if(critical) QMessageBox::critical(nullptr, title, message);

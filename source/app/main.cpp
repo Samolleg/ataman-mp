@@ -4493,8 +4493,15 @@ int main(int argc, char *argv[])
         QTimer::singleShot(0, &window, [&window, startupDocuments]()
         {
             qApp->setProperty("rebuild64StartupDocumentBatch",true);
-            for(const QString& path : startupDocuments)
-                window.openDocument(QFileInfo(path));
+            for(int i=0;i<startupDocuments.size();++i) {
+                QStringList roots;
+                if(QFileInfo(startupDocuments[i]).suffix().compare("mpr",Qt::CaseInsensitive)==0)
+                    for(int j=i+1;j<startupDocuments.size()&&QFileInfo(startupDocuments[j]).suffix().compare("mpr",Qt::CaseInsensitive)!=0;++j)
+                        if(QFileInfo(startupDocuments[j]).suffix().compare("mob",Qt::CaseInsensitive)==0)roots.append(startupDocuments[j]);
+                qApp->setProperty("rebuild64StartupMobs",roots);
+                window.openDocument(QFileInfo(startupDocuments[i]));
+            }
+            qApp->setProperty("rebuild64StartupMobs",QVariant());
             qApp->setProperty("rebuild64StartupDocumentBatch",false);
             if(qApp->property("terrainStampRegression").toBool())
             {

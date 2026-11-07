@@ -1,3 +1,5 @@
+#include "legacy_projection_pulse.h"
+#include "opening_trace.h"
 #include "texture_page_upload.h"
 #include "render_memory.h"
 #include "shader_locations.h"
@@ -846,9 +848,11 @@ void CLandscape::readMapInternal(const QFileInfo& path,
 
     ei::log(eLogInfo, "Start read terrain: " + m_filePath.absoluteFilePath());
     ei::setCrashContext("mpr/archive/read:" + path.fileName());
+    const auto archiveBegin=opening::clock();
     QMap<QString, QByteArray> aTmp;
     if(prepared) aTmp = *prepared;
     else { CResFile map(path.filePath()); aTmp = map.bufferOfFiles(); }
+    opening::span("gui.gl.landscape_archive",archiveBegin,path.fileName());
     ei::log(eLogInfo, QString("MPR archive read complete file:%1 members:%2")
             .arg(path.fileName()).arg(aTmp.size()));
     ei::setCrashContext("mpr/archive/normalize:" + path.fileName());
@@ -893,8 +897,12 @@ void CLandscape::readMapInternal(const QFileInfo& path,
             if(binding.success()) backgroundArchive=binding.archivePath;
         }
     }
+    const auto atlasBegin=opening::clock();
     m_texture = CTextureList::getInstance()->buildLandTex(
         innerMapName, int(m_header.nTexture), texCount, atlasColumns, backgroundArchive);
+    opening::span("gui.gl.landscape_atlas",atlasBegin,path.fileName());
+    ei::pulseLegacyProjection();
+    const auto sectorsBegin=opening::clock();
     m_renderTextureCount = qMax(1, texCount);
     m_baseAtlasTexture = m_texture;
     m_baseAtlasColumns = atlasColumns;
@@ -925,8 +933,10 @@ void CLandscape::readMapInternal(const QFileInfo& path,
             }
         }
         m_aSector.append(xSec);
+        ei::pulseLegacyProjection();
     }
 
+    opening::span("gui.gl.landscape_sectors",sectorsBegin,path.fileName());
     ei::log(eLogInfo, "End read terrain");
     ++m_shadowGeneration;
     ei::setCrashContext("idle");

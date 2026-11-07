@@ -1,3 +1,4 @@
+#include "opening_trace.h"
 #include "view.h"
 #include <QVariantList>
 
@@ -19,6 +20,7 @@ QVariantList CView::legacyVisualState() const
 
 void CView::ensureLegacyQueryContext()
 {
+    opening::Scope queryTiming("gui.gl.query_context");
     makeCurrent();
     if(!m_program.isLinked()) {glInit();resizeGL(qMax(1,width()),qMax(1,height()));}
 }

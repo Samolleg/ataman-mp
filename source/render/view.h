@@ -600,6 +600,7 @@ public:
     void convertBaseTerrainToHdRequested();
     void compactTerrainAtlasRequested();
     void cleanTerrainPackRequested();
+    void ensureMapOpeningCamera(const QFileInfo& file);
     void loadSession();
     void setSessionWorkspaceIdentity(const QString& kind, const QString& identifier,
                                      const QString& displayName, const QString& mapZoneId);
@@ -1564,6 +1565,7 @@ private:
     int m_unitAppearanceProviderExecutions{0};
     int m_unitAppearanceLastLoggedCompleted{-1};
     bool m_unitAppearanceProgressPending{false};
+    int m_openingProjectionDepth{0};
     bool m_unitVisualPreparationSuspended{false};
     QTimer* m_aiGraphRegenerationTimer{nullptr};
     quint64 m_aiGraphBuildRequest{0};

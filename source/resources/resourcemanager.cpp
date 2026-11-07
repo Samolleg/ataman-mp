@@ -1,3 +1,5 @@
+#include "legacy_projection_pulse.h"
+#include "opening_trace.h"
 #include "texture_page_upload.h"
 #include "resourcemanager.h"
 #include "render_memory.h"
@@ -835,6 +837,7 @@ QByteArray CObjectList::resourceData(const QString& name, QString* sourcePath) c
 
 void CObjectList::initResource()
 {
+    opening::Scope timing("gui.catalog.object_resources");
     QSet<QString> empty;
     loadFigures(empty);
 }
@@ -1579,6 +1582,7 @@ ERenderMaterialClass CTextureList::materialClass(QOpenGLTexture* texture) const
 
 void CTextureList::initResource()
 {
+    opening::Scope timing("gui.catalog.texture_resources");
 
     QImage img(":/default0.png", "PNG");
     QOpenGLTexture* texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
@@ -1990,6 +1994,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                                            int& atlasColumns,
                                            const QString& boundArchive)
 {
+    opening::Scope atlasTiming("gui.gl.atlas_build",name);
     ei::setCrashContext("mpr/terrain-atlas/cache:" + name);
     const QString localArchive = boundArchive.isEmpty() ? m_mapLocalTerrainArchive : boundArchive;
     QString archiveFingerprint;
@@ -2026,6 +2031,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
     QJsonArray terrainSources;
     for(const QString& texName : textureNames)
     {
+        ei::pulseLegacyProjection();
         ei::setCrashContext("mpr/terrain-atlas/resolve:" + texName);
         QByteArray textureData;
         QString sourcePath;
@@ -2096,6 +2102,7 @@ QOpenGLTexture* CTextureList::buildLandTex(const QString& name,
                    size,size,ei::DxtFormat::Dxt1,&page,&diagnostic))return {};
             page=page.convertToFormat(QImage::Format_RGBA8888);
             if(size!=maximumPage)page=page.scaled(maximumPage,maximumPage,Qt::IgnoreAspectRatio,Qt::FastTransformation);
+            ei::pulseLegacyProjection();
             return page;
         });
         if(!texture)return nullptr;

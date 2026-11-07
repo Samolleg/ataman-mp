@@ -128,9 +128,11 @@ public:
     void performAutosave();
     void beginAutosaveCountdown();
     void showRecoverableAutosaves();
+    QString openingCameraPath(const QFileInfo& mpr) const;
+    void configureOpeningEnvironment(const QFileInfo& mpr);
     CView* view() const { return m_pView; }
     bool rebuild64DocumentReady() const { return !m_workspaceLoadInProgress
-        && !backgroundMobLoading() && !m_worldMetadataWatcher; }
+        && !property("nativeMapRequestPending").toBool() && !backgroundMobLoading() && !m_worldMetadataWatcher; }
 
     void testFunc1();
 
@@ -463,6 +465,7 @@ private:
     CCameraTelephotoControls* m_cameraTelephotoControls{nullptr};
     bool m_uiStateSaved{false};
     bool m_restoringDockLayout{false};
+    quint64 m_nativeOpenRequestGeneration{0};
     bool m_workspaceLoadInProgress{false};
     QSharedPointer<SBackgroundMobState> m_backgroundMobs;
     quint64 m_backgroundMobGeneration{0};

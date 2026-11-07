@@ -1,3 +1,5 @@
+#include "opening_trace.h"
+#include "legacy_projection_pulse.h"
 #include "main_window.h"
 #include "view.h"
 #include "mob.h"
@@ -69,12 +71,13 @@ void MainWindow::queueBackgroundMobSource(CMob* source,bool root)
 
 void MainWindow::pumpBackgroundMobs(quint64 generation)
 {
+    opening::Scope openingTiming("gui.addmob_slice");
     if(generation!=m_backgroundMobGeneration||!m_backgroundMobs||!m_pView||m_shutdownInProgress)return;
     auto state=m_backgroundMobs;
     const auto later=[this,generation](int delay=8) {
         QTimer::singleShot(delay,this,[this,generation](){pumpBackgroundMobs(generation);});
     };
-    if(m_workspaceLoadInProgress||m_pView->hasPendingOperation()||QApplication::activeModalWidget()) {later(30);return;}
+    if(ei::legacyProjectionPulse()||m_workspaceLoadInProgress||m_pView->hasPendingOperation()||QApplication::activeModalWidget()) {later(30);return;}
     if(state->working)return;
     QMap<QString,CMob*> loaded;
     for(auto* mob:m_pView->mobs())loaded[CProcessEditLock::identity(mob->filePath().absoluteFilePath())]=mob;

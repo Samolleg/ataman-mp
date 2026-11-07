@@ -18,6 +18,8 @@
 #include "resource_write_lease.h"
 #include "map_save_batch.h"
 #include "profile_database.h"
+#include "endurance_document.h"
+#include "legacy_projection_pulse.h"
 #include "resourcemanager.h"
 #include <atomic>
 #include <QtWidgets>
@@ -65,23 +67,31 @@ QString fileHash(const QString& path)
 qint64 qpc(){LARGE_INTEGER value{};QueryPerformanceCounter(&value);return value.QuadPart;}
 void glPresented(HDC dc,qint64 begin,qint64 end,BOOL ok);
 using SwapBuffersFunction=BOOL (WINAPI*)(HDC);
-SwapBuffersFunction originalSwap=nullptr;
+SwapBuffersFunction originalSwap=nullptr,originalWglSwap=nullptr;
 BOOL WINAPI measuredSwap(HDC dc){const auto begin=qpc();const auto ok=originalSwap(dc);const auto end=qpc();glPresented(dc,begin,end,ok);return ok;}
+BOOL WINAPI measuredWglSwap(HDC dc){const auto begin=qpc();const auto ok=originalWglSwap(dc);const auto end=qpc();glPresented(dc,begin,end,ok);return ok;}
 bool installSwapTrace(){
- auto module=reinterpret_cast<unsigned char*>(GetModuleHandleW(L"qwindows.dll"));if(!module)return false;
- auto* dos=reinterpret_cast<IMAGE_DOS_HEADER*>(module);auto* nt=reinterpret_cast<IMAGE_NT_HEADERS64*>(module+dos->e_lfanew);
- auto* descriptor=reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(module+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
- for(;descriptor->Name;++descriptor){if(!descriptor->OriginalFirstThunk)continue;
-  auto* names=reinterpret_cast<IMAGE_THUNK_DATA64*>(module+descriptor->OriginalFirstThunk);auto* thunkSlots=reinterpret_cast<IMAGE_THUNK_DATA64*>(module+descriptor->FirstThunk);
-  for(;names->u1.AddressOfData;++names,++thunkSlots){if(IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal))continue;
-   auto* name=reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(module+names->u1.AddressOfData);
-   if(std::strcmp(reinterpret_cast<const char*>(name->Name),"SwapBuffers"))continue;
-   DWORD old=0;if(!VirtualProtect(&thunkSlots->u1.Function,sizeof(void*),PAGE_READWRITE,&old))return false;
-   originalSwap=reinterpret_cast<SwapBuffersFunction>(thunkSlots->u1.Function);thunkSlots->u1.Function=reinterpret_cast<ULONG_PTR>(&measuredSwap);
-   DWORD ignored=0;VirtualProtect(&thunkSlots->u1.Function,sizeof(void*),old,&ignored);return true;
+ bool installed=false;
+ for(const auto* moduleName:{L"qwindows.dll",L"Qt5OpenGL.dll",L"Qt5Gui.dll",L"Qt5Widgets.dll"}) {
+  auto module=reinterpret_cast<unsigned char*>(GetModuleHandleW(moduleName));if(!module)continue;
+  auto* dos=reinterpret_cast<IMAGE_DOS_HEADER*>(module);auto* nt=reinterpret_cast<IMAGE_NT_HEADERS64*>(module+dos->e_lfanew);
+  auto* descriptor=reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(module+nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+  for(;descriptor->Name;++descriptor){if(!descriptor->OriginalFirstThunk)continue;
+   auto* names=reinterpret_cast<IMAGE_THUNK_DATA64*>(module+descriptor->OriginalFirstThunk);auto* importSlots=reinterpret_cast<IMAGE_THUNK_DATA64*>(module+descriptor->FirstThunk);
+   for(;names->u1.AddressOfData;++names,++importSlots){if(IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal))continue;
+    auto* name=reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(module+names->u1.AddressOfData);
+    const bool gdi=std::strcmp(reinterpret_cast<const char*>(name->Name),"SwapBuffers")==0;
+    const bool wgl=std::strcmp(reinterpret_cast<const char*>(name->Name),"wglSwapBuffers")==0;
+    if(!gdi&&!wgl)continue;DWORD old=0;if(!VirtualProtect(&importSlots->u1.Function,sizeof(void*),PAGE_READWRITE,&old))continue;
+    if(gdi){if(!originalSwap)originalSwap=reinterpret_cast<SwapBuffersFunction>(importSlots->u1.Function);importSlots->u1.Function=reinterpret_cast<ULONG_PTR>(&measuredSwap);}
+    else {if(!originalWglSwap)originalWglSwap=reinterpret_cast<SwapBuffersFunction>(importSlots->u1.Function);importSlots->u1.Function=reinterpret_cast<ULONG_PTR>(&measuredWglSwap);}
+    DWORD ignored=0;VirtualProtect(&importSlots->u1.Function,sizeof(void*),old,&ignored);installed=true;
+   }
   }
- }return false;
+ }
+ return installed;
 }
+
 std::atomic<int> deniedWrites{0};QString& writableRoot=*new QString;QString& writableShortRoot=*new QString;QString& allowedNamedPipe=*new QString;
 bool allowedWrite(LPCWSTR file) {
     if(!file)return false;const auto literal=QDir::fromNativeSeparators(QString::fromWCharArray(file));
@@ -151,6 +161,7 @@ public:
     void attach(MainWindow& value)
     {
         window=&value;view=value.view();native=value.findChild<CRebuild64Viewport*>();
+        native->setFixedSize(1920,1080);
         window->resize(2560,1440);
         connect(view,&CView::updateMsg,this,[this](const QString& text){record("message",{{"text",text}});});
         connect(native,&CRebuild64Viewport::backendFailure,this,[this](const QString& text){++failures;record("backend_failure",{{"text",text}});});
@@ -159,8 +170,19 @@ public:
             if(generation==lastGeneration)return;
             lastGeneration=generation;
             const auto s=native->statistics();
+            if(configuration["earlyInput"].toBool()&&!earlyInputSent&&native->openingDocument()) {
+                earlyInputSent=true;earlyInputQpc=qpc();earlyUndoIndex=window->m_undoStack->index();
+                auto* target=native->findChild<QWidget*>("rebuild64NativeSurface");const auto point=target->rect().center();
+                QMouseEvent press(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier),release(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                QApplication::sendEvent(target,&press);QApplication::sendEvent(target,&release);
+                key(Qt::Key_G,"g");key(Qt::Key_X,"x");key(Qt::Key_1,"1");key(Qt::Key_Return,"\r");
+                record("early_input_queued",{{"queryReady",native->editorQueryReady()},{"pendingInput",native->pendingEditorInput()},{"undoUnchanged",window->m_undoStack->index()==earlyUndoIndex},{"targetNid",int(earlyTargetNid)}});
+            }
             QSaveFile shown(caseRoot+"/qt-page-shown-"+QString::number(generation)+".json");if(shown.open(QIODevice::WriteOnly)){shown.write(QJsonDocument(QJsonObject{{"renderer","Rebuild64"},{"neighbours_accepted",int(s.neighbours_accepted)},{"exeSha256",exeSha},{"dllSha256",dllSha},{"qpc",QString::number(qpc())}}).toJson());shown.commit();}
-            record("first_frame",{{"generation",QString::number(generation)},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"map",CLandscape::getInstance()->filePath().absoluteFilePath()},
+            const auto actualMap=native->openingDocument()?native->m_earlyMap:CLandscape::getInstance()->filePath().absoluteFilePath();
+            const int expected=QFileInfo(actualMap).completeBaseName()=="zone1"?5:QFileInfo(actualMap).completeBaseName()=="zone7"?4:0;
+            if(int(s.neighbours_accepted)!=expected||s.neighbours_pending)record("FAIL",{{"check","first displayed frame neighbour cohort"}});
+            record("first_frame",{{"expectedNeighbours",expected},{"cohortValid",int(s.neighbours_accepted)==expected&&!s.neighbours_pending},{"generation",QString::number(generation)},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"map",CLandscape::getInstance()->filePath().absoluteFilePath()},
                 {"neighbours_accepted",int(s.neighbours_accepted)},{"neighbours_pending",int(s.neighbours_pending)},
                 {"commandQpc",QString::number(commandQpc)},{"exeSha256",exeSha},{"dllSha256",dllSha}});
         });
@@ -169,7 +191,7 @@ public:
     void windowReady(){record("interactive",{{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"exeSha256",exeSha},{"dllSha256",dllSha}});QTimer::singleShot(100,this,[this]{startWhenIdle();});}
     void swapped(HDC dc,qint64 begin,qint64 end,BOOL ok){
         if(!window||!view)return;
-        if(WindowFromDC(dc)!=reinterpret_cast<HWND>(view->internalWinId()))return;
+        if(WindowFromDC(dc)!=reinterpret_cast<HWND>(view->internalWinId())&&QGLContext::currentContext()!=view->context())return;
         const auto path=CLandscape::getInstance()->filePath().absoluteFilePath();
         const bool ready=CLandscape::getInstance()->isMprLoad()&&window->rebuild64DocumentReady()&&!view->m_neighborLoadStage&&!view->m_neighborLoadJobs&&!view->m_neighborObjectUploadScheduled;
         record("gl_present",{{"beginQpc",QString::number(begin)},{"endQpc",QString::number(end)},{"ok",bool(ok)},{"map",path},{"complete",ready},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"neighbours_accepted",view->m_neighborLandscapes.size()},{"exeSha256",exeSha},{"dllSha256",dllSha}});
@@ -216,7 +238,7 @@ public:
         const auto stats=native->statistics();
         check(int(stats.neighbours_accepted)==expected&&stats.neighbours_pending==0,"native neighbours exact "+QString::number(expected));
         if(!sawGL) {
-            check(native->editorQueryReady(),"shared query geometry ready");
+            check(wait([&]{return window->rebuild64DocumentReady()&&!native->openingDocument()&&native->editorQueryReady();}),"shared query geometry ready (later than first world allowed)");
             check(view->m_neighborLandscapes.size()==expected,"only touching GL neighbours loaded");
         }
         record("ready",{{"name",name},{"renderer","Rebuild64"},{"neighbours_accepted",int(stats.neighbours_accepted)},{"legacyNeighbours",view->m_neighborLandscapes.size()},{"width",int(stats.width)},{"height",int(stats.height)},{"exeSha256",exeSha},{"dllSha256",dllSha}});
@@ -227,6 +249,7 @@ public:
     }
     void openPair(const QString& map)
     {
+        if(configuration["benchmarkCamera"].toBool())view->m_cam->setLocation({256,128,200},{256,128,0},{0,0,0});
         commandQpc=qpc();lastGeneration=0;
         window->openMapPair(fixture()+"/Maps/"+map+".mpr",fixture()+"/Maps/"+map+".mob",map);
     }
@@ -258,7 +281,7 @@ public:
         QMouseEvent dbl(QEvent::MouseButtonDblClick,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(tree->viewport(),&dbl);
         QApplication::sendEvent(tree->viewport(),&release);validateReady(map);
     }
-    void worldDoubleClick() {
+    void worldDoubleClick(bool gl=false) {
         SNeighborMapPlacement target;
         for(const auto& p:view->m_neighborPlacements)if(QFileInfo(p.mprPath).completeBaseName()=="zone7"){target=p;break;}
         check(!target.mprPath.isEmpty(),"zone7 is in the real world layout");
@@ -266,10 +289,11 @@ public:
         QMatrix4x4 camera;camera.lookAt(center+QVector3D(0,0,800),center,QVector3D(0,1,0));view->m_cam->setPreviewView(camera);
         view->m_normalProjection.setToIdentity();view->m_normalProjection.perspective(45,float(native->width())/qMax(1,native->height()),1,2000);view->m_projection=view->m_normalProjection;
         QElapsedTimer settle;settle.start();wait([&]{return settle.elapsed()>150;},1000);
-        const auto point=native->rect().center();commandQpc=qpc();
-        QMouseEvent dbl(QEvent::MouseButtonDblClick,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(native->findChild<QWidget*>("rebuild64NativeSurface"),&dbl);
+        QWidget* clickSurface=gl?static_cast<QWidget*>(view):native->findChild<QWidget*>("rebuild64NativeSurface");
+        const auto point=clickSurface->rect().center();commandQpc=qpc();
+        QMouseEvent dbl(QEvent::MouseButtonDblClick,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(clickSurface,&dbl);
         check(wait([&]{return CLandscape::getInstance()->filePath().completeBaseName()=="zone7";},240000),"native double click took the canonical neighbour route");
-        validateReady("zone7-world");view->m_cam->clearPreviewView();
+        validateReady("zone7-world",gl);view->m_cam->clearPreviewView();
     }
     void createMap() {
         const auto privatePack=configuration["privateTerrainPack"].toString();QString publication;
@@ -304,9 +328,63 @@ public:
         check(!result.contains("error"),"MCP operation payload success: "+result.value("error").toString());return result;
     }
     void key(int value,const QString& text={}) {
-        auto* target=native->findChild<QWidget*>("rebuild64NativeSurface");
+        QWidget* target=native->rebuildSelected()?native->findChild<QWidget*>("rebuild64NativeSurface"):view;
         QKeyEvent press(QEvent::KeyPress,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&press);
         QKeyEvent release(QEvent::KeyRelease,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&release);
+    }
+    void earlyInputScenario() {
+        CMobDocument document;CValidationReport report;
+        check(document.load(QFileInfo(fixture()+"/Maps/zone1.mob"),&report),"CPU source for first-frame click target");
+        const SMobObjectSnapshot* chosen=nullptr;
+        for(const auto& object:document.objects())if(object.sectionType==45057u&&object.hasPosition&&!object.unit&&object.model.compare("stst8",Qt::CaseInsensitive)) {
+            if(!chosen)chosen=&object;
+            if(object.model.contains("stbuho",Qt::CaseInsensitive)||object.model.contains("rock",Qt::CaseInsensitive)){chosen=&object;break;}
+        }
+        check(chosen,"real static target in zone1 CPU document");earlyTargetNid=chosen->nid;
+        earlyTargetPosition=QVector3D(chosen->positionX,chosen->positionY,chosen->positionZ);
+        QMatrix4x4 camera;camera.lookAt(earlyTargetPosition+QVector3D(0,0,100),earlyTargetPosition,QVector3D(0,1,0));view->m_cam->adoptView(camera);
+        record("early_input_target",{{"nid",int(earlyTargetNid)},{"model",chosen->model}});
+        openPair("zone1");validateReady("zone1-early-input");
+        check(earlyInputSent,"click and numeric edit sent on the first displayed world frame");
+        const bool applied=wait([&]{return !native->pendingEditorInput()&&window->m_undoStack->index()>=earlyUndoIndex+2;},15000);
+        record("early_input_state",{{"pendingInput",native->pendingEditorInput()},{"undoIndex",window->m_undoStack->index()},{"initialUndoIndex",earlyUndoIndex},{"selectionCount",view->selectionSnapshot().size()},{"pendingOperation",view->hasPendingOperation()}});
+        check(applied&&window->m_undoStack->index()==earlyUndoIndex+2,"retained click and numeric edit produce exactly their two canonical Undo commands");
+        check(native->rebuildSelected(),"retained click does not select an unsupported/garbage object");
+        const auto selection=view->selectionSnapshot();check(selection.size()==1,"retained click selects one canonical object");
+        auto* node=selection.first();check(node->nodeType()==eWorldObject,"retained click selects real static geometry");
+        const auto after=node->position();window->m_undoStack->undo();const auto before=node->position();
+        check((after-before-QVector3D(1,0,0)).length()<.0001f,"retained G X 1 Enter produces the canonical one-metre edit");
+        window->m_undoStack->redo();check(node->position()==after,"retained edit supports Redo");window->m_undoStack->undo();
+        record("early_input_applied",{{"queueMilliseconds",double(qpc()-earlyInputQpc)/10000.0},{"nid",int(node->mapId())},{"targetNid",int(earlyTargetNid)}});
+        validateReady("zone1-early-input-undone");window->closeAll();
+    }
+    void preparationRaces() {
+        bool closed=false;auto* closeTimer=new QTimer(this);closeTimer->setInterval(15);
+        connect(closeTimer,&QTimer::timeout,this,[&]{
+            if(closed||ei::legacyProjectionPulse()||!window->m_workspaceLoadInProgress||!native->openingDocument()||!CLandscape::getInstance()->isMprLoad())return;
+            closeQpc=qpc();window->closeAll();closed=!CLandscape::getInstance()->isMprLoad();
+            if(closed){closeTimer->stop();record("close_during_prepare",{{"qpcAccepted",QString::number(closeQpc)}});}
+        });closeTimer->start();openPair("zone1");closeTimer->stop();delete closeTimer;
+        check(closed,"real close-map accepted during parallel preparation");
+        check(!CLandscape::getInstance()->isMprLoad()&&view->mobs().isEmpty(),"cancelled opening does not register a late MOB/document");
+        check(wait([&]{return native->backendPrepared()&&native->backendResourcesRetired();},30000),"closed preparing map retires native resources");
+        bool queued=false;auto* timer=new QTimer(this);timer->setInterval(15);
+        connect(timer,&QTimer::timeout,this,[&]{
+            if(queued||!window->m_workspaceLoadInProgress||!native->openingDocument())return;
+            switchQpc=qpc();queued=true;timer->stop();
+            window->openMapPair(fixture()+"/Maps/zone7.mpr",fixture()+"/Maps/zone7.mob","zone7");
+            record("map_switch_during_prepare",{{"queued",window->property("nativeMapRequestPending").toBool()},{"qpcAccepted",QString::number(switchQpc)}});
+        });timer->start();openPair("zone1");
+        check(wait([&]{return queued&&!window->property("nativeMapRequestPending").toBool()&&CLandscape::getInstance()->filePath().completeBaseName()=="zone7";},120000),"latest queued map becomes the canonical document");
+        timer->stop();delete timer;validateReady("zone7-after-prepare-race");
+        for(auto* mob:view->mobs())check(!mob->filePath().fileName().contains("zone1",Qt::CaseInsensitive),"retired opening has no MOB in final cohort");
+        QFile trace(caseRoot+"/presented.jsonl");check(trace.open(QIODevice::ReadOnly),"race Present trace readable");
+        for(const auto& line:trace.readAll().split('\n')){const auto row=QJsonDocument::fromJson(line).object();
+            if(row["event"]=="present"&&row["map"]=="zone1.mpr") {
+                const auto at=qint64(row["qpc"].toDouble());check(at<=closeQpc,"no retired map Present after close/latest map request");
+            }
+        }
+        window->closeAll();
     }
     void recoveryCreate() {
         openPair("zone1");validateReady("zone1-before-edit");CNode* selected=nullptr;
@@ -355,20 +433,31 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="recover-create") {recoveryCreate();}
+            if(mode=="gl-camera") {
+                check(!native->rebuildSelected(),"GL control selected by saved preference");openPair("zone1");validateReady("zone1-gl-control",true);
+                check(view->m_neighborLandscapes.size()==11,"ordinary OpenGL retains all eleven neighbours");
+                CNode* target=nullptr;for(auto* node:view->m_activeMob->nodes())if(node->nodeType()==eWorldObject&&node->modelName().compare("stst8",Qt::CaseInsensitive)){target=node;break;}
+                check(target,"GL static operation target");view->restoreSelection({target});const auto before=target->position();
+                key(Qt::Key_G,"g");key(Qt::Key_X,"x");key(Qt::Key_1,"1");key(Qt::Key_Return,"\r");check(target->position()!=before,"ordinary GL canonical keyboard move");
+                window->m_undoStack->undo();check(target->position()==before,"ordinary GL Undo");window->m_undoStack->redo();window->m_undoStack->undo();
+                worldDoubleClick(true);createMap();check(!GetModuleHandleW(L"ataman_rebuild64.dll"),"GL control never loads native DLL");window->closeAll();
+            }
+            else if(mode=="early-input") {earlyInputScenario();}
+            else if(mode=="prepare-races") {preparationRaces();}
+            else if(mode=="recover-create") {recoveryCreate();}
             else if(mode=="recover-restore") {recoveryRestore();}
             else if(mode=="empty"||mode=="choice"||mode=="guard"||mode=="cold-switch") {
                 check(!CLandscape::getInstance()->isMprLoad(),"no startup map");
                 const bool expected=mode!="guard"&&configuration["expectedNative"].toBool(true);
                 check(native->rebuildSelected()==expected,"startup preference/guard");
                 if(mode=="cold-switch") {
-                    openPair(map);
-                    check(wait([&]{QFile trace(caseRoot+"/presented.jsonl");return trace.open(QIODevice::ReadOnly)&&trace.readAll().contains("shader_prepare_begin");},30000),"real shader preparation entered");
-                    QFile trace(caseRoot+"/presented.jsonl");trace.open(QIODevice::ReadOnly);const bool running=!trace.readAll().contains("shader_prepare_end");
-                    const auto before=qpc();native->m_glAction->trigger();record("shader_switch_gl",{{"ticks",QString::number(qpc()-before)},{"shaderStillRunning",running}});
-                    if(configuration["failure"].toString()=="shader-hold")check(running,"injected blocking shader preparation was still running at the menu action");
-                    check(!native->rebuildSelected(),"menu switched while shader work running");
-                    QElapsedTimer settle;settle.start();wait([&]{return settle.elapsed()>1000;},2000);
+                    bool switched=false,running=false;auto* timer=new QTimer(this);timer->setInterval(10);
+                    connect(timer,&QTimer::timeout,this,[&]{QFile trace(caseRoot+"/presented.jsonl");if(!trace.open(QIODevice::ReadOnly))return;
+                        const auto data=trace.readAll();if(!data.contains("shader_prepare_begin")||data.contains("shader_prepare_end"))return;
+                        timer->stop();running=true;const auto before=qpc();native->m_glAction->trigger();switched=!native->rebuildSelected();
+                        record("shader_switch_gl",{{"ticks",QString::number(qpc()-before)},{"shaderStillRunning",running}});
+                    });timer->start();openPair(map);timer->stop();delete timer;
+                    check(switched&&running,"real menu switched while parallel shader preparation was running");validateReady(map,true);
                 }
                 if(expected&&mode!="cold-switch"&&(!configuration["firstSetup"].toBool()||configuration["firstSetupAccept"].toBool()))check(wait([&]{return native->backendPrepared()||!native->lastFailure().isEmpty();}),"background startup preparation terminates");
                 check(!native->statistics().ready_generation,"no world frame without a document");if(mode=="guard")check(QFileInfo(native->m_guardDirectory+"/manual-retry-required").isFile(),"migration did not remove the startup guard latch");
@@ -418,8 +507,20 @@ public:
                 const auto revision=request("get_revision")["revision"].toString();commandQpc=qpc();
                 operation(request("open_map",{{"revision",revision},{"map","zone1"}}));validateReady("zone1-mcp");
                 createMap();window->closeAll();
-            } else if(mode=="session-create") {openPair(map);validateReady(map);view->saveSession();check(QFileInfo(QDir::tempPath()+"/ei_mapper_endurance_session.json").size()>0,"real session journal written");}
-            else if(mode=="session-restore") {check(CLandscape::getInstance()->isMprLoad(),"real main restored startup session");commandQpc=configuration["processStartQpc"].toString().toLongLong();validateReady(map);window->closeAll();}
+            } else if(mode=="session-create") {openPair(map);validateReady(map);
+                if(configuration["validSavedCamera"].toBool()) {
+                    QMatrix4x4 camera;camera.lookAt(QVector3D(160,120,180),QVector3D(160,120,10),QVector3D(0,1,0));view->m_cam->adoptView(camera);
+                    QJsonArray values;for(int i=0;i<16;++i)values.append(double(view->m_cam->viewMatrix().constData()[i]));
+                    QFile saved(caseRoot+"/saved-camera.json");saved.open(QIODevice::WriteOnly);saved.write(QJsonDocument(values).toJson());
+                }
+                view->saveSession();check(QFileInfo(QDir::tempPath()+"/ei_mapper_endurance_session.json").size()>0,"real session journal written");}
+            else if(mode=="session-restore") {check(CLandscape::getInstance()->isMprLoad(),"real main restored startup session");commandQpc=configuration["processStartQpc"].toString().toLongLong();validateReady(map);
+                if(configuration["validSavedCamera"].toBool()) {
+                    QFile saved(caseRoot+"/saved-camera.json");check(saved.open(QIODevice::ReadOnly),"saved camera proof exists");const auto values=QJsonDocument::fromJson(saved.readAll()).array();
+                    const auto matrix=view->m_cam->viewMatrix();double error=0;for(int i=0;i<16;++i)error=qMax(error,qAbs(double(matrix.constData()[i])-values[i].toDouble()));
+                    check(error<.0001,"correct saved camera retained on real main session restore");record("saved_camera_retained",{{"maximumMatrixError",error}});
+                }
+                window->closeAll();}
             else if(mode=="mcp" || headless) {
                 check(headless?!native->rebuildSelected():native->rebuildSelected(),"MCP startup renderer");
                 if(!headless){const auto empty=operation(request("window_snapshot"));check(empty["captureKind"].toString().startsWith("Qt Rebuild64"),"MCP no-map snapshot uses the real Qt preparation page");}
@@ -516,6 +617,8 @@ public:
     }
 private:
     QFile log;MainWindow* window=nullptr;CView* view=nullptr;CRebuild64Viewport* native=nullptr;
+    bool earlyInputSent=false;quint32 earlyTargetNid=0;QVector3D earlyTargetPosition;int earlyUndoIndex=0;
+    qint64 earlyInputQpc=0,closeQpc=0,switchQpc=0;
     QTimer pulse;qint64 lastPulse=0,maxGap=0,commandQpc=0;quint64 lastGeneration=0;
     bool sawGL=false,swapTraceInstalled=false,creating=false;QSet<QString> glCaptured;QString exeSha,dllSha,nextFile,nextCreated;int failures=0,unexpectedDialogs=0,requestId=0;
     QLocalSocket* socket=nullptr;QByteArray buffer;

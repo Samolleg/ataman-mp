@@ -1,3 +1,5 @@
+#include "opening_trace.h"
+#include "legacy_projection_pulse.h"
 #include "rebuild64_launch_check.h"
 #include <functional>
 #include "rebuild64_viewport_widget.h"
@@ -7426,11 +7428,26 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
                                              const QPointF& targetWorldOrigin,
                                              bool bindMap)
 {
+    opening::Scope openingTiming("gui.open_pair");
     QElapsedTimer workspaceLoadTimer;
     workspaceLoadTimer.start();
     if(m_workspaceLoadInProgress)
     {
-        statusBar()->showMessage(tr("Finish loading the current workspace first."), 4000);
+        auto* native=findChild<CRebuild64Viewport*>();
+        if(native&&native->rebuildSelected()&&!native->pendingEditorInput()
+           &&QFileInfo(mprPath).isFile()&&(requestedMobPath.isEmpty()||QFileInfo(requestedMobPath).isFile())) {
+            // Finish the current canonical critical section; retain only the
+            // latest request. Its retired native generation cannot Present.
+            const auto request=++m_nativeOpenRequestGeneration;setProperty("nativeMapRequestPending",true);
+            native->beginDocumentTransition();auto* timer=new QTimer(this);timer->setInterval(25);
+            connect(timer,&QTimer::timeout,this,[this,timer,request,mprPath,requestedMobPath,zoneId,ordinaryMapOpen,sourceWorldOrigin,targetWorldOrigin,bindMap]{
+                if(request!=m_nativeOpenRequestGeneration||m_shutdownInProgress){timer->stop();timer->deleteLater();return;}
+                if(m_workspaceLoadInProgress||m_backgroundMobAttaching)return;
+                timer->stop();timer->deleteLater();setProperty("nativeMapRequestPending",false);
+                openMapPairWithCameraPolicy(mprPath,requestedMobPath,zoneId,ordinaryMapOpen,sourceWorldOrigin,targetWorldOrigin,bindMap);
+            });timer->start();
+            statusBar()->showMessage(tr("Rebuild64: открытие новой карты поставлено в очередь; предыдущий кадр не будет опубликован."),10000);
+        } else statusBar()->showMessage(tr("Finish loading the current workspace first."),4000);
         return;
     }
     // An empty MOB selection means terrain-only, including world navigation.
@@ -7478,24 +7495,29 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     };
     CMprDocument targetMprDocument;
     CValidationReport targetMprReport;
-    if(!targetMprDocument.load(targetMpr, &targetMprReport)
-       || targetMprReport.hasErrors())
+    const auto validateMprBegin=opening::clock();
+    const bool validTargetMpr=targetMprDocument.load(targetMpr,&targetMprReport);
+    opening::span("gui.validate_mpr",validateMprBegin);
+    if(!validTargetMpr || targetMprReport.hasErrors())
     {
         rejectUnreadable(tr("MPR"), targetMpr, targetMprReport);
         return;
     }
     CMobDocument targetMobDocument;
     CValidationReport targetMobReport;
-    if(!terrainOnly && (!targetMobDocument.load(targetMob, &targetMobReport)
-       || targetMobReport.hasErrors()))
+    const auto validateMobBegin=opening::clock();
+    const bool validTargetMob=terrainOnly||targetMobDocument.load(targetMob,&targetMobReport);
+    opening::span("gui.validate_mob",validateMobBegin);
+    if(!terrainOnly && (!validTargetMob || targetMobReport.hasErrors()))
     {
         rejectUnreadable(tr("MOB"), targetMob, targetMobReport);
         return;
     }
     QString targetMobProjectionError;
-    if(!terrainOnly && !CMob::validateEditableProjection(targetMobDocument.originalBytes(),
-                                         targetMob,
-                                         &targetMobProjectionError))
+    const auto validateProjectionBegin=opening::clock();
+    const bool validProjection=terrainOnly||CMob::validateEditableProjection(targetMobDocument.originalBytes(),targetMob,&targetMobProjectionError);
+    opening::span("gui.validate_editable_projection",validateProjectionBegin);
+    if(!validProjection)
     {
         CValidationReport targetMobProjectionReport;
         targetMobProjectionReport.add(
@@ -7538,6 +7560,7 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     QProgressDialog progress(tr("Loading map..."), QString(), 0, 3, this);
     progress.setWindowTitle(tr("Loading map workspace"));
     configureBlockingProgress(&progress);
+    if(auto* native=findChild<CRebuild64Viewport*>())if(native->rebuildSelected())progress.setWindowModality(Qt::NonModal);
     progress.setValue(0);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -7553,18 +7576,26 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
     QElapsedTimer mapLoadPhase;
     mapLoadTimer.start();
     mapLoadPhase.start();
+    m_pView->setProperty("rebuild64OpeningMobs",terrainOnly?QStringList():QStringList{mobPath});
+    m_pView->setProperty("rebuild64OpeningSearch",QStringList(activeMapRoots().toList()));
+    if(preserveNeighborCamera)m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,targetWorldOrigin,sourceCameraPosition,sourceCameraPivot,sourceCameraRotation);
     m_pView->loadLandscape(QFileInfo(mprPath));
+    if(!CLandscape::getInstance()->isMprLoad()
+       ||QFileInfo(mprPath).canonicalFilePath()!=CLandscape::getInstance()->filePath().canonicalFilePath()) {
+        progress.close();endWorkspaceLoad();m_pView->setNeighborCacheTransition(false);return;
+    }
     // Apply the source snapshot before the first event pump can paint the
     // target terrain in source-local camera coordinates. Reading the camera
     // here would be too late: the old workspace has already been destroyed.
-    if(preserveNeighborCamera)
-        m_pView->rebaseCameraForOpenedNeighbor(sourceWorldOrigin,
-            targetWorldOrigin, sourceCameraPosition,
-            sourceCameraPivot, sourceCameraRotation);
+    // Neighbor rebase is applied before camera validation and native dispatch.
     const qint64 landscapeMs = mapLoadPhase.elapsed();
     progress.setLabelText(tr("Loading %1...").arg(QFileInfo(mobPath).fileName()));
     progress.setValue(2);
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    if(!CLandscape::getInstance()->isMprLoad()
+       ||QFileInfo(mprPath).canonicalFilePath()!=CLandscape::getInstance()->filePath().canonicalFilePath()) {
+        progress.close();endWorkspaceLoad();m_pView->setNeighborCacheTransition(false);return;
+    }
     QFileInfo mobFile(mobPath);
     mapLoadPhase.restart();
     const bool mobLoaded=terrainOnly || loadMobWithDependencies(mobFile, &progress);
@@ -7911,8 +7942,12 @@ bool MainWindow::beginWorkspaceLoad(const QString& description)
 {
     if(m_workspaceLoadInProgress || m_backgroundMobAttaching)
         return false;
+    if(auto* native=findChild<CRebuild64Viewport*>())if(native->pendingEditorInput()) {
+        statusBar()->showMessage(tr("Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты."),10000);return false;
+    }
     cancelBackgroundMobs();
-    if(auto* native=findChild<CRebuild64Viewport*>())native->beginDocumentTransition();
+    if(auto* native=findChild<CRebuild64Viewport*>())
+        if(!(qApp->property("rebuild64StartupDocumentBatch").toBool()&&native->openingDocument()))native->beginDocumentTransition();
     if(m_pView)m_pView->deferNeighborLoading(true);
     m_workspaceLoadInProgress = true;
     if(m_pView)
@@ -7925,6 +7960,7 @@ bool MainWindow::beginWorkspaceLoad(const QString& description)
 
 void MainWindow::endWorkspaceLoad()
 {
+    opening::Scope openingTiming("gui.end_workspace");
     if(!m_workspaceLoadInProgress)
         return;
     m_workspaceLoadInProgress = false;
@@ -8139,6 +8175,14 @@ void MainWindow::closeHotReloadProgress()
 
 bool MainWindow::isExitAllowed(bool retainWorldTerrain)
 {
+    if(ei::legacyProjectionPulse()) {
+        statusBar()->showMessage(tr("Подготовка геометрии: повторите закрытие или смену карты после завершения текущего участка."),10000);return false;
+    }
+    if(auto* native=findChild<CRebuild64Viewport*>())if(native->pendingEditorInput()) {
+        statusBar()->showMessage(tr("Ожидающий ввод ещё не выполнен: дождитесь подготовки инструментов перед закрытием или сменой карты."),10000);
+        return false;
+    }
+
     if(!resolveTravelClose())return false;
     if(!isDatabaseExitAllowed())return false;
     QStringList dirtyMobs;
@@ -8186,10 +8230,11 @@ bool MainWindow::isDatabaseExitAllowed()
 
 void MainWindow::closeAll()
 {
-    if(auto* native=findChild<CRebuild64Viewport*>())native->beginDocumentTransition();
     if(m_backgroundMobAttaching)return;
     if(isExitAllowed())
     {
+        ++m_nativeOpenRequestGeneration;setProperty("nativeMapRequestPending",false);
+        if(auto* native=findChild<CRebuild64Viewport*>())native->beginDocumentTransition();
         cancelBackgroundMobs();
         m_undoStack->clear();
         m_pView->unloadMob("");
@@ -8416,6 +8461,7 @@ bool MainWindow::openDocument(const QFileInfo& fileName)
 
 bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName, bool attachMob)
 {
+    opening::Scope openingTiming("gui.replace");
     QString leaseError;auto lease=CProcessEditLock::acquire(fileName.absoluteFilePath(),&leaseError);
     if(!lease){m_pView->setProperty("documentLockError",leaseError);statusBar()->showMessage(leaseError,15000);ei::log(eLogWarning,leaseError);return false;}
     // Re-selecting the collection's own terrain must not add its global map
@@ -8464,6 +8510,9 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName, bool attachMo
     setWorkspaceIdentity(QString(), QString(), QString(), QString());
     m_pView->prepareDocumentTransition();
     m_undoStack->clear();
+    auto earlyRoots=attachMob&&!companion.isEmpty()?QStringList{companion}:qApp->property("rebuild64StartupMobs").toStringList();
+    m_pView->setProperty("rebuild64OpeningMobs",earlyRoots);
+    m_pView->setProperty("rebuild64OpeningSearch",QStringList(activeMapRoots().toList()));
     if(!loadLandscapeWithProgress(fileName))
         return false;
     updateDocumentActionAvailability();
@@ -8472,6 +8521,7 @@ bool MainWindow::replaceLoadedLandscape(const QFileInfo& fileName, bool attachMo
 
 bool MainWindow::loadMobWithDependencies(QFileInfo fileName, QProgressDialog* progress)
 {
+    opening::Scope openingTiming("gui.primary");
     Q_UNUSED(progress);
     if(!m_pView->loadMob(fileName))return false;
     CMob* primary=m_pView->currentMob();
@@ -8487,6 +8537,7 @@ bool MainWindow::loadMobWithProgress(QFileInfo fileName, bool bindMap)
                              QString(), 0, 0, this);
     progress.setWindowTitle(tr("Loading MOB"));
     configureBlockingProgress(&progress);
+    if(auto* native=findChild<CRebuild64Viewport*>())if(native->rebuildSelected())progress.setWindowModality(Qt::NonModal);
     progress.setMinimumDuration(250);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -8512,12 +8563,14 @@ bool MainWindow::loadMobWithProgress(QFileInfo fileName, bool bindMap)
 
 bool MainWindow::loadLandscapeWithProgress(const QFileInfo& fileName)
 {
+    opening::Scope openingTiming("gui.landscape_progress");
     if(!beginWorkspaceLoad(tr("MPR %1").arg(fileName.fileName())))
         return false;
     QProgressDialog progress(tr("Loading MPR: %1").arg(fileName.fileName()),
                              QString(), 0, 0, this);
     progress.setWindowTitle(tr("Loading MPR"));
     configureBlockingProgress(&progress);
+    if(auto* native=findChild<CRebuild64Viewport*>())if(native->rebuildSelected())progress.setWindowModality(Qt::NonModal);
     progress.setMinimumDuration(250);
     progress.show();
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);

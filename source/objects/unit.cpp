@@ -1,3 +1,4 @@
+#include "opening_trace.h"
 #include "helper_visibility.h"
 #include "shader_locations.h"
 #include <QJsonObject>
@@ -310,6 +311,7 @@ bool CUnit::refreshTransientVisual(bool force)
         return true;
     if(!force && !AnimationFrameContext::instance().claimColdVisualResolution())
         return false;
+    opening::Scope appearanceTiming("gui.character.appearance_resolve");
     CRenderStallTrace timing("unit-visual");
     m_resolvedDatabaseGeneration = generation;
     m_resolvedVisualRevision = m_visualRevision;

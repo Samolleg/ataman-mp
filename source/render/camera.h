@@ -21,6 +21,7 @@ public:
 
     QMatrix4x4 update();
     QMatrix4x4 viewMatrix();
+    void adoptView(const QMatrix4x4& view);
     void setPreviewView(const QMatrix4x4& view);
     void clearPreviewView();
     void xRotate(float& angle);
@@ -77,6 +78,7 @@ private:
     bool m_previewActive{false};
     QVector3D m_pos;
     QVector3D m_pivot;
+    float m_yRot{0};
     float m_xRot;
     float m_zRot;
     float m_step;

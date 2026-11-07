@@ -1,5 +1,6 @@
 #pragma once
 #include <QWidget>
+#include <QFileInfo>
 #include <QByteArray>
 #include <QVector>
 #include <QElapsedTimer>
@@ -24,6 +25,8 @@ public:
     explicit CRebuild64Viewport(CView* gl, QMenu* menu, QWidget* parent=nullptr);
     ~CRebuild64Viewport() override;
     bool rebuildSelected() const { return m_selected; }
+    bool openingDocument() const { return m_earlyDocument; }
+    bool pendingEditorInput() const { return !m_waitingInput.isEmpty(); }
     bool backendLoaded() const;
     bool backendPrepared() const;
     bool backendResourcesRetired() const;
@@ -33,6 +36,7 @@ public:
     void prepareBackend();
     void selectRebuild(bool selected, bool persist=true);
     void beginDocumentTransition();
+    void openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search);
     void requireOpenGL(const QString& action);
     QString lastFailure() const { return m_failure; }
     EirStatistics statistics() const { return m_statistics; }
@@ -49,6 +53,7 @@ signals:
     void captureFinished(const QString& path, const QString& error, quint64 generation);
 protected:
     bool eventFilter(QObject*,QEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
 private:
     struct Worker;
     void tick();
@@ -63,8 +68,11 @@ private:
     bool m_stopping{false},m_restartWhenFinished{false};
     void showPreparation(const QString& phase);
     void updatePreparationText();
-    bool m_pointerDown{false};
+    bool m_pointerDown{false},m_editorViewportDirty{false};
     bool m_legacyNavigationPending{false};
+    QString m_earlyMap;
+    bool m_earlyDocument{false};
+    QVector<std::shared_ptr<QEvent>> m_waitingInput;
     QImage m_serviceImage;
     double m_serviceMilliseconds{0};
     void movePanels(bool native);
