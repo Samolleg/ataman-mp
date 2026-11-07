@@ -42,6 +42,7 @@ bool CView::clearCanvasNavigationStale(QString* error) {
 bool CView::applyCanvasResizeToCurrent(const SMprCanvasResizeRequest& resize,
                                       bool removeOutsideObjects, QString* error)
 {
+    useLegacyViewport(QString::fromUtf8("Изменение холста"));
     const auto refuse=[&](const QString& text){if(error)*error=text;return false;};
     if(!m_pLand || !m_pLand->isMprLoad() || !ensureTerrainAutoCatalogReady())
         return refuse(tr("Откройте MPR перед изменением холста."));

@@ -1,4 +1,5 @@
 #include "shutdown_deadline.h"
+#include "rebuild64_launch_check.h"
 #include "ai_agent_read.h"
 #include "startup_phases.h"
 #include "backup_manager.h"
@@ -544,6 +545,7 @@ int runHeadlessCommand(QApplication& app)
                                      "Print the application version without opening a window.");
     parser.addOption(versionOption);
     parser.addOption(QCommandLineOption("agent-headless","Run the mapper invisibly for MCP under saved owner permissions."));
+    parser.addOption(QCommandLineOption("rebuild64-launch-check","Run an explicitly isolated hidden startup case.","case-json"));
     QCommandLineOption validateOption("validate", "Validate a MOB or MPR without changing it.", "file");
     QCommandLineOption roundtripOption("roundtrip-check", "Verify byte-identical unchanged serialization.", "file");
     QCommandLineOption jsonOption("json", "Emit machine-readable JSON.");
@@ -4183,6 +4185,8 @@ int runHeadlessCommand(QApplication& app)
 #include <QtConcurrent>
 int main(int argc, char *argv[])
 {
+    const int launchCheck=initializeRebuild64LaunchCheck(argc,argv);
+    if(launchCheck>0)return launchCheck;
     bool agentHeadless=false;
     for(int i=1;i<argc;++i)agentHeadless|=std::strcmp(argv[i],"--agent-headless")==0;
     for(int i=1;i<argc;++i)
@@ -4212,6 +4216,7 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
     QApplication app(argc, argv);
+    installRebuild64LaunchCheck(app);
     app.setProperty("agentHeadless",agentHeadless);
     if(agentHeadless)app.setQuitOnLastWindowClosed(false);
     app.setProperty("startupReferenceMs",startupClock.msecsSinceReference());
@@ -4337,12 +4342,14 @@ int main(int argc, char *argv[])
         wait.exec();app.setProperty("mapSaveRecoveryWarnings",recovery.result());
     }
     MainWindow window;
+    attachRebuild64LaunchCheck(window);
     if(agentHeadless) {
         window.setAttribute(Qt::WA_DontShowOnScreen);
         window.show();window.view()->makeCurrent();
         QTimer lifetime;
         QObject::connect(&lifetime,&QTimer::timeout,&app,[&](){if(app.property("agentHeadlessClosing").toBool()&&!window.isVisible())app.quit();});lifetime.start(100);
         ei::log(eLogInfo,"AI headless ready; no visible windows");
+        markRebuild64LaunchWindowReady();
         return app.exec();
     }
     const qint64 constructorMs=startupPhase.elapsed();
@@ -4364,6 +4371,7 @@ int main(int argc, char *argv[])
     });
     ei::log(eLogInfo, QString("Startup phases readyWindow preparationMs:%1 constructorAndSplashMs:%2 showAndEventsMs:%3 totalMs:%4")
         .arg(preparationMs).arg(constructorMs).arg(startupPhase.elapsed()).arg(startupClock.elapsed()));
+    markRebuild64LaunchWindowReady();
     const QString visualSequence = qApp->property("workspaceVisualSequence").toString();
     if(!visualSequence.isEmpty())
     {
@@ -4484,8 +4492,10 @@ int main(int argc, char *argv[])
     {
         QTimer::singleShot(0, &window, [&window, startupDocuments]()
         {
+            qApp->setProperty("rebuild64StartupDocumentBatch",true);
             for(const QString& path : startupDocuments)
                 window.openDocument(QFileInfo(path));
+            qApp->setProperty("rebuild64StartupDocumentBatch",false);
             if(qApp->property("terrainStampRegression").toBool())
             {
                 QSharedPointer<int> attempts(new int(0));

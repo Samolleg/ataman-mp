@@ -14987,6 +14987,18 @@ Choose another source or create a MOB without copying settings.</source>
         <source>The template MOB is read-only. Choose a different destination.</source>
         <translation>MOB-шаблон используется только для чтения. Выберите другой файл для сохранения.</translation>
     </message>
+    <message>
+        <source>Генерация миникарты</source>
+        <translation>Генерация миникарты</translation>
+    </message>
+    <message>
+        <source>Генерация миникарты пока требует OpenGL. Выберите OpenGL или нажмите экспорт миникарты.</source>
+        <translation>Генерация миникарты пока требует OpenGL. Выберите OpenGL или нажмите экспорт миникарты.</translation>
+    </message>
+    <message>
+        <source>Восстановление предыдущей сессии</source>
+        <translation>Восстановление предыдущей сессии</translation>
+    </message>
 </context>
     <context>
         <name>MobDiffTerms</name>
@@ -17428,5 +17440,82 @@ Line: %4</source><translation>Вызов:
 <name>AtamanAgent</name>
 <message><source>Agent: create primary MOB</source><translation>ИИ: создать основной MOB</translation></message>
 <message><source>Agent: map position in world</source><translation>ИИ: положение карты в мире</translation></message>
+</context>
+<context>
+    <name>CRebuild64Viewport</name>
+    <message>
+        <source>Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL. Для повторного запуска выберите Rebuild64 в Настройках → Вид карты.</source>
+        <translation>Предыдущая загрузка Rebuild64 завершилась аварийно. Открыт OpenGL. Для повторного запуска выберите Rebuild64 в Настройках → Вид карты.</translation>
+    </message>
+    <message>
+        <source>Откройте карту через меню Файл, недавние документы или карту мира.</source>
+        <translation>Откройте карту через меню Файл, недавние документы или карту мира.</translation>
+    </message>
+    <message>
+        <source>Rebuild64 — %1
+Прошло %2 с. Окно работает. Можно выбрать OpenGL в Настройках → Вид карты.</source>
+        <translation>Rebuild64 — %1
+Прошло %2 с. Окно работает. Можно выбрать OpenGL в Настройках → Вид карты.</translation>
+    </message>
+    <message>
+        <source>Rebuild64 — %1
+Прошло %2 с. Окно работает; OpenGL доступен в Настройках → Вид карты.
+Карта не открыта. Можно выбрать или создать карту через меню Файл.</source>
+        <translation>Rebuild64 — %1
+Прошло %2 с. Окно работает; OpenGL доступен в Настройках → Вид карты.
+Карта не открыта. Можно выбрать или создать карту через меню Файл.</translation>
+    </message>
+    <message>
+        <source>Rebuild64
+Карта не открыта. Откройте или создайте карту через меню Файл.
+Восстановление сохранений и настройки доступны в обычных меню.</source>
+        <translation>Rebuild64
+Карта не открыта. Откройте или создайте карту через меню Файл.
+Восстановление сохранений и настройки доступны в обычных меню.</translation>
+    </message>
+    <message>
+        <source>Открытие карты</source>
+        <translation>Открытие карты</translation>
+    </message>
+    <message>
+        <source>%1 пока требует OpenGL. Открыт OpenGL; документы и правки сохранены. Вернуться можно через Настройки → Вид карты.</source>
+        <translation>%1 пока требует OpenGL. Открыт OpenGL; документы и правки сохранены. Вернуться можно через Настройки → Вид карты.</translation>
+    </message>
+    <message>
+        <source>Для Rebuild64 выберите установленную игру в настройках игры и мода. Правки остаются в документе.</source>
+        <translation>Для Rebuild64 выберите установленную игру в настройках игры и мода. Правки остаются в документе.</translation>
+    </message>
+    <message>
+        <source>Rebuild64: подготовка геометрии соседей для перехода двойным щелчком. Вид карты сохраняется.</source>
+        <translation>Rebuild64: подготовка геометрии соседей для перехода двойным щелчком. Вид карты сохраняется.</translation>
+    </message>
+    <message>
+        <source>Камера изменилась во время подготовки геометрии соседей. Повторите двойной щелчок; правки сохранены.</source>
+        <translation>Камера изменилась во время подготовки геометрии соседей. Повторите двойной щелчок; правки сохранены.</translation>
+    </message>
+    <message>
+        <source>Переход к соседней карте не выполнен: геометрия соседей не готова. Повторите или выберите OpenGL; правки сохранены.</source>
+        <translation>Переход к соседней карте не выполнен: геометрия соседей не готова. Повторите или выберите OpenGL; правки сохранены.</translation>
+    </message>
+    <message>
+        <source>Выделенные персонажи и stst8 пока требуют OpenGL. Выделение и правки сохранены; снимите выделение для перехода в Rebuild64.</source>
+        <translation>Выделенные персонажи и stst8 пока требуют OpenGL. Выделение и правки сохранены; снимите выделение для перехода в Rebuild64.</translation>
+    </message>
+    <message>
+        <source>Редактор завершает работу; новая запись ресурсов отменена.</source>
+        <translation>Редактор завершает работу; новая запись ресурсов отменена.</translation>
+    </message>
+    <message>
+        <source>Освобождение архивов перед сохранением</source>
+        <translation>Освобождение архивов перед сохранением</translation>
+    </message>
+    <message>
+        <source>Rebuild64 освобождает архивы перед сохранением. Окно работает.</source>
+        <translation>Rebuild64 освобождает архивы перед сохранением. Окно работает.</translation>
+    </message>
+    <message>
+        <source>Rebuild64 не освободил архивы за 120 секунд. Сохранение отменено; документы и правки сохранены в памяти.</source>
+        <translation>Rebuild64 не освободил архивы за 120 секунд. Сохранение отменено; документы и правки сохранены в памяти.</translation>
+    </message>
 </context>
 </TS>

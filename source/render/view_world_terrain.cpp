@@ -211,6 +211,7 @@ void CView::refreshWorldTerrainNeighbors()
 
 void CView::chooseWorldTerrainMaps()
 {
+    useLegacyViewport(QString::fromUtf8("Выбор карт для лепки мира"));
     finishSculptStroke();
     if(!m_hasActiveMapWorldOrigin || !m_neighborLayoutStorageWritable
        || !m_pLand->isMprLoad() || !ensureTerrainAutoCatalogReady())

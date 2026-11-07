@@ -204,6 +204,7 @@ class CView : public QGLWidget
     QSharedPointer<CProcessEditLock> m_landEditLease;
     QMap<QString,QSharedPointer<CProcessEditLock>> m_mobEditLeases;
     Q_OBJECT
+    friend class CRebuild64LaunchCheck;
     friend int runDatabasePreviewCheck();
     friend int runScenarioLayerCheck();
     friend int runDiplomacyCheck();
@@ -237,6 +238,10 @@ public:
     ~CView();
     bool prepareForApplicationShutdown();
     void stopForApplicationShutdown();
+    void useLegacyViewport(const QString& action);
+    QVariantList legacyVisualState() const;
+    void ensureLegacyQueryContext();
+    void ensureLegacyWorldResources();
     void suspendRendering() { if(m_timer)m_timer->stop(); }
     void resumeRendering() { if(!m_applicationShutdown && isVisible() && m_timer)m_timer->start(); }
     bool shutdownWorkersFinished() const;
@@ -941,6 +946,7 @@ public slots:
     void exportTerrainPaintDiagnostic();
 
 signals:
+    void legacyViewportRequested(const QString& action);
     void diplomacyMapModeChanged(bool enabled);
     void diplomacyWindowRequested();
     void canvasResizeMobPathsRequested(QStringList* paths);

@@ -1,3 +1,4 @@
+#include "resource_write_lease.h"
 #include "mpr_document.h"
 #include "endurance_document.h"
 #include "map_save_batch.h"
@@ -75,6 +76,10 @@ SMapSaveBatchResult commitMapSaveBatch(const QVector<SMapSaveFile>& input,
         }
         if(!file.existed || (!file.afterFile.isEmpty()?file.beforeSha256!=file.afterSha256:file.before!=file.after)) files.append(file);
     }
+    QStringList resourcePaths;
+    for(const auto& file:files)if(QFileInfo(file.path).suffix().compare("res",Qt::CaseInsensitive)==0)resourcePaths.append(file.path);
+    auto displayLease=resourcePaths.isEmpty()?std::shared_ptr<void>():CResourceWriteLease::acquire(resourcePaths,&result.error);
+    if(!result.error.isEmpty())return result;
     std::vector<std::unique_ptr<QLockFile>> locks;
     std::vector<std::unique_ptr<QSaveFile>> staged;
     for(const auto& file:files) {

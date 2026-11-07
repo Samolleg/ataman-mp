@@ -11,6 +11,7 @@ class CTopdownExport;
 // Human-owned authority and lifetime. No transport operation can enable this server.
 class CAiAgentServer : public QObject {
     Q_OBJECT
+    friend class CRebuild64LaunchCheck;
     friend int runAssemblyCatalogCheck();
 public:
     explicit CAiAgentServer(MainWindow* window);
@@ -49,6 +50,8 @@ private:
     QJsonObject startTopdownExport(const QJsonObject& args);
     QJsonObject startSnapshot();
     void captureSnapshot(const QString& id);
+    void encodeSnapshot(const QString& id, const QImage& image, const QString& revision,
+                        const QJsonObject& context, qint64 captureMs, const QString& kind);
     QJsonObject startEdit(const QString& method,const QJsonObject& args);
     QJsonObject startCommit(const QSharedPointer<ai::EditPlan>& plan,bool snapshot);
     void finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot);

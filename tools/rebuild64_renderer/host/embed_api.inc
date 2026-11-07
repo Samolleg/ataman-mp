@@ -28,7 +28,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
  if(!handle||!in||in->size!=sizeof(*in)||!in->generation||in->terrain.bytes>UINT32_MAX||(in->terrain.bytes&&!in->terrain.data)||in->mob_count>1024||(in->mob_count&&!in->mobs)||!in->terrain_name||in->object_count>10000000||(in->object_count&&!in->objects))
   return eir_error(out,fail(&e,E_INVALIDARG,"invalid memory document"),e);
  return eir_error(out,guarded(&e,[&]{
-  auto& s=*static_cast<Session*>(handle);++s.documentUpdates;
+  auto& s=*static_cast<Session*>(handle);s.trace.phase("document_begin");++s.documentUpdates;
   const auto* terrainBegin=static_cast<const uint8_t*>(in->terrain.data);
   s.holdObjectRefresh=s.terrain && s.terrainName==in->terrain_name && s.terrainBytes.size()==in->terrain.bytes && std::equal(s.terrainBytes.begin(),s.terrainBytes.end(),terrainBegin);
   if(in->terrain.bytes){s.terrainName=in->terrain_name;s.terrainBytes.assign(terrainBegin,terrainBegin+in->terrain.bytes);}else{s.terrainName.clear();s.terrainBytes.clear();}
@@ -117,7 +117,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
   s.water=s.environment=s.objects=true;
   // Content feature bits must not override the file-backed renderer settings.
-  const int result=probe1b_set_features(handle,7,&e);if(!result)owned::AtamanReadiness::quality(s.renderer);return result;
+  const int result=probe1b_set_features(handle,7,&e);if(!result)owned::AtamanReadiness::quality(s.renderer);s.trace.phase("document_end");return result;
  }),e);
 }
 int32_t EIR_CALL host_camera(void* h,const EirCamera* camera,EirError* out) noexcept {

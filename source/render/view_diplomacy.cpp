@@ -32,6 +32,7 @@ bool completeTable(const QVector<QVector<uint>>& table)
 
 void CView::setDiplomacyMapMode(bool enabled)
 {
+    useLegacyViewport(QString::fromUtf8("Карта дипломатии"));
     if(m_diplomacyMapMode == enabled) return;
     cancelPendingOperation();
     m_diplomacyMapMode = enabled;

@@ -13,23 +13,40 @@ class QMenu;
 class QAction;
 class QStackedLayout;
 class QTimer;
+class QLabel;
 class CRebuild64NativeSurface;
 
 // Owns only a display backend. CView remains the document/tool/camera owner.
 class CRebuild64Viewport : public QWidget {
     Q_OBJECT
+    friend class CRebuild64LaunchCheck;
 public:
     explicit CRebuild64Viewport(CView* gl, QMenu* menu, QWidget* parent=nullptr);
     ~CRebuild64Viewport() override;
     bool rebuildSelected() const { return m_selected; }
     bool backendLoaded() const;
+    bool backendPrepared() const;
+    bool backendResourcesRetired() const;
+    void stopForApplicationShutdown();
+    void finishApplicationShutdown();
+    bool applicationShutdownFinished() const;
+    void prepareBackend();
     void selectRebuild(bool selected, bool persist=true);
+    void beginDocumentTransition();
+    void requireOpenGL(const QString& action);
     QString lastFailure() const { return m_failure; }
     EirStatistics statistics() const { return m_statistics; }
+    bool frameIsCurrent() const { return m_selected && !m_documentRefreshPending
+        && m_generation && m_statistics.ready_generation==m_generation; }
     void capture(const QString& path, bool worldOnly=false);
+    void cancelCapture(const QString& path);
+    QImage emptyViewportImage();
 signals:
     void backendFailure(const QString& message);
     void frameCommitted(quint64 generation);
+    void rendererSelectionChanged(bool native);
+    void documentTransitionStarted(quint64 generation);
+    void captureFinished(const QString& path, const QString& error, quint64 generation);
 protected:
     bool eventFilter(QObject*,QEvent*) override;
 private:
@@ -38,19 +55,34 @@ private:
     void fallback(const QString& message);
     void editorInput(QEvent* event);
     void serviceInput();
+    bool editorQueryReady() const;
     void syncEditorViewport();
+    bool beginResourceWrite(QString* error);
+    void endResourceWrite();
+    int m_resourceWriteDepth{0};
+    bool m_stopping{false},m_restartWhenFinished{false};
+    void showPreparation(const QString& phase);
+    void updatePreparationText();
     bool m_pointerDown{false};
+    bool m_legacyNavigationPending{false};
     QImage m_serviceImage;
     double m_serviceMilliseconds{0};
     void movePanels(bool native);
     EirCamera cameraSnapshot();
     CView* m_gl;
     CRebuild64NativeSurface* m_native;
+    QWidget* m_preparation;
+    QLabel* m_preparationText;
+    QString m_preparationPhase;
+    QElapsedTimer m_preparationClock;
     QStackedLayout* m_stack;
     QTimer* m_timer;
     QAction *m_glAction,*m_rebuildAction;
     std::unique_ptr<Worker> m_worker;
+    QByteArray m_backendResourceKey;
+    int m_backendResourcePreparations{0};
     QByteArray m_documentHash;
+    QString m_documentMapPath;
     bool m_transformPreviewMessage{false};
     QByteArray m_documentVisibility;
     QHash<quint64,EirObjectPose> m_documentPoses;

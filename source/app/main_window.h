@@ -107,6 +107,7 @@ class MainWindow : public QMainWindow
     friend class CAiLifecycleCommand;
     friend class CAiAgentServer;
     Q_OBJECT
+    friend class CRebuild64LaunchCheck;
 
 public:
     friend bool travelEditorIntegrationCheck(MainWindow* window);
@@ -128,6 +129,8 @@ public:
     void beginAutosaveCountdown();
     void showRecoverableAutosaves();
     CView* view() const { return m_pView; }
+    bool rebuild64DocumentReady() const { return !m_workspaceLoadInProgress
+        && !backgroundMobLoading() && !m_worldMetadataWatcher; }
 
     void testFunc1();
 

@@ -4,6 +4,7 @@
 
 #include <QCryptographicHash>
 #include <QHash>
+#include <QSet>
 #include <QOpenGLContext>
 #include <QOpenGLExtraFunctions>
 #include <QOpenGLVertexArrayObject>
@@ -240,11 +241,19 @@ void CPart::deferGpuCleanupToContextDestruction()
 
 void CPart::releaseRetainedVertexArrays()
 {
-    for(const auto& mesh: shutdownRetainedMeshes())
-    {
+    // Resource catalogs can still own shared meshes after all map documents
+    // have closed. Their VAOs must retire while the owning widget context is
+    // current, before Qt's context-destruction callbacks create an offscreen
+    // surface for every remaining wrapper. This is final shutdown only.
+    QSet<CSharedPartMesh*> released;
+    const auto release=[&](const QSharedPointer<CSharedPartMesh>& mesh) {
+        if(!mesh || released.contains(mesh.data()))return;
+        released.insert(mesh.data());
         qDeleteAll(mesh->vertexArrays);
         mesh->vertexArrays.clear();
-    }
+    };
+    for(const auto& weak:s_meshCache)release(weak.toStrongRef());
+    for(const auto& mesh:shutdownRetainedMeshes())release(mesh);
 }
 
 int CPart::sharedMeshCount()

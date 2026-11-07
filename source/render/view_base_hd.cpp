@@ -30,6 +30,7 @@ private:
 
 void CView::convertBaseTerrainToHdRequested()
 {
+    useLegacyViewport(QString::fromUtf8("Преобразование Base в HD"));
     QString summary;
     const bool ok=convertBaseTerrainToHd(QDir(QCoreApplication::applicationDirPath()).filePath("hd-library"),
         QRandomGenerator::global()->generate(),&summary,true);

@@ -10,14 +10,20 @@ void CView::ensureUnitSupportSurface()
     const auto revision=CObjectBase::supportGeometryRevision();
     if(m_unitSupportRevision==revision && m_unitSupportMobs==m_aMob)return;
     m_unitSupportSurface.clear();
-    for(CMob* mob:m_aMob) if(mob) for(CNode* node:mob->nodes())
-        if(node && !node->isMarkDeleted()
-           && ei::contributesStaticNavigationCollision(node->nodeType()))
-            if(auto* object=dynamic_cast<CObjectBase*>(node))
-                for(const auto& proxy:object->navigationCollisionProxies())
-                    m_unitSupportSurface.add(proxy);
+    // A resolver can run inside a MOB/node projection loop. Read-only scans
+    // must not detach the live Qt containers while such an iterator exists.
+    const auto mobs = m_aMob;
+    for(CMob* mob:mobs) if(mob) {
+        const auto& nodes=mob->nodes();
+        for(CNode* node:nodes)
+            if(node && !node->isMarkDeleted()
+               && ei::contributesStaticNavigationCollision(node->nodeType()))
+                if(auto* object=dynamic_cast<CObjectBase*>(node))
+                    for(const auto& proxy:object->navigationCollisionProxies())
+                        m_unitSupportSurface.add(proxy);
+    }
     m_unitSupportRevision=revision;
-    m_unitSupportMobs=m_aMob;
+    m_unitSupportMobs=mobs;
 }
 
 bool CView::unitPlacementPositionAt(const QPoint& cursor,QVector3D* position)

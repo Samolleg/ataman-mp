@@ -1,6 +1,8 @@
 #include "ai_agent_server.h"
 #include "main_window.h"
 #include "view.h"
+#include "rebuild64_viewport_widget.h"
+#include <QTemporaryFile>
 #include "landscape.h"
 #include <QtConcurrent>
 #include "log.h"
@@ -9,6 +11,18 @@
 #include "topdown_export.h"
 
 namespace {
+bool nativePlanRequiresLegacy(const ai::EditPlan& plan) {
+    if(QStringList{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","edit_units"}.contains(plan.method))return true;
+    if(plan.method=="edit_objects")for(const auto& value:plan.changes) {
+        auto object=value.toObject()["after"].toObject();
+        if(object.contains("World object"))object=object["World object"].toObject();
+        if(object["Model name"].toString().compare("stst8",Qt::CaseInsensitive)==0)return true;
+    }
+    return false;
+}
+QJsonObject nativePlanRefusal() {
+    return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Эта операция требует OpenGL и не применена. Выберите OpenGL через Настройки → Вид карты; документы и правки сохранены.")}};
+}
 QString agentHistoryPath(){return QDir(QCoreApplication::applicationDirPath()).filePath("logs/agent-workflow.log");}
 QJsonObject headlessAuthority() {
     if(!qApp->property("agentHeadless").toBool())return {};
@@ -346,6 +360,7 @@ QJsonObject CAiAgentServer::startJob(const QString& method,const QJsonObject& ar
 QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& args)
 {
     if(qApp->property("agentHeadlessClosing").toBool())return ai::error("Background mapper is shutting down; reconnect on demand");
+    if(m_window&&m_window->m_shutdownInProgress)return ai::error(QString::fromUtf8("Редактор завершает работу. Повторите подключение после запуска; документы и сохранения не менялись."));
     const auto authority=headlessAuthority();
     if(!authority.isEmpty()) {
         if(authority["mode"].toInt()==0)return ai::error(QString::fromUtf8("Владелец выключил доступ агентов в доке"));
@@ -361,6 +376,17 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
         }
         return ai::error("Normal map commit in progress; retry after operation_status");
     }
+    // Native startup no longer paints an invisible GL world. Materialize the
+    // canonical CPU terrain model at the first MCP document query/edit.
+    if(method!="operation_status" && method!="cancel_operation" && m_view
+       && m_view->property("rebuild64Selected").toBool() && CLandscape::getInstance()->isMprLoad() && !m_view->m_terrainEditAvailable
+       && !CAiEditAdapter::busy(m_window))m_view->ensureTerrainAutoCatalogReady();
+    const QSet<QString> legacyTerrainTools{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"};
+    const auto requestedTool=method=="preview"?args["tool"].toString():method;
+    if(m_view && m_view->property("rebuild64Selected").toBool() && legacyTerrainTools.contains(requestedTool))
+        return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Изменение рельефа, текстур, воды и дорог пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
+    if(m_view && m_view->property("rebuild64Selected").toBool() && method=="edit_units")
+        return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Правки персонажей, appearance и stst8 пока требуют OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
     if(method=="get_revision")return {{"revision",CAiEditAdapter::revision(m_window)},{"mode",m_mode->currentIndex()==2?"edit":"read-only"},{"allowSave",m_mode->currentIndex()==2&&m_allowSave->isChecked()}};
     const QSet<QString> mutations{"edit_units","edit_objects","rebuild_ai_graph","create_map","open_map","close_map","place_map_in_world","set_world_position","create_mob","sculpt","paint","generate_terrain","erode","carve_river","auto_paint","preview","apply","undo_last_agent_operation","save"};
     if(mutations.contains(method)) {
@@ -374,6 +400,8 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
             const auto id=args["operation"].toString();
             if(!m_jobs.contains(id)||m_jobs[id].owner!=m_currentClient||!m_jobs[id].plan)return ai::error("No completed preview owned by this connection");
             auto plan=m_jobs[id].plan;
+            if(m_view && m_view->property("rebuild64Selected").toBool() && nativePlanRequiresLegacy(*plan))
+                return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Этот предпросмотр требует OpenGL. План сохранён; выберите OpenGL для применения или отмените операцию.")}};
             if(args["revision"].toString()!=plan->revision||CAiEditAdapter::revision(m_window)!=plan->revision)return ai::error("Document revision conflict; prepare a new preview");
             m_jobs.remove(id);return startCommit(plan,args["snapshot"].toBool());
         }
@@ -437,23 +465,50 @@ void CAiAgentServer::captureSnapshot(const QString& id)
     const auto fail=[&](QString code,QString reason){job.result={{"code",code},{"error",reason},{"phase",job.phase},{"deadlineMs",30000}};job.markComplete();job.finishedAt=QDateTime::currentDateTimeUtc();};
     if(job.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000){fail("SNAPSHOT_TIMEOUT","Snapshot preparation exceeded 30 seconds");return;}
     if(CAiEditAdapter::busy(m_window)||m_committing){fail("BUSY","Map loading/interaction in progress");return;}
-    if(!m_view||!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport GL context unavailable");return;}
-    job.phase="capturing";QElapsedTimer timer;timer.start();
     const auto revision=CAiEditAdapter::revision(m_window);const auto context=CAiReadAdapter::context(m_window);
-    QString error;
+    if(auto* native=m_window->findChild<CRebuild64Viewport*>())if(native->rebuildSelected()) {
+        const auto empty=native->emptyViewportImage();
+        if(!empty.isNull()){encodeSnapshot(id,empty,revision,context,0,"Qt Rebuild64 viewport without an open map; no world frame");return;}
+        if(!native->frameIsCurrent()){fail("BUSY",QString::fromUtf8("Rebuild64 готовит кадр открытой карты; повторите снимок после загрузки."));return;}
+        auto file=QSharedPointer<QTemporaryFile>::create(QDir::tempPath()+"/rebuild64-snapshot-XXXXXX.png");
+        if(!file->open()){fail("SNAPSHOT_IO",file->errorString());return;}
+        const auto path=file->fileName();file->close();job.phase="capturing";
+        auto connection=QSharedPointer<QMetaObject::Connection>::create();QElapsedTimer timer;timer.start();
+        *connection=connect(native,&CRebuild64Viewport::captureFinished,this,[this,id,path,file,connection,revision,context,timer](const QString& result,const QString& error,quint64){
+            if(result!=path)return;disconnect(*connection);
+            if(!m_jobs.contains(id)||m_jobs[id].complete)return;
+            if(!error.isEmpty()){auto& j=m_jobs[id];j.result={{"code","RENDER_UNAVAILABLE"},{"error",error}};j.markComplete();return;}
+            encodeSnapshot(id,QImage(path),revision,context,timer.elapsed(),"Rebuild64 accepted native frame and editor service; own GPU readback");
+        });
+        QTimer::singleShot(30000,this,[this,id,file,connection,path,native=QPointer<CRebuild64Viewport>(native)]{
+            if(native)native->cancelCapture(path);disconnect(*connection);
+            if(m_jobs.contains(id)&&!m_jobs[id].complete){auto& j=m_jobs[id];j.result={{"code","SNAPSHOT_TIMEOUT"},{"error","Native snapshot deadline exceeded"}};j.markComplete();}
+        });
+        native->capture(path);return;
+    }
+    if(!m_view||!m_view->isValid()){fail("RENDER_UNAVAILABLE","Owning viewport GL context unavailable");return;}
+    job.phase="capturing";QElapsedTimer timer;timer.start();QString error;
     const auto image=m_view->captureTopdownPass(ETopdownPass::None,m_view->size().scaled(1024,768,Qt::KeepAspectRatio),{},&error);
-    const qint64 captureMs=timer.elapsed();
     if(image.isNull()){fail("RENDER_UNAVAILABLE",error);return;}
+    encodeSnapshot(id,image,revision,context,timer.elapsed(),"current GL viewport; fresh owning-context FBO");
+}
+void CAiAgentServer::encodeSnapshot(const QString& id,const QImage& image,const QString& revision,
+                                  const QJsonObject& context,qint64 captureMs,const QString& kind)
+{
+    if(!m_jobs.contains(id)||m_jobs[id].complete)return;
+    auto& job=m_jobs[id];
+    const auto fail=[&](QString code,QString reason){job.result={{"code",code},{"error",reason}};job.markComplete();job.finishedAt=QDateTime::currentDateTimeUtc();};
+    if(image.isNull()){fail("RENDER_UNAVAILABLE","Frame readback is empty");return;}
     if(CAiEditAdapter::revision(m_window)!=revision){fail("REVISION_CONFLICT","Document changed during snapshot");return;}
     if(job.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000){fail("SNAPSHOT_TIMEOUT","Snapshot capture exceeded 30 seconds");return;}
     job.phase="encoding";const auto cancel=job.cancel;
     auto* watcher=new QFutureWatcher<QJsonObject>(this);job.watcher=watcher;
-    connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher,revision,context,captureMs](){
+    connect(watcher,&QFutureWatcher<QJsonObject>::finished,this,[this,id,watcher,revision,context,captureMs,kind](){
         if(m_jobs.contains(id)&&!m_jobs[id].complete) {
             auto& j=m_jobs[id];auto result=watcher->result();
             if(j.created.msecsTo(QDateTime::currentDateTimeUtc())>=30000)result={{"code","SNAPSHOT_TIMEOUT"},{"error","Snapshot encoding exceeded 30 seconds"},{"phase","encoding"}};
             result["capturedRevision"]=revision;result["profile"]=context["profile"];result["map"]=context["mpr"];
-            result["captureKind"]="current GL viewport; fresh owning-context FBO";
+            result["captureKind"]=kind;
             result["timingsMs"]=QJsonObject{{"capture",double(captureMs)},{"total",double(j.created.msecsTo(QDateTime::currentDateTimeUtc()))}};
             j.result=result;j.markComplete();j.phase="complete";j.finishedAt=QDateTime::currentDateTimeUtc();j.watcher=nullptr;
         }
@@ -463,6 +518,8 @@ void CAiAgentServer::captureSnapshot(const QString& id)
 }
 QJsonObject CAiAgentServer::startTopdownExport(const QJsonObject& args)
 {
+    if(m_view && m_view->property("rebuild64Selected").toBool())
+        return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Экспорт карты сверху пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};
     prune();if(m_jobs.size()>=8)return ai::error("Operation limit 8; cancel or wait for expiry");
     int running=0;for(const auto& job:m_jobs){if(!job.complete)++running;if(job.topdown&&!job.complete)return ai::error("A topdown export is already running");}
     if(running>=2)return ai::error("Two reads already running");
@@ -495,6 +552,7 @@ public:
 }
 QJsonObject CAiAgentServer::startCommit(const QSharedPointer<ai::EditPlan>& plan,bool snapshot)
 {
+    if(m_view&&m_view->property("rebuild64Selected").toBool()&&nativePlanRequiresLegacy(*plan))return nativePlanRefusal();
     prune();if(m_jobs.size()>=8)return ai::error("Operation limit 8; cancel or wait for expiry");
     for(const auto& job:m_jobs)if(job.edit&&!job.complete)return ai::error("A writer operation is already running");
     const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);Job job;job.edit=true;job.owner=m_currentClient;
@@ -504,6 +562,12 @@ QJsonObject CAiAgentServer::startCommit(const QSharedPointer<ai::EditPlan>& plan
 void CAiAgentServer::finishCommit(const QString& id,const QSharedPointer<ai::EditPlan>& plan,bool snapshot)
 {
     if(!m_jobs.contains(id)||m_jobs[id].cancel->load()||!m_jobs[id].owner||!m_view||!m_window)return;
+    // The renderer can change while an immutable plan is prepared or queued.
+    // Enforce the same capability again at the actual mutation boundary.
+    if(m_view->property("rebuild64Selected").toBool()&&nativePlanRequiresLegacy(*plan)) {
+        m_jobs[id].result=nativePlanRefusal();m_jobs[id].markComplete();
+        m_lastActivity=QDateTime::currentMSecsSinceEpoch();event(m_jobs[id].result["error"].toString());return;
+    }
     m_jobs[id].committing=true;
     QStringList targets;
     if(plan->method=="save")targets=m_view->m_worldTerrainSession.dirtyPaths();

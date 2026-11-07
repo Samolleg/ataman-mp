@@ -201,7 +201,7 @@ QJsonObject CAiReadAdapter::context(MainWindow* w)
             {"origin",QJsonArray{n.worldOrigin.x(),n.worldOrigin.y()}},{"size",QJsonArray{n.size.width(),n.size.height()}}});
     }
     const auto* profileOption=dynamic_cast<COptString*>(w->m_settings->opt(eOptSetResource,"resourceProfile"));
-    return {{"version",ENDURANCE_VERSION},{"mode","read-only"},{"profile",profileOption?profileOption->value():(profile?profile->profileId:QString())},
+    return {{"renderer",v->property("rebuild64Selected").toBool()?"Rebuild64":"OpenGL"},{"version",ENDURANCE_VERSION},{"mode","read-only"},{"profile",profileOption?profileOption->value():(profile?profile->profileId:QString())},
         {"mpr",CLandscape::getInstance()->isMprLoad()?CLandscape::getInstance()->filePath().absoluteFilePath():QString()},{"mobs",mobs},
         {"saveRecoveryWarnings",QJsonArray::fromStringList(qApp->property("mapSaveRecoveryWarnings").toStringList())},
         {"loadingAddMobs",w->backgroundMobLoading()},{"neighborLoadStage",v->property("neighborLoadPhase").toInt()},
@@ -249,6 +249,7 @@ QJsonObject CAiReadAdapter::read(MainWindow* w,const QString& method,const QJson
         QJsonObject out{{"objects",rows},{"scanned",scanned}};if(more)out.insert("nextOffset",index-1);return out;
     }
     if(method=="window_snapshot") {
+        if(v->property("rebuild64Selected").toBool())return {{"code","SNAPSHOT_ASYNC_REQUIRED"},{"error",QString::fromUtf8("Кадр Rebuild64 получается асинхронно. После операции вызовите window_snapshot; GL-кадр не подставляется.")}};
         // Optional post-edit snapshot uses the same fresh owning-context path.
         // Public window_snapshot is dispatched as an asynchronous server job.
         QString error;auto image=v->captureTopdownPass(ETopdownPass::None,v->size().scaled(1024,768,Qt::KeepAspectRatio),{},&error);

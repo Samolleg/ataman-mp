@@ -51,8 +51,13 @@ void CView::startNeighborLoadStage(quint64 generation)
     while(m_neighborLoadNext<m_neighborPlacements.size()) {
         const auto placement=m_neighborPlacements[m_neighborLoadNext++];
         const bool touches=CNeighborMapLayout::touchesActiveMap(activeSize,placement);
+        // Touching query geometry remains necessary for the shared editor's
+        // picking/service depth. Far GL-only scenery is deferred in native mode.
+        if(!touches && property("rebuild64Selected").toBool()
+           && !property("rebuild64LegacyNeighborsDemanded").toBool())continue;
         if(touches!=(m_neighborLoadStage!=3))continue;
         const bool objects=m_neighborLoadStage==2;
+        if(objects && property("rebuild64Selected").toBool())continue;
         const auto terrainFingerprint=neighborTerrainFingerprint(placement.mprPath,neighborResourceFingerprint());
         const auto objectFingerprint=objects?neighborContentFingerprint(placement.mobPath)+neighborObjectResourceFingerprint():QByteArray();
         int visible=-1;

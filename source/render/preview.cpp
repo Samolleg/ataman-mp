@@ -83,6 +83,12 @@ void CPreview::resizeGL(int width, int height)
     m_projection.perspective(45, ratio, 0.02f, 1000.0f);
 }
 
+void CPreview::showEvent(QShowEvent* event)
+{
+    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("GL-предпросмотр модели"));
+    QGLWidget::showEvent(event);
+}
+
 void CPreview::paintGL()
 {
     makeCurrent();

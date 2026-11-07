@@ -1,3 +1,4 @@
+#include "rebuild64_launch_check.h"
 #include <functional>
 #include "rebuild64_viewport_widget.h"
 #include "window_geometry.h"
@@ -833,6 +834,7 @@ MainWindow::MainWindow(QWidget* parent) :
     startup.mark("icons");
 
     m_settings.reset(new CSettings(this));
+    applyRebuild64LaunchFixture(*m_settings);
     startup.mark("settings");
     m_selector.reset(new CSelectForm(this));
     m_createDialog.reset(new CCreateObjectForm(this));
@@ -1567,6 +1569,7 @@ MainWindow::MainWindow(QWidget* parent) :
     // wizard later allowed initializeGL() to run against empty legacy settings.
     if(firstRunSetup && !qApp->property("agentHeadless").toBool())
         showGameAndModSetup();
+    applyRebuild64LaunchFixture(*m_settings);
 
     if(m_resourceBrowser)
     {
@@ -1910,7 +1913,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(m_viewportMinimap, &CViewportMinimapWidget::sizeModeChanged,
             this, &MainWindow::positionViewportMinimap);
     connect(m_viewportMinimap, &CViewportMinimapWidget::regenerationRequested,
-            this, [this]() { scheduleViewportMinimapRefresh(0, true); });
+            this, [this]() { m_pView->useLegacyViewport(tr("Генерация миникарты")); scheduleViewportMinimapRefresh(0, true); });
     connect(m_viewportMinimap, &CViewportMinimapWidget::generationLockRequested,
             this, &MainWindow::setMinimapGenerationLocked);
     connect(m_viewportMinimap, &CViewportMinimapWidget::cameraMoveRequested,
@@ -2448,12 +2451,14 @@ MainWindow::MainWindow(QWidget* parent) :
             ready->setFuture(QtConcurrent::run([changed](){for(const auto& path:changed)neighborFileSha256(path);return true;}));
         });poll->start();
     }
+    if(auto* native=findChild<CRebuild64Viewport*>())native->prepareBackend();
 //    if(m_pView->isRecentAvailable())
 //        m_ui->actionOpen_recent->setEnabled(true);
 }
 
 MainWindow::~MainWindow()
 {
+    if(auto* native=findChild<CRebuild64Viewport*>())native->finishApplicationShutdown();
     qApp->removeEventFilter(m_navBakeQuitFilter);
     cancelBackgroundMobs();
     if(m_aiAgent)m_aiAgent->stop();
@@ -2485,6 +2490,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::showUnitTexturePreview()
 {
+    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("Предпросмотр текстур персонажа"));
     if(!m_unitTextureDialog)
     {
         m_unitTextureDialog = new QDialog(this);
@@ -4477,7 +4483,11 @@ void MainWindow::createViewportToolbars()
     m_ui->toolsLayout->setSpacing(0);
 
     m_ui->workSpaceLayout->addWidget(testBar);
-    m_ui->workSpaceLayout->addWidget(new CRebuild64Viewport(m_pView, m_ui->menuSettings, m_ui->centralWidget), 1);
+    auto* renderer=new CRebuild64Viewport(m_pView,m_ui->menuSettings,m_ui->centralWidget);
+    m_ui->workSpaceLayout->addWidget(renderer,1);
+    connect(renderer,&CRebuild64Viewport::rendererSelectionChanged,this,[this](bool native){
+        if(!native)scheduleViewportMinimapRefresh(0);
+    });
     m_ui->workSpaceLayout->addWidget(operationBar);
 
     connect(m_entranceCombo, QOverload<int>::of(&QComboBox::activated), this,
@@ -5351,6 +5361,12 @@ void MainWindow::refreshViewportMinimapSources()
 
 void MainWindow::refreshViewportMinimap()
 {
+    if(m_pView && m_pView->property("rebuild64Selected").toBool()) {
+        m_minimapNeedsRefresh=true;
+        if(m_viewportMinimap)m_viewportMinimap->clearGeneratedPreview(
+            tr("Генерация миникарты пока требует OpenGL. Выберите OpenGL или нажмите экспорт миникарты."));
+        return;
+    }
     if(m_minimapCaptureRunning || !m_pView || !m_viewportMinimap
        || !CLandscape::getInstance()->isMprLoad()
        || m_mapTestEntry.isBriefing() || m_minimapGenerationLocked)
@@ -7104,7 +7120,10 @@ void MainWindow::loadLastSession()
 {
     if(!m_pView)
         return;
+    const bool native=m_pView->property("rebuild64Selected").toBool();
+    if(native&&!beginWorkspaceLoad(tr("Восстановление предыдущей сессии")))return;
     m_pView->loadSession();
+    if(native)endWorkspaceLoad();
     if(!CLandscape::getInstance()->isMprLoad())
         return;
     setWorkspaceIdentity(m_pView->sessionWorkspaceKind(),
@@ -7893,6 +7912,7 @@ bool MainWindow::beginWorkspaceLoad(const QString& description)
     if(m_workspaceLoadInProgress || m_backgroundMobAttaching)
         return false;
     cancelBackgroundMobs();
+    if(auto* native=findChild<CRebuild64Viewport*>())native->beginDocumentTransition();
     if(m_pView)m_pView->deferNeighborLoading(true);
     m_workspaceLoadInProgress = true;
     if(m_pView)
@@ -8166,6 +8186,7 @@ bool MainWindow::isDatabaseExitAllowed()
 
 void MainWindow::closeAll()
 {
+    if(auto* native=findChild<CRebuild64Viewport*>())native->beginDocumentTransition();
     if(m_backgroundMobAttaching)return;
     if(isExitAllowed())
     {
@@ -9677,6 +9698,7 @@ void MainWindow::on_actionOpen_MOB_triggered()
 
 void MainWindow::on_actionSettings_triggered()
 {
+    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("Параметры изображения OpenGL"));
 }
 
 void MainWindow::on_actionSave_as_triggered()
@@ -9771,6 +9793,7 @@ void MainWindow::on_actionDuplicate_selected_objects_triggered()
 
 void MainWindow::on_actionCreate_new_object_triggered()
 {
+    if(m_pView)m_pView->useLegacyViewport(QString::fromUtf8("GL-предпросмотр нового объекта"));
     if(!m_pView || !m_pView->hasActiveMob())
     {
         statusBar()->showMessage(tr("Open or activate a MOB before creating an object."), 4000);
@@ -10007,6 +10030,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
         if(m_validationTimer)m_validationTimer->stop();
         if(m_minimapRefreshTimer)m_minimapRefreshTimer->stop();
         if(m_minimapCameraTimer)m_minimapCameraTimer->stop();
+        if(auto* native=findChild<CRebuild64Viewport*>())native->stopForApplicationShutdown();
         m_pView->stopForApplicationShutdown();
         auto* progress=new QProgressDialog(tr("Finishing background tasks..."),QString(),0,0,this);
         progress->setObjectName("shutdownTasksProgress");progress->setCancelButton(nullptr);
@@ -10014,7 +10038,8 @@ void MainWindow::closeEvent(QCloseEvent *e)
         auto elapsed=std::make_shared<QElapsedTimer>();elapsed->start();
         auto* poll=new QTimer(progress);poll->setInterval(50);
         connect(poll,&QTimer::timeout,this,[this,progress,poll,elapsed]() {
-            if(m_pView->shutdownWorkersFinished() && QThreadPool::globalInstance()->activeThreadCount()==0
+            const auto* native=findChild<CRebuild64Viewport*>();
+            if(m_pView->shutdownWorkersFinished() && (!native||native->applicationShutdownFinished()) && QThreadPool::globalInstance()->activeThreadCount()==0
                && CFileWriteActivity::active()==0) {
                 poll->stop();progress->deleteLater();m_closeWaiting=false;m_closeReady=true;
                 ei::log(eLogInfo,QString("Shutdown background tasks complete elapsedMs:%1").arg(elapsed->elapsed()));

@@ -152,7 +152,7 @@ HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* s
   context->CopyResource(s.rawAccepted.Get(),source);
   context->CopyResource(next.Get(),back.Get());
   hr=s.display->Present(0,0);if(FAILED(hr))return hr;
-  tracePixels=s.trace.presented(s.generation,owned::AtamanReadiness::neighbours(s.renderer),s.frameCamera.neighbours_visible,s.pending,owned::neighbour_client_settled(s.world));
+  tracePixels=s.trace.presented(s.generation,owned::AtamanReadiness::neighbours(s.renderer),s.frameCamera.neighbours_visible,s.pending,owned::neighbour_client_settled(s.world),s.terrainName.c_str());
  }
  if(tracePixels)capture_presented_trace(&s,next.Get());
  s.accepted=std::move(next);s.readyGeneration=s.generation;s.acceptedServiceSerial=s.service.generation==s.generation?s.service.serial:0;s.acceptedServiceCpuMs=s.service.cpuMs;s.acceptedCompositeMs=compositeMs;return s.device->GetDeviceRemovedReason();
@@ -171,14 +171,20 @@ int32_t __cdecl probe1b_create(const probe1b_create_info* in,void** out,probe1b_
   auto s=std::make_unique<Session>();s->rendererIni=in->ini;
   s->hidden.value=CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,L"STATIC",L"",WS_POPUP,-32000,-32000,int(in->width),int(in->height),nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
   if(!s->hidden.value||IsWindowVisible(s->hidden.value))return fail(e,E_FAIL,"cannot create hidden renderer surface");s->width=in->width;s->height=in->height;for(uint32_t i=0;i<in->loose_count;++i)s->mounts.loose_roots.emplace_back(in->loose[i]);for(uint32_t i=0;i<in->archive_count;++i)s->mounts.archives.emplace_back(in->archives[i]);if(in->archive_kinds)s->mounts.archive_kinds.assign(in->archive_kinds,in->archive_kinds+in->archive_count);
+  s->trace.phase("device_begin");
   const D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_0};D3D_FEATURE_LEVEL level;
   HRESULT hr=in->test_failure==1?DXGI_ERROR_UNSUPPORTED:D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT|D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,levels,1,D3D11_SDK_VERSION,&s->device,&level,&s->context);
   if(FAILED(hr))return fail(e,hr,"D3D11CreateDevice hardware");
   ComPtr<IDXGIDevice> dxgi;ComPtr<IDXGIAdapter> adapter;if(SUCCEEDED(s->device.As(&dxgi))&&SUCCEEDED(dxgi->GetAdapter(&adapter))){DXGI_ADAPTER_DESC desc{};adapter->GetDesc(&desc);std::printf("adapter=%ls\n",desc.Description);std::fflush(stdout);}
   hr=s->renderer.adopt_host_device(s->device.Get(),s->context.Get(),s->width,s->height);if(FAILED(hr))return fail(e,hr,"adopt_host_device");
   if(!owned::AtamanReadiness::load(s->renderer,in->ini))return fail(e,E_FAIL,"read copied Rebuild64 configuration");
+  s->trace.phase("shader_prepare_begin");
+#ifdef EID3D11_EMBEDDED
+  if(in->test_failure==3)Sleep(3000); // isolated responsiveness injection, never a shader timing sample
+#endif
   std::puts("before ensure_host");std::fflush(stdout);
   hr=in->test_failure==2?E_FAIL:s->renderer.ensure_host(s->hidden.value,s->width,s->height);if(FAILED(hr))return fail(e,hr,"ensure_host");
+  s->trace.phase("shader_prepare_end");
   s->neighboursConfigured=owned::AtamanReadiness::neighboursEnabled(s->renderer);s->neighboursRequested=s->neighboursConfigured;
   owned::AtamanReadiness::quality(s->renderer);owned::AtamanReadiness::settings(s->renderer);
   ComPtr<IDXGIDevice> dx;ComPtr<IDXGIAdapter> ad;ComPtr<IDXGIFactory> factory;

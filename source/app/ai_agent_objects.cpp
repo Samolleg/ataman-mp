@@ -271,6 +271,9 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
         }
         for(auto* n:mob->nodes()){
             auto r=row(mob,n);auto data=r["data"].toObject();
+            if(edit && method=="edit_objects" && v->property("rebuild64Selected").toBool()
+               && selected(r,args) && n->modelName().compare("stst8",Qt::CaseInsensitive)==0)
+                return fail(QString::fromUtf8("Правки stst8 пока требуют OpenGL. Выберите OpenGL через Настройки → Вид карты; правки сохранены."));
             if(n->nodeType()==eUnit){r["prototype"]=data["Prototype name"];r["absoluteHeight"]=v->m_terrainEdit.terrainSurfaceHeight(n->position().x(),n->position().y())+n->position().z();}
             if(templates.contains(n)){
                 const auto source=templates[n].first,clean=templates[n].second;
@@ -314,6 +317,8 @@ ai::EditPlan CAiEditAdapter::captureObjects(MainWindow* w,const QString& method,
             if(it->typeId>=50&&it->typeId<=52)return fail("Units are read-only in272; unit placement is refused");
             if(it->typeId!=54)return fail("Prototype is not a static world object (database type54); units and other record types are refused in272");
             if(it->primaryTextures.isEmpty())return fail("Static prototype has no installed authored texture binding; choose/bind it in the manual model catalog first");
+            if(v->property("rebuild64Selected").toBool() && it->model.compare("stst8",Qt::CaseInsensitive)==0)
+                return fail(QString::fromUtf8("Расстановка stst8 пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; правки сохранены."));
             CWorldObj defaults;auto data=defaults.toJson();
             data["Model name"]=it->model;data["Object template"]=it->name;
             data["Primary texture"]=it->primaryTextures.value(0);data["Secondary texture"]=it->secondaryTextures.value(0,"default0");

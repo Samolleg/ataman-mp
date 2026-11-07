@@ -1966,6 +1966,7 @@ void CView::attachLandscapeTools(CLandscapeTools* tools)
 
 void CView::setDrawWater(bool bDraw)
 {
+    if(m_bDrawWater != bDraw)useLegacyViewport(QString::fromUtf8("Видимость overlay и воды"));
     if(m_bDrawWater == bDraw)
     {
         syncVisualChannelButtons();
@@ -1981,6 +1982,7 @@ void CView::setDrawWater(bool bDraw)
 
 void CView::setDrawLand(bool bDraw)
 {
+    if(m_bDrawLand != bDraw)useLegacyViewport(QString::fromUtf8("Видимость главной поверхности"));
     if(m_bDrawLand == bDraw)
     {
         syncVisualChannelButtons();
@@ -2002,6 +2004,7 @@ void CView::activateLandscapeTilePainting()
 
 void CView::prepareLandscapeTilePainting(bool showTools)
 {
+    useLegacyViewport(QString::fromUtf8("Рисование плиток"));
     if(!m_landscapeTools)
         return;
     ensureTerrainAutoCatalogReady();
@@ -2017,6 +2020,7 @@ void CView::prepareLandscapeTilePainting(bool showTools)
 
 void CView::setLandscapeEditingEnabled(bool enabled)
 {
+    if(enabled)useLegacyViewport(QString::fromUtf8("Кисти рельефа"));
     if(m_landscapeTools)
         m_landscapeTools->setEditingEnabled(enabled, false);
     if(!enabled)
@@ -2059,6 +2063,8 @@ void CView::closeLandscapeTools()
 
 void CView::syncLandscapeToolState()
 {
+    if(m_landscapeTools && m_landscapeTools->editingEnabled())
+        useLegacyViewport(QString::fromUtf8("Кисти рельефа"));
     if(m_landscapeGestureButtons != Qt::NoButton)
         m_landscapeGestureInterrupted = true;
     cancelTileBrushGroup();
@@ -2883,6 +2889,7 @@ void CView::initEnvironmentPreviewWidget()
     {
         if(m_environmentPreviewSyncing || !m_pSettings)
             return;
+        useLegacyViewport(QString::fromUtf8("Модель освещения OpenGL"));
         if(COptInt* option = dynamic_cast<COptInt*>(m_pSettings->opt("renderLightingMode")))
             option->setValue(qBound(0, index, 2));
         m_pSettings->persistOptions();
@@ -3052,6 +3059,9 @@ void CView::initEnvironmentPreviewWidget()
 
 void CView::persistViewportVisualState()
 {
+    if(property("rebuild64Selected").toBool()
+       && property("nativeLegacyVisualState").toList()!=legacyVisualState())
+        useLegacyViewport(QString::fromUtf8("Каналы изображения OpenGL"));
     QSettings settings;
     settings.setValue("ui/viewportVisuals/worldTileSnap",m_worldTileSnapEnabled);
     settings.setValue(QStringLiteral("ui/viewportVisuals/entrances"),
@@ -3385,6 +3395,7 @@ void CView::retainActiveLandscape()
 
 void CView::retainActiveNeighborObjects(CMob* mob)
 {
+    if(property("rebuild64Selected").toBool())return;
     if(!mob || !m_pLand->isMprLoad() || m_applicationShutdown || !isValid())return;
     if(mob->isDirty())return; // the MOB close prompt may have explicitly discarded local edits
     // Only the registered primary MOB of this map can become its background.
@@ -5093,6 +5104,42 @@ void CView::initializeGL()
     initShaders();
     startup.mark("shaders");
     logOpenGlDiagnosticState(QStringLiteral("initialize/shaders"));
+    if(!property("rebuild64Selected").toBool())ensureLegacyWorldResources();
+
+    CTextureList::getInstance()->initResource();
+    startup.mark("skyShadowsTextures");
+    CObjectList::getInstance()->initResource();
+    startup.mark("objects");
+    // Qt 5.12's ANGLE backend does not implement QOpenGLTimerQuery. Calling
+    // create() there emits "Not supported on OpenGL ES" and corrupts the
+    // platform query object's teardown state (observed as c0000374 in
+    // ntdll immediately after initializeGL). Do not construct the wrapper at
+    // all on GLES; CPU submission counters remain available.
+    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
+    if(currentContext && currentContext->isOpenGLES())
+    {
+        m_gpuTimer = nullptr;
+        ei::log(eLogInfo,
+                "GPU timer queries disabled on OpenGL ES/ANGLE");
+    }
+    else
+    {
+        m_gpuTimer = new QOpenGLTimerQuery(this);
+        if(!m_gpuTimer->create())
+        {
+            delete m_gpuTimer;
+            m_gpuTimer = nullptr;
+            ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
+        }
+    }
+    ei::setCrashContext("idle");
+    //doneCurrent();
+}
+
+void CView::ensureLegacyWorldResources()
+{
+    if(property("legacyWorldResourcesReady").toBool())return;
+    makeCurrent();
     m_skyBuffer.create();
     m_skyBuffer.setUsagePattern(QOpenGLBuffer::StaticDraw);
     ei::log(eLogInfo, "Particle GL subsystem deferred until a visible effect is submitted");
@@ -5129,35 +5176,7 @@ void CView::initializeGL()
     QOpenGLFramebufferObject::bindDefault();
     m_shadowUpdateTimer.start();
     logOpenGlDiagnosticState(QStringLiteral("initialize/shadow-framebuffers"));
-
-    CTextureList::getInstance()->initResource();
-    startup.mark("skyShadowsTextures");
-    CObjectList::getInstance()->initResource();
-    startup.mark("objects");
-    // Qt 5.12's ANGLE backend does not implement QOpenGLTimerQuery. Calling
-    // create() there emits "Not supported on OpenGL ES" and corrupts the
-    // platform query object's teardown state (observed as c0000374 in
-    // ntdll immediately after initializeGL). Do not construct the wrapper at
-    // all on GLES; CPU submission counters remain available.
-    const QOpenGLContext* currentContext = QOpenGLContext::currentContext();
-    if(currentContext && currentContext->isOpenGLES())
-    {
-        m_gpuTimer = nullptr;
-        ei::log(eLogInfo,
-                "GPU timer queries disabled on OpenGL ES/ANGLE");
-    }
-    else
-    {
-        m_gpuTimer = new QOpenGLTimerQuery(this);
-        if(!m_gpuTimer->create())
-        {
-            delete m_gpuTimer;
-            m_gpuTimer = nullptr;
-            ei::log(eLogWarning, "GPU timer queries are unavailable; render counters will report CPU submission only");
-        }
-    }
-    ei::setCrashContext("idle");
-    //doneCurrent();
+    setProperty("legacyWorldResourcesReady",true);
 }
 
 void CView::resizeGL(int width, int height)
@@ -5868,6 +5887,7 @@ bool CView::renderShadowMap(const QVector3D& cameraPosition,
 
 QString CView::captureShadowDiagnostics(QString* error)
 {
+    useLegacyViewport(QString::fromUtf8("Диагностика теней"));
     if(error)
         error->clear();
     if(!m_shadowInitialized || !m_shadowFbo || !m_dynamicShadowFbo
@@ -9245,6 +9265,7 @@ void CView::draw(SFramePresentationTelemetry* frameTelemetry)
 SMinimapSceneCaptureResult CView::captureMinimapScene(
     bool includeLoadedStaticGeometry, int targetTextureSize, bool finishBake)
 {
+    useLegacyViewport(QString::fromUtf8("Генерация миникарты"));
     SMinimapSceneCaptureResult result;
     result.targetTextureSize = targetTextureSize;
     result.framingDescription = tr(
@@ -9451,6 +9472,7 @@ SMinimapSceneCaptureResult CView::finishMinimapSceneCapture(SMinimapSceneCapture
 
 void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
 {
+    if(property("rebuild64Selected").toBool())ensureLegacyQueryContext();
     QString leaseError;auto lease=CProcessEditLock::acquire(filePath.absoluteFilePath(),&leaseError);
     if(!lease){setProperty("documentLockError",leaseError);emit updateMsg(leaseError);ei::log(eLogWarning,leaseError);return;}
     setProperty("documentLockError",QString());
@@ -10026,7 +10048,11 @@ bool CView::ensureTerrainAutoCatalogReady()
     }
     const qint64 archiveBindingMs = phaseTimer.elapsed();
 
-    for(CMob* mob : m_aMob)
+    // Unit projection calls ensureUnitSupportSurface(), which caches/shares
+    // the MOB vector. Keep a const snapshot across that nested read so Qt's
+    // implicit-sharing detach cannot invalidate the outer family's iterator.
+    const auto projectionMobs = m_aMob;
+    for(CMob* mob : projectionMobs)
         mob->reprojectForCurrentTerrain();
     connect(m_pTileForm, SIGNAL(applyChangesSignal()),
             this, SLOT(onMapMaterialUpdate()), Qt::UniqueConnection);
@@ -11919,6 +11945,7 @@ void CView::setWorkspaceVisibility(const QList<CMob*>& mobs,
 
 void CView::setLandscapeVisible(bool visible)
 {
+    if(m_landscapeVisible != visible)useLegacyViewport(QString::fromUtf8("Видимость ландшафта"));
     if(m_landscapeVisible == visible)
         return;
     m_landscapeVisible = visible;
@@ -13791,6 +13818,7 @@ QVector<STerrainAtlasSlotUsage> CView::terrainAtlasUsage() const
 
 void CView::reviewTerrainAtlasProfile()
 {
+    useLegacyViewport(QString::fromUtf8("Просмотр профиля атласа"));
     reviewTerrainAtlasProfileAtSlot(-1);
 }
 
@@ -14004,6 +14032,7 @@ void CView::updateTerrainAtlasViewerAnnotations(const QString& status)
 
 void CView::exportTerrainPaintDiagnostic()
 {
+    useLegacyViewport(QString::fromUtf8("Диагностика покраски"));
     if(!m_pLand->isMprLoad())
     {
         emit updateMsg(tr("Load an MPR before exporting a paint diagnostic."));
@@ -17835,6 +17864,7 @@ void CView::resetSelectedId()
 
 void CView::openMapParameters()
 {
+    useLegacyViewport(QString::fromUtf8("Настройки рельефа и воды MPR"));
     if(!m_worldTerrainSession.documents.isEmpty() && !resolveWorldTerrainClose(false)) return;
     if(m_mprSettingsDock)
     {
@@ -19150,6 +19180,7 @@ void CView::closeMprSettingsDock()
 
 void CView::openMprMaterials()
 {
+    useLegacyViewport(QString::fromUtf8("Материалы MPR"));
     openMapParameters();
     if(!m_mprSettingsDock)
         return;
@@ -19167,6 +19198,7 @@ void CView::refreshMprSettingsDock()
 
 void CView::openAtlasTiles()
 {
+    useLegacyViewport(QString::fromUtf8("Атлас плиток"));
     if(!m_pLand->isMprLoad())
         return;
     if(!ensureTerrainAutoCatalogReady())
@@ -21256,6 +21288,7 @@ void CView::requestResolveMissingTerrainBlends(
 
 void CView::resolveMissingTerrainBlends()
 {
+    useLegacyViewport(QString::fromUtf8("Переходы материалов"));
     const ETerrainResolveAuditTrigger trigger =
         m_pendingTerrainResolveAuditTrigger;
     m_pendingTerrainResolveAuditTrigger =
@@ -22869,6 +22902,7 @@ bool CView::terrainCellAtViewport(const QPoint& viewportPosition, QPoint* cell)
 
 void CView::showTerrainTileInformation(const QPoint& viewportPosition)
 {
+    useLegacyViewport(QString::fromUtf8("Информация о плитке"));
     QPoint cell;
     if(!terrainCellAtViewport(viewportPosition, &cell))
     {
@@ -23910,6 +23944,7 @@ bool CView::applyTerrainVerticalScalePreview(
 
 void CView::importTerrainHeightmap()
 {
+    useLegacyViewport(QString::fromUtf8("Импорт карты высот"));
     if(!m_terrainEditAvailable)
     {
         QMessageBox::information(this, tr("Heightmap import"),
