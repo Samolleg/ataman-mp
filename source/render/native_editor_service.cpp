@@ -72,6 +72,13 @@ QImage CNativeEditorService::raster(const QSize& size,const QVector<float>& dept
     if(grid){Batch batch;batch.color={.05f,.9f,1,1};const auto point=[&](int x,int y){const auto xy=grid->terrainVertexPosition(x,y);return QVector3D(xy.x(),xy.y(),grid->height(x,y)*grid->maxZ()/65535.f+.015f);};
         for(int y=0;y<grid->vertexCountY();y+=2)for(int x=0;x+1<grid->vertexCountX();++x)batch.vertices<<point(x,y)<<point(x+1,y);
         for(int x=0;x<grid->vertexCountX();x+=2)for(int y=0;y+1<grid->vertexCountY();++y)batch.vertices<<point(x,y)<<point(x,y+1);prepared.append(std::move(batch));}
+    if(brushTerrain)for(auto batch:brushPlanes){
+        QVector<QVector3D> points;for(auto p:batch.vertices){bool found=false;float z=0;
+            if(!brushLand)z=brushTerrain->navigationHeightSample(qRound(p.x()*2),qRound(p.y()*2),ETerrainTileLayer::Overlay,&found);
+            if(!found)z=brushTerrain->terrainSurfaceHeight(p.x(),p.y(),&found);
+            if(found){p.setZ(z+.12f);points.append(p);}}
+        batch.vertices=std::move(points);prepared.append(std::move(batch));
+    }
     for(const auto& batch:prepared){auto vertices=batch.vertices;
         Primitive primitive=batch.primitive;
         if(primitive==Ring){vertices.clear();for(const auto& center:batch.vertices)for(int i=0;i<24;++i){const float a=i*6.2831853f/24,b=(i+1)*6.2831853f/24;vertices<<center+QVector3D(qCos(a)*.8f,qSin(a)*.8f,.2f)<<center+QVector3D(qCos(b)*.8f,qSin(b)*.8f,.2f);}primitive=Lines;}

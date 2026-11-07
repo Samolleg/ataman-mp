@@ -179,6 +179,7 @@ void CView::refreshWorldTerrainNeighbors()
         // Clean atlas snapshots are already represented by the disk renderer.
         // Reapplying one would hide an external atlas publication.
         if(!retainedDirty)continue;
+        useLegacyViewport(QString::fromUtf8("Одновременная правка нескольких MPR мира"));
         if(doc->atlas && loaded.terrainPreviewAtlas!=doc->atlas) {
             if(!previewWorldPaintState(id)){emit updateMsg(tr("Не удалось обновить атлас соседней карты."));continue;}
         }
@@ -1386,6 +1387,7 @@ bool CView::previewWorldPaintState(const QString& id,
     if(!landscape->previewTerrainAtlasIfChanged(images,doc->atlas->activeTextureCount()))return false;
     landscape->setMaterials(worldRenderMaterials(doc->materials));
     int updatedSectors=0;
+    QRect nativeDirty;
     bool shadowChanged=false;
     for(const auto& sector:doc->baseline.sectors()) {
         const auto payload=doc->terrain.sectorPayload(sector.sectorX,sector.sectorY);
@@ -1401,12 +1403,14 @@ bool CView::previewWorldPaintState(const QString& id,
         if(before==payload)continue;
         if(!landscape->previewCanonicalSector(sector.sectorX,sector.sectorY,payload))return false;
         shadowChanged |= terrainShadowInputsChanged(before,payload);
-        ++updatedSectors;
+        ++updatedSectors;nativeDirty=nativeDirty.united(QRect(sector.sectorX,sector.sectorY,1,1));
         if(loadedNeighbor)loadedNeighbor->terrainPreviewPayloads[key]=payload;
     }
     if(id==active) {
         if(!m_pTileForm->adoptTileImages(images,doc->atlas->activeTileTypes()))return false;
         m_terrainEdit=doc->terrain;m_mprMaterials=doc->materials;
+        if(doc->atlas->generatedTileCount()>0)useLegacyViewport(QString::fromUtf8("Новые страницы рабочего атласа мира"));
+        emit nativeTerrainChanged(nativeDirty,7u | (m_tilePaintStrokeActive?0u:8u));
         // Restore the immutable source together with its working cache. The
         // renderer/picker contain edited slots and cannot serve as that source.
         m_authoredTerrainTileImages=doc->atlas->authoredTileImages();

@@ -1,4 +1,6 @@
 #include "view.h"
+#include "landscape_tools.h"
+#include <QtMath>
 #include "native_editor_service.h"
 #include "camera.h"
 #include "landscape.h"
@@ -52,8 +54,32 @@ CNativeEditorService CView::nativeServiceSnapshot() {
     add(m_leverApproachLines,{.2f,1,.4f,1},S::Lines,2,false);add(m_connectionGlyphs,m_modelMagnetApplied?QVector4D(1,.8f,.2f,1):QVector4D(.1f,.9f,1,1),S::Lines,2);
     if(m_connectionGhostNode&&!m_connectionGhostVertices.isEmpty()){QMatrix4x4 model;model.translate(m_connectionGhostNode->drawPosition());model.rotate(m_connectionGhostNode->rotation());s.add(m_connectionGhostVertices,{.1f,.9f,1,.35f},S::Triangles,1,true,model);}
     if(!m_camPreviewActive)add(m_cameraTrackLines,{1,.7f,.1f,1},S::Lines,1);
-    if(m_terrainPaintOutlineValid)add(m_terrainPaintOutlineVertices,m_terrainPaintProjectionLand?QVector4D(1,.72f,.08f,.95f):QVector4D(.1f,.82f,1,.95f),S::Loop,2.5f,false);
-    if(m_sculptOutlineValid)add(m_sculptOutlineVertices,{1,.72f,.08f,.95f},S::Loop,2,false);
+    if(m_landscapeTools&&m_landscapeTools->editingEnabled()&&m_terrainEditAvailable) {
+        const bool sculpt=m_landscapeTools->sculptEnabled()||m_landscapeTools->overlaySculptEnabled();
+        const bool valid=sculpt?m_sculptOutlineValid:m_terrainPaintOutlineValid;
+        if(valid){
+            s.brushTerrain=std::make_shared<CTerrainEditModel>(m_terrainEdit);
+            s.brushLand=sculpt?m_landscapeTools->sculptEnabled():m_terrainPaintProjectionLand;
+            s.brushFallbackZ=m_sculptOutlineCenter.z();
+            const auto color=s.brushLand?QVector4D(1,.72f,.08f,.95f):QVector4D(.1f,.82f,1,.95f);
+            if(!sculpt&&m_terrainPaintFootprint.cellCentered){
+                QVector<QVector3D> lines;const auto a=m_terrainPaintFootprint.anchor;const int r=m_terrainPaintFootprint.radius;
+                for(int y=a.y()-r;y<=a.y()+r;++y)for(int x=a.x()-r;x<=a.x()+r;++x)if(m_terrainPaintFootprint.contains(QPoint(x,y))){
+                    const QVector<QVector3D> c{{float(x*2),float(y*2),0},{float((x+1)*2),float(y*2),0},{float((x+1)*2),float((y+1)*2),0},{float(x*2),float((y+1)*2),0}};
+                    s.brushPlanes.append({c,QVector4D(color.x(),color.y(),color.z(),.12f),S::Fan,1,false,{}});
+                    for(int k=0;k<4;++k)lines<<c[k]<<c[(k+1)%4];}
+                s.brushPlanes.append({lines,color,S::Lines,2.5f,false,{}});
+            }else{
+                const float x=sculpt?m_sculptOutlineCenter.x():float(m_terrainPaintFootprint.anchor.x()*2);
+                const float y=sculpt?m_sculptOutlineCenter.y():float(m_terrainPaintFootprint.anchor.y()*2);
+                const float radius=sculpt?m_landscapeTools->radius():float(m_terrainPaintFootprint.radius*2+1);
+                QVector<QVector3D> points;
+                if(!sculpt&&m_terrainPaintFootprint.square)points={{x-radius,y-radius,0},{x+radius,y-radius,0},{x+radius,y+radius,0},{x-radius,y+radius,0}};
+                else for(int k=0;k<64;++k){const float angle=float(k)*float(2*M_PI/64);points.append({x+qCos(angle)*radius,y+qSin(angle)*radius,0});}
+                s.brushPlanes.append({points,color,S::Loop,sculpt?2.f:2.5f,false,{}});
+            }
+        }
+    }
     if(m_worldPlacementActive&&m_worldPlacementValid){const auto p=m_worldPlacementOrigin-m_activeMapWorldOrigin;const float z=m_worldPlacementZ+.15f;QVector<QVector3D> corners{{float(p.x()),float(p.y()),z},{float(p.x()+m_worldPlacementSize.width()),float(p.y()),z},{float(p.x()+m_worldPlacementSize.width()),float(p.y()+m_worldPlacementSize.height()),z},{float(p.x()),float(p.y()+m_worldPlacementSize.height()),z}};
         add(corners,m_worldPlacementOverlaps?QVector4D(1,.5f,.1f,.25f):QVector4D(.1f,.9f,1,.25f),S::Fan,1,false);add(corners,{.1f,.9f,1,1},S::Loop,1,false);}
     if(m_neighborLayoutDragActive||m_worldPlacementActive){QVector<QVector3D> lines;const float z=(m_worldPlacementActive?m_worldPlacementZ:m_neighborLayoutDragPlaneZ)+.2f;for(const auto& seam:m_worldMapSnapPreview.seams)for(const auto& p:{seam.p1(),seam.p2()}){const auto q=p-m_activeMapWorldOrigin;lines<<QVector3D(q.x(),q.y(),z);}add(lines,{.2f,1,.35f,1},S::Lines,3,false);}

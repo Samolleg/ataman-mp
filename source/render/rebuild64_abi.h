@@ -7,7 +7,8 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 10u
+#define EIR_ABI 13u
+#define EIR_PREVIEW_STATIC_FOOTPRINTS 1u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
     float position[3], color[3], radius;
@@ -15,6 +16,8 @@ typedef struct EirPointLight {
 } EirPointLight;
 typedef struct EirError { int32_t code; char message[2048]; } EirError;
 typedef struct EirSpan { const void* data; uint64_t bytes; } EirSpan;
+// Explicit immutable MMP package; no filesystem or global mutable mount.
+typedef struct EirTexturePage { const char* name; EirSpan mmp; } EirTexturePage;
 typedef struct EirMount { const uint16_t* path; uint32_t kind; uint32_t reserved; } EirMount;
 struct EirCamera;struct EirService;
 typedef struct EirCreate {
@@ -29,6 +32,9 @@ typedef struct EirCreate {
     void* present_context; // host worker admission only; no Qt/DLL document ownership
     // Offscreen 288: copied live camera/service values, never a GUI callback.
     uint32_t (EIR_CALL *live_values)(void*,uint64_t,uint32_t,struct EirCamera*,struct EirService*);
+    // ABI12: authoritative static editor world has no simulated footprint markers.
+    // Zero retains the ABI11 input contract; this is input validity, not a view option.
+    uint32_t preview_flags;
 } EirCreate;
 typedef struct EirObjectPose {
     uint32_t mob,nid,visible,changed;
@@ -43,6 +49,9 @@ typedef struct EirDocument {
     const char* terrain_name; // UTF-8, resource identity only; never reopened
     const EirObjectPose* objects; // immutable editor admission/geometry facts
     uint32_t object_count;
+    const EirTexturePage* pages;
+    uint32_t page_count;
+    EirSpan terrain_profile; // optional mapper atlas profile JSON, scoped to this source
 } EirDocument;
 typedef struct EirCamera {
     float world_to_clip[16]; // row-major, D3D depth [0,1], Z-up
@@ -56,6 +65,7 @@ typedef struct EirCamera {
     float fog_projection[3]; // TL _33/_34/_43 from the common camera
     uint32_t neighbours_visible; // existing human neighbour-landscapes toggle
     uint32_t visuals; // 1=sky, 2=fog, 4=terrain, 8=water, 16=static objects
+    uint64_t test_frame; // 0 normally; reproducible offscreen validation clock only
 } EirCamera;
 typedef struct EirStatistics {
     uint64_t generation, ready_generation, private_bytes, video_bytes;
@@ -107,6 +117,31 @@ typedef struct EirDepth {
     uint32_t size,width,height; uint64_t generation;
     float* pixels; uint64_t capacity;
 } EirDepth;
+// Rect is [x0,y0,x1,y1) in 32m sectors. MPR bytes are borrowed for the call.
+// Flags:1 heights,2 tile/material selectors,4 liquid/overlay topology,8 stroke end.
+// Calls are serialized on the creating renderer thread. Errors keep accepted output.
+typedef struct EirTerrainUpdate {
+    uint32_t size,flags;
+    uint64_t generation,world,serial;
+    uint32_t x0,y0,x1,y1;
+    const char* terrain_name;
+    EirSpan terrain;
+    const EirTexturePage* pages;
+    uint32_t page_count;
+    EirSpan terrain_profile; // optional mapper atlas profile JSON, scoped to this source
+} EirTerrainUpdate;
+typedef struct EirPoseUpdate {
+    uint32_t size,count;
+    uint64_t generation,world,serial;
+    const EirObjectPose* poses;
+} EirPoseUpdate;
+typedef struct EirUpdateState {
+    uint64_t world,applied_serial,presented_serial,updates,presents,device_identity,renderer_identity;
+    double decode_ms,publish_ms,last_update_to_present_ms;
+    uint64_t debug_available,debug_errors,debug_warnings;
+    uint64_t finalized_serial,derived_pending;
+    double finalize_ms,finalize_cpu_ms;
+} EirUpdateState;
 typedef struct EirApi {
     uint32_t size, abi;
     int32_t (EIR_CALL *create)(const EirCreate*,void**,EirError*);
@@ -122,5 +157,8 @@ typedef struct EirApi {
     int32_t (EIR_CALL *output)(void*,const EirOutputRequest*,EirOutput*,EirError*);
     int32_t (EIR_CALL *query)(void*,EirQuery*,EirError*);
     int32_t (EIR_CALL *depth)(void*,EirDepth*,EirError*);
+    int32_t (EIR_CALL *terrain_update)(void*,const EirTerrainUpdate*,EirError*);
+    int32_t (EIR_CALL *poses)(void*,const EirPoseUpdate*,EirError*);
+    int32_t (EIR_CALL *update_state)(void*,EirUpdateState*,EirError*);
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

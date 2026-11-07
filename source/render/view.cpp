@@ -2011,7 +2011,6 @@ void CView::activateLandscapeTilePainting()
 
 void CView::prepareLandscapeTilePainting(bool showTools)
 {
-    useLegacyViewport(QString::fromUtf8("Рисование плиток"));
     if(!m_landscapeTools)
         return;
     ensureTerrainAutoCatalogReady();
@@ -2027,7 +2026,6 @@ void CView::prepareLandscapeTilePainting(bool showTools)
 
 void CView::setLandscapeEditingEnabled(bool enabled)
 {
-    if(enabled)useLegacyViewport(QString::fromUtf8("Кисти рельефа"));
     if(m_landscapeTools)
         m_landscapeTools->setEditingEnabled(enabled, false);
     if(!enabled)
@@ -2070,8 +2068,6 @@ void CView::closeLandscapeTools()
 
 void CView::syncLandscapeToolState()
 {
-    if(m_landscapeTools && m_landscapeTools->editingEnabled())
-        useLegacyViewport(QString::fromUtf8("Кисти рельефа"));
     if(m_landscapeGestureButtons != Qt::NoButton)
         m_landscapeGestureInterrupted = true;
     cancelTileBrushGroup();
@@ -15249,6 +15245,7 @@ bool CView::syncWorkingTerrainAtlas(CValidationReport* report,
                 atlas->generatedTileCount());
         return true;
     }
+    useLegacyViewport(QString::fromUtf8("Новые страницы рабочего атласа"));
     const QVector<QImage> activeImages = atlas->activeTileImages();
     const int authoredSlotCount = atlas->authoredSlotCount();
     if(authoredSlotCount <= 0
@@ -20966,6 +20963,7 @@ void CView::pickQuickAccessTile(int index)
 
 void CView::endTileBrushGroup()
 {
+    QTimer::singleShot(0,this,[this]{emit nativeTerrainChanged(QRect(),8u);});
     if(m_tilePaintStrokeActive && !m_worldTerrainStroke.isEmpty()) {
         recordWorldTerrainStroke(m_worldTerrainStroke);
         m_worldTerrainStroke=SWorldTerrainStroke();
@@ -22091,6 +22089,9 @@ void CView::refreshTerrainTilePreview(const STerrainTileCommand& command,
     if(acquireContext)
         doneCurrent();
     m_pLand->setDirty(m_terrainEdit.isDirty());
+    QRect nativeDirty;
+    for(const auto& sector:sectors)nativeDirty=nativeDirty.united(QRect(sector.first,sector.second,1,1));
+    emit nativeTerrainChanged(nativeDirty,2u | (m_tilePaintStrokeActive?0u:8u));
     if(!m_tilePaintStrokeActive)
     {
         refreshTerrainFamilyUsage();
@@ -22118,6 +22119,9 @@ bool CView::applyOverlaySurfacePreview(const SOverlaySurfaceCommand& command,
         ei::log(eLogWarning, "Overlay surface preview command refused:\n" + report.toText());
         return false;
     }
+    QRect nativeDirty;
+    for(const auto& delta:command.sectors)nativeDirty=nativeDirty.united(QRect(delta.sectorX,delta.sectorY,1,1));
+    emit nativeTerrainChanged(nativeDirty,4u | (m_sculptStrokeActive||m_tilePaintStrokeActive?0u:8u));
     m_overlayModelNsecs += phaseTimer.nsecsElapsed();
     phaseTimer.restart();
     for(const SOverlaySectorDelta& delta : command.sectors)
@@ -23985,6 +23989,9 @@ bool CView::applyTerrainHeightPreview(const STerrainHeightCommand& command, bool
                     .arg(sector.first).arg(sector.second));
             }
         }
+    QRect nativeDirty;
+    for(const auto& sector:sectors)nativeDirty=nativeDirty.united(QRect(sector.first,sector.second,1,1));
+    emit nativeTerrainChanged(nativeDirty,1u | (m_sculptStrokeActive?0u:8u));
     m_pLand->invalidateTerrainShadowField();
     if(m_sculptStrokeActive)
     {
@@ -24780,7 +24787,7 @@ bool CView::terrainPositionAt(const QPoint& viewportPosition, QVector3D* positio
        || !rect().contains(viewportPosition) || width() <= 0 || height() <= 0)
         return false;
 
-    if(property("rebuild64Selected").toBool()&&!m_nativeQueryPixels.isEmpty())return nativeTerrainPositionAt(viewportPosition,position,land);
+    if(property("rebuild64Selected").toBool()&&!(m_landscapeTools&&m_landscapeTools->editingEnabled())&&!m_nativeQueryPixels.isEmpty())return nativeTerrainPositionAt(viewportPosition,position,land);
     const QRect viewport(0, 0, width(), height());
     const float screenY = float(height() - viewportPosition.y());
     const QMatrix4x4 view = m_cam->viewMatrix();
@@ -25051,7 +25058,9 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
     if(property("rebuild64Selected").toBool()) {
-        const bool found=nativeTerrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand);
+        const bool found=m_landscapeTools&&m_landscapeTools->editingEnabled()&&m_terrainEditAvailable
+            ? terrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand)
+            : nativeTerrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand);
         if(hit)*hit=found;return point;
     }
 
@@ -26886,6 +26895,7 @@ void CView::finishSculptStroke()
     int reprojectedObjects = 0;
     m_sculptRepeatTimer->stop();
     m_sculptStrokeActive = false;
+    QTimer::singleShot(0,this,[this]{emit nativeTerrainChanged(QRect(),8u);});
     m_sculptPointerValid = false;
     applyTerrainMobHeights(m_sculptStrokeMobHeightState.data(), true, true);
     if(!m_worldTerrainStroke.isEmpty())

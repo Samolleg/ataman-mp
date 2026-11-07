@@ -1,5 +1,5 @@
 {
-  "abi": 10,
+  "abi": 13,
   "sourceRepository": "Samolleg/EIRebuild64",
   "sourceCommit": "81dbcdd29b41baeb346f167c6dfb511dff05f295",
   "archivePaths": [
@@ -14,35 +14,35 @@
   "patches": [
     {
       "path": "001-E1Terrain.patch",
-      "sha256": "09fb099f79ef75edf269d6f55190f9191ab02794d11a6d72f411f4cd9b0fdc2f"
+      "sha256": "14d061b57746ea5a2cdf4fa69f80b38963c06d48859a41f2704a5051377f4d0e"
     },
     {
       "path": "002-Renderer.patch",
-      "sha256": "4e8d4ad6858b4cda7481a3f3b41279705547573a79dc6dc16b2e180a01606dcd"
+      "sha256": "09731f1434c95fff8da73716a90fd7ad8c4985bae5b082c3e0eb5243ad135a7a"
     },
     {
       "path": "003-OwnedRenderer.patch",
-      "sha256": "29f0722d1bad1ce7f9e9430cc63ccd204da7dc691200cb391b954f598bea0ed7"
+      "sha256": "5dd09ef13b9fd0098200b57cd2d6348dbfb24cc29bc25a0666d5318aa2ef3cc3"
     },
     {
       "path": "004-renderer.patch",
-      "sha256": "e1db56cf6563b25eb54719ec6ca0f9c6bd93c58df558e9c07f6dee9d118c2d49"
+      "sha256": "a7320148f10cc78502f110c50b1ed6ca5d0dd0dc69c54068deff5e0451dfa132"
     },
     {
       "path": "005-owned_asset_loader.patch",
-      "sha256": "e34242742881179770582567d4ef92e4da8410ed88fcfbaca038ee592f8c7081"
+      "sha256": "9f0492324afcdbe809cbcdf4e3258290120a7b05c7895408ab42a45e6d7b7985"
     },
     {
       "path": "006-owned_asset_loader.patch",
-      "sha256": "19bbdc40ccdd1ad722ce3f618c13a6d192cc624abe1b349632d5dad6ba9bfd8d"
+      "sha256": "f23fb5fa49ea87fa975dbfbac908f8db83643cd7e7979f96e6f4cf4af1849984"
     },
     {
       "path": "007-embedded_host.patch",
-      "sha256": "aa2c54d4e185812447a92f5dfdcbb203f254fb3ecc789d0b601545931a0a58a7"
+      "sha256": "054b869421271abb385c9f96270bdf010ed46766f4dfa158e40ac20a6ae52be7"
     },
     {
       "path": "008-embedded-neighbour-join.patch",
-      "sha256": "adc33a65a73e2b7c8ff1efd2e16b77cb203697141332b75cb6c549f9a73fa3fd"
+      "sha256": "0b8b706fa85a0eff66bf0296dcc7ff3d3772ea05b405153ee1bb85f7e8086bbb"
     },
     {
       "path": "020-independent-output-lifetime.patch",
@@ -55,6 +55,14 @@
     {
       "path": "060-editor-native-stencil-query.patch",
       "sha256": "79385bc9373c3e008d60b70f08e97464d8c2ec794a2854824b166342d3cafa80"
+    },
+    {
+      "path": "009-terrain-rectangle-decode.patch",
+      "sha256": "a0bc04e656dc43fefc3b02597fde24470229913cf5c89cad5ee98ed5812fa696"
+    },
+    {
+      "path": "010-same-world-terrain-and-seed-pose.patch",
+      "sha256": "b6bc70b6323c5789e80c1b2107b727c22eeb93efef4c99dfec21c3654bbb41e6"
     }
   ],
   "nvidiaSdk": false,

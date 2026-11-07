@@ -1,3 +1,4 @@
+#include "brush_d3d_counts.h"
 #pragma once
 #include <d3dcompiler.h>
 #include <d3d11_1.h>
@@ -36,12 +37,12 @@ struct EditorService {
         D3D11_TEXTURE2D_DESC old{};if(texture)texture->GetDesc(&old);
         if(!texture||old.Width!=width||old.Height!=height) {
             texture.Reset();view.Reset();D3D11_TEXTURE2D_DESC t{};t.Width=width;t.Height=height;t.MipLevels=1;t.ArraySize=1;t.Format=DXGI_FORMAT_R8G8B8A8_UNORM;t.SampleDesc.Count=1;t.Usage=D3D11_USAGE_DEFAULT;t.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-            hr=device->CreateTexture2D(&t,nullptr,&texture);if(FAILED(hr))return hr;
-            hr=device->CreateShaderResourceView(texture.Get(),nullptr,&view);if(FAILED(hr))return hr;
+            hr=brush_count_device(device).CreateTexture2D(&t,nullptr,&texture);if(FAILED(hr))return hr;
+            hr=brush_count_device(device).CreateShaderResourceView(texture.Get(),nullptr,&view);if(FAILED(hr))return hr;
         }
         context->UpdateSubresource(texture.Get(),0,nullptr,pixels.data(),stride,0);
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> output;
-        hr=device->CreateRenderTargetView(target,nullptr,&output);if(FAILED(hr))return hr;
+        hr=brush_count_device(device).CreateRenderTargetView(target,nullptr,&output);if(FAILED(hr))return hr;
         Microsoft::WRL::ComPtr<ID3D11Device1> device1;Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context1;
         hr=device->QueryInterface(IID_PPV_ARGS(&device1));if(FAILED(hr))return hr;
         hr=context->QueryInterface(IID_PPV_ARGS(&context1));if(FAILED(hr))return hr;

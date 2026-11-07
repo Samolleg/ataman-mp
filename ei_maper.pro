@@ -31,7 +31,7 @@ NAV_VENDOR = $$PWD/third_party/eirebuild64-nav
 INCLUDEPATH += $$NAV_VENDOR $$NAV_VENDOR/external/recastnavigation/Detour/Include
 DEFINES += DT_POLYREF64
 SOURCES += $$files($$NAV_VENDOR/external/recastnavigation/Detour/Source/*.cpp)
-!system(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $$shell_quote($$PWD/tools/check_nav_vendor.ps1)): error(Nav vendor lock mismatch)
+!system(powershell.exe -NoProfile -ExecutionPolicy Bypass -File $$system_quote($$system_path($$PWD/tools/check_nav_vendor.ps1))): error(Nav vendor lock mismatch)
 
 INCLUDEPATH += \
     $$PWD/source \

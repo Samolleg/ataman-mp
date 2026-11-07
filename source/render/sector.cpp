@@ -1084,6 +1084,7 @@ void CSector::updateLandTiles(const QSet<int>& localTiles)
 
 void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
 {
+    if(m_renderDeferred){invalidateQueryGeometry();return;}
     const int expectedVertices = nTile * nTile * 9;
     if(m_arrWaterVrtData.size() != expectedVertices
        || m_arrAnimatedWaterVrtData.size() != expectedVertices)
@@ -1256,6 +1257,9 @@ void CSector::updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices)
 
 void CSector::updateWaterDrawData(bool rebuildIndices)
 {
+    // Native loading keeps canonical tiles without legacy GL vertex arrays.
+    // ensureRenderGeometry rebuilds them from these tiles on a later GL switch.
+    if(m_renderDeferred){invalidateQueryGeometry();return;}
     generateWaterVertexData();
     updateBounds();
     if(m_arrWaterVrtData.isEmpty())

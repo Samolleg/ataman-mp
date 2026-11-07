@@ -13,7 +13,7 @@
 
 namespace {
 bool nativePlanRequiresLegacy(const ai::EditPlan& plan) {
-    if(QStringList{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint","edit_units"}.contains(plan.method))return true;
+    if(QStringList{"paint","auto_paint","generate_terrain","erode","edit_units"}.contains(plan.method))return true;
     if(plan.method=="edit_objects")for(const auto& value:plan.changes) {
         auto object=value.toObject()["after"].toObject();
         if(object.contains("World object"))object=object["World object"].toObject();
@@ -382,7 +382,7 @@ QJsonObject CAiAgentServer::dispatch(const QString& method,const QJsonObject& ar
     if(method!="operation_status" && method!="cancel_operation" && m_view
        && m_view->property("rebuild64Selected").toBool() && CLandscape::getInstance()->isMprLoad() && !m_view->m_terrainEditAvailable
        && !CAiEditAdapter::busy(m_window))m_view->ensureTerrainAutoCatalogReady();
-    const QSet<QString> legacyTerrainTools{"sculpt","paint","generate_terrain","erode","carve_river","auto_paint"};
+    const QSet<QString> legacyTerrainTools{"paint","auto_paint","generate_terrain","erode"};
     const auto requestedTool=method=="preview"?args["tool"].toString():method;
     if(m_view && m_view->property("rebuild64Selected").toBool() && legacyTerrainTools.contains(requestedTool))
         return {{"code","REQUIRES_OPENGL"},{"error",QString::fromUtf8("Изменение рельефа, текстур, воды и дорог пока требует OpenGL. Выберите OpenGL через Настройки → Вид карты; документы и правки сохраняются.")}};

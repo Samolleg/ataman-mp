@@ -43,8 +43,10 @@ public:
     void requireOpenGL(const QString& action);
     QString lastFailure() const { return m_failure; }
     EirStatistics statistics() const { return m_statistics; }
+    quint64 terrainPresentedSerial() const { return m_terrainPresented; }
     bool frameIsCurrent() const { return (m_selected||m_outputOnly) && !m_documentRefreshPending
-        && m_generation && m_statistics.ready_generation==m_generation; }
+        && m_generation && m_statistics.ready_generation==m_generation
+        && m_terrainPresented>=m_terrainSubmitted && !m_terrainFlags; }
     void capture(const QString& path, bool worldOnly=false);
     void cancelCapture(const QString& path);
     void cancelOutputs(const QString& reason);
@@ -74,6 +76,8 @@ private:
 
     void tick();
     void updateLiveCamera();
+    void queueTerrain(const QRect&,quint32);
+    bool submitTerrain();
     void fallback(const QString& message);
     void editorInput(QEvent* event);
     void serviceInput();
@@ -119,8 +123,13 @@ private:
     QVector<quintptr> m_documentMobOrder;
     QByteArray m_terrainState;
     bool m_documentRefreshPending{true};
-    quint64 m_outputSerial{0};
+    bool m_mobDocumentRefresh{false};
     quint64 m_generation{0};
+    quint64 m_diagnosticFrame{0}; // Set only by the isolated hidden acceptance harness.
+    QRect m_terrainDirty,m_strokeDirty;
+    quint32 m_terrainFlags{0},m_strokeFlags{0};
+    quint64 m_terrainSubmitted{0},m_terrainPresented{0};
+    quint64 m_outputSerial{0};
     bool m_selected{false},m_outputOnly{false};
     QPoint m_lastMouse;
     QString m_failure;

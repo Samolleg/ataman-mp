@@ -78,7 +78,7 @@ if($PrebuiltShaderRoot) {
 }
 foreach($project in $projects) {
     $log=Join-Path $target ('logs/'+[IO.Path]::GetFileNameWithoutExtension($project)+'.log')
-    & $MSBuild (Join-Path $target $project) /p:Configuration=Release /p:Platform=x64 "/p:AtamanHostRoot=$hostRoot" /m:2 /v:minimal *> $log
+    & $MSBuild (Join-Path $target $project) /p:Configuration=Release /p:Platform=x64 "/p:AtamanHostRoot=$hostRoot" /m:1 /v:minimal *> $log
     if($LASTEXITCODE){throw ('Build failed: '+$project+'; '+$log)}
 }
 Copy-Item -LiteralPath (Join-Path $target 'Data/eid3d_materials') -Destination (Join-Path $target 'bin') -Recurse

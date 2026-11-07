@@ -1,0 +1,807 @@
+--- a/external/owned-renderer/Source/owned_asset_loader.cpp
++++ b/external/owned-renderer/Source/owned_asset_loader.cpp
+@@ -1739,7 +1739,8 @@
+ bool TerrainTexturePage::ensure_upload_bytes(ResourceFailure& failure, bool require_bc1_chain) const {
+     if (texture) { failure = {}; return true; }
+     ResourceBlob blob;
+-    if (!store || !store->read(location, blob, failure)) return false;
++    if(memory_source){blob.bytes=memory_source;blob.identity=memory_identity;}
++    else if (!store || !store->read(location, blob, failure)) return false;
+     auto loaded = std::make_shared<TextureCpuAsset>();
+     if (!parse_texture_asset(blob, *loaded, failure)) return false;
+     if ((require_bc1_chain && (loaded->format != MmpFormat::dxt1 || loaded->mips.size() < 2)) ||
+@@ -1868,9 +1869,9 @@
+     }
+ }
+ 
+-static bool build_terrain_render_envelopes(TerrainCpuAsset& source) noexcept {
++static bool build_terrain_render_envelopes(TerrainCpuAsset& source,const std::array<std::uint32_t,4>* rectangle=nullptr) noexcept {
+     try {
+-        for (auto& sector : source.sectors) for (auto& material : sector.materials)
++        for (auto& sector : source.sectors) if(!rectangle||(sector.map_x>=(*rectangle)[0]&&sector.map_y>=(*rectangle)[1]&&sector.map_x<(*rectangle)[2]&&sector.map_y<(*rectangle)[3])) for (auto& material : sector.materials)
+             for (auto& range : material.subparts) {
+                 range.envelopes.clear();
+                 range.liquid_depth_objects.clear();
+@@ -1925,11 +1926,12 @@
+ // when the rim lies more than a fall step (kLiquidFallEdgeDrop) below it, so
+ // the map edge never reads as a fall. Shared edges with matching heights are
+ // untouched. The game's own liquid data is not changed.
+-static void flatten_liquid_rim(TerrainCpuAsset& source) noexcept {
++static void flatten_liquid_rim(TerrainCpuAsset& source,const std::array<std::uint32_t,4>* rectangle=nullptr) noexcept {
+     constexpr int rim = 2;
+     const int xmax = int(source.sector_count_x * 32), ymax = int(source.sector_count_y * 32);
+     if (xmax <= 2 * rim || ymax <= 2 * rim) return;
+     for (auto& sector : source.sectors) {
++        if(rectangle&&(sector.map_x<(*rectangle)[0]||sector.map_y<(*rectangle)[1]||sector.map_x>=(*rectangle)[2]||sector.map_y>=(*rectangle)[3]))continue;
+         if (!sector.has_layers || sector.vertices.size() < 2u * kTerrainVerticesPerSector) continue;
+         for (int row = 0; row < 33; ++row) for (int col = 0; col < 33; ++col) {
+             const int gx = int(sector.map_x) * 32 + col, gy = int(sector.map_y) * 32 + row;
+@@ -1951,44 +1953,11 @@
+     }
+ }
+ 
+-bool validate_terrain_asset_descriptor_once(
+-    TerrainCpuAsset& source) noexcept {
+-    if (source.immutable_descriptor_validation_count != 0u)
+-        return source.immutable_descriptor_validation_count == 1u &&
+-            source.immutable_descriptor_validated;
+-    source.immutable_descriptor_validation_count = 1u;
+-    source.immutable_descriptor_validated = false;
+-
+-    const std::uint64_t sector_count =
+-        static_cast<std::uint64_t>(source.sector_count_x) *
+-        source.sector_count_y;
+-    if (!source.sector_count_x || !source.sector_count_y ||
+-        sector_count != source.sectors.size() || !source.texture_count ||
+-        source.texture_count > 32766u ||
+-        source.texture_resources.size() !=
+-            static_cast<std::size_t>(source.texture_count) +
+-                kTerrainLongTextureCount ||
+-        !source.tiles_per_texture_side || !source.tiles_per_texture ||
+-        source.tiles_per_texture !=
+-            source.tiles_per_texture_side * source.tiles_per_texture_side ||
+-        source.tile_types.size() !=
+-            static_cast<std::size_t>(source.tile_count) +
+-                kTerrainLongTextureCount * kTerrainTilesPerLongTexture ||
+-        source.tile_animation_phases.size() != source.tile_types.size())
+-        return false;
+-
+-    const std::uint32_t material_count =
+-        (source.texture_count + kTerrainLongTextureCount) * 2u;
+-    const auto valid_bounds = [](const TerrainBounds& bounds) noexcept {
+-        for (std::size_t axis = 0; axis < 3; ++axis)
+-            if (!std::isfinite(bounds.minimum[axis]) ||
+-                !std::isfinite(bounds.maximum[axis]) ||
+-                bounds.minimum[axis] > bounds.maximum[axis])
+-                return false;
++static bool validate_terrain_sector_descriptor(const TerrainCpuAsset& source,const TerrainSectorCpuAsset& sector,std::size_t index,std::uint32_t material_count) noexcept {
++    const auto valid_bounds=[](const TerrainBounds& bounds) noexcept {
++        for(unsigned axis=0;axis<3;++axis)if(!std::isfinite(bounds.minimum[axis])||!std::isfinite(bounds.maximum[axis])||bounds.minimum[axis]>bounds.maximum[axis])return false;
+         return true;
+     };
+-    for (std::size_t index = 0; index < source.sectors.size(); ++index) {
+-        const auto& sector = source.sectors[index];
+         if (sector.map_x != index % source.sector_count_x ||
+             sector.map_y != index / source.sector_count_x ||
+             !std::isfinite(sector.average_z) ||
+@@ -2049,7 +2018,47 @@
+         if (expected_begin != sector.tiles.size()) return false;
+         for (std::uint32_t ordinal = 0; ordinal < sector.animation_count; ++ordinal)
+             if (!animation_seen[ordinal]) return false;
+-    }
++    return true;
++}
++
++bool validate_terrain_asset_descriptor_once(
++    TerrainCpuAsset& source) noexcept {
++    if (source.immutable_descriptor_validation_count != 0u)
++        return source.immutable_descriptor_validation_count == 1u &&
++            source.immutable_descriptor_validated;
++    source.immutable_descriptor_validation_count = 1u;
++    source.immutable_descriptor_validated = false;
++
++    const std::uint64_t sector_count =
++        static_cast<std::uint64_t>(source.sector_count_x) *
++        source.sector_count_y;
++    if (!source.sector_count_x || !source.sector_count_y ||
++        sector_count != source.sectors.size() || !source.texture_count ||
++        source.texture_count > 32766u ||
++        source.texture_resources.size() !=
++            static_cast<std::size_t>(source.texture_count) +
++                kTerrainLongTextureCount ||
++        !source.tiles_per_texture_side || !source.tiles_per_texture ||
++        source.tiles_per_texture !=
++            source.tiles_per_texture_side * source.tiles_per_texture_side ||
++        source.tile_types.size() !=
++            static_cast<std::size_t>(source.tile_count) +
++                kTerrainLongTextureCount * kTerrainTilesPerLongTexture ||
++        source.tile_animation_phases.size() != source.tile_types.size())
++        return false;
++
++    const std::uint32_t material_count =
++        (source.texture_count + kTerrainLongTextureCount) * 2u;
++    const auto valid_bounds = [](const TerrainBounds& bounds) noexcept {
++        for (std::size_t axis = 0; axis < 3; ++axis)
++            if (!std::isfinite(bounds.minimum[axis]) ||
++                !std::isfinite(bounds.maximum[axis]) ||
++                bounds.minimum[axis] > bounds.maximum[axis])
++                return false;
++        return true;
++    };
++    for(std::size_t index=0;index<source.sectors.size();++index)
++        if(!validate_terrain_sector_descriptor(source,source.sectors[index],index,material_count))return false;
+     flatten_liquid_rim(source);
+     owned_terrain_reset_liquid_outflow(source); // level river reaches, built on first use
+     if (!build_terrain_render_envelopes(source)) return false;
+@@ -2060,12 +2069,13 @@
+     return true;
+ }
+ 
+-bool parse_terrain_asset(const ResourceBlob& blob,
++static bool parse_terrain_asset_impl(const ResourceBlob& blob,
+                          const std::string& project_resource,
+                          TerrainCpuAsset& terrain,
+-                         ResourceFailure& failure) {
++                         ResourceFailure& failure, const TerrainCpuAsset* previous,
++                         const std::array<std::uint32_t,4>* rectangle) {
+     terrain = {};
+-    if (!blob.bytes || project_resource.empty()) {
++    if ((!blob.bytes && !blob.slice) || project_resource.empty()) {
+         fail(failure, ResourceFailureCode::parse,
+              "MPR terrain source is empty");
+         return false;
+@@ -2097,12 +2107,237 @@
+     return parse_terrain_members(blob.identity, project_resource, header_name,
+         [&archive](const std::string& name, ResourceBlob& member, ResourceFailure& error) {
+             return archive.resolve(name, member, error);
+-        }, terrain, failure);
++        }, terrain, failure, previous, rectangle);
++}
++bool parse_terrain_asset(const ResourceBlob& blob,const std::string& name,TerrainCpuAsset& out,ResourceFailure& error) {
++    return parse_terrain_asset_impl(blob,name,out,error,nullptr,nullptr);
++}
++bool parse_terrain_rectangle(const ResourceBlob& blob,const std::string& name,const TerrainCpuAsset& previous,
++    const std::array<std::uint32_t,4>& rectangle,TerrainCpuAsset& out,ResourceFailure& error) {
++    return parse_terrain_asset_impl(blob,name,out,error,&previous,&rectangle);
++}
++
++bool parse_terrain_sector_asset(const ResourceBlob& sector_blob,TerrainCpuAsset& terrain,
++    std::uint32_t sx,std::uint32_t sy,TerrainSectorCpuAsset& output,ResourceFailure& failure) {
++    if(!sector_blob.bytes||sector_blob.bytes->size()<5||sx>=terrain.sector_count_x||sy>=terrain.sector_count_y){
++        fail(failure,ResourceFailureCode::parse,"terrain sector source/coordinate missing");return false;
++    }
++    const float maximum_z=terrain.maximum_z;
++    const std::uint64_t material_count=(std::uint64_t(terrain.texture_count)+kTerrainLongTextureCount)*2u;
++    const auto& sector_bytes = *sector_blob.bytes;
++    // The game reads layers = flags & 1 and layer tiles = flags & 3,
++    // so bit 0 alone also carries layer tiles, and bits 2-7 are
++    // ignored. Layer tiles without layers (flags & 3 == 2) leave the
++    // game's object-id array empty and crash it on first draw.
++    const std::uint8_t flags = sector_bytes[4] & 0x03u;
++    if (read_u32(sector_bytes.data()) != kSectorSignatureNormals ||
++        flags == 0x02u) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR sector signature or flags are unsupported");
++        return false;
++    }
++    std::uint64_t expected_sector = 5u +
++        static_cast<std::uint64_t>(kTerrainVerticesPerSector) *
++            kTerrainVertexBytes + kTerrainTileBytes;
++    if (flags & 0x01u)
++        expected_sector +=
++            static_cast<std::uint64_t>(kTerrainVerticesPerSector) *
++                kTerrainVertexBytes + kTerrainTileBytes;
++    if (flags != 0u) expected_sector += kTerrainTileBytes;
++    if (expected_sector != sector_bytes.size()) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR sector byte count does not match its flags");
++        return false;
++    }
++    output = {};
++    output.identity = sector_blob.identity;
++    output.map_x = sx;
++    output.map_y = sy;
++    output.has_layers = (flags & 0x01u) != 0;
++    output.has_layer_tiles = flags != 0u;
++    const std::size_t vertex_count = kTerrainVerticesPerSector *
++        (output.has_layers ? 2u : 1u);
++    try { output.vertices.resize(vertex_count); }
++    catch (...) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR terrain vertex allocation failed");
++        return false;
++    }
++    const std::uint8_t* input = sector_bytes.data() + 5u;
++    const std::size_t base_vertex_bytes =
++        static_cast<std::size_t>(kTerrainVerticesPerSector) *
++        kTerrainVertexBytes;
++    const std::uint8_t* layer_input = output.has_layers
++        ? input + base_vertex_bytes : nullptr;
++    const std::uint8_t* base_tiles = input + base_vertex_bytes *
++        (output.has_layers ? 2u : 1u);
++    const std::uint8_t* layer_tiles = output.has_layer_tiles
++        ? base_tiles + kTerrainTileBytes : nullptr;
++    const std::uint8_t* object_ids = output.has_layers
++        ? base_tiles + kTerrainTileBytes +
++            (output.has_layer_tiles ? kTerrainTileBytes : 0u)
++        : nullptr;
++    auto object_id_at = [&](std::uint32_t index) noexcept {
++        return object_ids ? read_u16(object_ids + index * 2u) :
++            kTerrainUndefined;
++    };
++    for (std::uint32_t y = 0; y < kTerrainVerticesPerSide; ++y) {
++        for (std::uint32_t x = 0; x < kTerrainVerticesPerSide; ++x) {
++            const std::size_t index =
++                static_cast<std::size_t>(y) * kTerrainVerticesPerSide + x;
++            const std::uint8_t* encoded = input + index * kTerrainVertexBytes;
++            TerrainVertex& vertex = output.vertices[index];
++            vertex.x = static_cast<float>(sx * kTerrainCellsPerSector + x) +
++                static_cast<float>(static_cast<std::int8_t>(encoded[0])) *
++                    (0.5f / 126.0f);
++            vertex.y = static_cast<float>(sy * kTerrainCellsPerSector + y) +
++                static_cast<float>(static_cast<std::int8_t>(encoded[1])) *
++                    (0.5f / 126.0f);
++            vertex.z = static_cast<float>(read_u16(encoded + 2u)) *
++                maximum_z / 65534.0f;
++            decode_terrain_normal(read_u32(encoded + 4u), vertex);
++        }
++    }
++    if (output.has_layers) {
++        for (std::uint32_t y = 0; y < kTerrainVerticesPerSide; ++y) {
++            for (std::uint32_t x = 0; x < kTerrainVerticesPerSide; ++x) {
++                const std::size_t grid =
++                    static_cast<std::size_t>(y) * kTerrainVerticesPerSide + x;
++                const std::uint8_t* encoded =
++                    layer_input + grid * kTerrainVertexBytes;
++                TerrainVertex& vertex =
++                    output.vertices[kTerrainVerticesPerSector + grid];
++                std::uint32_t adjacent_count = 0;
++                const auto adjacent = terrain_adjacent_tiles(x, y, adjacent_count);
++                std::uint16_t geometry_object = kTerrainUndefined;
++                std::uint16_t lighting_object = kTerrainUndefined;
++                for (std::uint32_t item = 0; item < adjacent_count; ++item) {
++                    const std::uint16_t candidate = object_id_at(adjacent[item]);
++                    if (candidate == kTerrainUndefined) continue;
++                    if (candidate >= terrain.objects.size()) {
++                        fail(failure, ResourceFailureCode::parse,
++                             "MPR layer object selector is out of range");
++                        return false;
++                    }
++                    if (lighting_object == kTerrainUndefined)
++                        lighting_object = candidate;
++                    if (geometry_object == kTerrainUndefined ||
++                        terrain.objects[candidate].wave_multiplier <
++                            terrain.objects[geometry_object].wave_multiplier)
++                        geometry_object = candidate;
++                }
++                vertex.geometry_object = geometry_object;
++                vertex.lighting_object = lighting_object;
++                vertex.x = static_cast<float>(
++                    sx * kTerrainCellsPerSector + x);
++                vertex.y = static_cast<float>(
++                    sy * kTerrainCellsPerSector + y);
++                if (geometry_object != kTerrainUndefined &&
++                    terrain.objects[geometry_object].type == 4u) {
++                    vertex.x = output.vertices[grid].x;
++                    vertex.y = output.vertices[grid].y;
++                }
++                vertex.z = geometry_object == kTerrainUndefined ? 0.0f :
++                    static_cast<float>(read_u16(encoded + 2u)) *
++                        maximum_z / 65534.0f;
++                vertex.depth = vertex.z - output.vertices[grid].z;
++                decode_terrain_normal(read_u32(encoded + 4u), vertex);
++            }
++        }
++    }
++    if (!finalize_terrain_sector_spatial_descriptor(output)) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR terrain clip bounds are invalid");
++        return false;
++    }
++
++    std::uint32_t animation_ordinal = 0;
++    auto append_tile = [&](std::uint32_t tile_x, std::uint32_t tile_y,
++                           const std::uint8_t* ids, bool layer,
++                           std::uint16_t object_id) -> bool {
++        const std::uint32_t tile_offset = tile_y * kTerrainTilesPerSide + tile_x;
++        // Layer membership comes from the object selector. The shipped
++        // loader skips absent objects before interpreting their tile
++        // word, which may retain an unused value in production maps.
++        if (layer && object_id == kTerrainUndefined) return true;
++        const std::uint16_t encoded = read_u16(ids + tile_offset * 2u);
++        if (encoded == kTerrainUndefined) return false;
++        const std::uint32_t tile_index = encoded & 0x3fffu;
++        if (tile_index >= terrain.tile_types.size()) return false;
++        std::uint16_t material = 0;
++        std::uint32_t tile_position = 0;
++        if (!terrain_material(tile_index, terrain, material, tile_position))
++            return false;
++        TerrainTileDescriptor tile{};
++        tile.tile_index = static_cast<std::uint16_t>(tile_index);
++        tile.material_index = static_cast<std::uint16_t>(material +
++            (layer ? terrain.texture_count + kTerrainLongTextureCount : 0u));
++        tile.object_id = layer ? object_id : kTerrainUndefined;
++        tile.rotation = static_cast<std::uint8_t>(encoded >> 14u);
++        tile.subpart = static_cast<std::uint8_t>(
++            2u * ((2u * tile_y) / kTerrainTilesPerSide) +
++            (2u * tile_x) / kTerrainTilesPerSide);
++        tile.edge_mask = static_cast<std::uint8_t>(
++            (tile_y == 0u ? 1u : 0u) |
++            (tile_y + 1u == kTerrainTilesPerSide ? 2u : 0u) |
++            (tile_x == 0u ? 4u : 0u) |
++            (tile_x + 1u == kTerrainTilesPerSide ? 8u : 0u));
++        tile.transparent = layer;
++        if (!layer) output.base_tile_ids[tile_offset] = tile.tile_index;
++        tile.animation_phases = terrain.tile_animation_phases[tile_index];
++        if (tile.animation_phases)
++            tile.animation_ordinal = animation_ordinal++;
++        const std::uint32_t vertex_base = layer
++            ? kTerrainVerticesPerSector : 0u;
++        for (std::uint32_t y = 0; y < 3u; ++y)
++            for (std::uint32_t x = 0; x < 3u; ++x)
++                tile.vertex_indices[y * 3u + x] =
++                    static_cast<std::uint16_t>(vertex_base +
++                        (tile_y * 2u + y) * kTerrainVerticesPerSide +
++                        tile_x * 2u + x);
++        output.tiles.push_back(std::move(tile));
++        return true;
++    };
++    try { output.tiles.reserve(kTerrainTilesPerSector *
++        (output.has_layer_tiles ? 2u : 1u)); }
++    catch (...) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR terrain tile allocation failed");
++        return false;
++    }
++    for (std::uint32_t y = 0; y < kTerrainTilesPerSide; ++y)
++        for (std::uint32_t x = 0; x < kTerrainTilesPerSide; ++x)
++            if (!append_tile(x, y, base_tiles, false, kTerrainUndefined)) {
++                fail(failure, ResourceFailureCode::parse,
++                     "MPR base tile selector is invalid");
++                return false;
++            }
++    if (output.has_layer_tiles)
++        for (std::uint32_t y = 0; y < kTerrainTilesPerSide; ++y)
++            for (std::uint32_t x = 0; x < kTerrainTilesPerSide; ++x) {
++                const std::uint32_t tile_offset =
++                    y * kTerrainTilesPerSide + x;
++                if (!append_tile(x, y, layer_tiles, true,
++                                 object_id_at(tile_offset))) {
++                    fail(failure, ResourceFailureCode::parse,
++                         "MPR layer tile selector is invalid");
++                    return false;
++                }
++            }
++    output.animation_count = animation_ordinal;
++    if (!publish_terrain_sector_descriptors(
++            terrain, output, static_cast<std::uint32_t>(material_count))) {
++        fail(failure, ResourceFailureCode::parse,
++             "MPR terrain command descriptor publication failed");
++        return false;
++    }
++    failure={};return true;
+ }
+ 
+ bool parse_terrain_members(const ResourceIdentity& identity, const std::string& project_resource,
+     const std::string& header_name, const TerrainMemberResolver& resolve,
+-    TerrainCpuAsset& terrain, ResourceFailure& failure) {
++    TerrainCpuAsset& terrain, ResourceFailure& failure, const TerrainCpuAsset* previous,
++    const std::array<std::uint32_t,4>* rectangle) {
+     terrain = {};
+     if (!resolve || project_resource.empty() || header_name.size() < 3 ||
+         header_name.compare(header_name.size() - 3, 3, ".mp") != 0) {
+@@ -2270,6 +2505,17 @@
+              "MPR immutable descriptor allocation failed");
+         return false;
+     }
++    if (previous && (!rectangle || previous->sector_count_x!=sectors_x || previous->sector_count_y!=sectors_y ||
++        previous->maximum_z!=maximum_z || previous->texture_count!=textures || previous->texture_size!=texture_size ||
++        previous->tile_size!=tile_size || previous->tile_types!=terrain.tile_types ||
++        previous->tile_animation_phases!=terrain.tile_animation_phases || previous->objects.size()!=terrain.objects.size())) {
++        fail(failure,ResourceFailureCode::parse,"partial update changes global map layout; complete document required");return false;
++    }
++    if(previous)for(std::size_t i=0;i<terrain.objects.size();++i) {
++        const auto& a=previous->objects[i];const auto& b=terrain.objects[i];
++        if(a.type!=b.type||a.color!=b.color||a.opacity!=b.opacity||a.self_illumination!=b.self_illumination||a.wave_multiplier!=b.wave_multiplier||a.warp_speed!=b.warp_speed){
++            fail(failure,ResourceFailureCode::parse,"partial update changes global layer properties");return false;}
++    }
+     try { terrain.sectors.resize(static_cast<std::size_t>(sector_count)); }
+     catch (...) {
+         fail(failure, ResourceFailureCode::parse,
+@@ -2278,6 +2524,9 @@
+     }
+     for (std::uint32_t sy = 0; sy < sectors_y; ++sy) {
+         for (std::uint32_t sx = 0; sx < sectors_x; ++sx) {
++            if(previous && (sx<(*rectangle)[0]||sy<(*rectangle)[1]||sx>=(*rectangle)[2]||sy>=(*rectangle)[3])) {
++                terrain.sectors[std::size_t(sy)*sectors_x+sx]=previous->sectors[std::size_t(sy)*sectors_x+sx];continue;
++            }
+             char suffix[16]{};
+             std::snprintf(suffix, sizeof(suffix), "%03u%03u.sec", sx, sy);
+             ResourceBlob sector_blob;
+@@ -2285,217 +2534,27 @@
+             if (!resolve(sector_name, sector_blob, failure) ||
+                 !sector_blob.bytes || sector_blob.bytes->size() < 5u)
+                 return false;
+-            const auto& sector_bytes = *sector_blob.bytes;
+-            // The game reads layers = flags & 1 and layer tiles = flags & 3,
+-            // so bit 0 alone also carries layer tiles, and bits 2-7 are
+-            // ignored. Layer tiles without layers (flags & 3 == 2) leave the
+-            // game's object-id array empty and crash it on first draw.
+-            const std::uint8_t flags = sector_bytes[4] & 0x03u;
+-            if (read_u32(sector_bytes.data()) != kSectorSignatureNormals ||
+-                flags == 0x02u) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR sector signature or flags are unsupported");
+-                return false;
+-            }
+-            std::uint64_t expected_sector = 5u +
+-                static_cast<std::uint64_t>(kTerrainVerticesPerSector) *
+-                    kTerrainVertexBytes + kTerrainTileBytes;
+-            if (flags & 0x01u)
+-                expected_sector +=
+-                    static_cast<std::uint64_t>(kTerrainVerticesPerSector) *
+-                        kTerrainVertexBytes + kTerrainTileBytes;
+-            if (flags != 0u) expected_sector += kTerrainTileBytes;
+-            if (expected_sector != sector_bytes.size()) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR sector byte count does not match its flags");
+-                return false;
+-            }
+-            TerrainSectorCpuAsset& output = terrain.sectors[
+-                static_cast<std::size_t>(sy) * sectors_x + sx];
+-            output.identity = sector_blob.identity;
+-            output.map_x = sx;
+-            output.map_y = sy;
+-            output.has_layers = (flags & 0x01u) != 0;
+-            output.has_layer_tiles = flags != 0u;
+-            const std::size_t vertex_count = kTerrainVerticesPerSector *
+-                (output.has_layers ? 2u : 1u);
+-            try { output.vertices.resize(vertex_count); }
+-            catch (...) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR terrain vertex allocation failed");
+-                return false;
+-            }
+-            const std::uint8_t* input = sector_bytes.data() + 5u;
+-            const std::size_t base_vertex_bytes =
+-                static_cast<std::size_t>(kTerrainVerticesPerSector) *
+-                kTerrainVertexBytes;
+-            const std::uint8_t* layer_input = output.has_layers
+-                ? input + base_vertex_bytes : nullptr;
+-            const std::uint8_t* base_tiles = input + base_vertex_bytes *
+-                (output.has_layers ? 2u : 1u);
+-            const std::uint8_t* layer_tiles = output.has_layer_tiles
+-                ? base_tiles + kTerrainTileBytes : nullptr;
+-            const std::uint8_t* object_ids = output.has_layers
+-                ? base_tiles + kTerrainTileBytes +
+-                    (output.has_layer_tiles ? kTerrainTileBytes : 0u)
+-                : nullptr;
+-            auto object_id_at = [&](std::uint32_t index) noexcept {
+-                return object_ids ? read_u16(object_ids + index * 2u) :
+-                    kTerrainUndefined;
+-            };
+-            for (std::uint32_t y = 0; y < kTerrainVerticesPerSide; ++y) {
+-                for (std::uint32_t x = 0; x < kTerrainVerticesPerSide; ++x) {
+-                    const std::size_t index =
+-                        static_cast<std::size_t>(y) * kTerrainVerticesPerSide + x;
+-                    const std::uint8_t* encoded = input + index * kTerrainVertexBytes;
+-                    TerrainVertex& vertex = output.vertices[index];
+-                    vertex.x = static_cast<float>(sx * kTerrainCellsPerSector + x) +
+-                        static_cast<float>(static_cast<std::int8_t>(encoded[0])) *
+-                            (0.5f / 126.0f);
+-                    vertex.y = static_cast<float>(sy * kTerrainCellsPerSector + y) +
+-                        static_cast<float>(static_cast<std::int8_t>(encoded[1])) *
+-                            (0.5f / 126.0f);
+-                    vertex.z = static_cast<float>(read_u16(encoded + 2u)) *
+-                        maximum_z / 65534.0f;
+-                    decode_terrain_normal(read_u32(encoded + 4u), vertex);
+-                }
+-            }
+-            if (output.has_layers) {
+-                for (std::uint32_t y = 0; y < kTerrainVerticesPerSide; ++y) {
+-                    for (std::uint32_t x = 0; x < kTerrainVerticesPerSide; ++x) {
+-                        const std::size_t grid =
+-                            static_cast<std::size_t>(y) * kTerrainVerticesPerSide + x;
+-                        const std::uint8_t* encoded =
+-                            layer_input + grid * kTerrainVertexBytes;
+-                        TerrainVertex& vertex =
+-                            output.vertices[kTerrainVerticesPerSector + grid];
+-                        std::uint32_t adjacent_count = 0;
+-                        const auto adjacent = terrain_adjacent_tiles(x, y, adjacent_count);
+-                        std::uint16_t geometry_object = kTerrainUndefined;
+-                        std::uint16_t lighting_object = kTerrainUndefined;
+-                        for (std::uint32_t item = 0; item < adjacent_count; ++item) {
+-                            const std::uint16_t candidate = object_id_at(adjacent[item]);
+-                            if (candidate == kTerrainUndefined) continue;
+-                            if (candidate >= terrain.objects.size()) {
+-                                fail(failure, ResourceFailureCode::parse,
+-                                     "MPR layer object selector is out of range");
+-                                return false;
+-                            }
+-                            if (lighting_object == kTerrainUndefined)
+-                                lighting_object = candidate;
+-                            if (geometry_object == kTerrainUndefined ||
+-                                terrain.objects[candidate].wave_multiplier <
+-                                    terrain.objects[geometry_object].wave_multiplier)
+-                                geometry_object = candidate;
+-                        }
+-                        vertex.geometry_object = geometry_object;
+-                        vertex.lighting_object = lighting_object;
+-                        vertex.x = static_cast<float>(
+-                            sx * kTerrainCellsPerSector + x);
+-                        vertex.y = static_cast<float>(
+-                            sy * kTerrainCellsPerSector + y);
+-                        if (geometry_object != kTerrainUndefined &&
+-                            terrain.objects[geometry_object].type == 4u) {
+-                            vertex.x = output.vertices[grid].x;
+-                            vertex.y = output.vertices[grid].y;
+-                        }
+-                        vertex.z = geometry_object == kTerrainUndefined ? 0.0f :
+-                            static_cast<float>(read_u16(encoded + 2u)) *
+-                                maximum_z / 65534.0f;
+-                        vertex.depth = vertex.z - output.vertices[grid].z;
+-                        decode_terrain_normal(read_u32(encoded + 4u), vertex);
+-                    }
+-                }
+-            }
+-            if (!finalize_terrain_sector_spatial_descriptor(output)) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR terrain clip bounds are invalid");
+-                return false;
+-            }
+-
+-            std::uint32_t animation_ordinal = 0;
+-            auto append_tile = [&](std::uint32_t tile_x, std::uint32_t tile_y,
+-                                   const std::uint8_t* ids, bool layer,
+-                                   std::uint16_t object_id) -> bool {
+-                const std::uint32_t tile_offset = tile_y * kTerrainTilesPerSide + tile_x;
+-                // Layer membership comes from the object selector. The shipped
+-                // loader skips absent objects before interpreting their tile
+-                // word, which may retain an unused value in production maps.
+-                if (layer && object_id == kTerrainUndefined) return true;
+-                const std::uint16_t encoded = read_u16(ids + tile_offset * 2u);
+-                if (encoded == kTerrainUndefined) return false;
+-                const std::uint32_t tile_index = encoded & 0x3fffu;
+-                if (tile_index >= terrain.tile_types.size()) return false;
+-                std::uint16_t material = 0;
+-                std::uint32_t tile_position = 0;
+-                if (!terrain_material(tile_index, terrain, material, tile_position))
+-                    return false;
+-                TerrainTileDescriptor tile{};
+-                tile.tile_index = static_cast<std::uint16_t>(tile_index);
+-                tile.material_index = static_cast<std::uint16_t>(material +
+-                    (layer ? textures + kTerrainLongTextureCount : 0u));
+-                tile.object_id = layer ? object_id : kTerrainUndefined;
+-                tile.rotation = static_cast<std::uint8_t>(encoded >> 14u);
+-                tile.subpart = static_cast<std::uint8_t>(
+-                    2u * ((2u * tile_y) / kTerrainTilesPerSide) +
+-                    (2u * tile_x) / kTerrainTilesPerSide);
+-                tile.edge_mask = static_cast<std::uint8_t>(
+-                    (tile_y == 0u ? 1u : 0u) |
+-                    (tile_y + 1u == kTerrainTilesPerSide ? 2u : 0u) |
+-                    (tile_x == 0u ? 4u : 0u) |
+-                    (tile_x + 1u == kTerrainTilesPerSide ? 8u : 0u));
+-                tile.transparent = layer;
+-                if (!layer) output.base_tile_ids[tile_offset] = tile.tile_index;
+-                tile.animation_phases = terrain.tile_animation_phases[tile_index];
+-                if (tile.animation_phases)
+-                    tile.animation_ordinal = animation_ordinal++;
+-                const std::uint32_t vertex_base = layer
+-                    ? kTerrainVerticesPerSector : 0u;
+-                for (std::uint32_t y = 0; y < 3u; ++y)
+-                    for (std::uint32_t x = 0; x < 3u; ++x)
+-                        tile.vertex_indices[y * 3u + x] =
+-                            static_cast<std::uint16_t>(vertex_base +
+-                                (tile_y * 2u + y) * kTerrainVerticesPerSide +
+-                                tile_x * 2u + x);
+-                output.tiles.push_back(std::move(tile));
+-                return true;
+-            };
+-            try { output.tiles.reserve(kTerrainTilesPerSector *
+-                (output.has_layer_tiles ? 2u : 1u)); }
+-            catch (...) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR terrain tile allocation failed");
+-                return false;
+-            }
+-            for (std::uint32_t y = 0; y < kTerrainTilesPerSide; ++y)
+-                for (std::uint32_t x = 0; x < kTerrainTilesPerSide; ++x)
+-                    if (!append_tile(x, y, base_tiles, false, kTerrainUndefined)) {
+-                        fail(failure, ResourceFailureCode::parse,
+-                             "MPR base tile selector is invalid");
+-                        return false;
+-                    }
+-            if (output.has_layer_tiles)
+-                for (std::uint32_t y = 0; y < kTerrainTilesPerSide; ++y)
+-                    for (std::uint32_t x = 0; x < kTerrainTilesPerSide; ++x) {
+-                        const std::uint32_t tile_offset =
+-                            y * kTerrainTilesPerSide + x;
+-                        if (!append_tile(x, y, layer_tiles, true,
+-                                         object_id_at(tile_offset))) {
+-                            fail(failure, ResourceFailureCode::parse,
+-                                 "MPR layer tile selector is invalid");
+-                            return false;
+-                        }
+-                    }
+-            output.animation_count = animation_ordinal;
+-            if (!publish_terrain_sector_descriptors(
+-                    terrain, output, static_cast<std::uint32_t>(material_count))) {
+-                fail(failure, ResourceFailureCode::parse,
+-                     "MPR terrain command descriptor publication failed");
+-                return false;
+-            }
+-        }
+-    }
+-    if (!validate_terrain_asset_descriptor_once(terrain)) {
++            if(!parse_terrain_sector_asset(sector_blob,terrain,sx,sy,
++                terrain.sectors[std::size_t(sy)*sectors_x+sx],failure))return false;
++        }
++    }
++    bool valid=true;
++    if(previous&&rectangle){
++        const auto materials=(terrain.texture_count+kTerrainLongTextureCount)*2u;
++        for(std::uint32_t y=(*rectangle)[1];y<(*rectangle)[3]&&valid;++y)for(std::uint32_t x=(*rectangle)[0];x<(*rectangle)[2];++x){
++            const auto index=std::size_t(y)*terrain.sector_count_x+x;
++            if(!validate_terrain_sector_descriptor(terrain,terrain.sectors[index],index,materials)){valid=false;break;}
++        }
++        if(valid){
++            flatten_liquid_rim(terrain,rectangle);owned_terrain_reset_liquid_outflow(terrain);
++            valid=build_terrain_render_envelopes(terrain,rectangle);
++            // Brush ingress publishes only the selected SEC members. Falls
++            // are immutable derived data, built lazily at stroke end; the
++            // drag host retains the preceding complete solution meanwhile.
++            terrain.immutable_descriptor_validation_count=1;terrain.immutable_descriptor_validated=valid;
++        }
++    }else valid=validate_terrain_asset_descriptor_once(terrain);
++    if (!valid) {
+         fail(failure, ResourceFailureCode::parse,
+              "MPR immutable terrain descriptor is invalid");
+         return false;
+--- a/external/owned-renderer/Source/owned_asset_loader.h
++++ b/external/owned-renderer/Source/owned_asset_loader.h
+@@ -1,4 +1,5 @@
+ #pragma once
++#include "brush_shared_vector.h"
+ #include <functional>
+ 
+ #include "engine_bridge.h"
+@@ -432,8 +433,16 @@
+     std::array<TerrainTileRangeDescriptor, 4> subparts{};
+ };
+ 
++struct BrushVertexStreams;
++struct BrushTerrainAttributes;
+ struct TerrainSectorCpuAsset {
++    std::shared_ptr<const BrushVertexStreams> editor_vertices;
++    bool editor_shared_vertices=false;
++    std::shared_ptr<const BrushTerrainAttributes> editor_attributes;
++    std::vector<std::uint64_t> editor_material_revisions; // material * 4 + subpart
+     ResourceIdentity identity;
++    std::uint64_t editor_revision = 0; // embedded edits only; zero preserves retail keys
++    std::uint64_t editor_liquid_revision = 0; // global flow refresh does not rebuild opaque ground
+     std::uint32_t map_x = 0;
+     std::uint32_t map_y = 0;
+     bool has_layers = false;
+@@ -441,11 +450,11 @@
+     float average_z = 0.0f;
+     TerrainBounds bounds{};
+     std::array<TerrainBounds, 4> subpart_bounds{};
+-    std::vector<TerrainVertex> vertices;
++    BrushSharedVector<TerrainVertex> vertices;
+     // Immutable draw records in material-major, subpart-major order. Within a
+     // material/subpart range they retain exact source order (base row-major,
+     // then present layer row-major).
+-    std::vector<TerrainTileDescriptor> tiles;
++    BrushSharedVector<TerrainTileDescriptor> tiles;
+     // Base tile id by row-major tile position (UINT16_MAX = none), so zone-grid
+     // neighbour queries need no scan of the material-ordered records.
+     std::array<std::uint16_t, 256> base_tile_ids = [] {
+@@ -454,23 +463,30 @@
+         return none;
+     }();
+     // Dense material lookup. Empty materials/subparts have valid empty ranges.
+-    std::vector<TerrainMaterialDescriptor> materials;
++    BrushSharedVector<TerrainMaterialDescriptor> materials;
+     // Immutable decode result. Runtime dynamic capture uses this O(1) value
+     // instead of rescanning tile descriptors every frame.
+     std::uint32_t animation_count = 0;
+     // Per base vertex (1089): owned_terrain_slope_normal and _facet_flatness,
+     // computed by the loader worker for a terrain nothing edits after load
+     // (the active map). Empty: computed where they are read.
+-    std::vector<std::uint32_t> base_slope_normals, base_facet_flatness;
++    BrushSharedVector<std::uint32_t> base_slope_normals, base_facet_flatness;
+     // Core mode, game process only (owned_resource_runtime.cpp): a slim
+     // sector keeps no vertices, tiles or slope tables; `heights` holds the
+     // height fields of each vertex in the same order and vertex_count() the
+     // count. Never encoded: the x64 host has the full sector.
+-    std::vector<TerrainHeightVertex> heights;
++    BrushSharedVector<TerrainHeightVertex> heights;
+     std::size_t vertex_count() const noexcept {
+         return vertices.empty() ? heights.size() : vertices.size();
+     }
+ };
++
++// Height-only sectors are already used by core mode. Border editing keeps
++// these exact fields in the interior and decodes only touched sector meshes.
++inline TerrainHeightVertex terrain_height_value(const TerrainSectorCpuAsset& sector,std::size_t index) noexcept {
++    if(index<sector.vertices.size())return terrain_height_vertex(sector.vertices[index]);
++    return index<sector.heights.size()?sector.heights[index]:TerrainHeightVertex{};
++}
+ 
+ // Selected terrain page. Only its upload payload is mutable after publication;
+ // the render thread releases it after upload and rereads the same selection if
+@@ -478,6 +494,8 @@
+ struct TerrainTexturePage {
+     std::shared_ptr<ResourceStore> store;
+     ResourceLocation location;
++    std::shared_ptr<const std::vector<std::uint8_t>> memory_source;
++    ResourceIdentity memory_identity;
+     mutable std::uint32_t mip_count = 0;
+     mutable std::shared_ptr<const TextureCpuAsset> texture;
+     mutable std::vector<NativeOwnedTextureMip> mips;
+@@ -548,6 +566,7 @@
+     // filled by the map loader (off the render thread) through the active
+     // [RES] priority. Empty entries mean the page was not available.
+     std::vector<TerrainTexturePage> pages;
++    std::shared_ptr<const std::vector<std::uint8_t>> editor_profile;
+     // Per square-atlas tile slot: the algae share of a swamp frame's art (1
+     // for a pure swamp frame; less where the frame has open water painted
+     // in, the shipped swamp/water transition frames), filled once by the map
+@@ -563,6 +582,8 @@
+     // decode-boundary validation. Frame preparation checks these fields in
+     // O(1); it never memoizes validation by address or rescans source arrays.
+     bool immutable_descriptor_validated = false;
++    // Brush drags keep the last complete shadow selection until stroke end.
++    bool editor_defer_shadows = false;
+     // Procedural falls of the authored rest liquid (procedural_falls.h),
+     // derived once from this immutable asset on first use.
+     mutable std::shared_ptr<const ProceduralFallMap> procedural_falls;
+@@ -609,9 +630,9 @@
+ inline std::uint16_t terrain_base_liquid_object(const TerrainCpuAsset& source,
+     const TerrainSectorCpuAsset& sector, std::uint32_t base) noexcept {
+     constexpr std::uint32_t layer = 33u * 33u;
+-    if (base >= layer || !sector.has_layers || base + layer >= sector.vertices.size())
++    if (base >= layer || !sector.has_layers || base + layer >= sector.vertex_count())
+         return UINT16_MAX;
+-    const auto object = sector.vertices[base + layer].lighting_object;
++    const auto object = terrain_height_value(sector,base+layer).lighting_object;
+     return object < source.objects.size() && terrain_liquid_object(source.objects[object].type)
+         ? object : UINT16_MAX;
+ }
+@@ -626,8 +647,8 @@
+ inline std::uint16_t owned_terrain_layer_object(const TerrainCpuAsset& source,
+     const TerrainSectorCpuAsset& sector, std::uint32_t local) noexcept {
+     constexpr std::uint32_t layer = 33u * 33u;
+-    if (local >= layer || local + layer >= sector.vertices.size()) return UINT16_MAX;
+-    const std::uint16_t own = sector.vertices[local + layer].lighting_object;
++    if (local >= layer || local + layer >= sector.vertex_count()) return UINT16_MAX;
++    const std::uint16_t own = terrain_height_value(sector,local+layer).lighting_object;
+     std::uint32_t x = local % 33u, y = local / 33u, sx = sector.map_x, sy = sector.map_y;
+     if (x == 32u && sx + 1u < source.sector_count_x) { x = 0; ++sx; }
+     if (y == 32u && sy + 1u < source.sector_count_y) { y = 0; ++sy; }
+@@ -635,8 +656,8 @@
+     const std::size_t index = std::size_t(sy) * source.sector_count_x + sx;
+     if (index >= source.sectors.size()) return own;
+     const auto& owner = source.sectors[index];
+-    if (owner.map_x != sx || owner.map_y != sy || owner.vertices.size() < 2u * layer) return own;
+-    const std::uint16_t shared = owner.vertices[y * 33u + x + layer].lighting_object;
++    if (owner.map_x != sx || owner.map_y != sy || owner.vertex_count() < 2u * layer) return own;
++    const std::uint16_t shared = terrain_height_value(owner,y*33u+x+layer).lighting_object;
+     const auto liquid = [&](std::uint16_t o) {
+         return o < source.objects.size() && terrain_liquid_object(source.objects[o].type);
+     };
+@@ -784,7 +805,13 @@
+ using TerrainMemberResolver = std::function<bool(const std::string&, ResourceBlob&, ResourceFailure&)>;
+ bool parse_terrain_members(const ResourceIdentity& identity, const std::string& project_resource,
+     const std::string& header_name, const TerrainMemberResolver& resolve,
+-    TerrainCpuAsset& terrain, ResourceFailure& failure);
++    TerrainCpuAsset& terrain, ResourceFailure& failure,
++    const TerrainCpuAsset* previous = nullptr, const std::array<std::uint32_t,4>* rectangle = nullptr);
++// Exact shared sector decoder: reads only this completed .sec member.
++bool parse_terrain_sector_asset(const ResourceBlob&,TerrainCpuAsset&,std::uint32_t,std::uint32_t,
++    TerrainSectorCpuAsset&,ResourceFailure&);
++bool parse_terrain_rectangle(const ResourceBlob&, const std::string&, const TerrainCpuAsset&,
++    const std::array<std::uint32_t,4>&, TerrainCpuAsset&, ResourceFailure&);
+ bool parse_terrain_asset(const ResourceBlob& blob,
+                          const std::string& project_resource,
+                          TerrainCpuAsset& terrain,

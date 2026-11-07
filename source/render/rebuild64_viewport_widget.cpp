@@ -126,9 +126,13 @@ struct CRebuild64Viewport::Worker {
     struct OutputJob {quint64 serial,generation;QSize size;int mode;EirCamera camera;QByteArray model,texture;QVector3D shape;QVector<float> preview;QVector<quint64> objectKeys;QByteArray secondary,parts,modelBytes,boneBytes,textureBytes;};
     QList<OutputJob> outputs;
 
-    struct Query {quint64 serial=0,generation=0;EirCamera camera{};QMatrix4x4 clip;QSize size,logicalSize;QVector<EirPickPixel> pixels;};
+    struct Query {quint64 serial=0,generation=0,terrainSerial=0;EirCamera camera{};QMatrix4x4 clip;QSize size,logicalSize;QVector<EirPickPixel> pixels;};
+    struct TerrainPacket {
+        QByteArray bytes,name;QRect rect;quint32 flags{0};quint64 serial{0};
+    };
     struct Input {
         QByteArray terrain,name;
+        TerrainPacket terrainUpdate;
         QVector<QByteArray> mobs;
         QStringList paths;
         QString gameRoot, neighbourLayout;
@@ -254,7 +258,7 @@ struct CRebuild64Viewport::Worker {
             failure(QString::fromUtf8("Несовместимая DLL Rebuild64 (C ABI)."));return;
         }
         loaded=true;
-        void* handle=nullptr;quint64 generation=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot, activeLayout;
+        void* handle=nullptr;quint64 generation=0,readyGeneration=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot, activeLayout;
         bool injected=false,startupArmed=true,previousNeighbours=false;
         for(;;) {
             const auto frameStart=std::chrono::steady_clock::now();
@@ -333,7 +337,7 @@ struct CRebuild64Viewport::Worker {
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
                 const auto layout=next.neighbourLayout.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues,EIR_PREVIEW_STATIC_FOOTPRINTS};
                 phase(QString::fromUtf8("Создание D3D11 и подготовка шейдеров"));
                 opening::Scope deviceTiming("native.create");
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
@@ -413,6 +417,19 @@ struct CRebuild64Viewport::Worker {
                 if(api.resize(handle,uint32_t(next.size.width()),uint32_t(next.size.height()),&error)){failure(QString::fromUtf8(error.message));break;}
                 size=next.size;
             }
+            // The source snapshot remains owned by Input. Coalescing only replaces
+            // unsent rectangles; generation and native world are checked at ingress.
+            EirUpdateState updates{};
+            if(api.update_state(handle,&updates,&error)){failure(QString::fromUtf8(error.message));break;}
+            if(next.terrainUpdate.serial>updates.applied_serial && updates.world && readyGeneration==generation) {
+                const auto& p=next.terrainUpdate;
+                EirTerrainUpdate update{};update.size=sizeof(update);update.flags=p.flags;
+                update.generation=generation;update.world=updates.world;update.serial=p.serial;
+                update.x0=p.rect.x();update.y0=p.rect.y();update.x1=p.rect.x()+p.rect.width();update.y1=p.rect.y()+p.rect.height();
+                update.terrain_name=p.name.constData();update.terrain={p.bytes.constData(),uint64_t(p.bytes.size())};
+                if(api.terrain_update(handle,&update,&error)){failure(QString::fromUtf8(error.message));break;}
+                {std::lock_guard<std::mutex> lock(mutex);if(input.generation==generation&&input.terrainUpdate.serial==p.serial)input.terrainUpdate=TerrainPacket();}
+            }
             if(next.camera.neighbours_visible && !previousNeighbours && !startupArmed) {
                 if(!startup.arm()){failure("Cannot arm neighbour load crash marker");break;}
                 startupArmed=true;
@@ -432,6 +449,7 @@ struct CRebuild64Viewport::Worker {
                 failure(QString::fromUtf8("Rebuild64: данные нового кадра не подготовлены за 120 секунд. Открыт OpenGL."));break;
             }
             if(!rc) {
+                readyGeneration=generation;
                 prepared=true;
                 // Native depth and all service preparation are owned by this
                 // worker. No QGLWidget, QObject or editor document is touched.
@@ -453,7 +471,7 @@ struct CRebuild64Viewport::Worker {
                     const int queryRc=api.query(handle,&query,&error);const QString diagnostic=queryRc?QString::fromUtf8(error.message):QString();
                     {std::lock_guard<std::mutex> lock(mutex);if(input.query==request)input.query.reset();}
                     QMetaObject::invokeMethod(owner,[target=owner,request,diagnostic]{
-                        if(target->m_stopping||request->serial!=target->m_querySerial)return;
+                        if(target->m_stopping||request->serial!=target->m_querySerial||request->terrainSerial!=target->m_terrainSubmitted)return;
                         target->m_queryInFlight=false;auto pending=std::move(target->m_queryInput);target->m_queryInput.clear();
                         if(!target->m_selected||request->generation!=target->m_generation||request->logicalSize!=target->size())return;
                         if(!diagnostic.isEmpty()){emit target->m_gl->updateMsg(target->tr("Rebuild64: точный запрос недоступен: %1").arg(diagnostic));return;}
@@ -465,9 +483,10 @@ struct CRebuild64Viewport::Worker {
                 // Keep the crash marker until its async load/adoption settles.
                 if(!stats.neighbours_pending){startup.clear();startupArmed=false;}
                 pending.invalidate();
-                QMetaObject::invokeMethod(owner,[target=owner,stats]{
+                if(api.update_state(handle,&updates,&error)){failure(QString::fromUtf8(error.message));break;}
+                QMetaObject::invokeMethod(owner,[target=owner,stats,updates]{
                     if(target->m_stopping||stats.ready_generation!=target->m_generation)return;
-                    target->m_statistics=stats;
+                    target->m_statistics=stats;target->m_terrainPresented=updates.presented_serial;
                     if(target->m_selected && !target->m_documentRefreshPending && stats.ready_generation==target->m_generation) {
                         const bool firstShow=target->m_stack->currentWidget()!=target->m_native;
                         target->m_stack->setCurrentWidget(target->m_native);
@@ -515,6 +534,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_preparationText->setAlignment(Qt::AlignCenter);m_preparationText->setWordWrap(true);
     m_stack->setContentsMargins(0,0,0,0);m_stack->setSpacing(0);m_stack->addWidget(gl);m_stack->addWidget(m_native);m_stack->addWidget(m_preparation);m_stack->setCurrentWidget(m_preparation);
     connect(gl,&CView::legacyViewportRequested,this,&CRebuild64Viewport::requireOpenGL);
+    connect(gl,&CView::nativeTerrainChanged,this,&CRebuild64Viewport::queueTerrain);
     auto* viewMenu=menu->addMenu(QString::fromUtf8("Вид карты"));
     auto* group=new QActionGroup(this);group->setExclusive(true);
     m_glAction=viewMenu->addAction("OpenGL");m_rebuildAction=viewMenu->addAction(QString::fromUtf8("Rebuild64"));
@@ -528,7 +548,7 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     m_guardDirectory=QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)).filePath("rebuild64");
     m_interruptedStarts=CRebuild64StartupGuard::interrupted(m_guardDirectory);
     connect(gl,&QObject::destroyed,this,[this]{m_selected=false;m_timer->stop();m_worker.reset();m_gl=nullptr;});
-    connect(gl,&CView::mobStateChanged,this,[this]{if(m_earlyDocument)return;m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
+    connect(gl,&CView::mobStateChanged,this,[this]{if(m_earlyDocument)return;m_mobDocumentRefresh=true;m_documentRefreshPending=true;if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.documentDirty=true;}});
     connect(gl,&CView::loadedMapStateChanged,this,[this]{
         if(m_earlyDocument && m_gl->m_pLand && m_gl->m_pLand->isMprLoad()
            &&m_earlyMap==m_gl->m_pLand->filePath().absoluteFilePath())return;
@@ -758,6 +778,7 @@ void CRebuild64Viewport::updatePreparationText() {
             :tr("Rebuild64\nКарта не открыта. Откройте или создайте карту через меню Файл.\nВосстановление сохранений и настройки доступны в обычных меню.")));
 }
 void CRebuild64Viewport::beginDocumentTransition() {
+    m_terrainFlags=0;m_strokeFlags=0;m_terrainDirty=QRect();m_strokeDirty=QRect();m_terrainSubmitted=0;m_terrainPresented=0;
     cancelOutputs(tr("Offscreen отменён: карта закрывается или меняется."));
     if(!m_activeCapturePath.isEmpty())emit captureFinished(m_activeCapturePath,tr("Снимок отменён: карта закрывается или меняется."),m_generation);
     if(!m_selected&&!m_outputOnly)return;
@@ -807,7 +828,9 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
     result.hour=m_gl->effectiveWorldTimeHours();
     // Hour/region are editor controls; colours are read by the DLL from the
     // game's Lights[Cave]<region>.ini, never from GL's environment policy.
-    result.world_time=m_previewClock.isValid()?m_previewClock.elapsed()/55.0:0.0;
+    result.world_time=m_diagnosticFrame?double(m_diagnosticFrame)/3.0:(m_previewClock.isValid()?m_previewClock.elapsed()/55.0:0.0);
+    // The diagnostic freezes animation time, not the renderer's monotonic frame index.
+    result.test_frame=0;
     if(m_gl->m_activeMob){const auto& world=m_gl->m_activeMob->worldSet();const auto wind=util::vec3FromString(world.data(eWsTypeWindDir));for(int axis=0;axis<3;++axis)result.wind_direction[axis]=wind[axis];result.wind_force=world.data(eWsTypeWindStr).toFloat();}
     result.fog_projection[0]=.5f*(1-m_gl->m_projection(2,2));result.fog_projection[1]=1;result.fog_projection[2]=.5f*m_gl->m_projection(2,3);
     // Publish map light facts. The renderer owns attenuation and brightness. Copy live values
@@ -940,6 +963,9 @@ void CRebuild64Viewport::tick() {
     if(preview&&!m_transformPreviewMessage)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: предпросмотр преобразования. Мир обновится после подтверждения."));
     m_transformPreviewMessage=preview;
     if(!m_outputOnly)serviceInput();
+    if(m_worker&&!cohortChanged&&m_terrainFlags&&submitTerrain()) {
+        updateLiveCamera();return;
+    }
     if(m_worker&&m_sceneSnapshotTimer.isValid()&&m_sceneSnapshotTimer.elapsed()<100) {
         const auto camera=cameraSnapshot();
         const QSize size(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
@@ -959,7 +985,7 @@ void CRebuild64Viewport::tick() {
     const auto serializationStart=opening::clock();
     m_documentMobOrder=mobOrder;m_documentVisibility=visibility;
     m_documentMapPath=m_gl->m_pLand->filePath().absoluteFilePath();
-    m_terrainState=terrainState;m_documentRefreshPending=false;
+    m_terrainState=terrainState;m_documentRefreshPending=false;m_mobDocumentRefresh=false;
     m_documentPoses.clear();m_poseOverrides.clear();
     for(const auto& pose:editorPoses(m_gl))m_documentPoses.insert((quint64(pose.mob)<<32)|pose.nid,pose);
     Worker::Input next;next.documentObjects=editorPoses(m_gl);
@@ -983,7 +1009,7 @@ void CRebuild64Viewport::tick() {
     for(const auto& mob:next.mobs){hash.addData(QByteArray::number(mob.size()));hash.addData(mob);}
     hash.addData(visibility);
     for(const auto& placement:m_gl->m_neighborPlacements){hash.addData(placement.mprPath.toUtf8());hash.addData(QByteArray::number(placement.origin.x(),'g',17));hash.addData(QByteArray::number(placement.origin.y(),'g',17));hash.addData(QByteArray::number(placement.size.width(),'g',17));hash.addData(QByteArray::number(placement.size.height(),'g',17));}
-    const auto fingerprint=hash.result();const bool documentChanged=fingerprint!=m_documentHash;if(documentChanged){m_documentHash=fingerprint;++m_generation;m_gl->m_nativeQueryPixels.clear();}
+    const auto fingerprint=hash.result();const bool documentChanged=fingerprint!=m_documentHash;if(documentChanged){m_documentHash=fingerprint;++m_generation;m_gl->m_nativeQueryPixels.clear();m_terrainSubmitted=0;m_terrainPresented=0;m_terrainFlags=0;m_terrainDirty=QRect();m_strokeDirty=QRect();m_strokeFlags=0;}
     if(documentChanged&&m_worker)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: обновление вида после правки; пока показан последний готовый кадр. Правки находятся в документе."));
     next.generation=m_generation;next.camera=cameraSnapshot();
     {opening::Scope stage("gui.native.resource_snapshot");next.resources(m_gl->settings(),QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF()))));}
@@ -1003,6 +1029,44 @@ void CRebuild64Viewport::tick() {
     {std::lock_guard<std::mutex> lock(m_worker->mutex);next.query=m_worker->input.query;next.serviceScene=m_worker->input.serviceScene;next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureServiceSerial=m_worker->input.captureServiceSerial;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
     m_worker->wake.notify_all();
     if(!m_waitingInput.isEmpty() && frameIsCurrent() && editorQueryReady()){replayEditorInput();}
+}
+// Terrain notifications never change the canonical document or its undo/save path.
+void CRebuild64Viewport::queueTerrain(const QRect& rect,quint32 flags) {
+    if(!m_selected)return;
+    // Native pick/depth is cached by camera AND terrain revision. Preserve
+    // queued gestures, but never replay an old depth map over the new terrain.
+    m_gl->m_nativeQueryPixels.clear();++m_querySerial;m_queryInFlight=false;
+    for(const auto& pending:m_queryInput)m_waitingInput.append(pending);m_queryInput.clear();
+    if(m_worker){std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.query.reset();}
+    if((flags&1u)&&m_gl->m_landscapeTools&&!m_gl->m_landscapeTools->moveMobObjectsWithTerrain()) {
+        requireOpenGL(tr("Лепка с сохранением мировой высоты объектов"));return;
+    }
+    if(!rect.isEmpty()){m_terrainDirty=m_terrainDirty.united(rect);m_strokeDirty=m_strokeDirty.united(rect);m_strokeFlags|=flags&7u;}
+    if((flags&8u)&&m_terrainDirty.isEmpty())m_terrainDirty=m_strokeDirty;
+    if(m_terrainDirty.isEmpty())return;
+    m_terrainFlags|=flags|m_strokeFlags;
+    if(flags&8u){m_strokeDirty=QRect();m_strokeFlags=0;}
+}
+bool CRebuild64Viewport::submitTerrain() {
+    if(!m_worker||!m_gl->m_terrainEditAvailable||m_earlyDocument||m_mobDocumentRefresh)return false;
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);
+        if(m_worker->input.generation!=m_generation||m_worker->input.name!=m_gl->m_pLand->filePath().fileName().toUtf8())return false;}
+    Worker::TerrainPacket packet;CValidationReport report;
+    CMprEditTransaction transaction(QStringLiteral("Rebuild64 brush snapshot"));
+    if(!m_gl->m_terrainEdit.appendSectorEdits(&transaction,&report)
+       ||!m_gl->m_mprDocument.appendMapParametersEdit(m_gl->m_terrainEdit.maxZ(),m_gl->m_mprMaterials,m_gl->m_mprAnimatedTiles,&transaction,&report)
+       ||!m_gl->m_mprDocument.applyTransaction(transaction,&packet.bytes,&report)) {
+        fallback(tr("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ РѕР±РЅРѕРІР»РµРЅРёРµ РєРёСЃС‚Рё: ")+report.toText());return false;
+    }
+    packet.name=m_gl->m_pLand->filePath().fileName().toUtf8();
+    packet.rect=m_terrainDirty.intersected(QRect(0,0,int(m_gl->m_mprDocument.mapInfo().sectorCountX),int(m_gl->m_mprDocument.mapInfo().sectorCountY)));
+    packet.flags=m_terrainFlags;packet.serial=++m_terrainSubmitted;
+    m_terrainState=m_gl->m_terrainEdit.stateSha256();m_documentRefreshPending=false;
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);
+        auto& pending=m_worker->input.terrainUpdate;
+        packet.rect=packet.rect.united(pending.rect);packet.flags|=pending.flags;
+        pending=std::move(packet);m_worker->input.documentDirty=false;}
+    m_terrainFlags=0;m_terrainDirty=QRect();m_worker->wake.notify_all();return true;
 }
 void CRebuild64Viewport::openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search) {
     if(!m_selected||m_resourceWriteDepth||m_stopping||window()->property("nativeMapRequestPending").toBool())return;
@@ -1128,15 +1192,6 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
             event->accept();return;
         }
     }
-    if((event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)
-       && m_gl->m_landscapeTools && m_gl->m_landscapeTools->editingEnabled()) {
-        const auto* key=static_cast<QKeyEvent*>(event);
-        const auto cameraKeys=QVector<int>{Qt::Key_W,Qt::Key_A,Qt::Key_S,Qt::Key_D,Qt::Key_Q,Qt::Key_E,Qt::Key_Up,Qt::Key_Down,Qt::Key_Left,Qt::Key_Right,Qt::Key_Shift,Qt::Key_Escape};
-        if(!cameraKeys.contains(key->key())&&!(key->modifiers()&(Qt::ControlModifier|Qt::AltModifier))) {
-            if(event->type()==QEvent::KeyPress)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: инструменты рельефа требуют OpenGL."));
-            event->accept();return;
-        }
-    }
     if(event->type()==QEvent::MouseButtonDblClick)syncEditorViewport();
     if(m_selected&&!m_queryReplaying&&queryEditorInput(event)){event->accept();return;}
     const bool mouse=event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonDblClick||event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonRelease;
@@ -1146,12 +1201,6 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
            &&!m_gl->hasPendingOperation()
            &&(m_documentRefreshPending||m_statistics.ready_generation!=m_generation)) {
             emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: кадр после правки ещё обновляется. Дождитесь готового кадра перед новым выбором мышью; Undo и сохранение доступны."));
-            event->accept();return;
-        }
-        const bool terrain=m_gl->m_landscapeTools && m_gl->m_landscapeTools->editingEnabled();
-        if(terrain && (e->button()!=Qt::MiddleButton && !(e->buttons()&Qt::MiddleButton))) {
-            if(event->type()==QEvent::MouseButtonPress)
-                emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: кисти рельефа требуют OpenGL. Выберите OpenGL через меню вида; текущие правки сохранены в документе."));
             event->accept();return;
         }
         if(event->type()==QEvent::MouseButtonPress)m_pointerDown=true;
@@ -1173,6 +1222,10 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
     if(m_selected && mouse && event->type()==QEvent::MouseButtonPress)m_native->setFocus(Qt::MouseFocusReason);
 }
 bool CRebuild64Viewport::queryEditorInput(QEvent* event) {
+    // Brush ray queries use the canonical CPU terrain during the gesture.
+    // Object/ground selection resumes native ID/depth after leaving the tool.
+    if(m_gl->m_landscapeTools&&m_gl->m_landscapeTools->editingEnabled()&&m_gl->m_terrainEditAvailable)return false;
+
     std::shared_ptr<QEvent> copy;
     switch(event->type()){
     case QEvent::MouseMove:case QEvent::MouseButtonPress:case QEvent::MouseButtonRelease:case QEvent::MouseButtonDblClick:
@@ -1191,7 +1244,7 @@ bool CRebuild64Viewport::queryEditorInput(QEvent* event) {
     if(event->type()==QEvent::MouseMove&&!m_queryInput.isEmpty()&&m_queryInput.back().event->type()==QEvent::MouseMove)m_queryInput.back()=input;
     else m_queryInput.append(input);
     if(m_queryInFlight)return true;
-    auto request=std::make_shared<Worker::Query>();request->serial=++m_querySerial;request->generation=m_generation;request->clip=clip;request->logicalSize=size();
+    auto request=std::make_shared<Worker::Query>();request->serial=++m_querySerial;request->generation=m_generation;request->terrainSerial=m_terrainSubmitted;request->clip=clip;request->logicalSize=size();
     request->size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));request->camera=cameraSnapshot();
     for(int r=0;r<4;++r)for(int c=0;c<4;++c)request->camera.world_to_clip[r*4+c]=r==2?.5f*(clip(2,c)+clip(3,c)):clip(r,c);
     const auto inverse=input.view.inverted();const auto eye=inverse.map(QVector3D()),target=inverse.map(QVector3D(0,0,-1));for(int a=0;a<3;++a){request->camera.eye[a]=eye[a];request->camera.target[a]=target[a];}

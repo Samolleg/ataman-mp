@@ -18,6 +18,8 @@ struct CNativeEditorService {
     struct Label {QVector3D position;QImage image;};
     std::shared_ptr<const CTerrainEditModel> grid;
     QByteArray terrainBytes;
+    std::shared_ptr<const CTerrainEditModel> brushTerrain;
+    QVector<Batch> brushPlanes;bool brushLand{true};float brushFallbackZ{0};
     quint64 generation{0};
     CAiGraphDocument graph;int graphLayer{3};QVector<float> graphHeights;std::shared_ptr<const CTerrainEditModel> graphTerrain;
     QVector<Batch> batches;

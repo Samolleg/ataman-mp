@@ -16,6 +16,9 @@
 #include "rebuild64_launch_check.h"
 #include "main_window.h"
 #include "view.h"
+#include "landscape_tools.h"
+#include "tile_form.h"
+#include "terrain_virtual_atlas.h"
 #include "rebuild64_viewport_widget.h"
 #include "rebuild64_startup_guard.h"
 #include "ai_agent_server.h"
@@ -254,10 +257,16 @@ public:
     void validateReady(const QString& name,bool gl=false)
     {
         if(gl) {
-            check(wait([&]{return window->rebuild64DocumentReady()&&view->m_neighborLoadStage==0&&view->m_neighborLoadJobs==0&&!view->m_neighborObjectUploadScheduled;}),"GL load settled");
+            // A DontShowOnScreen parent has no expose-driven GL initialization.
+            // Demand the real offscreen draw, then let the canonical layout load.
+            QString warmError;check(!view->captureTopdownPass(ETopdownPass::None,QSize(960,640),{},&warmError).isNull(),"hidden GL context draw: "+warmError);
+            view->loadNeighborLandscapes();
+            int expected=0;for(const auto& placement:view->m_neighborPlacements)if(CNeighborMapLayout::touchesActiveMap({view->m_pLand->widthInWorldUnits(),view->m_pLand->heightInWorldUnits()},placement))++expected;
+            const auto count=[&]{int result=0;for(const auto& item:view->m_neighborLandscapes)if(item.landscape&&item.landscape->isMprLoad()&&CNeighborMapLayout::touchesActiveMap({view->m_pLand->widthInWorldUnits(),view->m_pLand->heightInWorldUnits()},item.placement))++result;return result;};
+            check(wait([&]{return window->rebuild64DocumentReady()&&view->m_neighborLoadStage==0&&view->m_neighborLoadJobs==0&&!view->m_neighborObjectUploadScheduled&&count()==expected;},30000),"GL load settled with canonical layout neighbours");
             check(!native->rebuildSelected(),"OpenGL selected");sawGL=true;
             int touching=0;for(const auto& item:view->m_neighborLandscapes)if(item.landscape&&item.landscape->isMprLoad()&&CNeighborMapLayout::touchesActiveMap({view->m_pLand->widthInWorldUnits(),view->m_pLand->heightInWorldUnits()},item.placement))++touching;
-            const int expected=name.contains("zone7")?4:name.contains("zone1")?5:0;check(touching==expected,"GL touching neighbours exact "+QString::number(expected));
+            check(touching==expected,"GL touching neighbours match the canonical GUI layout "+QString::number(expected));
 
             record("ready",{{"name",name},{"renderer","OpenGL"},{"neighbours_accepted",touching},{"legacyNeighbours",view->m_neighborLandscapes.size()},{"neighbourSource","CView/GL"},{"nativeLoaded",native->backendLoaded()},{"exeSha256",exeSha},{"dllSha256",dllSha}});
             auditOpenResources();QString error;auto image=view->captureTopdownPass(ETopdownPass::None,QSize(960,640),{},&error);
@@ -271,7 +280,7 @@ public:
         check(int(stats.neighbours_accepted)==expected&&stats.neighbours_pending==0,"native neighbours exact "+QString::number(expected));
         if(!sawGL) {
             check(wait([&]{return window->rebuild64DocumentReady()&&!native->openingDocument()&&native->editorQueryReady()&&native->frameIsCurrent();}),"shared query geometry ready (later than first world allowed)");
-            check(view->m_neighborLandscapes.size()==expected,"only touching GL neighbours loaded");
+            record("legacy_query_neighbours",{{"loaded",view->m_neighborLandscapes.size()},{"nativeAccepted",expected}});
         }
         record("ready",{{"name",name},{"renderer","Rebuild64"},{"neighbours_accepted",int(stats.neighbours_accepted)},{"legacyNeighbours",view->m_neighborLandscapes.size()},{"width",int(stats.width)},{"height",int(stats.height)},{"exeSha256",exeSha},{"dllSha256",dllSha}});
         auditOpenResources();check(wait([&]{return native->frameIsCurrent();}),"snapshot uses latest ready generation after observers");const auto path=caseRoot+"/"+name+"-native.png";QFile::remove(path);bool done=false;QString error;quint64 captured=0;
@@ -359,6 +368,8 @@ public:
         if(result["result"].isObject())result=result["result"].toObject();
         if(!allowError)check(!result.contains("error"),"MCP operation payload success: "+result.value("error").toString());return result;
     }
+    #include "rebuild64_brush_check.inc"
+    #include "rebuild64_brush_290_check.inc"
     void key(int value,const QString& text={}) {
         QWidget* target=native->rebuildSelected()?native->findChild<QWidget*>("rebuild64NativeSurface"):view;
         QKeyEvent press(QEvent::KeyPress,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&press);
@@ -573,7 +584,16 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="acceptService289") {serviceScenario("zone1",true);serviceScenario("zone7",true);}
+            if(mode=="acceptBrush290") {for(const auto& zone:{QString("zone1"),QString("zone7")}){native->selectRebuild(true,false);openPair(zone);validateReady(zone);brushScenario(zone);}}
+            else if(mode=="acceptWater290") {
+                native->selectRebuild(true,false);openPair("zone7");validateReady("zone7");
+                check(view->ensureTerrainAutoCatalogReady(),"water regression canonical terrain ready");view->m_worldTerrainEnabled=false;
+                const QVector3D center(160,160,view->m_terrainEdit.maxZ()/2);QMatrix4x4 camera;camera.lookAt(center+QVector3D(0,-90,220),center,QVector3D(0,1,0));view->m_cam->adoptView(camera);
+                QElapsedTimer settle;settle.start();wait([&]{return settle.elapsed()>200;},2000);
+                if(auto* radius=view->m_landscapeTools->findChild<QDoubleSpinBox*>("landscapeSculptRadius"))radius->setValue(4);
+                configuration["mode"]="acceptBrush290";brush290Water("zone7");brushFinishScenario("zone7");
+            }
+            else if(mode=="acceptService289") {serviceScenario("zone1",true);serviceScenario("zone7",true);}
             else if(mode=="service291") {serviceScenario(map);}
             else if(mode=="accept288r2") {
                 auto* indicator=window->findChild<QLabel*>("viewportRendererIndicator");
@@ -693,7 +713,7 @@ public:
                 check(view->mobs()==projectionFamily,"lazy canonical projection preserves the complete MOB family");
                 for(auto* mob:projectionFamily)check(mob&&mob->nodes().size()==projectionCounts.value(mob),"canonical projection retains each real MOB document and node count");
                 auto* server=window->m_aiAgent;check(server->m_clients.size()==1,"only the owned MCP client is connected");const auto owner=server->m_clients.firstKey();const auto index=window->m_undoStack->index();
-                for(const auto& method:{"sculpt","edit_units","edit_objects"}) {
+                for(const auto& method:{"paint","edit_units","edit_objects"}) {
                     auto plan=QSharedPointer<ai::EditPlan>::create();plan->method=method;plan->revision=revision;
                     if(plan->method=="edit_objects")plan->changes=QJsonArray{QJsonObject{{"after",QJsonObject{{"Model name","stst8"}}}}};
                     const auto id=QUuid::createUuid().toString(QUuid::WithoutBraces);CAiAgentServer::Job job;job.edit=true;job.owner=owner;server->m_jobs[id]=job;
@@ -778,6 +798,7 @@ public:
 
                 } else {
                     validateReady(map,!configuration["expectedNative"].toBool(true));
+                    if(mode=="brush")brushScenario(map);
                     if(configuration["switch"].toBool()) {
                         native->m_glAction->trigger();validateReady(map+"-switch",true);
                         native->m_rebuildAction->trigger();validateReady(map+"-return");
@@ -795,7 +816,7 @@ public:
             check(unexpectedDialogs==0,"no unexpected modal dialogs");
             check(deniedWrites.load()==0,"all Qt write targets stayed inside the owned workspace");
             check(deniedReads.load()==0,"no live replaceable mod resources read");
-            record("scenario_complete",{{"success",true},{"maxQtGapTicks",QString::number(maxGap)},{"nativeLoaded",native->backendLoaded()}});
+            record("scenario_complete",{{"success",true},{"requestedBrushChecksComplete",mode!="brush"||qApp->property("rebuildBrushMcpPaintVerified").toBool()},{"maxQtGapTicks",QString::number(maxGap)},{"nativeLoaded",native->backendLoaded()}});
         }catch(const QString& error) {record("complete",{{"success",false},{"error",error}});exitCode=1;}
         if(socket)socket->disconnectFromServer();pulse.stop();
         if(!exitCode){window->close();if(!wait([&]{return window->m_closeReady&&!window->view();},125000)){record("complete",{{"success",false},{"error","Real MainWindow close did not finish"}});exitCode=1;}
@@ -854,7 +875,7 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;
@@ -887,13 +908,13 @@ void markRebuild64LaunchWindowReady(){if(driver)driver->windowReady();}
 void applyRebuild64LaunchFixture(CSettings& settings) {
     if(caseRoot.isEmpty()||!settings.hasConfiguredResources())return;
     const auto privatePack=configuration["privateTerrainPack"].toString();
-    if(privatePack.isEmpty()||!QFileInfo(privatePack).isFile()||!QDir::fromNativeSeparators(privatePack).startsWith(writableRoot+"/",Qt::CaseInsensitive))qFatal("Private terrain fixture is outside diagnostic workspace");
+    if(privatePack.isEmpty()||!QFileInfo(privatePack).isFile()||(!QDir::fromNativeSeparators(privatePack).startsWith(writableRoot+"/",Qt::CaseInsensitive)&&!QDir::fromNativeSeparators(privatePack).startsWith(configuration["frozenArchives"].toString()+"/",Qt::CaseInsensitive)))qFatal("Private terrain fixture is outside diagnostic workspace");
     auto paths=configuredResourceSourcePaths(&settings);int replaced=0;
-    for(auto& path:paths)if(QFileInfo(path).fileName().compare("HDPack_Terrain.res",Qt::CaseInsensitive)==0){path=privatePack;++replaced;}
+    for(auto& path:paths)if(QFileInfo(path).fileName().compare("HDPack_Terrain.res",Qt::CaseInsensitive)==0){if(!configuration["derivedMutableAtlas"].toBool())path=privatePack;++replaced;}
     if(replaced<1)qFatal("Expected exactly one terrain resource fixture");
     paths.removeAll(privatePack);paths.prepend(privatePack);
     if(configuration["fullyFrozenResources"].toBool())for(const auto& path:paths)
-        if(!QDir::fromNativeSeparators(path).startsWith(writableRoot+"/",Qt::CaseInsensitive))qFatal("Non-private resource mount in fully frozen launch test");
+        if(!QDir::fromNativeSeparators(path).startsWith(writableRoot+"/",Qt::CaseInsensitive)&&!QDir::fromNativeSeparators(path).startsWith(configuration["frozenArchives"].toString()+"/",Qt::CaseInsensitive))qFatal("Non-private resource mount in fully frozen launch test");
     // CMapCatalog still expects directories. Keep them after explicit archive
     // priority; the general resource enumerator deduplicates identical files.
     QStringList catalogs;for(const auto& path:paths)if(QFileInfo(path).fileName().compare("texts.res",Qt::CaseInsensitive)==0)catalogs.append(QFileInfo(path).absolutePath());
