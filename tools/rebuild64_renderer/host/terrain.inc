@@ -36,9 +36,9 @@ int map_frame(Session& s,probe1b_error* e){
  std::vector<owned::RetainedWorldPointLight> lights;
  if(s.game.setting(L"Terrain Settings",L"EnableDynamicLights")!=0)for(uint32_t index=0;index<s.frameCamera.point_light_count;++index){const auto& in=s.frameCamera.point_lights[index];owned::RetainedWorldPointLight l;l.source_id=int32_t(in.source_id);std::copy_n(in.position,3,l.center.begin());std::copy_n(in.color,3,l.color.begin());l.radius=in.radius;l.casts_shadow=in.casts_shadow!=0;lights.push_back(l);}
  const char* lightFailure=nullptr;if(!E1Scene().Scene().visual_publish_world_point_lights(std::move(lights),&lightFailure))return fail(e,E_INVALIDARG,lightFailure?lightFailure:"point light publication");
- if(!s.materialsPublished&&s.map){
+ if(!s.materialsPublished&&s.map){s.trace.phase("material_texture_ingress_begin");
   for(const auto& texture:s.map->textures)if(texture.second){const HRESULT hr=owned::AtamanReadiness::material(s.renderer,texture.first,*texture.second);if(FAILED(hr))return fail(e,hr,"world material texture ingress failed");}
-  s.materialsPublished=true;
+  s.materialsPublished=true;s.trace.phase("material_texture_ingress_end");
  }
  auto geometry=owned::frozen_owned_terrain_geometry(*s.terrain);geometry.revision=s.generation;
  geometry.animation.precise_time=s.frameCamera.world_time;

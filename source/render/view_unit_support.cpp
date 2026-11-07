@@ -8,9 +8,9 @@
 
 void CView::ensureUnitSupportSurface()
 {
-    opening::Scope timing("gui.geometry.support");
     const auto revision=CObjectBase::supportGeometryRevision();
     if(m_unitSupportRevision==revision && m_unitSupportMobs==m_aMob)return;
+    opening::Scope timing("gui.geometry.support");
     m_unitSupportSurface.clear();
     // A resolver can run inside a MOB/node projection loop. Read-only scans
     // must not detach the live Qt containers while such an iterator exists.

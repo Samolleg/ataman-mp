@@ -17523,4 +17523,8 @@ Line: %4</source><translation>Вызов:
 <context><name>CView</name><message><source>Не удалось подготовить полный MOB. Неполный документ не принят.</source><translation>Не удалось подготовить полный MOB. Неполный документ не принят.</translation></message></context>
 <context><name>MainWindow</name><message><source>Rebuild64: открытие новой карты поставлено в очередь; предыдущий кадр не будет опубликован.</source><translation>Rebuild64: открытие новой карты поставлено в очередь; предыдущий кадр не будет опубликован.</translation></message></context>
 <context><name>MainWindow</name><message><source>Подготовка геометрии: повторите закрытие или смену карты после завершения текущего участка.</source><translation>Подготовка геометрии: повторите закрытие или смену карты после завершения текущего участка.</translation></message></context>
+<context><name>CRebuild64Viewport</name>
+<message><source>Отложенный ввод отменён: размер вида изменился. Повторите выбор и правку; документ сохранён.</source><translation>Отложенный ввод отменён: размер вида изменился. Повторите выбор и правку; документ сохранён.</translation></message>
+<message><source>OpenGL: подготовка атласов и геометрии. Дождитесь готовности; правки сохранены.</source><translation>OpenGL: подготовка атласов и геометрии. Дождитесь готовности; правки сохранены.</translation></message>
+</context>
 </TS>

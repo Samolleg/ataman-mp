@@ -2528,7 +2528,7 @@ QM: lrelease архивного TS, lconvert readback3341→3360,19 новых �
 
 Каждый ready/readback пишет фактический renderer, accepted neighbours, EXE/DLL SHA; несовпадение 5/4 — FAIL. Первый кадр берётся из настоящего DXGI Present потока после `qtPageShown=true`, а не из итогового snapshot. Qt gap — пересечение интервала между событиями с измеряемым окном; событие, записанное после кадра, также учитывается, если пауза пересекала кадр. Отдельно приводятся gap до первого кадра и до полной готовности инструментов.
 
-При 15:30:13 изменился **живой** `Dejavu/Res/HDPack_Terrain.res`: исходный `53505ad8…`, новый `def4e975…`. Тест остановился на проверке источника; собственная копия осталась побайтно прежней (`53505ad8fab92968f091c3adaac0ad7e0f62a413a063689712cc65d59b1c742c`, 744700123 bytes). Продолжение заморожено на ней, без копирования нового файла и без исправления живого. Собственная копия остаётся первым источником, вторичные mod/Base источники читаются. Источник внешнего изменения не установлен; это не приписывается другому участнику. Изменение вторичного архива может менять resource fingerprint/CPU cache, поэтому серия имеет эту дополнительную оговорку к шуму; журнал изменения сохранён. Одна GL-пара zone1/r2, внутри которой изменился вторичный архив, исключена и целиком повторена cold→warm на новом частном кеше при стабильном хеше источника; исходные две записи сохранены в performance-retired-external-epoch.json. Остальные пары не пересекали момент изменения. Проверка Qt writes во всех итоговых случаях не обнаружила записи вне W.
+При 15:30:13 изменился **живой** `Dejavu/Res/HDPack_Terrain.res`: исходный `53505ad8…`, новый `def4e975…`. Тест остановился на проверке источника; собственная копия осталась побайтно прежней (`53505ad8fab92968f091c3adaac0ad7e0f62a413a063689712cc65d59b1c742c`, 744700123 bytes). Продолжение заморожено на ней, без копирования нового файла и без исправления живого. Собственная копия остаётся первым источником, вторичные mod/Base источники читаются. Источник установлен владельцем при приёмке R3: штатное сохранение gipat4 через MCP установленной286, PID48164, `logs/headless-48164/workflow.log`, 15:30:13; namespace `gipat4_349a914d2fd9` заменён на `gipat4_fa74071fc87f`, создана резервная копия. Предыдущая попытка в15:29:24 завершилась «Atomic replacement failed», следующая прошла. Возможное удержание вторичного живого HDPack тестовыми процессами — гипотеза причины первого отказа, не доказанный факт. Код R2 действительно повторно включал живой RES через раскрытие исходного каталога, поэтому R3 исключает саму такую возможность полной заморозкой источников. Изменение вторичного архива может менять resource fingerprint/CPU cache, поэтому серия имеет эту дополнительную оговорку к шуму; журнал изменения сохранён. Одна GL-пара zone1/r2, внутри которой изменился вторичный архив, исключена и целиком повторена cold→warm на новом частном кеше при стабильном хеше источника; исходные две записи сохранены в performance-retired-external-epoch.json. Остальные пары не пересекали момент изменения. Проверка Qt writes во всех итоговых случаях не обнаружила записи вне W.
 
 
 ### Итоговая серия: медиана [минимум–максимум], миллисекунды
@@ -2726,3 +2726,257 @@ Release из git archive через 8.3-путь, qmake/mingw Release и соб�
 Функциональные сценарии раннего полного мира, очереди ввода, отмены/последней карты, камеры, routes, GL и headless прошли на итоговых бинарниках. Временные пороги целиком не выполнены; итог **PARTIAL**, не принятие владельцем. Полный перечень функций197/план288+ выше не сокращён и здесь не объявлен завершённым. Новых требований менять renderer/шейдеры не возникло. Дополнительный вопрос Илье: штатные точные отметки native document/geometry/material readiness для разбора хвоста без самодельного вмешательства в renderer. Остальные старые вопросы сохранены, никому сообщения не отправлялись.
 
 Копии и cleanup: поскольку общего PASS по порогам нет, необходимые частные fixtures сохранены для воспроизводимости; точный собственный остаток и план удаления после PASS — `W/cleanup-plan.json`. Чужие/288 каталоги и процессы не затронуты. На установке/видимой картинке проверяет только владелец. STOP BEFORE INSTALLATION, no push. Следующий этап запускаю я после приёмки, установка только по слову владельца; следующий этап в R2 не начинался.
+
+## R3 — живая камера, query-only рельеф и изоляция чтения, 2026-11-07
+
+Результаты R2 выше остаются историческими. Владелец принял ранний полный мир, параллельный старт, камеру новой карты, гонки, GL и headless, но вернул очередь навигации, поздние инструменты и Qt pauses. R3 — последний круг открытия; следующий этап здесь не начат, его запускает владелец. Установка только по его слову, push не выполняется. Номер остаётся287.
+
+### Что изменено
+
+1. Ввод навигации идёт сразу в исходные CView/COperation/CCamera, а не в очередь. Native tick передаёт общую камеру и во время подготовки, включая native-only projection pulse. W/A/S/D/Q/E и стрелки используют только CCamera/key manager/settings; в этом коде нет ограничения высотой или запроса GL-рельефа. Колесо использует тот же enlarge. Средняя кнопка использует обычный COperation, но pivot на поверхности берётся CPU-ray/height запросом CView::terrainPositionAt; если попадания нет, сохраняется прежний корректный pivot. Вычисление движения не зависит от готовности редактируемого документа или служебного слоя.
+2. Очередь геометрических действий хранит исходное Qt-событие, view/projection, viewport и модификаторы на момент события. При воспроизведении временно используется этот снимок общей камеры; после него возвращается живая камера. Отложенные Undo/Redo вызывают те же QAction/MainWindow handlers в порядке очереди. Изменившийся размер viewport отменяет оставшийся пакет с русским сообщением, сохраняя документ. Close/смена карты сохраняют прежнюю защиту очереди. В тесте клик перед полётом выбирает исходный nid, а не объект под новой камерой.
+3. CLandscape/CSector при native открытии читают CPU tiles/высоты и сохраняют исходные MPR. Не создаются мировой GL-атлас, его mipmaps, цветовые/material/water потоки и обычные GL-секторы. Для query depth/grid по требованию создаются отдельные position-only buffers из тех же девяти вершин плитки и тех же индексов треугольников. Единственный белый texel нужен старому GL depth/grid shader для alpha test, это служебный ресурс; он не передаётся в Rebuild64 и не заменяет материалы мира. Сетка запроса сбрасывается при изменении геометрии. Меши и alpha-текстуры объектов сохранены: они нужны прежнему выбору и служебному слою.
+4. Убрана ещё одна ненужная зависимость: native terrain cache не читает/хеширует содержимое мирового GL-атласа. Его ключ — содержимое MPR; object resource generation имеет собственный прежний контракт. Полный OpenGL сохраняет прежние ключи, атласы, воду, материалы и11 соседей. При явном GL/запасном переходе отложенные ресурсы строятся штатным путём с русским сообщением ожидания.
+5. MPR/MOB preflight и полная editable projection validation/deserialize выполняются как CPU value с проверкой request/serial перед принятием. Каноническая проекция остаётся в CView. При adopt события обрабатываются между завершёнными unit projections и стадиями; AddMob проверяет generation после возврата из adopt. Стадии end_workspace разложены на resume_tools/actions/minimap; между ними обслуживаются события и проверяется serial. До регистрации отменённый MOB удаляется явно, после неё сохраняется владение CView. Undo/Save/форматы не перенесены в DLL.
+6. Найден и исправлен потерянный readback: worker раньше забирал capture request до готового кадра и мог не ответить при pending. Теперь запрос сохраняется до ответа/отмены; другое поколение даёт явную ошибку. Проверяется отдельный запрос во время подготовки последней карты. Observer повторно проверяет текущий готовый generation перед обычным snapshot.
+
+Вид renderer и shader table не изменены. Новые отметки в embedding host: terrain page bytes, MOB resource snapshots, visual seed, material texture ingress, material-table ready epoch. Это измерители фактических вызовов/условий готовности. Texture ingress wall time измеряет вызов загрузки, а не GPU timestamp. Финальная material-table ready отметка требует pending0 и совпавший завершённый renderer epoch, как барьер показа. Отсутствие отдельного замера больше не объявляется блокером Ильи.
+
+### Потребители GL-атласов и запасной путь
+
+| Потребитель | Решение R3 |
+|---|---|
+| CView selection terrain depth / service depth (`view.cpp`, `view_editor_service.cpp`) | Untextured query geometry, исходные формы/диагонали; без world atlas. |
+| Сетка служебного слоя | Те же query vertices и border indices; прежние visibility/uniform settings. |
+| Height/pivot/placement query | CPU terrainPositionAt/projectPt; не строит GL-атлас. |
+| Мировые land/water passes | CLandscape::ensureRenderResources перед обычным draw; прежние full streams/атлас. |
+| Переход GL, включая device loss | Общий selectRebuild(false) создаёт отложенные ресурсы и затем использует прежний GL;11 соседей. |
+| Terrain palette/preview (`view.cpp`), `glTexture()` | Getter материализует ресурсы по требованию. Неперенесённые действия сохраняют прежний явный GL путь. |
+| `topdown_export.cpp::captureSourceAtlas`, export/миниатюры/GL captures | Getter обеспечивает настоящий atlas; обычный GL capture path сохранён. Автоматическая GL-миниатюра при native открытии по-прежнему не запускается (R1). |
+| Native window_snapshot / показанный поток | Собственный D3D readback, без GL мирового atlas; запрос pending больше не теряется. |
+| Headless | Прежний OpenGL путь; deferred native flags не включаются, D3D DLL не загружается. |
+
+### Чтение ресурсов: поправка к R2 и новая изоляция
+
+Факт установлен владельцем: живой HDPack в15:30:13 изменило штатное сохранение gipat4 через MCP установленной286, PID48164, `logs/headless-48164/workflow.log`. Namespace `gipat4_349a914d2fd9` заменён на `gipat4_fa74071fc87f`, с резервной копией. Попытка15:29:24 получила «Atomic replacement failed», следующая прошла. Соответствующая фраза R2 исправлена по прямому поручению. Связь первого отказа с удержанием файла тестом остаётся недоказанной гипотезой.
+
+По коду R2 риск был реальным: orderedResourceSources повторно раскрывал живой каталог RES после явного private archive и включал живой HDPack вторичным mount. Исторический список handle того процесса не сохранён, поэтому конкретный отказ не приписывается тесту как доказанный.
+
+R3 замораживает292 файла (все используемые mod/Base RES, карты и конфигурацию), сохраняет manifest SHA и не перечитывает оригиналы при каждом запуске. Состав раскладки и map roots перенаправлен в собственные копии, включая соседей/AddMob. Приоритетный terrain pack — тот же байтовый снимок, что в R2; вторичные архивы также частные. Профиль не содержит живых resource/map roots. Qt CreateFile guard запрещает попытки открытия живых mod RES/MPR/MOB, mount inventory проверяется до загрузки мира, NtQuerySystemInformation/GetFinalPathNameByHandle читает **только handles своего PID** и сохраняет список. Чужие handles не дублируются и процессы не меняются. Сам аудит выполняется как CPU value после отметки готовности, до snapshot; его стоимость не выдается за стоимость открытия.
+
+Условия чтения теперь строже R2. Контроль286 повторно не запускался по поручению; его цифры ниже используются как историческая граница R2, не как новый одновременный контроль с иной изоляцией.
+
+### Итоговые бинарники и проверки R3
+
+Все итоговые проверки ниже: EXE `13cb39156ff8c8b2afc5b0a8e0dae1a33097d6cf02762c8fc5a6aef5d4ef1cfa`, DLL `5319e9599b4a3d2ffdd06c85c31ceaa6755885bd2ecd2b07d4f77523a9417801`, archive tree `51bba8b26ab83ff80090b79075006a7e974a66f5`. Release собран из git archive без строк владельца; x86 runtime/MCP собраны штатным wrapper с известным обходом длинного пути через8.3. Таблица шейдеров прежняя `38fb2f9c8931f79080ca036d75f89388170852531627c31415b3ed3d99872f64`; renderer library `e21003c22efd3999c598a9bb7e99743fc95ca1dbc19320179185f0af6ee4c2d9` не пересобиралась. Только RTX4070SUPER, DPR1, настоящий main/MainWindow, скрытые реальные Qt-виджеты и события; видимое окно и ощущение работы проверяет только владелец.
+
+| Сценарий | Итог | Рендер / соседи |
+|---|---|---|
+| `seal-r3-final-live-camera` | PASS | Rebuild64/5 (GL loaded 5) |
+| `seal-r3-final-prepare-races` | PASS | Rebuild64/4 (GL loaded 4) |
+| `seal-r3-final-switch-gl` | PASS | OpenGL/5 (GL loaded 11); Rebuild64/5 (GL loaded 11); Rebuild64/5 (GL loaded 5) |
+| `seal-r3-final-device-late` | PASS | OpenGL/4 (GL loaded 11); Rebuild64/4 (GL loaded 4) |
+| `seal-r3-final-headless` | PASS | OpenGL/5 (GL loaded 11) |
+| `seal-r3-final-routes` | PASS | Rebuild64/0 (GL loaded 0); Rebuild64/4 (GL loaded 4); Rebuild64/5 (GL loaded 5) |
+
+Все case представлены в [functional-r3.json](../../work/rebuild64-launch-287-r3-20261107/functional-r3.json); события, opening-spans, process/exit и shown Present trace находятся рядом в соответствующем case. Перед снимком проверены текущие renderer/generation, 5/4 соседей (либо0 для нового холста), pending0/settled и SHA. GL-контроли явно отмечены OpenGL: касающихся соседей5/4, всего загруженных GL-ландшафтов11. Headless: open/read/Save/snapshot копии, DLL не загружается. Нет видимых окон, clipboard и обращений к живым заменяемым файлам.
+
+### Камера и порядок ввода
+
+| Настоящее Qt-событие после первого показанного кадра | Ввод → изменившийся Present, мс | Геометрия готова |
+|---|---:|---|
+| W | 297.3 | False |
+| wheel | 487.4 | False |
+| middle-drag | 458.2 | False |
+
+`syntheticQueryHold=False`: в итоговом прогоне использовано естественное ожидание геометрии, искусственная задержка не понадобилась. Клик по исходной точке перед полётом после подготовки выбрал исходный nid56; Qt G/X/1/Enter и Ctrl+Z сохранили порядок, Redo подтвердил отменённое перемещение. Камера не воспроизводится рывком из очереди. Проверены отмена открытия, close, новая последняя карта и запрос capture при pending: ответ текущего поколения либо явная отмена, без потери запроса.
+
+### Три повтора cold-private/warm-private
+
+Числа — медиана [минимум–максимум], мс. Это собственный пустой/готовый кеш, не доказанное охлаждение глобального shader cache драйвера. После добавления детализации service и порционного end_workspace использованы только новые case `seal-matrix-r3-*`; промежуточные `matrix-r3-*`, `accept-matrix-r3-*`, `verify/prove-r3-*` не входят в итоговую матрицу.
+
+| Карта / кеш | n | Первый настоящий Present | Первый показанный Present | Инструменты готовы | Максимальная пауза Qt до инструментов |
+|---|---:|---:|---:|---:|---:|
+| zone1 / cold-private | 3 | 6024 [5701–6854] | 6264 [5969–7129] | 13595 [12740–14005] | 1751 [1574–2310] |
+| zone1 / warm-private | 3 | 5723 [4702–7136] | 5941 [4916–7430] | 12785 [10057–13556] | 1224 [426–2278] |
+| zone7 / cold-private | 3 | 8683 [4448–9087] | 8959 [4659–9622] | 21672 [14482–23964] | 1498 [488–2166] |
+| zone7 / warm-private | 3 | 5918 [5212–6173] | 6160 [5442–6419] | 17220 [15538–17312] | 537 [448–639] |
+
+Полные строки12 прогонов, разбивка и все паузы>200мс: [timing-analysis-r3.json](../../work/rebuild64-launch-287-r3-20261107/timing-analysis-r3.json). [performance-matrix-r3.json](../../work/rebuild64-launch-287-r3-20261107/performance-matrix-r3.json) связывает условия с case; в каждом действительно приняты5/4 соседей, исключений/SKIP нет.
+
+| Исторический контроль из R2 | Карта / кеш | Инструменты, мс | Qt до инструментов, мс |
+|---|---|---:|---:|
+| 286  | zone1 / cold-private | 15305 [13576–16586] | 2743 [2207–3396] |
+| 286  | zone1 / warm-private | 15898 [13933–36600] | 2608 [2387–6259] |
+| 286  | zone7 / cold-private | 22697 [17919–36794] | 3498 [2331–6385] |
+| 286  | zone7 / warm-private | 18666 [17518–21073] | 2371 [2354–3153] |
+| 287 R2 | zone1 / cold-private | 19047 [17012–19921] | 1180 [1161–1479] |
+| 287 R2 | zone1 / warm-private | 19155 [16811–23777] | 1385 [1135–2756] |
+| 287 R2 | zone7 / cold-private | 23475 [20241–24409] | 1422 [1360–1804] |
+| 287 R2 | zone7 / warm-private | 22024 [20080–23001] | 1494 [1423–1612] |
+
+Повтор286 не запускался. Изоляция чтения теперь строже: все вторичные RES/карты заморожены, тогда как R2 повторно раскрывал живой RES-каталог. Приоритетный pack сохранён побайтно как в R2. Это историческое сравнение, а не новый попарный контроль при строго тождественных условиях; параллельная работа другого Codex не останавливалась.
+
+### Именованная разбивка и оставшиеся паузы
+
+Суммы вложенных/параллельных spans не складываются в CPU стоимость. Ниже общая стоимость стадии по каждому открытию: медиана по12 прогонам и максимальная одиночная порция. Полный файл хранит QPC/thread/detail; service.draw отделён от glFinish и readback.
+
+| Стадия | Медиана суммы на открытие, мс | Максимальная одиночная порция, мс |
+|---|---:|---:|
+| `cpu.validate_editable_projection` | 300.2 | 450.2 |
+| `mob.deserialize` | 351.7 | 435.4 |
+| `cpu.primary.prepare` | 157.5 | 212.0 |
+| `gui.mob.project_object` | 3290.4 | 268.5 |
+| `gui.mob.adopt` | 1820.5 | 748.9 |
+| `gui.addmob_slice` | 1677.7 | 750.7 |
+| `gui.end.resume_tools` | 212.9 | 256.7 |
+| `gui.end.actions` | 23.2 | 28.0 |
+| `gui.end.minimap` | 16.9 | 20.3 |
+| `gui.gl.neighbour_accept` | 354.1 | 240.0 |
+| `gui.gl.landscape_sectors` | 418.8 | 236.4 |
+| `gui.gl.atlas_page_decode` | 0.0 | 0.0 |
+| `gui.native.document_serialize` | 39.0 | 58.8 |
+| `gui.native.resource_snapshot` | 16.5 | 19.4 |
+| `gui.service.context` | 16.2 | 1.9 |
+| `gui.service.fbo` | 33.7 | 37.8 |
+| `gui.service.draw` | 1535.4 | 2254.3 |
+| `gui.service.finish` | 156.5 | 411.7 |
+| `gui.service.readback` | 114.1 | 59.6 |
+
+`gui.gl.landscape_sectors` в native теперь измеряет CPU constructors/tiles/bounds, а не создание полного GL world mesh; query-depth buffers выделяются отдельно. Atlas/mips/цветовые/водные streams отсутствуют до явного GL. `gui.mob.project_object` и draw service остаются на GUI: исходные CNode/GL owners и общий выбор требуют их; вынесен CPU deserialize/preflight, а не эти владельцы. `gui.end.minimap` — refreshViewportMinimapSources (обновление источников панели, не автоматическое GL-запекание), resume_tools — возобновление CView и его сигналов.
+
+Паузы service.draw относятся к drawEditorServiceScene: depth terrain, объектный ID/depth, выделение/метки и helpers. Это измеренная граница вызова CView; затраты CPU/драйвера внутри отдельных draw не разделены и не объявляются временем GPU. Для устранения такой паузы нужен порционный прогрев/подготовка query resources либо асинхронный service pass с безопасным снимком владельцев CView; этого в R3 нет. glFinish/readback измерены отдельно.
+
+#### zone1: cold-private-r1, точная шкала
+
+| Открытие → начало D3D: разбиение wall interval | мс |
+|---|---:|
+| `cpu.mpr.atlas_binding` | 406.627 |
+| `mob.deserialize` | 262.186 |
+| `outside_instrumented_scopes` | 145.375 |
+| `cpu.validate_mob` | 90.516 |
+| `cpu.mob.read_parse` | 29.273 |
+| `cpu.camera.map_bounds` | 22.510 |
+| `gui.native_dispatch` | 19.104 |
+| `gui.gl.landscape_sectors` | 17.618 |
+| `cpu.mpr.parse` | 8.123 |
+| `camera.validate` | 7.392 |
+| `cpu.validate_editable_projection` | 7.370 |
+| `cpu.validate_mpr` | 7.087 |
+| `gui.native.tick` | 5.577 |
+| `gui.gl.landscape_archive` | 1.100 |
+| `cpu.mpr.read` | 0.445 |
+| `cpu.cohort` | 0.404 |
+| `cpu.mpr.published_binding` | 0.169 |
+| `gui.fingerprint.terrain` | 0.141 |
+| `gui.fingerprint.resources` | 0.124 |
+| `gui.gl.query_context` | 0.019 |
+| `gui.gl.landscape_atlas` | 0.008 |
+| **Сумма = начало D3D** | **1031.169** |
+
+Разбиение отдано самому короткому покрывающему scope; это разметка интервала, не сумма параллельных CPU задач. Остаток outside_instrumented_scopes назван явно.
+
+| Отметка хоста | От открытия, мс |
+|---|---:|
+| `device_begin` | 1031.2 |
+| `shader_prepare_begin` | 1295.7 |
+| `shader_prepare_end` | 2360.6 |
+| `document_begin` | 2392.5 |
+| `terrain_page_bytes_begin` | 2434.3 |
+| `terrain_page_bytes_end` | 2509.0 |
+| `mob_resource_snapshots_begin` | 2509.0 |
+| `mob_resource_snapshots_end` | 2823.1 |
+| `scene_visual_seed_begin` | 2823.1 |
+| `scene_visual_seed_end` | 2952.4 |
+| `document_end` | 2952.5 |
+| `native_frame_work_begin` | 2953.0 |
+| `material_texture_ingress_begin` | 2958.5 |
+| `material_texture_ingress_end` | 2990.5 |
+| `neighbour_client_settled` | 6527.1 |
+| `native_material_table_ready_epoch` | 6843.0 |
+| `native_resources_pending_clear` | 6843.0 |
+| **Qt показанный Present** | **7128.9** |
+
+CPU raw cohort готова на 1343.6мс; от неё до показанного кадра 5785.3мс. Непересекающееся разбиение этого интервала также сохранено в timing-analysis-r3.json; исходные MOB/AddMob/appearance/геометрия/материалы имеют собственные spans и host phases.
+
+#### zone7: cold-private-r1, точная шкала
+
+| Открытие → начало D3D: разбиение wall interval | мс |
+|---|---:|
+| `mob.deserialize` | 431.239 |
+| `cpu.mpr.atlas_binding` | 398.579 |
+| `cpu.validate_mob` | 158.463 |
+| `outside_instrumented_scopes` | 117.938 |
+| `cpu.camera.map_bounds` | 34.647 |
+| `cpu.mob.read_parse` | 28.489 |
+| `gui.native_dispatch` | 18.885 |
+| `cpu.validate_editable_projection` | 14.659 |
+| `cpu.validate_mpr` | 12.951 |
+| `cpu.mpr.parse` | 12.334 |
+| `camera.validate` | 11.386 |
+| `gui.gl.landscape_sectors` | 10.919 |
+| `gui.native.tick` | 7.402 |
+| `gui.gl.landscape_archive` | 1.642 |
+| `cpu.mpr.read` | 0.681 |
+| `cpu.cohort` | 0.382 |
+| `gui.fingerprint.terrain` | 0.209 |
+| `gui.fingerprint.resources` | 0.177 |
+| `cpu.mpr.published_binding` | 0.135 |
+| `gui.gl.query_context` | 0.031 |
+| `gui.gl.landscape_atlas` | 0.008 |
+| **Сумма = начало D3D** | **1261.157** |
+
+Разбиение отдано самому короткому покрывающему scope; это разметка интервала, не сумма параллельных CPU задач. Остаток outside_instrumented_scopes назван явно.
+
+| Отметка хоста | От открытия, мс |
+|---|---:|
+| `device_begin` | 1261.2 |
+| `shader_prepare_begin` | 1503.7 |
+| `shader_prepare_end` | 1852.2 |
+| `document_begin` | 1882.2 |
+| `terrain_page_bytes_begin` | 1922.8 |
+| `terrain_page_bytes_end` | 1980.7 |
+| `mob_resource_snapshots_begin` | 1980.8 |
+| `mob_resource_snapshots_end` | 2357.4 |
+| `scene_visual_seed_begin` | 2357.5 |
+| `scene_visual_seed_end` | 2604.5 |
+| `document_end` | 2604.6 |
+| `native_frame_work_begin` | 2604.9 |
+| `material_texture_ingress_begin` | 2610.8 |
+| `material_texture_ingress_end` | 2622.7 |
+| `neighbour_client_settled` | 8318.1 |
+| `native_material_table_ready_epoch` | 8668.2 |
+| `native_resources_pending_clear` | 8668.3 |
+| **Qt показанный Present** | **8958.5** |
+
+CPU raw cohort готова на 1708.3мс; от неё до показанного кадра 7250.2мс. Непересекающееся разбиение этого интервала также сохранено в timing-analysis-r3.json; исходные MOB/AddMob/appearance/геометрия/материалы имеют собственные spans и host phases.
+
+### Границы результата R3
+
+**Функциональные проверки PASS; временные цели целиком не достигнуты, общий результат PARTIAL.** Камера живая с первого показанного кадра и очередь геометрических действий корректна. Убрана ненужная подготовка GL terrain atlas/mips/full sectors; CPU preflight и deserialize вынесены, adopt/end_workspace обслуживают события с serial guards. Однако инструменты≤10с и Qt≤500мс на всём интервале открытия не подтверждены. Остались исходные object projection/GL draw service, отдельные синхронные обновления панелей и шум параллельной нагрузки. Полная детализация внутри service.draw не выполнена; она не подменяется «неразобранной очередью» и не относится к проблеме вида Rebuild64.
+
+Смена/close/GL fallback/headless проверены на итоговом коде. В маршрутах создание новой MPR включает отдельную синхронную публикацию собственного RES и может давать паузу дольше контрольного обычного открытия; это не заявлено исправленным. Новая карта после соседней видна с первого кадра. Новых блокирующих вопросов Илье нет; измерительные точки добавлены в embedding host без изменения картинки. Следующий этап здесь не начат, его запускает владелец. Установка и push не выполнялись.
+
+### Снимки, владение MOB и ограничения проверки
+
+Просмотрены все12 первых показанных кадров итоговой матрицы, четыре кадра навигации, первый New MPR, два собственных GL FBO и native capture с выделением/служебным слоем. Реестр20 файлов: [pairs/provenance.json](../../work/rebuild64-launch-287-r3-20261107/pairs/provenance.json), [image-review-r3.json](../../work/rebuild64-launch-287-r3-20261107/image-review-r3.json). Это собственные readback/Present, не экран владельца. [W](../../work/rebuild64-launch-287-r3-20261107/pairs/camera-W.png), [колесо](../../work/rebuild64-launch-287-r3-20261107/pairs/camera-wheel.png), [MMB](../../work/rebuild64-launch-287-r3-20261107/pairs/camera-middle-drag.png), [новая карта](../../work/rebuild64-launch-287-r3-20261107/pairs/new-map-first.png).
+
+W проверен с небольшим наклоном eye–target=(0,-1,100). У строго отвесного взгляда старая CCamera::shift даёт нулевую горизонтальную проекцию W в обоих видах; этот старый общий крайний случай не исправлялся. Проверка очереди камеры относится к указанному реальному сценарию, а не доказывает исправление этой старой математики.
+
+Финальный просмотр обнаружил утечку до регистрации MOB при новой отмене adopt. В итоговом коде до m_aMob.append отменённый pMob удаляется явно; после регистрации сохраняется владение CView. Новый guard проверен по исходному владению; отдельная принудительная runtime-проверка попадания именно в этот короткий guard не инструментирована. Общие cancellation/last-map/close и связанный регресс повторены на итоговом EXE. Предыдущие6+12 прогоны EXE6086445e и их цифры — промежуточные, не итоговые.
+
+После первой очистки для этого исправления восстановлены292 файла с теми же SHA256, включая старый priority pack из сохранённой readonly backup. [frozen-recovery-receipt.json](../../work/rebuild64-launch-287-r3-20261107/frozen-recovery-receipt.json). Backup/исходники только читались при подготовке копий, закрыты до запуска; тесты опять открывали лишь собственные копии. Необходимость повторения не подменена проверками старого EXE.
+
+Все82 пауз>200мс перечислены в [qt-gaps-over200-r3.csv](../../work/rebuild64-launch-287-r3-20261107/qt-gaps-over200-r3.csv). Наибольшая —2309.7мс (`seal-matrix-r3-zone1-cold-private-r1`), пересекающиеся измеренные scopes: `{"gui.native.tick": 2276.4566, "gui.service.total": 2275.6928, "gui.service.capture": 2274.196, "gui.service.draw": 2254.2707, "gui.character.appearance_resolve": 38.2309}`. Вложенные интервалы не складываются повторно.
+
+Маршрутный New MPR получает отдельный case-local publication pack. В одном промежуточном routes harness ошибочно требовал неизменности общего частного pack после штатной публикации; driver исправлен, baseline восстановлен, итоговый routes использует отдельный pack. route-private-pack-mutation.json сохраняет историю. Живой HDPack этим сценарием не открывался. Критерии10с/500мс и прежний порог первого показанного кадра8с оцениваются по таблице, а не по exit0 функционального сценария; невыполненное не объявляется PASS.
+
+### Сохранность и очистка R3
+
+Удалены собственные fixtures/authoring, private caches и промежуточные payloads case-* трёх launch-папок R1/R2/R3: 470 целей, 8512090441 байт (8,51GB; предыдущий проход14,27GB зафиксирован отдельно в before-ownership-fix-cleanup-receipt-r3.json). Карты/RES для следующего шага не оставлены; блокировок нет. Сохранены cited logs, process/exit/events/opening-spans/Present traces, выбранные исходные PNG и pairs. [cleanup-receipt-r3.json](../../work/rebuild64-launch-287-r3-20261107/cleanup-receipt-r3.json), [cleanup-plan.json](../../work/rebuild64-launch-287-r3-20261107/cleanup-plan.json). Папки/процессы288, чужие checkout и установка не изменялись.
+
+[protection-audit-r3.json](../../work/rebuild64-launch-287-r3-20261107/protection-audit-r3.json): owner13/6/5 строк view.cpp/view_neighbor_load.cpp/landscape.cpp исключены из archive/индекса и остаются в рабочей копии, прочие защищённые файлы сохранены побайтно. Параллельные добавления ROADMAP также сохранены вне коммита. Scoped C++ blobs только LF; действующий AGENTS.md SHA256 `2a2f58ef34f63d6c5d67d165d0b809b046d0a519181119d22ea8fdd8781fe3b7` проверен. Новые правила/полномочия не вводились.
+
+### Сборка и состав R3
+
+Свежий `build-staging-287-rebuild64-launch-r3-20261107`, финализатор exit0. Против `build-staging-286-rebuild64-tools-r2-20261107`:1364→1365 управляемых файлов, **0 потерь**; добавлен только `docs/validation/ATAMAN_REBUILD64_LAUNCH_287_20261107.md`. Новые DLL/SDK/шейдеры не добавлены. Изменены EXE, embedding DLL, свежесобранные MCP/runtime, VERSION/Readme/CHANGELOG/BUILD_INFO и QM. QM: **3367 finished,0 unfinished** (R2:3365,286:3341), SHA256 `ca8f7665e32457cf77ad693869695e304a92891dd47c3f34a07627cbf167ebdd`. Рабочий QM владельца не менялся. Изолированный resource profile исключён из пакета. [package-receipt.json](../../work/rebuild64-launch-287-r3-20261107/package-receipt.json) и stage SHA256SUMS проверяют каждый файл; BUILD_INFO после scoped-коммита указывает его полный SHA. Удалённых функций/настроек нет. GL обычный путь и headless сохранены; новый отложенный путь включается при Rebuild64. Установка, push и следующий этап не выполнялись.

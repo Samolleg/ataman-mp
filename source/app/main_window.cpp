@@ -1,3 +1,5 @@
+#include "opening_preflight.h"
+#include "opening_cpu_value.h"
 #include "opening_trace.h"
 #include "legacy_projection_pulse.h"
 #include "rebuild64_launch_check.h"
@@ -7493,30 +7495,27 @@ void MainWindow::openMapPairWithCameraPolicy(const QString& mprPath,
             .arg(zoneId, component, file.absoluteFilePath(), details));
         QMessageBox::warning(this, tr("Open map"), message);
     };
-    CMprDocument targetMprDocument;
-    CValidationReport targetMprReport;
-    const auto validateMprBegin=opening::clock();
-    const bool validTargetMpr=targetMprDocument.load(targetMpr,&targetMprReport);
-    opening::span("gui.validate_mpr",validateMprBegin);
+    const bool nativeOpening=m_pView->property("rebuild64Selected").toBool();
+    const auto preflightRequest=nativeOpening?++m_nativeOpenRequestGeneration:m_nativeOpenRequestGeneration;
+    const auto preflightSerial=m_pView->property("openingSerial").toULongLong();
+    const auto preflight=ei::openingCpuValue(nativeOpening,[targetMpr,targetMob,terrainOnly]{return openingPreflight(targetMpr,targetMob,terrainOnly);});
+    if(nativeOpening&&(m_shutdownInProgress||preflightRequest!=m_nativeOpenRequestGeneration||preflightSerial!=m_pView->property("openingSerial").toULongLong()))return;
+    const auto& targetMprDocument=preflight.mpr;const auto& targetMprReport=preflight.mprReport;
+    const bool validTargetMpr=preflight.mprValid;
     if(!validTargetMpr || targetMprReport.hasErrors())
     {
         rejectUnreadable(tr("MPR"), targetMpr, targetMprReport);
         return;
     }
-    CMobDocument targetMobDocument;
-    CValidationReport targetMobReport;
-    const auto validateMobBegin=opening::clock();
-    const bool validTargetMob=terrainOnly||targetMobDocument.load(targetMob,&targetMobReport);
-    opening::span("gui.validate_mob",validateMobBegin);
+    const auto& targetMobDocument=preflight.mob;const auto& targetMobReport=preflight.mobReport;
+    const bool validTargetMob=preflight.mobValid;
     if(!terrainOnly && (!validTargetMob || targetMobReport.hasErrors()))
     {
         rejectUnreadable(tr("MOB"), targetMob, targetMobReport);
         return;
     }
-    QString targetMobProjectionError;
-    const auto validateProjectionBegin=opening::clock();
-    const bool validProjection=terrainOnly||CMob::validateEditableProjection(targetMobDocument.originalBytes(),targetMob,&targetMobProjectionError);
-    opening::span("gui.validate_editable_projection",validateProjectionBegin);
+    const auto& targetMobProjectionError=preflight.projectionError;
+    const bool validProjection=preflight.projectionValid;
     if(!validProjection)
     {
         CValidationReport targetMobProjectionReport;
@@ -7964,16 +7963,24 @@ void MainWindow::endWorkspaceLoad()
     if(!m_workspaceLoadInProgress)
         return;
     m_workspaceLoadInProgress = false;
-    if(m_pView)
-        m_pView->setWorkspaceLoadInProgress(false);
+    const bool native=m_pView&&m_pView->property("rebuild64Selected").toBool();
+    const auto serial=m_pView?m_pView->property("openingSerial").toULongLong():0;
+    QPointer<MainWindow> alive(this);
+    const auto yieldOpening=[this,alive,native,serial]() {
+        if(native)QApplication::processEvents(QEventLoop::AllEvents,4);
+        return alive&&!m_shutdownInProgress&&m_pView&&m_pView->property("openingSerial").toULongLong()==serial;
+    };
+    {opening::Scope stage("gui.end.resume_tools");if(m_pView)m_pView->setWorkspaceLoadInProgress(false);}
+    if(native&&!yieldOpening())return;
     // A second explicit open can interrupt a previous AddMob queue without
     // replacing its primary. Resume every surviving explicit root as well.
     if(m_pView)for(auto* mob:m_pView->mobs())
         if(!mob->loadedFromAddMob())queueBackgroundMobSource(mob,true);
     ei::log(eLogInfo, "Workspace load finished");
-    updateDocumentActionAvailability();
-    updateMapTestAction();
-    refreshViewportMinimapSources();
+    {opening::Scope stage("gui.end.actions");updateDocumentActionAvailability();updateMapTestAction();}
+    if(native&&!yieldOpening())return;
+    {opening::Scope stage("gui.end.minimap");refreshViewportMinimapSources();}
+    if(native&&!yieldOpening())return;
     setProperty("backgroundLoadPhase",backgroundMobLoading()?"addmob":"neighbors");
     const auto generation=m_backgroundMobGeneration;
     // Give the completed primary scene a frame before starting dependencies.

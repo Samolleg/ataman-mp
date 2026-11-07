@@ -156,6 +156,7 @@ void CView::acceptNeighborScene(const SNeighborSceneData& result,quint64 generat
         }
     if(!loaded.landscape) {
         loaded.landscape=CLandscape::createReadOnlyBackground();
+        loaded.landscape->deferRenderResources(property("rebuild64Selected").toBool());
         if(objects || !loaded.landscape->readPreparedBackground(QFileInfo(loaded.placement.mprPath),result.terrainMembers)) {
             loaded.landscape.clear();doneCurrent();finishNeighborLoadStage(generation);return;
         }

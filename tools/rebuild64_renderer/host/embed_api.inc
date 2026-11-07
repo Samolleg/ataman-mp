@@ -69,6 +69,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   // parse_terrain_asset supplies geometry and records, not the source pages.
   // Complete the same retained page inputs as OwnedResourceLoader before
   // classifying swamp frames; GPU atlas upload alone cannot supply their art.
+  s.trace.phase("terrain_page_bytes_begin");
   auto pages=std::make_shared<owned::ResourceStore>();if(!pages->open(s.mounts,error))return fail(&e,E_FAIL,error.message.c_str());
   terrain->pages.resize(terrain->texture_resources.size());size_t pageCount=0;
   for(size_t index=0;index<terrain->pages.size();++index){auto& page=terrain->pages[index];page.store=pages;
@@ -77,6 +78,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
   std::fprintf(stderr,"TERRAIN_SOURCE pages=%zu/%zu swamp_side=%u %s\n",pageCount,terrain->pages.size(),terrain->swamp_frame_side,swamp.c_str());s.terrain=terrain;s.baseline=terrain;
   if(!OwnedRender::E1PublishTerrainSnapshot(&s,s.world,s.generation,terrain))return fail(&e,E_FAIL,"publish in-memory terrain");
   std::string why;if(!upload_atlases(s,why))return fail(&e,E_FAIL,why.c_str());
+  s.trace.phase("terrain_page_bytes_end");s.trace.phase("mob_resource_snapshots_begin");
   auto combined=std::make_shared<owned::OwnedMapSnapshot>();combined->generation=s.world;combined->terrain=terrain;combined->terrain_resource=in->terrain_name;
   auto terrainBytes=std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t*>(in->terrain.data),static_cast<const uint8_t*>(in->terrain.data)+in->terrain.bytes);
   std::vector<std::pair<uint32_t,uint32_t>> identities;
@@ -93,7 +95,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
    for(auto object:loaded->objects){if(hidden.count((uint64_t(i)<<32)|object.nid))continue;identities.push_back({i,object.nid});object.nid=uint32_t(combined->objects.size()+1);combined->objects.push_back(std::move(object));}
    combined->models.insert(loaded->models.begin(),loaded->models.end());combined->textures.insert(loaded->textures.begin(),loaded->textures.end());combined->failures.insert(combined->failures.end(),loaded->failures.begin(),loaded->failures.end());
   }
-  s.map=combined;
+  s.map=combined;s.trace.phase("mob_resource_snapshots_end");s.trace.phase("scene_visual_seed_begin");
   OwnedRender::PublishTerrainPlacement(&s,identity());
   auto& membership=OwnedRender::E1Scene();membership.Begin(&s,s.world);auto& scene=membership.Scene();auto transaction=scene.begin_source(owned::MobSourceRole::main,in->terrain_name,"ataman-memory.mob");scene.record_source(transaction,"ataman-memory.mob");
   for(const auto& object:combined->objects)scene.record_admission(transaction,object.nid,object.family,int32_t(object.nid));
@@ -115,6 +117,7 @@ int32_t EIR_CALL host_document(void* handle,const EirDocument* in,EirError* out)
    } else ++omitted;
   }
   std::fprintf(stderr,"Ataman document generation=%llu world=%llu memory_mpr=%llu memory_mobs=%u objects=%zu seeds=%zu omitted=%zu\n",(unsigned long long)s.generation,(unsigned long long)s.world,(unsigned long long)in->terrain.bytes,in->mob_count,combined->objects.size(),seeds,omitted);
+  s.trace.phase("scene_visual_seed_end");
   s.water=s.environment=s.objects=true;
   // Content feature bits must not override the file-backed renderer settings.
   const int result=probe1b_set_features(handle,7,&e);if(!result)owned::AtamanReadiness::quality(s.renderer);s.trace.phase("document_end");return result;
@@ -153,7 +156,7 @@ int32_t EIR_CALL host_frame(void* h,EirStatistics* stats,EirError* out) noexcept
   const unsigned expectedNeighbours=!s.neighboursRequested?0:_stricmp(s.terrainName.c_str(),"zone1.mpr")==0?5:_stricmp(s.terrainName.c_str(),"zone7.mpr")==0?4:0;
   const bool neighboursReady=owned::neighbour_client_settled(s.world)&&owned::AtamanReadiness::neighbours(s.renderer)==expectedNeighbours;
   if(!s.traceNeighboursSettled&&neighboursReady) {s.trace.phase("neighbour_client_settled");s.traceNeighboursSettled=true;}
-  if(!s.traceResourcesSettled&&neighboursReady&&!owned::AtamanReadiness::pending(s.renderer)&&s.completedReadyEpoch==owned::AtamanReadiness::epoch(s.renderer)) {s.trace.phase("native_resources_pending_clear");s.traceResourcesSettled=true;}
+  if(!s.traceResourcesSettled&&neighboursReady&&!owned::AtamanReadiness::pending(s.renderer)&&s.completedReadyEpoch==owned::AtamanReadiness::epoch(s.renderer)) {s.trace.phase("native_material_table_ready_epoch");s.trace.phase("native_resources_pending_clear");s.traceResourcesSettled=true;}
 
   probe1b_statistics memory{};probe1b_get_statistics(h,&memory,&e);
   stats->service_cpu_ms=s.acceptedServiceCpuMs;stats->service_composite_ms=s.acceptedCompositeMs;stats->service_serial=s.acceptedServiceSerial;stats->document_updates=s.documentUpdates;

@@ -3289,6 +3289,10 @@ void CView::setNeighborMapContext(
 
 QByteArray CView::neighborResourceFingerprint() const
 {
+    opening::Scope timing("gui.fingerprint.resources");
+    // Native query terrain has no atlas/material dependency. Its object cache
+    // has the separate canonical object source-generation contract.
+    if(property("rebuild64Selected").toBool())return configuredResourceFingerprint(m_pSettings).toUtf8();
     QCryptographicHash hash(QCryptographicHash::Sha256);
     for(const auto& path:CTextureList::getInstance()->configuredResourceArchivePaths())
     {
@@ -3300,6 +3304,8 @@ QByteArray CView::neighborResourceFingerprint() const
 
 QByteArray CView::neighborTerrainFingerprint(const QString& path,const QByteArray& resources) const
 {
+    opening::Scope timing("gui.fingerprint.terrain");
+    if(property("rebuild64Selected").toBool())return QByteArray("native-query:")+neighborContentFingerprint(path);
     const QFileInfo info(path);
     Q_UNUSED(resources);
     const auto content=neighborContentFingerprint(path);
@@ -5396,12 +5402,15 @@ bool CView::drawSelectionTerrainDepth(const QMatrix4x4& viewMatrix)
     m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram, "u_viewMmatrix"), viewMatrix);
     const CViewFrustum frustum(m_projection * viewMatrix);
     ei::gl::ColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    const bool queryOnly=property("rebuild64Selected").toBool();
+    if(queryOnly)m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram,"u_solidColorEnabled"),true);
     if(m_neighborLandscapesVisible)
         for(const SLoadedNeighborLandscape& neighbor : m_neighborLandscapes)
             if(neighbor.landscape && neighbor.landscape->isMprLoad())
-                neighbor.landscape->draw(&m_landProgram, &frustum);
+                {if(queryOnly)neighbor.landscape->drawQueryDepth(&m_landProgram);else neighbor.landscape->draw(&m_landProgram,&frustum);}
     if(m_pLand && m_pLand->isMprLoad())
-        m_pLand->draw(&m_landProgram, &frustum);
+        {if(queryOnly)m_pLand->drawQueryDepth(&m_landProgram);else m_pLand->draw(&m_landProgram,&frustum);}
+    if(queryOnly)m_landProgram.setUniformValue(ei::uniformLocation(&m_landProgram,"u_solidColorEnabled"),false);
     ei::gl::ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     return true;
 }
@@ -9935,6 +9944,7 @@ void CView::loadLandscape(const QFileInfo& filePath,bool createRecoverySnapshot)
             if(pulseClock.elapsed()<8)return;
             QCoreApplication::processEvents(QEventLoop::AllEvents,4);makeCurrent();pulseClock.restart();
         }):std::function<void()>());
+        m_pLand->deferRenderResources(property("rebuild64Selected").toBool());
         m_pLand->readMap(filePath,createRecoverySnapshot);
     }
     m_activeRenderResources=fingerprint;
@@ -16720,6 +16730,10 @@ void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& le
     opening::Scope timing("gui.mob.adopt");
 
     const QFileInfo filePath=pMob->filePath();
+    const bool native=property("rebuild64Selected").toBool();const auto serial=property("openingSerial").toULongLong();
+    const QScopedValueRollback<int> adoptionDepth(m_openingProjectionDepth,m_openingProjectionDepth+(native?1:0));
+    QElapsedTimer pulseClock;pulseClock.start();
+    const auto pulse=[&](){if(native&&pulseClock.elapsed()>=4){QCoreApplication::processEvents(QEventLoop::AllEvents,4);makeCurrent();pulseClock.restart();}return !native||(!m_applicationShutdown&&serial==property("openingSerial").toULongLong());};
     QElapsedTimer adoptionTimer;adoptionTimer.start();
     int unitCount = 0;
     for(CNode* node : pMob->nodes())
@@ -16728,7 +16742,10 @@ void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& le
             unit->setEditorLogicIndex(m_logicSlotIndex);
             ++unitCount;
         }
+    {opening::Scope stage("gui.adopt.logic");
     pMob->logicNodesUpdate();
+    }
+    if(!pulse()){delete pMob;return;}
     // Unit draw resolves visuals after frustum culling. Eagerly resolving
     // every unit blocked zone18 for over nine seconds and created resources
     // for hundreds of off-screen actors. Keep the document usable immediately;
@@ -16738,9 +16755,11 @@ void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& le
     m_aMob.append(pMob);
     m_mobEditLeases[CProcessEditLock::identity(filePath.absoluteFilePath())]=lease;
     ensureUnitSupportSurface();
+    if(!pulse())return;
     for(CMob* loaded:m_aMob) for(CNode* node:loaded->nodes())
         if(auto* unit=dynamic_cast<CUnit*>(node)) {
             m_pLand->projectPosition(unit); unit->refreshLogicProjection();
+            if(!pulse())return;
         }
     armOpenGlDiagnostics(QStringLiteral("MOB loaded: %1")
         .arg(filePath.fileName()), 6);
@@ -16752,17 +16771,26 @@ void CView::adoptLoadedMob(CMob* pMob,const QSharedPointer<CProcessEditLock>& le
     QElapsedTimer postPreloadPhase;
     postPreloadTimer.start();
     postPreloadPhase.start();
+    {opening::Scope stage("gui.adopt.scripts");
     m_scriptWorkspaces->registerMob(pMob);
+    }
+    if(!pulse())return;
     const qint64 scriptRegistrationMs = postPreloadPhase.elapsed();
     postPreloadPhase.restart();
     if(activate)changeCurrentMob(pMob);
     else {collectObjectTreeData();emit loadedMapStateChanged();}
     const qint64 activationMs = postPreloadPhase.elapsed();
     postPreloadPhase.restart();
+    {opening::Scope stage("gui.adopt.ai_graph");
     refreshAiGraphPreviewSource();
+    }
+    if(!pulse())return;
     const qint64 aiGraphMs = postPreloadPhase.elapsed();
     postPreloadPhase.restart();
+    {opening::Scope stage("gui.adopt.signals");
     emit mobStateChanged();
+    }
+    if(!pulse())return;
     ei::log(eLogInfo, QString("MOB load complete file:%1 objects:%2 units:%3 elapsedMs:%4")
             .arg(filePath.fileName()).arg(pMob->nodes().size()).arg(unitCount)
             .arg(adoptionTimer.elapsed()));
@@ -24834,7 +24862,9 @@ void CView::anchorCameraRotationToViewportCenter()
     if(!m_cam || telephotoCameraEnabled() || width() <= 0 || height() <= 0)
         return;
     bool hit = false;
-    const QVector3D center = getTerrainPos(width() / 2, height() / 2, true, &hit);
+    QVector3D center;
+    if(property("rebuild64Selected").toBool())hit=terrainPositionAt(QPoint(width()/2,height()/2),&center);
+    else center=getTerrainPos(width()/2,height()/2,true,&hit);
     if(hit)
         m_cam->setOrbitPivotPreservingView(center);
 }
@@ -25012,6 +25042,10 @@ QVector3D CView::getTerrainPos(const int cursorPosX, const int cursorPosY,
         *hit = false;
     if(!m_pLand || !m_pLand->isMprLoad())
         return point;
+    if(property("rebuild64Selected").toBool()) {
+        const bool found=terrainPositionAt(QPoint(cursorPosX,cursorPosY),&point,bLand);
+        if(hit)*hit=found;return point;
+    }
 
     if(!beginEditorQueryFramebuffer())
         return point;

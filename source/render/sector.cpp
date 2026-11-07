@@ -47,6 +47,7 @@ static const int nTile = 16;   //tiles count by 1 side of sector
 
 CSector::~CSector()
 {
+    m_queryVertices.destroy();m_queryTriangles.destroy();m_queryGrid.destroy();
     m_vertexBuf.destroy();
     m_indexBuf.destroy();
     m_gridIndexBuf.destroy();
@@ -56,12 +57,13 @@ CSector::~CSector()
 
 CSector::CSector(QDataStream& stream, float maxZ, int texCount,
                  const QVector<SMaterial>* materials,
-                 const QVector<SAnimTile>* animatedTiles)
+                 const QVector<SAnimTile>* animatedTiles,bool deferRender)
     :m_indexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_gridIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_waterIndexBuf(QOpenGLBuffer::IndexBuffer)
     ,m_materials(materials)
     ,m_animatedTiles(animatedTiles)
+    ,m_renderDeferred(deferRender)
 {
     uint signature;
     stream >> signature;
@@ -71,11 +73,13 @@ CSector::CSector(QDataStream& stream, float maxZ, int texCount,
         return;
     }
     //init opengl buffers
+    if(!m_renderDeferred) {
     m_vertexBuf.create();
     m_indexBuf.create();
     m_gridIndexBuf.create();
     m_waterVertexBuf.create();
     m_waterIndexBuf.create();
+    }
     m_modelMatrix.setToIdentity();
 
     //continue read *.sec data
@@ -193,7 +197,7 @@ CSector::CSector(QDataStream& stream, float maxZ, int texCount,
     }
 
     //makeVertexData(landVertex, aLandTiles, waterVertex, aWaterTiles, maxZ, texCount);
-    generateVertexDataFromTile();
+    if(!m_renderDeferred)generateVertexDataFromTile();
 }
 
 bool CSector::previewCanonicalPayload(const QByteArray& payload)
@@ -1017,6 +1021,7 @@ void CSector::updateBounds()
 
 void CSector::updateLandTiles(const QSet<int>& localTiles)
 {
+    invalidateQueryGeometry();
     const int expectedVertices = nTile * nTile * 9;
     if(m_arrLandVrtData.size() != expectedVertices
        || m_arrLitLandVrtData.size() != expectedVertices)
@@ -1290,10 +1295,12 @@ void CSector::updateWaterDrawData(bool rebuildIndices)
 
 void CSector::updatePosition()
 {
+    invalidateQueryGeometry();
     m_modelMatrix.setToIdentity();
     m_modelMatrix.translate(QVector3D(m_index.x*32.0f, m_index.y*32.0f, .0f)
                             + m_worldOffset);
     updateBounds();
+    if(m_renderDeferred)return;
     m_vertexBuf.bind();
     m_vertexBuf.allocate(m_arrLitLandVrtData.data(),
                          m_arrLitLandVrtData.count()*int(sizeof(STerrainVertexData)));
@@ -1702,6 +1709,7 @@ bool CSector::existsTileIndices(const QVector<int>& arrInd)
 
 void CSector::updateDrawData()
 {
+    invalidateQueryGeometry();
     generateVertexDataFromTile(); //todo: apply changes locally, stop re-generating all data
     m_modelMatrix.setToIdentity(); // todo
     updatePosition(); //todo
@@ -1715,7 +1723,7 @@ void CSector::setTerrainAtlasLayout(int textureCount, int columns)
     for(QVector<CTile>& row : m_arrWater)
         for(CTile& tile : row)
             tile.setAtlasLayout(textureCount, columns);
-    updateDrawData();
+    if(!m_renderDeferred)updateDrawData();
 }
 
 STile::STile(ushort packedData)

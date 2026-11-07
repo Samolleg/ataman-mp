@@ -153,7 +153,7 @@ HRESULT commit_output(void* user,ID3D11DeviceContext* context,ID3D11Texture2D* s
   context->CopyResource(s.rawAccepted.Get(),source);
   context->CopyResource(next.Get(),back.Get());
   hr=s.display->Present(0,0);if(FAILED(hr))return hr;
-  tracePixels=s.trace.presented(s.generation,owned::AtamanReadiness::neighbours(s.renderer),s.frameCamera.neighbours_visible,s.pending,owned::neighbour_client_settled(s.world),s.terrainName.c_str());
+  tracePixels=s.trace.presented(s.generation,owned::AtamanReadiness::neighbours(s.renderer),s.frameCamera.neighbours_visible,s.pending,owned::neighbour_client_settled(s.world),s.terrainName.c_str(),s.frameCamera.world_to_clip,s.frameCamera.eye);
  }
  if(tracePixels)capture_presented_trace(&s,next.Get());
  s.accepted=std::move(next);s.readyGeneration=s.generation;s.acceptedServiceSerial=s.service.generation==s.generation?s.service.serial:0;s.acceptedServiceCpuMs=s.service.cpuMs;s.acceptedCompositeMs=compositeMs;return s.device->GetDeviceRemovedReason();

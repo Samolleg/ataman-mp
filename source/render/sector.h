@@ -42,10 +42,12 @@ public:
     CSector();
     CSector(QDataStream& stream, float maxZ, int texCount,
             const QVector<SMaterial>* materials,
-            const QVector<SAnimTile>* animatedTiles);
+            const QVector<SAnimTile>* animatedTiles,bool deferRender=false);
     ~CSector();
     QByteArray serializeSector();
     void draw(QOpenGLShaderProgram* program);
+    void ensureRenderGeometry();
+    void drawQueryGeometry(QOpenGLShaderProgram* program,bool grid);
     void drawTileGrid(QOpenGLShaderProgram* program);
     void drawWater(QOpenGLShaderProgram* program);
     void collectTerrainHeights(QVector<float>& heights, QVector<quint8>& present,
@@ -81,6 +83,7 @@ public:
 
 private:
     void updatePosition();
+    void invalidateQueryGeometry();
     void updateLandTiles(const QSet<int>& localTiles);
     void updateWaterDrawData(bool rebuildIndices = true);
     void updateWaterTiles(const QSet<int>& localTiles, bool rebuildIndices);
@@ -120,6 +123,10 @@ private:
     QVector<QVector<CTile>> m_arrLand;
     QVector<SVertexData> m_arrLandVrtData;
     QVector<STerrainVertexData> m_arrLitLandVrtData;
+    bool m_renderDeferred{false};
+    QOpenGLBuffer m_queryVertices;
+    QOpenGLBuffer m_queryTriangles{QOpenGLBuffer::IndexBuffer};
+    QOpenGLBuffer m_queryGrid{QOpenGLBuffer::IndexBuffer};
     QOpenGLBuffer m_vertexBuf;
     QOpenGLBuffer m_indexBuf;
     QOpenGLBuffer m_gridIndexBuf;

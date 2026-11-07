@@ -122,6 +122,7 @@ void MainWindow::pumpBackgroundMobs(quint64 generation)
                 state->mob->setLoadedFromAddMob(true);
                 auto* mob=state->mob.release();
                 m_pView->adoptLoadedMob(mob,state->lease,false);
+                if(generation!=m_backgroundMobGeneration||!m_backgroundMobs)return;
                 queueBackgroundMobSource(mob,false);++state->loaded;
             } else queueBackgroundMobSource(loaded[key],false);
             discard();later();return;

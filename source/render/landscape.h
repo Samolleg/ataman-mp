@@ -87,6 +87,10 @@ public:
     bool readPreparedBackground(const QFileInfo& path,
                                 const QMap<QString,QByteArray>& members);
     void setWorldOffset(const QVector3D& offset);
+    void deferRenderResources(bool value) {m_renderDeferred=value;}
+    bool renderResourcesDeferred() const {return m_renderDeferred;}
+    void ensureRenderResources();
+    void drawQueryDepth(QOpenGLShaderProgram* program,bool grid=false);
     void swapRenderState(CLandscape& other);
     quint64 residentBytes() const;
     void accumulateMemory(struct SRenderMemoryEstimate& memory) const;
@@ -110,8 +114,8 @@ public:
     bool pickTile(QVector3D& point, CTile*& pTileOut, STileLocation& tileLoc, bool bLand = true);
     void setTile(const QMap<STileLocation, STileInfo>& arrTileInfo);
     const QFileInfo& filePath() {return m_filePath;}
-    QOpenGLTexture* glTexture() const {return m_texture;}
-    QOpenGLTexture* captureSourceAtlas() const {return m_baseAtlasTexture?m_baseAtlasTexture:m_texture;}
+    QOpenGLTexture* glTexture() const {const_cast<CLandscape*>(this)->ensureRenderResources();return m_texture;}
+    QOpenGLTexture* captureSourceAtlas() const {const_cast<CLandscape*>(this)->ensureRenderResources();return m_baseAtlasTexture?m_baseAtlasTexture:m_texture;}
     bool captureUsesPreviewAtlas() const {return m_previewAtlasTexture && m_texture==m_previewAtlasTexture;}
     uint textureNum() const {return m_header.nTexture;}
     uint widthInWorldUnits() const { return m_header.nXSector * 32u; }
@@ -206,6 +210,9 @@ private:
     bool m_bDirty;
     bool m_materialDrawDataDirty;
     bool m_readOnlyBackground{false};
+    bool m_renderDeferred{false};
+    QString m_deferredAtlasArchive;
+    QSharedPointer<QOpenGLTexture> m_queryOpaque;
     const CTerrainEditModel* m_canonicalTerrain;
     quint64 m_shadowGeneration{0};
     quint64 m_terrainShadowFieldGeneration{0};

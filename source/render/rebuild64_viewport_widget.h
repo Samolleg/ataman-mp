@@ -1,3 +1,4 @@
+#include <QMatrix4x4>
 #pragma once
 #include <QWidget>
 #include <QFileInfo>
@@ -57,6 +58,7 @@ protected:
 private:
     struct Worker;
     void tick();
+    void updateLiveCamera();
     void fallback(const QString& message);
     void editorInput(QEvent* event);
     void serviceInput();
@@ -72,7 +74,11 @@ private:
     bool m_legacyNavigationPending{false};
     QString m_earlyMap;
     bool m_earlyDocument{false};
-    QVector<std::shared_ptr<QEvent>> m_waitingInput;
+    struct WaitingInput {std::shared_ptr<QEvent> event;QMatrix4x4 view,projection;QSize extent;};
+    QVector<WaitingInput> m_waitingInput;
+    const WaitingInput* m_replayInput{nullptr};
+    void queueEditorInput(std::shared_ptr<QEvent> event);
+    void replayEditorInput();
     QImage m_serviceImage;
     double m_serviceMilliseconds{0};
     void movePanels(bool native);

@@ -1,3 +1,6 @@
+#include "opening_cpu_value.h"
+#include "operationmanager.h"
+#include "key_manager.h"
 #include "rebuild64_launch_check.h"
 #include "main_window.h"
 #include "view.h"
@@ -27,6 +30,7 @@
 #include <windows.h>
 #include <psapi.h>
 #include <shlobj.h>
+#include "isolated_resource_handles.h"
 #include <cstring>
 #include <GL/gl.h>
 #include <functional>
@@ -92,6 +96,7 @@ bool installSwapTrace(){
  return installed;
 }
 
+std::atomic<int> deniedReads{0};
 std::atomic<int> deniedWrites{0};QString& writableRoot=*new QString;QString& writableShortRoot=*new QString;QString& allowedNamedPipe=*new QString;
 bool allowedWrite(LPCWSTR file) {
     if(!file)return false;const auto literal=QDir::fromNativeSeparators(QString::fromWCharArray(file));
@@ -110,6 +115,10 @@ using DeleteFileFn=BOOL(WINAPI*)(LPCWSTR);
 using ReplaceFileFn=BOOL(WINAPI*)(LPCWSTR,LPCWSTR,LPCWSTR,DWORD,LPVOID,LPVOID);
 CreateFileFn originalCreateFile=nullptr;MoveFileFn originalMoveFile=nullptr;DeleteFileFn originalDeleteFile=nullptr;ReplaceFileFn originalReplaceFile=nullptr;
 HANDLE WINAPI guardedCreate(LPCWSTR file,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES security,DWORD creation,DWORD flags,HANDLE templateFile) {
+    if(file){auto path=QDir::fromNativeSeparators(QString::fromWCharArray(file));if(path.startsWith("//?/"))path.remove(0,4);
+        const auto root=QDir::fromNativeSeparators(configuration.value("forbidLiveModRoot").toString());
+        if(!root.isEmpty()&&path.startsWith(root+"/",Qt::CaseInsensitive)&&(path.endsWith(".res",Qt::CaseInsensitive)||path.endsWith(".mpr",Qt::CaseInsensitive)||path.endsWith(".mob",Qt::CaseInsensitive))){++deniedReads;std::fwprintf(stderr,L"ISOLATION denied live resource read: %ls\n",file);SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}}
+
     if((access&(GENERIC_WRITE|DELETE|FILE_WRITE_DATA|FILE_APPEND_DATA|FILE_WRITE_ATTRIBUTES|FILE_WRITE_EA|WRITE_DAC|WRITE_OWNER))||creation!=OPEN_EXISTING)
         if(denyWrite(file))return INVALID_HANDLE_VALUE;
     return originalCreateFile(file,access,share,security,creation,flags,templateFile);
@@ -170,6 +179,7 @@ public:
             if(generation==lastGeneration)return;
             lastGeneration=generation;
             const auto s=native->statistics();
+            if(liveWanted&&!liveSent){liveSent=true;QTimer::singleShot(0,this,[this]{liveCameraEvents();});}
             if(configuration["earlyInput"].toBool()&&!earlyInputSent&&native->openingDocument()) {
                 earlyInputSent=true;earlyInputQpc=qpc();earlyUndoIndex=window->m_undoStack->index();
                 auto* target=native->findChild<QWidget*>("rebuild64NativeSurface");const auto point=target->rect().center();
@@ -219,6 +229,15 @@ public:
         for(;;){if(ready())return true;if(time.elapsed()>=timeout)return false;QCoreApplication::processEvents(QEventLoop::AllEvents,10);Sleep(1);}
     }
     QString fixture()const{return configuration["fixture"].toString();}
+    void auditOpenResources() {
+        if(!configuration["fullyFrozenResources"].toBool())return;
+        const auto audit=ei::openingCpuValue(true,[]{bool observed=false;auto paths=isolatedOpenResourceHandles(observed);return qMakePair(observed,paths);});
+        check(audit.first,"own process resource handles enumerated");const auto& paths=audit.second;
+        QJsonArray list;const auto live=QDir::fromNativeSeparators(configuration["forbidLiveModRoot"].toString());
+        for(const auto& path:paths){list.append(path);check(!path.startsWith(live+"/",Qt::CaseInsensitive),"no live mod archive/map handle: "+path);}
+        record("resource_handles",{{"paths",list},{"deniedLiveReads",deniedReads.load()},{"liveModHandles",0}});
+        check(deniedReads.load()==0,"no attempted live mod resource opens");
+    }
     void validateReady(const QString& name,bool gl=false)
     {
         if(gl) {
@@ -228,7 +247,7 @@ public:
             const int expected=name.contains("zone7")?4:name.contains("zone1")?5:0;check(touching==expected,"GL touching neighbours exact "+QString::number(expected));
 
             record("ready",{{"name",name},{"renderer","OpenGL"},{"neighbours_accepted",touching},{"legacyNeighbours",view->m_neighborLandscapes.size()},{"neighbourSource","CView/GL"},{"nativeLoaded",native->backendLoaded()},{"exeSha256",exeSha},{"dllSha256",dllSha}});
-            QString error;auto image=view->captureTopdownPass(ETopdownPass::None,QSize(960,640),{},&error);
+            auditOpenResources();QString error;auto image=view->captureTopdownPass(ETopdownPass::None,QSize(960,640),{},&error);
             check(!image.isNull(),"GL own FBO readback: "+error);image.save(caseRoot+"/"+name+"-gl.png");
             return;
         }
@@ -238,11 +257,11 @@ public:
         const auto stats=native->statistics();
         check(int(stats.neighbours_accepted)==expected&&stats.neighbours_pending==0,"native neighbours exact "+QString::number(expected));
         if(!sawGL) {
-            check(wait([&]{return window->rebuild64DocumentReady()&&!native->openingDocument()&&native->editorQueryReady();}),"shared query geometry ready (later than first world allowed)");
+            check(wait([&]{return window->rebuild64DocumentReady()&&!native->openingDocument()&&native->editorQueryReady()&&native->frameIsCurrent();}),"shared query geometry ready (later than first world allowed)");
             check(view->m_neighborLandscapes.size()==expected,"only touching GL neighbours loaded");
         }
         record("ready",{{"name",name},{"renderer","Rebuild64"},{"neighbours_accepted",int(stats.neighbours_accepted)},{"legacyNeighbours",view->m_neighborLandscapes.size()},{"width",int(stats.width)},{"height",int(stats.height)},{"exeSha256",exeSha},{"dllSha256",dllSha}});
-        const auto path=caseRoot+"/"+name+"-native.png";QFile::remove(path);bool done=false;QString error;quint64 captured=0;
+        auditOpenResources();check(wait([&]{return native->frameIsCurrent();}),"snapshot uses latest ready generation after observers");const auto path=caseRoot+"/"+name+"-native.png";QFile::remove(path);bool done=false;QString error;quint64 captured=0;
         const auto connection=connect(native,&CRebuild64Viewport::captureFinished,this,[&](const QString& output,const QString& failure,quint64 generation){if(output==path){done=true;error=failure;captured=generation;}});
         native->capture(path);const bool finished=wait([&]{return done;},15000);disconnect(connection);
         check(finished&&error.isEmpty()&&captured==native->statistics().ready_generation&&QFileInfo(path).size()>0,"fresh native own readback from current Present: "+error);
@@ -332,6 +351,57 @@ public:
         QKeyEvent press(QEvent::KeyPress,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&press);
         QKeyEvent release(QEvent::KeyRelease,value,Qt::NoModifier,0,value==Qt::Key_Return?VK_RETURN:value,0,text);QApplication::sendEvent(target,&release);
     }
+    QJsonArray latestPresentClip() {
+        QFile file(caseRoot+"/presented.jsonl");if(!file.open(QIODevice::ReadOnly))return {};
+        const auto rows=file.readAll().split('\n');for(int i=rows.size()-1;i>=0;--i){const auto row=QJsonDocument::fromJson(rows[i]).object();if(row["event"]=="present"&&row["qtPageShown"].toBool())return row["cameraClip"].toArray();}return {};
+    }
+    void measureCamera(const QString& kind,const std::function<void()>& input) {
+        const auto before=latestPresentClip();const auto begin=qpc();input();
+        record("camera_input_state",{{"kind",kind},{"keysW",view->m_pOp->keyManager()->isPressed(eKey_W)},{"cameraMoving",view->m_cam->movementInputActive()},{"frameCurrent",native->frameIsCurrent()},{"early",native->m_earlyDocument},{"queuedEvents",native->m_waitingInput.size()},{"selected",native->m_selected},{"resourceWriteDepth",native->m_resourceWriteDepth},{"projectionDepth",view->m_openingProjectionDepth},{"timerActive",native->m_timer->isActive()}});
+        const bool advanced=wait([&]{auto next=latestPresentClip();if(next.size()!=16||before.size()!=16)return false;for(int i=0;i<16;++i)if(qAbs(next[i].toDouble()-before[i].toDouble())>1e-6)return true;return false;},5000);
+        record("camera_after_wait",{{"kind",kind},{"keysW",view->m_pOp->keyManager()->isPressed(eKey_W)},{"cameraMoving",view->m_cam->movementInputActive()},{"frameCurrent",native->frameIsCurrent()},{"early",native->m_earlyDocument},{"queuedEvents",native->m_waitingInput.size()},{"selected",native->m_selected},{"resourceWriteDepth",native->m_resourceWriteDepth},{"projectionDepth",view->m_openingProjectionDepth},{"timerActive",native->m_timer->isActive()}});
+        check(advanced,"live camera has new accepted Present: "+kind);
+        QFile file(caseRoot+"/presented.jsonl");file.open(QIODevice::ReadOnly);qint64 accepted=0;
+        for(const auto& line:file.readAll().split('\n')){auto row=QJsonDocument::fromJson(line).object();if(row["event"]!="present"||row["qpc"].toDouble()<begin)continue;auto clip=row["cameraClip"].toArray();if(clip.size()!=16)continue;bool changed=false;for(int i=0;i<16;++i)changed|=qAbs(clip[i].toDouble()-before[i].toDouble())>1e-6;if(changed){accepted=qint64(row["qpc"].toDouble());break;}}
+        check(accepted>=begin,"camera latency uses actual Present QPC");record("camera_latency",{{"kind",kind},{"milliseconds",double(accepted-begin)/10000.0},{"inputQpc",QString::number(begin)},{"presentQpc",QString::number(accepted)},{"queryReady",native->editorQueryReady()}});
+    }
+    void liveCameraEvents() {
+        // Fast runs can finish query geometry before the first native frame.
+        // Exercise the same pending-input branch deterministically in this one
+        // functional case; never enable this gate in performance cases.
+        const bool controlledHold=native->editorQueryReady()&&!native->openingDocument();
+        const QScopedValueRollback<int> hold(view->m_openingProjectionDepth,view->m_openingProjectionDepth+(controlledHold?1:0));
+        try {
+            record("camera_readiness_gate",{{"controlledHold",controlledHold},{"naturalPending",!controlledHold}});
+            check(wait([&]{return latestPresentClip().size()==16;}),"first shown stream camera available");
+            check(CLandscape::getInstance()->isMprLoad()&&CLandscape::getInstance()->renderResourcesDeferred(),"first-frame navigation has CPU terrain without world GL atlas");
+            earlyUndoIndex=window->m_undoStack->index();auto* target=native->findChild<QWidget*>("rebuild64NativeSurface");const auto point=target->rect().center();
+            QMouseEvent press(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier),release(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+            QApplication::sendEvent(target,&press);QApplication::sendEvent(target,&release);
+            check(native->pendingEditorInput(),"click is queued while camera remains live");
+            measureCamera("W",[&]{QKeyEvent e(QEvent::KeyPress,Qt::Key_W,Qt::NoModifier,0,'W',0,"w");QApplication::sendEvent(target,&e);});
+            QKeyEvent up(QEvent::KeyRelease,Qt::Key_W,Qt::NoModifier,0,'W',0,"w");QApplication::sendEvent(target,&up);
+            measureCamera("wheel",[&]{QWheelEvent e(QPointF(point),QPointF(target->mapToGlobal(point)),QPoint(),QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);QApplication::sendEvent(target,&e);});
+            measureCamera("middle-drag",[&]{QMouseEvent a(QEvent::MouseButtonPress,point,Qt::MiddleButton,Qt::MiddleButton,Qt::NoModifier),b(QEvent::MouseMove,point+QPoint(24,8),Qt::NoButton,Qt::MiddleButton,Qt::NoModifier),c(QEvent::MouseButtonRelease,point+QPoint(24,8),Qt::MiddleButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(target,&a);QApplication::sendEvent(target,&b);QApplication::sendEvent(target,&c);});
+            key(Qt::Key_G,"g");key(Qt::Key_X,"x");key(Qt::Key_1,"1");key(Qt::Key_Return,"\r");
+            QKeyEvent undo(QEvent::KeyPress,Qt::Key_Z,Qt::ControlModifier,0,'Z',0,"z"),undoUp(QEvent::KeyRelease,Qt::Key_Z,Qt::ControlModifier,0,'Z',0,"z");QApplication::sendEvent(target,&undo);QApplication::sendEvent(target,&undoUp);
+            check(window->m_undoStack->index()==earlyUndoIndex,"Undo/edit wait for canonical geometry in input order");
+            record("camera_live_before_geometry",{{"pending",native->pendingEditorInput()},{"queryReady",native->editorQueryReady()},{"syntheticQueryHold",controlledHold}});
+        }catch(const QString& error){liveError=error;}
+        liveDone=true;
+    }
+    void liveCameraScenario() {
+        CMobDocument document;CValidationReport report;check(document.load(QFileInfo(fixture()+"/Maps/zone1.mob"),&report),"real CPU click target source");const SMobObjectSnapshot* chosen=nullptr;
+        for(const auto& object:document.objects())if(object.sectionType==45057u&&object.hasPosition&&!object.unit&&object.model.compare("stst8",Qt::CaseInsensitive)){if(!chosen)chosen=&object;if(object.model.contains("stbuho",Qt::CaseInsensitive)||object.model.contains("rock",Qt::CaseInsensitive)){chosen=&object;break;}}
+        check(chosen,"live-camera real static target");earlyTargetNid=chosen->nid;earlyTargetPosition={chosen->positionX,chosen->positionY,chosen->positionZ};
+        QMatrix4x4 camera;camera.lookAt(earlyTargetPosition+QVector3D(0,-1,100),earlyTargetPosition,QVector3D(0,1,0));view->m_cam->adoptView(camera);liveWanted=true;
+        openPair("zone1");check(wait([&]{return liveDone;}),"live camera scenario completed");check(liveError.isEmpty(),"live camera error: "+liveError);validateReady("zone1-live-camera");
+        check(wait([&]{return !native->pendingEditorInput();}),"frozen-camera queued input drained");
+        check(view->selectionSnapshot().size()==1,"queued click selects one object after flight");auto* node=view->selectionSnapshot().first();check(node->mapId()==earlyTargetNid,"queued click selects object at click-time camera");
+        check(window->m_undoStack->index()==earlyUndoIndex+1,"queued numeric edit then Undo keeps canonical history order");
+        auto before=node->position();window->on_actionRedo_triggered();check(qAbs(node->position().x()-before.x()-1)<.001f,"Redo proves queued edit was undone");window->on_actionUndo_triggered();
+        validateReady("zone1-live-camera-undone");window->closeAll();
+    }
     void earlyInputScenario() {
         CMobDocument document;CValidationReport report;
         check(document.load(QFileInfo(fixture()+"/Maps/zone1.mob"),&report),"CPU source for first-frame click target");
@@ -359,6 +429,10 @@ public:
         validateReady("zone1-early-input-undone");window->closeAll();
     }
     void preparationRaces() {
+        const auto pendingPath=caseRoot+"/during-prepare-native.png";
+        auto* captureTimer=new QTimer(this);captureTimer->setInterval(15);
+        const auto response=connect(native,&CRebuild64Viewport::captureFinished,this,[this,pendingPath](const QString& path,const QString& error,quint64 generation){if(path==pendingPath){prepareCaptureDone=true;prepareCaptureError=error;record("capture_during_prepare_response",{{"error",error},{"generation",QString::number(generation)}});}});
+        connect(captureTimer,&QTimer::timeout,this,[this,captureTimer,pendingPath]{if(!prepareCaptureSent&&native->openingDocument()&&native->m_earlyMap.endsWith("zone7.mpr",Qt::CaseInsensitive)&&native->m_worker){prepareCaptureSent=true;captureTimer->stop();native->capture(pendingPath);record("capture_during_prepare_requested");}});captureTimer->start();
         bool closed=false;auto* closeTimer=new QTimer(this);closeTimer->setInterval(15);
         connect(closeTimer,&QTimer::timeout,this,[&]{
             if(closed||ei::legacyProjectionPulse()||!window->m_workspaceLoadInProgress||!native->openingDocument()||!CLandscape::getInstance()->isMprLoad())return;
@@ -377,6 +451,8 @@ public:
         });timer->start();openPair("zone1");
         check(wait([&]{return queued&&!window->property("nativeMapRequestPending").toBool()&&CLandscape::getInstance()->filePath().completeBaseName()=="zone7";},120000),"latest queued map becomes the canonical document");
         timer->stop();delete timer;validateReady("zone7-after-prepare-race");
+        captureTimer->stop();delete captureTimer;check(prepareCaptureSent&&wait([&]{return prepareCaptureDone;},15000),"pending frame readback request receives a response");disconnect(response);
+        check(prepareCaptureError.isEmpty()||prepareCaptureError.contains(QString::fromUtf8("Документ изменился")),"pending capture is current or explicitly invalidated");
         for(auto* mob:view->mobs())check(!mob->filePath().fileName().contains("zone1",Qt::CaseInsensitive),"retired opening has no MOB in final cohort");
         QFile trace(caseRoot+"/presented.jsonl");check(trace.open(QIODevice::ReadOnly),"race Present trace readable");
         for(const auto& line:trace.readAll().split('\n')){const auto row=QJsonDocument::fromJson(line).object();
@@ -441,6 +517,16 @@ public:
                 key(Qt::Key_G,"g");key(Qt::Key_X,"x");key(Qt::Key_1,"1");key(Qt::Key_Return,"\r");check(target->position()!=before,"ordinary GL canonical keyboard move");
                 window->m_undoStack->undo();check(target->position()==before,"ordinary GL Undo");window->m_undoStack->redo();window->m_undoStack->undo();
                 worldDoubleClick(true);createMap();check(!GetModuleHandleW(L"ataman_rebuild64.dll"),"GL control never loads native DLL");window->closeAll();
+            }
+            else if(mode=="live-camera") {liveCameraScenario();}
+            else if(mode=="switch-gl"||mode=="device-late") {
+                openPair(map);validateReady(map);
+                if(mode=="device-late"){check(CLandscape::getInstance()->renderResourcesDeferred(),"native terrain atlas really deferred before device loss");QFile marker(caseRoot+"/case.json.device-loss");check(marker.open(QIODevice::WriteOnly),"own device loss request");marker.write("1");marker.close();check(wait([&]{return !native->lastFailure().isEmpty();}),"late device loss fallback");check(failures==1,"single late device loss message");}
+                else native->m_glAction->trigger();
+                validateReady(map+"-gl-fallback",true);check(view->m_neighborLandscapes.size()==11,"GL retains all 11 landscapes");
+                check(!CLandscape::getInstance()->renderResourcesDeferred()&&CLandscape::getInstance()->glTexture(),"deferred GL atlas materialized");
+                CNode* selected=nullptr;for(auto* mob:view->mobs())for(auto* node:mob->nodes())if(!selected&&node->nodeType()==eWorldObject&&node->modelName().compare("stst8",Qt::CaseInsensitive))selected=node;
+                check(selected,"GL static edit target");view->restoreSelection({selected});const auto before=selected->position();key(Qt::Key_G,"g");key(Qt::Key_X,"x");key(Qt::Key_1,"1");key(Qt::Key_Return,"\r");check(qAbs(selected->position().x()-before.x()-1)<.001f,"GL tool works after lazy materialization");window->on_actionUndo_triggered();check((selected->position()-before).length()<.001f,"GL Undo exact");if(mode=="switch-gl"){native->m_rebuildAction->trigger();validateReady(map+"-native-return");}window->closeAll();
             }
             else if(mode=="early-input") {earlyInputScenario();}
             else if(mode=="prepare-races") {preparationRaces();}
@@ -576,6 +662,7 @@ public:
             ownVisibleWindows=0;EnumWindows(ownWindow,0);check(ownVisibleWindows==0,"no visible process windows");
             check(unexpectedDialogs==0,"no unexpected modal dialogs");
             check(deniedWrites.load()==0,"all Qt write targets stayed inside the owned workspace");
+            check(deniedReads.load()==0,"no live replaceable mod resources read");
             record("scenario_complete",{{"success",true},{"maxQtGapTicks",QString::number(maxGap)},{"nativeLoaded",native->backendLoaded()}});
         }catch(const QString& error) {record("complete",{{"success",false},{"error",error}});exitCode=1;}
         if(socket)socket->disconnectFromServer();pulse.stop();
@@ -617,6 +704,8 @@ public:
     }
 private:
     QFile log;MainWindow* window=nullptr;CView* view=nullptr;CRebuild64Viewport* native=nullptr;
+    bool prepareCaptureSent=false,prepareCaptureDone=false;QString prepareCaptureError;
+    bool liveWanted=false,liveSent=false,liveDone=false;QString liveError;
     bool earlyInputSent=false;quint32 earlyTargetNid=0;QVector3D earlyTargetPosition;int earlyUndoIndex=0;
     qint64 earlyInputQpc=0,closeQpc=0,switchQpc=0;
     QTimer pulse;qint64 lastPulse=0,maxGap=0,commandQpc=0;quint64 lastGeneration=0;
@@ -671,6 +760,8 @@ void applyRebuild64LaunchFixture(CSettings& settings) {
     for(auto& path:paths)if(QFileInfo(path).fileName().compare("HDPack_Terrain.res",Qt::CaseInsensitive)==0){path=privatePack;++replaced;}
     if(replaced<1)qFatal("Expected exactly one terrain resource fixture");
     paths.removeAll(privatePack);paths.prepend(privatePack);
+    if(configuration["fullyFrozenResources"].toBool())for(const auto& path:paths)
+        if(!QDir::fromNativeSeparators(path).startsWith(writableRoot+"/",Qt::CaseInsensitive))qFatal("Non-private resource mount in fully frozen launch test");
     // CMapCatalog still expects directories. Keep them after explicit archive
     // priority; the general resource enumerator deduplicates identical files.
     QStringList catalogs;for(const auto& path:paths)if(QFileInfo(path).fileName().compare("texts.res",Qt::CaseInsensitive)==0)catalogs.append(QFileInfo(path).absolutePath());

@@ -1,4 +1,5 @@
 #include "view.h"
+#include "opening_trace.h"
 #include "landscape.h"
 #include "gl_dispatch.h"
 #include "shader_locations.h"
@@ -15,6 +16,7 @@ namespace { struct RestoreCapture { std::function<void()> restore; ~RestoreCaptu
 QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
                                const QVector<SRenderItem>& items, QString* error)
 {
+    opening::Scope captureTiming(m_editorServicePass?"gui.service.capture":"gui.capture.topdown");
     if(QThread::currentThread()!=thread() || !isValid() || m_minimapCaptureActive || m_snapshotCaptureActive) {
         *error="Renderer/context unavailable or already capturing";return {};
     }
@@ -78,7 +80,9 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
     if(size.width()>maximum || size.height()>maximum) {*error="EXPORT_SIZE_LIMIT: GL texture limit "+QString::number(maximum);return {};}
     if(!m_landProgram.bind() || !m_program.bind()) {*error="Could not bind terrain/object shader pipeline";return {};}
     QOpenGLFramebufferObjectFormat format;format.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    const auto fboStart=opening::clock();
     QOpenGLFramebufferObject target(size,format);
+    opening::span(m_editorServicePass?"gui.service.fbo":"gui.capture.fbo",fboStart);
     if(!target.isValid() || !target.bind()) {*error="Offscreen framebuffer unavailable";return {};}
     if(pass==ETopdownPass::None) {
         // Fresh current-camera frame even when paintGL deliberately skips a
@@ -90,10 +94,11 @@ QImage CView::captureTopdownPass(ETopdownPass pass, const QSize& size,
         gl->glDepthFunc(GL_LESS);gl->glDepthMask(GL_TRUE);
         gl->glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl->glEnable(GL_BLEND);
         gl->glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+        {opening::Scope stage(m_editorServicePass?"gui.service.draw":"gui.capture.draw");
         if(m_editorServicePass){drawEditorServiceScene();drawTestOverlaysOpenGl();}
-        else draw();
-        gl->glFinish();
-        auto image=target.toImage();
+        else draw();}
+        {opening::Scope stage(m_editorServicePass?"gui.service.finish":"gui.capture.finish");gl->glFinish();}
+        QImage image;{opening::Scope stage(m_editorServicePass?"gui.service.readback":"gui.capture.readback");image=target.toImage();}
         if(image.isNull())*error="Current viewport framebuffer readback failed";
         return image;
     }

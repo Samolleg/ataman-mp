@@ -81,6 +81,7 @@ void CLandscape::swapRenderState(CLandscape& other)
     swap(m_renderAtlasColumns,other.m_renderAtlasColumns);
     swap(m_aSector,other.m_aSector);
     swap(m_texture,other.m_texture);
+    swap(m_renderDeferred,other.m_renderDeferred);swap(m_deferredAtlasArchive,other.m_deferredAtlasArchive);swap(m_queryOpaque,other.m_queryOpaque);
     swap(m_baseAtlasTexture,other.m_baseAtlasTexture);
     swap(m_baseAtlasColumns,other.m_baseAtlasColumns);
     swap(m_baseAtlasMatchesBaseline,other.m_baseAtlasMatchesBaseline);
@@ -137,6 +138,7 @@ void CLandscape::unloadMpr()
     m_baseAtlasColumns = 1;
     m_baseAtlasMatchesBaseline = false;
     m_texture = nullptr;
+    m_queryOpaque.clear();m_renderDeferred=false;
     for (auto& xSec: m_aSector)
     {
         for(auto& ySec: xSec)
@@ -878,7 +880,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
 
     ei::log(eLogInfo, QString("MPR namespace outer:%1 inner:%2 expectedTerrainAtlases:%3")
             .arg(path.baseName(), innerMapName).arg(m_header.nTexture));
-    int texCount;
+    int texCount=int(m_header.nTexture);
     int atlasColumns = 1;
     ei::setCrashContext("mpr/terrain-atlas/build:" + path.fileName());
     QString backgroundArchive;
@@ -898,7 +900,8 @@ void CLandscape::readMapInternal(const QFileInfo& path,
         }
     }
     const auto atlasBegin=opening::clock();
-    m_texture = CTextureList::getInstance()->buildLandTex(
+    m_deferredAtlasArchive=backgroundArchive;
+    if(!m_renderDeferred)m_texture = CTextureList::getInstance()->buildLandTex(
         innerMapName, int(m_header.nTexture), texCount, atlasColumns, backgroundArchive);
     opening::span("gui.gl.landscape_atlas",atlasBegin,path.fileName());
     ei::pulseLegacyProjection();
@@ -923,7 +926,7 @@ void CLandscape::readMapInternal(const QFileInfo& path,
             QDataStream secStream(aComponent.take(innerMapName + genSectorSuffix(int(x), int(y)) + ".sec"));
             util::formatStream(secStream);
             CSector* sector = new CSector(secStream, m_header.maxZ, texCount,
-                                          &m_aMaterial, &m_aAnimTile);
+                                          &m_aMaterial, &m_aAnimTile,m_renderDeferred);
             sector->setTerrainAtlasLayout(texCount, atlasColumns);
             sector->setIndex(secIndex);
             xSec.append(sector);
@@ -1122,6 +1125,7 @@ bool CLandscape::adoptCanonicalTerrainSave(
 
 void CLandscape::draw(QOpenGLShaderProgram* program, const CViewFrustum* frustum)
 {
+    ensureRenderResources();
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
@@ -1423,6 +1427,7 @@ void CLandscape::updateTerrainShadowVisibility(const QVector3D& sunDirection,
 
 void CLandscape::drawWater(QOpenGLShaderProgram *program, const CViewFrustum* frustum)
 {
+    ensureRenderResources();
     refreshMaterialDrawDataIfNeeded();
     m_texture->bind(0);
     program->setUniformValue(ei::uniformLocation(program, "qt_Texture0"), 0);
@@ -1609,6 +1614,7 @@ void CLandscape::invalidateTerrainShadowField()
 
 void CLandscape::drawTileGrid(QOpenGLShaderProgram* program)
 {
+    if(m_renderDeferred){drawQueryDepth(program,true);return;}
     for(auto& row : m_aSector)
         for(CSector* sector : row)
             sector->drawTileGrid(program);
