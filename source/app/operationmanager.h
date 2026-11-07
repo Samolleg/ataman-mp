@@ -69,6 +69,7 @@ public:
     void mouseMoveEvent(QMouseEvent* pEvent);
     void wheelEvent(QWheelEvent* pEvent);
     EOperationMethod operationMethod();
+    bool canConfirmWithEnter() const;
 
     CKeyManager* keyManager() {return m_keyManager.get();}
     void attachCam(CCamera* pCam);
@@ -113,6 +114,7 @@ public:
     EOperationMethod operationMethod() override final {return eOperationMethodMoveAxis;};
     CMoveAxis(CView* pView, EOperateAxis ax);
     ~CMoveAxis() {}
+    bool canConfirmWithEnter() const;
 
     void keyPress(COperation* pOp, EKeyCode key) override final;
     void keyRelease(COperation* pOp, EKeyCode key) override final;

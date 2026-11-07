@@ -112,6 +112,8 @@ Owner строки view.cpp сохранены в working copy и исключе
 
 ## R2 — повторная приёмка с соседями (2026-11-07)
 
+> **Поправка R2.2, окончательные результаты ниже:** блок R2.1 ниже теперь исторический. Адресный настоящий Qt Ctrl+C/V обнаружил ошибку теста: пустой Enter в штатном CMoveAxis выходит из режима без commit обычной clipboard-вставки. Счётчик nodes+1 доказывал только preview, а Undo отменял прежнее выделение. Прежние утверждения о подтверждённой вставке/Undo и последующие C/D отозваны до нового прогона. В source host добавлена безопасная блокировка пустого Enter с сообщением и сохранением preview; решение получает общий predicate COperation/CMoveAxis, исходное GL-условие не меняется. Новый тест подтверждает вставку мышью и требует ровно один шаг истории, отсутствие pending, новое native generation и точные bytes после Undo. Прежние Release/package receipts сохранены как release-receipt-before-paste-confirmation.json и package-before-paste-confirmation.json в W. Финальные R2.2 результаты приведены ниже.
+
 **286 НЕ ПРИНЯТА, общая задача PARTIAL.** В перечисленных успешных прогонах A–D работают с настоящими соседями; быстрый object update не достигнут. Кроме того, обнаружен отдельный intermittent AV при принудительной подготовке canonical terrain в скрытом CView **до загрузки DLL**. Один GL-контроль на итоговых production objects завершился PASS, но чистого закрытия GL-регрессии при наличии этого AV не заявляю. Установки и push нет; картинку и видимое ощущение работы проверяет только владелец.
 
 ### Поправки к R1 и воспроизводимость
@@ -217,3 +219,79 @@ Release собран из git archive без owner working changes. build_releas
 - Полного PASS/принятия286 нет. Установка, push, видимые окна, desktop capture отсутствуют. Проверка картинки/плавности/сравнения с игрой остаётся **только владельцу**. Очистка собственных промежуточных case payloads и оставшиеся приватные копии — [cleanup receipt](../../work/rebuild64-tools-286-r2-20261107/cleanup-receipt.json) / [cleanup plan](../../work/rebuild64-tools-286-r2-20261107/cleanup-plan.json).
 
 I выполнен частично: после покадрового pixel PASS удалены13977 избыточных readback/duplicate PNG, освобождено11139767934 байта (10,38GiB);30 выбранных кадров, пары и журналы сохранены. Общего PASS из-за CView setup AV нет, поэтому полная условная очистка case-папок и копий карт пока не выполнена:58 приватных payloads/122380623 байта перечислены с точными SHA в cleanup-plan. Заблокированных файлов нет. Финализатор на установке не запускался; ни один путь владельца не участвовал в очистке.
+
+## R2.2 — окончательные прогоны после проверки подтверждения вставки
+
+**Действующие результаты — здесь. Технические сценарии A–D, точный B и один GL-контроль нового Release прошли; полная приёмка286 остаётся OPEN.** Задержка обновления всё ещё в секундах; точные native ID/depth и ранний AV общей подготовки CView не закрыты. Установка и push не выполнялись. Полный первоначальный результат не объявляется DONE.
+
+### Исправление теста и защита ввода
+
+Адресный `real-control-diff-r2` доказал причину ложной проверки вставки: до Ctrl+C/V индекс истории20, после пустого Enter также20, nodes2012→2013; верхняя команда — Select objects, после Undo индекс19 и всё ещё2013 nodes. Это был **не commit вставки**. Прежние R1/R2.1 утверждения о подтверждении вставки через пустой Enter и последующие C/D не являются доказательством требуемого сценария. Raw/JSON before/after использовались только приватно для диагностики; в журнале сохранены counts/indices/размеры. Новые вставки подтверждаются мышью, как штатный CView.
+
+В новом виде пустой Enter при clipboard preview теперь выдаёт «пустой Enter не подтверждает вставку… подтвердите щелчком» и сохраняет pending operation. Решение не продублировано: условие `!value.isEmpty() || isDatabasePlacementPending() || isLogicPlacementPending()` вынесено в `CMoveAxis::canConfirmWithEnter()`, его же использует прежний GL handler; COperation предоставляет запрос для хоста. GL-условие и переходы функционально прежние. Нормальные числовые Enter продолжают делегироваться CView. Документы, Undo, Save и форматы не переносятся в DLL.
+
+Ctrl в новом helper также доставляется **KeyPress/KeyRelease Qt в настоящий native widget**, без прямого press/release key manager. Адресный confirmed-control-r2 проверил: Ctrl pressed/released через канонический key manager; только собственный TMP clipboard file; отказ пустого Enter без нового history; мышь→ровно один history step и новое native generation; один Undo→**2012 nodes и точные1714199 bytes** исходного canonical MOB; Save candidate exact и строгий reopen. Ни системного буфера, ни глобальных клавиатурных событий нет.
+
+### Итоговый код и условия
+
+Qt Release git archive `3e935400b7ff48dbf717bf4b000bdc4e68c18c10`, EXE SHA256 **`89670da8fee26a0c797abb0052c9eccff18fd9c044a43df49f901260b5be9bc2`**. Host/DLL остались побайтно прежними после material/presentation fixes: tree `1eacfab62a2c82ebcbcee31feccdd7c1468ca860`, DLL SHA256 `33b2fd5b91da859aa1354e7191876191a63052eed938be62b4cfdfe3b4251179`. Renderer runtime/lib/shader table не пересобирались и не менялись. Последний harness archive `65f8bd679883ade7320700531c1e93f465d63997`; input probe `3e935400b7ff48dbf717bf4b000bdc4e68c18c10`. Production core исходники и objects совпадают с Release; различия тестовых main — изоляция/измерения, test hooks только для собственных lock/save paths. [Release receipt](../../work/rebuild64-tools-286-r2-20261107/release-receipt.json), [production objects](../../work/rebuild64-tools-286-r2-20261107/production-objects.json).
+
+Те же настоящие Qt widgets, обычный `AA_DisableHighDpiScaling`, фактический DPR1,960×640. Соседи включены сохранённой штатной настройкой до MainWindow, без defer и ручной подмены context. GL заканчивает штатную загрузку11 background landscapes. Native accepted строго5 на zone1 и4 на zone7; перед каждым snapshot это записано и проверено, иначе FAIL. Оба исходных MPR/MOB SHA сверены после каждого процесса, все правки/Save — только собственные копии DejaVu. Только RTX4070SUPER;0 видимых HWND. Сценарий владельца в видимом окне проверяется **только владельцем**.
+
+|Прогон|Сценарий|Соседи|Exit / журнал|SHA256 harness EXE|
+|---|---|---|---|---|
+|confirmed-control-r2|Ctrl/input/пустой Enter/Save/Undo|native5,GL11|0 / 40 строк PASS|`df34ad34b6a966db9fad019bbc5390e5704db563fb69efc020ef74dc83764e4e`|
+|confirmed-races-stream-r2|A/D и1689 actual Present PNG|native5/4,GL11; только явный OFF=0|0 / 125 строк PASS|`a94cdec143be8d54511f52945aad762c4bfedf39b508ec6820fd70a0edada79c`|
+|confirmed-neighbours-series-r2|A/C,20 строгих подтверждений|native5/4,GL11|0 / 259 строк PASS|`a94cdec143be8d54511f52945aad762c4bfedf39b508ec6820fd70a0edada79c`|
+|confirmed-release-r2|B, timestamp MouseButtonRelease|native5/4,GL11|0 / 105 строк PASS|`a94cdec143be8d54511f52945aad762c4bfedf39b508ec6820fd70a0edada79c`|
+|confirmed-camera-r2|реальный movable CCamera|native5/4,GL11|0 / 51 строк PASS|`a94cdec143be8d54511f52945aad762c4bfedf39b508ec6820fd70a0edada79c`|
+|confirmed-gl-control-r2|единственный GL контроль нового Release|native не запускался,GL11 ON|0 / 15 строк PASS|`a94cdec143be8d54511f52945aad762c4bfedf39b508ec6820fd70a0edada79c`|
+
+A: обе карты —8 точек активных объектов (клик совпадает с CView GL oracle), настоящий Shift, рамка, G→X и4 mouse move с принятым service_serial/0 document reload, mouse confirm, точный Undo/Redo, Delete/Undo, Ctrl+C/V и **mouse-confirmed** insert/Undo. Вставка требует отсутствия pending, history+1, нового показанного generation; Undo возвращает точные прежние MOB bytes. Последующая серия начинается с чистого завершённого состояния. Save копии равен lossless validated candidate, strict reopen даёт ту же normalized document projection; это не замена lossless формата простой сериализацией.
+
+Клик по реальному объекту соседней карты за границей активной и отдельной точке её рельефа даёт **0 выбранных объектов, как OpenGL**. Это readonly background, не редактирование соседнего MOB. Поимённые точки двух карт — `neighbour_hits` в [измерениях](../../work/rebuild64-tools-286-r2-20261107/measurements-r2-2.json). Все старые/новые запуски и наблюдённые counts — в [полном run inventory](../../work/rebuild64-tools-286-r2-20261107/run-neighbours-r2-2.json); старые Enter-based acceptance помечены superseded, unknown не считается PASS.
+
+### B — действующие задержки и кадры показа
+
+Начало — QPC входа **MouseButtonRelease** настоящего Qt widget, конец — первый фактический native Present целевого generation. Qt pause — наибольший10мс heartbeat gap, ограниченный тем же QPC интервалом. RAM — private bytes текущего процесса, VRAM — DXGI LOCAL CurrentUsage RTX4070SUPER; before/peak/after вMiB, пик sampled background thread каждые10мс (это не строгий максимум между отсчётами). Это обычные прогоны без постоянного CPU readback мирового кадра.
+
+|Карта|Native neighbours|Release→Present,мс|Qt max gap,мс|Private до / пик / после,MiB|VRAM до / пик / после,MiB|
+|---|---:|---:|---:|---|---|
+|zone1|5|4261.6|338.3|13018.6 / 13265.0 / 13263.9|8955.7 / 9191.9 / 9191.9|
+|zone7|4|3127.1|258.3|14756.5 / 15053.5 / 14890.0|8705.5 / 9104.3 / 8914.8|
+
+В полной34-action матрице —2806,3–3373,1мс от начала подтверждающего действия; максимальный Qt gap399,8мс. При точном B zone1 медленнее этого диапазона:4261,6мс, не скрыто усреднением. Подтверждение пока полностью перезагружает world и всех соседей. Человек видит последний готовый кадр; визуальное движение камеры ждёт нового кадра. Очередь Qt не останавливается на все3–4с, но паузы до~400мс заметны. Отдельный movable CCamera probe сохраняет исходную матрицу с ошибкой<0,001: W меняет camera matrix через369/500мс; подтверждение→Present3393,6/3590,6мс, Qt pause до370,6мс. Это не обещание плавной камеры во время reload.
+
+D записывает **весь actual Present stream**, а не поздний screenshot:1689 JSON records и1689 уникальных пар(sequence,generation)/PNG; все1689 прочитаны после завершения записи. **0 partial-neighbour,0 stale-generation,0 stale-visibility,0 Present после GL/close;0 известных магентовых fallback pixels**. При ON каждый native frame имеет5/4 accepted, pending0/settled=true;0 соседей — только два явно запрошенных OFF кадра. Диагностический CPU world readback включён только в этом trace-процессе и не входит в обычные B/C цифры.
+
+[Последний preview frame63/gen1](../../work/rebuild64-tools-286-r2-20261107/pairs/stream/confirmed-races-stream-r2/present-63-gen-1.png) → [первый новый frame64/gen2](../../work/rebuild64-tools-286-r2-20261107/pairs/stream/confirmed-races-stream-r2/present-64-gen-2.png); [OFF frame196](../../work/rebuild64-tools-286-r2-20261107/pairs/stream/confirmed-races-stream-r2/present-196-gen-15.png); [zone7 последний object update/native4](../../work/rebuild64-tools-286-r2-20261107/pairs/stream/confirmed-races-stream-r2/present-1626-gen-22.png). Между новыми Present удерживается последний готовый экран. [Все hash/pixel results](../../work/rebuild64-tools-286-r2-20261107/presented-pixels-confirmed-races-stream-r2.json), [30 выбранных кадров](../../work/rebuild64-tools-286-r2-20261107/selected-stream-confirmed-races-stream-r2.json), [stream audit](../../work/rebuild64-tools-286-r2-20261107/case-confirmed-races-stream-r2/stream-audit-r2.json). Проверен известный магентовый fallback и resource readiness, не универсальный классификатор любой ошибочной текстуры.
+
+Служебный слой: прежний GL depth + premultiplied RGBA CView → D3D host,2,34MiB при960×640. В итоговой матрице service CPU **9,02–21,09мс**, host composition submission **0,0006–2,8294мс**, native frame call **15,53–16,24мс**; это CPU интервалы, не GPU timestamp. CPU передаёт только service image; нормальный world остаётся на GPU. [zone1 GL service](../../work/rebuild64-tools-286-r2-20261107/pairs/r2-2/zone1-after-release-GL-service.png) / [native input service](../../work/rebuild64-tools-286-r2-20261107/pairs/r2-2/zone1-after-release-native-service.png), [zone7 GL](../../work/rebuild64-tools-286-r2-20261107/pairs/r2-2/zone7-after-release-GL-service.png) / [native](../../work/rebuild64-tools-286-r2-20261107/pairs/r2-2/zone7-after-release-native-service.png). Пары сверяют наличие меток, не вид рендера. GL geometry/depth остаются приближением: GL11 против native5/4, дальние GL-only метки могут висеть над пустым native фоном; cutout/LOD/точное occlusion и legacy grid stride не исправлялись подгонкой renderer. Нужен generation-coherent native ID/depth от Ильи.
+
+### C — исправленная серия20 подтверждений
+
+После точного Undo подтверждённой вставки: **10 move,5 Undo,5 Redo**. Каждый шаг обязан завершить pending operation, увеличить показанное generation; move — один шаг истории и изменённый document hash, Undo/Redo — точный hash предыдущего/изменённого MOB. Все20 условий выполнены, fallback/падений нет.
+
+|Правок|Private MiB|VRAM MiB|Handles|Потоки|GDI|USER|
+|---:|---:|---:|---:|---:|---:|---:|
+|0|13100.9|9029.5|967|40|86|161|
+|5|13161.1|9029.5|961|38|86|159|
+|10|13131.4|9029.5|961|35|86|159|
+|15|13159.6|9029.5|960|35|86|159|
+|20|13009.4|8164.3|960|35|86|159|
+
+Прирост0→20: **−91,4MiB private,−865,2MiB VRAM; handles−7, threads−5, GDI0, USER−2**. Это наблюдение этой серии, не доказательство отсутствия долгосрочной утечки и не доказательство её исправления. После закрытия карт private5600.0MiB/VRAM1480.9MiB; все `.mpr/.mob` handles собственного процесса (включая исходных соседей) закрыты. Предыдущие+410,8/+78,6MiB относятся к отозванной Enter-based серии и не являются итогом C.
+
+### D, GL, сборка и границы
+
+D повторён после корректно завершённой вставки: новая клавиатурная правка при reload (обе позиции+2 сохранены), два Undo подряд, Save копии во время update и strict reopen, GL→Rebuild во время update, OFF/ON, открытие zone7 без предварительного selectGL, Save/close при update. Документы и последние native generations относятся к последним правкам, map handles закрыты. Старые кадры не приняты после новых запросов. Viewport во время подготовки новой карты может пользоваться прежним GL loading path; выбранное Rebuild сохраняется. Это не скрытая смена пользовательского renderer setting и не доказательство видимой плавности перехода.
+
+Первоначальные defects144 partial и1 stale frame, первый magenta OFF исправлены host admission/material ready cycle/visibility-before-publication, без renderer/shader patches. Поздний Empty Enter теперь безопасно отклоняется в новом виде, сохранён preview и понятное сообщение. **При выбранном GL функциональные изменения — ничего; удалённое — ничего.** Общий source predicate извлечён без изменения старого условия. Mouse/keyboard handlers CView, Undo/Save/MCP/autosave/форматы прежние. В R2.2 настоящий DLL crash/autosave сценарий заново не запускался: R1 доказательство остаётся историческим без соседей, не выдаётся за новый прогон.
+
+Единственный GL-контроль именно нового Release: `confirmed-gl-control-r2`, GL11 ON/no defer, DPR1, native DLL lazy, собственный GL readback,0 visible HWND/closed handles, exit0. [Итоговый GL кадр](../../work/rebuild64-tools-286-r2-20261107/pairs/r2-2/final-gl-neighbours.png). Ранние AV R2.1 до DLL при explicit CView terrain setup остаются **необъяснённым историческим риском**: причина не установлена, не объявлена исправленной; три затронутые canonical функции совпадают с04548278. В новых окончательных прогонах он не повторился. Видимый запуск/приёмка — владельцу; общее обещание «AV устранён» не сделано.
+
+Release из git archive, owner changes исключены. Wrapper exit1 (известный x86 path normalization) не PASS; штатные direct x86 bridge/runtime host через8.3 exit0/0. Runtime lib e21003c22efd3999c598a9bb7e99743fc95ca1dbc19320179185f0af6ee4c2d9, shader table38fb2f9c8931f79080ca036d75f89388170852531627c31415b3ed3d99872f64 неизменны, NVIDIA SDK/foreign checkouts не менялись. Финальный staging того же номера: `build-staging-286-rebuild64-tools-r2-20261107`; перед выдачей он создаётся заново из нового Release с проверкой только собственных managed файлов. Состав против285:1364→1364,0 потерь, добавленное — ничего; [package receipt](../../work/rebuild64-tools-286-r2-20261107/package-receipt.json). Полный SHA в [postcommit receipt](../../work/rebuild64-tools-286-r2-20261107/postcommit-receipt.json).
+
+Причина QM285 и исправление упаковки прежние: повторный snapshot после lrelease восстановил tracked3292-message QM, stage_release предпочёл source; в286 отдельный lrelease archived TS явно пакует3341,49 переводов возвращены. Owner QM не коммитится. CR-only2c2e813e — отдельный коммит; working view.cpp exact f6630ce5192d4db647481a90e521fad63fe25b298c78bd86fda8c2e702677de4, indexLF/workingCRLF/owner13 additions. DPR1.5 через принудительный Qt env возможен, но прежние14/17 и12/17 не штатный открытый критерий; uiScalePercent и default OpenGL не менялись.
+
+**Открыто:** быстрый incremental object update и согласованный ID/depth — вопросы Илье; подтверждение пока3–4с с полной загрузкой соседей. Кисти/sector updates и units/stst8 отдельно/требуют GL. Исторический CView setup AV не локализован до причины; visible/game acceptance и ощущение работы только владельцу. STOP BEFORE INSTALLATION, no push. Полная очистка частных case/map copies после технического PASS и сохранённые доказательства — [cleanup receipt](../../work/rebuild64-tools-286-r2-20261107/cleanup-receipt-final.json) / [cleanup plan](../../work/rebuild64-tools-286-r2-20261107/cleanup-plan.json).

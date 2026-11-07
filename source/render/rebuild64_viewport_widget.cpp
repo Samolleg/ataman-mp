@@ -519,6 +519,16 @@ bool CRebuild64Viewport::eventFilter(QObject* object,QEvent* event) {
 }
 void CRebuild64Viewport::editorInput(QEvent* event) {
     if(event->type()==QEvent::FocusOut){m_gl->m_pOp->keyManager()->keys().clear();return;}
+    if(event->type()==QEvent::KeyPress && m_gl->m_pendingOperationOwnsPaste) {
+        const auto* key=static_cast<QKeyEvent*>(event);
+        if((key->key()==Qt::Key_Return||key->key()==Qt::Key_Enter)
+           && !m_gl->m_pOp->canConfirmWithEnter()) {
+            // Keep the canonical placement operation alive. Empty Enter in
+            // the legacy move state exits it without committing this paste.
+            emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: пустой Enter не подтверждает вставку. Подтвердите её щелчком мыши; предпросмотр и правки сохранены."));
+            event->accept();return;
+        }
+    }
     if((event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)
        && m_gl->m_landscapeTools && m_gl->m_landscapeTools->editingEnabled()) {
         const auto* key=static_cast<QKeyEvent*>(event);

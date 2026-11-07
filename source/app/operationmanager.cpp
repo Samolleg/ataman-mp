@@ -283,6 +283,18 @@ CMoveAxis::CMoveAxis(CView *pView, EOperateAxis ax)
     CButtonConnector::getInstance()->pressButton(EButtonOpMove);
 }
 
+bool COperation::canConfirmWithEnter() const
+{
+    const auto* move = dynamic_cast<const CMoveAxis*>(current);
+    return !move || move->canConfirmWithEnter();
+}
+
+bool CMoveAxis::canConfirmWithEnter() const
+{
+    return !value.isEmpty() || m_pView->isDatabasePlacementPending()
+            || m_pView->isLogicPlacementPending();
+}
+
 void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
 {
     if(key==eKey_Tab && !pOp->keyManager()->isPressed(eKey_Ctrl)) {m_pView->cycleModelConnectionTarget();return;}
@@ -377,7 +389,7 @@ void CMoveAxis::keyPress(COperation *pOp, EKeyCode key)
     }
     case eKey_Enter:
     {
-        if(!value.isEmpty() || m_pView->isDatabasePlacementPending() || m_pView->isLogicPlacementPending())
+        if(canConfirmWithEnter())
             m_pView->operationApply(EOperationAxisType::eMove);
         pOp->setCurrent(new CSelect(m_pView));
         delete this;
