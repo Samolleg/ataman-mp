@@ -1,3 +1,5 @@
+- 2026-11-08 INSTALLATION / PARTIAL: по явному поручению владельца295 установлена в artifacts/EI-Mapper-Ataman-2-first-test каноническим packaging/install_program.ps1; все1370 SHA совпали со staging, EIMapperMcp --version295. Откат293→295 проверен. Причина прежнего exit5 открыта, замечания отчёта сохраняются; видимая приёмка за владельцем. Push не выполнялся.
+
 ## EI-REBUILD64-GRAPHICS-295 — собственная графика поверх294 (2026-11-08)
 
 - STAGED / FUNCTIONAL PASS / HISTORICAL EXIT5 OPEN. База main7070af008c6d44313a19a99c168dd164465e176d/294; общий ABI17 EXE/DLL. Полный запрос: собственные197 полей/defaults/INI, причина exit5 и Qt-пауз, cold zone1→zone3obr60с/Apply/defaults/warm, staging без потерь/свежий QM, scoped-коммит. Разрешены только скрытые собственные процессы и копии; установка/push только владельцем.

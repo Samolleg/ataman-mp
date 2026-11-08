@@ -133,3 +133,35 @@ comparison.json, identity-receipt.json, evidence/case-accept-*/.
 Удаление завершено: 2526 тестовых файлов, remaining0; все295 frozen SHA256 совпали, finalDifferences[]. Копии ресурсов, карт, настроек и приватные тестовые кеши удалены.
 
 Состав staging: 1369→1370 управляемых файлов, удалений0; добавлен только docs/validation/ATAMAN_REBUILD64_GRAPHICS_295_20261108.md. Канонический финализатор и внутренний distribution validator — PASS, журнал work/rebuild64-graphics-295-20261108/logs/finalize.log.
+
+## Установка по поручению владельца — 2026-11-08
+
+**INSTALLED / PARTIAL.** Новое поручение «ставь295» разрешило установку,
+отменяя прежнее ограничение установки выше. Причина прежнего exit5 остаётся
+неизвестной; замечания отчёта сохраняются, видимая приёмка за владельцем.
+
+main HEAD перед установкой: c832da8f8fe74a38ad2e7c2e1e3eb0e478f904f5,
+точно принятый коммит; packaging/* не изменён. Использован репозиторный
+packaging/install_program.ps1 и неизменённый финализированный staging
+build-staging-295-rebuild64-graphics-20261108. Пересборки/финализации не было.
+Ожидаемые EXE/DLL SHA256 из начала отчёта совпали.
+
+Постоянная установка artifacts/EI-Mapper-Ataman-2-first-test обновлена с293(R2):
+1370 managed, changed10/added2/removed0. Все1370 установленных SHA256 совпали
+с manifest staging, включая ataman_rebuild64.dll,
+runtime/EIMapperEnduranceJmvBridge.plg, runtime/EIMapperEnduranceRuntimeHost.exe,
+translations/ei_mapper_ru.qm. EIMapperMcp.exe --version: EIMapperMcp 295, exit0.
+Пользовательских файлов вне manifest проверено 15259, SHA256 до/после
+идентичны, различий0. Настройки вида/соседей и rebuild64-graphics.ini (если есть)
+не изменены; финализатор на установке не запускался.
+
+Откат artifacts/rollback293-to295-rebuild64-graphics-20261108:
+rollback.ps1 -VerifyOnly → ROLLBACK_VERIFIED. Прежние откаты сохранены.
+Мосты PID17412,74000,53412,26408,56068,71636 до/после живы; процессы не завершались.
+Занят и отодвинут только EIMapperMcp.exe:
+EIMapperMcp.exe.old-ataman-0e7369187a0748bf8a6acfc80a090270.
+Штатная очистка .ataman-retired.json: removed1/retained4; неизвестные .old-* сохранены.
+Маппер/host из установки и игра перед заменой не обнаружены; после установки
+маппер/host отсутствовали. Маппер/игра не запускались, DLL не загружалась.
+Computer-use/видимых окон не было. Регистрация мостов, чужие work/*, код,
+VERSION и staging не изменялись. Subst в конце пуст. Push не выполнялся.
