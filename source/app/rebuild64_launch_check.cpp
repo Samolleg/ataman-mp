@@ -7,6 +7,7 @@
 #include "item_spell_constructor_dialog.h"
 #include "model_gallery.h"
 #include "native_output.h"
+#include "native_editor_service.h"
 #include "topdown_export.h"
 #include "preview.h"
 #include "scene.h"
@@ -572,6 +573,7 @@ public:
   run();
  }
     #include "rebuild64_service_check.inc"
+    #include "rebuild64_behaviour293_check.inc"
     void run()
     {
         int exitCode=0;
@@ -590,7 +592,8 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="acceptClose292")close292Scenario();
+            if(mode=="acceptBehaviour293")behaviour293Scenario();
+            else if(mode=="acceptClose292")close292Scenario();
             else if(mode=="acceptAtlas292")atlas292Scenario();
             else if(mode=="acceptReload293")reloadScenario293();
             else if(mode=="acceptUnits291"){for(const auto& zone:{QString("zone1"),QString("zone3obr")})unitsScenario289(zone);}
@@ -891,11 +894,11 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-close-292-20261108/")&&!normalized.contains("/work/rebuild64-atlas-292-20261108/")&&!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-reload-293-20261108/")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-behaviour-293-20261108/")&&!normalized.contains("/work/rebuild64-close-292-20261108/")&&!normalized.contains("/work/rebuild64-atlas-292-20261108/")&&!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-reload-293-20261108/")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;
-    if(configuration["mode"].toString()=="acceptReload293"||configuration["mode"].toString()=="acceptClose292") {
+    if(configuration["mode"].toString()=="acceptBehaviour293"||configuration["mode"].toString()=="acceptReload293"||configuration["mode"].toString()=="acceptClose292") {
         QFile frozen(configuration["ownerSettings"].toString());if(!frozen.open(QIODevice::ReadOnly))return 97;
         QSettings seed(QDir(caseRoot).filePath("settings/EI Mapper Endurance/EI Mapper Endurance Edition.ini"),QSettings::IniFormat);
         for(const auto& value:QJsonDocument::fromJson(frozen.readAll()).array()) {

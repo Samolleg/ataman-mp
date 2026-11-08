@@ -213,6 +213,22 @@ struct CRebuild64Viewport::Worker {
     void failure(const QString& detail) {
         QMetaObject::invokeMethod(owner,[target=owner,detail]{if(!target->m_stopping)target->fallback(detail);},Qt::QueuedConnection);
     }
+    QImage frameService293;
+    static uint32_t EIR_CALL rasterService293(void* context,uint64_t generation,const EirCamera* camera,uint32_t width,uint32_t height,const float* pixels,EirService* result) {
+        auto& worker=*static_cast<Worker*>(context);
+        std::shared_ptr<const CNativeEditorService> snapshot;quint64 serial=0;
+        {std::lock_guard<std::mutex> lock(worker.mutex);snapshot=worker.input.serviceScene;serial=worker.input.serviceSerial;}
+        if(!snapshot||snapshot->generation!=generation)return 0;
+        // Snapshot copies are implicitly shared values; only the projection is
+        // frame-specific. Labels and geometry use exactly the world frame lens.
+        auto frame=*snapshot;
+        for(int r=0;r<4;++r)for(int c=0;c<4;++c)frame.clip(r,c)=r==2?2*camera->world_to_clip[8+c]-camera->world_to_clip[12+c]:camera->world_to_clip[r*4+c];
+        QVector<float> depth(int(width*height));std::copy_n(pixels,depth.size(),depth.data());
+        QElapsedTimer timer;timer.start();worker.frameService293=frame.raster(QSize(width,height),depth);
+        const auto& image=worker.frameService293;
+        *result={sizeof(EirService),width,height,uint32_t(image.bytesPerLine()),serial,generation,timer.nsecsElapsed()/1e6,{image.constBits(),uint64_t(image.sizeInBytes())},nullptr,0};
+        result->image_update=1;std::copy_n(camera->world_to_clip,16,result->world_to_clip);return 1;
+    }
     static uint32_t EIR_CALL liveValues(void* context,uint64_t generation,uint32_t neighbours,EirCamera* camera,EirService* service) {
         auto& worker=*static_cast<Worker*>(context);std::lock_guard<std::mutex> lock(worker.mutex);
         if(worker.stop||worker.paused||worker.input.generation!=generation||worker.input.documentDirty||worker.input.camera.neighbours_visible!=neighbours)return 0;
@@ -359,7 +375,7 @@ struct CRebuild64Viewport::Worker {
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
                 const auto layout=next.neighbourLayout.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues,EIR_PREVIEW_STATIC_FOOTPRINTS};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues,EIR_PREVIEW_STATIC_FOOTPRINTS,&Worker::rasterService293};
                 phase(QString::fromUtf8("Создание D3D11 и подготовка шейдеров"));
                 opening::Scope deviceTiming("native.create");
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
@@ -492,20 +508,6 @@ struct CRebuild64Viewport::Worker {
             if(!rc) {
                 readyGeneration=generation;
                 prepared=true;
-                // Native depth and all service preparation are owned by this
-                // worker. No QGLWidget, QObject or editor document is touched.
-                if(next.serviceScene && next.serviceScene->generation==next.generation && next.generation==stats.ready_generation){
-                    float serviceClip[16];for(int r=0;r<4;++r)for(int c=0;c<4;++c)serviceClip[r*4+c]=r==2?.5f*(next.serviceScene->clip(2,c)+next.serviceScene->clip(3,c)):next.serviceScene->clip(r,c);
-                    const bool matchingCamera=!std::memcmp(serviceClip,next.camera.world_to_clip,sizeof(serviceClip));
-                    QVector<float> depth(next.size.width()*next.size.height());
-                    EirDepth read{sizeof(EirDepth),uint32_t(next.size.width()),uint32_t(next.size.height()),next.generation,depth.data(),uint64_t(depth.size())};
-                    if(matchingCamera&&!api.depth(handle,&read,&error)){
-                        QElapsedTimer serviceTimer;serviceTimer.start();auto image=next.serviceScene->raster(next.size,depth);
-                        EirService service{sizeof(EirService),uint32_t(image.width()),uint32_t(image.height()),uint32_t(image.bytesPerLine()),next.serviceSerial,next.generation,serviceTimer.nsecsElapsed()/1e6,{image.constBits(),uint64_t(image.sizeInBytes())},nullptr,0};
-                        service.image_update=1;std::copy_n(next.camera.world_to_clip,16,service.world_to_clip);
-                        if(api.service(handle,&service,&error)){failure(QString::fromUtf8(error.message));break;}
-                    }
-                }
                 if(next.query){auto request=next.query;
                     request->pixels.resize(request->size.width()*request->size.height());
                     EirQuery query{sizeof(EirQuery),uint32_t(request->size.width()),uint32_t(request->size.height()),request->generation,request->camera,request->pixels.data(),uint64_t(request->pixels.size())};
@@ -585,6 +587,15 @@ CRebuild64Viewport::CRebuild64Viewport(CView* gl,QMenu* menu,QWidget* parent)
     connect(gl,&CView::nativeNeighborTerrainChanged,this,&CRebuild64Viewport::queueNeighborTerrain);
     connect(gl,&CView::nativeSceneReloadRequested,this,&CRebuild64Viewport::reloadScene);
     connect(gl,&CView::nativeTerrainPosesChanged,this,[this]{m_gl->setProperty("nativeTerrainPoses293",true);});
+    const auto dirtyService=[this]{m_serviceDirty293=true;};
+    connect(gl,&CView::selectionChanged,this,dirtyService);
+    connect(gl,&CView::mobStateChanged,this,dirtyService);
+    connect(gl,&CView::loadedMapStateChanged,this,dirtyService);
+    connect(gl,&CView::nativeTerrainChanged,this,dirtyService);
+    connect(gl,&CView::nativeNeighborTerrainChanged,this,dirtyService);
+    connect(gl,&CView::diplomacyMapModeChanged,this,dirtyService);
+    connect(gl->m_pSettings,&CSettings::renderSettingsChanged,this,dirtyService);
+    connect(CScene::getInstance(),&CScene::modeChanged,this,dirtyService);
     auto* viewMenu=menu->addMenu(QString::fromUtf8("Вид карты"));
     auto* group=new QActionGroup(this);group->setExclusive(true);
     m_glAction=viewMenu->addAction("OpenGL");m_rebuildAction=viewMenu->addAction(QString::fromUtf8("Rebuild64"));
@@ -1348,6 +1359,7 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
         m_lastMouse=static_cast<QMouseEvent*>(event)->pos();m_gl->setProperty("nativePointer",m_lastMouse);
     }
     if(event->type()==QEvent::FocusOut){
+        m_serviceOrbit293=false;
         m_gl->m_pOp->keyManager()->keys().clear();
         if((m_earlyDocument||!editorQueryReady())&&!m_waitingInput.isEmpty())queueEditorInput(std::make_shared<QFocusEvent>(*static_cast<QFocusEvent*>(event)));
         return;
@@ -1365,11 +1377,14 @@ void CRebuild64Viewport::editorInput(QEvent* event) {
         navigation=mouse->button()==Qt::MiddleButton||(mouse->buttons()&Qt::MiddleButton);
     }
     if(navigation&&!m_replayInput&&m_selected) {
+        if(event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease||event->type()==QEvent::MouseMove)
+            m_serviceOrbit293=bool(static_cast<QMouseEvent*>(event)->buttons()&Qt::MiddleButton);
         // CPU-only extent/lens update: no GL initialization during preparation.
         m_gl->m_width=qMax(1,width());m_gl->m_height=qMax(1,height());
         m_gl->m_normalProjection(0,0)=m_gl->m_normalProjection(1,1)*float(m_gl->m_height)/m_gl->m_width;m_gl->updateCameraProjection();
         QApplication::sendEvent(m_gl,event);tick();return;
     }
+    m_serviceDirty293=true; // Non-navigation editor input may change helpers/brushes.
     if(m_earlyDocument || !editorQueryReady()) {
         if(event->type()==QEvent::MouseMove && static_cast<QMouseEvent*>(event)->buttons()==Qt::NoButton && m_waitingInput.isEmpty())return;
         if(event->type()==QEvent::KeyPress||event->type()==QEvent::KeyRelease)
@@ -1474,8 +1489,19 @@ void CRebuild64Viewport::serviceInput() {
     if(m_stack->currentWidget()==m_native)m_gl->m_cam->update();
     const QSize size(qMax(1,qRound(m_native->width()*devicePixelRatioF())),qMax(1,qRound(m_native->height()*devicePixelRatioF())));
     movePanels(true);
-    auto scene=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());
-    scene->generation=m_generation;
+    const auto clip=m_gl->m_projection*m_gl->m_cam->viewMatrix();
+    QByteArray options;QDataStream optionStream(&options,QIODevice::WriteOnly);
+    for(const char* key:{"drawLogic","drawHelp"}){const auto* o=dynamic_cast<const COptBool*>(m_gl->m_pSettings->opt(key));optionStream<<bool(o&&o->value());}
+    optionStream<<m_generation<<quint64(quintptr(m_gl->m_activeMob))<<int(CScene::getInstance()->getMode())<<m_gl->m_objectHelpersVisible<<size;
+    std::shared_ptr<const CNativeEditorService> scene;
+    // Camera-only publication reuses world geometry; all editor mutations,
+    // visibility changes and generation/extent changes invalidate this reuse.
+    if(!m_serviceDirty293&&options==m_serviceOptions293&&(m_serviceOrbit293||m_gl->m_cam->movementInputActive()||clip!=m_serviceCamera293)){
+        std::lock_guard<std::mutex> lock(m_worker->mutex);scene=m_worker->input.serviceScene;
+    }
+    const bool rebuilt=!scene;
+    if(rebuilt){auto snapshot=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());snapshot->generation=m_generation;scene=std::move(snapshot);}
+    m_serviceDirty293=false;m_serviceCamera293=clip;m_serviceOptions293=options;
     const auto poseStart=opening::clock();
     auto poses=editorPoses(m_gl);
     for(auto& pose:poses) {
@@ -1489,7 +1515,7 @@ void CRebuild64Viewport::serviceInput() {
     opening::span("gui.service.poses",poseStart);
     std::lock_guard<std::mutex> lock(m_worker->mutex);
     m_worker->input.camera=cameraSnapshot();m_worker->input.size=size;
-    m_worker->input.editorGeometryReady=editorQueryReady();m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.serviceScene=std::move(scene);m_worker->input.operationPreview=m_gl->hasPendingOperation();m_worker->input.poses=std::move(poses);++m_worker->input.serviceSerial;
+    m_worker->input.editorGeometryReady=editorQueryReady();m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.serviceScene=std::move(scene);m_worker->input.operationPreview=m_gl->hasPendingOperation();m_worker->input.poses=std::move(poses);if(rebuilt)++m_worker->input.serviceSerial;
 }
 
 void CRebuild64Viewport::syncEditorViewport() {

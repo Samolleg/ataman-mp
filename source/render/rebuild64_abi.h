@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 15u
+#define EIR_ABI 16u
 #define EIR_PREVIEW_STATIC_FOOTPRINTS 1u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
@@ -35,6 +35,9 @@ typedef struct EirCreate {
     // ABI12: authoritative static editor world has no simulated footprint markers.
     // Zero retains the ABI11 input contract; this is input validity, not a view option.
     uint32_t preview_flags;
+    // ABI16: render immutable world service with this frame's camera/depth,
+    // synchronously on the native worker, before composition and Present.
+    uint32_t (EIR_CALL *raster_service)(void*,uint64_t,const struct EirCamera*,uint32_t,uint32_t,const float*,struct EirService*);
 } EirCreate;
 typedef struct EirObjectPose {
     uint32_t mob,nid,visible,changed,selected;

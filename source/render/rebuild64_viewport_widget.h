@@ -109,6 +109,10 @@ private:
     void replayEditorInput();
     QImage m_serviceImage;
     double m_serviceMilliseconds{0};
+    bool m_serviceDirty293{true};
+    bool m_serviceOrbit293{false};
+    QMatrix4x4 m_serviceCamera293;
+    QByteArray m_serviceOptions293;
     void movePanels(bool native);
     EirCamera cameraSnapshot();
     CView* m_gl;

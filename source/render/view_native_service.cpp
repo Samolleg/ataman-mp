@@ -25,7 +25,9 @@ CNativeEditorService CView::nativeServiceSnapshot() {
     const auto add=[&](const QVector<QVector3D>& v,const QVector4D& c,S::Primitive p=S::Lines,float width=1,bool depth=true){s.add(v,c,p,width,depth);};
     if(m_selectFrame){const auto& points=m_selectFrame->points();if(points.size()==4){const auto a=points[0],b=points[2];s.selectionRect=QRect(QPoint(qRound((a.x()+1)*width()/2),qRound((1-a.y())*height()/2)),QPoint(qRound((b.x()+1)*width()/2),qRound((1-b.y())*height()/2))).normalized();}}
     const auto flag=[&](const char* key){const auto* o=dynamic_cast<const COptBool*>(m_pSettings->opt(key));return o&&o->value();};
-    const bool helpers=flag("drawHelp")||flag("drawLogic")||CScene::getInstance()->getMode()==eEditModeLogic;
+    const bool drawLogic=flag("drawLogic"),drawHelp=flag("drawHelp");
+    const bool logicMode=CScene::getInstance()->getMode()==eEditModeLogic;
+    QSet<CNode*> visibleLogicNodes;
     for(auto* mob:m_aMob)if(isMobVisible(mob))for(auto* node:mob->nodes()){
         if(!node||node->isMarkDeleted()||node->nodeState()==eHidden||!isObjectVisualVisible(node))continue;
         const bool selected=node->nodeState()==eSelect;const auto center=node->drawPosition();
@@ -34,17 +36,38 @@ CNativeEditorService CView::nativeServiceSnapshot() {
         if(m_diplomacyMapMode)if(auto* unit=dynamic_cast<CUnit*>(node)){const auto c=diplomacyNpcColor(unit);add({center},{float(c.redF()),float(c.greenF()),float(c.blueF()),1},S::Ring,3,false);}
         if(m_objectHelpersVisible&&(node->nodeType()==eLight||node->nodeType()==eSound||node->nodeType()==eParticle||node->nodeType()==eMagicTrap)){
             add({center},{1,.8f,.2f,1},S::Ring,1);add({center-QVector3D(0,0,.7f),center+QVector3D(0,0,.7f)},{1,.8f,.2f,1});}
-        if((selected||helpers)&&m_objectHelpersVisible)if(auto* unit=dynamic_cast<CUnit*>(node))if(auto* logic=unit->logicAt(unit->editorLogicIndex())){
-            const bool enabled=unit->editorLogicIndex()==0||logic->isUse();const bool authoring=CScene::getInstance()->getMode()==eEditModeLogic&&mob==m_activeMob;
-            if(enabled||authoring){const auto lineColor=!enabled?QVector4D(.46f,.46f,.46f,.82f):logic->behaviorType()==EBehaviourType::eRadius?QVector4D(.9f,.4f,.1f,1):QVector4D(.8f,.8f,.2f,1);
-                add(logic->editorPreviewPath(),lineColor,S::Strip,2,false);
-                if(enabled&&authoring&&(selected||flag("drawHelp")))add(logic->editorPreviewHelp(),{.8f,0,1,1},S::Strip,2,false);
-                for(auto* point:logic->patrolPoints()){add({point->drawPosition()},lineColor,S::Ring,1,false);for(auto* look:point->lookPoint()){add({point->drawPosition(),look->drawPosition()},lineColor,S::Lines,1,false);add({look->drawPosition()},{1,.8f,.2f,1},S::Points,5,false);}}
+        if(m_objectHelpersVisible)if(auto* unit=dynamic_cast<CUnit*>(node))if(auto* logic=unit->logicAt(unit->editorLogicIndex())){
+            const bool enabled=unit->editorLogicIndex()==0||logic->isUse();
+            const bool active=mob==m_activeMob,authoring=logicMode&&active;
+            // CLogic::draw: drawHelp does not admit the path. In logic mode,
+            // drawLogic=false admits only the active MOB, even if selected.
+            const bool pathVisible=(enabled||authoring)&&(drawLogic||(logicMode?active:selected));
+            if(enabled||authoring){
+                const auto lineColor=!enabled?QVector4D(.46f,.46f,.46f,.82f):logic->behaviorType()==EBehaviourType::eRadius?QVector4D(.9f,.4f,.1f,1):QVector4D(.8f,.8f,.2f,1);
+                if(pathVisible)add(logic->editorPreviewPath(),lineColor,S::Strip,2,false);
+                if(enabled&&active&&logicMode&&(selected||drawHelp))add(logic->editorPreviewHelp(),{.8f,0,1,1},S::Strip,2,false);
+                if(pathVisible)visibleLogicNodes.insert(unit);
+                if(pathVisible&&logic->behaviorType()==EBehaviourType::ePath)for(auto* point:logic->patrolPoints()){
+                    if(point->isMarkDeleted()||point->nodeState()==eHidden)continue;
+                    add({point->drawPosition()},lineColor,S::Ring,1,false);
+                    visibleLogicNodes.insert(point);
+                    for(auto* look:point->lookPoint())if(!look->isMarkDeleted()&&look->nodeState()!=eHidden){
+                        add({point->drawPosition(),look->drawPosition()},lineColor,S::Lines,1,false);
+                        add({look->drawPosition()},{1,.8f,.2f,1},S::Points,5,false);
+                        visibleLogicNodes.insert(look);
+                    }
+                }
             }
         }
     }
-    if(m_objectHelpersVisible)for(auto* mob:m_aMob)if(isMobVisible(mob))for(auto* node:mob->nodes())if(auto* trap=dynamic_cast<CMagicTrap*>(node))if(!trap->isMarkDeleted()&&trap->nodeState()!=eHidden&&(helpers||trap->nodeState()==eSelect)){
-        QVector<QVector3D> links;for(auto* zone:trap->actZones()){add(zone->editorPreviewArea(),{.2f,1,.2f,1},S::Strip,2,false);links<<trap->drawPosition()<<zone->drawPosition();}for(auto* cast:trap->castPoints())links<<trap->drawPosition()<<cast->drawPosition();add(links,{.2f,1,.2f,1},S::Lines,2,false);}
+    // CMagicTrap::drawLogicVisual admits both active and inactive MOBs.
+    if(m_objectHelpersVisible)for(auto* mob:m_aMob)if(isMobVisible(mob))for(auto* node:mob->nodes())if(auto* trap=dynamic_cast<CMagicTrap*>(node))if(!trap->isMarkDeleted()&&trap->nodeState()!=eHidden&&isObjectVisualVisible(trap)&&(drawLogic||logicMode||trap->nodeState()==eSelect)){
+        visibleLogicNodes.insert(trap);
+        QVector<QVector3D> links;
+        for(auto* zone:trap->actZones())if(!zone->isMarkDeleted()&&zone->nodeState()!=eHidden){add(zone->editorPreviewArea(),{.2f,1,.2f,1},S::Strip,2,false);links<<trap->drawPosition()<<zone->drawPosition();visibleLogicNodes.insert(zone);}
+        for(auto* cast:trap->castPoints())if(!cast->isMarkDeleted()&&cast->nodeState()!=eHidden){links<<trap->drawPosition()<<cast->drawPosition();visibleLogicNodes.insert(cast);}
+        add(links,{.2f,1,.2f,1},S::Lines,2,false);
+    }
     if(hasPendingOperation()){
         QVector3D center;int count=0;for(auto* node:selectionSnapshot()){center+=node->drawPosition();++count;}if(count){center/=count;
             add({center,center+QVector3D(4,0,0)},{1,.15f,.1f,1},S::Lines,2,false);
@@ -83,7 +106,7 @@ CNativeEditorService CView::nativeServiceSnapshot() {
     if(m_worldPlacementActive&&m_worldPlacementValid){const auto p=m_worldPlacementOrigin-m_activeMapWorldOrigin;const float z=m_worldPlacementZ+.15f;QVector<QVector3D> corners{{float(p.x()),float(p.y()),z},{float(p.x()+m_worldPlacementSize.width()),float(p.y()),z},{float(p.x()+m_worldPlacementSize.width()),float(p.y()+m_worldPlacementSize.height()),z},{float(p.x()),float(p.y()+m_worldPlacementSize.height()),z}};
         add(corners,m_worldPlacementOverlaps?QVector4D(1,.5f,.1f,.25f):QVector4D(.1f,.9f,1,.25f),S::Fan,1,false);add(corners,{.1f,.9f,1,1},S::Loop,1,false);}
     if(m_neighborLayoutDragActive||m_worldPlacementActive){QVector<QVector3D> lines;const float z=(m_worldPlacementActive?m_worldPlacementZ:m_neighborLayoutDragPlaneZ)+.2f;for(const auto& seam:m_worldMapSnapPreview.seams)for(const auto& p:{seam.p1(),seam.p2()}){const auto q=p-m_activeMapWorldOrigin;lines<<QVector3D(q.x(),q.y(),z);}add(lines,{.2f,1,.35f,1},S::Lines,3,false);}
-    if(m_objectHelpersVisible)for(auto* mob:m_aMob)if(isMobVisible(mob))for(auto* node:mob->logicNodes())if(node&&!node->isMarkDeleted()&&node->nodeState()!=eHidden&&(helpers||node->nodeState()==eSelect))add({node->drawPosition()},{.3f,.95f,.9f,1},S::Ring,2);
+    if(m_objectHelpersVisible)for(auto* mob:m_aMob)if(isMobVisible(mob))for(auto* node:mob->logicNodes())if(node&&!node->isMarkDeleted()&&node->nodeState()!=eHidden&&visibleLogicNodes.contains(node))add({node->drawPosition()},{.3f,.95f,.9f,1},S::Ring,2);
     if(m_aiGraphPreviewVisible&&m_aiGraphDocument.isValid()&&!(m_navmeshPanel&&m_navmeshPanel->layerVisible())){
         s.graph=m_aiGraphDocument;s.graphLayer=m_aiGraphLayerSlider?m_aiGraphLayerSlider->value():3;
         s.graphHeights=m_aiGraphPreviewUsesLoadedSource?m_aiGraphLoadedSurfaceHeights:m_aiGraphRegeneratedResult.navigationSurfaceHeights;

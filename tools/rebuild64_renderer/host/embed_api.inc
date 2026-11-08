@@ -19,7 +19,7 @@ int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) no
   const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
   const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
-  auto& session=*static_cast<Session*>(*result);session.canPresent=in->can_present;session.liveValues=in->live_values;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
+  auto& session=*static_cast<Session*>(*result);session.rasterService293=in->raster_service;session.canPresent=in->can_present;session.liveValues=in->live_values;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
   session.editorEmptyFootprints=in->abi>=12u&&(in->preview_flags&EIR_PREVIEW_STATIC_FOOTPRINTS);
   return 0;
  }),e);
@@ -245,7 +245,7 @@ int32_t EIR_CALL host_service(void* handle,const EirService* in,EirError* out) n
   }
   if(!s.poseAuditDone&&compared){std::fprintf(stderr,"POSE_AUDIT map=%s compared=%zu differing=%zu max_position_m=%.9f max_shape=%.9f max_quaternion=%.9f (unedited native poses retained)\n",s.map?s.map->terrain_resource.c_str():"",compared,differing,maxPosition,maxShape,maxRotation);s.poseAuditDone=true;}
   auto& service=s.service;
-  if(in->image_update&&(service.serial!=in->serial||service.generation!=in->generation)) {std::copy_n(in->world_to_clip,16,service.clip);service.cpuMs=in->cpu_ms;service.serial=in->serial;service.generation=in->generation;service.width=in->width;service.height=in->height;service.stride=in->stride;
+  if(in->image_update) {std::copy_n(in->world_to_clip,16,service.clip);service.cpuMs=in->cpu_ms;service.serial=in->serial;service.generation=in->generation;service.width=in->width;service.height=in->height;service.stride=in->stride;
    const auto* begin=static_cast<const uint8_t*>(in->rgba.data);if(in->rgba.bytes)service.pixels.assign(begin,begin+in->rgba.bytes);else service.pixels.clear();}
   return 0;
  }),e);

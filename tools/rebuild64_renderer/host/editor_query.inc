@@ -18,6 +18,17 @@ static uint32_t editor_sample(const EditorDepthReadback& depth,UINT x,UINT y,UIN
  const auto py=(std::min)(depth.height-1,UINT((uint64_t(2*y+1)*depth.height)/(2*height)));
  return depth.words[size_t(py)*depth.width+px];
 }
+// Called only after this frame's native color/depth are complete, before Present.
+HRESULT prepare_service293(Session& s,UINT width,UINT height) {
+ if(!s.rasterService293)return S_OK;
+ EditorDepthReadback depth;auto hr=read_editor_depth(s,depth);if(FAILED(hr))return hr;
+ std::vector<float> pixels(size_t(width)*height);
+ for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x)pixels[size_t(y)*width+x]=float(editor_sample(depth,x,y,width,height)&0xffffffu)/16777215.f;
+ EirService service{};
+ if(!s.rasterService293(s.presentContext,s.generation,&s.frameCamera,width,height,pixels.data(),&service))return S_OK;
+ // Reuse the existing validation/copy boundary; poses were applied before draw.
+ EirError error{};const auto rc=host_service(&s,&service,&error);return rc?HRESULT(rc):S_OK;
+}
 int32_t EIR_CALL host_depth(void* handle,EirDepth* out,EirError* error) noexcept {
  probe1b_error e{};
  return eir_error(error,guarded(&e,[&]{
