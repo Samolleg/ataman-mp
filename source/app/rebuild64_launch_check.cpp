@@ -209,7 +209,8 @@ public:
             }
             QSaveFile shown(caseRoot+"/qt-page-shown-"+QString::number(generation)+".json");if(shown.open(QIODevice::WriteOnly)){shown.write(QJsonDocument(QJsonObject{{"renderer","Rebuild64"},{"neighbours_accepted",int(s.neighbours_accepted)},{"exeSha256",exeSha},{"dllSha256",dllSha},{"qpc",QString::number(qpc())}}).toJson());shown.commit();}
             const auto actualMap=native->openingDocument()?native->m_earlyMap:CLandscape::getInstance()->filePath().absoluteFilePath();
-            const int expected=!configuration["seedNeighbors"].toBool(true)?0:QFileInfo(actualMap).completeBaseName()=="zone1"?5:QFileInfo(actualMap).completeBaseName()=="zone7"?4:0;
+            const auto zone=QFileInfo(actualMap).completeBaseName();
+            const int expected=!configuration["seedNeighbors"].toBool(true)?0:(zone=="zone1"||zone=="zone3obr")?5:zone=="zone7"?4:0;
             if(int(s.neighbours_accepted)!=expected||s.neighbours_pending)record("FAIL",{{"check","first displayed frame neighbour cohort"}});
             record("first_frame",{{"expectedNeighbours",expected},{"cohortValid",int(s.neighbours_accepted)==expected&&!s.neighbours_pending},{"generation",QString::number(generation)},{"renderer",native->rebuildSelected()?"Rebuild64":"OpenGL"},{"map",CLandscape::getInstance()->filePath().absoluteFilePath()},
                 {"neighbours_accepted",int(s.neighbours_accepted)},{"neighbours_pending",int(s.neighbours_pending)},

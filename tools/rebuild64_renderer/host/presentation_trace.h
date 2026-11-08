@@ -23,7 +23,7 @@ struct PresentationTrace {
  void phase(const char* name){if(!log)return;LARGE_INTEGER time{};QueryPerformanceCounter(&time);std::fprintf(log,"{\"event\":\"phase\",\"phase\":\"%s\",\"qpc\":%lld}\n",name,time.QuadPart);std::fflush(log);}
  bool presented(uint64_t generation,uint32_t neighbours,uint32_t requested,uint32_t pending,bool settled,const char* map,const float* clip,const float* eye,uint64_t edit){
   if(!log)return false;LARGE_INTEGER clock{};QueryPerformanceCounter(&clock);
-  const unsigned expected=!requested?0:_stricmp(map,"zone1.mpr")==0?5:_stricmp(map,"zone7.mpr")==0?4:0;
+  const unsigned expected=!requested?0:(_stricmp(map,"zone1.mpr")==0||_stricmp(map,"zone3obr.mpr")==0)?5:_stricmp(map,"zone7.mpr")==0?4:0;
   const bool valid=neighbours==expected&&!pending&&settled;
   if(lastGeneration!=generation)shownCaptured=false;
   const bool qtPageShown=GetFileAttributesW((root+L"/qt-page-shown-"+std::to_wstring(generation)+L".json").c_str())!=INVALID_FILE_ATTRIBUTES;

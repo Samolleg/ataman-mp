@@ -3528,6 +3528,15 @@ void MainWindow::updateEntranceOverlays()
 
 void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadCatalog)
 {
+    opening::Scope timing294("gui.294.map_test_context");
+    setProperty("mapTestContextDeferred294",false);
+    const bool nativeOpening294=m_workspaceLoadInProgress&&m_pView&&m_pView->property("rebuild64Selected").toBool();
+    const auto openingSerial294=m_pView?m_pView->property("openingSerial").toULongLong():0;
+    QPointer<MainWindow> alive294(this);
+    const auto pulse294=[this,alive294,nativeOpening294,openingSerial294]{
+        if(nativeOpening294)QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents,4);
+        return alive294&&!m_shutdownInProgress&&(!nativeOpening294||(m_pView&&m_pView->property("openingSerial").toULongLong()==openingSerial294));
+    };
     const int previousEntranceIndex = m_entranceCombo
         ? m_entranceCombo->currentData().toInt() : -1;
     const QString previousRouteKey = mapTravelRouteKey(m_validEntrances,
@@ -3622,10 +3631,13 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
     if(m_pView)
     {
         m_pView->setMapSkyType(m_mapTestEntry.skyType, m_mapTestEntry.allodId);
-        refreshEditorWorld();
+        {opening::Scope stage294("gui.294.context_world");refreshEditorWorld();}
     }
-    refreshTravelContext();
-    populateEntranceCombo();
+    if(!pulse294())return;
+    {opening::Scope stage294("gui.294.context_travel");refreshTravelContext();}
+    if(!pulse294())return;
+    {opening::Scope stage294("gui.294.context_entrances");populateEntranceCombo();}
+    if(!pulse294())return;
     if(preserveWorkspaceState && !previousRouteKey.isEmpty())
     {
         for(int index = 0; index < m_validEntrances.size(); ++index)
@@ -3637,7 +3649,9 @@ void MainWindow::refreshMapTestContext(bool preserveWorkspaceState, bool reloadC
         updateEntranceOverlays();
     }
     updateCustomSpawnControls();
+    if(!pulse294())return;
     updateMapTestAction();
+    if(!pulse294())return;
     refreshViewportMinimapSources();
 }
 
@@ -8017,6 +8031,12 @@ void MainWindow::endWorkspaceLoad()
     };
     {opening::Scope stage("gui.end.resume_tools");if(m_pView)m_pView->setWorkspaceLoadInProgress(false);}
     if(native&&!yieldOpening())return;
+    if(property("mapTestContextDeferred294").toBool()) {
+        // The title arrived before the primary MOB. Bind the completed workspace
+        // once, using the catalog already owned by the maps browser.
+        refreshMapTestContext(false,false);
+        if(native&&!yieldOpening())return;
+    }
     // A second explicit open can interrupt a previous AddMob queue without
     // replacing its primary. Resume every surviving explicit root as well.
     if(m_pView)for(auto* mob:m_pView->mobs())
@@ -9956,8 +9976,11 @@ void MainWindow::updateWindowTitle(eTitleTypeData type, QString data)
     else if(type == eTitleTypeData::eTitleTypeDataMprDirtyFlag)
         updateLoadedMapMprDirtyIndicator();
     updateMapTestAction();
-    if(type == eTitleTypeData::eTitleTypeDataMpr)
-        refreshMapTestContext();
+    if(type == eTitleTypeData::eTitleTypeDataMpr) {
+        if(m_workspaceLoadInProgress&&m_pView&&m_pView->property("rebuild64Selected").toBool())
+            setProperty("mapTestContextDeferred294",true);
+        else refreshMapTestContext();
+    }
 }
 
 void MainWindow::rebuildWindowTitle()

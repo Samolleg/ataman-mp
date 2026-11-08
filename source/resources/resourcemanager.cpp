@@ -812,6 +812,38 @@ QStringList CObjectList::figurePartNames(const QString& name)
     return result;
 }
 
+bool CObjectList::nativeAssemblyHierarchy(const QString& name, QStringList* parts,
+                                         QMap<QString,QString>* parents)
+{
+    struct Metadata {QStringList parts;QMap<QString,QString> parents;};
+    static quint64 generation=std::numeric_limits<quint64>::max();
+    static QHash<QString,QFuture<Metadata>> jobs;
+    if(generation!=m_sourceGeneration){jobs.clear();generation=m_sourceGeneration;}
+    const auto model=name.toLower();
+    auto job=jobs.find(model);
+    if(job==jobs.end()) {
+        const auto bytes=resourceData(model+".mod");
+        job=jobs.insert(model,QtConcurrent::run([bytes,model]{
+            Metadata value;if(bytes.isEmpty())return value;
+            CResFile archive(bytes);const auto components=normalizedResourceMap(archive.bufferOfFiles());
+            QDataStream stream(components.value(model));util::formatStream(stream);
+            qint32 count=0;stream>>count;if(stream.status()!=QDataStream::Ok||count<=0||count>10000)return value;
+            const auto read=[&](QString& text,bool empty){
+                qint32 length=0;stream>>length;if(stream.status()!=QDataStream::Ok||length<0||length>4096||(!empty&&!length))return false;
+                QByteArray raw(length,Qt::Uninitialized);if(stream.readRawData(raw.data(),length)!=length)return false;
+                while(raw.endsWith('\0'))raw.chop(1);text=QString::fromLatin1(raw).toLower();return empty||!text.isEmpty();
+            };
+            for(int i=0;i<count;++i){QString part,parent;if(!read(part,false)||!read(parent,true))return Metadata();
+                if(components.value(part).isEmpty())continue;
+                value.parts.append(part);value.parents.insert(part,parent);
+            }
+            return value;
+        }));
+    }
+    if(!job->isFinished())return false;
+    const auto metadata=job->result();*parts=metadata.parts;*parents=metadata.parents;return true;
+}
+
 QByteArray CObjectList::modelAnimation(const QString& name)
 {
     const QString member = name.toLower() + ".anm";

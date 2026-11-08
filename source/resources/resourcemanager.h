@@ -46,6 +46,10 @@ public:
     void attachSettings(CSettings* pSettings) {m_pSettings = pSettings;};
     QList<QString>& figureList() {return m_arrFigureForComboBox;}
     QStringList figurePartNames(const QString& name);
+    // Native appearance needs link names/parents, not decoded GL geometry.
+    // False means the immutable assembly metadata job is still pending.
+    bool nativeAssemblyHierarchy(const QString& name, QStringList* parts,
+                                 QMap<QString,QString>* parents);
     QByteArray modelAnimation(const QString& name);
     QByteArray resourceData(const QString& name, QString* sourcePath = nullptr) const;
     QJsonArray figureSources(const QString& resource) const { return m_figureSources.value(resource); }

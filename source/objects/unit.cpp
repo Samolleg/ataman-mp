@@ -480,7 +480,14 @@ bool CUnit::refreshTransientVisual(bool force, bool nativeOnly)
         if(cachedPlanPending)
             return false;
     }
-    const QStringList assemblyParts = CObjectList::getInstance()->figurePartNames(model);
+    QStringList assemblyParts;QMap<QString,QString> nativeParents;
+    if(nativeOnly) {
+        if(!CObjectList::getInstance()->nativeAssemblyHierarchy(model,&assemblyParts,&nativeParents)) {
+            m_resolvedDatabaseGeneration=std::numeric_limits<quint64>::max();
+            m_resolvedVisualRevision=std::numeric_limits<quint64>::max();
+            return false;
+        }
+    }else assemblyParts=CObjectList::getInstance()->figurePartNames(model);
     const QStringList resolvedBodyParts = appearance.contains("bodyParts")
         ? jsonStringList(appearance, "bodyParts") : m_bodyParts;
     QStringList visibleParts;
@@ -535,7 +542,8 @@ bool CUnit::refreshTransientVisual(bool force, bool nativeOnly)
     equipmentRequest.assemblyParts = assemblyParts;
     equipmentRequest.bodyParts = m_bodyParts;
     equipmentRequest.hairIndex = appearance.value("hairIndex").toInt(-1);
-    if(ei::CFigure* assemblyFigure = CObjectList::getInstance()->getFigure(model))
+    if(nativeOnly)equipmentRequest.assemblyParents=nativeParents;
+    else if(ei::CFigure* assemblyFigure = CObjectList::getInstance()->getFigure(model))
     {
         QMap<QString, QVector3D> ignoredRestOffsets;
         QVector3D hierarchyComplexion = m_complection;

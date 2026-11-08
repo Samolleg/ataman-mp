@@ -23,7 +23,18 @@ HRESULT prepare_service293(Session& s,UINT width,UINT height) {
  if(!s.rasterService293)return S_OK;
  EditorDepthReadback depth;auto hr=read_editor_depth(s,depth);if(FAILED(hr))return hr;
  std::vector<float> pixels(size_t(width)*height);
- for(UINT y=0;y<height;++y)for(UINT x=0;x<width;++x)pixels[size_t(y)*width+x]=float(editor_sample(depth,x,y,width,height)&0xffffffu)/16777215.f;
+ // Most frames have identical color/depth extents. Avoid two 64-bit divides
+ // per pixel (millions per frame); resampling computes each coordinate once.
+ constexpr float inverseDepth=1.f/16777215.f;
+ if(width==depth.width&&height==depth.height) {
+  for(size_t i=0;i<pixels.size();++i)pixels[i]=float(depth.words[i]&0xffffffu)*inverseDepth;
+ }else {
+  std::vector<UINT> columns(width);
+  for(UINT x=0;x<width;++x)columns[x]=(std::min)(depth.width-1,UINT((uint64_t(2*x+1)*depth.width)/(2*width)));
+  for(UINT y=0;y<height;++y){const auto py=(std::min)(depth.height-1,UINT((uint64_t(2*y+1)*depth.height)/(2*height)));
+   for(UINT x=0;x<width;++x)pixels[size_t(y)*width+x]=float(depth.words[size_t(py)*depth.width+columns[x]]&0xffffffu)*inverseDepth;
+  }
+ }
  EirService service{};
  if(!s.rasterService293(s.presentContext,s.generation,&s.frameCamera,width,height,pixels.data(),&service))return S_OK;
  // Reuse the existing validation/copy boundary; poses were applied before draw.

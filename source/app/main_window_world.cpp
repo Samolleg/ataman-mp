@@ -6,6 +6,7 @@
 #include "resource_profile.h"
 #include "mpr_document.h"
 #include "neighbor_scene_data.h"
+#include "opening_trace.h"
 #include "endurance_document.h"
 #include "mob.h"
 #include <QDialog>
@@ -43,8 +44,13 @@ QString pathKey(const QString& path)
 }
 QString metadataKey(const QFileInfo& info)
 {
+    // Size metadata needs a stable file revision, not a cold content hash of
+    // every map on Qt. Windows identity includes file ID and ChangeTime, so a
+    // same-size rewrite/restored mtime still invalidates this cache. The worker
+    // rechecks the same token after parsing; unsupported filesystems keep SHA.
+    const auto revision=neighborFileRevision(info.absoluteFilePath());
     return pathKey(info.absoluteFilePath()) + "|"
-        + QString::fromLatin1(neighborContentFingerprint(info.absoluteFilePath()).toHex());
+        + QString::fromLatin1((revision.isEmpty()?neighborContentFingerprint(info.absoluteFilePath()):revision).toHex());
 }
 }
 
@@ -132,6 +138,7 @@ bool MainWindow::validateWorldMap(SWorldMapZoneOrigin* map, QString* error)
 
 void MainWindow::refreshEditorWorld()
 {
+    opening::Scope timing294("gui.294.editor_world");
     // Defer metadata-driven scene replacement while checked rows are previewed.
     if(m_worldAlignmentPreviewActive) return;
     const auto profile = activeResourceProfile();
@@ -142,13 +149,16 @@ void MainWindow::refreshEditorWorld()
     if(auto* opt=dynamic_cast<COptStringList*>(m_settings->opt(eOptSetResource,"mapRoots")))
         for(const auto& dir:opt->value()) roots.append(dir);
     m_worldMapLayoutDocument.reload();
+    const auto layoutStart294=opening::clock();
     const auto result = m_worldMapLayoutDocument.loadEditorWorld(profile.profileId,roots);
+    opening::span("gui.294.world_layout",layoutStart294);
     m_editorWorldMaps = result.zones;
     m_editorActiveMap = SWorldMapZoneOrigin();
     const QString loaded = CLandscape::getInstance()->isMprLoad()
         ? pathKey(CLandscape::getInstance()->filePath().absoluteFilePath()) : QString();
     QVector<SMapCatalogEntry> topology;
     QMap<QString,QString> pendingMetadata;
+    const auto metadataStart294=opening::clock();
     for(auto& map : m_editorWorldMaps)
     {
         const QString path = m_worldMapLayoutDocument.absoluteResourcePath(map.mprPath);
@@ -176,8 +186,11 @@ void MainWindow::refreshEditorWorld()
         topology.append(entry);
         if(pathKey(path)==loaded && (m_editorActiveMap.zoneId.isEmpty() || map.zoneId==m_preferredEditorActiveMap)) m_editorActiveMap=map;
     }
+    opening::span("gui.294.world_metadata",metadataStart294);
+    const auto neighborsStart294=opening::clock();
     m_pView->setNeighborMapContext(topology,m_editorWorldMaps,profile.profileId,
         m_editorActiveMap.allodId,m_editorActiveMap.zoneId,result.warning);
+    opening::span("gui.294.world_neighbors",neighborsStart294);
     if(!result.warning.isEmpty() && result.warning!=m_lastWorldMapLayoutWarning)
         statusBar()->showMessage(result.warning,15000);
     m_lastWorldMapLayoutWarning=result.warning;

@@ -52,6 +52,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDir>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QFocusEvent>
@@ -534,6 +535,7 @@ struct CRebuild64Viewport::Worker {
                 QMetaObject::invokeMethod(owner,[target=owner,stats,updates]{
                     if(target->m_stopping||stats.ready_generation!=target->m_generation)return;
                     target->m_statistics=stats;
+                      target->setProperty("nativeFramePulse294",QVariant::fromValue<qlonglong>(QDateTime::currentMSecsSinceEpoch()));
                     bool neighborPending=false;{std::lock_guard<std::mutex> lock(target->m_worker->mutex);neighborPending=!target->m_worker->input.neighborUpdates.isEmpty();}
                     if(!neighborPending)target->m_terrainPresented=updates.presented_serial;
                     if(!qEnvironmentVariableIsEmpty("ATAMAN_REBUILD64_LAUNCH_CASE")){
@@ -917,17 +919,29 @@ EirCamera CRebuild64Viewport::cameraSnapshot() {
     return result;
 }
 namespace {
-void projectNativeUnits289(CView* view) {
+void projectNativeUnits289(CView* view,bool terrainChanged=false) {
     opening::Scope timing("gui.293.projectNativeUnits289");
     auto* land=CLandscape::getInstance();if(!land||!land->isMprLoad())return;
+    struct Projection {QVector3D source,result;};
+    static QHash<CNode*,Projection> cache;static CView* owner=nullptr;
+    static quint64 support=0;static const char* terrain=nullptr;
+    const auto source=land->originalMprData().constData();
+    const auto revision=CObjectBase::supportGeometryRevision();
+    if(owner!=view||terrain!=source||support!=revision||terrainChanged){cache.clear();owner=view;terrain=source;support=revision;}
+    QSet<CNode*> live;
     QVector<QPair<CNode*,QVector3D>> projected;
     for(auto* mob:view->mobs())for(auto* node:mob->nodes())if(node->nodeType()==eUnit||node->modelName().compare("stst8",Qt::CaseInsensitive)==0) {
-        auto position=node->position();QVector3D surface;
+        live.insert(node);auto position=node->position();
+        const auto old=cache.constFind(node);
+        if(old!=cache.cend()&&old->source==position&&old->result==node->drawPosition())continue;
+        QVector3D surface;
         if(node->nodeType()==eUnit)surface=land->unitSurfacePosition(position);
         else {surface=QVector3D(position.x(),position.y(),0);land->projectPt(surface);}
-        position.setZ(position.z()+surface.z());projected.append(qMakePair(node,position));
+        const auto original=position;position.setZ(position.z()+surface.z());projected.append(qMakePair(node,position));
+        cache.insert(node,{original,position});
     }
     for(const auto& value:projected)value.first->setDrawPosition(value.second);
+    for(auto i=cache.begin();i!=cache.end();)if(!live.contains(i.key()))i=cache.erase(i);else ++i;
 }
 QVector<quintptr> editorMobOrder(CView* view) {
     QVector<quintptr> result;for(auto* mob:view->mobs())if(mob&&view->isMobVisible(mob))result.append(quintptr(mob));return result;
@@ -1077,6 +1091,14 @@ void CRebuild64Viewport::tick() {
         return;
     }
     if((!m_selected&&!m_outputOnly)||!m_gl||m_gl->m_applicationShutdown)return;
+    // Keep a bounded liveness record even when the scene is otherwise idle.
+    // This measures statistics publication; actual Presents have their own trace.
+    static qint64 lastHealth=0;const auto now=QDateTime::currentMSecsSinceEpoch();
+    if(now-lastHealth>=5000){lastHealth=now;const auto pulse=property("nativeFramePulse294").toLongLong();
+        ei::log(eLogInfo,QString("Rebuild64 health generation:%1 ready:%2 pending:%3 appearance:%4 statisticsAgeMs:%5 frameMs:%6")
+            .arg(m_generation).arg(m_statistics.ready_generation).arg(m_statistics.pending).arg(m_visualsPending292)
+            .arg(pulse?now-pulse:-1).arg(m_statistics.frame_ms,0,'f',2));
+    }
     // Tool-context initialization can restart CView's uncapped GL timer after
     // selectRebuild stopped it. Native owns the display; do not leave a hidden
     // zero timer flooding Qt while its no-op updateWindow cannot draw anything.
@@ -1151,7 +1173,7 @@ void CRebuild64Viewport::tick() {
        &&(m_serviceOrbit293||m_gl->m_cam->movementInputActive())){
         updateLiveCamera();return;
     }
-    projectNativeUnits289(m_gl);
+    projectNativeUnits289(m_gl,m_terrainFlags||!m_neighborDirty.isEmpty());
     if(!m_outputOnly)serviceInput();
     if(m_worker&&!cohortChanged&&(m_terrainFlags||!m_neighborDirty.isEmpty())&&submitTerrain()) {
         updateLiveCamera();return;
@@ -1180,6 +1202,17 @@ void CRebuild64Viewport::tick() {
     for(const auto& pose:editorPoses(m_gl))m_documentPoses.insert((quint64(pose.mob)<<32)|pose.nid,pose);
     Worker::Input next;
     next.visuals=editorVisuals292();
+    if(m_visualsPending292) {
+        // A partial appearance packet is preparation, not a document edit.
+        // Publishing every slice retired the world before it could Present.
+        // Retain the current raw/accepted scene until one complete packet exists.
+        m_documentRefreshPending=true;
+        if(m_worker&&m_documentHash.isEmpty()){
+            std::lock_guard<std::mutex> lock(m_worker->mutex);
+            if(m_worker->input.name==m_gl->m_pLand->filePath().fileName().toUtf8())m_worker->input.documentDirty=false;
+        }
+        updateLiveCamera();return;
+    }
     projectNativeUnits289(m_gl);next.documentObjects=editorPoses(m_gl);
     next.atlas=Worker::atlasSource(m_gl);
     CMprEditTransaction transaction(QStringLiteral("Rebuild64 memory snapshot"));CValidationReport report;
@@ -1520,11 +1553,16 @@ void CRebuild64Viewport::serviceInput() {
     std::shared_ptr<const CNativeEditorService> scene;
     // Camera-only publication reuses world geometry; all editor mutations,
     // visibility changes and generation/extent changes invalidate this reuse.
-    if(!m_serviceDirty293&&options==m_serviceOptions293&&(m_serviceOrbit293||m_gl->m_cam->movementInputActive()||clip!=m_serviceCamera293)){
+    // Some auxiliary panels request a redraw without a document signal. Keep
+    // their idle refresh bounded, while avoiding a full snapshot every16ms.
+    const auto serviceNow294=QDateTime::currentMSecsSinceEpoch();
+    const bool idleRecent294=serviceNow294-property("nativeServiceBuild294").toLongLong()<100;
+    if(!m_serviceDirty293&&options==m_serviceOptions293
+       &&(idleRecent294||m_serviceOrbit293||m_gl->m_cam->movementInputActive()||clip!=m_serviceCamera293)){
         latency293::Lock lock(m_worker->mutex,latency293::ReuseWait);scene=m_worker->input.serviceScene;
     }
     const bool rebuilt=!scene;
-    if(rebuilt){latency293::Scope snapshotTiming(latency293::Snapshot);auto snapshot=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());snapshot->generation=m_generation;scene=std::move(snapshot);}
+    if(rebuilt){latency293::Scope snapshotTiming(latency293::Snapshot);auto snapshot=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());snapshot->generation=m_generation;scene=std::move(snapshot);setProperty("nativeServiceBuild294",serviceNow294);}
     m_serviceDirty293=false;m_serviceCamera293=clip;m_serviceOptions293=options;
     const auto poseStart=opening::clock();
     auto poses=editorPoses(m_gl);
