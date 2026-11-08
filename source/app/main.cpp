@@ -1,3 +1,4 @@
+#include "camera_latency293_trace.h"
 #include "shutdown_deadline.h"
 #include "rebuild64_launch_check.h"
 #include "ai_agent_read.h"
@@ -4216,7 +4217,7 @@ int main(int argc, char *argv[])
     else if(std::strcmp(openGlBackend, "desktop") == 0)
         QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
 
-    QApplication app(argc, argv);
+    latency293::Application app(argc, argv);
     installRebuild64LaunchCheck(app);
     app.setProperty("agentHeadless",agentHeadless);
     // Explicit output capability; no worker/DLL is created until an output tool asks.

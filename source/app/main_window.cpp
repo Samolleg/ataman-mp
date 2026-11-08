@@ -11,6 +11,7 @@
 #include "lever_approach_dialog.h"
 #include "ui_theme.h"
 #include "main_window.h"
+#include "camera_latency293_trace.h"
 #include "ai_agent_server.h"
 #include "travel_document.h"
 #include "loaded_map_panel_policy.h"
@@ -2450,8 +2451,13 @@ MainWindow::MainWindow(QWidget* parent) :
         auto* poll=new QTimer(this);poll->setObjectName("externalWorldRefresh");poll->setInterval(1000);
         const auto revision=[](const QString& path){const auto native=neighborFileRevision(path);if(!native.isEmpty())return native;QFileInfo f(path);return (path+":"+QString::number(f.size())+":"+f.lastModified().toString(Qt::ISODateWithMs)).toUtf8();};
         connect(poll,&QTimer::timeout,this,[this,external,revision](){
+            latency293::Scope cameraTiming(latency293::ExternalPoll);
             if(external->pending||m_shutdownInProgress||!m_pView||m_workspaceLoadInProgress||m_worldMetadataWatcher||m_worldAlignmentPreviewActive
                ||property("aiCommitBusy").toBool()||QApplication::activeModalWidget()||m_pView->hasPendingOperation())return;
+            // File revision enumeration can stall Qt for tens of milliseconds.
+            // Keep camera input live; the next ordinary poll reconciles after
+            // navigation, retaining the active document and its unsaved edits.
+            if(auto* native=findChild<CRebuild64Viewport*>())if(native->cameraNavigationActive())return;
             QStringList paths;if(!m_worldMapLayoutDocument.path().isEmpty())paths.append(m_worldMapLayoutDocument.path());
             for(const auto& n:m_editorWorldMaps)if(n.zoneId!=m_editorActiveMap.zoneId&&n.allodId==m_editorActiveMap.allodId){const auto mpr=m_worldMapLayoutDocument.absoluteResourcePath(n.mprPath);paths.append(mpr);if(!n.mobPath.isEmpty())paths.append(m_worldMapLayoutDocument.absoluteResourcePath(n.mobPath));QFileInfo f(mpr);paths.append(f.dir().filePath(f.completeBaseName()+"-atlas.res"));}
             if(m_editorWorldMaps.size()>1)paths.append(CTextureList::getInstance()->configuredResourceArchivePaths());
@@ -2461,9 +2467,11 @@ MainWindow::MainWindow(QWidget* parent) :
             external->pending=true;const auto world=m_worldMapLayoutDocument.path();
             auto* ready=new QFutureWatcher<bool>(this);
             connect(ready,&QFutureWatcher<bool>::finished,this,[this,external,observed,world,revision,ready](){
+                latency293::Scope cameraTiming(latency293::ExternalPoll);
                 ready->deleteLater();external->pending=false;
                 if(m_shutdownInProgress||!m_pView||world!=m_worldMapLayoutDocument.path()||m_workspaceLoadInProgress
                    ||m_worldMetadataWatcher||m_worldAlignmentPreviewActive||property("aiCommitBusy").toBool()||QApplication::activeModalWidget()||m_pView->hasPendingOperation())return;
+                if(auto* native=findChild<CRebuild64Viewport*>())if(native->cameraNavigationActive())return;
                 for(auto it=observed.cbegin();it!=observed.cend();++it)if(revision(it.key())!=it.value())return;
                 external->revisions=observed;refreshEditorWorld();
                 ei::log(eLogInfo,"External world/neighbor revisions reconciled; active map and unsaved edits retained");

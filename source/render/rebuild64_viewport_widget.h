@@ -29,6 +29,7 @@ public:
     explicit CRebuild64Viewport(CView* gl, QMenu* menu, QWidget* parent=nullptr);
     ~CRebuild64Viewport() override;
     bool rebuildSelected() const { return m_selected; }
+    bool cameraNavigationActive() const;
     bool openingDocument() const { return m_earlyDocument; }
     bool pendingEditorInput() const { return !m_waitingInput.isEmpty(); }
     bool backendLoaded() const;

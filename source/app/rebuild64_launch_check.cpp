@@ -8,6 +8,7 @@
 #include "model_gallery.h"
 #include "native_output.h"
 #include "native_editor_service.h"
+#include "camera_latency293_trace.h"
 #include "topdown_export.h"
 #include "preview.h"
 #include "scene.h"
@@ -244,7 +245,10 @@ public:
     bool wait(const std::function<bool()>& ready,int timeout=240000)
     {
         QElapsedTimer time;time.start();
-        for(;;){if(ready())return true;if(time.elapsed()>=timeout)return false;QCoreApplication::processEvents(QEventLoop::AllEvents,10);Sleep(1);}
+        for(;;){if(ready())return true;if(time.elapsed()>=timeout)return false;if(configuration["cameraOnly293"].toBool()&&latency293::state().phase.load()){
+                QEventLoop cycle;QTimer timer;timer.setSingleShot(true);timer.setTimerType(Qt::PreciseTimer);
+                connect(&timer,&QTimer::timeout,&cycle,&QEventLoop::quit);timer.start(1);cycle.exec();
+            }else {latency293::Scope timing(latency293::ProcessEvents);QCoreApplication::processEvents(QEventLoop::AllEvents,10);latency293::Scope sleepTiming(latency293::Sleep);Sleep(1);}}
     }
     QString fixture()const{return configuration["fixture"].toString();}
     void auditOpenResources() {

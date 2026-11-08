@@ -3,6 +3,7 @@
 #include "view.h"
 #include "log.h"
 #include "opening_trace.h"
+#include "camera_latency293_trace.h"
 #include "legacy_projection_pulse.h"
 #include "mob_family_validation.h"
 #include <QtConcurrent>
@@ -215,9 +216,10 @@ struct CRebuild64Viewport::Worker {
     }
     QImage frameService293;
     static uint32_t EIR_CALL rasterService293(void* context,uint64_t generation,const EirCamera* camera,uint32_t width,uint32_t height,const float* pixels,EirService* result) {
+        latency293::Scope timing(latency293::Raster);
         auto& worker=*static_cast<Worker*>(context);
         std::shared_ptr<const CNativeEditorService> snapshot;quint64 serial=0;
-        {std::lock_guard<std::mutex> lock(worker.mutex);snapshot=worker.input.serviceScene;serial=worker.input.serviceSerial;}
+        {latency293::Lock lock(worker.mutex,latency293::WorkerSnapshotWait);snapshot=worker.input.serviceScene;serial=worker.input.serviceSerial;}
         if(!snapshot||snapshot->generation!=generation)return 0;
         // Snapshot copies are implicitly shared values; only the projection is
         // frame-specific. Labels and geometry use exactly the world frame lens.
@@ -236,15 +238,17 @@ struct CRebuild64Viewport::Worker {
         *service={sizeof(EirService),uint32_t(current.service.width()),uint32_t(current.service.height()),uint32_t(current.service.bytesPerLine()),current.serviceSerial,current.generation,current.serviceCpuMs,{current.service.constBits(),uint64_t(current.service.sizeInBytes())},current.poses.constData(),uint32_t(current.poses.size())};
         return 1;
     }
+    qint64 presentLeaseStart293{0};int presentLeasePhase293{0};
     static uint32_t EIR_CALL canPresent(void* context,uint64_t generation,uint32_t neighbours,uint32_t phase) {
         auto& worker=*static_cast<Worker*>(context);
-        if(phase==1){worker.mutex.unlock();return 1;}
+        if(phase==1){latency293::add(latency293::PresentLease,worker.presentLeasePhase293,worker.presentLeaseStart293);worker.mutex.unlock();return 1;}
         worker.mutex.lock();
         const bool current=!worker.stop&&!worker.paused&&worker.input.generation==generation
             &&worker.input.camera.neighbours_visible==neighbours
             &&(!worker.input.documentDirty||worker.input.operationPreview)
             ; // Native world readiness is independent of editor query geometry.
         if(phase==2||!current)worker.mutex.unlock();
+        else {worker.presentLeasePhase293=latency293::state().phase.load();worker.presentLeaseStart293=worker.presentLeasePhase293?latency293::clock():0;}
         return current;
     }
     void processOutput(void* handle,EirApi& api,quint64 generation,const EirStatistics& stats) {
@@ -707,6 +711,9 @@ void CRebuild64Viewport::movePanels(bool native) {
     if(!native)m_panels.clear();
 }
 bool CRebuild64Viewport::backendLoaded() const {return m_worker&&m_worker->loaded.load();}
+bool CRebuild64Viewport::cameraNavigationActive() const {
+    return m_selected&&m_gl&&(m_serviceOrbit293||m_gl->m_cam->movementInputActive());
+}
 bool CRebuild64Viewport::backendPrepared() const {return m_worker&&m_worker->prepared.load();}
 bool CRebuild64Viewport::backendResourcesRetired() const {return !m_worker||m_worker->resourcesRetired.load();}
 void CRebuild64Viewport::stopForApplicationShutdown() {
@@ -1053,13 +1060,14 @@ void CRebuild64Viewport::updateLiveCamera() {
                 m_gl->updateCameraProjection();
                 const auto view=m_gl->m_cam->update(),clip=m_gl->m_projection*view;
                 const auto inverse=view.inverted();const auto eye=inverse.map(QVector3D()),target=inverse.map(QVector3D(0,0,-1));
-                std::lock_guard<std::mutex> lock(m_worker->mutex);auto& camera=m_worker->input.camera;
+                latency293::Lock lock(m_worker->mutex,latency293::LiveCameraWait);auto& camera=m_worker->input.camera;
                 for(int row=0;row<4;++row)for(int col=0;col<4;++col)camera.world_to_clip[row*4+col]=row==2?.5f*(clip(2,col)+clip(3,col)):clip(row,col);
                 for(int axis=0;axis<3;++axis){camera.eye[axis]=eye[axis];camera.target[axis]=target[axis];}
                 m_worker->input.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
             }
 }
 void CRebuild64Viewport::tick() {
+    latency293::Scope latencyTiming(latency293::Tick);
     opening::Scope tickTiming("gui.native.tick");
     if(!m_selected&&m_gl&&!m_waitingInput.isEmpty()) {
         auto* main=qobject_cast<MainWindow*>(window());
@@ -1069,6 +1077,13 @@ void CRebuild64Viewport::tick() {
         return;
     }
     if((!m_selected&&!m_outputOnly)||!m_gl||m_gl->m_applicationShutdown)return;
+    // Tool-context initialization can restart CView's uncapped GL timer after
+    // selectRebuild stopped it. Native owns the display; do not leave a hidden
+    // zero timer flooding Qt while its no-op updateWindow cannot draw anything.
+    if(m_selected&&m_gl->m_timer&&m_gl->m_timer->isActive()){
+        latency293::state().legacyStops.fetch_add(1);latency293::state().legacyInterval.store(m_gl->m_timer->interval());
+        m_gl->suspendRendering();
+    }
     updatePreparationText();
     if(m_restartWhenFinished){
         if(m_worker&&!m_worker->finished.load())return;
@@ -1100,7 +1115,7 @@ void CRebuild64Viewport::tick() {
     if(!m_gl->m_pLand || !m_gl->m_pLand->isMprLoad()) {
         if(m_outputOnly) {
             cancelOutputs(tr("Offscreen отменён: карта закрыта."));
-            if(m_worker){{std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->stop=true;}m_worker->wake.notify_all();}
+            if(m_worker){{latency293::Lock lock(m_worker->mutex,latency293::TickCameraWait);m_worker->stop=true;}m_worker->wake.notify_all();}
             m_outputOnly=false;m_statistics={};m_timer->stop();return;
         }
 
@@ -1129,6 +1144,13 @@ void CRebuild64Viewport::tick() {
     const bool preview=m_gl->hasPendingOperation();
     if(preview&&!m_transformPreviewMessage)emit m_gl->updateMsg(QString::fromUtf8("Rebuild64: предпросмотр преобразования. Мир обновится после подтверждения."));
     m_transformPreviewMessage=preview;
+    // A camera gesture changes no object pose or editor geometry. Publish only
+    // its lens; mutations and visibility/cohort changes take the ordinary path.
+    if(m_worker&&!cohortChanged&&!m_serviceDirty293&&!m_documentRefreshPending
+       &&!preview&&!m_terrainFlags&&m_neighborDirty.isEmpty()
+       &&(m_serviceOrbit293||m_gl->m_cam->movementInputActive())){
+        updateLiveCamera();return;
+    }
     projectNativeUnits289(m_gl);
     if(!m_outputOnly)serviceInput();
     if(m_worker&&!cohortChanged&&(m_terrainFlags||!m_neighborDirty.isEmpty())&&submitTerrain()) {
@@ -1137,7 +1159,7 @@ void CRebuild64Viewport::tick() {
     if(m_worker&&m_sceneSnapshotTimer.isValid()&&m_sceneSnapshotTimer.elapsed()<100) {
         const auto camera=cameraSnapshot();
         const QSize size(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
-        {std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.camera=camera;m_worker->input.size=size;m_worker->paused=false;}
+        {latency293::Lock lock(m_worker->mutex,latency293::TickCameraWait);m_worker->input.camera=camera;m_worker->input.size=size;m_worker->paused=false;}
         return;
     }
     m_sceneSnapshotTimer.restart();
@@ -1146,7 +1168,7 @@ void CRebuild64Viewport::tick() {
     opening::span("gui.native.terrain_fingerprint",terrainFingerprintStart);
     if(m_worker&&!cohortChanged&&(!m_documentRefreshPending || m_pointerDown || (m_gl->hasPendingOperation()&&!m_gl->m_pendingDatabasePlacement))&&terrainState==m_terrainState) {
         const auto camera=cameraSnapshot();
-        std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->input.camera=camera;
+        latency293::Lock lock(m_worker->mutex,latency293::TickCameraWait);m_worker->input.camera=camera;
         m_worker->input.size=QSize(qMax(1,qRound(width()*devicePixelRatioF())),qMax(1,qRound(height()*devicePixelRatioF())));
         return;
     }
@@ -1205,7 +1227,7 @@ void CRebuild64Viewport::tick() {
         m_worker.reset(new Worker(this,reinterpret_cast<void*>(m_native->winId()),scratch));
     }
     const auto inputLockStart293=opening::clock();
-    {std::lock_guard<std::mutex> lock(m_worker->mutex);opening::span("gui.293.publishInput.lockWait",inputLockStart293);opening::Scope inputTiming("gui.293.publishInput.assign");next.query=m_worker->input.query;next.serviceScene=m_worker->input.serviceScene;next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureServiceSerial=m_worker->input.captureServiceSerial;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
+    {latency293::Lock lock(m_worker->mutex,latency293::TickCameraWait);opening::span("gui.293.publishInput.lockWait",inputLockStart293);opening::Scope inputTiming("gui.293.publishInput.assign");next.query=m_worker->input.query;next.serviceScene=m_worker->input.serviceScene;next.capture=m_worker->input.capture;next.captureGeneration=m_worker->input.captureGeneration;next.captureServiceSerial=m_worker->input.captureServiceSerial;next.captureWorld=m_worker->input.captureWorld;next.serviceSerial=m_worker->input.serviceSerial;next.serviceCpuMs=m_worker->input.serviceCpuMs;if(!documentChanged){next.service=m_worker->input.service;next.poses=m_worker->input.poses;}m_worker->input=std::move(next);m_worker->paused=false;}
     m_worker->wake.notify_all();
     if(!m_waitingInput.isEmpty() && frameIsCurrent() && editorQueryReady()){replayEditorInput();}
 }
@@ -1355,6 +1377,7 @@ void CRebuild64Viewport::replayEditorInput() {
     syncEditorViewport();
 }
 void CRebuild64Viewport::editorInput(QEvent* event) {
+    latency293::Scope latencyTiming(latency293::Input);
     if(event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease||event->type()==QEvent::MouseButtonDblClick){
         m_lastMouse=static_cast<QMouseEvent*>(event)->pos();m_gl->setProperty("nativePointer",m_lastMouse);
     }
@@ -1481,6 +1504,7 @@ bool CRebuild64Viewport::editorQueryReady() const {
     return true;
 }
 void CRebuild64Viewport::serviceInput() {
+    latency293::Scope latencyTiming(latency293::Service);
     opening::Scope serviceTiming("gui.service.total");
     if(window()->property("aiCommitBusy").toBool())return;
     if(!m_worker)return;
@@ -1497,10 +1521,10 @@ void CRebuild64Viewport::serviceInput() {
     // Camera-only publication reuses world geometry; all editor mutations,
     // visibility changes and generation/extent changes invalidate this reuse.
     if(!m_serviceDirty293&&options==m_serviceOptions293&&(m_serviceOrbit293||m_gl->m_cam->movementInputActive()||clip!=m_serviceCamera293)){
-        std::lock_guard<std::mutex> lock(m_worker->mutex);scene=m_worker->input.serviceScene;
+        latency293::Lock lock(m_worker->mutex,latency293::ReuseWait);scene=m_worker->input.serviceScene;
     }
     const bool rebuilt=!scene;
-    if(rebuilt){auto snapshot=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());snapshot->generation=m_generation;scene=std::move(snapshot);}
+    if(rebuilt){latency293::Scope snapshotTiming(latency293::Snapshot);auto snapshot=std::make_shared<CNativeEditorService>(m_gl->nativeServiceSnapshot());snapshot->generation=m_generation;scene=std::move(snapshot);}
     m_serviceDirty293=false;m_serviceCamera293=clip;m_serviceOptions293=options;
     const auto poseStart=opening::clock();
     auto poses=editorPoses(m_gl);
@@ -1513,7 +1537,7 @@ void CRebuild64Viewport::serviceInput() {
     }
     m_gl->setProperty("nativeTerrainPoses293",false);
     opening::span("gui.service.poses",poseStart);
-    std::lock_guard<std::mutex> lock(m_worker->mutex);
+    latency293::Lock lock(m_worker->mutex,latency293::PublishWait);
     m_worker->input.camera=cameraSnapshot();m_worker->input.size=size;
     m_worker->input.editorGeometryReady=editorQueryReady();m_worker->input.serviceCpuMs=m_serviceMilliseconds;m_worker->input.serviceScene=std::move(scene);m_worker->input.operationPreview=m_gl->hasPendingOperation();m_worker->input.poses=std::move(poses);if(rebuilt)++m_worker->input.serviceSerial;
 }
@@ -1534,6 +1558,7 @@ void CRebuild64Viewport::syncEditorViewport() {
 }
 
 void CRebuild64Viewport::resizeEvent(QResizeEvent* event) {
+    m_serviceDirty293=true;
     QWidget::resizeEvent(event);if(m_stopping||!m_gl||!m_selected||event->size().isEmpty())return;
     const auto extent=event->size();m_gl->m_width=extent.width();m_gl->m_height=extent.height();
     m_gl->m_normalProjection.setToIdentity();m_gl->m_normalProjection.perspective(45,float(extent.width())/extent.height(),1,1000);
