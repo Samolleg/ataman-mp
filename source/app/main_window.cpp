@@ -115,6 +115,7 @@ private:
 #include "landscape.h"
 #include "node.h"
 #include "settings.h"
+#include "rebuild64_graphics_settings.h"
 #include "ui/validation_panel_layout.h"
 #include "ui/message_log_panel.h"
 #include "ui/dock_hidden_tab.h"
@@ -857,6 +858,14 @@ MainWindow::MainWindow(QWidget* parent) :
     m_settings.reset(new CSettings(this));
     applyRebuild64LaunchFixture(*m_settings);
     startup.mark("settings");
+    // The settings/database phase and the following widget construction are
+    // independent completed startup stages. Keep the splash/event dispatcher
+    // responsive between them; user and bridge input waits for the ready UI.
+    const auto startupPulse=[] {
+        if(!qApp->property("agentHeadless").toBool()&&QSettings().value("ui/renderer","Rebuild64").toString()=="Rebuild64")
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents|QEventLoop::ExcludeSocketNotifiers,5);
+    };
+    startupPulse();
     m_selector.reset(new CSelectForm(this));
     m_createDialog.reset(new CCreateObjectForm(this));
     m_randomizeForm.reset(new CRandomizeForm(this));
@@ -1411,6 +1420,14 @@ MainWindow::MainWindow(QWidget* parent) :
     m_stopMapTestAction = new QAction(tr("Stop Test"), this);
     m_stopMapTestAction->setEnabled(false);
     m_stopMapTestAction->setToolTip(tr("Stops only the game process launched by Endurance."));
+    auto* graphicsRebuild64=m_ui->menuSettings->addAction(tr("Rebuild64 graphics..."));
+    graphicsRebuild64->setObjectName("actionRebuild64Graphics");
+    connect(graphicsRebuild64,&QAction::triggered,this,[this]{
+        auto* dialog=new CRebuild64GraphicsDialog(this);dialog->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dialog,&CRebuild64GraphicsDialog::graphicsApplied,this,[this](const QByteArray& ini,bool restart){
+            if(auto* native=findChild<CRebuild64Viewport*>())native->applyGraphics(ini,restart);
+        });dialog->open();
+    });
     m_ui->menuSettings->insertAction(m_ui->actionOpen_2, gameAndModSetup);
     m_ui->menuSettings->insertSeparator(m_ui->actionOpen_2);
     m_ui->menuTools->addSeparator();
@@ -2342,8 +2359,10 @@ MainWindow::MainWindow(QWidget* parent) :
     m_createDialog.get()->attach(m_pView, m_undoStack);
     rebuildRecentFilesMenu();
     startup.mark("actionsAndResources");
+    startupPulse();
     refreshActiveCatalog(false);
     startup.mark("mapCatalogAndContext");
+    startupPulse();
     updateMapTestAction();
     updateWindowTitle(eTitleTypeData::eTitleTypeDataMpr, QString());
     updateLoadedMapPanel();

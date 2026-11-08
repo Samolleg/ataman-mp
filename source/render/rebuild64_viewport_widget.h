@@ -39,6 +39,7 @@ public:
     void finishApplicationShutdown();
     bool applicationShutdownFinished() const;
     void prepareBackend();
+    void applyGraphics(const QByteArray& ini,bool restart);
     void selectRebuild(bool selected, bool persist=true, const QString& action=QString());
     void beginDocumentTransition();
     void openDocumentEarly(const QFileInfo& file,const QStringList& mobs,const QStringList& search);
@@ -46,7 +47,7 @@ public:
     QString lastFailure() const { return m_failure; }
     EirStatistics statistics() const { return m_statistics; }
     quint64 terrainPresentedSerial() const { return m_terrainPresented; }
-    bool frameIsCurrent() const { return (m_selected||m_outputOnly) && !m_documentRefreshPending
+    bool frameIsCurrent() const { return (m_selected||m_outputOnly) && !m_documentRefreshPending && !m_graphicsPending
         && m_generation && m_statistics.ready_generation==m_generation
         && m_terrainPresented>=m_terrainSubmitted && !m_terrainFlags && m_neighborDirty.isEmpty() && !m_visualsPending292; }
     void capture(const QString& path, bool worldOnly=false);
@@ -139,6 +140,7 @@ private:
     bool m_documentRefreshPending{true};
     bool m_mobDocumentRefresh{false};
     quint64 m_generation{0};
+    bool m_graphicsPending{false};
     quint64 m_diagnosticFrame{0}; // Set only by the isolated hidden acceptance harness.
     QRect m_terrainDirty,m_strokeDirty;
     quint32 m_terrainFlags{0},m_strokeFlags{0};

@@ -17,6 +17,8 @@
 #include "navmesh_panel.h"
 #include "key_manager.h"
 #include "rebuild64_launch_check.h"
+#include "rebuild64_graphics_settings.h"
+#include "rebuild64_graphics_file_audit.h"
 #include "main_window.h"
 #include "view.h"
 #include "landscape_tools.h"
@@ -31,6 +33,7 @@
 #include "mob.h"
 #include "node.h"
 #include "unit.h"
+#include "worldobj.h"
 #include "camera.h"
 #include "settings.h"
 #include "resource_setup_dialog.h"
@@ -282,7 +285,7 @@ public:
         }
         check(wait([&]{return native->frameIsCurrent()||!native->lastFailure().isEmpty();}),"native load reached terminal state");
         check(native->rebuildSelected(),"Rebuild64 selected: "+native->lastFailure());
-        const int expected=name.contains("zone7")?4:name.contains("zone1")?5:0;
+        const int expected=name.contains("zone7")?4:(name.contains("zone1")||name.contains("zone3obr"))?5:0;
         const auto stats=native->statistics();
         check(int(stats.neighbours_accepted)==expected&&stats.neighbours_pending==0,"native neighbours exact "+QString::number(expected));
         if(!sawGL) {
@@ -322,7 +325,9 @@ public:
         check(found,"gallery resolves own map copy");
         for(auto* item=found->parent();item;item=item->parent())item->setExpanded(true);
         tree->setCurrentItem(found);tree->scrollToItem(found);QApplication::processEvents();
-        const auto point=tree->visualItemRect(found).center();check(tree->viewport()->rect().contains(point),"gallery event position valid");
+        found=nullptr;for(QTreeWidgetItemIterator it(tree);*it;++it)if(QFileInfo((*it)->data(0,Qt::UserRole).toString()).canonicalFilePath()==QFileInfo(fixture()+"/Maps/"+map+".mpr").canonicalFilePath()){found=*it;break;}
+        check(found,"gallery row survives deferred layout");
+        const auto point=tree->visualItemRect(found).center();check(tree->viewport()->rect().contains(point)&&tree->itemAt(point)==found,"gallery event position valid");
         commandQpc=qpc();
         QMouseEvent press(QEvent::MouseButtonPress,point,Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);QApplication::sendEvent(tree->viewport(),&press);
         QMouseEvent release(QEvent::MouseButtonRelease,point,Qt::LeftButton,Qt::NoButton,Qt::NoModifier);QApplication::sendEvent(tree->viewport(),&release);
@@ -579,6 +584,7 @@ public:
  }
     #include "rebuild64_service_check.inc"
     #include "rebuild64_behaviour293_check.inc"
+    #include "rebuild64_graphics_check.inc"
     void run()
     {
         int exitCode=0;
@@ -597,7 +603,8 @@ public:
             check(QSettings().value("ui/viewportVisuals/neighborLandscapes",false).toBool()==configuration["seedNeighbors"].toBool(true),"neighbour preference preserved");
             const auto map=configuration["map"].toString("zone1");
             const bool headless=qApp->property("agentHeadless").toBool();
-            if(mode=="acceptBehaviour293")behaviour293Scenario();
+            if(mode=="acceptGraphics")graphicsScenario();
+            else if(mode=="acceptBehaviour293")behaviour293Scenario();
             else if(mode=="acceptClose292")close292Scenario();
             else if(mode=="acceptAtlas292")atlas292Scenario();
             else if(mode=="acceptReload293")reloadScenario293();
@@ -899,11 +906,11 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     if(file.isEmpty())for(int i=1;i<argc;++i)if(std::strcmp(argv[i],"--ai-read-worker")==0)file=qEnvironmentVariable("ATAMAN_REBUILD64_LAUNCH_CASE");
     if(file.isEmpty())return 0;
     const QFileInfo info(file);caseRoot=info.canonicalPath();const QString normalized=QDir::fromNativeSeparators(caseRoot).toLower();
-    if((!normalized.contains("/work/rebuild64-behaviour-293-20261108/")&&!normalized.contains("/work/rebuild64-close-292-20261108/")&&!normalized.contains("/work/rebuild64-atlas-292-20261108/")&&!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-reload-293-20261108/")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
+    if((!normalized.contains("/work/rebuild64-graphics-295-20261108/")&&!normalized.contains("/work/rebuild64-graphics-settings-20261108/")&&!normalized.contains("/work/rebuild64-behaviour-293-20261108/")&&!normalized.contains("/work/rebuild64-close-292-20261108/")&&!normalized.contains("/work/rebuild64-atlas-292-20261108/")&&!normalized.contains("/work/rebuild64-launch-287-")&&!normalized.contains("/work/rebuild64-offscreen-288-")&&!normalized.contains("/work/rebuild64-service-291-20261107/")&&!normalized.contains("/work/rebuild64-brush-")&&!normalized.contains("/work/rebuild64-reload-293-20261108/")&&!normalized.contains("/work/rebuild64-units-merge-291-20261108/"))||QDir::currentPath().compare(caseRoot,Qt::CaseInsensitive)!=0)return 97;
     QFile input(info.absoluteFilePath());if(!input.open(QIODevice::ReadOnly))return 97;
     configuration=QJsonDocument::fromJson(input.readAll()).object();if(configuration["schema"].toInt()!=287)return 97;
     if(QDir::cleanPath(qEnvironmentVariable("EI_MAPPER_SETTINGS_DIR")).compare(QDir(caseRoot).filePath("settings"),Qt::CaseInsensitive)!=0)return 97;
-    if(configuration["mode"].toString()=="acceptBehaviour293"||configuration["mode"].toString()=="acceptReload293"||configuration["mode"].toString()=="acceptClose292") {
+    if(configuration["mode"].toString()=="acceptGraphics"||configuration["mode"].toString()=="acceptBehaviour293"||configuration["mode"].toString()=="acceptReload293"||configuration["mode"].toString()=="acceptClose292") {
         QFile frozen(configuration["ownerSettings"].toString());if(!frozen.open(QIODevice::ReadOnly))return 97;
         QSettings seed(QDir(caseRoot).filePath("settings/EI Mapper Endurance/EI Mapper Endurance Edition.ini"),QSettings::IniFormat);
         for(const auto& value:QJsonDocument::fromJson(frozen.readAll()).array()) {
@@ -928,6 +935,7 @@ int initializeRebuild64LaunchCheck(int argc,char** argv)
     const auto hr=SHGetKnownFolderPath(FOLDERID_ProgramData,0,nullptr,&probe);
     const QString verified=SUCCEEDED(hr)&&probe?QString::fromWCharArray(probe):QString();CoTaskMemFree(probe);
     if(!QDir::fromNativeSeparators(verified).startsWith(knownFolderRoot,Qt::CaseInsensitive))return 98;
+    if(configuration["mode"].toString()=="acceptGraphics"&&!installGraphicsFileAudit(caseRoot+"/file-events.log"))return 98;
     return 0;
 }
 void installRebuild64LaunchCheck(QApplication& app)

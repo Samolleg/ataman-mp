@@ -8,7 +8,7 @@ struct PresentationTrace {
  PresentationTrace(){
   wchar_t path[32768];const auto n=GetEnvironmentVariableW(L"ATAMAN_REBUILD64_PRESENT_TRACE",path,32768);
   if(!n||n>=32768)return;root=path;
-  if(root.find(L"/work/rebuild64-behaviour-293-20261108/")==std::wstring::npos&&root.find(L"\\work\\rebuild64-behaviour-293-20261108\\")==std::wstring::npos&&root.find(L"/work/rebuild64-tools-286-r2-")==std::wstring::npos&&root.find(L"\\work\\rebuild64-tools-286-r2-")==std::wstring::npos
+  if(root.find(L"/work/rebuild64-graphics-295-20261108/")==std::wstring::npos&&root.find(L"\\work\\rebuild64-graphics-295-20261108\\")==std::wstring::npos&&root.find(L"/work/rebuild64-behaviour-293-20261108/")==std::wstring::npos&&root.find(L"\\work\\rebuild64-behaviour-293-20261108\\")==std::wstring::npos&&root.find(L"/work/rebuild64-tools-286-r2-")==std::wstring::npos&&root.find(L"\\work\\rebuild64-tools-286-r2-")==std::wstring::npos
      &&root.find(L"/work/rebuild64-launch-287-")==std::wstring::npos&&root.find(L"\\work\\rebuild64-launch-287-")==std::wstring::npos
      &&root.find(L"/work/rebuild64-offscreen-288-")==std::wstring::npos&&root.find(L"\\work\\rebuild64-offscreen-288-")==std::wstring::npos
      &&root.find(L"/work/rebuild64-service-291-20261107/")==std::wstring::npos&&root.find(L"\\work\\rebuild64-service-291-20261107\\")==std::wstring::npos

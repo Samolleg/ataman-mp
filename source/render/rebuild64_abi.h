@@ -7,7 +7,7 @@
 #else
 #define EIR_CALL
 #endif
-#define EIR_ABI 16u
+#define EIR_ABI 17u
 #define EIR_PREVIEW_STATIC_FOOTPRINTS 1u
 #define EIR_MAX_POINT_LIGHTS 64u
 typedef struct EirPointLight {
@@ -38,6 +38,7 @@ typedef struct EirCreate {
     // ABI16: render immutable world service with this frame's camera/depth,
     // synchronously on the native worker, before composition and Present.
     uint32_t (EIR_CALL *raster_service)(void*,uint64_t,const struct EirCamera*,uint32_t,uint32_t,const float*,struct EirService*);
+    const uint16_t* graphics_path; // mapper-owned persistent effective INI, never Config64
 } EirCreate;
 typedef struct EirObjectPose {
     uint32_t mob,nid,visible,changed,selected;
@@ -173,5 +174,6 @@ typedef struct EirApi {
     // 293-B: same rectangle contract, terrain_name identifies a resident neighbour.
     // 1 = stream still loading; retry after frame. No mutation on that result.
     int32_t (EIR_CALL *neighbour_terrain)(void*,const EirTerrainUpdate*,EirError*);
+    int32_t (EIR_CALL *graphics_reload)(void*,EirError*); // creating worker, between frames
 } EirApi;
 typedef int32_t (EIR_CALL *EirGetApi)(uint32_t,EirApi*);

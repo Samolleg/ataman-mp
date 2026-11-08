@@ -5,7 +5,7 @@ int eir_error(EirError* out,int rc,const probe1b_error& in) noexcept {
 int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) noexcept {
  if(result)*result=nullptr;
  probe1b_error e{};
- if(!in||!result||in->abi!=EIR_ABI||in->size!=sizeof(*in)||!in->window||!in->scratch_path||!in->game_data_path||!in->neighbour_layout_path||in->mount_count>4096||!in->mounts||(in->preview_flags&~EIR_PREVIEW_STATIC_FOOTPRINTS))
+ if(!in||!result||in->abi!=EIR_ABI||in->size!=sizeof(*in)||!in->window||!in->scratch_path||!in->graphics_path||!in->game_data_path||!in->neighbour_layout_path||in->mount_count>4096||!in->mounts||(in->preview_flags&~EIR_PREVIEW_STATIC_FOOTPRINTS))
   return eir_error(out,fail(&e,E_INVALIDARG,"invalid renderer C ABI create"),e);
  return eir_error(out,guarded(&e,[&]{
   std::vector<std::wstring> roots,archives;std::vector<uint8_t> kinds;
@@ -16,7 +16,7 @@ int32_t EIR_CALL host_create(const EirCreate* in,void** result,EirError* out) no
   // it contains no maps and cannot shadow a real resource.
   roots.push_back(std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Maps");
   std::vector<const wchar_t*> rootPointers,archivePointers;for(const auto& p:roots)rootPointers.push_back(p.c_str());for(const auto& p:archives)archivePointers.push_back(p.c_str());
-  const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=scratch+L"/renderer.ini",layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
+  const auto scratch=std::wstring(reinterpret_cast<const wchar_t*>(in->scratch_path));const auto ini=std::wstring(reinterpret_cast<const wchar_t*>(in->graphics_path)),layout=std::wstring(reinterpret_cast<const wchar_t*>(in->neighbour_layout_path));
   probe1b_create_info info{sizeof(info),PROBE1B_ABI,in->width,in->height,static_cast<HWND>(in->window),ini.c_str(),layout.c_str(),rootPointers.data(),uint32_t(rootPointers.size()),archivePointers.data(),uint32_t(archivePointers.size()),kinds.data(),in->test_failure};
   const int rc=probe1b_create(&info,result,&e);if(rc){owned::embedded_host_configuration().reset();return rc;}
   auto& session=*static_cast<Session*>(*result);session.rasterService293=in->raster_service;session.canPresent=in->can_present;session.liveValues=in->live_values;session.presentContext=in->present_context;session.game.directory=std::wstring(reinterpret_cast<const wchar_t*>(in->game_data_path))+L"/Config";session.game.settings=scratch+L"/settings.ini";
@@ -295,9 +295,20 @@ int32_t EIR_CALL host_neighbour_terrain293(void* h,const EirTerrainUpdate* in,Ei
 
 void EIR_CALL host_device_loss(void* h){if(h)static_cast<Session*>(h)->loseDevice=true;}
 }
+// Serialized with frame/document/output on the owning worker.
+static int32_t EIR_CALL host_graphics_reload(void* handle,EirError* out) noexcept {
+ probe1b_error e{};
+ if(!handle||handle!=activeHandle.load()||GetCurrentThreadId()!=activeOwner.load())return eir_error(out,fail(&e,E_INVALIDARG,"graphics owner thread"),e);
+ return eir_error(out,guarded(&e,[&]{auto& s=*static_cast<Session*>(handle);
+  if(!owned::AtamanReadiness::reloadGraphics(s.renderer,s.rendererIni.c_str()))return fail(&e,E_FAIL,"reload mapper graphics");
+  s.neighboursConfigured=owned::AtamanReadiness::neighboursEnabled(s.renderer);
+  s.previewRenderer.reset();s.previewKey.clear();
+  owned::AtamanReadiness::settings(s.renderer);std::fprintf(stderr,"MAPPER_GRAPHICS live reload\n");return 0;
+ }),e);
+}
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_renderer_get_api(uint32_t abi,EirApi* out) noexcept {
  if(abi!=EIR_ABI||!out||out->size!=sizeof(*out))return -1;
- *out={sizeof(EirApi),abi,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output,&host_query,&host_depth,&host_terrain_update,&host_poses,&host_update_state,&host_atlas_update,&host_neighbour_terrain293};return 0;
+ *out={sizeof(EirApi),abi,&host_create,&probe1b_destroy,&host_document,&host_camera,&host_resize,&host_frame,&host_capture,&host_device_loss,&host_service,&host_capture_world,&host_output,&host_query,&host_depth,&host_terrain_update,&host_poses,&host_update_state,&host_atlas_update,&host_neighbour_terrain293,&host_graphics_reload};return 0;
 }
 extern "C" __declspec(dllexport) int32_t EIR_CALL ataman_brush_debug(void* h,char* out,uint32_t capacity) noexcept {
  if(!h||h!=activeHandle.load()||GetCurrentThreadId()!=activeOwner.load()||!out||!capacity)return -1;

@@ -17709,4 +17709,289 @@ Line: %4</source><translation>Вызов:
         <translation>Снимок Rebuild64 недоступен; для этого снимка используется OpenGL. %1</translation>
     </message>
 </context>
+<context><name>Rebuild64Graphics</name>
+<message><source>Vertical sync</source><translation>Вертикальная синхронизация</translation></message>
+<message><source>In the background</source><translation>Работа в фоне</translation></message>
+<message><source>Background frame limit (FPS)</source><translation>Лимит кадров в фоне (кадр/с)</translation></message>
+<message><source>Frame rate limit (FPS)</source><translation>Лимит кадров (кадр/с; 0 — без ограничения)</translation></message>
+<message><source>Shadows</source><translation>Тени от солнца</translation></message>
+<message><source>Terrain normal sunlight</source><translation>Освещение рельефа по нормалям</translation></message>
+<message><source>Anti-aliasing: SMAA</source><translation>Сглаживание SMAA</translation></message>
+<message><source>Depth prepass and shadow mask</source><translation>Предварительный проход глубины</translation></message>
+<message><source>Upscaling</source><translation>Масштабирование изображения</translation></message>
+<message><source>Upscaling quality</source><translation>Качество масштабирования</translation></message>
+<message><source>Sharpening</source><translation>Резкость масштабирования</translation></message>
+<message><source>Render scale (%)</source><translation>Масштаб рендера (%)</translation></message>
+<message><source>Frame generation</source><translation>Генерация кадров</translation></message>
+<message><source>NVIDIA Reflex</source><translation>NVIDIA Reflex</translation></message>
+<message><source>Renderer</source><translation>Графический API</translation></message>
+<message><source>Anisotropic filtering</source><translation>Анизотропная фильтрация</translation></message>
+<message><source>Water reflections</source><translation>Отражения в воде</translation></message>
+<message><source>Water reflection quality</source><translation>Качество отражений</translation></message>
+<message><source>Water reflection step bound (px)</source><translation>Шаг поиска отражений (пикс.)</translation></message>
+<message><source>Stock-look water (prototype)</source><translation>Вода в исходном стиле</translation></message>
+<message><source>Physical water</source><translation>Физическая вода</translation></message>
+<message><source>Sea surf quality</source><translation>Качество морского прибоя</translation></message>
+<message><source>Sea surf debug view</source><translation>Диагностика прибоя</translation></message>
+<message><source>Sea swell height (m)</source><translation>Высота морской зыби (м)</translation></message>
+<message><source>Sea swell wavelength (m)</source><translation>Длина морской волны (м)</translation></message>
+<message><source>Sea swell speed (m/s)</source><translation>Скорость морской волны (м/с)</translation></message>
+<message><source>Sea chop sharpness</source><translation>Острота гребней</translation></message>
+<message><source>Sea chop octaves</source><translation>Октавы мелких волн</translation></message>
+<message><source>Sea chop height (m)</source><translation>Высота мелких волн (м)</translation></message>
+<message><source>Sea crest segment length (m)</source><translation>Длина сегмента гребня (м)</translation></message>
+<message><source>Sea crest randomness</source><translation>Неравномерность гребней</translation></message>
+<message><source>Sea shore foam amount</source><translation>Количество береговой пены</translation></message>
+<message><source>Sea shore foam width (m of water)</source><translation>Глубина береговой пены (м)</translation></message>
+<message><source>Sea crest foam threshold</source><translation>Порог пены на гребнях</translation></message>
+<message><source>Sea foam cell size (m)</source><translation>Размер ячеек пены (м)</translation></message>
+<message><source>Sea shallow tint</source><translation>Окраска мелководья</translation></message>
+<message><source>Sea absorption</source><translation>Поглощение света водой</translation></message>
+<message><source>Sea cliff burst strength</source><translation>Сила всплесков у скал</translation></message>
+<message><source>Maps without sea</source><translation>Карты без моря (через запятую)</translation></message>
+<message><source>Sea surf edge fade (m)</source><translation>Затухание прибоя у края (м)</translation></message>
+<message><source>Bloom</source><translation>Свечение ярких участков</translation></message>
+<message><source>Emissive lighting</source><translation>Освещение от светящихся поверхностей</translation></message>
+<message><source>Emissive light strength</source><translation>Сила света от поверхностей</translation></message>
+<message><source>Bloom strength</source><translation>Сила свечения</translation></message>
+<message><source>Bloom threshold</source><translation>Порог свечения</translation></message>
+<message><source>Depth of field</source><translation>Глубина резкости</translation></message>
+<message><source>Depth of field strength</source><translation>Сила размытия фона</translation></message>
+<message><source>Bloom debug view</source><translation>Диагностика свечения</translation></message>
+<message><source>Ground cover</source><translation>Трава и наземный покров</translation></message>
+<message><source>Critters</source><translation>Мелкие животные</translation></message>
+<message><source>Ambient particles</source><translation>Атмосферные частицы</translation></message>
+<message><source>Ambient particle density</source><translation>Плотность частиц</translation></message>
+<message><source>Ambient particle size</source><translation>Размер частиц</translation></message>
+<message><source>Close shadow range</source><translation>Дальность ближних теней (м; 0 — автоматически)</translation></message>
+<message><source>Cascade resolution</source><translation>Разрешение солнечных теней</translation></message>
+<message><source>Close cascades</source><translation>Число ближних каскадов</translation></message>
+<message><source>Far shadows</source><translation>Дальние тени</translation></message>
+<message><source>Partial sun map refresh on membership change</source><translation>Частичное обновление солнечных теней</translation></message>
+<message><source>Neighbour-map sun casters</source><translation>Тени объектов соседних карт</translation></message>
+<message><source>Opaque far foliage shadows</source><translation>Сплошные дальние тени листвы</translation></message>
+<message><source>Shadow filter early-out</source><translation>Ускоренная фильтрация теней</translation></message>
+<message><source>Point-light shadows</source><translation>Тени от точечных источников</translation></message>
+<message><source>Point-shadow resolution</source><translation>Разрешение теней источников</translation></message>
+<message><source>Material quality</source><translation>Качество материалов</translation></message>
+<message><source>Material view</source><translation>Диагностика материалов</translation></message>
+<message><source>Sky reflection strength</source><translation>Сила отражения неба</translation></message>
+<message><source>Metal masks</source><translation>Маски металла</translation></message>
+<message><source>World object materials</source><translation>Материалы объектов мира</translation></message>
+<message><source>World relief strength</source><translation>Рельеф объектов</translation></message>
+<message><source>World roughness offset</source><translation>Смещение шероховатости объектов</translation></message>
+<message><source>Terrain materials</source><translation>Материалы поверхности земли</translation></message>
+<message><source>Terrain relief depth</source><translation>Глубина рельефа земли (м)</translation></message>
+<message><source>Terrain crevice roughness</source><translation>Шероховатость углублений земли</translation></message>
+<message><source>Shadow softness</source><translation>Мягкость теней</translation></message>
+<message><source>Sun size (0.1 degree)</source><translation>Размер солнца (0,1 градуса)</translation></message>
+<message><source>Lamp size (%)</source><translation>Размер источников света (%)</translation></message>
+<message><source>Change-driven object poses</source><translation>Обновлять позы только при изменениях</translation></message>
+<message><source>Prewarm terrain meshes</source><translation>Предварительная подготовка рельефа</translation></message>
+<message><source>Merge character parts</source><translation>Объединять части персонажей</translation></message>
+<message><source>Skip scenery draw walk</source><translation>Ускоренный обход статичных объектов</translation></message>
+<message><source>Occlusion culling</source><translation>Отсечение скрытых объектов</translation></message>
+<message><source>Scene thread</source><translation>Отдельный поток подготовки сцены</translation></message>
+<message><source>Scene thread frame latency</source><translation>Очередь кадров потока сцены</translation></message>
+<message><source>Minimum object size</source><translation>Минимальный размер объекта (‰ экрана)</translation></message>
+<message><source>Minimum shadow caster size</source><translation>Минимальный размер отбрасывателя (текс.)</translation></message>
+<message><source>Point-shadow full-rate lamps</source><translation>Источники с частым обновлением теней</translation></message>
+<message><source>Point-shadow merge distance</source><translation>Расстояние объединения теней источников</translation></message>
+<message><source>Varying wind</source><translation>Переменный ветер</translation></message>
+<message><source>Wind floor</source><translation>Минимальная сила ветра</translation></message>
+<message><source>Wind trails</source><translation>Следы ветра</translation></message>
+<message><source>Precipitation quality</source><translation>Качество дождя и снега</translation></message>
+<message><source>Rain and snow strength</source><translation>Сила дождя и снега</translation></message>
+<message><source>Precipitation test</source><translation>Проверка осадков</translation></message>
+<message><source>Precipitation strength test</source><translation>Проверка силы осадков</translation></message>
+<message><source>Ground contact blend</source><translation>Смешивание объектов с землёй</translation></message>
+<message><source>Ground contact height (m)</source><translation>Высота смешивания с землёй (м)</translation></message>
+<message><source>Tree sway</source><translation>Колыхание деревьев</translation></message>
+<message><source>Tree sway strength (%)</source><translation>Сила колыхания деревьев (%)</translation></message>
+<message><source>Ambient occlusion</source><translation>Затенение углублений (AO)</translation></message>
+<message><source>AO strength</source><translation>Сила AO</translation></message>
+<message><source>AO radius (m)</source><translation>Радиус AO (м)</translation></message>
+<message><source>AO low-light boost</source><translation>Усиление AO при слабом свете</translation></message>
+<message><source>Sky and clouds</source><translation>Небо и облака</translation></message>
+<message><source>Cave brightness</source><translation>Яркость пещер</translation></message>
+<message><source>Cave darkness floor</source><translation>Минимальное освещение пещер</translation></message>
+<message><source>Bounce light</source><translation>Отражённый свет</translation></message>
+<message><source>Bounce light view</source><translation>Диагностика отражённого света</translation></message>
+<message><source>Sun bounce strength</source><translation>Сила отражённого солнечного света</translation></message>
+<message><source>Bounce light strength</source><translation>Сила отражённого света источников</translation></message>
+<message><source>Sky brightness</source><translation>Яркость неба</translation></message>
+<message><source>Night sky brightness</source><translation>Яркость ночного неба</translation></message>
+<message><source>Cloud shadow strength</source><translation>Сила теней облаков</translation></message>
+<message><source>Cloud shadow speed</source><translation>Скорость теней облаков (м/с)</translation></message>
+<message><source>Cloud wind speed</source><translation>Скорость ветра облаков (м/с)</translation></message>
+<message><source>Cloud motion</source><translation>Движение облаков</translation></message>
+<message><source>Fog</source><translation>Туман</translation></message>
+<message><source>Volumetric fog quality</source><translation>Качество объёмного тумана</translation></message>
+<message><source>Fog debug: show only</source><translation>Диагностика компонентов тумана</translation></message>
+<message><source>Sun shafts</source><translation>Солнечные лучи</translation></message>
+<message><source>Sun shaft strength</source><translation>Сила солнечных лучей</translation></message>
+<message><source>Fog strength</source><translation>Сила тумана</translation></message>
+<message><source>Fog test: dense morning fog</source><translation>Проверка густого утреннего тумана</translation></message>
+<message><source>Fog visibility (m)</source><translation>Дальность видимости в тумане (м)</translation></message>
+<message><source>Ground fog density</source><translation>Плотность приземного тумана</translation></message>
+<message><source>Morning fog chance</source><translation>Вероятность утреннего тумана</translation></message>
+<message><source>Fog after rain (game hours)</source><translation>Туман после дождя (игровых часов)</translation></message>
+<message><source>Neighbouring maps</source><translation>Соседние карты</translation></message>
+<message><source>Neighbour fog range</source><translation>Дальность тумана на соседних картах</translation></message>
+<message><source>Ground cover distance (m)</source><translation>Дальность травы (м)</translation></message>
+<message><source>Ground cover shadows</source><translation>Тени наземного покрова</translation></message>
+<message><source>Effect distance (m)</source><translation>Дальность эффектов (м)</translation></message>
+<message><source>Crown impostors</source><translation>Плоские изображения дальних крон</translation></message>
+<message><source>Crown impostor size (px)</source><translation>Размер перехода к плоской кроне (пикс.)</translation></message>
+<message><source>Crown impostor diagnostic view</source><translation>Диагностика дальних крон</translation></message>
+<message><source>Static object LOD</source><translation>Уровни детализации объектов</translation></message>
+<message><source>Static LOD pixel limit</source><translation>Допустимая ошибка детализации (пикс.)</translation></message>
+<message><source>Draw distance (m)</source><translation>Дальность отрисовки (м)</translation></message>
+<message><source>Terrain LOD</source><translation>Уровни детализации рельефа</translation></message>
+<message><source>Terrain detail</source><translation>Качество поверхности земли</translation></message>
+<message><source>Terrain anti-repetition</source><translation>Устранение повторов текстуры</translation></message>
+<message><source>Terrain cliffs</source><translation>Материалы крутых склонов</translation></message>
+<message><source>Rock amount</source><translation>Доля скалы</translation></message>
+<message><source>Rock edge softness</source><translation>Мягкость края скалы</translation></message>
+<message><source>Rock patch size</source><translation>Размер скальных пятен</translation></message>
+<message><source>Rock streak length</source><translation>Длина вертикальных потёков</translation></message>
+<message><source>Rock from slope (deg)</source><translation>Начальный угол скалы (град.)</translation></message>
+<message><source>Rock full at slope (deg)</source><translation>Угол полного проявления скалы (град.)</translation></message>
+<message><source>Rock on snow</source><translation>Доля скалы на снегу</translation></message>
+<message><source>Face boundary wander</source><translation>Извилистость границ на склоне</translation></message>
+<message><source>Rock shape detail</source><translation>Детализация контура скалы</translation></message>
+<message><source>Skip blend under neighbour fog</source><translation>Пропуск смешивания под туманом соседей</translation></message>
+<message><source>Terrain blend on neighbour maps</source><translation>Смешивание материалов соседних карт</translation></message>
+<message><source>Terrain material blend</source><translation>Смешивание материалов земли</translation></message>
+<message><source>Terrain cliff tessellation</source><translation>Тесселяция крутых склонов</translation></message>
+<message><source>Terrain 2.0 material cache</source><translation>Кэш материалов земли</translation></message>
+<message><source>Terrain 2.0 cache size (%)</source><translation>Размер кэша земли (%)</translation></message>
+<message><source>Terrain 2.0 cache bake per frame (k texels)</source><translation>Запекание кэша за кадр (тыс. текс.)</translation></message>
+<message><source>Terrain 2.0 cache level bias</source><translation>Смещение уровня кэша земли</translation></message>
+<message><source>Terrain transition sharpening</source><translation>Резкость переходов материалов</translation></message>
+<message><source>Sky weather test</source><translation>Проверка погоды неба</translation></message>
+<message><source>Critter labels</source><translation>Подписи мелких животных</translation></message>
+<message><source>Fur and hair</source><translation>Мех и волосы</translation></message>
+<message><source>Fur shells</source><translation>Число слоёв меха</translation></message>
+<message><source>Fur length (%)</source><translation>Длина меха и волос (%)</translation></message>
+<message><source>Fur density (%)</source><translation>Плотность меха и волос (%)</translation></message>
+<message><source>Fur quality</source><translation>Качество меха</translation></message>
+<message><source>Critter showcase</source><translation>Показ всех мелких животных</translation></message>
+<message><source>Rebuild64 graphics</source><translation>Графика Rebuild64</translation></message>
+<message><source>General</source><translation>Общие</translation></message>
+<message><source>Shadows</source><translation>Тени</translation></message>
+<message><source>Water</source><translation>Вода</translation></message>
+<message><source>Distance and terrain</source><translation>Дальность и рельеф</translation></message>
+<message><source>Materials</source><translation>Материалы</translation></message>
+<message><source>AO, sky and fog</source><translation>AO, небо и туман</translation></message>
+<message><source>Fur</source><translation>Мех</translation></message>
+<message><source>Grass and effects</source><translation>Трава и эффекты</translation></message>
+<message><source>Apply</source><translation>Применить</translation></message>
+<message><source>Rebuild64 defaults</source><translation>По умолчанию Rebuild64</translation></message>
+<message><source>Cancel</source><translation>Отмена</translation></message>
+<message><source>Unavailable in the mapper: fixed Direct3D 11, no upscaler, frame generation or Reflex.</source><translation>В маппере используется Direct3D 11; масштабирование, генерация кадров и Reflex недоступны.</translation></message>
+<message><source>Changes affect only Rebuild64. Map, edits and camera are preserved. Some changes prepare the render session again.</source><translation>Настройки действуют только на Rebuild64. Карта, правки и камера сохраняются. Некоторые изменения заново подготавливают сессию рендера.</translation></message>
+<message><source>Cannot save graphics settings: </source><translation>Не удалось сохранить настройки графики: </translation></message>
+<message><source>Off</source><translation>Выключено</translation></message>
+<message><source>Original</source><translation>Исходный</translation></message>
+<message><source>Atmospheric</source><translation>Атмосферный</translation></message>
+<message><source>Volumetric</source><translation>Объёмный</translation></message>
+<message><source>Continue drawing</source><translation>Продолжать отрисовку</translation></message>
+<message><source>Pause</source><translation>Пауза</translation></message>
+<message><source>Terrain 2.0</source><translation>Поверхность 2.0</translation></message>
+<message><source>Screen space</source><translation>В пространстве экрана</translation></message>
+<message><source>Both</source><translation>Оба способа</translation></message>
+<message><source>Sun and sky</source><translation>Солнце и небо</translation></message>
+<message><source>Lamps and relief</source><translation>Источники света и рельеф</translation></message>
+<message><source>Full</source><translation>Полное</translation></message>
+</context>
+<context><name>MainWindow</name><message><source>Rebuild64 graphics...</source><translation>Графика Rebuild64...</translation></message></context>
+<context><name>Rebuild64Graphics</name><message><source>Rats</source><translation>Крысы</translation></message>
+<message><source>Rats spawn weight (%)</source><translation>Крысы: частота появления (%)</translation></message>
+<message><source>Spiders</source><translation>Пауки</translation></message>
+<message><source>Spiders spawn weight (%)</source><translation>Пауки: частота появления (%)</translation></message>
+<message><source>Crawler larvae</source><translation>Личинки ползунов</translation></message>
+<message><source>Crawler larvae spawn weight (%)</source><translation>Личинки ползунов: частота появления (%)</translation></message>
+<message><source>Frogs</source><translation>Лягушки</translation></message>
+<message><source>Frogs spawn weight (%)</source><translation>Лягушки: частота появления (%)</translation></message>
+<message><source>Lizards</source><translation>Ящерицы</translation></message>
+<message><source>Lizards spawn weight (%)</source><translation>Ящерицы: частота появления (%)</translation></message>
+<message><source>Snakes</source><translation>Змеи</translation></message>
+<message><source>Snakes spawn weight (%)</source><translation>Змеи: частота появления (%)</translation></message>
+<message><source>Scolopendras</source><translation>Сколопендры</translation></message>
+<message><source>Scolopendras spawn weight (%)</source><translation>Сколопендры: частота появления (%)</translation></message>
+<message><source>Dung beetles</source><translation>Жуки-навозники</translation></message>
+<message><source>Dung beetles spawn weight (%)</source><translation>Жуки-навозники: частота появления (%)</translation></message>
+<message><source>Small birds</source><translation>Мелкие птицы</translation></message>
+<message><source>Small birds spawn weight (%)</source><translation>Мелкие птицы: частота появления (%)</translation></message>
+<message><source>Ravens and crows</source><translation>Врановые</translation></message>
+<message><source>Ravens and crows spawn weight (%)</source><translation>Врановые: частота появления (%)</translation></message>
+<message><source>Vultures</source><translation>Грифы</translation></message>
+<message><source>Vultures spawn weight (%)</source><translation>Грифы: частота появления (%)</translation></message>
+<message><source>Shore crabs</source><translation>Береговые крабы</translation></message>
+<message><source>Shore crabs spawn weight (%)</source><translation>Береговые крабы: частота появления (%)</translation></message>
+<message><source>Snow birds</source><translation>Снежные птицы</translation></message>
+<message><source>Snow birds spawn weight (%)</source><translation>Снежные птицы: частота появления (%)</translation></message>
+<message><source>Snow mice</source><translation>Снежные мыши</translation></message>
+<message><source>Snow mice spawn weight (%)</source><translation>Снежные мыши: частота появления (%)</translation></message>
+<message><source>Cave bats</source><translation>Пещерные летучие мыши</translation></message>
+<message><source>Cave bats spawn weight (%)</source><translation>Пещерные летучие мыши: частота появления (%)</translation></message></context>
+<context><name>Rebuild64Graphics</name><message><source>General settings</source><translation>Общие</translation></message>
+<message><source>Shadow settings</source><translation>Тени</translation></message>
+<message><source>Water settings</source><translation>Вода</translation></message>
+<message><source>Terrain settings</source><translation>Рельеф</translation></message>
+<message><source>Material settings</source><translation>Материалы</translation></message>
+<message><source>Fog settings</source><translation>AO и туман</translation></message>
+<message><source>Fur settings</source><translation>Мех</translation></message>
+<message><source>Grass settings</source><translation>Трава</translation></message></context>
+<context><name>Rebuild64Graphics</name><message><source>Low</source><translation>Низкое</translation></message>
+<message><source>Medium</source><translation>Среднее</translation></message>
+<message><source>High</source><translation>Высокое</translation></message>
+<message><source>Normal</source><translation>Обычное</translation></message>
+<message><source>On</source><translation>Включено</translation></message>
+<message><source>Dense</source><translation>Густые</translation></message>
+<message><source>Ultra</source><translation>Максимальное</translation></message>
+<message><source>Automatic</source><translation>Автоматически</translation></message>
+<message><source>Light</source><translation>Слабые</translation></message>
+<message><source>Heavy</source><translation>Сильные</translation></message>
+<message><source>Use setting</source><translation>Из основных настроек</translation></message>
+<message><source>Follow weather</source><translation>По погоде</translation></message>
+<message><source>Rain</source><translation>Дождь</translation></message>
+<message><source>Snow</source><translation>Снег</translation></message>
+<message><source>Sandstorm</source><translation>Песчаная буря</translation></message>
+<message><source>Storm</source><translation>Гроза</translation></message>
+<message><source>Clear</source><translation>Ясно</translation></message>
+<message><source>Shaded</source><translation>Обычный вид</translation></message>
+<message><source>Roughness</source><translation>Шероховатость</translation></message>
+<message><source>Metal</source><translation>Металл</translation></message>
+<message><source>Material channels</source><translation>Каналы материала</translation></message>
+<message><source>Sea exposure</source><translation>Открытость моря</translation></message>
+<message><source>Shore impact</source><translation>Воздействие на берег</translation></message>
+<message><source>Foam</source><translation>Пена</translation></message>
+<message><source>All</source><translation>Все компоненты</translation></message>
+<message><source>Air haze</source><translation>Воздушная дымка</translation></message>
+<message><source>Height fog</source><translation>Приземный туман</translation></message>
+<message><source>Mist</source><translation>Влажная дымка</translation></message>
+<message><source>Sun shafts</source><translation>Солнечные лучи</translation></message>
+<message><source>Lamp scatter</source><translation>Рассеяние света источников</translation></message>
+<message><source>Close cascades</source><translation>Ближние каскады</translation></message>
+<message><source>All cascades</source><translation>Все каскады</translation></message>
+<message><source>Fixed edge</source><translation>Постоянная мягкость</translation></message>
+<message><source>Contact: low</source><translation>Контактные, низкое качество</translation></message>
+<message><source>Contact: high</source><translation>Контактные, высокое качество</translation></message>
+<message><source>Normal (8 m)</source><translation>Обычное (сетка 8 м)</translation></message>
+<message><source>Fine (4 m)</source><translation>Подробное (сетка 4 м)</translation></message>
+<message><source>Large cover</source><translation>Крупный наземный покров</translation></message>
+<message><source>All eligible cover</source><translation>Весь подходящий покров</translation></message>
+<message><source>Cache debug</source><translation>Диагностика кэша</translation></message>
+<message><source>Normal size</source><translation>Обычный размер</translation></message>
+<message><source>Double size</source><translation>Двойной размер</translation></message>
+<message><source>Ignore depth</source><translation>Без проверки глубины</translation></message>
+<message><source>Quality</source><translation>Качество</translation></message>
+<message><source>Balanced</source><translation>Баланс</translation></message>
+<message><source>Performance</source><translation>Производительность</translation></message>
+<message><source>Ultra performance</source><translation>Максимальная производительность</translation></message>
+<message><source>Native AA</source><translation>Сглаживание в исходном разрешении</translation></message>
+<message><source>Low latency</source><translation>Низкая задержка</translation></message>
+<message><source>Low latency and sleep</source><translation>Низкая задержка и ожидание</translation></message></context>
 </TS>

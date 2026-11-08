@@ -17,17 +17,25 @@ R2 patches008–010 and stock_sky.inc were
 removed in R3. The pinned game's E1Terrain/surface path also resolves one mip;
 R2's mip patch was not proven an editor-only loss and is not kept.
 
-ABI8 is flat C, copied across one renderer worker thread. QLibrary remains
+ABI17 is flat C, copied across one renderer worker thread. QLibrary remains
 lazy: ordinary OpenGL startup does not load the DLL. The native presentation
 receives only accepted renderer-owned output. PNG capture is its own readback.
 Frame readiness observes resource/contact/Terrain2 publication; it does not
 rewrite options or require optional specialized shader residency.
 
-Before create, the worker reads Config64/rddraw.ini and settings.ini from the
-configured game root and writes isolated copies under its cache. The renderer
-may save only those copies. Missing config fails explicitly, not to an editor
-quality preset. Only backend/DLSS/Streamline/Reflex are disabled for this
-D3D11/no-SDK build. Cache identity is process-local bookkeeping.
+Before create, the worker reads only the mapper-owned rebuild64-graphics.ini
+beside endurance-options.json. Missing keys use the pinned renderer registry
+defaults. Game Config64 is never opened. Backend/upscaler/frame generation/Reflex
+are fixed off for this D3D11 build. Resource mounts come from the mapper profile.
+The mapper generates GameInputs' common fog starts, enabled dynamic lights and
+water waves, and terrain LOD distances of 64/128 m. These are mapper inputs,
+not imported game settings. Config/lights*.ini remains unchanged game data.
+The effective renderer INI and native bytecode lookup directory persist below
+the mapper cache, namespaced by the DLL SHA-256. Program keys include shader
+inputs/defines, so settings variants cannot substitute another program. GPU
+objects remain per D3D11 device; their preparation is not a fresh FXC compile.
+ABI17 adds an explicit graphics path and serialized live reload. Creation-time
+options retire/recreate only the worker session with the same editor document.
 Every effective registered renderer option is logged with EFFECTIVE_CONFIG.
 All other options, including fog/mist, clouds, Terrain2, PBR and modern liquids,
 are loaded by the renderer's normal config reader. No post-grade is applied.

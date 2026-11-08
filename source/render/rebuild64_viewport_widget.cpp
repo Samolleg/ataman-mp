@@ -9,6 +9,7 @@
 #include <QtConcurrent>
 #include "main_window.h"
 #include "renderer_preferences.h"
+#include "rebuild64_graphics_settings.h"
 #include "resource_write_lease.h"
 #include <QEventLoop>
 #include <QThread>
@@ -153,6 +154,7 @@ struct CRebuild64Viewport::Worker {
     };
     struct Input {
         QByteArray terrain,name,visuals;
+        QByteArray graphics;quint64 graphicsSerial{0},graphicsRestartSerial{0};
         std::shared_ptr<AtlasSource> atlas;
         TerrainPacket terrainUpdate;
         QMap<QByteArray,TerrainPacket> neighborUpdates;
@@ -189,6 +191,8 @@ struct CRebuild64Viewport::Worker {
     void* window;
     QTemporaryDir sessionDirectory;
     QString scratch,guardDirectory;
+    QByteArray initialGraphics{rebuild64graphics::encode(rebuild64graphics::load())};
+    QByteArray graphics;quint64 graphicsSerial{0},graphicsRestartSerial{0}; // not replaced by document snapshots
     std::mutex mutex;
     std::condition_variable wake;
     std::atomic<bool> loaded{false},prepared{false},resourcesRetired{true},finished{false};
@@ -300,9 +304,14 @@ struct CRebuild64Viewport::Worker {
         if(!getApi || getApi(EIR_ABI,&api) || api.abi!=EIR_ABI || api.size!=sizeof(api)) {
             failure(QString::fromUtf8("Несовместимая DLL Rebuild64 (C ABI)."));return;
         }
+        const auto pipelineRoot=rebuild64graphics::pipelineDirectory(guardDirectory,library.fileName());
+        if(pipelineRoot.isEmpty()||!QDir().mkpath(pipelineRoot)){failure("Cannot create persistent renderer cache");return;}
+        qInfo("MAPPER_GRAPHICS persistent pipeline directory=%s",qPrintable(pipelineRoot));
+        if(!QFileInfo::exists(rebuild64graphics::filePath())){QString why;if(!rebuild64graphics::save(rebuild64graphics::load(),&why)){failure(why);return;}}
         loaded=true;
         void* handle=nullptr;quint64 generation=0,readyGeneration=0;QSize size;QElapsedTimer pending;QStringList activePaths;QString activeGameRoot, activeLayout;
         bool injected=false,startupArmed=true,previousNeighbours=false;
+        quint64 appliedGraphics=0;
         for(;;) {
             const auto frameStart=std::chrono::steady_clock::now();
             Input next;
@@ -317,7 +326,7 @@ struct CRebuild64Viewport::Worker {
                     resourcesRetired=!handle;
                     continue;
                 }
-                next=input; // A pending frame must not consume a capture request without a response.
+                next=input;next.graphics=graphics.isEmpty()?initialGraphics:graphics;next.graphicsSerial=graphicsSerial;next.graphicsRestartSerial=graphicsRestartSerial; // A pending frame must not consume a capture request without a response.
             }
             EirError error{};
             bool detachedPreview=false;
@@ -327,15 +336,7 @@ struct CRebuild64Viewport::Worker {
                 // profile would be discarded when map-local mounts/layout arrive.
                 // Closing a document also retires its device instead of submitting
                 // an empty MPR into the pending-frame/120-second fallback loop.
-                if(!prepared.load()||activeGameRoot!=next.gameRoot) {
-                    for(const auto& file:QStringList{"rddraw.ini","settings.ini"}) {
-                        QFile config(QDir(next.gameRoot).filePath("Config64/"+file));
-                        if(!config.open(QIODevice::ReadOnly)) {
-                            failure(QString::fromUtf8("Не удалось прочитать конфигурацию EIRebuild64: ")+config.fileName());return;
-                        }
-                    }
-                    activeGameRoot=next.gameRoot;
-                }
+                activeGameRoot=next.gameRoot;
                 if(handle){api.destroy(handle);handle=nullptr;generation=0;}
                 resourcesRetired=true;prepared=true;pending.invalidate();
                 startup.clear();activity.clear();
@@ -343,6 +344,17 @@ struct CRebuild64Viewport::Worker {
                 std::unique_lock<std::mutex> lock(mutex);
                 wake.wait_for(lock,std::chrono::milliseconds(100),[this]{return stop||paused||!input.terrain.isEmpty();});
                 continue;
+            }
+            if(handle&&appliedGraphics!=next.graphicsSerial) {
+                if(next.graphicsRestartSerial>appliedGraphics) {
+                    prepared=false;api.destroy(handle);handle=nullptr;generation=0;
+                    qInfo("MAPPER_GRAPHICS recreating session serial=%llu",(unsigned long long)next.graphicsSerial);
+                } else {
+                    QSaveFile effective(QDir(pipelineRoot).filePath("renderer.ini"));
+                    if(!effective.open(QIODevice::WriteOnly)||effective.write(next.graphics)!=next.graphics.size()||!effective.commit()||api.graphics_reload(handle,&error)) {failure(QString("Cannot apply mapper graphics: ")+QString::fromUtf8(error.message));break;}
+                    appliedGraphics=next.graphicsSerial;
+                    qInfo("MAPPER_GRAPHICS applied live serial=%llu",(unsigned long long)appliedGraphics);
+                }
             }
             if(handle&&(activePaths!=next.paths||activeGameRoot!=next.gameRoot||activeLayout!=next.neighbourLayout)){prepared=false;api.destroy(handle);handle=nullptr;generation=0;}
             {std::lock_guard<std::mutex> lock(mutex);if(stop)break;if(paused||input.generation!=next.generation)continue;}
@@ -353,22 +365,18 @@ struct CRebuild64Viewport::Worker {
                 for(const auto& path:next.paths)paths.push_back(path.toStdWString());
                 std::vector<EirMount> mounts;
                 for(size_t i=0;i<paths.size();++i)mounts.push_back({reinterpret_cast<const uint16_t*>(paths[i].c_str()),QFileInfo(next.paths[int(i)]).isDir()?3u:0u,0});
-                // The renderer can save config. Give it an isolated copy;
-                // never hand its config writer the owner's Config64 path.
-                const QDir game(next.gameRoot);
-                const QDir config(game.filePath("Config64"));
-                for(const auto& file:QStringList{"rddraw.ini","settings.ini"}) {
-                    QFile source(config.filePath(file));QSaveFile copy(QDir(scratch).filePath(file=="rddraw.ini"?"renderer.ini":file));
-                    if(!source.open(QIODevice::ReadOnly)||!copy.open(QIODevice::WriteOnly)) {failure(QString::fromUtf8("Не удалось прочитать конфигурацию EIRebuild64: ")+source.fileName());return;}
-                    const auto bytes=source.readAll();if(copy.write(bytes)!=bytes.size()||!copy.commit()){failure("Cannot copy renderer configuration to isolated cache");return;}
-                }
-                QSettings local(QDir(scratch).filePath("renderer.ini"),QSettings::IniFormat);
-                local.setValue("graphics/renderer_backend",0); // host device is D3D11
-                local.setValue("graphics/upscaler",0); // no DLSS/NGX SDK in mapper
-                local.setValue("graphics/frame_generation",0); // no Streamline
-                local.setValue("graphics/reflex",0); // no NGX/Reflex integration
-                local.remove("setup/nvidia_cache_id"); // process-local cache bookkeeping
-                local.sync();
+                // EI-REBUILD64-GRAPHICS: effective files and native bytecode cache
+                // outlive session-*; source INI is owned by the mapper.
+                const auto bytes=next.graphics.isEmpty()?initialGraphics:next.graphics;
+                QSaveFile effective(QDir(pipelineRoot).filePath("renderer.ini"));
+                if(!effective.open(QIODevice::WriteOnly)||effective.write(bytes)!=bytes.size()||!effective.commit()){failure("Cannot write mapper renderer configuration");break;}
+                QSaveFile shared(QDir(scratch).filePath("settings.ini"));
+                // The host needs just these common fog starts; resource paths are
+                // explicit ABI mounts, sourced only from the mapper profile.
+                const auto day=ei::renderEnvironmentForValues(12,.2f,.6f).fogStart;
+                const auto night=ei::renderEnvironmentForValues(0,.2f,.6f).fogStart;
+                const auto common=QByteArray("[Game Specific Settings]\nFogDayStartDistance=")+QByteArray::number(day)+"\nFogNightStartDistance="+QByteArray::number(night)+"\n[Terrain Settings]\nEnableDynamicLights=1\nEnableWaterWaves=1\nLOD1=64\nLOD2=128\n";
+                if(!shared.open(QIODevice::WriteOnly)||shared.write(common)!=common.size()||!shared.commit()){failure("Cannot write mapper shared renderer settings");break;}
                 const QDir work(QDir(scratch).filePath("game-work"));
                 if(!QDir().mkpath(work.filePath("Config"))||!QDir().mkpath(work.filePath("Maps"))){failure("Cannot create isolated renderer work paths");return;}
                 const QDir sourceConfig(QDir(resourceGameDataRoot(next.gameRoot)).filePath("Config"));
@@ -379,11 +387,13 @@ struct CRebuild64Viewport::Worker {
                 }
                 const auto dataRoot=work.absolutePath().toStdWString();
                 const auto cache=scratch.toStdWString();
+                const auto graphics=QDir(pipelineRoot).filePath("renderer.ini").toStdWString();
                 const auto layout=next.neighbourLayout.toStdWString();
-                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues,EIR_PREVIEW_STATIC_FOOTPRINTS,&Worker::rasterService293};
+                EirCreate info{sizeof(info),EIR_ABI,uint32_t(next.size.width()),uint32_t(next.size.height()),window,mounts.data(),uint32_t(mounts.size()),hook=="no-d3d11"?1u:hook=="init"?2u:hook=="shader-hold"?3u:0u,reinterpret_cast<const uint16_t*>(cache.c_str()),reinterpret_cast<const uint16_t*>(layout.c_str()),reinterpret_cast<const uint16_t*>(dataRoot.c_str()),&Worker::canPresent,this,&Worker::liveValues,EIR_PREVIEW_STATIC_FOOTPRINTS,&Worker::rasterService293,reinterpret_cast<const uint16_t*>(graphics.c_str())};
                 phase(QString::fromUtf8("Создание D3D11 и подготовка шейдеров"));
                 opening::Scope deviceTiming("native.create");
                 if(api.create(&info,&handle,&error)) {failure(QString::fromUtf8(error.message));break;}
+                appliedGraphics=next.graphicsSerial;
                 prepared=true;size=next.size;
                 activePaths=next.paths;activeGameRoot=next.gameRoot;activeLayout=next.neighbourLayout;
             }
@@ -532,11 +542,11 @@ struct CRebuild64Viewport::Worker {
                 if(!stats.neighbours_pending){startup.clear();startupArmed=false;}
                 pending.invalidate();
                 if(api.update_state(handle,&updates,&error)){failure(QString::fromUtf8(error.message));break;}
-                QMetaObject::invokeMethod(owner,[target=owner,stats,updates]{
+                QMetaObject::invokeMethod(owner,[target=owner,stats,updates,appliedGraphics]{
                     if(target->m_stopping||stats.ready_generation!=target->m_generation)return;
                     target->m_statistics=stats;
                       target->setProperty("nativeFramePulse294",QVariant::fromValue<qlonglong>(QDateTime::currentMSecsSinceEpoch()));
-                    bool neighborPending=false;{std::lock_guard<std::mutex> lock(target->m_worker->mutex);neighborPending=!target->m_worker->input.neighborUpdates.isEmpty();}
+                    bool neighborPending=false;{std::lock_guard<std::mutex> lock(target->m_worker->mutex);neighborPending=!target->m_worker->input.neighborUpdates.isEmpty();target->m_graphicsPending=appliedGraphics!=target->m_worker->graphicsSerial;}
                     if(!neighborPending)target->m_terrainPresented=updates.presented_serial;
                     if(!qEnvironmentVariableIsEmpty("ATAMAN_REBUILD64_LAUNCH_CASE")){
                         target->setProperty("nativeFinalized292",QVariant::fromValue<qulonglong>(updates.finalized_serial));
@@ -724,6 +734,14 @@ void CRebuild64Viewport::stopForApplicationShutdown() {
     if(m_worker){{std::lock_guard<std::mutex> lock(m_worker->mutex);m_worker->stop=true;}m_worker->wake.notify_all();}
 }
 bool CRebuild64Viewport::applicationShutdownFinished() const {return !m_worker||m_worker->finished.load();}
+void CRebuild64Viewport::applyGraphics(const QByteArray& ini,bool restart) {
+    if(!m_worker)return; // The next worker reads the committed mapper INI.
+    m_graphicsPending=true;
+    {std::lock_guard<std::mutex> lock(m_worker->mutex);
+        m_worker->graphics=ini;++m_worker->graphicsSerial;
+        if(restart)m_worker->graphicsRestartSerial=m_worker->graphicsSerial;
+    }m_worker->wake.notify_all();
+}
 void CRebuild64Viewport::finishApplicationShutdown(){stopForApplicationShutdown();m_worker.reset();}
 
 void CRebuild64Viewport::prepareBackend() {
