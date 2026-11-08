@@ -116,3 +116,27 @@ Staging: `build-staging-293-rebuild64-behaviour-20261108`. **Кандидат с
 Игровые/runtime/настроечные копии удалены после прогона; итоговая квитанция `cleanup-plan.json`: removed=true,remaining0,processesKilled0. Сохраняются только доказательства вне Git, исходники и staging. Защищённые файлы владельца проверены по SHA; в ROADMAP добавлен только собственный пункт, при staging Git используются только его строки. landscape.cpp, render_stall_trace.h, view.cpp, view_neighbor_load.cpp, mob_load_pipeline_check.cpp, корневой QM, отчёт277, .mcp.json и шум patches001–008 в коммит не включаются. Наша работа не писала в установку, живой мод и реестр владельца.
 
 Перед scoped-коммитом main продвинулся чужим `955ae7b4c3d51f154c3bce9e36971a22bedf9f85` (только ROADMAP и отчёт другой задачи). Он сохранён как родитель коммита293; программных изменений относительно исходного `f5d2949dc646733f98d8b55e9da918952b10f7c8` в нём нет. Замороженный корпус не обновлялся после стороннего изменения живых данных; результат относится к зафиксированному входу, как требовал один проход.
+
+## Installation293 - 2026-11-08
+
+Owner authorized installation293. main HEAD exactly e333369246100615c5ef881db357215195372d08; packaging/* unchanged against that commit. Canonical repository packaging/install_program.ps1 installed unchanged build-staging-293-rebuild64-behaviour-20261108-r2 into artifacts/EI-Mapper-Ataman-2-first-test, replacing292. No rebuild, staging modification or finalizer.
+
+INSTALLED verified=1368 changed=9 added=1 removed=0. All1368 managed SHA256 match staging, including runtime/host/bridge and QM. All14896 user files outside manifests unchanged by SHA256; installer-owned retired metadata and old retired images accounted separately. View/neighbor settings preserved. EIMapperMcp.exe --version: EIMapperMcp 293, exit0; VERSION293.
+
+Rollback artifacts/rollback292-to293-rebuild64-behaviour-20261108 created by installer; its rollback.ps1 -VerifyOnly: ROLLBACK_VERIFIED. Previous rollbacks preserved. Retired cleanup removed=0 retained=3. Busy files moved aside:
+
+- `EIMapperMcp.exe.old-ataman-d274e6c590c544f89a0dd2f20e5bd8f3`, SHA256 `c67df5f62d9f76a863cbde5316c1719ef7bf8e5ce689a7de1c0418e85cc2124a`.
+- `SHA256SUMS.txt.old-ataman-0c496d6da12b4510bec020263f634333`, SHA256 `9fe142ce5536dcb67d7c86551f74c25603bdb8d57d9608a599f35e80f9289884`.
+
+Original bridge PIDs 17412, 74000, 53412, 26408, 56068, 71804, 3796 alive afterwards with unchanged CreationDate. No processes stopped. Installation mapper and game absent before replacement, during observations and afterwards. No mapper/game launched or DLL loaded; no computer-use or visible windows. Bridge registrations, other work/* and processes untouched; final subst empty, no junction created.
+
+| File | Installed SHA256 (= staging) |
+|---|---|
+| `EIMapperEndurance.exe` | `80fe5eb5d1176cbfa19b0aa860be50230516da4b17769264886d6cd7a616e63b` |
+| `ataman_rebuild64.dll` | `2f4da89a2ffe99c80de46794b2d29dddf87e026084b741b360b733331d786853` |
+| `runtime/EIMapperEnduranceRuntimeHost.exe` | `393e6f11c2688c8ccab3f753652603be36e6424bac6137f07a4c1be5808dd8fc` |
+| `EIMapperMcp.exe` | `5bf6f9d913597555f3d00f1a358d5fb94dac3defb59783097a987414e091bc1e` |
+| `runtime/EIMapperEnduranceJmvBridge.plg` | `6d3fd882eb87b63d3822dc0a30218d83c6d731ca830b4a18b3bb270051cfd5af` |
+| `translations/ei_mapper_ru.qm` | `b7e65aad9692940704b3e16e127dc960d9dede4f41d9df7f311b2fee71cab853` |
+
+Stage remains **PARTIAL with R2 report limitations**: checkpoint-based verification, no single complete run of final EXE; short pan with0 frames not counted as visual PASS. Visible acceptance belongs to owner. Installation does not close these limitations. No push.
