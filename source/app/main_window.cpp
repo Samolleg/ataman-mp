@@ -1642,6 +1642,10 @@ MainWindow::MainWindow(QWidget* parent) :
             uiSettings.value("ui/mainWindowState").toByteArray();
     const bool initializeDefaultDockLayout = firstRunSetup && savedMainWindowState.isEmpty();
     restoreGeometry(uiSettings.value("ui/mainWindowGeometry").toByteArray());
+    // Keep the saved presentation mode independent of later startup events.
+    // Do not reapply geometry: Qt must retain the saved normal rectangle.
+    setProperty("enduranceRestoredWindowState", int(windowState()
+            & (Qt::WindowMaximized | Qt::WindowFullScreen)));
     m_ui->workspaceSplitter->restoreState(uiSettings.value("ui/workspaceSplitter").toByteArray());
     m_ui->outlinerSplitter->restoreState(uiSettings.value("ui/outlinerSplitter").toByteArray());
     // Restore widths after floating tab hosts reach their final geometry.

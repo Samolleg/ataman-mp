@@ -4364,7 +4364,28 @@ int main(int argc, char *argv[])
     //window.resize(window.sizeHint());
 
     splash.setStatus(QObject::tr("Opening main window..."));
-    window.show();
+    const bool ordinaryStartup = !automatedWorkspaceSmokeRequested(argc, argv)
+            && !app.arguments().contains(QStringLiteral("--rebuild64-launch-check"));
+    const Qt::WindowStates restoredWindowState = ordinaryStartup
+            ? Qt::WindowStates(window.property("enduranceRestoredWindowState").toInt())
+            : Qt::WindowStates(Qt::WindowNoState);
+    const char* showMethod = "show";
+    if(restoredWindowState.testFlag(Qt::WindowFullScreen))
+    {
+        showMethod = "showFullScreen";
+        window.showFullScreen();
+    }
+    else if(restoredWindowState.testFlag(Qt::WindowMaximized))
+    {
+        showMethod = "showMaximized";
+        window.showMaximized();
+    }
+    else
+        window.show();
+    if(ordinaryStartup)
+        ei::log(eLogInfo, QString("Startup window show method:%1 savedState:%2 stateAfter:%3")
+                .arg(QString::fromLatin1(showMethod)).arg(int(restoredWindowState))
+                .arg(int(window.windowState())));
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     splash.close();
     qApp->setProperty("enduranceStartupScreenGeometry", QVariant());
