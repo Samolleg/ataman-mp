@@ -1,5 +1,43 @@
 # Ataman296 — явная защита режима главного окна (2026-11-08)
 
+## Установка 296 — 2026-11-08 (INSTALLED / PARTIAL)
+
+По поручению «ставь 296» неизменённый build-staging-296-window-maximized-20261108
+установлен каноническим packaging/install_program.ps1 из репозитория в
+artifacts/EI-Mapper-Ataman-2-first-test. HEAD main:
+d7a65b311ee236553a505508bcca733d8edd828c; packaging/* не изменён относительно него.
+Пересборка и финализация staging не выполнялись.
+
+Установщик: verified=1371 changed=8 added=1 removed=0. Все1371 управляемых SHA256
+совпали со staging; EIMapperMcp.exe --version: EIMapperMcp 296, exit0.
+EXE: ba39f9f65faa7837e4d1a5c50dbe2890e12d6bd174c3573937a42b5a11f92605.
+ataman_rebuild64.dll: 0714441100e4a63e5a10f92e9d2a03511fe5d096e2bd73ff5b43336be6206bfe.
+runtime/EIMapperEnduranceJmvBridge.plg: 4a6f54e1b963c99876e8be2e7547959f667efb1f83c85b0e3c9f741a27b4d0ed.
+runtime/EIMapperEnduranceRuntimeHost.exe: 78af2a547fb12f7696db7fe2eefa468499cc013c0e1bfd16d7a104800679709a.
+translations/ei_mapper_ru.qm: 03370f93d40a72b0b0dc2eb4cc1a7e9f24b7becc72456e48e714531bb8f8a3c5.
+
+Откат artifacts/rollback295-to296-window-maximized-20261108 создан установщиком;
+rollback.ps1 -VerifyOnly: ROLLBACK_VERIFIED. Прежние откаты не удалялись.
+Занят только заменяемый EIMapperMcp.exe, отодвинут в
+EIMapperMcp.exe.old-ataman-8b71778e60a64c5b8895244a6448e715.
+Штатная очистка retired по квитанциям: removed=4 retained=1.
+Исходные мосты PID17412/64460 после установки живы с прежним временем создания.
+Процессы не завершались; при проверках до/после маппер/host из установки и игра
+не обнаружены; закрытие редактора дополнительно проверяет установщик.
+
+15575 пользовательских файлов вне manifest и служебных retired-квитанций
+сохранили SHA256, включая настройки и rebuild64-graphics.ini при наличии.
+Выбор вида, настройка соседей, регистрация мостов не менялись.
+Маппер/игра не запускались, DLL не загружалась. Computer-use/видимых окон нет.
+subst в конце пуст; subst/junction не создавались. Чужие work/*, код/QM,
+.mcp.json, отчёт277 и исходные строки ROADMAP сохранены. VERSION/код не менялись,
+push нет.
+
+Этап PARTIAL: замечания исходного отчёта сохраняются. Первопричина295 неизвестна,
+Qt flags не доказывают WM_SIZE/фактический native размер; fullscreen отдельно
+не прогонялся. Видимая приёмка, включая «Восстановить», остаётся за владельцем.
+
+
 **IMPLEMENTED / LOGIC PASS / STAGED.** Решение владельца после первоначального
 аудита: поиск первопричины остановлен; требуется явное применение сохранённого
 режима. Первопричина295 не найдена и исправленной не объявляется.
